@@ -14,6 +14,7 @@ export * from './intake.ts';
 export * from './invitations.ts';
 export * from './ledger.ts';
 export * from './members.ts';
+export * from './outbound.ts';
 export * from './projects.ts';
 export * from './research.ts';
 export * from './schedules.ts';

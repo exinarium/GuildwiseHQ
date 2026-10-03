@@ -135,6 +135,8 @@ export const RpcMethodSchema = z.enum([
   'intake.unmapped',
   /** M7, answered by the runner itself (credentials stay on the workstation): read a GitHub issue with `gh`. */
   'source.read',
+  /** M8, the BA's finalize shift: draft the update for the card's ticket (the manager approves it on the desk). */
+  'outbound.draft',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 
