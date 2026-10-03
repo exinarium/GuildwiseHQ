@@ -259,10 +259,12 @@ describe('shift flow with a fake runner', () => {
       kind: 'question',
       text: 'why?',
       options: [],
+      recommend: 3, // no such option: rejected, the shift keeps going (questions themselves are in questions.test.ts)
       doing: '',
       blocking: true,
     });
     expect(question.accepted).toBe(false);
+    expect(question.error).toContain('--recommend');
     const unknownShift = await report(r, '00000000-0000-4000-8000-000000000000', {
       kind: 'comment',
       note: 'x',

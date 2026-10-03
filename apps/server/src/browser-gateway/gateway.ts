@@ -155,12 +155,9 @@ export class BrowserGateway {
         c.watchers.delete(msg.shiftId);
         return;
       case 'chat.send':
+        return this.ctx.services.chat.send(c.userId, msg);
       case 'chat.cancel':
-        return this.send(c, {
-          type: 'chat.error',
-          threadId: msg.threadId,
-          reason: 'chat is not available yet',
-        });
+        return this.ctx.services.chat.cancel(c.userId, msg.threadId);
     }
   }
 
@@ -208,6 +205,11 @@ export class BrowserGateway {
     for (const c of this.conns) {
       if (c.watchers.has(shiftId)) this.send(c, { type: 'shift.progress', shiftId, cardId, items });
     }
+  }
+
+  /** Sends a message to every open socket of the user (chat streaming). */
+  sendToUser(userId: string, msg: ServerToBrowser): void {
+    for (const c of this.conns) if (c.userId === userId) this.send(c, msg);
   }
 
   closeUser(userId: string): void {

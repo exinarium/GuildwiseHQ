@@ -1,8 +1,8 @@
-import { LoginRequestSchema, type MeResponse } from '@aom/shared';
+import { ChangePasswordRequestSchema, LoginRequestSchema, type MeResponse } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
 import { createSession, deleteSession, SESSION_COOKIE } from '../auth/sessions.ts';
-import { verifyLogin } from '../commands/auth.ts';
+import { changePassword, verifyLogin } from '../commands/auth.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { toUserDto } from '../dto.ts';
@@ -62,6 +62,12 @@ export function authRoutes(ctx: Ctx) {
       await deleteSession(ctx, s.sessionId);
       ctx.services.browser.closeSession(s.sessionId);
       reply.clearCookie(SESSION_COOKIE, { path: '/' });
+      return { ok: true };
+    });
+
+    app.post('/api/auth/password', { schema: { body: ChangePasswordRequestSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await changePassword(ctx, s, req.body.current, req.body.new);
       return { ok: true };
     });
 

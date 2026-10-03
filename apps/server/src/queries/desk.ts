@@ -1,0 +1,168 @@
+import {
+  canAnswerCardDeskItem,
+  type DeskItemDto,
+  type DeskListResponse,
+  isProjectOwner,
+  type ProjectRole,
+} from '@aom/shared';
+import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
+
+const SELECT = `
+SELECT d.*, c.ref AS card_ref, c.title AS card_title, c.stage AS card_stage, c.status AS card_status,
+       c.owner_user_id AS card_owner, c.decision_policy AS card_policy, p.key AS project_key,
+       a.name AS agent_name, u.display_name AS answered_by_name
+  FROM desk_items d
+  LEFT JOIN cards c ON c.id = d.card_id
+  LEFT JOIN projects p ON p.id = d.project_id
+  LEFT JOIN agents a ON a.id = d.asked_by_agent_id
+  LEFT JOIN users u ON u.id = d.answered_by`;
+
+/** Desk items the user may see: their project items (any active member) and their own org-level items. */
+export const DESK_VISIBLE = `(d.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')
+   OR (d.project_id IS NULL AND d.org_id = $1))`;
+
+/** May `userId` answer this item? (docs/ARCHITECTURE.md section 17.2) */
+export function canAnswerItem(r: Row, userId: string, role: ProjectRole): boolean {
+  if (r.card_id) {
+    return canAnswerCardDeskItem({
+      userId,
+      projectRole: role,
+      cardOwnerUserId: r.card_owner,
+      policy: r.card_policy ?? 'owner_only',
+    });
+  }
+  if (r.project_id) return isProjectOwner(role);
+  return r.org_id === userId;
+}
+
+export async function dedupEntriesFor(db: Queryable, ids: string[]) {
+  if (ids.length === 0) return new Map<string, { id: string; scope: any; title: string; body: string }>();
+  const found = await rows(
+    db,
+    'SELECT id, scope, title, body FROM ledger_entries WHERE id = ANY($1::uuid[])',
+    [ids],
+  );
+  return new Map(found.map((r) => [r.id, { id: r.id, scope: r.scope, title: r.title, body: r.body }]));
+}
+
+export function toDeskDto(
+  r: Row,
+  userId: string,
+  roles: Map<string, ProjectRole>,
+  dedup: Map<string, { id: string; scope: any; title: string; body: string }>,
+): DeskItemDto {
+  const role = r.project_id ? (roles.get(r.project_id) ?? null) : null;
+  return {
+    id: r.id,
+    kind: r.kind,
+    subkind: r.subkind,
+    status: r.status,
+    routedTo: r.routed_to,
+    title: r.title,
+    body: r.body,
+    doing: r.doing,
+    options: r.options,
+    recommendation: r.recommendation,
+    blocking: r.blocking,
+    pinned: r.pinned,
+    urgent: r.pinned,
+    affectedCardIds: r.affected_card_ids,
+    affectedCount: r.affected_card_ids.length,
+    askedBy: {
+      kind: r.asked_by_kind,
+      agentId: r.asked_by_agent_id,
+      agentName: r.agent_name,
+      role: r.asked_by_role,
+    },
+    card: r.card_id
+      ? {
+          id: r.card_id,
+          ref: r.card_ref,
+          title: r.card_title,
+          stage: r.card_stage,
+          status: r.card_status,
+          projectKey: r.project_key,
+        }
+      : null,
+    projectId: r.project_id,
+    dedupEntries: (r.dedup_ledger_ids as string[]).flatMap((id) => {
+      const e = dedup.get(id);
+      return e ? [e] : [];
+    }),
+    answer: r.answer,
+    answerOption: r.answer_option,
+    answeredAt: iso(r.answered_at),
+    answeredByName: r.answered_by_name,
+    decisionPolicy: r.card_policy ?? null,
+    canAnswer: r.status === 'open' && canAnswerItem(r, userId, role),
+    createdAt: iso(r.created_at) as string,
+  };
+}
+
+async function rolesOf(db: Queryable, userId: string): Promise<Map<string, ProjectRole>> {
+  const list = await rows<{ project_id: string; role: 'owner' | 'manager' }>(
+    db,
+    `SELECT project_id, role FROM project_members WHERE user_id=$1 AND status='active'`,
+    [userId],
+  );
+  return new Map(list.map((r) => [r.project_id, r.role]));
+}
+
+/**
+ * `GET /api/desk`. Open items are ordered pinned DESC, blocking DESC, affected-card count DESC, age ASC; closed
+ * items (answered, dismissed, superseded) follow, newest first.
+ */
+export async function listDesk(
+  db: Queryable,
+  userId: string,
+  opts: { projectId?: string | undefined; status: 'open' | 'closed' | 'all' },
+): Promise<DeskListResponse> {
+  const params = [userId, opts.projectId ?? null];
+  const scope = `${DESK_VISIBLE} AND ($2::uuid IS NULL OR d.project_id = $2)`;
+  const open =
+    opts.status === 'closed'
+      ? []
+      : await rows(
+          db,
+          `${SELECT} WHERE ${scope} AND d.status = 'open'
+            ORDER BY d.pinned DESC, d.blocking DESC, cardinality(d.affected_card_ids) DESC, d.created_at ASC, d.id`,
+          params,
+        );
+  const closed =
+    opts.status === 'open'
+      ? []
+      : await rows(
+          db,
+          `${SELECT} WHERE ${scope} AND d.status <> 'open' ORDER BY d.updated_at DESC, d.id LIMIT 100`,
+          params,
+        );
+  const all = [...open, ...closed];
+  const dedup = await dedupEntriesFor(db, [...new Set(all.flatMap((r) => r.dedup_ledger_ids as string[]))]);
+  const roles = await rolesOf(db, userId);
+  const items = all.map((r) => toDeskDto(r, userId, roles, dedup));
+  const openItems = items.filter((i) => i.status === 'open');
+  return {
+    items,
+    counts: {
+      open: openItems.length,
+      blocking: openItems.filter((i) => i.blocking).length,
+      urgent: openItems.filter((i) => i.urgent).length,
+    },
+  };
+}
+
+export async function getDeskDto(
+  db: Queryable,
+  userId: string,
+  id: string,
+): Promise<DeskItemDto | undefined> {
+  const r = (await rows(db, `${SELECT} WHERE d.id = $2 AND ${DESK_VISIBLE}`, [userId, id]))[0];
+  if (!r) return undefined;
+  const dedup = await dedupEntriesFor(db, r.dedup_ledger_ids);
+  return toDeskDto(r, userId, await rolesOf(db, userId), dedup);
+}
+
+/** Raw row (with card columns) for command-side authorization. */
+export async function loadDeskRow(db: Queryable, userId: string, id: string): Promise<Row | undefined> {
+  return (await rows(db, `${SELECT} WHERE d.id = $2 AND ${DESK_VISIBLE}`, [userId, id]))[0];
+}

@@ -16,6 +16,7 @@ import type { StoredEvent } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from './commands-queue.ts';
 import { RunnerHandlers } from './handlers.ts';
 import type { RunnerConn } from './registry.ts';
+import { promoteRotatedToken } from './rotation.ts';
 
 const PING_MS = 15_000;
 
@@ -95,6 +96,7 @@ export class RunnerGateway {
         const c = conn as RunnerConn | null;
         if (!c || this.closing) return;
         if (!ctx.services.runners.remove(c)) return; // superseded
+        await ctx.services.chat.workstationLost(c.workstationId);
         try {
           await ctx.store.append([
             {
@@ -128,9 +130,10 @@ export class RunnerGateway {
       socket.close(WS_CLOSE.unauthorized, 'unauthorized');
       return null;
     }
-    const ws = await one(ctx.pool, 'SELECT id, user_id, status FROM workstations WHERE token_hash=$1', [
-      sha256Hex(token),
-    ]);
+    const ws =
+      (await one(ctx.pool, 'SELECT id, user_id, status FROM workstations WHERE token_hash=$1', [
+        sha256Hex(token),
+      ])) ?? (await promoteRotatedToken(ctx, token));
     if (!ws) {
       socket.close(WS_CLOSE.unauthorized, 'unauthorized');
       return null;

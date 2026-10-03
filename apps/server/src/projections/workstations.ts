@@ -23,6 +23,10 @@ export const workstationProjectors: Record<string, Projector> = {
       e.createdAt,
     ]);
   },
+  WorkstationTokenRotated: async (tx, e) => {
+    const p = (e.event as EventOf<'WorkstationTokenRotated'>).payload;
+    await exec(tx, 'UPDATE workstations SET token_hash=$2 WHERE id=$1', [p.workstationId, p.tokenHash]);
+  },
   WorkstationConnected: async (tx, e) => {
     const p = (e.event as EventOf<'WorkstationConnected'>).payload;
     await exec(

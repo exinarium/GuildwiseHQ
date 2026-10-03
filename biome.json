@@ -10,7 +10,8 @@
       "!**/test-results",
       "!**/playwright-report",
       "!pnpm-lock.yaml",
-      "!docs"
+      "!docs",
+      "!.claude"
     ]
   },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 110 },

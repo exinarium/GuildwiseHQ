@@ -14,6 +14,7 @@ import {
 } from 'fastify-type-provider-zod';
 import { checkContentType, checkOrigin } from './auth/origin-check.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
+import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
 import type { Config } from './config.ts';
 import type { Ctx } from './context.ts';
@@ -32,9 +33,13 @@ import { agentRoutes } from './routes/agents.ts';
 import { authRoutes } from './routes/auth.ts';
 import { cardRoutes } from './routes/cards.ts';
 import { catalogueRoutes } from './routes/catalogue.ts';
+import { chatRoutes } from './routes/chats.ts';
+import { deskRoutes } from './routes/desk.ts';
 import { invitationRoutes } from './routes/invitations.ts';
+import { ledgerRoutes } from './routes/ledger.ts';
 import { projectRoutes } from './routes/projects.ts';
 import { shiftRoutes } from './routes/shifts.ts';
+import { threadRoutes } from './routes/threads.ts';
 import { workstationRoutes } from './routes/workstations.ts';
 import { RunnerGateway } from './runner-gateway/gateway.ts';
 import { RunnerRegistry } from './runner-gateway/registry.ts';
@@ -173,6 +178,10 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(agentRoutes(ctx));
   await app.register(catalogueRoutes(ctx));
   await app.register(shiftRoutes(ctx));
+  await app.register(deskRoutes(ctx));
+  await app.register(ledgerRoutes(ctx));
+  await app.register(chatRoutes(ctx));
+  await app.register(threadRoutes(ctx));
 
   // Gateways: runner WS (/api/runner/ws) and browser WS (/api/ws).
   const runners = new RunnerRegistry();
@@ -181,6 +190,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const dispatcher = new Dispatcher(ctx);
   const reaper = new Reaper(ctx);
   Object.assign(ctx.services, { runners, gateway, browser, dispatcher, reaper });
+  ctx.services.chat = new ChatRelay(ctx);
   await app.register(websocket, {
     options: {
       maxPayload: 8 * 1024 * 1024,

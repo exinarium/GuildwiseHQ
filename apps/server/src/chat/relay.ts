@@ -1,0 +1,275 @@
+import { randomUUID } from 'node:crypto';
+import {
+  CHAT_ERROR,
+  type ChatContext,
+  type RunnerToServerOf,
+  type ServerToBrowser,
+  streamId,
+} from '@aom/shared';
+import { agentActor, orgScope, runnerActor, userActor } from '../commands/common.ts';
+import type { Ctx } from '../context.ts';
+import { one } from '../db/sql.ts';
+import type { Tx } from '../db/tx.ts';
+import type { AppendInput } from '../eventstore/types.ts';
+import { agentSpec } from '../runner-gateway/brief.ts';
+
+const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+
+interface Inflight {
+  chatId: string;
+  threadId: string;
+  userId: string;
+  orgId: string;
+  agentId: string;
+  workstationId: string;
+  startedAt: Date;
+}
+
+/** What a terminal chat frame produced, for the notification after the transaction committed. */
+export interface ChatTerminal {
+  userId: string;
+  threadId: string;
+  messageId?: string;
+  reason?: string;
+}
+
+/**
+ * Chat relay (docs/ARCHITECTURE.md section 14): browser `chat.send` -> runner `chat.start`; runner `chat.delta`/
+ * `chat.done`/`chat.error` -> browser. One headless call per user message on the agent's workstation. If the
+ * workstation is offline the user is told at once and nothing is queued. Each conversation is saved to its thread,
+ * and the chat counts as a `chat` shift (tokens count toward the agent) that never claims a card.
+ */
+export class ChatRelay {
+  private readonly inflight = new Map<string, Inflight>();
+  private readonly byThread = new Map<string, string>();
+
+  constructor(private readonly ctx: Ctx) {}
+
+  private tell(userId: string, msg: ServerToBrowser): void {
+    this.ctx.services.browser.sendToUser(userId, msg);
+  }
+
+  private fail(userId: string, threadId: string, reason: string): void {
+    this.tell(userId, { type: 'chat.error', threadId, reason });
+  }
+
+  private release(c: Inflight): void {
+    this.inflight.delete(c.chatId);
+    if (this.byThread.get(c.threadId) === c.chatId) this.byThread.delete(c.threadId);
+  }
+
+  /** `chat.send` from a browser. Errors are reported on the socket, never thrown. */
+  async send(userId: string, msg: { threadId: string; body: string; clientMsgId: string }): Promise<void> {
+    const { ctx } = this;
+    const row = await one(
+      ctx.pool,
+      `SELECT a.*, t.project_id AS thread_project_id, t.card_id AS thread_card_id, p.key AS project_key, c.ref AS card_ref
+         FROM threads t JOIN agents a ON a.id = t.agent_id
+         LEFT JOIN projects p ON p.id = t.project_id LEFT JOIN cards c ON c.id = t.card_id
+        WHERE t.id = $1 AND t.kind = 'chat' AND t.created_by = $2`,
+      [msg.threadId, userId],
+    );
+    if (!row) return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);
+    if (this.byThread.has(msg.threadId)) return this.fail(userId, msg.threadId, CHAT_ERROR.busy);
+    // Nothing is queued: an offline workstation is reported immediately and the message is not saved.
+    if (row.status !== 'active' || !row.workstation_id || !ctx.services.runners.isOnline(row.workstation_id))
+      return this.fail(userId, msg.threadId, CHAT_ERROR.workstationOffline);
+
+    const prior = await one(
+      ctx.pool,
+      `SELECT data->>'runtimeSessionId' AS sid FROM thread_messages
+        WHERE thread_id = $1 AND author_kind = 'agent' AND data ? 'runtimeSessionId'
+        ORDER BY created_at DESC, event_seq DESC LIMIT 1`,
+      [msg.threadId],
+    );
+    const chatId = randomUUID();
+    const inflight: Inflight = {
+      chatId,
+      threadId: msg.threadId,
+      userId,
+      orgId: row.org_id,
+      agentId: row.id,
+      workstationId: row.workstation_id,
+      startedAt: ctx.clock.now(),
+    };
+    this.inflight.set(chatId, inflight);
+    this.byThread.set(msg.threadId, chatId);
+    try {
+      await ctx.store.append([
+        {
+          streamId: streamId.thread(msg.threadId),
+          event: {
+            type: 'ThreadMessagePosted',
+            payload: {
+              threadId: msg.threadId,
+              messageId: randomUUID(),
+              ...(row.thread_card_id ? { cardId: row.thread_card_id } : {}),
+              authorKind: 'user',
+              authorUserId: userId,
+              kind: 'chat',
+              body: msg.body,
+              data: { clientMsgId: msg.clientMsgId },
+            },
+          },
+          actor: userActor(userId),
+          scope: orgScope(row.org_id),
+        },
+        {
+          streamId: streamId.shift(chatId),
+          event: {
+            type: 'ShiftStarted',
+            payload: {
+              shiftId: chatId,
+              agentId: row.id,
+              workstationId: row.workstation_id,
+              ...(row.thread_card_id ? { cardId: row.thread_card_id } : {}),
+              kind: 'chat',
+              runtime: row.runtime,
+              model: row.model,
+              overflow: false,
+            },
+          },
+          actor: runnerActor(row.workstation_id),
+          scope: orgScope(row.org_id),
+        },
+      ]);
+      const context: ChatContext = {
+        ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),
+        ...(row.thread_card_id ? { cardId: row.thread_card_id, cardRef: row.card_ref } : {}),
+      };
+      const sent = ctx.services.runners.send(
+        row.workstation_id,
+        'chat.start',
+        {
+          chatId,
+          threadId: msg.threadId,
+          agent: agentSpec(row),
+          message: msg.body,
+          ...(prior?.sid ? { resumeSessionId: prior.sid as string } : {}),
+          context,
+        },
+        ctx.clock.now(),
+      );
+      if (!sent) await this.finish(inflight, 'rejected', CHAT_ERROR.workstationOffline);
+    } catch (err) {
+      ctx.log.error({ err }, 'chat.send failed');
+      await this.finish(inflight, 'crashed', CHAT_ERROR.runnerError).catch(() => {});
+    }
+  }
+
+  cancel(userId: string, threadId: string): void {
+    const chatId = this.byThread.get(threadId);
+    const c = chatId ? this.inflight.get(chatId) : undefined;
+    if (!c || c.userId !== userId) return;
+    this.ctx.services.runners.send(
+      c.workstationId,
+      'chat.cancel',
+      { chatId: c.chatId },
+      this.ctx.clock.now(),
+    );
+  }
+
+  onDelta(workstationId: string, msg: RunnerToServerOf<'chat.delta'>): void {
+    const c = this.inflight.get(msg.chatId);
+    if (c && c.workstationId === workstationId)
+      this.tell(c.userId, { type: 'chat.delta', threadId: c.threadId, text: msg.text });
+  }
+
+  /** The runner finished one reply. Runs inside the runner-inbox transaction; notify afterwards. */
+  async applyDone(
+    workstationId: string,
+    msg: RunnerToServerOf<'chat.done'>,
+    tx: Tx,
+  ): Promise<ChatTerminal | undefined> {
+    const c = this.inflight.get(msg.chatId);
+    if (!c || c.workstationId !== workstationId) return undefined;
+    const messageId = randomUUID();
+    await this.ctx.store.append(
+      [
+        {
+          streamId: streamId.thread(c.threadId),
+          event: {
+            type: 'ThreadMessagePosted',
+            payload: {
+              threadId: c.threadId,
+              messageId,
+              authorKind: 'agent',
+              authorAgentId: c.agentId,
+              kind: 'chat',
+              body: msg.messageText,
+              data: {
+                ...(msg.runtimeSessionId ? { runtimeSessionId: msg.runtimeSessionId } : {}),
+                usage: msg.usage,
+              },
+            },
+          },
+          actor: agentActor(c.agentId),
+          scope: orgScope(c.orgId),
+        },
+        this.shiftEnded(c, 'reported', msg.usage),
+      ],
+      { tx },
+    );
+    this.release(c);
+    return { userId: c.userId, threadId: c.threadId, messageId };
+  }
+
+  async applyError(
+    workstationId: string,
+    msg: RunnerToServerOf<'chat.error'>,
+    tx: Tx,
+  ): Promise<ChatTerminal | undefined> {
+    const c = this.inflight.get(msg.chatId);
+    if (!c || c.workstationId !== workstationId) return undefined;
+    await this.ctx.store.append([this.shiftEnded(c, msg.error === 'cancelled' ? 'stopped' : 'crashed')], {
+      tx,
+    });
+    this.release(c);
+    return { userId: c.userId, threadId: c.threadId, reason: msg.error };
+  }
+
+  notify(t: ChatTerminal | undefined): void {
+    if (!t) return;
+    if (t.messageId) this.tell(t.userId, { type: 'chat.done', threadId: t.threadId, messageId: t.messageId });
+    else this.fail(t.userId, t.threadId, t.reason ?? CHAT_ERROR.runnerError);
+  }
+
+  /** The runner's socket closed: its chats cannot finish (the runner kills them too). */
+  async workstationLost(workstationId: string): Promise<void> {
+    for (const c of [...this.inflight.values()]) {
+      if (c.workstationId !== workstationId) continue;
+      await this.finish(c, 'lost', CHAT_ERROR.workstationOffline).catch((err) =>
+        this.ctx.log.error({ err }, 'failed to end lost chat'),
+      );
+    }
+  }
+
+  private async finish(c: Inflight, outcome: 'rejected' | 'crashed' | 'lost', reason: string): Promise<void> {
+    this.release(c);
+    await this.ctx.store.append([this.shiftEnded(c, outcome)]);
+    this.fail(c.userId, c.threadId, reason);
+  }
+
+  private shiftEnded(
+    c: Inflight,
+    outcome: 'reported' | 'stopped' | 'crashed' | 'rejected' | 'lost',
+    usage = ZERO_USAGE,
+  ): AppendInput {
+    return {
+      streamId: streamId.shift(c.chatId),
+      event: {
+        type: 'ShiftEnded',
+        payload: {
+          shiftId: c.chatId,
+          agentId: c.agentId,
+          outcome,
+          durationMs: Math.max(0, this.ctx.clock.now().getTime() - c.startedAt.getTime()),
+          usage,
+          guardViolations: [],
+        },
+      },
+      actor: runnerActor(c.workstationId),
+      scope: orgScope(c.orgId),
+    };
+  }
+}

@@ -10,6 +10,7 @@ import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import type { ClaimResult } from '../dispatcher/claim.ts';
+import { cardLedgerEntries, standingOrdersFor } from '../queries/ledger.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
 
@@ -133,8 +134,8 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       body: m.body,
       at: iso(m.created_at) as string,
     })),
-    standingOrders: [],
-    ledger: [],
+    standingOrders: await standingOrdersFor(ctx.pool, card.org_id, card.project_id),
+    ledger: await cardLedgerEntries(ctx.pool, card.id),
   };
 }
 

@@ -4,6 +4,7 @@ import {
   type DiffStats,
   getOutcome,
   getStage,
+  type LedgerMatch,
   outcomeDataSchema,
   type RunnerToServerOf,
   resolveOutcome,
@@ -16,6 +17,7 @@ import { exec, one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
+import { raiseQuestion } from './questions.ts';
 
 export interface WsRef {
   id: string;
@@ -25,6 +27,10 @@ export interface WsRef {
 export interface ReportResult {
   accepted: boolean;
   error?: string;
+  /** Shown to the agent on acceptance. */
+  message?: string;
+  /** Ledger entries that matched a question. */
+  matches?: LedgerMatch[];
 }
 
 const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -160,13 +166,7 @@ export async function applyShiftReport(
     );
     return { accepted: true };
   }
-  if (report.kind === 'question') {
-    return {
-      accepted: false,
-      error:
-        'questions are not available yet (they arrive with the decision desk); make a reasonable assumption, note it in your handoff and continue',
-    };
-  }
+  if (report.kind === 'question') return raiseQuestion(ctx, tx, shift, card, agent, report);
 
   const wf = await loadWorkflowById(tx, card.workflow_version_id);
   if (!wf) return { accepted: false, error: 'workflow definition is missing' };
@@ -416,6 +416,9 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
     'SELECT outcome FROM card_handoffs WHERE shift_id=$1 ORDER BY created_at DESC, event_seq DESC LIMIT 1',
     [s.id],
   );
+  const asked = handoff
+    ? undefined
+    : await one(tx, 'SELECT 1 FROM desk_items WHERE shift_id=$1 AND blocking LIMIT 1', [s.id]);
   if (card && card.claim_shift_id === s.id) {
     const stopped = msg.outcome === 'stopped';
     const text = stopped
@@ -425,7 +428,7 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
   }
   events.push(
     await shiftEndedFor(tx, s, msg.outcome, {
-      reportOutcome: handoff?.outcome,
+      reportOutcome: handoff?.outcome ?? (asked ? 'question' : undefined),
       durationMs: msg.durationMs,
       usage: msg.usage,
       exitCode: msg.exitCode,

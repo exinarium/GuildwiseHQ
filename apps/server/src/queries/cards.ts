@@ -187,6 +187,14 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
       canComment: canCommentOnCard(role),
     },
     diffStats: lastDiff?.data?.diffStats ?? null,
+    blockers: (
+      await rows(
+        ctx.pool,
+        `SELECT d.id, d.title FROM card_blockers b JOIN desk_items d ON d.id = b.desk_item_id
+          WHERE b.card_id=$1 AND d.status='open' ORDER BY d.created_at`,
+        [card.id],
+      )
+    ).map((b) => ({ deskItemId: b.id, title: b.title })),
   };
 }
 

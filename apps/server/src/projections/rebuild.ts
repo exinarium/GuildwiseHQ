@@ -9,6 +9,7 @@ const SAVED: Array<{ table: string; restoreWhere: string }> = [
   { table: 'auth_sessions', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'pairing_codes', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'runner_commands', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
+  { table: 'runner_token_rotations', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
   {
     table: 'workstation_repos',
     restoreWhere:

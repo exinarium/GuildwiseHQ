@@ -6,6 +6,7 @@ import {
   type ServerToRunner,
   streamId,
 } from '@aom/shared';
+import type { ChatTerminal } from '../chat/relay.ts';
 import { cardMessage, orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import {
   applyShiftEnded,
@@ -21,7 +22,9 @@ import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { buildBrief } from './brief.ts';
 import { completeCommand, markCommandSent, pendingCommands } from './commands-queue.ts';
+import { ledgerSearchRpc } from './ledger-rpc.ts';
 import type { RunnerConn } from './registry.ts';
+import { issueRotatedToken } from './rotation.ts';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_CONCURRENT_SHIFTS = 4;
@@ -111,6 +114,8 @@ export class RunnerHandlers {
           reportId: msg.reportId,
           accepted: r.accepted,
           error: r.error,
+          message: r.message,
+          matches: r.matches,
         });
         return;
       }
@@ -122,12 +127,26 @@ export class RunnerHandlers {
       case 'command.result':
         await completeCommand(this.ctx.pool, msg.commandId, msg.ok, msg.error, this.ctx.clock.now());
         return this.ack(conn, msg);
+      case 'chat.delta':
+        return this.ctx.services.chat.onDelta(conn.workstationId, msg);
       case 'chat.done':
-      case 'chat.error':
+      case 'chat.error': {
+        const chat = this.ctx.services.chat;
+        const { duplicate, result } = await this.withInbox<ChatTerminal | null>(conn, msg.id, async (tx) =>
+          msg.type === 'chat.done'
+            ? ((await chat.applyDone(conn.workstationId, msg, tx)) ?? null)
+            : ((await chat.applyError(conn.workstationId, msg, tx)) ?? null),
+        );
+        if (!duplicate) chat.notify(result ?? undefined);
+        return this.ack(conn, msg);
+      }
+      case 'token.rotate':
+        this.send(conn, 'token.rotated', { token: await issueRotatedToken(this.ctx, conn.workstationId) });
+        return;
       case 'vault.conflict':
         return this.ack(conn, msg);
       default:
-        return; // chat.delta, vault.status, ack: nothing to do in M1
+        return; // vault.status, ack: nothing to do
     }
   }
 
@@ -338,14 +357,14 @@ export class RunnerHandlers {
         msg.shiftId,
         conn.workstationId,
       ]);
-      if (!shift?.card_id) return reply(false, undefined, 'unknown shift');
+      if (!shift) return reply(false, undefined, 'unknown shift');
+      if (msg.method === 'ledger.search') return reply(true, await ledgerSearchRpc(ctx, shift, msg.params));
+      if (!shift.card_id) return reply(false, undefined, 'this conversation has no card');
       switch (msg.method) {
         case 'card.get': {
           const brief = await buildBrief(ctx, shift);
           return reply(!!brief, brief ?? undefined, brief ? undefined : 'card unavailable');
         }
-        case 'ledger.search':
-          return reply(true, { entries: [] });
         case 'thread.read': {
           const brief = await buildBrief(ctx, shift);
           return reply(true, { messages: brief?.thread ?? [] });
@@ -354,7 +373,8 @@ export class RunnerHandlers {
           const body = String(msg.params.body ?? msg.params.note ?? '').trim();
           if (!body) return reply(false, undefined, 'body is required');
           const card = await one(ctx.pool, 'SELECT * FROM cards WHERE id=$1', [shift.card_id]);
-          if (!card || card.claim_shift_id !== shift.id)
+          // Chat conversations comment on the card in context without holding its claim.
+          if (!card || (shift.kind !== 'chat' && card.claim_shift_id !== shift.id))
             return reply(false, undefined, 'this shift no longer holds the claim');
           const m = cardMessage(card, { kind: 'agent', agentId: shift.agent_id }, 'comment', body);
           await ctx.store.append([m]);

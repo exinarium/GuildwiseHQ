@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { BrowserGateway } from './browser-gateway/gateway.ts';
+import type { ChatRelay } from './chat/relay.ts';
 import type { Clock } from './clock.ts';
 import type { Config } from './config.ts';
 import type { Pool } from './db/pool.ts';
@@ -30,4 +31,5 @@ export interface Services {
   dispatcher: Dispatcher;
   reaper: Reaper;
   browser: BrowserGateway;
+  chat: ChatRelay;
 }
