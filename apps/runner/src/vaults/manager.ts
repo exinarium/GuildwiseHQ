@@ -1,0 +1,244 @@
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import {
+  type VaultConfig,
+  type VaultConfigureCommand,
+  VaultConfigureCommandSchema,
+  type VaultWriteCommand,
+} from '@aom/shared';
+import { type Logger, nullLogger } from '../log.ts';
+import type { RunnerPaths } from '../paths.ts';
+import { ensureClone, identityEnv, isClean, isCloned, syncVault, type VaultSyncResult } from './sync.ts';
+import { VaultWriteError, writeVaultFile } from './write.ts';
+
+export interface VaultTransport {
+  /** Acked types (`vault.conflict`) are persisted in the outbox; `vault.status` is best effort. */
+  send(type: 'vault.status' | 'vault.conflict', payload: Record<string, unknown>): void;
+}
+
+export interface VaultManagerOptions {
+  paths: RunnerPaths;
+  transport: VaultTransport;
+  log?: Logger;
+  /** Test hook: milliseconds per configured second (default 1000). */
+  secondMs?: number;
+}
+
+interface PersistedState {
+  config: VaultConfigureCommand | null;
+  /** vaultId -> conflicted files. A paused vault is not synced until the manager resolves it. */
+  paused: Record<string, string[]>;
+}
+
+export interface VaultWriteOutcome {
+  written: boolean;
+  committed: boolean;
+  pushed: boolean;
+  paused: boolean;
+  conflict?: string[];
+}
+
+/**
+ * Vault sync and writes on this workstation (docs/ARCHITECTURE.md sections 16.3 and 16.4). The set of vaults comes
+ * from the server (`vault.configure`, replace semantics) and is persisted, so syncing continues while the runner is
+ * offline. Per vault: one serialized git operation at a time, a timer per `syncIntervalSec`, status reports to the
+ * server, and a pause after an unresolved conflict.
+ */
+export class VaultManager {
+  private config: VaultConfigureCommand | null = null;
+  private paused = new Map<string, string[]>();
+  private timers = new Map<string, NodeJS.Timeout>();
+  private chains = new Map<string, Promise<unknown>>();
+  private lastPull = new Map<string, string>();
+  private lastPush = new Map<string, string>();
+  private stopped = false;
+  private readonly log: Logger;
+  private readonly file: string;
+
+  constructor(private readonly opts: VaultManagerOptions) {
+    this.log = opts.log ?? nullLogger;
+    this.file = join(opts.paths.root, 'vaults.json');
+    this.load();
+  }
+
+  dir(vaultId: string): string {
+    return join(this.opts.paths.vaults, vaultId);
+  }
+
+  /** Starts the sync timers for the persisted configuration (before the server connection exists). */
+  start(): void {
+    if (this.config) this.schedule();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    for (const t of this.timers.values()) clearInterval(t);
+    this.timers.clear();
+  }
+
+  /** `hello.vaults`: the vaults this runner holds a clone of. */
+  async report(): Promise<Array<{ vaultId: string; localPath: string; clean: boolean }>> {
+    const out = [];
+    for (const v of this.config?.vaults ?? []) {
+      const dir = this.dir(v.vaultId);
+      if (isCloned(dir)) out.push({ vaultId: v.vaultId, localPath: dir, clean: await isClean(dir) });
+    }
+    return out;
+  }
+
+  configured(): string[] {
+    return (this.config?.vaults ?? []).map((v) => v.vaultId);
+  }
+
+  isPaused(vaultId: string): boolean {
+    return this.paused.has(vaultId);
+  }
+
+  vault(vaultId: string): VaultConfig | undefined {
+    return this.config?.vaults.find((v) => v.vaultId === vaultId);
+  }
+
+  /** `vault.configure`: replaces the vault set, drops state of removed vaults, resumes the ones the manager resolved. */
+  configure(cmd: VaultConfigureCommand): void {
+    const ids = new Set(cmd.vaults.map((v) => v.vaultId));
+    this.config = cmd;
+    for (const id of [...this.paused.keys()]) if (!ids.has(id)) this.paused.delete(id);
+    for (const id of cmd.resume) this.paused.delete(id);
+    this.persist();
+    this.schedule();
+    for (const id of cmd.resume) if (ids.has(id)) void this.syncNow(id);
+  }
+
+  private schedule(): void {
+    for (const [id, t] of this.timers) {
+      clearInterval(t);
+      this.timers.delete(id);
+    }
+    if (this.stopped || !this.config) return;
+    for (const v of this.config.vaults) {
+      const t = setInterval(
+        () => void this.syncNow(v.vaultId),
+        v.syncIntervalSec * (this.opts.secondMs ?? 1000),
+      );
+      t.unref?.();
+      this.timers.set(v.vaultId, t);
+      // a vault without a clone yet (or never synced in this process) is synced right away
+      if (!this.paused.has(v.vaultId) && !this.lastPull.has(v.vaultId)) void this.syncNow(v.vaultId);
+    }
+  }
+
+  private serialize<T>(vaultId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.chains.get(vaultId) ?? Promise.resolve();
+    const next = prev.then(fn, fn);
+    this.chains.set(
+      vaultId,
+      next.catch(() => {}),
+    );
+    return next;
+  }
+
+  /** One sync pass now (also what the interval timer runs). A paused vault is skipped. */
+  syncNow(vaultId: string): Promise<VaultSyncResult | { status: 'paused' }> {
+    return this.serialize(vaultId, () => this.runSync(vaultId));
+  }
+
+  private async runSync(vaultId: string): Promise<VaultSyncResult | { status: 'paused' }> {
+    const cfg = this.config;
+    const v = this.vault(vaultId);
+    if (!cfg || !v || this.stopped) return { status: 'error', error: 'vault is not configured' };
+    if (this.paused.has(vaultId)) return { status: 'paused' };
+    const r = await syncVault({
+      dir: this.dir(vaultId),
+      remoteUrl: v.remoteUrl,
+      identity: cfg.identity,
+      workstationName: cfg.workstationName,
+    });
+    this.afterSync(vaultId, r);
+    return r;
+  }
+
+  private afterSync(vaultId: string, r: VaultSyncResult): void {
+    const now = new Date().toISOString();
+    if (r.status === 'ok') {
+      this.lastPull.set(vaultId, now);
+      if (r.pushed) this.lastPush.set(vaultId, now);
+      this.opts.transport.send('vault.status', {
+        vaultId,
+        lastPullAt: this.lastPull.get(vaultId) ?? null,
+        lastPushAt: this.lastPush.get(vaultId) ?? null,
+      });
+      return;
+    }
+    if (r.status === 'conflict') {
+      this.paused.set(vaultId, r.files);
+      this.persist();
+      this.log.warn(`vault ${vaultId} has a sync conflict; syncing paused`, r.files);
+      this.opts.transport.send('vault.conflict', { vaultId, files: r.files });
+      this.opts.transport.send('vault.status', {
+        vaultId,
+        lastPullAt: this.lastPull.get(vaultId) ?? null,
+        lastPushAt: this.lastPush.get(vaultId) ?? null,
+        error: `sync conflict in ${r.files.join(', ')}`,
+      });
+      return;
+    }
+    this.log.warn(`vault ${vaultId} sync failed: ${r.error}`);
+    this.opts.transport.send('vault.status', {
+      vaultId,
+      lastPullAt: null,
+      lastPushAt: null,
+      error: r.error.slice(0, 500),
+    });
+  }
+
+  /**
+   * `vault.write`: write + commit locally, then push through a sync pass (unless the vault is paused, then the commit
+   * waits for the manager to resolve the conflict). Throws on a bad path, an existing different file or no vault.
+   */
+  write(cmd: VaultWriteCommand): Promise<VaultWriteOutcome> {
+    return this.serialize(cmd.vaultId, async () => {
+      const cfg = this.config;
+      const v = this.vault(cmd.vaultId);
+      if (!cfg || !v) throw new VaultWriteError(`vault ${cmd.vaultId} is not configured on this workstation`);
+      const dir = this.dir(cmd.vaultId);
+      await ensureClone(dir, v.remoteUrl, identityEnv(cfg.identity));
+      const w = await writeVaultFile(dir, cmd, cfg.identity);
+      if (this.paused.has(cmd.vaultId))
+        return { ...w, pushed: false, paused: true, conflict: this.paused.get(cmd.vaultId) };
+      if (!cmd.push) return { ...w, pushed: false, paused: false };
+      const r = await syncVault({
+        dir,
+        remoteUrl: v.remoteUrl,
+        identity: cfg.identity,
+        workstationName: cfg.workstationName,
+      });
+      this.afterSync(cmd.vaultId, r);
+      if (r.status === 'conflict') return { ...w, pushed: false, paused: true, conflict: r.files };
+      if (r.status === 'error') throw new VaultWriteError(r.error);
+      return { ...w, pushed: r.pushed, paused: false };
+    });
+  }
+
+  private load(): void {
+    try {
+      if (!existsSync(this.file)) return;
+      const s = JSON.parse(readFileSync(this.file, 'utf8')) as PersistedState;
+      const cfg = s.config ? VaultConfigureCommandSchema.safeParse(s.config) : null;
+      if (cfg?.success) this.config = cfg.data;
+      for (const [id, files] of Object.entries(s.paused ?? {})) this.paused.set(id, files);
+    } catch (err) {
+      this.log.warn(`ignoring unreadable ${this.file}: ${String(err)}`);
+    }
+  }
+
+  private persist(): void {
+    try {
+      mkdirSync(dirname(this.file), { recursive: true });
+      const s: PersistedState = { config: this.config, paused: Object.fromEntries(this.paused) };
+      writeFileSync(`${this.file}.tmp`, JSON.stringify(s), { mode: 0o600 });
+      renameSync(`${this.file}.tmp`, this.file);
+    } catch (err) {
+      this.log.warn(`could not persist vault state: ${String(err)}`);
+    }
+  }
+}

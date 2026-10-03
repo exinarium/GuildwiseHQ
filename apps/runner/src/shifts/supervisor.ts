@@ -10,8 +10,6 @@ import {
   isTerminalReport,
   outcomeDataSchema,
   type RepoReport,
-  renderInstructions,
-  renderShiftPrompt,
   type ServerToRunnerOf,
   type ShiftReport,
   ShiftReportSchema,
@@ -21,6 +19,7 @@ import {
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
+import { cardPayload, shiftTexts } from '../devops/requests.ts';
 import { computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git } from '../git/git.ts';
 import {
@@ -34,6 +33,7 @@ import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import { readVaultContext, withVaultContext } from '../vaults/context.ts';
 import { autoCommit } from './autocommit.ts';
 import { type BranchSnapshot, runGuard, snapshotBranches } from './guard.ts';
 
@@ -111,7 +111,8 @@ export class ShiftSupervisor {
       .filter((s) => s.session || s.resumed)
       .map((s) => ({
         shiftId: s.msg.shiftId,
-        ...(s.msg.brief.card ? { cardId: s.msg.brief.card.id } : {}),
+        // a DevOps shift has no card (its brief carries a placeholder)
+        ...(s.msg.kind === 'card' && s.msg.brief.card ? { cardId: s.msg.brief.card.id } : {}),
         agentId: s.msg.agent.agentId,
         startedAt: s.startedAt.toISOString(),
       }));
@@ -291,7 +292,11 @@ export class ShiftSupervisor {
     if (!s.resumed) this.deps.transport.send('shift.accepted', { shiftId: msg.shiftId });
     this.persist(s);
 
-    await adapter.writeInstructions(sandbox, renderInstructions(msg.brief));
+    // A card shift reads only the vault the server named for this card; a DevOps shift reads none.
+    const vaultCtx =
+      msg.kind === 'card' && msg.vault ? await readVaultContext(paths.vaults, msg.vault) : null;
+    const texts = shiftTexts(msg, withVaultContext(msg.brief, vaultCtx));
+    await adapter.writeInstructions(sandbox, texts.instructions);
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
     s.env = {
       ...sandboxEnv(sandbox),
@@ -304,13 +309,13 @@ export class ShiftSupervisor {
     try {
       s.session = await adapter.start({
         shiftId: msg.shiftId,
-        prompt: renderShiftPrompt(msg.brief),
-        instructionsMarkdown: renderInstructions(msg.brief),
+        prompt: texts.prompt,
+        instructionsMarkdown: texts.instructions,
         cwd,
         sandbox,
         agent: msg.agent as AgentRuntimeSpec,
         env: s.env,
-        addDirs: [],
+        addDirs: vaultCtx ? [vaultCtx.addDir] : [],
         maxShiftMinutes: msg.maxShiftMinutes,
         logFile: `${paths.shiftLogs}/${msg.shiftId}.jsonl`,
       });
@@ -433,7 +438,7 @@ export class ShiftSupervisor {
     return {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
       rpc: async (req: IpcRpcRequest) => {
-        if (req.method === 'card.get') return { ok: true, result: s.msg.brief };
+        if (req.method === 'card.get') return { ok: true, result: cardPayload(s.msg) };
         return this.deps.rpc(s.msg.shiftId, req.method, req.params);
       },
     };

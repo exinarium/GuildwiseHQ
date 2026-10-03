@@ -196,10 +196,59 @@ describe('aom CLI', () => {
     expect(await t.run('handoff')).toBe(1);
     expect(t.err.join('')).toContain('--note');
     expect(await t.run('review', 'approve', '--note', 'x')).toBe(1); // missing score
-    expect(await t.run('devops', 'do a thing')).toBe(2);
+    expect(await t.run('publish', '--file', 'x.md')).toBe(2); // later milestones
     const noEnv = await runAom(['card'], { ...t.ctx, env: {} });
     expect(noEnv).toBe(1);
     expect(t.err.join('')).toContain('AOM_SHIFT_TOKEN');
+  });
+
+  it('devops "<request>" is a non-terminal rpc; usage is checked', async () => {
+    const t = await setup();
+    expect(await t.run('devops', 'start the app')).toBe(0);
+    expect(t.rpcs.at(-1)).toEqual({ method: 'devops.request', params: { text: 'start the app' } });
+    expect(t.reports).toEqual([]);
+    expect(await t.run('devops')).toBe(1);
+    expect(t.err.join('')).toContain('usage: aom devops');
+  });
+
+  it('devops-done and devops-approval are terminal outcome reports with their data', async () => {
+    const t = await setup();
+    expect(
+      await t.run(
+        'devops-done',
+        '--summary',
+        'app is up on :3000',
+        '--command',
+        'npm start',
+        '--command',
+        'curl :3000',
+      ),
+    ).toBe(0);
+    expect(t.reports.at(-1)).toEqual({
+      kind: 'outcome',
+      outcomeId: 'devops_done',
+      note: 'app is up on :3000',
+      data: { summary: 'app is up on :3000', commands: ['npm start', 'curl :3000'] },
+    });
+    expect(
+      await t.run(
+        'devops-approval',
+        '--action',
+        'install docker',
+        '--reason',
+        'tester needs it',
+        '--command',
+        'apt install docker.io',
+      ),
+    ).toBe(0);
+    expect(t.reports.at(-1)).toEqual({
+      kind: 'outcome',
+      outcomeId: 'devops_approval',
+      note: 'Needs approval: install docker',
+      data: { action: 'install docker', reason: 'tester needs it', commands: ['apt install docker.io'] },
+    });
+    expect(await t.run('devops-approval', '--action', 'x')).toBe(1);
+    expect(await t.run('devops-done')).toBe(1);
   });
 
   it('an expired token says the shift is over', async () => {

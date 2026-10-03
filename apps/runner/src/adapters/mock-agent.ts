@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { needsApproval } from '@aom/shared/devops';
 
 type Action = 'ok' | 'changes' | 'fail' | 'question' | 'crash' | 'hang' | 'no_report' | 'edit_outside_scope';
 
@@ -118,6 +119,62 @@ function report(brief: Brief, action: Action): { code: number; out: string; err:
   return aom(args);
 }
 
+interface DevopsBrief extends Brief {
+  devops: {
+    summary: string;
+    access: { allowInstall: boolean; allowDocker: boolean; allowedPaths: string[]; sudo: boolean };
+    approval?: { action: string };
+  };
+}
+
+/**
+ * DevOps shift (docs/ARCHITECTURE.md section 16.2). Deterministic: a request that needs more than the granted access
+ * (see `needsApproval`) asks for approval unless the manager already approved it; anything else is "done". Tokens in
+ * the request text drive failure paths: `[crash]`, `[hang]`, `[no_report]`.
+ */
+async function devopsMain(brief: DevopsBrief): Promise<number> {
+  const d = brief.devops;
+  for (let i = 1; i <= 3; i++) {
+    emit({ kind: 'progress', text: `mock devops: step ${i}/3 (${d.summary.slice(0, 60)})` });
+    await sleep(stepMs);
+  }
+  emit({ kind: 'usage', usage: { inputTokens: 500, outputTokens: 100 } });
+  if (d.summary.includes('[crash]')) {
+    process.stderr.write('mock devops crash\n');
+    return 1;
+  }
+  if (d.summary.includes('[hang]')) {
+    for (;;) {
+      emit({ kind: 'progress', text: 'mock hanging' });
+      await sleep(100);
+    }
+  }
+  if (d.summary.includes('[no_report]')) {
+    emit({ kind: 'final', text: 'mock devops finished without reporting' });
+    return 0;
+  }
+  const r =
+    !d.approval && needsApproval(d.access, d.summary)
+      ? aom([
+          'devops-approval',
+          '--action',
+          d.summary,
+          '--reason',
+          'mock: outside the access granted to the DevOps engineer',
+          '--command',
+          `mock: ${d.summary}`,
+        ])
+      : aom(['devops-done', '--summary', `mock: ${d.summary}`, '--command', 'mock: echo done']);
+  emit({
+    kind: 'final',
+    text:
+      r.code === 0
+        ? `mock devops reported: ${r.out.trim()}`
+        : `mock devops report failed: ${(r.err || r.out).trim()}`,
+  });
+  return 0;
+}
+
 async function main(): Promise<number> {
   const card = aom(['card', '--json']);
   if (card.code !== 0) {
@@ -125,6 +182,7 @@ async function main(): Promise<number> {
     return 1;
   }
   const brief = JSON.parse(card.out) as Brief;
+  if ((brief.shift as { kind?: string }).kind === 'devops') return devopsMain(brief as DevopsBrief);
   const stage = brief.shift.stage;
   const action = pickAction(brief, attemptIndex(brief));
 
