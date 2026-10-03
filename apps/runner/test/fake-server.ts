@@ -22,7 +22,9 @@ export interface FakeServerOptions {
   /** Ack runner messages that require an ack (default true). */
   autoAck?: boolean;
   /** Verdict for each `shift.report` (default: accept). */
-  reportResult?: (msg: RunnerToServerOf<'shift.report'>) => { accepted: boolean; error?: string } | 'ignore';
+  reportResult?: (
+    msg: RunnerToServerOf<'shift.report'>,
+  ) => { accepted: boolean; error?: string; message?: string; matches?: unknown[] } | 'ignore';
   rpc?: (msg: RunnerToServerOf<'rpc.request'>) => { ok: boolean; result?: unknown; error?: string };
   pairCode?: string;
 }
@@ -47,10 +49,14 @@ export class FakeServer {
   });
   port = 0;
   readonly token: string;
+  /** Tokens the socket accepts: the paired one plus any issued by `token.rotate`. */
+  readonly tokens = new Set<string>();
+  private rotations = 0;
 
   constructor(readonly opts: FakeServerOptions = {}) {
     this.token = opts.token ?? 'aomr_testtoken';
     this.autoAck = opts.autoAck ?? true;
+    this.tokens.add(this.token);
   }
 
   static async start(opts: FakeServerOptions = {}): Promise<FakeServer> {
@@ -105,7 +111,8 @@ export class FakeServer {
   }
 
   private onSocket(ws: WebSocket, req: IncomingMessage): void {
-    if (req.headers.authorization !== `Bearer ${this.token}`) {
+    const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
+    if (!bearer || !this.tokens.has(bearer)) {
       ws.close(WS_CLOSE.unauthorized, 'unauthorized');
       return;
     }
@@ -123,6 +130,12 @@ export class FakeServer {
     }
     const msg = parsed.data;
     this.received.push(msg);
+    if (msg.type === 'token.rotate') {
+      const token = `aomr_rotated${++this.rotations}`;
+      this.tokens.add(token);
+      this.sendRaw(ws, 'token.rotated', { token });
+      return;
+    }
     if (msg.type === 'hello') {
       this.helloCount++;
       this.sendRaw(ws, 'welcome', {

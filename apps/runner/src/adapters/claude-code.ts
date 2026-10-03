@@ -9,7 +9,13 @@ import type { ClaudeRuntimeConfigSchema } from '../config.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { ClaudeStreamParser } from './claude-stream-parser.ts';
 import { spawnSession } from './process-session.ts';
-import type { RuntimeAdapter, RuntimeCapabilities, RuntimeSession, ShiftStartInput } from './types.ts';
+import type {
+  ChatStartInput,
+  RuntimeAdapter,
+  RuntimeCapabilities,
+  RuntimeSession,
+  ShiftStartInput,
+} from './types.ts';
 
 type ClaudeConfig = z.infer<typeof ClaudeRuntimeConfigSchema>;
 
@@ -86,6 +92,47 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
   return { bin: cfg.bin, args, env };
 }
 
+/** Chat sessions read and talk; the only shell command they may run is `aom` (comment, ledger search). */
+export function buildClaudeChatSettings(readOnly: boolean): {
+  permissions: { allow: string[]; deny: string[]; defaultMode: 'default' };
+  includeCoAuthoredBy: false;
+} {
+  return {
+    permissions: {
+      allow: ['Read', 'Glob', 'Grep', 'Bash(aom:*)'],
+      deny: [...ALWAYS_DENIED, ...(readOnly ? ['Edit', 'Write', 'NotebookEdit'] : [])],
+      defaultMode: 'default',
+    },
+    includeCoAuthoredBy: false,
+  };
+}
+
+/** `claude -p <message> --resume <id> --output-format stream-json --verbose --include-partial-messages` (section 14). */
+export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig): ClaudeCommand {
+  const args = [
+    '-p',
+    input.message,
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--include-partial-messages',
+    '--model',
+    input.agent.model,
+  ];
+  if (input.agent.effort) args.push('--effort', input.agent.effort);
+  args.push('--strict-mcp-config', '--mcp-config', join(input.sandbox.configDir, 'mcp.json'));
+  if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
+  const env: Record<string, string> = {
+    ...input.env,
+    CLAUDE_CONFIG_DIR: input.sandbox.configDir,
+    HOME: input.sandbox.home,
+    USERPROFILE: input.sandbox.home,
+  };
+  if (cfg.authMode === 'oauth' && cfg.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = cfg.oauthToken;
+  else if (cfg.authMode === 'api_key' && cfg.apiKey) env.ANTHROPIC_API_KEY = cfg.apiKey;
+  return { bin: cfg.bin, args, env };
+}
+
 export class ClaudeCodeAdapter implements RuntimeAdapter {
   readonly id = 'claude-code';
 
@@ -126,6 +173,29 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     this.linkCredentials(dir);
 
     const cmd = buildClaudeCommand(input, this.cfg);
+    const parser = new ClaudeStreamParser();
+    return spawnSession({
+      bin: cmd.bin,
+      args: cmd.args,
+      cwd: input.cwd,
+      env: cmd.env,
+      parseLine: (l) => parser.parseLine(l),
+      usage: () => parser.usage(),
+      logFile: input.logFile,
+      exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
+    });
+  }
+
+  async startChat(input: ChatStartInput): Promise<RuntimeSession> {
+    const dir = input.sandbox.configDir;
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'settings.json'),
+      `${JSON.stringify(buildClaudeChatSettings(input.readOnly), null, 2)}\n`,
+    );
+    await writeFile(join(dir, 'mcp.json'), `${JSON.stringify({ mcpServers: {} })}\n`);
+    this.linkCredentials(dir);
+    const cmd = buildClaudeChatCommand(input, this.cfg);
     const parser = new ClaudeStreamParser();
     return spawnSession({
       bin: cmd.bin,

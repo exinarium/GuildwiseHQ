@@ -31,6 +31,7 @@ export interface ShiftStartInput {
 }
 
 export type RuntimeEvent =
+  | { kind: 'delta'; text: string }
   | { kind: 'session'; runtimeSessionId: string }
   | { kind: 'progress'; text: string }
   | { kind: 'tool'; name: string; summary: string }
@@ -45,6 +46,23 @@ export interface RuntimeSession {
   usage(): Usage;
 }
 
+export interface ChatStartInput {
+  chatId: string;
+  /** The user's message (one headless call per message). */
+  message: string;
+  /** Agent scratch dir, or the card worktree when the chat has a card in context (read only). */
+  cwd: string;
+  sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch'>;
+  agent: AgentRuntimeSpec;
+  /** AOM_IPC_URL, AOM_SHIFT_TOKEN (chat scoped), AOM_SHIFT_ID, PATH prefix, plus the sandbox env. */
+  env: Record<string, string>;
+  /** Previous runtime session of this conversation. */
+  resumeSessionId?: string;
+  /** Tools are limited to reading (and the chat-scoped `aom` verbs). */
+  readOnly: boolean;
+  logFile?: string;
+}
+
 export interface RuntimeAdapter {
   readonly id: string;
   /** Probed at start and every 10 min. */
@@ -55,4 +73,9 @@ export interface RuntimeAdapter {
     markdown: string,
   ): Promise<void>;
   start(input: ShiftStartInput): Promise<RuntimeSession>;
+  /**
+   * Chat (docs/ARCHITECTURE.md section 14): one headless call per user message, streaming `delta` events, ending with
+   * `session` (to resume next time), `usage`, `final` and `exit`.
+   */
+  startChat?(input: ChatStartInput): Promise<RuntimeSession>;
 }

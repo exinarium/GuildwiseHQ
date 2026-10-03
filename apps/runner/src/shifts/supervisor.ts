@@ -8,6 +8,7 @@ import {
   type IpcRpcRequest,
   type IpcRpcResponse,
   isTerminalReport,
+  type LedgerMatch,
   outcomeDataSchema,
   type RepoReport,
   renderInstructions,
@@ -68,6 +69,14 @@ export interface SupervisorDeps {
   progressFlushMs?: number;
 }
 
+/** The server's answer to a `shift.report`: what the agent is told (and any ledger matches for a question). */
+interface ReportVerdict {
+  accepted: boolean;
+  error?: string;
+  message?: string;
+  matches?: LedgerMatch[];
+}
+
 interface ActiveShift {
   msg: ShiftStartMsg;
   startedAt: Date;
@@ -78,7 +87,7 @@ interface ActiveShift {
   branchesAtStart: BranchSnapshot;
   stopReason?: StopReason | 'timeout';
   reportState: 'none' | 'pending' | 'accepted';
-  pendingReports: Map<string, (r: { accepted: boolean; error?: string }) => void>;
+  pendingReports: Map<string, (r: ReportVerdict) => void>;
   guardViolations: GuardViolation[];
   finalText?: string;
   progress: Array<{ at: string; kind: 'text' | 'tool' | 'status'; text: string }>;
@@ -219,7 +228,12 @@ export class ShiftSupervisor {
       const cb = s.pendingReports.get(msg.reportId);
       if (cb) {
         s.pendingReports.delete(msg.reportId);
-        cb({ accepted: msg.accepted, ...(msg.error ? { error: msg.error } : {}) });
+        cb({
+          accepted: msg.accepted,
+          ...(msg.error ? { error: msg.error } : {}),
+          ...(msg.message ? { message: msg.message } : {}),
+          ...(msg.matches ? { matches: msg.matches } : {}),
+        });
         return;
       }
     }
@@ -453,9 +467,6 @@ export class ShiftSupervisor {
         error: 'already reported',
       };
     }
-    if (report.kind === 'question' && report.blocking) {
-      return { status: 501, error: 'questions are not available yet (arrives with the decision desk, M2)' };
-    }
 
     let attach: Record<string, unknown> = {};
     let toSend: ShiftReport = report;
@@ -523,7 +534,7 @@ export class ShiftSupervisor {
 
     const reportId = uuidv7();
     if (terminal) s.reportState = 'pending';
-    const verdict = new Promise<{ accepted: boolean; error?: string } | 'timeout'>((resolve) => {
+    const verdict = new Promise<ReportVerdict | 'timeout'>((resolve) => {
       s.pendingReports.set(reportId, resolve);
       setTimeout(() => {
         if (s.pendingReports.delete(reportId)) resolve('timeout');
@@ -538,7 +549,7 @@ export class ShiftSupervisor {
     }
     if (!result.accepted) {
       if (terminal) s.reportState = 'none';
-      return rejected(result.error ?? 'the server rejected the report');
+      return rejected(result.error ?? 'the server rejected the report', result.matches);
     }
     if (terminal) {
       s.reportState = 'accepted';
@@ -548,14 +559,19 @@ export class ShiftSupervisor {
       );
       s.graceTimer.unref?.();
     }
-    return { accepted: true, message: terminal ? ACCEPTED_MESSAGE : 'Recorded.' };
+    return {
+      accepted: true,
+      message: result.message ?? (terminal ? ACCEPTED_MESSAGE : 'Recorded.'),
+      ...(result.matches ? { matches: result.matches } : {}),
+    };
   }
 }
 
-const rejected = (error: string): IpcReportResponse => ({
+const rejected = (error: string, matches?: LedgerMatch[]): IpcReportResponse => ({
   accepted: false,
   message: `Report rejected: ${error}`,
   error,
+  ...(matches ? { matches } : {}),
 });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });

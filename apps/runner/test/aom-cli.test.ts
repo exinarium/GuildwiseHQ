@@ -154,30 +154,6 @@ describe('aom CLI', () => {
     expect(t.out.join('')).toContain('found it');
   });
 
-  it('question is stubbed (501): exit 2 and a clear message', async () => {
-    const t = await setup();
-    // the real supervisor answers 501; emulate with the handler status contract
-    const ipc = new IpcServer();
-    servers.push(ipc);
-    await ipc.start();
-    const token = ipc.registerShift({
-      report: async () => ({ status: 501, error: 'questions are not available yet (M2)' }),
-      rpc: async () => ({ ok: true }),
-    });
-    const out: string[] = [];
-    const err: string[] = [];
-    const code = await runAom(
-      ['question', '--text', 'why?', '--option', 'a', '--recommend', '0', '--doing', 'x'],
-      {
-        ...t.ctx,
-        env: { AOM_IPC_URL: ipc.url, AOM_SHIFT_TOKEN: token },
-        io: { out: (s) => out.push(s), err: (s) => err.push(s) },
-      },
-    );
-    expect(code).toBe(2);
-    expect(err.join('')).toContain('not available yet');
-  });
-
   it('a rejected report prints the reason and guard violations and exits 1', async () => {
     const t = await setup(() => ({
       accepted: false,

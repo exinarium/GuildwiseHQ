@@ -12,6 +12,7 @@ import {
 } from '@aom/shared';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
+import { ChatManager } from './chat/chat.ts';
 import type { RunnerConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
@@ -45,6 +46,7 @@ export class Runner {
   readonly outbox: Outbox;
   readonly ipc = new IpcServer();
   readonly supervisor: ShiftSupervisor;
+  readonly chat: ChatManager;
   readonly client: RunnerClient;
   private readonly log: Logger;
   private readonly adapters: Map<string, RuntimeAdapter>;
@@ -92,12 +94,23 @@ export class Runner {
       reportWaitMs: opts.reportWaitMs,
       exitGraceMs: opts.exitGraceMs,
     });
+    this.chat = new ChatManager({
+      paths: this.paths,
+      adapters: this.adapters,
+      ipc: this.ipc,
+      log: this.log,
+      send: (type, payload) => void this.client.send(type, payload),
+      rpc: (chatId, method, params) => this.rpc(chatId, method, params),
+    });
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
       this.maxConcurrent = Math.min(w.limits.maxConcurrentShifts, opts.config.maxConcurrentShifts);
       this.writeStatus(true);
     });
-    this.client.on('disconnected', () => this.writeStatus(false));
+    this.client.on('disconnected', () => {
+      this.writeStatus(false);
+      void this.chat.cancelAll('workstation offline: the connection to the server dropped');
+    });
     this.client.on('fatal', (code, why) => {
       this.log.error(`connection closed for good (${code}): ${why}`);
       this.fatalResolve?.(code === 4409 ? 3 : 2);
@@ -119,6 +132,7 @@ export class Runner {
   async stop(): Promise<void> {
     for (const t of this.timers) clearInterval(t);
     await this.supervisor.stopAll('manager');
+    await this.chat.cancelAll('runner stopped');
     await this.client.stop();
     await this.ipc.stop();
     this.writeStatus(false);
@@ -222,11 +236,10 @@ export class Runner {
         void this.runCommand(msg.commandId, msg.command, msg.payload);
         break;
       case 'chat.start':
-        this.client.send('chat.error', {
-          chatId: msg.chatId,
-          threadId: msg.threadId,
-          error: 'chat is not supported by this runner version',
-        });
+        void this.chat.handleStart(msg);
+        break;
+      case 'chat.cancel':
+        void this.chat.handleCancel(msg.chatId);
         break;
       default:
         break;

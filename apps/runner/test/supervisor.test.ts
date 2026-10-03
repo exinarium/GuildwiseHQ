@@ -90,17 +90,6 @@ describe('supervisor', () => {
     expect(seen.ledger.json.result).toEqual({ echoed: { query: 'cookies' } });
   });
 
-  it('blocking questions are stubbed to 501 until M2', async () => {
-    const seen: any = {};
-    await start(async (_i, ctl) => {
-      seen.q = await ctl.post('/v1/report', {
-        report: { kind: 'question', text: 'why?', options: [], doing: '', blocking: true },
-      });
-    });
-    await h!.runShift({ stage: 'build' });
-    expect(seen.q.status).toBe(501);
-  });
-
   it('build handoff carries diffStats and risk tier; leftovers are auto-committed, before and after the report', async () => {
     let wt = '';
     await start(async (i, ctl) => {

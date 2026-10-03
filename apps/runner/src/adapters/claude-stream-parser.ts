@@ -65,6 +65,13 @@ export class ClaudeStreamParser {
     if (msg.type === 'system' && msg.subtype === 'init' && typeof msg.session_id === 'string') {
       this.sessionId = msg.session_id;
       events.push({ kind: 'session', runtimeSessionId: msg.session_id });
+    } else if (msg.type === 'stream_event' && isObj(msg.event)) {
+      // `--include-partial-messages`: token deltas of the reply being written.
+      const d =
+        msg.event.type === 'content_block_delta' && isObj(msg.event.delta) ? msg.event.delta : undefined;
+      if (d?.type === 'text_delta' && typeof d.text === 'string' && d.text) {
+        events.push({ kind: 'delta', text: d.text });
+      }
     } else if (msg.type === 'assistant' && isObj(msg.message) && Array.isArray(msg.message.content)) {
       for (const block of msg.message.content) {
         if (!isObj(block)) continue;

@@ -6,6 +6,8 @@ import { RunnerPairRequestSchema, RunnerPairResponseSchema } from '@aom/shared';
 import { Command } from 'commander';
 import { execa } from 'execa';
 import { applyOverrides, loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
+import { toWsUrl } from './connection/client.ts';
+import { requestRotatedToken } from './connection/rotate.ts';
 import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { createLogger } from './log.ts';
@@ -189,6 +191,31 @@ async function doctor(opts: { dataDir?: string }): Promise<void> {
   if (failed) process.exitCode = 1;
 }
 
+function runnerAlive(statusFile: string): boolean {
+  if (!existsSync(statusFile)) return false;
+  try {
+    process.kill((JSON.parse(readFileSync(statusFile, 'utf8')) as { pid: number }).pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Replaces the runner token. The runner must be stopped: a second connection would supersede the running one. */
+async function rotateToken(opts: { dataDir?: string }): Promise<void> {
+  const paths = runnerPaths(resolveDataDir(opts.dataDir));
+  const config = loadConfig(paths.config);
+  if (runnerAlive(paths.status))
+    throw new Error(
+      'the runner is running: stop it first (`aom-runner rotate-token` replaces its credentials)',
+    );
+  const token = await requestRotatedToken({ url: toWsUrl(config.serverUrl), token: config.runnerToken });
+  saveConfig(paths.config, { ...config, runnerToken: token });
+  console.log(
+    `Runner token rotated. The new token is stored in ${paths.config} (mode 0600); start the runner again.`,
+  );
+}
+
 function reposAdd(path: string, opts: { dataDir?: string }): void {
   const paths = runnerPaths(resolveDataDir(opts.dataDir));
   const config = loadConfig(paths.config);
@@ -234,6 +261,11 @@ export function buildProgram(): Command {
     .description('check git, node, claude, docker and server connectivity')
     .option(...dataDirOpt)
     .action(doctor);
+  program
+    .command('rotate-token')
+    .description('replace the runner token with a freshly issued one (stop the runner first)')
+    .option(...dataDirOpt)
+    .action(rotateToken);
   const repos = program.command('repos').description('manage the folders scanned for git repositories');
   repos
     .command('add <path>')

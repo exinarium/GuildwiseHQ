@@ -7,6 +7,7 @@ import type { RunnerPaths } from '../paths.ts';
 import { selfCommand } from '../shims.ts';
 import { spawnSession } from './process-session.ts';
 import type {
+  ChatStartInput,
   RuntimeAdapter,
   RuntimeCapabilities,
   RuntimeEvent,
@@ -42,6 +43,57 @@ export class MockAdapter implements RuntimeAdapter {
   async writeInstructions(sandbox: { configDir: string }, markdown: string): Promise<void> {
     await mkdir(sandbox.configDir, { recursive: true });
     await writeFile(join(sandbox.configDir, 'CLAUDE.md'), markdown);
+  }
+
+  /**
+   * Deterministic chat: echoes `[mock] <name> heard: <message> (turn <n>)` word by word. The runtime session id is
+   * `mock-<agentId>-<n>`, so resuming counts turns. No process, no tokens.
+   */
+  async startChat(input: ChatStartInput): Promise<RuntimeSession> {
+    const prior = /-(\d+)$/.exec(input.resumeSessionId ?? '');
+    const turn = (prior ? Number(prior[1]) : 0) + 1;
+    const sessionId = `mock-${input.agent.agentId}-${turn}`;
+    const reply = `[mock] ${input.agent.name} heard: ${input.message} (turn ${turn})`;
+    const tokenMs = Number(process.env.AOM_MOCK_CHAT_TOKEN_MS ?? 40);
+    const usage: Usage = {
+      inputTokens: input.message.length,
+      outputTokens: reply.length,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    };
+    let stopped = false;
+    let finish: () => void = () => {};
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    async function* gen(): AsyncGenerator<RuntimeEvent> {
+      try {
+        yield { kind: 'session', runtimeSessionId: sessionId };
+        for (const word of reply.split(/(?<= )/)) {
+          if (stopped) break;
+          await new Promise((r) => setTimeout(r, tokenMs));
+          yield { kind: 'delta', text: word };
+        }
+        if (stopped) {
+          yield { kind: 'exit', code: null, signal: 'SIGTERM' };
+          return;
+        }
+        yield { kind: 'usage', usage };
+        yield { kind: 'final', text: reply };
+        yield { kind: 'exit', code: 0 };
+      } finally {
+        finish();
+      }
+    }
+    const events = gen();
+    return {
+      events: () => ({ [Symbol.asyncIterator]: () => events }),
+      async stop() {
+        stopped = true;
+        await Promise.race([done, new Promise((r) => setTimeout(r, 2000))]);
+      },
+      usage: () => usage,
+    };
   }
 
   async start(input: ShiftStartInput): Promise<RuntimeSession> {

@@ -4,10 +4,12 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import {
+  formatLedgerMatches,
   IPC_REPORT_PATH,
   IPC_RPC_PATH,
   type IpcReportResponse,
   type IpcRpcResponse,
+  type LedgerMatch,
   renderShiftPrompt,
   type ShiftBrief,
   type ShiftReport,
@@ -30,7 +32,7 @@ interface Parsed {
   positionals: string[];
 }
 
-const BOOLEAN_FLAGS = new Set(['json', 'non-blocking', 'help']);
+const BOOLEAN_FLAGS = new Set(['json', 'non-blocking', 'force', 'help']);
 
 export function parseArgs(argv: string[]): Parsed {
   const flags = new Map<string, string[]>();
@@ -125,7 +127,7 @@ async function report(ctx: AomContext, rep: ShiftReport): Promise<number> {
     return 0;
   }
   ctx.io.err(`${r.message ?? `Rejected (HTTP ${status})`}\n`);
-  if (r.error && r.error !== r.message) ctx.io.err(`${r.error}\n`);
+  if (r.error && !r.message?.includes(r.error)) ctx.io.err(`${r.error}\n`);
   for (const v of r.guardViolations ?? []) ctx.io.err(`guard: ${v.rule}: ${v.detail}\n`);
   if (status === 409) ctx.io.err('Do not report again. Finish now.\n');
   else ctx.io.err('Fix the problem and run the command again within this shift.\n');
@@ -162,7 +164,16 @@ const VERBS: Record<string, Verb> = {
       query: p.positionals[1],
       scope: one(p, 'scope') ?? 'all',
     });
-    ctx.io.out(`${typeof result === 'string' ? result : JSON.stringify(result, null, 2)}\n`);
+    const entries = (result as { entries?: LedgerMatch[] } | null)?.entries;
+    ctx.io.out(
+      `${
+        Array.isArray(entries)
+          ? formatLedgerMatches(entries)
+          : typeof result === 'string'
+            ? result
+            : JSON.stringify(result, null, 2)
+      }\n`,
+    );
     return 0;
   },
   comment: async (ctx, p) => report(ctx, { kind: 'comment', note: textFlag(ctx, p, 'note', true) as string }),
@@ -179,6 +190,7 @@ const VERBS: Record<string, Verb> = {
       ...(rec !== undefined ? { recommend: Number(rec) } : {}),
       doing: one(p, 'doing') ?? '',
       blocking: !has(p, 'non-blocking'),
+      force: has(p, 'force'),
     });
   },
   handoff: async (ctx, p) => report(ctx, outcome('handoff', textFlag(ctx, p, 'note', true) as string)),
@@ -234,7 +246,7 @@ export const USAGE = `usage: aom <verb> [options]
   card [--json]                              print the card and brief
   ledger search "<query>" [--scope s]        search decisions and standing orders
   comment --note "<text>"                    post a note without ending the shift
-  question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--non-blocking]
+  question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--non-blocking] [--force]
   handoff --note "<text>"                    builder: hand the card on
   review approve --score <1-5> --note "<text>"
   review changes --reason <r>[,<r>] --score <1-5> [--criteria-missed "<c>"]... --note "<text>"

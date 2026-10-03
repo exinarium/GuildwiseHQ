@@ -1,0 +1,9 @@
+{"type":"system","subtype":"init","session_id":"c4a7a1de-0b53-4d4c-9d0e-5e3f1a2b3c4d","model":"claude-sonnet-4-5","tools":["Read"]}
+{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1","role":"assistant"}}}
+{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", manager"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}}
+{"type":"stream_event","event":{"type":"content_block_stop","index":0}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello, manager"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"Hello, manager","usage":{"input_tokens":12,"output_tokens":4,"cache_read_input_tokens":100,"cache_creation_input_tokens":0}}

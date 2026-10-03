@@ -10,6 +10,8 @@ type Action = 'ok' | 'changes' | 'fail' | 'question' | 'crash' | 'hang' | 'no_re
 
 interface Brief {
   shift: { stage: string; outcomes: Array<{ id: string; kind: string; data: string }> };
+  standingOrders?: Array<{ title: string }>;
+  ledger?: Array<{ title: string; body: string }>;
   card: { ref: string; title: string; reworkRound: number; fields: Record<string, unknown> };
   handoffs?: Array<{ stage: string }>;
 }
@@ -128,6 +130,11 @@ async function main(): Promise<number> {
   const stage = brief.shift.stage;
   const action = pickAction(brief, attemptIndex(brief));
 
+  // What the shift prompt carries from the ledger (answers to earlier questions, standing orders): visible in the log.
+  emit({
+    kind: 'progress',
+    text: `mock ledger: ${(brief.ledger ?? []).map((l) => l.body.replace(/\s+/g, ' ')).join(' | ') || 'none'}; standing orders: ${(brief.standingOrders ?? []).map((o) => o.title).join(' | ') || 'none'}`,
+  });
   for (let i = 1; i <= 3; i++) {
     emit({ kind: 'progress', text: `mock ${brief.card.ref} ${stage}: step ${i}/3 (${action})` });
     await sleep(stepMs);
@@ -158,7 +165,7 @@ async function main(): Promise<number> {
     const q = aom([
       'question',
       '--text',
-      'Mock question?',
+      `Mock question for ${brief.card.ref}?`,
       '--option',
       'yes',
       '--option',
