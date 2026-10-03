@@ -1,0 +1,432 @@
+import { randomUUID } from 'node:crypto';
+import {
+  type AgentStats,
+  type ApplyRecommendationResponse,
+  canManageAgent,
+  HR_DESK_SUBKIND,
+  HR_WINDOW_DAYS,
+  type HrBoardResponse,
+  type Recommendation,
+  type ResetRoleResponse,
+  type RoleExtensions,
+  RoleExtensionsSchema,
+  type RoleUpdate,
+  streamId,
+  type WorkQuality,
+} from '@aom/shared';
+import type { AuthSession } from '../auth/sessions.ts';
+import { loadRole } from '../catalogue/loader.ts';
+import { agentScope, fireAgent, manageableAgent, suggestNames } from '../commands/agents.ts';
+import { orgScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
+import type { Ctx } from '../context.ts';
+import { one, rows } from '../db/sql.ts';
+import { withAppendTx } from '../db/tx.ts';
+import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import type { AppendInput, StoredEvent } from '../eventstore/types.ts';
+import { listAgents } from '../queries/agents.ts';
+import { computeRecommendations } from './recommendations.ts';
+import { computeTrack, type StatsAgent } from './track-record.ts';
+
+const statsAgent = (a: { id: string; roleKey: string; hiredAt: string; status: string }): StatsAgent => ({
+  id: a.id,
+  roleKey: a.roleKey,
+  hiredAt: new Date(a.hiredAt),
+  retired: a.status === 'retired',
+});
+
+/** The HR board for `userId`: visible agents with stats against the role average, recommendations, role updates. */
+export async function hrBoard(ctx: Ctx, userId: string, projectId?: string): Promise<HrBoardResponse> {
+  const now = ctx.clock.now();
+  const agents = (await listAgents(ctx, userId, projectId)).filter((a) => a.status !== 'retired');
+  const track = await computeTrack(ctx.pool, agents.map(statsAgent), now);
+  const names = new Map(
+    (
+      await rows<{ id: string; display_name: string }>(
+        ctx.pool,
+        'SELECT id, display_name FROM users WHERE id = ANY($1::uuid[])',
+        [[...new Set(agents.map((a) => a.hiredByUserId))]],
+      )
+    ).map((u) => [u.id, u.display_name]),
+  );
+  const blocked = await rows(
+    ctx.pool,
+    `SELECT id, ref, title, last_agent_id FROM cards WHERE status='blocked' AND last_agent_id = ANY($1::uuid[]) ORDER BY number`,
+    [agents.map((a) => a.id)],
+  );
+  return {
+    windowDays: HR_WINDOW_DAYS,
+    agents: agents.map((agent) => {
+      const t = track.get(agent.id) as NonNullable<ReturnType<typeof track.get>>;
+      return {
+        agent,
+        hiredByName: names.get(agent.hiredByUserId) ?? 'unknown',
+        blockedOn: blocked
+          .filter((c) => c.last_agent_id === agent.id)
+          .map((c) => ({ cardId: c.id as string, ref: c.ref as string, title: c.title as string })),
+        stats: t.stats,
+        quality: t.quality,
+      };
+    }),
+    recommendations: (await listRecommendations(ctx, userId, projectId)).map((r) => r.rec),
+    roleUpdates: await roleUpdates(ctx, userId),
+  };
+}
+
+export async function agentStats(
+  ctx: Ctx,
+  userId: string,
+  agentId: string,
+): Promise<{ stats: AgentStats; quality: WorkQuality }> {
+  const all = (await listAgents(ctx, userId)).filter((a) => a.status !== 'retired');
+  const agent = all.find((a) => a.id === agentId);
+  if (!agent) throw notFound('agent not found');
+  const track = await computeTrack(ctx.pool, all.map(statsAgent), ctx.clock.now());
+  const t = track.get(agentId) as NonNullable<ReturnType<typeof track.get>>;
+  return { stats: t.stats, quality: t.quality };
+}
+
+interface Listed {
+  rec: Recommendation;
+  orgId: string;
+}
+
+/**
+ * Recommendations the user may see: those about agents visible to them (an additional manager sees the project's
+ * agents, never the owner's org-wide ones), with `canApply` set for the owner and for the hiring manager of the agent.
+ * Standing-order proposals are the owner's to apply.
+ */
+export async function listRecommendations(ctx: Ctx, userId: string, projectId?: string): Promise<Listed[]> {
+  const visible = (await listAgents(ctx, userId, projectId)).filter((a) => a.status !== 'retired');
+  const byId = new Map(visible.map((a) => [a.id, a]));
+  const orgIds = [...new Set([userId, ...visible.map((a) => a.orgId)])];
+  const out: Listed[] = [];
+  for (const orgId of orgIds) {
+    for (const r of await computeRecommendations(ctx, orgId)) {
+      const agent = r.agentId ? byId.get(r.agentId) : undefined;
+      if (r.agentId && !agent) continue;
+      if (!r.agentId && orgId !== userId) continue;
+      if (projectId && !agent && r.agentId === null) continue;
+      const canApply =
+        r.action.type === 'none'
+          ? false
+          : r.ownerOnly
+            ? userId === orgId
+            : !!agent && canManageAgent({ userId, orgId, managerUserId: agent.managerUserId });
+      const { ownerOnly: _ownerOnly, ...rest } = r;
+      out.push({ rec: { ...rest, canApply }, orgId });
+    }
+  }
+  return out;
+}
+
+/** One-click apply. Every change is a real event: AgentChanged, AgentHired, AgentRetired, or a desk approval. */
+export async function applyRecommendation(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  id: string,
+): Promise<ApplyRecommendationResponse> {
+  const listed = (await listRecommendations(ctx, user.id)).find((l) => l.rec.id === id);
+  if (!listed) throw notFound('that recommendation no longer applies (it may already be applied)');
+  const { rec, orgId } = listed;
+  if (rec.action.type === 'none')
+    throw badRequest('not_applicable', 'this recommendation is advice only; there is nothing to apply');
+  if (!rec.canApply) throw forbidden('only the organization owner or the hiring manager can apply this');
+  const action = rec.action;
+  const applied = (effect: string, deskItemId?: string): AppendInput => ({
+    streamId: streamId.agent(rec.agentId ?? orgId),
+    event: {
+      type: 'RecommendationApplied',
+      payload: {
+        orgId,
+        recommendationId: rec.id,
+        kind: rec.kind,
+        ...(rec.agentId ? { agentId: rec.agentId } : {}),
+        appliedBy: user.id,
+        effect,
+        ...(deskItemId ? { deskItemId } : {}),
+      },
+    },
+    actor: userActor(user.id),
+    scope: orgScope(orgId),
+  });
+
+  switch (action.type) {
+    case 'change_model':
+      return withAppendTx(ctx.pool, async (tx) => {
+        const a = await manageableAgent(tx, user, action.agentId);
+        if (a.status === 'retired') throw conflict('agent_retired', 'agent is retired');
+        if (a.model !== action.fromModel)
+          throw conflict(
+            'stale_recommendation',
+            'the agent changed since this was suggested; reload the board',
+          );
+        const effect = `${a.name} moved from ${a.model} to ${action.model}`;
+        await ctx.store.append(
+          [
+            {
+              streamId: streamId.agent(a.id),
+              event: { type: 'AgentChanged', payload: { agentId: a.id, changes: { model: action.model } } },
+              actor: userActor(user.id),
+              scope: agentScope(a),
+            },
+            applied(effect),
+          ],
+          { tx },
+        );
+        return { applied: true as const, effect, deskItemId: null, agentIds: [a.id] };
+      });
+
+    case 'standing_order':
+      return withAppendTx(ctx.pool, async (tx) => {
+        const open = await one<{ id: string }>(
+          tx,
+          `SELECT id FROM desk_items WHERE org_id=$1 AND subkind=$2 AND status='open' AND lower(body)=lower($3)`,
+          [orgId, HR_DESK_SUBKIND.standingOrder, action.text],
+        );
+        const deskItemId = open?.id ?? randomUUID();
+        const effect = 'Proposed a standing order on the desk';
+        const events: AppendInput[] = [];
+        if (!open)
+          events.push({
+            streamId: streamId.desk(deskItemId),
+            event: {
+              type: 'DeskItemCreated',
+              payload: {
+                deskItemId,
+                kind: 'approval',
+                subkind: HR_DESK_SUBKIND.standingOrder,
+                title: `Add a standing order: ${action.topic ?? rec.title}`,
+                body: action.text,
+                blocking: false,
+                pinned: false,
+                options: [],
+                affectedCardIds: [],
+                askedBy: { kind: 'system' },
+              },
+            },
+            actor: SYSTEM_ACTOR,
+            scope: orgScope(orgId),
+          });
+        events.push(applied(effect, deskItemId));
+        await ctx.store.append(events, { tx });
+        return { applied: true as const, effect, deskItemId, agentIds: rec.agentId ? [rec.agentId] : [] };
+      });
+
+    case 'split_role':
+      return withAppendTx(ctx.pool, async (tx) => {
+        const a = await manageableAgent(tx, user, action.agentId);
+        if (a.status !== 'active') throw conflict('agent_inactive', 'agent is not active');
+        if (!a.workstation_id) throw conflict('needs_rehome', 'the agent has no workstation to hire onto');
+        const role = await loadRole(tx, a.org_id, a.role_key);
+        const levels = role?.definition.seniorityLevels ?? [a.seniority];
+        let name = action.juniorName;
+        if (await one(tx, 'SELECT 1 FROM agents WHERE org_id=$1 AND lower(name)=lower($2)', [a.org_id, name]))
+          name = (await suggestNames(ctx, a.org_id, undefined, 1))[0] ?? `${name} 2`;
+        const juniorId = randomUUID();
+        const perms = a.permissions ?? {};
+        const effect = `${a.name} now takes large cards (${action.seniorModel}); ${name} was hired for small ones (${action.juniorModel})`;
+        await ctx.store.append(
+          [
+            {
+              streamId: streamId.agent(a.id),
+              event: {
+                type: 'AgentChanged',
+                payload: {
+                  agentId: a.id,
+                  changes: {
+                    model: action.seniorModel,
+                    ...(levels.includes('senior') ? { seniority: 'senior' as const } : {}),
+                    permissions: { ...perms, riskTiers: ['large'] },
+                  },
+                },
+              },
+              actor: userActor(user.id),
+              scope: agentScope(a),
+            },
+            {
+              streamId: streamId.agent(juniorId),
+              event: {
+                type: 'AgentHired',
+                payload: {
+                  agentId: juniorId,
+                  orgId: a.org_id,
+                  ...(a.project_id ? { projectId: a.project_id } : {}),
+                  hiredByUserId: user.id,
+                  workstationId: a.workstation_id,
+                  name,
+                  roleKey: a.role_key,
+                  roleVersion: a.role_version,
+                  seniority: levels.includes('junior') ? 'junior' : a.seniority,
+                  runtime: a.runtime,
+                  model: action.juniorModel,
+                  ...(a.effort ? { effort: a.effort } : {}),
+                  skills: a.skills,
+                  permissions: { ...perms, riskTiers: ['small'] },
+                  capacity: a.capacity,
+                  isDevops: false,
+                },
+              },
+              actor: userActor(user.id),
+              scope: agentScope(a),
+            },
+            applied(effect),
+          ],
+          { tx },
+        );
+        return { applied: true as const, effect, deskItemId: null, agentIds: [a.id, juniorId] };
+      });
+
+    case 'fire': {
+      const { releasedCardIds } = await fireAgent(ctx, user, action.agentId);
+      const effect = `${rec.agentName ?? 'The agent'} was let go${releasedCardIds.length ? `; ${releasedCardIds.length} card(s) went back to the queue` : ''}`;
+      await ctx.store.append([applied(effect)]);
+      return { applied: true as const, effect, deskItemId: null, agentIds: [action.agentId] };
+    }
+
+    default:
+      throw badRequest('not_applicable', 'this recommendation is advice only; there is nothing to apply');
+  }
+}
+
+// ------------------------------------------------------------------------------- built-in role defaults
+
+/**
+ * Built-in roles the owner extended whose default has moved on since: the owner sees them on the HR board and may reset
+ * a role to the new default, which drops the extensions (shown here first).
+ */
+export async function roleUpdates(ctx: Ctx, userId: string): Promise<RoleUpdate[]> {
+  const list = await rows(
+    ctx.pool,
+    `SELECT e.role_key, e.base_version, e.extensions, r.version AS latest, r.definition
+       FROM role_extensions e
+       JOIN LATERAL (SELECT version, definition FROM role_definitions
+                      WHERE org_id IS NULL AND key = e.role_key AND status = 'active'
+                      ORDER BY version DESC LIMIT 1) r ON true
+      WHERE e.org_id = $1 AND r.version > e.base_version
+      ORDER BY e.role_key`,
+    [userId],
+  );
+  const out: RoleUpdate[] = [];
+  for (const r of list) {
+    const stale = await one<{ n: number }>(
+      ctx.pool,
+      'SELECT count(*)::int AS n FROM agents WHERE org_id=$1 AND role_key=$2 AND status <> $3 AND role_version < $4',
+      [userId, r.role_key, 'retired', r.latest],
+    );
+    out.push({
+      roleKey: r.role_key,
+      roleName: r.definition.name,
+      extensionBaseVersion: r.base_version,
+      latestVersion: r.latest,
+      purpose: r.definition.purpose,
+      extensions: RoleExtensionsSchema.parse(r.extensions),
+      agentsOnOlderVersion: Number(stale?.n ?? 0),
+    });
+  }
+  return out;
+}
+
+/**
+ * Owner only: resets a built-in role to its current default. `RoleResetToDefault` records what was dropped; agents of
+ * the role move to the new version in the same append.
+ */
+export async function resetRole(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  roleKey: string,
+): Promise<ResetRoleResponse> {
+  return withAppendTx(ctx.pool, async (tx) => {
+    const ext = await one(tx, 'SELECT * FROM role_extensions WHERE org_id=$1 AND role_key=$2 FOR UPDATE', [
+      user.id,
+      roleKey,
+    ]);
+    const latest = await one<{ version: number }>(
+      tx,
+      `SELECT version FROM role_definitions WHERE org_id IS NULL AND key=$1 AND status='active' ORDER BY version DESC LIMIT 1`,
+      [roleKey],
+    );
+    if (!latest) throw notFound('built-in role not found');
+    const stale = await rows(
+      tx,
+      `SELECT * FROM agents WHERE org_id=$1 AND role_key=$2 AND status <> 'retired' AND role_version < $3 ORDER BY hired_at`,
+      [user.id, roleKey, latest.version],
+    );
+    if (!ext && stale.length === 0) throw conflict('nothing_to_reset', 'this role already uses the default');
+    const dropped: RoleExtensions = ext
+      ? RoleExtensionsSchema.parse(ext.extensions)
+      : { instructions: '', skills: [], standingOrders: [] };
+    const events: AppendInput[] = [
+      {
+        streamId: streamId.role(user.id, roleKey),
+        event: {
+          type: 'RoleResetToDefault',
+          payload: { orgId: user.id, roleKey, toVersion: latest.version, droppedExtensions: dropped },
+        },
+        actor: userActor(user.id),
+        scope: orgScope(user.id),
+      },
+      ...stale.map(
+        (a): AppendInput => ({
+          streamId: streamId.agent(a.id),
+          event: {
+            type: 'AgentChanged',
+            payload: { agentId: a.id, changes: { roleVersion: latest.version } },
+          },
+          actor: userActor(user.id),
+          scope: agentScope(a),
+        }),
+      ),
+    ];
+    await ctx.store.append(events, { tx });
+    return {
+      roleKey,
+      toVersion: latest.version,
+      droppedExtensions: dropped,
+      updatedAgentIds: stale.map((a) => a.id as string),
+    };
+  });
+}
+
+// ----------------------------------------------------------------------------------------------- hooks
+
+/**
+ * An approved HR standing-order proposal becomes an org-wide standing order in the ledger (the existing M2 mechanism
+ * every agent loads at shift start). The edited text of the approval wins.
+ */
+export function registerHrHook(ctx: Ctx): () => void {
+  return ctx.store.subscribe(async (e: StoredEvent) => {
+    try {
+      const ev = e.event;
+      if (ev.type !== 'DeskItemResolved' || ev.payload.resolution !== 'approved') return;
+      const d = await one(ctx.pool, `SELECT org_id, title, body FROM desk_items WHERE id=$1 AND subkind=$2`, [
+        ev.payload.deskItemId,
+        HR_DESK_SUBKIND.standingOrder,
+      ]);
+      if (!d) return;
+      const entryId = randomUUID();
+      await ctx.store.append([
+        {
+          streamId: streamId.ledger(entryId),
+          event: {
+            type: 'LedgerEntryAdded',
+            payload: {
+              entryId,
+              scope: 'standing_order',
+              title:
+                String(d.title)
+                  .replace(/^Add a standing order: /, '')
+                  .slice(0, 120) || 'Standing order',
+              body: d.body,
+              tags: ['hr'],
+              sourceDeskItemId: ev.payload.deskItemId,
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: orgScope(d.org_id),
+        },
+      ]);
+    } catch (err) {
+      ctx.log.warn({ err }, 'standing order hook failed');
+    }
+  });
+}

@@ -13,7 +13,7 @@ async function upsert(tx: Parameters<Projector>[0], p: Body, at: Date): Promise<
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)
      ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, kind=EXCLUDED.kind, cron=EXCLUDED.cron,
        timezone=EXCLUDED.timezone, card_template=EXCLUDED.card_template, enabled=EXCLUDED.enabled,
-       next_fire_at=EXCLUDED.next_fire_at, updated_at=EXCLUDED.updated_at`,
+       next_fire_at=EXCLUDED.next_fire_at, updated_at=EXCLUDED.updated_at, fail_count=0, last_error=NULL`,
     [
       p.scheduleId,
       proj?.org_id,
@@ -41,8 +41,19 @@ export const scheduleProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ScheduleFired'>).payload;
     await exec(
       tx,
-      `UPDATE schedules SET last_fired_at=$2, next_fire_at=$3, last_card_id=$4, updated_at=$2 WHERE id=$1`,
+      `UPDATE schedules SET last_fired_at=$2, next_fire_at=$3, last_card_id=$4, updated_at=$2, fail_count=0,
+              last_error=NULL, failure_desk_item_id=NULL WHERE id=$1`,
       [p.scheduleId, e.createdAt, p.nextFireAt, p.cardId],
+    );
+  },
+  /** Backs off: the retry time replaces `next_fire_at`; the first failure of a streak remembers its desk notice. */
+  ScheduleFireFailed: async (tx, e) => {
+    const p = (e.event as EventOf<'ScheduleFireFailed'>).payload;
+    await exec(
+      tx,
+      `UPDATE schedules SET next_fire_at=$2, fail_count=$3, last_error=$4,
+              failure_desk_item_id = COALESCE($5::uuid, failure_desk_item_id), updated_at=$6 WHERE id=$1`,
+      [p.scheduleId, p.nextFireAt, p.attempts, p.error, p.deskItemId ?? null, e.createdAt],
     );
   },
   FeedRunRequested: async (tx, e) => {

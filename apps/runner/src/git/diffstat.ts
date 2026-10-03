@@ -44,7 +44,14 @@ export async function computeDiffStats(input: DiffInput): Promise<DiffStats> {
   const outOfScopeTestChange =
     mod.exitCode === 0 && mod.stdout.split('\n').some((p) => p && isTest(p) && !areas.includes(p));
 
-  const stats: DiffStats = { files: paths.length, added, removed, architecturalPaths };
+  // M9: how many changed files are tests (the HR board's "test coverage of its changes").
+  const stats: DiffStats = {
+    files: paths.length,
+    added,
+    removed,
+    architecturalPaths,
+    testFiles: paths.filter((p) => isTest(p)).length,
+  };
   if (outOfScopeTestChange) stats.outOfScopeTestChange = true;
   return stats;
 }

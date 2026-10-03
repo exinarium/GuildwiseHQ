@@ -40,5 +40,5 @@ The Workstations page lists, per workstation, the repositories that match a proj
 
 ## Operations notes
 
-- First-run hire caps (2 builders, 1 of each other role) apply until `AOM_FIRST_RUN_HIRE_CAP=false`.
+- There is no hire cap any more (the first-run cap ended with the HR board); hire as many agents as you need.
 - `AOM_RATE_LIMIT`, `AOM_TEST_CLOCK` and `AOM_SERVE_WEB`/`AOM_WEB_DIST` are documented in `.env.example`. Never set `AOM_TEST_CLOCK` in production: it exposes `POST /api/test/clock`.

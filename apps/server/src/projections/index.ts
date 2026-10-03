@@ -14,6 +14,7 @@ import { sharingProjectors } from './sharing.ts';
 import { shiftProjectors } from './shifts.ts';
 import { testingProjectors } from './testing.ts';
 import { threadProjectors } from './threads.ts';
+import { trackRecordProjectors } from './track-record.ts';
 import { userProjectors } from './users.ts';
 import { vaultProjectors } from './vaults.ts';
 import { workstationProjectors } from './workstations.ts';
@@ -41,6 +42,7 @@ const domains: Array<Record<string, Projector>> = [
   scheduleProjectors,
   feedProjectors,
   researchProjectors,
+  trackRecordProjectors,
 ];
 
 export function buildProjectors(): ProjectorMap {
@@ -89,4 +91,8 @@ export const PROJECTION_TABLES = [
   'digest_items',
   'feed_seen',
   'research_publications',
+  'agent_card_stats',
+  'agent_review_log',
+  'agent_stats_daily',
+  'hr_applied',
 ];

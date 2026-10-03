@@ -105,6 +105,7 @@ describe('supervisor', () => {
       added: 2,
       removed: 0,
       architecturalPaths: ['uncommitted.ts'],
+      testFiles: 0,
     });
     expect(rep?.riskTier).toBe('large');
     expect(sh(wt, 'git', ['status', '--porcelain'])).toBe('');
