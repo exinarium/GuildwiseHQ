@@ -15,7 +15,7 @@ import {
   SMTP_URL,
 } from './support/env.ts';
 import { deleteMailFor } from './support/mail.ts';
-import { killRunner } from './support/runner.ts';
+import { killAllRunners } from './support/runner.ts';
 
 function sh(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): string {
   return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], ...opts });
@@ -68,7 +68,11 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 
   await recreateDb();
   makeToyRepo();
-  await Promise.all(['member@e2e.test', 'other@e2e.test'].map(deleteMailFor));
+  await Promise.all(
+    ['member@e2e.test', 'other@e2e.test', 'devops@e2e.test', 'sharer@e2e.test', 'guest@e2e.test'].map(
+      deleteMailFor,
+    ),
+  );
 
   const env = {
     ...process.env,
@@ -109,7 +113,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   writeFileSync(paths.pids, JSON.stringify({ server: server.pid }));
 
   return async () => {
-    killRunner('SIGTERM');
+    killAllRunners('SIGTERM');
     server.kill('SIGTERM');
   };
 }

@@ -37,7 +37,9 @@ describe('hiring', () => {
     expect(r.body.permissions.mayCommit).toBe(true);
     expect(r.body.activeCards).toEqual([]);
     const list = await ok<any>(w.t.req('GET', '/api/agents', { cookie: w.owner.cookie }));
-    expect(list.agents.map((a: any) => a.name)).toEqual(['Ada']);
+    // The workstation's auto-hired DevOps engineer is listed too (M3).
+    expect(list.agents.filter((a: any) => !a.isDevops).map((a: any) => a.name)).toEqual(['Ada']);
+    expect(list.agents.filter((a: any) => a.isDevops)).toHaveLength(1);
   });
 
   it('validates role, seniority, devops and workstation ownership', async () => {

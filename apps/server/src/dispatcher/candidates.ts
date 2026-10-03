@@ -25,6 +25,16 @@ export function agentView(a: Row, capabilities: string[]): AgentView {
   };
 }
 
+/**
+ * Cards without a repo (research, feed) work on a vault: when the card's domain has a registered vault the agent's
+ * workstation must hold a clone of it (docs/ARCHITECTURE.md section 9.3, M3). The vault applicable to a card is its
+ * project's vault, or the owner's vault of the project's domain (only for the owner's own workstations).
+ */
+const VAULT_OF_CARD = `(v.project_id = c.project_id
+         OR (v.project_id IS NULL AND v.org_id = c.org_id AND v.kind = p.domain
+             AND v.org_id = (SELECT w.user_id FROM workstations w WHERE w.id = $6)))`;
+const APPLICABLE_VAULT = `SELECT 1 FROM vaults v WHERE ${VAULT_OF_CARD}`;
+
 const CANDIDATES_SQL = (cardFilter: string) => `
 SELECT c.id, c.stage
 FROM cards c
@@ -44,6 +54,9 @@ WHERE c.status = 'queued'
   AND (c.repo_id IS NULL OR EXISTS (
         SELECT 1 FROM workstation_repos wr
          WHERE wr.workstation_id = $6 AND wr.project_repo_id = c.repo_id))
+  AND (c.repo_id IS NOT NULL OR NOT EXISTS (${APPLICABLE_VAULT}) OR EXISTS (
+        SELECT 1 FROM vaults v JOIN workstation_vaults wv ON wv.vault_id = v.id AND wv.workstation_id = $6
+         WHERE ${VAULT_OF_CARD}))
   AND (c.worktree_card_id IS NULL OR EXISTS (
         SELECT 1 FROM cards pc WHERE pc.id = c.worktree_card_id AND pc.home_workstation_id = $6))
   AND NOT EXISTS (

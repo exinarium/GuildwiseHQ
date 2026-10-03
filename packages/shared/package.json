@@ -12,7 +12,8 @@
     "./api": "./src/api/index.ts",
     "./protocol": "./src/protocol/index.ts",
     "./prompt": "./src/prompt/index.ts",
-    "./authz": "./src/authz/index.ts"
+    "./authz": "./src/authz/index.ts",
+    "./devops": "./src/devops/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

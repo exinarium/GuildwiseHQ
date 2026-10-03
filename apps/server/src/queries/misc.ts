@@ -91,7 +91,9 @@ export async function workstationDtos(
 ): Promise<Array<WorkstationDto & { ownerEmail: string }>> {
   const list = await rows(
     ctx.pool,
-    `SELECT w.*, u.email AS owner_email FROM workstations w JOIN users u ON u.id = w.user_id WHERE ${where} ORDER BY w.paired_at`,
+    `SELECT w.*, u.email AS owner_email,
+            (SELECT a.id FROM agents a WHERE a.workstation_id = w.id AND a.is_devops AND a.status = 'active' LIMIT 1) AS devops_agent_id
+       FROM workstations w JOIN users u ON u.id = w.user_id WHERE ${where} ORDER BY w.paired_at`,
     params,
   );
   const repos = await rows(
@@ -118,6 +120,8 @@ export async function workstationDtos(
         reportedAt: iso(r.reported_at) as string,
       })),
     pairedAt: iso(w.paired_at) as string,
+    devopsAccess: w.devops_access,
+    devopsAgentId: w.devops_agent_id ?? null,
     ownerEmail: w.owner_email,
   }));
 }

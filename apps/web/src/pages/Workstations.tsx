@@ -1,6 +1,7 @@
 import type { WorkstationDto } from '@aom/shared';
 import { useState } from 'react';
 import { usePairingCode, useUnlinkWorkstation, useWorkstations } from '../api/queries/workstations.ts';
+import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
 import {
   Badge,
   Button,
@@ -107,6 +108,7 @@ export function WorkstationCard({
         {w.lastSeenAt && (
           <p className="mt-1 text-xs text-zinc-500">Last seen {formatDateTime(w.lastSeenAt)}</p>
         )}
+        {!admin && <DevOpsPanel w={w} />}
         <ErrorBox error={unlink.error} />
       </Panel>
       <Dialog

@@ -8,6 +8,7 @@ import {
 } from '@aom/shared';
 import type { ChatTerminal } from '../chat/relay.ts';
 import { cardMessage, orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
 import {
   applyShiftEnded,
   applyShiftRejected,
@@ -17,6 +18,7 @@ import {
   type ReportResult,
   releaseClaimEvents,
 } from '../commands/shifts.ts';
+import { applyVaultConflict, markVaultStatus, queueVaultConfigure } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -143,10 +145,14 @@ export class RunnerHandlers {
       case 'token.rotate':
         this.send(conn, 'token.rotated', { token: await issueRotatedToken(this.ctx, conn.workstationId) });
         return;
+      case 'vault.status':
+        await markVaultStatus(this.ctx, conn.workstationId, msg);
+        return;
       case 'vault.conflict':
+        await this.withInbox(conn, msg.id, (tx) => applyVaultConflict(this.ctx, tx, ws, msg));
         return this.ack(conn, msg);
       default:
-        return; // vault.status, ack: nothing to do
+        return; // ack: nothing to do
     }
   }
 
@@ -164,6 +170,8 @@ export class RunnerHandlers {
       [conn.workstationId, JSON.stringify(msg.runtimes), msg.runnerVersion, msg.hostname, msg.platform, now],
     );
     await this.matchRepos(conn);
+    await this.recordVaults(conn, msg.vaults);
+    await alignDevopsRuntime(ctx, conn.workstationId, msg.runtimes);
     await ctx.store.append([
       {
         streamId: streamId.workstation(conn.workstationId),
@@ -220,16 +228,55 @@ export class RunnerHandlers {
     }
     // Shifts the runner still runs but the server no longer holds.
     for (const shiftId of known) await this.stopIfClaimLost(conn, shiftId);
+    await this.reconcileDevops(conn, known, helloAt);
+    await queueVaultConfigure(ctx, ctx.pool, conn.workstationId);
     await this.deliverPending(conn.workstationId);
     ctx.services.dispatcher.trigger();
   }
 
-  private async stopIfClaimLost(conn: RunnerConn, shiftId: string): Promise<void> {
-    const holder = await one(
-      this.ctx.pool,
-      'SELECT 1 FROM cards WHERE claim_shift_id=$1 AND claim_id IS NOT NULL',
-      [shiftId],
+  /** Vault clones the runner reports in `hello` (their local paths) for the vaults it may sync. */
+  private async recordVaults(
+    conn: RunnerConn,
+    vaults: Array<{ vaultId: string; localPath: string; clean: boolean }>,
+  ): Promise<void> {
+    for (const v of vaults) {
+      if (!UUID_RE.test(v.vaultId)) continue;
+      await exec(
+        this.ctx.pool,
+        `INSERT INTO workstation_vaults (workstation_id, vault_id, local_path)
+         SELECT $1, v.id, $3 FROM vaults v WHERE v.id = $2
+         ON CONFLICT (workstation_id, vault_id) DO UPDATE SET local_path = EXCLUDED.local_path`,
+        [conn.workstationId, v.vaultId, v.localPath],
+      );
+    }
+  }
+
+  /** DevOps shifts the server holds as running but the reconnected runner does not: requeue their requests. */
+  private async reconcileDevops(conn: RunnerConn, known: Set<string>, helloAt: Date): Promise<void> {
+    const { ctx } = this;
+    const open = await rows(
+      ctx.pool,
+      `SELECT id FROM shifts WHERE workstation_id=$1 AND kind='devops' AND status <> 'ended' AND started_at <= $2`,
+      [conn.workstationId, helloAt],
     );
+    for (const s of open) {
+      if (known.has(s.id)) continue;
+      await withAppendTx(ctx.pool, async (tx) => {
+        const shift = await one(tx, `SELECT * FROM shifts WHERE id=$1 AND status <> 'ended'`, [s.id]);
+        if (shift) await ctx.store.append(await endDevopsShift(tx, shift, 'lost'), { tx });
+      });
+    }
+  }
+
+  private async stopIfClaimLost(conn: RunnerConn, shiftId: string): Promise<void> {
+    const holder =
+      (await one(this.ctx.pool, 'SELECT 1 FROM cards WHERE claim_shift_id=$1 AND claim_id IS NOT NULL', [
+        shiftId,
+      ])) ??
+      // A DevOps shift has no card: it is held while its request is running.
+      (await one(this.ctx.pool, `SELECT 1 FROM devops_requests WHERE shift_id=$1 AND status='running'`, [
+        shiftId,
+      ]));
     if (holder) return;
     const last = conn.stopSentAt.get(shiftId) ?? 0;
     const now = this.ctx.clock.now().getTime();
@@ -345,6 +392,35 @@ export class RunnerHandlers {
     ctx.services.dispatcher.trigger();
   }
 
+  /** `aom devops "<text>"` from a running shift: a request for this workstation's DevOps engineer (non-terminal). */
+  private async devopsRequest(
+    conn: RunnerConn,
+    shift: Record<string, any>,
+    params: Record<string, unknown>,
+  ): Promise<[boolean, unknown?, string?]> {
+    const text = String(params.text ?? params.summary ?? '').trim();
+    if (!text) return [false, undefined, 'a request text is required'];
+    if (shift.kind === 'devops') return [false, undefined, 'the DevOps engineer cannot ask itself'];
+    const agent = await one(this.ctx.pool, 'SELECT id, name FROM agents WHERE id=$1', [shift.agent_id]);
+    const r = await withAppendTx(this.ctx.pool, (tx) =>
+      createDevOpsRequestIn(this.ctx, tx, {
+        workstationId: conn.workstationId,
+        summary: text,
+        requestedBy: { kind: 'agent', id: shift.agent_id, name: agent?.name },
+        cardId: shift.card_id ?? undefined,
+      }),
+    );
+    this.ctx.services.dispatcher.trigger();
+    return [
+      true,
+      {
+        requestId: r.requestId,
+        threadId: r.threadId,
+        message: 'Request sent to the DevOps engineer. Continue your work; do not wait for it.',
+      },
+    ];
+  }
+
   // ---------------------------------------------------------------------------------------- rpc
 
   private async rpc(conn: RunnerConn, msg: RunnerToServerOf<'rpc.request'>): Promise<void> {
@@ -359,6 +435,8 @@ export class RunnerHandlers {
       ]);
       if (!shift) return reply(false, undefined, 'unknown shift');
       if (msg.method === 'ledger.search') return reply(true, await ledgerSearchRpc(ctx, shift, msg.params));
+      if (msg.method === 'devops.request')
+        return reply(...(await this.devopsRequest(conn, shift, msg.params)));
       if (!shift.card_id) return reply(false, undefined, 'this conversation has no card');
       switch (msg.method) {
         case 'card.get': {

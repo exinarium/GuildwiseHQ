@@ -51,6 +51,10 @@ export function renderInstructions(brief: ShiftBrief): string {
   if (brief.project.e2eGlobs.length > 0)
     projectLines.push(`- End-to-end test paths: ${brief.project.e2eGlobs.join(', ')}`);
   out.push(projectLines.join('\n'));
+  if (brief.project.projectDoc?.trim()) {
+    out.push('## PROJECT.md (from the knowledge vault)');
+    out.push(brief.project.projectDoc.trim());
+  }
 
   out.push('# How to report');
   out.push(

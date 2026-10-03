@@ -6,6 +6,7 @@ import type { StoredEvent } from '../eventstore/types.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
 import { agentView, candidateCards, isCandidate } from './candidates.ts';
 import { type ClaimResult, claim } from './claim.ts';
+import { devopsPass } from './devops.ts';
 
 /** Events that make a dispatch pass worthwhile (docs/ARCHITECTURE.md section 9.1). */
 const TRIGGER_TYPES = new Set([
@@ -29,6 +30,9 @@ const TRIGGER_TYPES = new Set([
   'RebaseConflict',
   'CardMovedByManager',
   'CardFinalized',
+  'DevOpsRequested',
+  'DevOpsRequestRequeued',
+  'DevOpsApprovalResolved',
 ]);
 
 const ONLINE_WINDOW_MS = 45_000;
@@ -162,6 +166,7 @@ export class Dispatcher {
       }
     }
     made.push(...(await this.overflowPass(agents, nowMs)));
+    await devopsPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
     for (const r of made) await this.sendShiftStart(r);
     return made;
   }
@@ -174,7 +179,7 @@ export class Dispatcher {
     const late = await rows(
       this.ctx.pool,
       `SELECT id, org_id, stage FROM cards WHERE status='queued' AND scheduled AND claim_id IS NULL AND queued_at < $1
-        ORDER BY queued_at`,
+        ORDER BY queued_at, created_at, number`,
       [new Date(nowMs - LATE_SCHEDULED_MS)],
     );
     const made: ClaimResult[] = [];

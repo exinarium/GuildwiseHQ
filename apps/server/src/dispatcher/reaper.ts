@@ -1,6 +1,7 @@
 import { getStage, streamId } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { endDevopsShift } from '../commands/devops.ts';
 import { releaseClaimEvents } from '../commands/shifts.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
@@ -80,6 +81,16 @@ export class Reaper {
           ])
         ).rows[0];
         if (!shift) return;
+        if (shift.kind === 'devops') {
+          ctx.services.dispatcher.cooldown.set(shift.agent_id, ctx.clock.now().getTime() + 30_000);
+          await ctx.store.append(
+            await endDevopsShift(tx, shift, 'rejected', {
+              finalText: 'The runner did not accept the DevOps shift within 30 seconds.',
+            }),
+            { tx },
+          );
+          return;
+        }
         const card = shift.card_id
           ? (await tx.query('SELECT * FROM cards WHERE id=$1 FOR UPDATE', [shift.card_id])).rows[0]
           : undefined;

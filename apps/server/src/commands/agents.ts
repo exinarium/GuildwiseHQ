@@ -247,6 +247,8 @@ export async function patchAgent(
   await withAppendTx(ctx.pool, async (tx) => {
     const a = await manageableAgent(tx, user, agentId);
     if (a.status === 'retired') throw conflict('agent_retired', 'agent is retired');
+    if (a.is_devops && (changes.roleKey || changes.seniority || changes.capacity))
+      throw badRequest('devops_fixed', 'the DevOps engineer keeps its role, seniority and capacity');
     const next: AgentChanges = { ...changes };
     if (changes.roleKey && changes.roleKey !== a.role_key) {
       const role = await loadRole(tx, a.org_id, changes.roleKey);
@@ -276,6 +278,8 @@ export async function fireAgent(
   return withAppendTx(ctx.pool, async (tx) => {
     const a = await manageableAgent(tx, user, agentId);
     if (a.status === 'retired') throw conflict('agent_retired', 'agent is already retired');
+    if (a.is_devops)
+      throw conflict('devops_cannot_be_fired', 'the DevOps engineer cannot be fired; reset it instead');
     const cards = await rows(
       tx,
       `SELECT c.*, (SELECT h.id FROM card_handoffs h WHERE h.card_id = c.id ORDER BY h.created_at DESC, h.event_seq DESC LIMIT 1) AS last_handoff_id
@@ -320,5 +324,27 @@ export async function fireAgent(
     await ctx.store.append(events, { tx });
     if (a.workstation_id) await enqueueRunnerCommand(tx, a.workstation_id, 'agent.wipe', { agentId });
     return { releasedCardIds: cards.map((c) => c.id as string) };
+  });
+}
+
+/** DevOps only: wipes the sandbox like a firing does, but the engineer stays (`AgentReset` + `agent.wipe`). */
+export async function resetAgent(ctx: Ctx, user: AuthSession['user'], agentId: string): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const a = await manageableAgent(tx, user, agentId);
+    if (!a.is_devops)
+      throw conflict('not_devops', 'only the DevOps engineer can be reset; other agents are fired');
+    if (a.status !== 'active') throw conflict('agent_inactive', 'agent is not active');
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.agent(agentId),
+          event: { type: 'AgentReset', payload: { agentId } },
+          actor: userActor(user.id),
+          scope: agentScope(a),
+        },
+      ],
+      { tx },
+    );
+    if (a.workstation_id) await enqueueRunnerCommand(tx, a.workstation_id, 'agent.wipe', { agentId });
   });
 }

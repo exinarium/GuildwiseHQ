@@ -4,12 +4,14 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import {
+  type DevopsShift,
   formatLedgerMatches,
   IPC_REPORT_PATH,
   IPC_RPC_PATH,
   type IpcReportResponse,
   type IpcRpcResponse,
   type LedgerMatch,
+  renderDevopsPrompt,
   renderShiftPrompt,
   type ShiftBrief,
   type ShiftReport,
@@ -151,8 +153,9 @@ type Verb = (ctx: AomContext, p: Parsed) => Promise<number>;
 
 const VERBS: Record<string, Verb> = {
   card: async (ctx, p) => {
-    const brief = (await rpc(ctx, 'card.get')) as ShiftBrief;
-    ctx.io.out(has(p, 'json') ? `${JSON.stringify(brief, null, 2)}\n` : `${renderShiftPrompt(brief)}\n`);
+    const brief = (await rpc(ctx, 'card.get')) as ShiftBrief & { devops?: DevopsShift };
+    if (has(p, 'json')) ctx.io.out(`${JSON.stringify(brief, null, 2)}\n`);
+    else ctx.io.out(`${brief.devops ? renderDevopsPrompt(brief.devops) : renderShiftPrompt(brief)}\n`);
     return 0;
   },
   ledger: async (ctx, p) => {
@@ -233,6 +236,35 @@ const VERBS: Record<string, Verb> = {
     }
     throw new UsageError('usage: aom test pass|fail ...');
   },
+  devops: async (ctx, p) => {
+    const text = p.positionals[0] ?? one(p, 'text');
+    if (!text?.trim()) throw new UsageError('usage: aom devops "<what you need from the DevOps engineer>"');
+    const r = (await rpc(ctx, 'devops.request', { text })) as { requestId?: string; message?: string };
+    ctx.io.out(
+      `${r.message ?? 'Request sent to the DevOps engineer.'}${r.requestId ? ` (request ${r.requestId})` : ''}\n`,
+    );
+    return 0;
+  },
+  'devops-approval': async (ctx, p) => {
+    const action = one(p, 'action');
+    const reason = one(p, 'reason');
+    if (!action || !reason)
+      throw new UsageError(
+        'usage: aom devops-approval --action "<action>" --reason "<why>" [--command "<cmd>"]...',
+      );
+    return report(
+      ctx,
+      outcome('devops_approval', `Needs approval: ${action}`, {
+        action,
+        reason,
+        commands: many(p, 'command'),
+      }),
+    );
+  },
+  'devops-done': async (ctx, p) => {
+    const summary = textFlag(ctx, p, 'summary', true) as string;
+    return report(ctx, outcome('devops_done', summary, { summary, commands: many(p, 'command') }));
+  },
   outcome: async (ctx, p) => {
     const id = p.positionals[0];
     if (!id) throw new UsageError('usage: aom outcome <outcomeId> --note "<text>" [--data-file <json>]');
@@ -253,6 +285,9 @@ export const USAGE = `usage: aom <verb> [options]
   test pass --evidence "<text>" [--command "<cmd>"]...
   test fail --title "<bug>" --note "<text>" [--evidence "<text>"]
   outcome <id> --note "<text>" [--data-file <json>]
+  devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
+  devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
+  devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed
 `;
 
 /** Runs the CLI; returns the exit code (0 ok, 1 error or rejected report, 2 not available). */

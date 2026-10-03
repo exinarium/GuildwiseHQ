@@ -118,7 +118,7 @@ describe('projections:rebuild', () => {
     expect(before.card_handoffs).toHaveLength(2);
     expect(before.card_transitions!.length).toBeGreaterThan(8);
     expect(before.thread_messages!.length).toBeGreaterThanOrEqual(4);
-    expect(before.agents).toHaveLength(2);
+    expect(before.agents).toHaveLength(3); // two hires + the workstation's DevOps engineer
     expect(before.workflow_stages!.length).toBeGreaterThan(10);
 
     const res = await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);

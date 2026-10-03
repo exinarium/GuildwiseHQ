@@ -3,6 +3,7 @@ import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
 import { useWorkflows } from '../api/queries/agents.ts';
 import { useCreateProject, useProjects } from '../api/queries/projects.ts';
+import { ProjectInvitations } from '../components/ProjectInvitations.tsx';
 import {
   Badge,
   Button,
@@ -28,6 +29,7 @@ export function Projects() {
           </Button>
         }
       />
+      <ProjectInvitations />
       {projects.isPending && <Spinner />}
       {projects.isError && <ErrorBox error={projects.error} />}
       {projects.data?.length === 0 && (

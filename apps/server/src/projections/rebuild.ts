@@ -15,6 +15,10 @@ const SAVED: Array<{ table: string; restoreWhere: string }> = [
     restoreWhere:
       'workstation_id IN (SELECT id FROM workstations) AND project_repo_id IN (SELECT id FROM project_repos)',
   },
+  {
+    table: 'workstation_vaults',
+    restoreWhere: 'workstation_id IN (SELECT id FROM workstations) AND vault_id IN (SELECT id FROM vaults)',
+  },
 ];
 
 /**

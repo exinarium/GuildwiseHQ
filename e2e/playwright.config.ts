@@ -20,5 +20,7 @@ export default defineConfig({
     { name: 'core-loop', testMatch: 'core-loop.spec.ts', dependencies: ['pairing'] },
     { name: 'desk', testMatch: 'desk.spec.ts', dependencies: ['core-loop'] },
     { name: 'chat', testMatch: 'chat.spec.ts', dependencies: ['desk'] },
+    { name: 'devops', testMatch: 'devops.spec.ts', dependencies: ['chat'] },
+    { name: 'sharing', testMatch: 'sharing.spec.ts', dependencies: ['devops'] },
   ],
 });

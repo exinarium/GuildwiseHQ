@@ -699,13 +699,17 @@ describe('agent retirement, unlinking and runner commands', () => {
     const r = await w.connectRunner();
     const cmd = await r.waitFor('command', (f) => f.command === 'agent.wipe');
     expect(cmd.payload.agentId).toBe(gone.id);
-    expect((await q('SELECT status, attempts FROM runner_commands'))[0]).toEqual({
+    expect((await q(`SELECT status, attempts FROM runner_commands WHERE type='agent.wipe'`))[0]).toEqual({
       status: 'sent',
       attempts: 1,
     });
     // failure -> retried on the next connect
     r.send('command.result', { commandId: cmd.commandId, ok: false, error: 'disk busy' });
-    await until(async () => (await q('SELECT status FROM runner_commands'))[0]!.status === 'pending', 3000);
+    await until(
+      async () =>
+        (await q(`SELECT status FROM runner_commands WHERE type='agent.wipe'`))[0]!.status === 'pending',
+      3000,
+    );
     r.close();
   });
 

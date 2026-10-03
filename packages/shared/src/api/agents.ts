@@ -56,6 +56,7 @@ export const RehomeAgentRequestSchema = z.object({
   runtime: z.string(),
   model: z.string(),
 });
+export type RehomeAgentRequest = z.infer<typeof RehomeAgentRequestSchema>;
 
 export const NameSuggestionsQuerySchema = z.object({
   theme: z.string().optional(),

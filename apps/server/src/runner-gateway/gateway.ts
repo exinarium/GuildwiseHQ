@@ -9,6 +9,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { refreshVaultConfig, vaultAudience } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { sha256Hex } from '../crypto.ts';
 import { one, rows } from '../db/sql.ts';
@@ -179,7 +180,7 @@ export class RunnerGateway {
       case 'ClaimReleased': {
         const p = (e.event as EventOf<'ClaimReleased'>).payload;
         let reason: StopReason | null = null;
-        if (p.reason === 'agent_retired') reason = 'agent_retired';
+        if (p.reason === 'agent_retired' || p.reason === 'member_removed') reason = 'agent_retired';
         else if (p.reason === 'manual') {
           const card = await one(ctx.pool, 'SELECT status FROM cards WHERE id=$1', [p.cardId]);
           reason = card?.status === 'cancelled' ? 'card_cancelled' : 'manager';
@@ -197,6 +198,41 @@ export class RunnerGateway {
         const p = (e.event as EventOf<'AgentRetired'>).payload;
         const a = await one(ctx.pool, 'SELECT workstation_id FROM agents WHERE id=$1', [p.agentId]);
         if (a?.workstation_id) await this.deliverPending(a.workstation_id);
+        return;
+      }
+      case 'AgentReset': {
+        // A reset DevOps engineer drops whatever it is doing; the request goes back to the queue.
+        const p = (e.event as EventOf<'AgentReset'>).payload;
+        const open = await rows(
+          ctx.pool,
+          `SELECT id, workstation_id FROM shifts WHERE agent_id=$1 AND status <> 'ended'`,
+          [p.agentId],
+        );
+        for (const s of open) this.stopShift(s.workstation_id, s.id, 'agent_retired');
+        const a = await one(ctx.pool, 'SELECT workstation_id FROM agents WHERE id=$1', [p.agentId]);
+        if (a?.workstation_id) await this.deliverPending(a.workstation_id);
+        return;
+      }
+      case 'VaultRegistered':
+      case 'VaultUpdated': {
+        const v = await one(ctx.pool, 'SELECT org_id, project_id FROM vaults WHERE id=$1', [
+          (e.event.payload as { vaultId: string }).vaultId,
+        ]);
+        if (v) await refreshVaultConfig(ctx, await vaultAudience(ctx.pool, v as never));
+        return;
+      }
+      case 'ProjectShareAccepted':
+      case 'ProjectMemberRemoved': {
+        const userId = (e.event.payload as { userId: string }).userId;
+        await refreshVaultConfig(ctx, [userId]);
+        // Repo matching follows membership: a runner that is already connected re-matches what it reported
+        // (joining makes the project's repos visible to it, leaving removes them).
+        for (const conn of ctx.services.runners.all()) {
+          if (conn.userId !== userId) continue;
+          await this.handlers.matchRepos(conn);
+          await enqueueRunnerCommand(ctx.pool, conn.workstationId, 'repos.rescan', {});
+          await this.deliverPending(conn.workstationId);
+        }
         return;
       }
       case 'ProjectRepoAdded':

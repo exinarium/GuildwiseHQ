@@ -14,12 +14,14 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
       return [event.projectId ? ['board', event.projectId] : ['board'], ['card'], ['agents']];
     case 'thread':
       // Card threads show on the card; chat threads have their own message list and the chat list.
-      return [['card'], ['thread', event.streamId.slice('thread-'.length)], ['chats']];
+      return [['card'], ['devops'], ['thread', event.streamId.slice('thread-'.length)], ['chats']];
     case 'desk':
       // Questions block and unblock cards; answers add ledger entries.
-      return [['desk'], ['board'], ['card'], ['ledger']];
+      return [['desk'], ['board'], ['card'], ['ledger'], ['devops'], ['vaults']];
     case 'ledger':
       return [['ledger'], ['desk'], ['card']];
+    case 'vault':
+      return [['vaults']];
     case 'shift':
       return [['card'], ['agents'], ['board']];
     case 'agent':
@@ -27,7 +29,7 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
     case 'workstation':
       return [['workstations'], ['admin', 'workstations'], ['agents']];
     case 'project':
-      return [['projects'], ['project'], ['board']];
+      return [['projects'], ['project'], ['board'], ['project-invitations'], ['agents']];
     case 'user':
     case 'invitation':
       return [['admin'], ['me']];

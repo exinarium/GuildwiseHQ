@@ -24,6 +24,7 @@ import { type RunnerPaths, runnerPaths } from './paths.ts';
 import { wipeAgent } from './sandbox/sandbox.ts';
 import { ShiftSupervisor } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
+import { VaultManager } from './vaults/manager.ts';
 import { RUNNER_VERSION } from './version.ts';
 
 export interface RunnerOptions {
@@ -38,6 +39,8 @@ export interface RunnerOptions {
   /** Re-scan repos and re-probe runtimes this often (ms). Defaults: 10 min. */
   rescanMs?: number;
   adapters?: Map<string, RuntimeAdapter>;
+  /** Test hook: milliseconds per vault sync interval second (default 1000). */
+  vaultSecondMs?: number;
 }
 
 /** The long-running runner process: connection, IPC server, supervisor and command handlers. */
@@ -48,6 +51,7 @@ export class Runner {
   readonly supervisor: ShiftSupervisor;
   readonly chat: ChatManager;
   readonly client: RunnerClient;
+  readonly vaults: VaultManager;
   private readonly log: Logger;
   private readonly adapters: Map<string, RuntimeAdapter>;
   private repos: RepoReport[] = [];
@@ -78,6 +82,12 @@ export class Runner {
         activeShifts: this.supervisor.activeShifts().map((s) => s.shiftId),
         load: { runningShifts: this.supervisor.size },
       }),
+    });
+    this.vaults = new VaultManager({
+      paths: this.paths,
+      log: this.log,
+      transport: { send: (type, payload) => void this.client.send(type, payload) },
+      secondMs: opts.vaultSecondMs,
     });
     this.supervisor = new ShiftSupervisor({
       paths: this.paths,
@@ -122,6 +132,7 @@ export class Runner {
     await this.ipc.start();
     this.repos = await scanRepos(this.opts.config.repoRoots);
     this.supervisor.resumePersisted();
+    this.vaults.start();
     this.client.start();
     const t = setInterval(() => void this.rescan(), this.opts.rescanMs ?? 600_000);
     t.unref();
@@ -131,6 +142,7 @@ export class Runner {
 
   async stop(): Promise<void> {
     for (const t of this.timers) clearInterval(t);
+    this.vaults.stop();
     await this.supervisor.stopAll('manager');
     await this.chat.cancelAll('runner stopped');
     await this.client.stop();
@@ -174,7 +186,7 @@ export class Runner {
       hostname: hostname(),
       runtimes: await this.runtimeInfos(),
       repos: this.repos,
-      vaults: [],
+      vaults: await this.vaults.report(),
       activeShifts: this.supervisor.activeShifts(),
     };
   }
@@ -271,6 +283,11 @@ export class Runner {
       } else if (command === 'repos.rescan') {
         await this.rescan();
         done(true, { repos: this.repos.length });
+      } else if (command === 'vault.configure') {
+        this.vaults.configure(CommandPayloadSchemas['vault.configure'].parse(payload));
+        done(true, { vaults: this.vaults.configured() });
+      } else if (command === 'vault.write') {
+        done(true, await this.vaults.write(CommandPayloadSchemas['vault.write'].parse(payload)));
       } else {
         done(false, undefined, `command ${command} is not supported by this runner version`);
       }
