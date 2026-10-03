@@ -152,7 +152,7 @@ export async function answerDeskItem(
     await ctx.store.append(events, { tx });
     return { ledgerEntryId: entryId, unblockedCardIds: blocked.map((b) => b.card_id) };
   });
-  if (after.mapped) await continueIntake(ctx, after.mapped.intake, after.mapped.projectKey);
+  if (after.mapped) continueIntake(ctx, after.mapped.intake, after.mapped.projectKey);
   return answered;
 }
 

@@ -165,6 +165,11 @@ export class ChatRelay {
     }
   }
 
+  /** A reply to this thread is being written right now (the next message would be refused as busy). */
+  isBusy(threadId: string): boolean {
+    return this.byThread.has(threadId);
+  }
+
   /** The thread an in-flight chat belongs to (the chat id is its shift id): chat-scoped rpcs resolve their intake with it. */
   threadOfChat(chatId: string): string | undefined {
     return this.inflight.get(chatId)?.threadId;

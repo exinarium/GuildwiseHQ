@@ -78,6 +78,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       'tester@e2e.test',
       'feeder@e2e.test',
       'scholar@e2e.test',
+      'intaker@e2e.test',
     ].map(deleteMailFor),
   );
 

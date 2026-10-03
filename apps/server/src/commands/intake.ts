@@ -607,15 +607,22 @@ export async function mappingAnsweredEvents(
   };
 }
 
-/** Tells the BA the manager's mapping answer so it carries on (the chat is one call per message). */
-export async function continueIntake(ctx: Ctx, intake: Row, projectKey: string): Promise<void> {
-  try {
-    await ctx.services.chat.send(intake.started_by, {
-      threadId: intake.thread_id,
-      body: `[Desk] I mapped ${intake.external_key ?? 'this request'} to project ${projectKey}. Continue the intake.`,
-      clientMsgId: randomUUID(),
-    });
-  } catch (err) {
-    ctx.log.warn({ err }, 'could not continue the intake chat');
-  }
+/**
+ * Tells the BA the manager's mapping answer so it carries on (the chat is one call per message). The BA may still be
+ * finishing the turn in which it asked, so this waits (in the background) until the conversation is free.
+ */
+export function continueIntake(ctx: Ctx, intake: Row, projectKey: string): void {
+  void (async () => {
+    try {
+      for (let i = 0; i < 240 && ctx.services.chat.isBusy(intake.thread_id); i++)
+        await new Promise((r) => setTimeout(r, 500));
+      await ctx.services.chat.send(intake.started_by, {
+        threadId: intake.thread_id,
+        body: `[Desk] I mapped ${intake.external_key ?? 'this request'} to project ${projectKey}. Continue the intake.`,
+        clientMsgId: randomUUID(),
+      });
+    } catch (err) {
+      ctx.log.warn({ err }, 'could not continue the intake chat');
+    }
+  })();
 }

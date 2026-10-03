@@ -345,7 +345,7 @@ describe('unmapped tickets', () => {
       body: { answer: 'toy' },
     });
     expect(noOption.status).toBe(400);
-    await finishChat(start);
+    // the manager answers while the BA is still finishing the turn in which it asked
     const from = r.received.length;
     await post(`/api/desk/${deskItemId}/answer`, {
       answer: 'TOY: Toy',
@@ -358,7 +358,10 @@ describe('unmapped tickets', () => {
       status: 'mapped',
       mappedProjectKey: 'TOY',
     });
-    // the BA is told, in the same chat, to continue
+    // the BA is told, in the same chat, to continue: once its turn is over
+    await new Promise((x) => setTimeout(x, 700));
+    expect(r.received.slice(from).some((f) => f.type === 'chat.start')).toBe(false);
+    await finishChat(start);
     const next = (await r.waitFor('chat.start', (f) => f.threadId === intake.threadId, 5000, from)) as any;
     expect(next.message).toMatch(/mapped ABC-777 to project TOY/);
     expect(next.context.intake.mappedProjectKey).toBe('TOY');

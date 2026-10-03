@@ -25,5 +25,6 @@ export default defineConfig({
     { name: 'test-loop', testMatch: 'test-loop.spec.ts', dependencies: ['sharing'] },
     { name: 'feeds', testMatch: 'feeds.spec.ts', dependencies: ['sharing'] },
     { name: 'research', testMatch: 'research.spec.ts', dependencies: ['feeds'] },
+    { name: 'intake', testMatch: 'intake.spec.ts', dependencies: ['research'] },
   ],
 });

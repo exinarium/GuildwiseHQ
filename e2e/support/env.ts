@@ -45,3 +45,6 @@ export const paths = {
 
 /** M4: the user of the tester / bug loop specs (own runner, own project TST). */
 export const TESTER = { email: 'tester@e2e.test', name: 'E2E Tester', password: 'tester-password-12345' };
+
+/** M7 intake spec: own user, own runner (mock), projects INT and OTH on the toy repo, a BA and two builders. */
+export const INTAKER = { email: 'intaker@e2e.test', name: 'E2E Intaker', password: 'intaker-password-12345' };
