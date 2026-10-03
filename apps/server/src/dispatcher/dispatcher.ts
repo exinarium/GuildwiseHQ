@@ -178,7 +178,7 @@ export class Dispatcher {
     const late = await rows(
       this.ctx.pool,
       `SELECT id, org_id, stage FROM cards WHERE status='queued' AND scheduled AND claim_id IS NULL AND queued_at < $1
-        ORDER BY queued_at`,
+        ORDER BY queued_at, created_at, number`,
       [new Date(nowMs - LATE_SCHEDULED_MS)],
     );
     const made: ClaimResult[] = [];

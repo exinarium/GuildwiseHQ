@@ -26,5 +26,14 @@ export async function q<T extends Record<string, any> = Record<string, any>>(
   sql: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  return (await adminPool().query(sql, params)).rows as T[];
+  // A TRUNCATE between tests can deadlock with the previous test's last background dispatch or presence update:
+  // the test statement is the victim, so simply run it again.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return (await adminPool().query(sql, params)).rows as T[];
+    } catch (err) {
+      if ((err as { code?: string }).code !== '40P01' || attempt >= 4) throw err;
+      await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
+    }
+  }
 }

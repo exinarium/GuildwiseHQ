@@ -5,7 +5,6 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { needsApproval } from '@aom/shared/devops';
 
 type Action =
   | 'ok'
@@ -143,6 +142,8 @@ interface DevopsBrief extends Brief {
  * the request text drive failure paths: `[crash]`, `[hang]`, `[no_report]`.
  */
 async function devopsMain(brief: DevopsBrief): Promise<number> {
+  // Loaded lazily: card shifts must start as fast as before (zod is not needed for them).
+  const { needsApproval } = await import('@aom/shared/devops');
   const d = brief.devops;
   for (let i = 1; i <= 3; i++) {
     emit({ kind: 'progress', text: `mock devops: step ${i}/3 (${d.summary.slice(0, 60)})` });
