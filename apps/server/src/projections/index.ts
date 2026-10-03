@@ -8,6 +8,7 @@ import { devopsProjectors } from './devops.ts';
 import { feedProjectors } from './feeds.ts';
 import { intakeProjectors } from './intake.ts';
 import { ledgerProjectors } from './ledger.ts';
+import { outboundProjectors } from './outbound.ts';
 import { projectProjectors } from './projects.ts';
 import { researchProjectors } from './research.ts';
 import { scheduleProjectors } from './schedules.ts';
@@ -43,6 +44,7 @@ const domains: Array<Record<string, Projector>> = [
   feedProjectors,
   researchProjectors,
   intakeProjectors,
+  outboundProjectors,
 ];
 
 export function buildProjectors(): ProjectorMap {
@@ -93,4 +95,5 @@ export const PROJECTION_TABLES = [
   'research_publications',
   'intakes',
   'intake_cards',
+  'outbound_drafts',
 ];

@@ -9,9 +9,11 @@ import {
 import type { ChatTerminal } from '../chat/relay.ts';
 import { cardMessage, orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
+import { outboundDraftRpc } from '../commands/drafts.ts';
 import { endQuestionShift } from '../commands/escalation.ts';
 import { applyFinalizeResult } from '../commands/finalize.ts';
 import { intakeRpc } from '../commands/intake.ts';
+import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import {
   applyShiftEnded,
   applyShiftRejected,
@@ -154,6 +156,17 @@ export class RunnerHandlers {
             msg.result,
             msg.error,
           );
+        } else if (cmd?.type === 'outbound.post') {
+          // Terminal like finalize: posted, or a failure that lands on the desk (the manager retries from the card).
+          await finishOutboundCommand(this.ctx, msg.commandId);
+          await applyOutboundResult(
+            this.ctx,
+            conn.workstationId,
+            cmd.payload.draftId,
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
         } else {
           await completeCommand(this.ctx.pool, msg.commandId, msg.ok, msg.error, this.ctx.clock.now());
         }
@@ -261,6 +274,7 @@ export class RunnerHandlers {
     await this.reconcileDevops(conn, known, helloAt);
     await this.reconcileQuestions(conn, known, helloAt);
     await queueVaultConfigure(ctx, ctx.pool, conn.workstationId);
+    await queueApprovedFor(ctx, conn.userId, conn.workstationId);
     await this.deliverPending(conn.workstationId);
     ctx.services.dispatcher.trigger();
   }
@@ -491,6 +505,7 @@ export class RunnerHandlers {
       if (msg.method === 'ledger.search') return reply(true, await ledgerSearchRpc(ctx, shift, msg.params));
       if (msg.method === 'devops.request')
         return reply(...(await this.devopsRequest(conn, shift, msg.params)));
+      if (msg.method === 'outbound.draft') return reply(...(await outboundDraftRpc(ctx, shift, msg.params)));
       if (INTAKE_METHODS.has(msg.method))
         return reply(...(await intakeRpc(ctx, shift, msg.method, msg.params)));
       if (!shift.card_id) return reply(false, undefined, 'this conversation has no card');
