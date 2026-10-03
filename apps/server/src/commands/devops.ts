@@ -445,7 +445,7 @@ export async function applyDevopsReport(
     await ctx.store.append([threadMessage(req.thread_id, ws.userId, agent, 'comment', report.note)], { tx });
     return { accepted: true };
   }
-  if (report.kind === 'question') {
+  if (report.kind !== 'outcome') {
     return {
       accepted: false,
       error: `questions are not available in a DevOps shift; ask for approval with \`aom ${DEVOPS_OUTCOME_APPROVAL.replace('_', '-')}\` instead`,

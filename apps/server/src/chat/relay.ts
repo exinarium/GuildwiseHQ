@@ -7,6 +7,7 @@ import {
   streamId,
 } from '@aom/shared';
 import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../commands/common.ts';
+import { intakeContext } from '../commands/intake.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -65,10 +66,10 @@ export class ChatRelay {
     const { ctx } = this;
     const row = await one(
       ctx.pool,
-      `SELECT a.*, t.project_id AS thread_project_id, t.card_id AS thread_card_id, p.key AS project_key, c.ref AS card_ref
+      `SELECT a.*, t.kind AS thread_kind, t.project_id AS thread_project_id, t.card_id AS thread_card_id, p.key AS project_key, c.ref AS card_ref
          FROM threads t JOIN agents a ON a.id = t.agent_id
          LEFT JOIN projects p ON p.id = t.project_id LEFT JOIN cards c ON c.id = t.card_id
-        WHERE t.id = $1 AND t.kind = 'chat' AND t.created_by = $2`,
+        WHERE t.id = $1 AND t.kind IN ('chat','intake') AND t.created_by = $2`,
       [msg.threadId, userId],
     );
     if (!row) return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);
@@ -138,9 +139,11 @@ export class ChatRelay {
           scope: orgScope(row.org_id),
         },
       ]);
+      const intake = row.thread_kind === 'intake' ? await intakeContext(ctx, msg.threadId) : undefined;
       const context: ChatContext = {
         ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),
         ...(row.thread_card_id ? { cardId: row.thread_card_id, cardRef: row.card_ref } : {}),
+        ...(intake ? { intake } : {}),
       };
       const sent = ctx.services.runners.send(
         row.workstation_id,
@@ -160,6 +163,11 @@ export class ChatRelay {
       ctx.log.error({ err }, 'chat.send failed');
       await this.finish(inflight, 'crashed', CHAT_ERROR.runnerError).catch(() => {});
     }
+  }
+
+  /** The thread an in-flight chat belongs to (the chat id is its shift id): chat-scoped rpcs resolve their intake with it. */
+  threadOfChat(chatId: string): string | undefined {
+    return this.inflight.get(chatId)?.threadId;
   }
 
   cancel(userId: string, threadId: string): void {

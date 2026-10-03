@@ -24,7 +24,7 @@ export const needsMergeApproval = (card: Row, action: CompletionAction): boolean
   action === 'merge' && card.risk_tier === 'large';
 
 /** `finalize.execute` for the card's home workstation (the runner executes the completion action; no agent). */
-async function queueExecute(tx: Tx, card: Row, action: CompletionAction): Promise<string> {
+export async function queueExecute(tx: Tx, card: Row, action: CompletionAction): Promise<string> {
   if (!card.home_workstation_id || !card.repo_id || !card.branch_name)
     throw conflict('no_worktree', 'the card has no worktree on a workstation to finalize from');
   const repo = (await one(tx, 'SELECT * FROM project_repos WHERE id=$1', [card.repo_id])) as Row;
@@ -45,6 +45,61 @@ async function queueExecute(tx: Tx, card: Row, action: CompletionAction): Promis
   };
   await enqueueRunnerCommand(tx, card.home_workstation_id, 'finalize.execute', payload as never);
   return card.home_workstation_id;
+}
+
+/**
+ * A large merge waits for the manager: the desk approval, `FinalizeApprovalRequested` and a note on the card thread
+ * (used by the manager's Finalize button and by the BA's `aom finalize`).
+ */
+export function mergeApprovalEvents(
+  card: Row,
+  action: CompletionAction,
+  who: { requestedBy: string; actor: AppendInput['actor']; by: string },
+): { deskItemId: string; events: AppendInput[] } {
+  const scope = projectScope(card.org_id, card.project_id);
+  const deskItemId = randomUUID();
+  return {
+    deskItemId,
+    events: [
+      {
+        streamId: streamId.desk(deskItemId),
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId,
+            kind: 'approval',
+            subkind: DESK_SUBKIND.largeMerge,
+            title: `Approve merge of ${card.ref}: ${card.title}`,
+            body: `${card.ref} is a large change (two reviewers approved). Approving merges ${card.branch_name} into the working branch (${card.base_branch ?? 'main'}); the runner does it, then a full E2E suite runs on the result.`,
+            options: [],
+            blocking: false,
+            pinned: true,
+            cardId: card.id,
+            projectId: card.project_id,
+            affectedCardIds: [card.id],
+            askedBy: { kind: 'system' },
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope,
+      },
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'FinalizeApprovalRequested',
+          payload: { cardId: card.id, action, deskItemId, requestedBy: who.requestedBy },
+        },
+        actor: who.actor,
+        scope,
+      },
+      cardMessage(
+        card,
+        { kind: 'system' },
+        'system',
+        `Finalize (merge) requested by ${who.by}; waiting for the manager's approval on the desk.`,
+      ),
+    ],
+  };
 }
 
 export interface FinalizeOutcome {
@@ -82,46 +137,13 @@ export async function requestFinalize(
         scope,
       });
     if (needsMergeApproval(card, action)) {
-      const deskItemId = randomUUID();
-      events.push(
-        {
-          streamId: streamId.desk(deskItemId),
-          event: {
-            type: 'DeskItemCreated',
-            payload: {
-              deskItemId,
-              kind: 'approval',
-              subkind: DESK_SUBKIND.largeMerge,
-              title: `Approve merge of ${card.ref}: ${card.title}`,
-              body: `${card.ref} is a large change (two reviewers approved). Approving merges ${card.branch_name} into the working branch (${card.base_branch ?? 'main'}); the runner does it, then a full E2E suite runs on the result.`,
-              options: [],
-              blocking: false,
-              pinned: true,
-              cardId: card.id,
-              projectId: card.project_id,
-              affectedCardIds: [card.id],
-              askedBy: { kind: 'system' },
-            },
-          },
-          actor: SYSTEM_ACTOR,
-          scope,
-        },
-        {
-          streamId: streamId.card(card.id),
-          event: {
-            type: 'FinalizeApprovalRequested',
-            payload: { cardId: card.id, action, deskItemId, requestedBy: user.id },
-          },
-          actor: userActor(user.id),
-          scope,
-        },
-        cardMessage(
-          card,
-          { kind: 'system' },
-          'system',
-          `Finalize (merge) requested by ${user.displayName}; waiting for the manager's approval on the desk.`,
-        ),
-      );
+      const approval = mergeApprovalEvents(card, action, {
+        requestedBy: user.id,
+        actor: userActor(user.id),
+        by: user.displayName,
+      });
+      events.push(...approval.events);
+      const deskItemId = approval.deskItemId;
       await ctx.store.append(events, { tx });
       return { cardId: card.id, ref: card.ref, state: 'awaiting_approval', action, deskItemId };
     }

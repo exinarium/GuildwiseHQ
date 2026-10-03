@@ -119,6 +119,7 @@ export const deskProjectors: Record<string, Projector> = {
     await insertItem(tx, e, {
       id: p.deskItemId,
       kind: 'question',
+      subkind: p.subkind,
       projectId: p.projectId,
       cardId: p.cardId,
       shiftId: p.shiftId,

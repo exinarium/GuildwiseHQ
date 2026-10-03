@@ -40,7 +40,7 @@ export const CardDraftSchema = z.object({
   cardType: CardType.default('feature'),
   completionAction: CompletionAction.optional(),
   docsNeeded: z.boolean().optional(),
-  priority: z.number().int().min(1).max(5).optional(),
+  priority: z.number().int().min(1).max(9).optional(),
   riskTier: RiskTier.optional(),
   /** Repository name or id; optional when the project has exactly one. */
   repo: z.string().optional(),

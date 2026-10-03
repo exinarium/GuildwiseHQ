@@ -5,6 +5,7 @@ import {
   type DeskResolution,
   type ResolveDeskItemRequest,
   streamId,
+  UNMAPPED_TICKET_SUBKIND,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
@@ -18,6 +19,7 @@ import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
 import { plannedVaultPath } from './decisions.ts';
 import { resolveDevOpsApprovalIn } from './devops.ts';
 import { resolveLargeMergeIn } from './finalize.ts';
+import { continueIntake, mappingAnsweredEvents } from './intake.ts';
 import { resolveVaultConflictIn } from './vaults.ts';
 
 const itemScope = (item: Row) =>
@@ -57,7 +59,8 @@ export async function answerDeskItem(
   id: string,
   req: AnswerDeskItemRequest,
 ): Promise<{ ledgerEntryId: string; unblockedCardIds: string[] }> {
-  return withAppendTx(ctx.pool, async (tx) => {
+  const after: { mapped?: { intake: Row; projectKey: string } } = {};
+  const answered = await withAppendTx(ctx.pool, async (tx) => {
     const { item, mayAct } = await lockItem(tx, user, id);
     if (item.status !== 'open') throw conflict('already_answered', `this item is already ${item.status}`);
     if (item.kind !== 'question' && item.kind !== 'escalation')
@@ -137,9 +140,20 @@ export async function answerDeskItem(
           }),
         );
     }
+    // M7: the answer to a mapping question maps the intake's ticket to the chosen project (the option id).
+    if (item.subkind === UNMAPPED_TICKET_SUBKIND) {
+      if (!req.optionId) throw badRequest('option_required', 'pick the project this ticket belongs to');
+      const m = await mappingAnsweredEvents(tx, item, user, req.optionId);
+      if (m) {
+        events.push(...m.events);
+        after.mapped = { intake: m.intake, projectKey: m.projectKey };
+      }
+    }
     await ctx.store.append(events, { tx });
     return { ledgerEntryId: entryId, unblockedCardIds: blocked.map((b) => b.card_id) };
   });
+  if (after.mapped) await continueIntake(ctx, after.mapped.intake, after.mapped.projectKey);
+  return answered;
 }
 
 /** Approves, rejects or acknowledges a non-question item. The domain event it triggers is the owning milestone's. */

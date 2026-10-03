@@ -13,6 +13,7 @@ import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { dedupMatches } from '../queries/ledger.ts';
 import { agentActor, cardMessage, projectScope } from './common.ts';
+import { nextRoute, routedMessage } from './escalation.ts';
 import { releaseClaimEvents } from './shifts.ts';
 
 type QuestionReport = Extract<ShiftReport, { kind: 'question' }>;
@@ -39,7 +40,8 @@ async function affectedCards(tx: Tx, card: Row): Promise<string[]> {
  * An agent raises a question on its card (`aom question`). Ledger duplicate check first (top 3 matches are stored on
  * the desk item and returned to the agent); then `QuestionRaised`. Blocking questions park the card in Blocked and
  * release the claim in the same append, so the builder can take its next card (docs/ARCHITECTURE.md section 15).
- * Until the BA exists (M7) every question goes straight to the manager's desk.
+ * M7: the question starts in the escalation chain (a senior of the same role or the previous holder, then the BA)
+ * and reaches the manager's desk only when nobody up the chain can answer (`commands/escalation.ts`).
  */
 export async function raiseQuestion(
   ctx: Ctx,
@@ -66,6 +68,15 @@ export async function raiseQuestion(
   const options: DeskOption[] = report.options.map((label, i) => ({ id: optionId(i), label }));
   const deskItemId = randomUUID();
   const affected = report.blocking ? await affectedCards(tx, card) : [card.id];
+  const route = await nextRoute(ctx, tx, {
+    orgId: card.org_id,
+    projectId: card.project_id,
+    cardId: card.id,
+    askerAgentId: agent.id,
+    askerRole: agent.role_key,
+    from: 'raise',
+    tried: [],
+  });
   const scope = projectScope(card.org_id, card.project_id);
   const raised: AppendInput = {
     streamId: streamId.desk(deskItemId),
@@ -82,7 +93,9 @@ export async function raiseQuestion(
         options,
         ...(report.recommend !== undefined ? { recommendation: optionId(report.recommend) } : {}),
         blocking: report.blocking,
-        routedTo: 'manager',
+        routedTo: route.routedTo,
+        ...(route.routedAgentId ? { routedAgentId: route.routedAgentId } : {}),
+        chainLevel: route.level,
         dedupLedgerIds: matches.map((m) => m.id),
         affectedCardIds: affected,
         pinned: report.blocking,
@@ -105,7 +118,9 @@ export async function raiseQuestion(
         tx,
         card,
         'question',
-        'Raised a question for the manager; the card is Blocked until it is answered.',
+        route.routedTo === 'manager'
+          ? 'Raised a question for the manager; the card is Blocked until it is answered.'
+          : `Raised a question for ${route.agentName} (${route.agentRole}); the card is Blocked until it is answered.`,
         null,
         [raised, thread],
       ),
@@ -119,9 +134,7 @@ export async function raiseQuestion(
     : '';
   return {
     accepted: true,
-    message: report.blocking
-      ? `Recorded. The card is now Blocked and your question is on the manager's desk. Finish now; do not make further changes.${seen}`
-      : `Recorded. The manager will see your question; carry on with your best assumption.${seen}`,
+    message: routedMessage(route, report.blocking, seen),
     matches,
   };
 }

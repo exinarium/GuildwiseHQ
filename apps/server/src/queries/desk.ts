@@ -12,12 +12,14 @@ import { digestItemsForDesk } from './digests.ts';
 const SELECT = `
 SELECT d.*, c.ref AS card_ref, c.title AS card_title, c.stage AS card_stage, c.status AS card_status,
        c.owner_user_id AS card_owner, c.decision_policy AS card_policy, p.key AS project_key,
-       a.name AS agent_name, u.display_name AS answered_by_name
+       a.name AS agent_name, u.display_name AS answered_by_name, aa.name AS answered_by_agent_name,
+       (SELECT i.id FROM intakes i WHERE i.mapping_desk_item_id = d.id) AS intake_id
   FROM desk_items d
   LEFT JOIN cards c ON c.id = d.card_id
   LEFT JOIN projects p ON p.id = d.project_id
   LEFT JOIN agents a ON a.id = d.asked_by_agent_id
-  LEFT JOIN users u ON u.id = d.answered_by`;
+  LEFT JOIN users u ON u.id = d.answered_by
+  LEFT JOIN agents aa ON aa.id = d.answered_by_agent_id`;
 
 /** Desk items the user may see: their project items (any active member) and their own org-level items. */
 export const DESK_VISIBLE = `(d.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')
@@ -97,6 +99,9 @@ export function toDeskDto(
     answerOption: r.answer_option,
     answeredAt: iso(r.answered_at),
     answeredByName: r.answered_by_name,
+    answeredByAgentName: r.answered_by_agent_name ?? null,
+    escalationTrail: r.escalation_trail ?? [],
+    intakeId: r.intake_id ?? null,
     decisionPolicy: r.card_policy ?? null,
     canAnswer: r.status === 'open' && canAnswerItem(r, userId, role),
     createdAt: iso(r.created_at) as string,
@@ -131,7 +136,7 @@ export async function listDesk(
       ? []
       : await rows(
           db,
-          `${SELECT} WHERE ${scope} AND d.status = 'open'
+          `${SELECT} WHERE ${scope} AND d.status = 'open' AND d.routed_to = 'manager'
             ORDER BY d.pinned DESC, d.blocking DESC, cardinality(d.affected_card_ids) DESC, d.created_at ASC, d.id`,
           params,
         );

@@ -169,6 +169,8 @@ export function registerDecisionHook(ctx: Ctx): () => void {
       }
       if (e.event.type !== 'QuestionAnswered') return;
       const p = e.event.payload;
+      // Only the manager's decisions become decision files; an agent's answer in the escalation chain does not.
+      if (p.answeredBy.kind !== 'user') return;
       const item = await one(
         ctx.pool,
         `SELECT d.project_id, d.card_id, d.title, d.body, d.options, d.asked_by_role, c.ref AS card_ref,

@@ -9,7 +9,9 @@ import {
 import type { ChatTerminal } from '../chat/relay.ts';
 import { cardMessage, orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
+import { endQuestionShift } from '../commands/escalation.ts';
 import { applyFinalizeResult } from '../commands/finalize.ts';
+import { intakeRpc } from '../commands/intake.ts';
 import {
   applyShiftEnded,
   applyShiftRejected,
@@ -31,6 +33,14 @@ import { issueRotatedToken } from './rotation.ts';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_CONCURRENT_SHIFTS = 4;
+/** M7: what the BA does in its intake chat. */
+const INTAKE_METHODS = new Set([
+  'card.create',
+  'card.update',
+  'card.specify',
+  'intake.map',
+  'intake.unmapped',
+]);
 const LOST_AFTER_MISSED_HEARTBEATS = 2;
 const STOP_RESEND_MS = 30_000;
 
@@ -249,6 +259,7 @@ export class RunnerHandlers {
     // Shifts the runner still runs but the server no longer holds.
     for (const shiftId of known) await this.stopIfClaimLost(conn, shiftId);
     await this.reconcileDevops(conn, known, helloAt);
+    await this.reconcileQuestions(conn, known, helloAt);
     await queueVaultConfigure(ctx, ctx.pool, conn.workstationId);
     await this.deliverPending(conn.workstationId);
     ctx.services.dispatcher.trigger();
@@ -288,6 +299,23 @@ export class RunnerHandlers {
     }
   }
 
+  /** Question shifts the server holds as running but the reconnected runner does not: they ended with the runner. */
+  private async reconcileQuestions(conn: RunnerConn, known: Set<string>, helloAt: Date): Promise<void> {
+    const { ctx } = this;
+    const open = await rows(
+      ctx.pool,
+      `SELECT id FROM shifts WHERE workstation_id=$1 AND kind='question' AND status <> 'ended' AND started_at <= $2`,
+      [conn.workstationId, helloAt],
+    );
+    for (const s of open) {
+      if (known.has(s.id)) continue;
+      await withAppendTx(ctx.pool, async (tx) => {
+        const shift = await one(tx, `SELECT * FROM shifts WHERE id=$1 AND status <> 'ended'`, [s.id]);
+        if (shift) await ctx.store.append(endQuestionShift(shift, 'lost'), { tx });
+      });
+    }
+  }
+
   private async stopIfClaimLost(conn: RunnerConn, shiftId: string): Promise<void> {
     const holder =
       (await one(this.ctx.pool, 'SELECT 1 FROM cards WHERE claim_shift_id=$1 AND claim_id IS NOT NULL', [
@@ -296,7 +324,13 @@ export class RunnerHandlers {
       // A DevOps shift has no card: it is held while its request is running.
       (await one(this.ctx.pool, `SELECT 1 FROM devops_requests WHERE shift_id=$1 AND status='running'`, [
         shiftId,
-      ]));
+      ])) ??
+      // A question shift is held while it has not ended.
+      (await one(
+        this.ctx.pool,
+        `SELECT 1 FROM shifts WHERE id=$1 AND kind='question' AND status <> 'ended'`,
+        [shiftId],
+      ));
     if (holder) return;
     const last = conn.stopSentAt.get(shiftId) ?? 0;
     const now = this.ctx.clock.now().getTime();
@@ -457,6 +491,8 @@ export class RunnerHandlers {
       if (msg.method === 'ledger.search') return reply(true, await ledgerSearchRpc(ctx, shift, msg.params));
       if (msg.method === 'devops.request')
         return reply(...(await this.devopsRequest(conn, shift, msg.params)));
+      if (INTAKE_METHODS.has(msg.method))
+        return reply(...(await intakeRpc(ctx, shift, msg.method, msg.params)));
       if (!shift.card_id) return reply(false, undefined, 'this conversation has no card');
       switch (msg.method) {
         case 'card.get': {

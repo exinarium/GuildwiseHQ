@@ -11,9 +11,12 @@ export async function ledgerSearchRpc(
 ): Promise<LedgerSearchResult> {
   const p = LedgerSearchParamsSchema.safeParse({ ...params, query: String(params.query ?? '') });
   if (!p.success) return { entries: [] };
+  // A question shift searches the project of the question it answers.
   const card = shift.card_id
     ? await one(ctx.pool, 'SELECT project_id FROM cards WHERE id=$1', [shift.card_id])
-    : undefined;
+    : shift.desk_item_id
+      ? await one(ctx.pool, 'SELECT project_id FROM desk_items WHERE id=$1', [shift.desk_item_id])
+      : undefined;
   const entries = await searchLedger(ctx.pool, p.data.query, {
     orgId: shift.org_id,
     projectId: card?.project_id ?? null,

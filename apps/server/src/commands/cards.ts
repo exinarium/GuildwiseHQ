@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   type CardChanges,
+  type CardOrigin,
   type CreateCardRequest,
   canManageCard,
   cardRef,
@@ -68,103 +69,118 @@ async function assertDependencies(tx: Tx, projectId: string, deps: string[], sel
     throw badRequest('invalid_dependency', 'dependencies must be cards of the same project');
 }
 
+/** Who a card command acts as, and where the card comes from: the BA's intake chat creates cards as `intake`. */
+export interface CardActing {
+  origin?: CardOrigin;
+  actor?: AppendInput['actor'];
+}
+
 export async function createCard(
   ctx: Ctx,
   user: AuthSession['user'],
   req: CreateCardRequest,
 ): Promise<{ cardId: string; missing?: string[] }> {
-  return withAppendTx(ctx.pool, async (tx) => {
-    const project = await loadVisibleProject(tx, user.id, req.projectId);
-    if (project.status !== 'active') throw conflict('project_archived', 'project is archived');
-    const wf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
-    if (!wf) throw badRequest('unknown_workflow', `workflow '${project.workflow_key}' is not available`);
-    const def = wf.definition;
-    if (!def.cardTypes.includes(req.cardType)) {
-      throw badRequest(
-        'invalid_card_type',
-        `card type '${req.cardType}' is not allowed in workflow '${def.key}'`,
-      );
-    }
-    const parsed = parseCardFields(def.fieldSet, { ...emptyFields(def.fieldSet), ...req.fields });
-    if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
+  return withAppendTx(ctx.pool, (tx) => createCardIn(ctx, tx, user, req));
+}
 
-    let repoId = req.repoId;
-    if (repoId) await assertRepoInProject(tx, project.id, repoId);
-    else {
-      const repos = await rows<{ id: string }>(
-        tx,
-        'SELECT id FROM project_repos WHERE project_id=$1 AND removed_at IS NULL',
-        [project.id],
-      );
-      if (repos.length === 1) repoId = repos[0]?.id;
-    }
-    const dependencies = req.dependencies ?? [];
-    await assertDependencies(tx, project.id, dependencies);
-
-    const number = Number(
-      (await one(tx, 'SELECT next_card_number FROM projects WHERE id=$1 FOR UPDATE', [project.id]))
-        ?.next_card_number,
+export async function createCardIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  req: CreateCardRequest,
+  acting: CardActing = {},
+): Promise<{ cardId: string; ref: string; missing?: string[] }> {
+  const actor = acting.actor ?? userActor(user.id);
+  const project = await loadVisibleProject(tx, user.id, req.projectId);
+  if (project.status !== 'active') throw conflict('project_archived', 'project is archived');
+  const wf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
+  if (!wf) throw badRequest('unknown_workflow', `workflow '${project.workflow_key}' is not available`);
+  const def = wf.definition;
+  if (!def.cardTypes.includes(req.cardType)) {
+    throw badRequest(
+      'invalid_card_type',
+      `card type '${req.cardType}' is not allowed in workflow '${def.key}'`,
     );
-    const cardId = randomUUID();
-    const target = specifyTarget(def);
-    const view: FillableCard = {
-      title: req.title,
-      cardType: req.cardType,
-      repoId: repoId ?? null,
-      completionAction: req.completionAction ?? null,
-      docsNeeded: req.docsNeeded ?? false,
-      riskTier: null,
-      priority: req.priority ?? 2,
-      fields: parsed.data,
-    };
-    const scope = projectScope(project.org_id, project.id);
-    const events: AppendInput[] = [
-      {
-        streamId: streamId.card(cardId),
-        event: {
-          type: 'CardCreated',
-          payload: {
-            cardId,
-            projectId: project.id,
-            number,
-            ref: cardRef(project.key, number),
-            title: req.title,
-            cardType: req.cardType,
-            workflowVersionId: wf.id,
-            stage: def.initialStage,
-            status: 'draft',
-            fields: parsed.data,
-            ownerUserId: user.id,
-            origin: 'manual',
-            scheduled: false,
-            repoId,
-            priority: req.priority ?? 2,
-            docsNeeded: req.docsNeeded ?? false,
-            completionAction: req.completionAction,
-            dependencies,
-            requiredCapabilities: [],
-          },
+  }
+  const parsed = parseCardFields(def.fieldSet, { ...emptyFields(def.fieldSet), ...req.fields });
+  if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
+
+  let repoId = req.repoId;
+  if (repoId) await assertRepoInProject(tx, project.id, repoId);
+  else {
+    const repos = await rows<{ id: string }>(
+      tx,
+      'SELECT id FROM project_repos WHERE project_id=$1 AND removed_at IS NULL',
+      [project.id],
+    );
+    if (repos.length === 1) repoId = repos[0]?.id;
+  }
+  const dependencies = req.dependencies ?? [];
+  await assertDependencies(tx, project.id, dependencies);
+
+  const number = Number(
+    (await one(tx, 'SELECT next_card_number FROM projects WHERE id=$1 FOR UPDATE', [project.id]))
+      ?.next_card_number,
+  );
+  const cardId = randomUUID();
+  const target = specifyTarget(def);
+  const view: FillableCard = {
+    title: req.title,
+    cardType: req.cardType,
+    repoId: repoId ?? null,
+    completionAction: req.completionAction ?? null,
+    docsNeeded: req.docsNeeded ?? false,
+    riskTier: null,
+    priority: req.priority ?? 2,
+    fields: parsed.data,
+  };
+  const scope = projectScope(project.org_id, project.id);
+  const events: AppendInput[] = [
+    {
+      streamId: streamId.card(cardId),
+      event: {
+        type: 'CardCreated',
+        payload: {
+          cardId,
+          projectId: project.id,
+          number,
+          ref: cardRef(project.key, number),
+          title: req.title,
+          cardType: req.cardType,
+          workflowVersionId: wf.id,
+          stage: def.initialStage,
+          status: 'draft',
+          fields: parsed.data,
+          ownerUserId: user.id,
+          origin: acting.origin ?? 'manual',
+          scheduled: false,
+          repoId,
+          priority: req.priority ?? 2,
+          docsNeeded: req.docsNeeded ?? false,
+          completionAction: req.completionAction,
+          dependencies,
+          requiredCapabilities: [],
         },
-        actor: userActor(user.id),
-        scope,
       },
-    ];
-    let missing: string[] | undefined;
-    if (req.specify) {
-      missing = requiredMissing(view, target.stage);
-      if (missing.length === 0) {
-        missing = undefined;
-        events.push({
-          streamId: streamId.card(cardId),
-          event: { type: 'CardSpecified', payload: { cardId, fromStage: target.from, toStage: target.to } },
-          actor: userActor(user.id),
-          scope,
-        });
-      }
+      actor,
+      scope,
+    },
+  ];
+  let missing: string[] | undefined;
+  if (req.specify) {
+    missing = requiredMissing(view, target.stage);
+    if (missing.length === 0) {
+      missing = undefined;
+      events.push({
+        streamId: streamId.card(cardId),
+        event: { type: 'CardSpecified', payload: { cardId, fromStage: target.from, toStage: target.to } },
+        actor,
+        scope,
+      });
     }
-    await ctx.store.append(events, { tx });
-    return { cardId, missing };
-  });
+  }
+  await ctx.store.append(events, { tx });
+  return { cardId, ref: cardRef(project.key, number), missing };
 }
 
 export async function loadManageable(tx: Tx, user: AuthSession['user'], idOrRef: string) {
@@ -181,79 +197,96 @@ export async function patchCard(
   idOrRef: string,
   patch: PatchCardRequest,
 ): Promise<string> {
-  return withAppendTx(ctx.pool, async (tx) => {
-    const card = await loadManageable(tx, user, idOrRef);
-    if (['done', 'cancelled'].includes(card.status)) throw conflict('card_closed', `card is ${card.status}`);
-    const wf = await loadWorkflowById(tx, card.workflow_version_id);
-    const changes: CardChanges = {};
-    if (patch.title !== undefined && patch.title !== card.title) changes.title = patch.title;
-    if (patch.priority !== undefined && patch.priority !== card.priority) changes.priority = patch.priority;
-    if (patch.docsNeeded !== undefined && patch.docsNeeded !== card.docs_needed)
-      changes.docsNeeded = patch.docsNeeded;
-    if (patch.completionAction !== undefined && patch.completionAction !== card.completion_action) {
-      changes.completionAction = patch.completionAction;
-    }
-    if (patch.repoId !== undefined && patch.repoId !== card.repo_id) {
-      if (patch.repoId) await assertRepoInProject(tx, card.project_id, patch.repoId);
-      changes.repoId = patch.repoId;
-    }
-    if (patch.riskTier !== undefined && patch.riskTier !== card.risk_tier) {
-      changes.riskTier = patch.riskTier;
-      changes.riskTierOverridden = patch.riskTier !== null;
-    }
-    if (patch.fields !== undefined) {
-      const merged = { ...card.fields, ...patch.fields };
-      const parsed = parseCardFields(wf?.definition.fieldSet ?? 'code', merged);
-      if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
-      changes.fields = parsed.data;
-    }
-    if (patch.dependencies !== undefined) {
-      await assertDependencies(tx, card.project_id, patch.dependencies, card.id);
-      changes.dependencies = patch.dependencies;
-    }
-    if (Object.keys(changes).length === 0) return card.id as string;
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.card(card.id),
-          event: { type: 'CardUpdated', payload: { cardId: card.id, changes } },
-          actor: userActor(user.id),
-          scope: projectScope(card.org_id, card.project_id),
-        },
-      ],
-      { tx },
-    );
-    return card.id as string;
-  });
+  return withAppendTx(ctx.pool, (tx) => patchCardIn(ctx, tx, user, idOrRef, patch));
+}
+
+export async function patchCardIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  idOrRef: string,
+  patch: PatchCardRequest,
+  acting: CardActing = {},
+): Promise<string> {
+  const card = await loadManageable(tx, user, idOrRef);
+  if (['done', 'cancelled'].includes(card.status)) throw conflict('card_closed', `card is ${card.status}`);
+  const wf = await loadWorkflowById(tx, card.workflow_version_id);
+  const changes: CardChanges = {};
+  if (patch.title !== undefined && patch.title !== card.title) changes.title = patch.title;
+  if (patch.priority !== undefined && patch.priority !== card.priority) changes.priority = patch.priority;
+  if (patch.docsNeeded !== undefined && patch.docsNeeded !== card.docs_needed)
+    changes.docsNeeded = patch.docsNeeded;
+  if (patch.completionAction !== undefined && patch.completionAction !== card.completion_action) {
+    changes.completionAction = patch.completionAction;
+  }
+  if (patch.repoId !== undefined && patch.repoId !== card.repo_id) {
+    if (patch.repoId) await assertRepoInProject(tx, card.project_id, patch.repoId);
+    changes.repoId = patch.repoId;
+  }
+  if (patch.riskTier !== undefined && patch.riskTier !== card.risk_tier) {
+    changes.riskTier = patch.riskTier;
+    changes.riskTierOverridden = patch.riskTier !== null;
+  }
+  if (patch.fields !== undefined) {
+    const merged = { ...card.fields, ...patch.fields };
+    const parsed = parseCardFields(wf?.definition.fieldSet ?? 'code', merged);
+    if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
+    changes.fields = parsed.data;
+  }
+  if (patch.dependencies !== undefined) {
+    await assertDependencies(tx, card.project_id, patch.dependencies, card.id);
+    changes.dependencies = patch.dependencies;
+  }
+  if (Object.keys(changes).length === 0) return card.id as string;
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.card(card.id),
+        event: { type: 'CardUpdated', payload: { cardId: card.id, changes } },
+        actor: acting.actor ?? userActor(user.id),
+        scope: projectScope(card.org_id, card.project_id),
+      },
+    ],
+    { tx },
+  );
+  return card.id as string;
 }
 
 export async function specifyCard(ctx: Ctx, user: AuthSession['user'], idOrRef: string): Promise<string> {
-  return withAppendTx(ctx.pool, async (tx) => {
-    const card = await loadManageable(tx, user, idOrRef);
-    if (card.status !== 'draft') throw conflict('not_draft', 'only draft cards can be specified');
-    const wf = await loadWorkflowById(tx, card.workflow_version_id);
-    if (!wf) throw conflict('unknown_workflow', 'card workflow is missing');
-    const target = specifyTarget(wf.definition);
-    const missing = requiredMissing(cardView(card), target.stage);
-    if (missing.length) {
-      throw unprocessable('missing_fields', `missing required fields: ${missing.join(', ')}`, { missing });
-    }
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.card(card.id),
-          event: {
-            type: 'CardSpecified',
-            payload: { cardId: card.id, fromStage: card.stage, toStage: target.to },
-          },
-          actor: userActor(user.id),
-          scope: projectScope(card.org_id, card.project_id),
+  return withAppendTx(ctx.pool, (tx) => specifyCardIn(ctx, tx, user, idOrRef));
+}
+
+export async function specifyCardIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  idOrRef: string,
+  acting: CardActing = {},
+): Promise<string> {
+  const card = await loadManageable(tx, user, idOrRef);
+  if (card.status !== 'draft') throw conflict('not_draft', 'only draft cards can be specified');
+  const wf = await loadWorkflowById(tx, card.workflow_version_id);
+  if (!wf) throw conflict('unknown_workflow', 'card workflow is missing');
+  const target = specifyTarget(wf.definition);
+  const missing = requiredMissing(cardView(card), target.stage);
+  if (missing.length) {
+    throw unprocessable('missing_fields', `missing required fields: ${missing.join(', ')}`, { missing });
+  }
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'CardSpecified',
+          payload: { cardId: card.id, fromStage: card.stage, toStage: target.to },
         },
-      ],
-      { tx },
-    );
-    return card.id as string;
-  });
+        actor: acting.actor ?? userActor(user.id),
+        scope: projectScope(card.org_id, card.project_id),
+      },
+    ],
+    { tx },
+  );
+  return card.id as string;
 }
 
 export async function commentOnCard(ctx: Ctx, user: AuthSession['user'], idOrRef: string, body: string) {

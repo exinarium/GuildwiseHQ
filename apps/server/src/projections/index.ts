@@ -6,6 +6,7 @@ import { chatProjectors } from './chats.ts';
 import { deskProjectors } from './desk.ts';
 import { devopsProjectors } from './devops.ts';
 import { feedProjectors } from './feeds.ts';
+import { intakeProjectors } from './intake.ts';
 import { ledgerProjectors } from './ledger.ts';
 import { projectProjectors } from './projects.ts';
 import { researchProjectors } from './research.ts';
@@ -41,6 +42,7 @@ const domains: Array<Record<string, Projector>> = [
   scheduleProjectors,
   feedProjectors,
   researchProjectors,
+  intakeProjectors,
 ];
 
 export function buildProjectors(): ProjectorMap {
@@ -89,4 +91,6 @@ export const PROJECTION_TABLES = [
   'digest_items',
   'feed_seen',
   'research_publications',
+  'intakes',
+  'intake_cards',
 ];

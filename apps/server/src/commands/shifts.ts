@@ -19,8 +19,10 @@ import type { Ctx } from '../context.ts';
 import { exec, one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { baFinalizeEvents } from './ba-finalize.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
+import { applyQuestionReport, endQuestionShift } from './escalation.ts';
 import { buildDigestEvents } from './feeds.ts';
 import { raiseQuestion } from './questions.ts';
 import { rebaseConflictEvents } from './rebase.ts';
@@ -146,6 +148,7 @@ export async function applyShiftReport(
   if (!shift) return { accepted: false, error: 'unknown shift' };
   if (shift.status === 'ended') return { accepted: false, error: 'this shift has already ended' };
   if (shift.kind === 'devops') return applyDevopsReport(ctx, tx, ws, msg, shift);
+  if (shift.kind === 'question') return applyQuestionReport(ctx, tx, ws, msg.report, shift);
   if (!shift.card_id) return { accepted: false, error: 'this shift has no card to report on' };
   const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [shift.card_id]);
   if (!card) return { accepted: false, error: 'card not found' };
@@ -176,6 +179,8 @@ export async function applyShiftReport(
     return { accepted: true };
   }
   if (report.kind === 'question') return raiseQuestion(ctx, tx, shift, card, agent, report);
+  if (report.kind !== 'outcome')
+    return { accepted: false, error: '`aom answer` and `aom escalate` are for question shifts only' };
 
   const wf = await loadWorkflowById(tx, card.workflow_version_id);
   if (!wf) return { accepted: false, error: 'workflow definition is missing' };
@@ -365,6 +370,20 @@ export async function applyShiftReport(
       acceptMessage = `${digest.summary} Finish now.`;
       break;
     }
+    case 'CardFinalized': {
+      // The BA's finalize queue: the completion action goes to the card's workstation (a large merge to the desk).
+      const fin = await baFinalizeEvents(tx, {
+        card,
+        agent,
+        action: payloadData.action,
+        note: report.note,
+      });
+      if (!fin.ok) return { accepted: false, error: fin.error };
+      mains = fin.events;
+      handoffData = { action: payloadData.action };
+      acceptMessage = fin.message;
+      break;
+    }
     case 'ResearchPublished': {
       const project = await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id]);
       const pub = buildPublicationEvents({ card, agent, project: project as Row, data: payloadData });
@@ -484,6 +503,10 @@ export async function applyShiftRejected(
     await ctx.store.append(await endDevopsShift(tx, s, 'rejected', { finalText: msg.detail }), { tx });
     return;
   }
+  if (s.kind === 'question') {
+    await ctx.store.append(endQuestionShift(s, 'rejected'), { tx });
+    return;
+  }
   const card = s.card_id
     ? await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [s.card_id])
     : undefined;
@@ -515,6 +538,18 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
         usage: msg.usage,
         exitCode: msg.exitCode,
         finalText: msg.finalText,
+        guardViolations: msg.guardViolations,
+      }),
+      { tx },
+    );
+    return;
+  }
+  if (s.kind === 'question') {
+    await ctx.store.append(
+      endQuestionShift(s, msg.outcome, {
+        durationMs: msg.durationMs,
+        usage: msg.usage,
+        exitCode: msg.exitCode,
         guardViolations: msg.guardViolations,
       }),
       { tx },
