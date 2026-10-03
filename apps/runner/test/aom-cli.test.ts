@@ -135,7 +135,12 @@ describe('aom CLI', () => {
         kind: 'outcome',
         outcomeId: 'fail',
         note: 'it crashes',
-        data: { title: 'Crash on save', evidence: 'evidence from file' },
+        data: {
+          title: 'Crash on save',
+          summary: 'it crashes',
+          commands: [],
+          outputExcerpt: 'evidence from file',
+        },
       },
       { kind: 'outcome', outcomeId: 'digest', note: 'ok', data: { items: [1] } },
     ]);

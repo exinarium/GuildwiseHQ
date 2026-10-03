@@ -231,8 +231,17 @@ const VERBS: Record<string, Verb> = {
     if (sub === 'fail') {
       const title = one(p, 'title');
       if (!title) throw new UsageError('--title "<bug title>" is required');
+      const note = textFlag(ctx, p, 'note', true) as string;
       const evidence = textFlag(ctx, p, 'evidence', false) ?? '';
-      return report(ctx, outcome('fail', textFlag(ctx, p, 'note', true) as string, { title, evidence }));
+      return report(
+        ctx,
+        outcome('fail', note, {
+          title,
+          summary: note.slice(0, 1000),
+          commands: many(p, 'command'),
+          outputExcerpt: evidence.slice(0, 4000),
+        }),
+      );
     }
     throw new UsageError('usage: aom test pass|fail ...');
   },
@@ -283,7 +292,7 @@ export const USAGE = `usage: aom <verb> [options]
   review approve --score <1-5> --note "<text>"
   review changes --reason <r>[,<r>] --score <1-5> [--criteria-missed "<c>"]... --note "<text>"
   test pass --evidence "<text>" [--command "<cmd>"]...
-  test fail --title "<bug>" --note "<text>" [--evidence "<text>"]
+  test fail --title "<bug>" --note "<text>" [--evidence "<text>"] [--command "<cmd>"]...
   outcome <id> --note "<text>" [--data-file <json>]
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager

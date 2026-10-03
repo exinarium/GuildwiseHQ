@@ -1,0 +1,175 @@
+import { mkdir } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import type { FinalizeExecutePayload, FinalizeResult } from '@aom/shared';
+import type { PrCreator } from './gh.ts';
+import { git, gitOk, hasRemote, revParse } from './git.ts';
+import { baseTarget, RebaseConflictError, rebaseOntoBase } from './rebase.ts';
+import { ensureWorktree, removeWorktree } from './worktrees.ts';
+
+export interface CompletionInput {
+  payload: FinalizeExecutePayload;
+  /** Local clone of the card's repository. */
+  repoPath: string;
+  /** Where the card worktree lives (or is recreated) on this workstation. */
+  worktreePath: string;
+  /** Directory for the throwaway integration worktree of a merge. */
+  integrationDir: string;
+  pr: PrCreator;
+  /** Identity for the merge commit (the runner has no agent behind it). */
+  identity?: { name: string; email: string };
+}
+
+const IDENTITY = { name: 'Agent Org Manager (aom)', email: 'aom@runner.aom.invalid' };
+
+const fail = (action: FinalizeResult['action'], error: string): FinalizeResult => ({
+  ok: false,
+  action,
+  error,
+});
+
+/**
+ * The completion action of a card (docs/ARCHITECTURE.md sections 13.5, 13.6, 24.13): deterministic runner code, no
+ * agent. Rebases the card branch onto the working branch first (a conflict is reported, never resolved), then
+ * `merge` (integration worktree on the working branch, `git merge --no-ff`, push the working branch), `push_branch`
+ * (`git push -u origin <branch>`) or `pr` (push + `gh pr create`; without `gh` the branch is pushed and a notice
+ * is returned). Idempotent: a branch already merged reports its merge commit again.
+ */
+export async function executeCompletion(input: CompletionInput): Promise<FinalizeResult> {
+  const { payload: p } = input;
+  const action = p.action;
+  let wt: string;
+  try {
+    const w = await ensureWorktree({
+      repoPath: input.repoPath,
+      spec: {
+        mode: 'reuse',
+        repoId: p.repoId,
+        remoteUrlNormalized: p.remoteUrlNormalized,
+        baseBranch: p.baseBranch,
+        branchName: p.branchName,
+        path: p.worktreePath ?? input.worktreePath,
+      },
+      defaultPath: input.worktreePath,
+    });
+    wt = w.path;
+  } catch (err) {
+    return fail(action, `the card worktree is not available: ${errMsg(err)}`);
+  }
+
+  const dirty = (await git(wt, ['status', '--porcelain'])).stdout.trim();
+  if (dirty) return fail(action, `the card worktree has uncommitted changes:\n${dirty.slice(0, 500)}`);
+
+  try {
+    await rebaseOntoBase(wt, p.baseBranch);
+  } catch (err) {
+    if (err instanceof RebaseConflictError)
+      return { ok: false, action, conflict: true, conflictedFiles: err.conflictedFiles, error: err.message };
+    return fail(action, `rebase failed: ${errMsg(err)}`);
+  }
+
+  if (action === 'merge') return merge(input, wt);
+  const remote = await hasRemote(wt);
+  if (!remote)
+    return fail(
+      action,
+      `cannot ${action === 'pr' ? 'open a PR' : 'push'}: the repository has no origin remote`,
+    );
+  const push = await git(wt, ['push', '-u', 'origin', p.branchName]);
+  if (push.exitCode !== 0) return fail(action, `git push failed: ${(push.stderr || push.stdout).trim()}`);
+  if (action === 'push_branch') return { ok: true, action, pushedBranch: p.branchName };
+
+  try {
+    const r = await input.pr.create({
+      cwd: wt,
+      base: p.baseBranch,
+      branch: p.branchName,
+      title: p.prTitle ?? `${p.ref}: ${p.title}`,
+      body: p.prBody ?? p.title,
+    });
+    if ('unavailable' in r)
+      return {
+        ok: true,
+        action,
+        pushedBranch: p.branchName,
+        notice: `${r.unavailable}: the branch ${p.branchName} was pushed, open the pull request by hand`,
+      };
+    return { ok: true, action, pushedBranch: p.branchName, ...(r.url ? { prUrl: r.url } : {}) };
+  } catch (err) {
+    return fail(action, errMsg(err));
+  }
+}
+
+async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult> {
+  const { payload: p, repoPath } = input;
+  const base = p.baseBranch;
+  const remote = await hasRemote(repoPath);
+  if (remote) await git(repoPath, ['fetch', 'origin', base]);
+  const startPoint = await baseTarget(repoPath, base);
+  if (!(await revParse(repoPath, startPoint))) return fail('merge', `base branch ${base} not found`);
+
+  // Already merged (a redelivered command): report the existing result.
+  const merged = await git(repoPath, ['merge-base', '--is-ancestor', p.branchName, startPoint]);
+  if (merged.exitCode === 0)
+    return { ok: true, action: 'merge', mergeCommit: (await revParse(repoPath, startPoint)) ?? undefined };
+
+  const id = input.identity ?? IDENTITY;
+  const env = {
+    GIT_AUTHOR_NAME: id.name,
+    GIT_AUTHOR_EMAIL: id.email,
+    GIT_COMMITTER_NAME: id.name,
+    GIT_COMMITTER_EMAIL: id.email,
+  };
+  const integration = join(input.integrationDir, p.ref);
+  const tempBranch = `aom-integration/${p.ref.toLowerCase()}`;
+  await removeWorktree({ path: integration, branchName: tempBranch, deleteBranch: true });
+  await mkdir(dirname(integration), { recursive: true });
+  const add = await git(repoPath, ['worktree', 'add', '-B', tempBranch, integration, startPoint]);
+  if (add.exitCode !== 0)
+    return fail('merge', `could not create the integration worktree: ${add.stderr.trim()}`);
+  try {
+    const m = await git(
+      integration,
+      ['merge', '--no-ff', '-m', `Merge ${p.branchName} (${p.ref}: ${p.title})`, p.branchName],
+      { env },
+    );
+    if (m.exitCode !== 0) {
+      const files = (await git(integration, ['diff', '--name-only', '--diff-filter=U'])).stdout
+        .split('\n')
+        .filter(Boolean);
+      await git(integration, ['merge', '--abort']);
+      return {
+        ok: false,
+        action: 'merge',
+        conflict: true,
+        conflictedFiles: files,
+        error: `merge conflict in ${files.join(', ')}`,
+      };
+    }
+    const mergeCommit = await gitOk(integration, ['rev-parse', 'HEAD']);
+    if (remote) {
+      const push = await git(integration, ['push', 'origin', `HEAD:refs/heads/${base}`]);
+      if (push.exitCode !== 0)
+        return fail('merge', `pushing ${base} failed: ${(push.stderr || push.stdout).trim()}`);
+    }
+    await advanceLocalBase(repoPath, base, mergeCommit);
+    return { ok: true, action: 'merge', mergeCommit };
+  } finally {
+    await removeWorktree({ path: integration, branchName: tempBranch, deleteBranch: true });
+  }
+}
+
+/** Fast-forwards the clone's local working branch to the merge commit when that is safe (best effort). */
+async function advanceLocalBase(repo: string, base: string, sha: string): Promise<void> {
+  const local = await revParse(repo, `refs/heads/${base}`);
+  if (!local || local === sha) return;
+  if ((await git(repo, ['merge-base', '--is-ancestor', local, sha])).exitCode !== 0) return;
+  const current = (await git(repo, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).stdout.trim();
+  if (current === base) {
+    if ((await git(repo, ['status', '--porcelain', '--untracked-files=no'])).stdout.trim()) return;
+    await git(repo, ['merge', '--ff-only', sha]);
+  } else {
+    await git(repo, ['update-ref', `refs/heads/${base}`, sha, local]);
+  }
+}
+
+const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));

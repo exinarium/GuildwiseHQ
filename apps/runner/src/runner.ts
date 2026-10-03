@@ -16,6 +16,8 @@ import { ChatManager } from './chat/chat.ts';
 import type { RunnerConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
+import { executeCompletion } from './git/completion.ts';
+import { ghPrCreator, type PrCreator } from './git/gh.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { removeWorktree } from './git/worktrees.ts';
 import { IpcServer } from './ipc/server.ts';
@@ -41,6 +43,10 @@ export interface RunnerOptions {
   adapters?: Map<string, RuntimeAdapter>;
   /** Test hook: milliseconds per vault sync interval second (default 1000). */
   vaultSecondMs?: number;
+  /** Opens pull requests for the `pr` completion action; default shells out to `gh` (tests inject a fake). */
+  prCreator?: PrCreator;
+  /** Test hook: replaces the tester environment check (docker, deployed app). */
+  envChecker?: import('./testing/environment.ts').EnvChecker;
 }
 
 /** The long-running runner process: connection, IPC server, supervisor and command handlers. */
@@ -103,6 +109,7 @@ export class Runner {
       maxShiftMsOverride: opts.maxShiftMsOverride,
       reportWaitMs: opts.reportWaitMs,
       exitGraceMs: opts.exitGraceMs,
+      envChecker: opts.envChecker,
     });
     this.chat = new ChatManager({
       paths: this.paths,
@@ -288,6 +295,23 @@ export class Runner {
         done(true, { vaults: this.vaults.configured() });
       } else if (command === 'vault.write') {
         done(true, await this.vaults.write(CommandPayloadSchemas['vault.write'].parse(payload)));
+      } else if (command === 'finalize.execute') {
+        const p = CommandPayloadSchemas['finalize.execute'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        if (!repo) {
+          done(true, { ok: false, action: p.action, error: `no local clone for ${p.remoteUrlNormalized}` });
+        } else {
+          done(
+            true,
+            await executeCompletion({
+              payload: p,
+              repoPath: repo.localPath,
+              worktreePath: this.paths.worktreePath(p.projectKey, p.ref),
+              integrationDir: this.paths.integration,
+              pr: this.opts.prCreator ?? ghPrCreator,
+            }),
+          );
+        }
       } else {
         done(false, undefined, `command ${command} is not supported by this runner version`);
       }

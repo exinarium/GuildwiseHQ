@@ -37,7 +37,7 @@ export async function siblingWorktreeBranches(worktree: string): Promise<Set<str
 export interface GuardInput {
   worktree: string;
   roleKey: string;
-  permissions: Pick<AgentPermissions, 'mayCommit'>;
+  permissions: Pick<AgentPermissions, 'mayCommit'> & { writableGlobs?: string[] | null };
   branchName: string;
   startSha: string;
   branchesAtStart: BranchSnapshot;
@@ -76,6 +76,30 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
       violations.push({
         rule: 'tester_edited_non_e2e',
         detail: `Testers may only change end-to-end tests (${input.e2eGlobs.join(', ') || 'none configured'}); changed: ${bad.slice(0, 10).join(', ')}`,
+      });
+    }
+  }
+
+  // Writers change documentation only (their role's writable globs).
+  if (input.roleKey === 'writer' && input.permissions.writableGlobs?.length) {
+    const isDoc = picomatch(input.permissions.writableGlobs, { dot: true });
+    const bad = changed.filter((p) => !isDoc(p));
+    if (bad.length > 0) {
+      violations.push({
+        rule: 'writer_edited_non_docs',
+        detail: `Writers may only change documentation (${input.permissions.writableGlobs.join(', ')}); changed: ${bad.slice(0, 10).join(', ')}`,
+      });
+    }
+  }
+
+  // Builders never do E2E testing: the tester owns the E2E paths (spec "Testing strategy").
+  if (input.roleKey === 'builder' && input.e2eGlobs.length > 0) {
+    const isE2e = picomatch(input.e2eGlobs, { dot: true });
+    const touched = changed.filter((p) => isE2e(p));
+    if (touched.length > 0) {
+      violations.push({
+        rule: 'builder_edited_e2e',
+        detail: `Builders must not write or change end-to-end tests (${input.e2eGlobs.join(', ')}); changed: ${touched.slice(0, 10).join(', ')}`,
       });
     }
   }

@@ -34,6 +34,7 @@ import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
 import { readVaultContext, withVaultContext } from '../vaults/context.ts';
 import { autoCommit } from './autocommit.ts';
 import { type BranchSnapshot, runGuard, snapshotBranches } from './guard.ts';
@@ -67,6 +68,8 @@ export interface SupervisorDeps {
   /** How long the session may linger after an accepted report. Default 2 min. */
   exitGraceMs?: number;
   progressFlushMs?: number;
+  /** Tester environment check before the session starts (default: Docker and the deployed app). */
+  envChecker?: EnvChecker;
 }
 
 /** The server's answer to a `shift.report`: what the agent is told (and any ledger matches for a question). */
@@ -250,15 +253,18 @@ export class ShiftSupervisor {
       | 'repo_missing'
       | 'worktree_failed'
       | 'rebase_conflict'
+      | 'environment_not_ready'
       | 'internal',
     detail?: string,
     conflictedFiles?: string[],
+    environment?: { problem: string; detail?: string },
   ): void {
     this.deps.transport.send('shift.rejected', {
       shiftId,
       reason,
       ...(detail ? { detail } : {}),
       ...(conflictedFiles ? { conflictedFiles } : {}),
+      ...(environment ? { environment } : {}),
     });
   }
 
@@ -301,6 +307,17 @@ export class ShiftSupervisor {
       cwd = s.worktree.path;
       s.startSha = (await git(cwd, ['rev-parse', 'HEAD'])).stdout.trim();
       s.branchesAtStart = await snapshotBranches(cwd);
+    }
+
+    // Test environment (spec "Testing strategy"): a tester needs the deployed app and Docker. If not, the server
+    // raises a DevOps request for the card and parks it (the shift is rejected, nothing started).
+    if (!s.resumed && needsTestEnvironment(msg)) {
+      const check = this.deps.envChecker ?? defaultEnvChecker();
+      const problem = await check({ msg, worktree: s.worktree?.path ?? null, paths });
+      if (problem) {
+        this.reject(msg.shiftId, 'environment_not_ready', problem.detail, undefined, problem);
+        return;
+      }
     }
 
     if (!s.resumed) this.deps.transport.send('shift.accepted', { shiftId: msg.shiftId });

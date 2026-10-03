@@ -118,24 +118,4 @@ export async function removeWorktree(input: {
   return { removed, branchDeleted };
 }
 
-export class RebaseConflictError extends Error {
-  constructor(readonly conflictedFiles: string[]) {
-    super(`rebase conflict in ${conflictedFiles.join(', ')}`);
-  }
-}
-
-/** Runner-side rebase before test/finalize (section 13.6): never leaves a half-done rebase behind. */
-export async function rebaseOntoBase(worktree: string, baseBranch: string): Promise<void> {
-  const origin = await hasRemote(worktree);
-  if (origin) await git(worktree, ['fetch', 'origin', baseBranch]);
-  const target = (await revParse(worktree, `refs/remotes/origin/${baseBranch}`))
-    ? `origin/${baseBranch}`
-    : baseBranch;
-  const r = await git(worktree, ['rebase', target]);
-  if (r.exitCode === 0) return;
-  const conflicted = (await git(worktree, ['diff', '--name-only', '--diff-filter=U'])).stdout
-    .split('\n')
-    .filter(Boolean);
-  await git(worktree, ['rebase', '--abort']);
-  throw new RebaseConflictError(conflicted);
-}
+export { RebaseConflictError, rebaseOntoBase } from './rebase.ts';

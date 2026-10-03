@@ -10,7 +10,7 @@ const OUTCOMES: Record<Stage, ShiftBrief['shift']['outcomes']> = {
   ],
   test: [
     { id: 'pass', label: 'Pass', kind: 'success', data: 'testEvidence' },
-    { id: 'fail', label: 'Fail', kind: 'failure', data: 'none' },
+    { id: 'fail', label: 'Fail', kind: 'failure', data: 'testEvidence' },
   ],
 };
 const ROLE: Record<Stage, string> = { build: 'builder', review: 'reviewer', test: 'tester' };
@@ -33,6 +33,8 @@ export interface ShiftOptions {
   worktreePath?: string;
   rebase?: boolean;
   cardType?: string;
+  /** Extra card fields (e.g. `mockEnv`). */
+  fields?: Record<string, unknown>;
 }
 
 /** A valid `shift.start` payload for the runner (the server's gateway builds the real one). */
@@ -63,7 +65,12 @@ export function makeShiftStart(o: ShiftOptions): Record<string, unknown> {
       ref,
       title,
       cardType: o.cardType ?? 'feature',
-      fields: { context: 'ctx', affectedAreas: 'src/greeting.ts', ...(o.mock ? { mock: o.mock } : {}) },
+      fields: {
+        context: 'ctx',
+        affectedAreas: 'src/greeting.ts',
+        ...(o.mock ? { mock: o.mock } : {}),
+        ...(o.fields ?? {}),
+      },
       riskTier: 'small',
       reworkRound: o.reworkRound ?? 0,
       completionAction: 'push_branch',

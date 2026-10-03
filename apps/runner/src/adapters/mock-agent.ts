@@ -152,6 +152,8 @@ async function devopsMain(brief: DevopsBrief): Promise<number> {
     await sleep(stepMs);
   }
   emit({ kind: 'usage', usage: { inputTokens: 500, outputTokens: 100 } });
+  // M4: fixing the test environment is what lets the runner's mock environment check pass (see testing/environment.ts).
+  markEnvironmentFixed(d.summary);
   if (d.summary.includes('[crash]')) {
     process.stderr.write('mock devops crash\n');
     return 1;
@@ -186,6 +188,15 @@ async function devopsMain(brief: DevopsBrief): Promise<number> {
         : `mock devops report failed: ${(r.err || r.out).trim()}`,
   });
   return 0;
+}
+
+/** The mock DevOps engineer "installs docker" / "starts the app": drops the marker the mock tester check looks for. */
+function markEnvironmentFixed(summary: string): void {
+  const dir = process.env.AOM_MOCK_STATE_DIR;
+  if (!dir) return;
+  mkdirSync(dir, { recursive: true });
+  if (/docker/i.test(summary)) writeFileSync(join(dir, 'env-ok-docker_missing'), 'ok\n');
+  if (/\b(app|start|deploy)/i.test(summary)) writeFileSync(join(dir, 'env-ok-app_not_deployed'), 'ok\n');
 }
 
 async function main(): Promise<number> {
