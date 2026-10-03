@@ -1,6 +1,6 @@
 import type { DeskItemDto } from '@aom/shared';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
@@ -280,6 +280,7 @@ function AnswerForm({ item }: { item: DeskItemDto }) {
 }
 
 function ResolveButtons({ item }: { item: DeskItemDto }) {
+  const nav = useNavigate();
   const resolve = useResolveDeskItem();
   const dismiss = useDismissDeskItem();
   return (
@@ -292,19 +293,32 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
               variant="primary"
               onClick={() => resolve.mutate({ id: item.id, body: { resolution: 'approved' } })}
             >
-              Approve
+              {item.subkind === 'large_merge' ? 'Approve merge' : 'Approve'}
             </Button>
             <Button onClick={() => resolve.mutate({ id: item.id, body: { resolution: 'rejected' } })}>
               Reject
             </Button>
           </>
         ) : (
-          <Button
-            variant="primary"
-            onClick={() => resolve.mutate({ id: item.id, body: { resolution: 'acknowledged' } })}
-          >
-            {item.subkind === 'vault_conflict' ? 'Conflict resolved, resume sync' : 'Acknowledge'}
-          </Button>
+          <>
+            {item.subkind === 'tester_bottleneck' && (
+              <Button
+                variant="primary"
+                data-testid="hire-tester"
+                onClick={() =>
+                  nav(`/agents?hire=tester${item.projectId ? `&projectId=${item.projectId}` : ''}`)
+                }
+              >
+                Hire tester
+              </Button>
+            )}
+            <Button
+              variant={item.subkind === 'tester_bottleneck' ? 'secondary' : 'primary'}
+              onClick={() => resolve.mutate({ id: item.id, body: { resolution: 'acknowledged' } })}
+            >
+              {item.subkind === 'vault_conflict' ? 'Conflict resolved, resume sync' : 'Acknowledge'}
+            </Button>
+          </>
         )}
         <Button onClick={() => dismiss.mutate(item.id)}>Dismiss</Button>
       </div>

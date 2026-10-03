@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { useBoard } from '../api/queries/board.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { BoardView } from '../components/BoardView.tsx';
+import { RegressionDialog } from '../components/RegressionDialog.tsx';
 import { ErrorBox, PageHeader, Spinner } from '../components/ui.tsx';
 import { setLastProjectKey } from '../lib/lastProject.ts';
 
@@ -55,6 +56,7 @@ export function Board() {
                 </option>
               ))}
             </select>
+            <RegressionDialog projectId={project.id} />
             <Link
               to={`/cards/new?project=${project.key}`}
               className="inline-flex min-h-8 items-center rounded-md bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-500"

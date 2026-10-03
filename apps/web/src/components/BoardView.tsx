@@ -37,8 +37,27 @@ export function CardTile({ card, now }: { card: BoardCard; now?: number }) {
             </Badge>
           )}
           {card.blocked && <Badge tone="red">Blocked</Badge>}
+          {card.status === 'waiting' && (
+            <span data-testid="waiting-badge">
+              <Badge tone="amber">waiting on bug</Badge>
+            </span>
+          )}
+          {(card.origin === 'full_suite' || card.origin === 'regression') && (
+            <span data-testid="suite-badge">
+              <Badge tone="blue">{card.origin === 'full_suite' ? 'full suite' : 'regression'}</Badge>
+            </span>
+          )}
         </div>
       </Link>
+      {card.status === 'waiting' && card.waitingOn && (
+        <Link
+          to={`/cards/${card.waitingOn.ref}`}
+          data-testid={`waiting-on-link-${card.waitingOn.ref}`}
+          className="mt-0.5 ml-2 inline-block text-xs underline"
+        >
+          waiting on {card.waitingOn.ref}
+        </Link>
+      )}
     </li>
   );
 }

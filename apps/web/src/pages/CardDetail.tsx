@@ -12,6 +12,8 @@ import {
   useSpecifyCard,
 } from '../api/queries/cards.ts';
 import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
+import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
+import { FinalizePanel } from '../components/FinalizePanel.tsx';
 import { ShiftLog } from '../components/ShiftLog.tsx';
 import {
   Avatar,
@@ -172,6 +174,8 @@ export function CardDetailView({
         </div>
       )}
 
+      {data.testing && <TestingLinks testing={data.testing} status={card.status} />}
+
       <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-3">
           {currentShift && currentShift.status !== 'ended' && (
@@ -230,6 +234,15 @@ export function CardDetailView({
               </dl>
             )}
           </Panel>
+          {data.testing && (
+            <FinalizePanel
+              cardId={card.id}
+              finalize={data.testing.finalize}
+              completionAction={card.completionAction ?? null}
+              canAct={permissions.canMove}
+            />
+          )}
+          {data.testing && <EvidencePanel testing={data.testing} handoffs={handoffs} />}
           <Panel>
             <h2 className="mb-2 text-sm font-semibold">Handoffs ({handoffs.length})</h2>
             {handoffs.length === 0 && <p className="text-sm text-zinc-500">No handoffs yet.</p>}

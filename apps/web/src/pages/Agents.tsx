@@ -1,6 +1,6 @@
 import type { AgentDto } from '@aom/shared';
 import { type FormEvent, useMemo, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { useAgents, useFire, useHire, useNameSuggestions, useRoles } from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
 import { useResetAgent } from '../api/queries/devops.ts';
@@ -26,7 +26,13 @@ export function Agents() {
   const agents = useAgents();
   const roles = useRoles();
   const workstations = useWorkstations();
-  const [hireOpen, setHireOpen] = useState(false);
+  const [params] = useSearchParams();
+  /** `/agents?hire=tester&projectId=<id>` (the desk's "Hire tester" button) opens the form prefilled. */
+  const [prefill] = useState(() => {
+    const role = params.get('hire');
+    return role ? { roleKey: role, projectId: params.get('projectId') ?? '' } : null;
+  });
+  const [hireOpen, setHireOpen] = useState(!!prefill);
   const [firing, setFiring] = useState<AgentDto | null>(null);
   const [rehoming, setRehoming] = useState<AgentDto | null>(null);
   const [projectFilter, setProjectFilter] = useState('');
@@ -157,7 +163,7 @@ export function Agents() {
           </ul>
         </details>
       )}
-      <HireDialog open={hireOpen} onOpenChange={setHireOpen} agents={agents.data ?? []} />
+      <HireDialog open={hireOpen} onOpenChange={setHireOpen} agents={agents.data ?? []} prefill={prefill} />
       <FireDialog agent={firing} onClose={() => setFiring(null)} />
       <RehomeDialog agent={rehoming} onClose={() => setRehoming(null)} />
     </div>
@@ -283,10 +289,12 @@ function HireDialog({
   open,
   onOpenChange,
   agents,
+  prefill,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   agents: AgentDto[];
+  prefill?: { roleKey: string; projectId: string } | null;
 }) {
   const roles = useRoles();
   const stations = useWorkstations();
@@ -294,10 +302,10 @@ function HireDialog({
   const hire = useHire();
   const [nonce, setNonce] = useState(0);
   const suggestions = useNameSuggestions(open, nonce);
-  const [roleKey, setRoleKey] = useState('');
-  const [seniority, setSeniority] = useState('');
+  const [roleKey, setRoleKey] = useState(prefill?.roleKey ?? '');
+  const [seniority, setSeniority] = useState(prefill ? 'junior' : '');
   const [workstationId, setWorkstationId] = useState('');
-  const [projectId, setProjectId] = useState('');
+  const [projectId, setProjectId] = useState(prefill?.projectId ?? '');
   const [runtime, setRuntime] = useState('');
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState('');

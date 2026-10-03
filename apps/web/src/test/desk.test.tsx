@@ -218,7 +218,7 @@ describe('DeskItem', () => {
 
   it('approvals offer approve/reject instead of a text answer', () => {
     renderItem(item({ kind: 'approval', subkind: 'large_merge', options: [], blocking: false }));
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve merge' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
     expect(screen.queryByRole('form', { name: 'Answer' })).toBeNull();
   });
