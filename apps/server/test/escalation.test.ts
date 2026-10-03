@@ -40,6 +40,12 @@ async function hangUp() {
   if (!r) return;
   r.close();
   await until(async () => !w.t.app.ctx.services.runners.isOnline(w.workstationId), 3000, 'runner offline');
+  // ... and has recorded the disconnect (a late WorkstationDisconnected would mark the next runner offline)
+  await until(
+    async () => !(await q('SELECT connected FROM workstations WHERE id=$1', [w.workstationId]))[0]?.connected,
+    3000,
+    'disconnect recorded',
+  );
 }
 
 async function fresh(team: Array<[string, string, 'junior' | 'senior']>) {
@@ -63,15 +69,16 @@ async function asked(over: Record<string, unknown> = {}, who = 'Bea') {
 }
 
 /** Dispatches the question shift for `name` and starts it. */
+const usedShifts = new Set<string>();
 async function questionShift(name: string) {
-  const from = r.received.length;
   await h.dispatcher().run();
+  // The dispatcher may already have sent it (a QuestionEscalated triggers a pass): take the first one not yet used.
   const start = (await r.waitFor(
     'shift.start',
-    (f) => f.agent.name === name && f.kind === 'question',
+    (f) => f.agent.name === name && f.kind === 'question' && !usedShifts.has(f.shiftId),
     5000,
-    from,
   )) as any;
+  usedShifts.add(start.shiftId);
   await h.startShift(r, start);
   return start;
 }

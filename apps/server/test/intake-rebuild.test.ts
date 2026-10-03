@@ -58,15 +58,15 @@ describe('projection rebuild', () => {
     });
     r.ended(asker.shiftId, 'reported');
     const it = (await q('SELECT * FROM desk_items WHERE card_id=$1', [card.id]))[0]!;
+    const used = new Set<string>();
     const run = async (name: string, report: Record<string, unknown>) => {
-      const from = r.received.length;
       await h.dispatcher().run();
       const s = (await r.waitFor(
         'shift.start',
-        (f) => f.agent.name === name && f.kind === 'question',
+        (f) => f.agent.name === name && f.kind === 'question' && !used.has(f.shiftId),
         5000,
-        from,
       )) as any;
+      used.add(s.shiftId);
       await h.startShift(r, s);
       await h.report(r, s.shiftId, report);
       r.ended(s.shiftId, 'reported');

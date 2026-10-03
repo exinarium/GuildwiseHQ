@@ -80,6 +80,8 @@ export const IntakeContextSchema = z.object({
   externalKey: z.string().optional(),
   /** Project key once mapped. */
   mappedProjectKey: z.string().optional(),
+  /** The manager's work vault: its `skills/jira.md` (if any) replaces the built-in Jira skill text. */
+  workVaultId: z.string().optional(),
   projects: z.array(IntakeProjectSchema),
   cards: z.array(z.object({ ref: z.string(), title: z.string(), status: z.string() })).default([]),
 });

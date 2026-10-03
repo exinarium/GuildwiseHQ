@@ -1,10 +1,12 @@
 import { existsSync } from 'node:fs';
-import { delimiter } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { delimiter, join } from 'node:path';
 import {
   type IpcReportRequest,
   type IpcReportResponse,
   type IpcRpcRequest,
   type IpcRpcResponse,
+  JIRA_SKILL_PATH,
   renderChatInstructions,
   type ServerToRunnerOf,
   type Usage,
@@ -133,6 +135,18 @@ export class ChatManager {
     };
   }
 
+  /** The manager's own Jira skill (`skills/jira.md` in their work vault) replaces the built-in text in an intake chat. */
+  private async jiraSkill(msg: ChatStartMsg): Promise<string | undefined> {
+    const vaultId = msg.context.intake?.workVaultId;
+    if (!vaultId) return undefined;
+    try {
+      const file = join(this.deps.paths.vaults, vaultId, ...JIRA_SKILL_PATH.split('/'));
+      return existsSync(file) ? await readFile(file, 'utf8') : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** `aom source read --ref <ticket>`: read a ticket on this workstation (GitHub through `gh`; Jira is the agent's skill). */
   private async readSource(params: Record<string, unknown>): Promise<IpcRpcResponse> {
     const ref = String(params.ref ?? '').trim();
@@ -163,7 +177,10 @@ export class ChatManager {
     const readOnly = !!wt && existsSync(wt);
     const cwd = readOnly && wt ? wt : sandbox.scratch;
 
-    await adapter.writeInstructions(sandbox, renderChatInstructions(msg.agent, msg.context));
+    await adapter.writeInstructions(
+      sandbox,
+      renderChatInstructions(msg.agent, msg.context, { jiraSkill: await this.jiraSkill(msg) }),
+    );
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
     const env = {
       ...sandboxEnv(sandbox),

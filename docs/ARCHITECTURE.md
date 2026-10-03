@@ -1582,11 +1582,11 @@ Root scripts: `pnpm test` (all vitest), `pnpm e2e`, `pnpm typecheck` (`tsc --noE
 12. **Provider credentials** stay in the runner's local config (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) or are linked from the user's default Claude config; never sent to the site.
 13. **Vault sync, rebases, worktree management and completion actions** are deterministic runner code; LLM DevOps shifts handle only ad-hoc requests (setup, tools, environment).
 14. **Decision files and taste rules** reach the vault through `vault.write` runner commands, since the site holds no vault content.
-15. **Escalation chain** before the BA milestone (M7): questions go straight to the manager desk after the ledger dedup check.
+15. **Escalation chain** (M7 replaced the M2 default of going straight to the desk): a question goes to the card's previous holder or a senior agent of the asker's role (an online agent only), then to the BA, then to the manager's desk; an agent answers with `aom answer` (a note on the card thread, not a ledger entry) or passes it on with `aom escalate`. A question nobody takes within 10 minutes moves on by itself. Without a peer or BA the question goes straight to the desk, as before.
 16. **DevOps engineer** is auto-hired per (user, workstation) at pairing.
 17. **Project sharing** requires the invitee to accept (pending until then).
 18. **Scheduled overflow** is limited to one extra shift per organization at a time.
 19. **Research and feed roles** (researcher, checker, scout, curator) ship as built-in roles.
 20. **Operational, non-event state**: auth sessions, heartbeats/lease refresh, connection flags, shift progress tails, runner inbox and command queue.
 21. **Risk tier** computed by the runner at build handoff: ≥ 200 changed lines, any architectural glob, or refactor ⇒ large.
-22. **Finalize before the BA exists** (M4–M6): the manager triggers finalize from the card; the runner executes the completion action. From M7 the BA claims the Finalize stage.
+22. **Finalize before the BA exists** (M4–M6): the manager triggers finalize from the card; the runner executes the completion action. From M7 the BA claims the Finalize stage and reports `aom finalize --action ...` (revising the completion action if it should); the server then queues the same `finalize.execute` (large merges wait for desk approval). The manager's Finalize button remains as an override.

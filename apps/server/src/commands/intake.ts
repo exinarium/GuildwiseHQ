@@ -108,8 +108,14 @@ export async function intakeContext(ctx: Ctx, threadId: string): Promise<IntakeC
   if (!i) return undefined;
   const projects = await visibleProjects(ctx.pool, i.started_by);
   const cards = (await toDto(ctx, [i]))[0]?.cards ?? [];
+  const work = await one(
+    ctx.pool,
+    `SELECT id FROM vaults WHERE org_id=$1 AND kind='work' AND project_id IS NULL`,
+    [i.org_id],
+  );
   return {
     intakeId: i.id,
+    ...(work ? { workVaultId: work.id } : {}),
     ...(i.external_system ? { externalSystem: i.external_system as ExternalSystem } : {}),
     ...(i.external_key ? { externalKey: i.external_key } : {}),
     ...(i.project_key ? { mappedProjectKey: i.project_key } : {}),

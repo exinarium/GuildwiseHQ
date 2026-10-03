@@ -172,6 +172,20 @@ describe('BA instructions and prompts', () => {
     expect(renderChatInstructions(agentSpec, {})).not.toContain('# Intake');
   });
 
+  it("uses the manager's own Jira skill text when the vault has one", () => {
+    const intake = { intakeId: U.a, projects: [], cards: [] };
+    const text = renderChatInstructions(
+      { ...agentSpec, roleKey: 'ba' },
+      { intake },
+      { jiraSkill: '# My Jira skill\nUse jira-cli.' },
+    );
+    expect(text).toContain('Use jira-cli.');
+    expect(text).not.toContain('Skill: read a Jira ticket');
+    expect(
+      renderChatInstructions({ ...agentSpec, roleKey: 'ba' }, { intake }, { jiraSkill: '  ' }),
+    ).toContain('Skill: read a Jira ticket');
+  });
+
   it('renders a question shift prompt with the question, the trail, the ledger matches and the way out', () => {
     const q = {
       deskItemId: U.c,

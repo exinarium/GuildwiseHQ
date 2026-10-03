@@ -8,6 +8,7 @@ import type { AgentRuntimeSpec, ChatContext } from '../protocol/runner.ts';
 export function renderChatInstructions(
   agent: Pick<AgentRuntimeSpec, 'name' | 'roleKey' | 'seniority'>,
   ctx: ChatContext,
+  opts: { jiraSkill?: string } = {},
 ): string {
   const out: string[] = [];
   out.push('# Who you are');
@@ -32,12 +33,12 @@ export function renderChatInstructions(
       '- `aom comment --note "<text>"`: post a note on the card thread (only when a card is in context).',
     ].join('\n'),
   );
-  if (ctx.intake) out.push(renderIntakeSection(ctx.intake));
+  if (ctx.intake) out.push(renderIntakeSection(ctx.intake, opts.jiraSkill));
   return `${out.join('\n\n')}\n`;
 }
 
 /** The BA's intake chat (M7): the ticket, the projects it may map to, the cards created so far and the verbs to use. */
-function renderIntakeSection(intake: NonNullable<ChatContext['intake']>): string {
+function renderIntakeSection(intake: NonNullable<ChatContext['intake']>, jiraSkill?: string): string {
   const out: string[] = ['# Intake'];
   out.push(
     [
@@ -88,6 +89,6 @@ function renderIntakeSection(intake: NonNullable<ChatContext['intake']>): string
     ].join('\n'),
   );
   out.push('## Jira skill');
-  out.push(JIRA_SKILL_MD.trim());
+  out.push((jiraSkill?.trim() || JIRA_SKILL_MD).trim());
   return out.join('\n\n');
 }
