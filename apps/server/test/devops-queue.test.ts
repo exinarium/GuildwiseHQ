@@ -265,6 +265,22 @@ describe('DevOps request queue', () => {
     );
     expect(events).toHaveLength(1);
     expect(events[0]!.payload.deskItemId).toBe(d.request.approval.deskItemId);
+    // the approval is a pinned, open item on the owner's desk (and only theirs)
+    const desk = await q(
+      `SELECT kind, subkind, status, pinned, project_id, card_id, org_id FROM desk_items WHERE id=$1`,
+      [d.request.approval.deskItemId],
+    );
+    expect(desk).toEqual([
+      expect.objectContaining({
+        kind: 'approval',
+        subkind: 'devops',
+        status: 'open',
+        pinned: true,
+        project_id: null,
+        card_id: null,
+        org_id: w.owner.id,
+      }),
+    ]);
 
     // while waiting for the manager nothing is dispatched
     const mark = r.received.length;
@@ -285,6 +301,10 @@ describe('DevOps request queue', () => {
       note: 'go ahead',
     });
     expect(approved.request.approval.resolution).toBe('approved');
+    // resolving on the DevOps page closes the desk item too
+    expect(
+      (await q(`SELECT status FROM desk_items WHERE id=$1`, [d.request.approval.deskItemId]))[0]!.status,
+    ).toBe('answered');
     expect(approved.messages.at(-1)).toMatchObject({ kind: 'answer', authorKind: 'user' });
     const again = await w.t.req('POST', `/api/devops/requests/${created.request.id}/resolve`, {
       cookie: w.owner.cookie,
@@ -301,7 +321,7 @@ describe('DevOps request queue', () => {
     await until(async () => (await statusOf(created.request.id)) === 'done');
   });
 
-  it('a rejected approval fails the request', async () => {
+  it('a rejection on the desk fails the request; a stranger cannot resolve the item', async () => {
     const from = r.received.length;
     const created = await request('delete the old build output');
     const start = await nextDevopsShift(from);
@@ -314,11 +334,34 @@ describe('DevOps request queue', () => {
     });
     r.ended(start.shiftId, 'reported');
     await until(async () => (await statusOf(created.request.id)) === 'needs_approval');
-    const rej = await post(`/api/devops/requests/${created.request.id}/resolve`, {
-      resolution: 'rejected',
-      note: 'no',
+    const deskItemId = (await get(`/api/devops/requests/${created.request.id}`)).request.approval.deskItemId;
+    const other = await w.t.userSession(uniqueEmail('stranger'));
+    expect(
+      (
+        await w.t.req('POST', `/api/desk/${deskItemId}/resolve`, {
+          cookie: other.cookie,
+          body: { resolution: 'rejected' },
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await w.t.req('POST', `/api/desk/${deskItemId}/resolve`, {
+          cookie: w.owner.cookie,
+          body: { resolution: 'acknowledged' },
+        })
+      ).status,
+    ).toBe(400);
+    const res = await w.t.req('POST', `/api/desk/${deskItemId}/resolve`, {
+      cookie: w.owner.cookie,
+      body: { resolution: 'rejected', note: 'no' },
     });
-    expect(rej.request).toMatchObject({ status: 'failed', resultSummary: 'Approval rejected: no' });
+    expect(res.status).toBe(200);
+    expect((await get(`/api/devops/requests/${created.request.id}`)).request).toMatchObject({
+      status: 'failed',
+      resultSummary: 'Approval rejected: no',
+    });
+    expect((await q(`SELECT status FROM desk_items WHERE id=$1`, [deskItemId]))[0]!.status).toBe('answered');
   });
 
   it('granted access is passed to the DevOps shift and can be changed by the workstation owner only', async () => {

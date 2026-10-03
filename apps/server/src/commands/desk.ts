@@ -15,6 +15,9 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { canAnswerItem, DESK_VISIBLE } from '../queries/desk.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
+import { plannedVaultPath } from './decisions.ts';
+import { resolveDevOpsApprovalIn } from './devops.ts';
+import { resolveVaultConflictIn } from './vaults.ts';
 
 const itemScope = (item: Row) =>
   item.project_id ? projectScope(item.org_id, item.project_id) : orgScope(item.org_id);
@@ -75,6 +78,17 @@ export async function answerDeskItem(
           AND NOT EXISTS (SELECT 1 FROM card_blockers o WHERE o.card_id = b.card_id AND o.desk_item_id <> $1)`,
       [item.id],
     );
+    const projectId = orgWide || !item.project_id ? undefined : (item.project_id as string);
+    const vaultPath = await plannedVaultPath(tx, {
+      scope,
+      orgId: item.org_id,
+      projectId,
+      decision: {
+        deskItemId: item.id,
+        question: item.body?.trim() ? item.body : item.title,
+        answeredAt: ctx.clock.now(),
+      },
+    });
     const by: DeskActor = { kind: 'user', userId: user.id };
     const events: AppendInput[] = [
       {
@@ -106,6 +120,7 @@ export async function answerDeskItem(
             body,
             tags: [],
             sourceDeskItemId: item.id,
+            ...(vaultPath ? { vaultPath } : {}),
           },
         },
         actor: userActor(user.id),
@@ -153,12 +168,47 @@ async function closeItem(
   note?: string,
   editedBody?: string,
 ) {
+  let workstationToDeliver: string | undefined;
+  let devops = false;
   await withAppendTx(ctx.pool, async (tx) => {
     const { item, mayAct } = await lockItem(tx, user, id);
     if (item.status !== 'open') throw conflict('already_resolved', `this item is already ${item.status}`);
     if (item.kind === 'question' && resolution !== 'dismissed')
       throw badRequest('wrong_kind', 'questions are answered (POST /api/desk/:id/answer) or dismissed');
     if (!mayAct) throw forbidden('only the card owner (or any manager, per the decision policy) can do this');
+    // M3 kinds: resolving the item acts on the DevOps request / paused vault in the same transaction.
+    if (item.kind === 'approval' && item.subkind === 'devops') {
+      if (resolution === 'acknowledged')
+        throw badRequest('wrong_resolution', 'a DevOps approval is approved or rejected');
+      const req = await one(tx, `SELECT id FROM devops_requests WHERE approval->>'deskItemId' = $1`, [
+        item.id,
+      ]);
+      if (!req) throw notFound('devops request not found');
+      await resolveDevOpsApprovalIn(
+        ctx,
+        tx,
+        user,
+        req.id,
+        resolution === 'approved' ? 'approved' : 'rejected',
+        note,
+      );
+      devops = true;
+    } else if (
+      item.kind === 'escalation' &&
+      item.subkind === 'vault_conflict' &&
+      resolution !== 'dismissed'
+    ) {
+      if (resolution !== 'acknowledged')
+        throw badRequest('wrong_resolution', 'a vault conflict is acknowledged once you have resolved it');
+      const wv = await one(
+        tx,
+        'SELECT workstation_id, vault_id FROM workstation_vaults WHERE desk_item_id = $1',
+        [item.id],
+      );
+      if (!wv) throw notFound('vault conflict not found');
+      await resolveVaultConflictIn(ctx, tx, user, wv.vault_id, wv.workstation_id);
+      workstationToDeliver = wv.workstation_id;
+    }
     await ctx.store.append(
       [
         {
@@ -180,4 +230,6 @@ async function closeItem(
       { tx },
     );
   });
+  if (devops) ctx.services.dispatcher.trigger();
+  if (workstationToDeliver) await ctx.services.gateway.deliverPending(workstationToDeliver);
 }

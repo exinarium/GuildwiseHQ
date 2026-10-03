@@ -190,7 +190,7 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
           Read only:{' '}
           {item.card ? 'only the card owner can answer this.' : 'only the project owner can answer.'}
         </p>
-      ) : item.kind === 'question' || item.kind === 'escalation' ? (
+      ) : item.kind === 'question' || (item.kind === 'escalation' && item.subkind !== 'vault_conflict') ? (
         <AnswerForm item={item} />
       ) : (
         <ResolveButtons item={item} />
@@ -303,7 +303,7 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
             variant="primary"
             onClick={() => resolve.mutate({ id: item.id, body: { resolution: 'acknowledged' } })}
           >
-            Acknowledge
+            {item.subkind === 'vault_conflict' ? 'Conflict resolved, resume sync' : 'Acknowledge'}
           </Button>
         )}
         <Button onClick={() => dismiss.mutate(item.id)}>Dismiss</Button>

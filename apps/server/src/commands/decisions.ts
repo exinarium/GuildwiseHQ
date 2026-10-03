@@ -1,10 +1,12 @@
 import { decisionFilePath, projectVaultFolder, renderDecisionFile } from '@aom/shared';
 import type { Ctx } from '../context.ts';
-import { one } from '../db/sql.ts';
+import { one, type Queryable } from '../db/sql.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { enqueueVaultWrite } from './vaults.ts';
 
 export interface DecisionRecord {
+  /** Overrides the computed path (the path recorded on the ledger entry when the question was answered). */
+  path?: string;
   deskItemId: string;
   projectId: string;
   question: string;
@@ -15,6 +17,54 @@ export interface DecisionRecord {
   ledgerEntryId?: string;
   answeredAt: Date;
   answeredBy?: string;
+}
+
+/** The vault a project's files go to: the project vault if it has one, else the owner's vault of its domain. */
+async function projectVault(db: Queryable, projectId: string) {
+  const p = await one(db, 'SELECT id, org_id, key, domain, vault_folder FROM projects WHERE id=$1', [
+    projectId,
+  ]);
+  if (!p) return null;
+  const vault =
+    (await one(db, 'SELECT id FROM vaults WHERE project_id=$1', [p.id])) ??
+    (await one(db, 'SELECT id FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [
+      p.org_id,
+      p.domain,
+    ]));
+  return {
+    vaultId: vault?.id as string | undefined,
+    folder: projectVaultFolder({ key: p.key, vaultFolder: p.vault_folder }),
+  };
+}
+
+/**
+ * The vault path a ledger entry will be written to (recorded as `LedgerEntryAdded.vaultPath`), or undefined when
+ * no vault exists for it: decisions and features go to `decisions/`, standing orders to `standing-orders.md`.
+ */
+export async function plannedVaultPath(
+  db: Queryable,
+  q: {
+    scope: 'feature' | 'decision' | 'standing_order';
+    orgId: string;
+    projectId?: string | null;
+    decision?: { deskItemId: string; question: string; answeredAt: Date };
+  },
+): Promise<string | undefined> {
+  if (q.scope === 'standing_order') {
+    if (q.projectId) {
+      const t = await projectVault(db, q.projectId);
+      return t?.vaultId ? `${t.folder}/standing-orders.md` : undefined;
+    }
+    const w = await one(db, `SELECT id FROM vaults WHERE org_id=$1 AND kind='work' AND project_id IS NULL`, [
+      q.orgId,
+    ]);
+    return w ? 'standing-orders.md' : undefined;
+  }
+  if (!q.projectId || !q.decision) return undefined;
+  const t = await projectVault(db, q.projectId);
+  return t?.vaultId
+    ? decisionFilePath(t.folder, q.decision as Parameters<typeof decisionFilePath>[1])
+    : undefined;
 }
 
 export type DecisionWriteResult =
@@ -40,7 +90,7 @@ export async function writeDecisionFile(ctx: Ctx, rec: DecisionRecord): Promise<
     ]));
   if (!vault) return { queued: false, reason: 'no_vault' };
   const folder = projectVaultFolder({ key: p.key, vaultFolder: p.vault_folder });
-  const path = decisionFilePath(folder, rec);
+  const path = rec.path ?? decisionFilePath(folder, rec);
   const r = await enqueueVaultWrite(ctx, ctx.pool, vault.id, {
     path,
     mode: 'create',
@@ -55,8 +105,8 @@ export async function writeDecisionFile(ctx: Ctx, rec: DecisionRecord): Promise<
 /**
  * Appends a standing order added on the desk to the vault: `projects/<name>/standing-orders.md` for a project order,
  * the work vault's `standing-orders.md` for an organization-wide one (docs/ARCHITECTURE.md section 16.4).
- *
- * TODO(M2 integration): call from the M2 ledger command / `LedgerEntryAdded` handler when `scope = 'standing_order'`.
+
+ * Called by `registerDecisionHook` for every standing order added to the ledger.
  */
 export async function appendStandingOrder(
   ctx: Ctx,
@@ -98,33 +148,39 @@ export async function appendStandingOrder(
 }
 
 /**
- * TODO(M2 integration): `QuestionAnswered` and the `desk_items` table belong to M2 and do not exist on this branch.
- * This hook subscribes to the event store and, when M2's `QuestionAnswered` arrives, reads the desk item (columns per
- * docs/ARCHITECTURE.md section 4.2: id, project_id, card_id, title, body, doing, options, asked_by_role, ...) and
- * calls `writeDecisionFile`. It is registered in app.ts (one line) and is inert here: without the table the lookup
- * fails and is logged at debug level. The coordinator should check the column names against M2's migration 0200.
+ * Subscribes to the event store: an answered question writes its decision file into the project's domain vault,
+ * and a standing order added to the ledger is appended to the vault's `standing-orders.md`. Both go through the
+ * durable `vault.write` command; with no vault registered nothing is written (the ledger entry still exists).
  */
 export function registerDecisionHook(ctx: Ctx): () => void {
   return ctx.store.subscribe(async (e: StoredEvent) => {
-    if ((e.event.type as string) !== 'QuestionAnswered') return;
-    const p = e.event.payload as unknown as {
-      deskItemId: string;
-      answer: string;
-      answerOption?: string;
-      ledgerEntryId?: string;
-      answeredBy?: { userId?: string };
-    };
     try {
+      if (e.event.type === 'LedgerEntryAdded') {
+        const p = e.event.payload;
+        if (p.scope !== 'standing_order') return;
+        await appendStandingOrder(ctx, {
+          orgId: e.scope.orgId as string,
+          projectId: p.projectId ?? null,
+          title: p.title,
+          body: p.body,
+          at: e.createdAt,
+        });
+        return;
+      }
+      if (e.event.type !== 'QuestionAnswered') return;
+      const p = e.event.payload;
       const item = await one(
         ctx.pool,
         `SELECT d.project_id, d.card_id, d.title, d.body, d.options, d.asked_by_role, c.ref AS card_ref,
-                a.name AS agent_name, u.display_name AS answered_by_name
+                a.name AS agent_name, u.display_name AS answered_by_name,
+                l.scope AS ledger_scope, l.vault_path AS ledger_path
            FROM desk_items d LEFT JOIN cards c ON c.id = d.card_id LEFT JOIN agents a ON a.id = d.asked_by_agent_id
-           LEFT JOIN users u ON u.id = $2
+           LEFT JOIN users u ON u.id = $2 LEFT JOIN ledger_entries l ON l.id = $3
           WHERE d.id = $1`,
-        [p.deskItemId, p.answeredBy?.userId ?? null],
+        [p.deskItemId, p.answeredBy.userId ?? null, p.ledgerEntryId],
       );
-      if (!item?.project_id) return;
+      // Standing orders are written by the LedgerEntryAdded branch; items without a project have no domain vault.
+      if (!item?.project_id || item.ledger_scope === 'standing_order') return;
       const option = (item.options as Array<{ id: string; label: string }> | null)?.find(
         (o) => o.id === p.answerOption,
       );
@@ -141,9 +197,10 @@ export function registerDecisionHook(ctx: Ctx): () => void {
         ledgerEntryId: p.ledgerEntryId,
         answeredAt: e.createdAt,
         answeredBy: item.answered_by_name ?? undefined,
+        ...(item.ledger_path ? { path: item.ledger_path } : {}),
       });
     } catch (err) {
-      ctx.log.debug({ err }, 'decision file hook skipped (M2 desk not wired yet?)');
+      ctx.log.warn({ err }, 'vault write hook failed');
     }
   });
 }

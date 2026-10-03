@@ -26,10 +26,11 @@ export const vaultProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'VaultSyncConflict'>).payload;
     await exec(
       tx,
-      `INSERT INTO workstation_vaults (workstation_id, vault_id, paused, conflict_files)
-       VALUES ($1,$2,true,$3)
-       ON CONFLICT (workstation_id, vault_id) DO UPDATE SET paused = true, conflict_files = EXCLUDED.conflict_files`,
-      [p.workstationId, p.vaultId, p.files],
+      `INSERT INTO workstation_vaults (workstation_id, vault_id, paused, conflict_files, desk_item_id)
+       VALUES ($1,$2,true,$3,$4)
+       ON CONFLICT (workstation_id, vault_id) DO UPDATE
+         SET paused = true, conflict_files = EXCLUDED.conflict_files, desk_item_id = EXCLUDED.desk_item_id`,
+      [p.workstationId, p.vaultId, p.files, p.deskItemId ?? null],
     );
   },
   VaultConflictResolved: async (tx, e) => {

@@ -14,7 +14,7 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { exec, iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { getDeskPort } from '../desk-port.ts';
+import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
@@ -189,33 +189,46 @@ export async function resolveVaultConflict(
   workstationId: string,
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
-    const ws = await one(tx, `SELECT id, user_id FROM workstations WHERE id=$1 AND status='active'`, [
-      workstationId,
-    ]);
-    if (!ws || ws.user_id !== user.id) throw notFound('workstation not found');
-    const v = await one(tx, 'SELECT * FROM vaults WHERE id=$1', [vaultId]);
-    if (!v) throw notFound('vault not found');
-    const wv = await one(
-      tx,
-      'SELECT paused FROM workstation_vaults WHERE workstation_id=$1 AND vault_id=$2',
-      [workstationId, vaultId],
-    );
-    if (!wv?.paused)
-      throw conflict('not_in_conflict', 'this vault has no unresolved conflict on that workstation');
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.vault(vaultId),
-          event: { type: 'VaultConflictResolved', payload: { vaultId, workstationId, resolvedBy: user.id } },
-          actor: userActor(user.id),
-          scope: vaultScope(v),
-        },
-      ],
-      { tx },
-    );
-    await queueVaultConfigure(ctx, tx, workstationId, [vaultId]);
+    const deskItemId = await resolveVaultConflictIn(ctx, tx, user, vaultId, workstationId);
+    await closeDeskItemIn(ctx, tx, deskItemId, { userId: user.id }, 'acknowledged');
   });
   await ctx.services.gateway.deliverPending(workstationId);
+}
+
+/** Same inside the caller's append transaction (the desk resolve path); returns the conflict's desk item id. */
+export async function resolveVaultConflictIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  vaultId: string,
+  workstationId: string,
+): Promise<string | null> {
+  const ws = await one(tx, `SELECT id, user_id FROM workstations WHERE id=$1 AND status='active'`, [
+    workstationId,
+  ]);
+  if (!ws || ws.user_id !== user.id) throw notFound('workstation not found');
+  const v = await one(tx, 'SELECT * FROM vaults WHERE id=$1', [vaultId]);
+  if (!v) throw notFound('vault not found');
+  const wv = await one(
+    tx,
+    'SELECT paused, desk_item_id FROM workstation_vaults WHERE workstation_id=$1 AND vault_id=$2',
+    [workstationId, vaultId],
+  );
+  if (!wv?.paused)
+    throw conflict('not_in_conflict', 'this vault has no unresolved conflict on that workstation');
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.vault(vaultId),
+        event: { type: 'VaultConflictResolved', payload: { vaultId, workstationId, resolvedBy: user.id } },
+        actor: userActor(user.id),
+        scope: vaultScope(v),
+      },
+    ],
+    { tx },
+  );
+  await queueVaultConfigure(ctx, tx, workstationId, [vaultId]);
+  return wv.desk_item_id ?? null;
 }
 
 // ------------------------------------------------------------------- what a workstation should sync
@@ -409,7 +422,7 @@ export async function applyVaultConflict(
     v.id,
   ]);
   if (wv?.paused) return;
-  const { deskItemId } = await getDeskPort().raise(tx, {
+  const { deskItemId } = await raiseDeskItem(ctx, tx, {
     kind: 'escalation',
     subkind: 'vault_conflict',
     title: `Vault sync conflict: ${v.name}`,

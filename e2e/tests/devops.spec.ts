@@ -86,9 +86,17 @@ test('AC1: pairing a workstation auto-hires exactly one DevOps engineer that can
   expect(agents).toHaveLength(1);
   expect(agents[0]).toMatchObject({ roleKey: 'devops', workstationId, status: 'active' });
   devopsAgentId = agents[0].id;
-  // The DevOps engineer defaults to the best real runtime on the machine; CI must never start a real session.
-  const mock = await api.patch(`/api/agents/${devopsAgentId}`, { data: { runtime: 'mock', model: 'mock' } });
-  expect(mock.status(), await mock.text()).toBe(200);
+  // CI must never start a real session: the mock-mode runner reports claude-code unavailable on hello, so the
+  // server re-points the auto-hired engineer to the mock runtime without any test intervention.
+  await waitFor(
+    'the DevOps engineer uses the mock runtime',
+    async () =>
+      (await (await api.get('/api/agents')).json()).agents.find(
+        (x: { id: string }) => x.id === devopsAgentId,
+      ),
+    (a) => a?.runtime === 'mock',
+    30_000,
+  );
   await page.goto('/agents');
   const tile = page.getByTestId(`agent-${agents[0].name}`);
   await expect(tile).toContainText('DevOps engineer');
@@ -211,12 +219,32 @@ test('AC5b: a request outside the granted access waits on an approval and resume
   await expect(approval).toBeVisible();
   await expect(approval).toContainText('Approval needed: install docker');
   await page.screenshot({ path: join(paths.vaults, 'devops-approval.png') });
-  await approval.getByRole('button', { name: 'Approve' }).click();
+  // M2 integration: the same approval is a pinned desk item, and approving it there resumes DevOps.
+  const desk = await q<{ kind: string; subkind: string; pinned: boolean; status: string; blocking: boolean }>(
+    `SELECT kind, subkind, pinned, status, blocking FROM desk_items WHERE subkind='devops'`,
+  );
+  expect(desk).toEqual([
+    { kind: 'approval', subkind: 'devops', pinned: true, status: 'open', blocking: true },
+  ]);
+  await page.goto('/desk');
+  const item = page.getByRole('article', { name: 'DevOps needs approval: install docker' });
+  await expect(item).toBeVisible();
+  await expect(item.getByTestId('urgent-badge')).toBeVisible();
+  await item.getByRole('button', { name: 'Approve' }).click();
+  await expect(item).toHaveCount(0);
+  const closed = await q<{ status: string; answer_option: string }>(
+    `SELECT status, answer_option FROM desk_items WHERE subkind='devops'`,
+  );
+  expect(closed).toEqual([{ status: 'answered', answer_option: 'approved' }]);
+  await page.goto('/workstations');
   await expect(row).toHaveAttribute('data-status', 'done', { timeout: 60_000 });
   const changes = await q('SELECT 1 FROM environment_changes');
   expect(changes).toHaveLength(2);
-  const approved = await q(`SELECT payload FROM events WHERE type='DevOpsApprovalResolved'`);
+  const approved = await q<{ payload: { resolution: string } }>(
+    `SELECT payload FROM events WHERE type='DevOpsApprovalResolved'`,
+  );
   expect(approved).toHaveLength(1);
+  expect(approved[0]?.payload.resolution).toBe('approved');
   await waitFor(
     'second builder handoff',
     () => q<{ stage: string }>('SELECT stage FROM cards WHERE ref=$1', [ref]),
@@ -350,7 +378,22 @@ test('AC2: vault sync pushes local edits, pulls remote edits and pauses on a con
   const { execFileSync } = await import('node:child_process');
   execFileSync('git', ['-C', dir, 'fetch', 'origin'], { stdio: 'ignore' });
   execFileSync('git', ['-C', dir, 'reset', '--hard', 'origin/main'], { stdio: 'ignore' });
-  await work.getByRole('button', { name: 'Resume sync on Dev Box' }).click();
+  // M2 integration: the conflict is a pinned desk escalation; resolving it there resumes sync.
+  const deskRows = await q<{ id: string; kind: string; pinned: boolean; status: string }>(
+    `SELECT id, kind, pinned, status FROM desk_items WHERE subkind='vault_conflict'`,
+  );
+  expect(deskRows).toHaveLength(1);
+  expect(deskRows[0]).toMatchObject({ kind: 'escalation', pinned: true, status: 'open' });
+  expect(deskRows[0]?.id).toBe(ev[0]?.payload.deskItemId);
+  await page.goto('/desk');
+  const conflictItem = page.getByRole('article', { name: /Vault sync conflict/ });
+  await expect(conflictItem).toContainText('conflict.md');
+  await conflictItem.getByRole('button', { name: /Conflict resolved/ }).click();
+  await expect(conflictItem).toHaveCount(0);
+  expect(
+    (await q<{ status: string }>(`SELECT status FROM desk_items WHERE subkind='vault_conflict'`))[0]?.status,
+  ).toBe('answered');
+  await page.goto('/settings/vaults');
   await expect(work.getByTestId('vault-ws-Dev Box')).toHaveAttribute('data-paused', 'false', {
     timeout: 30_000,
   });
@@ -363,39 +406,88 @@ test('AC2: vault sync pushes local edits, pulls remote edits and pauses on a con
   );
 });
 
-test('AC3: answering a question writes projects/<name>/decisions/<date>-<slug>.md into the domain vault, committed and pushed', async () => {
-  // M2 owns QuestionAnswered; this drives the same server function the M2 hook calls (test-only entry point).
-  const res = await api.post('/api/test/decision-file', {
-    data: {
-      deskItemId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
-      projectId,
-      question: 'Should the login form use email or username?',
-      answer: 'Email, because it is unique.',
-      askedBy: 'Dana (builder)',
-      cardRef: 'DVO-1',
-      answeredAt: '2026-10-03T12:00:00.000Z',
-    },
-  });
-  expect(res.ok(), await res.text()).toBeTruthy();
-  const body = await res.json();
-  expect(body.queued).toBe(true);
-  expect(body.path).toBe(
-    'projects/dvo/decisions/2026-10-03-should-the-login-form-use-email-or-username-019e3f.md',
+test('AC3: answering a question on the desk writes projects/<name>/decisions/<date>-<slug>.md into the domain vault, committed and pushed', async () => {
+  // The real M2 path: a builder asks, the manager answers on the desk, the QuestionAnswered hook writes the file.
+  const ref = await createCard('Needs a decision for the vault', { build: ['question', 'ok'] });
+  await page.goto('/desk');
+  const item = page.getByRole('article', { name: `Mock question for ${ref}?` });
+  await expect(item).toBeVisible({ timeout: 90_000 });
+  await item.getByRole('button', { name: 'Answer' }).click(); // the recommended option is preselected
+  await expect(item).toHaveCount(0);
+
+  const entry = await waitFor(
+    'ledger entry with a vault path',
+    () =>
+      q<{ id: string; vault_path: string | null }>(
+        `SELECT id, vault_path FROM ledger_entries WHERE source_desk_item_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
+      ),
+    (r) => !!r[0]?.vault_path,
+    30_000,
+  );
+  const path = entry[0]?.vault_path as string;
+  expect(path).toMatch(
+    new RegExp(
+      `^projects/dvo/decisions/\\d{4}-\\d{2}-\\d{2}-mock-question-for-${ref.toLowerCase()}-[0-9a-f]{6}\\.md$`,
+    ),
   );
   await waitFor(
     'decision file on origin',
-    async () => originHas(WORK, body.path),
+    async () => originHas(WORK, path),
     (b) => b,
     30_000,
   );
-  const md = originFile(WORK, body.path);
-  expect(md).toContain('# Should the login form use email or username?');
+  const md = originFile(WORK, path);
+  expect(md).toContain(`# Mock question for ${ref}?`);
   expect(md).toContain('Status: accepted');
-  expect(md).toContain('Email, because it is unique.');
-  const log = originLog(WORK);
-  expect(log.some((l) => l.includes('aom: decision DVO-1'))).toBe(true);
+  expect(md).toContain('yes');
+  expect(md).toContain(`on card ${ref}`);
+  expect(originLog(WORK).some((l) => l.includes(`aom: decision ${ref} Mock question for ${ref}?`))).toBe(
+    true,
+  );
   // the personal vault never got it
-  expect(originHas(PERSONAL, body.path)).toBe(false);
+  expect(originHas(PERSONAL, path)).toBe(false);
+  // the unblocked card carries on
+  await waitFor(
+    'unblocked card reaches review',
+    () => q<{ stage: string }>('SELECT stage FROM cards WHERE ref=$1', [ref]),
+    (r) => r[0]?.stage === 'review',
+    90_000,
+  );
+});
+
+test('AC3b: standing orders added to the ledger are appended to the vault standing-orders.md (project and global)', async () => {
+  const project = await api.post('/api/ledger', {
+    data: {
+      scope: 'standing_order',
+      projectId,
+      title: 'DVO order: tests first',
+      body: 'Write the test before the code.',
+    },
+  });
+  expect(project.status(), await project.text()).toBe(201);
+  const global = await api.post('/api/ledger', {
+    data: { scope: 'standing_order', title: 'GLOBAL order: be brief', body: 'Keep every answer short.' },
+  });
+  expect(global.status(), await global.text()).toBe(201);
+  await waitFor(
+    'project standing order on origin',
+    async () =>
+      originHas(WORK, 'projects/dvo/standing-orders.md') &&
+      originFile(WORK, 'projects/dvo/standing-orders.md'),
+    (t) => !!t && t.includes('DVO order: tests first'),
+    30_000,
+  );
+  expect(originFile(WORK, 'projects/dvo/standing-orders.md')).toContain('Write the test before the code.');
+  await waitFor(
+    'global standing order on origin',
+    async () => originFile(WORK, 'standing-orders.md'),
+    (t) => t.includes('GLOBAL order: be brief') && t.includes('WORK-ORDER2'),
+    30_000,
+  );
+  const paths = await q<{ vault_path: string | null }>(
+    `SELECT vault_path FROM ledger_entries WHERE scope='standing_order' AND vault_path IS NOT NULL ORDER BY created_at`,
+  );
+  expect(paths.map((p) => p.vault_path)).toEqual(['projects/dvo/standing-orders.md', 'standing-orders.md']);
 });
 
 test('AC4: a work-domain card shift sees only the work vault; a personal card only the personal vault', async () => {

@@ -20,7 +20,7 @@ import { loadRole } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { getDeskPort } from '../desk-port.ts';
+import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
@@ -377,38 +377,52 @@ export async function resolveDevOpsApproval(
   note?: string,
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
-    const r = await one(tx, 'SELECT * FROM devops_requests WHERE id=$1 AND org_id=$2 FOR UPDATE', [
-      requestId,
-      user.id,
-    ]);
-    if (!r) throw notFound('request not found');
-    const ap = r.approval as { deskItemId: string; resolution: string | null } | null;
-    if (r.status !== 'needs_approval' || !ap || ap.resolution)
-      throw conflict('not_awaiting_approval', 'this request is not waiting for approval');
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.thread(requestId),
-          event: {
-            type: 'DevOpsApprovalResolved',
-            payload: { requestId, deskItemId: ap.deskItemId, resolution, resolvedBy: user.id, note },
-          },
-          actor: userActor(user.id),
-          scope: orgScope(user.id),
-        },
-        threadMessage(
-          r.thread_id,
-          user.id,
-          { kind: 'user', userId: user.id },
-          'answer',
-          `${resolution === 'approved' ? 'Approved' : 'Rejected'}${note ? `: ${note}` : ''}`,
-          { resolution },
-        ),
-      ],
-      { tx },
-    );
+    const deskItemId = await resolveDevOpsApprovalIn(ctx, tx, user, requestId, resolution, note);
+    await closeDeskItemIn(ctx, tx, deskItemId, { userId: user.id }, resolution, note);
   });
   ctx.services.dispatcher.trigger();
+}
+
+/** Same inside the caller's append transaction (the desk resolve path); returns the approval's desk item id. */
+export async function resolveDevOpsApprovalIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: AuthSession['user'],
+  requestId: string,
+  resolution: 'approved' | 'rejected',
+  note?: string,
+): Promise<string> {
+  const r = await one(tx, 'SELECT * FROM devops_requests WHERE id=$1 AND org_id=$2 FOR UPDATE', [
+    requestId,
+    user.id,
+  ]);
+  if (!r) throw notFound('request not found');
+  const ap = r.approval as { deskItemId: string; resolution: string | null } | null;
+  if (r.status !== 'needs_approval' || !ap || ap.resolution)
+    throw conflict('not_awaiting_approval', 'this request is not waiting for approval');
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.thread(requestId),
+        event: {
+          type: 'DevOpsApprovalResolved',
+          payload: { requestId, deskItemId: ap.deskItemId, resolution, resolvedBy: user.id, note },
+        },
+        actor: userActor(user.id),
+        scope: orgScope(user.id),
+      },
+      threadMessage(
+        r.thread_id,
+        user.id,
+        { kind: 'user', userId: user.id },
+        'answer',
+        `${resolution === 'approved' ? 'Approved' : 'Rejected'}${note ? `: ${note}` : ''}`,
+        { resolution },
+      ),
+    ],
+    { tx },
+  );
+  return ap.deskItemId;
 }
 
 // ------------------------------------------------------------------------- reports of a DevOps shift
@@ -494,7 +508,7 @@ export async function applyDevopsReport(
     const project = req.card_id
       ? await one<{ project_id: string }>(tx, 'SELECT project_id FROM cards WHERE id=$1', [req.card_id])
       : undefined;
-    const { deskItemId } = await getDeskPort().raise(tx, {
+    const { deskItemId } = await raiseDeskItem(ctx, tx, {
       kind: 'approval',
       subkind: 'devops',
       title: `DevOps needs approval: ${data.data.action}`,

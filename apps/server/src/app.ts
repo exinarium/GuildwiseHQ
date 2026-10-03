@@ -16,7 +16,7 @@ import { checkContentType, checkOrigin } from './auth/origin-check.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
 import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
-import { registerDecisionHook, writeDecisionFile } from './commands/decisions.ts';
+import { registerDecisionHook } from './commands/decisions.ts';
 import type { Config } from './config.ts';
 import type { Ctx } from './context.ts';
 import { createPool } from './db/pool.ts';
@@ -219,11 +219,6 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
       await ctx.services.reaper.run();
       ctx.services.dispatcher.trigger();
       return { now: clock.now().toISOString(), offsetMs: clock.offsetMs };
-    });
-    // Stand-in for M2's `QuestionAnswered` while the desk is not merged: what the decision hook would call.
-    app.post('/api/test/decision-file', async (req) => {
-      const b = (req.body ?? {}) as Parameters<typeof writeDecisionFile>[1] & { answeredAt?: string };
-      return writeDecisionFile(ctx, { ...b, answeredAt: new Date(b.answeredAt ?? clock.now()) });
     });
   }
 

@@ -6,6 +6,7 @@ import type { Ctx } from '../context.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { forbidden } from '../errors.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
+import { plannedVaultPath } from './decisions.ts';
 
 /**
  * The manager adds a requirement, decision or standing order directly (no question needed). Standing orders
@@ -35,6 +36,11 @@ export async function addLedgerEntry(
       if (p.my_role !== 'owner') throw forbidden('only the project owner can add project standing orders');
     }
     const entryId = randomUUID();
+    // Only standing orders are mirrored to the vault from here; decisions come from answered questions.
+    const vaultPath =
+      req.scope === 'standing_order'
+        ? await plannedVaultPath(tx, { scope: req.scope, orgId, projectId })
+        : undefined;
     await ctx.store.append(
       [
         {
@@ -49,6 +55,7 @@ export async function addLedgerEntry(
               title: req.title,
               body: req.body,
               tags: req.tags,
+              ...(vaultPath ? { vaultPath } : {}),
             },
           },
           actor: userActor(user.id),

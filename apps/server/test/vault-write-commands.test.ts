@@ -212,9 +212,3 @@ describe('standing orders (desk -> vault.write append)', () => {
     });
   });
 });
-
-describe('test-only entry point', () => {
-  it('is not mounted without AOM_TEST_CLOCK', async () => {
-    expect((await owner('POST', '/api/test/decision-file', record())).status).toBe(404);
-  });
-});

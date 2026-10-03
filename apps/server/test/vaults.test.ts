@@ -201,6 +201,12 @@ describe('sync conflicts', () => {
       files: ['projects/toy/PROJECT.md'],
     });
     expect(ev[0]!.payload.deskItemId).toMatch(/^[0-9a-f-]{36}$/);
+    const desk = await q(`SELECT kind, subkind, status, pinned, org_id FROM desk_items WHERE id=$1`, [
+      ev[0]!.payload.deskItemId,
+    ]);
+    expect(desk).toEqual([
+      { kind: 'escalation', subkind: 'vault_conflict', status: 'open', pinned: true, org_id: w.owner.id },
+    ]);
     const s = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.id === work.id)
       .workstations[0];
     expect(s).toMatchObject({ paused: true, conflictFiles: ['projects/toy/PROJECT.md'] });
@@ -228,10 +234,35 @@ describe('sync conflicts', () => {
     const p = await configured(r, (c) => c.resume.includes(work.id));
     expect(p.resume).toEqual([work.id]);
     expect(await q(`SELECT 1 FROM events WHERE type='VaultConflictResolved'`)).toHaveLength(1);
+    expect((await q(`SELECT status FROM desk_items WHERE subkind='vault_conflict'`))[0]!.status).toBe(
+      'answered',
+    );
     expect(
       (await owner().post(`/api/vaults/${work.id}/resolve-conflict`, { workstationId: w.workstationId }))
         .status,
     ).toBe(409);
+  });
+});
+
+describe('sync conflicts resolved on the desk', () => {
+  it('acknowledging the desk escalation resumes sync like the vault page does', async () => {
+    const work = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'work');
+    const id = r.send('vault.conflict', { vaultId: work.id, files: ['a.md'] });
+    await r.waitFor('ack', (f) => f.ackOf === id);
+    const item = (await q(`SELECT id FROM desk_items WHERE subkind='vault_conflict' AND status='open'`))[0]!;
+    const before = r.of('command').filter((c) => c.command === 'vault.configure').length;
+    const res = await owner().post(`/api/desk/${item.id}/resolve`, { resolution: 'acknowledged' });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('answered');
+    await until(
+      async () => r.of('command').filter((c) => c.command === 'vault.configure').length === before + 1,
+      4000,
+      'vault.configure{resume}',
+    );
+    expect(lastConfigure(r).resume).toEqual([work.id]);
+    const s = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.id === work.id)
+      .workstations[0];
+    expect(s).toMatchObject({ paused: false, conflictFiles: [] });
   });
 });
 
