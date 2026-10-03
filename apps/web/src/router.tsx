@@ -11,10 +11,12 @@ import { CardDetail } from './pages/CardDetail.tsx';
 import { CardNew } from './pages/CardNew.tsx';
 import { Chat } from './pages/Chat.tsx';
 import { Desk } from './pages/Desk.tsx';
+import { FeedProject } from './pages/FeedProject.tsx';
 import { Ledger } from './pages/Ledger.tsx';
 import { Login } from './pages/Login.tsx';
 import { ProjectSettings } from './pages/ProjectSettings.tsx';
 import { Projects } from './pages/Projects.tsx';
+import { Schedules } from './pages/Schedules.tsx';
 import { Vaults } from './pages/Vaults.tsx';
 import { Workstations } from './pages/Workstations.tsx';
 
@@ -34,6 +36,8 @@ export const routes = [
     children: [
       { path: '/', element: <Home /> },
       { path: '/p/:projectKey/board', element: <Board /> },
+      { path: '/p/:projectKey/feed', element: <FeedProject /> },
+      { path: '/schedules', element: <Schedules /> },
       { path: '/cards/new', element: <CardNew /> },
       { path: '/cards/:ref', element: <CardDetail /> },
       { path: '/projects', element: <Projects /> },

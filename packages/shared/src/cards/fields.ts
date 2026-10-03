@@ -45,6 +45,8 @@ export const MockActionSchema = z.enum([
   'devops_install',
   /** M5: the scout also reports an item it never opened; the runner rejects it and the scout retries without it. */
   'fabricate',
+  /** M6: the checker first tries to publish a note without citations (the runner refuses), then does it properly. */
+  'uncited',
 ]);
 export type MockAction = z.infer<typeof MockActionSchema>;
 /** `{ "<stage>": ["<action>", ...] }` consumed by round index. Example: `{ review: ['changes', 'ok'] }`. */
@@ -82,6 +84,23 @@ export const CODE_FIELDS: Record<string, FieldMeta> = {
 // -------------------------------------------------------------- research set
 
 export const ResearchDepth = z.enum(['quick', 'standard', 'deep']);
+/**
+ * Mock adapter only: the claims a scripted researcher "finds" (each with the page that supports it). A claim with
+ * `supported: false` is one the mock checker cannot verify against its page: the fact check fails and the card goes
+ * back to the researcher, who drops it in the next round.
+ */
+export const MockResearchSchema = z.object({
+  claims: z.array(
+    z.object({
+      text: z.string().min(1),
+      url: z.url(),
+      title: z.string().optional(),
+      supported: z.boolean().optional(),
+    }),
+  ),
+});
+export type MockResearch = z.infer<typeof MockResearchSchema>;
+
 export const ResearchFieldsSchema = z.object({
   question: z.string().optional(),
   scope: z.string().optional(),
@@ -90,6 +109,7 @@ export const ResearchFieldsSchema = z.object({
   preferredSites: z.array(z.string()).optional(),
   maxPerKind: z.record(z.string(), z.number().int().nonnegative()).optional(),
   mock: MockScriptSchema.optional(),
+  mockResearch: MockResearchSchema.optional(),
 });
 export type ResearchFields = z.infer<typeof ResearchFieldsSchema>;
 
@@ -101,6 +121,7 @@ export const RESEARCH_FIELDS: Record<string, FieldMeta> = {
   preferredSites: { label: 'Preferred sites', kind: 'url-list' },
   maxPerKind: { label: 'Max per kind', kind: 'json' },
   mock: { label: 'Mock script', kind: 'json' },
+  mockResearch: { label: 'Mock research claims', kind: 'json' },
 };
 
 // ------------------------------------------------------------------ feed set

@@ -20,6 +20,12 @@ export const DEVOPS = { email: 'devops@e2e.test', name: 'E2E DevOps', password: 
 export const SHARER = { email: 'sharer@e2e.test', name: 'E2E Sharer', password: 'sharer-password-12345' };
 export const GUEST = { email: 'guest@e2e.test', name: 'E2E Guest', password: 'guest-password-12345' };
 
+/** M5 feeds spec. */
+export const FEEDER = { email: 'feeder@e2e.test', name: 'E2E Feeder', password: 'feeder-password-12345' };
+
+/** M6 research spec. */
+export const SCHOLAR = { email: 'scholar@e2e.test', name: 'E2E Scholar', password: 'scholar-password-12345' };
+
 export const paths = {
   server: join(ROOT, 'apps/server/dist/main.mjs'),
   runnerBin: join(ROOT, 'apps/runner/dist/aom-runner.mjs'),

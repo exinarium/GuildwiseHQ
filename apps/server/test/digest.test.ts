@@ -23,7 +23,8 @@ afterAll(async () => {
   await closeAdminPool();
 });
 
-const owner = (method: string, url: string, body?: unknown) => w.t.req(method, url, { cookie: w.owner.cookie, body });
+const owner = (method: string, url: string, body?: unknown) =>
+  w.t.req(method, url, { cookie: w.owner.cookie, body });
 const runNow = async (scheduleBody: Record<string, unknown> = {}) => {
   const s = await ok<any>(feedSchedule(w, feedId, { name: `s${Date.now()}`, ...scheduleBody }), 201);
   return ok<{ cardId: string; ref: string }>(owner('POST', `/api/schedules/${s.id}/run`), 201);
@@ -35,7 +36,10 @@ const threadOf = async (cardId: string) =>
 describe('feed pipeline: scout -> curator -> digest', () => {
   it('hands the scout candidates to the curator and logs at most the maximum per kind, oldest to newest', async () => {
     const card = await runNow({
-      cardTemplate: { title: 'Max run', fields: { topic: 'reloading', maxPerKind: { article: 2, video: 1 } } },
+      cardTemplate: {
+        title: 'Max run',
+        fields: { topic: 'reloading', maxPerKind: { article: 2, video: 1 } },
+      },
     });
     const candidates = [
       item(1),
@@ -63,7 +67,10 @@ describe('feed pipeline: scout -> curator -> digest', () => {
       candidates[1]?.url,
       candidates[3]?.url,
     ]);
-    expect(posted.items[0]).toMatchObject({ urlNormalized: 'news.example.test/story-1', publishedAt: '2026-10-02T00:00:00.000Z' });
+    expect(posted.items[0]).toMatchObject({
+      urlNormalized: 'news.example.test/story-1',
+      publishedAt: '2026-10-02T00:00:00.000Z',
+    });
 
     expect((await q('SELECT status, stage FROM cards WHERE id=$1', [card.cardId]))[0]).toMatchObject({
       status: 'done',
@@ -87,18 +94,30 @@ describe('feed pipeline: scout -> curator -> digest', () => {
     const before = await feedList();
     const candidates = [
       item(1), // seen URL
-      item(1, { url: 'https://www.news.example.test/story-1/?utm_source=feedly#top', title: 'A different headline entirely' }), // same URL, tracking params
-      item(2, { url: 'https://other.example.test/hornady-6mm-arc', title: 'Berger releases new hunting bullet line!' }), // same story as item 2, other source
+      item(1, {
+        url: 'https://www.news.example.test/story-1/?utm_source=feedly#top',
+        title: 'A different headline entirely',
+      }), // same URL, tracking params
+      item(2, {
+        url: 'https://other.example.test/hornady-6mm-arc',
+        title: 'Berger releases new hunting bullet line!',
+      }), // same story as item 2, other source
       item(6),
       item(6, { url: 'https://third.example.test/lapua', source: 'Third' }), // duplicate inside the digest
     ];
     const { curator } = await run.scan(candidates);
     expect(curator.brief.feed?.seenUrls).toEqual(
-      expect.arrayContaining(['news.example.test/story-1', 'news.example.test/story-2', 'video.example.test/v4']),
+      expect.arrayContaining([
+        'news.example.test/story-1',
+        'news.example.test/story-2',
+        'video.example.test/v4',
+      ]),
     );
     const res = await run.digest(curator.shiftId, { items: candidates });
     expect(res.accepted).toBe(true);
-    const posted = (await q(`SELECT payload FROM events WHERE type='DigestPosted' ORDER BY seq DESC LIMIT 1`))[0]?.payload;
+    const posted = (
+      await q(`SELECT payload FROM events WHERE type='DigestPosted' ORDER BY seq DESC LIMIT 1`)
+    )[0]?.payload;
     expect(posted.items).toHaveLength(1);
     expect(posted.items[0].url).toBe(candidates[3]?.url);
     expect(posted.duplicatesDropped).toBe(4);
@@ -117,8 +136,12 @@ describe('feed pipeline: scout -> curator -> digest', () => {
     const res = await run.digest(curator.shiftId, { items: [] }, 'nothing new today');
     expect(res.message).toMatch(/Nothing qualified in this run; nothing was logged/);
     expect(await feedList()).toHaveLength(itemsBefore);
-    expect((await q(`SELECT count(*)::int AS n FROM desk_items WHERE kind='rating'`))[0]?.n).toBe(ratingBefore);
-    const posted = (await q(`SELECT payload FROM events WHERE type='DigestPosted' ORDER BY seq DESC LIMIT 1`))[0]?.payload;
+    expect((await q(`SELECT count(*)::int AS n FROM desk_items WHERE kind='rating'`))[0]?.n).toBe(
+      ratingBefore,
+    );
+    const posted = (
+      await q(`SELECT payload FROM events WHERE type='DigestPosted' ORDER BY seq DESC LIMIT 1`)
+    )[0]?.payload;
     expect(posted).toMatchObject({ nothingQualified: true, items: [] });
     expect((await q('SELECT status FROM cards WHERE id=$1', [card.cardId]))[0]?.status).toBe('done');
     const thread = (await threadOf(card.cardId)).map((m) => m.body).join('\n');
@@ -151,9 +174,13 @@ describe('feed pipeline: scout -> curator -> digest', () => {
 
   it('rebuilds the feed projections identically from the event log', async () => {
     const snapshot = async () => ({
-      items: await q('SELECT id, card_id, url, url_normalized, position, verdict, desk_item_id FROM digest_items ORDER BY event_seq, position'),
+      items: await q(
+        'SELECT id, card_id, url, url_normalized, position, verdict, desk_item_id FROM digest_items ORDER BY event_seq, position',
+      ),
       seen: await q('SELECT project_id, url_normalized FROM feed_seen ORDER BY url_normalized'),
-      schedules: await q('SELECT id, cron, timezone, enabled, next_fire_at, last_card_id FROM schedules ORDER BY id'),
+      schedules: await q(
+        'SELECT id, cron, timezone, enabled, next_fire_at, last_card_id FROM schedules ORDER BY id',
+      ),
       cards: await q(`SELECT id, status, stage FROM cards WHERE project_id=$1 ORDER BY number`, [feedId]),
     });
     const before = await snapshot();

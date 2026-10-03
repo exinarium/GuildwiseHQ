@@ -55,7 +55,9 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       WHERE h.card_id=$1 ORDER BY h.created_at, h.event_seq`,
     [card.id],
   );
-  const lastChanges = [...handoffs].reverse().find((h) => h.outcome === 'changes');
+  const lastChanges = [...handoffs]
+    .reverse()
+    .find((h) => h.outcome === 'changes' || h.outcome === 'unsupported');
   const thread = await rows(
     ctx.pool,
     `SELECT m.*, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m

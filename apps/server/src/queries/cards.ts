@@ -15,6 +15,7 @@ import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
+import { publicationOfCard } from './research.ts';
 
 const COLUMN_FALLBACK = 'Other';
 
@@ -195,6 +196,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
         [card.id],
       )
     ).map((b) => ({ deskItemId: b.id, title: b.title })),
+    publication: await publicationOfCard(ctx.pool, card.id),
   };
 }
 

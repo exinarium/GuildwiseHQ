@@ -19,6 +19,10 @@ export function commandForOutcome(outcome: BriefOutcome): string {
       return 'aom test fail --title "<bug title>" --note "<what failed and how to reproduce>" --evidence-file <path>';
     case 'digest':
       return 'aom digest --file <digest.json> --note "<what you picked and why>"   # { "items": [ ... ] }, empty when nothing qualifies';
+    case 'published':
+      return 'aom publish --file <note.md> --title "<title>" --citations-file <citations.json>   # citations: [ { url, title } ] of pages you opened; no citations, no publication';
+    case 'unsupported':
+      return 'aom outcome unsupported --note "<each unsupported claim and why>"';
     case 'devops_done':
       return 'aom devops-done --summary "<what you did>" --command "<command you ran>"';
     case 'devops_approval':

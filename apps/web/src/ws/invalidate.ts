@@ -11,7 +11,9 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
   const kind = event.streamId.split('-')[0];
   switch (kind) {
     case 'card':
-      return [event.projectId ? ['board', event.projectId] : ['board'], ['card'], ['agents']];
+      return [event.projectId ? ['board', event.projectId] : ['board'], ['card'], ['agents'], ['digest']];
+    case 'schedule':
+      return [['schedules'], ['board']];
     case 'thread':
       // Card threads show on the card; chat threads have their own message list and the chat list.
       return [['card'], ['devops'], ['thread', event.streamId.slice('thread-'.length)], ['chats']];

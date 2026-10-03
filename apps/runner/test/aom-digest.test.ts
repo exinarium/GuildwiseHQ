@@ -91,3 +91,41 @@ describe('aom digest and aom handoff --data-file', () => {
     expect(t.reports[1]).toMatchObject({ data: {} });
   });
 });
+
+describe('aom publish', () => {
+  const cites = [{ url: 'https://a.test/1', title: 'A' }];
+  it('sends the note and its citations as the published outcome', async () => {
+    const t = await cli({ 'n.md': '# Title\n\nBody', 'c.json': JSON.stringify(cites) });
+    expect(await t.run('publish', '--file', 'n.md', '--title', 'Title', '--citations-file', 'c.json')).toBe(
+      0,
+    );
+    expect(t.reports[0]).toEqual({
+      kind: 'outcome',
+      outcomeId: 'published',
+      note: 'Published: Title',
+      data: { content: '# Title\n\nBody', citations: cites, title: 'Title' },
+    });
+  });
+
+  it('accepts {citations: [...]}, an explicit path and note; citations are optional here (the runner refuses without)', async () => {
+    const t = await cli({ 'n.md': 'x', 'c.json': JSON.stringify({ citations: cites }) });
+    expect(
+      await t.run(
+        'publish',
+        '--file',
+        'n.md',
+        '--citations-file',
+        'c.json',
+        '--path',
+        'projects/x/n.md',
+        '--note',
+        'ok',
+      ),
+    ).toBe(0);
+    expect(t.reports[0]).toMatchObject({ note: 'ok', data: { citations: cites, path: 'projects/x/n.md' } });
+    expect(await t.run('publish', '--file', 'n.md')).toBe(0);
+    expect(t.reports[1]).toMatchObject({ data: { content: 'x', citations: [] } });
+    expect(await t.run('publish')).toBe(1);
+    expect(t.err.join('')).toMatch(/usage: aom publish/);
+  });
+});

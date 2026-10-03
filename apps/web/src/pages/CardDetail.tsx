@@ -12,6 +12,7 @@ import {
   useSpecifyCard,
 } from '../api/queries/cards.ts';
 import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
+import { PublicationPanel } from '../components/PublicationPanel.tsx';
 import { ShiftLog } from '../components/ShiftLog.tsx';
 import {
   Avatar,
@@ -183,6 +184,7 @@ export function CardDetailView({
               <ShiftLog key={currentShift.id} shift={currentShift} />
             </Panel>
           )}
+          {data.publication && <PublicationPanel publication={data.publication} />}
           <Panel>
             <h2 className="mb-2 text-sm font-semibold">Details</h2>
             <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2">

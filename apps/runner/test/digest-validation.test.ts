@@ -132,7 +132,7 @@ describe('mock adapter: scripted feed runs through the real aom CLI', () => {
     expect(ended.outcome).toBe('reported');
     const sent = reports(msg.shiftId as string);
     expect(sent).toHaveLength(1);
-    const urls = ((sent[0]?.report as any).data.items as Array<{ url: string }>).map((i) => i.url);
+    const urls = ((sent[0] as any).report.data.items as Array<{ url: string }>).map((i) => i.url);
     expect(urls).toEqual(['https://example.test/1', 'https://example.test/2']);
   }, 120_000);
 
@@ -175,9 +175,8 @@ describe('mock adapter: scripted feed runs through the real aom CLI', () => {
       .of('shift.progress')
       .flatMap((p) => p.items)
       .map((i) => i.text);
-    expect(
-      log.some((t) => t.startsWith('mock taste: # Taste') && t.includes('Skip articles like "Headline 2"')),
-    ).toBe(true);
+    expect(log).toContain('mock taste: 1 rule line(s)');
+    expect(log.some((t) => t.startsWith('mock taste rule: - Skip articles like "Headline 2"'))).toBe(true);
   }, 120_000);
 
   it('a curator with nothing left posts an empty digest', async () => {

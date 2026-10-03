@@ -1,9 +1,4 @@
-import {
-  FEED_LIST_HEADER,
-  TASTE_HEADER,
-  type VaultWriteCommand,
-  VaultWriteCommandSchema,
-} from '@aom/shared';
+import { FEED_LIST_HEADER, TASTE_HEADER, type VaultWriteCommand, VaultWriteCommandSchema } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
@@ -32,10 +27,10 @@ beforeAll(async () => {
     201,
   );
   vaultId = vault.id;
-  await q(`INSERT INTO workstation_vaults (workstation_id, vault_id, local_path) VALUES ($1,$2,'/vaults/p')`, [
-    w.workstationId,
-    vaultId,
-  ]);
+  await q(
+    `INSERT INTO workstation_vaults (workstation_id, vault_id, local_path) VALUES ($1,$2,'/vaults/p')`,
+    [w.workstationId, vaultId],
+  );
   run = feedRunner(w, r);
 });
 afterAll(async () => {
@@ -44,7 +39,8 @@ afterAll(async () => {
   await closeAdminPool();
 });
 
-const owner = (method: string, url: string, body?: unknown) => w.t.req(method, url, { cookie: w.owner.cookie, body });
+const owner = (method: string, url: string, body?: unknown) =>
+  w.t.req(method, url, { cookie: w.owner.cookie, body });
 /** Every vault.write the runner received, once each (the server re-sends commands that are not completed yet). */
 const writes = (): Array<{ commandId: string; cmd: VaultWriteCommand }> => {
   const seen = new Map<string, { commandId: string; cmd: VaultWriteCommand }>();
@@ -75,7 +71,10 @@ describe('digest on the desk and ratings', () => {
     const { curator } = await run.scan([item(1), item(2), item(3)]);
     const res = await run.digest(curator.shiftId, {
       items: [item(1), item(2), item(3)],
-      tasteRuleProposal: { rule: 'Prefer manufacturer announcements with load data', evidenceUrls: [item(1).url] },
+      tasteRuleProposal: {
+        rule: 'Prefer manufacturer announcements with load data',
+        evidenceUrls: [item(1).url],
+      },
     });
     expect(res.accepted).toBe(true);
 
@@ -84,7 +83,9 @@ describe('digest on the desk and ratings', () => {
     expect(feedWrite).toMatchObject({ vaultId, mode: 'append', push: true, header: FEED_LIST_HEADER });
     const lines = feedWrite.content.trimEnd().split('\n');
     expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain(`[${item(1).title}](${item(1).url}) (article, News Example, published 2026-10-02): Summary of story 1`);
+    expect(lines[0]).toContain(
+      `[${item(1).title}](${item(1).url}) (article, News Example, published 2026-10-02): Summary of story 1`,
+    );
     expect(lines[2]).toContain(item(3).url);
 
     const desk = await ok<any>(owner('GET', '/api/desk'));
@@ -111,12 +112,18 @@ describe('digest on the desk and ratings', () => {
       `- Skip articles like "${item(2).title}" from News Example (rated irrelevant). Reason: Not about reloading. Example: ${item(2).url}\n`,
     );
     // The desk item stays open until every item has a verdict.
-    expect((await ok<any>(owner('GET', '/api/desk'))).items.find((i: any) => i.id === ratingDesk.id)?.status).toBe('open');
+    expect(
+      (await ok<any>(owner('GET', '/api/desk'))).items.find((i: any) => i.id === ratingDesk.id)?.status,
+    ).toBe('open');
 
     await ok(rate(items[2].id, { verdict: 'boring' }));
     await until(async () => writesTo('taste.md').length === 3, 5000, 'third taste write');
-    expect(writesTo('taste.md')[2]?.cmd.content).toMatch(/^- Deprioritise articles like .* \(rated boring\)\. Example: /);
-    const closed = (await ok<any>(owner('GET', '/api/desk?status=closed'))).items.find((i: any) => i.id === ratingDesk.id);
+    expect(writesTo('taste.md')[2]?.cmd.content).toMatch(
+      /^- Deprioritise articles like .* \(rated boring\)\. Example: /,
+    );
+    const closed = (await ok<any>(owner('GET', '/api/desk?status=closed'))).items.find(
+      (i: any) => i.id === ratingDesk.id,
+    );
     expect(closed).toMatchObject({ status: 'answered', answerOption: 'acknowledged' });
 
     // taste.md preview rebuilt from the verdicts
@@ -133,7 +140,9 @@ describe('digest on the desk and ratings', () => {
     const stranger = await w.t.userSession(uniqueEmail('stranger'));
     expect((await rate(items[0].id, { verdict: 'useful' }, stranger.cookie)).status).toBe(404);
     expect((await rate(items[0].id, { verdict: 'meh' })).status).toBe(400);
-    expect((await w.t.req('GET', `/api/projects/${feedId}/taste`, { cookie: stranger.cookie })).status).toBe(404);
+    expect((await w.t.req('GET', `/api/projects/${feedId}/taste`, { cookie: stranger.cookie })).status).toBe(
+      404,
+    );
   });
 
   it('a curator proposal lands on the desk as an approval; approving appends the (edited) rule to taste.md', async () => {

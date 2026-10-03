@@ -271,8 +271,9 @@ describe('commandForOutcome', () => {
     expect(commandForOutcome(o('changes'))).toContain('aom review changes');
     expect(commandForOutcome(o('pass'))).toContain('aom test pass');
     expect(commandForOutcome(o('fail'))).toContain('aom test fail');
-    expect(commandForOutcome(o('published', 'publication'))).toBe(
-      'aom outcome published --note "<summary>" --data-file <json>',
+    expect(commandForOutcome(o('published', 'publication'))).toContain('aom publish --file <note.md>');
+    expect(commandForOutcome(o('custom', 'publication'))).toBe(
+      'aom outcome custom --note "<summary>" --data-file <json>',
     );
     expect(commandForOutcome(o('done'))).toBe('aom outcome done --note "<summary>"');
   });

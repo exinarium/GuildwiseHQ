@@ -11,6 +11,7 @@ import {
 } from '../cards/types.ts';
 import { CardChangesSchema } from '../events/card.ts';
 import { IsoTime } from './common.ts';
+import { PublicationDtoSchema } from './research.ts';
 import { ShiftDtoSchema } from './shifts.ts';
 
 export const CardDtoSchema = z.object({
@@ -112,6 +113,8 @@ export const CardDetailResponseSchema = z.object({
   diffStats: DiffStats.nullable().optional(),
   /** Open desk items blocking this card (M2). */
   blockers: z.array(z.object({ deskItemId: z.uuid(), title: z.string() })).default([]),
+  /** M6: the published research note of a research card. */
+  publication: PublicationDtoSchema.nullable().optional(),
 });
 export type CardDetailResponse = z.infer<typeof CardDetailResponseSchema>;
 

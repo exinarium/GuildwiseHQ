@@ -17,7 +17,8 @@ type Action =
   | 'edit_outside_scope'
   | 'devops'
   | 'devops_install'
-  | 'fabricate';
+  | 'fabricate'
+  | 'uncited';
 
 interface FeedItem {
   kind: string;
@@ -33,8 +34,14 @@ interface Brief {
   feed?: { candidates: FeedItem[]; seenUrls: string[]; taste?: string };
   standingOrders?: Array<{ title: string }>;
   ledger?: Array<{ title: string; body: string }>;
-  card: { ref: string; title: string; reworkRound: number; fields: Record<string, unknown> };
-  handoffs?: Array<{ stage: string }>;
+  card: {
+    ref: string;
+    title: string;
+    cardType: string;
+    reworkRound: number;
+    fields: Record<string, unknown>;
+  };
+  handoffs?: Array<{ stage: string; outcome?: string; note?: string }>;
 }
 
 const emit = (ev: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(ev)}\n`);
@@ -94,6 +101,10 @@ function buildWork(brief: Brief): void {
 
 async function report(brief: Brief, action: Action): Promise<{ code: number; out: string; err: string }> {
   const stage = brief.shift.stage;
+  if (brief.card.cardType === 'research') {
+    if (brief.shift.outcomes.some((o) => o.id === 'published')) return checkerWork(brief, action);
+    if (brief.shift.outcomes.some((o) => o.id === 'handoff')) return researcherWork(brief);
+  }
   if (brief.shift.outcomes.some((o) => o.data === 'candidates' || o.data === 'digest'))
     return feedWork(brief, action);
   const failing = action === 'changes' || action === 'fail';
@@ -138,12 +149,13 @@ const DEFAULT_ITEMS: FeedItem[] = [1, 2].map((n) => ({
   summary: `Mock summary of item ${n}`,
 }));
 
-const tmpJson = (name: string, value: unknown): string => {
-  const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), 'mock-feed-'));
+const tmpText = (name: string, text: string): string => {
+  const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), 'mock-agent-'));
   const file = join(dir, name);
-  writeFileSync(file, JSON.stringify(value));
+  writeFileSync(file, text);
   return file;
 };
+const tmpJson = (name: string, value: unknown): string => tmpText(name, JSON.stringify(value));
 
 /** "Opens" a page the way Claude's WebFetch tool shows up in the runtime stream: the runner records it. */
 async function openPage(url: string): Promise<void> {
@@ -198,10 +210,10 @@ async function feedWork(brief: Brief, action: Action): Promise<{ code: number; o
   }
   // curator
   const taste = brief.feed?.taste;
-  emit({
-    kind: 'progress',
-    text: `mock taste: ${taste ? taste.replace(/\s+/g, ' ').slice(0, 300) : 'none'}`,
-  });
+  // taste.md as the curator read it at shift start: one progress line per rule (progress lines are short)
+  const tasteLines = (taste ?? '').split('\n').filter((l) => l.startsWith('- '));
+  emit({ kind: 'progress', text: `mock taste: ${taste ? `${tasteLines.length} rule line(s)` : 'none'}` });
+  for (const l of tasteLines) emit({ kind: 'progress', text: `mock taste rule: ${l.slice(0, 400)}` });
   const skip = skipTitles(taste);
   const max = fields.maxPerKind ?? { article: 5, video: 3 };
   const used: Record<string, number> = {};
@@ -222,6 +234,91 @@ async function feedWork(brief: Brief, action: Action): Promise<{ code: number; o
     tmpJson('digest.json', data),
     '--note',
     `mock curator picked ${picked.length} of ${brief.feed?.candidates.length ?? 0}`,
+  ]);
+}
+
+interface MockClaim {
+  text: string;
+  url: string;
+  title?: string;
+  supported?: boolean;
+}
+
+const DEFAULT_CLAIMS: MockClaim[] = [1, 2].map((n) => ({
+  text: `Mock claim ${n} about the question`,
+  url: `https://example.test/research/${n}`,
+  title: `Mock source ${n}`,
+}));
+
+const claimsOf = (brief: Brief): MockClaim[] =>
+  (brief.card.fields as { mockResearch?: { claims?: MockClaim[] } }).mockResearch?.claims ?? DEFAULT_CLAIMS;
+
+/**
+ * Scripted research (M6). Researcher: opens the page behind each scripted claim and hands off a draft that lists every
+ * claim with its numbered reference; in a rework round it drops the claims the fact checker could not verify (those
+ * with `supported: false`). Checker: sends the card back (`unsupported`) while the draft still contains an unsupported
+ * claim; otherwise opens every cited page and publishes the note with its citations. Action `uncited` first tries to
+ * publish without citations (the runner refuses) and then does it properly; action `fail` always sends it back.
+ */
+async function researcherWork(brief: Brief): Promise<{ code: number; out: string; err: string }> {
+  const all = claimsOf(brief);
+  const claims = brief.card.reworkRound > 0 ? all.filter((c) => c.supported !== false) : all;
+  for (const c of claims) await openPage(c.url);
+  const question = (brief.card.fields as { question?: string }).question ?? brief.card.title;
+  const draft = [
+    `# ${brief.card.title}`,
+    '',
+    `Question: ${question}`,
+    '',
+    ...claims.map((c, i) => `- ${c.text} [${i + 1}]`),
+    '',
+    'References',
+    ...claims.map((c, i) => `${i + 1}. ${c.title ?? c.url} - ${c.url}`),
+    '',
+  ].join('\n');
+  const file = tmpText('draft.md', draft);
+  return aom(['handoff', '--note-file', file]);
+}
+
+async function checkerWork(
+  brief: Brief,
+  action: Action,
+): Promise<{ code: number; out: string; err: string }> {
+  const draft = [...(brief.handoffs ?? [])].reverse().find((h) => h.stage === 'research')?.note ?? '';
+  const refs = [...draft.matchAll(/^\d+\.\s+(.*?)\s+-\s+(https?:\/\/\S+)\s*$/gm)].map((m) => ({
+    title: m[1] as string,
+    url: m[2] as string,
+  }));
+  const bad = claimsOf(brief).filter((c) => c.supported === false && draft.includes(c.text));
+  if (action === 'fail' || bad.length > 0) {
+    const what = bad.length ? bad.map((c) => `"${c.text}"`).join('; ') : 'a claim';
+    return aom(['outcome', 'unsupported', '--note', `Not supported by the cited page: ${what}`]);
+  }
+  const title = brief.card.title;
+  const noteFile = tmpText('note.md', `# ${title}\n\n${draft.replace(/^# .*\n/, '').trim()}\n`);
+  if (action === 'uncited') {
+    const first = aom(['publish', '--file', noteFile, '--title', title]);
+    emit({
+      kind: 'progress',
+      text: `mock checker: publishing without citations ${first.code === 0 ? 'was accepted' : `was refused: ${first.err.trim().slice(0, 200)}`}`,
+    });
+    if (first.code === 0) return first;
+  }
+  for (const r of refs) await openPage(r.url);
+  const cites = tmpJson(
+    'citations.json',
+    refs.map((r) => ({ url: r.url, title: r.title })),
+  );
+  return aom([
+    'publish',
+    '--file',
+    noteFile,
+    '--title',
+    title,
+    '--citations-file',
+    cites,
+    '--note',
+    `Verified ${refs.length} source(s); published`,
   ]);
 }
 

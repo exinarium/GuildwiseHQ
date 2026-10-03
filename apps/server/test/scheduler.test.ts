@@ -21,7 +21,8 @@ afterAll(async () => {
 });
 
 const ctx = () => w.t.app.ctx;
-const owner = (method: string, url: string, body?: unknown) => w.t.req(method, url, { cookie: w.owner.cookie, body });
+const owner = (method: string, url: string, body?: unknown) =>
+  w.t.req(method, url, { cookie: w.owner.cookie, body });
 const setNow = (at: Date) => ctx().clock.setOffset(at.getTime() - Date.now());
 const scheduler = () => ctx().services.scheduler;
 const cards = () => q('SELECT * FROM cards WHERE project_id=$1 ORDER BY number', [feedId]);
@@ -37,11 +38,17 @@ describe('schedules', () => {
     expect(tz.body.error.code).toBe('invalid_timezone');
     // a feed schedule needs a feed project; the template must fit the feed field set
     expect((await feedSchedule(w, w.projectId)).status).toBe(400);
-    expect((await feedSchedule(w, feedId, { cardTemplate: { title: 'x', fields: { windowHours: 'many' } } })).status).toBe(400);
+    expect(
+      (await feedSchedule(w, feedId, { cardTemplate: { title: 'x', fields: { windowHours: 'many' } } }))
+        .status,
+    ).toBe(400);
   });
 
   it('computes the next fire in the schedule time zone and only the owner manages schedules', async () => {
-    const jhb = await ok<any>(feedSchedule(w, feedId, { timezone: 'Africa/Johannesburg', name: 'Joburg 07:00' }), 201);
+    const jhb = await ok<any>(
+      feedSchedule(w, feedId, { timezone: 'Africa/Johannesburg', name: 'Joburg 07:00' }),
+      201,
+    );
     expect(new Date(jhb.nextFireAt).getUTCHours()).toBe(5);
     expect(new Date(jhb.nextFireAt).getUTCMinutes()).toBe(0);
     expect(new Date(jhb.nextFireAt).getTime()).toBeGreaterThan(Date.now());
@@ -49,15 +56,22 @@ describe('schedules', () => {
     expect(new Date(utc.nextFireAt).getUTCHours()).toBe(7);
 
     const stranger = await w.t.userSession(uniqueEmail('stranger'));
-    const forbidden = await w.t.req('PATCH', `/api/schedules/${jhb.id}`, { cookie: stranger.cookie, body: { enabled: false } });
+    const forbidden = await w.t.req('PATCH', `/api/schedules/${jhb.id}`, {
+      cookie: stranger.cookie,
+      body: { enabled: false },
+    });
     expect(forbidden.status).toBe(404);
     const list = await ok<any>(owner('GET', `/api/schedules?projectId=${feedId}`));
-    expect(list.schedules.map((s: any) => s.name)).toEqual(expect.arrayContaining(['Joburg 07:00', 'UTC 07:00']));
+    expect(list.schedules.map((s: any) => s.name)).toEqual(
+      expect.arrayContaining(['Joburg 07:00', 'UTC 07:00']),
+    );
     expect((await w.t.req('GET', '/api/schedules', { cookie: stranger.cookie })).body.schedules).toEqual([]);
 
     const patched = await ok<any>(owner('PATCH', `/api/schedules/${utc.id}`, { cron: '30 18 * * 1-5' }));
     expect(new Date(patched.nextFireAt).getUTCHours()).toBe(18);
-    expect((await ok<any>(owner('PATCH', `/api/schedules/${utc.id}`, { enabled: false }))).nextFireAt).toBeNull();
+    expect(
+      (await ok<any>(owner('PATCH', `/api/schedules/${utc.id}`, { enabled: false }))).nextFireAt,
+    ).toBeNull();
     await ok(owner('DELETE', `/api/schedules/${jhb.id}`));
     await ok(owner('DELETE', `/api/schedules/${utc.id}`));
     expect((await ok<any>(owner('GET', `/api/schedules?projectId=${feedId}`))).schedules).toEqual([]);
@@ -85,7 +99,11 @@ describe('the scheduler fires on time (clock-controlled)', () => {
       status: 'queued',
     });
     expect(card?.title).toMatch(/^News run \(\d{4}-\d{2}-\d{2}\)$/);
-    expect(card?.fields).toMatchObject({ topic: 'reloading', windowHours: 24, maxPerKind: { article: 5, video: 3 } });
+    expect(card?.fields).toMatchObject({
+      topic: 'reloading',
+      windowHours: 24,
+      maxPerKind: { article: 5, video: 3 },
+    });
 
     const after = await ok<any>(owner('GET', `/api/schedules?projectId=${feedId}`));
     const next = new Date(after.schedules[0].nextFireAt);
@@ -108,7 +126,9 @@ describe('the scheduler fires on time (clock-controlled)', () => {
     setNow(new Date(new Date(s.nextFireAt).getTime() + 5 * 24 * 3600_000 + 1000));
     expect(await scheduler().run()).toHaveLength(1);
     expect(await cards()).toHaveLength(1);
-    const next = (await ok<any>(owner('GET', `/api/schedules?projectId=${feedId}`))).schedules.find((x: any) => x.name === 'Catch-up');
+    const next = (await ok<any>(owner('GET', `/api/schedules?projectId=${feedId}`))).schedules.find(
+      (x: any) => x.name === 'Catch-up',
+    );
     expect(new Date(next.nextFireAt).getTime()).toBeGreaterThan(ctx().clock.now().getTime());
   });
 

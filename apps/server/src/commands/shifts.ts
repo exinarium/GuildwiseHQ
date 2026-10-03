@@ -21,6 +21,7 @@ import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_AC
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { buildDigestEvents } from './feeds.ts';
 import { raiseQuestion } from './questions.ts';
+import { buildPublicationEvents } from './research.ts';
 
 export interface WsRef {
   id: string;
@@ -307,6 +308,16 @@ export async function applyShiftReport(
       main = digest.events[0] as AppendInput;
       followUps.push(...digest.events.slice(1));
       acceptMessage = `${digest.summary} Finish now.`;
+      break;
+    }
+    case 'ResearchPublished': {
+      const project = await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id]);
+      const pub = buildPublicationEvents({ card, agent, project: project as Row, data: payloadData });
+      if (!pub.ok) return { accepted: false, error: pub.error };
+      main = pub.events[0] as AppendInput;
+      followUps.push(...pub.events.slice(1));
+      handoffData = pub.handoffData;
+      acceptMessage = `${pub.summary} Finish now.`;
       break;
     }
     default:

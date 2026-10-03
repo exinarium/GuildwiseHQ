@@ -98,6 +98,7 @@ export class Runner {
       log: this.log,
       transport: { send: (type, payload) => this.client.send(type as never, payload) },
       findRepo: (norm) => this.findRepo(norm),
+      writeVault: (cmd) => this.vaults.write(cmd),
       rpc: (shiftId, method, params) => this.rpc(shiftId, method, params),
       maxConcurrentShifts: () => this.maxConcurrent,
       maxShiftMsOverride: opts.maxShiftMsOverride,

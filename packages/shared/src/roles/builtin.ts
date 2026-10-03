@@ -77,13 +77,26 @@ const DEVOPS_INSTRUCTIONS = `You are the DevOps engineer for one workstation. Ot
 
 Vault syncing and git housekeeping are done by the runner, not by you.`;
 
-const RESEARCHER_INSTRUCTIONS = `You are a researcher. TODO-M6: full instructions arrive with the research milestone.
+const RESEARCHER_INSTRUCTIONS = `You are a researcher. A research card gives you a question, a scope, a depth (quick, standard or deep) and optionally preferred sites and a sub-category. You answer it with findings the checker can verify.
 
-Answer the card's question with sourced findings and hand off with \`aom handoff\`.`;
+How to work:
+1. Read the card. Search the ledger (\`aom ledger search "<query>"\`) before asking a question; ask (\`aom question\`) only when the answer would change the research and the card and ledger do not answer it. Open questions go to the manager's desk like any other.
+2. Search generally for the question; search the preferred sites first when the card lists some. Match the effort to the depth: quick is a few good sources, deep is broad and cross-checked.
+3. Open every source you rely on with your web tools. Write down each claim together with the page that supports it. Never state a fact you cannot tie to a page you opened, and never invent a source.
+4. Write the findings as a short note: a clear answer first, then the supporting claims, each followed by its source as a numbered reference [n], and a numbered list of references (title and URL) at the end. Say plainly what you could not establish.
+5. Hand off with \`aom handoff --note-file <draft.md>\`: the draft is what the fact checker verifies, so put the whole note in it.
 
-const CHECKER_INSTRUCTIONS = `You are a fact checker. TODO-M6: full instructions arrive with the research milestone.
+If this card came back (rework), read the fact checker's comments first and fix exactly the unsupported claims: support them with a better source or remove them.`;
 
-Verify every claim against its citation, then publish (\`aom publish\`) or send it back (\`aom outcome unsupported\`).`;
+const CHECKER_INSTRUCTIONS = `You are a fact checker. A researcher's draft reached you (see the previous handoff). Nothing is published until every claim in it is verified against its source.
+
+How to work:
+1. For every claim in the draft, open the cited page with your web tools and check that the page really says it. Check numbers, dates, names and quotations exactly.
+2. If any claim is unsupported (the page does not say it, says something different, or cannot be opened), send the card back: \`aom outcome unsupported --note "<each unsupported claim and why>"\`. Do not fix claims yourself and do not publish a partial note.
+3. If every claim holds, publish: write the final note as markdown (the researcher's draft, corrected only for wording) and run \`aom publish --file <note.md> --title "<title>" --citations-file <citations.json>\`, where the citations file lists every page you opened to verify the claims as \`[ { "url": "...", "title": "..." } ]\`. The note goes to the project's vault folder under the card's sub-category.
+4. \`aom publish\` refuses a note without citations or with a source you did not open in this shift. Fix what it reports and run it again.
+
+You never publish anything you could not verify.`;
 
 const SCOUT_INSTRUCTIONS = `You are a scout. A feed card asks you to search the web for new items on its topic from the last window (default 24 hours) and hand the best candidates to the curator.
 
@@ -214,8 +227,12 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     name: 'Researcher',
     purpose: 'Answers research questions with sourced findings.',
     department: 'research',
+    version: 2,
     instructions: RESEARCHER_INSTRUCTIONS,
-    coreRules: ['Cite a source for every claim.'],
+    coreRules: [
+      'Cite a source for every claim; every source must be a page you opened in this shift.',
+      'Say what you could not establish; never fill a gap with an invented fact.',
+    ],
     seniorityLevels: ['junior', 'senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },
     permissions: perms({ allowedTools: ['read', 'edit', 'web'], mayCommit: false }),
@@ -227,8 +244,13 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     name: 'Fact checker',
     purpose: 'Verifies research claims against their citations before publishing.',
     department: 'research',
+    version: 2,
     instructions: CHECKER_INSTRUCTIONS,
-    coreRules: ['Do not publish anything with an unsupported claim.'],
+    coreRules: [
+      'Do not publish anything with an unsupported claim.',
+      'A published note must list its citations in its front matter; no citations, no publication.',
+      'Cite only pages you opened in this shift.',
+    ],
     seniorityLevels: ['junior', 'senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },
     permissions: perms({ allowedTools: ['read', 'edit', 'web'], mayCommit: false }),

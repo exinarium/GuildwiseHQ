@@ -2,8 +2,9 @@ import { useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useBoard } from '../api/queries/board.ts';
 import { useProjects } from '../api/queries/projects.ts';
+import { useRunFeed } from '../api/queries/schedules.ts';
 import { BoardView } from '../components/BoardView.tsx';
-import { ErrorBox, PageHeader, Spinner } from '../components/ui.tsx';
+import { Button, ErrorBox, PageHeader, Spinner } from '../components/ui.tsx';
 import { setLastProjectKey } from '../lib/lastProject.ts';
 
 export function Board() {
@@ -12,6 +13,7 @@ export function Board() {
   const projects = useProjects();
   const project = projects.data?.find((p) => p.key === projectKey);
   const board = useBoard(project?.id);
+  const runFeed = useRunFeed();
 
   useEffect(() => {
     if (project) setLastProjectKey(project.key);
@@ -55,6 +57,19 @@ export function Board() {
                 </option>
               ))}
             </select>
+            {project.workflowKey === 'feed' && (
+              <>
+                <Link
+                  to={`/p/${project.key}/feed`}
+                  className="inline-flex min-h-8 items-center rounded-md border border-zinc-300 px-3 py-1 text-sm font-medium dark:border-zinc-700"
+                >
+                  Feed
+                </Link>
+                <Button disabled={runFeed.isPending} onClick={() => runFeed.mutate(project.id)}>
+                  Run now
+                </Button>
+              </>
+            )}
             <Link
               to={`/cards/new?project=${project.key}`}
               className="inline-flex min-h-8 items-center rounded-md bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-500"
@@ -64,6 +79,7 @@ export function Board() {
           </>
         }
       />
+      <ErrorBox error={runFeed.error} />
       {board.isPending && <Spinner label="Loading board" />}
       {board.isError && <ErrorBox error={board.error} />}
       {board.data && <BoardView board={board.data} />}
