@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+/* Dark mode follows prefers-color-scheme (Tailwind v4 default `dark:` variant). */
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  background-color: #fff;
+  color: #18181b;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: #09090b;
+    color: #f4f4f5;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}

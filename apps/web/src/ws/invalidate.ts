@@ -1,0 +1,35 @@
+import type { VisibleEvent } from '@aom/shared';
+import type { QueryClient } from '@tanstack/react-query';
+
+type Keys = ReadonlyArray<readonly unknown[]>;
+
+/**
+ * Maps a visible event to the TanStack Query keys it makes stale (docs/ARCHITECTURE.md section 20). No client-side
+ * event projection: we only refetch. Card queries are keyed by ref or id, so the whole `card` prefix is invalidated.
+ */
+export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'projectId'>): Keys {
+  const kind = event.streamId.split('-')[0];
+  switch (kind) {
+    case 'card':
+      return [event.projectId ? ['board', event.projectId] : ['board'], ['card'], ['agents']];
+    case 'thread':
+      return [['card']];
+    case 'shift':
+      return [['card'], ['agents'], ['board']];
+    case 'agent':
+      return [['agents'], ['board'], ['card']];
+    case 'workstation':
+      return [['workstations'], ['admin', 'workstations'], ['agents']];
+    case 'project':
+      return [['projects'], ['project'], ['board']];
+    case 'user':
+    case 'invitation':
+      return [['admin'], ['me']];
+    default:
+      return [];
+  }
+}
+
+export function invalidateForEvent(qc: QueryClient, event: VisibleEvent): void {
+  for (const key of keysForEvent(event)) void qc.invalidateQueries({ queryKey: key as unknown[] });
+}
