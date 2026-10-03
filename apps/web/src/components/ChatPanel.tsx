@@ -34,6 +34,8 @@ export function ChatPanel({ threadId }: { threadId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<{ id: string; body: string } | null>(null);
   const log = useRef<HTMLDivElement>(null);
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
 
   useEffect(() => {
     setStreaming(null);
@@ -46,8 +48,14 @@ export function ChatPanel({ threadId }: { threadId: string }) {
         void qc.invalidateQueries({ queryKey: ['thread', threadId] });
         void qc.invalidateQueries({ queryKey: ['chats'] });
       } else {
+        // The message was not delivered (offline, busy...): take it back out of the thread and keep the text.
+        const lost = pendingRef.current;
         setStreaming(null);
         setError(ev.reason);
+        if (lost && ev.reason !== 'cancelled') {
+          setPending(null);
+          setDraft((d) => d || lost.body);
+        }
       }
     });
   }, [threadId, qc]);
@@ -152,7 +160,7 @@ export function ChatPanel({ threadId }: { threadId: string }) {
         </p>
       )}
       <ErrorBox error={messages.error} />
-      <form onSubmit={send} aria-label="Send a message" className="flex flex-col gap-2">
+      <form onSubmit={send} aria-label="Compose" className="flex flex-col gap-2">
         <TextArea
           label="Message"
           rows={2}

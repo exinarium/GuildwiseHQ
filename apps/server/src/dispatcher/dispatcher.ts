@@ -20,6 +20,7 @@ const TRIGGER_TYPES = new Set([
   'StageCompleted',
   'ChildCardResolved',
   'QuestionAnswered',
+  'DeskItemResolved',
   'AgentHired',
   'AgentChanged',
   'AgentRehomed',

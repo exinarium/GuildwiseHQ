@@ -102,6 +102,9 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('chat-error')).toHaveTextContent('workstation is not connected');
     expect(screen.getByTestId('chat-error')).toHaveTextContent('Nothing is queued');
     expect(screen.getByLabelText('Message')).toBeEnabled();
+    // The undelivered message is not shown as sent; its text is back in the box.
+    expect(screen.queryAllByTestId('chat-message')).toHaveLength(0);
+    expect(screen.getByLabelText('Message')).toHaveValue('anyone?');
   });
 
   it('ignores events of other conversations', async () => {
