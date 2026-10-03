@@ -1,9 +1,12 @@
 import { z } from 'zod';
 import { DiffStats } from '../cards/types.ts';
+import { DevopsShiftSchema } from '../devops/index.ts';
 import { Usage } from '../events/define.ts';
 import { GuardViolation, ShiftKind } from '../events/shift.ts';
+import { VaultKind } from '../events/vault.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
+import { VaultConfigureCommandSchema, VaultWriteCommandSchema } from '../vaults/index.ts';
 import { RpcMethodSchema, ShiftReportSchema } from './ipc.ts';
 
 /**
@@ -104,6 +107,8 @@ export const ShiftBriefSchema = z.object({
     e2eGlobs: z.array(z.string()),
     architecturalGlobs: z.array(z.string()),
     vaultFolder: z.string().optional(),
+    /** M3: `PROJECT.md` from the card's domain vault, filled in by the runner (the site holds no vault content). */
+    projectDoc: z.string().optional(),
   }),
   role: z.object({
     key: z.string(),
@@ -165,8 +170,19 @@ export const RunnerCommandNameSchema = z.enum([
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
-/** Typed payloads for the M1 commands; later commands add theirs. `command.payload` is the loose record on the wire. */
+/** The one vault a card shift may read (docs/ARCHITECTURE.md section 16.1): its domain vault or the project vault. */
+export const ShiftVaultSchema = z.object({
+  vaultId: z.string().min(1),
+  kind: VaultKind,
+  /** `projects/<name>` inside the vault. */
+  folder: z.string().min(1),
+});
+export type ShiftVault = z.infer<typeof ShiftVaultSchema>;
+
+/** Typed payloads for the commands; `command.payload` is the loose record on the wire. */
 export const CommandPayloadSchemas = {
+  'vault.configure': VaultConfigureCommandSchema,
+  'vault.write': VaultWriteCommandSchema,
   'agent.wipe': z.object({ agentId: z.uuid() }),
   'worktree.remove': z.object({
     repoId: z.uuid().optional(),
@@ -320,6 +336,10 @@ export const ShiftStartSchema = msg('shift.start', {
   worktree: WorktreeSpecSchema.nullable(),
   prepare: z.object({ rebase: z.boolean() }),
   maxShiftMinutes: z.number().int().positive(),
+  /** M3: for `kind: 'devops'` the request being worked (the brief then carries a placeholder card). */
+  devops: DevopsShiftSchema.optional(),
+  /** M3: the card's domain vault; the runner reads only this vault and passes only it as `--add-dir`. */
+  vault: ShiftVaultSchema.nullable().optional(),
 });
 export const ShiftStopSchema = msg('shift.stop', { shiftId: z.uuid(), reason: ShiftStopReasonSchema });
 export const ShiftReportResultSchema = msg('shift.report.result', {

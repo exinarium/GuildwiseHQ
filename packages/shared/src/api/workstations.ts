@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DevOpsAccessSchema } from '../events/devops.ts';
 import { RuntimeInfoSchema } from '../protocol/runner.ts';
 import { IsoTime } from './common.ts';
 
@@ -16,6 +17,9 @@ export const WorkstationDtoSchema = z.object({
   /** Project repos this workstation holds a clone of. */
   repos: z.array(z.object({ projectRepoId: z.uuid(), localPath: z.string(), reportedAt: IsoTime })),
   pairedAt: IsoTime,
+  /** M3: what this workstation's DevOps engineer may do without asking, and who it is. */
+  devopsAccess: DevOpsAccessSchema.optional(),
+  devopsAgentId: z.uuid().nullable().optional(),
 });
 export type WorkstationDto = z.infer<typeof WorkstationDtoSchema>;
 export const WorkstationsResponseSchema = z.object({ workstations: z.array(WorkstationDtoSchema) });

@@ -51,6 +51,10 @@ export function renderInstructions(brief: ShiftBrief): string {
   if (brief.project.e2eGlobs.length > 0)
     projectLines.push(`- End-to-end test paths: ${brief.project.e2eGlobs.join(', ')}`);
   out.push(projectLines.join('\n'));
+  if (brief.project.projectDoc?.trim()) {
+    out.push('## PROJECT.md (from the knowledge vault)');
+    out.push(brief.project.projectDoc.trim());
+  }
 
   out.push('# How to report');
   out.push(
@@ -62,8 +66,7 @@ export function renderInstructions(brief: ShiftBrief): string {
       '',
       'Other commands:',
       '- `aom card [--json]`: print this card and brief again.',
-      '- `aom ledger search "<query>"`: search decisions and standing orders. Do this before asking a question.',
-      '- `aom comment --note "<text>"`: post a note on the card thread without ending the shift.',
+      '- `aom ledger search "<query>"`: search decisions and standing orders. Do this before asking a question.',      '- `aom comment --note "<text>"`: post a note on the card thread without ending the shift.',
       `- \`${QUESTION_COMMAND}\`: ask the manager when the card and ledger cannot answer; this ends the shift and parks the card as Blocked.`,
       '',
       'If `aom` reports an error, read it, fix the cause and run the command again within this shift.',

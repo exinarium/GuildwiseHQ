@@ -15,6 +15,10 @@ export function commandForOutcome(outcome: BriefOutcome): string {
       return 'aom test pass --evidence "<what you ran and saw>" --command "<command you ran>"';
     case 'fail':
       return 'aom test fail --title "<bug title>" --note "<what failed and how to reproduce>" --evidence-file <path>';
+    case 'devops_done':
+      return 'aom devops-done --summary "<what you did>" --command "<command you ran>"';
+    case 'devops_approval':
+      return 'aom devops-approval --action "<what needs approval>" --reason "<why>" --command "<command you would run>"';
     default:
       return `aom outcome ${outcome.id} --note "<summary>"${outcome.data !== 'none' ? ' --data-file <json>' : ''}`;
   }

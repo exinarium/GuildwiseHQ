@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ReviewData, TestEvidence } from '../cards/types.ts';
+import { DevopsApprovalDataSchema, DevopsDoneDataSchema } from '../devops/index.ts';
 
 /**
  * `aom` CLI <-> runner IPC (docs/ARCHITECTURE.md section 13.4). HTTP on 127.0.0.1:<ephemeral>,
@@ -51,6 +52,10 @@ export function outcomeDataSchema(kind: string): z.ZodType {
       return ReviewData;
     case 'testEvidence':
       return TestEvidence;
+    case 'devopsDone':
+      return DevopsDoneDataSchema;
+    case 'devopsApproval':
+      return DevopsApprovalDataSchema;
     default:
       return z.record(z.string(), z.unknown());
   }
