@@ -33,10 +33,17 @@ export const DevopsShiftSchema = z.object({
   access: DevOpsAccessSchema,
   /** Set when the manager already approved the out-of-access action this request is resumed for. */
   approval: z
-    .object({ action: z.string(), reason: z.string(), commands: z.array(z.string()), note: z.string().optional() })
+    .object({
+      action: z.string(),
+      reason: z.string(),
+      commands: z.array(z.string()),
+      note: z.string().optional(),
+    })
     .optional(),
   /** Earlier messages of the request thread, oldest first. */
-  history: z.array(z.object({ authorName: z.string(), kind: z.string(), body: z.string(), at: z.iso.datetime() })).default([]),
+  history: z
+    .array(z.object({ authorName: z.string(), kind: z.string(), body: z.string(), at: z.iso.datetime() }))
+    .default([]),
 });
 export type DevopsShift = z.infer<typeof DevopsShiftSchema>;
 
@@ -62,7 +69,8 @@ export function devopsBriefOutcomes() {
 export function needsApproval(access: z.infer<typeof DevOpsAccessSchema>, text: string): boolean {
   const t = text.toLowerCase();
   if (/\b(sudo|delete|destroy|wipe|format|rm -rf|uninstall)\b/.test(t)) return !access.sudo;
-  if (/\bdocker\b/.test(t) && /\b(install|setup|set up)\b/.test(t)) return !(access.allowInstall && access.allowDocker);
+  if (/\bdocker\b/.test(t) && /\b(install|setup|set up)\b/.test(t))
+    return !(access.allowInstall && access.allowDocker);
   if (/\binstall\b/.test(t)) return !access.allowInstall;
   return false;
 }

@@ -83,5 +83,8 @@ export const devopsEvents = [
     'DevOpsRequestCompleted',
     z.object({ requestId: Id, status: z.enum(['done', 'failed']), summary: z.string() }),
   ),
-  defineEvent('DevOpsAccessChanged', z.object({ workstationId: Id, access: DevOpsAccessSchema, changedBy: Id })),
+  defineEvent(
+    'DevOpsAccessChanged',
+    z.object({ workstationId: Id, access: DevOpsAccessSchema, changedBy: Id }),
+  ),
 ] as const;

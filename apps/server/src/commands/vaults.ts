@@ -86,7 +86,12 @@ export async function registerVault(
       orgId = p.org_id;
       if (await one(tx, 'SELECT 1 FROM vaults WHERE project_id=$1', [p.id]))
         throw conflict('vault_exists', 'this project already has a vault');
-    } else if (await one(tx, 'SELECT 1 FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [orgId, req.kind])) {
+    } else if (
+      await one(tx, 'SELECT 1 FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [
+        orgId,
+        req.kind,
+      ])
+    ) {
       throw conflict('vault_exists', `you already registered a ${req.kind} vault; edit it instead`);
     }
     const payload = {
@@ -94,7 +99,11 @@ export async function registerVault(
       orgId,
       projectId: req.projectId,
       kind: req.kind,
-      name: req.name ?? (req.kind === 'project' ? 'Project vault' : `${req.kind[0]?.toUpperCase()}${req.kind.slice(1)} vault`),
+      name:
+        req.name ??
+        (req.kind === 'project'
+          ? 'Project vault'
+          : `${req.kind[0]?.toUpperCase()}${req.kind.slice(1)} vault`),
       remoteUrl: req.remoteUrl.trim(),
       syncIntervalSec: req.syncIntervalSec,
     };
@@ -121,10 +130,11 @@ async function editableVault(tx: Queryable, user: AuthSession['user'], vaultId: 
   );
   if (!v) throw notFound('vault not found');
   const visible = v.project_id
-    ? await one(tx, `SELECT role FROM project_members WHERE project_id=$1 AND user_id=$2 AND status='active'`, [
-        v.project_id,
-        user.id,
-      ])
+    ? await one(
+        tx,
+        `SELECT role FROM project_members WHERE project_id=$1 AND user_id=$2 AND status='active'`,
+        [v.project_id, user.id],
+      )
     : v.org_id === user.id
       ? { role: 'owner' }
       : undefined;
@@ -179,15 +189,19 @@ export async function resolveVaultConflict(
   workstationId: string,
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
-    const ws = await one(tx, `SELECT id, user_id FROM workstations WHERE id=$1 AND status='active'`, [workstationId]);
+    const ws = await one(tx, `SELECT id, user_id FROM workstations WHERE id=$1 AND status='active'`, [
+      workstationId,
+    ]);
     if (!ws || ws.user_id !== user.id) throw notFound('workstation not found');
     const v = await one(tx, 'SELECT * FROM vaults WHERE id=$1', [vaultId]);
     if (!v) throw notFound('vault not found');
-    const wv = await one(tx, 'SELECT paused FROM workstation_vaults WHERE workstation_id=$1 AND vault_id=$2', [
-      workstationId,
-      vaultId,
-    ]);
-    if (!wv?.paused) throw conflict('not_in_conflict', 'this vault has no unresolved conflict on that workstation');
+    const wv = await one(
+      tx,
+      'SELECT paused FROM workstation_vaults WHERE workstation_id=$1 AND vault_id=$2',
+      [workstationId, vaultId],
+    );
+    if (!wv?.paused)
+      throw conflict('not_in_conflict', 'this vault has no unresolved conflict on that workstation');
     await ctx.store.append(
       [
         {
@@ -290,7 +304,10 @@ export async function refreshVaultConfig(ctx: Ctx, userIds: string[]): Promise<v
 }
 
 /** Users whose workstations sync `vault`: the owner for org vaults, the active members for a project vault. */
-export async function vaultAudience(db: Queryable, vault: { org_id: string; project_id: string | null }): Promise<string[]> {
+export async function vaultAudience(
+  db: Queryable,
+  vault: { org_id: string; project_id: string | null },
+): Promise<string[]> {
   if (!vault.project_id) return [vault.org_id];
   return (
     await rows<{ user_id: string }>(
@@ -313,7 +330,9 @@ export async function vaultForProject(
   projectId: string,
   workstationUserId: string,
 ): Promise<{ id: string; kind: 'work' | 'personal' | 'project'; folder: string } | null> {
-  const p = await one(db, 'SELECT id, org_id, key, domain, vault_folder FROM projects WHERE id=$1', [projectId]);
+  const p = await one(db, 'SELECT id, org_id, key, domain, vault_folder FROM projects WHERE id=$1', [
+    projectId,
+  ]);
   if (!p) return null;
   const v =
     (await one(db, 'SELECT id, kind FROM vaults WHERE project_id=$1', [projectId])) ??

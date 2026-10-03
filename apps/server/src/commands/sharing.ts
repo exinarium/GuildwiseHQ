@@ -30,17 +30,19 @@ export async function shareProject(
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.my_role !== 'owner') throw forbidden('only the project owner can share it');
     if (p.status !== 'active') throw conflict('project_archived', 'project is archived');
-    const invitee = await one(tx, `SELECT id, status FROM users WHERE lower(email) = lower($1)`, [email.trim()]);
+    const invitee = await one(tx, `SELECT id, status FROM users WHERE lower(email) = lower($1)`, [
+      email.trim(),
+    ]);
     if (!invitee || invitee.status !== 'active')
       throw notFound('no active account with that email; invite them to the app first');
     if (invitee.id === user.id) throw badRequest('invalid_invitee', 'you already own this project');
-    const existing = await one(
-      tx,
-      'SELECT status FROM project_members WHERE project_id=$1 AND user_id=$2',
-      [projectId, invitee.id],
-    );
+    const existing = await one(tx, 'SELECT status FROM project_members WHERE project_id=$1 AND user_id=$2', [
+      projectId,
+      invitee.id,
+    ]);
     if (existing?.status === 'active') throw conflict('already_member', 'this user is already a member');
-    if (existing?.status === 'invited') throw conflict('already_invited', 'this user already has a pending invitation');
+    if (existing?.status === 'invited')
+      throw conflict('already_invited', 'this user already has a pending invitation');
     await ctx.store.append(
       [
         {
@@ -219,6 +221,22 @@ export async function removeMember(
         ),
       );
     }
+    // Work in progress on the departed manager's machines cannot continue there: those cards forget their home
+    // workstation (the stage restarts from the base branch on the owner's side, like a manual card re-home).
+    const homed = await rows(
+      tx,
+      `SELECT c.* FROM cards c WHERE c.project_id=$1 AND c.status NOT IN ('done','cancelled')
+          AND c.home_workstation_id IN (SELECT id FROM workstations WHERE user_id=$2)`,
+      [projectId, memberId],
+    );
+    for (const c of homed) {
+      events.push({
+        streamId: streamId.card(c.id),
+        event: { type: 'CardRehomed', payload: { cardId: c.id, by: user.id } },
+        actor: userActor(user.id),
+        scope: projectScope(c.org_id, c.project_id),
+      });
+    }
     const inheritedAgentIds = plan.agents.map((a) => a.id as string);
     const transferredCardIds = plan.owned.map((c) => c.id as string);
     events.push({
@@ -235,7 +253,11 @@ export async function removeMember(
     for (const a of plan.agents) {
       if (a.workstation_id) await enqueueRunnerCommand(tx, a.workstation_id, 'agent.wipe', { agentId: a.id });
     }
-    return { inheritedAgentIds, transferredCardIds, releasedCardIds: plan.claimed.map((c) => c.id as string) };
+    return {
+      inheritedAgentIds,
+      transferredCardIds,
+      releasedCardIds: plan.claimed.map((c) => c.id as string),
+    };
   });
 }
 
@@ -255,10 +277,11 @@ export async function rehomeAgent(
       throw forbidden('only the organization owner or the hiring manager can do this');
     if (a.status !== 'needs_rehome')
       throw conflict('not_homeless', 'only agents that need a new home can be re-homed');
-    const ws = await one(tx, `SELECT id, runtimes FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`, [
-      req.workstationId,
-      user.id,
-    ]);
+    const ws = await one(
+      tx,
+      `SELECT id, runtimes FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`,
+      [req.workstationId, user.id],
+    );
     if (!ws) throw notFound('workstation not found');
     await ctx.store.append(
       [

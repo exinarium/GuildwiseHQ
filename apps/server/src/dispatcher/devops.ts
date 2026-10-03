@@ -20,7 +20,10 @@ export interface DevopsDispatch {
  * DevOps engineer (capacity 1), only on a connected, reconciled workstation whose runtime is available. Returns the
  * shifts started; `shift.start` is sent after the dispatch committed.
  */
-export async function devopsPass(ctx: Ctx, skipAgent: (agentId: string) => boolean = () => false): Promise<DevopsDispatch[]> {
+export async function devopsPass(
+  ctx: Ctx,
+  skipAgent: (agentId: string) => boolean = () => false,
+): Promise<DevopsDispatch[]> {
   const onlineSince = new Date(ctx.clock.now().getTime() - ONLINE_WINDOW_MS);
   const queued = await rows(
     ctx.pool,
@@ -78,8 +81,7 @@ export async function devopsPass(ctx: Ctx, skipAgent: (agentId: string) => boole
     busy.add(r.devops_agent_id);
     started.push({ requestId: r.id, shiftId, workstationId: r.workstation_id, agentId: r.devops_agent_id });
     const payload = await buildDevopsShiftStart(ctx, r.id, shiftId);
-    if (payload)
-      ctx.services.runners.send(r.workstation_id, 'shift.start', payload, ctx.clock.now());
+    if (payload) ctx.services.runners.send(r.workstation_id, 'shift.start', payload, ctx.clock.now());
   }
   return started;
 }

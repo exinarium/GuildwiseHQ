@@ -134,7 +134,9 @@ export function registerDecisionHook(ctx: Ctx): () => void {
         question: item.body?.trim() ? item.body : item.title,
         answer: p.answer,
         answerOptionLabel: option?.label,
-        askedBy: item.agent_name ? `${item.agent_name}${item.asked_by_role ? ` (${item.asked_by_role})` : ''}` : 'an agent',
+        askedBy: item.agent_name
+          ? `${item.agent_name}${item.asked_by_role ? ` (${item.asked_by_role})` : ''}`
+          : 'an agent',
         cardRef: item.card_ref ?? undefined,
         ledgerEntryId: p.ledgerEntryId,
         answeredAt: e.createdAt,

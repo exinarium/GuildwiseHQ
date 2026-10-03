@@ -86,6 +86,8 @@ export function renderDevopsPrompt(devops: DevopsShift): string {
     out.push(devops.history.map((m) => `- ${m.authorName} (${m.kind}): ${m.body}`).join('\n'));
   }
   out.push('## Your job in this shift');
-  out.push('Do the request within your granted access, then report with `aom devops-done` or `aom devops-approval`.');
+  out.push(
+    'Do the request within your granted access, then report with `aom devops-done` or `aom devops-approval`.',
+  );
   return `${out.join('\n\n')}\n`;
 }

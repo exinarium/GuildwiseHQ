@@ -26,7 +26,15 @@ describe('M3 events', () => {
     ],
     [
       'VaultUpdated',
-      { vaultId: U.a, orgId: U.b, projectId: U.c, kind: 'project', name: 'P', remoteUrl: '/x', syncIntervalSec: 5 },
+      {
+        vaultId: U.a,
+        orgId: U.b,
+        projectId: U.c,
+        kind: 'project',
+        name: 'P',
+        remoteUrl: '/x',
+        syncIntervalSec: 5,
+      },
     ],
     ['VaultSyncConflict', { vaultId: U.a, workstationId: U.b, files: ['a.md'], deskItemId: U.c }],
     ['VaultConflictResolved', { vaultId: U.a, workstationId: U.b, resolvedBy: U.c }],
@@ -42,7 +50,10 @@ describe('M3 events', () => {
       },
     ],
     ['DevOpsShiftDispatched', { requestId: U.a, shiftId: U.b, agentId: U.c, workstationId: U.d }],
-    ['EnvironmentChanged', { changeId: U.a, workstationId: U.b, summary: 'installed x', commands: ['apt x'] }],
+    [
+      'EnvironmentChanged',
+      { changeId: U.a, workstationId: U.b, summary: 'installed x', commands: ['apt x'] },
+    ],
     ['DevOpsApprovalNeeded', { requestId: U.a, deskItemId: U.b, action: 'install docker', reason: 'r' }],
     ['DevOpsApprovalResolved', { requestId: U.a, deskItemId: U.b, resolution: 'approved', resolvedBy: U.c }],
     ['DevOpsRequestRequeued', { requestId: U.a, reason: 'runner rejected' }],
@@ -72,7 +83,15 @@ describe('M3 events', () => {
     const bad = (over: Record<string, unknown>) =>
       DomainEventSchema.safeParse({
         type: 'VaultRegistered',
-        payload: { vaultId: U.a, orgId: U.b, kind: 'work', name: 'W', remoteUrl: '/x', syncIntervalSec: 5, ...over },
+        payload: {
+          vaultId: U.a,
+          orgId: U.b,
+          kind: 'work',
+          name: 'W',
+          remoteUrl: '/x',
+          syncIntervalSec: 5,
+          ...over,
+        },
       }).success;
     expect(bad({})).toBe(true);
     expect(bad({ syncIntervalSec: 0 })).toBe(false);
@@ -138,7 +157,9 @@ describe('vault helpers', () => {
   });
   it('derives the project folder', () => {
     expect(projectVaultFolder({ key: 'WEB' })).toBe('projects/web');
-    expect(projectVaultFolder({ key: 'WEB', vaultFolder: 'projects/storefront' })).toBe('projects/storefront');
+    expect(projectVaultFolder({ key: 'WEB', vaultFolder: 'projects/storefront' })).toBe(
+      'projects/storefront',
+    );
     expect(projectVaultFolder({ key: 'WEB', vaultFolder: 'storefront/' })).toBe('projects/storefront');
   });
   it('renders an ADR-style decision file', () => {
@@ -209,7 +230,10 @@ describe('DevOps prompts and instructions', () => {
   it('card instructions render PROJECT.md only when present', () => {
     const b = buildBrief();
     expect(renderInstructions(b)).not.toContain('PROJECT.md');
-    const md = renderInstructions({ ...b, project: { ...b.project, projectDoc: 'Use pnpm. Never force push.' } });
+    const md = renderInstructions({
+      ...b,
+      project: { ...b.project, projectDoc: 'Use pnpm. Never force push.' },
+    });
     expect(md).toContain('## PROJECT.md (from the knowledge vault)');
     expect(md).toContain('Use pnpm. Never force push.');
   });

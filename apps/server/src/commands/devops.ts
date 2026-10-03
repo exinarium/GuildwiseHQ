@@ -3,13 +3,13 @@ import {
   type CreateDevOpsRequest,
   DEVOPS_OUTCOME_APPROVAL,
   DEVOPS_OUTCOME_DONE,
-  DevopsApprovalDataSchema,
-  DevopsDoneDataSchema,
   type DevOpsAccess,
   DevOpsAccessSchema,
   type DevOpsRequestDetail,
   type DevOpsRequestDto,
   type DevOpsRequester,
+  DevopsApprovalDataSchema,
+  DevopsDoneDataSchema,
   type PatchDevOpsAccessRequest,
   type RunnerToServerOf,
   streamId,
@@ -18,9 +18,9 @@ import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard } from '../authz/scope.ts';
 import { loadRole } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
-import { getDeskPort } from '../desk-port.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
+import { getDeskPort } from '../desk-port.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
@@ -47,7 +47,9 @@ const DEVOPS_NAMES = [
 /** First unused DevOps name in the org (retired agents keep their names; numbered variants when the list runs out). */
 async function devopsName(db: Queryable, orgId: string): Promise<string> {
   const used = new Set(
-    (await rows<{ n: string }>(db, 'SELECT lower(name) AS n FROM agents WHERE org_id=$1', [orgId])).map((r) => r.n),
+    (await rows<{ n: string }>(db, 'SELECT lower(name) AS n FROM agents WHERE org_id=$1', [orgId])).map(
+      (r) => r.n,
+    ),
   );
   for (let round = 1; ; round++) {
     for (const base of DEVOPS_NAMES) {
@@ -120,7 +122,10 @@ export async function alignDevopsRuntime(
       streamId: streamId.agent(a.id),
       event: {
         type: 'AgentChanged',
-        payload: { agentId: a.id, changes: { runtime: next.id, ...(next.id === 'mock' ? { model: 'mock' } : {}) } },
+        payload: {
+          agentId: a.id,
+          changes: { runtime: next.id, ...(next.id === 'mock' ? { model: 'mock' } : {}) },
+        },
       },
       actor: SYSTEM_ACTOR,
       scope: orgScope(a.org_id),
@@ -243,7 +248,13 @@ const REQUEST_SQL = `SELECT r.*, w.name AS workstation_name, a.name AS agent_nam
    JOIN agents a ON a.id = r.devops_agent_id LEFT JOIN cards c ON c.id = r.card_id`;
 
 function toRequestDto(r: Row): DevOpsRequestDto {
-  const ap = r.approval as { deskItemId: string; action: string; reason: string; commands: string[]; resolution: 'approved' | 'rejected' | null } | null;
+  const ap = r.approval as {
+    deskItemId: string;
+    action: string;
+    reason: string;
+    commands: string[];
+    resolution: 'approved' | 'rejected' | null;
+  } | null;
   return {
     id: r.id,
     workstationId: r.workstation_id,
@@ -427,7 +438,10 @@ export async function applyDevopsReport(
     };
   }
   if (req.status !== 'running') {
-    return { accepted: false, error: 'already reported: exactly one terminal report is accepted per shift (409)' };
+    return {
+      accepted: false,
+      error: 'already reported: exactly one terminal report is accepted per shift (409)',
+    };
   }
 
   if (report.outcomeId === DEVOPS_OUTCOME_DONE) {
@@ -460,7 +474,10 @@ export async function applyDevopsReport(
         ),
         {
           streamId: streamId.thread(req.id),
-          event: { type: 'DevOpsRequestCompleted', payload: { requestId: req.id, status: 'done', summary: data.data.summary } },
+          event: {
+            type: 'DevOpsRequestCompleted',
+            payload: { requestId: req.id, status: 'done', summary: data.data.summary },
+          },
           actor: agentActor(shift.agent_id),
           scope,
         },
@@ -472,7 +489,8 @@ export async function applyDevopsReport(
 
   if (report.outcomeId === DEVOPS_OUTCOME_APPROVAL) {
     const data = DevopsApprovalDataSchema.safeParse(report.data);
-    if (!data.success) return { accepted: false, error: `invalid devops-approval data: ${data.error.message}` };
+    if (!data.success)
+      return { accepted: false, error: `invalid devops-approval data: ${data.error.message}` };
     const project = req.card_id
       ? await one<{ project_id: string }>(tx, 'SELECT project_id FROM cards WHERE id=$1', [req.card_id])
       : undefined;

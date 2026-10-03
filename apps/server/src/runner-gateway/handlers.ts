@@ -252,9 +252,13 @@ export class RunnerHandlers {
 
   private async stopIfClaimLost(conn: RunnerConn, shiftId: string): Promise<void> {
     const holder =
-      (await one(this.ctx.pool, 'SELECT 1 FROM cards WHERE claim_shift_id=$1 AND claim_id IS NOT NULL', [shiftId])) ??
+      (await one(this.ctx.pool, 'SELECT 1 FROM cards WHERE claim_shift_id=$1 AND claim_id IS NOT NULL', [
+        shiftId,
+      ])) ??
       // A DevOps shift has no card: it is held while its request is running.
-      (await one(this.ctx.pool, `SELECT 1 FROM devops_requests WHERE shift_id=$1 AND status='running'`, [shiftId]));
+      (await one(this.ctx.pool, `SELECT 1 FROM devops_requests WHERE shift_id=$1 AND status='running'`, [
+        shiftId,
+      ]));
     if (holder) return;
     const last = conn.stopSentAt.get(shiftId) ?? 0;
     const now = this.ctx.clock.now().getTime();
@@ -389,7 +393,14 @@ export class RunnerHandlers {
       }),
     );
     this.ctx.services.dispatcher.trigger();
-    return [true, { requestId: r.requestId, threadId: r.threadId, message: 'Request sent to the DevOps engineer. Continue your work; do not wait for it.' }];
+    return [
+      true,
+      {
+        requestId: r.requestId,
+        threadId: r.threadId,
+        message: 'Request sent to the DevOps engineer. Continue your work; do not wait for it.',
+      },
+    ];
   }
 
   // ---------------------------------------------------------------------------------------- rpc
@@ -404,7 +415,8 @@ export class RunnerHandlers {
         msg.shiftId,
         conn.workstationId,
       ]);
-      if (shift && msg.method === 'devops.request') return reply(...(await this.devopsRequest(conn, shift, msg.params)));
+      if (shift && msg.method === 'devops.request')
+        return reply(...(await this.devopsRequest(conn, shift, msg.params)));
       if (!shift?.card_id) return reply(false, undefined, 'unknown shift');
       switch (msg.method) {
         case 'card.get': {

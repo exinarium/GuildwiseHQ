@@ -34,7 +34,9 @@ export const sharingProjectors: Record<string, Projector> = {
   },
   ProjectMemberRemoved: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectMemberRemoved'>).payload;
-    const project = await one<{ org_id: string }>(tx, 'SELECT org_id FROM projects WHERE id=$1', [p.projectId]);
+    const project = await one<{ org_id: string }>(tx, 'SELECT org_id FROM projects WHERE id=$1', [
+      p.projectId,
+    ]);
     await exec(
       tx,
       `UPDATE project_members SET status='removed', removed_at=$3 WHERE project_id=$1 AND user_id=$2 AND role <> 'owner'`,

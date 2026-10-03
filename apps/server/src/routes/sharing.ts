@@ -67,11 +67,15 @@ export function sharingRoutes(ctx: Ctx) {
       },
     );
 
-    app.delete('/api/projects/:id/members/:userId', { schema: { params: MemberParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
-      const r = await removeMember(ctx, s.user, req.params.id, req.params.userId);
-      return { project: await getProjectDetail(ctx, s.user.id, req.params.id), ...r };
-    });
+    app.delete(
+      '/api/projects/:id/members/:userId',
+      { schema: { params: MemberParamsSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        const r = await removeMember(ctx, s.user, req.params.id, req.params.userId);
+        return { project: await getProjectDetail(ctx, s.user.id, req.params.id), ...r };
+      },
+    );
 
     app.post(
       '/api/agents/:id/rehome',

@@ -17,7 +17,9 @@ export const ProjectInvitationDtoSchema = z.object({
   invitedAt: IsoTime.nullable(),
 });
 export type ProjectInvitationDto = z.infer<typeof ProjectInvitationDtoSchema>;
-export const ProjectInvitationsResponseSchema = z.object({ invitations: z.array(ProjectInvitationDtoSchema) });
+export const ProjectInvitationsResponseSchema = z.object({
+  invitations: z.array(ProjectInvitationDtoSchema),
+});
 
 /** What removing a member hands to the owner (shown before confirming). */
 export const RemovalPreviewSchema = z.object({

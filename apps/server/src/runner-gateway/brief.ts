@@ -189,11 +189,15 @@ export async function buildDevopsShiftStart(
   const req = await one(ctx.pool, 'SELECT * FROM devops_requests WHERE id=$1', [requestId]);
   if (!req) return null;
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [req.devops_agent_id]);
-  const ws = await one(ctx.pool, 'SELECT id, name, devops_access FROM workstations WHERE id=$1', [req.workstation_id]);
+  const ws = await one(ctx.pool, 'SELECT id, name, devops_access FROM workstations WHERE id=$1', [
+    req.workstation_id,
+  ]);
   if (!agent || !ws) return null;
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
   if (!role) return null;
-  const card = req.card_id ? await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1', [req.card_id]) : undefined;
+  const card = req.card_id
+    ? await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1', [req.card_id])
+    : undefined;
   const history = await rows(
     ctx.pool,
     `SELECT m.kind, m.body, m.created_at, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
@@ -201,7 +205,13 @@ export async function buildDevopsShiftStart(
       WHERE m.thread_id=$1 ORDER BY m.created_at, m.event_seq LIMIT 30`,
     [req.thread_id],
   );
-  const ap = req.approval as { action: string; reason: string; commands: string[]; resolution: string | null; note?: string } | null;
+  const ap = req.approval as {
+    action: string;
+    reason: string;
+    commands: string[];
+    resolution: string | null;
+    note?: string;
+  } | null;
   const placeholder = { id: requestId, key: 'DEVOPS', name: 'DevOps', ref: 'DEVOPS' };
   const brief: ShiftBrief = {
     shift: {
@@ -261,11 +271,18 @@ export async function buildDevopsShiftStart(
       requestId,
       threadId: req.thread_id,
       summary: req.summary,
-      requestedBy: { kind: req.requested_by_kind, id: req.requested_by_id, name: req.requested_by_name ?? undefined },
+      requestedBy: {
+        kind: req.requested_by_kind,
+        id: req.requested_by_id,
+        name: req.requested_by_name ?? undefined,
+      },
       card: card ? { ref: card.ref, title: card.title } : undefined,
       workstationName: ws.name,
       access: DevOpsAccessSchema.parse(ws.devops_access ?? {}),
-      approval: ap?.resolution === 'approved' ? { action: ap.action, reason: ap.reason, commands: ap.commands ?? [], note: ap.note ?? undefined } : undefined,
+      approval:
+        ap?.resolution === 'approved'
+          ? { action: ap.action, reason: ap.reason, commands: ap.commands ?? [], note: ap.note ?? undefined }
+          : undefined,
       history: history.map((m) => ({
         authorName: m.user_name ?? m.agent_name ?? 'system',
         kind: m.kind,

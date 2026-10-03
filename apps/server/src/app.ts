@@ -15,6 +15,7 @@ import {
 import { checkContentType, checkOrigin } from './auth/origin-check.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
 import { type Clock, createClock } from './clock.ts';
+import { registerDecisionHook, writeDecisionFile } from './commands/decisions.ts';
 import type { Config } from './config.ts';
 import type { Ctx } from './context.ts';
 import { createPool } from './db/pool.ts';
@@ -26,7 +27,6 @@ import { Notifier } from './eventstore/notifier.ts';
 import { PgEventStore } from './eventstore/pg-event-store.ts';
 import { ConcurrencyError } from './eventstore/types.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
-import { registerDecisionHook, writeDecisionFile } from './commands/decisions.ts';
 import { buildProjectors } from './projections/index.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { agentRoutes } from './routes/agents.ts';
