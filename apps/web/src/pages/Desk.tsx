@@ -4,7 +4,9 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
 import { DigestRating } from '../components/DigestRating.tsx';
+import { EscalationTrail } from '../components/EscalationTrail.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
+import { MappingForm } from '../components/MappingForm.tsx';
 import {
   Avatar,
   Badge,
@@ -32,6 +34,7 @@ export function Desk() {
   const [chatOpen, setChatOpen] = useState(false);
   const [showLedger, setShowLedger] = useState(false);
   const { hash } = useLocation();
+  const nav = useNavigate();
 
   const items = useMemo(() => sortDeskItems(open.data?.items ?? []), [open.data]);
 
@@ -57,6 +60,9 @@ export function Desk() {
           <>
             <Button onClick={() => setShowLedger((v) => !v)} aria-expanded={showLedger}>
               Add to ledger
+            </Button>
+            <Button data-testid="intake-button" onClick={() => nav('/intake')}>
+              Intake
             </Button>
             <Button variant="primary" onClick={() => setChatOpen(true)}>
               Chat
@@ -98,9 +104,12 @@ export function Desk() {
                   <p className="text-sm font-medium">{i.title}</p>
                   <p className="text-xs text-zinc-500">
                     {i.status}
-                    {i.answeredByName ? ` by ${i.answeredByName}` : ''} · {formatDateTime(i.answeredAt)}
+                    {i.answeredByName ? ` by ${i.answeredByName}` : ''}
+                    {i.answeredByAgentName ? ` by ${i.answeredByAgentName} (without reaching the desk)` : ''}{' '}
+                    · {formatDateTime(i.answeredAt)}
                   </p>
                   {i.answer && <p className="mt-1 text-sm whitespace-pre-wrap">{i.answer}</p>}
+                  <EscalationTrail item={i} />
                 </Panel>
               </li>
             ))}
@@ -134,7 +143,9 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
             <span data-testid="urgent-badge">Urgent</span>
           </Badge>
         )}
-        <Badge tone="violet">{item.subkind ?? item.kind}</Badge>
+        <Badge tone="violet">
+          {item.subkind === 'unmapped_ticket' ? 'Unmapped ticket' : (item.subkind ?? item.kind)}
+        </Badge>
         <Badge tone={item.blocking ? 'red' : 'neutral'}>{item.blocking ? 'Blocking' : 'Non-blocking'}</Badge>
         <span data-testid="affected-count">
           Affects {item.affectedCount} {item.affectedCount === 1 ? 'card' : 'cards'}
@@ -184,6 +195,8 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
         </div>
       )}
 
+      <EscalationTrail item={item} />
+
       {item.status !== 'open' ? (
         <p className="mt-2 text-sm text-zinc-500">
           {item.status}
@@ -194,6 +207,8 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
           Read only:{' '}
           {item.card ? 'only the card owner can answer this.' : 'only the project owner can answer.'}
         </p>
+      ) : item.subkind === 'unmapped_ticket' ? (
+        <MappingForm item={item} />
       ) : item.kind === 'question' || (item.kind === 'escalation' && item.subkind !== 'vault_conflict') ? (
         <AnswerForm item={item} />
       ) : (

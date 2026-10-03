@@ -35,6 +35,11 @@ export function FinalizePanel({
       <div data-testid="finalize-panel" data-state={state}>
         <h2 className="mb-2 text-sm font-semibold">Finalize</h2>
         {finalize.available && canAct && (
+          <p className="mb-2 text-xs text-zinc-500" data-testid="finalize-override-note">
+            A BA, if you have one, finalizes cards waiting here by itself; this is your override.
+          </p>
+        )}
+        {finalize.available && canAct && (
           <div className="flex flex-col gap-2">
             <Select
               label="Completion action"

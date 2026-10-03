@@ -12,6 +12,7 @@ import { CardNew } from './pages/CardNew.tsx';
 import { Chat } from './pages/Chat.tsx';
 import { Desk } from './pages/Desk.tsx';
 import { FeedProject } from './pages/FeedProject.tsx';
+import { IntakeNew, IntakeView } from './pages/Intake.tsx';
 import { Ledger } from './pages/Ledger.tsx';
 import { Login } from './pages/Login.tsx';
 import { ProjectSettings } from './pages/ProjectSettings.tsx';
@@ -49,6 +50,8 @@ export const routes = [
       { path: '/desk', element: <Desk /> },
       { path: '/ledger', element: <Ledger /> },
       { path: '/chat/:threadId', element: <Chat /> },
+      { path: '/intake', element: <IntakeNew /> },
+      { path: '/intake/:id', element: <IntakeView /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

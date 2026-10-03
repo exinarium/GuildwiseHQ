@@ -11,15 +11,29 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
   const kind = event.streamId.split('-')[0];
   switch (kind) {
     case 'card':
-      return [event.projectId ? ['board', event.projectId] : ['board'], ['card'], ['agents'], ['digest']];
+      return [
+        event.projectId ? ['board', event.projectId] : ['board'],
+        ['card'],
+        ['agents'],
+        ['digest'],
+        ['intakes'],
+      ];
+    case 'intake':
+      return [['intakes'], ['desk'], ['card'], ['board']];
     case 'schedule':
       return [['schedules'], ['board']];
     case 'thread':
       // Card threads show on the card; chat threads have their own message list and the chat list.
-      return [['card'], ['devops'], ['thread', event.streamId.slice('thread-'.length)], ['chats']];
+      return [
+        ['card'],
+        ['devops'],
+        ['thread', event.streamId.slice('thread-'.length)],
+        ['chats'],
+        ['intakes'],
+      ];
     case 'desk':
       // Questions block and unblock cards; answers add ledger entries.
-      return [['desk'], ['board'], ['card'], ['ledger'], ['devops'], ['vaults']];
+      return [['desk'], ['board'], ['card'], ['ledger'], ['devops'], ['vaults'], ['intakes']];
     case 'ledger':
       return [['ledger'], ['desk'], ['card']];
     case 'vault':

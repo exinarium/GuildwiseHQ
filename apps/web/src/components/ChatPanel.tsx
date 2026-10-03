@@ -24,8 +24,18 @@ export function chatErrorText(reason: string): string {
 }
 
 /** One conversation: saved history, streamed reply, offline banner, send/stop. */
-export function ChatPanel({ threadId }: { threadId: string }) {
+export function ChatPanel({
+  threadId,
+  agentName,
+  online,
+}: {
+  threadId: string;
+  /** For conversations that are not in the chat list (the BA's intake chat). */
+  agentName?: string;
+  online?: boolean;
+}) {
   const chat = useChat(threadId).data;
+  const name = agentName ?? chat?.agentName;
   const messages = useThreadMessages(threadId);
   const qc = useQueryClient();
   const [draft, setDraft] = useState('');
@@ -68,7 +78,7 @@ export function ChatPanel({ threadId }: { threadId: string }) {
     if (log.current) log.current.scrollTop = log.current.scrollHeight;
   }, [list.length, streaming, pending]);
 
-  const offline = chat ? !chat.workstationOnline : false;
+  const offline = online !== undefined ? !online : chat ? !chat.workstationOnline : false;
   const busy = streaming !== null;
 
   const send = (e: FormEvent) => {
@@ -97,7 +107,7 @@ export function ChatPanel({ threadId }: { threadId: string }) {
           data-testid="chat-offline"
           className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
         >
-          {chat?.agentName} is offline: its workstation is not connected. Messages are not queued.
+          {name} is offline: its workstation is not connected. Messages are not queued.
         </p>
       )}
       <div
@@ -107,7 +117,7 @@ export function ChatPanel({ threadId }: { threadId: string }) {
         className="min-h-40 flex-1 overflow-y-auto rounded-md border border-zinc-200 p-2 dark:border-zinc-800"
       >
         {list.length === 0 && !showPending && streaming === null && (
-          <p className="text-sm text-zinc-500">Say hello to {chat?.agentName ?? 'the agent'}.</p>
+          <p className="text-sm text-zinc-500">Say hello to {name ?? 'the agent'}.</p>
         )}
         <ul className="flex flex-col gap-2">
           {list.map((m) => (

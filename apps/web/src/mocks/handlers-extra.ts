@@ -26,6 +26,10 @@ export const extraHandlers = [
   http.get(`${A}/chats`, empty({ chats: [] })),
   http.post(`${A}/chats`, unavailable),
   http.get(`${A}/threads/:id/messages`, notFound),
+  // M7 intake
+  http.get(`${A}/intakes`, empty({ intakes: [] })),
+  http.get(`${A}/intakes/:id`, notFound),
+  http.post(`${A}/intakes`, unavailable),
   // M3 devops and vaults
   http.get(`${A}/devops/requests`, empty({ requests: [] })),
   http.get(`${A}/devops/requests/:id`, notFound),
