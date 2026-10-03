@@ -23,5 +23,7 @@ export default defineConfig({
     { name: 'devops', testMatch: 'devops.spec.ts', dependencies: ['chat'] },
     { name: 'sharing', testMatch: 'sharing.spec.ts', dependencies: ['devops'] },
     { name: 'test-loop', testMatch: 'test-loop.spec.ts', dependencies: ['sharing'] },
+    { name: 'feeds', testMatch: 'feeds.spec.ts', dependencies: ['sharing'] },
+    { name: 'research', testMatch: 'research.spec.ts', dependencies: ['feeds'] },
   ],
 });

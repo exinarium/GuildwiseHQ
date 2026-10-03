@@ -84,6 +84,8 @@ export function CardNewForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [note, setNote] = useState<{ id: string; ref: string; missing: string[] } | null>(null);
   const list = formFieldList(workflow);
+  // Repository and completion action belong to code work; research and feed cards live in the vault.
+  const codeCard = workflow.fieldSet !== 'research' && workflow.fieldSet !== 'feed';
   const setField = (k: string, val: string) => setV((s) => ({ ...s, fields: { ...s.fields, [k]: val } }));
 
   const submit = (specify: boolean) => {
@@ -163,32 +165,36 @@ export function CardNewForm({
           maxLength={300}
         />
         <div className="grid gap-3 sm:grid-cols-2">
-          <Select
-            label="Repository"
-            value={v.repoId}
-            onChange={(e) => setV({ ...v, repoId: e.target.value })}
-            error={errors.repoId}
-          >
-            <option value="">None</option>
-            {repos.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </Select>
-          <Select
-            label="Completion action"
-            value={v.completionAction}
-            onChange={(e) => setV({ ...v, completionAction: e.target.value })}
-            error={errors.completionAction}
-          >
-            <option value="">None</option>
-            {CompletionAction.options.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </Select>
+          {codeCard && (
+            <>
+              <Select
+                label="Repository"
+                value={v.repoId}
+                onChange={(e) => setV({ ...v, repoId: e.target.value })}
+                error={errors.repoId}
+              >
+                <option value="">None</option>
+                {repos.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                label="Completion action"
+                value={v.completionAction}
+                onChange={(e) => setV({ ...v, completionAction: e.target.value })}
+                error={errors.completionAction}
+              >
+                <option value="">None</option>
+                {CompletionAction.options.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </Select>
+            </>
+          )}
           <TextInput
             label="Priority (1-9)"
             inputMode="numeric"
@@ -196,14 +202,16 @@ export function CardNewForm({
             onChange={(e) => setV({ ...v, priority: e.target.value })}
             error={errors.priority}
           />
-          <label className="flex items-center gap-2 self-end pb-2 text-sm">
-            <input
-              type="checkbox"
-              checked={v.docsNeeded}
-              onChange={(e) => setV({ ...v, docsNeeded: e.target.checked })}
-            />
-            Docs needed
-          </label>
+          {codeCard && (
+            <label className="flex items-center gap-2 self-end pb-2 text-sm">
+              <input
+                type="checkbox"
+                checked={v.docsNeeded}
+                onChange={(e) => setV({ ...v, docsNeeded: e.target.checked })}
+              />
+              Docs needed
+            </label>
+          )}
         </div>
         {list.map(([k, meta]) => {
           const common = {

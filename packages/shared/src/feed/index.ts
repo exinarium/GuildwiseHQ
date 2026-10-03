@@ -1,0 +1,188 @@
+import { z } from 'zod';
+
+/**
+ * Feed contract (M5, docs/SPEC.md "Research and feeds"): what scouts and curators report, how items are
+ * de-duplicated, and how the running list and `taste.md` are written. Pure and deterministic; used by the server,
+ * the runner and the mock agent.
+ */
+
+const parsableDate = (s: string) => !Number.isNaN(Date.parse(s));
+
+/** One item a scout found or a curator logs: a real page that was opened during the run. */
+export const FeedItemInputSchema = z.object({
+  /** Item kind, e.g. `article` or `video`. `maxPerKind` on the card is keyed by it. */
+  kind: z.string().min(1).max(40),
+  url: z.url().max(2000),
+  title: z.string().min(1).max(300),
+  source: z.string().min(1).max(200),
+  /** A date or ISO timestamp the page was published. */
+  publishedAt: z.string().refine(parsableDate, { message: 'publishedAt must be a date' }),
+  /** Written from the page itself. */
+  summary: z.string().min(1).max(2000),
+});
+export type FeedItemInput = z.infer<typeof FeedItemInputSchema>;
+
+/** `data` of the scout's `handoff` outcome (data kind `candidates`). */
+export const CandidatesDataSchema = z.object({ items: z.array(FeedItemInputSchema).max(200).default([]) });
+export type CandidatesData = z.infer<typeof CandidatesDataSchema>;
+
+/** A curator's proposal for a new taste rule, from a pattern in the verdicts. */
+export const TasteRuleProposalSchema = z.object({
+  rule: z.string().min(5).max(500),
+  /** URLs of rated items that show the pattern. */
+  evidenceUrls: z.array(z.string()).max(50).default([]),
+});
+export type TasteRuleProposal = z.infer<typeof TasteRuleProposalSchema>;
+
+/** `data` of the curator's `digest` outcome (data kind `digest`). An empty list means nothing qualified. */
+export const DigestDataSchema = z.object({
+  items: z.array(FeedItemInputSchema).max(100).default([]),
+  tasteRuleProposal: TasteRuleProposalSchema.optional(),
+});
+export type DigestData = z.infer<typeof DigestDataSchema>;
+
+/** A digest item as stored (ids and the normalized URL are minted by the server). */
+export const DigestItemSchema = FeedItemInputSchema.extend({
+  itemId: z.uuid(),
+  urlNormalized: z.string().min(1),
+  publishedAt: z.iso.datetime(),
+});
+export type DigestItem = z.infer<typeof DigestItemSchema>;
+
+export const FeedVerdictSchema = z.enum(['useful', 'irrelevant', 'boring']);
+export type FeedVerdict = z.infer<typeof FeedVerdictSchema>;
+
+export const FEED_LIST_FILE = 'feed.md';
+export const TASTE_FILE = 'taste.md';
+
+const TRACKING_PARAM = /^(utm_.*|fbclid|gclid|mc_cid|mc_eid|igshid|ref|ref_src|si|feature)$/i;
+
+/** Canonical form of a URL for the seen-list: no scheme, `www.`, fragment, tracking params, default port or trailing slash. */
+export function normalizeUrl(raw: string): string {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return raw.trim().toLowerCase();
+  }
+  const host = u.hostname.toLowerCase().replace(/^www\./, '');
+  const port = u.port && u.port !== '80' && u.port !== '443' ? `:${u.port}` : '';
+  const path = u.pathname.replace(/\/+$/, '');
+  const params = [...u.searchParams.entries()]
+    .filter(([k]) => !TRACKING_PARAM.test(k))
+    .sort(([a, av], [b, bv]) => (a === b ? av.localeCompare(bv) : a.localeCompare(b)));
+  const query = params.length ? `?${params.map(([k, v]) => `${k}=${v}`).join('&')}` : '';
+  return `${host}${port}${path}${query}`;
+}
+
+const STOP = new Set([
+  'the',
+  'a',
+  'an',
+  'of',
+  'and',
+  'to',
+  'in',
+  'on',
+  'for',
+  'is',
+  'at',
+  'with',
+  'by',
+  'new',
+]);
+
+/** Words of a title that identify the story (lowercase, no punctuation, no filler words). */
+export function titleTokens(title: string): string[] {
+  return title
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')
+    .filter((w) => (w.length > 1 || /\d/.test(w)) && !STOP.has(w));
+}
+
+/**
+ * The same story from another source: identical titles, or titles that share at least 80 percent of their words
+ * (Jaccard, with at least three words in common so short titles cannot collide by accident).
+ */
+export function isSameStory(a: string, b: string): boolean {
+  const x = new Set(titleTokens(a));
+  const y = new Set(titleTokens(b));
+  if (x.size === 0 || y.size === 0) return false;
+  const shared = [...x].filter((w) => y.has(w)).length;
+  if (shared === x.size && shared === y.size) return true;
+  const union = x.size + y.size - shared;
+  return shared >= 3 && shared / union >= 0.8;
+}
+
+/** Picks at most `max[kind]` items per kind in the order given (the agent's best first); kinds not listed are dropped. */
+export function applyMaxPerKind<T extends { kind: string }>(
+  items: readonly T[],
+  max: Record<string, number>,
+): { kept: T[]; dropped: T[] } {
+  const used = new Map<string, number>();
+  const kept: T[] = [];
+  const dropped: T[] = [];
+  for (const item of items) {
+    const limit = max[item.kind] ?? 0;
+    const n = used.get(item.kind) ?? 0;
+    if (n < limit) {
+      used.set(item.kind, n + 1);
+      kept.push(item);
+    } else dropped.push(item);
+  }
+  return { kept, dropped };
+}
+
+export const FEED_LIST_HEADER = '# Feed\n\nRunning list, oldest first. Entries are only ever appended.\n\n';
+
+/** One line per item, appended to `projects/<name>/feed.md` (never rewritten; oldest first, newest last). */
+export function renderFeedEntries(
+  items: ReadonlyArray<Pick<DigestItem, 'kind' | 'url' | 'title' | 'source' | 'publishedAt' | 'summary'>>,
+  loggedAt: Date,
+): string {
+  const logged = loggedAt.toISOString().slice(0, 10);
+  return `${items
+    .map(
+      (i) =>
+        `- ${logged} [${i.title.replace(/[[\]]/g, '')}](${i.url}) (${i.kind}, ${i.source}, published ${i.publishedAt.slice(0, 10)}): ${i.summary.replace(/\s+/g, ' ').trim()}`,
+    )
+    .join('\n')}\n`;
+}
+
+export const TASTE_HEADER =
+  "# Taste\n\nRules and examples from the manager's ratings, one per line. Curators read this before filtering; edit or delete lines freely.\n\n";
+
+const VERDICT_RULE: Record<FeedVerdict, string> = {
+  useful: 'Prefer',
+  irrelevant: 'Skip',
+  boring: 'Deprioritise',
+};
+
+export interface TasteEntryInput {
+  verdict: FeedVerdict;
+  kind: string;
+  title: string;
+  source: string;
+  url: string;
+  reason?: string | null | undefined;
+}
+
+/** An explicit, readable rule plus the example it came from (never a score). */
+export function renderTasteEntry(e: TasteEntryInput): string {
+  const why = e.reason?.trim() ? ` Reason: ${e.reason.replace(/\s+/g, ' ').trim()}.` : '';
+  return `- ${VERDICT_RULE[e.verdict]} ${e.kind}s like "${e.title.replace(/"/g, "'")}" from ${e.source} (rated ${e.verdict}).${why} Example: ${e.url}\n`;
+}
+
+/** A rule the manager approved after a curator proposed it. */
+export function renderTasteRule(rule: string): string {
+  return `- Rule: ${rule.replace(/\s+/g, ' ').trim()}\n`;
+}
+
+/** Titles the taste file says to skip (`Skip ... like "<title>"`), for agents that apply the rules mechanically. */
+export function tasteSkipTitles(taste: string): string[] {
+  const out: string[] = [];
+  for (const m of taste.matchAll(/^- Skip \S+ like "([^"]+)"/gm)) out.push(m[1] as string);
+  return out;
+}

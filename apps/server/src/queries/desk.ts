@@ -2,10 +2,12 @@ import {
   canAnswerCardDeskItem,
   type DeskItemDto,
   type DeskListResponse,
+  type DigestItemDto,
   isProjectOwner,
   type ProjectRole,
 } from '@aom/shared';
 import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
+import { digestItemsForDesk } from './digests.ts';
 
 const SELECT = `
 SELECT d.*, c.ref AS card_ref, c.title AS card_title, c.stage AS card_stage, c.status AS card_status,
@@ -23,6 +25,8 @@ export const DESK_VISIBLE = `(d.project_id IN (SELECT project_id FROM project_me
 
 /** May `userId` answer this item? (docs/ARCHITECTURE.md section 17.2) */
 export function canAnswerItem(r: Row, userId: string, role: ProjectRole): boolean {
+  // Ratings: any active member of the project (the digest belongs to the whole project).
+  if (r.kind === 'rating') return role !== null;
   if (r.card_id) {
     return canAnswerCardDeskItem({
       userId,
@@ -99,6 +103,9 @@ export function toDeskDto(
   };
 }
 
+const withDigest = (dto: DeskItemDto, digests: Map<string, DigestItemDto[]>): DeskItemDto =>
+  dto.kind === 'rating' ? { ...dto, digestItems: digests.get(dto.id) ?? [] } : dto;
+
 async function rolesOf(db: Queryable, userId: string): Promise<Map<string, ProjectRole>> {
   const list = await rows<{ project_id: string; role: 'owner' | 'manager' }>(
     db,
@@ -139,7 +146,11 @@ export async function listDesk(
   const all = [...open, ...closed];
   const dedup = await dedupEntriesFor(db, [...new Set(all.flatMap((r) => r.dedup_ledger_ids as string[]))]);
   const roles = await rolesOf(db, userId);
-  const items = all.map((r) => toDeskDto(r, userId, roles, dedup));
+  const digests = await digestItemsForDesk(
+    db,
+    all.filter((r) => r.kind === 'rating').map((r) => r.id),
+  );
+  const items = all.map((r) => withDigest(toDeskDto(r, userId, roles, dedup), digests));
   const openItems = items.filter((i) => i.status === 'open');
   return {
     items,
@@ -159,7 +170,8 @@ export async function getDeskDto(
   const r = (await rows(db, `${SELECT} WHERE d.id = $2 AND ${DESK_VISIBLE}`, [userId, id]))[0];
   if (!r) return undefined;
   const dedup = await dedupEntriesFor(db, r.dedup_ledger_ids);
-  return toDeskDto(r, userId, await rolesOf(db, userId), dedup);
+  const digests = await digestItemsForDesk(db, r.kind === 'rating' ? [r.id] : []);
+  return withDigest(toDeskDto(r, userId, await rolesOf(db, userId), dedup), digests);
 }
 
 /** Raw row (with card columns) for command-side authorization. */

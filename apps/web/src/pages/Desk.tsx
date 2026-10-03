@@ -3,6 +3,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
+import { DigestRating } from '../components/DigestRating.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
 import {
   Avatar,
@@ -161,7 +162,10 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
         </p>
       )}
       <h2 className="mt-2 text-base font-semibold whitespace-pre-wrap">{item.title}</h2>
-      {item.body && <p className="mt-1 text-sm whitespace-pre-wrap">{item.body}</p>}
+      {item.body && item.kind !== 'rating' && <p className="mt-1 text-sm whitespace-pre-wrap">{item.body}</p>}
+      {item.kind === 'rating' && item.digestItems && (
+        <DigestRating items={item.digestItems} canRate={item.status === 'open' && item.canAnswer} />
+      )}
 
       {item.dedupEntries.length > 0 && (
         <div
@@ -283,15 +287,27 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
   const nav = useNavigate();
   const resolve = useResolveDeskItem();
   const dismiss = useDismissDeskItem();
+  // A curator's taste-rule proposal can be reworded before it is approved (the edited text is what taste.md gets).
+  const [rule, setRule] = useState(item.body);
+  const editable = item.kind === 'approval' && item.subkind === 'taste_rule';
+  const edited = editable && rule.trim() && rule.trim() !== item.body.trim() ? rule.trim() : undefined;
   return (
     <div className="mt-3 flex flex-col gap-2">
+      {editable && (
+        <TextArea label="Rule (editable)" value={rule} onChange={(e) => setRule(e.target.value)} />
+      )}
       <ErrorBox error={resolve.error ?? dismiss.error} />
       <div className="flex flex-wrap gap-2">
         {item.kind === 'approval' ? (
           <>
             <Button
               variant="primary"
-              onClick={() => resolve.mutate({ id: item.id, body: { resolution: 'approved' } })}
+              onClick={() =>
+                resolve.mutate({
+                  id: item.id,
+                  body: { resolution: 'approved', ...(edited ? { editedBody: edited } : {}) },
+                })
+              }
             >
               {item.subkind === 'large_merge' ? 'Approve merge' : 'Approve'}
             </Button>

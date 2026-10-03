@@ -17,6 +17,7 @@ import { BrowserGateway } from './browser-gateway/gateway.ts';
 import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
 import { registerDecisionHook } from './commands/decisions.ts';
+import { registerTasteHook } from './commands/taste.ts';
 import type { Config } from './config.ts';
 import type { Ctx } from './context.ts';
 import { createPool } from './db/pool.ts';
@@ -37,9 +38,12 @@ import { catalogueRoutes } from './routes/catalogue.ts';
 import { chatRoutes } from './routes/chats.ts';
 import { deskRoutes } from './routes/desk.ts';
 import { devopsRoutes } from './routes/devops.ts';
+import { digestRoutes } from './routes/digests.ts';
 import { invitationRoutes } from './routes/invitations.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
 import { projectRoutes } from './routes/projects.ts';
+import { researchRoutes } from './routes/research.ts';
+import { scheduleRoutes } from './routes/schedules.ts';
 import { sharingRoutes } from './routes/sharing.ts';
 import { shiftRoutes } from './routes/shifts.ts';
 import { testingRoutes } from './routes/testing.ts';
@@ -48,6 +52,7 @@ import { vaultRoutes } from './routes/vaults.ts';
 import { workstationRoutes } from './routes/workstations.ts';
 import { RunnerGateway } from './runner-gateway/gateway.ts';
 import { RunnerRegistry } from './runner-gateway/registry.ts';
+import { Scheduler } from './scheduler/scheduler.ts';
 
 export interface BuildOptions {
   /** Start dispatcher/reaper timers (production). Tests drive them explicitly. */
@@ -191,6 +196,9 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(devopsRoutes(ctx));
   await app.register(sharingRoutes(ctx));
   await app.register(testingRoutes(ctx));
+  await app.register(scheduleRoutes(ctx));
+  await app.register(digestRoutes(ctx));
+  await app.register(researchRoutes(ctx));
 
   // Gateways: runner WS (/api/runner/ws) and browser WS (/api/ws).
   const runners = new RunnerRegistry();
@@ -198,7 +206,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const browser = new BrowserGateway(ctx);
   const dispatcher = new Dispatcher(ctx);
   const reaper = new Reaper(ctx);
-  Object.assign(ctx.services, { runners, gateway, browser, dispatcher, reaper });
+  const scheduler = new Scheduler(ctx);
+  Object.assign(ctx.services, { runners, gateway, browser, dispatcher, reaper, scheduler });
   ctx.services.chat = new ChatRelay(ctx);
   await app.register(websocket, {
     options: {
@@ -219,6 +228,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
       if (typeof b.advanceMs === 'number') clock.advance(b.advanceMs);
       // Time-dependent housekeeping (lease expiry, accept timeout) runs immediately instead of on the next tick.
       await ctx.services.reaper.run();
+      await ctx.services.scheduler.run();
       ctx.services.dispatcher.trigger();
       return { now: clock.now().toISOString(), offsetMs: clock.offsetMs };
     });
@@ -231,14 +241,18 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   }
 
   const unhookDecisions = registerDecisionHook(ctx);
+  const unhookTaste = registerTasteHook(ctx);
   await notifier.start();
   if (opts.background) {
     dispatcher.start();
     reaper.start();
+    scheduler.start();
   }
 
   app.addHook('onClose', async () => {
     unhookDecisions();
+    unhookTaste();
+    await scheduler.stop();
     await dispatcher.stop();
     await reaper.stop();
     await gateway.stop();

@@ -164,7 +164,14 @@ export const cardEvents = [
   ),
   defineEvent(
     'StageCompleted',
-    z.object({ cardId: Id, fromStage: Stage, toStage: Stage, outcome: z.string() }),
+    z.object({
+      cardId: Id,
+      fromStage: Stage,
+      toStage: Stage,
+      outcome: z.string(),
+      /** The outcome sends the card back for rework (research fact-check failure): increments the rework round. */
+      rework: z.boolean().optional(),
+    }),
   ),
   defineEvent(
     'CardMovedByManager',

@@ -7,20 +7,25 @@ import {
   type IpcReportResponse,
   type IpcRpcRequest,
   type IpcRpcResponse,
+  isPublishRequest,
   isTerminalReport,
   type LedgerMatch,
   outcomeDataSchema,
+  type PublishRequest,
   type RepoReport,
   type ServerToRunnerOf,
+  type ShiftBrief,
   type ShiftReport,
   ShiftReportSchema,
   type Usage,
   uuidv7,
+  type VaultWriteCommand,
 } from '@aom/shared';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
 import { cardPayload, shiftTexts } from '../devops/requests.ts';
+import { checkFeedItemsFetched, FetchedUrls } from '../feeds/validation.ts';
 import { computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git } from '../git/git.ts';
 import {
@@ -33,6 +38,7 @@ import {
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { preparePublication } from '../research/publish.ts';
 import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
 import { readVaultContext, withVaultContext } from '../vaults/context.ts';
@@ -60,6 +66,10 @@ export interface SupervisorDeps {
   findRepo: (remoteUrlNormalized: string) => Promise<RepoReport | undefined>;
   /** Forwards an rpc to the server (`rpc.request`). */
   rpc: (shiftId: string, method: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>;
+  /** Writes (and commits, pushes) a file into a vault clone: `aom publish` puts research notes there (M6). */
+  writeVault?: (
+    cmd: VaultWriteCommand,
+  ) => Promise<{ written: boolean; committed: boolean; pushed: boolean; paused: boolean }>;
   maxConcurrentShifts?: () => number;
   /** Test/dev override of `maxShiftMinutes` (milliseconds). */
   maxShiftMsOverride?: number;
@@ -96,6 +106,10 @@ interface ActiveShift {
   progress: Array<{ at: string; kind: 'text' | 'tool' | 'status'; text: string }>;
   env: Record<string, string>;
   graceTimer?: NodeJS.Timeout;
+  /** Pages the agent opened with its web tools (no fabrication: reported feed items must be among them). */
+  fetched: FetchedUrls;
+  /** The brief the agent sees: the server's brief plus what the runner read from the vault (PROJECT.md, taste.md). */
+  brief?: ShiftBrief;
   /** Resumed after a runner restart: the server already holds the claim and has seen accepted/started. */
   resumed?: boolean;
   startedSent?: boolean;
@@ -150,6 +164,7 @@ export class ShiftSupervisor {
       pendingReports: new Map(),
       guardViolations: [],
       progress: [],
+      fetched: new FetchedUrls(),
       env: {},
       ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
     };
@@ -326,7 +341,8 @@ export class ShiftSupervisor {
     // A card shift reads only the vault the server named for this card; a DevOps shift reads none.
     const vaultCtx =
       msg.kind === 'card' && msg.vault ? await readVaultContext(paths.vaults, msg.vault) : null;
-    const texts = shiftTexts(msg, withVaultContext(msg.brief, vaultCtx));
+    s.brief = withVaultContext(msg.brief, vaultCtx);
+    const texts = shiftTexts(msg, s.brief);
     await adapter.writeInstructions(sandbox, texts.instructions);
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
     s.env = {
@@ -451,8 +467,10 @@ export class ShiftSupervisor {
 
   private onRuntimeEvent(s: ActiveShift, ev: RuntimeEvent): void {
     if (ev.kind === 'progress') this.addProgress(s, 'text', ev.text);
-    else if (ev.kind === 'tool') this.addProgress(s, 'tool', `${ev.name}: ${ev.summary}`);
-    else if (ev.kind === 'final') s.finalText = ev.text;
+    else if (ev.kind === 'tool') {
+      s.fetched.record(ev.name, ev.summary);
+      this.addProgress(s, 'tool', `${ev.name}: ${ev.summary}`);
+    } else if (ev.kind === 'final') s.finalText = ev.text;
   }
 
   private addProgress(s: ActiveShift, kind: 'text' | 'tool' | 'status', text: string): void {
@@ -469,10 +487,59 @@ export class ShiftSupervisor {
     return {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
       rpc: async (req: IpcRpcRequest) => {
-        if (req.method === 'card.get') return { ok: true, result: cardPayload(s.msg) };
+        if (req.method === 'card.get')
+          return { ok: true, result: cardPayload({ ...s.msg, brief: s.brief ?? s.msg.brief }) };
         return this.deps.rpc(s.msg.shiftId, req.method, req.params);
       },
     };
+  }
+
+  /** `aom publish`: checks the note (citations, opened sources, path), writes it into the card's vault and commits it. */
+  private async publishNote(
+    s: ActiveShift,
+    request: PublishRequest,
+  ): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; error: string }> {
+    const { msg } = s;
+    if (!msg.vault)
+      return {
+        ok: false,
+        error:
+          'there is no knowledge vault for this project (register the work or personal vault in Settings, Vaults), so the note cannot be published',
+      };
+    if (!this.deps.writeVault) return { ok: false, error: 'this runner cannot write into a vault' };
+    const sub = msg.brief.card.fields.subCategory;
+    const prepared = preparePublication({
+      request,
+      folder: msg.vault.folder,
+      card: {
+        ref: msg.brief.card.ref,
+        ...(typeof sub === 'string' && sub.trim() ? { subCategory: sub.trim() } : {}),
+      },
+      fetched: s.fetched,
+      at: s.startedAt,
+    });
+    if (!prepared.ok) return prepared;
+    try {
+      const w = await this.deps.writeVault({
+        vaultId: msg.vault.vaultId,
+        path: prepared.path,
+        mode: 'create',
+        content: prepared.content,
+        commitMessage: `aom: research ${msg.brief.card.ref} ${prepared.publication.title}`.slice(0, 120),
+        push: true,
+      });
+      this.addProgress(
+        s,
+        'status',
+        `published ${prepared.path}${w.paused ? ' (vault sync paused: it is pushed once the conflict is resolved)' : ''}`,
+      );
+    } catch (err) {
+      return {
+        ok: false,
+        error: `could not write the note into the vault: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    return { ok: true, data: prepared.publication as unknown as Record<string, unknown> };
   }
 
   /** Validates, guards, attaches runner data, sends `shift.report` and waits for the server's verdict. */
@@ -507,6 +574,23 @@ export class ShiftSupervisor {
         );
       }
       toSend = { ...report, data: parsed.data as Record<string, unknown> };
+
+      // No fabrication: scouts and curators may only report pages that were opened during this shift (feeds, M5).
+      const unopened = checkFeedItemsFetched({
+        dataKind: outcome.data,
+        data: toSend.data,
+        fetched: s.fetched,
+        vouched: msg.brief.feed?.candidates.map((c) => c.url) ?? [],
+      });
+      if (unopened) return rejected(unopened);
+
+      // Research (M6): the checker's note is written into the vault by the runner; the server only hears the path
+      // and the citations.
+      if (outcome.data === 'publication' && isPublishRequest(toSend.data)) {
+        const published = await this.publishNote(s, toSend.data as unknown as PublishRequest);
+        if (!published.ok) return rejected(published.error);
+        toSend = { ...report, data: published.data };
+      }
 
       if (s.worktree && s.startSha) {
         const violations = await runGuard({

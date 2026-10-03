@@ -34,7 +34,7 @@ interface Parsed {
   positionals: string[];
 }
 
-const BOOLEAN_FLAGS = new Set(['json', 'non-blocking', 'force', 'help']);
+const BOOLEAN_FLAGS = new Set(['json', 'non-blocking', 'force', 'help', 'none']);
 
 export function parseArgs(argv: string[]): Parsed {
   const flags = new Map<string, string[]>();
@@ -196,7 +196,52 @@ const VERBS: Record<string, Verb> = {
       force: has(p, 'force'),
     });
   },
-  handoff: async (ctx, p) => report(ctx, outcome('handoff', textFlag(ctx, p, 'note', true) as string)),
+  handoff: async (ctx, p) => {
+    const dataFile = one(p, 'data-file');
+    const data = dataFile ? (JSON.parse(ctx.readFile(dataFile)) as Record<string, unknown>) : {};
+    return report(ctx, outcome('handoff', textFlag(ctx, p, 'note', true) as string, data));
+  },
+  publish: async (ctx, p) => {
+    const file = one(p, 'file');
+    if (!file)
+      throw new UsageError(
+        'usage: aom publish --file <note.md> [--title "<title>"] [--citations-file <citations.json>] [--path <vault path>] [--note "<text>"]',
+      );
+    const citationsFile = one(p, 'citations-file');
+    const parsed = citationsFile ? (JSON.parse(ctx.readFile(citationsFile)) as unknown) : [];
+    const citations = Array.isArray(parsed)
+      ? parsed
+      : ((parsed as { citations?: unknown[] } | null)?.citations ?? []);
+    const title = one(p, 'title');
+    const path = one(p, 'path');
+    const note =
+      textFlag(ctx, p, 'note', false)?.trim() || `Published${title ? `: ${title}` : ' the research note'}`;
+    return report(
+      ctx,
+      outcome('published', note, {
+        content: ctx.readFile(file),
+        citations,
+        ...(title ? { title } : {}),
+        ...(path ? { path } : {}),
+      }),
+    );
+  },
+  digest: async (ctx, p) => {
+    const file = one(p, 'file');
+    if (!file && !has(p, 'none'))
+      throw new UsageError(
+        'usage: aom digest --file <digest.json> [--note "<text>"]   (or --none when nothing qualifies)',
+      );
+    let data: Record<string, unknown> = { items: [] };
+    if (file) {
+      const parsed = JSON.parse(ctx.readFile(file)) as unknown;
+      data = Array.isArray(parsed) ? { items: parsed } : (parsed as Record<string, unknown>);
+    }
+    const count = Array.isArray(data.items) ? data.items.length : 0;
+    const note =
+      textFlag(ctx, p, 'note', false)?.trim() || (count ? `Digest of ${count} item(s)` : 'Nothing qualified');
+    return report(ctx, outcome('digest', note, data));
+  },
   review: async (ctx, p) => {
     const sub = p.positionals[0];
     const note = textFlag(ctx, p, 'note', true) as string;
@@ -288,7 +333,9 @@ export const USAGE = `usage: aom <verb> [options]
   ledger search "<query>" [--scope s]        search decisions and standing orders
   comment --note "<text>"                    post a note without ending the shift
   question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--non-blocking] [--force]
-  handoff --note "<text>"                    builder: hand the card on
+  handoff --note "<text>" [--data-file <json>]   builder/scout/researcher: hand the card on (scout: candidates)
+  publish --file <note.md> [--title "<t>"] [--citations-file <json>] [--path <p>]   checker: publish the verified note
+  digest --file <json> [--note "<text>"] | --none   curator: post the digest (empty when nothing qualifies)
   review approve --score <1-5> --note "<text>"
   review changes --reason <r>[,<r>] --score <1-5> [--criteria-missed "<c>"]... --note "<text>"
   test pass --evidence "<text>" [--command "<cmd>"]...

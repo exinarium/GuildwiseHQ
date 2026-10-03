@@ -177,7 +177,7 @@ describe('aom CLI', () => {
     expect(await t.run('handoff')).toBe(1);
     expect(t.err.join('')).toContain('--note');
     expect(await t.run('review', 'approve', '--note', 'x')).toBe(1); // missing score
-    expect(await t.run('publish', '--file', 'x.md')).toBe(2); // later milestones
+    expect(await t.run('frobnicate', '--action', 'merge')).toBe(2); // not an aom verb
     const noEnv = await runAom(['card'], { ...t.ctx, env: {} });
     expect(noEnv).toBe(1);
     expect(t.err.join('')).toContain('AOM_SHIFT_TOKEN');

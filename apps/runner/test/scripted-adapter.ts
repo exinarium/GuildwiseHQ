@@ -13,6 +13,8 @@ export type ScriptResult = {
 
 export interface Ctl {
   signal: AbortSignal;
+  /** Emits a runtime event as the runtime would (e.g. a `WebFetch` tool use). */
+  emit(event: RuntimeEvent): void;
   /** POST to the runner's IPC the way `aom` does. */
   post(
     path: '/v1/report' | '/v1/rpc',
@@ -51,6 +53,7 @@ export class ScriptedAdapter implements RuntimeAdapter {
     };
     const ctl: Ctl = {
       signal: abort.signal,
+      emit: push,
       post: async (path, body, token = input.env.AOM_SHIFT_TOKEN) => {
         const res = await fetch(`${input.env.AOM_IPC_URL}${path}`, {
           method: 'POST',

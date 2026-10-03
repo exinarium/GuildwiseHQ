@@ -20,7 +20,7 @@ export interface DecisionRecord {
 }
 
 /** The vault a project's files go to: the project vault if it has one, else the owner's vault of its domain. */
-async function projectVault(db: Queryable, projectId: string) {
+export async function projectVault(db: Queryable, projectId: string) {
   const p = await one(db, 'SELECT id, org_id, key, domain, vault_folder FROM projects WHERE id=$1', [
     projectId,
   ]);

@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { ReviewData, TestEvidence } from '../cards/types.ts';
 import { DevopsApprovalDataSchema, DevopsDoneDataSchema } from '../devops/index.ts';
+import { CandidatesDataSchema, DigestDataSchema } from '../feed/index.ts';
+import { PublicationOutcomeSchema } from '../research/index.ts';
 
 /**
  * `aom` CLI <-> runner IPC (docs/ARCHITECTURE.md section 13.4). HTTP on 127.0.0.1:<ephemeral>,
@@ -58,6 +60,12 @@ export function outcomeDataSchema(kind: string): z.ZodType {
       return DevopsDoneDataSchema;
     case 'devopsApproval':
       return DevopsApprovalDataSchema;
+    case 'candidates':
+      return CandidatesDataSchema;
+    case 'digest':
+      return DigestDataSchema;
+    case 'publication':
+      return PublicationOutcomeSchema;
     default:
       return z.record(z.string(), z.unknown());
   }
