@@ -171,6 +171,7 @@ describe('renderInstructions', () => {
       - \`aom ledger search "<query>"\`: search decisions and standing orders. Do this before asking a question.
       - \`aom comment --note "<text>"\`: post a note on the card thread without ending the shift.
       - \`aom question --text "<question>" [--option "<answer a>"]... [--recommend <n>] --doing "<what you were doing>"\`: ask the manager when the card and ledger cannot answer; this ends the shift and parks the card as Blocked.
+      - \`aom question ... --non-blocking\`: ask the manager without ending the shift (add \`--force\` if the ledger already has a similar entry).
 
       If \`aom\` reports an error, read it, fix the cause and run the command again within this shift.
 
@@ -232,6 +233,7 @@ describe('renderInstructions', () => {
       - \`aom ledger search "<query>"\`: search decisions and standing orders. Do this before asking a question.
       - \`aom comment --note "<text>"\`: post a note on the card thread without ending the shift.
       - \`aom question --text "<question>" [--option "<answer a>"]... [--recommend <n>] --doing "<what you were doing>"\`: ask the manager when the card and ledger cannot answer; this ends the shift and parks the card as Blocked.
+      - \`aom question ... --non-blocking\`: ask the manager without ending the shift (add \`--force\` if the ledger already has a similar entry).
 
       If \`aom\` reports an error, read it, fix the cause and run the command again within this shift.
 

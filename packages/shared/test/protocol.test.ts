@@ -103,6 +103,7 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
   'command.result': { ...env('command.result'), commandId: 'k1', ok: true, result: { removed: true } },
   'vault.status': { ...env('vault.status'), vaultId: 'v1', lastPullAt: TS, lastPushAt: null, error: 'x' },
   'vault.conflict': { ...env('vault.conflict'), vaultId: 'v1', files: ['standing-orders.md'] },
+  'token.rotate': { ...env('token.rotate') },
   ack: { ...env('ack'), ackOf: U.d },
 };
 
@@ -144,6 +145,7 @@ const serverToRunner: Record<string, Record<string, unknown>> = {
     context: { projectId: U.d, cardRef: 'WEB-12' },
   },
   'chat.cancel': { ...env('chat.cancel'), chatId: 'c1' },
+  'token.rotated': { ...env('token.rotated'), token: 'aomr_newtoken' },
   command: {
     ...env('command'),
     commandId: 'k1',
@@ -263,6 +265,7 @@ describe('ipc', () => {
       options: ['pg', 'sqlite'],
       recommend: 0,
       doing: 'picking a db',
+      force: false,
       blocking: true,
     },
     comment: { kind: 'comment', note: 'fyi' },
@@ -273,6 +276,7 @@ describe('ipc', () => {
   });
   it('applies question defaults', () => {
     expect(ShiftReportSchema.parse({ kind: 'question', text: 'q' })).toEqual({
+      force: false,
       kind: 'question',
       text: 'q',
       options: [],

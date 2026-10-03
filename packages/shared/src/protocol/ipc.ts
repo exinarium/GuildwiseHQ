@@ -25,6 +25,8 @@ export const QuestionReportSchema = z.object({
   recommend: z.number().int().nonnegative().optional(),
   doing: z.string().default(''),
   blocking: z.boolean().default(true),
+  /** Ask even though the ledger already has a matching entry (non-blocking questions need this). */
+  force: z.boolean().default(false),
 });
 
 /** Non-terminal thread message. */
@@ -56,6 +58,31 @@ export function outcomeDataSchema(kind: string): z.ZodType {
   }
 }
 
+/** A ledger entry returned by `aom ledger search` and by the duplicate check on `aom question`. */
+export const LedgerMatchSchema = z.object({
+  id: z.string(),
+  scope: z.enum(['feature', 'decision', 'standing_order']),
+  title: z.string(),
+  body: z.string(),
+  rank: z.number().optional(),
+});
+export type LedgerMatch = z.infer<typeof LedgerMatchSchema>;
+
+export const LedgerSearchParamsSchema = z.object({
+  query: z.string().min(1).max(500),
+  scope: z.enum(['all', 'feature', 'decision', 'standing_order']).default('all'),
+});
+export const LedgerSearchResultSchema = z.object({ entries: z.array(LedgerMatchSchema) });
+export type LedgerSearchResult = z.infer<typeof LedgerSearchResultSchema>;
+
+/** Renders ledger matches for the agent's terminal (shared by the CLI and server messages). */
+export function formatLedgerMatches(entries: readonly LedgerMatch[]): string {
+  if (entries.length === 0) return 'No matching ledger entries.';
+  return entries
+    .map((e) => `- [${e.scope}] ${e.title} (id ${e.id})\n  ${e.body.trim().replace(/\n/g, '\n  ')}`)
+    .join('\n');
+}
+
 export const IpcReportRequestSchema = z.object({ report: ShiftReportSchema });
 export type IpcReportRequest = z.infer<typeof IpcReportRequestSchema>;
 
@@ -66,6 +93,8 @@ export const IpcReportResponseSchema = z.object({
   error: z.string().optional(),
   /** Set on a rejected report so the CLI can show the guard violation and the agent can retry in the same shift. */
   guardViolations: z.array(z.object({ rule: z.string(), detail: z.string() })).optional(),
+  /** Ledger entries that already cover a question (stored on its desk item). */
+  matches: z.array(LedgerMatchSchema).optional(),
 });
 export type IpcReportResponse = z.infer<typeof IpcReportResponseSchema>;
 

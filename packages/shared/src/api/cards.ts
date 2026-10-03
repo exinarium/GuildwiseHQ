@@ -110,6 +110,8 @@ export const CardDetailResponseSchema = z.object({
     canComment: z.boolean(),
   }),
   diffStats: DiffStats.nullable().optional(),
+  /** Open desk items blocking this card (M2). */
+  blockers: z.array(z.object({ deskItemId: z.uuid(), title: z.string() })).default([]),
 });
 export type CardDetailResponse = z.infer<typeof CardDetailResponseSchema>;
 

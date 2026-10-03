@@ -25,3 +25,10 @@ export const MeResponseSchema = z.object({
 export type MeResponse = z.infer<typeof MeResponseSchema>;
 
 export const PasswordSchema = z.string().min(12).max(256);
+
+/** `POST /api/auth/password`: changes the signed-in user's password (other sessions are signed out). */
+export const ChangePasswordRequestSchema = z.object({
+  current: z.string().min(1).max(256),
+  new: PasswordSchema,
+});
+export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;

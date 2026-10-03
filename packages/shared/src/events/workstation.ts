@@ -18,4 +18,5 @@ export const workstationEvents = [
   defineEvent('WorkstationUnlinked', z.object({ workstationId: Id, by: z.enum(['owner', 'admin']) })),
   defineEvent('WorkstationConnected', z.object({ workstationId: Id, runnerVersion: z.string().optional() })),
   defineEvent('WorkstationDisconnected', z.object({ workstationId: Id })),
+  defineEvent('WorkstationTokenRotated', z.object({ workstationId: Id, tokenHash: z.string().min(1) })),
 ] as const;

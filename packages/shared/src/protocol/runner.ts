@@ -4,7 +4,7 @@ import { Usage } from '../events/define.ts';
 import { GuardViolation, ShiftKind } from '../events/shift.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
-import { RpcMethodSchema, ShiftReportSchema } from './ipc.ts';
+import { LedgerMatchSchema, RpcMethodSchema, ShiftReportSchema } from './ipc.ts';
 
 /**
  * Runner WebSocket protocol (docs/ARCHITECTURE.md section 11.2).
@@ -283,6 +283,8 @@ export const ChatDoneSchema = msg('chat.done', {
   threadId: z.uuid(),
   messageText: z.string(),
   usage: Usage,
+  /** Runtime session to `--resume` on the next message of this conversation. */
+  runtimeSessionId: z.string().optional(),
 });
 export const ChatErrorSchema = msg('chat.error', {
   chatId: z.string(),
@@ -295,6 +297,8 @@ export const CommandResultSchema = msg('command.result', {
   result: z.unknown().optional(),
   error: z.string().optional(),
 });
+/** Asks the server for a new runner token (`aom-runner rotate-token`); the old one stays valid until the new one connects. */
+export const TokenRotateSchema = msg('token.rotate', {});
 export const VaultStatusSchema = msg('vault.status', {
   vaultId: z.string(),
   lastPullAt: z.iso.datetime().nullable(),
@@ -326,6 +330,10 @@ export const ShiftReportResultSchema = msg('shift.report.result', {
   reportId: z.uuid(),
   accepted: z.boolean(),
   error: z.string().optional(),
+  /** Shown to the agent on acceptance (e.g. what happened to its question). */
+  message: z.string().optional(),
+  /** Ledger entries that matched a question (duplicate check). */
+  matches: z.array(LedgerMatchSchema).optional(),
 });
 export const RpcResponseSchema = msg('rpc.response', {
   rpcId: z.string(),
@@ -341,6 +349,7 @@ export const ChatStartSchema = msg('chat.start', {
   resumeSessionId: z.string().optional(),
   context: ChatContextSchema,
 });
+export const TokenRotatedSchema = msg('token.rotated', { token: z.string().min(1) });
 export const ChatCancelSchema = msg('chat.cancel', { chatId: z.string() });
 export const CommandSchema = msg('command', {
   commandId: z.string(),
@@ -368,6 +377,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   CommandResultSchema,
   VaultStatusSchema,
   VaultConflictSchema,
+  TokenRotateSchema,
   AckSchema,
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServerSchema>;
@@ -381,6 +391,7 @@ export const ServerToRunnerSchema = z.discriminatedUnion('type', [
   ChatStartSchema,
   ChatCancelSchema,
   CommandSchema,
+  TokenRotatedSchema,
   AckSchema,
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunnerSchema>;

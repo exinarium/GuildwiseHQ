@@ -9,6 +9,15 @@ import { ProgressItemSchema } from './runner.ts';
 
 export const RESYNC_THRESHOLD = 500;
 
+/** `chat.error.reason` values the server sends. */
+export const CHAT_ERROR = {
+  workstationOffline: 'workstation_offline',
+  unknownThread: 'unknown_thread',
+  busy: 'busy',
+  cancelled: 'cancelled',
+  runnerError: 'runner_error',
+} as const;
+
 // client -> server
 export const BrowserHelloSchema = z.object({
   type: z.literal('hello'),
