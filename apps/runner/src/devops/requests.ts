@@ -24,7 +24,7 @@ export function shiftTexts(msg: ShiftStartMsg, brief: ShiftBrief): { instruction
   return {
     // Card agents learn how to ask the DevOps engineer (`aom devops`); the section is runner-side by design.
     instructions: `${renderInstructions(brief)}\n${ENVIRONMENT_HELP_SECTION}`,
-    prompt: renderShiftPrompt(msg.brief),
+    prompt: renderShiftPrompt(brief),
   };
 }
 

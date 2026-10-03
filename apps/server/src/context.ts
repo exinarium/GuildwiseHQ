@@ -11,6 +11,7 @@ import type { PgEventStore } from './eventstore/pg-event-store.ts';
 import type { Mailer } from './mail/mailer.ts';
 import type { RunnerGateway } from './runner-gateway/gateway.ts';
 import type { RunnerRegistry } from './runner-gateway/registry.ts';
+import type { Scheduler } from './scheduler/scheduler.ts';
 
 /** Everything a command, route or gateway needs. Built once in `createApp` (app.ts). */
 export interface Ctx {
@@ -30,6 +31,7 @@ export interface Services {
   gateway: RunnerGateway;
   dispatcher: Dispatcher;
   reaper: Reaper;
+  scheduler: Scheduler;
   browser: BrowserGateway;
   chat: ChatRelay;
 }

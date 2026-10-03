@@ -38,7 +38,9 @@ export async function writeVaultFile(
       break;
     case 'append':
       if (exists && current.includes(cmd.content)) return { written: false, committed: false };
-      next = `${current}${current && !current.endsWith('\n') ? '\n' : ''}${cmd.content}`;
+      next = exists
+        ? `${current}${current && !current.endsWith('\n') ? '\n' : ''}${cmd.content}`
+        : `${cmd.header ?? ''}${cmd.content}`;
       break;
     case 'replace':
       if (exists && current === cmd.content) return { written: false, committed: false };

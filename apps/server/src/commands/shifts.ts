@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   type ClaimReleaseReason,
   type DiffStats,
+  type DigestData,
   getOutcome,
   getStage,
   type LedgerMatch,
@@ -18,6 +19,7 @@ import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
+import { buildDigestEvents } from './feeds.ts';
 import { raiseQuestion } from './questions.ts';
 
 export interface WsRef {
@@ -209,6 +211,9 @@ export async function applyShiftReport(
 
   let handoffData: Record<string, unknown> = payloadData;
   let main: AppendInput;
+  /** Events that belong to the outcome and follow it (desk items, thread notes). */
+  const followUps: AppendInput[] = [];
+  let acceptMessage: string | undefined;
   switch (outcome.event) {
     case 'ReviewRequested': {
       if (resolved.toStage !== 'review')
@@ -280,9 +285,30 @@ export async function applyShiftReport(
     case 'StageCompleted':
       main = mk({
         type: 'StageCompleted',
-        payload: { cardId, fromStage: card.stage, toStage: resolved.toStage, outcome: outcome.id },
+        payload: {
+          cardId,
+          fromStage: card.stage,
+          toStage: resolved.toStage,
+          outcome: outcome.id,
+          ...(outcome.rework ? { rework: true } : {}),
+        },
       });
       break;
+    case 'DigestPosted': {
+      const project = await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id]);
+      const digest = await buildDigestEvents(tx, {
+        card,
+        agent,
+        project: project as Row,
+        note: report.note,
+        data: payloadData as DigestData,
+      });
+      if (!digest.ok) return { accepted: false, error: digest.error };
+      main = digest.events[0] as AppendInput;
+      followUps.push(...digest.events.slice(1));
+      acceptMessage = `${digest.summary} Finish now.`;
+      break;
+    }
     default:
       return {
         accepted: false,
@@ -306,6 +332,7 @@ export async function applyShiftReport(
         },
       }),
       main,
+      ...followUps,
       mk({
         type: 'ClaimReleased',
         payload: {
@@ -319,7 +346,7 @@ export async function applyShiftReport(
     ],
     { tx },
   );
-  return { accepted: true };
+  return { accepted: true, ...(acceptMessage ? { message: acceptMessage } : {}) };
 }
 
 // ----------------------------------------------------------------------------- shift lifecycle

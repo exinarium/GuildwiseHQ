@@ -1,13 +1,15 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ShiftBrief, ShiftVault } from '@aom/shared';
+import { type ShiftBrief, type ShiftVault, TASTE_FILE } from '@aom/shared';
 
 export interface VaultShiftContext {
   /** The one directory passed to the runtime as `--add-dir`. */
   addDir: string;
   standingOrders: Array<{ title: string; body: string }>;
   projectDoc?: string;
+  /** `<folder>/taste.md`: the manager's feed preferences (curators read it at shift start). */
+  taste?: string;
 }
 
 const read = async (file: string): Promise<string | undefined> => {
@@ -33,7 +35,13 @@ export async function readVaultContext(
   const project = await read(join(root, ...vault.folder.split('/'), 'standing-orders.md'));
   if (project) orders.push({ title: 'Project standing orders (vault)', body: project });
   const projectDoc = await read(join(root, ...vault.folder.split('/'), 'PROJECT.md'));
-  return { addDir: root, standingOrders: orders, ...(projectDoc ? { projectDoc } : {}) };
+  const taste = await read(join(root, ...vault.folder.split('/'), TASTE_FILE));
+  return {
+    addDir: root,
+    standingOrders: orders,
+    ...(projectDoc ? { projectDoc } : {}),
+    ...(taste ? { taste } : {}),
+  };
 }
 
 /** Merges vault content into the brief the instructions are rendered from. */
@@ -43,5 +51,6 @@ export function withVaultContext(brief: ShiftBrief, ctx: VaultShiftContext | nul
     ...brief,
     project: { ...brief.project, ...(ctx.projectDoc ? { projectDoc: ctx.projectDoc } : {}) },
     standingOrders: [...ctx.standingOrders, ...brief.standingOrders],
+    ...(brief.feed && ctx.taste ? { feed: { ...brief.feed, taste: ctx.taste } } : {}),
   };
 }

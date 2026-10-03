@@ -31,6 +31,8 @@ export const VaultWriteCommandSchema = z.object({
   mode: z.enum(['create', 'append', 'replace']),
   content: z.string(),
   commitMessage: z.string().min(1),
+  /** `append` only: written first when the file does not exist yet (e.g. a title for `taste.md`). */
+  header: z.string().optional(),
   /** Push right after committing (default); otherwise the next sync pushes. */
   push: z.boolean().default(true),
 });

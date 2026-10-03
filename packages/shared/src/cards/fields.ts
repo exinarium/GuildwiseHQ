@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FeedItemInputSchema } from '../feed/index.ts';
 import type { Stage } from '../workflows/schema.ts';
 
 export type FieldKind =
@@ -42,6 +43,8 @@ export const MockActionSchema = z.enum([
   'devops',
   /** M3: like `devops` but for a request outside the default access ("install docker" needs approval). */
   'devops_install',
+  /** M5: the scout also reports an item it never opened; the runner rejects it and the scout retries without it. */
+  'fabricate',
 ]);
 export type MockAction = z.infer<typeof MockActionSchema>;
 /** `{ "<stage>": ["<action>", ...] }` consumed by round index. Example: `{ review: ['changes', 'ok'] }`. */
@@ -102,12 +105,20 @@ export const RESEARCH_FIELDS: Record<string, FieldMeta> = {
 
 // ------------------------------------------------------------------ feed set
 
+/** Mock adapter only: the pages a scripted scout "finds" (and whether the curator proposes a taste rule). */
+export const MockFeedSchema = z.object({
+  items: z.array(FeedItemInputSchema),
+  proposeRule: z.string().optional(),
+});
+export type MockFeed = z.infer<typeof MockFeedSchema>;
+
 export const FeedFieldsSchema = z.object({
   topic: z.string().optional(),
   windowHours: z.number().int().positive().optional(),
   preferredSites: z.array(z.string()).optional(),
   maxPerKind: z.record(z.string(), z.number().int().nonnegative()).optional(),
   mock: MockScriptSchema.optional(),
+  mockFeed: MockFeedSchema.optional(),
 });
 export type FeedFields = z.infer<typeof FeedFieldsSchema>;
 
@@ -119,6 +130,7 @@ export const FEED_FIELDS: Record<string, FieldMeta> = {
   preferredSites: { label: 'Preferred sites', kind: 'url-list' },
   maxPerKind: { label: 'Max per kind', kind: 'json' },
   mock: { label: 'Mock script', kind: 'json' },
+  mockFeed: { label: 'Mock feed items', kind: 'json' },
 };
 
 // ------------------------------------------------------------------ registry

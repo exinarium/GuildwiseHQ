@@ -4,6 +4,7 @@ import { DevopsShiftSchema } from '../devops/index.ts';
 import { Usage } from '../events/define.ts';
 import { GuardViolation, ShiftKind } from '../events/shift.ts';
 import { VaultKind } from '../events/vault.ts';
+import { FeedItemInputSchema } from '../feed/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import { VaultConfigureCommandSchema, VaultWriteCommandSchema } from '../vaults/index.ts';
@@ -148,6 +149,18 @@ export const ShiftBriefSchema = z.object({
   ledger: z
     .array(z.object({ id: z.string(), scope: z.string(), title: z.string(), body: z.string() }))
     .default([]),
+  /**
+   * M5: feed context for scouts and curators. `candidates` are the items the scout handed off (curator only),
+   * `seenUrls` the project's seen-list (normalized), `taste` the project's `taste.md` (filled in by the runner from
+   * the vault).
+   */
+  feed: z
+    .object({
+      candidates: z.array(FeedItemInputSchema).default([]),
+      seenUrls: z.array(z.string()).default([]),
+      taste: z.string().optional(),
+    })
+    .optional(),
 });
 export type ShiftBrief = z.infer<typeof ShiftBriefSchema>;
 

@@ -2,7 +2,7 @@
 // Mock agent process (docs/ARCHITECTURE.md section 12.3). Standalone: node builtins only, talks to the runner
 // exclusively through the real `aom` CLI. Stdout is JSON lines of RuntimeEvent.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,10 +16,21 @@ type Action =
   | 'no_report'
   | 'edit_outside_scope'
   | 'devops'
-  | 'devops_install';
+  | 'devops_install'
+  | 'fabricate';
+
+interface FeedItem {
+  kind: string;
+  url: string;
+  title: string;
+  source: string;
+  publishedAt: string;
+  summary: string;
+}
 
 interface Brief {
   shift: { stage: string; outcomes: Array<{ id: string; kind: string; data: string }> };
+  feed?: { candidates: FeedItem[]; seenUrls: string[]; taste?: string };
   standingOrders?: Array<{ title: string }>;
   ledger?: Array<{ title: string; body: string }>;
   card: { ref: string; title: string; reworkRound: number; fields: Record<string, unknown> };
@@ -81,8 +92,10 @@ function buildWork(brief: Brief): void {
   sh('git', ['commit', '--no-verify', '--allow-empty', '-m', `mock build round ${round}: ${brief.card.ref}`]);
 }
 
-function report(brief: Brief, action: Action): { code: number; out: string; err: string } {
+async function report(brief: Brief, action: Action): Promise<{ code: number; out: string; err: string }> {
   const stage = brief.shift.stage;
+  if (brief.shift.outcomes.some((o) => o.data === 'candidates' || o.data === 'digest'))
+    return feedWork(brief, action);
   const failing = action === 'changes' || action === 'fail';
   const outcomes = brief.shift.outcomes;
   const has = (id: string) => outcomes.some((o) => o.id === id);
@@ -113,21 +126,103 @@ function report(brief: Brief, action: Action): { code: number; out: string; err:
   const wanted = outcomes.find((o) => o.kind === (failing ? 'failure' : 'success')) ?? outcomes[0];
   if (!wanted) return { code: 1, out: '', err: `no outcomes for stage ${stage}` };
   const args = ['outcome', wanted.id, '--note', `mock ${stage} ${wanted.id}`];
-  if (wanted.data === 'digest') {
-    const f = join(process.env.TMPDIR ?? tmpdir(), 'mock-digest.json');
-    writeFileSync(
-      f,
-      JSON.stringify({
-        items: [1, 2].map((n) => ({
-          title: `Mock item ${n}`,
-          url: `https://example.test/${n}`,
-          kind: 'article',
-        })),
-      }),
-    );
-    args.push('--data-file', f);
-  }
   return aom(args);
+}
+
+const DEFAULT_ITEMS: FeedItem[] = [1, 2].map((n) => ({
+  kind: 'article',
+  url: `https://example.test/${n}`,
+  title: `Mock item ${n}`,
+  source: 'example.test',
+  publishedAt: '2026-10-02',
+  summary: `Mock summary of item ${n}`,
+}));
+
+const tmpJson = (name: string, value: unknown): string => {
+  const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), 'mock-feed-'));
+  const file = join(dir, name);
+  writeFileSync(file, JSON.stringify(value));
+  return file;
+};
+
+/** "Opens" a page the way Claude's WebFetch tool shows up in the runtime stream: the runner records it. */
+async function openPage(url: string): Promise<void> {
+  emit({ kind: 'tool', name: 'WebFetch', summary: url });
+  await sleep(stepMs);
+}
+
+const skipTitles = (taste: string | undefined): string[] =>
+  [...(taste ?? '').matchAll(/^- Skip \S+ like "([^"]+)"/gm)].map((m) => m[1] as string);
+
+/**
+ * Scripted feed work (M5). Scout: opens every page of `card.fields.mockFeed.items` (default: two example items) and
+ * hands them off as candidates; action `fabricate` also reports a page it never opened, is rejected by the runner and
+ * retries without it. Curator: reads taste.md, takes the candidates (skipping titles the taste file says to skip) up to
+ * the card's maximum per kind and posts the digest, optionally proposing a taste rule.
+ */
+async function feedWork(brief: Brief, action: Action): Promise<{ code: number; out: string; err: string }> {
+  const fields = brief.card.fields as {
+    mockFeed?: { items?: FeedItem[]; proposeRule?: string };
+    maxPerKind?: Record<string, number>;
+  };
+  const wantsCandidates = brief.shift.outcomes.some((o) => o.data === 'candidates');
+  if (wantsCandidates) {
+    const items = fields.mockFeed?.items ?? DEFAULT_ITEMS;
+    for (const i of items) await openPage(i.url);
+    if (action === 'fabricate') {
+      const fake: FeedItem = {
+        ...DEFAULT_ITEMS[0],
+        url: 'https://fabricated.example.test/never-opened',
+        title: 'Fabricated item',
+      } as FeedItem;
+      const first = aom([
+        'handoff',
+        '--note',
+        'mock scout (with a fabricated item)',
+        '--data-file',
+        tmpJson('candidates.json', { items: [...items, fake] }),
+      ]);
+      emit({
+        kind: 'progress',
+        text: `mock scout: first report ${first.code === 0 ? 'accepted' : `rejected: ${first.err.trim()}`}`,
+      });
+      if (first.code === 0) return first;
+    }
+    return aom([
+      'handoff',
+      '--note',
+      `mock scout found ${items.length} candidate(s)`,
+      '--data-file',
+      tmpJson('candidates.json', { items }),
+    ]);
+  }
+  // curator
+  const taste = brief.feed?.taste;
+  emit({
+    kind: 'progress',
+    text: `mock taste: ${taste ? taste.replace(/\s+/g, ' ').slice(0, 300) : 'none'}`,
+  });
+  const skip = skipTitles(taste);
+  const max = fields.maxPerKind ?? { article: 5, video: 3 };
+  const used: Record<string, number> = {};
+  const picked: FeedItem[] = [];
+  for (const c of brief.feed?.candidates ?? []) {
+    if (skip.includes(c.title)) continue;
+    if ((used[c.kind] ?? 0) >= (max[c.kind] ?? 0)) continue;
+    used[c.kind] = (used[c.kind] ?? 0) + 1;
+    picked.push(c);
+  }
+  const data: Record<string, unknown> = { items: picked };
+  if (fields.mockFeed?.proposeRule && picked[0])
+    data.tasteRuleProposal = { rule: fields.mockFeed.proposeRule, evidenceUrls: [picked[0].url] };
+  if (picked.length === 0) return aom(['digest', '--none', '--note', 'mock curator: nothing qualified']);
+  return aom([
+    'digest',
+    '--file',
+    tmpJson('digest.json', data),
+    '--note',
+    `mock curator picked ${picked.length} of ${brief.feed?.candidates.length ?? 0}`,
+  ]);
 }
 
 interface DevopsBrief extends Brief {
@@ -256,7 +351,7 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  const r = report(brief, action);
+  const r = await report(brief, action);
   emit({
     kind: 'final',
     text: r.code === 0 ? `mock reported: ${r.out.trim()}` : `mock report failed: ${(r.err || r.out).trim()}`,

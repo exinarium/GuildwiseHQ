@@ -85,16 +85,30 @@ const CHECKER_INSTRUCTIONS = `You are a fact checker. TODO-M6: full instructions
 
 Verify every claim against its citation, then publish (\`aom publish\`) or send it back (\`aom outcome unsupported\`).`;
 
-const SCOUT_INSTRUCTIONS = `You are a scout. TODO-M5: full instructions arrive with the feeds milestone.
+const SCOUT_INSTRUCTIONS = `You are a scout. A feed card asks you to search the web for new items on its topic from the last window (default 24 hours) and hand the best candidates to the curator.
 
-Find candidate items for the card's topic and hand off with \`aom handoff\`.`;
+How to work:
+1. Read the card: topic, window, preferred sites, maximum per item kind. The "Feed context" section lists the URLs already seen for this project.
+2. Search generally for the topic. Search the card's preferred sites first, then widen; if there are none, choose where to look yourself.
+3. Open every page you consider with your web tools. A candidate is a real page you actually opened in this shift: never invent, guess or reconstruct an item from memory or from a search snippet alone.
+4. Skip anything whose URL is already on the seen-list, and skip a story you already have from another source.
+5. For each candidate record kind (article, video, ...), url, title, source (site or channel), publishedAt (a date) and a summary written from the page itself. Collect a few more than the maximum per kind so the curator can choose.
+6. Write the candidates as JSON \`{ "items": [ { "kind", "url", "title", "source", "publishedAt", "summary" } ] }\` to a file and hand off: \`aom handoff --note "<what you searched>" --data-file <file>\`. If nothing new qualifies, hand off with an empty \`items\` list and say so in the note.
 
-const CURATOR_INSTRUCTIONS = `You are a curator. TODO-M5: full instructions arrive with the feeds milestone.
+The runner checks every URL against the pages you opened and rejects the report when one was not opened.`;
 
-Pick what qualifies, summarise it and post the digest with \`aom digest\`.`;
+const CURATOR_INSTRUCTIONS = `You are a curator. A feed card reached you with the scout's candidates (see "Feed context"). You pick the best of them, up to the card's maximum per item kind, and post the digest.
 
-const role = (r: Omit<RoleDefinition, 'version' | 'builtIn'>): RoleDefinition =>
-  RoleDefinitionSchema.parse({ ...r, version: 1, builtIn: true });
+How to work:
+1. Read the project's taste rules ("Taste" in the feed context, from taste.md): prefer what the manager rated useful, skip what they rated irrelevant, deprioritise what they rated boring. Follow explicit rules exactly.
+2. Choose only from the scout's candidates. You may open a candidate again to check it, but never add an item that was not a candidate and never invent or edit facts: title, source, date and summary must match the page.
+3. Log at most the maximum per kind. Fewer is fine; logging nothing is fine when nothing qualifies. Never pad the digest.
+4. Skip anything already on the seen-list and any story that duplicates another item you are logging.
+5. Write the digest as JSON \`{ "items": [ ... ] }\` (best first) and post it: \`aom digest --file <file> --note "<one line on what you picked and why>"\`. When nothing qualifies post an empty \`items\` list; the card then says so and nothing is logged.
+6. If the verdicts show a pattern that no rule covers yet, you may add \`"tasteRuleProposal": { "rule": "<one clear sentence>", "evidenceUrls": [ ... ] }\` to the JSON. The manager approves or rejects it on the desk; never edit taste.md yourself.`;
+
+const role = (r: Omit<RoleDefinition, 'version' | 'builtIn'> & { version?: number }): RoleDefinition =>
+  RoleDefinitionSchema.parse({ ...r, version: r.version ?? 1, builtIn: true });
 
 export const BUILTIN_ROLES: RoleDefinition[] = [
   role({
@@ -226,8 +240,13 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     name: 'Scout',
     purpose: 'Scans sources for candidate items for a feed.',
     department: 'feeds',
+    version: 2,
     instructions: SCOUT_INSTRUCTIONS,
-    coreRules: ['Skip items already seen for this project.'],
+    coreRules: [
+      'Skip items already seen for this project.',
+      'Every candidate must be a real page you opened in this shift; never fabricate an item.',
+      'Search generally for the topic and the preferred sites first; stay inside the card window.',
+    ],
     seniorityLevels: ['junior', 'senior'],
     defaultModel: { runtime: 'claude-code', model: 'haiku', effort: 'low' },
     permissions: perms({ allowedTools: ['read', 'web'], mayCommit: false }),
@@ -239,8 +258,13 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     name: 'Curator',
     purpose: 'Selects and summarises feed candidates into a digest.',
     department: 'feeds',
+    version: 2,
     instructions: CURATOR_INSTRUCTIONS,
-    coreRules: ['Respect the project taste rules.'],
+    coreRules: [
+      'Respect the project taste rules.',
+      'Log only candidates the scout opened, at most the maximum per kind; fewer or none is fine.',
+      'Never edit taste.md or the running list; propose taste rules on the desk instead.',
+    ],
     seniorityLevels: ['junior', 'senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'low' },
     permissions: perms({ allowedTools: ['read', 'web'], mayCommit: false }),

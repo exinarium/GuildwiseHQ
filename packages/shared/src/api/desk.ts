@@ -3,6 +3,7 @@ import { DecisionPolicy } from '../cards/types.ts';
 import { DeskItemKind, DeskItemStatus, DeskOptionSchema } from '../events/desk.ts';
 import { LedgerScope } from '../events/ledger.ts';
 import { IsoTime } from './common.ts';
+import { DigestItemDtoSchema } from './digest.ts';
 
 export const DeskLedgerChoiceSchema = z.object({
   /** "Add to ledger as": feature (card requirement), decision (project log) or standing order (every agent). */
@@ -56,6 +57,8 @@ export const DeskItemDtoSchema = z.object({
   answeredAt: IsoTime.nullable(),
   answeredByName: z.string().nullable(),
   decisionPolicy: DecisionPolicy.nullable(),
+  /** M5: the items of a digest rating item (`kind 'rating'`), for rating them in place. */
+  digestItems: z.array(DigestItemDtoSchema).optional(),
   /** False for members who may see but not answer (owner_only on a shared card). */
   canAnswer: z.boolean(),
   createdAt: IsoTime,

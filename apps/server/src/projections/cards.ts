@@ -312,7 +312,13 @@ export const cardProjectors: Record<string, Projector> = {
         ]),
       );
     } else {
-      await moveTo(tx, e, p.cardId, p.toStage, `excluded_agent_ids = '{}'`);
+      await moveTo(
+        tx,
+        e,
+        p.cardId,
+        p.toStage,
+        `excluded_agent_ids = '{}'${p.rework ? ', rework_round = rework_round + 1' : ''}`,
+      );
     }
   },
 

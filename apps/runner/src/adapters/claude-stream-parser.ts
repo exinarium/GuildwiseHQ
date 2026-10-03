@@ -10,6 +10,7 @@ const num = (v: unknown): number =>
 export function summarizeToolInput(name: string, input: unknown): string {
   let s: string;
   if (isObj(input) && name === 'Bash' && typeof input.command === 'string') s = input.command;
+  else if (isObj(input) && name === 'WebFetch' && typeof input.url === 'string') s = input.url;
   else if (isObj(input) && typeof input.file_path === 'string') s = input.file_path;
   else {
     try {

@@ -3,6 +3,7 @@ export * from './authz/index.ts';
 export * from './cards/index.ts';
 export * from './devops/index.ts';
 export * from './events/index.ts';
+export * from './feed/index.ts';
 export * from './ids.ts';
 export * from './prompt/index.ts';
 export * from './protocol/index.ts';

@@ -1,0 +1,268 @@
+import { describe, expect, it } from 'vitest';
+import {
+  applyMaxPerKind,
+  CreateScheduleRequestSchema,
+  commandForOutcome,
+  DigestDataSchema,
+  DomainEventSchema,
+  FEED_LIST_HEADER,
+  FeedFieldsSchema,
+  getBuiltinRole,
+  isSameStory,
+  normalizeUrl,
+  outcomeDataSchema,
+  renderFeedEntries,
+  renderShiftPrompt,
+  renderTasteEntry,
+  renderTasteRule,
+  SCHEDULE_PRESETS,
+  type ShiftBrief,
+  tasteSkipTitles,
+  VaultWriteCommandSchema,
+} from '../src/index.ts';
+import { U } from './fixtures.ts';
+
+const item = (n: number, over: Record<string, unknown> = {}) => ({
+  kind: 'article',
+  url: `https://example.test/a${n}`,
+  title: `Story number ${n}`,
+  source: 'Example',
+  publishedAt: '2026-10-02',
+  summary: `Summary ${n}`,
+  ...over,
+});
+
+describe('feed helpers', () => {
+  it('normalizes URLs for the seen-list', () => {
+    const base = normalizeUrl('https://example.test/a/b');
+    expect(normalizeUrl('http://www.Example.test/a/b/?utm_source=x&fbclid=1#frag')).toBe(base);
+    expect(normalizeUrl('https://example.test:443/a/b')).toBe(base);
+    expect(normalizeUrl('https://example.test/a/b?id=2&z=1')).toBe(
+      normalizeUrl('https://example.test/a/b?z=1&id=2'),
+    );
+    expect(normalizeUrl('https://example.test/a/b?id=2')).not.toBe(base);
+  });
+
+  it('recognises the same story under another title spelling, not a different one', () => {
+    expect(isSameStory('Hornady unveils the new 6mm ARC load', 'Hornady unveils new 6mm ARC load!')).toBe(
+      true,
+    );
+    expect(
+      isSameStory('Hornady unveils the new 6mm ARC load', 'Ruger releases a lightweight carry pistol'),
+    ).toBe(false);
+    expect(isSameStory('Rifles', 'Rifle')).toBe(false);
+  });
+
+  it('keeps at most the maximum per kind in order and drops unlisted kinds', () => {
+    const items = [item(1), item(2, { kind: 'video' }), item(3), item(4), item(5, { kind: 'podcast' })];
+    const { kept, dropped } = applyMaxPerKind(items, { article: 2, video: 3 });
+    expect(kept.map((i) => i.title)).toEqual(['Story number 1', 'Story number 2', 'Story number 3']);
+    expect(dropped.map((i) => i.title)).toEqual(['Story number 4', 'Story number 5']);
+  });
+
+  it('renders append-only feed lines and explicit taste rules', () => {
+    const text = renderFeedEntries(
+      [{ ...item(1), publishedAt: '2026-10-02T00:00:00.000Z' }],
+      new Date('2026-10-03T07:00:00Z'),
+    );
+    expect(text).toBe(
+      '- 2026-10-03 [Story number 1](https://example.test/a1) (article, Example, published 2026-10-02): Summary 1\n',
+    );
+    expect(FEED_LIST_HEADER).toContain('oldest first');
+    const rule = renderTasteEntry({
+      verdict: 'irrelevant',
+      kind: 'article',
+      title: 'Story number 1',
+      source: 'Example',
+      url: 'https://example.test/a1',
+      reason: 'Too generic',
+    });
+    expect(rule).toBe(
+      '- Skip articles like "Story number 1" from Example (rated irrelevant). Reason: Too generic. Example: https://example.test/a1\n',
+    );
+    expect(tasteSkipTitles(rule + renderTasteRule('Prefer reviews with chronograph data'))).toEqual([
+      'Story number 1',
+    ]);
+    expect(renderTasteRule('Prefer  reviews')).toBe('- Rule: Prefer reviews\n');
+  });
+});
+
+describe('M5 contract', () => {
+  it('parses the schedule and feed events', () => {
+    const body = {
+      scheduleId: U.a,
+      projectId: U.b,
+      name: 'Daily',
+      kind: 'feed',
+      cron: '0 7 * * *',
+      timezone: 'UTC',
+      cardTemplate: { title: 'Feed run', fields: { topic: 'x' } },
+      enabled: true,
+      nextFireAt: '2026-10-04T07:00:00.000Z',
+    };
+    for (const type of ['ScheduleCreated', 'ScheduleUpdated']) {
+      expect(DomainEventSchema.safeParse({ type, payload: body }).success).toBe(true);
+    }
+    expect(
+      DomainEventSchema.safeParse({ type: 'ScheduleDeleted', payload: { scheduleId: U.a } }).success,
+    ).toBe(true);
+    expect(
+      DomainEventSchema.safeParse({
+        type: 'ScheduleFired',
+        payload: { scheduleId: U.a, cardId: U.c, firedFor: '2026-10-04T07:00:00.000Z', nextFireAt: null },
+      }).success,
+    ).toBe(true);
+    expect(
+      DomainEventSchema.safeParse({
+        type: 'FeedRunRequested',
+        payload: { projectId: U.b, cardId: U.c, requestedBy: U.d },
+      }).success,
+    ).toBe(true);
+    const digest = DomainEventSchema.parse({
+      type: 'DigestPosted',
+      payload: {
+        cardId: U.c,
+        projectId: U.b,
+        items: [
+          {
+            ...item(1),
+            itemId: U.a,
+            urlNormalized: 'example.test/a1',
+            publishedAt: '2026-10-02T00:00:00.000Z',
+          },
+        ],
+        nothingQualified: false,
+      },
+    });
+    expect(digest.type === 'DigestPosted' && digest.payload.duplicatesDropped).toBe(0);
+    expect(
+      DomainEventSchema.safeParse({
+        type: 'ItemRated',
+        payload: { itemId: U.a, projectId: U.b, verdict: 'boring', ratedBy: U.d },
+      }).success,
+    ).toBe(true);
+    expect(
+      DomainEventSchema.safeParse({
+        type: 'ItemRated',
+        payload: { itemId: U.a, projectId: U.b, verdict: 'meh', ratedBy: U.d },
+      }).success,
+    ).toBe(false);
+    expect(
+      DomainEventSchema.safeParse({
+        type: 'TasteRuleProposed',
+        payload: { projectId: U.b, deskItemId: U.a, rule: 'Prefer data', evidenceItemIds: [U.c] },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('validates candidates and digests: every item needs kind, url, title, source, date and summary', () => {
+    expect(outcomeDataSchema('candidates').safeParse({ items: [item(1)] }).success).toBe(true);
+    expect(outcomeDataSchema('candidates').safeParse({}).success).toBe(true);
+    expect(
+      outcomeDataSchema('digest').safeParse({ items: [{ ...item(1), summary: undefined }] }).success,
+    ).toBe(false);
+    expect(outcomeDataSchema('digest').safeParse({ items: [item(1, { url: 'not a url' })] }).success).toBe(
+      false,
+    );
+    expect(
+      outcomeDataSchema('digest').safeParse({ items: [item(1, { publishedAt: 'someday' })] }).success,
+    ).toBe(false);
+    const empty = DigestDataSchema.parse({});
+    expect(empty.items).toEqual([]);
+    expect(
+      DigestDataSchema.parse({ items: [], tasteRuleProposal: { rule: 'Skip press releases' } })
+        .tasteRuleProposal?.evidenceUrls,
+    ).toEqual([]);
+  });
+
+  it('accepts a vault append header and the feed mock fields', () => {
+    expect(
+      VaultWriteCommandSchema.parse({
+        vaultId: 'v',
+        path: 'projects/x/taste.md',
+        mode: 'append',
+        content: '- a\n',
+        header: '# Taste\n',
+        commitMessage: 'm',
+      }).header,
+    ).toBe('# Taste\n');
+    expect(FeedFieldsSchema.safeParse({ mockFeed: { items: [item(1)], proposeRule: 'x' } }).success).toBe(
+      true,
+    );
+  });
+
+  it('schedule requests default to a daily 07:00 feed and ship presets', () => {
+    const r = CreateScheduleRequestSchema.parse({
+      projectId: U.b,
+      name: 'Daily',
+      cardTemplate: { title: 'Run' },
+    });
+    expect(r).toMatchObject({ kind: 'feed', cron: '0 7 * * *', timezone: 'UTC', enabled: true });
+    expect(SCHEDULE_PRESETS.map((p) => p.id)).toContain('daily-0700');
+  });
+
+  it('ships real scout and curator instructions', () => {
+    const scout = getBuiltinRole('scout');
+    const curator = getBuiltinRole('curator');
+    expect(scout?.instructions).not.toContain('TODO');
+    expect(curator?.instructions).not.toContain('TODO');
+    expect(scout?.instructions).toContain('real page you actually opened');
+    expect(curator?.instructions).toContain('maximum per');
+    expect(
+      commandForOutcome({ id: 'digest', label: 'Post digest', kind: 'success', data: 'digest' }),
+    ).toContain('aom digest --file');
+    expect(commandForOutcome({ id: 'handoff', label: 'h', kind: 'success', data: 'candidates' })).toContain(
+      '--data-file',
+    );
+  });
+
+  it('renders the feed context into the prompt', () => {
+    const brief = {
+      shift: {
+        id: U.a,
+        kind: 'card',
+        stage: 'curate',
+        stageLabel: 'Curate',
+        doneCriteria: 'd',
+        outcomes: [],
+        maxShiftMinutes: 30,
+      },
+      agent: { id: U.a, name: 'Cora', seniority: 'junior' },
+      card: {
+        id: U.c,
+        ref: 'FEED-1',
+        title: 'Run',
+        cardType: 'feed',
+        fields: { topic: 'reloading', maxPerKind: { article: 2 }, preferredSites: ['https://a.test'] },
+        riskTier: null,
+        reworkRound: 0,
+        completionAction: null,
+        docsNeeded: false,
+        dependencies: [],
+      },
+      project: {
+        id: U.b,
+        key: 'FEED',
+        name: 'Feed',
+        domain: 'personal',
+        workingBranch: 'main',
+        e2eGlobs: [],
+        architecturalGlobs: [],
+      },
+      role: { key: 'curator', name: 'Curator', instructions: 'i', coreRules: [], skills: [] },
+      handoffs: [],
+      reviewComments: [],
+      thread: [],
+      standingOrders: [],
+      ledger: [],
+      feed: { candidates: [item(1)], seenUrls: ['example.test/old'], taste: '- Skip articles like "X"' },
+    } as unknown as ShiftBrief;
+    const prompt = renderShiftPrompt(brief);
+    expect(prompt).toContain('## Feed context');
+    expect(prompt).toContain('Topic: reloading');
+    expect(prompt).toContain('Maximum per kind: 2 article');
+    expect(prompt).toContain('example.test/old');
+    expect(prompt).toContain('Story number 1');
+    expect(prompt).toContain('Skip articles like "X"');
+  });
+});

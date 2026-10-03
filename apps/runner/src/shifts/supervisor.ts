@@ -12,6 +12,7 @@ import {
   outcomeDataSchema,
   type RepoReport,
   type ServerToRunnerOf,
+  type ShiftBrief,
   type ShiftReport,
   ShiftReportSchema,
   type Usage,
@@ -21,6 +22,7 @@ import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/t
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
 import { cardPayload, shiftTexts } from '../devops/requests.ts';
+import { checkFeedItemsFetched, FetchedUrls } from '../feeds/validation.ts';
 import { computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git } from '../git/git.ts';
 import {
@@ -93,6 +95,10 @@ interface ActiveShift {
   progress: Array<{ at: string; kind: 'text' | 'tool' | 'status'; text: string }>;
   env: Record<string, string>;
   graceTimer?: NodeJS.Timeout;
+  /** Pages the agent opened with its web tools (no fabrication: reported feed items must be among them). */
+  fetched: FetchedUrls;
+  /** The brief the agent sees: the server's brief plus what the runner read from the vault (PROJECT.md, taste.md). */
+  brief?: ShiftBrief;
   /** Resumed after a runner restart: the server already holds the claim and has seen accepted/started. */
   resumed?: boolean;
   startedSent?: boolean;
@@ -147,6 +153,7 @@ export class ShiftSupervisor {
       pendingReports: new Map(),
       guardViolations: [],
       progress: [],
+      fetched: new FetchedUrls(),
       env: {},
       ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
     };
@@ -309,7 +316,8 @@ export class ShiftSupervisor {
     // A card shift reads only the vault the server named for this card; a DevOps shift reads none.
     const vaultCtx =
       msg.kind === 'card' && msg.vault ? await readVaultContext(paths.vaults, msg.vault) : null;
-    const texts = shiftTexts(msg, withVaultContext(msg.brief, vaultCtx));
+    s.brief = withVaultContext(msg.brief, vaultCtx);
+    const texts = shiftTexts(msg, s.brief);
     await adapter.writeInstructions(sandbox, texts.instructions);
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
     s.env = {
@@ -434,8 +442,10 @@ export class ShiftSupervisor {
 
   private onRuntimeEvent(s: ActiveShift, ev: RuntimeEvent): void {
     if (ev.kind === 'progress') this.addProgress(s, 'text', ev.text);
-    else if (ev.kind === 'tool') this.addProgress(s, 'tool', `${ev.name}: ${ev.summary}`);
-    else if (ev.kind === 'final') s.finalText = ev.text;
+    else if (ev.kind === 'tool') {
+      s.fetched.record(ev.name, ev.summary);
+      this.addProgress(s, 'tool', `${ev.name}: ${ev.summary}`);
+    } else if (ev.kind === 'final') s.finalText = ev.text;
   }
 
   private addProgress(s: ActiveShift, kind: 'text' | 'tool' | 'status', text: string): void {
@@ -452,7 +462,8 @@ export class ShiftSupervisor {
     return {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
       rpc: async (req: IpcRpcRequest) => {
-        if (req.method === 'card.get') return { ok: true, result: cardPayload(s.msg) };
+        if (req.method === 'card.get')
+          return { ok: true, result: cardPayload({ ...s.msg, brief: s.brief ?? s.msg.brief }) };
         return this.deps.rpc(s.msg.shiftId, req.method, req.params);
       },
     };
@@ -490,6 +501,15 @@ export class ShiftSupervisor {
         );
       }
       toSend = { ...report, data: parsed.data as Record<string, unknown> };
+
+      // No fabrication: scouts and curators may only report pages that were opened during this shift (feeds, M5).
+      const unopened = checkFeedItemsFetched({
+        dataKind: outcome.data,
+        data: toSend.data,
+        fetched: s.fetched,
+        vouched: msg.brief.feed?.candidates.map((c) => c.url) ?? [],
+      });
+      if (unopened) return rejected(unopened);
 
       if (s.worktree && s.startSha) {
         const violations = await runGuard({

@@ -8,6 +8,42 @@ const list = (v: unknown): string[] =>
 const section = (title: string, body: string): string | null =>
   body.trim() ? `## ${title}\n${body.trim()}` : null;
 
+/** Feed cards (M5): topic, window, preferred sites, maximum per kind, seen-list, candidates and taste rules. */
+function feedContext(brief: ShiftBrief): string {
+  const f = brief.card.fields;
+  const lines: string[] = [];
+  if (text(f.topic)) lines.push(`- Topic: ${text(f.topic)}`);
+  lines.push(`- Window: the last ${typeof f.windowHours === 'number' ? f.windowHours : 24} hours`);
+  const sites = list(f.preferredSites);
+  lines.push(
+    `- Preferred sites (search these first): ${sites.length ? sites.join(', ') : 'none, choose where to look'}`,
+  );
+  const max =
+    f.maxPerKind && typeof f.maxPerKind === 'object'
+      ? Object.entries(f.maxPerKind as Record<string, unknown>)
+          .map(([k, v]) => `${v} ${k}`)
+          .join(', ')
+      : '5 article, 3 video';
+  lines.push(`- Maximum per kind: ${max}`);
+  const feed = brief.feed;
+  if (feed) {
+    lines.push(`- Seen-list: ${feed.seenUrls.length} URL(s) already logged for this project; skip them`);
+    if (feed.seenUrls.length > 0)
+      lines.push(`\n### Seen URLs\n${feed.seenUrls.map((u) => `- ${u}`).join('\n')}`);
+    if (feed.candidates.length > 0)
+      lines.push(
+        `\n### Candidates from the scout\n${feed.candidates
+          .map(
+            (c) =>
+              `- (${c.kind}) ${c.title} | ${c.source} | ${c.publishedAt} | ${c.url}\n  ${c.summary.replace(/\s+/g, ' ')}`,
+          )
+          .join('\n')}`,
+      );
+    lines.push(`\n### Taste (taste.md)\n${feed.taste?.trim() ? feed.taste.trim() : 'No taste rules yet.'}`);
+  }
+  return lines.join('\n');
+}
+
 /**
  * Renders the card as a markdown prompt (`-p`): ref, title, type, risk tier, rework round; the card fields;
  * dependencies; all prior handoffs; latest review comments; last thread messages; then the job for this shift
@@ -28,6 +64,7 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
     ].join('\n'),
   );
 
+  if (card.cardType === 'feed') parts.push(section('Feed context', feedContext(brief)));
   parts.push(section('Context', text(f.context)));
   parts.push(section('Requirements', text(f.requirements)));
   const criteria = list(f.acceptanceCriteria);

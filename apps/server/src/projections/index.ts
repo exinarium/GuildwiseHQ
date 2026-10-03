@@ -5,8 +5,10 @@ import { catalogueProjectors } from './catalogue.ts';
 import { chatProjectors } from './chats.ts';
 import { deskProjectors } from './desk.ts';
 import { devopsProjectors } from './devops.ts';
+import { feedProjectors } from './feeds.ts';
 import { ledgerProjectors } from './ledger.ts';
 import { projectProjectors } from './projects.ts';
+import { scheduleProjectors } from './schedules.ts';
 import { sharingProjectors } from './sharing.ts';
 import { shiftProjectors } from './shifts.ts';
 import { threadProjectors } from './threads.ts';
@@ -33,6 +35,8 @@ const domains: Array<Record<string, Projector>> = [
   vaultProjectors,
   devopsProjectors,
   sharingProjectors,
+  scheduleProjectors,
+  feedProjectors,
 ];
 
 export function buildProjectors(): ProjectorMap {
@@ -76,4 +80,7 @@ export const PROJECTION_TABLES = [
   'vaults',
   'devops_requests',
   'environment_changes',
+  'schedules',
+  'digest_items',
+  'feed_seen',
 ];
