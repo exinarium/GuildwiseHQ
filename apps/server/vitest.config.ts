@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 
-const TEST_DB = 'postgres://aom:aom@127.0.0.1:5433/aom_test';
+const TEST_DB = process.env.AOM_TEST_DB_URL ?? 'postgres://aom:aom@127.0.0.1:5433/aom_test';
 // globalSetup runs in the main process: tests must only ever touch aom_test.
 process.env.DATABASE_URL = TEST_DB;
 

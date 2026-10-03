@@ -3,9 +3,9 @@ import { fileURLToPath } from 'node:url';
 
 export const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 export const E2E_DIR = process.env.AOM_E2E_DIR ?? '/tmp/aom-e2e';
-export const PORT = 4601;
+export const PORT = Number(process.env.AOM_E2E_PORT ?? 4601);
 export const BASE_URL = `http://localhost:${PORT}`;
-export const DB_NAME = 'aom_e2e';
+export const DB_NAME = process.env.AOM_E2E_DB ?? 'aom_e2e';
 export const PG_ADMIN_URL = 'postgres://aom:aom@127.0.0.1:5433/postgres';
 export const DATABASE_URL = `postgres://aom:aom@127.0.0.1:5433/${DB_NAME}`;
 export const MAILPIT_API = process.env.AOM_MAILPIT_API ?? 'http://127.0.0.1:8025';

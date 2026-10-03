@@ -1,7 +1,7 @@
 import pg from 'pg';
 
 export const TEST_DB_URL = process.env.DATABASE_URL as string;
-if (!TEST_DB_URL?.endsWith('/aom_test')) throw new Error(`tests must use aom_test, got ${TEST_DB_URL}`);
+if (!/\/aom_test(_[a-z0-9]+)?$/.test(TEST_DB_URL ?? '')) throw new Error(`tests must use aom_test, got ${TEST_DB_URL}`);
 
 let admin: pg.Pool | null = null;
 const adminPool = () => (admin ??= new pg.Pool({ connectionString: TEST_DB_URL, max: 2 }));
