@@ -74,7 +74,17 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
           </Link>
         )}
         <Badge tone={s.enabled ? 'green' : 'amber'}>{s.enabled ? 'Enabled' : 'Paused'}</Badge>
+        {(s.failCount ?? 0) > 0 && (
+          <Badge tone="red" title={s.lastError ?? undefined}>
+            Cannot run ({s.failCount} failed {s.failCount === 1 ? 'try' : 'tries'})
+          </Badge>
+        )}
       </div>
+      {(s.failCount ?? 0) > 0 && s.lastError && (
+        <p className="mt-1 text-xs text-red-700 dark:text-red-400" data-testid="schedule-error">
+          {s.lastError} Retrying with growing pauses.
+        </p>
+      )}
       <dl className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
         <div>
           <dt className="text-xs text-zinc-500">When</dt>

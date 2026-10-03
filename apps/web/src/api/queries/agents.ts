@@ -15,12 +15,13 @@ export function useAgents(projectId?: string) {
   });
 }
 
-export function useNameSuggestions(enabled: boolean, nonce: number) {
+export function useNameSuggestions(enabled: boolean, nonce: number, theme = 'default') {
   return useQuery({
-    queryKey: ['name-suggestions', nonce],
+    queryKey: ['name-suggestions', nonce, theme],
     enabled,
     staleTime: Number.POSITIVE_INFINITY,
-    queryFn: async () => (await get('/agents/name-suggestions?count=6', NameSuggestionsResponseSchema)).names,
+    queryFn: async () =>
+      (await get(`/agents/name-suggestions${qs({ count: 6, theme })}`, NameSuggestionsResponseSchema)).names,
   });
 }
 

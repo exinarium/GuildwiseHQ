@@ -601,7 +601,7 @@ CREATE TABLE runner_inbox (                     -- idempotency for runner->serve
 | `research_publications` | M6 | `id, card_id, project_id, vault_path, title, citations jsonb, created_at` |
 | `intakes` | M7 | `id, org_id, thread_id, external_system, external_key, mapped_project_id, card_id, status, created_at` |
 | `outbound_drafts` | M8 | `id, card_id, org_id, external_system, external_key, kind ('comment','resolution','decision'), body, status ('pending','approved','rejected','posted','failed'), approved_by, posted_at, error, desk_item_id, created_at` |
-| `agent_stats_daily` | M9 | materialised per agent/day from `card_transitions`, `card_handoffs`, `shifts` (refreshed by a job; derived, not events) |
+| `agent_card_stats`, `agent_review_log`, `agent_stats_daily`, `hr_applied` | M9 | HR track record, projected from events by `projections/track-record.ts` (no refresh job; a rebuild reproduces them): per agent and card (questions, rework rounds, bugs, tokens, diff and test files), per review verdict (score, reasons, criteria missed), per agent and day (shift time, tokens, cards done), applied recommendations. Stats over the rolling 30-day window are computed from them at read time (`hr/track-record.ts`). `schedules` gains `fail_count`, `last_error`, `failure_desk_item_id` |
 | `departments` | M10 | `id, org_id, name, created_at` and `department` column on `role_definitions` / `workflow_versions` |
 
 ---
@@ -737,6 +737,8 @@ Heartbeats are not events.
 | `ScheduleCreated` / `ScheduleUpdated` / `ScheduleDeleted` | `{scheduleId, projectId, name, kind, cron, timezone, cardTemplate, enabled}` | schedules |
 | **`ScheduleFired`** | `{scheduleId, cardId, firedFor: ISO time}` | last_fired_at, next_fire_at; `CardCreated{scheduled:true, origin:'schedule', status:'queued'}` in same append |
 | `FeedRunRequested` | `{projectId, scheduleId?, cardId, requestedBy}` | manual "run now" → same as ScheduleFired path |
+| `ScheduleFireFailed` | `{scheduleId, error, attempts, nextFireAt, deskItemId?}` | M9: a due schedule could not emit its card; `next_fire_at` moves to the retry time (1 min doubling to 6 h), `fail_count`/`last_error` set; the first failure of a streak also raises one desk alert (`schedule_failed`), resolved by the next `ScheduleFired` |
+| `RecommendationApplied` | `{orgId, recommendationId, kind, agentId?, appliedBy, effect, deskItemId?}` | M9: one-click HR recommendation applied (the change is its own event in the same append: `AgentChanged`, `AgentHired`, `AgentRetired` or a `DeskItemCreated` approval `standing_order`); `hr_applied` hides it for the window |
 | **`DigestPosted`** | `{cardId, projectId, items:[{itemId, kind, url, urlNormalized, title, source, publishedAt, summary}], nothingQualified: boolean}` | digest_items, feed_seen; desk items kind rating (one grouped desk item per digest) |
 | **`ItemRated`** | `{itemId, verdict, reason?, ratedBy}` | digest_items verdict; `vault.write` append to taste.md |
 | `TasteRuleProposed` | `{projectId, deskItemId, rule, evidenceItemIds[]}` | desk approval item |
@@ -1082,9 +1084,9 @@ Overflow is per organization (one extra shift at a time per org).
 
 At the end of each pass: for each project with queued cards in a stage claimed by `tester` older than 5 min and no free tester agent (all testers at capacity), append `TesterBottleneck` unless an open bottleneck desk item exists for that project. Resolved automatically (DeskItemResolved acknowledged) when the queue drains.
 
-### 9.6 Hire cap for first runs
+### 9.6 Hire cap for first runs (removed in M9)
 
-Until M9, `POST /api/agents` enforces per org: at most 2 active `builder`s and 1 active agent of each other role (excluding DevOps). Controlled by `AOM_FIRST_RUN_HIRE_CAP=true` (default true until M9 flips it).
+The first-run cap (2 builders, 1 of each other role) and `AOM_FIRST_RUN_HIRE_CAP` are gone; the HR board's recommendations (model, split, fire or reassign) replace the guard rail.
 
 ---
 

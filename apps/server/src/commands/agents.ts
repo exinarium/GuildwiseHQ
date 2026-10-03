@@ -104,6 +104,50 @@ const NAMES: Record<string, string[]> = {
     'Linden',
     'Sycamore',
   ],
+  rivers: [
+    'Danube',
+    'Nile',
+    'Orinoco',
+    'Volga',
+    'Yukon',
+    'Tigris',
+    'Zambezi',
+    'Rhine',
+    'Loire',
+    'Mekong',
+    'Indus',
+    'Tagus',
+    'Elbe',
+    'Seine',
+    'Limpopo',
+    'Congo',
+    'Ganges',
+    'Thames',
+    'Murray',
+    'Niger',
+  ],
+  planets: [
+    'Mercury',
+    'Venus',
+    'Mars',
+    'Jupiter',
+    'Saturn',
+    'Neptune',
+    'Titan',
+    'Europa',
+    'Callisto',
+    'Triton',
+    'Io',
+    'Ganymede',
+    'Rhea',
+    'Oberon',
+    'Miranda',
+    'Ceres',
+    'Phobos',
+    'Enceladus',
+    'Iapetus',
+    'Charon',
+  ],
 };
 
 /** Names not used in the org (retired agents' names count as used, they are never reused). */
@@ -129,23 +173,6 @@ export async function suggestNames(
     }
   }
   return out;
-}
-
-async function enforceHireCap(ctx: Ctx, tx: Tx, orgId: string, roleKey: string) {
-  if (!ctx.config.firstRunHireCap) return;
-  const r = await one(
-    tx,
-    `SELECT count(*)::int AS n FROM agents WHERE org_id=$1 AND role_key=$2 AND status IN ('active','needs_rehome') AND NOT is_devops`,
-    [orgId, roleKey],
-  );
-  const cap = roleKey === 'builder' ? 2 : 1;
-  if (Number(r?.n) >= cap) {
-    throw conflict(
-      'hire_cap_reached',
-      `first-run cap reached: at most ${cap} active ${roleKey}${cap > 1 ? 's' : ''} per organization`,
-      { roleKey, cap },
-    );
-  }
 }
 
 export async function hireAgent(ctx: Ctx, user: AuthSession['user'], req: HireAgentRequest): Promise<string> {
@@ -183,7 +210,6 @@ export async function hireAgent(ctx: Ctx, user: AuthSession['user'], req: HireAg
         `the name '${req.name}' is already used in this organization (retired agents keep their names)`,
       );
     }
-    await enforceHireCap(ctx, tx, orgId, req.roleKey);
     const dm = roleDef.definition.defaultModel;
     await ctx.store.append(
       [
@@ -220,7 +246,7 @@ export async function hireAgent(ctx: Ctx, user: AuthSession['user'], req: HireAg
   return agentId;
 }
 
-async function manageableAgent(tx: Tx, user: AuthSession['user'], agentId: string): Promise<Row> {
+export async function manageableAgent(tx: Tx, user: AuthSession['user'], agentId: string): Promise<Row> {
   const a = await one(
     tx,
     `SELECT a.* FROM agents a WHERE a.id=$1 AND (
@@ -236,7 +262,8 @@ async function manageableAgent(tx: Tx, user: AuthSession['user'], agentId: strin
   return a;
 }
 
-const agentScope = (a: Row) => (a.project_id ? projectScope(a.org_id, a.project_id) : orgScope(a.org_id));
+export const agentScope = (a: Row) =>
+  a.project_id ? projectScope(a.org_id, a.project_id) : orgScope(a.org_id);
 
 export async function patchAgent(
   ctx: Ctx,

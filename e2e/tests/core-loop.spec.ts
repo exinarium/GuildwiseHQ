@@ -92,7 +92,7 @@ async function assertExclusiveClaims(refs: string[]): Promise<void> {
   }
 }
 
-test('AC3: hire two builders and a reviewer (mock runtime); a third builder is refused', async () => {
+test('AC3: hire two builders and a reviewer (mock runtime); the hire form has no role limits', async () => {
   await page.goto('/agents');
   const hire = async (role: string, name: string, seniority?: string) => {
     await page.getByRole('button', { name: 'Hire agent' }).first().click();
@@ -108,24 +108,12 @@ test('AC3: hire two builders and a reviewer (mock runtime); a third builder is r
   await hire('Builder', 'Grace');
   await hire('Reviewer', 'Linus', 'senior');
 
-  // Third builder: the UI disables the role and the API refuses it.
+  // M9 removed the first-run cap: the form offers every role and no limits are shown.
   await page.getByRole('button', { name: 'Hire agent' }).first().click();
   const form = page.getByRole('form', { name: 'Hire agent' });
-  await expect(form.getByRole('option', { name: /Builder.*limit reached/ })).toBeDisabled();
+  await expect(form.getByRole('option', { name: 'Builder', exact: true })).toBeEnabled();
+  await expect(page.getByTestId('hire-caps')).toHaveCount(0);
   await page.keyboard.press('Escape');
-  const ws = (await (await api.get('/api/workstations')).json()).workstations[0];
-  const refused = await api.post('/api/agents', {
-    data: {
-      name: 'Third',
-      roleKey: 'builder',
-      seniority: 'junior',
-      workstationId: ws.id,
-      projectId,
-      runtime: 'mock',
-    },
-  });
-  expect(refused.status()).toBeGreaterThanOrEqual(400);
-  expect((await refused.json()).error.code).toBe('hire_cap_reached');
 });
 
 test('AC4: create TOY-1 with all required fields and a mock script, then specify it', async () => {

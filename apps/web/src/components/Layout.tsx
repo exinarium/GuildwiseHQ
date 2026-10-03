@@ -64,7 +64,10 @@ function Shell({ isAdmin, name, live }: { isAdmin: boolean; name: string; live: 
               New card
             </NavLink>
             <NavLink to="/agents" className={link}>
-              Agents
+              HR
+            </NavLink>
+            <NavLink to="/metrics" className={link}>
+              Metrics
             </NavLink>
             <NavLink to="/workstations" className={link}>
               Workstations

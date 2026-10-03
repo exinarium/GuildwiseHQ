@@ -17,6 +17,8 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['agents'],
         ['digest'],
         ['intakes'],
+        ['hr'],
+        ['metrics'],
       ];
     case 'intake':
       return [['intakes'], ['desk'], ['card'], ['board']];
@@ -33,15 +35,27 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
       ];
     case 'desk':
       // Questions block and unblock cards; answers add ledger entries.
-      return [['desk'], ['board'], ['card'], ['ledger'], ['devops'], ['vaults'], ['intakes']];
+      return [
+        ['desk'],
+        ['board'],
+        ['card'],
+        ['ledger'],
+        ['devops'],
+        ['vaults'],
+        ['intakes'],
+        ['hr'],
+        ['metrics'],
+      ];
     case 'ledger':
       return [['ledger'], ['desk'], ['card']];
     case 'vault':
       return [['vaults']];
     case 'shift':
-      return [['card'], ['agents'], ['board']];
+      return [['card'], ['agents'], ['board'], ['hr'], ['metrics']];
     case 'agent':
-      return [['agents'], ['board'], ['card']];
+      return [['agents'], ['board'], ['card'], ['hr'], ['roles']];
+    case 'role':
+      return [['roles'], ['hr'], ['agents']];
     case 'workstation':
       return [['workstations'], ['admin', 'workstations'], ['agents']];
     case 'project':

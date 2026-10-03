@@ -304,12 +304,17 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
   const dismiss = useDismissDeskItem();
   // A curator's taste-rule proposal can be reworded before it is approved (the edited text is what taste.md gets).
   const [rule, setRule] = useState(item.body);
-  const editable = item.kind === 'approval' && item.subkind === 'taste_rule';
+  const editable =
+    item.kind === 'approval' && (item.subkind === 'taste_rule' || item.subkind === 'standing_order');
   const edited = editable && rule.trim() && rule.trim() !== item.body.trim() ? rule.trim() : undefined;
   return (
     <div className="mt-3 flex flex-col gap-2">
       {editable && (
-        <TextArea label="Rule (editable)" value={rule} onChange={(e) => setRule(e.target.value)} />
+        <TextArea
+          label={item.subkind === 'standing_order' ? 'Standing order (editable)' : 'Rule (editable)'}
+          value={rule}
+          onChange={(e) => setRule(e.target.value)}
+        />
       )}
       <ErrorBox error={resolve.error ?? dismiss.error} />
       <div className="flex flex-wrap gap-2">

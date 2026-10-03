@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createTestApp, uniqueEmail } from './helpers/app.ts';
+import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { createWorld, ok, pairWorkstation, type World } from './helpers/world.ts';
 
@@ -97,16 +97,17 @@ describe('hiring', () => {
     expect(birds.names).toEqual(['Heron', 'Kestrel', 'Wren']);
   });
 
-  it('enforces the first-run cap: 2 builders, 1 of each other role (retired do not count)', async () => {
-    // Ada is active, Grace retired: one more builder is fine, the next is capped.
-    expect((await hire({ name: 'Linus', roleKey: 'builder', seniority: 'junior' })).status).toBe(201);
-    const third = await hire({ name: 'Barbara', roleKey: 'builder', seniority: 'junior' });
-    expect(third.status).toBe(409);
-    expect(third.body.error.code).toBe('hire_cap_reached');
-    expect((await hire({ name: 'Rev1', roleKey: 'reviewer', seniority: 'senior' })).status).toBe(201);
-    expect((await hire({ name: 'Rev2', roleKey: 'reviewer', seniority: 'senior' })).status).toBe(409);
-    expect((await hire({ name: 'Tess', roleKey: 'tester', seniority: 'junior' })).status).toBe(201);
-    expect((await hire({ name: 'Tess2', roleKey: 'tester', seniority: 'junior' })).status).toBe(409);
+  it('has no hire cap: any number of agents per role (M9 removed the first-run cap)', async () => {
+    for (const [name, roleKey, seniority] of [
+      ['Linus', 'builder', 'junior'],
+      ['Barbara', 'builder', 'junior'],
+      ['Rev1', 'reviewer', 'senior'],
+      ['Rev2', 'reviewer', 'senior'],
+      ['Tess', 'tester', 'junior'],
+      ['Tess2', 'tester', 'junior'],
+    ] as const) {
+      expect((await hire({ name, roleKey, seniority })).status).toBe(201);
+    }
   });
 
   it('patches an agent and refuses changes by strangers', async () => {
@@ -133,26 +134,5 @@ describe('hiring', () => {
     const rows = await q(`SELECT type, payload FROM runner_commands WHERE type='agent.wipe'`);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.payload.agentId).toBeTruthy();
-  });
-});
-
-describe('without the first-run cap', () => {
-  it('allows more builders', async () => {
-    await w.t.close();
-    const t2 = await createTestApp({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' }, reset: true });
-    try {
-      const s = await t2.userSession(uniqueEmail('capless'));
-      const { workstationId } = await pairWorkstation(t2, s);
-      for (const n of ['A1', 'A2', 'A3']) {
-        const r = await t2.req('POST', '/api/agents', {
-          cookie: s.cookie,
-          body: { name: n, roleKey: 'builder', seniority: 'junior', workstationId },
-        });
-        expect(r.status).toBe(201);
-      }
-    } finally {
-      await t2.close();
-    }
-    w = await createWorld({ listen: false });
   });
 });

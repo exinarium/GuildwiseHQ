@@ -7,6 +7,7 @@ import { deskEvents } from './desk.ts';
 import { devopsEvents } from './devops.ts';
 import { feedEvents } from './feed.ts';
 import { intakeEvents } from './intake.ts';
+import { hrEvents } from './hr.ts';
 import { ledgerEvents } from './ledger.ts';
 import { projectEvents } from './project.ts';
 import { researchEvents } from './research.ts';
@@ -38,6 +39,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...feedEvents,
   ...researchEvents,
   ...intakeEvents,
+  ...hrEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -54,6 +56,7 @@ export * from './devops.ts';
 export * from './envelope.ts';
 export * from './feed.ts';
 export * from './intake.ts';
+export * from './hr.ts';
 export * from './ledger.ts';
 export * from './project.ts';
 export * from './research.ts';

@@ -6,10 +6,12 @@ import {
   emptyFields,
   FEED_FIELD_DEFAULTS,
   getStage,
+  HR_DESK_SUBKIND,
   type PatchScheduleRequest,
   parseCardFields,
   RegressionPlatform,
   type ScheduleDto,
+  scheduleBackoffMs,
   streamId,
 } from '@aom/shared';
 import { CronExpressionParser } from 'cron-parser';
@@ -67,6 +69,8 @@ const toDto = (r: Row): ScheduleDto => ({
   nextFireAt: iso(r.next_fire_at),
   lastFiredAt: iso(r.last_fired_at),
   lastCardId: r.last_card_id,
+  failCount: r.fail_count ?? 0,
+  lastError: r.last_error ?? null,
   createdAt: iso(r.created_at) as string,
 });
 
@@ -349,6 +353,7 @@ export async function fireDueSchedules(ctx: Ctx): Promise<Array<{ scheduleId: st
           await ctx.store.append(
             [
               ...run.events,
+              ...(await resolveFailureNotice(tx, s, project)),
               {
                 streamId: streamId.schedule(s.id),
                 event: {
@@ -378,6 +383,7 @@ export async function fireDueSchedules(ctx: Ctx): Promise<Array<{ scheduleId: st
         await ctx.store.append(
           [
             card.event,
+            ...(await resolveFailureNotice(tx, s, project)),
             {
               streamId: streamId.schedule(s.id),
               event: {
@@ -400,10 +406,105 @@ export async function fireDueSchedules(ctx: Ctx): Promise<Array<{ scheduleId: st
       if (r) fired.push(r);
     } catch (err) {
       ctx.log.error({ err, scheduleId: id }, 'schedule failed to fire');
+      await recordFireFailure(ctx, id, err, now).catch((e2) =>
+        ctx.log.error({ err: e2, scheduleId: id }, 'could not record the schedule failure'),
+      );
     }
   }
   if (fired.length) ctx.services.dispatcher.trigger();
   return fired;
+}
+
+/** A fire that works again closes the desk notice its earlier failures raised. */
+async function resolveFailureNotice(tx: Tx, s: Row, project: Row): Promise<AppendInput[]> {
+  if (!s.failure_desk_item_id) return [];
+  const open = await one(tx, `SELECT 1 FROM desk_items WHERE id=$1 AND status='open'`, [
+    s.failure_desk_item_id,
+  ]);
+  if (!open) return [];
+  return [
+    {
+      streamId: streamId.desk(s.failure_desk_item_id),
+      event: {
+        type: 'DeskItemResolved',
+        payload: {
+          deskItemId: s.failure_desk_item_id,
+          resolution: 'acknowledged',
+          note: 'The schedule fired again.',
+          by: { kind: 'system' },
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(project.org_id, project.id),
+    },
+  ];
+}
+
+/**
+ * A schedule that cannot emit its card (a regression schedule on a project without a repo, say) must not be retried on
+ * every tick: back off (1 min doubling to 6 h) and raise one desk notice for the whole streak. The next fire time moves
+ * to the retry time; a successful fire (or an edit of the schedule) resets the streak.
+ */
+async function recordFireFailure(ctx: Ctx, id: string, err: unknown, now: Date): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const s = await one(
+      tx,
+      `SELECT * FROM schedules WHERE id=$1 AND enabled AND next_fire_at <= $2 FOR UPDATE SKIP LOCKED`,
+      [id, now],
+    );
+    if (!s) return;
+    const project = await one(tx, 'SELECT * FROM projects WHERE id=$1', [s.project_id]);
+    if (!project) return;
+    const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);
+    const attempts = Number(s.fail_count ?? 0) + 1;
+    const nextFireAt = new Date(now.getTime() + scheduleBackoffMs(attempts));
+    const noticeOpen = s.failure_desk_item_id
+      ? await one(tx, `SELECT 1 FROM desk_items WHERE id=$1 AND status='open'`, [s.failure_desk_item_id])
+      : undefined;
+    const deskItemId = noticeOpen ? undefined : randomUUID();
+    const scope = projectScope(project.org_id, project.id);
+    const events: AppendInput[] = [
+      {
+        streamId: streamId.schedule(id),
+        event: {
+          type: 'ScheduleFireFailed',
+          payload: {
+            scheduleId: id,
+            error: message,
+            attempts,
+            nextFireAt: nextFireAt.toISOString(),
+            ...(deskItemId ? { deskItemId } : {}),
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope,
+      },
+    ];
+    if (deskItemId) {
+      events.push({
+        streamId: streamId.desk(deskItemId),
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId,
+            kind: 'alert',
+            subkind: HR_DESK_SUBKIND.scheduleFailed,
+            title: `Schedule "${s.name}" cannot run`,
+            body: `${message}\n\nThe schedule keeps trying with growing pauses (next try ${nextFireAt.toISOString()}). Fix the cause or disable the schedule; this notice closes when it fires again.`,
+            blocking: false,
+            pinned: false,
+            options: [],
+            projectId: project.id,
+            affectedCardIds: [],
+            askedBy: { kind: 'system' },
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope,
+      });
+    }
+    await ctx.store.append(events, { tx });
+  });
 }
 
 /** Default template for "Run now" on a feed project without a schedule. */

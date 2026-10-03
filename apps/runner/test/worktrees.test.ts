@@ -170,7 +170,7 @@ describe('diffstat and risk tier', () => {
     sh(path, 'git', ['add', '-A']);
     sh(path, 'git', ['commit', '-m', 'a']);
     const stats = await computeDiffStats({ worktree: path, baseBranch: 'main', architecturalGlobs: [] });
-    expect(stats).toEqual({ files: 1, added: 3, removed: 0, architecturalPaths: [] });
+    expect(stats).toEqual({ files: 1, added: 3, removed: 0, architecturalPaths: [], testFiles: 0 });
     expect(riskTier(stats, 'feature')).toBe('small');
     expect(riskTier(stats, 'refactor')).toBe('large');
   });
@@ -214,5 +214,16 @@ describe('diffstat and risk tier', () => {
       affectedAreas: 'test/existing.test.ts',
     });
     expect(inScope.outOfScopeTestChange).toBeUndefined();
+  });
+
+  it('counts the changed test files (HR: test coverage of the changes)', async () => {
+    const path = await setup();
+    mkdirSync(join(path, 'src'), { recursive: true });
+    writeFileSync(join(path, 'src', 'greet.ts'), 'export const g = 1;\n');
+    writeFileSync(join(path, 'src', 'greet.test.ts'), 'it("g", () => {});\n');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'code and test']);
+    const stats = await computeDiffStats({ worktree: path, baseBranch: 'main', architecturalGlobs: [] });
+    expect(stats).toMatchObject({ files: 2, testFiles: 1 });
   });
 });

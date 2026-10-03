@@ -189,7 +189,7 @@ test('AC bottleneck: E2E work waits 5 min while every tester is busy -> one pinn
   await page.screenshot({ path: join(paths.vaults, 'test-loop-bottleneck.png') });
   await item.getByTestId('hire-tester').click();
   await expect(page).toHaveURL(/\/agents\?hire=tester&projectId=/);
-  // the first-run hire cap (one tester) refuses the hire itself; the form opens pre-filled
+  // the form opens pre-filled
   const form = page.getByRole('form', { name: 'Hire agent' });
   await expect(form.getByLabel('Role', { exact: true })).toHaveValue('tester');
   await expect(form.getByLabel('Seniority')).toHaveValue('junior');

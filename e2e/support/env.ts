@@ -48,3 +48,10 @@ export const TESTER = { email: 'tester@e2e.test', name: 'E2E Tester', password: 
 
 /** M7 intake spec: own user, own runner (mock), projects INT and OTH on the toy repo, a BA and two builders. */
 export const INTAKER = { email: 'intaker@e2e.test', name: 'E2E Intaker', password: 'intaker-password-12345' };
+/** M9 HR board spec: the owner of the HR project and an additional manager of it. */
+export const HR = { email: 'hr@e2e.test', name: 'E2E HR', password: 'hr-password-12345' };
+export const HRGUEST = {
+  email: 'hrguest@e2e.test',
+  name: 'E2E HR Guest',
+  password: 'hrguest-password-12345',
+};

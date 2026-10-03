@@ -28,6 +28,9 @@ export const ScheduleDtoSchema = z.object({
   lastFiredAt: IsoTime.nullable(),
   /** The card the last run emitted. */
   lastCardId: z.uuid().nullable(),
+  /** M9: consecutive failed fires (0 = healthy) and the last error; the schedule backs off between retries. */
+  failCount: z.number().int().nonnegative().optional(),
+  lastError: z.string().nullable().optional(),
   createdAt: IsoTime,
 });
 export type ScheduleDto = z.infer<typeof ScheduleDtoSchema>;

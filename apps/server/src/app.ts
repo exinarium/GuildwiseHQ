@@ -28,6 +28,7 @@ import { HttpError } from './errors.ts';
 import { Notifier } from './eventstore/notifier.ts';
 import { PgEventStore } from './eventstore/pg-event-store.ts';
 import { ConcurrencyError } from './eventstore/types.ts';
+import { registerHrHook } from './hr/hr.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
 import { buildProjectors } from './projections/index.ts';
 import { adminRoutes } from './routes/admin.ts';
@@ -40,6 +41,7 @@ import { deskRoutes } from './routes/desk.ts';
 import { devopsRoutes } from './routes/devops.ts';
 import { digestRoutes } from './routes/digests.ts';
 import { intakeRoutes } from './routes/intakes.ts';
+import { hrRoutes } from './routes/hr.ts';
 import { invitationRoutes } from './routes/invitations.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
 import { projectRoutes } from './routes/projects.ts';
@@ -201,6 +203,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(digestRoutes(ctx));
   await app.register(researchRoutes(ctx));
   await app.register(intakeRoutes(ctx));
+  await app.register(hrRoutes(ctx));
 
   // Gateways: runner WS (/api/runner/ws) and browser WS (/api/ws).
   const runners = new RunnerRegistry();
@@ -244,6 +247,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
 
   const unhookDecisions = registerDecisionHook(ctx);
   const unhookTaste = registerTasteHook(ctx);
+  const unhookHr = registerHrHook(ctx);
   await notifier.start();
   if (opts.background) {
     dispatcher.start();
@@ -254,6 +258,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   app.addHook('onClose', async () => {
     unhookDecisions();
     unhookTaste();
+    unhookHr();
     await scheduler.stop();
     await dispatcher.stop();
     await reaper.stop();
