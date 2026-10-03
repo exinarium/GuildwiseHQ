@@ -15,6 +15,11 @@ export const ADMIN = { email: 'admin@e2e.test', name: 'E2E Admin', password: 'ad
 export const MEMBER = { email: 'member@e2e.test', name: 'E2E Member', password: 'member-password-12345' };
 export const OTHER = { email: 'other@e2e.test', name: 'E2E Other', password: 'other-password-12345' };
 
+/** M3 specs: one user for the DevOps/vault flows, an owner and a guest for project sharing. */
+export const DEVOPS = { email: 'devops@e2e.test', name: 'E2E DevOps', password: 'devops-password-12345' };
+export const SHARER = { email: 'sharer@e2e.test', name: 'E2E Sharer', password: 'sharer-password-12345' };
+export const GUEST = { email: 'guest@e2e.test', name: 'E2E Guest', password: 'guest-password-12345' };
+
 export const paths = {
   server: join(ROOT, 'apps/server/dist/main.mjs'),
   runnerBin: join(ROOT, 'apps/runner/dist/aom-runner.mjs'),
@@ -23,6 +28,10 @@ export const paths = {
   repoRoot: join(E2E_DIR, 'repos'),
   toyClone: join(E2E_DIR, 'repos/toy'),
   runnerData: join(E2E_DIR, 'runner'),
+  /** Data dir of an extra runner (M3 specs). */
+  runnerHome: (name: string) => join(E2E_DIR, `runner-${name}`),
+  /** Temp dir for git vault fixtures (bare origin + clones); never pushed anywhere real. */
+  vaults: join(E2E_DIR, 'vaults'),
   pids: join(E2E_DIR, 'pids.json'),
   serverLog: join(E2E_DIR, 'server.log'),
   runnerLog: join(E2E_DIR, 'runner.out.log'),

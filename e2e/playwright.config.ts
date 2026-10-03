@@ -18,5 +18,7 @@ export default defineConfig({
     { name: 'auth', testMatch: 'auth.spec.ts' },
     { name: 'pairing', testMatch: 'pairing.spec.ts', dependencies: ['auth'] },
     { name: 'core-loop', testMatch: 'core-loop.spec.ts', dependencies: ['pairing'] },
+    { name: 'devops', testMatch: 'devops.spec.ts', dependencies: ['core-loop'] },
+    { name: 'sharing', testMatch: 'sharing.spec.ts', dependencies: ['devops'] },
   ],
 });

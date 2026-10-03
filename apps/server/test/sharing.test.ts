@@ -1,8 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
+import { FakeRunner } from './helpers/fake-runner.ts';
 import { addMember, connectMemberRunner, hireFor, type Member } from './helpers/members.ts';
-import { createWorld, ok, until, type World } from './helpers/world.ts';
+import {
+  createWorld,
+  MOCK_RUNTIME,
+  ok,
+  pairWorkstation,
+  REPO_SSH,
+  until,
+  type World,
+} from './helpers/world.ts';
 
 let w: World;
 beforeAll(async () => {
@@ -187,6 +196,30 @@ describe('agents and claims across managers', () => {
     // the member's workstation resolves the repo through their membership
     const wsRepos = await q('SELECT 1 FROM workstation_repos WHERE workstation_id=$1', [m.workstationId]);
     expect(wsRepos).toHaveLength(1);
+    r.close();
+  });
+});
+
+describe('a runner that is already connected when the share is accepted', () => {
+  it('matches the project repos right away, and drops them again when the member is removed', async () => {
+    const m = await w.t.userSession(uniqueEmail('early'));
+    const ws = await pairWorkstation(w.t, m, 'early-box');
+    const r = await FakeRunner.connect(w.baseUrl, ws.runnerToken);
+    r.hello({
+      repos: [{ remoteUrl: REPO_SSH, localPath: '/tmp/early', headBranch: 'main' }],
+      runtimes: MOCK_RUNTIME,
+    });
+    await r.waitFor('welcome');
+    await w.t.app.ctx.notifier.flush();
+    const repos = () => q('SELECT 1 FROM workstation_repos WHERE workstation_id=$1', [ws.workstationId]);
+    expect(await repos()).toHaveLength(0); // not a member yet
+    await ok(as(w.owner.cookie).post(`/api/projects/${w.projectId}/members`, { email: m.email }), 201);
+    await ok(as(m.cookie).post(`/api/projects/${w.projectId}/members/accept`));
+    await until(async () => (await repos()).length === 1, 4000, 'repo matched after accept');
+    const rescan = await r.waitFor('command', (f) => f.command === 'repos.rescan');
+    expect(rescan).toBeTruthy();
+    await w.t.req('DELETE', `/api/projects/${w.projectId}/members/${m.id}`, { cookie: w.owner.cookie });
+    await until(async () => (await repos()).length === 0, 4000, 'repo dropped after removal');
     r.close();
   });
 });

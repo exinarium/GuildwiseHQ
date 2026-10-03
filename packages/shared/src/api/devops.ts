@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DevOpsAccessSchema, DevOpsRequester, DevOpsRequestStatus } from '../events/devops.ts';
+import { DevOpsRequester, DevOpsRequestStatus } from '../events/devops.ts';
 import { IsoTime } from './common.ts';
 
 export const DevOpsRequestDtoSchema = z.object({
@@ -67,7 +67,13 @@ export const DevOpsRequestsQuerySchema = z.object({
 });
 
 /** `PATCH /api/workstations/:id/devops-access`. */
-export const PatchDevOpsAccessRequestSchema = DevOpsAccessSchema.partial();
+// Explicit optional fields: `DevOpsAccessSchema.partial()` would still fill the defaults and reset what was not sent.
+export const PatchDevOpsAccessRequestSchema = z.object({
+  allowInstall: z.boolean().optional(),
+  allowDocker: z.boolean().optional(),
+  allowedPaths: z.array(z.string()).optional(),
+  sudo: z.boolean().optional(),
+});
 export type PatchDevOpsAccessRequest = z.infer<typeof PatchDevOpsAccessRequestSchema>;
 
 /** `POST /api/devops/requests/:id/resolve` (also what the M2 desk resolve calls for `subkind: 'devops'`). */

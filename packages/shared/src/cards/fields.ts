@@ -38,6 +38,10 @@ export const MockActionSchema = z.enum([
   'hang',
   'no_report',
   'edit_outside_scope',
+  /** M3: the agent asks the DevOps engineer (`aom devops "start the app"`) and then carries on normally. */
+  'devops',
+  /** M3: like `devops` but for a request outside the default access ("install docker" needs approval). */
+  'devops_install',
 ]);
 export type MockAction = z.infer<typeof MockActionSchema>;
 /** `{ "<stage>": ["<action>", ...] }` consumed by round index. Example: `{ review: ['changes', 'ok'] }`. */

@@ -316,6 +316,8 @@ export const VaultStatusSchema = msg('vault.status', {
   lastPullAt: z.iso.datetime().nullable(),
   lastPushAt: z.iso.datetime().nullable(),
   error: z.string().optional(),
+  /** Additive: where the clone lives on the workstation (also reported by `hello.vaults`). */
+  localPath: z.string().optional(),
 });
 export const VaultConflictSchema = msg('vault.conflict', { vaultId: z.string(), files: z.array(z.string()) });
 

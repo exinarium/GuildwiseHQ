@@ -219,9 +219,19 @@ export class RunnerGateway {
         return;
       }
       case 'ProjectShareAccepted':
-      case 'ProjectMemberRemoved':
-        await refreshVaultConfig(ctx, [(e.event.payload as { userId: string }).userId]);
+      case 'ProjectMemberRemoved': {
+        const userId = (e.event.payload as { userId: string }).userId;
+        await refreshVaultConfig(ctx, [userId]);
+        // Repo matching follows membership: a runner that is already connected re-matches what it reported
+        // (joining makes the project's repos visible to it, leaving removes them).
+        for (const conn of ctx.services.runners.all()) {
+          if (conn.userId !== userId) continue;
+          await this.handlers.matchRepos(conn);
+          await enqueueRunnerCommand(ctx.pool, conn.workstationId, 'repos.rescan', {});
+          await this.deliverPending(conn.workstationId);
+        }
         return;
+      }
       case 'ProjectRepoAdded':
       case 'ProjectRepoRemoved': {
         const projectId = (e.event.payload as { projectId: string }).projectId;

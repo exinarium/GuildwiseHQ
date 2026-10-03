@@ -440,16 +440,24 @@ export async function applyVaultConflict(
 export async function markVaultStatus(
   ctx: Ctx,
   workstationId: string,
-  s: { vaultId: string; lastPullAt: string | null; lastPushAt: string | null; error?: string },
+  s: {
+    vaultId: string;
+    lastPullAt: string | null;
+    lastPushAt: string | null;
+    error?: string;
+    localPath?: string;
+  },
 ): Promise<void> {
+  if (!UUID_RE.test(s.vaultId)) return;
   await exec(
     ctx.pool,
-    `INSERT INTO workstation_vaults (workstation_id, vault_id, last_pull_at, last_push_at, last_error)
-     SELECT $1, v.id, $3, $4, $5 FROM vaults v WHERE v.id = $2
+    `INSERT INTO workstation_vaults (workstation_id, vault_id, last_pull_at, last_push_at, last_error, local_path)
+     SELECT $1, v.id, $3, $4, $5, $6 FROM vaults v WHERE v.id = $2
      ON CONFLICT (workstation_id, vault_id) DO UPDATE
        SET last_pull_at = COALESCE(EXCLUDED.last_pull_at, workstation_vaults.last_pull_at),
            last_push_at = COALESCE(EXCLUDED.last_push_at, workstation_vaults.last_push_at),
-           last_error = EXCLUDED.last_error`,
-    [workstationId, s.vaultId, s.lastPullAt, s.lastPushAt, s.error ?? null],
+           last_error = EXCLUDED.last_error,
+           local_path = COALESCE(EXCLUDED.local_path, workstation_vaults.local_path)`,
+    [workstationId, s.vaultId, s.lastPullAt, s.lastPushAt, s.error ?? null, s.localPath ?? null],
   );
 }

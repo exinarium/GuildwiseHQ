@@ -38,7 +38,13 @@ describe('project invitations inbox', () => {
       if (url === '/api/project-invitations')
         return json({
           invitations: [
-            { projectId: PROJECT, projectKey: 'TOY', projectName: 'Toy', invitedByName: 'Olga', invitedAt: null },
+            {
+              projectId: PROJECT,
+              projectKey: 'TOY',
+              projectName: 'Toy',
+              invitedByName: 'Olga',
+              invitedAt: null,
+            },
           ],
         });
       if (url === `/api/projects/${PROJECT}/members/accept` && init?.method === 'POST') return json({});
@@ -67,8 +73,20 @@ describe('members panel', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   const members = [
-    { userId: U1, displayName: 'Olga', email: 'olga@example.test', role: 'owner' as const, status: 'active' as const },
-    { userId: U2, displayName: 'Max', email: 'max@example.test', role: 'manager' as const, status: 'invited' as const },
+    {
+      userId: U1,
+      displayName: 'Olga',
+      email: 'olga@example.test',
+      role: 'owner' as const,
+      status: 'active' as const,
+    },
+    {
+      userId: U2,
+      displayName: 'Max',
+      email: 'max@example.test',
+      role: 'manager' as const,
+      status: 'invited' as const,
+    },
   ];
 
   it('members cannot invite or remove', () => {
@@ -104,11 +122,14 @@ describe('members panel', () => {
           userId: U2,
           displayName: 'Max',
           status: 'active',
-          agents: [{ id: U1, name: 'Mia', roleKey: 'builder', workstationName: 'laptop', claimedCardRef: 'TOY-2' }],
+          agents: [
+            { id: U1, name: 'Mia', roleKey: 'builder', workstationName: 'laptop', claimedCardRef: 'TOY-2' },
+          ],
           releasedCards: [{ ref: 'TOY-2', title: 'Rework card' }],
           transferredCards: [{ ref: 'TOY-5', title: 'Max card', status: 'queued' }],
         });
-      if (url === `/api/projects/${PROJECT}/members/${U2}` && init?.method === 'DELETE') return json({ ok: true });
+      if (url === `/api/projects/${PROJECT}/members/${U2}` && init?.method === 'DELETE')
+        return json({ ok: true });
       return json({}, 404);
     });
     const user = userEvent.setup();

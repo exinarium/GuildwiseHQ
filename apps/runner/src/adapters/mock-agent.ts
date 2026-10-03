@@ -7,7 +7,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { needsApproval } from '@aom/shared/devops';
 
-type Action = 'ok' | 'changes' | 'fail' | 'question' | 'crash' | 'hang' | 'no_report' | 'edit_outside_scope';
+type Action =
+  | 'ok'
+  | 'changes'
+  | 'fail'
+  | 'question'
+  | 'crash'
+  | 'hang'
+  | 'no_report'
+  | 'edit_outside_scope'
+  | 'devops'
+  | 'devops_install';
 
 interface Brief {
   shift: { stage: string; outcomes: Array<{ id: string; kind: string; data: string }> };
@@ -203,6 +213,14 @@ async function main(): Promise<number> {
     }
   }
 
+  if (action === 'devops' || action === 'devops_install') {
+    // Ask this workstation's DevOps engineer (non-terminal), then carry on with the stage as usual.
+    const asked = aom(['devops', action === 'devops' ? 'start the app' : 'install docker']);
+    emit({
+      kind: 'progress',
+      text: `mock asked DevOps: ${(asked.code === 0 ? asked.out : asked.err).trim()}`,
+    });
+  }
   if (stage === 'build') buildWork(brief);
   if (action === 'edit_outside_scope') {
     mkdirSync('aom-mock', { recursive: true });

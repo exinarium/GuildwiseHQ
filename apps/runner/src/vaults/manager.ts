@@ -166,6 +166,7 @@ export class VaultManager {
         vaultId,
         lastPullAt: this.lastPull.get(vaultId) ?? null,
         lastPushAt: this.lastPush.get(vaultId) ?? null,
+        ...this.pathField(vaultId),
       });
       return;
     }
@@ -179,6 +180,7 @@ export class VaultManager {
         lastPullAt: this.lastPull.get(vaultId) ?? null,
         lastPushAt: this.lastPush.get(vaultId) ?? null,
         error: `sync conflict in ${r.files.join(', ')}`,
+        ...this.pathField(vaultId),
       });
       return;
     }
@@ -188,7 +190,12 @@ export class VaultManager {
       lastPullAt: null,
       lastPushAt: null,
       error: r.error.slice(0, 500),
+      ...this.pathField(vaultId),
     });
+  }
+
+  private pathField(vaultId: string): { localPath?: string } {
+    return isCloned(this.dir(vaultId)) ? { localPath: this.dir(vaultId) } : {};
   }
 
   /**

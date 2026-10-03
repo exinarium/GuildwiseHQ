@@ -165,6 +165,28 @@ describe('`aom devops` from a card shift', () => {
   });
 });
 
+describe('mock builder asking DevOps', () => {
+  it('the devops mock actions call `aom devops` and still hand off', async () => {
+    h = await startHarness({
+      rpc: (m) =>
+        m.method === 'devops.request'
+          ? { ok: true, result: { requestId: uuidv7(), message: 'sent' } }
+          : { ok: false },
+    });
+    const a = await h.runShift({ stage: 'build', ref: 'TOY-1', mock: { build: ['devops'] } });
+    const b = await h.runShift({ stage: 'build', ref: 'TOY-2', mock: { build: ['devops_install'] } });
+    const texts = h.server
+      .of('rpc.request')
+      .filter((r) => r.method === 'devops.request')
+      .map((r) => r.params.text);
+    expect(texts).toEqual(['start the app', 'install docker']);
+    for (const s of [a, b]) {
+      expect(s.ended.outcome).toBe('reported');
+      expect(h.server.of('shift.report').filter((r) => r.shiftId === s.shiftId)).toHaveLength(1);
+    }
+  });
+});
+
 describe('a card shift sees only the vault of its domain', () => {
   async function twoVaults() {
     const work = makeVault({

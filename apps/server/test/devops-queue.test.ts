@@ -334,6 +334,25 @@ describe('DevOps request queue', () => {
       allowedPaths: ['/srv/apps'],
       sudo: false,
     });
+    // a partial patch keeps what was granted before (no defaults leak back in)
+    const more = await ok<any>(
+      w.t.req('PATCH', `/api/workstations/${w.workstationId}/devops-access`, {
+        cookie: w.owner.cookie,
+        body: { allowDocker: true },
+      }),
+    );
+    expect(more.devopsAccess).toEqual({
+      allowInstall: true,
+      allowDocker: true,
+      allowedPaths: ['/srv/apps'],
+      sudo: false,
+    });
+    await ok<any>(
+      w.t.req('PATCH', `/api/workstations/${w.workstationId}/devops-access`, {
+        cookie: w.owner.cookie,
+        body: { allowDocker: false },
+      }),
+    );
     const other = await w.t.userSession(uniqueEmail('stranger2'));
     const nope = await w.t.req('PATCH', `/api/workstations/${w.workstationId}/devops-access`, {
       cookie: other.cookie,
