@@ -23,6 +23,8 @@ export function commandForOutcome(outcome: BriefOutcome): string {
       return 'aom publish --file <note.md> --title "<title>" --citations-file <citations.json>   # citations: [ { url, title } ] of pages you opened; no citations, no publication';
     case 'unsupported':
       return 'aom outcome unsupported --note "<each unsupported claim and why>"';
+    case 'finalized':
+      return 'aom finalize --action <pr|push_branch|merge> --note "<why this action; say so when you revise the card\'s completion action>"';
     case 'devops_done':
       return 'aom devops-done --summary "<what you did>" --command "<command you ran>"';
     case 'devops_approval':

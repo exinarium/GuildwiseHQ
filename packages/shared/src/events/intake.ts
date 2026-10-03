@@ -1,0 +1,46 @@
+import { z } from 'zod';
+import { defineEvent, Id } from './define.ts';
+
+/** Where an intake's ticket lives. Inbound access is read-only (docs/SPEC.md "External systems boundary"). */
+export const ExternalSystem = z.enum(['jira', 'github']);
+export type ExternalSystem = z.infer<typeof ExternalSystem>;
+
+/** Steps of the escalation chain (docs/ARCHITECTURE.md section 15): a senior of the same role or the previous holder, then the BA, then the desk. */
+export const ChainLevel = z.enum(['peer', 'ba', 'desk']);
+export type ChainLevel = z.infer<typeof ChainLevel>;
+
+export const intakeEvents = [
+  /** The manager opened an intake chat with the BA (thread `kind 'intake'`, created by this event). */
+  defineEvent(
+    'IntakeStarted',
+    z.object({
+      intakeId: Id,
+      threadId: Id,
+      externalSystem: ExternalSystem.optional(),
+      externalKey: z.string().min(1).max(200).optional(),
+      startedBy: Id,
+      baAgentId: Id,
+      /** What the manager typed (free text, or the ticket key). */
+      note: z.string().max(20000).optional(),
+    }),
+  ),
+  /**
+   * The BA mapped the intake to a project (`projectId`), linked a card it drafted (`cardId`), or could not map the
+   * ticket (`unmapped`, with the desk question that asks the manager).
+   */
+  defineEvent(
+    'TicketMapped',
+    z.object({
+      intakeId: Id,
+      projectId: Id.optional(),
+      cardId: Id.optional(),
+      unmapped: z.boolean(),
+      deskItemId: Id.optional(),
+    }),
+  ),
+  /** A `question` shift for the agent a desk item is routed to (no card claim, no worktree). */
+  defineEvent(
+    'QuestionShiftDispatched',
+    z.object({ deskItemId: Id, shiftId: Id, agentId: Id, workstationId: Id }),
+  ),
+] as const;

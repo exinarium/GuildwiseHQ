@@ -7,6 +7,7 @@ import { TestEnvProblem } from '../events/testing.ts';
 import { VaultKind } from '../events/vault.ts';
 import { FeedItemInputSchema } from '../feed/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
+import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import { FinalizeExecutePayloadSchema } from '../testing/index.ts';
 import { VaultConfigureCommandSchema, VaultWriteCommandSchema } from '../vaults/index.ts';
@@ -171,6 +172,8 @@ export const ChatContextSchema = z.object({
   cardId: z.uuid().optional(),
   projectKey: z.string().optional(),
   cardRef: z.string().optional(),
+  /** M7: set for the BA's intake chat (project list, mapping state, cards created so far). */
+  intake: IntakeContextSchema.optional(),
 });
 export type ChatContext = z.infer<typeof ChatContextSchema>;
 
@@ -364,6 +367,8 @@ export const ShiftStartSchema = msg('shift.start', {
   maxShiftMinutes: z.number().int().positive(),
   /** M3: for `kind: 'devops'` the request being worked (the brief then carries a placeholder card). */
   devops: DevopsShiftSchema.optional(),
+  /** M7: for `kind: 'question'` the desk item to answer or escalate (the brief then carries the card in question). */
+  question: QuestionShiftSchema.optional(),
   /** M3: the card's domain vault; the runner reads only this vault and passes only it as `--add-dir`. */
   vault: ShiftVaultSchema.nullable().optional(),
 });

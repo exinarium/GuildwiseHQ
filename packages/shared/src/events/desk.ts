@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { defineEvent, Id, Note } from './define.ts';
+import { ChainLevel as ChainLevelSchema } from './intake.ts';
 
 export const DeskItemKind = z.enum(['question', 'approval', 'escalation', 'alert', 'rating']);
 export type DeskItemKind = z.infer<typeof DeskItemKind>;
@@ -53,6 +54,10 @@ export const deskEvents = [
       affectedCardIds: z.array(Id).default([]),
       /** Blocking questions are pinned to the top of the desk. */
       pinned: z.boolean().default(false),
+      /** M7: `unmapped_ticket` for the mapping question of an intake. */
+      subkind: z.string().optional(),
+      /** M7: where in the escalation chain the question starts (default: the desk). */
+      chainLevel: ChainLevelSchema.optional(),
     }),
   ),
   defineEvent(
@@ -63,19 +68,28 @@ export const deskEvents = [
       routedTo: z.enum(['manager', 'agent']),
       routedAgentId: Id.optional(),
       note: z.string(),
+      /** M7: the step the question moves to. */
+      chainLevel: ChainLevelSchema.optional(),
     }),
   ),
   defineEvent(
     'QuestionAnswered',
-    z.object({
-      deskItemId: Id,
-      answer: Note,
-      answerOption: z.string().optional(),
-      answeredBy: DeskActorSchema,
-      ledgerEntryId: Id,
-      /** Blocked cards that return to the queue (no other open blocker). */
-      unblockedCardIds: z.array(Id).default([]),
-    }),
+    z
+      .object({
+        deskItemId: Id,
+        answer: Note,
+        answerOption: z.string().optional(),
+        answeredBy: DeskActorSchema,
+        /** Absent when an agent (not the manager) answered: only the manager's answers become ledger entries. */
+        ledgerEntryId: Id.optional(),
+        /** Blocked cards that return to the queue (no other open blocker). */
+        unblockedCardIds: z.array(Id).default([]),
+      })
+      // The manager's answers always become a ledger entry; an agent's (M7 escalation chain) do not.
+      .refine((p) => p.answeredBy.kind !== 'user' || p.ledgerEntryId !== undefined, {
+        message: 'a manager answer needs its ledger entry id',
+        path: ['ledgerEntryId'],
+      }),
   ),
   defineEvent(
     'DeskItemCreated',

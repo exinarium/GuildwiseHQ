@@ -47,6 +47,10 @@ export const MockActionSchema = z.enum([
   'fabricate',
   /** M6: the checker first tries to publish a note without citations (the runner refuses), then does it properly. */
   'uncited',
+  /** M7: a question shift answers the question (`aom answer`) ... */
+  'answer',
+  /** ... or passes it on along the escalation chain (`aom escalate`). */
+  'escalate',
 ]);
 export type MockAction = z.infer<typeof MockActionSchema>;
 /** `{ "<stage>": ["<action>", ...] }` consumed by round index. Example: `{ review: ['changes', 'ok'] }`. */

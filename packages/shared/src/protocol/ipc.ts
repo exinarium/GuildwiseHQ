@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ReviewData, TestEvidence } from '../cards/types.ts';
 import { DevopsApprovalDataSchema, DevopsDoneDataSchema } from '../devops/index.ts';
 import { CandidatesDataSchema, DigestDataSchema } from '../feed/index.ts';
+import { AnswerReportSchema, EscalateReportSchema, FinalizeReportDataSchema } from '../intake/index.ts';
 import { PublicationOutcomeSchema } from '../research/index.ts';
 
 /**
@@ -42,12 +43,19 @@ export const ShiftReportSchema = z.discriminatedUnion('kind', [
   OutcomeReportSchema,
   QuestionReportSchema,
   CommentReportSchema,
+  /** M7: a question shift answers the desk item it was given (`aom answer`) ... */
+  AnswerReportSchema,
+  /** ... or passes it on along the escalation chain (`aom escalate`). */
+  EscalateReportSchema,
 ]);
 export type ShiftReport = z.infer<typeof ShiftReportSchema>;
 
 /** Terminal reports end the shift (exactly one per shift; a second gets 409 already reported). */
 export const isTerminalReport = (r: ShiftReport): boolean =>
-  r.kind === 'outcome' || (r.kind === 'question' && r.blocking);
+  r.kind === 'outcome' ||
+  r.kind === 'answer' ||
+  r.kind === 'escalate' ||
+  (r.kind === 'question' && r.blocking);
 
 /** Data attached to an outcome report, by the outcome's `data` kind. `diffStats` is attached by the runner, not the agent. */
 export function outcomeDataSchema(kind: string): z.ZodType {
@@ -66,6 +74,8 @@ export function outcomeDataSchema(kind: string): z.ZodType {
       return DigestDataSchema;
     case 'publication':
       return PublicationOutcomeSchema;
+    case 'finalize':
+      return FinalizeReportDataSchema;
     default:
       return z.record(z.string(), z.unknown());
   }
@@ -117,6 +127,14 @@ export const RpcMethodSchema = z.enum([
   'thread.post',
   'thread.read',
   'devops.request',
+  /** M7, BA intake chat: draft and specify cards, map the ticket to a project, ask the manager when it cannot. */
+  'card.create',
+  'card.update',
+  'card.specify',
+  'intake.map',
+  'intake.unmapped',
+  /** M7, answered by the runner itself (credentials stay on the workstation): read a GitHub issue with `gh`. */
+  'source.read',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

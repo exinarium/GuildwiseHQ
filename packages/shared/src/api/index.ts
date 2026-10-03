@@ -10,6 +10,7 @@ export * from './common.ts';
 export * from './desk.ts';
 export * from './devops.ts';
 export * from './digest.ts';
+export * from './intake.ts';
 export * from './invitations.ts';
 export * from './ledger.ts';
 export * from './members.ts';

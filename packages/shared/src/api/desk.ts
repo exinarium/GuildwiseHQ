@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { DecisionPolicy } from '../cards/types.ts';
 import { DeskItemKind, DeskItemStatus, DeskOptionSchema } from '../events/desk.ts';
 import { LedgerScope } from '../events/ledger.ts';
+import { EscalationStepSchema } from '../intake/index.ts';
 import { IsoTime } from './common.ts';
 import { DigestItemDtoSchema } from './digest.ts';
 
@@ -57,6 +58,12 @@ export const DeskItemDtoSchema = z.object({
   answeredAt: IsoTime.nullable(),
   answeredByName: z.string().nullable(),
   decisionPolicy: DecisionPolicy.nullable(),
+  /** M7: who looked at the question on its way to the desk (senior peer, BA), and who answered it. */
+  escalationTrail: z.array(EscalationStepSchema).optional(),
+  /** M7: the intake whose ticket this mapping question (`subkind 'unmapped_ticket'`) is about. */
+  intakeId: z.uuid().nullable().optional(),
+  /** M7: set when an agent (not the manager) answered the question. */
+  answeredByAgentName: z.string().nullable().optional(),
   /** M5: the items of a digest rating item (`kind 'rating'`), for rating them in place. */
   digestItems: z.array(DigestItemDtoSchema).optional(),
   /** False for members who may see but not answer (owner_only on a shared card). */

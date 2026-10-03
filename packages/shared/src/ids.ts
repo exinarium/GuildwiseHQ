@@ -21,6 +21,7 @@ export const streamId = {
   thread: (id: string) => `thread-${id}`,
   desk: (id: string) => `desk-${id}`,
   ledger: (id: string) => `ledger-${id}`,
+  intake: (id: string) => `intake-${id}`,
   schedule: (id: string) => `schedule-${id}`,
   shift: (id: string) => `shift-${id}`,
   vault: (id: string) => `vault-${id}`,
