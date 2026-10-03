@@ -76,6 +76,9 @@ describe('regression schedules (M5 scheduler -> M4 regression run)', () => {
     expect(await q(`SELECT kind, platform, result FROM test_runs`)).toEqual([
       { kind: 'regression', platform: 'web', result: 'passed' },
     ]);
+    // The mobile card is claimed next; running it also leaves no stale shift.start behind for later tests.
+    const mobile = await p.run('Tess', testPass('mobile regression green'));
+    expect(mobile.start.brief.card.fields.platform).toBe('mobile');
   });
 
   it('rejects a regression schedule with an unknown platform', async () => {

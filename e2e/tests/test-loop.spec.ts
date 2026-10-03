@@ -503,3 +503,54 @@ test('AC regression: the manager starts a web regression run from the board; a t
   const events = await q('SELECT 1 FROM events WHERE type=$1', ['RegressionRequested']);
   expect(events).toHaveLength(1);
 });
+
+test('AC regression schedule: a due regression schedule creates a regression card that a tester runs', async () => {
+  const before = (await q<{ n: string }>(`SELECT count(*) AS n FROM cards WHERE origin='regression'`))[0]!.n;
+  const created = await api.post('/api/schedules', {
+    data: {
+      projectId,
+      name: 'Nightly regression',
+      kind: 'regression',
+      cron: '*/5 * * * *',
+      timezone: 'UTC',
+      cardTemplate: { title: 'Nightly regression', fields: { platform: 'web' } },
+    },
+  });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const s = (await created.json()) as { id: string; nextFireAt: string };
+  try {
+    const clockRes = await fetch(`${BASE_URL}/api/test/clock`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: BASE_URL },
+      body: JSON.stringify({ advanceMs: 0 }),
+    });
+    const now = new Date(((await clockRes.json()) as { now: string }).now).getTime();
+    const advance = Math.max(new Date(s.nextFireAt).getTime() - now + 2000, 1);
+    const adv = await fetch(`${BASE_URL}/api/test/clock`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: BASE_URL },
+      body: JSON.stringify({ advanceMs: advance }),
+    });
+    expect(adv.ok).toBeTruthy();
+    const cards = await waitFor(
+      'the scheduled regression card',
+      () => q<CardRow>(`SELECT * FROM cards WHERE origin='regression' ORDER BY number DESC`),
+      (r) => r.length === Number(before) + 1,
+      30_000,
+    );
+    const c = cards[0]!;
+    expect(c).toMatchObject({ card_type: 'regression', stage: 'test' });
+    expect(c.fields.platform).toBe('web');
+    expect(
+      (await q<{ scheduled: boolean }>('SELECT scheduled FROM cards WHERE id=$1', [c.id]))[0]?.scheduled,
+    ).toBe(true);
+    await waitCard(c.ref, 'done', (x) => x?.status === 'done', 120_000);
+    const runs = await q<{ kind: string; result: string }>(
+      'SELECT kind, result FROM test_runs WHERE card_id=$1',
+      [c.id],
+    );
+    expect(runs).toEqual([{ kind: 'regression', result: 'passed' }]);
+  } finally {
+    await api.delete(`/api/schedules/${s.id}`);
+  }
+});
