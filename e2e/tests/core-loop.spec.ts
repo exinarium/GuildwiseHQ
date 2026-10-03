@@ -327,6 +327,17 @@ test('AC8: firing a builder holding a card releases it and another builder claim
       ),
     (r) => r.length === 1,
   );
+  // Wait for the observable precondition (the first shift is really running, hanging) instead of racing it.
+  await waitFor(
+    'the first shift is running',
+    () =>
+      q<{ status: string }>(
+        `SELECT s.status FROM shifts s JOIN cards c ON c.id=s.card_id WHERE c.ref=$1 AND s.agent_id=$2 AND s.ended_at IS NULL`,
+        [ref, first[0]?.claimed_by_agent_id],
+      ),
+    (r) => r.some((x) => x.status === 'running'),
+    60_000,
+  );
   await page.goto('/agents');
   await page.getByRole('button', { name: `Fire ${first[0]?.name}` }).click();
   await expect(page.getByTestId('fire-releases')).toContainText(ref);

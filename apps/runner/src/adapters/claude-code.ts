@@ -133,6 +133,24 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
   return { bin: cfg.bin, args, env };
 }
 
+/**
+ * Tests and CI must never start a real Claude session (it spends tokens and can touch the machine). In mock mode
+ * (`AOM_RUNNER_MOCK=1`) or under a test runner this is true unless the opt-in smoke test (`AOM_CLAUDE_SMOKE=1`) runs.
+ */
+export function realClaudeBlocked(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.AOM_CLAUDE_SMOKE === '1') return false;
+  return env.AOM_RUNNER_MOCK === '1' || env.NODE_ENV === 'test' || env.VITEST !== undefined;
+}
+
+export class RealClaudeBlockedError extends Error {
+  constructor() {
+    super(
+      'refusing to start a real Claude Code session: AOM_RUNNER_MOCK=1 or a test environment is active (agents must use the mock runtime)',
+    );
+    this.name = 'RealClaudeBlockedError';
+  }
+}
+
 export class ClaudeCodeAdapter implements RuntimeAdapter {
   readonly id = 'claude-code';
 
@@ -143,6 +161,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   async capabilities(): Promise<RuntimeCapabilities> {
     const caps = ['shell', 'edit', 'web', 'mcp', 'skills', 'sandbox_config', 'resume'];
+    // Reported unavailable in mock/test mode so the server never picks it for an agent (it also refuses to start).
+    if (realClaudeBlocked())
+      return { runtime: this.id, version: 'blocked', available: false, capabilities: [] };
     try {
       const r = await execa(this.cfg.bin, ['--version'], { reject: false, timeout: 10_000, stdin: 'ignore' });
       const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(r.stdout));
@@ -163,6 +184,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   }
 
   async start(input: ShiftStartInput): Promise<RuntimeSession> {
+    if (realClaudeBlocked()) throw new RealClaudeBlockedError();
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     await writeFile(
@@ -187,6 +209,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   }
 
   async startChat(input: ChatStartInput): Promise<RuntimeSession> {
+    if (realClaudeBlocked()) throw new RealClaudeBlockedError();
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     await writeFile(
