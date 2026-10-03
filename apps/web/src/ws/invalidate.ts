@@ -13,7 +13,13 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
     case 'card':
       return [event.projectId ? ['board', event.projectId] : ['board'], ['card'], ['agents']];
     case 'thread':
-      return [['card']];
+      // Card threads show on the card; chat threads have their own message list and the chat list.
+      return [['card'], ['thread', event.streamId.slice('thread-'.length)], ['chats']];
+    case 'desk':
+      // Questions block and unblock cards; answers add ledger entries.
+      return [['desk'], ['board'], ['card'], ['ledger']];
+    case 'ledger':
+      return [['ledger'], ['desk'], ['card']];
     case 'shift':
       return [['card'], ['agents'], ['board']];
     case 'agent':

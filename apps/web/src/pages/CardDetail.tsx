@@ -1,6 +1,6 @@
 import { type CardDetailResponse, fieldCatalogue, type WorkflowDefinition } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
-import { useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { useWorkflows } from '../api/queries/agents.ts';
 import {
   missingFromError,
@@ -80,7 +80,7 @@ export function CardDetailView({
   data: CardDetailResponse;
   workflow: WorkflowDefinition | undefined;
 }) {
-  const { card, handoffs, transitions, thread, currentShift, permissions } = data;
+  const { card, handoffs, transitions, thread, currentShift, permissions, blockers } = data;
   const specify = useSpecifyCard(card.id);
   const release = useReleaseCard(card.id);
   const [dialog, setDialog] = useState<'move' | 'cancel' | null>(null);
@@ -138,6 +138,24 @@ export function CardDetailView({
         </p>
       )}
       {!missing.length && <ErrorBox error={specify.error ?? release.error} />}
+      {blockers.length > 0 && (
+        <div
+          role="status"
+          data-testid="card-blockers"
+          className="mb-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
+        >
+          Blocked by{' '}
+          {blockers.map((b, i) => (
+            <span key={b.deskItemId}>
+              {i > 0 && ', '}
+              <Link to={`/desk#desk-item-${b.deskItemId}`} className="font-medium underline">
+                {b.title}
+              </Link>
+            </span>
+          ))}
+          . Answer it on the desk to put this card back in the queue.
+        </div>
+      )}
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-3">

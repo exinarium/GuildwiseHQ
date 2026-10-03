@@ -13,6 +13,13 @@ export type SocketState = 'connecting' | 'open' | 'closed';
 
 type ProgressListener = (items: ProgressItem[], cardId: string | null) => void;
 
+/** What a chat panel hears about its conversation (docs/ARCHITECTURE.md section 20). */
+export type ChatEvent =
+  | { type: 'delta'; text: string }
+  | { type: 'done'; messageId: string }
+  | { type: 'error'; reason: string };
+type ChatListener = (ev: ChatEvent) => void;
+
 /** Single browser WebSocket to `/api/ws` with reconnect, `hello {lastSeq}` resume and shift watch bookkeeping. */
 export class LiveSocket {
   private ws: WebSocket | null = null;
@@ -25,6 +32,7 @@ export class LiveSocket {
   private state: SocketState = 'closed';
   private stateListeners = new Set<() => void>();
   private watchers = new Map<string, Set<ProgressListener>>();
+  private chatListeners = new Map<string, Set<ChatListener>>();
 
   constructor(
     private readonly qc: QueryClient,
@@ -121,13 +129,52 @@ export class LiveSocket {
       case 'presence':
         void this.qc.invalidateQueries({ queryKey: ['workstations'] });
         void this.qc.invalidateQueries({ queryKey: ['admin', 'workstations'] });
+        void this.qc.invalidateQueries({ queryKey: ['chats'] });
         break;
       case 'shift.progress':
         for (const cb of this.watchers.get(msg.shiftId) ?? []) cb(msg.items, msg.cardId);
         break;
+      case 'chat.delta':
+        this.emitChat(msg.threadId, { type: 'delta', text: msg.text });
+        break;
+      case 'chat.done':
+        this.emitChat(msg.threadId, { type: 'done', messageId: msg.messageId });
+        break;
+      case 'chat.error':
+        this.emitChat(msg.threadId, { type: 'error', reason: msg.reason });
+        break;
       default:
         break;
     }
+  }
+
+  private emitChat(threadId: string, ev: ChatEvent): void {
+    for (const cb of this.chatListeners.get(threadId) ?? []) cb(ev);
+  }
+
+  /** Streaming chat: replies and errors of one conversation. Returns an unsubscribe. */
+  listenChat(threadId: string, cb: ChatListener): () => void {
+    let set = this.chatListeners.get(threadId);
+    if (!set) {
+      set = new Set();
+      this.chatListeners.set(threadId, set);
+    }
+    set.add(cb);
+    return () => {
+      set.delete(cb);
+      if (set.size === 0) this.chatListeners.delete(threadId);
+    };
+  }
+
+  /** Sends a chat message; false when the socket is not open (the panel then says the chat is unavailable). */
+  sendChat(threadId: string, body: string, clientMsgId: string): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN && !this.mocked) return false;
+    this.send({ type: 'chat.send', threadId, body, clientMsgId });
+    return true;
+  }
+
+  cancelChat(threadId: string): void {
+    this.send({ type: 'chat.cancel', threadId });
   }
 
   /** Live shift log: sends `shift.watch` and returns an unsubscribe that sends `shift.unwatch`. */

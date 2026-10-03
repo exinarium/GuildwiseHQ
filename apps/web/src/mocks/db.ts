@@ -230,6 +230,7 @@ export function detail(card: CardDto): CardDetailResponse {
       canComment: true,
     },
     diffStats: null,
+    blockers: [],
   };
 }
 

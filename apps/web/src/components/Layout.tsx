@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { useLogout, useMe } from '../api/queries/auth.ts';
+import { useDesk } from '../api/queries/desk.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { getLastProjectKey } from '../lib/lastProject.ts';
 import { getSocket, useSocketState } from '../ws/socket.ts';
@@ -32,6 +33,8 @@ export function RequireAuth() {
 function Shell({ isAdmin, name, live }: { isAdmin: boolean; name: string; live: string }) {
   const logout = useLogout();
   const projects = useProjects();
+  const desk = useDesk();
+  const open = desk.data?.counts.open ?? 0;
   const key = getLastProjectKey() ?? projects.data?.[0]?.key;
   return (
     <div className="flex min-h-dvh flex-col">
@@ -41,6 +44,21 @@ function Shell({ isAdmin, name, live }: { isAdmin: boolean; name: string; live: 
           <nav aria-label="Main" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
             <NavLink to={key ? `/p/${key}/board` : '/projects'} className={link}>
               Board
+            </NavLink>
+            <NavLink to="/desk" className={link}>
+              Desk
+              {open > 0 && (
+                <span
+                  data-testid="desk-badge"
+                  title={`${desk.data?.counts.blocking ?? 0} blocking, ${open} open`}
+                  className="ml-1.5 rounded-full bg-red-600 px-1.5 text-[11px] font-semibold text-white"
+                >
+                  {open}
+                </span>
+              )}
+            </NavLink>
+            <NavLink to="/ledger" className={link}>
+              Ledger
             </NavLink>
             <NavLink to="/cards/new" className={link}>
               New card

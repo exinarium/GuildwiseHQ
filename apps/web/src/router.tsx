@@ -9,6 +9,9 @@ import { Agents } from './pages/Agents.tsx';
 import { Board } from './pages/Board.tsx';
 import { CardDetail } from './pages/CardDetail.tsx';
 import { CardNew } from './pages/CardNew.tsx';
+import { Chat } from './pages/Chat.tsx';
+import { Desk } from './pages/Desk.tsx';
+import { Ledger } from './pages/Ledger.tsx';
 import { Login } from './pages/Login.tsx';
 import { ProjectSettings } from './pages/ProjectSettings.tsx';
 import { Projects } from './pages/Projects.tsx';
@@ -37,6 +40,9 @@ export const routes = [
       { path: '/agents', element: <Agents /> },
       { path: '/workstations', element: <Workstations /> },
       { path: '/admin', element: <Admin /> },
+      { path: '/desk', element: <Desk /> },
+      { path: '/ledger', element: <Ledger /> },
+      { path: '/chat/:threadId', element: <Chat /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },
