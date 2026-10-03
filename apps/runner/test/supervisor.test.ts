@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { extractFallbackReport } from '../src/shifts/supervisor.ts';
@@ -264,6 +264,23 @@ describe('supervisor', () => {
     expect(ended.outcome).toBe('stopped');
     expect(h!.runner.outbox.list().some((e) => e.type === 'shift.report')).toBe(false);
     expect(existsSync(join(h!.dataDir, 'worktrees', 'TOY', 'TOY-1'))).toBe(true);
+  });
+
+  it('resumes a persisted shift after a runner restart without re-sending shift.accepted/started', async () => {
+    await start(async (_i, ctl) => {
+      await ctl.post('/v1/report', outcome('handoff', 'resumed and done'));
+    });
+    const msg = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized });
+    const dir = join(h!.dataDir, 'active-shifts');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${msg.shiftId}.json`), JSON.stringify({ msg, startedSent: true }));
+    h!.runner.supervisor.resumePersisted();
+    expect(h!.runner.supervisor.activeShifts().map((s) => s.shiftId)).toContain(msg.shiftId as string);
+    const ended = await h!.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId, 30_000);
+    expect(ended.outcome).toBe('reported');
+    expect(h!.server.of('shift.accepted').filter((m) => m.shiftId === msg.shiftId)).toHaveLength(0);
+    expect(h!.server.of('shift.started').filter((m) => m.shiftId === msg.shiftId)).toHaveLength(0);
+    expect(existsSync(join(dir, `${msg.shiftId}.json`))).toBe(false); // forgotten once the shift is over
   });
 
   it('commands: agent.wipe and worktree.remove are idempotent', async () => {

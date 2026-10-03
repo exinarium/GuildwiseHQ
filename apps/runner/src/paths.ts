@@ -23,6 +23,8 @@ export interface RunnerPaths {
   runnerLog: string;
   status: string;
   mockState: string;
+  /** Persisted `shift.start` messages of running shifts, so a restarted runner can resume them. */
+  activeShifts: string;
   agentDir(agentId: string): string;
   worktreePath(projectKey: string, cardRef: string): string;
 }
@@ -42,6 +44,7 @@ export function runnerPaths(root: string): RunnerPaths {
     runnerLog: join(root, 'logs', 'runner.log'),
     status: join(root, 'status.json'),
     mockState: join(root, 'mock-state'),
+    activeShifts: join(root, 'active-shifts'),
     agentDir: (agentId) => join(root, 'agents', agentId),
     worktreePath: (projectKey, cardRef) => join(root, 'worktrees', projectKey, cardRef),
   };

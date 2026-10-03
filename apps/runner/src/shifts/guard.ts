@@ -16,6 +16,24 @@ export async function snapshotBranches(cwd: string): Promise<BranchSnapshot> {
   return snap;
 }
 
+/**
+ * Branches checked out in linked worktrees other than `worktree` (the main clone is not a linked worktree).
+ * Concurrent shifts of the same repo share one ref store, so commits those shifts make move these branches
+ * legitimately during this shift; they belong to other cards and are not this agent's doing.
+ */
+export async function siblingWorktreeBranches(worktree: string): Promise<Set<string>> {
+  const r = await git(worktree, ['worktree', 'list', '--porcelain']);
+  const out = new Set<string>();
+  const blocks = r.stdout.split(/\n\n+/).filter(Boolean);
+  const self = (await git(worktree, ['rev-parse', '--show-toplevel'])).stdout.trim();
+  for (const block of blocks.slice(1)) {
+    const path = /^worktree (.+)$/m.exec(block)?.[1];
+    const branch = /^branch refs\/heads\/(.+)$/m.exec(block)?.[1];
+    if (branch && path && path !== self) out.add(branch);
+  }
+  return out;
+}
+
 export interface GuardInput {
   worktree: string;
   roleKey: string;
@@ -70,7 +88,10 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
     });
   }
   const now = await snapshotBranches(input.worktree);
-  const moved = Object.keys(now).filter((b) => b !== input.branchName && input.branchesAtStart[b] !== now[b]);
+  const siblings = await siblingWorktreeBranches(input.worktree);
+  const moved = Object.keys(now).filter(
+    (b) => b !== input.branchName && !siblings.has(b) && input.branchesAtStart[b] !== now[b],
+  );
   if (moved.length > 0) {
     violations.push({
       rule: 'commits_on_other_branch',

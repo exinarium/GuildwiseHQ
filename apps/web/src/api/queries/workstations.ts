@@ -15,6 +15,8 @@ export function useWorkstations() {
   return useQuery({
     queryKey: ['workstations'],
     queryFn: async () => (await get('/workstations', WorkstationsResponseSchema)).workstations,
+    // Repo matching (workstation_repos) is an operational projection that emits no event, so poll lightly.
+    refetchInterval: 5000,
   });
 }
 

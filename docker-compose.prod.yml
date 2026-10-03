@@ -1,0 +1,63 @@
+# Production stack: app (API + web) + Postgres + Caddy (HTTPS).
+#   cp .env.prod.example .env && edit it, then:  docker compose -f docker-compose.prod.yml up -d --build
+# See docs/DEPLOY.md.
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aom
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: aom
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aom -d aom"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://aom:${POSTGRES_PASSWORD}@postgres:5432/aom
+      # The URL users type, including the port when it is not 443. Cookies are Secure when it starts with https.
+      AOM_PUBLIC_ORIGIN: ${AOM_PUBLIC_ORIGIN:?set AOM_PUBLIC_ORIGIN in .env}
+      AOM_SMTP_URL: ${AOM_SMTP_URL:-smtp://mailpit:1025}
+      AOM_MAIL_FROM: ${AOM_MAIL_FROM:-Agent Org Manager <noreply@aom.local>}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    expose:
+      - "4600"
+
+  # Optional catch-all mail sink for trying the stack without an SMTP relay: --profile mail (UI on 127.0.0.1:8025).
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: ["mail"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${AOM_MAILPIT_PORT:-8025}:8025"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      AOM_DOMAIN: ${AOM_DOMAIN:-localhost}
+    ports:
+      - "${AOM_HTTP_PORT:-80}:80"
+      - "${AOM_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

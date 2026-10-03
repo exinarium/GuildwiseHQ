@@ -15,6 +15,7 @@ interface Brief {
 }
 
 const emit = (ev: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(ev)}\n`);
+const stepMs = Number(process.env.AOM_MOCK_STEP_MS) || 100;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function aom(args: string[]): { code: number; out: string; err: string } {
@@ -65,7 +66,7 @@ function buildWork(brief: Brief): void {
     `unit-test-like file for ${brief.card.ref}, round ${round}\n`,
   );
   sh('git', ['add', '-A']);
-  sh('git', ['commit', '--no-verify', '-m', `mock build round ${round}: ${brief.card.ref}`]);
+  sh('git', ['commit', '--no-verify', '--allow-empty', '-m', `mock build round ${round}: ${brief.card.ref}`]);
 }
 
 function report(brief: Brief, action: Action): { code: number; out: string; err: string } {
@@ -129,7 +130,7 @@ async function main(): Promise<number> {
 
   for (let i = 1; i <= 3; i++) {
     emit({ kind: 'progress', text: `mock ${brief.card.ref} ${stage}: step ${i}/3 (${action})` });
-    await sleep(100);
+    await sleep(stepMs);
   }
   emit({ kind: 'usage', usage: { inputTokens: 1000, outputTokens: 200 } });
 

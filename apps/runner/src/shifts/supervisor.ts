@@ -1,4 +1,5 @@
-import { delimiter } from 'node:path';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { delimiter, join } from 'node:path';
 import {
   type AgentRuntimeSpec,
   type GuardViolation,
@@ -83,6 +84,15 @@ interface ActiveShift {
   progress: Array<{ at: string; kind: 'text' | 'tool' | 'status'; text: string }>;
   env: Record<string, string>;
   graceTimer?: NodeJS.Timeout;
+  /** Resumed after a runner restart: the server already holds the claim and has seen accepted/started. */
+  resumed?: boolean;
+  startedSent?: boolean;
+}
+
+/** On-disk record of a running shift (`<dataDir>/active-shifts/<shiftId>.json`). */
+interface PersistedShift {
+  msg: ShiftStartMsg;
+  startedSent: boolean;
 }
 
 const ACCEPTED_MESSAGE = 'Recorded. Finish now; do not make further changes.';
@@ -98,7 +108,7 @@ export class ShiftSupervisor {
   /** Shifts that are running (for `hello` and heartbeats). */
   activeShifts(): Array<{ shiftId: string; cardId?: string; agentId: string; startedAt: string }> {
     return [...this.active.values()]
-      .filter((s) => s.session)
+      .filter((s) => s.session || s.resumed)
       .map((s) => ({
         shiftId: s.msg.shiftId,
         ...(s.msg.brief.card ? { cardId: s.msg.brief.card.id } : {}),
@@ -112,7 +122,7 @@ export class ShiftSupervisor {
   }
 
   /** Resolves when the shift has fully ended (or was rejected). Never throws. */
-  async handleStart(msg: ShiftStartMsg): Promise<void> {
+  async handleStart(msg: ShiftStartMsg, resume?: { startedSent: boolean }): Promise<void> {
     if (this.active.has(msg.shiftId)) return; // redelivery
     const max = this.deps.maxConcurrentShifts?.() ?? this.deps.config.maxConcurrentShifts;
     if (this.active.size >= max) {
@@ -128,6 +138,7 @@ export class ShiftSupervisor {
       guardViolations: [],
       progress: [],
       env: {},
+      ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
     };
     this.active.set(msg.shiftId, shift);
     try {
@@ -140,7 +151,48 @@ export class ShiftSupervisor {
       if (shift.token) this.deps.ipc.revoke(shift.token);
       if (shift.graceTimer) clearTimeout(shift.graceTimer);
       this.active.delete(msg.shiftId);
+      this.forget(msg.shiftId);
     }
+  }
+
+  /**
+   * Resumes the shifts a previous runner process left running (SIGKILL, crash, restart). The server keeps the claim
+   * while the workstation is back within the lease, so the shift is started again under the same id in the same
+   * worktree. If the server released it meanwhile, it answers `hello` with `shift.stop{claim_lost}`.
+   */
+  resumePersisted(): void {
+    let files: string[] = [];
+    try {
+      files = readdirSync(this.deps.paths.activeShifts).filter((f) => f.endsWith('.json'));
+    } catch {
+      return;
+    }
+    for (const f of files) {
+      try {
+        const rec = JSON.parse(readFileSync(join(this.deps.paths.activeShifts, f), 'utf8')) as PersistedShift;
+        this.log.info(`resuming shift ${rec.msg.shiftId} after runner restart`);
+        void this.handleStart(rec.msg, { startedSent: rec.startedSent });
+      } catch (err) {
+        this.log.warn(`ignoring unreadable persisted shift ${f}: ${String(err)}`);
+        rmSync(join(this.deps.paths.activeShifts, f), { force: true });
+      }
+    }
+  }
+
+  private persist(s: ActiveShift): void {
+    try {
+      mkdirSync(this.deps.paths.activeShifts, { recursive: true });
+      const file = join(this.deps.paths.activeShifts, `${s.msg.shiftId}.json`);
+      const rec: PersistedShift = { msg: s.msg, startedSent: !!s.startedSent };
+      writeFileSync(`${file}.tmp`, JSON.stringify(rec), { mode: 0o600 });
+      renameSync(`${file}.tmp`, file);
+    } catch (err) {
+      this.log.warn(`could not persist shift ${s.msg.shiftId}: ${String(err)}`);
+    }
+  }
+
+  private forget(shiftId: string): void {
+    rmSync(join(this.deps.paths.activeShifts, `${shiftId}.json`), { force: true });
   }
 
   async handleStop(shiftId: string, reason: StopReason): Promise<void> {
@@ -220,7 +272,7 @@ export class ShiftSupervisor {
           spec: msg.worktree,
           defaultPath: paths.worktreePath(msg.brief.project.key, msg.brief.card.ref),
         });
-        if (msg.prepare.rebase) await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch);
+        if (msg.prepare.rebase && !s.resumed) await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch);
       } catch (err) {
         if (err instanceof RebaseConflictError) {
           this.reject(msg.shiftId, 'rebase_conflict', err.message, err.conflictedFiles);
@@ -236,7 +288,8 @@ export class ShiftSupervisor {
       s.branchesAtStart = await snapshotBranches(cwd);
     }
 
-    this.deps.transport.send('shift.accepted', { shiftId: msg.shiftId });
+    if (!s.resumed) this.deps.transport.send('shift.accepted', { shiftId: msg.shiftId });
+    this.persist(s);
 
     await adapter.writeInstructions(sandbox, renderInstructions(msg.brief));
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
@@ -278,20 +331,25 @@ export class ShiftSupervisor {
       return;
     }
 
-    this.deps.transport.send('shift.started', {
-      shiftId: msg.shiftId,
-      ...(s.worktree
-        ? {
-            worktree: {
-              path: s.worktree.path,
-              branchName: s.worktree.branchName,
-              baseBranch: s.worktree.baseBranch,
-              created: s.worktree.created,
-              headSha: s.startSha ?? s.worktree.headSha,
-            },
-          }
-        : {}),
-    });
+    if (!s.startedSent)
+      this.deps.transport.send('shift.started', {
+        shiftId: msg.shiftId,
+        ...(s.worktree
+          ? {
+              worktree: {
+                path: s.worktree.path,
+                branchName: s.worktree.branchName,
+                baseBranch: s.worktree.baseBranch,
+                created: s.worktree.created,
+                headSha: s.startSha ?? s.worktree.headSha,
+              },
+            }
+          : {}),
+      });
+    if (!s.startedSent) {
+      s.startedSent = true;
+      this.persist(s);
+    }
     this.addProgress(s, 'status', `shift started on ${msg.agent.runtime}`);
 
     const maxMs = this.deps.maxShiftMsOverride ?? msg.maxShiftMinutes * 60_000;

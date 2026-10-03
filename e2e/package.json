@@ -4,10 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "e2e": "playwright test",
+    "e2e": "pnpm -C .. build && playwright test",
+    "e2e:run": "playwright test",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0"
+    "@playwright/test": "^1.63.0",
+    "@types/pg": "^8.11.0",
+    "pg": "^8.0.0"
   }
 }

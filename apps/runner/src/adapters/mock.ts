@@ -51,7 +51,12 @@ export class MockAdapter implements RuntimeAdapter {
       bin,
       args: pre,
       cwd: input.cwd,
-      env: { ...input.env, AOM_MOCK_STATE_DIR: this.paths.mockState },
+      env: {
+        ...input.env,
+        AOM_MOCK_STATE_DIR: this.paths.mockState,
+        // Test hook: slow the mock's three progress steps so UIs can observe each stage.
+        ...(process.env.AOM_MOCK_STEP_MS ? { AOM_MOCK_STEP_MS: process.env.AOM_MOCK_STEP_MS } : {}),
+      },
       logFile: input.logFile,
       usage: () => usage,
       parseLine: (line) => {

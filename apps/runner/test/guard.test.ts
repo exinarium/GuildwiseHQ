@@ -98,6 +98,28 @@ describe('guard', () => {
   });
 });
 
+describe('guard with concurrent shifts', () => {
+  it("commits on another card's linked worktree branch are not a violation", async () => {
+    const { repo, guard } = await setup('builder');
+    const otherPath = join(tmp(), 'wt-other');
+    await ensureWorktree({
+      repoPath: repo.clone,
+      spec: {
+        mode: 'create',
+        repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
+        remoteUrlNormalized: 'x',
+        baseBranch: 'main',
+        branchName: 'aom/toy-2-y',
+      },
+      defaultPath: otherPath,
+    });
+    writeFileSync(join(otherPath, 'o.txt'), 'o');
+    sh(otherPath, 'git', ['add', '-A']);
+    sh(otherPath, 'git', ['commit', '-m', 'other card']);
+    expect(await guard()).toEqual([]);
+  });
+});
+
 describe('autocommit', () => {
   it('commits leftovers with the agent identity and a conventional message; no-op when clean', async () => {
     const { path } = await setup('builder');

@@ -46,6 +46,8 @@ aom-runner start                      # foreground; run it under systemd/launchd
 
 `pair` writes `config.json` (mode 0600) and keeps existing `repoRoots`/runtime settings when re-pairing. `start` connects, sends `hello` (repos, runtimes, active shifts), heartbeats every 15 s (the server's `welcome.heartbeatSec`), reconnects with full-jitter backoff (1 s up to 30 s) and resends the outbox after every reconnect or process restart. Exit codes: 0 on SIGINT/SIGTERM, 2 if the server rejects the token (re-pair), 3 if another runner connected for the same workstation.
 
+Restart behaviour: running shifts are persisted in `active-shifts/` and resumed (same shift id, same worktree) when the runner starts again, so killing and restarting the runner within the one-hour lease keeps the card claim. The agent process is re-run, not re-attached. `AOM_MOCK_STEP_MS` slows the mock agent's three progress steps (default 100 ms) for UI tests.
+
 Other commands:
 
 ```

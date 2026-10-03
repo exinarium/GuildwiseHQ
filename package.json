@@ -10,8 +10,11 @@
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"pnpm --filter @aom/server dev\" \"pnpm --filter @aom/web dev\"",
     "runner:dev": "pnpm --filter @aom/runner dev -- --data-dir .dev/runner",
+    "build": "pnpm -r --if-present build",
     "test": "pnpm -r --if-present test",
     "e2e": "pnpm --filter @aom/e2e e2e",
+    "e2e:prod": "scripts/check-prod-compose.sh",
+    "package:runner": "scripts/package-runner.sh",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "biome check .",
     "format": "biome check --write .",

@@ -1,0 +1,11 @@
+# TLS terminator and reverse proxy for the app container.
+# AOM_DOMAIN: a public DNS name gets a Let's Encrypt certificate automatically (ports 80 and 443 must be reachable).
+# `localhost` (the default) or an IP address uses Caddy's internal CA instead: a locally trusted test certificate.
+{$AOM_DOMAIN:localhost} {
+	encode zstd gzip
+	# WebSocket upgrades (/api/ws, /api/runner/ws) pass through reverse_proxy unchanged.
+	reverse_proxy app:4600 {
+		health_uri /api/health
+		health_interval 15s
+	}
+}

@@ -108,6 +108,7 @@ export class Runner {
     await writeShims(this.paths.bin);
     await this.ipc.start();
     this.repos = await scanRepos(this.opts.config.repoRoots);
+    this.supervisor.resumePersisted();
     this.client.start();
     const t = setInterval(() => void this.rescan(), this.opts.rescanMs ?? 600_000);
     t.unref();
