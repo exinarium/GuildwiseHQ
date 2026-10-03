@@ -9,6 +9,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { refreshVaultConfig, vaultAudience } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { sha256Hex } from '../crypto.ts';
 import { one, rows } from '../db/sql.ts';
@@ -176,7 +177,7 @@ export class RunnerGateway {
       case 'ClaimReleased': {
         const p = (e.event as EventOf<'ClaimReleased'>).payload;
         let reason: StopReason | null = null;
-        if (p.reason === 'agent_retired') reason = 'agent_retired';
+        if (p.reason === 'agent_retired' || p.reason === 'member_removed') reason = 'agent_retired';
         else if (p.reason === 'manual') {
           const card = await one(ctx.pool, 'SELECT status FROM cards WHERE id=$1', [p.cardId]);
           reason = card?.status === 'cancelled' ? 'card_cancelled' : 'manager';
@@ -196,6 +197,31 @@ export class RunnerGateway {
         if (a?.workstation_id) await this.deliverPending(a.workstation_id);
         return;
       }
+      case 'AgentReset': {
+        // A reset DevOps engineer drops whatever it is doing; the request goes back to the queue.
+        const p = (e.event as EventOf<'AgentReset'>).payload;
+        const open = await rows(
+          ctx.pool,
+          `SELECT id, workstation_id FROM shifts WHERE agent_id=$1 AND status <> 'ended'`,
+          [p.agentId],
+        );
+        for (const s of open) this.stopShift(s.workstation_id, s.id, 'agent_retired');
+        const a = await one(ctx.pool, 'SELECT workstation_id FROM agents WHERE id=$1', [p.agentId]);
+        if (a?.workstation_id) await this.deliverPending(a.workstation_id);
+        return;
+      }
+      case 'VaultRegistered':
+      case 'VaultUpdated': {
+        const v = await one(ctx.pool, 'SELECT org_id, project_id FROM vaults WHERE id=$1', [
+          (e.event.payload as { vaultId: string }).vaultId,
+        ]);
+        if (v) await refreshVaultConfig(ctx, await vaultAudience(ctx.pool, v as never));
+        return;
+      }
+      case 'ProjectShareAccepted':
+      case 'ProjectMemberRemoved':
+        await refreshVaultConfig(ctx, [(e.event.payload as { userId: string }).userId]);
+        return;
       case 'ProjectRepoAdded':
       case 'ProjectRepoRemoved': {
         const projectId = (e.event.payload as { projectId: string }).projectId;

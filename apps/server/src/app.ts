@@ -26,15 +26,19 @@ import { Notifier } from './eventstore/notifier.ts';
 import { PgEventStore } from './eventstore/pg-event-store.ts';
 import { ConcurrencyError } from './eventstore/types.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
+import { registerDecisionHook, writeDecisionFile } from './commands/decisions.ts';
 import { buildProjectors } from './projections/index.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { agentRoutes } from './routes/agents.ts';
 import { authRoutes } from './routes/auth.ts';
 import { cardRoutes } from './routes/cards.ts';
 import { catalogueRoutes } from './routes/catalogue.ts';
+import { devopsRoutes } from './routes/devops.ts';
 import { invitationRoutes } from './routes/invitations.ts';
 import { projectRoutes } from './routes/projects.ts';
+import { sharingRoutes } from './routes/sharing.ts';
 import { shiftRoutes } from './routes/shifts.ts';
+import { vaultRoutes } from './routes/vaults.ts';
 import { workstationRoutes } from './routes/workstations.ts';
 import { RunnerGateway } from './runner-gateway/gateway.ts';
 import { RunnerRegistry } from './runner-gateway/registry.ts';
@@ -173,6 +177,9 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(agentRoutes(ctx));
   await app.register(catalogueRoutes(ctx));
   await app.register(shiftRoutes(ctx));
+  await app.register(vaultRoutes(ctx));
+  await app.register(devopsRoutes(ctx));
+  await app.register(sharingRoutes(ctx));
 
   // Gateways: runner WS (/api/runner/ws) and browser WS (/api/ws).
   const runners = new RunnerRegistry();
@@ -203,6 +210,11 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
       ctx.services.dispatcher.trigger();
       return { now: clock.now().toISOString(), offsetMs: clock.offsetMs };
     });
+    // Stand-in for M2's `QuestionAnswered` while the desk is not merged: what the decision hook would call.
+    app.post('/api/test/decision-file', async (req) => {
+      const b = (req.body ?? {}) as Parameters<typeof writeDecisionFile>[1] & { answeredAt?: string };
+      return writeDecisionFile(ctx, { ...b, answeredAt: new Date(b.answeredAt ?? clock.now()) });
+    });
   }
 
   if (config.serveWeb) {
@@ -211,6 +223,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     else app.log.warn('AOM_SERVE_WEB is set but apps/web/dist was not found');
   }
 
+  const unhookDecisions = registerDecisionHook(ctx);
   await notifier.start();
   if (opts.background) {
     dispatcher.start();
@@ -218,6 +231,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   }
 
   app.addHook('onClose', async () => {
+    unhookDecisions();
     await dispatcher.stop();
     await reaper.stop();
     await gateway.stop();

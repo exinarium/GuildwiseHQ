@@ -2,10 +2,13 @@ import type { Projector, ProjectorMap } from '../eventstore/types.ts';
 import { agentProjectors } from './agents.ts';
 import { cardProjectors } from './cards.ts';
 import { catalogueProjectors } from './catalogue.ts';
+import { devopsProjectors } from './devops.ts';
 import { projectProjectors } from './projects.ts';
+import { sharingProjectors } from './sharing.ts';
 import { shiftProjectors } from './shifts.ts';
 import { threadProjectors } from './threads.ts';
 import { userProjectors } from './users.ts';
+import { vaultProjectors } from './vaults.ts';
 import { workstationProjectors } from './workstations.ts';
 
 /**
@@ -21,6 +24,9 @@ const domains: Array<Record<string, Projector>> = [
   cardProjectors,
   shiftProjectors,
   threadProjectors,
+  vaultProjectors,
+  devopsProjectors,
+  sharingProjectors,
 ];
 
 export function buildProjectors(): ProjectorMap {
@@ -58,4 +64,7 @@ export const PROJECTION_TABLES = [
   'shifts',
   'threads',
   'thread_messages',
+  'vaults',
+  'devops_requests',
+  'environment_changes',
 ];

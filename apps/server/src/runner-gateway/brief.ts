@@ -1,12 +1,16 @@
+import { randomUUID } from 'node:crypto';
 import {
   AgentPermissionsSchema,
   type AgentRuntimeSpec,
+  DevOpsAccessSchema,
+  devopsBriefOutcomes,
   getStage,
   type ServerToRunnerOf,
   type ShiftBrief,
   type WorktreeSpec,
 } from '@aom/shared';
 import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
+import { vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import type { ClaimResult } from '../dispatcher/claim.ts';
@@ -155,6 +159,9 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
         path: claim.worktree.created ? undefined : claim.worktree.worktreePath,
       }
     : null;
+  // The one vault this card may read: its domain (or project) vault, only if this workstation's user can access it.
+  const ws = await one(ctx.pool, 'SELECT user_id FROM workstations WHERE id=$1', [claim.workstationId]);
+  const vault = ws ? await vaultForProject(ctx.pool, brief.project.id, ws.user_id) : null;
   return {
     shiftId: claim.shiftId,
     claimId: claim.claimId,
@@ -164,5 +171,108 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     worktree,
     prepare: { rebase: claim.rebase },
     maxShiftMinutes: claim.maxShiftMinutes,
+    vault: vault ? { vaultId: vault.id, kind: vault.kind, folder: vault.folder } : null,
+  };
+}
+
+const DEVOPS_MAX_SHIFT_MINUTES = 30;
+
+/**
+ * The `shift.start` for one DevOps request. A DevOps shift has no card, but the runner's shift machinery is brief
+ * driven, so the brief carries a placeholder card ("DEVOPS") and the real request travels in `devops`.
+ */
+export async function buildDevopsShiftStart(
+  ctx: Ctx,
+  requestId: string,
+  shiftId: string,
+): Promise<ShiftStartPayload | null> {
+  const req = await one(ctx.pool, 'SELECT * FROM devops_requests WHERE id=$1', [requestId]);
+  if (!req) return null;
+  const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [req.devops_agent_id]);
+  const ws = await one(ctx.pool, 'SELECT id, name, devops_access FROM workstations WHERE id=$1', [req.workstation_id]);
+  if (!agent || !ws) return null;
+  const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
+  if (!role) return null;
+  const card = req.card_id ? await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1', [req.card_id]) : undefined;
+  const history = await rows(
+    ctx.pool,
+    `SELECT m.kind, m.body, m.created_at, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
+       LEFT JOIN users u ON u.id = m.author_user_id LEFT JOIN agents a ON a.id = m.author_agent_id
+      WHERE m.thread_id=$1 ORDER BY m.created_at, m.event_seq LIMIT 30`,
+    [req.thread_id],
+  );
+  const ap = req.approval as { action: string; reason: string; commands: string[]; resolution: string | null; note?: string } | null;
+  const placeholder = { id: requestId, key: 'DEVOPS', name: 'DevOps', ref: 'DEVOPS' };
+  const brief: ShiftBrief = {
+    shift: {
+      id: shiftId,
+      kind: 'devops',
+      stage: 'devops',
+      stageLabel: 'DevOps request',
+      doneCriteria: 'The request is done within the granted access, or the manager approved what it needs.',
+      outcomes: devopsBriefOutcomes(),
+      maxShiftMinutes: DEVOPS_MAX_SHIFT_MINUTES,
+    },
+    agent: { id: agent.id, name: agent.name, seniority: agent.seniority },
+    card: {
+      id: requestId,
+      ref: placeholder.ref,
+      title: String(req.summary).replace(/\s+/g, ' ').slice(0, 120),
+      cardType: 'support',
+      fields: {},
+      riskTier: null,
+      reworkRound: 0,
+      completionAction: null,
+      docsNeeded: false,
+      dependencies: [],
+    },
+    project: {
+      id: placeholder.id,
+      key: placeholder.key,
+      name: placeholder.name,
+      domain: 'work',
+      workingBranch: 'main',
+      e2eGlobs: [],
+      architecturalGlobs: [],
+    },
+    role: {
+      key: role.definition.key,
+      name: role.definition.name,
+      instructions: role.definition.instructions,
+      coreRules: role.definition.coreRules,
+      skills: agent.skills,
+    },
+    handoffs: [],
+    reviewComments: [],
+    thread: [],
+    standingOrders: [],
+    ledger: [],
+  };
+  return {
+    shiftId,
+    claimId: randomUUID(),
+    kind: 'devops',
+    agent: agentSpec(agent),
+    brief,
+    worktree: null,
+    prepare: { rebase: false },
+    maxShiftMinutes: DEVOPS_MAX_SHIFT_MINUTES,
+    devops: {
+      requestId,
+      threadId: req.thread_id,
+      summary: req.summary,
+      requestedBy: { kind: req.requested_by_kind, id: req.requested_by_id, name: req.requested_by_name ?? undefined },
+      card: card ? { ref: card.ref, title: card.title } : undefined,
+      workstationName: ws.name,
+      access: DevOpsAccessSchema.parse(ws.devops_access ?? {}),
+      approval: ap?.resolution === 'approved' ? { action: ap.action, reason: ap.reason, commands: ap.commands ?? [], note: ap.note ?? undefined } : undefined,
+      history: history.map((m) => ({
+        authorName: m.user_name ?? m.agent_name ?? 'system',
+        kind: m.kind,
+        body: m.body,
+        at: iso(m.created_at) as string,
+      })),
+    },
+    vault: null,
   };
 }

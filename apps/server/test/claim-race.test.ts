@@ -56,7 +56,9 @@ describe('exclusive claim', () => {
   });
 
   it('a claimed card cannot be claimed again, and wrong stage claims fail', async () => {
-    const agents = (await ok<any>(w.t.req('GET', '/api/agents', { cookie: w.owner.cookie }))).agents;
+    const agents = (await ok<any>(w.t.req('GET', '/api/agents', { cookie: w.owner.cookie }))).agents.filter(
+      (a: any) => !a.isDevops,
+    );
     const card = await w.card({ title: 'Stage check' });
     expect(
       await claim(w.t.app.ctx, { cardId: card.id, agentId: agents[0].id, expectedStage: 'review' }),

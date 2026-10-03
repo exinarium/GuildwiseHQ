@@ -16,6 +16,7 @@ import { exec, one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
+import { applyDevopsReport, endDevopsShift } from './devops.ts';
 
 export interface WsRef {
   id: string;
@@ -131,6 +132,7 @@ export async function applyShiftReport(
   const shift = await one(tx, 'SELECT * FROM shifts WHERE id=$1 AND workstation_id=$2', [msg.shiftId, ws.id]);
   if (!shift) return { accepted: false, error: 'unknown shift' };
   if (shift.status === 'ended') return { accepted: false, error: 'this shift has already ended' };
+  if (shift.kind === 'devops') return applyDevopsReport(ctx, tx, ws, msg, shift);
   if (!shift.card_id) return { accepted: false, error: 'this shift has no card to report on' };
   const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [shift.card_id]);
   if (!card) return { accepted: false, error: 'card not found' };
@@ -374,6 +376,10 @@ export async function applyShiftRejected(
 ) {
   const s = await one(tx, 'SELECT * FROM shifts WHERE id=$1 AND workstation_id=$2', [msg.shiftId, ws.id]);
   if (!s || s.status === 'ended') return;
+  if (s.kind === 'devops') {
+    await ctx.store.append(await endDevopsShift(tx, s, 'rejected', { finalText: msg.detail }), { tx });
+    return;
+  }
   const card = s.card_id
     ? await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [s.card_id])
     : undefined;
@@ -407,6 +413,19 @@ export async function applyShiftRejected(
 export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerToServerOf<'shift.ended'>) {
   const s = await one(tx, 'SELECT * FROM shifts WHERE id=$1 AND workstation_id=$2', [msg.shiftId, ws.id]);
   if (!s || s.status === 'ended') return;
+  if (s.kind === 'devops') {
+    await ctx.store.append(
+      await endDevopsShift(tx, s, msg.outcome, {
+        durationMs: msg.durationMs,
+        usage: msg.usage,
+        exitCode: msg.exitCode,
+        finalText: msg.finalText,
+        guardViolations: msg.guardViolations,
+      }),
+      { tx },
+    );
+    return;
+  }
   const events: AppendInput[] = [];
   const card = s.card_id
     ? await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [s.card_id])

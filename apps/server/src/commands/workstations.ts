@@ -8,6 +8,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { conflict, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { cardMessage, orgScope, runnerActor, SYSTEM_ACTOR, userActor } from './common.ts';
+import { devopsHireEvent } from './devops.ts';
 
 const CODE_TTL_MS = 10 * 60_000;
 const MAX_ACTIVE_CODES = 3;
@@ -69,6 +70,8 @@ export async function pairRunner(
     if (!c || c.used_at || new Date(c.expires_at) <= now || c.attempts > MAX_CODE_ATTEMPTS)
       throw new PairingError();
     await exec(tx, 'UPDATE pairing_codes SET used_at=$2 WHERE id=$1', [c.id, now]);
+    // Every workstation gets its own DevOps engineer, hired in the same append (docs/ARCHITECTURE.md section 16.2).
+    const devopsHire = await devopsHireEvent(tx, c.user_id, workstationId);
     await ctx.store.append(
       [
         {
@@ -88,6 +91,7 @@ export async function pairRunner(
           actor: SYSTEM_ACTOR,
           scope: orgScope(c.user_id),
         },
+        ...(devopsHire ? [devopsHire] : []),
       ],
       { tx },
     );
