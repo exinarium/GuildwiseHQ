@@ -1,0 +1,517 @@
+import { delimiter } from 'node:path';
+import {
+  type AgentRuntimeSpec,
+  type GuardViolation,
+  type IpcReportRequest,
+  type IpcReportResponse,
+  type IpcRpcRequest,
+  type IpcRpcResponse,
+  isTerminalReport,
+  outcomeDataSchema,
+  type RepoReport,
+  renderInstructions,
+  renderShiftPrompt,
+  type ServerToRunnerOf,
+  type ShiftReport,
+  ShiftReportSchema,
+  type Usage,
+  uuidv7,
+} from '@aom/shared';
+import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
+import type { RunnerConfig } from '../config.ts';
+import type { Outbox } from '../connection/outbox.ts';
+import { computeDiffStats, riskTier } from '../git/diffstat.ts';
+import { git } from '../git/git.ts';
+import {
+  ensureWorktree,
+  RebaseConflictError,
+  rebaseOntoBase,
+  WorktreeError,
+  type WorktreeResult,
+} from '../git/worktrees.ts';
+import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
+import { type Logger, nullLogger } from '../log.ts';
+import type { RunnerPaths } from '../paths.ts';
+import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import { autoCommit } from './autocommit.ts';
+import { type BranchSnapshot, runGuard, snapshotBranches } from './guard.ts';
+
+type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
+type ReportResultMsg = ServerToRunnerOf<'shift.report.result'>;
+type StopReason = ServerToRunnerOf<'shift.stop'>['reason'];
+
+export interface ShiftTransport {
+  /** Acked types are persisted and retried; best-effort types are dropped while offline. */
+  send(type: string, payload: Record<string, unknown>): string;
+}
+
+export interface SupervisorDeps {
+  paths: RunnerPaths;
+  config: RunnerConfig;
+  adapters: Map<string, RuntimeAdapter>;
+  ipc: IpcServer;
+  transport: ShiftTransport;
+  outbox: Outbox;
+  log?: Logger;
+  /** Finds the local clone for a normalized remote URL. */
+  findRepo: (remoteUrlNormalized: string) => Promise<RepoReport | undefined>;
+  /** Forwards an rpc to the server (`rpc.request`). */
+  rpc: (shiftId: string, method: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>;
+  maxConcurrentShifts?: () => number;
+  /** Test/dev override of `maxShiftMinutes` (milliseconds). */
+  maxShiftMsOverride?: number;
+  /** How long a report waits for `shift.report.result` before being treated as queued. Default 120 s. */
+  reportWaitMs?: number;
+  /** How long the session may linger after an accepted report. Default 2 min. */
+  exitGraceMs?: number;
+  progressFlushMs?: number;
+}
+
+interface ActiveShift {
+  msg: ShiftStartMsg;
+  startedAt: Date;
+  token?: string;
+  session?: RuntimeSession;
+  worktree?: WorktreeResult;
+  startSha?: string;
+  branchesAtStart: BranchSnapshot;
+  stopReason?: StopReason | 'timeout';
+  reportState: 'none' | 'pending' | 'accepted';
+  pendingReports: Map<string, (r: { accepted: boolean; error?: string }) => void>;
+  guardViolations: GuardViolation[];
+  finalText?: string;
+  progress: Array<{ at: string; kind: 'text' | 'tool' | 'status'; text: string }>;
+  env: Record<string, string>;
+  graceTimer?: NodeJS.Timeout;
+}
+
+const ACCEPTED_MESSAGE = 'Recorded. Finish now; do not make further changes.';
+
+export class ShiftSupervisor {
+  private readonly active = new Map<string, ActiveShift>();
+  private readonly log: Logger;
+
+  constructor(private readonly deps: SupervisorDeps) {
+    this.log = deps.log ?? nullLogger;
+  }
+
+  /** Shifts that are running (for `hello` and heartbeats). */
+  activeShifts(): Array<{ shiftId: string; cardId?: string; agentId: string; startedAt: string }> {
+    return [...this.active.values()]
+      .filter((s) => s.session)
+      .map((s) => ({
+        shiftId: s.msg.shiftId,
+        ...(s.msg.brief.card ? { cardId: s.msg.brief.card.id } : {}),
+        agentId: s.msg.agent.agentId,
+        startedAt: s.startedAt.toISOString(),
+      }));
+  }
+
+  get size(): number {
+    return this.active.size;
+  }
+
+  /** Resolves when the shift has fully ended (or was rejected). Never throws. */
+  async handleStart(msg: ShiftStartMsg): Promise<void> {
+    if (this.active.has(msg.shiftId)) return; // redelivery
+    const max = this.deps.maxConcurrentShifts?.() ?? this.deps.config.maxConcurrentShifts;
+    if (this.active.size >= max) {
+      this.reject(msg.shiftId, 'busy', `${this.active.size} shifts already running`);
+      return;
+    }
+    const shift: ActiveShift = {
+      msg,
+      startedAt: new Date(),
+      branchesAtStart: {},
+      reportState: 'none',
+      pendingReports: new Map(),
+      guardViolations: [],
+      progress: [],
+      env: {},
+    };
+    this.active.set(msg.shiftId, shift);
+    try {
+      await this.run(shift);
+    } catch (err) {
+      this.log.error(`shift ${msg.shiftId} failed unexpectedly`, err);
+      if (!shift.session)
+        this.reject(msg.shiftId, 'internal', err instanceof Error ? err.message : String(err));
+    } finally {
+      if (shift.token) this.deps.ipc.revoke(shift.token);
+      if (shift.graceTimer) clearTimeout(shift.graceTimer);
+      this.active.delete(msg.shiftId);
+    }
+  }
+
+  async handleStop(shiftId: string, reason: StopReason): Promise<void> {
+    const s = this.active.get(shiftId);
+    if (!s) return;
+    s.stopReason ??= reason;
+    if (reason === 'claim_lost') {
+      s.reportState = 'accepted'; // no further reports for a shift the server no longer holds
+      this.deps.outbox.discard((e) => e.type === 'shift.report' && e.frame.shiftId === shiftId);
+      for (const [id, cb] of s.pendingReports) {
+        s.pendingReports.delete(id);
+        cb({ accepted: false, error: 'claim lost: the server no longer holds this shift' });
+      }
+    }
+    await s.session?.stop(`stop:${reason}`);
+  }
+
+  async stopAll(reason: StopReason = 'manager'): Promise<void> {
+    await Promise.all([...this.active.keys()].map((id) => this.handleStop(id, reason)));
+  }
+
+  onReportResult(msg: ReportResultMsg): void {
+    for (const s of this.active.values()) {
+      const cb = s.pendingReports.get(msg.reportId);
+      if (cb) {
+        s.pendingReports.delete(msg.reportId);
+        cb({ accepted: msg.accepted, ...(msg.error ? { error: msg.error } : {}) });
+        return;
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ internals
+
+  private reject(
+    shiftId: string,
+    reason:
+      | 'busy'
+      | 'runtime_unavailable'
+      | 'repo_missing'
+      | 'worktree_failed'
+      | 'rebase_conflict'
+      | 'internal',
+    detail?: string,
+    conflictedFiles?: string[],
+  ): void {
+    this.deps.transport.send('shift.rejected', {
+      shiftId,
+      reason,
+      ...(detail ? { detail } : {}),
+      ...(conflictedFiles ? { conflictedFiles } : {}),
+    });
+  }
+
+  private async run(s: ActiveShift): Promise<void> {
+    const { msg } = s;
+    const { paths } = this.deps;
+    const adapter = this.deps.adapters.get(msg.agent.runtime);
+    const caps = adapter ? await adapter.capabilities() : undefined;
+    if (!adapter || !caps?.available) {
+      this.reject(msg.shiftId, 'runtime_unavailable', `runtime ${msg.agent.runtime} is not available`);
+      return;
+    }
+
+    const sandbox = await ensureSandbox(paths, msg.agent.agentId, msg.agent.name);
+    let cwd = sandbox.scratch;
+
+    if (msg.worktree) {
+      const repo = await this.deps.findRepo(msg.worktree.remoteUrlNormalized);
+      if (!repo) {
+        this.reject(msg.shiftId, 'repo_missing', `no local clone for ${msg.worktree.remoteUrlNormalized}`);
+        return;
+      }
+      try {
+        s.worktree = await ensureWorktree({
+          repoPath: repo.localPath,
+          spec: msg.worktree,
+          defaultPath: paths.worktreePath(msg.brief.project.key, msg.brief.card.ref),
+        });
+        if (msg.prepare.rebase) await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch);
+      } catch (err) {
+        if (err instanceof RebaseConflictError) {
+          this.reject(msg.shiftId, 'rebase_conflict', err.message, err.conflictedFiles);
+        } else if (err instanceof WorktreeError) {
+          this.reject(msg.shiftId, 'worktree_failed', err.message);
+        } else {
+          this.reject(msg.shiftId, 'worktree_failed', err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+      cwd = s.worktree.path;
+      s.startSha = (await git(cwd, ['rev-parse', 'HEAD'])).stdout.trim();
+      s.branchesAtStart = await snapshotBranches(cwd);
+    }
+
+    this.deps.transport.send('shift.accepted', { shiftId: msg.shiftId });
+
+    await adapter.writeInstructions(sandbox, renderInstructions(msg.brief));
+    s.token = this.deps.ipc.registerShift(this.handlerFor(s));
+    s.env = {
+      ...sandboxEnv(sandbox),
+      AOM_IPC_URL: this.deps.ipc.url,
+      AOM_SHIFT_TOKEN: s.token,
+      AOM_SHIFT_ID: msg.shiftId,
+      PATH: `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
+    };
+
+    try {
+      s.session = await adapter.start({
+        shiftId: msg.shiftId,
+        prompt: renderShiftPrompt(msg.brief),
+        instructionsMarkdown: renderInstructions(msg.brief),
+        cwd,
+        sandbox,
+        agent: msg.agent as AgentRuntimeSpec,
+        env: s.env,
+        addDirs: [],
+        maxShiftMinutes: msg.maxShiftMinutes,
+        logFile: `${paths.shiftLogs}/${msg.shiftId}.jsonl`,
+      });
+    } catch (err) {
+      this.deps.transport.send('shift.ended', {
+        shiftId: msg.shiftId,
+        outcome: 'crashed',
+        exitCode: null,
+        durationMs: Date.now() - s.startedAt.getTime(),
+        usage: zeroUsage(),
+        finalText:
+          `failed to start ${msg.agent.runtime}: ${err instanceof Error ? err.message : String(err)}`.slice(
+            0,
+            4000,
+          ),
+        guardViolations: [],
+      });
+      return;
+    }
+
+    this.deps.transport.send('shift.started', {
+      shiftId: msg.shiftId,
+      ...(s.worktree
+        ? {
+            worktree: {
+              path: s.worktree.path,
+              branchName: s.worktree.branchName,
+              baseBranch: s.worktree.baseBranch,
+              created: s.worktree.created,
+              headSha: s.startSha ?? s.worktree.headSha,
+            },
+          }
+        : {}),
+    });
+    this.addProgress(s, 'status', `shift started on ${msg.agent.runtime}`);
+
+    const maxMs = this.deps.maxShiftMsOverride ?? msg.maxShiftMinutes * 60_000;
+    const timeout = setTimeout(() => {
+      s.stopReason ??= 'timeout';
+      void s.session?.stop('timeout');
+    }, maxMs);
+    const flush = setInterval(() => this.flushProgress(s), this.deps.progressFlushMs ?? 1000);
+    if (s.stopReason) void s.session.stop(`stop:${s.stopReason}`); // stop arrived while preparing
+
+    let exit: Extract<RuntimeEvent, { kind: 'exit' }> = { kind: 'exit', code: null };
+    try {
+      for await (const ev of s.session.events()) {
+        if (ev.kind === 'exit') exit = ev;
+        else this.onRuntimeEvent(s, ev);
+      }
+    } finally {
+      clearTimeout(timeout);
+      clearInterval(flush);
+    }
+    this.flushProgress(s);
+
+    // Fallback: a fenced aom-report block in the last assistant message.
+    if (s.reportState === 'none' && !s.stopReason && s.finalText) {
+      const fallback = extractFallbackReport(s.finalText);
+      if (fallback) {
+        const r = await this.submit(s, fallback);
+        this.log.info(
+          `fallback aom-report for shift ${msg.shiftId}: ${'accepted' in r && r.accepted ? 'accepted' : 'rejected'}`,
+        );
+      }
+    }
+    // A report may still be waiting for the server's verdict.
+    while (s.pendingReports.size > 0) await sleep(50);
+
+    if (msg.worktree && s.worktree && msg.agent.permissions.mayCommit) {
+      await autoCommit({
+        worktree: s.worktree.path,
+        ref: msg.brief.card.ref,
+        stage: msg.brief.shift.stage,
+        shiftId: msg.shiftId,
+        env: s.env,
+      });
+    }
+
+    let outcome: 'reported' | 'no_report' | 'stopped' | 'crashed' | 'timeout';
+    if (s.reportState !== 'none' && s.stopReason !== 'claim_lost') outcome = 'reported';
+    else if (s.stopReason === 'timeout') outcome = 'timeout';
+    else if (s.stopReason) outcome = 'stopped';
+    else if (exit.code !== 0) outcome = 'crashed';
+    else outcome = 'no_report';
+
+    this.deps.transport.send('shift.ended', {
+      shiftId: msg.shiftId,
+      outcome,
+      exitCode: exit.code,
+      durationMs: Date.now() - s.startedAt.getTime(),
+      usage: s.session.usage(),
+      ...(s.finalText || exit.error ? { finalText: (s.finalText ?? exit.error ?? '').slice(0, 4000) } : {}),
+      guardViolations: s.guardViolations,
+    });
+  }
+
+  private onRuntimeEvent(s: ActiveShift, ev: RuntimeEvent): void {
+    if (ev.kind === 'progress') this.addProgress(s, 'text', ev.text);
+    else if (ev.kind === 'tool') this.addProgress(s, 'tool', `${ev.name}: ${ev.summary}`);
+    else if (ev.kind === 'final') s.finalText = ev.text;
+  }
+
+  private addProgress(s: ActiveShift, kind: 'text' | 'tool' | 'status', text: string): void {
+    s.progress.push({ at: new Date().toISOString(), kind, text: text.slice(0, 500) });
+  }
+
+  private flushProgress(s: ActiveShift): void {
+    if (s.progress.length === 0) return;
+    const items = s.progress.splice(0, s.progress.length);
+    this.deps.transport.send('shift.progress', { shiftId: s.msg.shiftId, items });
+  }
+
+  private handlerFor(s: ActiveShift): ShiftIpcHandler {
+    return {
+      report: async (req: IpcReportRequest) => this.submit(s, req.report),
+      rpc: async (req: IpcRpcRequest) => {
+        if (req.method === 'card.get') return { ok: true, result: s.msg.brief };
+        return this.deps.rpc(s.msg.shiftId, req.method, req.params);
+      },
+    };
+  }
+
+  /** Validates, guards, attaches runner data, sends `shift.report` and waits for the server's verdict. */
+  private async submit(
+    s: ActiveShift,
+    report: ShiftReport,
+  ): Promise<IpcReportResponse | { status: number; error: string }> {
+    const { msg } = s;
+    const terminal = isTerminalReport(report);
+    if (terminal && s.reportState !== 'none') {
+      return {
+        accepted: false,
+        message: 'A terminal report was already recorded for this shift.',
+        error: 'already reported',
+      };
+    }
+    if (report.kind === 'question' && report.blocking) {
+      return { status: 501, error: 'questions are not available yet (arrives with the decision desk, M2)' };
+    }
+
+    let attach: Record<string, unknown> = {};
+    let toSend: ShiftReport = report;
+    if (report.kind === 'outcome') {
+      const outcome = msg.brief.shift.outcomes.find((o) => o.id === report.outcomeId);
+      if (!outcome) {
+        const allowed = msg.brief.shift.outcomes.map((o) => o.id).join(', ');
+        return rejected(
+          `Unknown outcome "${report.outcomeId}" for the ${msg.brief.shift.stageLabel} stage. Allowed: ${allowed}.`,
+        );
+      }
+      const parsed = outcomeDataSchema(outcome.data).safeParse(report.data);
+      if (!parsed.success) {
+        return rejected(
+          `Invalid data for outcome "${outcome.id}" (${outcome.data}): ${parsed.error.message}`,
+        );
+      }
+      toSend = { ...report, data: parsed.data as Record<string, unknown> };
+
+      if (s.worktree && s.startSha) {
+        const violations = await runGuard({
+          worktree: s.worktree.path,
+          roleKey: msg.agent.roleKey,
+          permissions: msg.agent.permissions,
+          branchName: s.worktree.branchName,
+          startSha: s.startSha,
+          branchesAtStart: s.branchesAtStart,
+          e2eGlobs: msg.brief.project.e2eGlobs,
+        });
+        if (violations.length > 0) {
+          for (const v of violations) {
+            if (!s.guardViolations.some((x) => x.rule === v.rule && x.detail === v.detail))
+              s.guardViolations.push(v);
+          }
+          return {
+            accepted: false,
+            message: 'Report rejected by the post-shift guard.',
+            error: violations.map((v) => `${v.rule}: ${v.detail}`).join('; '),
+            guardViolations: violations,
+          };
+        }
+        if (outcome.kind === 'success' && outcome.data === 'diffStats') {
+          if (msg.agent.permissions.mayCommit) {
+            await autoCommit({
+              worktree: s.worktree.path,
+              ref: msg.brief.card.ref,
+              stage: msg.brief.shift.stage,
+              shiftId: msg.shiftId,
+              env: s.env,
+            });
+          }
+          const stats = await computeDiffStats({
+            worktree: s.worktree.path,
+            baseBranch: s.worktree.baseBranch,
+            architecturalGlobs: msg.brief.project.architecturalGlobs,
+            affectedAreas:
+              typeof msg.brief.card.fields.affectedAreas === 'string'
+                ? msg.brief.card.fields.affectedAreas
+                : '',
+          });
+          attach = { diffStats: stats, riskTier: riskTier(stats, msg.brief.card.cardType) };
+        }
+      }
+    }
+
+    const reportId = uuidv7();
+    if (terminal) s.reportState = 'pending';
+    const verdict = new Promise<{ accepted: boolean; error?: string } | 'timeout'>((resolve) => {
+      s.pendingReports.set(reportId, resolve);
+      setTimeout(() => {
+        if (s.pendingReports.delete(reportId)) resolve('timeout');
+      }, this.deps.reportWaitMs ?? 120_000).unref?.();
+    });
+    this.deps.transport.send('shift.report', { shiftId: msg.shiftId, reportId, report: toSend, ...attach });
+    const result = await verdict;
+
+    if (result === 'timeout') {
+      // Persisted in the outbox: it will be delivered when the server is reachable.
+      return { accepted: true, message: `Queued. ${ACCEPTED_MESSAGE}` };
+    }
+    if (!result.accepted) {
+      if (terminal) s.reportState = 'none';
+      return rejected(result.error ?? 'the server rejected the report');
+    }
+    if (terminal) {
+      s.reportState = 'accepted';
+      s.graceTimer = setTimeout(
+        () => void s.session?.stop('report_accepted'),
+        this.deps.exitGraceMs ?? 120_000,
+      );
+      s.graceTimer.unref?.();
+    }
+    return { accepted: true, message: terminal ? ACCEPTED_MESSAGE : 'Recorded.' };
+  }
+}
+
+const rejected = (error: string): IpcReportResponse => ({
+  accepted: false,
+  message: `Report rejected: ${error}`,
+  error,
+});
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+
+/** Finds a valid terminal ```aom-report {json}``` block in the last assistant text. */
+export function extractFallbackReport(text: string): ShiftReport | null {
+  const re = /```aom-report\s*([\s\S]*?)```/g;
+  let last: string | undefined;
+  for (let m = re.exec(text); m; m = re.exec(text)) last = m[1];
+  if (!last) return null;
+  try {
+    const parsed = ShiftReportSchema.safeParse(JSON.parse(last));
+    return parsed.success && isTerminalReport(parsed.data) ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}

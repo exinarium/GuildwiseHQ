@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","cwd":"/work/toy","session_id":"11111111-2222-4333-8444-555555555555","tools":["Bash"],"model":"claude-sonnet-4-5","permissionMode":"acceptEdits"}
+{"type":"result","subtype":"success","is_error":true,"duration_ms":812,"num_turns":1,"result":"Invalid API key - Please run /login","session_id":"11111111-2222-4333-8444-555555555555","total_cost_usd":0,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}

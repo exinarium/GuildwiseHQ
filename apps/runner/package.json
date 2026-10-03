@@ -9,9 +9,10 @@
   },
   "scripts": {
     "dev": "tsx src/cli.ts start",
-    "build": "tsup src/cli.ts src/aom/aom-cli.ts --format esm --out-dir dist --noExternal @aom/shared",
+    "build": "tsup",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "test:smoke": "AOM_CLAUDE_SMOKE=1 vitest run test/claude-smoke.test.ts"
   },
   "dependencies": {
     "@aom/shared": "workspace:*",

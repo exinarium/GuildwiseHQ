@@ -1,0 +1,9 @@
+{"type":"system","subtype":"init","cwd":"/work/toy","session_id":"7c1f6f0e-5d2a-4a56-9f9a-3b1d0c7e1a11","tools":["Bash","Edit","Read","Write"],"model":"claude-sonnet-4-5","permissionMode":"acceptEdits"}
+{"type":"assistant","message":{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"I'll start by reading the card and the existing code."}],"usage":{"input_tokens":3,"output_tokens":20}},"session_id":"7c1f6f0e-5d2a-4a56-9f9a-3b1d0c7e1a11"}
+{"type":"assistant","message":{"id":"msg_02","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"aom card --json","description":"Read the brief"}}],"usage":{"input_tokens":3,"output_tokens":40}},"session_id":"7c1f6f0e-5d2a-4a56-9f9a-3b1d0c7e1a11"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"{...}"}]},"session_id":"7c1f6f0e-5d2a-4a56-9f9a-3b1d0c7e1a11"}
+{"type":"assistant","message":{"id":"msg_03","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"Write","input":{"file_path":"/work/toy/src/greeting.ts","content":"export const greet = () => 'hi';\n"}}]},"session_id":"7c1f6f0e-5d2a-4a56-9f9a-3b1d0c7e1a11"}
+{"type":"not json at all"}
+{"type":"stream_event","event":{"type":"content_block_delta"}}
+{"type":"assistant","message":{"id":"msg_04","type":"message","role":"assistant","content":[{"type":"text","text":"Done. Handed off with aom handoff."}]},"session_id":"7c1f6f0e-5d2a-4a56-9f9a-3b1d0c7e1a11"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":41234,"duration_api_ms":39000,"num_turns":4,"result":"Done. Handed off with aom handoff.","session_id":"7c1f6f0e-5d2a-4a56-9f9a-3b1d0c7e1a11","total_cost_usd":0.0421,"usage":{"input_tokens":1520,"cache_creation_input_tokens":8000,"cache_read_input_tokens":42000,"output_tokens":910}}
