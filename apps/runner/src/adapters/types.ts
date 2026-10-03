@@ -1,4 +1,4 @@
-import type { AgentRuntimeSpec, Usage } from '@aom/shared';
+import type { AgentRuntimeSpec, ChatContext, Usage } from '@aom/shared';
 import type { Sandbox } from '../sandbox/sandbox.ts';
 
 export interface RuntimeCapabilities {
@@ -60,6 +60,10 @@ export interface ChatStartInput {
   resumeSessionId?: string;
   /** Tools are limited to reading (and the chat-scoped `aom` verbs). */
   readOnly: boolean;
+  /** What the server told the agent about this conversation (card, project, M7: the intake). */
+  context?: ChatContext;
+  /** M7: the BA's intake chat: it may read the ticket with the user's Jira tool (MCP) configured on this workstation. */
+  intake?: boolean;
   logFile?: string;
 }
 

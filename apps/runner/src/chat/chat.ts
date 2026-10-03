@@ -10,6 +10,7 @@ import {
   type Usage,
 } from '@aom/shared';
 import type { RuntimeAdapter, RuntimeSession } from '../adapters/types.ts';
+import { type ExternalAdapters, formatSource } from '../external/index.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
@@ -24,6 +25,8 @@ export interface ChatDeps {
   log?: Logger;
   /** Acked types (`chat.done`, `chat.error`) go through the outbox; `chat.delta` is dropped while offline. */
   send(type: 'chat.delta' | 'chat.done' | 'chat.error', payload: Record<string, unknown>): void;
+  /** M7: the ticket systems of this workstation (`aom source read`); credentials never leave it. */
+  external?: ExternalAdapters;
   /** RPC to the server under the chat's id (the server treats a chat as a shift of kind `chat`). */
   rpc(chatId: string, method: string, params: Record<string, unknown>): Promise<IpcRpcResponse>;
 }
@@ -35,8 +38,20 @@ interface ActiveChat {
   stopReason?: 'cancelled' | string;
 }
 
-/** Chat verbs a conversation may use (chat-scoped token): `ledger search`, `comment`, and reading the thread. */
-const CHAT_RPC = new Set(['ledger.search', 'thread.post', 'thread.read']);
+/**
+ * Chat verbs a conversation may use (chat-scoped token): `ledger search`, `comment`, and reading the thread; the BA's
+ * intake adds drafting cards and mapping the ticket (the server only allows those in an intake chat).
+ */
+const CHAT_RPC = new Set([
+  'ledger.search',
+  'thread.post',
+  'thread.read',
+  'card.create',
+  'card.update',
+  'card.specify',
+  'intake.map',
+  'intake.unmapped',
+]);
 
 const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
 
@@ -109,11 +124,25 @@ export class ChatManager {
           ? { accepted: true, message: 'Recorded.' }
           : { accepted: false, message: `Rejected: ${r.error ?? 'failed'}`, error: r.error ?? 'failed' };
       },
-      rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> =>
-        CHAT_RPC.has(req.method)
+      rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
+        if (req.method === 'source.read') return this.readSource(req.params);
+        return CHAT_RPC.has(req.method)
           ? this.deps.rpc(chatId, req.method, req.params)
-          : { ok: false, error: `${req.method} is not available in a chat conversation` },
+          : { ok: false, error: `${req.method} is not available in a chat conversation` };
+      },
     };
+  }
+
+  /** `aom source read --ref <ticket>`: read a ticket on this workstation (GitHub through `gh`; Jira is the agent's skill). */
+  private async readSource(params: Record<string, unknown>): Promise<IpcRpcResponse> {
+    const ref = String(params.ref ?? '').trim();
+    if (!ref) return { ok: false, error: 'usage: aom source read --ref <owner/repo#12>' };
+    if (!this.deps.external) return { ok: false, error: 'this runner has no ticket adapters' };
+    try {
+      return { ok: true, result: formatSource(await this.deps.external.readText(ref)) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   private async run(chat: ActiveChat): Promise<void> {
@@ -151,6 +180,8 @@ export class ChatManager {
       agent: msg.agent,
       env,
       readOnly,
+      context: msg.context,
+      ...(msg.context.intake ? { intake: true } : {}),
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
     });

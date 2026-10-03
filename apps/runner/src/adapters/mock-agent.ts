@@ -18,7 +18,9 @@ type Action =
   | 'devops'
   | 'devops_install'
   | 'fabricate'
-  | 'uncited';
+  | 'uncited'
+  | 'answer'
+  | 'escalate';
 
 interface FeedItem {
   kind: string;
@@ -30,7 +32,14 @@ interface FeedItem {
 }
 
 interface Brief {
-  shift: { stage: string; outcomes: Array<{ id: string; kind: string; data: string }> };
+  shift: { stage: string; kind?: string; outcomes: Array<{ id: string; kind: string; data: string }> };
+  question?: {
+    deskItemId: string;
+    level: string;
+    text: string;
+    recommendation?: string;
+    ledgerMatches: Array<{ title: string; body: string }>;
+  };
   feed?: { candidates: FeedItem[]; seenUrls: string[]; taste?: string };
   standingOrders?: Array<{ title: string }>;
   ledger?: Array<{ title: string; body: string }>;
@@ -39,6 +48,7 @@ interface Brief {
     title: string;
     cardType: string;
     reworkRound: number;
+    completionAction?: string | null;
     fields: Record<string, unknown>;
   };
   handoffs?: Array<{ stage: string; outcome?: string; note?: string }>;
@@ -133,6 +143,16 @@ async function report(brief: Brief, action: Action): Promise<{ code: number; out
     return failing
       ? aom(['test', 'fail', '--title', 'Mock bug', '--note', 'mock failure', '--evidence', 'mock: 1 failed'])
       : aom(['test', 'pass', '--evidence', 'mock: 1 passed', '--command', 'mock test']);
+  }
+  // M7: the BA claims Finalize and runs the card's completion action (a different `--action` would revise it).
+  if (has('finalized')) {
+    return aom([
+      'finalize',
+      '--action',
+      brief.card.completionAction ?? 'push_branch',
+      '--note',
+      `mock BA: ${brief.card.ref} is ready`,
+    ]);
   }
   const wanted = outcomes.find((o) => o.kind === (failing ? 'failure' : 'success')) ?? outcomes[0];
   if (!wanted) return { code: 1, out: '', err: `no outcomes for stage ${stage}` };
@@ -391,7 +411,194 @@ function markEnvironmentFixed(summary: string): void {
   if (/\b(app|start|deploy)/i.test(summary)) writeFileSync(join(dir, 'env-ok-app_not_deployed'), 'ok\n');
 }
 
+/**
+ * A question shift (M7): a colleague's question reached this agent along the escalation chain. Deterministic: the
+ * card's `mock.question` script (consumed per question shift of the card) says `answer` (default) or `escalate`.
+ * An answer quotes the first ledger entry that matched, else follows the asker's recommendation.
+ */
+async function questionMain(brief: Brief): Promise<number> {
+  const q = brief.question;
+  if (!q) return 1;
+  const script = (brief.card.fields.mock as Record<string, unknown> | undefined)?.question;
+  const index = attemptIndex(brief);
+  const action: Action =
+    Array.isArray(script) && typeof script[index] === 'string' ? (script[index] as Action) : 'answer';
+  for (let i = 1; i <= 2; i++) {
+    emit({ kind: 'progress', text: `mock ${brief.card.ref} question (${q.level}): step ${i}/2 (${action})` });
+    await sleep(stepMs);
+  }
+  emit({ kind: 'usage', usage: { inputTokens: 400, outputTokens: 80 } });
+  const r =
+    action === 'escalate'
+      ? aom([
+          'escalate',
+          '--item',
+          q.deskItemId,
+          '--note',
+          `mock ${q.level}: cannot settle "${q.text.slice(0, 60)}"`,
+        ])
+      : aom([
+          'answer',
+          '--item',
+          q.deskItemId,
+          '--text',
+          q.ledgerMatches[0]
+            ? `mock answer from the ledger: ${q.ledgerMatches[0].body.replace(/\s+/g, ' ').slice(0, 300)}`
+            : `mock answer: ${q.recommendation ? 'go with the recommended option' : 'proceed with your best judgement'}`,
+          ...(q.recommendation ? ['--option', q.recommendation] : []),
+        ]);
+  emit({
+    kind: 'final',
+    text:
+      r.code === 0 ? `mock question: ${r.out.trim()}` : `mock question failed: ${(r.err || r.out).trim()}`,
+  });
+  return 0;
+}
+
+interface MockSource {
+  title?: string;
+  body?: string;
+  /** The project key a ticket maps to (what the BA works out from its ledger and the project list). */
+  project?: string;
+  completionAction?: string;
+  repo?: string;
+  docsNeeded?: boolean;
+  acceptanceCriteria?: string[];
+  mock?: unknown;
+  /** Several cards from one ticket: `dependsOn` lists indexes of earlier cards. */
+  cards?: Array<MockSource & { dependsOn?: number[] }>;
+}
+
+interface IntakeCtx {
+  externalSystem?: string;
+  externalKey?: string;
+  mappedProjectKey?: string;
+  projects: Array<{ key: string; name: string; repos: string[] }>;
+  cards: Array<{ ref: string; title: string; status: string }>;
+}
+
+/**
+ * The BA's intake chat (M7), scripted. It reads the ticket (GitHub: `aom source read` through the runner's `gh`;
+ * Jira: the "skill", i.e. a fixture file under `$AOM_MOCK_SOURCES_DIR/<KEY>.json`), maps it to a project (a project key
+ * equal to the Jira prefix, a project repo named like the GitHub repo, the fixture's `project`, or the only project),
+ * asks the desk when nothing fits, then drafts one card per fixture card (default: one) and specifies them.
+ */
+async function intakeMain(): Promise<number> {
+  const ctx = (JSON.parse(process.env.AOM_MOCK_CONTEXT ?? '{}') as { intake?: IntakeCtx }).intake;
+  if (!ctx) return 1;
+  const message = process.env.AOM_MOCK_MESSAGE ?? '';
+  const said: string[] = [];
+  const say = (text: string) => {
+    said.push(text);
+    emit({ kind: 'delta', text: `${text}\n` });
+  };
+  emit({ kind: 'session', runtimeSessionId: process.env.AOM_MOCK_SESSION ?? 'mock-intake' });
+  emit({ kind: 'usage', usage: { inputTokens: message.length, outputTokens: 120 } });
+  const finish = (): number => {
+    emit({ kind: 'final', text: said.join('\n') });
+    return 0;
+  };
+
+  let source: MockSource = { title: message.replace(/\s+/g, ' ').slice(0, 80), body: message };
+  const key = ctx.externalKey;
+  if (key && ctx.externalSystem === 'github') {
+    emit({ kind: 'tool', name: 'Bash', summary: `aom source read --ref ${key}` });
+    const r = aom(['source', 'read', '--ref', key]);
+    if (r.code !== 0) {
+      say(`I could not read ${key}: ${(r.err || r.out).trim()}`);
+      return finish();
+    }
+    const [head = '', ...rest] = r.out.split('\n');
+    source = { title: head.replace(`${key}:`, '').trim(), body: rest.join('\n').trim() };
+    say(`Read GitHub issue ${key}: ${source.title}`);
+  } else if (key) {
+    emit({ kind: 'tool', name: 'Skill', summary: `jira: read ${key}` });
+    const dir = process.env.AOM_MOCK_SOURCES_DIR ?? '';
+    try {
+      source = JSON.parse(readFileSync(join(dir, `${key}.json`), 'utf8')) as MockSource;
+      say(`Read Jira ticket ${key} with the Jira skill: ${source.title ?? ''}`);
+    } catch {
+      say(`I could not read Jira ticket ${key} (no Jira tool is configured on this workstation).`);
+      return finish();
+    }
+  }
+
+  let project = ctx.mappedProjectKey;
+  if (!project) {
+    const prefix = key && ctx.externalSystem !== 'github' ? key.split('-')[0] : undefined;
+    const repoName = key && ctx.externalSystem === 'github' ? key.split('#')[0]?.split('/')[1] : undefined;
+    project =
+      ctx.projects.find((p) => p.key === prefix)?.key ??
+      ctx.projects.find((p) => repoName && p.repos.includes(repoName))?.key ??
+      ctx.projects.find((p) => p.key === source.project)?.key ??
+      (!key && ctx.projects.length === 1 ? ctx.projects[0]?.key : undefined);
+    if (!project) {
+      const r = aom([
+        'intake',
+        'unmapped',
+        '--note',
+        `mock BA: none of ${ctx.projects.map((p) => p.key).join(', ')} matches ${key ?? 'this request'}`,
+      ]);
+      say(
+        r.code === 0
+          ? `I could not map ${key ?? 'this request'} to a project, so I asked you on the desk.`
+          : `Could not ask: ${r.err.trim()}`,
+      );
+      return finish();
+    }
+    const m = aom(['intake', 'map', '--project', project]);
+    if (m.code !== 0) {
+      say(`Mapping failed: ${(m.err || m.out).trim()}`);
+      return finish();
+    }
+    say(`Mapped to project ${project}.`);
+  }
+  if (ctx.cards.length > 0) {
+    say(`Cards of this intake: ${ctx.cards.map((c) => `${c.ref} (${c.status})`).join(', ')}.`);
+    return finish();
+  }
+
+  const repo = ctx.projects.find((p) => p.key === project)?.repos[0];
+  const drafts = source.cards ?? [source];
+  const refs: string[] = [];
+  for (const d of drafts) {
+    const title = d.title ?? source.title ?? 'Untitled';
+    const draft = {
+      title,
+      cardType: 'feature',
+      completionAction: d.completionAction ?? source.completionAction ?? 'push_branch',
+      docsNeeded: d.docsNeeded ?? false,
+      ...((d.repo ?? repo) ? { repo: d.repo ?? repo } : {}),
+      ...(key ? { externalRef: key } : {}),
+      dependencies: ((d as { dependsOn?: number[] }).dependsOn ?? []).map((i) => refs[i]).filter(Boolean),
+      fields: {
+        context: `${key ? `${key}: ` : ''}${title}\n\n${d.body ?? source.body ?? ''}`.trim(),
+        requirements: d.body ?? source.body ?? title,
+        acceptanceCriteria: d.acceptanceCriteria ?? [`Implements: ${title}`],
+        affectedAreas: 'src/',
+        constraints: 'none',
+        testPlan: 'Run the unit tests',
+        ...((d.mock ?? source.mock) ? { mock: d.mock ?? source.mock } : {}),
+      },
+    };
+    const c = aom(['card', 'create', '--file', tmpJson('draft.json', draft)]);
+    const ref = /Created (\S+) /.exec(c.out)?.[1];
+    if (c.code !== 0 || !ref) {
+      say(`Could not create "${title}": ${(c.err || c.out).trim()}`);
+      return finish();
+    }
+    refs.push(ref);
+  }
+  for (const ref of refs) {
+    const s = aom(['card', 'specify', ref]);
+    say(s.code === 0 ? s.out.trim() : `Could not specify ${ref}: ${(s.err || s.out).trim()}`);
+  }
+  say(`Created ${refs.join(', ')} from ${key ?? 'your request'}.`);
+  return finish();
+}
+
 async function main(): Promise<number> {
+  if (process.env.AOM_MOCK_CHAT === 'intake') return intakeMain();
   const card = aom(['card', '--json']);
   if (card.code !== 0) {
     process.stderr.write(`aom card failed: ${card.err}\n`);
@@ -399,6 +606,7 @@ async function main(): Promise<number> {
   }
   const brief = JSON.parse(card.out) as Brief;
   if ((brief.shift as { kind?: string }).kind === 'devops') return devopsMain(brief as DevopsBrief);
+  if (brief.shift.kind === 'question') return questionMain(brief);
   const stage = brief.shift.stage;
   const action = pickAction(brief, attemptIndex(brief));
 

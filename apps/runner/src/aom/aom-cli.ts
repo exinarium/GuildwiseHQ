@@ -11,7 +11,9 @@ import {
   type IpcReportResponse,
   type IpcRpcResponse,
   type LedgerMatch,
+  type QuestionShift,
   renderDevopsPrompt,
+  renderQuestionPrompt,
   renderShiftPrompt,
   type ShiftBrief,
   type ShiftReport,
@@ -151,11 +153,61 @@ function score(p: Parsed): number {
 
 type Verb = (ctx: AomContext, p: Parsed) => Promise<number>;
 
+/** `aom card create|update|specify` (the BA's intake chat): drafts and validates cards through the server. */
+async function cardDraft(ctx: AomContext, p: Parsed, sub: 'create' | 'update' | 'specify'): Promise<number> {
+  const ref = p.positionals[1];
+  const file = one(p, 'file');
+  const fileJson = (): Record<string, unknown> => {
+    if (!file)
+      throw new UsageError(`usage: aom card ${sub}${sub === 'update' ? ' <REF>' : ''} --file <draft.json>`);
+    try {
+      return JSON.parse(ctx.readFile(file)) as Record<string, unknown>;
+    } catch (err) {
+      throw new UsageError(
+        `cannot read ${file} as JSON: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+  if (sub === 'create') {
+    const r = (await rpc(ctx, 'card.create', fileJson())) as { ref: string; missing?: string[] };
+    ctx.io.out(
+      `Created ${r.ref} (draft).${r.missing?.length ? ` Still missing before it can be specified: ${r.missing.join(', ')}.` : ' It is complete: run `aom card specify` when you are happy with it.'}\n`,
+    );
+    return 0;
+  }
+  if (!ref)
+    throw new UsageError(`usage: aom card ${sub} <REF>${sub === 'update' ? ' --file <patch.json>' : ''}`);
+  if (sub === 'update') {
+    const r = (await rpc(ctx, 'card.update', { ...fileJson(), ref })) as { ref: string; missing?: string[] };
+    ctx.io.out(
+      `Updated ${r.ref}.${r.missing?.length ? ` Still missing: ${r.missing.join(', ')}.` : ' It is complete.'}\n`,
+    );
+    return 0;
+  }
+  const r = (await rpc(ctx, 'card.specify', { ref })) as { ref: string; stage: string; status: string };
+  ctx.io.out(`Specified ${r.ref}: it is now in ${r.stage} (${r.status}).\n`);
+  return 0;
+}
+
 const VERBS: Record<string, Verb> = {
   card: async (ctx, p) => {
-    const brief = (await rpc(ctx, 'card.get')) as ShiftBrief & { devops?: DevopsShift };
+    const sub = p.positionals[0];
+    if (sub === 'create' || sub === 'update' || sub === 'specify') return cardDraft(ctx, p, sub);
+    const brief = (await rpc(ctx, 'card.get')) as ShiftBrief & {
+      devops?: DevopsShift;
+      question?: QuestionShift;
+    };
     if (has(p, 'json')) ctx.io.out(`${JSON.stringify(brief, null, 2)}\n`);
-    else ctx.io.out(`${brief.devops ? renderDevopsPrompt(brief.devops) : renderShiftPrompt(brief)}\n`);
+    else
+      ctx.io.out(
+        `${
+          brief.devops
+            ? renderDevopsPrompt(brief.devops)
+            : brief.question
+              ? renderQuestionPrompt(brief, brief.question)
+              : renderShiftPrompt(brief)
+        }\n`,
+      );
     return 0;
   },
   ledger: async (ctx, p) => {
@@ -319,6 +371,60 @@ const VERBS: Record<string, Verb> = {
     const summary = textFlag(ctx, p, 'summary', true) as string;
     return report(ctx, outcome('devops_done', summary, { summary, commands: many(p, 'command') }));
   },
+  answer: async (ctx, p) => {
+    const itemId = one(p, 'item');
+    if (!itemId)
+      throw new UsageError('usage: aom answer --item <id> --text "<answer>" [--option <option id>]');
+    const optionId = one(p, 'option');
+    return report(ctx, {
+      kind: 'answer',
+      itemId,
+      text: textFlag(ctx, p, 'text', true) as string,
+      ...(optionId ? { optionId } : {}),
+    });
+  },
+  escalate: async (ctx, p) => {
+    const itemId = one(p, 'item');
+    if (!itemId)
+      throw new UsageError(
+        'usage: aom escalate --item <id> --note "<what you checked, what must be decided>"',
+      );
+    return report(ctx, { kind: 'escalate', itemId, note: textFlag(ctx, p, 'note', true) as string });
+  },
+  finalize: async (ctx, p) => {
+    const action = one(p, 'action');
+    if (action !== 'pr' && action !== 'push_branch' && action !== 'merge')
+      throw new UsageError('usage: aom finalize --action <pr|push_branch|merge> --note "<why this action>"');
+    const note = textFlag(ctx, p, 'note', false)?.trim() || `Finalize with ${action}`;
+    return report(ctx, outcome('finalized', note, { action }));
+  },
+  intake: async (ctx, p) => {
+    const sub = p.positionals[0];
+    if (sub === 'map') {
+      const project = one(p, 'project');
+      if (!project) throw new UsageError('usage: aom intake map --project <KEY>');
+      const r = (await rpc(ctx, 'intake.map', { project })) as { project?: string; repos?: string[] };
+      ctx.io.out(
+        `Mapped to project ${r.project}${r.repos?.length ? ` (repos: ${r.repos.join(', ')})` : ''}.\n`,
+      );
+      return 0;
+    }
+    if (sub === 'unmapped') {
+      const r = (await rpc(ctx, 'intake.unmapped', { note: textFlag(ctx, p, 'note', true) as string })) as {
+        message?: string;
+      };
+      ctx.io.out(`${r.message ?? 'Asked the manager.'}\n`);
+      return 0;
+    }
+    throw new UsageError('usage: aom intake map --project <KEY> | aom intake unmapped --note "<why>"');
+  },
+  source: async (ctx, p) => {
+    if (p.positionals[0] !== 'read' || !one(p, 'ref'))
+      throw new UsageError('usage: aom source read --ref <owner/repo#12 | ABC-123 | ticket URL>');
+    const r = await rpc(ctx, 'source.read', { ref: one(p, 'ref') });
+    ctx.io.out(`${typeof r === 'string' ? r : JSON.stringify(r, null, 2)}\n`);
+    return 0;
+  },
   outcome: async (ctx, p) => {
     const id = p.positionals[0];
     if (!id) throw new UsageError('usage: aom outcome <outcomeId> --note "<text>" [--data-file <json>]');
@@ -341,6 +447,12 @@ export const USAGE = `usage: aom <verb> [options]
   test pass --evidence "<text>" [--command "<cmd>"]...
   test fail --title "<bug>" --note "<text>" [--evidence "<text>"] [--command "<cmd>"]...
   outcome <id> --note "<text>" [--data-file <json>]
+  answer --item <id> --text "<answer>" [--option <id>]   answer a colleague's question (question shifts)
+  escalate --item <id> --note "<what must be decided>"   pass the question on (peer -> BA -> manager's desk)
+  finalize --action <pr|push_branch|merge> [--note "<why>"]   BA: run the completion action (revise it with a different action)
+  intake map --project <KEY> | intake unmapped --note "<why>"   BA intake: map the ticket, or ask the manager
+  card create --file <draft.json> | card update <REF> --file <patch.json> | card specify <REF>   BA intake: draft cards
+  source read --ref <owner/repo#12 | ticket URL>         BA intake: read a GitHub issue (Jira: the Jira skill)
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed

@@ -16,6 +16,7 @@ import { ChatManager } from './chat/chat.ts';
 import type { RunnerConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
+import { ExternalAdapters } from './external/index.ts';
 import { executeCompletion } from './git/completion.ts';
 import { ghPrCreator, type PrCreator } from './git/gh.ts';
 import { scanRepos } from './git/repo-scan.ts';
@@ -45,6 +46,8 @@ export interface RunnerOptions {
   vaultSecondMs?: number;
   /** Opens pull requests for the `pr` completion action; default shells out to `gh` (tests inject a fake). */
   prCreator?: PrCreator;
+  /** Ticket systems for `aom source read` (default: `gh` for GitHub, the agent's skill for Jira). Tests inject fakes. */
+  external?: ExternalAdapters;
   /** Test hook: replaces the tester environment check (docker, deployed app). */
   envChecker?: import('./testing/environment.ts').EnvChecker;
 }
@@ -119,6 +122,9 @@ export class Runner {
       log: this.log,
       send: (type, payload) => void this.client.send(type, payload),
       rpc: (chatId, method, params) => this.rpc(chatId, method, params),
+      external:
+        opts.external ??
+        ExternalAdapters.defaults(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
     });
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {

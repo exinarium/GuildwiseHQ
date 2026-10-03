@@ -1,6 +1,6 @@
 import { BUILTIN_ROLES, type ShiftBrief, uuidv7 } from '@aom/shared';
 
-export type Stage = 'build' | 'review' | 'test';
+export type Stage = 'build' | 'review' | 'test' | 'finalize';
 
 const OUTCOMES: Record<Stage, ShiftBrief['shift']['outcomes']> = {
   build: [{ id: 'handoff', label: 'Hand off for review', kind: 'success', data: 'diffStats' }],
@@ -12,8 +12,9 @@ const OUTCOMES: Record<Stage, ShiftBrief['shift']['outcomes']> = {
     { id: 'pass', label: 'Pass', kind: 'success', data: 'testEvidence' },
     { id: 'fail', label: 'Fail', kind: 'failure', data: 'testEvidence' },
   ],
+  finalize: [{ id: 'finalized', label: 'Finalized', kind: 'success', data: 'finalize' }],
 };
-const ROLE: Record<Stage, string> = { build: 'builder', review: 'reviewer', test: 'tester' };
+const ROLE: Record<Stage, string> = { build: 'builder', review: 'reviewer', test: 'tester', finalize: 'ba' };
 
 export interface ShiftOptions {
   stage?: Stage;

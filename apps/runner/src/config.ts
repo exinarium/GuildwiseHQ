@@ -8,6 +8,14 @@ export const ClaudeRuntimeConfigSchema = z.object({
   authMode: z.enum(['oauth', 'api_key', 'default']).default('default'),
   oauthToken: z.string().optional(),
   apiKey: z.string().optional(),
+  /**
+   * M7, the BA's intake chat: the Jira tool of this workstation. `mcpConfig` is the path of an MCP config file (with the
+   * Jira server and its credentials, which never leave this machine); `allowedTools` lists what the chat may use
+   * without asking (`mcp__<server>`, `WebFetch`, ...). Without it the chat has no tools beyond `aom`, `gh` and reading.
+   */
+  intake: z
+    .object({ mcpConfig: z.string().optional(), allowedTools: z.array(z.string()).default([]) })
+    .optional(),
 });
 
 export const MockRuntimeConfigSchema = z.object({

@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, rmSync, symlinkSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -93,13 +93,16 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
 }
 
 /** Chat sessions read and talk; the only shell command they may run is `aom` (comment, ledger search). */
-export function buildClaudeChatSettings(readOnly: boolean): {
+export function buildClaudeChatSettings(
+  readOnly: boolean,
+  extraAllow: string[] = [],
+): {
   permissions: { allow: string[]; deny: string[]; defaultMode: 'default' };
   includeCoAuthoredBy: false;
 } {
   return {
     permissions: {
-      allow: ['Read', 'Glob', 'Grep', 'Bash(aom:*)'],
+      allow: ['Read', 'Glob', 'Grep', 'Bash(aom:*)', ...extraAllow],
       deny: [...ALWAYS_DENIED, ...(readOnly ? ['Edit', 'Write', 'NotebookEdit'] : [])],
       defaultMode: 'default',
     },
@@ -214,9 +217,16 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     await mkdir(dir, { recursive: true });
     await writeFile(
       join(dir, 'settings.json'),
-      `${JSON.stringify(buildClaudeChatSettings(input.readOnly), null, 2)}\n`,
+      `${JSON.stringify(buildClaudeChatSettings(input.readOnly, input.intake ? (this.cfg.intake?.allowedTools ?? []) : []), null, 2)}\n`,
     );
-    await writeFile(join(dir, 'mcp.json'), `${JSON.stringify({ mcpServers: {} })}\n`);
+    // The BA's intake reads Jira with the user's own MCP server (configured on this workstation); other chats have none.
+    const intakeMcp = input.intake ? this.cfg.intake?.mcpConfig : undefined;
+    await writeFile(
+      join(dir, 'mcp.json'),
+      intakeMcp && existsSync(intakeMcp)
+        ? readFileSync(intakeMcp, 'utf8')
+        : `${JSON.stringify({ mcpServers: {} })}\n`,
+    );
     this.linkCredentials(dir);
     const cmd = buildClaudeChatCommand(input, this.cfg);
     const parser = new ClaudeStreamParser();
