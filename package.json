@@ -1,0 +1,28 @@
+{
+  "name": "agent-org-manager",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=22.23"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"pnpm --filter @aom/server dev\" \"pnpm --filter @aom/web dev\"",
+    "runner:dev": "pnpm --filter @aom/runner dev -- --data-dir .dev/runner",
+    "test": "pnpm -r --if-present test",
+    "e2e": "pnpm --filter @aom/e2e e2e",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "db:migrate": "pnpm --filter @aom/server db:migrate"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^22.19.0",
+    "concurrently": "^10.0.5",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

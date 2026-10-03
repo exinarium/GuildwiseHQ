@@ -1,0 +1,476 @@
+# Agent Org Manager — Spec
+
+Oct 2, 2026 · @Pieter
+
+## Overview and goals
+
+Agent Org Manager runs a team of named AI agents as an organization across code, research and feed projects, work and personal alike: work arrives as cards, agents pull it asynchronously, and the human acts as engineering manager rather than implementer. The unit of work is the card, not the session; sessions are short shifts that start, do one job, write a handoff and exit.
+
+Goals:
+
+- One board to see every card, who holds it, and what state it is in
+- One decision desk where every question and approval reaches the manager, with who asked and why
+- No agent ever blocks waiting on another; testing runs in parallel with building
+- Every answer is recorded once and never asked again
+- The organization stays separate from company systems; nothing leaves without manager approval
+
+Idle capacity is never wasted: when work queues are empty, agents pull side-project and research cards, and scheduled tasks always run on time.
+
+It is a hosted, multi-user website from the start; agents run on each user's own workstation, which connects out to the site.
+
+Non-goals for v1: cost tracking, Postgres backups (handled outside the app), and agents that pick their own work outside the board.
+
+## Operating model
+
+An agent is a persistent profile; a session is a disposable shift run under that profile. Hiring creates a profile; firing retires it and wipes everything it has accumulated outside the official record.
+
+| Field | Purpose |
+| --- | --- |
+| Name | Handle shown on the board and decision desk |
+| Role | BA/architect, builder, reviewer, tester, technical writer |
+| Seniority | Junior or senior; gates permissions |
+| Model | Agent runtime and provider (Claude by default), model and effort |
+| Permissions | Tools, repos, branches it may touch |
+| Skills | Skills and standing instructions loaded per shift |
+| Capacity | Max concurrent cards (default 1) |
+| Track record | Cards done, bounce rate, bugs escaped, questions per card |
+
+Roles:
+
+- **BA/architect** (senior): intake with the manager, investigation, specs, dependency graph, answers builder questions, finalization. One identity, two queues: interactive intake and background finalize.
+- **Builder**: claims To do and Rework cards, works in the card's worktree, writes unit tests for its work, confirms the project builds and all unit tests pass, and writes a handoff.
+- **Reviewer** (senior): reviews against the card spec, bounces with comments or approves to test.
+- **Tester**: writes and runs Playwright E2E tests for new features on the card branch, runs full suites after finalize and regression runs, and may change E2E tests only.
+- **Technical writer**: works a card after its test passes when the BA flagged it docs-needed at intake.
+- **DevOps engineer**: one per user, always available, described below.
+
+Names are handles, not personas. Official memory is the card history, ledger and vault; anything else an agent accumulates lives in its private sandbox and is disposable.
+
+**DevOps engineer**: every user gets one dedicated DevOps engineer on each workstation. It cannot be fired, only reset, which wipes its sandbox like a firing does. It is not driven by cards alone: other agents and the manager ask it directly, and every request and action is logged as events on a thread so there is a record.
+
+- **Project setup**: clone the project's repositories, install dependencies, start containers, seed data, and deploy the app locally so testers and builders can work
+- **Vault sync**: clone the user's vaults and shared project vaults onto the workstation, pull updates on a regular interval, and commit and push changes on a regular interval (default every 5 minutes, configurable)
+- **Environment management**: with the access the manager grants on that workstation, install tools and manage the machine's environment
+- **Guardrails**: access is set per workstation; anything destructive or outside the granted access goes to the desk for approval first
+
+Typical callers are a tester whose app is not running, a builder missing a tool, or the manager setting up a new project or machine.
+
+**Private sandbox**: each agent runs with its own config and home directory (for Claude Code, its own `CLAUDE_CONFIG_DIR`). Session transcripts, auto-memory, caches, scratch files and any notes the agent writes for itself live there and nowhere else, so they can be wiped cleanly.
+
+**Firing** is a reset, not a deletion:
+
+1. Claimed cards are released back to their queues with the agent's last handoff attached
+2. The private sandbox is deleted: transcripts, memory, caches, scratch files
+3. The profile is marked retired: hidden from the HR board and dispatcher, never assigned work again
+4. The official record stays intact: events, card threads, handoffs, review comments and ledger entries still show the agent's name, marked as retired
+
+A retired name is never reused, so history stays unambiguous. To get the same role back with a clean slate, hire a new agent.
+
+**Hiring** takes a role, seniority, model, skills and a name. The name is typed, or picked by an optional name generator that suggests a few names, skips any name in use or retired, and can draw from a themed list.
+
+## Projects, types and scheduling
+
+Every card belongs to a project, and the project's type decides its pipeline and which roles can claim its cards; the board, desk, ledger and dispatcher are shared by all types.
+
+| Type | Pipeline | Roles | Examples |
+| --- | --- | --- | --- |
+| Code | Spec → build → review → test → finalize | BA/architect, builder, reviewer, tester, writer | Work repos, P5, side projects |
+| Research | Question → research → fact-check → publish to vault | Researcher, checker | Shooting (reloading, hunting, sport shooting), education |
+| Feed | Scheduled scan → filter → digest | Scout, curator | Firearm articles, AI and shooting videos |
+
+A project has a domain (work or personal), a priority tier, its repos or topics, sub-categories, and a folder in the matching knowledge vault. Intake maps each incoming ticket to a project; an unmapped ticket becomes a desk question.
+
+**Scheduling rules**
+
+1. Scheduled tasks always fire on time, whatever the project type or queue state. They emit a card that takes the next free agent of the right role ahead of normal work; if none is free, the runner starts one extra shift at a time rather than letting the schedule slip; a second late schedule waits for the next free agent.
+2. Work cards outrank personal cards in every queue.
+3. Idle agents pull personal code and research cards; a new work card waits only for the current shift to end, never preempts it mid-shift.
+
+## Expanding the organization
+
+Each user can grow their organization beyond the built-in roles and workflows by designing new ones with the BA; the built-in roles and the Code, Research and Feed workflows can never be removed.
+
+**Roles** are definitions in the user's role catalogue. A custom role has a name, purpose, instructions, permissions, tools and skills, default model, seniority levels, and which workflow stages it may claim. Once defined, it appears on the HR board's Hire form like any built-in role. Built-in roles ship with the app as versioned defaults. Only the organization's owner can extend them with extra instructions, skills and standing orders, and their core rules, such as test ownership and review gates, cannot be changed. When an app update ships a new default version, the owner sees it on the HR board and can reset a built-in role to the new default, which drops their extensions after showing what will be removed.
+
+**Workflows** are pipelines of stages. Each stage names the role that claims it, the card fields required to enter it, what counts as done, and where failures route. A project's type is now its workflow, built-in or custom.
+
+**Departments** group roles and workflows that serve one function, for example Support triage or Marketing alongside Engineering and Research, so a user's organization can grow into several functions. The HR board and board views can be filtered by department.
+
+**Designing with the BA**
+
+1. The manager describes the need to the BA, in intake or on the desk
+2. The BA drafts the role or workflow definition and asks questions where it is unclear
+3. The definition is validated: every stage has a role that can claim it, every failure path ends somewhere, no stage is unreachable
+4. It lands on the desk for approval, and only then becomes available
+
+Definitions are versioned and stored as provider-neutral files in the user's vault, with a copy registered on the site so the dispatcher can route by them. Changing a workflow never changes cards already in flight; they finish on the version they started with.
+
+Custom roles and workflows belong to the user's own organization. A shared project runs inside its owner's organization: invited members join it as additional engineering managers for that project only. They see its board and desk, answer its desk items, and hire agents for it from the owner's role catalogue onto their own workstations, under their own provider accounts. The owner's workflows, roles and standing orders apply to every card in the project. On the project's HR board, the owner can hire, change and fire any agent; an additional manager can hire, change and fire only agents they hired themselves, and cannot change the owner's role catalogue or anyone else's agents. Outside that project, each member's own organization is unchanged and stays private.
+
+Every agent hired for a shared project serves the whole organization for that project: any manager can direct or message it, and it can claim any card in the project. Only HR actions are limited to the hiring manager and the owner.
+
+**Removing a member**: when the owner drops a manager from a project, the owner inherits every agent that manager hired for it. Because those agents ran on the departed manager's workstation and provider account, they are re-homed: the owner picks one of their own workstations and providers, the old sandbox stays behind and is treated as wiped, and the agent's name, track record and history carry over. Cards the agents held are released to the queue with their last handoff until re-homing is done. Cards the departed manager imported transfer to the owner, who takes over their desk items and posts their outbound updates with the owner's own access.
+
+## Users, workstations and administration
+
+The app is a hosted website; code, credentials and agent sessions stay on each user's own workstation, which connects out to the site.
+
+- **Users** log in with email and password. Every user is sandboxed: they see and act on only their own agents, desk and personal projects, never another user's. Shared projects are the one exception, described below. Admins also see the administration view, which manages accounts, not anyone's work.
+- **Invitations**: an admin enters an email address and the app sends a single-use, expiring invitation link; accepting it sets the password and creates the account. Admins can resend or revoke pending invitations, deactivate users, and change roles (admin or member).
+- **Workstations**: each user links one or more workstations, for example a Windows machine, by installing the runner and pairing it with a one-time code from their settings. The runner connects outbound over WebSocket, so no inbound ports are opened, and reports which repos, vaults and agent runtimes it holds. Users can rename or unlink their workstations; admins can unlink any.
+- **Agents** are hired onto a workstation and run there under that user's own account with the agent provider they choose: Claude is the baseline, but a user may drive their agents with OpenAI, Grok or another provider. The dispatcher gives an agent only its owner's cards, for projects whose repo is on that workstation.
+- **Projects** can span several repositories. The owner shares a project by inviting another user by email; the invitee must already have an account, and accepting makes them an additional engineering manager in the owner's organization for that project only. A shared project's cards appear on every manager's board, and any agent in the project can claim any card and run it on its own workstation. Each card has a decision policy: by default only the card's owner answers its desk items and decisions, which still show on every manager's desk; the owner can open a card so any manager may answer. Outbound updates stay with the card's owner, who imported the ticket and posts with their own access.
+- **Vaults** are git repositories that the DevOps engineer clones onto each workstation. A personal vault is visible only to its owner; a shared project's vault is shared with its members.
+- **Offline workstations**: if a runner disconnects mid-shift, its cards wait one hour, then return to their owner's queue with the last handoff attached.
+- **What the site holds**: users, and each user's cards, events, threads, handoffs and desk items, scoped to that user, except shared project cards, which every member sees. It never holds repo credentials, agent provider credentials or vault content.
+
+## Card lifecycle
+
+A card moves forward only by events, and every failure loops back to the builder as new work rather than holding anyone up.
+
+&#91;embedded content: card lifecycle · 6 stages, 2 loops back to build\]
+
+Builders never wait: after handing off to review they claim their next card, and bounced work returns as Rework or a linked bug card. A card blocked on a question sits in Blocked until the answer arrives.
+
+## Card schema
+
+A card cannot enter To do until every required field is filled; the card is the complete prompt a fresh builder session starts from.
+
+| Field | Required | Filled by |
+| --- | --- | --- |
+| Title and type (feature, bug, support, refactor, docs) | Yes | BA |
+| External reference (e.g. Jira key) | If any | BA |
+| Context: why this exists, current behaviour | Yes | BA |
+| Requirements | Yes | BA |
+| Acceptance criteria | Yes | BA |
+| Affected areas: files, modules, findings from investigation | Yes | BA |
+| Constraints and linked ledger entries | Yes | BA |
+| Test plan | Yes | BA |
+| Completion action: PR, push branch, or merge to working branch | Yes | BA, at intake |
+| Risk tier: small or large | Yes | Computed from diff, BA may override |
+| Dependencies (blocking cards) | If any | BA |
+| Decision policy on shared projects: owner only (default) or any manager; repo, base branch, worktree path, branch name | Yes | Dispatcher on claim |
+| Assignee history | Auto | System |
+| Handoff notes per stage | Yes, per transition | Agent leaving the stage |
+| Thread: comments, questions, evidence | Auto | Everyone |
+
+## Decision desk and requirements ledger
+
+Every item needing the manager lands on one page, modelled on the work decision desk, and every answer is written to the ledger so it is never asked twice.
+
+Each desk item shows:
+
+- Who is asking (agent name, role) and which card
+- What they were doing when the question came up
+- The question, options, and a recommended default
+- Blocking or non-blocking, and how many cards it affects
+- Item kind: question, approval (outbound update, large-risk merge), or escalation
+
+Alerts are in-app only: urgent items such as blockers and tester bottlenecks are pinned to the top of the desk with a badge, with no email or push notifications.
+
+**Chat**: a Chat button on the decision desk opens an in-app conversation with the BA, the DevOps engineer, or any agent the manager may direct. It is how intake, DevOps requests and ad-hoc instructions happen, from any browser including a phone. Messages stream through the runner on the agent's workstation; if that workstation is offline, the chat says so and nothing is queued silently. Every conversation is saved to a thread, linked to any card or request it creates.
+
+Answering an item emits an event, unblocks every card waiting on it, and writes a ledger entry.
+
+The ledger has three scopes:
+
+1. **Feature spec**: requirements and decisions attached to an epic or card
+2. **Project decision log**: ADR-style entries per repo
+3. **Standing orders**: conventions, preferences and never-do rules every agent loads at the start of a shift
+
+Rules: an agent must search the ledger before raising a question, and the BA deduplicates incoming questions against it. The manager can also add requirements and standing orders directly on the desk without a question prompting it.
+
+## Knowledge vault
+
+Knowledge lives in git repos of markdown, separate from the event store: the store holds state, the vault holds what agents and the manager know. Vaults are Obsidian-compatible so the manager can browse and edit them directly. Each vault is a git repository. The DevOps engineer clones it onto every workstation that needs it, pulls updates on a regular interval, and commits and pushes local changes on a regular interval. A sync conflict it cannot resolve goes to the desk.
+
+There are two vaults, work and personal, and an agent on a card can read only the vault of that card's domain. Work knowledge never reaches personal projects or the reverse.
+
+Layout per vault:
+
+- `standing-orders.md`: global rules every agent loads
+- `projects/<name>/PROJECT.md`: the CLAUDE.md equivalent (context, repos, rules, pointers to repo-local docs)
+- `projects/<name>/decisions/`: ledger entries, one ADR-style file each
+- `projects/<name>/standing-orders.md`: project rules
+- `projects/<name>/<sub-category>/`: research output, e.g. `shooting/reloading/`
+- `projects/<name>/taste.md`: feed preferences and examples (see Research and feeds)
+
+Repo-local documentation stays in the repo as the source of truth; `PROJECT.md` points to it and agents load both. Answering a desk item writes the event to the store and the resulting decision file to the vault.
+
+## Agent communication and escalation
+
+Agents talk through messages on a card's thread, never through side channels, so every conversation stays readable on the board.
+
+Escalation chain for a question:
+
+1. Search the ledger
+2. Ask the senior in the same role, or the agent that last held the card
+3. Ask the BA/architect
+4. BA raises it on the decision desk
+
+A blocked agent files its question, parks the card in Blocked, and claims its next card instead of waiting. Reviewer and tester comments addressed to the builder travel on the same thread and are attached to the Rework or bug card they produce.
+
+## Worktrees, testing, review and integration
+
+Untested code stays quarantined in its card's worktree until it passes review and test; only then does it reach the working branch.
+
+**Worktrees**
+
+- One worktree and branch per card, created on first claim and recorded on the card
+- Builder, reviewer and tester all work in that worktree at different times
+- New cards branch from the working branch, never from another card's untested branch, unless the BA marks a dependency
+- Worktree is removed after finalization
+
+**Claim priority for builders**
+
+1. Rework and bug cards they originally built
+2. Any other Rework or bug card
+3. New To do cards, respecting dependencies
+
+**Review tiers**
+
+| Tier | Trigger | Review |
+| --- | --- | --- |
+| Small | Under 200 changed lines, no architectural areas touched | One senior reviewer; manager reviews |
+| Large | Large diff, refactor, or flagged areas | Two independent senior reviewers; manager spot-checks |
+
+**Testing** runs asynchronously in isolation against the card's test plan. A pass carries evidence: what ran and its output. Suites run on the workstation that holds the card, against shared services, with one Couchbase bucket or scope per worktree, and heavy builds such as MAUI queue one at a time. A failure files a bug card linked to the parent and routed to the original builder.
+
+**Staleness**: before test and again before finalize, the worktree is rebased on the working branch. A conflict becomes a Rework card; no agent resolves conflicts silently.
+
+**Finalize**: the BA executes the card's completion action (PR, push branch, or merge to working branch) and re-runs the suite after any merge. Small-tier cards merge to the working branch without the manager; large-tier merges wait for the manager's approval on the desk. The completion action is set at intake and the BA may revise it before finalize.
+
+## Testing strategy
+
+Each role tests at its own level and may change only the tests it owns: builders own unit tests for their work, testers own E2E tests.
+
+| Level | Who | When | On failure |
+| --- | --- | --- | --- |
+| Unit | Builder | Before handoff: project builds, all unit tests pass | Builder fixes its own work |
+| Feature E2E | Tester | After review approval, on the card branch | Rework to the original builder |
+| Full E2E suite | Dedicated tester, spawned automatically | After the BA's completion action | Tester triages, see below |
+| Regression | Testers, via a regression card | On demand or scheduled by the manager, per platform: web, mobile or both | Bug cards, manager notified |
+
+**Builder rules**: write unit tests for the card's work and run the full unit suite before handoff. Never modify unit tests outside the card's scope to make the work pass; a broken test means the work gets fixed. No E2E testing. The reviewer checks this, and any out-of-scope test change is an automatic bounce tagged as a quality cause.
+
+**Tester rules**: write Playwright tests for new features, run them, and commit them to the card branch. Testers change E2E tests only, never application code or unit tests.
+
+**Test environment**: before a tester actions a card, its adapter checks that the application is deployed and running on the workstation. If it is not, the tester asks the user's DevOps engineer to set it up. Docker is required; if it is missing and the DevOps engineer cannot install it, the card is a hard stop and goes to the desk as a blocker.
+
+**After finalize**: a dedicated tester spawns and runs the full E2E suite on the resulting branch. Test-side causes (flaky test, data reset, environment) are fixed by the tester on that branch. A genuine bug goes to the BA, who files a new bug card. These failures and regression bugs notify the manager, who prioritises the fix or leaves it in the queue; they do not block merges, pushes or client releases unless the manager says so.
+
+**Regression**: the manager starts a regression run per platform from the board, or schedules one. The BA creates a regression card and testers claim it.
+
+**Tester bottleneck**: full suites and regression can hold testers for hours. When E2E work is waiting and every tester is busy, the manager is alerted on the desk immediately with a recommendation to hire more testers, applied with one click from the HR board.
+
+## Research and feeds
+
+Research and feed projects run on the same board and desk as code; what changes is the pipeline and what "done" means: a fact-checked note in the vault, or a digest the manager rates.
+
+**Research cards** carry a question, scope, depth, and the sub-category they belong to. A researcher gathers and writes, a checker verifies claims against the sources, and the result is published to the project's vault folder with citations. Open questions go to the desk like any other.
+
+**Feeds** are recurring tasks that search the last 24 hours, daily by default; the manager can also run any feed immediately from the board. Each run emits a card; a scout collects candidates and a curator picks the best and appends them to the project's list.
+
+**Feed and research rules**
+
+- Searches are general for the topic; a card may list preferred sites, searched first, and otherwise the agent chooses where to look
+- Each card sets a maximum per item kind, for example 5 articles and 3 videos; the agent picks the best up to that maximum and logs only those, and fewer is fine
+- Results append to the project's running list, ordered oldest to newest; a new run never drops, rewrites or reorders earlier entries
+- No duplicates: a candidate is skipped if its URL is on the seen-list or it is the same story already listed from another source
+- No fabrication: every logged item is a real page the agent opened during the run, with title, source, date and a summary written from that page; if nothing qualifies, the run logs nothing and says so on the card
+
+**Feedback loop**
+
+- Every digest item gets a quick verdict on the desk: useful, irrelevant, or boring, with an optional reason
+- Verdicts are written to the project's `taste.md` as explicit rules and examples, never an opaque score, so the manager can read and correct them
+- Curators read `taste.md` before filtering and keep a seen-list by URL so nothing repeats
+- A curator may propose a new taste rule from a pattern of verdicts; it lands on the desk as an approval item
+
+## External systems boundary
+
+Company systems such as Jira are clients of the organization, not part of it: intake is read-only and every outbound write needs the manager's approval.
+
+- **Inbound**: the BA reads the external ticket during intake (via the Jira skill or a GitHub/support adapter) and stores its key on the card. Nothing writes back automatically.
+- **Outbound outbox**: when work finishes, the BA drafts the external update (comment, design decision, resolution) from the outcome and ledger. It lands on the decision desk as an approval item: approve, edit, or reject. Only approved drafts are posted.
+- **Internal stays internal**: agent names, review comments, bounce history and question threads never leave the board. Outbound drafts are written in the manager's voice.
+
+Each external system is an adapter with two operations, read source and post approved draft, so new sources plug in without touching the core.
+
+## Event catalogue
+
+State changes only through events; the board, desk and dashboard are projections of the event log.
+
+| Event | Emitted by | Effect |
+| --- | --- | --- |
+| `IntakeStarted` | Manager | BA session opens with external ticket context |
+| `TicketMapped` | BA | Card assigned to a project; unmapped tickets become a desk question |
+| `CardSpecified` | BA | Card validated against schema, moved to To do |
+| `ScheduleFired` | Scheduler | Card emitted for a recurring task, jumps the queue for its role |
+| `CardClaimed` | Dispatcher | Exclusive claim taken (fails if already held), agent assigned, worktree created or reused, shift started |
+| `QuestionRaised` | Any agent | Card to Blocked, routed up the escalation chain |
+| `QuestionAnswered` | Senior, BA or manager | Decision written to the vault, waiting cards unblocked |
+| `HandoffWritten` | Agent leaving a stage | Note attached, card moved to next column |
+| `ReviewRequested` | Builder | Card to Review |
+| `ChangesRequested` | Reviewer | Card to Rework, comments attached |
+| `ReviewApproved` | Reviewer | Card to Test |
+| `TestPassed` | Tester | Evidence attached, card to Finalize |
+| `TestFailed` | Tester | Bug card created and linked, routed to original builder |
+| `RebaseConflict` | System | Card to Rework |
+| `CardFinalized` | BA | Completion action executed, worktree removed |
+| `ResearchPublished` | Checker | Verified note written to the project's vault folder |
+| `DigestPosted` | Curator | Digest items appear on the desk for rating |
+| `ItemRated` | Manager | Verdict recorded, seen-list and `taste.md` updated |
+| `OutboundDrafted` | BA | Approval item on decision desk |
+| `OutboundApproved` | Manager | Adapter posts to external system |
+| `AgentHired` / `AgentRetired` | Manager | Profile created; or retired, sandbox wiped and claimed cards requeued |
+| `ShiftEnded` | Runner | Duration, tokens and outcome recorded to track record |
+
+Testing events:
+
+| Event | Emitted by | Effect |
+| --- | --- | --- |
+| `FullSuiteStarted` | System, after `CardFinalized` | Dedicated tester spawned on the resulting branch |
+| `FullSuiteFailed` | Tester | Tester triages: fixes test-side causes or reports a bug |
+| `BugReported` | Tester | BA files a bug card; manager notified, nothing blocked |
+| `RegressionRequested` | Manager or scheduler | BA creates a regression card for web, mobile or both |
+| `TesterBottleneck` | System | Desk alert recommending more testers |
+
+DevOps events:
+
+| Event | Emitted by | Effect |
+| --- | --- | --- |
+| `DevOpsRequested` | Any agent or manager | Request queued for that user's DevOps engineer, thread opened |
+| `EnvironmentChanged` | DevOps engineer | Setup or change on the workstation logged with what was done |
+| `DevOpsApprovalNeeded` | DevOps engineer | Destructive or out-of-access action waits on the desk |
+| `ProjectShared` | Project owner | Existing user added as a project member |
+
+## Architecture
+
+A hosted Node service with Postgres at the centre, plus a runner on each user's workstation; nothing talks to anything else except through events.
+
+&#91;embedded content: architecture · 6 components around one event store\]
+
+The dispatcher reacts to events and assigns cards; the runner on the agent's workstation starts a session through the agent's runtime adapter (headless Claude Code as the baseline) in the card's worktree and records its outcome when the shift ends.
+
+**One claim per card**: a card can be held by only one agent at a time, across all users and workstations. Claiming is a single atomic Postgres operation (a conditional update, or `SELECT … FOR UPDATE SKIP LOCKED` on the queue), so two agents racing for the same card cannot both win; the loser simply takes the next card. The claim is a lease kept alive by the runner's heartbeat and released when the agent hands off, is fired or reset, or its workstation stays offline past the one-hour timeout.
+
+| Component | v1 choice |
+| --- | --- |
+| Runtime | Node, TypeScript |
+| Event store and projections | Postgres: append-only events table plus projections, LISTEN/NOTIFY for subscriptions |
+| UI | Hosted web app with email and password login, over WebSocket and REST |
+| Agent runtime | Pluggable runtime adapters: Claude Code or the Claude Agent SDK as baseline, other providers' coding agents through the same contract |
+| Git | `git worktree` per card, one branch per card |
+
+**Runtime adapter contract**: every agent runtime is wrapped by an adapter on the runner with the same operations, so the dispatcher, board and HR board never know which provider did the work.
+
+- `start(card prompt, worktree, permissions, instructions)` starts a session
+- `events()` streams progress, questions and the handoff back as standard events
+- `stop()` ends the shift
+- `usage()` reports tokens for the HR board
+- `capabilities` declares what the runtime supports (skills, MCP tools, sandbox config), so the dispatcher can avoid giving a card to a runtime that lacks a tool it needs
+
+Standing orders, `PROJECT.md` and skills are kept provider-neutral in the vault; the adapter writes them into whatever instruction file its runtime reads (for example `CLAUDE.md` or `AGENTS.md`). Model recommendations on the HR board stay within the providers that user has linked.
+
+Core entities: User, Invitation, Workstation, Project membership, Agent, Card, Event, Thread message, Desk item, Ledger entry, Worktree, Shift.
+
+Two further components sit beside the core: a scheduler that emits `ScheduleFired` events for recurring tasks, and the knowledge vaults (git repos of markdown) that sessions read at shift start and write decisions and research to.
+
+**Event store choice**: Postgres from the start, to support multiple users and workstations: an append-only events table, projections for the board, desk and HR board, and LISTEN/NOTIFY to push events to browsers and runners. A dedicated store such as KurrentDB (formerly EventStoreDB) adds a server for features this volume doesn't need. The store sits behind a small interface (`append`, `read(stream)`, `subscribe`) so it can move to Kurrent later without touching the rest.
+
+**Deployment**: one VPS running the app and Postgres with Docker Compose.
+
+## Manager dashboard
+
+Three views make up the manager's day: the board, the decision desk, and a team view that says when to hire, fire or change a role's model.
+
+- **Board**: columns per lifecycle stage, each card showing assignee, age, risk tier and blocked state
+- **Decision desk**: open questions and approvals, sorted by blocking count then age
+- **Team view**: the HR board, described below
+
+Metrics:
+
+- Throughput: cards finalized per day
+- Time blocked on the manager
+- Bounce rate per builder (review and test)
+- Bugs escaped past test
+- Duration per card and per agent
+- Queue depth per column
+
+## HR board
+
+The HR board is where agents are hired, tuned and fired: one card per agent, with the stats and recommendations that say whether it is earning its model.
+
+&#91;embedded content: HR board · one agent card, illustrative numbers\]
+
+**Agent card**: avatar (generated from the name), name, role, seniority, model and effort, status (idle, on shift, blocked) with the current card, the manager who hired it, and actions to change model, change role or fire. A Hire button opens a form for role, seniority, model, skills and a name, typed or generated.
+
+**Stats** over a rolling window, each shown against the team average for the role:
+
+| Stat | Meaning |
+| --- | --- |
+| Cards done | Cards the agent moved out of its stage |
+| Blocked rate | Share of the agent's cards that raised a question |
+| Rework rate | Share of its cards sent back by review |
+| Bugs escaped | Share of its cards that later failed test |
+| Utilisation | Share of time on shift versus idle |
+| Tokens per card | Average tokens used per completed card |
+
+**Recommendations** are rule-based, show the evidence that triggered them, and apply with one click:
+
+- **Blocked**: if its questions were already answered in the ledger, ledger search is failing; if they cluster on one topic, propose a standing order; if they trace back to thin specs, the fix is the BA's spec quality, not the builder.
+- **Rework**: group review comments by reason; a recurring reason becomes a proposed standing order. High rework concentrated on large cards suggests a stronger model.
+- **Model up**: high rework or bug rate on complex cards.
+- **Model down**: low rework and bugs on mostly small cards, where a cheaper model would do the same work with fewer tokens.
+- **Split the role**: when cards vary widely in complexity, run a strong-model senior for large cards and a light-model junior for small ones; the dispatcher routes by risk tier.
+- **Fire or reassign**: sustained low utilisation in a role with an empty queue.
+
+Idle agents use no tokens, since sessions only exist during shifts; the waste to target is a strong model doing simple work. Failures are attributed to the stage that caused them: a reviewer who bounces everyone or a BA writing thin specs shows up on their own card, and sub-par building shows up on the builder's.
+
+**Work quality** gets its own panel on every builder's card, because a builder can be fast, rarely blocked and still produce poor work.
+
+- **Reviewer quality score**: the reviewer scores each card 1 to 5 against the spec and conventions, with a reason; shown as a rolling average
+- **Rework by reason**: each bounce tagged by cause (missed requirement, broke convention, no or weak tests, poor structure, spec unclear); everything except spec unclear counts against the builder
+- **Rework rounds per card**: one bounce is normal, three on the same card is a pattern
+- **Bugs escaped**: test failures and later regressions traced back to the builder's cards
+- **Acceptance criteria missed**: criteria the reviewer or tester found unmet at handoff
+- **Test coverage of its changes**: whether the builder wrote or updated tests with the code
+
+The recommendations act on these too: a recurring cause becomes a proposed standing order, low scores on large cards suggest a stronger model, and low scores across all card sizes suggest firing, which also clears any cached context that may be causing the failures, and hiring a fresh profile.
+
+## Build plan and open questions
+
+Build the smallest loop that removes terminal juggling first, then let the team build the rest of itself.
+
+1. **Core loop**: Postgres event store, login and invitations, runner pairing for one workstation, card schema, projects, dispatcher with exclusive claims, builders and a reviewer running headless in worktrees, a bare board; first runs capped at two builders and one of each other role
+2. **Decision desk, ledger, vaults and DevOps**: questions, answers, standing orders, dedup check, work and personal vaults, DevOps engineer with vault sync
+3. **Tester and bug loop**: unit test rules, Playwright feature E2E, bug cards, rebase step, post-finalize full suite, regression runs, bottleneck alert
+4. **Scheduler and feeds**: recurring tasks, scout and curator, digests, ratings and `taste.md`
+5. **Research projects**: researcher and checker, publishing to the vault
+6. **BA intake**: Jira skill integration, ticket-to-project mapping, investigation, spec validation, completion actions
+7. **Outbox and adapters**: gated Jira updates, GitHub issues
+8. **HR board and metrics**: track records, hire and fire
+9. **Organization designer**: custom roles, workflows and departments drafted with the BA
+
+From phase 2 onward, new work is fed through the tool itself.
+
+Decisions taken and what is still open:
+
+- [x] Risk tiers: small is under 200 changed lines with no architectural areas touched
+- [x] Merges: only large-tier merges to the working branch need manager approval; branch name is set per project
+- [x] First runs: two builders, one of each other role
+- [x] Completion action: set at intake, BA may revise
+- [x] Heavy test suites: the card's workstation, app deployed there by DevOps, Docker required
+- [x] Technical writer: per card when flagged docs-needed
+- [x] Schedules: at most one extra shift at a time
+- [x] Feeds: general search per topic with optional preferred sites, daily over the last 24 hours or run on demand, narrowed later through ratings
+- [x] Login: email and password, via invitation links
+- [x] Isolation: every user is sandboxed except within shared projects they manage
+- [x] Shared projects: span several repos, shared by email invite to existing users, who join the owner's organization as additional managers for that project
+- [x] Shared project cards: any project agent may claim them; decisions are owner-only by default; outbound updates belong to the card's owner
+- [x] Shared project HR: owner manages all agents, others only their own; agents serve the whole project; a removed manager's agents and cards pass to the owner
+- [x] DevOps: one dedicated engineer per user, reset rather than fired
+- [x] Built-in roles: extended only by the organization's owner, never changed or removed; resettable to the latest app default
+- [x] Alerts: in-app desk only
+- [x] Offline workstations: cards requeued after one hour
+- [x] Hosting: one VPS with Docker Compose

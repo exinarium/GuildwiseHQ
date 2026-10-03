@@ -1,0 +1,29 @@
+{
+  "name": "@aom/runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "aom-runner": "./dist/aom-runner.mjs",
+    "aom": "./dist/aom.mjs"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts start",
+    "build": "tsup src/cli.ts src/aom/aom-cli.ts --format esm --out-dir dist --noExternal @aom/shared",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@aom/shared": "workspace:*",
+    "commander": "^14.0.0",
+    "execa": "^9.0.0",
+    "picomatch": "^4.0.0",
+    "ws": "^8.0.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/picomatch": "^4.0.0",
+    "@types/ws": "^8.0.0",
+    "tsup": "^8.5.1"
+  }
+}

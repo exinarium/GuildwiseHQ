@@ -1,0 +1,44 @@
+import { z } from 'zod';
+import { RuntimeInfoSchema } from '../protocol/runner.ts';
+import { IsoTime } from './common.ts';
+
+export const WorkstationDtoSchema = z.object({
+  id: z.uuid(),
+  userId: z.uuid(),
+  name: z.string(),
+  platform: z.string().nullable(),
+  hostname: z.string().nullable(),
+  runnerVersion: z.string().nullable(),
+  status: z.enum(['active', 'unlinked']),
+  connected: z.boolean(),
+  lastSeenAt: IsoTime.nullable(),
+  runtimes: z.array(RuntimeInfoSchema),
+  /** Project repos this workstation holds a clone of. */
+  repos: z.array(z.object({ projectRepoId: z.uuid(), localPath: z.string(), reportedAt: IsoTime })),
+  pairedAt: IsoTime,
+});
+export type WorkstationDto = z.infer<typeof WorkstationDtoSchema>;
+export const WorkstationsResponseSchema = z.object({ workstations: z.array(WorkstationDtoSchema) });
+
+export const PatchWorkstationRequestSchema = z.object({ name: z.string().min(1).max(80) });
+
+/** `POST /api/workstations/pairing-codes` -> `XXXX-XXXX` (Crockford base32), shown once, 10 min TTL. */
+export const PairingCodeResponseSchema = z.object({ code: z.string(), expiresAt: IsoTime });
+export type PairingCodeResponse = z.infer<typeof PairingCodeResponseSchema>;
+export const PAIRING_CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
+
+/** `POST /api/runner/pair` (unauthenticated). */
+export const RunnerPairRequestSchema = z.object({
+  code: z.string().min(1),
+  name: z.string().min(1).max(80),
+  platform: z.string(),
+  hostname: z.string(),
+  runnerVersion: z.string(),
+});
+export type RunnerPairRequest = z.infer<typeof RunnerPairRequestSchema>;
+export const RunnerPairResponseSchema = z.object({
+  workstationId: z.uuid(),
+  /** `aomr_` + 32 random bytes base64url. */
+  runnerToken: z.string().startsWith('aomr_'),
+});
+export type RunnerPairResponse = z.infer<typeof RunnerPairResponseSchema>;

@@ -1,0 +1,25 @@
+{
+  "name": "@aom/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./events": "./src/events/index.ts",
+    "./workflows": "./src/workflows/index.ts",
+    "./roles": "./src/roles/index.ts",
+    "./cards": "./src/cards/index.ts",
+    "./api": "./src/api/index.ts",
+    "./protocol": "./src/protocol/index.ts",
+    "./prompt": "./src/prompt/index.ts",
+    "./authz": "./src/authz/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "uuid": "^14.0.2",
+    "zod": "^4.6.5"
+  }
+}

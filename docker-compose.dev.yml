@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: aom-postgres
+    environment:
+      POSTGRES_USER: aom
+      POSTGRES_PASSWORD: aom
+      POSTGRES_DB: aom
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - aom-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aom"]
+      interval: 2s
+      retries: 30
+volumes:
+  aom-pgdata:
