@@ -11,7 +11,7 @@ export function EscalationTrail({ item }: { item: Pick<DeskItemDto, 'escalationT
       <ol className="mt-1 flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
         {steps.map((s, i) => (
           <li
-            key={`${s.step}-${s.at}-${i}`}
+            key={`${s.step}-${s.at}-${s.agentId ?? 'x'}-${s.note ?? ''}`}
             data-testid="trail-step"
             data-step={s.step}
             className="flex items-baseline gap-1"
