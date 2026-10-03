@@ -4,6 +4,7 @@ import { uniqueEmail } from './helpers/app.ts';
 import { Browser } from './helpers/browser.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
+import { addMember } from './helpers/members.ts';
 import { freshState } from './helpers/shifts.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
 
@@ -288,5 +289,36 @@ describe('chat with an agent', () => {
     );
     b.close();
     await hangUp(r);
+  });
+});
+
+describe('chats tied to a shared project', () => {
+  it('are visible to the project members (project audience); chats without a project stay private', async () => {
+    await freshState();
+    const agent = await w.hire('Shared', 'builder', 'junior');
+    const m = await addMember(w, 'chatmember');
+    const outsider = await w.t.userSession(uniqueEmail('outsider'));
+    const inProject = await newChat(agent.id, { projectId: w.projectId });
+    const priv = await newChat(agent.id);
+
+    const events = await q(
+      `SELECT audience, project_id FROM events WHERE type='ChatThreadCreated' AND payload->>'threadId' = ANY($1)`,
+      [[inProject.threadId, priv.threadId]],
+    );
+    expect(events.map((e: any) => e.audience).sort()).toEqual(['org', 'project']);
+
+    const listFor = async (cookie: string) =>
+      (await ok<any>(w.t.req('GET', '/api/chats', { cookie }))).chats.map((c: any) => c.threadId);
+    expect(await listFor(m.cookie)).toEqual([inProject.threadId]);
+    expect(await listFor(outsider.cookie)).toEqual([]);
+    expect((await w.t.req('GET', `/api/chats/${inProject.threadId}`, { cookie: m.cookie })).status).toBe(200);
+    expect((await w.t.req('GET', `/api/chats/${priv.threadId}`, { cookie: m.cookie })).status).toBe(404);
+    expect(
+      (await w.t.req('GET', `/api/threads/${inProject.threadId}/messages`, { cookie: m.cookie })).status,
+    ).toBe(200);
+    expect(
+      (await w.t.req('GET', `/api/threads/${inProject.threadId}/messages`, { cookie: outsider.cookie }))
+        .status,
+    ).toBe(404);
   });
 });

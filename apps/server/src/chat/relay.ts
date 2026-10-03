@@ -6,7 +6,7 @@ import {
   type ServerToBrowser,
   streamId,
 } from '@aom/shared';
-import { agentActor, orgScope, runnerActor, userActor } from '../commands/common.ts';
+import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -20,6 +20,8 @@ interface Inflight {
   threadId: string;
   userId: string;
   orgId: string;
+  /** Set when the thread is tied to a project: its messages are visible to the project's members. */
+  projectId: string | null;
   agentId: string;
   workstationId: string;
   startedAt: Date;
@@ -88,6 +90,7 @@ export class ChatRelay {
       threadId: msg.threadId,
       userId,
       orgId: row.org_id,
+      projectId: row.thread_project_id ?? null,
       agentId: row.id,
       workstationId: row.workstation_id,
       startedAt: ctx.clock.now(),
@@ -112,7 +115,9 @@ export class ChatRelay {
             },
           },
           actor: userActor(userId),
-          scope: orgScope(row.org_id),
+          scope: row.thread_project_id
+            ? projectScope(row.org_id, row.thread_project_id)
+            : orgScope(row.org_id),
         },
         {
           streamId: streamId.shift(chatId),
@@ -204,7 +209,7 @@ export class ChatRelay {
             },
           },
           actor: agentActor(c.agentId),
-          scope: orgScope(c.orgId),
+          scope: c.projectId ? projectScope(c.orgId, c.projectId) : orgScope(c.orgId),
         },
         this.shiftEnded(c, 'reported', msg.usage),
       ],
