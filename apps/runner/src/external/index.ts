@@ -1,9 +1,10 @@
 import { type ExternalAdapter, type ExternalRef, type ExternalSource, parseExternalRef } from '@aom/shared';
-import { type Exec, GithubAdapter, SourceReadError } from './github.ts';
+import type { JiraConfig } from '../config.ts';
+import { type Exec, GithubAdapter, PostError, SourceReadError } from './github.ts';
 import { JiraAdapter } from './jira.ts';
 
 export type { Exec };
-export { GithubAdapter, JiraAdapter, SourceReadError };
+export { GithubAdapter, JiraAdapter, PostError, SourceReadError };
 
 /** The adapters of this workstation, by system. */
 export class ExternalAdapters {
@@ -13,13 +14,20 @@ export class ExternalAdapters {
     for (const a of adapters) this.byName.set(a.system, a);
   }
 
-  static defaults(opts: { ghBin?: string; exec?: Exec } = {}): ExternalAdapters {
+  static defaults(
+    opts: {
+      ghBin?: string;
+      exec?: Exec;
+      jira?: JiraConfig | undefined;
+      jiraFetch?: (url: string, init: RequestInit) => Promise<Response>;
+    } = {},
+  ): ExternalAdapters {
     return new ExternalAdapters([
       new GithubAdapter({
         ...(opts.ghBin ? { bin: opts.ghBin } : {}),
         ...(opts.exec ? { exec: opts.exec } : {}),
       }),
-      new JiraAdapter(),
+      new JiraAdapter({ config: opts.jira, ...(opts.jiraFetch ? { fetch: opts.jiraFetch } : {}) }),
     ]);
   }
 

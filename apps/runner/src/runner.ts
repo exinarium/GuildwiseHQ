@@ -17,6 +17,7 @@ import type { RunnerConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
 import { ExternalAdapters } from './external/index.ts';
+import { OutboundExecutor } from './external/outbound.ts';
 import { executeCompletion } from './git/completion.ts';
 import { ghPrCreator, type PrCreator } from './git/gh.ts';
 import { scanRepos } from './git/repo-scan.ts';
@@ -61,8 +62,11 @@ export class Runner {
   readonly chat: ChatManager;
   readonly client: RunnerClient;
   readonly vaults: VaultManager;
+  /** M8: posts approved drafts to Jira and the code host with this workstation's credentials. */
+  readonly outbound: OutboundExecutor;
   private readonly log: Logger;
   private readonly adapters: Map<string, RuntimeAdapter>;
+  private readonly external: ExternalAdapters;
   private repos: RepoReport[] = [];
   private maxConcurrent: number;
   private readonly rpcs = new Map<string, (r: IpcRpcResponse) => void>();
@@ -115,6 +119,12 @@ export class Runner {
       exitGraceMs: opts.exitGraceMs,
       envChecker: opts.envChecker,
     });
+    this.external =
+      opts.external ??
+      ExternalAdapters.defaults({
+        ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
+        jira: opts.config.jira,
+      });
     this.chat = new ChatManager({
       paths: this.paths,
       adapters: this.adapters,
@@ -122,10 +132,9 @@ export class Runner {
       log: this.log,
       send: (type, payload) => void this.client.send(type, payload),
       rpc: (chatId, method, params) => this.rpc(chatId, method, params),
-      external:
-        opts.external ??
-        ExternalAdapters.defaults(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
+      external: this.external,
     });
+    this.outbound = new OutboundExecutor({ dir: this.paths.outbound, adapters: this.external });
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
       this.maxConcurrent = Math.min(w.limits.maxConcurrentShifts, opts.config.maxConcurrentShifts);
@@ -319,6 +328,9 @@ export class Runner {
             }),
           );
         }
+      } else if (command === 'outbound.post') {
+        // Failures are answered as `ok:true, result.ok:false`: the server turns them into a desk alert, not a blind retry.
+        done(true, await this.outbound.run(CommandPayloadSchemas['outbound.post'].parse(payload)));
       } else {
         done(false, undefined, `command ${command} is not supported by this runner version`);
       }

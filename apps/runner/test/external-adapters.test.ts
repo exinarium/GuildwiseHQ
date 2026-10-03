@@ -1,4 +1,4 @@
-import { NotImplementedError, parseExternalRef } from '@aom/shared';
+import { parseExternalRef } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { defaultExec } from '../src/external/github.ts';
 import {
@@ -87,19 +87,6 @@ describe('GitHub adapter (gh issue view --json on the runner)', () => {
     await expect(
       a(fakeExec('nope').exec).readSource({ system: 'github', key: 'acme/toy#1' }),
     ).rejects.toThrow(/not JSON/);
-  });
-
-  it('cannot post yet: the post side is a typed stub for M8', async () => {
-    const draft = {
-      draftId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
-      ref: { system: 'github' as const, key: 'acme/toy#1' },
-      kind: 'comment' as const,
-      body: 'x',
-    };
-    await expect(new GithubAdapter().postApproved(draft)).rejects.toBeInstanceOf(NotImplementedError);
-    await expect(
-      new JiraAdapter().postApproved({ ...draft, ref: { system: 'jira', key: 'ABC-1' } }),
-    ).rejects.toBeInstanceOf(NotImplementedError);
   });
 });
 

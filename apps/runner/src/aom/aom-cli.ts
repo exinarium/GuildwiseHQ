@@ -418,6 +418,18 @@ const VERBS: Record<string, Verb> = {
     }
     throw new UsageError('usage: aom intake map --project <KEY> | aom intake unmapped --note "<why>"');
   },
+  outbound: async (ctx, p) => {
+    if (p.positionals[0] !== 'draft')
+      throw new UsageError('usage: aom outbound draft --kind <comment|resolution|decision> --body "<text>"');
+    const kind = one(p, 'kind') ?? 'resolution';
+    if (kind !== 'comment' && kind !== 'resolution' && kind !== 'decision')
+      throw new UsageError('--kind is comment, resolution or decision');
+    const r = (await rpc(ctx, 'outbound.draft', { kind, body: textFlag(ctx, p, 'body', true) })) as {
+      message?: string;
+    };
+    ctx.io.out(`${r.message ?? 'Drafted. The manager approves it on the desk.'}\n`);
+    return 0;
+  },
   source: async (ctx, p) => {
     if (p.positionals[0] !== 'read' || !one(p, 'ref'))
       throw new UsageError('usage: aom source read --ref <owner/repo#12 | ABC-123 | ticket URL>');
@@ -452,7 +464,8 @@ export const USAGE = `usage: aom <verb> [options]
   finalize --action <pr|push_branch|merge> [--note "<why>"]   BA: run the completion action (revise it with a different action)
   intake map --project <KEY> | intake unmapped --note "<why>"   BA intake: map the ticket, or ask the manager
   card create --file <draft.json> | card update <REF> --file <patch.json> | card specify <REF>   BA intake: draft cards
-  source read --ref <owner/repo#12 | ticket URL>         BA intake: read a GitHub issue (Jira: the Jira skill)
+  outbound draft --kind <comment|resolution|decision> --body "<text>"   BA: draft the update for the card's ticket (the manager approves it)
+  source read --ref <owner/repo#12 | ticket URL>        BA intake: read a GitHub issue (Jira: the Jira skill)
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed
