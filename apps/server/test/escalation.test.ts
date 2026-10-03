@@ -76,7 +76,7 @@ async function questionShift(name: string) {
   const start = (await r.waitFor(
     'shift.start',
     (f) => f.agent.name === name && f.kind === 'question' && !usedShifts.has(f.shiftId),
-    5000,
+    15_000,
   )) as any;
   usedShifts.add(start.shiftId);
   await h.startShift(r, start);

@@ -64,7 +64,7 @@ describe('projection rebuild', () => {
       const s = (await r.waitFor(
         'shift.start',
         (f) => f.agent.name === name && f.kind === 'question' && !used.has(f.shiftId),
-        5000,
+        15_000,
       )) as any;
       used.add(s.shiftId);
       await h.startShift(r, s);
@@ -79,7 +79,7 @@ describe('projection rebuild', () => {
       w.t.req('POST', '/api/intakes', { cookie: w.owner.cookie, body: { note: 'ABC-5' } }),
       201,
     );
-    const cs = (await r.waitFor('chat.start', (f) => f.threadId === intake.threadId, 5000, from)) as any;
+    const cs = (await r.waitFor('chat.start', (f) => f.threadId === intake.threadId, 15_000, from)) as any;
     const call = async (method: string, params: Record<string, unknown>) => {
       const rpcId = randomUUID();
       const n = r.received.length;

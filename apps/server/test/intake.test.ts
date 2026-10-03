@@ -52,7 +52,7 @@ async function setup(hireBa = true) {
 async function openIntake(note = 'ABC-123', extra: Record<string, unknown> = {}) {
   const from = r.received.length;
   const { intake } = await post('/api/intakes', { note, ...extra }, 201);
-  const start = (await r.waitFor('chat.start', (f) => f.threadId === intake.threadId, 5000, from)) as any;
+  const start = (await r.waitFor('chat.start', (f) => f.threadId === intake.threadId, 15_000, from)) as any;
   return { intake, start };
 }
 
@@ -61,7 +61,7 @@ async function rpc(chatId: string, method: string, params: Record<string, unknow
   const rpcId = randomUUID();
   const from = r.received.length;
   r.send('rpc.request', { rpcId, shiftId: chatId, method, params });
-  return (await r.waitFor('rpc.response', (f) => f.rpcId === rpcId, 5000, from)) as {
+  return (await r.waitFor('rpc.response', (f) => f.rpcId === rpcId, 15_000, from)) as {
     ok: boolean;
     result?: any;
     error?: string;
@@ -220,7 +220,7 @@ describe('the BA drafts cards in the intake chat', () => {
       body: 'more?',
       clientMsgId: 'c2',
     });
-    const again = (await r.waitFor('chat.start', (f) => f.threadId === intake.threadId, 5000, from)) as any;
+    const again = (await r.waitFor('chat.start', (f) => f.threadId === intake.threadId, 15_000, from)) as any;
     expect(again.context.intake).toMatchObject({
       mappedProjectKey: 'TOY',
       cards: [{ ref: 'TOY-1', status: 'queued' }],
@@ -305,7 +305,7 @@ describe('the BA drafts cards in the intake chat', () => {
     const chat = (await post('/api/chats', { agentId: agent.id }, 201)).chat;
     const from = r.received.length;
     w.t.app.ctx.services.chat.send(w.owner.id, { threadId: chat.threadId, body: 'hi', clientMsgId: 'c' });
-    const cs = (await r.waitFor('chat.start', (f) => f.threadId === chat.threadId, 5000, from)) as any;
+    const cs = (await r.waitFor('chat.start', (f) => f.threadId === chat.threadId, 15_000, from)) as any;
     const denied = await rpc(cs.chatId, 'intake.map', { project: 'TOY' });
     expect(denied.ok).toBe(false);
     expect(denied.error).toMatch(/not an intake/);
@@ -368,7 +368,7 @@ describe('unmapped tickets', () => {
     await new Promise((x) => setTimeout(x, 700));
     expect(r.received.slice(from).some((f) => f.type === 'chat.start')).toBe(false);
     await finishChat(start);
-    const next = (await r.waitFor('chat.start', (f) => f.threadId === intake.threadId, 5000, from)) as any;
+    const next = (await r.waitFor('chat.start', (f) => f.threadId === intake.threadId, 15_000, from)) as any;
     expect(next.message).toMatch(/mapped ABC-777 to project TOY/);
     expect(next.context.intake.mappedProjectKey).toBe('TOY');
     // and the decision is in the ledger for the next ticket

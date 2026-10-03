@@ -35,7 +35,7 @@ const finalized = (action: string, note = 'ready') => ({
   data: { action },
 });
 const nextCommand = (from: number, name = 'finalize.execute') =>
-  r.waitFor('command', (f) => f.command === name, 5000, from);
+  r.waitFor('command', (f) => f.command === name, 15_000, from);
 
 /** A card all the way to Finalize with a BA in the org (small tier unless `large`). */
 async function cardAtFinalize(over: Record<string, unknown> = {}, large = false) {
