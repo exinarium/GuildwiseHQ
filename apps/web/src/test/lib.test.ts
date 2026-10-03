@@ -1,7 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 import { hueFor, initials } from '../lib/avatar.ts';
-import { roleCap } from '../lib/hireCaps.ts';
 import { ageLabel } from '../lib/time.ts';
 import { keysForEvent } from '../ws/invalidate.ts';
 import { LiveSocket } from '../ws/socket.ts';
@@ -12,20 +11,6 @@ describe('avatar', () => {
     expect(initials('Ada Lovelace')).toBe('AL');
     expect(hueFor('Quinn')).toBe(hueFor('Quinn'));
     expect(hueFor('Quinn')).not.toBe(hueFor('Marlowe'));
-  });
-});
-
-describe('hire caps', () => {
-  const agent = (roleKey: string) => ({ roleKey, status: 'active' as const, isDevops: false });
-  it('limits builders to 2 and other roles to 1 with a reason', () => {
-    expect(roleCap('builder', 'Builder', [agent('builder')]).full).toBe(false);
-    const full = roleCap('builder', 'Builder', [agent('builder'), agent('builder')]);
-    expect(full.full).toBe(true);
-    expect(full.reason).toContain('2 of 2');
-    expect(roleCap('reviewer', 'Reviewer', [agent('reviewer')]).full).toBe(true);
-    expect(roleCap('reviewer', 'Reviewer', [{ ...agent('reviewer'), status: 'retired' as never }]).full).toBe(
-      false,
-    );
   });
 });
 

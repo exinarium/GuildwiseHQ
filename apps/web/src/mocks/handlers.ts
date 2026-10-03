@@ -317,6 +317,46 @@ export const handlers = [
 
   // agents
   http.get(`${A}/agents`, () => HttpResponse.json({ agents: db.agents.map(agentView) })),
+  // M9 HR board: every agent with empty stats (no events to derive them from in the mock server)
+  http.get(`${A}/hr/board`, () => {
+    const none = { value: null, team: null };
+    const now = iso();
+    return HttpResponse.json({
+      windowDays: 30,
+      agents: db.agents
+        .filter((a) => a.status !== 'retired')
+        .map((a) => ({
+          agent: agentView(a),
+          hiredByName: ME.displayName,
+          blockedOn: [],
+          stats: {
+            agentId: a.id,
+            windowDays: 30,
+            from: now,
+            to: now,
+            cardsTouched: 0,
+            cardsDone: { value: 0, team: null },
+            blockedRate: none,
+            reworkRate: none,
+            bugsEscaped: none,
+            utilisation: { value: 0, team: null },
+            tokensPerCard: none,
+            doneByDay: Array.from({ length: 14 }, () => 0),
+          },
+          quality: {
+            reviewScoreAvg: null,
+            reviewCount: 0,
+            reworkByReason: [],
+            reworkRoundsPerCard: { avg: null, max: 0, cardsWithThreeOrMore: 0 },
+            bugsEscaped: 0,
+            criteriaMissed: 0,
+            testCoverage: { cardsWithTests: 0, cardsMeasured: 0, rate: null },
+          },
+        })),
+      recommendations: [],
+      roleUpdates: [],
+    });
+  }),
   http.get(`${A}/agents/name-suggestions`, () => {
     const used = new Set(db.agents.map((a) => a.name));
     const pool = NAMES.filter((n) => !used.has(n));
@@ -328,14 +368,6 @@ export const handlers = [
     if (!b) return err(400, 'validation', 'Invalid request');
     const role = roles.find((r) => r.key === b.roleKey);
     if (!role) return err(404, 'not_found', 'Role not found');
-    const active = db.agents.filter((a) => a.roleKey === b.roleKey && a.status === 'active').length;
-    const cap = b.roleKey === 'builder' ? 2 : 1;
-    if (active >= cap)
-      return err(
-        409,
-        'hire_cap',
-        `First-run limit reached: at most ${cap} active ${role.name.toLowerCase()}(s)`,
-      );
     if (db.agents.some((a) => a.name.toLowerCase() === b.name.toLowerCase()))
       return err(409, 'name_taken', 'That name is already used');
     const agent: AgentDto = {

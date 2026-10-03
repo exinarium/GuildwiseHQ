@@ -35,6 +35,21 @@ export const extraHandlers = [
   http.post(`${A}/vaults`, unavailable),
   http.patch(`${A}/vaults/:id`, unavailable),
   http.post(`${A}/vaults/:id/resolve-conflict`, unavailable),
+  // M9 metrics
+  http.get(
+    `${A}/metrics`,
+    empty({
+      projectId: null,
+      from: new Date(0).toISOString(),
+      to: new Date(0).toISOString(),
+      throughput: [],
+      timeBlockedOnManager: { totalMs: 0, cards: 0, avgMsPerCard: null },
+      bounceRate: [],
+      bugsEscaped: { total: 0, byDay: [] },
+      duration: { cards: 0, avgMsPerCard: null, medianMsPerCard: null, perAgent: [] },
+      queueDepth: [],
+    }),
+  ),
   // M4 testing
   http.post(`${A}/cards/:key/finalize`, unavailable),
   http.post(`${A}/projects/:id/regression`, empty({ cards: [] })),

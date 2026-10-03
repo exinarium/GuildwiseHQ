@@ -11,7 +11,14 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
   const kind = event.streamId.split('-')[0];
   switch (kind) {
     case 'card':
-      return [event.projectId ? ['board', event.projectId] : ['board'], ['card'], ['agents'], ['digest']];
+      return [
+        event.projectId ? ['board', event.projectId] : ['board'],
+        ['card'],
+        ['agents'],
+        ['digest'],
+        ['hr'],
+        ['metrics'],
+      ];
     case 'schedule':
       return [['schedules'], ['board']];
     case 'thread':
@@ -19,15 +26,17 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
       return [['card'], ['devops'], ['thread', event.streamId.slice('thread-'.length)], ['chats']];
     case 'desk':
       // Questions block and unblock cards; answers add ledger entries.
-      return [['desk'], ['board'], ['card'], ['ledger'], ['devops'], ['vaults']];
+      return [['desk'], ['board'], ['card'], ['ledger'], ['devops'], ['vaults'], ['hr'], ['metrics']];
     case 'ledger':
       return [['ledger'], ['desk'], ['card']];
     case 'vault':
       return [['vaults']];
     case 'shift':
-      return [['card'], ['agents'], ['board']];
+      return [['card'], ['agents'], ['board'], ['hr'], ['metrics']];
     case 'agent':
-      return [['agents'], ['board'], ['card']];
+      return [['agents'], ['board'], ['card'], ['hr'], ['roles']];
+    case 'role':
+      return [['roles'], ['hr'], ['agents']];
     case 'workstation':
       return [['workstations'], ['admin', 'workstations'], ['agents']];
     case 'project':

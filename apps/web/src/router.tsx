@@ -14,6 +14,7 @@ import { Desk } from './pages/Desk.tsx';
 import { FeedProject } from './pages/FeedProject.tsx';
 import { Ledger } from './pages/Ledger.tsx';
 import { Login } from './pages/Login.tsx';
+import { Metrics } from './pages/Metrics.tsx';
 import { ProjectSettings } from './pages/ProjectSettings.tsx';
 import { Projects } from './pages/Projects.tsx';
 import { Schedules } from './pages/Schedules.tsx';
@@ -43,6 +44,8 @@ export const routes = [
       { path: '/projects', element: <Projects /> },
       { path: '/projects/:id/settings', element: <ProjectSettings /> },
       { path: '/agents', element: <Agents /> },
+      { path: '/hr', element: <Agents /> },
+      { path: '/metrics', element: <Metrics /> },
       { path: '/workstations', element: <Workstations /> },
       { path: '/settings/vaults', element: <Vaults /> },
       { path: '/admin', element: <Admin /> },

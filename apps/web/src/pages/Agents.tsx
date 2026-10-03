@@ -1,12 +1,16 @@
-import type { AgentDto } from '@aom/shared';
+import { type AgentDto, type HrAgent, NAME_THEMES } from '@aom/shared';
 import { type FormEvent, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useAgents, useFire, useHire, useNameSuggestions, useRoles } from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
 import { useResetAgent } from '../api/queries/devops.ts';
+import { useHrBoard } from '../api/queries/hr.ts';
 import { useRehomeAgent } from '../api/queries/members.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
+import { AgentStats, WorkQualityPanel } from '../components/hr/AgentStats.tsx';
+import { ChangeModelDialog, ChangeRoleDialog } from '../components/hr/ChangeDialogs.tsx';
+import { RecommendationList, RoleUpdates } from '../components/hr/Recommendations.tsx';
 import {
   Avatar,
   Badge,
@@ -19,10 +23,15 @@ import {
   Spinner,
   TextInput,
 } from '../components/ui.tsx';
-import { roleCap } from '../lib/hireCaps.ts';
 import { getLastProjectKey } from '../lib/lastProject.ts';
 
+/**
+ * The HR board (docs/SPEC.md "HR board"): one card per agent with avatar, role, model, status, hiring manager, stats
+ * against the role average, a work-quality panel for builders, and the recommendations with evidence and one-click apply.
+ */
 export function Agents() {
+  const [projectFilter, setProjectFilter] = useState('');
+  const board = useHrBoard(projectFilter || undefined);
   const agents = useAgents();
   const roles = useRoles();
   const workstations = useWorkstations();
@@ -35,7 +44,8 @@ export function Agents() {
   const [hireOpen, setHireOpen] = useState(!!prefill);
   const [firing, setFiring] = useState<AgentDto | null>(null);
   const [rehoming, setRehoming] = useState<AgentDto | null>(null);
-  const [projectFilter, setProjectFilter] = useState('');
+  const [changingModel, setChangingModel] = useState<AgentDto | null>(null);
+  const [changingRole, setChangingRole] = useState<AgentDto | null>(null);
   const me = useMe();
   const projects = useProjects();
   const reset = useResetAgent();
@@ -44,19 +54,23 @@ export function Agents() {
   const canManage = (a: AgentDto) => !!myId && (myId === a.orgId || myId === a.managerUserId);
   const roleName = (k: string) => roles.data?.find((r) => r.definition.key === k)?.definition.name ?? k;
   const stationName = (id: string | null) => workstations.data?.find((w) => w.id === id)?.name ?? '';
-  const inFilter = (a: AgentDto) =>
-    !projectFilter || a.projectId === projectFilter || (a.projectId === null && !a.isDevops);
-  const active = agents.data?.filter((a) => a.status !== 'retired' && inFilter(a)) ?? [];
+  const active = board.data?.agents ?? [];
   const retired = agents.data?.filter((a) => a.status === 'retired') ?? [];
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-6xl">
       <PageHeader
-        title="Agents"
+        title="HR board"
+        sub={`Stats over the last ${board.data?.windowDays ?? 30} days, each against the average of the agents in the role.`}
         actions={
-          <Button variant="primary" onClick={() => setHireOpen(true)}>
-            Hire agent
-          </Button>
+          <>
+            <Link to="/metrics" className="text-sm underline" data-testid="metrics-link">
+              Metrics
+            </Link>
+            <Button variant="primary" onClick={() => setHireOpen(true)}>
+              Hire agent
+            </Button>
+          </>
         }
       />
       {(projects.data?.length ?? 0) > 1 && (
@@ -71,83 +85,40 @@ export function Agents() {
           </Select>
         </div>
       )}
-      {agents.isPending && <Spinner />}
-      {agents.isError && <ErrorBox error={agents.error} />}
+      {board.isPending && <Spinner />}
+      {board.isError && <ErrorBox error={board.error} />}
       <ErrorBox error={reset.error} />
-      {agents.data && active.length === 0 && (
+      {board.data && <RoleUpdates updates={board.data.roleUpdates} />}
+      {board.data && <RecommendationList recommendations={board.data.recommendations} />}
+      {board.data && active.length === 0 && (
         <Panel>
           <p className="text-sm text-zinc-500">No agents hired yet.</p>
         </Panel>
       )}
-      <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" data-testid="agents">
-        {active.map((a) => (
-          <li key={a.id} data-testid={`agent-${a.name}`} data-editable={canManage(a) ? 'true' : 'false'}>
-            <Panel className="flex h-full flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <Avatar name={a.name} size={36} />
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{a.name}</p>
-                  <p className="text-xs text-zinc-500">
-                    {roleName(a.roleKey)} · {a.seniority}
-                    {a.projectId &&
-                      ` · ${projects.data?.find((p) => p.id === a.projectId)?.key ?? 'shared project'}`}
-                  </p>
-                </div>
-                <span className="ml-auto">
-                  {a.status === 'needs_rehome' ? (
-                    <Badge tone="amber">needs rehome</Badge>
-                  ) : a.activeCards.length ? (
-                    <Badge tone="blue">on shift</Badge>
-                  ) : (
-                    <Badge>idle</Badge>
-                  )}
-                </span>
-              </div>
-              <p className="text-xs text-zinc-500">
-                {a.runtime} · {a.model}
-                {a.effort ? ` · ${a.effort}` : ''}
-                {stationName(a.workstationId) && ` · ${stationName(a.workstationId)}`}
-              </p>
-              <p className="text-sm" data-testid="agent-current-card">
-                {a.activeCards.length === 0
-                  ? 'No current card'
-                  : a.activeCards.map((c) => (
-                      <Link key={c.cardId} to={`/cards/${c.ref}`} className="underline">
-                        {c.ref} {c.title}
-                      </Link>
-                    ))}
-              </p>
-              {a.isDevops ? (
-                <div className="mt-auto flex items-center gap-2">
-                  <Badge tone="violet">DevOps engineer</Badge>
-                  {canManage(a) && (
-                    <Button
-                      variant="ghost"
-                      aria-label={`Reset ${a.name}`}
-                      disabled={reset.isPending}
-                      onClick={() => reset.mutate(a.id)}
-                    >
-                      Reset
-                    </Button>
-                  )}
-                </div>
-              ) : canManage(a) ? (
-                <div className="mt-auto flex gap-2">
-                  {a.status === 'needs_rehome' && (
-                    <Button variant="primary" aria-label={`Re-home ${a.name}`} onClick={() => setRehoming(a)}>
-                      Re-home
-                    </Button>
-                  )}
-                  <Button variant="ghost" aria-label={`Fire ${a.name}`} onClick={() => setFiring(a)}>
-                    Fire
-                  </Button>
-                </div>
-              ) : (
-                <p className="mt-auto text-xs text-zinc-500" data-testid="agent-readonly">
-                  Hired by another manager (read only)
-                </p>
-              )}
-            </Panel>
+      <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="agents">
+        {active.map((h) => (
+          <li
+            key={h.agent.id}
+            data-testid={`agent-${h.agent.name}`}
+            data-editable={canManage(h.agent) ? 'true' : 'false'}
+          >
+            <AgentCard
+              hr={h}
+              roleName={roleName(h.agent.roleKey)}
+              station={stationName(h.agent.workstationId)}
+              projectKey={
+                h.agent.projectId
+                  ? (projects.data?.find((p) => p.id === h.agent.projectId)?.key ?? 'shared project')
+                  : null
+              }
+              canManage={canManage(h.agent)}
+              onFire={() => setFiring(h.agent)}
+              onRehome={() => setRehoming(h.agent)}
+              onModel={() => setChangingModel(h.agent)}
+              onRole={() => setChangingRole(h.agent)}
+              onReset={() => reset.mutate(h.agent.id)}
+              resetting={reset.isPending}
+            />
           </li>
         ))}
       </ul>
@@ -163,10 +134,124 @@ export function Agents() {
           </ul>
         </details>
       )}
-      <HireDialog open={hireOpen} onOpenChange={setHireOpen} agents={agents.data ?? []} prefill={prefill} />
+      <HireDialog open={hireOpen} onOpenChange={setHireOpen} prefill={prefill} />
       <FireDialog agent={firing} onClose={() => setFiring(null)} />
       <RehomeDialog agent={rehoming} onClose={() => setRehoming(null)} />
+      <ChangeModelDialog agent={changingModel} onClose={() => setChangingModel(null)} />
+      <ChangeRoleDialog agent={changingRole} roles={roles.data ?? []} onClose={() => setChangingRole(null)} />
     </div>
+  );
+}
+
+function AgentCard({
+  hr,
+  roleName,
+  station,
+  projectKey,
+  canManage,
+  onFire,
+  onRehome,
+  onModel,
+  onRole,
+  onReset,
+  resetting,
+}: {
+  hr: HrAgent;
+  roleName: string;
+  station: string;
+  projectKey: string | null;
+  canManage: boolean;
+  onFire: () => void;
+  onRehome: () => void;
+  onModel: () => void;
+  onRole: () => void;
+  onReset: () => void;
+  resetting: boolean;
+}) {
+  const a = hr.agent;
+  const isBuilder = a.roleKey === 'builder';
+  return (
+    <Panel className="flex h-full flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <Avatar name={a.name} size={36} />
+        <div className="min-w-0">
+          <p className="truncate font-medium">{a.name}</p>
+          <p className="text-xs text-zinc-500">
+            {roleName} · {a.seniority}
+            {projectKey && ` · ${projectKey}`}
+          </p>
+        </div>
+        <span className="ml-auto" data-testid="agent-status">
+          {a.status === 'needs_rehome' ? (
+            <Badge tone="amber">needs rehome</Badge>
+          ) : a.activeCards.length ? (
+            <Badge tone="blue">on shift</Badge>
+          ) : hr.blockedOn.length ? (
+            <Badge tone="red" title="Left a card blocked on a question for the manager">
+              blocked
+            </Badge>
+          ) : (
+            <Badge>idle</Badge>
+          )}
+        </span>
+      </div>
+      <p className="text-xs text-zinc-500" data-testid="agent-model">
+        {a.runtime} · {a.model}
+        {a.effort ? ` · ${a.effort}` : ''}
+        {station && ` · ${station}`}
+      </p>
+      <p className="text-xs text-zinc-500" data-testid="agent-hired-by">
+        Hired by {hr.hiredByName}
+      </p>
+      <p className="text-sm" data-testid="agent-current-card">
+        {a.activeCards.length === 0
+          ? hr.blockedOn.length
+            ? hr.blockedOn.map((c) => (
+                <Link key={c.cardId} to={`/cards/${c.ref}`} className="underline">
+                  {c.ref} {c.title} (blocked)
+                </Link>
+              ))
+            : 'No current card'
+          : a.activeCards.map((c) => (
+              <Link key={c.cardId} to={`/cards/${c.ref}`} className="underline">
+                {c.ref} {c.title}
+              </Link>
+            ))}
+      </p>
+      {!a.isDevops && <AgentStats stats={hr.stats} roleName={roleName.toLowerCase()} />}
+      {isBuilder && <WorkQualityPanel quality={hr.quality} />}
+      {a.isDevops ? (
+        <div className="mt-auto flex items-center gap-2">
+          <Badge tone="violet">DevOps engineer</Badge>
+          {canManage && (
+            <Button variant="ghost" aria-label={`Reset ${a.name}`} disabled={resetting} onClick={onReset}>
+              Reset
+            </Button>
+          )}
+        </div>
+      ) : canManage ? (
+        <div className="mt-auto flex flex-wrap gap-2">
+          {a.status === 'needs_rehome' && (
+            <Button variant="primary" aria-label={`Re-home ${a.name}`} onClick={onRehome}>
+              Re-home
+            </Button>
+          )}
+          <Button variant="ghost" aria-label={`Change model of ${a.name}`} onClick={onModel}>
+            Change model
+          </Button>
+          <Button variant="ghost" aria-label={`Change role of ${a.name}`} onClick={onRole}>
+            Change role
+          </Button>
+          <Button variant="ghost" aria-label={`Fire ${a.name}`} onClick={onFire}>
+            Fire
+          </Button>
+        </div>
+      ) : (
+        <p className="mt-auto text-xs text-zinc-500" data-testid="agent-readonly">
+          Hired by another manager (read only)
+        </p>
+      )}
+    </Panel>
   );
 }
 
@@ -288,12 +373,10 @@ function FireDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () =>
 function HireDialog({
   open,
   onOpenChange,
-  agents,
   prefill,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
-  agents: AgentDto[];
   prefill?: { roleKey: string; projectId: string } | null;
 }) {
   const roles = useRoles();
@@ -301,7 +384,8 @@ function HireDialog({
   const projects = useProjects();
   const hire = useHire();
   const [nonce, setNonce] = useState(0);
-  const suggestions = useNameSuggestions(open, nonce);
+  const [theme, setTheme] = useState('default');
+  const suggestions = useNameSuggestions(open, nonce, theme);
   const [roleKey, setRoleKey] = useState(prefill?.roleKey ?? '');
   const [seniority, setSeniority] = useState(prefill ? 'junior' : '');
   const [workstationId, setWorkstationId] = useState('');
@@ -317,13 +401,8 @@ function HireDialog({
     () => (roles.data ?? []).filter((r) => r.definition.key !== 'devops'),
     [roles.data],
   );
-  const caps = useMemo(
-    () => hireable.map((r) => roleCap(r.definition.key, r.definition.name, agents)),
-    [hireable, agents],
-  );
   const activeStations = (stations.data ?? []).filter((w) => w.status === 'active');
-  const firstOpen = hireable.find((r) => !caps.find((c) => c.roleKey === r.definition.key)?.full);
-  const effectiveRoleKey = roleKey || firstOpen?.definition.key || '';
+  const effectiveRoleKey = roleKey || hireable[0]?.definition.key || '';
   const role = hireable.find((r) => r.definition.key === effectiveRoleKey)?.definition;
   const effectiveSeniority =
     seniority && role?.seniorityLevels.includes(seniority as 'junior')
@@ -344,13 +423,11 @@ function HireDialog({
       ].filter(Boolean) as string[],
     ),
   ];
-  const full = caps.find((c) => c.roleKey === effectiveRoleKey)?.full ?? false;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (!role) errs.role = 'Choose a role';
-    if (full) errs.role = 'This role is at its limit';
     if (!name.trim()) errs.name = 'A name is required';
     if (!effectiveStation) errs.workstation = 'Pair a workstation first';
     setErrors(errs);
@@ -395,26 +472,12 @@ function HireDialog({
           onChange={(e) => setRoleKey(e.target.value)}
           error={errors.role}
         >
-          {hireable.map((r) => {
-            const c = caps.find((x) => x.roleKey === r.definition.key);
-            return (
-              <option key={r.definition.key} value={r.definition.key} disabled={c?.full}>
-                {r.definition.name}
-                {c?.full ? ` (limit reached ${c.active}/${c.cap})` : ''}
-              </option>
-            );
-          })}
+          {hireable.map((r) => (
+            <option key={r.definition.key} value={r.definition.key}>
+              {r.definition.name}
+            </option>
+          ))}
         </Select>
-        <ul className="-mt-1 text-xs text-zinc-500" data-testid="hire-caps" aria-label="Role limits">
-          {caps
-            .filter((c) => c.full)
-            .map((c) => (
-              <li key={c.roleKey} className="text-amber-700 dark:text-amber-400">
-                {c.reason}
-              </li>
-            ))}
-          {caps.every((c) => !c.full) && <li>First-run limits: 2 builders, 1 of each other role.</li>}
-        </ul>
         <div className="grid gap-3 sm:grid-cols-2">
           <Select label="Seniority" value={effectiveSeniority} onChange={(e) => setSeniority(e.target.value)}>
             {(role?.seniorityLevels ?? []).map((s) => (
@@ -486,6 +549,19 @@ function HireDialog({
             maxLength={60}
           />
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-testid="name-suggestions">
+            <select
+              aria-label="Name theme"
+              data-testid="name-theme"
+              value={theme}
+              onChange={(e) => setTheme(e.target.value)}
+              className="rounded border border-zinc-300 bg-white px-1 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+            >
+              {NAME_THEMES.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
             <span className="text-xs text-zinc-500">Suggestions:</span>
             {suggestions.data?.map((n) => (
               <button
@@ -505,7 +581,7 @@ function HireDialog({
         <ErrorBox error={hire.error} />
         <div className="flex justify-end gap-2">
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" disabled={hire.isPending || full}>
+          <Button type="submit" variant="primary" disabled={hire.isPending}>
             Hire
           </Button>
         </div>
