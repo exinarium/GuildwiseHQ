@@ -3,9 +3,11 @@ import { DiffStats } from '../cards/types.ts';
 import { DevopsShiftSchema } from '../devops/index.ts';
 import { Usage } from '../events/define.ts';
 import { GuardViolation, ShiftKind } from '../events/shift.ts';
+import { TestEnvProblem } from '../events/testing.ts';
 import { VaultKind } from '../events/vault.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
+import { FinalizeExecutePayloadSchema } from '../testing/index.ts';
 import { VaultConfigureCommandSchema, VaultWriteCommandSchema } from '../vaults/index.ts';
 import { LedgerMatchSchema, RpcMethodSchema, ShiftReportSchema } from './ipc.ts';
 
@@ -191,6 +193,7 @@ export const CommandPayloadSchemas = {
     deleteBranch: z.boolean().default(false),
   }),
   'repos.rescan': z.object({}),
+  'finalize.execute': FinalizeExecutePayloadSchema,
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([
@@ -199,6 +202,8 @@ export const ShiftRejectReasonSchema = z.enum([
   'repo_missing',
   'worktree_failed',
   'rebase_conflict',
+  /** M4: a tester shift found the app not deployed or Docker missing (see `environment`). */
+  'environment_not_ready',
   'internal',
 ]);
 export const ShiftStopReasonSchema = z.enum([
@@ -248,6 +253,8 @@ export const ShiftRejectedSchema = msg('shift.rejected', {
   reason: ShiftRejectReasonSchema,
   detail: z.string().optional(),
   conflictedFiles: z.array(z.string()).optional(),
+  /** Set with `reason: 'environment_not_ready'`. */
+  environment: z.object({ problem: TestEnvProblem, detail: z.string().optional() }).optional(),
 });
 export const ShiftStartedSchema = msg('shift.started', {
   shiftId: z.uuid(),

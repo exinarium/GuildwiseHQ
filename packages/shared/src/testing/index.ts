@@ -1,0 +1,76 @@
+import { z } from 'zod';
+import { CompletionAction, TestEvidence } from '../cards/types.ts';
+
+/**
+ * M4 contract shared by the server and the runner: the `finalize.execute` runner command, the tester environment
+ * check and the constants of the bug loop (docs/ARCHITECTURE.md sections 5.2, 9.5, 13.5, 13.6 and 24).
+ */
+
+/** Minutes E2E work may wait with every tester busy before the bottleneck alert appears (section 9.5). */
+export const TESTER_BOTTLENECK_MINUTES = 5;
+
+/** Desk `subkind` values M4 introduces. */
+export const DESK_SUBKIND = {
+  largeMerge: 'large_merge',
+  testerBottleneck: 'tester_bottleneck',
+  testEnvironment: 'test_environment',
+  bugReported: 'bug_reported',
+  finalizeFailed: 'finalize_failed',
+  prNotice: 'pr_notice',
+} as const;
+
+/** Card origins whose card is a suite (full E2E suite or regression run) rather than a feature under test. */
+export const SUITE_ORIGINS = ['full_suite', 'regression'] as const;
+export const isSuiteOrigin = (origin: string | null | undefined): boolean =>
+  origin === 'full_suite' || origin === 'regression';
+
+/** Payload of the `finalize.execute` runner command. The runner executes the completion action (no agent involved). */
+export const FinalizeExecutePayloadSchema = z.object({
+  cardId: z.uuid(),
+  ref: z.string(),
+  title: z.string(),
+  projectKey: z.string(),
+  action: CompletionAction,
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string(),
+  baseBranch: z.string(),
+  branchName: z.string(),
+  /** Where the card's worktree lives on the workstation (null when unknown: the runner recreates it). */
+  worktreePath: z.string().nullable(),
+  prTitle: z.string().optional(),
+  prBody: z.string().optional(),
+});
+export type FinalizeExecutePayload = z.infer<typeof FinalizeExecutePayloadSchema>;
+
+/** `command.result.result` of `finalize.execute`. Expected failures set `ok: false` with `error` or `conflict`. */
+export const FinalizeResultSchema = z.object({
+  ok: z.boolean(),
+  action: CompletionAction,
+  mergeCommit: z.string().optional(),
+  prUrl: z.string().optional(),
+  pushedBranch: z.string().optional(),
+  /** E.g. `gh` was not available: the branch was pushed and the manager opens the PR by hand. */
+  notice: z.string().optional(),
+  /** The pre-finalize rebase conflicted (card goes to Rework, no agent resolves it). */
+  conflict: z.boolean().optional(),
+  conflictedFiles: z.array(z.string()).optional(),
+  error: z.string().optional(),
+});
+export type FinalizeResult = z.infer<typeof FinalizeResultSchema>;
+
+/** Data of the `fail` outcome of a tester: the bug that becomes a child card (or a standalone bug after finalize). */
+export const TestFailDataSchema = TestEvidence.extend({ title: z.string().min(1).max(300) });
+export type TestFailData = z.infer<typeof TestFailDataSchema>;
+
+/** Bug card description assembled from a tester's failure report. */
+export function bugDescription(input: { note: string; evidence: TestEvidence; parentRef?: string }): string {
+  const lines: string[] = [];
+  if (input.parentRef) lines.push(`Found while testing ${input.parentRef}.`, '');
+  lines.push(input.note.trim());
+  if (input.evidence.summary.trim() && input.evidence.summary.trim() !== input.note.trim())
+    lines.push('', `Evidence: ${input.evidence.summary.trim()}`);
+  if (input.evidence.commands.length)
+    lines.push('', 'Commands:', ...input.evidence.commands.map((c) => `- ${c}`));
+  if (input.evidence.outputExcerpt.trim()) lines.push('', 'Output:', input.evidence.outputExcerpt.trim());
+  return lines.join('\n');
+}

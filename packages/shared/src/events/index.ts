@@ -9,6 +9,7 @@ import { ledgerEvents } from './ledger.ts';
 import { projectEvents } from './project.ts';
 import { sharingEvents } from './sharing.ts';
 import { shiftEvents } from './shift.ts';
+import { testingEvents } from './testing.ts';
 import { userEvents } from './user.ts';
 import { vaultEvents } from './vault.ts';
 import { workstationEvents } from './workstation.ts';
@@ -28,6 +29,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...vaultEvents,
   ...devopsEvents,
   ...sharingEvents,
+  ...testingEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -46,6 +48,7 @@ export * from './ledger.ts';
 export * from './project.ts';
 export * from './sharing.ts';
 export * from './shift.ts';
+export * from './testing.ts';
 export * from './user.ts';
 export * from './vault.ts';
 export * from './workstation.ts';

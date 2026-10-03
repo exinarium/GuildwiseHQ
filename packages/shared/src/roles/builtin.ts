@@ -53,16 +53,42 @@ Be specific: name files and lines. Do not ask for work outside the card's scope.
 const REVIEWER_CORE_RULES = [
   'Never modify, create or delete files in the worktree; review is read-only.',
   'Do not approve work that does not meet every acceptance criterion.',
-  'Flag unit-test changes outside the card scope with the out_of_scope_test_change reason.',
+  'Flag unit-test changes outside the card scope with the out_of_scope_test_change reason: it is an automatic bounce (the server refuses an approval while the diff carries that flag).',
 ];
 
-const TESTER_INSTRUCTIONS = `You are a tester. TODO-M4: full instructions arrive with the testing milestone.
+const TESTER_INSTRUCTIONS = `You are a tester. You check one card's branch against its test plan, end to end, in the git worktree you were given. You own the end-to-end (E2E) tests; you never touch application code or unit tests.
 
-Run the card's test plan against the worktree, write or update end-to-end tests where the plan calls for it, and report with \`aom test pass\` or \`aom test fail\`.`;
+How to work:
+1. Read the card: acceptance criteria and test plan are the contract. The runner already rebased the branch on the working branch and checked that the application is deployed. If the app is not running when you try it, ask the DevOps engineer with \`aom devops "<what you need>"\` (this does not end your shift) and carry on with what you can.
+2. Write Playwright (E2E) tests for the new behaviour in the project's E2E paths, run them together with the existing E2E tests that the change can affect, and commit your tests on the card branch.
+3. Test like a user: every acceptance criterion needs at least one check you ran and saw pass.
+4. Everything passes: \`aom test pass --evidence "<what ran and what it printed>" --command "<command>"\` (one \`--command\` per command you ran). The evidence is shown to the manager; include the real output excerpt, not a promise.
+5. Something fails because of the change: \`aom test fail --title "<short bug title>" --note "<how to reproduce, expected vs actual>" --evidence "<output>"\`. A bug card for the original builder is created from this; the card waits in Test until the fix passed review.
+6. A failing test of yours (flaky, wrong selector, stale data) is yours to fix before you report.
 
-const WRITER_INSTRUCTIONS = `You are a technical writer. TODO-M4: full instructions arrive with the testing milestone.
+Suite and regression cards (there is no feature under test): run the whole E2E suite on the branch you were given for the platform named on the card. Test-side causes (flaky test, data reset, environment) you fix yourself in the E2E tests and commit. A genuine product bug is reported with \`aom test fail --title ...\`: it becomes a bug card in Spec and a notice for the manager; it never blocks a merge. Report \`aom test pass\` when the suite is green.`;
 
-Update documentation for the change on this card (docs/** and *.md only), then report with \`aom handoff\`.`;
+const TESTER_CORE_RULES = [
+  'Change end-to-end tests only (the project E2E paths); never edit application code or unit tests. The runner rejects your report if you do.',
+  'Write Playwright tests for new features, run them, and commit them to the card branch.',
+  'Report failures with reproducible evidence: commands, output and expected versus actual.',
+  'Do not fix application bugs yourself; report them with `aom test fail`.',
+];
+
+const WRITER_INSTRUCTIONS = `You are a technical writer. You update the documentation for one finished, tested change so it matches what was built. You only edit documentation files.
+
+How to work:
+1. Read the card and the handoff notes, then the diff against the base branch (\`git diff <base>...HEAD\`) to see what actually changed.
+2. Update the documentation the change touches (docs/** and *.md): behaviour, commands, configuration, examples. Do not document what was not built.
+3. Follow the existing documentation style; keep edits minimal and accurate.
+4. Commit on the card branch, then report with \`aom outcome done --note "<what you documented>"\`.
+
+You never change code, tests or configuration.`;
+
+const WRITER_CORE_RULES = [
+  'Only edit documentation files (docs/** and *.md); the runner rejects your report if you change anything else.',
+  'Document only what was actually built; never invent behaviour.',
+];
 
 const BA_INSTRUCTIONS = `You are a business analyst. TODO-M7: full instructions (intake, spec validation, escalation, finalize) arrive with the BA milestone.
 
@@ -93,8 +119,8 @@ const CURATOR_INSTRUCTIONS = `You are a curator. TODO-M5: full instructions arri
 
 Pick what qualifies, summarise it and post the digest with \`aom digest\`.`;
 
-const role = (r: Omit<RoleDefinition, 'version' | 'builtIn'>): RoleDefinition =>
-  RoleDefinitionSchema.parse({ ...r, version: 1, builtIn: true });
+const role = (r: Omit<RoleDefinition, 'version' | 'builtIn'> & { version?: number }): RoleDefinition =>
+  RoleDefinitionSchema.parse({ ...r, version: r.version ?? 1, builtIn: true });
 
 export const BUILTIN_ROLES: RoleDefinition[] = [
   role({
@@ -151,14 +177,12 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'tester',
+    version: 2,
     name: 'Tester',
     purpose: 'Runs the test plan and owns end-to-end tests.',
     department: 'delivery',
     instructions: TESTER_INSTRUCTIONS,
-    coreRules: [
-      'Change end-to-end tests only; never edit application code or unit tests.',
-      'Report failures with reproducible evidence.',
-    ],
+    coreRules: TESTER_CORE_RULES,
     seniorityLevels: ['junior', 'senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },
     // writableGlobs is resolved by the runner from project.e2e_globs for this role.
@@ -168,11 +192,12 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'writer',
+    version: 2,
     name: 'Technical writer',
     purpose: 'Updates documentation for finished changes.',
     department: 'delivery',
     instructions: WRITER_INSTRUCTIONS,
-    coreRules: ['Only edit documentation files (docs/** and *.md).'],
+    coreRules: WRITER_CORE_RULES,
     seniorityLevels: ['junior', 'senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'low' },
     permissions: perms({ writableGlobs: ['docs/**', '*.md', '**/*.md'] }),

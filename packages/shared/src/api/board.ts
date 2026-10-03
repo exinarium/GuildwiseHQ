@@ -17,6 +17,10 @@ export const BoardCardSchema = z.object({
   blocked: z.boolean(),
   reworkRound: z.number().int(),
   priority: z.number().int(),
+  /** M4: the open bug card this (waiting) card waits on, for the Test column's "waiting on bug" state. */
+  waitingOn: z.object({ id: z.uuid(), ref: z.string() }).nullable().optional(),
+  /** M4: suite (full E2E / regression) cards are marked on the board. */
+  origin: z.string().optional(),
 });
 export type BoardCard = z.infer<typeof BoardCardSchema>;
 

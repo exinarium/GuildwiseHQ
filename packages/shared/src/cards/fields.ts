@@ -61,6 +61,12 @@ export const CodeFieldsSchema = z.object({
   testPlan: z.string().optional(),
   externalRef: z.string().optional(),
   mock: MockScriptSchema.optional(),
+  /** M4 regression and full-suite cards: the platform under test. */
+  platform: z.enum(['web', 'mobile']).optional(),
+  /** M4 suite cards: the branch the suite runs on (the pushed card branch for `pr` / `push_branch`; default: the working branch). */
+  suiteBranch: z.string().optional(),
+  /** M4 mock runtime: the test environment problem a tester shift finds until DevOps fixed it. */
+  mockEnv: z.enum(['app_not_deployed', 'docker_missing']).optional(),
 });
 export type CodeFields = z.infer<typeof CodeFieldsSchema>;
 
@@ -74,6 +80,9 @@ export const CODE_FIELDS: Record<string, FieldMeta> = {
   testPlan: { label: 'Test plan', kind: 'markdown' },
   externalRef: { label: 'External reference', kind: 'text' },
   mock: { label: 'Mock script', kind: 'json' },
+  platform: { label: 'Platform', kind: 'enum' },
+  suiteBranch: { label: 'Suite branch', kind: 'text' },
+  mockEnv: { label: 'Mock test environment', kind: 'enum' },
 };
 
 // -------------------------------------------------------------- research set

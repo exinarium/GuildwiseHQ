@@ -12,6 +12,7 @@ import {
 import { CardChangesSchema } from '../events/card.ts';
 import { IsoTime } from './common.ts';
 import { ShiftDtoSchema } from './shifts.ts';
+import { CardTestingSchema } from './testing.ts';
 
 export const CardDtoSchema = z.object({
   id: z.uuid(),
@@ -112,6 +113,8 @@ export const CardDetailResponseSchema = z.object({
   diffStats: DiffStats.nullable().optional(),
   /** Open desk items blocking this card (M2). */
   blockers: z.array(z.object({ deskItemId: z.uuid(), title: z.string() })).default([]),
+  /** M4: test runs (evidence), bug child / parent links and the finalize state. */
+  testing: CardTestingSchema.optional(),
 });
 export type CardDetailResponse = z.infer<typeof CardDetailResponseSchema>;
 

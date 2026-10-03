@@ -83,6 +83,8 @@ export const TestEvidence = z.object({
   commands: z.array(z.string()).default([]),
   summary: z.string(),
   outputExcerpt: z.string().default(''),
+  /** `aom test fail --title`: the bug title (failures only). */
+  title: z.string().optional(),
 });
 export type TestEvidence = z.infer<typeof TestEvidence>;
 

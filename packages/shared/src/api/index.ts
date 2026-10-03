@@ -14,6 +14,7 @@ export * from './ledger.ts';
 export * from './members.ts';
 export * from './projects.ts';
 export * from './shifts.ts';
+export * from './testing.ts';
 export * from './threads.ts';
 export * from './vaults.ts';
 export * from './workstations.ts';
