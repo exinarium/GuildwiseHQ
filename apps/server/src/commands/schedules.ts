@@ -5,8 +5,10 @@ import {
   cardRef,
   emptyFields,
   FEED_FIELD_DEFAULTS,
+  getStage,
   type PatchScheduleRequest,
   parseCardFields,
+  RegressionPlatform,
   type ScheduleDto,
   streamId,
 } from '@aom/shared';
@@ -21,6 +23,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { specifyTarget } from './cards.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { regressionRunEvents } from './regression.ts';
 
 /** The next time `cron` fires strictly after `from`, evaluated in the IANA zone `timezone`. Null: it never fires again. */
 export function nextFireAfter(cron: string, timezone: string, from: Date): Date | null {
@@ -95,6 +98,13 @@ async function checkTemplate(tx: Queryable, project: Row, kind: string, template
   if (!wf) throw badRequest('unknown_workflow', `workflow '${project.workflow_key}' is not available`);
   if (kind === 'feed' && wf.definition.fieldSet !== 'feed')
     throw badRequest('not_a_feed_project', 'feed schedules need a project with the feed workflow');
+  if (kind === 'regression') {
+    if (!getStage(wf.definition, 'test'))
+      throw badRequest('no_test_stage', 'regression schedules need a project workflow with a test stage');
+    if (!RegressionPlatform.safeParse(template.fields.platform ?? 'web').success)
+      throw badRequest('invalid_platform', "a regression schedule's platform must be web, mobile or both");
+    return;
+  }
   const cardType = template.cardType ?? wf.definition.cardTypes[0];
   if (!cardType || !wf.definition.cardTypes.includes(cardType))
     throw badRequest(
@@ -320,6 +330,44 @@ export async function fireDueSchedules(ctx: Ctx): Promise<Array<{ scheduleId: st
           return null;
         }
         const template = s.card_template as CardTemplate;
+        if (s.kind === 'regression') {
+          // M4's regression run: one scheduled regression card per platform, queued at Test for testers.
+          const owner = await one(
+            tx,
+            `SELECT user_id FROM project_members WHERE project_id=$1 AND role='owner' AND status='active' LIMIT 1`,
+            [project.id],
+          );
+          const platform = RegressionPlatform.parse(template.fields.platform ?? 'web');
+          const run = await regressionRunEvents(tx, project, {
+            platform,
+            ownerUserId: (owner?.user_id ?? project.org_id) as string,
+            requestedBy: (owner?.user_id ?? project.org_id) as string,
+            actor: SYSTEM_ACTOR,
+            scheduled: true,
+            startedBy: `schedule "${s.name}"`,
+          });
+          await ctx.store.append(
+            [
+              ...run.events,
+              {
+                streamId: streamId.schedule(s.id),
+                event: {
+                  type: 'ScheduleFired',
+                  payload: {
+                    scheduleId: s.id,
+                    cardId: (run.cards[0] as { id: string }).id,
+                    firedFor: firedFor.toISOString(),
+                    nextFireAt: next?.toISOString() ?? null,
+                  },
+                },
+                actor: SYSTEM_ACTOR,
+                scope: projectScope(project.org_id, project.id),
+              },
+            ],
+            { tx },
+          );
+          return { scheduleId: s.id as string, cardId: (run.cards[0] as { id: string }).id };
+        }
         const card = await scheduledCard(
           tx,
           project,

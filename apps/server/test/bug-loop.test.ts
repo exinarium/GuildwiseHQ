@@ -131,4 +131,28 @@ describe('tester fail -> bug child -> resume', () => {
     expect(child).toMatchObject({ stage: 'build', status: 'queued', rework_round: 1 });
     expect((await eventsOfType('ChildCardResolved')).filter((e) => e.cardId === card.id)).toHaveLength(0);
   });
+
+  it('cancelling the bug child returns the waiting parent to the Test queue', async () => {
+    await freshState();
+    await hireTeam(w);
+    const card = await w.card({ title: 'Third' });
+    await p.toTest('Bea', ['Rex']);
+    await p.run('Tess', testFail('Cancelled bug'));
+    expect(await cardRow(card.id)).toMatchObject({ stage: 'test', status: 'waiting' });
+    const child = (await q('SELECT * FROM cards WHERE parent_card_id=$1', [card.id]))[0]!;
+    await ok(
+      w.t.req('POST', `/api/cards/${child.id}/cancel`, {
+        cookie: w.owner.cookie,
+        body: { reason: 'not a real bug' },
+      }),
+    );
+    expect(await cardRow(child.id)).toMatchObject({ status: 'cancelled' });
+    expect(await cardRow(card.id)).toMatchObject({ stage: 'test', status: 'queued', claim_id: null });
+    expect((await eventsOfType('ChildCardResolved')).filter((e) => e.cardId === card.id)).toHaveLength(1);
+    const cols = await board();
+    expect(cols.find((c: any) => c.name === 'Test').cards.map((c: any) => c.ref)).toContain(card.ref);
+    // a tester can claim the parent again
+    const { start } = await p.run('Tess', testPass());
+    expect(start.brief.card.ref).toBe(card.ref);
+  });
 });

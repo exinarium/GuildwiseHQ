@@ -29,6 +29,7 @@ import {
   transition,
   workflows,
 } from './db.ts';
+import { extraHandlers } from './handlers-extra.ts';
 
 const err = (status: number, code: string, message: string, details?: unknown) =>
   HttpResponse.json({ error: { code, message, ...(details ? { details } : {}) } }, { status });
@@ -386,6 +387,7 @@ export const handlers = [
       workflows: workflows.map((definition) => ({ id: uuid(), orgId: null, status: 'active', definition })),
     }),
   ),
+  ...extraHandlers,
 ];
 
 function unlink(id: string) {

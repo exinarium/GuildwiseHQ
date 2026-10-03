@@ -129,6 +129,38 @@ describe('supervisor', () => {
     expect(h!.server.of('shift.report').filter((r) => r.shiftId === shiftId)).toHaveLength(0);
   });
 
+  it("after a guard rejection a tester's out-of-scope leftovers are discarded, not auto-committed", async () => {
+    const seen: any = {};
+    let wt = '';
+    await start(async (i, ctl) => {
+      if (i.agent.roleKey === 'builder') {
+        writeFileSync(join(i.cwd, 'README.md'), 'base\n');
+        return;
+      }
+      wt = i.cwd;
+      mkdirSync(join(wt, 'e2e'), { recursive: true });
+      writeFileSync(join(wt, 'e2e', 'ok.spec.ts'), 'test\n'); // in scope: kept and committed
+      writeFileSync(join(wt, 'src-new.ts'), 'app code\n'); // untracked, out of scope
+      writeFileSync(join(wt, 'README.md'), 'edited by the tester\n'); // tracked, out of scope
+      seen.r = await ctl.post(
+        '/v1/report',
+        outcome('pass', 'ok', { summary: 's', commands: ['pnpm e2e'], outputExcerpt: 'ok' }),
+      );
+    });
+    await h!.runShift({ stage: 'build' });
+    const { ended } = await h!.runShift({ stage: 'test' });
+    expect(seen.r.status).toBe(422);
+    expect(seen.r.json.guardViolations[0].rule).toBe('tester_edited_non_e2e');
+    expect(ended.outcome).toBe('no_report');
+    expect(existsSync(join(wt, 'src-new.ts'))).toBe(false);
+    expect(sh(wt, 'git', ['show', 'HEAD:README.md'])).toBe('base');
+    expect(sh(wt, 'git', ['status', '--porcelain'])).toBe('');
+    const files = sh(wt, 'git', ['log', '--name-only', '--format=', '-n', '3']);
+    expect(files).toContain('e2e/ok.spec.ts');
+    expect(files).not.toContain('src-new.ts');
+    expect(sh(wt, 'cat', ['README.md'])).toBe('base');
+  });
+
   it('a server-side rejection reaches the agent, who can report again', async () => {
     let calls = 0;
     const seen: any[] = [];

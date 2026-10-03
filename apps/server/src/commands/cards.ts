@@ -348,6 +348,37 @@ export async function cancelCard(ctx: Ctx, user: AuthSession['user'], idOrRef: s
     const card = await loadManageable(tx, user, idOrRef);
     if (['done', 'cancelled'].includes(card.status))
       throw conflict('card_closed', `card is already ${card.status}`);
+    // A cancelled bug child will never pass review: the parent waiting on it goes back to the Test queue
+    // (unless another bug child of the same parent is still open).
+    const resume: AppendInput[] = [];
+    if (card.parent_card_id && card.origin === 'test_failure') {
+      const parent = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [card.parent_card_id]);
+      const open = await one(
+        tx,
+        `SELECT 1 FROM cards WHERE parent_card_id=$1 AND origin='test_failure' AND id<>$2
+            AND status NOT IN ('done','cancelled') LIMIT 1`,
+        [card.parent_card_id, card.id],
+      );
+      if (parent && parent.status === 'waiting' && !open) {
+        resume.push(
+          {
+            streamId: streamId.card(parent.id),
+            event: {
+              type: 'ChildCardResolved',
+              payload: { cardId: parent.id, childCardId: card.id, toStage: 'test' },
+            },
+            actor: userActor(user.id),
+            scope: projectScope(parent.org_id, parent.project_id),
+          },
+          cardMessage(
+            parent,
+            { kind: 'system' },
+            'system',
+            `${card.ref} (${card.title}) was cancelled: ${parent.ref} is back in the Test queue.`,
+          ),
+        );
+      }
+    }
     await ctx.store.append(
       [
         ...releaseEvents(card, user.id, 'manual'),
@@ -358,6 +389,7 @@ export async function cancelCard(ctx: Ctx, user: AuthSession['user'], idOrRef: s
           scope: projectScope(card.org_id, card.project_id),
         },
         cardMessage(card, { kind: 'system' }, 'system', `Cancelled by ${user.displayName}: ${reason}`),
+        ...resume,
       ],
       { tx },
     );

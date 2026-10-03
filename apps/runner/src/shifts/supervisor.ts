@@ -43,7 +43,7 @@ import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
 import { readVaultContext, withVaultContext } from '../vaults/context.ts';
 import { autoCommit } from './autocommit.ts';
-import { type BranchSnapshot, runGuard, snapshotBranches } from './guard.ts';
+import { type BranchSnapshot, discardOutOfScope, runGuard, snapshotBranches } from './guard.ts';
 
 type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
 type ReportResultMsg = ServerToRunnerOf<'shift.report.result'>;
@@ -438,6 +438,20 @@ export class ShiftSupervisor {
     while (s.pendingReports.size > 0) await sleep(50);
 
     if (msg.worktree && s.worktree && msg.agent.permissions.mayCommit) {
+      // A guard rejection leaves the agent's out-of-scope edits in the worktree: discard them, never commit them.
+      if (s.startSha) {
+        const dropped = await discardOutOfScope({
+          worktree: s.worktree.path,
+          roleKey: msg.agent.roleKey,
+          permissions: msg.agent.permissions,
+          branchName: s.worktree.branchName,
+          startSha: s.startSha,
+          branchesAtStart: s.branchesAtStart,
+          e2eGlobs: msg.brief.project.e2eGlobs,
+        });
+        if (dropped.length > 0)
+          this.log.warn(`discarded out-of-scope changes of shift ${msg.shiftId}: ${dropped.join(', ')}`);
+      }
       await autoCommit({
         worktree: s.worktree.path,
         ref: msg.brief.card.ref,

@@ -56,6 +56,40 @@ export async function changedPaths(worktree: string, startSha: string): Promise<
   return [...out];
 }
 
+/**
+ * Paths a path-scoped role (tester: E2E globs, writer: documentation globs) changed outside its scope; empty for other
+ * roles. The guard rejects these, and the runner discards them instead of auto-committing them.
+ */
+export function outOfScope(input: GuardInput, changed: string[]): string[] {
+  if (input.roleKey === 'tester') {
+    const isE2e = picomatch(input.e2eGlobs.length ? input.e2eGlobs : ['!**'], { dot: true });
+    return changed.filter((p) => !isE2e(p));
+  }
+  if (input.roleKey === 'writer' && input.permissions.writableGlobs?.length) {
+    const isDoc = picomatch(input.permissions.writableGlobs, { dot: true });
+    return changed.filter((p) => !isDoc(p));
+  }
+  return [];
+}
+
+/**
+ * Throws away out-of-scope changes (uncommitted edits, untracked files and out-of-scope edits already committed since
+ * `startSha`) so that the shift-end autocommit never commits them. Returns the discarded paths.
+ */
+export async function discardOutOfScope(input: GuardInput): Promise<string[]> {
+  const bad = outOfScope(input, await changedPaths(input.worktree, input.startSha));
+  for (const p of bad) {
+    const atStart = await git(input.worktree, ['cat-file', '-e', `${input.startSha}:${p}`]);
+    if (atStart.exitCode === 0) {
+      await git(input.worktree, ['checkout', input.startSha, '--', p]);
+    } else {
+      await git(input.worktree, ['rm', '-rf', '--cached', '--ignore-unmatch', '--', p]);
+      await git(input.worktree, ['clean', '-fdq', '--', p]);
+    }
+  }
+  return bad;
+}
+
 /** Post-shift guard (docs/ARCHITECTURE.md section 13.7). Returns the violations; empty means the report may go ahead. */
 export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
   const violations: GuardViolation[] = [];
@@ -70,8 +104,7 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
   }
 
   if (input.roleKey === 'tester') {
-    const isE2e = picomatch(input.e2eGlobs.length ? input.e2eGlobs : ['!**'], { dot: true });
-    const bad = changed.filter((p) => !isE2e(p));
+    const bad = outOfScope(input, changed);
     if (bad.length > 0) {
       violations.push({
         rule: 'tester_edited_non_e2e',
@@ -82,8 +115,7 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
 
   // Writers change documentation only (their role's writable globs).
   if (input.roleKey === 'writer' && input.permissions.writableGlobs?.length) {
-    const isDoc = picomatch(input.permissions.writableGlobs, { dot: true });
-    const bad = changed.filter((p) => !isDoc(p));
+    const bad = outOfScope(input, changed);
     if (bad.length > 0) {
       violations.push({
         rule: 'writer_edited_non_docs',
