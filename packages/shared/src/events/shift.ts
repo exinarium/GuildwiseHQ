@@ -32,6 +32,16 @@ export const shiftEvents = [
       model: z.string(),
       overflow: z.boolean().default(false),
       runtimeSessionId: z.string().optional(),
+      /** Additive: set from the runner's `shift.started`; the server learns the worktree path here. */
+      worktree: z
+        .object({
+          path: z.string(),
+          branchName: z.string(),
+          baseBranch: z.string(),
+          created: z.boolean(),
+          headSha: z.string(),
+        })
+        .optional(),
     }),
   ),
   defineEvent(

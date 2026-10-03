@@ -1,0 +1,369 @@
+import type { EventOf, EventType } from '@aom/shared';
+import { exec, one } from '../db/sql.ts';
+import type { Tx } from '../db/tx.ts';
+import type { Projector, StoredEvent } from '../eventstore/types.ts';
+import { getCard, leaseExpiry, mutateCard, recordTransition } from './util.ts';
+
+const ev = <T extends EventType>(e: StoredEvent): EventOf<T> => e.event as EventOf<T>;
+
+const CARD_CHANGE_COLUMNS: Record<string, string> = {
+  title: 'title',
+  fields: 'fields',
+  priority: 'priority',
+  repoId: 'repo_id',
+  docsNeeded: 'docs_needed',
+  completionAction: 'completion_action',
+  riskTier: 'risk_tier',
+  riskTierOverridden: 'risk_tier_overridden',
+  ownerUserId: 'owner_user_id',
+};
+
+/** Moves a card to a stage and queue state (the shape most outcome events share). */
+async function moveTo(
+  tx: Tx,
+  e: StoredEvent,
+  cardId: string,
+  toStage: string,
+  extra = '',
+  extraParams: unknown[] = [],
+) {
+  const params = [cardId, toStage, e.createdAt, ...extraParams];
+  await mutateCard(tx, e, cardId, () =>
+    exec(
+      tx,
+      `UPDATE cards SET stage=$2, status='queued', queued_at=$3, updated_at=$3 ${extra ? `, ${extra}` : ''} WHERE id=$1`,
+      params,
+    ),
+  );
+}
+
+const DISTINCT_EXCLUDED = `ARRAY(SELECT DISTINCT x FROM unnest(ARRAY[original_builder_agent_id, last_agent_id]) AS x WHERE x IS NOT NULL)`;
+
+export const cardProjectors: Record<string, Projector> = {
+  CardCreated: async (tx, e) => {
+    const p = ev<'CardCreated'>(e).payload;
+    const proj = await one<{ org_id: string }>(tx, 'SELECT org_id FROM projects WHERE id=$1', [p.projectId]);
+    await exec(
+      tx,
+      `INSERT INTO cards (id, org_id, project_id, number, ref, title, card_type, workflow_version_id, stage, status, fields,
+         owner_user_id, risk_tier, docs_needed, completion_action, repo_id, parent_card_id, origin, scheduled,
+         schedule_id, priority, required_capabilities, worktree_card_id, queued_at, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$25)`,
+      [
+        p.cardId,
+        proj?.org_id,
+        p.projectId,
+        p.number,
+        p.ref,
+        p.title,
+        p.cardType,
+        p.workflowVersionId,
+        p.stage,
+        p.status,
+        JSON.stringify(p.fields),
+        p.ownerUserId,
+        p.riskTier ?? null,
+        p.docsNeeded,
+        p.completionAction ?? null,
+        p.repoId ?? null,
+        p.parentCardId ?? null,
+        p.origin,
+        p.scheduled,
+        p.scheduleId ?? null,
+        p.priority,
+        p.requiredCapabilities,
+        p.worktreeCardId ?? null,
+        p.status === 'queued' ? e.createdAt : null,
+        e.createdAt,
+      ],
+    );
+    for (const dep of p.dependencies) {
+      await exec(tx, 'INSERT INTO card_dependencies (card_id, depends_on_card_id) VALUES ($1,$2)', [
+        p.cardId,
+        dep,
+      ]);
+    }
+    await exec(tx, 'UPDATE projects SET next_card_number = GREATEST(next_card_number, $2) WHERE id=$1', [
+      p.projectId,
+      p.number + 1,
+    ]);
+    await recordTransition(tx, undefined, await getCard(tx, p.cardId), e, {
+      userId: p.ownerUserId,
+      agentId: null,
+    });
+  },
+
+  CardUpdated: async (tx, e) => {
+    const p = ev<'CardUpdated'>(e).payload;
+    const sets: string[] = [];
+    const params: unknown[] = [p.cardId, e.createdAt];
+    for (const [k, v] of Object.entries(p.changes)) {
+      const col = CARD_CHANGE_COLUMNS[k];
+      if (!col || v === undefined) continue;
+      params.push(k === 'fields' ? JSON.stringify(v) : v);
+      sets.push(`${col} = $${params.length}`);
+    }
+    await exec(tx, `UPDATE cards SET ${[...sets, 'updated_at = $2'].join(', ')} WHERE id=$1`, params);
+    if (p.changes.dependencies) {
+      await exec(tx, 'DELETE FROM card_dependencies WHERE card_id=$1', [p.cardId]);
+      for (const dep of p.changes.dependencies) {
+        await exec(tx, 'INSERT INTO card_dependencies (card_id, depends_on_card_id) VALUES ($1,$2)', [
+          p.cardId,
+          dep,
+        ]);
+      }
+    }
+  },
+
+  CardSpecified: async (tx, e) => {
+    const p = ev<'CardSpecified'>(e).payload;
+    await moveTo(tx, e, p.cardId, p.toStage);
+  },
+
+  DecisionPolicyChanged: async (tx, e) => {
+    const p = ev<'DecisionPolicyChanged'>(e).payload;
+    await exec(tx, 'UPDATE cards SET decision_policy=$2, updated_at=$3 WHERE id=$1', [
+      p.cardId,
+      p.policy,
+      e.createdAt,
+    ]);
+  },
+
+  CardClaimed: async (tx, e) => {
+    const p = ev<'CardClaimed'>(e).payload;
+    const role = await one<{ claim_role: string | null }>(
+      tx,
+      `SELECT st.claim_role FROM cards c JOIN workflow_stages st
+         ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = $2 WHERE c.id=$1`,
+      [p.cardId, p.stage],
+    );
+    // The claim SQL already set these columns (idempotent here); the transition is recorded from the
+    // queued state explicitly so live handling and replay agree.
+    await exec(
+      tx,
+      `UPDATE cards SET claim_id=$2, claimed_by_agent_id=$3, claim_workstation_id=$4, claim_shift_id=$5,
+              claimed_at=$6, lease_expires_at=$7, claim_overflow=$8, status='claimed', last_agent_id=$3,
+              original_builder_agent_id = CASE WHEN $9 AND original_builder_agent_id IS NULL THEN $3 ELSE original_builder_agent_id END,
+              updated_at=$6
+        WHERE id=$1`,
+      [
+        p.cardId,
+        p.claimId,
+        p.agentId,
+        p.workstationId,
+        p.shiftId,
+        e.createdAt,
+        leaseExpiry(e.createdAt),
+        p.overflow,
+        role?.claim_role === 'builder',
+      ],
+    );
+    await recordTransition(
+      tx,
+      { id: p.cardId, stage: p.stage, status: 'queued' },
+      await getCard(tx, p.cardId),
+      e,
+      {
+        agentId: p.agentId,
+      },
+    );
+    if (p.worktree) {
+      await exec(
+        tx,
+        `UPDATE cards SET base_branch = $2, branch_name = COALESCE(branch_name, $3),
+                worktree_path = COALESCE(NULLIF($4, ''), worktree_path),
+                home_workstation_id = COALESCE(home_workstation_id, $5),
+                repo_id = COALESCE(repo_id, $6)
+          WHERE id=$1`,
+        [
+          p.cardId,
+          p.worktree.baseBranch,
+          p.worktree.branchName,
+          p.worktree.worktreePath,
+          p.worktree.homeWorkstationId,
+          p.worktree.repoId,
+        ],
+      );
+    }
+  },
+
+  ClaimReleased: async (tx, e) => {
+    const p = ev<'ClaimReleased'>(e).payload;
+    await mutateCard(
+      tx,
+      e,
+      p.cardId,
+      () =>
+        exec(
+          tx,
+          `UPDATE cards SET claim_id=NULL, claimed_by_agent_id=NULL, claim_workstation_id=NULL, claim_shift_id=NULL,
+                  claimed_at=NULL, lease_expires_at=NULL, claim_overflow=false,
+                  queued_at = CASE WHEN status='claimed' THEN $3::timestamptz ELSE queued_at END,
+                  status = CASE WHEN status='claimed' THEN 'queued' ELSE status END,
+                  home_workstation_id = CASE WHEN $4 = 'workstation_unlinked' THEN NULL ELSE home_workstation_id END,
+                  worktree_path = CASE WHEN $4 = 'workstation_unlinked' THEN NULL ELSE worktree_path END,
+                  updated_at=$3
+            WHERE id=$1 AND claim_id=$2`,
+          [p.cardId, p.claimId, e.createdAt, p.reason],
+        ),
+      { agentId: p.agentId },
+    );
+  },
+
+  HandoffWritten: async (tx, e) => {
+    const p = ev<'HandoffWritten'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO card_handoffs (id, card_id, shift_id, agent_id, stage, outcome, note, data, event_seq, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [
+        p.handoffId,
+        p.cardId,
+        p.shiftId,
+        p.agentId,
+        p.stage,
+        p.outcome,
+        p.note,
+        JSON.stringify(p.data),
+        e.seq.toString(),
+        e.createdAt,
+      ],
+    );
+  },
+
+  ReviewRequested: async (tx, e) => {
+    const p = ev<'ReviewRequested'>(e).payload;
+    await moveTo(
+      tx,
+      e,
+      p.cardId,
+      p.toStage,
+      `risk_tier = CASE WHEN risk_tier_overridden THEN risk_tier ELSE $4 END, review_approvals = 0,
+       excluded_agent_ids = ${DISTINCT_EXCLUDED}`,
+      [p.riskTier],
+    );
+  },
+
+  ChangesRequested: async (tx, e) => {
+    const p = ev<'ChangesRequested'>(e).payload;
+    await moveTo(
+      tx,
+      e,
+      p.cardId,
+      p.toStage,
+      `rework_round = rework_round + 1, excluded_agent_ids = '{}', review_approvals = 0`,
+    );
+  },
+
+  ReviewApproved: async (tx, e) => {
+    const p = ev<'ReviewApproved'>(e).payload;
+    if (p.toStage === 'review') {
+      await mutateCard(tx, e, p.cardId, () =>
+        exec(
+          tx,
+          `UPDATE cards SET status='queued', queued_at=$3, review_approvals = review_approvals + 1,
+                  excluded_agent_ids = excluded_agent_ids || $2::uuid, updated_at=$3 WHERE id=$1`,
+          [p.cardId, p.reviewerAgentId, e.createdAt],
+        ),
+      );
+    } else {
+      await moveTo(tx, e, p.cardId, 'test', `excluded_agent_ids = '{}'`);
+    }
+  },
+
+  TestPassed: async (tx, e) => {
+    const p = ev<'TestPassed'>(e).payload;
+    await moveTo(tx, e, p.cardId, p.toStage, `excluded_agent_ids = '{}'`);
+  },
+
+  TestFailed: async (tx, e) => {
+    const p = ev<'TestFailed'>(e).payload;
+    await mutateCard(tx, e, p.cardId, () =>
+      exec(tx, `UPDATE cards SET status='waiting', updated_at=$2 WHERE id=$1`, [p.cardId, e.createdAt]),
+    );
+  },
+
+  ChildCardResolved: async (tx, e) => {
+    const p = ev<'ChildCardResolved'>(e).payload;
+    await moveTo(tx, e, p.cardId, p.toStage);
+  },
+
+  RebaseConflict: async (tx, e) => {
+    const p = ev<'RebaseConflict'>(e).payload;
+    await moveTo(tx, e, p.cardId, 'build', `rework_round = rework_round + 1`);
+  },
+
+  StageCompleted: async (tx, e) => {
+    const p = ev<'StageCompleted'>(e).payload;
+    const card = await getCard(tx, p.cardId);
+    const st = card
+      ? await one<{ kind: string }>(
+          tx,
+          'SELECT kind FROM workflow_stages WHERE workflow_version_id=$1 AND stage_id=$2',
+          [card.workflow_version_id, p.toStage],
+        )
+      : undefined;
+    if (st?.kind === 'terminal') {
+      await mutateCard(tx, e, p.cardId, () =>
+        exec(tx, `UPDATE cards SET stage=$2, status='done', finalized_at=$3, updated_at=$3 WHERE id=$1`, [
+          p.cardId,
+          p.toStage,
+          e.createdAt,
+        ]),
+      );
+    } else {
+      await moveTo(tx, e, p.cardId, p.toStage, `excluded_agent_ids = '{}'`);
+    }
+  },
+
+  CardMovedByManager: async (tx, e) => {
+    const p = ev<'CardMovedByManager'>(e).payload;
+    await mutateCard(
+      tx,
+      e,
+      p.cardId,
+      () =>
+        exec(
+          tx,
+          `UPDATE cards SET stage=$2, status=$3, queued_at = CASE WHEN $3 = 'queued' THEN $4::timestamptz ELSE queued_at END,
+                  excluded_agent_ids='{}', review_approvals=0, updated_at=$4 WHERE id=$1`,
+          [p.cardId, p.toStage, p.status, e.createdAt],
+        ),
+      { agentId: null },
+    );
+  },
+
+  FinalizeRequested: async (tx, e) => {
+    const p = ev<'FinalizeRequested'>(e).payload;
+    await mutateCard(tx, e, p.cardId, () =>
+      exec(tx, `UPDATE cards SET status='waiting', updated_at=$2 WHERE id=$1`, [p.cardId, e.createdAt]),
+    );
+  },
+
+  CardFinalized: async (tx, e) => {
+    const p = ev<'CardFinalized'>(e).payload;
+    await mutateCard(tx, e, p.cardId, () =>
+      exec(
+        tx,
+        `UPDATE cards SET stage='done', status='done', finalized_at=$2, updated_at=$2,
+                claim_id=NULL, claimed_by_agent_id=NULL, claim_workstation_id=NULL, claim_shift_id=NULL,
+                claimed_at=NULL, lease_expires_at=NULL
+          WHERE id=$1`,
+        [p.cardId, e.createdAt],
+      ),
+    );
+  },
+
+  CardCancelled: async (tx, e) => {
+    const p = ev<'CardCancelled'>(e).payload;
+    await mutateCard(tx, e, p.cardId, () =>
+      exec(
+        tx,
+        `UPDATE cards SET status='cancelled', updated_at=$2, claim_id=NULL, claimed_by_agent_id=NULL,
+                claim_workstation_id=NULL, claim_shift_id=NULL, claimed_at=NULL, lease_expires_at=NULL
+          WHERE id=$1`,
+        [p.cardId, e.createdAt],
+      ),
+    );
+  },
+};

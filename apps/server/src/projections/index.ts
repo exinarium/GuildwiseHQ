@@ -1,0 +1,61 @@
+import type { Projector, ProjectorMap } from '../eventstore/types.ts';
+import { agentProjectors } from './agents.ts';
+import { cardProjectors } from './cards.ts';
+import { catalogueProjectors } from './catalogue.ts';
+import { projectProjectors } from './projects.ts';
+import { shiftProjectors } from './shifts.ts';
+import { threadProjectors } from './threads.ts';
+import { userProjectors } from './users.ts';
+import { workstationProjectors } from './workstations.ts';
+
+/**
+ * Registry: later domains add one import and one `...register(...)` line below (docs/PLAN.md rule 3).
+ * Projectors are deterministic functions of the event and prior projection state (use `e.createdAt`, never now()).
+ */
+const domains: Array<Record<string, Projector>> = [
+  userProjectors,
+  catalogueProjectors,
+  workstationProjectors,
+  projectProjectors,
+  agentProjectors,
+  cardProjectors,
+  shiftProjectors,
+  threadProjectors,
+];
+
+export function buildProjectors(): ProjectorMap {
+  const map: ProjectorMap = {};
+  for (const d of domains) {
+    for (const [type, fn] of Object.entries(d)) {
+      const list = map[type] ?? [];
+      list.push(fn);
+      map[type] = list;
+    }
+  }
+  return map;
+}
+
+/**
+ * Every table written by a projector; `projections:rebuild` truncates these (CASCADE) and replays all events.
+ * Operational tables that reference them are saved and restored by the rebuild (see scripts/projections-rebuild.ts).
+ */
+export const PROJECTION_TABLES = [
+  'users',
+  'invitations',
+  'workstations',
+  'projects',
+  'project_repos',
+  'project_members',
+  'workflow_versions',
+  'workflow_stages',
+  'role_definitions',
+  'role_extensions',
+  'agents',
+  'cards',
+  'card_dependencies',
+  'card_handoffs',
+  'card_transitions',
+  'shifts',
+  'threads',
+  'thread_messages',
+];

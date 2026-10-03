@@ -1,0 +1,231 @@
+import {
+  type EventOf,
+  RUNNER_TOKEN_PREFIX,
+  RunnerToServerSchema,
+  type ServerToRunnerOf,
+  streamId,
+  WS_CLOSE,
+} from '@aom/shared';
+import type { FastifyInstance } from 'fastify';
+import type { WebSocket } from 'ws';
+import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import type { Ctx } from '../context.ts';
+import { sha256Hex } from '../crypto.ts';
+import { one, rows } from '../db/sql.ts';
+import type { StoredEvent } from '../eventstore/types.ts';
+import { enqueueRunnerCommand } from './commands-queue.ts';
+import { RunnerHandlers } from './handlers.ts';
+import type { RunnerConn } from './registry.ts';
+
+const PING_MS = 15_000;
+
+type StopReason = ServerToRunnerOf<'shift.stop'>['reason'];
+
+/** `/api/runner/ws`: authentication, supersession, framing and the event-driven reactions toward runners. */
+export class RunnerGateway {
+  readonly handlers: RunnerHandlers;
+  private closing = false;
+  private unsubscribe: (() => void) | null = null;
+  private pings = new Set<NodeJS.Timeout>();
+
+  constructor(private readonly ctx: Ctx) {
+    this.handlers = new RunnerHandlers(ctx);
+  }
+
+  register(app: FastifyInstance): void {
+    app.get('/api/runner/ws', { websocket: true }, (socket, req) =>
+      this.onConnection(socket, req.headers.authorization),
+    );
+    this.unsubscribe = this.ctx.store.subscribe((e) => this.onEvent(e));
+  }
+
+  /** Sends `shift.stop` for a shift if its runner is connected. */
+  stopShift(workstationId: string, shiftId: string, reason: StopReason): boolean {
+    return this.ctx.services.runners.send(
+      workstationId,
+      'shift.stop',
+      { shiftId, reason },
+      this.ctx.clock.now(),
+    );
+  }
+
+  deliverPending(workstationId: string) {
+    return this.handlers.deliverPending(workstationId);
+  }
+
+  private onConnection(socket: WebSocket, authorization: string | undefined): void {
+    const { ctx } = this;
+    let conn: RunnerConn | null = null;
+    // Messages are processed strictly in order, after authentication.
+    let chain: Promise<unknown> = this.authenticate(socket, authorization).then((c) => {
+      conn = c;
+      return c;
+    });
+    let ping: NodeJS.Timeout | undefined;
+
+    socket.on('message', (data) => {
+      chain = chain.then(async () => {
+        const c = conn as RunnerConn | null;
+        if (!c) return;
+        let json: unknown;
+        try {
+          json = JSON.parse(data.toString());
+        } catch {
+          return;
+        }
+        const parsed = RunnerToServerSchema.safeParse(json);
+        if (!parsed.success) {
+          ctx.log.warn({ issues: parsed.error.issues.slice(0, 3) }, 'invalid runner message');
+          return;
+        }
+        try {
+          await this.handlers.handle(c, parsed.data);
+        } catch (err) {
+          ctx.log.error({ err, type: parsed.data.type }, 'runner message handler failed');
+        }
+      });
+    });
+
+    socket.on('close', () => {
+      if (ping) {
+        clearInterval(ping);
+        this.pings.delete(ping);
+      }
+      chain = chain.then(async () => {
+        const c = conn as RunnerConn | null;
+        if (!c || this.closing) return;
+        if (!ctx.services.runners.remove(c)) return; // superseded
+        try {
+          await ctx.store.append([
+            {
+              streamId: streamId.workstation(c.workstationId),
+              event: { type: 'WorkstationDisconnected', payload: { workstationId: c.workstationId } },
+              actor: SYSTEM_ACTOR,
+              scope: orgScope(c.userId),
+            },
+          ]);
+        } catch (err) {
+          ctx.log.error({ err }, 'failed to record disconnect');
+        }
+      });
+    });
+    socket.on('error', (err) => ctx.log.debug({ err }, 'runner socket error'));
+
+    ping = setInterval(() => {
+      if (socket.readyState === 1) socket.ping();
+    }, PING_MS);
+    ping.unref();
+    this.pings.add(ping);
+  }
+
+  private async authenticate(
+    socket: WebSocket,
+    authorization: string | undefined,
+  ): Promise<RunnerConn | null> {
+    const { ctx } = this;
+    const token = /^Bearer\s+(\S+)$/i.exec(authorization ?? '')?.[1];
+    if (!token || !token.startsWith(RUNNER_TOKEN_PREFIX)) {
+      socket.close(WS_CLOSE.unauthorized, 'unauthorized');
+      return null;
+    }
+    const ws = await one(ctx.pool, 'SELECT id, user_id, status FROM workstations WHERE token_hash=$1', [
+      sha256Hex(token),
+    ]);
+    if (!ws) {
+      socket.close(WS_CLOSE.unauthorized, 'unauthorized');
+      return null;
+    }
+    if (ws.status !== 'active') {
+      socket.close(WS_CLOSE.forbidden, 'workstation unlinked');
+      return null;
+    }
+    const conn: RunnerConn = {
+      socket,
+      workstationId: ws.id,
+      userId: ws.user_id,
+      connectedAt: ctx.clock.now(),
+      helloAt: null,
+      reconciled: false,
+      helloShiftIds: [],
+      lastRepos: [],
+      missing: new Map(),
+      stopSentAt: new Map(),
+    };
+    const old = ctx.services.runners.set(conn);
+    if (old) {
+      try {
+        old.socket.close(WS_CLOSE.superseded, 'superseded');
+      } catch {
+        // already closed
+      }
+    }
+    if (socket.readyState !== 1) ctx.services.runners.remove(conn);
+    return conn;
+  }
+
+  // ----------------------------------------------------------------- event-driven reactions
+
+  private async onEvent(e: StoredEvent): Promise<void> {
+    const { ctx } = this;
+    switch (e.event.type) {
+      case 'WorkstationUnlinked': {
+        const p = (e.event as EventOf<'WorkstationUnlinked'>).payload;
+        ctx.services.runners.close(p.workstationId, WS_CLOSE.forbidden, 'workstation unlinked');
+        return;
+      }
+      case 'ClaimReleased': {
+        const p = (e.event as EventOf<'ClaimReleased'>).payload;
+        let reason: StopReason | null = null;
+        if (p.reason === 'agent_retired') reason = 'agent_retired';
+        else if (p.reason === 'manual') {
+          const card = await one(ctx.pool, 'SELECT status FROM cards WHERE id=$1', [p.cardId]);
+          reason = card?.status === 'cancelled' ? 'card_cancelled' : 'manager';
+        }
+        if (!reason) return;
+        const open = await rows(
+          ctx.pool,
+          `SELECT id, workstation_id FROM shifts WHERE card_id=$1 AND agent_id=$2 AND status <> 'ended'`,
+          [p.cardId, p.agentId],
+        );
+        for (const s of open) this.stopShift(s.workstation_id, s.id, reason);
+        return;
+      }
+      case 'AgentRetired': {
+        const p = (e.event as EventOf<'AgentRetired'>).payload;
+        const a = await one(ctx.pool, 'SELECT workstation_id FROM agents WHERE id=$1', [p.agentId]);
+        if (a?.workstation_id) await this.deliverPending(a.workstation_id);
+        return;
+      }
+      case 'ProjectRepoAdded':
+      case 'ProjectRepoRemoved': {
+        const projectId = (e.event.payload as { projectId: string }).projectId;
+        const members = await rows<{ user_id: string }>(
+          ctx.pool,
+          `SELECT user_id FROM project_members WHERE project_id=$1 AND status='active'`,
+          [projectId],
+        );
+        for (const conn of ctx.services.runners.all()) {
+          if (!members.some((m) => m.user_id === conn.userId)) continue;
+          await this.handlers.matchRepos(conn);
+          await enqueueRunnerCommand(ctx.pool, conn.workstationId, 'repos.rescan', {});
+          await this.deliverPending(conn.workstationId);
+        }
+        return;
+      }
+      default:
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.closing = true;
+    this.unsubscribe?.();
+    for (const p of this.pings) clearInterval(p);
+    for (const c of this.ctx.services.runners.all()) {
+      try {
+        c.socket.close(1001, 'server shutting down');
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
