@@ -20,12 +20,9 @@ export function useMetrics(projectId?: string, days = 30) {
   return useQuery({
     queryKey: ['metrics', projectId ?? 'all', days],
     queryFn: () => {
-      const to = new Date();
-      const from = new Date(to.getTime() - days * 86_400_000);
-      return get(
-        `/metrics${qs({ projectId, from: from.toISOString(), to: to.toISOString() })}`,
-        MetricsResponseSchema,
-      );
+      // No `to`: the range ends at the server's now (its clock may differ from the browser's).
+      const from = new Date(Date.now() - (days + 1) * 86_400_000);
+      return get(`/metrics${qs({ projectId, from: from.toISOString() })}`, MetricsResponseSchema);
     },
   });
 }
