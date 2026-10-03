@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAddRepo, usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
+import { MembersPanel } from '../components/MembersPanel.tsx';
 import {
   Badge,
   Button,
@@ -170,16 +171,7 @@ export function ProjectSettings() {
           </Button>
         </form>
       </Panel>
-      <Panel>
-        <h2 className="mb-2 text-sm font-semibold">Members</h2>
-        <ul className="text-sm">
-          {members.map((m) => (
-            <li key={m.userId}>
-              {m.displayName} <span className="text-zinc-500">({m.email})</span> <Badge>{m.role}</Badge>
-            </li>
-          ))}
-        </ul>
-      </Panel>
+      <MembersPanel projectId={id} members={members} isOwner={project?.myRole === 'owner'} />
     </div>
   );
 }

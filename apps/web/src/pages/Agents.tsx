@@ -2,6 +2,9 @@ import type { AgentDto } from '@aom/shared';
 import { type FormEvent, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useAgents, useFire, useHire, useNameSuggestions, useRoles } from '../api/queries/agents.ts';
+import { useMe } from '../api/queries/auth.ts';
+import { useResetAgent } from '../api/queries/devops.ts';
+import { useRehomeAgent } from '../api/queries/members.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
 import {
@@ -25,9 +28,19 @@ export function Agents() {
   const workstations = useWorkstations();
   const [hireOpen, setHireOpen] = useState(false);
   const [firing, setFiring] = useState<AgentDto | null>(null);
+  const [rehoming, setRehoming] = useState<AgentDto | null>(null);
+  const [projectFilter, setProjectFilter] = useState('');
+  const me = useMe();
+  const projects = useProjects();
+  const reset = useResetAgent();
+  const myId = me.data?.user.id;
+  /** The org owner may change and fire any agent; a member only the ones they hired themselves. */
+  const canManage = (a: AgentDto) => !!myId && (myId === a.orgId || myId === a.managerUserId);
   const roleName = (k: string) => roles.data?.find((r) => r.definition.key === k)?.definition.name ?? k;
   const stationName = (id: string | null) => workstations.data?.find((w) => w.id === id)?.name ?? '';
-  const active = agents.data?.filter((a) => a.status !== 'retired') ?? [];
+  const inFilter = (a: AgentDto) =>
+    !projectFilter || a.projectId === projectFilter || (a.projectId === null && !a.isDevops);
+  const active = agents.data?.filter((a) => a.status !== 'retired' && inFilter(a)) ?? [];
   const retired = agents.data?.filter((a) => a.status === 'retired') ?? [];
 
   return (
@@ -40,8 +53,21 @@ export function Agents() {
           </Button>
         }
       />
+      {(projects.data?.length ?? 0) > 1 && (
+        <div className="mb-3 max-w-xs">
+          <Select label="Project" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+            <option value="">All projects</option>
+            {projects.data?.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.key} {p.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
       {agents.isPending && <Spinner />}
       {agents.isError && <ErrorBox error={agents.error} />}
+      <ErrorBox error={reset.error} />
       {agents.data && active.length === 0 && (
         <Panel>
           <p className="text-sm text-zinc-500">No agents hired yet.</p>
@@ -49,7 +75,7 @@ export function Agents() {
       )}
       <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" data-testid="agents">
         {active.map((a) => (
-          <li key={a.id} data-testid={`agent-${a.name}`}>
+          <li key={a.id} data-testid={`agent-${a.name}`} data-editable={canManage(a) ? 'true' : 'false'}>
             <Panel className="flex h-full flex-col gap-2">
               <div className="flex items-center gap-2">
                 <Avatar name={a.name} size={36} />
@@ -57,6 +83,8 @@ export function Agents() {
                   <p className="truncate font-medium">{a.name}</p>
                   <p className="text-xs text-zinc-500">
                     {roleName(a.roleKey)} · {a.seniority}
+                    {a.projectId &&
+                      ` · ${projects.data?.find((p) => p.id === a.projectId)?.key ?? 'shared project'}`}
                   </p>
                 </div>
                 <span className="ml-auto">
@@ -83,14 +111,36 @@ export function Agents() {
                       </Link>
                     ))}
               </p>
-              <Button
-                variant="ghost"
-                className="mt-auto self-start"
-                aria-label={`Fire ${a.name}`}
-                onClick={() => setFiring(a)}
-              >
-                Fire
-              </Button>
+              {a.isDevops ? (
+                <div className="mt-auto flex items-center gap-2">
+                  <Badge tone="violet">DevOps engineer</Badge>
+                  {canManage(a) && (
+                    <Button
+                      variant="ghost"
+                      aria-label={`Reset ${a.name}`}
+                      disabled={reset.isPending}
+                      onClick={() => reset.mutate(a.id)}
+                    >
+                      Reset
+                    </Button>
+                  )}
+                </div>
+              ) : canManage(a) ? (
+                <div className="mt-auto flex gap-2">
+                  {a.status === 'needs_rehome' && (
+                    <Button variant="primary" aria-label={`Re-home ${a.name}`} onClick={() => setRehoming(a)}>
+                      Re-home
+                    </Button>
+                  )}
+                  <Button variant="ghost" aria-label={`Fire ${a.name}`} onClick={() => setFiring(a)}>
+                    Fire
+                  </Button>
+                </div>
+              ) : (
+                <p className="mt-auto text-xs text-zinc-500" data-testid="agent-readonly">
+                  Hired by another manager (read only)
+                </p>
+              )}
             </Panel>
           </li>
         ))}
@@ -109,7 +159,79 @@ export function Agents() {
       )}
       <HireDialog open={hireOpen} onOpenChange={setHireOpen} agents={agents.data ?? []} />
       <FireDialog agent={firing} onClose={() => setFiring(null)} />
+      <RehomeDialog agent={rehoming} onClose={() => setRehoming(null)} />
     </div>
+  );
+}
+
+/** A removed manager's agent needs a new home: one of your own workstations and runtime. Name and history carry over. */
+function RehomeDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () => void }) {
+  const stations = useWorkstations();
+  const rehome = useRehomeAgent();
+  const active = (stations.data ?? []).filter((w) => w.status === 'active');
+  const [stationId, setStationId] = useState('');
+  const [runtime, setRuntime] = useState('');
+  const [model, setModel] = useState('');
+  const eff = stationId || active[0]?.id || '';
+  const station = active.find((w) => w.id === eff);
+  const runtimes = station?.runtimes.filter((r) => r.available).map((r) => r.id) ?? [];
+  const effRuntime = runtime && runtimes.includes(runtime) ? runtime : (runtimes[0] ?? agent?.runtime ?? '');
+  return (
+    <Dialog
+      open={!!agent}
+      onOpenChange={(o) => !o && onClose()}
+      title={`Re-home ${agent?.name ?? ''}`}
+      description="Pick one of your workstations and a runtime. The name, history and track record carry over; the old sandbox stays behind."
+    >
+      {agent && (
+        <form
+          aria-label="Re-home agent"
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!eff) return;
+            rehome.mutate(
+              {
+                agentId: agent.id,
+                workstationId: eff,
+                runtime: effRuntime,
+                model: model.trim() || agent.model,
+              },
+              { onSuccess: onClose },
+            );
+          }}
+        >
+          <Select label="Workstation" value={eff} onChange={(e) => setStationId(e.target.value)}>
+            {active.length === 0 && <option value="">No workstation paired</option>}
+            {active.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name} {w.connected ? '(connected)' : '(offline)'}
+              </option>
+            ))}
+          </Select>
+          <Select label="Runtime" value={effRuntime} onChange={(e) => setRuntime(e.target.value)}>
+            {(runtimes.length ? runtimes : [agent.runtime]).map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </Select>
+          <TextInput
+            label="Model"
+            placeholder={agent.model}
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+          />
+          <ErrorBox error={rehome.error} />
+          <div className="flex justify-end gap-2">
+            <Button onClick={onClose}>Cancel</Button>
+            <Button type="submit" variant="primary" disabled={rehome.isPending || !eff}>
+              Re-home
+            </Button>
+          </div>
+        </form>
+      )}
+    </Dialog>
   );
 }
 

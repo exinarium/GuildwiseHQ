@@ -13,7 +13,9 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
     case 'card':
       return [event.projectId ? ['board', event.projectId] : ['board'], ['card'], ['agents']];
     case 'thread':
-      return [['card']];
+      return [['card'], ['devops']];
+    case 'vault':
+      return [['vaults']];
     case 'shift':
       return [['card'], ['agents'], ['board']];
     case 'agent':
@@ -21,7 +23,7 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
     case 'workstation':
       return [['workstations'], ['admin', 'workstations'], ['agents']];
     case 'project':
-      return [['projects'], ['project'], ['board']];
+      return [['projects'], ['project'], ['board'], ['project-invitations'], ['agents']];
     case 'user':
     case 'invitation':
       return [['admin'], ['me']];

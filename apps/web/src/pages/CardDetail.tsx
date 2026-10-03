@@ -11,6 +11,7 @@ import {
   useReleaseCard,
   useSpecifyCard,
 } from '../api/queries/cards.ts';
+import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
 import { ShiftLog } from '../components/ShiftLog.tsx';
 import {
   Avatar,
@@ -83,6 +84,8 @@ export function CardDetailView({
   const { card, handoffs, transitions, thread, currentShift, permissions } = data;
   const specify = useSpecifyCard(card.id);
   const release = useReleaseCard(card.id);
+  const policy = useDecisionPolicy(card.id);
+  const rehome = useRehomeCard(card.id);
   const [dialog, setDialog] = useState<'move' | 'cancel' | null>(null);
   const missing = missingFromError(specify.error);
   const catalogue = workflow ? fieldCatalogue(workflow.fieldSet, workflow.customFields) : {};
@@ -123,6 +126,18 @@ export function CardDetailView({
                 Release
               </Button>
             )}
+            {permissions.canMove &&
+              !card.claimedByAgentName &&
+              card.status !== 'done' &&
+              card.status !== 'cancelled' && (
+                <Button
+                  disabled={rehome.isPending}
+                  title="Forget this card's workstation and worktree: the stage restarts from the base branch"
+                  onClick={() => rehome.mutate()}
+                >
+                  Re-home
+                </Button>
+              )}
             {permissions.canCancel && card.status !== 'cancelled' && card.status !== 'done' && (
               <Button variant="danger" onClick={() => setDialog('cancel')}>
                 Cancel card
@@ -137,7 +152,7 @@ export function CardDetailView({
           {missing.map((m) => (workflow ? fieldLabel(workflow, m) : m)).join(', ')}
         </p>
       )}
-      {!missing.length && <ErrorBox error={specify.error ?? release.error} />}
+      {!missing.length && <ErrorBox error={specify.error ?? release.error ?? rehome.error ?? policy.error} />}
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-3">
@@ -159,6 +174,32 @@ export function CardDetailView({
               <Meta k="Docs needed" v={card.docsNeeded ? 'yes' : 'no'} />
               {card.branchName && <Meta k="Branch" v={card.branchName} mono />}
               <Meta k="Priority" v={String(card.priority)} />
+              <div>
+                <dt className="text-xs font-medium text-zinc-500">Who answers its questions</dt>
+                <dd>
+                  {permissions.canMove ? (
+                    <select
+                      aria-label="Decision policy"
+                      data-testid="decision-policy"
+                      className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                      value={card.decisionPolicy}
+                      disabled={policy.isPending}
+                      onChange={(e) =>
+                        policy.mutate({ policy: e.target.value as 'owner_only' | 'any_manager' })
+                      }
+                    >
+                      <option value="owner_only">Only the card owner</option>
+                      <option value="any_manager">Any manager of the project</option>
+                    </select>
+                  ) : (
+                    <span data-testid="decision-policy">
+                      {card.decisionPolicy === 'any_manager'
+                        ? 'Any manager of the project'
+                        : 'Only the card owner'}
+                    </span>
+                  )}
+                </dd>
+              </div>
             </dl>
             {keys.length > 0 && (
               <dl className="mt-3 flex flex-col gap-3 border-t border-zinc-200 pt-3 text-sm dark:border-zinc-800">
