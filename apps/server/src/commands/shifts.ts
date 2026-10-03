@@ -4,12 +4,14 @@ import {
   type DiffStats,
   getOutcome,
   getStage,
+  isSuiteOrigin,
   type LedgerMatch,
   outcomeDataSchema,
   type RunnerToServerOf,
   resolveOutcome,
   type ShiftEndOutcome,
   streamId,
+  type TestEvidence,
 } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
@@ -19,6 +21,8 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { raiseQuestion } from './questions.ts';
+import { rebaseConflictEvents } from './rebase.ts';
+import { environmentNotReadyEvents, suiteOutcomeEvents, testFailedEvents } from './testing.ts';
 
 export interface WsRef {
   id: string;
@@ -208,7 +212,9 @@ export async function applyShiftReport(
   });
 
   let handoffData: Record<string, unknown> = payloadData;
-  let main: AppendInput;
+  let main: AppendInput | undefined;
+  let mains: AppendInput[] | null = null;
+  const after: AppendInput[] = [];
   switch (outcome.event) {
     case 'ReviewRequested': {
       if (resolved.toStage !== 'review')
@@ -224,6 +230,12 @@ export async function applyShiftReport(
       break;
     }
     case 'ReviewApproved': {
+      if (await outOfScopeTestChange(tx, cardId))
+        return {
+          accepted: false,
+          error:
+            'the builder changed unit tests outside the card scope (flagged on the diff): request changes with `--reason out_of_scope_test_change`; this cannot be approved',
+        };
       const tier = (card.risk_tier ?? 'small') as 'small' | 'large';
       const required = stage.approvals?.[tier] ?? 1;
       const soFar = Number(card.review_approvals) + 1;
@@ -254,7 +266,9 @@ export async function applyShiftReport(
           fromStage: 'review',
           toStage: 'build',
           reviewerAgentId: agent.id,
-          reasons: payloadData.reasons ?? [],
+          reasons: (await outOfScopeTestChange(tx, cardId))
+            ? [...new Set([...(payloadData.reasons ?? []), 'out_of_scope_test_change'])]
+            : (payloadData.reasons ?? []),
           score: payloadData.score,
           criteriaMissed: payloadData.criteriaMissed ?? [],
           comments: report.note,
@@ -262,7 +276,26 @@ export async function applyShiftReport(
       });
       break;
     }
-    case 'TestPassed': {
+    case 'TestPassed':
+    case 'TestFailed': {
+      const ev = payloadData as TestEvidence;
+      if (isSuiteOrigin(card.origin)) {
+        mains = await suiteOutcomeEvents(
+          ctx,
+          tx,
+          card,
+          ws,
+          agent.id,
+          outcome.event === 'TestPassed',
+          report.note,
+          ev,
+        );
+        break;
+      }
+      if (outcome.event === 'TestFailed') {
+        mains = await testFailedEvents(tx, card, agent.id, report.note, ev);
+        break;
+      }
       if (resolved.toStage !== 'docs' && resolved.toStage !== 'finalize') {
         return { accepted: false, error: `unsupported transition to '${resolved.toStage}'` };
       }
@@ -282,6 +315,28 @@ export async function applyShiftReport(
         type: 'StageCompleted',
         payload: { cardId, fromStage: card.stage, toStage: resolved.toStage, outcome: outcome.id },
       });
+      if (outcome.effect === 'resume_parent' && card.parent_card_id) {
+        const parent = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [card.parent_card_id]);
+        if (parent && parent.status === 'waiting') {
+          after.push({
+            streamId: streamId.card(parent.id),
+            event: {
+              type: 'ChildCardResolved',
+              payload: { cardId: parent.id, childCardId: cardId, toStage: 'test' },
+            },
+            actor,
+            scope,
+          });
+          after.push(
+            cardMessage(
+              parent,
+              { kind: 'system' },
+              'system',
+              `${card.ref} (${card.title}) passed review: ${parent.ref} is back in the Test queue.`,
+            ),
+          );
+        }
+      }
       break;
     default:
       return {
@@ -305,7 +360,7 @@ export async function applyShiftReport(
           data: handoffData,
         },
       }),
-      main,
+      ...(mains ?? (main ? [main] : [])),
       mk({
         type: 'ClaimReleased',
         payload: {
@@ -316,10 +371,21 @@ export async function applyShiftReport(
           lastHandoffId: handoffId,
         },
       }),
+      ...after,
     ],
     { tx },
   );
   return { accepted: true };
+}
+
+/** The latest build handoff's diff carries the out-of-scope unit test change flag (spec: an automatic bounce). */
+async function outOfScopeTestChange(tx: Tx, cardId: string): Promise<boolean> {
+  const h = await one(
+    tx,
+    `SELECT data FROM card_handoffs WHERE card_id=$1 AND data ? 'diffStats' ORDER BY created_at DESC, event_seq DESC LIMIT 1`,
+    [cardId],
+  );
+  return h?.data?.diffStats?.outOfScopeTestChange === true;
 }
 
 // ----------------------------------------------------------------------------- shift lifecycle
@@ -389,20 +455,11 @@ export async function applyShiftRejected(
   }
   const extra: AppendInput[] = [];
   if (msg.reason === 'rebase_conflict') {
-    extra.push({
-      streamId: streamId.card(card.id),
-      event: {
-        type: 'RebaseConflict',
-        payload: {
-          cardId: card.id,
-          stage: card.stage,
-          baseBranch: card.base_branch ?? '',
-          conflictedFiles: msg.conflictedFiles ?? [],
-        },
-      },
-      actor: runnerActor(ws.id),
-      scope: projectScope(card.org_id, card.project_id),
-    });
+    extra.push(
+      ...rebaseConflictEvents(card, ws.id, card.stage, card.base_branch ?? '', msg.conflictedFiles ?? []),
+    );
+  } else if (msg.reason === 'environment_not_ready' && msg.environment) {
+    extra.push(...(await environmentNotReadyEvents(ctx, tx, ws, card, msg.environment)));
   }
   const text = `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
   await ctx.store.append(await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra), {

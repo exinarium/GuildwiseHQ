@@ -167,7 +167,7 @@ export async function createCard(
   });
 }
 
-async function loadManageable(tx: Tx, user: AuthSession['user'], idOrRef: string) {
+export async function loadManageable(tx: Tx, user: AuthSession['user'], idOrRef: string) {
   const { card, role } = await loadVisibleCard(tx, user.id, idOrRef);
   if (!canManageCard({ userId: user.id, projectRole: role, cardOwnerUserId: card.owner_user_id })) {
     throw forbidden('only the card owner or the project owner can do this');

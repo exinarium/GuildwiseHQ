@@ -109,7 +109,11 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
       worktree = {
         repoId: repo.id,
         remoteUrlNormalized: repo.remote_url_normalized,
-        baseBranch: repo.working_branch ?? project.working_branch,
+        // Suite cards run on the branch the completion action produced (pushed card branch), else the working branch.
+        baseBranch:
+          (path === null && typeof card.fields?.suiteBranch === 'string' && card.fields.suiteBranch) ||
+          repo.working_branch ||
+          project.working_branch,
         branchName: wcard.branch_name ?? branchName(project.branch_prefix, wcard.ref, wcard.title),
         worktreePath: path ?? '',
         homeWorkstationId: wcard.home_workstation_id ?? a.workstation_id,

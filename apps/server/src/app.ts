@@ -42,6 +42,7 @@ import { ledgerRoutes } from './routes/ledger.ts';
 import { projectRoutes } from './routes/projects.ts';
 import { sharingRoutes } from './routes/sharing.ts';
 import { shiftRoutes } from './routes/shifts.ts';
+import { testingRoutes } from './routes/testing.ts';
 import { threadRoutes } from './routes/threads.ts';
 import { vaultRoutes } from './routes/vaults.ts';
 import { workstationRoutes } from './routes/workstations.ts';
@@ -189,6 +190,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(vaultRoutes(ctx));
   await app.register(devopsRoutes(ctx));
   await app.register(sharingRoutes(ctx));
+  await app.register(testingRoutes(ctx));
 
   // Gateways: runner WS (/api/runner/ws) and browser WS (/api/ws).
   const runners = new RunnerRegistry();

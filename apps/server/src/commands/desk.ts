@@ -17,6 +17,7 @@ import { canAnswerItem, DESK_VISIBLE } from '../queries/desk.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
 import { plannedVaultPath } from './decisions.ts';
 import { resolveDevOpsApprovalIn } from './devops.ts';
+import { resolveLargeMergeIn } from './finalize.ts';
 import { resolveVaultConflictIn } from './vaults.ts';
 
 const itemScope = (item: Row) =>
@@ -193,6 +194,10 @@ async function closeItem(
         note,
       );
       devops = true;
+    } else if (item.kind === 'approval' && item.subkind === 'large_merge' && resolution !== 'dismissed') {
+      if (resolution === 'acknowledged')
+        throw badRequest('wrong_resolution', 'a merge approval is approved or rejected');
+      workstationToDeliver = (await resolveLargeMergeIn(ctx, tx, user, item, resolution, note)) ?? undefined;
     } else if (
       item.kind === 'escalation' &&
       item.subkind === 'vault_conflict' &&

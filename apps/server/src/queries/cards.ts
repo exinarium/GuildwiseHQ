@@ -15,6 +15,7 @@ import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
+import { cardTesting } from './testing.ts';
 
 const COLUMN_FALLBACK = 'Other';
 
@@ -187,6 +188,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
       canComment: canCommentOnCard(role),
     },
     diffStats: lastDiff?.data?.diffStats ?? null,
+    testing: await cardTesting(ctx, card, manage),
     blockers: (
       await rows(
         ctx.pool,
@@ -205,7 +207,10 @@ export async function getBoard(ctx: Ctx, userId: string, projectId: string): Pro
   const columns = boardColumns(wf.definition as WorkflowDefinition);
   const cards = await rows(
     ctx.pool,
-    `SELECT c.*, a.name AS agent_name FROM cards c LEFT JOIN agents a ON a.id = c.claimed_by_agent_id
+    `SELECT c.*, a.name AS agent_name, wo.id AS waiting_on_id, wo.ref AS waiting_on_ref
+       FROM cards c LEFT JOIN agents a ON a.id = c.claimed_by_agent_id
+       LEFT JOIN LATERAL (SELECT ch.id, ch.ref FROM cards ch WHERE ch.parent_card_id = c.id AND ch.origin = 'test_failure'
+                             AND ch.status NOT IN ('done','cancelled') ORDER BY ch.number DESC LIMIT 1) wo ON c.status = 'waiting'
       WHERE c.project_id=$1 AND c.status <> 'cancelled' ORDER BY c.priority, c.queued_at NULLS LAST, c.number`,
     [projectId],
   );
@@ -227,6 +232,8 @@ export async function getBoard(ctx: Ctx, userId: string, projectId: string): Pro
       blocked: c.status === 'blocked',
       reworkRound: c.rework_round,
       priority: c.priority,
+      waitingOn: c.waiting_on_id ? { id: c.waiting_on_id, ref: c.waiting_on_ref } : null,
+      origin: c.origin,
     });
   }
   return {

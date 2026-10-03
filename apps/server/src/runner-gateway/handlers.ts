@@ -9,6 +9,7 @@ import {
 import type { ChatTerminal } from '../chat/relay.ts';
 import { cardMessage, orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
+import { applyFinalizeResult } from '../commands/finalize.ts';
 import {
   applyShiftEnded,
   applyShiftRejected,
@@ -111,6 +112,8 @@ export class RunnerHandlers {
           applyShiftReport(this.ctx, tx, ws, msg),
         );
         this.ack(conn, msg);
+        // A report may queue runner commands (worktree removal of a finished suite card).
+        await this.deliverPending(conn.workstationId);
         const r = result ?? { accepted: duplicate };
         this.send(conn, 'shift.report.result', {
           reportId: msg.reportId,
@@ -126,9 +129,26 @@ export class RunnerHandlers {
         return this.ack(conn, msg);
       case 'rpc.request':
         return this.rpc(conn, msg);
-      case 'command.result':
-        await completeCommand(this.ctx.pool, msg.commandId, msg.ok, msg.error, this.ctx.clock.now());
+      case 'command.result': {
+        const cmd = await one(this.ctx.pool, 'SELECT type, payload FROM runner_commands WHERE id=$1', [
+          msg.commandId,
+        ]);
+        if (cmd?.type === 'finalize.execute') {
+          // Terminal: the outcome (finalized, conflict or failure) is recorded on the card, never retried blindly.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyFinalizeResult(
+            this.ctx,
+            conn.workstationId,
+            cmd.payload.cardId,
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
+        } else {
+          await completeCommand(this.ctx.pool, msg.commandId, msg.ok, msg.error, this.ctx.clock.now());
+        }
         return this.ack(conn, msg);
+      }
       case 'chat.delta':
         return this.ctx.services.chat.onDelta(conn.workstationId, msg);
       case 'chat.done':
