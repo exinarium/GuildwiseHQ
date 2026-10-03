@@ -82,7 +82,7 @@ describe('tester bottleneck alert', () => {
     expect(await cardRow(a.id)).toBeTruthy();
   });
 
-  it('does not alert while a tester is free, and recommends a hire when none exists', async () => {
+  it('does not alert while a tester is free, or when the project has no tester pool at all', async () => {
     await freshState();
     await q(`DELETE FROM desk_items WHERE subkind='tester_bottleneck'`);
     await w.hire('Bea', 'builder', 'junior');
@@ -91,8 +91,6 @@ describe('tester bottleneck alert', () => {
     await p.toTest('Bea', ['Rex']);
     await age(card.id, 10);
     await w.t.app.ctx.services.dispatcher.runPass();
-    const items = await desk();
-    expect(items).toHaveLength(1);
-    expect(items[0].body).toMatch(/No tester is hired/);
+    expect(await desk()).toHaveLength(0);
   });
 });

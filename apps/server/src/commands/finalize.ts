@@ -288,6 +288,8 @@ export async function applyFinalizeResult(
           context: `Run the full E2E suite on ${branch} after ${card.ref} was finalized (${action}).`,
           platform: 'web',
           suiteBranch: branch,
+          // Mock runtime only: the parent's `mock.suite` script drives the suite card's tester shift.
+          ...(card.fields?.mock?.suite ? { mock: { test: card.fields.mock.suite } } : {}),
         },
       });
       events.push(suite.event, {

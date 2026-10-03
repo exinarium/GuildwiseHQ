@@ -36,3 +36,6 @@ export const paths = {
   serverLog: join(E2E_DIR, 'server.log'),
   runnerLog: join(E2E_DIR, 'runner.out.log'),
 };
+
+/** M4: the user of the tester / bug loop specs (own runner, own project TST). */
+export const TESTER = { email: 'tester@e2e.test', name: 'E2E Tester', password: 'tester-password-12345' };

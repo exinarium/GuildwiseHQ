@@ -69,9 +69,14 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   await recreateDb();
   makeToyRepo();
   await Promise.all(
-    ['member@e2e.test', 'other@e2e.test', 'devops@e2e.test', 'sharer@e2e.test', 'guest@e2e.test'].map(
-      deleteMailFor,
-    ),
+    [
+      'member@e2e.test',
+      'other@e2e.test',
+      'devops@e2e.test',
+      'sharer@e2e.test',
+      'guest@e2e.test',
+      'tester@e2e.test',
+    ].map(deleteMailFor),
   );
 
   const env = {

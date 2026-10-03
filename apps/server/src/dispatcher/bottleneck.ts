@@ -54,7 +54,7 @@ export async function unparkPass(ctx: Ctx): Promise<number> {
 
 /**
  * E2E work waiting longer than 5 minutes while every tester is busy: one pinned desk alert per project with a
- * hire recommendation. Resolved automatically once the tester queue of the project drained.
+ * hire recommendation (only when testers exist). Resolved automatically once the tester queue of the project drained.
  */
 export async function testerBottleneckCheck(ctx: Ctx): Promise<void> {
   const now = ctx.clock.now();
@@ -123,6 +123,8 @@ export async function testerBottleneckCheck(ctx: Ctx): Promise<void> {
           AND (a.project_id = $1 OR (a.project_id IS NULL AND a.org_id = $2))`,
       [projectId, first.org_id, onlineSince],
     );
+    // Spec: "all testers are busy". A project that never hired a tester has no tester pool to be a bottleneck of.
+    if (testers.length === 0) continue;
     const free = testers.some((t) => t.online && Number(t.active) < Number(t.capacity));
     if (free) continue;
     const busy = testers.filter((t) => Number(t.active) >= Number(t.capacity)).map((t) => t.id as string);
@@ -153,9 +155,7 @@ export async function testerBottleneckCheck(ctx: Ctx): Promise<void> {
             kind: 'alert',
             subkind: DESK_SUBKIND.testerBottleneck,
             title: `${overdue.length} card${overdue.length === 1 ? '' : 's'} waiting for a tester for over ${TESTER_BOTTLENECK_MINUTES} minutes`,
-            body: testers.length
-              ? `All ${testers.length} tester${testers.length === 1 ? ' is' : 's are'} busy or offline. Hiring one more tester clears the E2E queue sooner.`
-              : 'No tester is hired for this project. Hire one so E2E work can start.',
+            body: `All ${testers.length} tester${testers.length === 1 ? ' is' : 's are'} busy or offline. Hiring one more tester clears the E2E queue sooner.`,
             options: [{ id: 'hire_tester', label: 'Hire a tester' }],
             recommendation: 'hire_tester',
             blocking: false,
