@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { type ChainLevel, type DeskActor, streamId } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -98,8 +99,115 @@ export const triedAgents = (item: Row): string[] => [
   ),
 ];
 
+// ------------------------------------------------------------------------------------- duplicate questions
+
+/** Share of distinct words two questions need in common (Jaccard) to count as the same question. */
+export const DUPLICATE_SIMILARITY = 0.6;
+const MIN_SHARED_WORDS = 3;
+const STOP_WORDS = new Set(
+  'the and for are but not you your with that this from have has was were will would could should can how what which who why when where there their its into onto about our out use using used any all'.split(
+    ' ',
+  ),
+);
+const wordsOf = (text: string): Set<string> =>
+  new Set((text.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []).filter((w) => !STOP_WORDS.has(w)));
+
+/** Word-set similarity of two questions, 0..1. */
+export function questionSimilarity(a: string, b: string): number {
+  const x = wordsOf(a);
+  const y = wordsOf(b);
+  let shared = 0;
+  for (const w of x) if (y.has(w)) shared++;
+  if (shared < MIN_SHARED_WORDS) return 0;
+  return shared / (x.size + y.size - shared);
+}
+
+/**
+ * The open question of the same project that `text` duplicates (high word similarity), preferring one that is already
+ * on the manager's desk. Mapping questions of an intake never merge.
+ */
+export async function findOpenDuplicate(
+  db: Queryable,
+  q: { orgId: string; projectId: string | null; text: string; excludeId?: string },
+): Promise<{ id: string; title: string } | undefined> {
+  const open = await rows(
+    db,
+    `SELECT id, title, routed_to FROM desk_items
+      WHERE org_id=$1 AND kind='question' AND status='open' AND subkind IS DISTINCT FROM 'unmapped_ticket'
+        AND project_id IS NOT DISTINCT FROM $2 AND ($3::uuid IS NULL OR id <> $3) ORDER BY created_at, id`,
+    [q.orgId, q.projectId, q.excludeId ?? null],
+  );
+  let best: { id: string; title: string; score: number } | undefined;
+  for (const o of open) {
+    const sim = questionSimilarity(q.text, o.title);
+    if (sim < DUPLICATE_SIMILARITY) continue;
+    const score = sim + (o.routed_to === 'manager' ? 1 : 0);
+    if (!best || score > best.score) best = { id: o.id, title: o.title, score };
+  }
+  return best && { id: best.id, title: best.title };
+}
+
+/** Attaches the duplicate `item` (or a question being raised, `cardId`) to the open question `into`. */
+export function mergeEvents(
+  item: Row,
+  card: Row | undefined,
+  into: { id: string; title: string },
+  byAgentId: string | undefined,
+): AppendInput[] {
+  const events: AppendInput[] = [
+    {
+      streamId: streamId.desk(item.id),
+      event: {
+        type: 'QuestionMerged',
+        payload: {
+          deskItemId: item.id,
+          intoDeskItemId: into.id,
+          ...(byAgentId ? { fromAgentId: byAgentId } : {}),
+          note: 'the same question is already open',
+        },
+      },
+      actor: byAgentId ? agentActor(byAgentId) : SYSTEM_ACTOR,
+      scope: item.project_id ? projectScope(item.org_id, item.project_id) : orgScope(item.org_id),
+    },
+  ];
+  if (card)
+    events.push(
+      cardMessage(
+        card,
+        { kind: 'system' },
+        'system',
+        `The same question is already open ("${into.title}"). This card waits on that one and returns to the queue when it is answered.`,
+        { deskItemId: into.id },
+      ),
+    );
+  return events;
+}
+
+/** The answer on the thread of every other card that waited on the item (cards of merged duplicates). */
+export async function mergedAnswerNotes(
+  tx: Tx,
+  item: Row,
+  blockedCardIds: string[],
+  author: Parameters<typeof cardMessage>[1],
+  text: string,
+  meta: Record<string, unknown>,
+): Promise<AppendInput[]> {
+  const out: AppendInput[] = [];
+  for (const id of blockedCardIds) {
+    if (id === item.card_id) continue;
+    const card = await one(tx, 'SELECT * FROM cards WHERE id=$1', [id]);
+    if (card) out.push(cardMessage(card, author, 'answer', text, { deskItemId: item.id, ...meta }));
+  }
+  return out;
+}
+
 const itemScope = (item: Row) =>
   item.project_id ? projectScope(item.org_id, item.project_id) : orgScope(item.org_id);
+
+const truncate = (s: string, n: number): string => {
+  const t = s.replace(/\s+/g, ' ').trim();
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+};
 
 const where = (r: Route): string =>
   r.routedTo === 'manager' ? "the manager's desk" : `${r.agentName} (${r.agentRole})`;
@@ -111,7 +219,7 @@ export async function escalateEvents(
   item: Row,
   by: Row | null,
   note: string,
-): Promise<{ events: AppendInput[]; route: Route }> {
+): Promise<{ events: AppendInput[]; route: Route; mergedInto?: { id: string; title: string } }> {
   const card = item.card_id ? await one(tx, 'SELECT * FROM cards WHERE id=$1', [item.card_id]) : undefined;
   const at: ChainLevel =
     by?.role_key === 'ba'
@@ -128,6 +236,16 @@ export async function escalateEvents(
     from: at,
     tried: triedAgents(item),
   });
+  // A question reaching the BA or the desk that matches an open one is attached to it, not asked a second time.
+  if (route.level !== 'peer') {
+    const dup = await findOpenDuplicate(tx, {
+      orgId: item.org_id,
+      projectId: item.project_id,
+      text: item.title,
+      excludeId: item.id,
+    });
+    if (dup) return { events: mergeEvents(item, card, dup, by?.id), route, mergedInto: dup };
+  }
   const events: AppendInput[] = [
     {
       streamId: streamId.desk(item.id),
@@ -199,8 +317,10 @@ export function endQuestionShift(
 }
 
 /**
- * `aom answer` / `aom escalate` in a question shift. Answering closes the item for every card it blocks (agents'
- * answers are not ledger entries: only the manager's decisions are); escalating moves it to the next step.
+ * `aom answer` / `aom escalate` in a question shift. Answering closes the item for every card it blocks and is
+ * recorded once as a feature-scope ledger entry attached to the card, attributed to the answering agent, so ledger
+ * search and the duplicate check find it (only the manager's answers also become vault decision files);
+ * escalating moves it to the next step (or attaches the question to a matching open one).
  */
 export async function applyQuestionReport(
   ctx: Ctx,
@@ -241,6 +361,7 @@ export async function applyQuestionReport(
       [item.id],
     );
     const by: DeskActor = { kind: 'agent', agentId: agent.id, role: agent.role_key };
+    const entryId = randomUUID();
     const events: AppendInput[] = [
       {
         streamId: streamId.desk(item.id),
@@ -251,7 +372,26 @@ export async function applyQuestionReport(
             answer: report.text as string,
             ...(optionId ? { answerOption: optionId } : {}),
             answeredBy: by,
+            ledgerEntryId: entryId,
             unblockedCardIds: blocked.map((b) => b.card_id),
+          },
+        },
+        actor: agentActor(agent.id),
+        scope: itemScope(item),
+      },
+      {
+        streamId: streamId.ledger(entryId),
+        event: {
+          type: 'LedgerEntryAdded',
+          payload: {
+            entryId,
+            scope: 'feature',
+            ...(item.project_id ? { projectId: item.project_id } : {}),
+            ...(item.card_id ? { cardId: item.card_id } : {}),
+            title: truncate(item.title, 120),
+            body: `Question: ${String(item.title).trim()}\n\nAnswer: ${String(report.text).trim()}`,
+            tags: [],
+            sourceDeskItemId: item.id,
           },
         },
         actor: agentActor(agent.id),
@@ -266,6 +406,16 @@ export async function applyQuestionReport(
           answeredBy: `${agent.name} (${agent.role_key})`,
         }),
       );
+    events.push(
+      ...(await mergedAnswerNotes(
+        tx,
+        item,
+        blocked.map((b) => b.card_id),
+        { kind: 'agent', agentId: agent.id },
+        report.text as string,
+        { answeredBy: `${agent.name} (${agent.role_key})` },
+      )),
+    );
     await ctx.store.append(events, { tx });
     return {
       accepted: true,
@@ -273,11 +423,13 @@ export async function applyQuestionReport(
     };
   }
 
-  const { events, route } = await escalateEvents(ctx, tx, item, agent, report.note as string);
+  const { events, route, mergedInto } = await escalateEvents(ctx, tx, item, agent, report.note as string);
   await ctx.store.append(events, { tx });
   return {
     accepted: true,
-    message: `Recorded. The question went on to ${where(route)}. Finish now.`,
+    message: mergedInto
+      ? `Recorded. The same question is already open, so yours was attached to it: every card waiting on it returns to the queue when it is answered. Finish now.`
+      : `Recorded. The question went on to ${where(route)}. Finish now.`,
   };
 }
 

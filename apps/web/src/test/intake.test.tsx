@@ -84,6 +84,10 @@ describe('intake helpers', () => {
     expect(trailLabel({ at, step: 'peer', agentName: 'Sam', role: 'builder' })).toBe('Sam (builder)');
     expect(trailLabel({ at, step: 'desk' })).toBe('the desk');
     expect(trailLabel({ at, step: 'answered', agentName: 'Ben', role: 'ba' })).toBe('answered by Ben (ba)');
+    expect(trailLabel({ at, step: 'merged', note: 'Bea (builder) asked the same: merged' })).toBe(
+      'Bea (builder) asked the same: merged',
+    );
+    expect(trailLabel({ at, step: 'merged' })).toBe('merged with a similar open question');
     expect(hasTrail({ escalationTrail: [{ at, step: 'asked' }] })).toBe(false);
     expect(
       hasTrail({

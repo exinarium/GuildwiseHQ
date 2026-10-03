@@ -38,6 +38,20 @@ export const intakeEvents = [
       deskItemId: Id.optional(),
     }),
   ),
+  /**
+   * A question that matches another open question of the project (same project, high similarity) was attached to it
+   * instead of becoming a second item: the cards it blocks now wait on `intoDeskItemId`, and answering that one
+   * unblocks them all.
+   */
+  defineEvent(
+    'QuestionMerged',
+    z.object({
+      deskItemId: Id,
+      intoDeskItemId: Id,
+      fromAgentId: Id.optional(),
+      note: z.string().default(''),
+    }),
+  ),
   /** A `question` shift for the agent a desk item is routed to (no card claim, no worktree). */
   defineEvent(
     'QuestionShiftDispatched',

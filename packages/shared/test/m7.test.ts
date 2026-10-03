@@ -35,6 +35,7 @@ describe('M7 events', () => {
           baAgentId: U.d,
         },
       },
+      { type: 'QuestionMerged', payload: { deskItemId: U.a, intoDeskItemId: U.b } },
       { type: 'TicketMapped', payload: { intakeId: U.a, unmapped: true, deskItemId: U.b } },
       { type: 'TicketMapped', payload: { intakeId: U.a, projectId: U.b, cardId: U.c, unmapped: false } },
       {

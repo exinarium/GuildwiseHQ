@@ -18,6 +18,7 @@ import { canAnswerItem, DESK_VISIBLE } from '../queries/desk.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
 import { plannedVaultPath } from './decisions.ts';
 import { resolveDevOpsApprovalIn } from './devops.ts';
+import { mergedAnswerNotes } from './escalation.ts';
 import { resolveLargeMergeIn } from './finalize.ts';
 import { continueIntake, mappingAnsweredEvents } from './intake.ts';
 import { resolveVaultConflictIn } from './vaults.ts';
@@ -140,6 +141,16 @@ export async function answerDeskItem(
           }),
         );
     }
+    events.push(
+      ...(await mergedAnswerNotes(
+        tx,
+        item,
+        blocked.map((b) => b.card_id),
+        { kind: 'user', userId: user.id },
+        req.answer,
+        {},
+      )),
+    );
     // M7: the answer to a mapping question maps the intake's ticket to the chosen project (the option id).
     if (item.subkind === UNMAPPED_TICKET_SUBKIND) {
       if (!req.optionId) throw badRequest('option_required', 'pick the project this ticket belongs to');

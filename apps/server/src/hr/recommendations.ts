@@ -148,15 +148,20 @@ export async function computeRecommendations(
     for (const q of questions) if (q.card_id && !blockedCards.has(q.card_id)) blockedCards.set(q.card_id, q);
     const thin = [...blockedCards.values()].filter((q) => isThinSpec(q.fields));
     if (blockedCards.size >= HR_RULES.minCards && thin.length / blockedCards.size >= HR_RULES.thinSpecShare) {
+      // The author of a spec: whoever wrote its spec handoff, else (M7) the BA of the intake that drafted the card.
       const authors = await rows(
         ctx.pool,
-        `SELECT DISTINCT ON (card_id) card_id, agent_id FROM card_handoffs
-          WHERE card_id = ANY($1::uuid[]) AND stage='spec' AND agent_id IS NOT NULL
-          ORDER BY card_id, event_seq DESC`,
+        `SELECT c.id AS card_id,
+                COALESCE((SELECT h.agent_id FROM card_handoffs h WHERE h.card_id = c.id AND h.stage='spec'
+                           AND h.agent_id IS NOT NULL ORDER BY h.event_seq DESC LIMIT 1),
+                         (SELECT i.ba_agent_id FROM intake_cards ic JOIN intakes i ON i.id = ic.intake_id
+                           WHERE ic.card_id = c.id AND c.origin = 'intake' LIMIT 1)) AS agent_id
+           FROM cards c WHERE c.id = ANY($1::uuid[])`,
         [thin.map((q) => q.card_id)],
       );
       const counts = new Map<string, number>();
-      for (const au of authors) counts.set(au.agent_id, (counts.get(au.agent_id) ?? 0) + 1);
+      for (const au of authors.filter((x) => x.agent_id))
+        counts.set(au.agent_id, (counts.get(au.agent_id) ?? 0) + 1);
       const authorId = [...counts.entries()].sort((x, y) => y[1] - x[1])[0]?.[0];
       const ba = authorId ? (byId.get(authorId) ?? null) : null;
       push(

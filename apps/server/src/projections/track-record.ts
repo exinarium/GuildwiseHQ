@@ -102,6 +102,19 @@ async function lastHandoffAgent(tx: Tx, cardId: string, stage: string): Promise<
   return r?.agent_id ?? null;
 }
 
+/** Who wrote the spec: the spec handoff's agent, else the BA of the intake that drafted the card (M7). */
+async function specAuthor(tx: Tx, cardId: string): Promise<string | null> {
+  const handoff = await lastHandoffAgent(tx, cardId, 'spec');
+  if (handoff) return handoff;
+  const r = await one<{ ba_agent_id: string }>(
+    tx,
+    `SELECT i.ba_agent_id FROM intake_cards ic JOIN intakes i ON i.id = ic.intake_id
+       JOIN cards c ON c.id = ic.card_id WHERE ic.card_id=$1 AND c.origin='intake' LIMIT 1`,
+    [cardId],
+  );
+  return r?.ba_agent_id ?? null;
+}
+
 async function logReview(
   tx: Tx,
   e: StoredEvent,
@@ -132,7 +145,7 @@ async function logReview(
       p.cardId,
       builder,
       p.reviewerAgentId,
-      await lastHandoffAgent(tx, p.cardId, 'spec'),
+      await specAuthor(tx, p.cardId),
       p.verdict,
       p.score,
       p.reasons,

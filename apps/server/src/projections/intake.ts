@@ -10,6 +10,7 @@ const ev = <
     | 'QuestionShiftDispatched'
     | 'QuestionRaised'
     | 'QuestionEscalated'
+    | 'QuestionMerged'
     | 'QuestionAnswered',
 >(
   e: StoredEvent,
@@ -131,6 +132,26 @@ export const intakeProjectors: Record<string, Projector> = {
       ...(p.routedAgentId ? { agentId: p.routedAgentId } : {}),
       ...(to ? { agentName: to.name, role: to.role_key } : {}),
       ...(p.note ? { note: p.note } : {}),
+    });
+  },
+
+  // The duplicate's trail ends here; the surviving item records who else asked.
+  QuestionMerged: async (tx, e) => {
+    const p = ev<'QuestionMerged'>(e).payload;
+    const at = e.createdAt.toISOString();
+    const dup = await one<{ asked_by_agent_id: string | null }>(
+      tx,
+      'SELECT asked_by_agent_id FROM desk_items WHERE id=$1',
+      [p.deskItemId],
+    );
+    const asker = await agentOf(tx, dup?.asked_by_agent_id ?? undefined);
+    await addStep(tx, p.deskItemId, { at, step: 'merged', note: 'merged into an open question' });
+    await addStep(tx, p.intoDeskItemId, {
+      at,
+      step: 'merged',
+      ...(dup?.asked_by_agent_id ? { agentId: dup.asked_by_agent_id } : {}),
+      ...(asker ? { agentName: asker.name, role: asker.role_key } : {}),
+      note: `${asker ? `${asker.name} (${asker.role_key})` : 'Another agent'} asked the same: merged`,
     });
   },
 

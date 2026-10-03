@@ -13,7 +13,7 @@ import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { dedupMatches } from '../queries/ledger.ts';
 import { agentActor, cardMessage, projectScope } from './common.ts';
-import { nextRoute, routedMessage } from './escalation.ts';
+import { findOpenDuplicate, mergeEvents, nextRoute, routedMessage } from './escalation.ts';
 import { releaseClaimEvents } from './shifts.ts';
 
 type QuestionReport = Extract<ShiftReport, { kind: 'question' }>;
@@ -78,6 +78,15 @@ export async function raiseQuestion(
     tried: [],
   });
   const scope = projectScope(card.org_id, card.project_id);
+  // Going to the BA or the desk while the same question is already open: attach to it instead of a second item.
+  const duplicate =
+    route.level === 'peer'
+      ? undefined
+      : await findOpenDuplicate(tx, {
+          orgId: card.org_id,
+          projectId: card.project_id,
+          text: report.text,
+        });
   const raised: AppendInput = {
     streamId: streamId.desk(deskItemId),
     event: {
@@ -112,6 +121,15 @@ export async function raiseQuestion(
     { deskItemId },
   );
 
+  const merged = duplicate
+    ? mergeEvents(
+        { id: deskItemId, org_id: card.org_id, project_id: card.project_id },
+        undefined,
+        duplicate,
+        agent.id,
+      )
+    : [];
+
   if (report.blocking) {
     await ctx.store.append(
       await releaseClaimEvents(
@@ -122,16 +140,22 @@ export async function raiseQuestion(
           ? 'Raised a question for the manager; the card is Blocked until it is answered.'
           : `Raised a question for ${route.agentName} (${route.agentRole}); the card is Blocked until it is answered.`,
         null,
-        [raised, thread],
+        [raised, thread, ...merged],
       ),
       { tx },
     );
   } else {
-    await ctx.store.append([raised, thread], { tx });
+    await ctx.store.append([raised, thread, ...merged], { tx });
   }
   const seen = matches.length
     ? `\nThe ledger has similar entries; the manager sees them next to your question:\n${formatLedgerMatches(matches)}`
     : '';
+  if (duplicate)
+    return {
+      accepted: true,
+      message: `Recorded. The same question is already open ("${duplicate.title}"), so yours was attached to it.${report.blocking ? ' The card is Blocked until it is answered. Finish now; do not make further changes.' : ' Carry on with your best assumption.'}${seen}`,
+      matches,
+    };
   return {
     accepted: true,
     message: routedMessage(route, report.blocking, seen),

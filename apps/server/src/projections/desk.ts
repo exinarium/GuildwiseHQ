@@ -197,6 +197,36 @@ export const deskProjectors: Record<string, Projector> = {
     await unblock(tx, e, p.deskItemId);
   },
 
+  // M7: a duplicate question is attached to the open one it matches. The cards it blocks wait on the survivor, so
+  // answering that one returns them all to the queue.
+  QuestionMerged: async (tx, e) => {
+    const p = ev<'QuestionMerged'>(e).payload;
+    const dup = await one<{ affected_card_ids: string[]; blocking: boolean; pinned: boolean }>(
+      tx,
+      'SELECT affected_card_ids, blocking, pinned FROM desk_items WHERE id=$1',
+      [p.deskItemId],
+    );
+    if (!dup) return;
+    await exec(tx, `UPDATE desk_items SET status='superseded', updated_at=$2 WHERE id=$1`, [
+      p.deskItemId,
+      e.createdAt,
+    ]);
+    await exec(
+      tx,
+      `UPDATE desk_items SET blocking = blocking OR $3, pinned = pinned OR $4, updated_at=$5,
+              affected_card_ids = ARRAY(SELECT DISTINCT x FROM unnest(affected_card_ids || $2::uuid[]) AS x)
+        WHERE id=$1`,
+      [p.intoDeskItemId, dup.affected_card_ids, dup.blocking, dup.pinned, e.createdAt],
+    );
+    await exec(
+      tx,
+      `INSERT INTO card_blockers (card_id, desk_item_id)
+         SELECT card_id, $2 FROM card_blockers WHERE desk_item_id=$1 ON CONFLICT DO NOTHING`,
+      [p.deskItemId, p.intoDeskItemId],
+    );
+    await exec(tx, 'DELETE FROM card_blockers WHERE desk_item_id=$1', [p.deskItemId]);
+  },
+
   // A cancelled card no longer needs its questions answered.
   CardCancelled: async (tx, e) => {
     const p = ev<'CardCancelled'>(e).payload;

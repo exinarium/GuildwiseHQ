@@ -51,16 +51,30 @@ export async function metrics(
     ).map((r) => [r.day, r.n]),
   );
 
-  // Time blocked on the manager: every interval a card sat in status 'blocked', clipped to the range.
+  // Time blocked on the manager: every interval a card sat in status 'blocked', clipped to the range. An interval
+  // that only waited on questions the escalation chain handled (answered by a senior or the BA, or still with an
+  // agent) is not the manager's: it counts only when a desk-level item (answered by the manager, open on the desk, an
+  // approval or an alert) blocked the card in that interval.
   const blocked = await one<{ ms: string | null; cards: number }>(
     ctx.pool,
     `WITH t AS (
        SELECT tr.card_id, tr.to_status, tr.at, LEAD(tr.at) OVER (PARTITION BY tr.card_id ORDER BY tr.id) AS next_at
-         FROM card_transitions tr JOIN cards c ON c.id = tr.card_id WHERE c.project_id = ANY($1::uuid[]))
+         FROM card_transitions tr JOIN cards c ON c.id = tr.card_id WHERE c.project_id = ANY($1::uuid[])),
+     b AS (
+       SELECT t.*,
+              EXISTS (SELECT 1 FROM desk_items d
+                       WHERE d.status <> 'superseded' AND (d.card_id = t.card_id OR t.card_id = ANY(d.affected_card_ids))
+                         AND d.created_at < COALESCE(t.next_at, $3::timestamptz) AND COALESCE(d.answered_at, 'infinity') >= t.at
+                         AND d.answered_by_agent_id IS NULL AND NOT (d.status = 'open' AND d.routed_to = 'agent')) AS on_desk,
+              EXISTS (SELECT 1 FROM desk_items d
+                       WHERE d.status <> 'superseded' AND (d.card_id = t.card_id OR t.card_id = ANY(d.affected_card_ids))
+                         AND d.created_at < COALESCE(t.next_at, $3::timestamptz) AND COALESCE(d.answered_at, 'infinity') >= t.at
+                         AND (d.answered_by_agent_id IS NOT NULL OR (d.status = 'open' AND d.routed_to = 'agent'))) AS in_chain
+         FROM t WHERE to_status='blocked')
      SELECT COALESCE(sum(extract(epoch FROM (LEAST(COALESCE(next_at, $3::timestamptz), $3::timestamptz)
                                               - GREATEST(at, $2::timestamptz))) * 1000), 0)::bigint AS ms,
             count(DISTINCT card_id)::int AS cards
-       FROM t WHERE to_status='blocked' AND at < $3 AND COALESCE(next_at, $3::timestamptz) > $2`,
+       FROM b WHERE at < $3 AND COALESCE(next_at, $3::timestamptz) > $2 AND (on_desk OR NOT in_chain)`,
     [projectIds, from, to],
   );
   const blockedMs = Number(blocked?.ms ?? 0);

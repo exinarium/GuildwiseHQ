@@ -92,8 +92,8 @@ export type IntakeContext = z.infer<typeof IntakeContextSchema>;
 /** One step of the escalation trail of a desk item. */
 export const EscalationStepSchema = z.object({
   at: z.iso.datetime(),
-  /** `asked` is the agent's question; `answered` closes the trail. */
-  step: z.enum(['asked', 'peer', 'ba', 'desk', 'answered']),
+  /** `asked` is the agent's question; `answered` closes the trail; `merged` marks a duplicate attached to an open question. */
+  step: z.enum(['asked', 'peer', 'ba', 'desk', 'answered', 'merged']),
   agentId: z.uuid().optional(),
   agentName: z.string().optional(),
   role: z.string().optional(),

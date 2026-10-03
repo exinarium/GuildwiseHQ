@@ -80,12 +80,12 @@ export const deskEvents = [
         answer: Note,
         answerOption: z.string().optional(),
         answeredBy: DeskActorSchema,
-        /** Absent when an agent (not the manager) answered: only the manager's answers become ledger entries. */
+        /** The ledger entry the answer was recorded as (agents' answers: feature scope; the manager's: their choice). */
         ledgerEntryId: Id.optional(),
         /** Blocked cards that return to the queue (no other open blocker). */
         unblockedCardIds: z.array(Id).default([]),
       })
-      // The manager's answers always become a ledger entry; an agent's (M7 escalation chain) do not.
+      // The manager's answers always carry their ledger entry id (an agent's in the chain may predate it).
       .refine((p) => p.answeredBy.kind !== 'user' || p.ledgerEntryId !== undefined, {
         message: 'a manager answer needs its ledger entry id',
         path: ['ledgerEntryId'],

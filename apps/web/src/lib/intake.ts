@@ -27,6 +27,7 @@ export function trailLabel(s: EscalationStep): string {
       : 'the manager';
   if (s.step === 'asked') return `${who} asked`;
   if (s.step === 'answered') return `answered by ${who}`;
+  if (s.step === 'merged') return s.note ?? 'merged with a similar open question';
   if (s.step === 'desk') return 'the desk';
   return who;
 }

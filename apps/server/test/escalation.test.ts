@@ -58,8 +58,9 @@ async function fresh(team: Array<[string, string, 'junior' | 'senior']>) {
 
 /** Bea builds a card and asks; returns the card and the desk item. */
 async function asked(over: Record<string, unknown> = {}, who = 'Bea') {
+  const from = r.received.length;
   const card = await w.card({ title: `Card ${randomUUID().slice(0, 4)}` });
-  const start = await h.dispatchTo(r, who);
+  const start = await h.dispatchTo(r, who, from);
   await h.startShift(r, start);
   const res = await ask(start.shiftId, over);
   expect(res.accepted).toBe(true);
@@ -127,9 +128,19 @@ describe('escalation chain: senior peer first', () => {
     expect((await item(it.id)).answered_by_agent_id).toBe(sam.id);
     expect(await trail(it.id)).toEqual(['asked', 'peer', 'answered']);
     expect(await cardRow(card.id)).toMatchObject({ status: 'queued' });
-    // the manager is never bothered, and the answer is not a ledger entry
+    // the manager is never bothered; the answer is recorded once in the ledger, attributed to Sam
     expect((await desk()).items).toHaveLength(0);
-    expect(await q('SELECT 1 FROM ledger_entries')).toHaveLength(0);
+    const entries = await q('SELECT * FROM ledger_entries');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      scope: 'feature',
+      card_id: card.id,
+      project_id: w.projectId,
+      created_by_kind: 'agent',
+      created_by_id: sam.id,
+      source_desk_item_id: it.id,
+    });
+    expect(entries[0]!.body).toContain('Answer: Use tabs.');
     const msg = (
       await q(
         `SELECT kind, body, author_agent_id FROM thread_messages WHERE thread_id=$1 AND kind='answer'`,
@@ -325,6 +336,97 @@ describe('escalation chain: peer, then BA, then the desk', () => {
     const ben = await questionShift('Ben');
     expect(ben.question.ledgerMatches.map((m: any) => m.title)).toContain('Indentation');
     expect(it.dedup_ledger_ids).toHaveLength(1);
+  });
+});
+
+describe('agent answers are recorded in the ledger', () => {
+  it('ledger search and the duplicate check find an answer a senior gave, so it is not asked again', async () => {
+    await fresh([
+      ['Bea', 'builder', 'junior'],
+      ['Sam', 'builder', 'senior'],
+    ]);
+    const { item: it } = await asked();
+    const sam = await questionShift('Sam');
+    expect((await answer(sam.shiftId, it.id, 'Use tabs, always.')).accepted).toBe(true);
+    r.ended(sam.shiftId, 'reported');
+    const found = await ok<any>(
+      w.t.req('GET', `/api/ledger?q=${encodeURIComponent('tabs spaces')}`, { cookie: w.owner.cookie }),
+    );
+    expect(found.entries).toHaveLength(1);
+    expect(found.entries[0]).toMatchObject({
+      scope: 'feature',
+      createdByKind: 'agent',
+      createdByName: 'Sam',
+    });
+    // The same question again (a non-blocking one needs --force when the ledger has an answer).
+    const from = r.received.length;
+    await w.card({ title: 'Another card' });
+    const start = await h.dispatchTo(r, 'Bea', from);
+    await h.startShift(r, start);
+    const again = await ask(start.shiftId, { blocking: false });
+    expect(again.accepted).toBe(false);
+    expect(again.matches).toHaveLength(1);
+    expect(again.error).toMatch(/ledger already has similar entries/);
+  });
+});
+
+describe('a duplicate question attaches to the open one', () => {
+  it('a question raised while the same one is on the desk adds no second item; answering unblocks both cards', async () => {
+    await fresh([
+      ['Bea', 'builder', 'junior'],
+      ['Bob', 'builder', 'junior'],
+    ]);
+    const first = await asked({}, 'Bea');
+    const second = await asked({ text: 'Should source files use spaces or tabs?' }, 'Bob');
+    expect(await item(second.item.id)).toMatchObject({ status: 'superseded' });
+    expect((await trail(second.item.id)).at(-1)).toBe('merged');
+    expect(second.res.message).toMatch(/already open/);
+    const { items } = await desk();
+    expect(items.map((i: any) => i.id)).toEqual([first.item.id]);
+    expect(items[0].affectedCardIds.sort()).toEqual([first.card.id, second.card.id].sort());
+    expect((await cardRow(second.card.id)).status).toBe('blocked');
+
+    const a = await answerAsManager(first.item.id, { answer: 'Tabs.', optionId: 'o1' });
+    expect(a.unblockedCardIds.sort()).toEqual([first.card.id, second.card.id].sort());
+    expect((await cardRow(first.card.id)).status).toBe('queued');
+    expect((await cardRow(second.card.id)).status).toBe('queued');
+    const note = await q(`SELECT body FROM thread_messages WHERE thread_id=$1 AND kind='answer'`, [
+      second.card.id,
+    ]);
+    expect(note.map((n) => n.body)).toEqual(['Tabs.']);
+    expect(await q('SELECT 1 FROM ledger_entries')).toHaveLength(1);
+  });
+
+  it('a question the BA receives by escalation attaches to the matching open one, and an agent answer unblocks every card', async () => {
+    await fresh([
+      ['Sam', 'builder', 'senior'],
+      ['Bea', 'builder', 'junior'],
+      ['Ben', 'ba', 'senior'],
+    ]);
+    // Sam's own question has no senior to go to: it is with the BA.
+    const first = await asked({}, 'Sam');
+    expect(await item(first.item.id)).toMatchObject({ routed_to: 'agent' });
+    // Bea's goes to Sam first; Sam cannot answer and passes it to the BA, where it matches the open one.
+    const second = await asked({}, 'Bea');
+    expect(await trail(second.item.id)).toEqual(['asked', 'peer']);
+    const sam = await questionShift('Sam');
+    expect(sam.question.deskItemId).toBe(second.item.id);
+    const out = await escalate(sam.shiftId, second.item.id, 'ask the BA');
+    expect(out.message).toMatch(/already open/);
+    r.ended(sam.shiftId, 'reported');
+    expect(await item(second.item.id)).toMatchObject({ status: 'superseded' });
+    expect((await trail(second.item.id)).at(-1)).toBe('merged');
+    expect((await trail(first.item.id)).at(-1)).toBe('merged');
+    expect((await cardRow(second.card.id)).status).toBe('blocked');
+
+    const ben = await questionShift('Ben');
+    expect(ben.question.deskItemId).toBe(first.item.id);
+    expect((await answer(ben.shiftId, first.item.id, 'Tabs.')).accepted).toBe(true);
+    r.ended(ben.shiftId, 'reported');
+    expect((await cardRow(first.card.id)).status).toBe('queued');
+    expect((await cardRow(second.card.id)).status).toBe('queued');
+    expect(await q('SELECT 1 FROM ledger_entries')).toHaveLength(1);
+    expect((await desk()).items).toHaveLength(0);
   });
 });
 
