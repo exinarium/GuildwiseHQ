@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { ExternalSystem } from '../events/intake.ts';
+import { OutboundKind } from '../events/outbound.ts';
 
 /**
  * External systems (docs/SPEC.md "External systems boundary"; docs/ARCHITECTURE.md section 16.5). Company systems such as
  * Jira are clients of the organization: inbound is read-only (the BA reads a ticket during intake and keeps its key on
  * the card) and every outbound write needs the manager's approval. Credentials live only on workstations, so adapters run
  * on the runner. M7 implements `readSource` (Jira through the agent's Jira skill, GitHub through `gh`); M8 implements
- * `postApproved` against this same interface.
+ * `postApproved` against this same interface (GitHub through `gh`, Jira through REST with the token in the runner config).
  */
 
 /** A ticket: Jira `ABC-123`, or a GitHub issue `owner/repo#12`. */
@@ -58,10 +59,10 @@ export const ExternalSourceSchema = z.object({
 });
 export type ExternalSource = z.infer<typeof ExternalSourceSchema>;
 
-export const OutboundDraftKind = z.enum(['comment', 'resolution', 'decision']);
+export const OutboundDraftKind = OutboundKind;
 export type OutboundDraftKind = z.infer<typeof OutboundDraftKind>;
 
-/** A draft the manager approved (possibly edited): `body` is the final text, posted as it is. M8 posts these. */
+/** A draft the manager approved (possibly edited): `body` is the final text, posted as it is. */
 export const ApprovedDraftSchema = z.object({
   draftId: z.uuid(),
   ref: ExternalRefSchema,
@@ -73,7 +74,7 @@ export type ApprovedDraft = z.infer<typeof ApprovedDraftSchema>;
 export const PostResultSchema = z.object({ externalRef: z.string().optional() });
 export type PostResult = z.infer<typeof PostResultSchema>;
 
-/** Thrown by adapter operations a milestone has not built yet (the post side until M8). */
+/** Thrown by adapter operations a milestone has not built yet. */
 export class NotImplementedError extends Error {
   constructor(what: string) {
     super(`${what} is not implemented yet`);
@@ -83,12 +84,17 @@ export class NotImplementedError extends Error {
 
 /**
  * One external system, as seen from the runner of the workstation that holds its credentials.
- * `readSource(ref)` reads a ticket; `postApproved(draft)` posts a manager-approved draft (M8; a typed stub in M7).
+ * `readSource(ref)` reads a ticket; `postApproved(draft)` posts a manager-approved draft, exactly as approved.
  */
 export interface ExternalAdapter {
   readonly system: ExternalSystem;
   readSource(ref: ExternalRef): Promise<ExternalSource>;
   postApproved(draft: ApprovedDraft): Promise<PostResult>;
+  /**
+   * Optional: has this draft's text already been posted to the ticket? Used on a retry after an ambiguous failure
+   * (a timeout, a crash after sending) so the same update is never posted twice.
+   */
+  findPosted?(draft: ApprovedDraft): Promise<PostResult | null>;
 }
 
 /**
@@ -107,3 +113,33 @@ Use this to read one Jira ticket during intake. It is read-only: never create, e
 5. If the ticket cannot be read (no tool, no access), say so plainly in the conversation; never invent ticket content.
 6. Store the ticket key in the card's \`externalRef\` field. Quote the ticket in the card's context; do not paste secrets.
 `;
+
+export * from './leak-check.ts';
+
+/**
+ * Payload of the `outbound.post` runner command: an approved draft, for the workstation of the card's owner (the only
+ * place the owner's Jira and GitHub credentials exist). `agentNames` are the organization's agents: the runner scrubs
+ * the text against them once more before posting.
+ */
+export const OutboundPostPayloadSchema = z.object({
+  draftId: z.uuid(),
+  cardId: z.uuid(),
+  cardRef: z.string(),
+  ref: ExternalRefSchema,
+  kind: OutboundDraftKind,
+  /** The final, approved text, posted exactly as it is. */
+  body: z.string().min(1),
+  agentNames: z.array(z.string()).default([]),
+});
+export type OutboundPostPayload = z.infer<typeof OutboundPostPayloadSchema>;
+
+/** The runner's `command.result` for `outbound.post`. `ok:false` is a refusal or failure, with the reason in `error`. */
+export const OutboundPostResultSchema = z.object({
+  ok: z.boolean(),
+  /** URL or id the system returned. */
+  externalRef: z.string().optional(),
+  error: z.string().optional(),
+  /** The runner had already posted this draft (a retry): nothing was sent again. */
+  duplicate: z.boolean().optional(),
+});
+export type OutboundPostResult = z.infer<typeof OutboundPostResultSchema>;

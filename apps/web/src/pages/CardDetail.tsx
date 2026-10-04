@@ -2,6 +2,7 @@ import { type CardDetailResponse, fieldCatalogue, type WorkflowDefinition } from
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useWorkflows } from '../api/queries/agents.ts';
+import { useMe } from '../api/queries/auth.ts';
 import {
   missingFromError,
   useCancelCard,
@@ -14,6 +15,7 @@ import {
 import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
 import { FinalizePanel } from '../components/FinalizePanel.tsx';
+import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
 import { ShiftLog } from '../components/ShiftLog.tsx';
 import {
@@ -89,6 +91,7 @@ export function CardDetailView({
   const release = useReleaseCard(card.id);
   const policy = useDecisionPolicy(card.id);
   const rehome = useRehomeCard(card.id);
+  const me = useMe();
   const [dialog, setDialog] = useState<'move' | 'cancel' | null>(null);
   const missing = missingFromError(specify.error);
   const catalogue = workflow ? fieldCatalogue(workflow.fieldSet, workflow.customFields) : {};
@@ -245,6 +248,13 @@ export function CardDetailView({
             />
           )}
           {data.testing && <EvidencePanel testing={data.testing} handoffs={handoffs} />}
+          <OutboundHistory
+            cardId={card.id}
+            cardRef={card.ref}
+            ticket={typeof card.fields.externalRef === 'string' ? card.fields.externalRef : undefined}
+            isOwner={me.data?.user.id === card.ownerUserId}
+            canDraft={permissions.canMove}
+          />
           <Panel>
             <h2 className="mb-2 text-sm font-semibold">Handoffs ({handoffs.length})</h2>
             {handoffs.length === 0 && <p className="text-sm text-zinc-500">No handoffs yet.</p>}

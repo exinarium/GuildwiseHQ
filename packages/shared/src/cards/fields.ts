@@ -76,6 +76,10 @@ export const CodeFieldsSchema = z.object({
   suiteBranch: z.string().optional(),
   /** M4 mock runtime: the test environment problem a tester shift finds until DevOps fixed it. */
   mockEnv: z.enum(['app_not_deployed', 'docker_missing']).optional(),
+  /** M8 mock runtime: the update the mock BA drafts for the card's ticket (default: a plain resolution). */
+  mockOutbound: z
+    .object({ kind: z.enum(['comment', 'resolution', 'decision']).optional(), body: z.string().optional() })
+    .optional(),
 });
 export type CodeFields = z.infer<typeof CodeFieldsSchema>;
 
@@ -92,6 +96,7 @@ export const CODE_FIELDS: Record<string, FieldMeta> = {
   platform: { label: 'Platform', kind: 'enum' },
   suiteBranch: { label: 'Suite branch', kind: 'text' },
   mockEnv: { label: 'Mock test environment', kind: 'enum' },
+  mockOutbound: { label: 'Mock outbound draft', kind: 'json' },
 };
 
 // -------------------------------------------------------------- research set

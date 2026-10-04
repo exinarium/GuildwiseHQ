@@ -4,7 +4,6 @@ import {
   type ExternalRef,
   type ExternalSource,
   ExternalSourceSchema,
-  NotImplementedError,
   type PostResult,
   parseGithubKey,
 } from '@aom/shared';
@@ -29,6 +28,14 @@ export const defaultExec: Exec = async (bin, args, opts) => {
   return { exitCode: r.exitCode ?? 1, stdout: String(r.stdout ?? ''), stderr: String(r.stderr ?? '') };
 };
 
+/** A post the system refused (a non-zero exit, a non-2xx answer): definitely not posted, safe to try again. */
+export class PostError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PostError';
+  }
+}
+
 export class SourceReadError extends Error {
   constructor(message: string) {
     super(message);
@@ -47,7 +54,8 @@ interface GhIssue {
 
 /**
  * GitHub issues through `gh issue view --json` on this workstation (docs/ARCHITECTURE.md section 16.5): the credentials
- * are the user's own `gh` login, nothing goes through the site. Read-only: `postApproved` arrives with M8.
+ * are the user's own `gh` login, nothing goes through the site. `postApproved` comments with `gh issue comment`, or
+ * (for a resolution) closes the issue with the text as its closing comment, `gh issue close --comment`.
  */
 export class GithubAdapter implements ExternalAdapter {
   readonly system = 'github' as const;
@@ -100,7 +108,58 @@ export class GithubAdapter implements ExternalAdapter {
     });
   }
 
-  postApproved(_draft: ApprovedDraft): Promise<PostResult> {
-    return Promise.reject(new NotImplementedError('posting to GitHub (M8: `gh issue comment`)'));
+  private async run(args: string[]): Promise<Awaited<ReturnType<Exec>>> {
+    const exec = this.opts.exec ?? defaultExec;
+    try {
+      return await exec(this.opts.bin ?? 'gh', args);
+    } catch (err) {
+      if ((err as { code?: string }).code === 'ENOENT')
+        throw new PostError('the GitHub CLI (`gh`) is not installed on this workstation');
+      throw err;
+    }
+  }
+
+  async postApproved(draft: ApprovedDraft): Promise<PostResult> {
+    const gh = parseGithubKey(draft.ref.key);
+    if (!gh)
+      throw new PostError(`'${draft.ref.key}' is not a GitHub issue reference (expected owner/repo#12)`);
+    const n = String(gh.number);
+    const args =
+      draft.kind === 'resolution'
+        ? ['issue', 'close', n, '--repo', gh.repo, '--comment', draft.body]
+        : ['issue', 'comment', n, '--repo', gh.repo, '--body', draft.body];
+    const r = await this.run(args);
+    if (r.exitCode !== 0)
+      throw new PostError(
+        `gh issue ${args[1]} failed: ${(r.stderr || r.stdout).trim().slice(0, 500) || `exit ${r.exitCode}`}`,
+      );
+    const url = /https?:\/\/\S+/.exec(`${r.stdout}\n${r.stderr}`)?.[0];
+    return { externalRef: url ?? draft.ref.url ?? `https://github.com/${gh.repo}/issues/${gh.number}` };
+  }
+
+  /** Is a comment with exactly this text already on the issue? (A retry after an ambiguous failure.) */
+  async findPosted(draft: ApprovedDraft): Promise<PostResult | null> {
+    const gh = parseGithubKey(draft.ref.key);
+    if (!gh) return null;
+    const r = await this.run([
+      'issue',
+      'view',
+      String(gh.number),
+      '--repo',
+      gh.repo,
+      '--json',
+      'comments,url',
+    ]);
+    if (r.exitCode !== 0) return null;
+    try {
+      const issue = JSON.parse(r.stdout) as {
+        url?: string;
+        comments?: Array<{ body?: string; url?: string }>;
+      };
+      const hit = (issue.comments ?? []).find((c) => (c.body ?? '').trim() === draft.body.trim());
+      return hit ? { externalRef: hit.url ?? issue.url ?? draft.ref.url ?? draft.ref.key } : null;
+    } catch {
+      return null;
+    }
   }
 }

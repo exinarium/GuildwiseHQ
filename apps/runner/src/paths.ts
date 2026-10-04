@@ -13,6 +13,8 @@ export interface RunnerPaths {
   root: string;
   config: string;
   outbox: string;
+  /** M8: one record per outbound draft posted from this workstation (never post twice). */
+  outbound: string;
   bin: string;
   agents: string;
   worktrees: string;
@@ -34,6 +36,7 @@ export function runnerPaths(root: string): RunnerPaths {
     root,
     config: join(root, 'config.json'),
     outbox: join(root, 'outbox'),
+    outbound: join(root, 'outbound'),
     bin: join(root, 'bin'),
     agents: join(root, 'agents'),
     worktrees: join(root, 'worktrees'),

@@ -55,3 +55,10 @@ export const HRGUEST = {
   name: 'E2E HR Guest',
   password: 'hrguest-password-12345',
 };
+
+/** M8 outbox spec: own user, own runner (mock, fake gh, fake Jira), project OUT on the toy repo, a BA, a builder, a reviewer. */
+export const OUTBOXER = {
+  email: 'outboxer@e2e.test',
+  name: 'E2E Outboxer',
+  password: 'outboxer-password-12345',
+};

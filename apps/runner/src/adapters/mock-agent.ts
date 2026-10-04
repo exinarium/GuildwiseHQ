@@ -146,6 +146,15 @@ async function report(brief: Brief, action: Action): Promise<{ code: number; out
   }
   // M7: the BA claims Finalize and runs the card's completion action (a different `--action` would revise it).
   if (has('finalized')) {
+    // M8: a card that came from a ticket gets its outside update drafted first (`fields.mockOutbound` overrides the text;
+    // a blocked draft is rewritten once, as the real BA would).
+    if (typeof brief.card.fields.externalRef === 'string' && brief.card.fields.externalRef.trim()) {
+      const mock = (brief.card.fields.mockOutbound ?? {}) as { kind?: string; body?: string };
+      const clean = `${brief.card.title} is done and ready.`;
+      for (const body of [mock.body, clean].filter((b): b is string => !!b)) {
+        if (aom(['outbound', 'draft', '--kind', mock.kind ?? 'resolution', '--body', body]).code === 0) break;
+      }
+    }
     return aom([
       'finalize',
       '--action',

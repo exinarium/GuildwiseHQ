@@ -5,6 +5,7 @@ import { Usage } from '../events/define.ts';
 import { GuardViolation, ShiftKind } from '../events/shift.ts';
 import { TestEnvProblem } from '../events/testing.ts';
 import { VaultKind } from '../events/vault.ts';
+import { OutboundPostPayloadSchema } from '../external/index.ts';
 import { FeedItemInputSchema } from '../feed/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
@@ -210,6 +211,7 @@ export const CommandPayloadSchemas = {
   }),
   'repos.rescan': z.object({}),
   'finalize.execute': FinalizeExecutePayloadSchema,
+  'outbound.post': OutboundPostPayloadSchema,
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([

@@ -18,6 +18,18 @@ export const ClaudeRuntimeConfigSchema = z.object({
     .optional(),
 });
 
+/**
+ * Jira on this workstation, for posting approved updates (M8). The runner posts with the owner's own API token over
+ * REST; the token stays in this file (mode 0600) and nowhere else. `email` + `apiToken` is Jira Cloud (basic auth);
+ * `apiToken` alone is a personal access token (bearer) for Jira Data Center.
+ */
+export const JiraConfigSchema = z.object({
+  baseUrl: z.string().min(1),
+  email: z.string().optional(),
+  apiToken: z.string().min(1),
+});
+export type JiraConfig = z.infer<typeof JiraConfigSchema>;
+
 export const MockRuntimeConfigSchema = z.object({
   enabled: z.boolean().default(false),
   /** Narrow the advertised capabilities (default: all). */
@@ -35,6 +47,8 @@ export const RunnerConfigSchema = z.object({
       mock: MockRuntimeConfigSchema.optional(),
     })
     .default({ 'claude-code': ClaudeRuntimeConfigSchema.parse({}) }),
+  /** M8: credentials for posting approved updates to Jira (GitHub uses this machine's `gh` login). */
+  jira: JiraConfigSchema.optional(),
   maxConcurrentShifts: z.number().int().positive().default(4),
   vaultSyncIntervalSec: z.number().int().positive().default(300),
 });

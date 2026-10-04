@@ -7,6 +7,7 @@ import { DigestRating } from '../components/DigestRating.tsx';
 import { EscalationTrail } from '../components/EscalationTrail.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
 import { MappingForm } from '../components/MappingForm.tsx';
+import { OutboundApproval } from '../components/OutboundApproval.tsx';
 import {
   Avatar,
   Badge,
@@ -144,7 +145,13 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
           </Badge>
         )}
         <Badge tone="violet">
-          {item.subkind === 'unmapped_ticket' ? 'Unmapped ticket' : (item.subkind ?? item.kind)}
+          {item.subkind === 'unmapped_ticket'
+            ? 'Unmapped ticket'
+            : item.subkind === 'outbound'
+              ? 'Update to a ticket'
+              : item.subkind === 'outbound_failed'
+                ? 'Posting failed'
+                : (item.subkind ?? item.kind)}
         </Badge>
         <Badge tone={item.blocking ? 'red' : 'neutral'}>{item.blocking ? 'Blocking' : 'Non-blocking'}</Badge>
         <span data-testid="affected-count">
@@ -209,6 +216,8 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
         </p>
       ) : item.subkind === 'unmapped_ticket' ? (
         <MappingForm item={item} />
+      ) : item.kind === 'approval' && item.subkind === 'outbound' ? (
+        <OutboundApproval item={item} />
       ) : item.kind === 'question' || (item.kind === 'escalation' && item.subkind !== 'vault_conflict') ? (
         <AnswerForm item={item} />
       ) : (
