@@ -271,6 +271,8 @@ export const HelloSchema = msg('hello', {
     }),
   ),
   outboxPending: z.number().int().nonnegative(),
+  /** The runner's configured `maxConcurrentShifts` (shown on the Workstations page; the server caps it). */
+  maxConcurrentShifts: z.number().int().positive().optional(),
 });
 export const OutboxFlushedSchema = msg('outbox.flushed', {});
 export const HeartbeatSchema = msg('heartbeat', {

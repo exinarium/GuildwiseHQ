@@ -223,6 +223,7 @@ export class Runner {
       repos: this.repos,
       vaults: await this.vaults.report(),
       activeShifts: this.supervisor.activeShifts(),
+      maxConcurrentShifts: this.opts.config.maxConcurrentShifts,
     };
   }
 

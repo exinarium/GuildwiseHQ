@@ -20,6 +20,10 @@ export const WorkstationDtoSchema = z.object({
   /** M3: what this workstation's DevOps engineer may do without asking, and who it is. */
   devopsAccess: DevOpsAccessSchema.optional(),
   devopsAgentId: z.uuid().nullable().optional(),
+  /** Shifts running now and how many this workstation takes at once (`limit` is null while it is offline). */
+  shifts: z
+    .object({ running: z.number().int().nonnegative(), limit: z.number().int().positive().nullable() })
+    .optional(),
 });
 export type WorkstationDto = z.infer<typeof WorkstationDtoSchema>;
 export const WorkstationsResponseSchema = z.object({ workstations: z.array(WorkstationDtoSchema) });

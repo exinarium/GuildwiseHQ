@@ -13,7 +13,7 @@ import {
   Panel,
   Spinner,
 } from '../components/ui.tsx';
-import { UNSANDBOXED_CONSEQUENCE, unavailableRuntimes, unsandboxedRuntimes } from '../lib/sandbox.ts';
+import { unavailableRuntimes, unsandboxedConsequence, unsandboxedRuntimes } from '../lib/sandbox.ts';
 import { formatDateTime } from '../lib/time.ts';
 
 export function pairCommand(code: string, origin: string = location.origin): string {
@@ -87,7 +87,7 @@ export function WorkstationCard({
           <div key={r.id} className="mt-2" data-testid={`sandbox-warning-${r.id}`}>
             <SandboxWarning testId="sandbox-warning">
               The {r.id} runtime on {w.name} runs agents without an OS sandbox
-              {r.sandboxReason ? ` (${r.sandboxReason})` : ''}: {UNSANDBOXED_CONSEQUENCE}
+              {r.sandboxReason ? ` (${r.sandboxReason})` : ''}: {unsandboxedConsequence(r.sandboxReason)}
             </SandboxWarning>
           </div>
         ))}
@@ -106,6 +106,19 @@ export function WorkstationCard({
                   {r.id} {r.version}
                 </Badge>
               ))}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-zinc-500">Shifts running</p>
+            <p
+              data-testid="workstation-shifts"
+              title="Set maxConcurrentShifts in the runner config.json (default 4)"
+            >
+              {w.shifts
+                ? w.shifts.limit
+                  ? `${w.shifts.running} of ${w.shifts.limit}`
+                  : `${w.shifts.running} (limit shown while connected)`
+                : 'Not reported'}
             </p>
           </div>
           <div>

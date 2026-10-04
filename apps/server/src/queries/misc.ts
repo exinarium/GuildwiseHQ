@@ -109,6 +109,12 @@ export async function workstationDtos(
     `SELECT workstation_id, project_repo_id, local_path, reported_at FROM workstation_repos WHERE workstation_id = ANY($1::uuid[])`,
     [list.map((w) => w.id)],
   );
+  const running = await rows(
+    ctx.pool,
+    `SELECT workstation_id, count(*)::int AS n FROM shifts
+      WHERE workstation_id = ANY($1::uuid[]) AND status <> 'ended' GROUP BY workstation_id`,
+    [list.map((w) => w.id)],
+  );
   return list.map((w) => ({
     id: w.id,
     userId: w.user_id,
@@ -130,6 +136,10 @@ export async function workstationDtos(
     pairedAt: iso(w.paired_at) as string,
     devopsAccess: w.devops_access,
     devopsAgentId: w.devops_agent_id ?? null,
+    shifts: {
+      running: running.find((r) => r.workstation_id === w.id)?.n ?? 0,
+      limit: ctx.services.runners.isOnline(w.id) ? (ctx.services.runners.get(w.id)?.maxShifts ?? null) : null,
+    },
     ownerEmail: w.owner_email,
   }));
 }

@@ -14,6 +14,8 @@ export interface RunnerConn {
   /** shiftId -> consecutive heartbeats that did not report it. */
   missing: Map<string, number>;
   stopSentAt: Map<string, number>;
+  /** Shifts this workstation takes at once: the runner's `maxConcurrentShifts`, capped by the server. */
+  maxShifts: number;
 }
 
 /** Live runner sockets by workstation. A second connection supersedes the first. */

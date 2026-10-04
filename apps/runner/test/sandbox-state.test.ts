@@ -105,7 +105,9 @@ describe('mock runtime override', () => {
       expect(applyOverrides(c, { mock: true }).runtimes.mock).toMatchObject({
         enabled: true,
         sandbox: 'unsandboxed',
+        sandboxReason: 'test override: AOM_RUNNER_MOCK_SANDBOX=unsandboxed',
       });
+      expect(applyOverrides(c, { mock: true }).runtimes.mock?.sandboxReason).not.toMatch(/windows/i);
     } finally {
       delete process.env.AOM_RUNNER_MOCK_SANDBOX;
     }

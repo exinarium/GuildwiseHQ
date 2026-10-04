@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { FakeRunner } from './helpers/fake-runner.ts';
-import { createWorld, ok, pairWorkstation, REPO_SSH, type World } from './helpers/world.ts';
+import { createWorld, ok, pairWorkstation, REPO_SSH, until, type World } from './helpers/world.ts';
 
 let w: World;
 beforeAll(async () => {
@@ -100,6 +100,31 @@ describe('runner websocket auth', () => {
     expect(ws.repos).toHaveLength(1); // git@ remote matched https project repo
     expect(ws.repos[0].localPath).toBe('/tmp/toy');
     r.close();
+  });
+
+  it('shows how many shifts the workstation runs and the limit the runner announced', async () => {
+    const shifts = async () =>
+      (await ok<any>(w.t.req('GET', '/api/workstations', { cookie: w.owner.cookie }))).workstations.find(
+        (x: any) => x.id === w.workstationId,
+      ).shifts;
+    const r = await w.connectRunner({ hello: false });
+    r.hello({ maxConcurrentShifts: 8 });
+    const welcome = await r.waitFor('welcome');
+    expect(welcome.limits.maxConcurrentShifts).toBe(8);
+    await w.t.app.ctx.notifier.flush();
+    expect(await shifts()).toEqual({ running: 0, limit: 8 });
+    r.close();
+    // a runner that asks for more than the server allows is capped (AOM_MAX_SHIFTS_PER_WORKSTATION, default 16)
+    const greedy = await w.connectRunner({ hello: false });
+    greedy.hello({ maxConcurrentShifts: 500 });
+    expect((await greedy.waitFor('welcome')).limits.maxConcurrentShifts).toBe(16);
+    greedy.close();
+    // an older runner that announces nothing gets the server ceiling; offline there is no limit to show
+    const old = await w.connectRunner({ hello: false });
+    old.hello();
+    expect((await old.waitFor('welcome')).limits.maxConcurrentShifts).toBe(16);
+    old.close();
+    await until(async () => (await shifts()).limit === null, 3000, 'offline');
   });
 
   it('closes 4401 for a missing or bad token', async () => {

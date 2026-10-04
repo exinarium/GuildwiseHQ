@@ -482,6 +482,16 @@ const VERBS: Record<string, Verb> = {
     ctx.io.out(`${r.message ?? 'Drafted. The manager approves it on the desk.'}\n`);
     return 0;
   },
+  risk: async (ctx, p) => {
+    const tier = p.positionals[0];
+    if (tier !== 'small' && tier !== 'large')
+      throw new UsageError('usage: aom risk <small|large> --reason "<why>"');
+    const r = (await rpc(ctx, 'card.risk', { tier, reason: textFlag(ctx, p, 'reason', true) })) as {
+      message?: string;
+    };
+    ctx.io.out(`${r.message ?? `Risk tier set to ${tier}.`}\n`);
+    return 0;
+  },
   org: async (ctx, p) => orgDesign(ctx, p),
   source: async (ctx, p) => {
     if (p.positionals[0] !== 'read' || !one(p, 'ref'))
@@ -518,6 +528,7 @@ export const USAGE = `usage: aom <verb> [options]
   intake map --project <KEY> | intake unmapped --note "<why>"   BA intake: map the ticket, or ask the manager
   card create --file <draft.json> | card update <REF> --file <patch.json> | card specify <REF>   BA intake: draft cards
   outbound draft --kind <comment|resolution|decision> --body "<text>"   BA: draft the update for the card's ticket (the manager approves it)
+  risk <small|large> --reason "<why>"      BA: override the card's risk tier (drives the review tier and the merge approval)
   source read --ref <owner/repo#12 | ticket URL>        BA intake: read a GitHub issue (Jira: the Jira skill)
   org catalogue | org role draft --file <json> | org workflow draft --file <json> | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)

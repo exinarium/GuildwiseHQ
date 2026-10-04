@@ -48,7 +48,7 @@ export async function maskDemo(page: Page): Promise<void> {
     ];
     const extra: Array<[RegExp, string]> = [
       [/WIN-HOST/g, 'desktop-wsl'],
-      [/unsandboxed \(forced by AOM_RUNNER_MOCK_SANDBOX\)/g, 'native Windows, unsandboxed by choice'],
+      [/test override: AOM_RUNNER_MOCK_SANDBOX=unsandboxed/g, 'native Windows, unsandboxed by choice'],
     ];
     const fix = (s: string): string => [...map, ...extra].reduce((acc, [re, to]) => acc.replace(re, to), s);
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);

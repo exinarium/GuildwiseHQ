@@ -53,7 +53,7 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
     case 'vault':
       return [['vaults']];
     case 'shift':
-      return [['card'], ['agents'], ['board'], ['hr'], ['metrics']];
+      return [['card'], ['agents'], ['board'], ['hr'], ['metrics'], ['workstations']];
     case 'agent':
       return [['agents'], ['board'], ['card'], ['hr'], ['roles']];
     case 'role':

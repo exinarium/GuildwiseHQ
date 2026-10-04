@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { agentWarning, sandboxAdvice } from '../lib/sandbox.ts';
 import { Agents } from '../pages/Agents.tsx';
 import { Workstations } from '../pages/Workstations.tsx';
 import { keysForEvent } from '../ws/invalidate.ts';
@@ -36,6 +37,7 @@ const station = (id: string, name: string, runtimes: unknown[]) => ({
   runtimes,
   repos: [],
   pairedAt: new Date(0).toISOString(),
+  shifts: name === 'Linux box' ? { running: 2, limit: 4 } : { running: 0, limit: null },
 });
 const stations = [
   station(WS_BAD, 'Win desk', [runtime('unsandboxed', 'Native Windows: allowUnsandboxed is set')]),
@@ -152,6 +154,25 @@ function wrap(ui: React.ReactElement) {
   );
 }
 
+describe('sandbox advice follows the reported cause', () => {
+  it.each([
+    ['Native Windows: allowUnsandboxed is set', 'WSL2'],
+    ['bwrap and socat not installed: install them', 'bubblewrap and socat'],
+    ['sandbox is set to "off" in the runner config', '"required"'],
+    ['test override: AOM_RUNNER_MOCK_SANDBOX=unsandboxed', 'test override'],
+  ])('%s', (reason, expected) => {
+    expect(sandboxAdvice(reason)).toContain(expected);
+  });
+  it('the agent card sentence follows the reason too', () => {
+    expect(agentWarning('Box', 'bwrap and socat not installed')).toBe(
+      'Runs without an OS sandbox on Box: an agent could read files your user can read, including the runner token. Install bubblewrap and socat to sandbox it.',
+    );
+  });
+  it('a Linux reason never recommends WSL2 only', () => {
+    expect(sandboxAdvice('bwrap not installed')).not.toContain('WSL2');
+  });
+});
+
 describe('workstations page', () => {
   it('warns on an unsandboxed workstation, explains an unavailable one, and says nothing for an enforced one', async () => {
     wrap(<Workstations />);
@@ -173,6 +194,14 @@ describe('workstations page', () => {
     );
     expect(within(cold).queryByTestId('sandbox-warning')).toBeNull();
 
+    // the shift cap of each workstation (runner config maxConcurrentShifts), and how many run now
+    expect(
+      within(screen.getByTestId('workstation-Linux box')).getByTestId('workstation-shifts'),
+    ).toHaveTextContent('2 of 4');
+    expect(within(bad).getByTestId('workstation-shifts')).toHaveTextContent(
+      '0 (limit shown while connected)',
+    );
+
     const ok = screen.getByTestId('workstation-Linux box');
     expect(within(ok).queryByTestId('sandbox-warning')).toBeNull();
     expect(within(ok).queryByTestId('sandbox-unavailable')).toBeNull();
@@ -185,7 +214,7 @@ describe('HR board', () => {
     const una = await screen.findByTestId('agent-Una');
     const w = await within(una).findByTestId('agent-sandbox-warning');
     expect(w).toHaveTextContent(
-      'Runs without an OS sandbox on Win desk: an agent could read files your user can read, including the runner token. Run the runner in WSL2 to sandbox it.',
+      'Runs without an OS sandbox on Win desk: an agent could read files your user can read, including the runner token. Run the runner in WSL2, or on Linux with bubblewrap and socat, to sandbox it.',
     );
     expect(within(w).getByRole('link')).toHaveAttribute('href', expect.stringContaining('RUNNER.md'));
     expect(within(screen.getByTestId('agent-Ede')).queryByTestId('agent-sandbox-warning')).toBeNull();

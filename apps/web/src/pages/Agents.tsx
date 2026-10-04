@@ -26,7 +26,7 @@ import {
   TextInput,
 } from '../components/ui.tsx';
 import { getLastProjectKey } from '../lib/lastProject.ts';
-import { agentWarning, isRuntimeUnsandboxed } from '../lib/sandbox.ts';
+import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../lib/sandbox.ts';
 
 /**
  * The HR board (docs/SPEC.md "HR board"): one card per agent with avatar, role, model, status, hiring manager, stats
@@ -225,7 +225,7 @@ function AgentCard({
       </p>
       {a.sandbox === 'unsandboxed' && (
         <SandboxWarning testId="agent-sandbox-warning" lead="Warning:">
-          {agentWarning(station || 'its workstation')}
+          {agentWarning(station || 'its workstation', a.sandboxReason)}
         </SandboxWarning>
       )}
       <p className="text-xs text-zinc-500" data-testid="agent-hired-by">
@@ -347,7 +347,7 @@ function RehomeDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () 
           {rehomeUnsandboxed && station && (
             <div className="flex flex-col gap-2">
               <SandboxWarning testId="rehome-sandbox-warning" role="alert" lead="Warning:">
-                {agentWarning(station.name)}
+                {agentWarning(station.name, sandboxReasonOf(station.runtimes, effRuntime))}
               </SandboxWarning>
               <label className="flex items-start gap-2 text-sm">
                 <input
@@ -645,7 +645,7 @@ function HireDialog({
         {unsandboxed && station && (
           <div className="flex flex-col gap-2" data-testid="hire-unsandboxed">
             <SandboxWarning testId="hire-sandbox-warning" role="alert" lead="Warning:">
-              {agentWarning(station.name)}
+              {agentWarning(station.name, sandboxReasonOf(station.runtimes, effectiveRuntime))}
             </SandboxWarning>
             <label className="flex items-start gap-2 text-sm">
               <input

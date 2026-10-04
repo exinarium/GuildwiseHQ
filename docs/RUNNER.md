@@ -290,7 +290,7 @@ aom-runner doctor             # checks node, git, claude, docker, repos, server
 GitHub uses your machine's `gh` CLI login (run `gh auth login` once).
 
 #### Agent and vault settings
-- **maxConcurrentShifts** (default `4`): max cards running at once
+- **maxConcurrentShifts** (default `4`): max agent shifts this workstation runs at once; a shift offered beyond it is rejected as `busy` and the card waits. The runner announces it in `hello`, the Workstations page shows `running of limit`, and the server caps it at `AOM_MAX_SHIFTS_PER_WORKSTATION` (default 16). Restart the runner after changing it.
 - **vaultSyncIntervalSec** (default `300`): how often to pull/commit/push vaults
 
 ### Setting credentials

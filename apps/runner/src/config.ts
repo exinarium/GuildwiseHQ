@@ -115,7 +115,7 @@ export function applyOverrides(config: RunnerConfig, opts: { mock?: boolean }): 
       mock: {
         ...(config.runtimes.mock ?? {}),
         enabled: true,
-        ...(sandbox ? { sandbox, sandboxReason: `${sandbox} (forced by AOM_RUNNER_MOCK_SANDBOX)` } : {}),
+        ...(sandbox ? { sandbox, sandboxReason: `test override: AOM_RUNNER_MOCK_SANDBOX=${sandbox}` } : {}),
       },
     },
   };

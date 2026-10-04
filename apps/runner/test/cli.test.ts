@@ -76,6 +76,8 @@ describe('aom-runner cli', () => {
       const hello = await server.waitFor('hello');
       expect(hello.repos.map((r) => r.localPath)).toEqual([repo.clone]);
       expect(hello.runtimes.some((r) => r.id === 'mock' && r.available)).toBe(true);
+      // the shift cap (config.json maxConcurrentShifts, default 4) is announced so the Workstations page can show it
+      expect(hello.maxConcurrentShifts).toBe(4);
     } finally {
       child.kill('SIGTERM');
       await child;

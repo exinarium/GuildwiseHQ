@@ -160,6 +160,7 @@ export class RunnerGateway {
       lastRepos: [],
       missing: new Map(),
       stopSentAt: new Map(),
+      maxShifts: ctx.config.maxShiftsPerWorkstation,
     };
     const old = ctx.services.runners.set(conn);
     if (old) {

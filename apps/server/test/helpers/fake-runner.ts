@@ -15,6 +15,7 @@ export interface HelloOptions {
   runtimes?: Array<{ id: string; version: string; available: boolean; capabilities: string[] }>;
   activeShifts?: Array<{ shiftId: string; cardId?: string; agentId: string; startedAt: string }>;
   outboxPending?: number;
+  maxConcurrentShifts?: number;
 }
 
 /** In-process runner speaking the shared protocol; auto-acks server messages that need it. */
@@ -90,6 +91,7 @@ export class FakeRunner {
       vaults: [],
       activeShifts: o.activeShifts ?? [],
       outboxPending: o.outboxPending ?? 0,
+      ...(o.maxConcurrentShifts ? { maxConcurrentShifts: o.maxConcurrentShifts } : {}),
     });
   }
 

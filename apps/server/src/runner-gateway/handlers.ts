@@ -15,6 +15,7 @@ import { endQuestionShift } from '../commands/escalation.ts';
 import { applyFinalizeResult } from '../commands/finalize.ts';
 import { intakeRpc } from '../commands/intake.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
+import { riskTierRpc } from '../commands/risk.ts';
 import {
   applyShiftEnded,
   applyShiftRejected,
@@ -35,7 +36,6 @@ import type { RunnerConn } from './registry.ts';
 import { issueRotatedToken } from './rotation.ts';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_CONCURRENT_SHIFTS = 4;
 /** M7: what the BA does in its intake chat. */
 const INTAKE_METHODS = new Set([
   'card.create',
@@ -257,6 +257,10 @@ export class RunnerHandlers {
     const { ctx } = this;
     const now = ctx.clock.now();
     conn.helloAt = now;
+    conn.maxShifts = Math.min(
+      msg.maxConcurrentShifts ?? ctx.config.maxShiftsPerWorkstation,
+      ctx.config.maxShiftsPerWorkstation,
+    );
     conn.lastRepos = msg.repos;
     conn.helloShiftIds = msg.activeShifts.map((s) => s.shiftId);
     await exec(
@@ -284,7 +288,7 @@ export class RunnerHandlers {
       workstationId: conn.workstationId,
       serverTime: now.toISOString(),
       heartbeatSec: HEARTBEAT_SEC,
-      limits: { maxConcurrentShifts: MAX_CONCURRENT_SHIFTS },
+      limits: { maxConcurrentShifts: conn.maxShifts },
     });
     // With nothing in the runner's outbox there is nothing to wait for; otherwise reconcile on outbox.flushed.
     if (msg.outboxPending === 0) await this.reconcile(conn);
@@ -559,6 +563,7 @@ export class RunnerHandlers {
       if (msg.method === 'devops.request')
         return reply(...(await this.devopsRequest(conn, shift, msg.params)));
       if (msg.method === 'outbound.draft') return reply(...(await outboundDraftRpc(ctx, shift, msg.params)));
+      if (msg.method === 'card.risk') return reply(...(await riskTierRpc(ctx, shift, msg.params)));
       if (DESIGN_METHODS.has(msg.method))
         return reply(...(await designRpc(ctx, shift, msg.method, msg.params)));
       if (INTAKE_METHODS.has(msg.method))
