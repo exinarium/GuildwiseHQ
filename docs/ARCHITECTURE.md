@@ -645,7 +645,7 @@ Names in **bold** are from the spec; the rest are infrastructure events the spec
 | `InvitationRevoked` | `{invitationId}` | status revoked |
 | `InvitationAccepted` | `{invitationId, userId, email, displayName, passwordHash, role}` | invitation accepted; insert users |
 | `UserRoleChanged` | `{userId, role}` | users.role |
-| `UserDeactivated` / `UserReactivated` | `{userId}` | users.status; deactivation also deletes auth_sessions (side effect in command handler) |
+| `UserDeactivated` / `UserReactivated` | `{userId}` | users.status; deactivation also deletes auth_sessions (side effect in command handler) and, in the same transaction, appends `ProjectMemberRemoved` for every shared project the user is a manager of and `WorkstationUnlinked` (by `admin`) for every active workstation of the user; the projection parks the user's own remaining agents (`needs_rehome`, no workstation). Reactivation does not restore workstations (re-pair) or memberships (re-share) |
 | `PasswordChanged` | `{userId, passwordHash}` | users.password_hash |
 | `WorkstationPaired` | `{workstationId, userId, name, platform, hostname, runnerVersion, tokenHash}` | insert workstations; pairing code marked used (command handler, same tx); triggers auto-hire of DevOps engineer (M3) |
 | `WorkstationRenamed` | `{workstationId, name}` | name |
@@ -1124,7 +1124,7 @@ agents/<agentId>/
   home/                # agent HOME/USERPROFILE (.gitconfig with agent identity, tool caches)
   claude/              # CLAUDE_CONFIG_DIR: CLAUDE.md (regenerated each shift), settings.json, transcripts, memory
   scratch/
-worktrees/<PROJECTKEY>/<CARD-REF>/   # git worktrees
+worktrees/<PROJECTKEY>-<project id[:8]>/<CARD-REF>/   # git worktrees (legacy: <PROJECTKEY>/<CARD-REF>, still reused)
 integration/<repoId>/                # worktree on the working branch used for merges (M4)
 vaults/<vaultId>/                    # vault clones (M3)
 logs/runner.log, logs/shifts/<shiftId>.jsonl   # raw runtime stream per shift (local only)
@@ -1254,19 +1254,20 @@ Questions, handoffs and verdicts do not come from the runtime stream; they arriv
 
 - `capabilities()`: run `claude --version` (≥ 2.1); capabilities `['shell','edit','web','mcp','skills','sandbox_config','resume']`.
 - `writeInstructions`: write `<configDir>/CLAUDE.md` (user-level memory for that `CLAUDE_CONFIG_DIR`). The repo's own `CLAUDE.md` in the worktree is still loaded by Claude Code and is never modified.
-- Settings: write `<configDir>/settings.json` per shift:
-  `{ "permissions": { "allow": [...mapped allowedTools], "deny": ["Bash(git push:*)","Bash(git rebase:*)","Bash(git checkout:*)","Bash(git switch:*)","Bash(git reset --hard:*)", ...deniedShellPatterns, ...Edit/Write denies outside writableGlobs], "defaultMode": "acceptEdits" }, "includeCoAuthoredBy": false }`. Mapping: `read`→`Read,Glob,Grep`, `edit`→`Edit,Write,NotebookEdit` (or `Edit(<glob>)` per writable glob), `shell`→`Bash`, `web`→`WebFetch,WebSearch`.
+- Settings: write `<configDir>/settings.json` per shift (`adapters/claude-policy.ts`, keys verified against the Claude Code docs for 2.1.288; the full table is in docs/RUNNER.md, "Claude Code sandbox and permissions"): `permissions` (`allow` mapped from `allowedTools`: `read`→`Read,Glob,Grep`, `edit`→`Edit(//<worktree>/**)` or one `Edit(//<worktree>/<glob>)` per writable glob, `shell`→`Bash`, `web`→`WebFetch,WebSearch`; `deny`: `Edit,Write,NotebookEdit` without the `edit` tool, `WebFetch,WebSearch` without `web`, the role's shell patterns, git push/rebase/checkout/switch/reset, Edit on the vault/config dir/`.git`, Read on the runner's private files and credential stores; `defaultMode: "dontAsk"`; `blockReadsOutsideWorkingDirectories: true`) and `sandbox` (enabled, `failIfUnavailable`, no unsandboxed retry, per-role filesystem and network lists). `acceptEdits` is not used: it approved every edit in the worktree regardless of the role.
 - Spawn (execa, `cwd` = worktree, no shell):
 
 ```
 claude -p <prompt> --output-format stream-json --verbose
        --model <model> [--effort <effort>]
-       --permission-mode acceptEdits
+       --permission-mode dontAsk --setting-sources user
        --strict-mcp-config --mcp-config <configDir>/mcp.json
        --add-dir <vault path> ...
-env: CLAUDE_CONFIG_DIR=<configDir> HOME=<home> USERPROFILE=<home>
-     PATH=<dataDir>/bin:<PATH>  AOM_IPC_URL AOM_SHIFT_TOKEN AOM_SHIFT_ID
+env (not inherited from the runner: an allow-list of PATH/LANG/TERM/TZ/proxy and CA variables plus):
+     CLAUDE_CONFIG_DIR=<configDir> HOME=<home> USERPROFILE=<home>
+     PATH=<dataDir>/bin:<PATH>  AOM_IPC_URL AOM_IPC_SOCKET AOM_SHIFT_TOKEN AOM_SHIFT_ID
      + auth: CLAUDE_CODE_OAUTH_TOKEN (from runner config, created with `claude setup-token`) or ANTHROPIC_API_KEY
+     + optional CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 (runtime config `scrubSubprocessEnv`)
 ```
 
   In print mode tool calls not covered by `allow` are denied rather than prompted, so the shift never blocks on a permission prompt.
@@ -1311,13 +1312,13 @@ An adapter for another coding agent implements the same interface; its `writeIns
 
 ### 13.3 Private sandbox (`sandbox/sandbox.ts`)
 
-`agents/<agentId>/{home,claude,scratch}` created on first shift; `home/.gitconfig` sets `user.name = "<AgentName> (aom)"`, `user.email = "<agentId>@agents.aom.invalid"`, so commits are attributed to the agent. Everything the runtime accumulates (transcripts, memory, caches) lives under this directory. `agent.wipe` deletes `agents/<agentId>` recursively (and for re-homing, the old workstation's copy is simply abandoned and wiped if that runner ever reconnects).
+`agents/<agentId>/{home,claude,scratch}` created on first shift (the OS-level sandbox that confines these directories is described in 12.2 and docs/RUNNER.md); `home/.gitconfig` sets `user.name = "<AgentName> (aom)"`, `user.email = "<agentId>@agents.aom.invalid"`, so commits are attributed to the agent. Everything the runtime accumulates (transcripts, memory, caches) lives under this directory. `agent.wipe` deletes `agents/<agentId>` recursively (and for re-homing, the old workstation's copy is simply abandoned and wiped if that runner ever reconnects).
 
 ### 13.4 Reporting: the `aom` CLI (chosen) over local IPC
 
 Rationale: a shell command works for any provider's coding agent (provider neutral), is synchronous so the agent learns immediately whether the report was accepted, and keeps reporting out of free-form text. MCP was rejected as the primary path because not every runtime supports it; structured final JSON is kept only as a fallback (§13.1 step 7).
 
-Transport: the runner runs an HTTP server on `127.0.0.1:<ephemeral>`; each shift gets `AOM_SHIFT_TOKEN` (32 random bytes) valid only while the shift runs. `aom` posts JSON to `${AOM_IPC_URL}/v1/report` or `/v1/rpc` with `Authorization: Bearer`. Schemas: `packages/shared/src/protocol/ipc.ts`.
+Transport: the runner runs an HTTP server on `127.0.0.1:<ephemeral>` and on a Unix socket (`AOM_IPC_SOCKET`, which the sandboxed `aom` CLI uses because the sandbox has no loopback route); each shift gets `AOM_SHIFT_TOKEN` (32 random bytes) valid only while the shift runs. `aom` posts JSON to `${AOM_IPC_URL}/v1/report` or `/v1/rpc` with `Authorization: Bearer`. Schemas: `packages/shared/src/protocol/ipc.ts`.
 
 ```
 aom card [--json]                                  # print the brief
@@ -1348,7 +1349,7 @@ Runner-attached data: for build outcomes the runner computes `diffStats` with `g
 ### 13.5 Worktrees and branches (`git/worktrees.ts`)
 
 - Branch: `<project.branch_prefix><ref-lowercase>-<slug(title, 40)>`, e.g. `aom/web-12-add-login-page`. Fixed on first claim and stored on the card.
-- Path: `<dataDir>/worktrees/<PROJECTKEY>/<REF>`.
+- Path: `<dataDir>/worktrees/<PROJECTKEY>-<project id[:8]>/<REF>` (keys are unique per organization only, so the project id keeps same-keyed projects of two organizations apart on one workstation; worktrees created under the old `<PROJECTKEY>/<REF>` path are reused through the path the server recorded). Paths from the server are confined to `<dataDir>/worktrees` and refs are validated before any git call.
 - First claim (`mode:'create'`): `git -C <repo> fetch origin <base>` (skipped if no `origin`), then `git -C <repo> worktree add -b <branch> <path> origin/<base>` (or `<base>` if no remote). Base = repo `working_branch` or project `working_branch`, never another card's branch. `CardClaimed` sets `home_workstation_id`.
 - Later stages and rework (`mode:'reuse'`): verify the path exists and is on the branch; if missing but the branch exists, `git worktree add <path> <branch>`; if both missing → `shift.rejected{worktree_failed}` and a desk escalation.
 - Bug children reuse the parent's worktree and branch (`worktree_card_id`).
@@ -1455,9 +1456,11 @@ Admins get the administration view only; being admin grants no visibility into o
 | Answer desk item for a card | `owner_only`: card owner; `any_manager`: any active member. Items always visible to all members |
 | Answer project-level desk item (no card) | project owner; DevOps/vault/bottleneck items: the user whose workstation/vault it concerns |
 | Hire agent org-wide | the org owner, onto own workstation |
-| Hire agent for a shared project | any active member, onto own workstation, from the owner's role catalogue; `project_id` is set |
+| Hire agent for a shared project | any active member, onto own workstation, from the owner's role catalogue; `project_id` is set; refused on archived projects |
+| Add a standing order (`POST /api/ledger`, or `ledger.scope=standing_order` when answering a desk item) | project owner for project-wide orders (also when a `cardId` is given: the order is still project-wide); the organization owner for organization-wide orders (a guest manager's answer may carry decisions and requirements, never standing orders) |
+| Change an agent's `permissions` | anyone who may change the agent, but only to narrow the role definition; widening non-core limits (web/MCP tools, risk tiers, repos) needs the org owner; the role's hard limits (`edit`/`shell` tools it lacks, `mayCommit`, its denied shell patterns, its writable globs) are never widened (`checkPermissions`, `permissions_exceed_role`); changing the role resets permissions to the new role's |
 | Change / fire / rehome agent | org owner (any agent of the org) or `manager_user_id` (own hires) |
-| Direct / chat with an agent | org owner for org-wide agents; any active member of the agent's project for project-scoped agents; any member may chat with org-wide agents in the context of the shared project (thread linked to the project) |
+| Direct / chat with an agent | org owner for org-wide agents; any active member of the agent's project for project-scoped agents; any member may chat with org-wide agents in the context of the shared project (thread linked to the project). Re-checked on every `chat.send` (a removed member or deactivated account cannot keep using an old thread); project chats are labelled "visible to this project's managers" in the UI |
 | Extend / reset built-in roles, create custom roles/workflows/departments | org owner |
 | Rate digest items, approve outbound for a card | card owner (outbound) / project members (ratings) |
 
@@ -1469,14 +1472,17 @@ Enforcement: every route calls a guard from `apps/server/src/auth/guards.ts` (`r
 
 ## 18. Security
 
-- **Passwords**: argon2id via `@node-rs/argon2` (memoryCost 19456 KiB, timeCost 2, parallelism 1 — OWASP baseline). Minimum length 12, max 256. Login failure responses are uniform; `@fastify/rate-limit` 10/min per IP+email on `/api/auth/login`, 5/min per IP on `/api/runner/pair` and invitation accept.
+- **Passwords**: argon2id via `@node-rs/argon2` (memoryCost 19456 KiB, timeCost 2, parallelism 1 — OWASP baseline). Minimum length 12, max 256. Login failure responses are uniform; `@fastify/rate-limit` 10/min per IP+email on `/api/auth/login` plus a global 30/min per IP on login, 5/min per account on `/api/auth/password`, 5/min per IP on `/api/runner/pair` and invitation accept.
 - **Sessions**: cookie `aom_sid` = 32 random bytes base64url; DB stores `sha256(token)`. `HttpOnly; Secure (prod); SameSite=Lax; Path=/`; 30-day absolute expiry, 7-day idle expiry (sliding `last_seen_at`, updated at most every 5 min). Logout deletes the row; deactivation deletes all of the user's rows and closes their browser sockets.
 - **CSRF**: SameSite=Lax cookie + strict `Origin` check on every non-GET request and on WS upgrades (`Origin` must equal `AOM_PUBLIC_ORIGIN`; requests without `Origin` are rejected for cookie-authenticated routes) + mutating endpoints accept only `application/json` (blocks HTML form posts). No CSRF token needed with these three.
 - **Runner tokens**: 32 random bytes with prefix `aomr_`; only `sha256` stored (high-entropy secret; slow hashing unnecessary); compared via unique index lookup. Unlink invalidates immediately and closes the socket. Token rotation: `aom-runner rotate-token` (M2 hardening) issues a new token over the authenticated WS.
+- **Deactivation**: also unlinks the user's workstations and removes their memberships (see `UserDeactivated`); the runner gateway and the dispatcher additionally refuse any workstation whose user is not `active`.
 - **Pairing codes**: single use, 10 min, max 5 attempts per code, stored as `sha256(normalized code)`; at most 3 active codes per user.
 - **Invitations**: 32-byte token in the link `/invite/<token>`; `sha256` stored; 7-day expiry; single use (status flip in the same transaction as user creation with `WHERE status='pending' AND expires_at > now()`); resend issues a new token and invalidates the old; revoke invalidates. Accepting checks no existing user with that email.
-- **IPC**: bound to `127.0.0.1`, per-shift bearer token, rejected after shift end.
-- **Headers**: `@fastify/helmet` with a CSP allowing `self` and `connect-src` for the WS origin. All input validated with zod at the route boundary (`fastify-type-provider-zod`).
+- **IPC**: bound to `127.0.0.1` and (not Windows) a Unix socket in a private `0700` temp directory, per-shift bearer token, rejected after shift end. A runner may only answer its own `runner_commands` (`command.result` of another workstation's command is dropped).
+- **Untrusted owner-controlled strings**: branch prefix, working branches, vault folder and repository/vault URLs are validated in `packages/shared/src/safe.ts` at the API (git ref rules, no leading `-`, no `..`; `https://`, `ssh://`, `git@host:path` only, no userinfo password and no http(s) user name; `file://`/path remotes only with `AOM_ALLOW_LOCAL_REMOTES`) and again by the runner, which also confines every path to its own directories. Migration `1100_scrub_url_credentials.sql` and the projectors scrub credentials from URLs stored before the rule (the append-only guard on `events` is lifted for that one redaction). Feed and citation URLs must be http(s) and the web app renders only http(s) hrefs.
+- **Access logs**: invitation tokens (`/api/invitations/<t>`, `/invite/<t>`) and `token=`/`code=` query values are redacted from logged URLs.
+- **Headers** (set in the app's `onSend` hook; the behaviour of `@fastify/helmet` without the dependency): `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' <ws(s) origin>; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'` (+ `upgrade-insecure-requests` on https), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Cross-Origin-Opener-Policy`, `Permissions-Policy`, and `Strict-Transport-Security` when `AOM_PUBLIC_ORIGIN` is https (Caddy adds it for real domains too). `style-src 'unsafe-inline'` is needed for React's inline `style` attributes only; there are no inline scripts. All input validated with zod at the route boundary (`fastify-type-provider-zod`).
 - **Secrets on the site**: only `DATABASE_URL` and SMTP credentials in env. Session, runner and invitation tokens are random values looked up by hash, so no signing secret exists to leak.
 
 ---
@@ -1505,7 +1511,7 @@ Errors: `{error: {code, message, details?}}` with 400 validation, 401 unauthenti
 | `POST /api/projects/:id/members` `{email}` · `POST /api/projects/:id/members/accept` · `POST /api/projects/:id/members/decline` · `DELETE /api/projects/:id/members/:userId` | sharing | M3 |
 | `GET /api/board?projectId=` | columns with card summaries (ref, title, assignee, age, risk tier, blocked, rework round) | M1 |
 | `POST /api/cards` `{projectId, title, cardType, fields, repoId?, completionAction?, docsNeeded?, priority?, dependencies?, specify?:boolean}` | create (draft, or specified if `specify` and valid) | M1 |
-| `GET /api/cards/:id` | card + handoffs + transitions + thread + current shift | M1 |
+| `GET /api/cards/:id` | card + handoffs + transitions + thread + current shift. `:id` is the card uuid or a ref; a ref that matches cards in more than one of the caller's projects (same key in two organizations) is `409 ambiguous_ref` with `details.candidates` (use the uuid; the web app links by uuid) | M1 |
 | `PATCH /api/cards/:id` | edit fields (owner) | M1 |
 | `POST /api/cards/:id/specify` | → 422 with `missing[]` if required fields absent | M1 |
 | `POST /api/cards/:id/comments` `{body}` | | M1 |

@@ -140,8 +140,17 @@ Set these in `.env` before starting the server. All have defaults suitable for d
 | `AOM_MIGRATIONS_DIR` | — | Override the directory SQL migrations are read from (defaults to the bundled `migrations/`) |
 | `AOM_WEB_DIST` | — | Path to built web assets (auto-set in Docker to `/app/dist/web`) |
 | `AOM_RATE_LIMIT` | `true` | Enable request rate limiting |
+| `AOM_ALLOW_LOCAL_REMOTES` | `false` | **Tests only.** Accept `file://` and local-path git remotes for repositories and vaults; production refuses them |
 | `AOM_TEST_CLOCK` | `false` | **Never enable in production.** Exposes `POST /api/test/clock` for testing |
 | `LOG_LEVEL` | `info` | Logging level (`debug`, `info`, `warn`, `error`) |
+
+### Security headers
+
+The app sends a Content-Security-Policy (same-origin scripts, `connect-src` for the WebSocket origin derived from
+`AOM_PUBLIC_ORIGIN`, no framing, no objects) and, when `AOM_PUBLIC_ORIGIN` is `https://...`, `Strict-Transport-Security`.
+The bundled `deploy/Caddyfile` also adds HSTS for every host except `localhost`/`127.0.0.1`, so a locally trusted test
+certificate never pins your browser. If you terminate TLS elsewhere, keep forwarding the `Host` header and do not strip
+these headers. Access logs redact invitation tokens and pairing codes in URLs.
 
 ### Development only (never in production)
 

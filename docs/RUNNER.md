@@ -320,6 +320,7 @@ The runner respects these environment variables:
 | `AOM_RUNNER_MAX_SHIFT_MS` | Override `maxShiftMinutes` for testing (milliseconds, e.g., 5000 for 5 seconds) |
 | `AOM_MOCK_STEP_MS` | Speed up mock adapter progress steps (default 100 ms) |
 | `AOM_GH_BIN` | Path to `gh` binary (default `gh`; for GitHub API integration) |
+| `AOM_ALLOW_LOCAL_REMOTES` | Set to `1` to accept `file://` and path git remotes (tests only; production refuses them) |
 | `AOM_CLAUDE_SMOKE` | Set to `1` to run the real-Claude smoke test (spends tokens) |
 | `AOM_CLAUDE_SMOKE_MODEL` | Smoke test model (default `opus`; try `haiku` to save tokens) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Claude Code (from `claude setup-token`) |
@@ -396,12 +397,19 @@ aom publish --file <note.md> [--title "<t>"] [--citations-file <json>]
 
 Runs the `claude` CLI in a shift, builds the full environment, and streams the output.
 
-**Environment setup** (per shift):
+**Environment setup** (per shift). The agent process does **not** inherit the runner's environment; it gets an
+allow-list (`PATH`, `LANG`/`LC_*`, `TERM`, `TZ`, proxy and CA variables such as `HTTPS_PROXY` and `SSL_CERT_FILE`, and the
+few variables Windows needs to start a process) plus:
 - `HOME=~/.aom-runner/agents/<agentId>/home`
 - `CLAUDE_CONFIG_DIR=~/.aom-runner/agents/<agentId>/claude`
-- `GIT_CONFIG_FILE=~/.aom-runner/agents/<agentId>/home/.gitconfig` (with agent name and email)
-- `AOM_IPC_URL=http://127.0.0.1:<ephemeral>` (for `aom` CLI)
+- `GIT_CONFIG_GLOBAL=~/.aom-runner/agents/<agentId>/home/.gitconfig` (with agent name and email)
+- `AOM_IPC_URL=http://127.0.0.1:<ephemeral>` and `AOM_IPC_SOCKET=<private unix socket>` (for the `aom` CLI; the CLI
+  prefers the socket, because the sandbox has no route to loopback TCP)
 - `AOM_SHIFT_TOKEN=<per-shift-token>` (ephemeral, valid only during the shift)
+- only the provider credential this runtime is configured with (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`)
+
+`GH_TOKEN`, `GITHUB_TOKEN`, `SSH_AUTH_SOCK`, cloud keys (`AWS_*`, ...) and everything else in the runner's own
+environment never reach an agent.
 
 **Session startup:**
 ```sh
@@ -461,6 +469,8 @@ First review bounces, second approves; first test fails (creates bug card), seco
 ## Sandbox isolation
 
 Each agent runs with its own home directory and config, wiped when the agent is fired (or when the DevOps engineer is reset).
+On top of that, Claude Code sessions run inside Claude Code's own sandbox and permission system. Read
+[Threat model](#threat-model-and-residual-risk) for what this does and does not protect against.
 
 ### Per-agent directories
 
@@ -472,7 +482,86 @@ All are cleaned up when the agent is fired.
 
 ### Git worktrees
 
-Worktrees are created under `worktrees/<PROJECT>-<number>/aom/<ref>-<slug>/` and reused across stages of the same card. They are removed after finalize.
+Worktrees are created under `worktrees/<KEY>-<project id prefix>/<REF>/` (project keys are only unique per
+organization, so the project id keeps two same-keyed projects on one workstation apart) and reused across stages of the
+same card. Worktrees created by older runner versions under `worktrees/<KEY>/<REF>` keep working: reuse follows the path
+the server recorded for the card. They are removed after finalize.
+
+Everything the server sends that ends up in git or on the filesystem is treated as untrusted:
+branch names and base branches must be valid git refs without a leading `-` (checked again on the runner, `--` is passed
+before every ref and path), vault and repository URLs must be `https://`, `ssh://` or `git@host:path` without
+credentials, and every worktree, integration and vault path is resolved with `realpath` and must lie strictly inside the
+runner's `worktrees/`, `integration/` or `vaults/` directory; a path outside (a `..`, an absolute path, a symlink) is
+refused and never deleted. `file://` and local-path remotes exist for tests only (`AOM_ALLOW_LOCAL_REMOTES=1`).
+
+### Claude Code sandbox and permissions (per role)
+
+Verified against the Claude Code docs (settings reference, permissions and sandboxing pages, https://code.claude.com/docs)
+and `claude --help` of version 2.1.288. The runner writes `<configDir>/settings.json` for every shift and starts
+`claude` with `--permission-mode dontAsk --setting-sources user`, so a cloned repository's own `.claude/settings*.json`
+cannot loosen anything.
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| `permissions.defaultMode` | `dontAsk` | anything no allow rule approves is denied (`acceptEdits` approved every edit in the worktree whatever the role) |
+| `permissions.allow` | per `allowedTools`: `Read, Glob, Grep`; `Bash`; `WebFetch, WebSearch`; `Edit(//<worktree>/**)` or one `Edit(//<worktree>/<glob>)` per `writableGlobs` entry | explicit allow |
+| `permissions.deny` | `Edit, Write, NotebookEdit` when the role has no `edit` tool; `WebFetch, WebSearch` without `web`; `Bash` without `shell`; the role's `deniedShellPatterns` and `git push/rebase/checkout/switch/reset --hard`; `Edit` on the vault, the agent's config dir and the worktree `.git`; `Read` on the runner's `config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`, `logs` and on `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.claude`, ... | deny wins over allow in every scope |
+| `permissions.blockReadsOutsideWorkingDirectories` | `true` | the Read/Grep/Glob tools only see the worktree (or scratch dir), the agent's scratch dir and the vault (`--add-dir`); other agents' sandboxes and other cards' worktrees are out of reach |
+| `sandbox.enabled`, `failIfUnavailable`, `allowUnsandboxedCommands` | `true`, `true` (`sandbox: "required"`), `false` | Bash runs inside bubblewrap (Linux/WSL2) or Seatbelt (macOS); no `dangerouslyDisableSandbox` retry; no silent fallback to unsandboxed |
+| `sandbox.filesystem.denyRead` | the runner data dir, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.config/gh`, `~/.config/gcloud`, `~/.claude`, `~/.claude.json` | runner token, Jira and provider credentials, the linked `.credentials.json` |
+| `sandbox.filesystem.allowRead` | the agent's own dir, its worktree, the vault, the `aom` shim and script | the narrower allow re-opens only what this shift needs |
+| `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + the main repository's `.git` (a linked worktree commits into it) / the repository's `.git/hooks` and `.git/config`, the vault, the runner's private files | hooks and git config run outside the sandbox the next time the user uses git |
+| `sandbox.network` | `strictAllowlist: true`; `allowedDomains`: package registries and source hosts for roles with `shell` (npm, yarn, PyPI, crates.io, Go proxy, RubyGems, Maven/Gradle, github.com), nothing for others; `allowUnixSockets`: the runner's IPC socket; `allowLocalBinding` for `shell` roles | scouts and researchers reach the web through `WebFetch`/`WebSearch` (permission rules, not the sandbox); builders reach registries from the shell. Add private mirrors with `runtimes.claude-code.extraAllowedDomains` |
+
+Claude Code's sandbox wraps shell commands only; the Read/Edit/Write/WebFetch tools are governed by the permission rules
+above, which is why both exist. Chat sessions get the same layer with only `Read, Glob, Grep, Bash(aom:*)`, and `Edit`
+denied when a card worktree is in context.
+
+Config keys (`runtimes.claude-code`): `sandbox` (`required` default, `best_effort`, `off`), `extraAllowedDomains`
+(array of hosts), `scrubSubprocessEnv` (boolean, default `false`). With `sandbox: "required"` the runtime reports itself
+unavailable (no agent is scheduled on it) when `bwrap` and `socat` are missing on Linux (`sudo apt-get install
+bubblewrap socat`; on Ubuntu 24.04+ see the AppArmor note in the Claude Code sandboxing docs) or on native Windows (use
+WSL2); `claude` must be 2.1.257 or newer.
+
+`scrubSubprocessEnv: true` sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`: Claude Code then strips credentials from the
+environment of everything its shell starts and, on Linux, isolates the PID namespace so `/proc/<pid>/environ` of other
+processes is unreadable. It is off by default because Claude Code also removes variables it recognizes as credentials,
+and we could not verify (without running a real session) that `AOM_SHIFT_TOKEN` survives. Turn it on for one
+workstation, run a shift and check that `aom card` still works; the per-shift IPC token is the only secret it protects.
+
+### Read-only roles and path scopes
+
+A role that may not commit (reviewer, scout, ...) is rolled back after every shift: `git checkout -f <branch>`,
+`git reset --hard <start sha>`, `git clean -fd` inside its worktree. Roles with `writableGlobs` (tester: the project's
+E2E globs; writer: documentation; any custom role) may only change matching paths: the post-shift guard reports
+`edited_outside_writable_globs` (or the tester/writer rules), and out-of-scope edits are discarded before the shift-end
+autocommit.
+
+### Threat model and residual risk
+
+What the layers above protect against: an agent (or a prompt injection that steers it) reading the runner's
+`config.json` (runner token, Jira token, provider credentials), other agents' sandboxes and worktrees, the user's SSH
+keys and cloud credentials; writing outside its worktree, into the vault, into the repository's hooks or config;
+reaching hosts other than package registries from the shell; inheriting `GH_TOKEN`, `SSH_AUTH_SOCK` or cloud keys; and a
+manipulated server or project owner steering `git` or `rm -rf` with option-like refs or `..` paths.
+
+Where the runner token lives: in `config.json` (mode 0600) inside the runner data directory, which every agent session
+is denied (sandbox `denyRead` and a `Read` deny rule). We did not move it to the OS keyring: the runner needs it
+unattended at boot, and a keyring that is unlocked for the runner is as reachable by a same-user process as the file.
+
+**Residual risk, stated plainly.** Agents run as the same OS user as the runner. That is not a hard security boundary:
+- Anything outside the sandbox boundary runs with the runner user's rights: Claude Code itself, MCP servers, hooks, and
+  any command you add to `sandbox.excludedCommands` yourself.
+- Without `scrubSubprocessEnv`, a process of the same user can read `/proc/<pid>/environ` of the runner's other child
+  processes (it contains other shifts' IPC tokens and the provider credential).
+- The sandbox depends on Claude Code and the OS (bubblewrap/Seatbelt) being correct; the permission rules are matched on
+  command text and are not a boundary by themselves.
+- A same-user local attacker (outside the agent) can read `config.json` regardless.
+
+**Recommendation:** run the runner as a dedicated, unprivileged OS user with its own home directory and a data directory
+only that user can read (`sudo useradd -m aom-runner`, install the service from the section above under that user).
+Then even a sandbox escape finds no SSH keys, no `gh` login, no other projects and no personal files. Put Docker access
+for tester shifts behind a rootless Docker of that user.
 
 ## Vaults: sync and write
 
@@ -510,8 +599,8 @@ A builder on a work-domain card sees only the work vault; personal cards see onl
 ## Credentials and secrets
 
 **Credentials stay on the machine:**
-- Runner token: stored in `config.json` (mode 0600)
-- Claude credentials: stored in agent's `CLAUDE_CONFIG_DIR` (mode 0700) or symlinked to your `~/.claude`
+- Runner token: stored in `config.json` (mode 0600); agents are denied the data directory (see the threat model)
+- Claude credentials: stored in agent's `CLAUDE_CONFIG_DIR` (mode 0700) or symlinked to your `~/.claude/.credentials.json` (the sandbox denies reading the real file to shell commands; Claude Code itself reads it)
 - Jira token: stored in `config.json` (mode 0600)
 - GitHub: uses machine's `gh` login (via `gh auth login`)
 - Vault SSH keys: used from machine's SSH agent or keyfiles

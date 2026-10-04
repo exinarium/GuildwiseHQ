@@ -99,7 +99,7 @@ Vaults are git repositories that sync to your workstations automatically. Each w
 
 To configure:
 1. Go to **Projects** > **Settings** > **Vaults**
-2. Add URLs (SSH or HTTPS) for personal and work vaults
+2. Add URLs (SSH or HTTPS) for personal and work vaults. URLs must not contain a password or token (`https://user:token@host/...` is refused): use SSH keys or a credential helper on the workstation
 3. Set sync interval (default 300 seconds)
 
 **On Windows**, if vault URLs use SSH keys, ensure git can find them (OpenSSH or PuTTY; WSL2 recommended).
@@ -114,7 +114,9 @@ Only the project owner can share. To invite another manager:
 4. They can hire agents onto their own workstations, see the board, and answer desk items
 5. Only the owner (and the hiring manager) can change each agent; only the owner can hire/change/fire shared project agents
 
-When you remove a member, their agents are re-homed to your workstation and account automatically; claimed cards are released.
+When you remove a member, their agents are re-homed to your workstation and account automatically; claimed cards are released. Deactivating a user (administrator) does the same for every project they were a manager of, unlinks all of their workstations (their runners are disconnected and cannot reconnect), and parks their own agents until the account is reactivated and re-paired.
+
+Only the project owner can add standing orders (also from a card or when answering a question); a guest manager can answer questions with decisions and requirements. Organization-wide standing orders can only come from the organization owner. An agent's permissions can be narrowed by its hiring manager but never widened beyond its role (a reviewer never commits); widening other limits (web, extra tools, risk tiers) is for the organization owner.
 
 ### Decision policy
 
@@ -129,7 +131,7 @@ By default, only the card's owner (who created it) can answer questions and appr
 
 The board shows all cards in a workflow, from left to right by stage. Each card tile shows:
 
-- **Card ref** (e.g., `TOY-1`)
+- **Card ref** (e.g., `TOY-1`). Refs are unique only within one organization: if two of your projects (your own and a shared one) both have a `TOY-1`, the ref link asks which one you mean, and the board always links by card id
 - **Title and type** (feature, bug, support, refactor, docs)
 - **Assignee** (the agent working on it, if claimed)
 - **Age** (time in current stage)
@@ -447,7 +449,7 @@ Click an agent card on the board to open its detail, then click **Chat**. This o
 - Offer suggestions
 - Discuss blockers or decisions
 
-Chat is saved to a thread and appears in the card's history.
+Chat is saved to a thread and appears in the card's history. A chat that belongs to a project is marked "visible to this project's managers". Rights are checked on every message: if you are removed from the project, you can no longer talk to its agents through an old chat.
 
 ## Windows workstation notes
 
