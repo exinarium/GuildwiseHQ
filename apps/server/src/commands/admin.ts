@@ -1,9 +1,11 @@
 import { streamId } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
-import { exec, one } from '../db/sql.ts';
+import { exec, one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
+import { removeMemberIn } from './sharing.ts';
+import { unlinkWorkstationIn } from './workstations.ts';
 
 const ADMIN_SCOPE = { orgId: null, projectId: null, audience: 'admin' } as const;
 
@@ -39,6 +41,22 @@ export async function patchUser(
         if (u.role === 'admin' && (await adminCount()) <= 1) {
           throw conflict('last_admin', 'cannot deactivate the last active administrator');
         }
+        // Cut off everything the account could still reach: its projects first (releases the claims of its
+        // agents and hands them to the owners, as a member removal does), then its runners (claims, shifts and
+        // queued commands go, the gateway closes the sockets). Each step is its own append inside this transaction.
+        const memberships = await rows(
+          tx,
+          `SELECT pm.project_id, p.* FROM project_members pm JOIN projects p ON p.id = pm.project_id
+            WHERE pm.user_id=$1 AND pm.role <> 'owner' AND pm.status IN ('active','invited')`,
+          [userId],
+        );
+        for (const m of memberships) await removeMemberIn(ctx, tx, admin.user.id, m, userId);
+        const stations = await rows<{ id: string }>(
+          tx,
+          `SELECT id FROM workstations WHERE user_id=$1 AND status='active'`,
+          [userId],
+        );
+        for (const w of stations) await unlinkWorkstationIn(ctx, tx, admin.user.id, w.id, userId, 'admin');
         events.push({
           ...base,
           streamId: streamId.user(userId),

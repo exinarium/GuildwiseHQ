@@ -183,6 +183,21 @@ export async function removeMember(
   return withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.my_role !== 'owner') throw forbidden('only the project owner can do this');
+    return removeMemberIn(ctx, tx, user.id, p, memberId);
+  });
+}
+
+/** The removal itself, inside the caller's transaction (also used when an administrator deactivates a user). */
+export async function removeMemberIn(
+  ctx: Ctx,
+  tx: Tx,
+  actorId: string,
+  p: Row,
+  memberId: string,
+): Promise<{ inheritedAgentIds: string[]; transferredCardIds: string[]; releasedCardIds: string[] }> {
+  const projectId = p.id as string;
+  const user = { id: actorId };
+  {
     const m = await one(
       tx,
       `SELECT status FROM project_members WHERE project_id=$1 AND user_id=$2 AND role <> 'owner'`,
@@ -258,7 +273,7 @@ export async function removeMember(
       transferredCardIds,
       releasedCardIds: plan.claimed.map((c) => c.id as string),
     };
-  });
+  }
 }
 
 // ------------------------------------------------------------------------------------ agent re-home

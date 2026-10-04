@@ -4,7 +4,7 @@ import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { generatePairingCode, normalizePairingCode, randomToken, sha256Hex } from '../crypto.ts';
 import { exec, one, rows } from '../db/sql.ts';
-import { withAppendTx } from '../db/tx.ts';
+import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { cardMessage, orgScope, runnerActor, SYSTEM_ACTOR, userActor } from './common.ts';
@@ -123,7 +123,22 @@ export async function unlinkWorkstation(ctx: Ctx, user: AuthSession['user'], id:
     const ws = await one(tx, 'SELECT user_id, status FROM workstations WHERE id=$1', [id]);
     if (!ws || !canUnlinkWorkstation(user, ws.user_id)) throw notFound('workstation not found');
     if (ws.status === 'unlinked') throw conflict('already_unlinked', 'workstation is already unlinked');
-    const by = ws.user_id === user.id ? 'owner' : 'admin';
+    await unlinkWorkstationIn(ctx, tx, user.id, id, ws.user_id, ws.user_id === user.id ? 'owner' : 'admin');
+  });
+}
+
+/** The unlink itself, inside the caller's transaction (also used when an administrator deactivates a user). */
+export async function unlinkWorkstationIn(
+  ctx: Ctx,
+  tx: Tx,
+  actorUserId: string,
+  id: string,
+  wsOwnerId: string,
+  by: 'owner' | 'admin',
+): Promise<void> {
+  const ws = { user_id: wsOwnerId };
+  const user = { id: actorUserId };
+  {
     const events: AppendInput[] = [
       {
         streamId: streamId.workstation(id),
@@ -188,5 +203,5 @@ export async function unlinkWorkstation(ctx: Ctx, user: AuthSession['user'], id:
       `UPDATE runner_commands SET status='failed', last_error='workstation unlinked' WHERE workstation_id=$1 AND status IN ('pending','sent')`,
       [id],
     );
-  });
+  }
 }

@@ -129,6 +129,7 @@ export class Dispatcher {
       `SELECT a.*, ws.runtimes,
               (SELECT count(*)::int FROM cards c WHERE c.claimed_by_agent_id = a.id AND c.claim_id IS NOT NULL) AS active
          FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
+                 JOIN users wu ON wu.id = ws.user_id AND wu.status = 'active'
         WHERE a.status='active' AND NOT a.is_devops AND ws.status='active' AND ws.connected AND ws.last_seen_at > $1
         ORDER BY a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
       [onlineSince],

@@ -59,6 +59,14 @@ export const userProjectors: Record<string, Projector> = {
       p.userId,
       e.createdAt,
     ]);
+    // Their own agents stop with them: parked until the account is back (or the owner re-homes them). Agents of
+    // shared projects were already handed to the project owners by the member removals that precede this event.
+    await exec(
+      tx,
+      `UPDATE agents SET status='needs_rehome', workstation_id=NULL
+        WHERE manager_user_id=$1 AND status='active' AND NOT is_devops`,
+      [p.userId],
+    );
   },
   UserReactivated: async (tx, e) => {
     const p = (e.event as EventOf<'UserReactivated'>).payload;

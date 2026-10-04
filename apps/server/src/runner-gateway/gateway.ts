@@ -143,6 +143,12 @@ export class RunnerGateway {
       socket.close(WS_CLOSE.forbidden, 'workstation unlinked');
       return null;
     }
+    // A deactivated account keeps no runner access (also covers workstations that predate the cut-off on deactivation).
+    const owner = await one(ctx.pool, 'SELECT status FROM users WHERE id=$1', [ws.user_id]);
+    if (owner?.status !== 'active') {
+      socket.close(WS_CLOSE.forbidden, 'account deactivated');
+      return null;
+    }
     const conn: RunnerConn = {
       socket,
       workstationId: ws.id,

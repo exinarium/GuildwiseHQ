@@ -31,6 +31,7 @@ export async function devopsPass(
        FROM devops_requests r
        JOIN agents a ON a.id = r.devops_agent_id AND a.status = 'active'
        JOIN workstations w ON w.id = r.workstation_id AND w.status = 'active' AND w.connected AND w.last_seen_at > $1
+       JOIN users wu ON wu.id = w.user_id AND wu.status = 'active'
       WHERE r.status = 'queued'
       ORDER BY r.created_at, r.id`,
     [onlineSince],

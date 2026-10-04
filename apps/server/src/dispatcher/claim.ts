@@ -48,6 +48,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
     const a = await one(
       tx,
       `SELECT a.*, ws.runtimes, ws.connected FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
+                 JOIN users wu ON wu.id = ws.user_id AND wu.status = 'active'
         WHERE a.id=$1 AND a.status='active' AND ws.status='active'`,
       [args.agentId],
     );
