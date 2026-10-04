@@ -35,6 +35,14 @@ export function renderChatInstructions(
     ].join('\n'),
   );
   const intakeChat = ctx.intake && !ctx.intake.fromChat;
+  if (agent.roleKey === 'devops')
+    out.push(
+      [
+        '# Repositories',
+        'You have no GitHub login in your sandbox and `git push` is denied, so never try `gh` or `git push` yourself.',
+        '- `aom repo create --name <owner/repo> --private|--public --project <KEY> [--description "<text>"]`: ask the project owner to create a new GitHub repository for the project. They approve on the desk and their own runner creates it, pushes a first commit, clones it under their repository folder and adds it to the project; you are told the result in this conversation.',
+      ].join('\n'),
+    );
   if (agent.roleKey === 'ba' && !intakeChat) out.push(renderDesignSection());
   if (agent.roleKey === 'ba' && !intakeChat) out.push(renderChatCardsSection(ctx));
   if (ctx.intake && intakeChat) out.push(renderIntakeSection(ctx.intake, opts.jiraSkill));

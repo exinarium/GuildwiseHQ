@@ -107,22 +107,25 @@ export class RepoCreator {
     const login = String(who.stdout).trim();
 
     // Does it exist already?
-    const view = await this.gh(['repo', 'view', p.name, '--json', 'url,isEmpty,owner']);
+    const view = await this.gh(['repo', 'view', p.name, '--json', 'url,sshUrl,isEmpty,owner']);
     let url: string | undefined;
+    let sshUrl: string | undefined;
     let existing = false;
     if (view.exitCode === 0) {
       const v = JSON.parse(String(view.stdout)) as {
         url: string;
+        sshUrl?: string;
         isEmpty?: boolean;
         owner?: { login?: string };
       };
       const mine = v.owner?.login?.toLowerCase() === login.toLowerCase();
-      if (!(mine && (v.isEmpty || (await this.isOurClone(target, v.url)))))
+      if (!(mine && (v.isEmpty || (await this.isOurClone(target, [v.url, v.sshUrl])))))
         return {
           ok: false,
           error: `${p.name} already exists on GitHub and is not an empty repository of ${login}, so it was not touched`,
         };
       url = v.url;
+      sshUrl = v.sshUrl;
       existing = true;
     } else if (!/could not resolve|not found|404/i.test(String(view.stderr))) {
       return { ok: false, error: `could not check ${p.name}: ${String(view.stderr || view.stdout).trim()}` };
@@ -132,27 +135,57 @@ export class RepoCreator {
       const made = await this.gh(args);
       if (made.exitCode !== 0)
         return { ok: false, error: `gh repo create failed: ${String(made.stderr || made.stdout).trim()}` };
-      const again = await this.gh(['repo', 'view', p.name, '--json', 'url']);
+      const again = await this.gh(['repo', 'view', p.name, '--json', 'url,sshUrl']);
       if (again.exitCode !== 0)
         return {
           ok: false,
           error: `${p.name} was created but its URL could not be read: ${String(again.stderr).trim()}`,
         };
-      url = (JSON.parse(String(again.stdout)) as { url: string }).url;
+      ({ url, sshUrl } = JSON.parse(String(again.stdout)) as { url: string; sshUrl?: string });
     }
-    const remoteUrl = /^https?:\/\//.test(url) && !url.endsWith('.git') ? `${url}.git` : url;
+    // Clone with the protocol the owner's gh uses for this host (ssh here: the owner's other repos are git@github.com:
+    // remotes). Over https, git borrows gh's login (`gh auth git-credential`) so no username prompt can block it.
+    const host = /^https?:\/\//.test(url) ? new URL(url).host : undefined;
+    const proto = host
+      ? String((await this.gh(['config', 'get', 'git_protocol', '-h', host])).stdout).trim()
+      : '';
+    const useSsh = proto === 'ssh' && !!sshUrl;
+    const remoteUrl = useSsh
+      ? (sshUrl as string)
+      : /^https?:\/\//.test(url) && !url.endsWith('.git')
+        ? `${url}.git`
+        : url;
+    const auth =
+      useSsh || !host
+        ? []
+        : [
+            '-c',
+            `credential.https://${host}.helper=`,
+            '-c',
+            `credential.https://${host}.helper=!${this.deps.ghBin ?? 'gh'} auth git-credential`,
+          ];
 
     if (existsSync(target)) {
       const origin = await this.git(target, ['remote', 'get-url', 'origin']);
-      if (origin.exitCode !== 0 || String(origin.stdout).trim() !== remoteUrl)
+      if (
+        origin.exitCode !== 0 ||
+        ![remoteUrl, url, `${url}.git`, sshUrl].includes(String(origin.stdout).trim())
+      )
         return { ok: false, error: `${target} already exists and is not a clone of ${p.name}` };
     } else {
-      const clone = await this.git(realRoot, ['clone', remoteUrl, target]);
+      const clone = await this.git(realRoot, [...auth, 'clone', remoteUrl, target]);
       if (clone.exitCode !== 0)
         return { ok: false, error: `git clone failed: ${String(clone.stderr || clone.stdout).trim()}` };
+      // Later pushes (the finalize step) run plain git in this clone: keep gh's login for https there too.
+      if (!useSsh && host)
+        await this.git(target, [
+          'config',
+          `credential.https://${host}.helper`,
+          `!${this.deps.ghBin ?? 'gh'} auth git-credential`,
+        ]);
     }
 
-    const published = await this.git(target, ['ls-remote', '--heads', 'origin', p.branch]);
+    const published = await this.git(target, [...auth, 'ls-remote', '--heads', 'origin', p.branch]);
     if (!String(published.stdout).trim()) {
       const head = await this.git(target, ['symbolic-ref', 'HEAD', `refs/heads/${p.branch}`]);
       if (head.exitCode !== 0)
@@ -170,7 +203,7 @@ export class RepoCreator {
       ]);
       if (commit.exitCode !== 0)
         return { ok: false, error: `git commit failed: ${String(commit.stderr || commit.stdout).trim()}` };
-      const push = await this.git(target, ['push', '-u', 'origin', p.branch]);
+      const push = await this.git(target, [...auth, 'push', '-u', 'origin', p.branch]);
       if (push.exitCode !== 0)
         return { ok: false, error: `git push failed: ${String(push.stderr || push.stdout).trim()}` };
     }
@@ -187,10 +220,11 @@ export class RepoCreator {
   }
 
   /** A repository that is not empty but whose clone here is the one a previous run of this request made (same origin). */
-  private async isOurClone(target: string, url: string): Promise<boolean> {
+  private async isOurClone(target: string, urls: Array<string | undefined>): Promise<boolean> {
     if (!existsSync(join(target, '.git'))) return false;
     const origin = await this.git(target, ['remote', 'get-url', 'origin']);
     const o = String(origin.stdout).trim();
-    return origin.exitCode === 0 && (o === url || o === `${url}.git`);
+    const ok = urls.filter((u): u is string => !!u).flatMap((u) => [u, `${u}.git`]);
+    return origin.exitCode === 0 && ok.includes(o);
   }
 }

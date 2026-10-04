@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { devopsHireEvent } from '../src/commands/devops.ts';
+import { withAppendTx } from '../src/db/tx.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -211,7 +213,28 @@ describe('approved repository setup', () => {
     const other = await openChat(r, builder.id, w.owner.id, w.owner.cookie);
     const denied = await request(r, other.start.chatId);
     expect(denied.ok).toBe(false);
-    expect(denied.error).toMatch(/only the BA/);
+    expect(denied.error).toMatch(/only the BA and the DevOps engineer/);
+  });
+
+  // Real use: the manager asked the DevOps engineer in a desk chat; the request was refused (chat allowed only the BA)
+  // and the DevOps chat instructions did not mention `aom repo create`, so the engineer tried gh and hit the sandbox.
+  it('the DevOps engineer can request a repository from a chat with its manager', async () => {
+    await setup();
+    // freshState() clears agents: hire the workstation's DevOps engineer the way pairing does, on the mock runtime.
+    const ctx = w.t.app.ctx;
+    const devopsId = await withAppendTx(ctx.pool, async (tx) => {
+      const hire = await devopsHireEvent(tx, w.owner.id, w.workstationId);
+      if (!hire) throw new Error('no devops role');
+      (hire.event.payload as { runtime: string }).runtime = 'mock';
+      await ctx.store.append([hire], { tx });
+      return (hire.event.payload as { agentId: string }).agentId;
+    });
+    const { start } = await openChat(r, devopsId, w.owner.id, w.owner.cookie);
+    const res = await request(r, start.chatId);
+    expect(res.ok, res.error).toBe(true);
+    const items = await deskItems();
+    expect(items).toHaveLength(1);
+    expect(items[0].subkind).toBe('repo_create');
   });
 
   it('only the project owner approves; approving needs the owner workstation connected', async () => {

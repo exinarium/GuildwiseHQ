@@ -71,7 +71,7 @@ async function connectedWorkstation(db: Queryable, userId: string): Promise<Row 
   );
 }
 
-/** `aom repo create` from the BA's chat or a DevOps shift. */
+/** `aom repo create` from a chat with the BA or the DevOps engineer, or from a DevOps shift. */
 export async function repoCreateRpc(
   ctx: Ctx,
   shift: Row,
@@ -88,7 +88,7 @@ export async function repoCreateRpc(
   if (!agent) return [false, undefined, 'unknown agent'];
   let userId: string | undefined;
   let threadId: string | null = null;
-  if (shift.kind === 'chat' && agent.role_key === BA_ROLE_KEY) {
+  if (shift.kind === 'chat' && (agent.role_key === BA_ROLE_KEY || agent.is_devops)) {
     userId = ctx.services.chat.userOfChat(shift.id);
     threadId = ctx.services.chat.threadOfChat(shift.id) ?? null;
   } else if (shift.kind === 'devops' && agent.is_devops) {
@@ -101,7 +101,7 @@ export async function repoCreateRpc(
     return [
       false,
       undefined,
-      'only the BA (in a chat with its manager) and the DevOps engineer can request a repository',
+      'only the BA and the DevOps engineer (in a chat with their manager, or a DevOps request) can request a repository',
     ];
   if (!userId) return [false, undefined, 'this conversation has no manager to ask'];
 

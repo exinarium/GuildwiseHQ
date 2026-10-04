@@ -11,7 +11,7 @@ cleanupTmp();
  * A fake `gh` (nothing talks to GitHub) over a directory of bare repositories that stand in for the created origins.
  * State per repository `<owner>__<repo>`: `<dir>/<key>.git` (bare origin), `<dir>/<key>.owner`.
  */
-function fakeGh(login = 'octo') {
+function fakeGh(login = 'octo', protocol?: 'ssh' | 'https') {
   const dir = tmp('aom-fake-gh-');
   const bin = join(dir, 'gh.sh');
   writeFileSync(
@@ -28,7 +28,12 @@ case "$1 $2" in
     OWNER=$(cat "$D/$K.owner")
     EMPTY=true
     if [ -n "$(git --git-dir="$D/$K.git" for-each-ref refs/heads)" ]; then EMPTY=false; fi
-    echo "{\\"url\\":\\"$D/$K.git\\",\\"isEmpty\\":$EMPTY,\\"owner\\":{\\"login\\":\\"$OWNER\\"}}" ;;
+    if [ -n "${protocol ?? ''}" ]; then
+      echo "{\\"url\\":\\"https://github.com/$3\\",\\"sshUrl\\":\\"$D/$K.git\\",\\"isEmpty\\":$EMPTY,\\"owner\\":{\\"login\\":\\"$OWNER\\"}}"
+    else
+      echo "{\\"url\\":\\"$D/$K.git\\",\\"isEmpty\\":$EMPTY,\\"owner\\":{\\"login\\":\\"$OWNER\\"}}"
+    fi ;;
+  "config get") echo "${protocol ?? ''}" ;;
   "repo create")
     K=$(key "$3")
     git init --bare -q "$D/$K.git"
@@ -61,8 +66,8 @@ const git = (cwd: string, ...args: string[]) =>
     env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' },
   });
 
-function setup(login?: string) {
-  const gh = fakeGh(login);
+function setup(login?: string, protocol?: 'ssh' | 'https') {
+  const gh = fakeGh(login, protocol);
   const records = tmp('aom-records-');
   const root = tmp('aom-root-');
   const make = (roots: string[] = [root]) =>
@@ -71,6 +76,25 @@ function setup(login?: string) {
 }
 
 describe('repo.create on the runner', () => {
+  // Real use: gh's protocol for github.com was ssh, the runner cloned the https URL and git stopped at
+  // "could not read Username for 'https://github.com': terminal prompts disabled".
+  it("clones with the protocol the owner's gh uses for the host (ssh), not the https URL", async () => {
+    const { gh, root, make } = setup('octo', 'ssh');
+    const r = await make().run(payload());
+    expect(r).toMatchObject({ ok: true, remoteUrl: gh.origin('acme_newrepo') });
+    expect(gh.calls()).toContain('config get git_protocol -h github.com');
+    expect(git(join(root, 'newrepo'), 'remote', 'get-url', 'origin').trim()).toBe(gh.origin('acme_newrepo'));
+    expect(git(gh.origin('acme_newrepo'), 'log', '--format=%s', 'main').trim()).toBe('Initial commit');
+  });
+
+  it("over https, git uses gh's login and the clone keeps it for later pushes", async () => {
+    const { gh, make } = setup('octo', 'https');
+    await make().run(payload());
+    // https://github.com/acme/newrepo is not reachable from the test, so the clone itself fails; what matters is that
+    // git asked gh for the credentials (`gh auth git-credential get`) instead of prompting for a username.
+    expect(gh.calls()).toContain('auth git-credential get');
+  });
+
   it('creates the repository with gh, makes the first commit on main, pushes and clones it under the repo root', async () => {
     const { gh, root, make } = setup();
     const r = await make().run(payload({ description: 'Hello world' }));
