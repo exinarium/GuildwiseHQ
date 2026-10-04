@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
 import { apiAs, storagePath } from '../support/api.ts';
 import { pool, q, waitFor } from '../support/db.ts';
-import { MEMBER, OTHER, paths } from '../support/env.ts';
+import { MAILPIT_API, MEMBER, OTHER, paths } from '../support/env.ts';
 import { startRunner } from '../support/runner.ts';
 
 // M2: decision desk, questions and ledger. Runs after core-loop, which leaves the runner killed and the server
@@ -103,6 +103,7 @@ test('AC1: a blocking question parks the card in Blocked, frees the builder, and
   await expect(item.getByText('Blocking', { exact: true })).toBeVisible();
   await expect(item.getByTestId('affected-count')).toContainText('Affects 1 card');
   await expect(item.getByTestId('urgent-badge')).toBeVisible();
+  await expect(item.getByTestId('desk-kind')).toHaveText('Question'); // a human label, not the raw kind
   await expect(page.getByTestId('desk-badge')).toBeVisible();
   await page.screenshot({ path: '/tmp/aom-e2e-desk.png', fullPage: true });
 
@@ -319,7 +320,7 @@ test('AC6: owner_only - a member sees the item read-only and cannot answer; no n
   }
   // No email goes out for urgent items: nothing was mailed to the member about the desk.
   const mail = await fetch(
-    `http://127.0.0.1:8025/api/v1/search?query=${encodeURIComponent(`to:${MEMBER.email} subject:desk`)}`,
+    `${MAILPIT_API}/api/v1/search?query=${encodeURIComponent(`to:${MEMBER.email} subject:desk`)}`,
   );
   expect(((await mail.json()) as { messages?: unknown[] }).messages ?? []).toHaveLength(0);
 });

@@ -23,6 +23,7 @@ import {
   answerText,
   choiceFor,
   defaultOption,
+  deskKindLabel,
   LEDGER_CHOICES,
   type LedgerChoiceKey,
   sortDeskItems,
@@ -145,15 +146,7 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
           </Badge>
         )}
         <Badge tone="violet">
-          {item.subkind === 'unmapped_ticket'
-            ? 'Unmapped ticket'
-            : item.subkind === 'outbound'
-              ? 'Update to a ticket'
-              : item.subkind === 'outbound_failed'
-                ? 'Posting failed'
-                : item.subkind === 'definition'
-                  ? 'Role or workflow'
-                  : (item.subkind ?? item.kind)}
+          <span data-testid="desk-kind">{deskKindLabel(item)}</span>
         </Badge>
         <Badge tone={item.blocking ? 'red' : 'neutral'}>{item.blocking ? 'Blocking' : 'Non-blocking'}</Badge>
         <span data-testid="affected-count">

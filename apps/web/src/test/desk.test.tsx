@@ -4,7 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { answerText, choiceFor, defaultOption, sortDeskItems } from '../lib/desk.ts';
+import { answerText, choiceFor, defaultOption, deskKindLabel, sortDeskItems } from '../lib/desk.ts';
 import { DeskItem } from '../pages/Desk.tsx';
 
 const base: DeskItemDto = {
@@ -140,6 +140,25 @@ describe('answer helpers', () => {
   it('maps the ledger choices', () => {
     expect(choiceFor('decision')).toEqual({ scope: 'decision' });
     expect(choiceFor('standing_org')).toEqual({ scope: 'standing_order', orgWide: true });
+  });
+});
+
+describe('desk kind labels', () => {
+  it.each([
+    ['question', null, 'Question'],
+    ['approval', null, 'Approval'],
+    ['approval', 'devops', 'DevOps approval'],
+    ['approval', 'outbound', 'Outbound update'],
+    ['approval', 'large_merge', 'Merge approval'],
+    ['rating', 'digest', 'Digest to rate'],
+    ['escalation', null, 'Escalation'],
+    ['escalation', 'vault_conflict', 'Vault conflict'],
+    ['alert', 'tester_bottleneck', 'Tester bottleneck'],
+    ['alert', 'some_new_thing', 'Some new thing'],
+  ] as const)('%s / %s is "%s"', (kind, subkind, label) => {
+    expect(deskKindLabel({ kind, subkind })).toBe(label);
+    renderItem(item({ kind, subkind }));
+    expect(screen.getByTestId('desk-kind')).toHaveTextContent(label);
   });
 });
 

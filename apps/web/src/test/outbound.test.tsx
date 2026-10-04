@@ -88,7 +88,7 @@ describe('the outbound approval on the desk', () => {
   it('approves the draft as it is', async () => {
     const calls = stubFetch(ok);
     renderItem(approval);
-    expect(screen.getByText('Update to a ticket')).toBeInTheDocument();
+    expect(screen.getByText('Outbound update')).toBeInTheDocument();
     expect(screen.getByTestId('outbound-text')).toHaveValue(approval.body);
     expect(screen.queryByTestId('outbound-diff')).toBeNull();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Approve and post' }));

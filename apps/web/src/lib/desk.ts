@@ -47,3 +47,43 @@ export function answerText(
 /** The option preselected on the form: the agent's recommendation when it gave one. */
 export const defaultOption = (item: Pick<DeskItemDto, 'recommendation' | 'options'>): string | null =>
   item.recommendation && item.options.some((o) => o.id === item.recommendation) ? item.recommendation : null;
+
+const KIND_LABEL: Record<string, string> = {
+  question: 'Question',
+  approval: 'Approval',
+  escalation: 'Escalation',
+  alert: 'Alert',
+  rating: 'Rating',
+};
+
+/** Specific labels, keyed by subkind (the more specific the better: a `devops` approval is a "DevOps approval"). */
+const SUBKIND_LABEL: Record<string, string> = {
+  devops: 'DevOps approval',
+  digest: 'Digest to rate',
+  outbound: 'Outbound update',
+  outbound_failed: 'Posting failed',
+  unmapped_ticket: 'Unmapped ticket',
+  definition: 'Role or workflow',
+  large_merge: 'Merge approval',
+  tester_bottleneck: 'Tester bottleneck',
+  test_environment: 'Test environment',
+  bug_reported: 'Bug reported',
+  finalize_failed: 'Finalize failed',
+  pr_notice: 'Pull request notice',
+  taste_rule: 'Taste rule',
+  standing_order: 'Standing order',
+  schedule_failed: 'Schedule failed',
+  vault_conflict: 'Vault conflict',
+};
+
+const titleCase = (raw: string) => {
+  const t = raw.replaceAll('_', ' ').trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+};
+
+/** The human label of a desk item's kind: shown on the badge in the list and in the item detail. */
+export function deskKindLabel(item: Pick<DeskItemDto, 'kind' | 'subkind'>): string {
+  if (item.subkind && SUBKIND_LABEL[item.subkind]) return SUBKIND_LABEL[item.subkind] as string;
+  if (item.subkind) return titleCase(item.subkind);
+  return KIND_LABEL[item.kind] ?? titleCase(item.kind);
+}
