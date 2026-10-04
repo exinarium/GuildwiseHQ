@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { useChat, useThreadMessages } from '../api/queries/chats.ts';
+import { newId } from '../lib/secure.ts';
 import { getSocket } from '../ws/socket.ts';
 import { Avatar, Button, ErrorBox, Spinner, TextArea } from './ui.tsx';
 
@@ -85,7 +86,7 @@ export function ChatPanel({
     e.preventDefault();
     const body = draft.trim();
     if (!body || busy) return;
-    const id = crypto.randomUUID();
+    const id = newId();
     const sock = getSocket();
     setError(null);
     if (!sock?.sendChat(threadId, body, id)) {

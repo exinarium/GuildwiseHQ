@@ -14,6 +14,7 @@ import {
   Spinner,
 } from '../components/ui.tsx';
 import { unavailableRuntimes, unsandboxedConsequence, unsandboxedRuntimes } from '../lib/sandbox.ts';
+import { copyText } from '../lib/secure.ts';
 import { formatDateTime } from '../lib/time.ts';
 
 export function pairCommand(code: string, origin: string = location.origin): string {
@@ -165,12 +166,7 @@ function PairDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
   const code = gen.data?.code;
   const cmd = code ? pairCommand(code) : '';
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(cmd);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
+    setCopied(await copyText(cmd));
   };
   return (
     <Dialog
