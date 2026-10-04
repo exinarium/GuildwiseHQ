@@ -19,8 +19,85 @@ const INTERNAL_TERMS: ReadonlyArray<readonly [string, RegExp]> = [
   ['ledger', /\bledger\b/i],
   ['role title', /\b(?:builders?|reviewers?|business\s+analyst)\b/i],
   ['role title', /\bBA\b/],
-  ['product name', /\b(?:Agent\s+Org\s+Manager|AOM)\b/],
+  ['product name', /\b(?:Agent\s+Org(?:ani[sz]ation)?(?:\s+Manager)?|AOM)\b/i],
+  ['internal branch', /\baom\/[\w./-]+/i],
+  ['role title', /\b(?:scouts?|curators?)\b/i],
+  ['standing orders', /\bstanding\s+orders?\b/i],
 ];
+
+/**
+ * Agent names that are also everyday words. These match case-insensitively only when written capitalized (a name),
+ * so "the Will agent" is caught and "I will fix it" is not.
+ */
+const COMMON_WORD_NAMES = new Set(
+  [
+    'will',
+    'mark',
+    'grace',
+    'hope',
+    'joy',
+    'rose',
+    'art',
+    'bill',
+    'page',
+    'dawn',
+    'faith',
+    'rob',
+    'pat',
+    'sue',
+    'jack',
+    'may',
+    'june',
+    'april',
+    'summer',
+    'ray',
+    'sky',
+    'wade',
+    'chase',
+    'drew',
+    'bob',
+    'don',
+    'earl',
+    'frank',
+    'gene',
+    'guy',
+    'hunter',
+    'miles',
+    'pierce',
+    'rich',
+    'sandy',
+    'skip',
+    'stone',
+    'ward',
+    'wayne',
+    'case',
+    'dean',
+    'ivy',
+    'iris',
+    'lily',
+    'olive',
+    'pearl',
+    'ruby',
+    'amber',
+    'autumn',
+    'blake',
+    'cliff',
+    'dale',
+    'glen',
+    'heath',
+    'jay',
+    'lane',
+    'max',
+    'neil',
+    'nick',
+    'norm',
+    'pete',
+    'rod',
+    'tag',
+    'tom',
+    'viola',
+  ].map((n) => n.toLowerCase()),
+);
 
 export interface LeakResult {
   ok: boolean;
@@ -30,12 +107,18 @@ export interface LeakResult {
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Finds internal names and terms in a draft. `agentNames` are the organization's agents (whole word, case-sensitive). */
+/** Finds internal names and terms in a draft. `agentNames` are the organization's agents (whole word, case-insensitive). */
 export function checkOutboundLeaks(body: string, agentNames: readonly string[] = []): LeakResult {
   const found: Array<{ at: number; text: string }> = [];
   for (const name of new Set(agentNames.map((n) => n.trim()).filter((n) => n.length >= 2))) {
-    const m = new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRe(name)}(?![\\p{L}\\p{N}_])`, 'u').exec(body);
-    if (m) found.push({ at: m.index, text: `agent name "${name}"` });
+    const re = new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRe(name)}(?![\\p{L}\\p{N}_])`, 'giu');
+    const common = COMMON_WORD_NAMES.has(name.toLowerCase());
+    for (const m of body.matchAll(re)) {
+      // an everyday word counts only when written like a name (capitalized, or exactly as the agent is spelled)
+      if (common && m[0] !== name && m[0][0] !== m[0][0]?.toUpperCase()) continue;
+      found.push({ at: m.index ?? 0, text: `agent name "${name}"` });
+      break;
+    }
   }
   for (const [label, re] of INTERNAL_TERMS) {
     const m = re.exec(body);

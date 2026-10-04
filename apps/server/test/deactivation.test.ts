@@ -31,8 +31,9 @@ describe('deactivating a user cuts off runner and project access (review H3)', (
     );
     await until(async () => mr.closed, 3000, 'runner socket closed');
     expect(
-      (await q(`SELECT status FROM project_members WHERE project_id=$1 AND user_id=$2`, [w.projectId, m.id]))[0]!
-        .status,
+      (
+        await q(`SELECT status FROM project_members WHERE project_id=$1 AND user_id=$2`, [w.projectId, m.id])
+      )[0]!.status,
     ).toBe('removed');
     const a = (await q('SELECT manager_user_id, status FROM agents WHERE id=$1', [agent.id]))[0]!;
     expect(a).toMatchObject({ manager_user_id: w.owner.id, status: 'needs_rehome' });

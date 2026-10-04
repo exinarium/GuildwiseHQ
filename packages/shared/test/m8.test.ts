@@ -32,6 +32,37 @@ describe('the leak check for outbound drafts', () => {
     expect(checkOutboundLeaks("Rex's review", ['Rex']).ok).toBe(false);
   });
 
+  it('matches agent names case-insensitively, without flagging everyday words (review low)', () => {
+    expect(checkOutboundLeaks('thanks bea, rex did this', ['Bea', 'Rex']).matches).toEqual([
+      'agent name "Bea"',
+      'agent name "Rex"',
+    ]);
+    expect(checkOutboundLeaks('BEA fixed it.', ['Bea']).ok).toBe(false);
+    // names that are ordinary words: only a capitalized use is the agent
+    expect(
+      checkOutboundLeaks('I will mark the ticket as done, as we may agree.', ['Will', 'Mark', 'May']).ok,
+    ).toBe(true);
+    expect(checkOutboundLeaks('Will fixed the export.', ['Will']).ok).toBe(false);
+  });
+
+  it('catches internal branch names, the product name in any case and role words', () => {
+    expect(checkOutboundLeaks('Pushed to aom/web-12-add-login.').ok).toBe(false);
+    expect(checkOutboundLeaks('built with agent org manager').ok).toBe(false);
+    expect(checkOutboundLeaks('The scout found it.').ok).toBe(false);
+    expect(checkOutboundLeaks('A standing order says so.').ok).toBe(false);
+  });
+
+  it('keeps false positives low on realistic manager text', () => {
+    for (const text of [
+      'The export now includes archived items. AI-assisted search is unchanged.',
+      'We shipped the fix to the login page; the team will monitor error rates this week.',
+      'Rolled out to 10% of customers. The organization settings page has a new layout.',
+      'Tested on Chrome and Safari; the checkout flow works as expected.',
+      'Updated the API to return 404 instead of 500 for missing records.',
+    ])
+      expect(checkOutboundLeaks(text, ['Bea', 'Rex']), text).toEqual({ ok: true, matches: [] });
+  });
+
   it.each([
     'It bounced back twice.',
     'The reviewer asked for changes.',

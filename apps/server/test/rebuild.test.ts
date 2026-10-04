@@ -110,6 +110,8 @@ describe('projections:rebuild', () => {
     await ok(w.t.req('POST', `/api/agents/${rev.id}/fire`, { cookie: w.owner.cookie }));
     await w.t.app.ctx.notifier.flush();
 
+    // a heartbeat extended the live claim's lease well past `claimed_at + 1h`
+    await q(`UPDATE cards SET lease_expires_at = claimed_at + interval '5 hours' WHERE claim_id IS NOT NULL`);
     const sessionsBefore = (await q('SELECT count(*)::int AS n FROM auth_sessions'))[0]!.n;
     const reposBefore = (await q('SELECT count(*)::int AS n FROM workstation_repos'))[0]!.n;
     const commandsBefore = await q('SELECT id, status FROM runner_commands ORDER BY id');
@@ -130,10 +132,11 @@ describe('projections:rebuild', () => {
     expect((await q('SELECT count(*)::int AS n FROM workstation_repos'))[0]!.n).toBe(reposBefore);
     expect(await q('SELECT id, status FROM runner_commands ORDER BY id')).toEqual(commandsBefore);
     expect((await q('SELECT connected FROM workstations'))[0]!.connected).toBe(true);
-    // the live claim's lease is recomputed from the claim time
+    // the live claim keeps its (heartbeat-extended) lease: it is not reset to claimed_at + 1h (review low)
     const claimed = await q(`SELECT claimed_at, lease_expires_at FROM cards WHERE claim_id IS NOT NULL`);
+    expect(claimed.length).toBeGreaterThan(0);
     for (const c of claimed)
-      expect(new Date(c.lease_expires_at).getTime() - new Date(c.claimed_at).getTime()).toBe(3600_000);
+      expect(new Date(c.lease_expires_at).getTime() - new Date(c.claimed_at).getTime()).toBe(5 * 3600_000);
     r.close();
   });
 });

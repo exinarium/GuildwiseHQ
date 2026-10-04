@@ -34,4 +34,43 @@ describe('AOM_SERVE_WEB', () => {
       db: true,
     });
   });
+
+  it('sends a CSP and no HSTS on a plain-http origin (review M8)', async () => {
+    const root = await t.app.inject({ method: 'GET', url: '/' });
+    const csp = String(root.headers['content-security-policy']);
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("connect-src 'self' ws://aom.test");
+    expect(root.headers['strict-transport-security']).toBeUndefined();
+    expect(root.headers['x-content-type-options']).toBe('nosniff');
+  });
+});
+
+describe('HSTS (review M8)', () => {
+  it('is sent when the public origin is https', async () => {
+    const https = await createTestApp({ env: { AOM_PUBLIC_ORIGIN: 'https://aom.example.com' } });
+    try {
+      const r = await https.app.inject({ method: 'GET', url: '/api/health' });
+      expect(r.headers['strict-transport-security']).toMatch(/max-age=31536000/);
+      expect(String(r.headers['content-security-policy'])).toContain('wss://aom.example.com');
+      expect(String(r.headers['content-security-policy'])).toContain('upgrade-insecure-requests');
+    } finally {
+      await https.close();
+    }
+  });
+});
+
+describe('access logs do not carry secrets (review low)', () => {
+  it('redacts invitation tokens and pairing codes in logged URLs', async () => {
+    const { redactUrl, requestLogSerializer } = await import('../src/app.ts');
+    expect(redactUrl('/api/invitations/abcDEF123_-xyz')).toBe('/api/invitations/[redacted]');
+    expect(redactUrl('/api/invitations/abc123/accept?x=1')).toBe('/api/invitations/[redacted]/accept?x=1');
+    expect(redactUrl('/invite/secretToken')).toBe('/invite/[redacted]');
+    expect(redactUrl('/pair?code=ABCD-1234&x=1')).toBe('/pair?code=[redacted]&x=1');
+    expect(redactUrl('/api/health')).toBe('/api/health');
+    expect(requestLogSerializer({ method: 'GET', url: '/invite/tok123' }).url).toBe('/invite/[redacted]');
+  });
 });

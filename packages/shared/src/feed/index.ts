@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { HttpUrlSchema } from '../safe.ts';
 
 /**
  * Feed contract (M5, docs/SPEC.md "Research and feeds"): what scouts and curators report, how items are
@@ -12,7 +13,7 @@ const parsableDate = (s: string) => !Number.isNaN(Date.parse(s));
 export const FeedItemInputSchema = z.object({
   /** Item kind, e.g. `article` or `video`. `maxPerKind` on the card is keyed by it. */
   kind: z.string().min(1).max(40),
-  url: z.url().max(2000),
+  url: HttpUrlSchema.max(2000),
   title: z.string().min(1).max(300),
   source: z.string().min(1).max(200),
   /** A date or ISO timestamp the page was published. */

@@ -3,6 +3,10 @@
 # `localhost` (the default) or an IP address uses Caddy's internal CA instead: a locally trusted test certificate.
 {$AOM_DOMAIN:localhost} {
 	encode zstd gzip
+	# HSTS only for a real domain: a locally trusted `localhost` certificate must not pin browsers to https for
+	# every other service on localhost. (The app sends HSTS itself when AOM_PUBLIC_ORIGIN is https.)
+	@public not host localhost 127.0.0.1 ::1
+	header @public Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	# WebSocket upgrades (/api/ws, /api/runner/ws) pass through reverse_proxy unchanged.
 	reverse_proxy app:4600 {
 		health_uri /api/health

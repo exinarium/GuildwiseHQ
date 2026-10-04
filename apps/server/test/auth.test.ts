@@ -157,4 +157,36 @@ describe('rate limiting', () => {
       await rl.close();
     }
   });
+
+  it('limits login per IP across emails, and password changes per account (review low)', async () => {
+    const rl = await createTestApp({ env: { AOM_RATE_LIMIT: 'true' }, reset: false });
+    try {
+      const u = await rl.userSession(uniqueEmail('pw')); // before the IP is locked out
+      let last = 0;
+      for (let i = 0; i < 32; i++) {
+        last = (
+          await rl.req('POST', '/api/auth/login', {
+            body: { email: uniqueEmail(`stuff${i}`), password: 'wrong-password-123' },
+          })
+        ).status;
+      }
+      expect(last).toBe(429);
+
+      const statuses: number[] = [];
+      for (let i = 0; i < 7; i++) {
+        statuses.push(
+          (
+            await rl.req('POST', '/api/auth/password', {
+              cookie: u.cookie,
+              body: { current: 'not-the-password-1', new: 'another-new-password-123' },
+            })
+          ).status,
+        );
+      }
+      expect(statuses.slice(0, 5).every((s) => s !== 429)).toBe(true);
+      expect(statuses.slice(5)).toEqual([429, 429]);
+    } finally {
+      await rl.close();
+    }
+  });
 });

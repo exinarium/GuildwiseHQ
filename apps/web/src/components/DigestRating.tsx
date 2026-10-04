@@ -2,6 +2,7 @@ import type { DigestItemDto } from '@aom/shared';
 import { useState } from 'react';
 import { useRateDigestItem } from '../api/queries/digest.ts';
 import { VERDICTS, verdictTone } from '../lib/feeds.ts';
+import { safeHref } from '../lib/links.ts';
 import { Badge, Button, ErrorBox } from './ui.tsx';
 
 /**
@@ -37,14 +38,20 @@ export function DigestItemRow({ item, canRate }: { item: DigestItemDto; canRate:
         {item.publishedAt && <span>· {item.publishedAt.slice(0, 10)}</span>}
         <span>· {item.cardRef}</span>
       </div>
-      <a
-        href={item.url}
-        target="_blank"
-        rel="noreferrer noopener"
-        className="mt-1 block text-sm font-medium underline"
-      >
-        {item.title}
-      </a>
+      {safeHref(item.url) ? (
+        <a
+          href={safeHref(item.url)}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="mt-1 block text-sm font-medium underline"
+        >
+          {item.title}
+        </a>
+      ) : (
+        <span className="mt-1 block text-sm font-medium" data-testid="unsafe-link">
+          {item.title}
+        </span>
+      )}
       <p className="mt-0.5 text-sm text-zinc-700 dark:text-zinc-300">{item.summary}</p>
       {rated && item.verdict ? (
         <p className="mt-2 flex flex-wrap items-center gap-2 text-sm" data-testid="verdict">

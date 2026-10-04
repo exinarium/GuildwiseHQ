@@ -1,4 +1,5 @@
 import type { PublicationDto } from '@aom/shared';
+import { safeHref } from '../lib/links.ts';
 import { Badge, Panel } from './ui.tsx';
 
 /** The published note of a research card: where it lives in the vault, a preview and the citations it carries. */
@@ -29,9 +30,13 @@ export function PublicationPanel({ publication }: { publication: PublicationDto 
         <ol className="mt-1 list-decimal pl-5 text-sm" data-testid="publication-citations">
           {publication.citations.map((c) => (
             <li key={c.url}>
-              <a href={c.url} target="_blank" rel="noreferrer noopener" className="underline">
-                {c.title}
-              </a>
+              {safeHref(c.url) ? (
+                <a href={safeHref(c.url)} target="_blank" rel="noreferrer noopener" className="underline">
+                  {c.title}
+                </a>
+              ) : (
+                <span data-testid="unsafe-link">{c.title}</span>
+              )}
             </li>
           ))}
         </ol>

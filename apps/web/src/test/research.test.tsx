@@ -119,4 +119,20 @@ describe('published note panel', () => {
     expect(links.map((l) => l.getAttribute('href'))).toEqual(pub.citations.map((c) => c.url));
     expect(panel).toHaveTextContent('Citations (2)');
   });
+
+  it('never renders a non-http(s) citation as a link (review low)', () => {
+    const evil = {
+      ...pub,
+      citations: [
+        { url: 'javascript:alert(1)', title: 'Click me', accessedAt: '2026-10-03T08:00:00.000Z' },
+        { url: 'https://ok.example.test/', title: 'Fine', accessedAt: '2026-10-03T08:00:00.000Z' },
+      ],
+    };
+    render(<PublicationPanel publication={evil} />);
+    const list = within(screen.getByTestId('publication-citations'));
+    expect(list.getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual([
+      'https://ok.example.test/',
+    ]);
+    expect(list.getByText('Click me').closest('a')).toBeNull();
+  });
 });

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { slugify } from '../ids.ts';
+import { HttpUrlSchema } from '../safe.ts';
 
 /**
  * Research contract (M6, docs/SPEC.md "Research and feeds"): what the checker publishes, how a note carries its
@@ -9,7 +10,7 @@ import { slugify } from '../ids.ts';
 
 /** A source a note relies on. `accessedAt` is when the checker opened the page. */
 export const CitationSchema = z.object({
-  url: z.url().max(2000),
+  url: HttpUrlSchema.max(2000),
   title: z.string().min(1).max(300),
   accessedAt: z.iso.datetime(),
 });

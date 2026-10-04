@@ -70,6 +70,16 @@ const ratingItem = (digestItems: DigestItemDto[], over: Partial<DeskItemDto> = {
   ...over,
 });
 
+describe('digest links (review low)', () => {
+  it('renders only http(s) item URLs as links', () => {
+    const bad = digestItem(1, { url: 'javascript:alert(1)', title: 'Evil item' });
+    const good = digestItem(2, { url: 'https://example.test/a', title: 'Good item' });
+    wrap(<DeskItem item={ratingItem([bad, good])} now={Date.parse('2026-10-03T12:00:00.000Z')} />);
+    expect(screen.getByText('Evil item').closest('a')).toBeNull();
+    expect(screen.getByText('Good item').closest('a')?.getAttribute('href')).toBe('https://example.test/a');
+  });
+});
+
 describe('feed helpers', () => {
   it('names presets and falls back to the cron expression', () => {
     expect(describeCron('0 7 * * *')).toBe('Daily at 07:00');

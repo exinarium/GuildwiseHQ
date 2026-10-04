@@ -110,6 +110,11 @@ export function ChatPanel({
           {name} is offline: its workstation is not connected. Messages are not queued.
         </p>
       )}
+      {chat?.projectId && (
+        <p className="text-xs text-zinc-500" data-testid="chat-visibility">
+          This conversation is visible to this project's managers.
+        </p>
+      )}
       <div
         ref={log}
         role="log"

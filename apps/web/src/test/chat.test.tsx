@@ -8,13 +8,13 @@ import { ChatPanel, chatErrorText } from '../components/ChatPanel.tsx';
 import { initSocket, type LiveSocket } from '../ws/socket.ts';
 
 const THREAD = '0192f3a0-0000-7000-8000-0000000000d1';
-const chat = (online: boolean): ChatDto => ({
+const chat = (online: boolean, projectId: string | null = null): ChatDto => ({
   threadId: THREAD,
   title: 'Chat with Ada',
   agentId: '0192f3a0-0000-7000-8000-0000000000a1',
   agentName: 'Ada',
   agentRole: 'builder',
-  projectId: null,
+  projectId,
   cardId: null,
   cardRef: null,
   workstationOnline: online,
@@ -38,12 +38,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-function renderPanel(online: boolean) {
+function renderPanel(online: boolean, projectId: string | null = null) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
       const body = String(url).startsWith('/api/chats')
-        ? { chats: [chat(online)] }
+        ? { chats: [chat(online, projectId)] }
         : { threadId: THREAD, kind: 'chat', hasMore: false, messages: [] };
       return new Response(JSON.stringify(body), { status: 200 });
     }),
@@ -59,6 +59,17 @@ function renderPanel(online: boolean) {
 }
 
 describe('ChatPanel', () => {
+  it("labels project chats as visible to the project's managers, and org chats not (review low)", async () => {
+    const withProject = renderPanel(true, '0192f3a0-0000-7000-8000-0000000000b1');
+    expect(await screen.findByTestId('chat-visibility')).toHaveTextContent(
+      "visible to this project's managers",
+    );
+    withProject.unmount();
+    renderPanel(true);
+    await screen.findByRole('log', { name: 'Conversation' });
+    expect(screen.queryByTestId('chat-visibility')).toBeNull();
+  });
+
   it('sends over the socket, streams the reply token by token, and clears when it is done', async () => {
     renderPanel(true);
     await screen.findByRole('log', { name: 'Conversation' });

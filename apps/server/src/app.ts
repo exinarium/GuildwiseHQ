@@ -90,9 +90,60 @@ function webDistDir(config: Config): string | null {
   return candidates.find((c) => existsSync(join(c, 'index.html'))) ?? null;
 }
 
+/** Secrets that travel in URLs: invitation tokens (`/api/invitations/<t>`, `/invite/<t>`) and pairing codes. */
+export function redactUrl(url: string): string {
+  return url
+    .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
+    .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]');
+}
+
+/** pino `req` serializer: the default one with the URL redacted. */
+export const requestLogSerializer = (req: {
+  method?: string;
+  url?: string;
+  hostname?: string;
+  ip?: string;
+  socket?: { remotePort?: number };
+}) => ({
+  method: req.method,
+  url: redactUrl(req.url ?? ''),
+  host: req.hostname,
+  remoteAddress: req.ip,
+  remotePort: req.socket?.remotePort,
+});
+
+/**
+ * CSP for the built web app: Vite emits only same-origin module scripts and CSS files, React sets inline style
+ * attributes (hence `style-src 'unsafe-inline'`, no inline scripts), the browser talks to `/api` and `/api/ws` of the
+ * same origin. Everything else (objects, framing, foreign forms, base tag) is shut.
+ */
+export function contentSecurityPolicy(config: { publicOrigin: string; secureCookies: boolean }): string {
+  let ws = '';
+  try {
+    const u = new URL(config.publicOrigin);
+    ws = `${u.protocol === 'https:' ? 'wss' : 'ws'}://${u.host}`;
+  } catch {
+    // an unparsable origin falls back to 'self' only
+  }
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    `connect-src 'self'${ws ? ` ${ws}` : ''}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    ...(config.secureCookies ? ['upgrade-insecure-requests'] : []),
+  ].join('; ');
+}
+
 export async function createApp(config: Config, opts: BuildOptions = {}): Promise<AomApp> {
   const app = Fastify({
-    logger: opts.logger === false ? false : { level: config.logLevel },
+    logger:
+      opts.logger === false ? false : { level: config.logLevel, serializers: { req: requestLogSerializer } },
     trustProxy: true,
     bodyLimit: 2 * 1024 * 1024,
   }) as unknown as AomApp;
@@ -169,10 +220,17 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     checkOrigin(config, req);
     checkContentType(req);
   });
+  const csp = contentSecurityPolicy(config);
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('x-content-type-options', 'nosniff');
     reply.header('x-frame-options', 'DENY');
     reply.header('referrer-policy', 'no-referrer');
+    reply.header('content-security-policy', csp);
+    reply.header('cross-origin-opener-policy', 'same-origin');
+    reply.header('permissions-policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    // HSTS only where the public origin is https (a plain-http dev server must not pin browsers to https).
+    if (config.secureCookies)
+      reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
     return payload;
   });
 

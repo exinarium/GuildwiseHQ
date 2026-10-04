@@ -322,3 +322,24 @@ describe('chats tied to a shared project', () => {
     ).toBe(404);
   });
 });
+
+describe('chat rights are re-checked on every send (review M6)', () => {
+  it('a removed manager cannot keep talking to a project agent through an old thread', async () => {
+    await freshState();
+    const r = await w.connectRunner();
+    const agent = await w.hire('Quin', 'builder', 'junior', { projectId: w.projectId });
+    const m = await addMember(w, 'chatty');
+    const chat = await newChat(agent.id, { projectId: w.projectId }, m.cookie);
+    await ok(w.t.req('DELETE', `/api/projects/${w.projectId}/members/${m.id}`, { cookie: w.owner.cookie }));
+    const b = await Browser.open(w.baseUrl, m.cookie);
+    await b.hello();
+    const before = r.received.length;
+    b.send({ type: 'chat.send', threadId: chat.threadId, body: 'still there?', clientMsgId: 'x1' });
+    await until(async () => b.of('chat.error').length >= 1, 3000, 'chat.error');
+    await r.barrier();
+    expect(r.received.slice(before).filter((f) => f.type === 'chat.start')).toHaveLength(0);
+    expect((await messages(chat.threadId)).map((x) => x.body)).not.toContain('still there?');
+    b.close();
+    await hangUp(r);
+  });
+});

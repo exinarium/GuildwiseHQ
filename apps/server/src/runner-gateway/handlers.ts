@@ -152,9 +152,20 @@ export class RunnerHandlers {
       case 'rpc.request':
         return this.rpc(conn, msg);
       case 'command.result': {
-        const cmd = await one(this.ctx.pool, 'SELECT type, payload FROM runner_commands WHERE id=$1', [
-          msg.commandId,
-        ]);
+        const cmd = await one(
+          this.ctx.pool,
+          'SELECT type, payload, workstation_id FROM runner_commands WHERE id=$1',
+          [msg.commandId],
+        );
+        // A runner may only answer its own commands: a result for another workstation's command (or an unknown
+        // one) is acknowledged and dropped, so it can neither complete nor fail somebody else's work.
+        if (!cmd || cmd.workstation_id !== conn.workstationId) {
+          this.ctx.log.warn(
+            { commandId: msg.commandId },
+            'command.result for a command this workstation does not own',
+          );
+          return this.ack(conn, msg);
+        }
         if (cmd?.type === 'finalize.execute') {
           // Terminal: the outcome (finalized, conflict or failure) is recorded on the card, never retried blindly.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
