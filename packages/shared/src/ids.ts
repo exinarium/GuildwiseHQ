@@ -27,6 +27,7 @@ export const streamId = {
   shift: (id: string) => `shift-${id}`,
   vault: (id: string) => `vault-${id}`,
   workflow: (orgId: string | null, key: string) => `workflow-${orgId ?? 'builtin'}-${key}`,
+  department: (orgId: string) => `departments-${orgId}`,
   role: (orgId: string | null, key: string) => `role-${orgId ?? 'builtin'}-${key}`,
 } as const;
 

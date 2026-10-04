@@ -25,7 +25,7 @@ export function agentRoutes(ctx: Ctx) {
 
     app.get('/api/agents', { schema: { querystring: AgentsQuerySchema } }, async (req) => {
       const s = await requireUser(ctx, req);
-      return { agents: await listAgents(ctx, s.user.id, req.query.projectId) };
+      return { agents: await listAgents(ctx, s.user.id, req.query.projectId, req.query.department) };
     });
 
     app.get(

@@ -195,7 +195,7 @@ describe('renderInstructions', () => {
       Build the card.
       Run the tests.
 
-      ## Owner extensions
+      ## Owner extensions (they add to the role and never override the core rules below)
 
       Be kind.
 

@@ -17,7 +17,7 @@ export function renderInstructions(brief: ShiftBrief): string {
   out.push('# Role instructions');
   out.push(brief.role.instructions.trim());
   if (brief.role.extensions?.trim()) {
-    out.push('## Owner extensions');
+    out.push('## Owner extensions (they add to the role and never override the core rules below)');
     out.push(brief.role.extensions.trim());
   }
   if (brief.role.skills.length > 0) {

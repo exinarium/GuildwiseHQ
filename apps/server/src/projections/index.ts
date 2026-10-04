@@ -76,6 +76,7 @@ export const PROJECTION_TABLES = [
   'workflow_stages',
   'role_definitions',
   'role_extensions',
+  'departments',
   'agents',
   'cards',
   'card_dependencies',

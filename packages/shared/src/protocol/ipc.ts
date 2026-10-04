@@ -137,6 +137,13 @@ export const RpcMethodSchema = z.enum([
   'source.read',
   /** M8, the BA's finalize shift: draft the update for the card's ticket (the manager approves it on the desk). */
   'outbound.draft',
+  /** M10, the BA's design chat: draft roles and workflows for the owner's organization (they approve on the desk). */
+  'org.catalogue',
+  'org.role.draft',
+  'org.workflow.draft',
+  'org.validate',
+  'org.submit',
+  'org.department',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

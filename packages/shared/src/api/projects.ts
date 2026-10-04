@@ -21,6 +21,8 @@ export const ProjectDtoSchema = z.object({
   name: z.string(),
   domain: ProjectDomain,
   workflowKey: z.string(),
+  /** M10: the department of the project's workflow (its type). */
+  department: z.string().nullable().optional(),
   priorityTier: z.number().int(),
   branchPrefix: z.string(),
   workingBranch: z.string(),
@@ -43,6 +45,7 @@ export const ProjectMemberDtoSchema = z.object({
   status: z.enum(['invited', 'active', 'removed']),
 });
 
+export const ProjectsQuerySchema = z.object({ department: z.string().optional() });
 export const ProjectsResponseSchema = z.object({ projects: z.array(ProjectDtoSchema) });
 export const ProjectDetailResponseSchema = z.object({
   project: ProjectDtoSchema,

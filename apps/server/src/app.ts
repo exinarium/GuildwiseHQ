@@ -17,6 +17,7 @@ import { BrowserGateway } from './browser-gateway/gateway.ts';
 import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
 import { registerDecisionHook } from './commands/decisions.ts';
+import { registerDefinitionHook } from './commands/designer.ts';
 import { registerTasteHook } from './commands/taste.ts';
 import type { Config } from './config.ts';
 import type { Ctx } from './context.ts';
@@ -37,6 +38,7 @@ import { authRoutes } from './routes/auth.ts';
 import { cardRoutes } from './routes/cards.ts';
 import { catalogueRoutes } from './routes/catalogue.ts';
 import { chatRoutes } from './routes/chats.ts';
+import { designerRoutes } from './routes/designer.ts';
 import { deskRoutes } from './routes/desk.ts';
 import { devopsRoutes } from './routes/devops.ts';
 import { digestRoutes } from './routes/digests.ts';
@@ -205,6 +207,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(researchRoutes(ctx));
   await app.register(intakeRoutes(ctx));
   await app.register(hrRoutes(ctx));
+  await app.register(designerRoutes(ctx));
   await app.register(outboundRoutes(ctx));
 
   // Gateways: runner WS (/api/runner/ws) and browser WS (/api/ws).
@@ -250,6 +253,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const unhookDecisions = registerDecisionHook(ctx);
   const unhookTaste = registerTasteHook(ctx);
   const unhookHr = registerHrHook(ctx);
+  const unhookDefinitions = registerDefinitionHook(ctx);
   await notifier.start();
   if (opts.background) {
     dispatcher.start();
@@ -261,6 +265,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     unhookDecisions();
     unhookTaste();
     unhookHr();
+    unhookDefinitions();
     await scheduler.stop();
     await dispatcher.stop();
     await reaper.stop();

@@ -35,9 +35,14 @@ const statsAgent = (a: { id: string; roleKey: string; hiredAt: string; status: s
 });
 
 /** The HR board for `userId`: visible agents with stats against the role average, recommendations, role updates. */
-export async function hrBoard(ctx: Ctx, userId: string, projectId?: string): Promise<HrBoardResponse> {
+export async function hrBoard(
+  ctx: Ctx,
+  userId: string,
+  projectId?: string,
+  department?: string,
+): Promise<HrBoardResponse> {
   const now = ctx.clock.now();
-  const agents = (await listAgents(ctx, userId, projectId)).filter((a) => a.status !== 'retired');
+  const agents = (await listAgents(ctx, userId, projectId, department)).filter((a) => a.status !== 'retired');
   const track = await computeTrack(ctx.pool, agents.map(statsAgent), now);
   const names = new Map(
     (

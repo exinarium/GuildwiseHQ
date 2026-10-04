@@ -36,7 +36,7 @@ interface Parsed {
   positionals: string[];
 }
 
-const BOOLEAN_FLAGS = new Set(['json', 'non-blocking', 'force', 'help', 'none']);
+const BOOLEAN_FLAGS = new Set(['json', 'non-blocking', 'force', 'help', 'none', 'role', 'workflow']);
 
 export function parseArgs(argv: string[]): Parsed {
   const flags = new Map<string, string[]>();
@@ -187,6 +187,57 @@ async function cardDraft(ctx: AomContext, p: Parsed, sub: 'create' | 'update' | 
   const r = (await rpc(ctx, 'card.specify', { ref })) as { ref: string; stage: string; status: string };
   ctx.io.out(`Specified ${r.ref}: it is now in ${r.stage} (${r.status}).\n`);
   return 0;
+}
+
+const ORG_USAGE = `usage: aom org catalogue
+       aom org role draft --file <role.json>
+       aom org workflow draft --file <workflow.json>
+       aom org validate <key> [--role|--workflow]
+       aom org submit <key> [--role|--workflow]
+       aom org department --name "<name>"`;
+
+/** `aom org ...` (the BA's design chat): draft roles and workflows for the owner's organization, validate, submit. */
+async function orgDesign(ctx: AomContext, p: Parsed): Promise<number> {
+  const [sub, ...rest] = p.positionals;
+  const kind = has(p, 'role') ? 'role' : has(p, 'workflow') ? 'workflow' : undefined;
+  const readJson = (): Record<string, unknown> => {
+    const file = one(p, 'file');
+    if (!file) throw new UsageError(ORG_USAGE);
+    try {
+      return JSON.parse(ctx.readFile(file)) as Record<string, unknown>;
+    } catch (err) {
+      throw new UsageError(
+        `cannot read ${file} as JSON: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+  const print = (r: unknown): number => {
+    const m = (r as { message?: string } | null)?.message;
+    ctx.io.out(`${m ?? JSON.stringify(r, null, 2)}\n`);
+    return 0;
+  };
+  switch (sub) {
+    case 'catalogue':
+      return print(await rpc(ctx, 'org.catalogue'));
+    case 'role':
+    case 'workflow': {
+      if (rest[0] !== 'draft') throw new UsageError(ORG_USAGE);
+      return print(await rpc(ctx, `org.${sub}.draft`, { definition: readJson() }));
+    }
+    case 'validate':
+    case 'submit': {
+      const key = rest[0];
+      if (!key) throw new UsageError(ORG_USAGE);
+      return print(await rpc(ctx, `org.${sub}`, { key, ...(kind ? { kind } : {}) }));
+    }
+    case 'department': {
+      const name = one(p, 'name');
+      if (!name) throw new UsageError(ORG_USAGE);
+      return print(await rpc(ctx, 'org.department', { name }));
+    }
+    default:
+      throw new UsageError(ORG_USAGE);
+  }
 }
 
 const VERBS: Record<string, Verb> = {
@@ -430,6 +481,7 @@ const VERBS: Record<string, Verb> = {
     ctx.io.out(`${r.message ?? 'Drafted. The manager approves it on the desk.'}\n`);
     return 0;
   },
+  org: async (ctx, p) => orgDesign(ctx, p),
   source: async (ctx, p) => {
     if (p.positionals[0] !== 'read' || !one(p, 'ref'))
       throw new UsageError('usage: aom source read --ref <owner/repo#12 | ABC-123 | ticket URL>');
@@ -466,6 +518,7 @@ export const USAGE = `usage: aom <verb> [options]
   card create --file <draft.json> | card update <REF> --file <patch.json> | card specify <REF>   BA intake: draft cards
   outbound draft --kind <comment|resolution|decision> --body "<text>"   BA: draft the update for the card's ticket (the manager approves it)
   source read --ref <owner/repo#12 | ticket URL>        BA intake: read a GitHub issue (Jira: the Jira skill)
+  org catalogue | org role draft --file <json> | org workflow draft --file <json> | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed

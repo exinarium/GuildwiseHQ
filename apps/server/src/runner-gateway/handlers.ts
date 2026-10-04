@@ -8,6 +8,7 @@ import {
 } from '@aom/shared';
 import type { ChatTerminal } from '../chat/relay.ts';
 import { cardMessage, orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { designRpc } from '../commands/design-rpc.ts';
 import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
 import { outboundDraftRpc } from '../commands/drafts.ts';
 import { endQuestionShift } from '../commands/escalation.ts';
@@ -42,6 +43,15 @@ const INTAKE_METHODS = new Set([
   'card.specify',
   'intake.map',
   'intake.unmapped',
+]);
+/** M10: what the BA does in a design chat. */
+const DESIGN_METHODS = new Set([
+  'org.catalogue',
+  'org.role.draft',
+  'org.workflow.draft',
+  'org.validate',
+  'org.submit',
+  'org.department',
 ]);
 const LOST_AFTER_MISSED_HEARTBEATS = 2;
 const STOP_RESEND_MS = 30_000;
@@ -506,6 +516,8 @@ export class RunnerHandlers {
       if (msg.method === 'devops.request')
         return reply(...(await this.devopsRequest(conn, shift, msg.params)));
       if (msg.method === 'outbound.draft') return reply(...(await outboundDraftRpc(ctx, shift, msg.params)));
+      if (DESIGN_METHODS.has(msg.method))
+        return reply(...(await designRpc(ctx, shift, msg.method, msg.params)));
       if (INTAKE_METHODS.has(msg.method))
         return reply(...(await intakeRpc(ctx, shift, msg.method, msg.params)));
       if (!shift.card_id) return reply(false, undefined, 'this conversation has no card');

@@ -3,6 +3,7 @@ import {
   CreateProjectRequestSchema,
   IdParamsSchema,
   PatchProjectRequestSchema,
+  ProjectsQuerySchema,
   RepoParamsSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -16,9 +17,9 @@ export function projectRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
     const app = typed(fastify);
 
-    app.get('/api/projects', async (req) => {
+    app.get('/api/projects', { schema: { querystring: ProjectsQuerySchema } }, async (req) => {
       const s = await requireUser(ctx, req);
-      return { projects: await listProjects(ctx, s.user.id) };
+      return { projects: await listProjects(ctx, s.user.id, req.query.department) };
     });
 
     app.post('/api/projects', { schema: { body: CreateProjectRequestSchema } }, async (req, reply) => {

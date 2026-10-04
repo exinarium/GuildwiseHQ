@@ -17,6 +17,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { canAnswerItem, DESK_VISIBLE } from '../queries/desk.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
 import { plannedVaultPath } from './decisions.ts';
+import { resolveDefinitionIn } from './designer.ts';
 import { resolveDevOpsApprovalIn } from './devops.ts';
 import { mergedAnswerNotes } from './escalation.ts';
 import { resolveLargeMergeIn } from './finalize.ts';
@@ -224,6 +225,9 @@ async function closeItem(
       if (resolution === 'acknowledged')
         throw badRequest('wrong_resolution', 'a merge approval is approved or rejected');
       workstationToDeliver = (await resolveLargeMergeIn(ctx, tx, user, item, resolution, note)) ?? undefined;
+    } else if (item.kind === 'approval' && item.subkind === 'definition') {
+      // M10: approving makes the role or workflow available; only the owner decides.
+      await resolveDefinitionIn(ctx, tx, user, item, resolution, note);
     } else if (item.kind === 'approval' && item.subkind === 'outbound') {
       // M8: only the card's owner decides; an approved draft is posted by their own workstation, exactly as approved.
       workstationToDeliver =

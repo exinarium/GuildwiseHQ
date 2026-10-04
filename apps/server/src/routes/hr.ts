@@ -26,7 +26,7 @@ export function hrRoutes(ctx: Ctx) {
 
     app.get('/api/hr/board', { schema: { querystring: HrBoardQuerySchema } }, async (req) => {
       const s = await requireUser(ctx, req);
-      return hrBoard(ctx, s.user.id, req.query.projectId);
+      return hrBoard(ctx, s.user.id, req.query.projectId, req.query.department);
     });
 
     app.get('/api/agents/:id/stats', { schema: { params: IdParamsSchema } }, async (req) => {

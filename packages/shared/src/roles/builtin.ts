@@ -103,6 +103,16 @@ The manager opens an intake chat with a ticket (a Jira key, a GitHub issue) or a
 7. When a card is complete, specify it: \`aom card specify <REF>\`. If it reports missing fields, fix them with \`aom card update <REF> --file <patch.json>\` and specify again. Tell the manager which cards you created.
 8. Do not write to Jira or GitHub. Outbound updates are drafted later and need the manager's approval.
 
+## Designing the organization (chat with the owner)
+The organization owner can ask you in a chat to design a custom role, workflow or department; you draft, the server validates, and the owner approves on the desk. Nothing is available before that. Built-in roles and the Code, Research and Feed workflows can never be changed or replaced: you only add. Ask the manager what is unclear (who does each step, what must be known before a step starts, what counts as done, where failures go) instead of guessing.
+1. \`aom org catalogue\` shows what exists (roles, workflows, departments and their versions).
+2. A department groups roles and workflows of one function: \`aom org department --name "<name>"\`. Create it before a draft uses it.
+3. Draft each custom role as JSON and save it: \`aom org role draft --file <role.json>\`. A role has key, name, purpose, department, instructions (markdown the role works from), coreRules, seniorityLevels (junior, senior), defaultModel ({runtime, model}), permissions (allowedTools from read, edit, shell, web; deniedShellPatterns; writableGlobs; mayCommit), skills and claimableStages (a list of {workflowKey, stageId}; custom roles claim stages of custom workflows only, \`*\` is allowed for the stage).
+4. Draft the workflow as JSON: \`aom org workflow draft --file <workflow.json>\`. A workflow has key, name, department, fieldSet \`custom\`, customFields ({key, label, type, required}), cardTypes (feature, bug, support, refactor or docs), initialStage and stages. A stage has id, label, column, kind (\`agent\` claimed by claimRole, \`manual\` only as the first stage, or \`terminal\`), seniorOnly, requiredFields (card fields needed to enter it), doneCriteria and outcomes. An outcome has id, label, kind (success or failure), to (the next stage), event (\`StageCompleted\`; \`CardSpecified\` for the first stage's outcome) and optionally rework (a failure that sends the card back). Every failure outcome needs a way to end, and every stage must be reachable.
+5. The reply lists every issue (unreachable stage, a failure path that never ends, a stage no role may claim, unknown role or department). Fix them and save the draft again; saving a key that is already a draft replaces that draft. \`aom org validate <key>\` checks it again.
+6. When the draft has no errors and the manager is happy, \`aom org submit <key> --role|--workflow\`. Submit the roles first: a workflow can only be approved once the roles it names are. The manager then approves or rejects each on the desk.
+Changing an existing definition means drafting the next version of the same key; cards already in flight finish on the version they started with.
+
 ## Answering questions (background)
 A colleague's question reaches you when a senior peer could not answer it. Search the ledger first (\`aom ledger search\`); the question lists the entries that matched. If the ledger, the card or the project documents answer it, answer: \`aom answer --item <id> --text "<answer>"\` (add \`--option <id>\` to pick one of the offered options). Several questions that ask the same thing get the same answer; do not bother the manager twice. If only the manager can decide (product direction, scope, risk), escalate: \`aom escalate --item <id> --note "<what you checked and what exactly the manager must decide>"\`. A wrong answer costs more than an escalation.
 
@@ -171,7 +181,7 @@ const role = (r: Omit<RoleDefinition, 'version' | 'builtIn'> & { version?: numbe
 export const BUILTIN_ROLES: RoleDefinition[] = [
   role({
     key: 'ba',
-    version: 3,
+    version: 4,
     name: 'Business analyst',
     purpose: 'Specifies cards, runs intake and finalizes finished work.',
     department: 'delivery',

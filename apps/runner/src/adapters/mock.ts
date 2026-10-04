@@ -51,6 +51,8 @@ export class MockAdapter implements RuntimeAdapter {
    */
   async startChat(input: ChatStartInput): Promise<RuntimeSession> {
     if (input.agent.roleKey === 'ba' && input.context?.intake) return this.startIntakeChat(input);
+    if (input.agent.roleKey === 'ba' && /^\s*design\b/i.test(input.message))
+      return this.startIntakeChat(input, 'design');
     const prior = /-(\d+)$/.exec(input.resumeSessionId ?? '');
     const turn = (prior ? Number(prior[1]) : 0) + 1;
     const sessionId = `mock-${input.agent.agentId}-${turn}`;
@@ -101,7 +103,10 @@ export class MockAdapter implements RuntimeAdapter {
    * The BA's intake chat: the scripted mock BA (`mock-agent` in intake mode) drives the real `aom` verbs through the
    * chat-scoped IPC token, so the whole path (rpc, server validation, cards) is exercised without a model.
    */
-  private async startIntakeChat(input: ChatStartInput): Promise<RuntimeSession> {
+  private async startIntakeChat(
+    input: ChatStartInput,
+    mode: 'intake' | 'design' = 'intake',
+  ): Promise<RuntimeSession> {
     const [bin, ...pre] = selfCommand('mock-agent') as [string, ...string[]];
     const prior = /-(\d+)$/.exec(input.resumeSessionId ?? '');
     const turn = (prior ? Number(prior[1]) : 0) + 1;
@@ -112,7 +117,7 @@ export class MockAdapter implements RuntimeAdapter {
       cwd: input.cwd,
       env: {
         ...input.env,
-        AOM_MOCK_CHAT: 'intake',
+        AOM_MOCK_CHAT: mode,
         AOM_MOCK_MESSAGE: input.message,
         AOM_MOCK_CONTEXT: JSON.stringify(input.context ?? {}),
         AOM_MOCK_SESSION: `mock-${input.agent.agentId}-${turn}`,

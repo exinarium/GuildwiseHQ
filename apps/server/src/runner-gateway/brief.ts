@@ -73,7 +73,10 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
   const parent = card.parent_card_id
     ? await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1', [card.parent_card_id])
     : undefined;
-  const mergedInstr = (ext?.extensions as { instructions?: string } | undefined)?.instructions;
+  const extension = ext?.extensions as
+    | { instructions?: string; skills?: string[]; standingOrders?: string[] }
+    | undefined;
+  const mergedInstr = extension?.instructions;
 
   return {
     shift: {
@@ -115,7 +118,7 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       instructions: role.definition.instructions,
       coreRules: role.definition.coreRules,
       extensions: mergedInstr || undefined,
-      skills: agent.skills,
+      skills: [...new Set([...(agent.skills as string[]), ...(extension?.skills ?? [])])],
     },
     handoffs: handoffs.map((h) => ({
       stage: h.stage,
@@ -141,7 +144,13 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       body: m.body,
       at: iso(m.created_at) as string,
     })),
-    standingOrders: await standingOrdersFor(ctx.pool, card.org_id, card.project_id),
+    standingOrders: [
+      ...(await standingOrdersFor(ctx.pool, card.org_id, card.project_id)),
+      ...(extension?.standingOrders ?? []).map((body, i) => ({
+        title: `Owner standing order for ${role.definition.name} ${i + 1}`,
+        body,
+      })),
+    ],
     ledger: await cardLedgerEntries(ctx.pool, card.id),
     ...(card.card_type === 'feed'
       ? {

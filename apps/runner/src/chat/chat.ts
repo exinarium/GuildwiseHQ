@@ -53,6 +53,13 @@ const CHAT_RPC = new Set([
   'card.specify',
   'intake.map',
   'intake.unmapped',
+  /** M10: the BA's design chat (the server only allows these in the owner's chat with their BA). */
+  'org.catalogue',
+  'org.role.draft',
+  'org.workflow.draft',
+  'org.validate',
+  'org.submit',
+  'org.department',
 ]);
 
 const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });

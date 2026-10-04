@@ -24,13 +24,18 @@ export const AgentDtoSchema = z.object({
   status: z.enum(['active', 'retired', 'needs_rehome']),
   hiredAt: IsoTime,
   retiredAt: IsoTime.nullable(),
+  /** M10: the department of the agent's role. */
+  department: z.string().nullable().optional(),
   lastShiftEndedAt: IsoTime.nullable(),
   /** Active claims right now. */
   activeCards: z.array(z.object({ cardId: z.uuid(), ref: z.string(), title: z.string() })).default([]),
 });
 export type AgentDto = z.infer<typeof AgentDtoSchema>;
 export const AgentsResponseSchema = z.object({ agents: z.array(AgentDtoSchema) });
-export const AgentsQuerySchema = z.object({ projectId: z.uuid().optional() });
+export const AgentsQuerySchema = z.object({
+  projectId: z.uuid().optional(),
+  department: z.string().optional(),
+});
 
 /** `POST /api/agents` (hire). */
 export const HireAgentRequestSchema = z.object({

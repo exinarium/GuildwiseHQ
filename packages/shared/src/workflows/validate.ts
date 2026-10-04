@@ -32,6 +32,16 @@ export type IssueCode =
   | 'invalid_effect'
   // rule 9
   | 'when_field_not_boolean'
+  // custom workflows only
+  | 'not_custom'
+  | 'invalid_key'
+  | 'builtin_key'
+  | 'invalid_field_set'
+  | 'invalid_card_type'
+  | 'unknown_department'
+  | 'manual_stage_not_initial'
+  | 'role_not_claimable'
+  | 'unsupported_custom_event'
   // warnings
   | 'missing_done_criteria'
   | 'too_many_stages';

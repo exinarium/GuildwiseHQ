@@ -33,8 +33,29 @@ export function renderChatInstructions(
       '- `aom comment --note "<text>"`: post a note on the card thread (only when a card is in context).',
     ].join('\n'),
   );
+  if (agent.roleKey === 'ba' && !ctx.intake) out.push(renderDesignSection());
   if (ctx.intake) out.push(renderIntakeSection(ctx.intake, opts.jiraSkill));
   return `${out.join('\n\n')}\n`;
+}
+
+/**
+ * The BA's design chat (M10): the owner describes a role, workflow or department they need; the BA drafts it with
+ * `aom org ...`, the server validates, and the owner approves on the desk. The full method is in the BA's role instructions.
+ */
+export function renderDesignSection(): string {
+  return [
+    '# Designing the organization',
+    'When the manager describes a need that the built-in roles and workflows do not cover (a new kind of work, a new function), design it with them. Ask what is unclear first: who does each step, what must be known before a step starts, what counts as done, and where a failure goes.',
+    [
+      '- `aom org catalogue`: roles, workflows, departments and their versions.',
+      '- `aom org department --name "<name>"`: create a department for a function.',
+      '- `aom org role draft --file <role.json>`: save a custom role (name, purpose, instructions, permissions, skills, default model, seniority levels, claimable stages). Prints every issue.',
+      '- `aom org workflow draft --file <workflow.json>`: save a custom workflow (stages with claiming role, required fields, done criteria, outcomes and failure routes). Prints every issue: unreachable stages, failure paths that never end, stages no role may claim.',
+      '- `aom org validate <key>`: check a draft again.',
+      "- `aom org submit <key> --role|--workflow`: put a valid draft on the owner's desk. Nothing is available until they approve it; submit roles before the workflow that uses them.",
+    ].join('\n'),
+    'Built-in roles and the Code, Research and Feed workflows can never be changed or removed. Changing a definition means drafting its next version: cards already in flight finish on the version they started with.',
+  ].join('\n\n');
 }
 
 /** The BA's intake chat (M7): the ticket, the projects it may map to, the cards created so far and the verbs to use. */

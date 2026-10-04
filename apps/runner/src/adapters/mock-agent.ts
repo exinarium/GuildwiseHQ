@@ -606,8 +606,73 @@ async function intakeMain(): Promise<number> {
   return finish();
 }
 
+interface MockDesign {
+  departments?: string[];
+  roles?: unknown[];
+  workflows?: unknown[];
+}
+
+/**
+ * The BA's design chat (M10), scripted: `design { "departments": [...], "roles": [...], "workflows": [...] }` is "the
+ * need described to the BA". It drafts every definition with the real `aom org` verbs, validates, submits what is
+ * valid (roles first) and reports what is wrong with the rest; a message without a definition gets a question back.
+ */
+async function designMain(): Promise<number> {
+  const message = process.env.AOM_MOCK_MESSAGE ?? '';
+  const said: string[] = [];
+  const say = (text: string) => {
+    said.push(text);
+    emit({ kind: 'delta', text: `${text}\n` });
+  };
+  emit({ kind: 'session', runtimeSessionId: process.env.AOM_MOCK_SESSION ?? 'mock-design' });
+  emit({ kind: 'usage', usage: { inputTokens: message.length, outputTokens: 120 } });
+  const finish = (): number => {
+    emit({ kind: 'final', text: said.join('\n') });
+    return 0;
+  };
+  let spec: MockDesign | undefined;
+  try {
+    spec = JSON.parse(message.replace(/^\s*design\b/i, '').trim()) as MockDesign;
+  } catch {
+    spec = undefined;
+  }
+  if (!spec || (!spec.roles?.length && !spec.workflows?.length && !spec.departments?.length)) {
+    say(
+      'Before I draft anything: which stages should the workflow have, which role claims each stage, what must be known before a stage starts, and where does a failure go?',
+    );
+    return finish();
+  }
+  const run = (args: string[]): { ok: boolean; text: string } => {
+    const r = aom(args);
+    return { ok: r.code === 0, text: (r.code === 0 ? r.out : r.err || r.out).trim() };
+  };
+  for (const name of spec.departments ?? []) say(run(['org', 'department', '--name', name]).text);
+  const keys: Array<{ key: string; kind: 'role' | 'workflow' }> = [];
+  for (const [kind, list] of [
+    ['role', spec.roles ?? []],
+    ['workflow', spec.workflows ?? []],
+  ] as const) {
+    for (const def of list as Array<{ key: string }>) {
+      const r = run(['org', kind, 'draft', '--file', tmpJson(`${kind}.json`, def)]);
+      say(r.text);
+      if (r.ok) keys.push({ key: def.key, kind });
+    }
+  }
+  for (const { key, kind } of keys) {
+    const v = run(['org', 'validate', key, `--${kind}`]);
+    if (!v.ok || !v.text.startsWith('Valid.')) {
+      say(`${key} is not valid yet, so I did not submit it: ${v.text}`);
+      continue;
+    }
+    const s = run(['org', 'submit', key, `--${kind}`]);
+    say(s.ok ? `Submitted ${kind} ${key} for your approval.` : `Could not submit ${key}: ${s.text}`);
+  }
+  return finish();
+}
+
 async function main(): Promise<number> {
   if (process.env.AOM_MOCK_CHAT === 'intake') return intakeMain();
+  if (process.env.AOM_MOCK_CHAT === 'design') return designMain();
   const card = aom(['card', '--json']);
   if (card.code !== 0) {
     process.stderr.write(`aom card failed: ${card.err}\n`);

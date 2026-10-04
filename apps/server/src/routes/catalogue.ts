@@ -1,6 +1,7 @@
-import { RoleDefinitionSchema, WorkflowDefinitionSchema } from '@aom/shared';
+import { OrgContextQuerySchema, RoleDefinitionSchema, WorkflowDefinitionSchema } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
+import { catalogueOrg } from '../commands/designer.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { typed } from './util.ts';
@@ -10,8 +11,10 @@ export function catalogueRoutes(ctx: Ctx) {
     const app = typed(fastify);
 
     // Latest active version per key: built-in plus the caller's own org.
-    app.get('/api/roles', async (req) => {
+    // `?projectId=`: a shared project runs on its owner's catalogue (the Hire form lists the owner's roles).
+    app.get('/api/roles', { schema: { querystring: OrgContextQuerySchema } }, async (req) => {
       const s = await requireUser(ctx, req);
+      const { orgId } = await catalogueOrg(ctx.pool, s.user, req.query.projectId, false);
       const list = await rows(
         ctx.pool,
         `SELECT DISTINCT ON (r.org_id, r.key) r.org_id, r.status, r.definition, e.extensions
@@ -19,7 +22,7 @@ export function catalogueRoutes(ctx: Ctx) {
            LEFT JOIN role_extensions e ON e.org_id = $1 AND e.role_key = r.key AND r.org_id IS NULL
           WHERE (r.org_id IS NULL OR r.org_id = $1) AND r.status = 'active'
           ORDER BY r.org_id NULLS FIRST, r.key, r.version DESC`,
-        [s.user.id],
+        [orgId],
       );
       return {
         roles: list.map((r) => ({
@@ -31,14 +34,15 @@ export function catalogueRoutes(ctx: Ctx) {
       };
     });
 
-    app.get('/api/workflows', async (req) => {
+    app.get('/api/workflows', { schema: { querystring: OrgContextQuerySchema } }, async (req) => {
       const s = await requireUser(ctx, req);
+      const { orgId } = await catalogueOrg(ctx.pool, s.user, req.query.projectId, false);
       const list = await rows(
         ctx.pool,
         `SELECT DISTINCT ON (org_id, key) id, org_id, status, definition FROM workflow_versions
           WHERE (org_id IS NULL OR org_id = $1) AND status = 'active'
           ORDER BY org_id NULLS FIRST, key, version DESC`,
-        [s.user.id],
+        [orgId],
       );
       return {
         workflows: list.map((w) => ({

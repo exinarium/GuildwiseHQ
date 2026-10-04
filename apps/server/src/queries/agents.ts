@@ -24,16 +24,25 @@ export function toAgentDto(a: Row, active: Array<{ cardId: string; ref: string; 
     status: a.status,
     hiredAt: iso(a.hired_at) as string,
     retiredAt: iso(a.retired_at),
+    department: a.department ?? null,
     lastShiftEndedAt: iso(a.last_shift_ended_at),
     activeCards: active,
   };
 }
 
 /** Agents visible to the user: their own org's agents plus project-scoped agents of projects they belong to. */
-export async function listAgents(ctx: Ctx, userId: string, projectId?: string): Promise<AgentDto[]> {
+export async function listAgents(
+  ctx: Ctx,
+  userId: string,
+  projectId?: string,
+  department?: string,
+): Promise<AgentDto[]> {
   const list = await rows(
     ctx.pool,
-    `SELECT a.* FROM agents a
+    `SELECT a.*, (SELECT r.department FROM role_definitions r
+                   WHERE r.key = a.role_key AND (r.org_id = a.org_id OR r.org_id IS NULL)
+                   ORDER BY (r.version = a.role_version) DESC, (r.org_id IS NULL), r.version DESC LIMIT 1) AS department
+       FROM agents a
       WHERE (a.org_id = $1 OR a.project_id IN (SELECT project_id FROM project_members WHERE user_id=$1 AND status='active'))
         AND ($2::uuid IS NULL
              OR a.project_id = $2
@@ -55,12 +64,14 @@ export async function listAgents(ctx: Ctx, userId: string, projectId?: string): 
     `SELECT id, ref, title, claimed_by_agent_id FROM cards WHERE claimed_by_agent_id = ANY($1::uuid[]) AND claim_id IS NOT NULL`,
     [list.map((a) => a.id)],
   );
-  return list.map((a) =>
-    toAgentDto(
-      a,
-      claims
-        .filter((c) => c.claimed_by_agent_id === a.id)
-        .map((c) => ({ cardId: c.id, ref: c.ref, title: c.title })),
-    ),
-  );
+  return list
+    .filter((a) => !department || a.department === department)
+    .map((a) =>
+      toAgentDto(
+        a,
+        claims
+          .filter((c) => c.claimed_by_agent_id === a.id)
+          .map((c) => ({ cardId: c.id, ref: c.ref, title: c.title })),
+      ),
+    );
 }

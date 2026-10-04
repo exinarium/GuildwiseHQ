@@ -1,6 +1,7 @@
 export * from './api/index.ts';
 export * from './authz/index.ts';
 export * from './cards/index.ts';
+export * from './definitions/index.ts';
 export * from './devops/index.ts';
 export * from './events/index.ts';
 export * from './external/index.ts';

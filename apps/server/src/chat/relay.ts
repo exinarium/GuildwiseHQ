@@ -175,6 +175,11 @@ export class ChatRelay {
     return this.inflight.get(chatId)?.threadId;
   }
 
+  /** The manager who is talking in an in-flight chat. */
+  userOfChat(chatId: string): string | undefined {
+    return this.inflight.get(chatId)?.userId;
+  }
+
   cancel(userId: string, threadId: string): void {
     const chatId = this.byThread.get(threadId);
     const c = chatId ? this.inflight.get(chatId) : undefined;

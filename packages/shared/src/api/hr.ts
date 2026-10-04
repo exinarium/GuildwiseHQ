@@ -117,7 +117,10 @@ export const RoleUpdateSchema = z.object({
 export type RoleUpdate = z.infer<typeof RoleUpdateSchema>;
 
 /** `GET /api/hr/board?projectId=` */
-export const HrBoardQuerySchema = z.object({ projectId: z.uuid().optional() });
+export const HrBoardQuerySchema = z.object({
+  projectId: z.uuid().optional(),
+  department: z.string().optional(),
+});
 export const HrBoardResponseSchema = z.object({
   windowDays: z.number().int(),
   agents: z.array(HrAgentSchema),
