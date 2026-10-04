@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DUPLICATE_SIMILARITY, questionSimilarity } from '../src/commands/escalation.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { freshState, shiftHelpers } from './helpers/shifts.ts';
@@ -372,6 +373,22 @@ describe('agent answers are recorded in the ledger', () => {
 });
 
 describe('a duplicate question attaches to the open one', () => {
+  it('only near-identical wording counts; a different number or identifier makes it another question', () => {
+    expect(
+      questionSimilarity('Which port does the dev server use?', 'What port should the dev server use?'),
+    ).toBeLessThan(DUPLICATE_SIMILARITY); // reworded questions stay below the bar
+    expect(
+      questionSimilarity(
+        'Should source files use tabs or spaces?',
+        'Should source files use spaces or tabs?',
+      ),
+    ).toBe(1);
+    expect(questionSimilarity('Mock question for TOY-14?', 'Mock question for TOY-15?')).toBe(0);
+    expect(
+      questionSimilarity('Which retry limit applies to job 3?', 'Which retry limit applies to job 4?'),
+    ).toBe(0);
+  });
+
   it('a question raised while the same one is on the desk adds no second item; answering unblocks both cards', async () => {
     await fresh([
       ['Bea', 'builder', 'junior'],

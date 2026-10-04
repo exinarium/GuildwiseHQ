@@ -102,7 +102,7 @@ export const triedAgents = (item: Row): string[] => [
 // ------------------------------------------------------------------------------------- duplicate questions
 
 /** Share of distinct words two questions need in common (Jaccard) to count as the same question. */
-export const DUPLICATE_SIMILARITY = 0.6;
+export const DUPLICATE_SIMILARITY = 0.8;
 const MIN_SHARED_WORDS = 3;
 const STOP_WORDS = new Set(
   'the and for are but not you your with that this from have has was were will would could should can how what which who why when where there their its into onto about our out use using used any all'.split(
@@ -110,12 +110,19 @@ const STOP_WORDS = new Set(
   ),
 );
 const wordsOf = (text: string): Set<string> =>
-  new Set((text.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []).filter((w) => !STOP_WORDS.has(w)));
+  new Set((text.toLowerCase().match(/[a-z0-9]{2,}/g) ?? []).filter((w) => !STOP_WORDS.has(w)));
+const hasDigit = (w: string): boolean => /\d/.test(w);
 
-/** Word-set similarity of two questions, 0..1. */
+/**
+ * Word-set similarity of two questions, 0..1. Numbers and identifiers (TOY-14, 300, v2) tell questions apart, so
+ * questions that mention different ones are never the same question.
+ */
 export function questionSimilarity(a: string, b: string): number {
   const x = wordsOf(a);
   const y = wordsOf(b);
+  const numX = [...x].filter(hasDigit).sort().join(' ');
+  const numY = [...y].filter(hasDigit).sort().join(' ');
+  if (numX !== numY) return 0;
   let shared = 0;
   for (const w of x) if (y.has(w)) shared++;
   if (shared < MIN_SHARED_WORDS) return 0;
