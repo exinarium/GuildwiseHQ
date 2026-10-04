@@ -34,6 +34,8 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
     case 'desk':
       // Questions block and unblock cards; answers add ledger entries.
       return [['desk'], ['board'], ['card'], ['ledger'], ['devops'], ['vaults'], ['intakes']];
+    case 'outbound':
+      return [['outbound'], ['desk'], ['card']];
     case 'ledger':
       return [['ledger'], ['desk'], ['card']];
     case 'vault':

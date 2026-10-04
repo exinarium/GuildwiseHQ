@@ -48,3 +48,10 @@ export const TESTER = { email: 'tester@e2e.test', name: 'E2E Tester', password: 
 
 /** M7 intake spec: own user, own runner (mock), projects INT and OTH on the toy repo, a BA and two builders. */
 export const INTAKER = { email: 'intaker@e2e.test', name: 'E2E Intaker', password: 'intaker-password-12345' };
+
+/** M8 outbox spec: own user, own runner (mock, fake gh, fake Jira), project OUT on the toy repo, a BA, a builder, a reviewer. */
+export const OUTBOXER = {
+  email: 'outboxer@e2e.test',
+  name: 'E2E Outboxer',
+  password: 'outboxer-password-12345',
+};

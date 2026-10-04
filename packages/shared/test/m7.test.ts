@@ -137,7 +137,7 @@ describe('M7 reports and rpc', () => {
 describe('BA instructions and prompts', () => {
   it('ships real BA instructions: intake, answering, finalize', () => {
     const ba = getBuiltinRole('ba');
-    expect(ba?.version).toBe(2);
+    expect(ba?.version).toBe(3); // 3: M8 added the outbound updates section
     expect(ba?.instructions).not.toMatch(/TODO/);
     for (const w of [
       'aom intake map',
