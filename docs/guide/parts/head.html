@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<title>Agent Org Manager - User guide and handover</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 18mm 15mm; }
+  :root { --blue: #2563eb; --blue-dark: #1e3a8a; --blue-soft: #eff6ff; --ink: #111827; --muted: #4b5563; --line: #e5e7eb;
+          --amber: #b45309; --amber-soft: #fffbeb; --green: #047857; --green-soft: #ecfdf5; --red: #b91c1c; --red-soft: #fef2f2; }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-family: "Adwaita Sans", "Liberation Sans", Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: var(--ink); margin: 0; counter-reset: fig; }
+  code, .mono { font-family: "Adwaita Mono", "Liberation Mono", monospace; font-size: 9.2pt; background: #f3f4f6; padding: 0 3px; border-radius: 3px; }
+  pre { font-family: "Adwaita Mono", "Liberation Mono", monospace; font-size: 8.8pt; background: #0f172a; color: #e2e8f0; padding: 9px 12px; border-radius: 6px; white-space: pre-wrap; line-height: 1.45; break-inside: avoid; }
+  a { color: var(--blue); text-decoration: none; }
+  h1, h2, h3, h4 { line-height: 1.25; break-after: avoid; page-break-after: avoid; }
+  h2 { font-size: 20pt; color: var(--blue-dark); margin: 0 0 10px; padding-bottom: 6px; border-bottom: 3px solid var(--blue); }
+  h3 { font-size: 13.5pt; color: var(--blue-dark); margin: 20px 0 6px; }
+  h4 { font-size: 11.5pt; margin: 14px 0 4px; }
+  p { margin: 0 0 8px; }
+  ul, ol { margin: 0 0 8px; padding-left: 20px; }
+  li { margin: 2px 0; }
+  .chapter { break-before: page; page-break-before: always; }
+  .lead { font-size: 11.5pt; color: var(--muted); }
+  .mk { position: absolute; font-size: 1pt; color: #fff; }
+  .keep { break-inside: avoid; page-break-inside: avoid; }
+
+  /* figures */
+  figure { margin: 10px 0 14px; break-inside: avoid; page-break-inside: avoid; text-align: center; }
+  figure img { max-width: 100%; max-height: 205mm; border: 1px solid #d1d5db; border-radius: 4px; }
+  figure.w70 img { max-width: 70%; } figure.w55 img { max-width: 55%; } figure.w45 img { max-width: 45%; } figure.tall img { max-height: 232mm; }
+  figcaption { counter-increment: fig; font-size: 9pt; color: var(--muted); margin-top: 5px; text-align: center; }
+  figcaption::before { content: "Figure " counter(fig) " \2014  "; font-weight: 700; color: var(--blue-dark); }
+  .figrow { display: flex; gap: 10px; align-items: flex-start; justify-content: center; }
+  .figrow figure { flex: 1; margin: 6px 0 10px; }
+  .phones { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .phones figure { margin: 4px 0 8px; } .phones figure img { max-height: 112mm; }
+
+  /* callouts */
+  .callout { border-left: 4px solid var(--blue); background: var(--blue-soft); padding: 8px 12px; border-radius: 0 6px 6px 0; margin: 10px 0; break-inside: avoid; font-size: 10.5pt; }
+  .callout b.t { display: block; color: var(--blue-dark); margin-bottom: 2px; }
+  .callout.rule { border-color: #7c3aed; background: #f5f3ff; } .callout.rule b.t { color: #5b21b6; }
+  .callout.warn { border-color: #d97706; background: var(--amber-soft); } .callout.warn b.t { color: var(--amber); }
+  .callout.ok { border-color: #059669; background: var(--green-soft); } .callout.ok b.t { color: var(--green); }
+  .callout.todo { border-color: #dc2626; background: var(--red-soft); } .callout.todo b.t { color: var(--red); }
+
+  /* tables */
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 12px; font-size: 9.6pt; break-inside: auto; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  th { background: var(--blue); color: #fff; text-align: left; font-weight: 600; padding: 5px 7px; }
+  td { border-bottom: 1px solid var(--line); padding: 4px 7px; vertical-align: top; }
+  tbody tr:nth-child(even) td { background: #f9fafb; }
+  td.c, th.c { text-align: center; } td.r, th.r { text-align: right; white-space: nowrap; }
+  .yes { color: var(--green); font-weight: 700; } .no { color: #9ca3af; }
+  .badge { display: inline-block; font-size: 8.5pt; padding: 0 7px; border-radius: 9px; font-weight: 600; }
+  .b-pend { background: #fef3c7; color: #92400e; } .b-appr { background: #dbeafe; color: #1e40af; } .b-rej { background: #fee2e2; color: #991b1b; } .b-paid { background: #d1fae5; color: #065f46; }
+  .b-good { background: #d1fae5; color: #065f46; } .b-avg { background: #fef3c7; color: #92400e; } .b-risk { background: #fee2e2; color: #991b1b; } .b-new { background: #e5e7eb; color: #374151; }
+
+  /* cover */
+  .cover { height: 263mm; display: flex; flex-direction: column; justify-content: space-between; break-after: page; page-break-after: always; }
+  .cover .band { background: linear-gradient(135deg, #1d4ed8, #2563eb 60%, #3b82f6); color: #fff; border-radius: 14px; padding: 34px 32px 30px; }
+  .cover .kicker { letter-spacing: .18em; text-transform: uppercase; font-size: 10pt; opacity: .85; }
+  .cover h1 { font-size: 40pt; margin: 8px 0 4px; letter-spacing: -.01em; }
+  .cover .sub { font-size: 16pt; opacity: .95; }
+  .cover .sub2 { margin-top: 18px; font-size: 12pt; opacity: .9; }
+  .cover .flow { display: flex; gap: 6px; margin: 26px 0 0; flex-wrap: wrap; }
+  .cover .flow span { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.35); border-radius: 18px; padding: 4px 11px; font-size: 10pt; }
+  .cover .meta { font-size: 10.5pt; color: var(--muted); }
+  .cover .meta table td { border: 0; padding: 3px 8px 3px 0; background: none !important; }
+  .cover .meta td:first-child { color: #6b7280; width: 38mm; }
+
+  /* toc */
+  .toc { font-size: 10.5pt; }
+  .toc a { display: flex; color: var(--ink); padding: 2.2px 0; }
+  .toc a .t { flex: 0 1 auto; } .toc a .dots { flex: 1; border-bottom: 1px dotted #9ca3af; margin: 0 6px 5px; } .toc a .pg { flex: 0 0 auto; min-width: 7mm; text-align: right; color: var(--blue-dark); font-weight: 600; }
+  .toc a.l1 { font-weight: 700; margin-top: 7px; color: var(--blue-dark); }
+  .toc a.l2 { padding-left: 7mm; }
+
+  /* at a glance */
+  .steps { display: flex; gap: 6px; margin: 10px 0 12px; }
+  .steps div { flex: 1; background: var(--blue-soft); border: 1px solid #bfdbfe; border-radius: 8px; padding: 7px 7px; font-size: 9.2pt; text-align: center; }
+  .steps div b { display: block; color: var(--blue); font-size: 13pt; }
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 12px; }
+  .kpis div { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; break-inside: avoid; }
+  .kpis b { display: block; font-size: 17pt; color: var(--green); line-height: 1.15; } .kpis span { font-size: 9pt; color: var(--muted); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .check li { list-style: none; margin-left: -18px; padding-left: 22px; position: relative; }
+  .check li::before { content: ""; position: absolute; left: 0; top: 4px; width: 11px; height: 11px; border: 1.6px solid var(--blue); border-radius: 3px; }
+  .small { font-size: 9.5pt; color: var(--muted); }
+  table.compact { font-size: 8.9pt; } table.compact td { padding: 2.5px 6px; }
+  #s1 h3 { margin-top: 10px; } #s1 .callout { margin: 6px 0; } #s1 .lead { font-size: 10.5pt; }
+  #s1 .kpis { grid-template-columns: repeat(6, 1fr); gap: 5px; } #s1 .kpis div { padding: 5px 6px; } #s1 .kpis b { font-size: 12.5pt; } #s1 .kpis span { font-size: 7.8pt; display: block; line-height: 1.25; }
+  #s1 .steps div { padding: 5px; font-size: 8.6pt; } #s1 p, #s1 li { font-size: 10.3pt; }
+  #s4 table, #s5 table, #s6 table, #s7 table, #s8 table, #s9 table, #s10 table, #s11 table { font-size: 8.9pt; } #s4 td, #s5 td, #s6 td, #s7 td, #s8 td, #s9 td, #s10 td, #s11 td { padding: 3px 6px; }
+  .b-sent { background: #f3f4f6; color: #1f2937; } .b-deliv { background: #dbeafe; color: #1e40af; } .b-open { background: #d1fae5; color: #065f46; } .b-def { background: #fef3c7; color: #92400e; } .b-fail { background: #fee2e2; color: #991b1b; }
+  figure.w80 img { max-width: 80%; } figure.w60 img { max-width: 60%; } figure.w35 img { max-width: 35%; }
+  figure.h120 img { max-height: 120mm; } figure.h150 img { max-height: 150mm; } figure.h170 img { max-height: 170mm; }
+  .phones figure img { max-height: 112mm; } .phones4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; } .phones4 figure { margin: 4px 0 8px; } .phones4 figure img { max-height: 100mm; }
+</style>
+<body>

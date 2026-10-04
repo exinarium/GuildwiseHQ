@@ -1,0 +1,141 @@
+<section class="chapter" id="s11">
+  <h2><span class="mk">TOCMARK_s11_</span>11&nbsp;&nbsp;Running locally and deploying</h2>
+
+  <h3 id="s11-1" style="margin-top:4px"><span class="mk">TOCMARK_s11x1_</span>11.1 Requirements and local development</h3>
+  <p>The server runs in Docker, so any host with Docker works. For development and testing you need Node 22.23, Git 2.40 or later, and Docker. Workstations run the runner on Linux, macOS or Windows via WSL2 (real Claude Code was only run on Linux so far, see chapter 13). Agents run on your workstations, not on the server, so the workstation setup is separate (see <code>docs/RUNNER.md</code>).</p>
+  <h4>Install dependencies</h4>
+  <ul>
+    <li><b>Node 22.23:</b> download from <code>https://nodejs.org</code> or use <code>nvm install 22.23 && nvm use</code></li>
+    <li><b>Git 2.40+:</b> check with <code>git --version</code>; update if needed</li>
+    <li><b>Docker:</b> for local Postgres and any container-based testing</li>
+    <li><b>pnpm 12.8.1:</b> pinned in <code>package.json</code>, installed via corepack: <code>corepack enable</code></li>
+  </ul>
+  <h4>Set up for local development</h4>
+  <pre>
+git clone https://github.com/your-org/agent-org-manager.git
+cd agent-org-manager
+corepack enable                  # Enable pnpm
+pnpm install                     # Install dependencies
+docker compose -f docker-compose.dev.yml up -d  # Start Postgres (127.0.0.1:5433, user/password/db aom)
+pnpm db:migrate                  # Apply migrations to the aom database
+pnpm dev                         # Start server (localhost:4600) and web (localhost:5173)
+pnpm --filter @aom/server admin:create --email you@example.com --name "You" --password 'at-least-12-chars'  # Bootstrap first admin
+  </pre>
+  <p>The server reads real environment variables only (it does not load a <code>.env</code> file); the built-in defaults match the dev compose file. The web app proxies <code>/api</code> to the server and works with WebSocket. Open <code>http://localhost:5173</code> and sign in with the admin account.</p>
+  <h4>Run tests and checks</h4>
+  <pre>
+pnpm typecheck                   # TypeScript type check
+pnpm lint                        # Biome linter
+pnpm test                        # Unit and integration tests (vitest)
+pnpm e2e                         # End-to-end tests with Playwright (needs Postgres on 5433, Mailpit on 1025, Chromium)
+pnpm --filter @aom/server projections:rebuild   # Rebuild all projections from events (stop the server first)
+  </pre>
+
+  <h3 id="s11-2"><span class="mk">TOCMARK_s11x2_</span>11.2 Deploying to a VPS with Docker Compose</h3>
+  <p>Production runs on a VPS (or your own server) with Docker Compose, Postgres, and Caddy for HTTPS. Agents run on separate workstations and connect outbound to the server over WebSocket (no inbound agent ports needed).</p>
+  <h4>Pre-deployment checklist</h4>
+  <ul>
+    <li>Domain name with DNS pointing to your VPS IP</li>
+    <li>Postgres password chosen</li>
+    <li>SMTP relay configured for invitation emails</li>
+    <li>Ports 80 and 443 open (for Caddy TLS)</li>
+    <li>Docker and docker-compose installed on the VPS</li>
+    <li>Latest code pulled: <code>git pull origin main</code></li>
+  </ul>
+  <h4>Deploy step by step</h4>
+  <ol>
+    <li><b>Create .env on the VPS:</b>
+      <pre>
+cp .env.prod.example .env
+# Edit .env with your values (at minimum):
+# POSTGRES_PASSWORD=<strong-password>
+# AOM_DOMAIN=aom.example.com
+# AOM_PUBLIC_ORIGIN=https://aom.example.com
+# AOM_SMTP_URL=smtp://user:pass@relay.example.com:587
+      </pre>
+    </li>
+    <li><b>Build and start Docker containers:</b>
+      <pre>
+docker compose -f docker-compose.prod.yml up -d --build
+# Migrations run automatically on boot (AOM_MIGRATE_ON_BOOT=true)
+      </pre>
+    </li>
+    <li><b>Create the first admin account:</b>
+      <pre>
+docker compose -f docker-compose.prod.yml exec app node dist/admin-create.mjs \
+  --email you@example.com \
+  --name "You" \
+  --password 'your-strong-password'
+      </pre>
+    </li>
+    <li><b>Test the deployment:</b>
+      <pre>
+curl https://aom.example.com/api/health
+# Returns: {"ok":true,"db":true}
+      </pre>
+    </li>
+  </ol>
+  <div class="callout ok"><b class="t">Deployment complete</b>
+    Open <code>https://aom.example.com</code> in a browser and sign in with the admin account. For local testing with an internal CA certificate, extract the root certificate and add it to your trusted CAs.</div>
+
+  <h3 id="s11-3"><span class="mk">TOCMARK_s11x3_</span>11.3 Configuration reference</h3>
+  <p>All server configuration is set via environment variables in <code>.env</code> (read on server startup). Defaults are suitable for development; production requires setting at least the domain and database password.</p>
+  <table class="compact">
+    <thead><tr><th>Variable</th><th>Default</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>AOM_PUBLIC_ORIGIN</code></td><td><code>http://localhost:5173</code></td><td>Full URL users open; determines CSRF origin, cookie Secure flag, invitation links</td></tr>
+      <tr><td><code>AOM_DOMAIN</code></td><td><code>localhost</code></td><td>Read by Caddy (compose), not by the server: a public domain gets a Let's Encrypt certificate; <code>localhost</code> or an IP uses Caddy's internal CA</td></tr>
+      <tr><td><code>AOM_HOST</code></td><td><code>127.0.0.1</code></td><td>Server bind address (use <code>0.0.0.0</code> in Docker)</td></tr>
+      <tr><td><code>AOM_PORT</code></td><td><code>4600</code></td><td>Server port (expose through Caddy, not directly)</td></tr>
+      <tr><td><code>DATABASE_URL</code></td><td><code>postgres://aom:aom@127.0.0.1:5433/aom</code></td><td>Postgres connection string; in Docker use <code>postgres://aom:$POSTGRES_PASSWORD@postgres:5432/aom</code></td></tr>
+      <tr><td><code>POSTGRES_PASSWORD</code></td><td>—</td><td>Database password (set this; used by postgres container and DATABASE_URL)</td></tr>
+      <tr><td><code>AOM_SMTP_URL</code></td><td><code>smtp://127.0.0.1:1025</code></td><td>SMTP relay URL for invitation emails</td></tr>
+      <tr><td><code>AOM_MAIL_FROM</code></td><td><code>Agent Org Manager &lt;noreply@aom.local&gt;</code></td><td>From address in emails</td></tr>
+      <tr><td><code>AOM_MIGRATE_ON_BOOT</code></td><td><code>true</code></td><td>Apply migrations on server start</td></tr>
+      <tr><td><code>AOM_SERVE_WEB</code></td><td><code>false</code></td><td>Serve built web app from server (enabled in <code>docker-compose.prod.yml</code>)</td></tr>
+      <tr><td><code>AOM_HTTP_PORT</code>, <code>AOM_HTTPS_PORT</code></td><td><code>80</code>, <code>443</code></td><td>Host ports Caddy publishes (compose)</td></tr>
+      <tr><td><code>LOG_LEVEL</code></td><td><code>info</code></td><td>Logging level: <code>debug</code>, <code>info</code>, <code>warn</code>, <code>error</code></td></tr>
+      <tr><td><code>AOM_RATE_LIMIT</code></td><td><code>true</code></td><td>Enable rate limiting on the sensitive routes (login, invitations, pairing); there is no global limit</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn"><b class="t">Never in production</b>
+    Do not set <code>AOM_TEST_CLOCK</code>, <code>AOM_ALLOW_LOCAL_REMOTES</code> or use <code>.env.example</code> in production. Always use <code>.env.prod.example</code> as your template and review all values before deploying.</div>
+
+  <h3 id="s11-4"><span class="mk">TOCMARK_s11x4_</span>11.4 Backups, upgrades and operations</h3>
+  <h4>Backup strategy</h4>
+  <p>Postgres stores the event log (immutable, append-only) and projections. Regular backups are critical. Use your VPS provider's snapshot tools or Docker for manual backups.</p>
+  <pre>
+# Manual backup (example)
+docker compose -f docker-compose.prod.yml exec postgres pg_dump -U aom aom > backup-$(date +%s).sql
+
+# Restore from backup
+docker compose -f docker-compose.prod.yml exec -T postgres psql -U aom aom < backup.sql
+  </pre>
+  <p>Set up automated daily snapshots with your VPS provider. Point-in-time recovery is out of scope for v1.</p>
+  <h4>Upgrades with minimal downtime</h4>
+  <ol>
+    <li>Ensure all runners are idle (no active shifts on the board)</li>
+    <li>Pull the latest code: <code>git pull origin main</code></li>
+    <li>Rebuild and restart: <code>docker compose -f docker-compose.prod.yml up -d --build</code></li>
+    <li>Migrations run on boot (typically &lt;1 second)</li>
+    <li>Test: <code>curl https://aom.example.com/api/health</code></li>
+  </ol>
+  <p>Total downtime is typically under 5 seconds (container rebuild + migration). Caddy proxies requests during rebuild.</p>
+  <h4>Health check and monitoring</h4>
+  <pre>
+curl https://aom.example.com/api/health
+# Returns: {"ok":true,"db":true}
+  </pre>
+  <p>Monitor container status with <code>docker compose -f docker-compose.prod.yml ps</code> and logs with <code>docker compose -f docker-compose.prod.yml logs -f app</code>. The app container has a Docker health check on this endpoint (Caddy starts only when the app is healthy); Docker does not restart a container just for being unhealthy, but <code>restart: unless-stopped</code> restarts it if it exits.</p>
+  <h4>Troubleshooting</h4>
+  <table class="compact">
+    <thead><tr><th>Issue</th><th>Check / Fix</th></tr></thead>
+    <tbody>
+      <tr><td>Caddy certificate fails (Let's Encrypt)</td><td>Verify DNS points to the VPS IP; check Caddy logs: <code>docker compose -f docker-compose.prod.yml logs caddy</code>; for internal IP/hostname, set <code>AOM_DOMAIN=localhost</code></td></tr>
+      <tr><td>Migrations fail on boot</td><td>Check database connectivity: <code>docker compose -f docker-compose.prod.yml logs postgres</code>; verify <code>DATABASE_URL</code> and <code>POSTGRES_PASSWORD</code> match; check disk space</td></tr>
+      <tr><td>High error rates or slow responses</td><td>Check app logs: <code>docker compose -f docker-compose.prod.yml logs app | tail -100</code>; check database size: <code>docker compose -f docker-compose.prod.yml exec postgres du -sh /var/lib/postgresql/data</code></td></tr>
+      <tr><td>Runner disconnects frequently</td><td>Check server logs and runner connectivity; ensure firewall allows WebSocket on port 443; check runner config has the correct server URL</td></tr>
+    </tbody>
+  </table>
+
+</section>

@@ -1,0 +1,125 @@
+<section class="chapter" id="s8">
+  <h2><span class="mk">TOCMARK_s8_</span>8&nbsp;&nbsp;Organization designer</h2>
+
+  <h3 id="s8-1" style="margin-top:4px"><span class="mk">TOCMARK_s8x1_</span>8.1 Roles</h3>
+  <p><b>Organization &rarr; Roles</b> tab shows your organization's role catalogue: custom roles you have designed, and built-in roles that ship with the system. Every agent holds a role; a role defines which workflow stages its agents may claim, their tools and their default runtime and model. The page header reads "Roles, workflows and departments. Definitions are versioned and approved on the desk before they are available."</p>
+  <figure><img src="assets/org-roles.jpg"><figcaption>Organization Roles tab: custom roles Release manager (waiting for approval), Responder and Triager (active), and the ten built-in roles with Extend buttons (none on DevOps engineer); Reviewer and Tester carry the Extended badge (Pieter Demo)</figcaption></figure>
+  <h4>Custom roles</h4>
+  <p>Press <b>New custom role</b> to create one. Each custom role is a card with its name, key, department badge, purpose and one line per version: <code>v1</code>, a status badge, and the vault path once the definition has been written to the vault. Below it, <b>May claim</b> lists the stages the role may claim, as <code>workflow.stage</code>. A version has these statuses:</p>
+  <table>
+    <thead><tr><th style="width:22%">Status</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge b-paid">Active</span></td><td>Available for hiring agents and claiming stages.</td></tr>
+      <tr><td><span class="badge b-pend">Waiting for your approval</span></td><td>Submitted. It is on your desk as an item; the line has an <b>Open the desk</b> link.</td></tr>
+      <tr><td><span class="badge b-appr">Draft</span></td><td>Saved but not submitted. Buttons: <b>Edit</b>, <b>Submit for approval</b>, <b>Discard</b>.</td></tr>
+      <tr><td><span class="badge b-new">Replaced by a newer version</span></td><td>A newer version was approved; this one stays in the list for reference.</td></tr>
+      <tr><td><span class="badge b-rej">Rejected</span></td><td>You rejected it on the desk. Buttons: <b>New version</b> (starts from it) and <b>Discard</b>.</td></tr>
+    </tbody>
+  </table>
+  <h4>Built-in roles</h4>
+  <p>Ten built-in roles ship with the system and can never be removed: Business analyst, Builder, Fact checker, Curator, DevOps engineer, Researcher, Reviewer, Scout, Tester and Technical writer. Each card shows a <b>Built in</b> badge, its department and its version. The core rules of a built-in role (for example test ownership and review gates) cannot be changed, but you can extend the role with extra instructions, skills and standing orders. An extended role shows an <span class="badge b-appr">Extended</span> badge with the number of additions and the version they were written against.</p>
+  <p>Every built-in role except the DevOps engineer has an <b>Extend</b> button. Only the organization owner sees <b>New custom role</b> and <b>Extend</b>.</p>
+</section>
+
+<section>
+  <h3 id="s8-2"><span class="mk">TOCMARK_s8x2_</span>8.2 Extending built-in roles</h3>
+  <p>Click <b>Extend</b> on a built-in role to open the dialog <b>Extend [role]</b>. It says that your additions are added to the role's instructions for every agent in this role, in every project of your organization. At the top it lists the role's core rules, which cannot be changed.</p>
+  <figure class="w70"><img src="assets/dlg-extend.jpg"><figcaption>Extend Reviewer dialog: the three core rules, Extra instructions, Extra skills and Standing orders, with Cancel and Save extensions (Pieter Demo)</figcaption></figure>
+  <h4>Extension fields</h4>
+  <ul>
+    <li><b>Extra instructions:</b> free text added to the role's instructions. The demo has "Check that every new screen has a keyboard path."</li>
+    <li><b>Extra skills (comma separated):</b> for example <code>accessibility</code>.</li>
+    <li><b>Standing orders (one per line):</b> for example "Reject changes that add a dependency without a card".</li>
+  </ul>
+  <p><b>Save extensions</b> saves them straight away; an extension does not go through the desk. At least one of the three fields must be filled. After saving, the role card shows the <span class="badge b-appr">Extended</span> badge.</p>
+  <h4>New defaults for built-in roles</h4>
+  <p>The shipped definition of a built-in role can get a new version. If you extended that role against an older version, the <b>HR board</b> shows a section <b>New defaults for built-in roles</b>, for example "Tester has a new default (version 2); your extensions were written for version 1." with the number of agents still on the old version. <b>Reset to default</b> opens a dialog that lists what will be removed (your extra instructions, skills and standing orders). Confirm with <b>Reset and drop extensions</b>: the extensions are dropped, the core rules do not change, and the agents of that role move to the new version.</p>
+</section>
+
+<section>
+  <h3 id="s8-3"><span class="mk">TOCMARK_s8x3_</span>8.3 Workflows and the graph</h3>
+  <p><b>Organization &rarr; Workflows</b> tab shows one card per workflow (custom and built-in) and the button <b>New custom workflow</b>. Four built-in workflows ship with the system: <b>code</b>, <b>code-bugfix</b>, <b>feed</b> and <b>research</b>. Each version of a workflow is one line with its status and, when cards use it, how many cards are in flight on that version. Press <b>View</b> on a line to show its graph and stage list, and <b>Hide</b> to close them. Custom workflows also have <b>New version</b>, and drafts have <b>Edit</b>, <b>Submit for approval</b> and <b>Discard</b>.</p>
+  <figure><img src="assets/org-workflows.jpg"><figcaption>Workflows tab: Code (15 cards in flight), Code bugfix, Feed, Research and the custom workflow Support triage, opened to show its graph and stage list (Pieter Demo)</figcaption></figure>
+  <h4>The workflow graph</h4>
+  <p>The graph shows stages (boxes) and outcomes (arrows) that move a card from one stage to the next. The second line in a box is the claiming role for an agent stage, or the stage kind. Yellow boxes are manual stages (moved by a person or the BA), blue boxes are agent stages and green boxes are terminal stages. Red dashed arrows are failure routes. A terminal stage has no outgoing arrows. In the figure, Support triage runs Intake (manual), Triage (role triager), Resolve (role responder) and Done; the red dashed arrow leads from Resolve back to Triage.</p>
+  <h4>Stage list</h4>
+  <p>Below the graph, a numbered list gives every stage: its name, the claiming role in brackets (with <code>senior</code> if only senior agents may claim it) or its kind, the fields needed to enter it, and its done criteria, for example "Resolve (responder): The customer has an answer."</p>
+  <p><b>Cards in flight stay on their workflow version:</b> every card is tied to the workflow version it was created on, and the version line shows how many cards are in flight on it.</p>
+</section>
+
+<section>
+  <h3 id="s8-4"><span class="mk">TOCMARK_s8x4_</span>8.4 The editor and validation</h3>
+  <p>Click <b>New custom workflow</b> (or <b>New version</b> / <b>Edit</b> on a custom workflow) to open the editor above the list. Only the organization owner can do this. The editor checks your definition while you type and shows the result under <b>Validation</b>.</p>
+  <figure class="w70"><img src="assets/org-workflow-editor.jpg"><figcaption>Workflow editor with a deliberately broken draft (key bad-flow): the Work and Stage 4 rows are marked red and the Validation list shows errors and warnings (Pieter Demo)</figcaption></figure>
+  <h4>Editor fields</h4>
+  <ul>
+    <li><b>Key</b>, <b>Name</b> and <b>Department</b> (a list of departments, or None). The key is lowercase letters, digits, <code>-</code> and <code>_</code>, and starts with a letter. It cannot be a built-in key (<code>code</code>, <code>code-bugfix</code>, <code>feed</code>, <code>research</code>).</li>
+    <li><b>Card types:</b> checkboxes <code>feature</code>, <code>bug</code>, <code>support</code>, <code>refactor</code>, <code>docs</code>. At least one is required.</li>
+    <li><b>Card fields:</b> <b>Add field</b> adds extra fields to the card (key, label, type, required).</li>
+    <li><b>Stages:</b> a table with the columns Stage (name; the id is made from it), Kind (<code>agent</code>, <code>manual (first stage)</code> or <code>terminal</code>), Claimed by (a role, and a <b>senior only</b> checkbox), Needs to enter (field keys), Done when, and <b>Remove</b>. <b>Add stage</b> adds a row.</li>
+    <li><b>Outcomes and failure routes:</b> for every stage, rows with an outcome id, <code>success</code> or <code>failure</code>, <b>goes to</b> (a stage), a <b>counts as rework</b> checkbox and <b>Remove</b>. <b>Add outcome</b> adds a row.</li>
+    <li><b>Graph preview</b> of what you have so far. A stage with an error has a red border; a stage nothing leads to has a dashed red border (Stage 4 in the figure).</li>
+  </ul>
+  <div class="callout rule"><b class="t">Validation rules (from packages/shared/src/workflows/validate.ts and custom.ts)</b>
+    <ol style="margin:0">
+      <li><b>Shape and ids:</b> the definition has at least two stages and every field has the right type; stage ids are unique; outcome ids are unique within a stage; the first stage exists.</li>
+      <li><b>Terminals and outcomes:</b> there is at least one terminal stage; a terminal stage has no outcomes; every other stage has at least one outcome and at least one of them is a success outcome.</li>
+      <li><b>Roles:</b> an agent stage names a role (<code>claimRole</code>); the role exists in the catalogue; the role may claim that stage (it is in the role's May claim list); a senior-only stage needs a role that has a senior level.</li>
+      <li><b>Targets:</b> every outcome goes to a stage that exists.</li>
+      <li><b>Reachable:</b> every stage can be reached from the first stage.</li>
+      <li><b>Can finish:</b> every stage can reach a terminal stage, and so can the target of every failure outcome.</li>
+      <li><b>Fields:</b> every field a stage needs to enter is a known card field.</li>
+      <li><b>Effects:</b> an outcome that spawns a bug child must go to the same stage; a finalize outcome must go to a terminal stage; resume-parent needs the card type <code>bug</code>.</li>
+      <li><b>Conditions:</b> a stage skipped by a <code>when</code> condition must test a yes/no field.</li>
+    </ol>
+  </div>
+  <p>Rule 7 applies to the Needs to enter column. Rules 8 and 9 only matter for effects and <code>when</code> conditions; the editor has no controls for them, and a custom outcome may not have an effect. A custom workflow also has to meet these extra rules:</p>
+  <ul>
+    <li>The key matches <code>^[a-z][a-z0-9_-]*$</code> and is not a built-in key; it uses the field set <code>custom</code>; the card types are limited to those in the editor (not <code>research</code>, <code>feed</code> or <code>regression</code>); the department exists.</li>
+    <li>Only the first stage may be manual.</li>
+    <li>The DevOps engineer cannot claim a stage.</li>
+    <li>Outcomes move cards with a plain stage move: no structured data and no effects. The card-specified event belongs to the first stage only.</li>
+  </ul>
+  <p>Two warnings do not block anything: a stage without done criteria, and more than 12 stages. In the figure, "stage 'work' has no doneCriteria" is a warning.</p>
+  <h4>Save draft vs. Save and submit for approval</h4>
+  <ul>
+    <li><b>Save draft:</b> saves the definition as a draft, even with errors; the errors stay listed. You can edit it again later.</li>
+    <li><b>Save and submit for approval:</b> saves, and if there are no errors, puts it on the desk. It becomes <span class="badge b-paid">Active</span> only after you approve it there. With errors it stays a draft.</li>
+    <li><b>Close</b> closes the editor.</li>
+  </ul>
+  <p>The editor for roles works the same way. <b>New custom role</b> opens the form in the figure below: Key, Name, Department, Purpose, Instructions, Core rules (one per line), Seniority levels (junior, senior), Default runtime, Default model, Effort, Tools (read, edit, shell, web, may commit), Denied shell patterns, Skills and May claim (<code>workflow.stage</code>, comma separated; <code>*</code> for any stage). The error in the figure, "key: Invalid string: must match pattern", appears because the key is still empty.</p>
+  <figure class="w70"><img src="assets/org-role-editor.jpg"><figcaption>New custom role form with an empty key and the validation error; the custom and built-in roles are listed below it (Pieter Demo)</figcaption></figure>
+</section>
+
+<section>
+  <h3 id="s8-5"><span class="mk">TOCMARK_s8x5_</span>8.5 Departments</h3>
+  <p><b>Organization &rarr; Departments</b> tab lists departments. A department groups the roles and workflows of one function. Each card shows the department name, a <b>Built in</b> badge for the four that ship with the system (delivery, operations, research, feeds), and the keys of its roles and workflows. Below the explanation is a <b>New department</b> field with a <b>Create department</b> button (owner only). A role or workflow chooses its department in its editor. A project has no department of its own: it shows the department of its workflow. The <b>Projects</b> page and the <b>HR board</b> each have a Department filter.</p>
+  <figure class="w70"><img src="assets/org-departments.jpg"><figcaption>Departments tab: delivery (roles ba, builder, reviewer, tester, writer; workflows code, code-bugfix), operations, research and feeds (all built in), and the custom department support (roles responder, triager; workflow support) (Pieter Demo)</figcaption></figure>
+</section>
+
+<section>
+  <h3 id="s8-6"><span class="mk">TOCMARK_s8x6_</span>8.6 Designing with the BA and approving on the desk</h3>
+  <p><b>Organization &rarr; Design with the BA</b> tab is where the business analyst (BA) drafts roles and workflows with you. Only the organization owner can use it. The tab says: "Describe the role or workflow you need. The BA drafts it, asks what is unclear, validates it and puts it on your desk; it is available only after you approve it." If you have no business analyst that is not tied to a project, the tab asks you to hire one on the HR board first. Otherwise choose the <b>Business analyst</b> (if you have several) and press <b>Start a design chat</b>. The conversation has a <b>Message</b> field and a <b>Send</b> button.</p>
+  <figure class="w70"><img src="assets/org-design-chat.jpg"><figcaption>Design with the BA chat: Pieter Demo wrote "design a support pipeline for me" and Olga (BA) asks which stages the workflow should have, which role claims each stage, what must be known before a stage starts, and where a failure goes (Pieter Demo)</figcaption></figure>
+  <p>The design process:</p>
+  <ol>
+    <li>You describe what you need in the chat.</li>
+    <li>The BA asks what is unclear.</li>
+    <li>The BA drafts a role, a workflow or a department with its <code>aom org</code> commands (section 10.7), validates the draft with the same rules as the editor, and fixes the errors it gets back.</li>
+    <li>The BA submits the draft. Nothing is approved in the chat: the draft goes to your desk.</li>
+    <li>On the desk the item is titled <b>Approve role "[name]" (v1)</b> or <b>Approve workflow "[name]" (v1)</b>. It has the badges <b>Role or workflow</b> and <b>Non-blocking</b>, a short description, a link <b>Open the Organization page</b> ("to see the stage table, graph and validation. Nothing is available until you approve.") and the buttons <b>Approve</b>, <b>Reject</b> and <b>Dismiss</b>.</li>
+  </ol>
+  <figure class="w70"><img src="assets/desk-definition.jpg"><figcaption>Desk item Approve role "Release manager" (v1): seniority senior, model mock/mock, tools read, may claim support.resolve, with Approve, Reject and Dismiss (Pieter Demo)</figcaption></figure>
+  <p><b>Roles must be approved before workflows that use them.</b> When you approve, the definition is validated again against the catalogue as it is then. A workflow that names a role that is not approved yet is refused with the hint "approve the role first". An approved definition is <span class="badge b-paid">Active</span> and can be used to hire agents and to create cards. A rejected one stays in the list as <span class="badge b-rej">Rejected</span> until you discard it.</p>
+  <h4>Where definitions are stored</h4>
+  <p>The version history lives in the site. When you approve a role or workflow, its definition is also written to your vault as a YAML file: <code>organization/roles/&lt;key&gt;/v&lt;N&gt;.yaml</code> or <code>organization/workflows/&lt;key&gt;/v&lt;N&gt;.yaml</code> (the path is shown on the version line, see the figure in 8.1). This happens only when you have a vault that is not tied to a project (see 7.3). Departments are kept in the site, not in the vault.</p>
+</section>
+
+<section>
+  <h3 id="s8-7"><span class="mk">TOCMARK_s8x7_</span>8.7 For additional managers on a shared project</h3>
+  <p>If you are an additional manager (not the owner) on a shared project, the Organization page shows a note: <b>"You are an additional manager here: this is the owner's catalogue. Their roles, workflows and standing orders apply to the shared project's cards, and only the owner can change them."</b></p>
+  <p>You can read the owner's catalogue but not change it: no <b>New custom role</b>, <b>Extend</b>, <b>New custom workflow</b> or <b>Create department</b>, and the Design with the BA tab says only the owner designs. A list <b>Organization</b> at the top switches between "My organization" and "[KEY]: the owner's organization" for every project shared with you. You see only the owner's active definitions, not their drafts.</p>
+  <figure class="w70"><img src="assets/org-maya.jpg"><figcaption>Organization page as Maya (additional manager): the Organization list set to "WEB: the owner's organization", the read-only note, and the owner's active custom roles Responder and Triager (Maya Demo)</figcaption></figure>
+</section>
+<!-- NOTES: Live validation happens in the editor as you type. Drafts with errors can be saved but not submitted. Extending a built-in role needs no desk approval; the HR board banner appears only when the shipped default is newer than the version the extension was written against. The Roles page has no banner. Validation rule numbers follow docs/ARCHITECTURE.md section 6.6. The BA drafts with JSON files (aom org role draft --file), the vault copies are YAML. -->
+</section>

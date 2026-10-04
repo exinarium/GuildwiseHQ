@@ -8,3 +8,4 @@ playwright-report/
 .env.local
 release/
 .claude/worktrees/
+docs/guide/raw/

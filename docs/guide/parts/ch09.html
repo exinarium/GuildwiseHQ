@@ -1,0 +1,70 @@
+<section class="chapter" id="s9">
+  <h2><span class="mk">TOCMARK_s9_</span>9&nbsp;&nbsp;Administration and on a phone</h2>
+
+  <h3 id="s9-1" style="margin-top:4px"><span class="mk">TOCMARK_s9x1_</span>9.1 The Admin page</h3>
+  <p>The <b>Admin</b> item in the top menu (shown only to administrators) manages users, invitations and workstations for the whole system. Someone who is not an administrator and opens the page is sent back to the home page. Being an administrator gives no access to other people's projects, cards, agents or desk.</p>
+  <figure><img src="assets/admin.jpg"><figcaption>Admin page: Invite a user, Invitations (lee@demo.local revoked, sam@demo.local pending with Resend and Revoke, maya and pieter accepted), Users (Admin Demo admin, Pieter Demo and Maya Demo members) and All workstations (Pieter's desktop (WSL2), Build mini-PC with the amber sandbox warning, Maya's laptop offline) (Admin Demo)</figcaption></figure>
+  <h4>Invite a user</h4>
+  <p>Enter an email address, choose a role (<b>member</b> or <b>admin</b>) and press <b>Send invitation</b>. The invitee receives an email with an accept link. On the accept page they enter a display name and a password (12 to 256 characters) and then sign in with their email. If a user with that email exists, or a pending invitation for it exists, the server refuses the new invitation. If the email cannot be sent, the invitation still exists and you can use <b>Resend</b> later.</p>
+  <h4>Invitations list</h4>
+  <p>Every invitation is listed with the email, a role badge, a status badge and its expiry time:</p>
+  <table class="compact">
+    <thead><tr><th style="width:20%">Status</th><th>Meaning</th><th>Actions</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge b-pend">pending</span></td><td>Invitation sent, not yet accepted</td><td><b>Resend</b> (sends a new link and sets a new expiry), <b>Revoke</b> (cancels it)</td></tr>
+      <tr><td><span class="badge b-paid">accepted</span></td><td>The invitee accepted and has an account</td><td>None</td></tr>
+      <tr><td><span class="badge b-new">revoked</span></td><td>The invitation was cancelled</td><td>None</td></tr>
+    </tbody>
+  </table>
+  <p>An invitation expires 7 days after it was sent (or resent). The demo's accepted rows also show an expiry time.</p>
+  <h4>Users list</h4>
+  <p>Every user is listed with the display name and email, and a <span class="badge b-rej">deactivated</span> badge if the account is deactivated. For each user you can:</p>
+  <ul>
+    <li>Change the role with the dropdown (<code>admin</code> or <code>member</code>). It is disabled for yourself. The last active administrator cannot be demoted.</li>
+    <li>Click <b>Deactivate</b> on an active user, or <b>Reactivate</b> on a deactivated one. The button is disabled for yourself. The last active administrator cannot be deactivated.</li>
+  </ul>
+  <h4>All workstations</h4>
+  <p>Every workstation paired by any user is listed here with the platform, hostname, runner version and the owner's email, the connection status, runtimes, repositories and last-seen time, and an <b>Unlink</b> button. Administrators see this list. The DevOps panel is not shown here; it is on the Workstations page of the workstation's owner, who sees only their own workstations (and can unlink them too).</p>
+  <h4>Creating the first administrator</h4>
+  <p>When you first deploy the system there are no users. Create the first administrator on the server with:</p>
+  <div class="callout"><code>pnpm --filter @aom/server admin:create --email you@example.com --name "You"</code></div>
+  <p>The command asks for anything you leave out: email, display name and a password (12 to 256 characters; it can also be given with <code>--password</code> or the <code>AOM_ADMIN_PASSWORD</code> variable). From then on that administrator invites everyone else on the Admin page.</p>
+</section>
+
+<section>
+  <h3 id="s9-2"><span class="mk">TOCMARK_s9x2_</span>9.2 Deactivating and unlinking</h3>
+  <h4>Deactivation</h4>
+  <p>On the Admin page, click <b>Deactivate</b> next to a user. The server refuses it for yourself and for the last active administrator. Otherwise it does this, in order:</p>
+  <ol>
+    <li>For every project where the user is an additional manager (active or invited), it removes them as in section 7.5: their agents' claims are released, open cards homed on their workstations forget that home, their agents move to the project owner with status <code>needs_rehome</code>, and the cards they own become the owner's.</li>
+    <li>Every active workstation of the user is unlinked (see below).</li>
+    <li>The account is marked <span class="badge b-rej">deactivated</span>, and all the user's remaining agents (except the DevOps engineers) get the status <code>needs_rehome</code> and lose their workstation.</li>
+    <li>The user's sign-in sessions are deleted, so they are signed out and cannot sign in.</li>
+  </ol>
+  <p>Projects the user owns are not changed. Click <b>Reactivate</b> on the Admin page to make the account active again. Nothing else comes back by itself: the agents stay in <code>needs_rehome</code> until they are re-homed onto a workstation, and the workstations stay unlinked and must be paired again.</p>
+  <h4>Unlinking a workstation</h4>
+  <p>The owner of a workstation (Workstations page) or an administrator (Admin page) clicks <b>Unlink</b>. A dialog <b>Unlink [name]?</b> says that agents on this workstation will be released and its runner token stops working; <b>Confirm unlink</b> does it. The server then marks the workstation unlinked, releases the card claims held on it (each card gets the system message "Claim released: the workstation was unlinked."), ends the shifts still open on it as lost, and fails the commands still queued for it. An unlinked workstation no longer appears in any list. Workstations are unlinked automatically when a user is deactivated.</p>
+</section>
+
+<section>
+  <h3 id="s9-3"><span class="mk">TOCMARK_s9x3_</span>9.3 On a phone (390 px)</h3>
+  <p>The app also works in a phone browser. The figures below are 390 px wide. The top menu is the same row of items as on the desktop (Board, Desk with its count, Ledger, New card, ...) and scrolls sideways; on the phone only the first items are visible and the rest are reached by swiping. Wide layouts become one column.</p>
+  <div class="phones">
+    <figure><img src="assets/m-board.jpg"><figcaption>Board of WEB on a phone: the Spec column (WEB-42, WEB-43) and the start of To do, with the department and project filters, Run regression and New card (390 px, Pieter Demo)</figcaption></figure>
+    <figure><img src="assets/m-desk.jpg"><figcaption>Decision desk on a phone: 12 open, 3 blocking, with Grace's blocking question for WEB-21 about guest data retention, its options and Answer and Dismiss (390 px, Pieter Demo)</figcaption></figure>
+    <figure><img src="assets/m-card.jpg"><figcaption>Card WEB-21 on a phone: blocked banner, Move, Re-home and Cancel card buttons, and the Details panel (390 px, Pieter Demo)</figcaption></figure>
+  </div>
+  <div class="phones">
+    <figure><img src="assets/m-hr.jpg"><figcaption>HR board on a phone: the New defaults for built-in roles section (Tester) and the first recommendations (390 px, Pieter Demo)</figcaption></figure>
+    <figure><img src="assets/m-new-card.jpg"><figcaption>New card form for WEB on a phone (390 px, Pieter Demo)</figcaption></figure>
+    <figure><img src="assets/m-workstations.jpg"><figcaption>Workstations page on a phone: Pieter's desktop (WSL2) with its DevOps engineer panel (390 px, Pieter Demo)</figcaption></figure>
+  </div>
+  <div class="phones">
+    <figure><img src="assets/m-ledger.jpg"><figcaption>Ledger on a phone: search, scope and project filters and the first entries (390 px, Pieter Demo)</figcaption></figure>
+    <figure><img src="assets/m-metrics.jpg"><figcaption>Metrics on a phone: Throughput, Time blocked on you, Bounce rate per builder and more (390 px, Pieter Demo)</figcaption></figure>
+    <figure><img src="assets/m-chat.jpg"><figcaption>Chat with Olga as a page on a phone (Connected, Back to the desk): the replies start with [mock] because the demo uses the mock runtime (390 px, Pieter Demo)</figcaption></figure>
+  </div>
+  <p>A conversation also exists as a page of its own, with a <b>Back to the desk</b> link at the top; the last figure shows that page. The chat drawer on the desk fills the whole width on a phone.</p>
+</section>
+<!-- NOTES: Admin is a top-menu item for administrators only. Deactivation: member removals, unlink workstations, mark deactivated + agents needs_rehome, delete sessions; owned projects are not transferred. The accept page asks for display name and password; there is no one-time code in the invitation. -->
+</section>

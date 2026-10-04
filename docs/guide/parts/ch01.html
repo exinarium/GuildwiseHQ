@@ -1,0 +1,51 @@
+<!-- ============================ 1 AT A GLANCE ============================ -->
+<section class="chapter" id="s1">
+  <h2><span class="mk">TOCMARK_s1_</span>1&nbsp;&nbsp;At a glance</h2>
+  <p class="lead">Agent Org Manager is a self-hosted website for running an organization of AI coding agents. You create projects and cards. Builder, reviewer, tester and other agents claim cards one at a time, work in git worktrees on your own workstations through a small runner program, and hand the work on through a board. Everything that needs a human reaches one place, the decision desk.</p>
+  <div class="steps">
+    <div><b>1</b>Write a card: context, requirements, acceptance criteria, test plan</div>
+    <div><b>2</b>A builder claims it exclusively and builds on a branch</div>
+    <div><b>3</b>A senior reviewer approves or bounces it with a score</div>
+    <div><b>4</b>A tester runs the plan and records evidence</div>
+    <div><b>5</b>The BA finalizes: pull request, push or merge</div>
+    <div><b>6</b>Anything unclear lands on your decision desk</div>
+  </div>
+
+  <h3>What you get and how it works</h3>
+  <table class="compact">
+    <thead><tr><th style="width:22%">Topic</th><th style="width:33%">What you get</th><th>How it works</th></tr></thead>
+    <tbody>
+      <tr><td>The board</td><td>One board per project: who has what, how old it is, what is blocked</td><td>Columns come from the workflow. A card is claimed by one agent at a time; nobody waits on another agent</td></tr>
+      <tr><td>Decisions</td><td>A single desk for questions, approvals, alerts and ratings, most urgent first</td><td>Questions pass a senior peer and the BA first. Your answer goes into the ledger and into every later shift</td></tr>
+      <tr><td>Memory</td><td>A ledger of decisions, requirements and standing orders</td><td>Searchable, shared with agents; standing orders are loaded into every agent's next shift</td></tr>
+      <tr><td>Quality</td><td>Review with scores, a tester with evidence, bug cards, a full suite after a merge</td><td>Small changes need one review, large ones two senior reviews and your approval to merge</td></tr>
+      <tr><td>External systems</td><td>Intake from Jira or GitHub, updates back to the ticket</td><td>The BA reads tickets on your workstation; nothing is posted before you approve the text</td></tr>
+      <tr><td>Research and feeds</td><td>Fact-checked notes with citations; scheduled digests you rate</td><td>Notes are published into your vault; ratings become explicit rules in <code>taste.md</code></td></tr>
+      <tr><td>The team</td><td>A HR board with stats against the team average and one-click recommendations</td><td>Rule-based advice with the evidence behind it; applying one is an ordinary, logged change</td></tr>
+      <tr><td>Your own design</td><td>Custom roles, workflows and departments</td><td>Validated by the server, approved by you on the desk before they exist</td></tr>
+      <tr><td>Safety</td><td>Agents run in an OS sandbox on your machines</td><td>Linux and WSL2 use bubblewrap, macOS uses Seatbelt; an unsandboxed workstation is a visible, confirmed opt-in</td></tr>
+      <tr><td>Where it runs</td><td>One server (Docker Compose) and a runner on each workstation</td><td>The runner connects outbound; code, credentials and vault content never leave your machines</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Status on 4 October 2026</h3>
+  <div class="kpis">
+    <div><b>277 / 277</b><span>shared contract tests</span></div>
+    <div><b>393 / 393</b><span>server unit and integration tests (real Postgres)</span></div>
+    <div><b>104 / 104</b><span>web tests</span></div>
+    <div><b>288 passed, 1 skipped</b><span>runner tests</span></div>
+    <div><b>102 / 102</b><span>Playwright end-to-end tests (real UI, server, runner)</span></div>
+    <div><b>PASSED</b><span>real Claude Code smoke run in the sandbox</span></div>
+  </div>
+  <p>All ten milestones of the plan are built and tested. An independent security review found issues from high to low severity; all were fixed and re-tested (chapter 12). A real Claude Code run in the sandbox found four more problems, now fixed. Not yet verified with a real Claude: macOS and native Windows (chapter 13).</p>
+
+  <div class="callout todo"><b class="t">What you need to do next (full list in chapter 14)</b>
+    <ol style="margin:0">
+      <li>Read chapters 3 to 9, or sign in to the demo and click through the screens.</li>
+      <li>Deploy the server to a VPS with Docker Compose, set <code>AOM_PUBLIC_ORIGIN</code> and create your admin with <code>admin:create</code> (chapter 11).</li>
+      <li>Pair your WSL2 workstation, log Claude in for the runner, install <code>bubblewrap</code> and <code>socat</code>, and set <code>toolchainPaths</code> (chapter 10).</li>
+      <li>Run one real shift on a small repository and watch it on the card.</li>
+      <li>Then hire your first team, feed work through intake and look at the HR board after a week.</li>
+    </ol>
+  </div>
+</section>

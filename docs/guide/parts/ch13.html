@@ -1,0 +1,71 @@
+<section class="chapter" id="s13">
+  <h2><span class="mk">TOCMARK_s13_</span>13&nbsp;&nbsp;Decisions taken, known limitations</h2>
+
+  <h3 id="s13-1" style="margin-top:4px"><span class="mk">TOCMARK_s13x1_</span>13.1 Decisions that shape the product</h3>
+  <p>This table lists the most important architectural decisions from <code>docs/ARCHITECTURE.md</code> section 24 ("Resolved ambiguities and defaults"), which lists 22 decisions; all are shown here with the numbers used there.</p>
+  <table class="compact">
+    <thead><tr><th style="width:8%">#</th><th>Decision</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>One organization per user; agent names are unique per organization forever (including retired agents).</td></tr>
+      <tr><td>2</td><td>Card owner = the user who created or imported the card.</td></tr>
+      <tr><td>3</td><td>Rework and Blocked are not stages. Rework is the <code>build</code> stage with <code>rework_round > 0</code> (or a bug card); Blocked is a status overlay; board columns are derived.</td></tr>
+      <tr><td>4</td><td>Test failure before finalize creates a bug child card on the <code>code-bugfix</code> workflow that shares the parent's worktree and branch and goes to the original builder first; the parent waits in Test until the child passes review, then re-enters the Test queue.</td></tr>
+      <tr><td>5</td><td>Post-finalize failures and regression bugs create standalone bug cards in Spec for the BA (M4) and never block merges.</td></tr>
+      <tr><td>6</td><td>Dependencies gate the first build claim until every dependency is done (finalized); dependent cards still branch from the working branch. Branching from a dependency's branch is out of scope for v1.</td></tr>
+      <tr><td>7</td><td>Card pinning to a workstation: after the first claim creates the worktree, all later stages run on that workstation. Cards do not move between workstations; the manager can re-home a card, which restarts its current stage from the base branch.</td></tr>
+      <tr><td>8</td><td>Offline timeout is implemented as a 1-hour lease refreshed by 15 s heartbeats.</td></tr>
+      <tr><td>9</td><td>Large-tier review = two approvals from two distinct senior reviewers, sequentially.</td></tr>
+      <tr><td>10</td><td>Instructions are written to the agent's own <code>CLAUDE_CONFIG_DIR/CLAUDE.md</code>, not the worktree's <code>CLAUDE.md</code> (which belongs to the repo and must not be modified or committed).</td></tr>
+      <tr><td>11</td><td>Agent reporting uses the <code>aom</code> CLI over a localhost IPC with a per-shift token; fenced <code>aom-report</code> JSON in the final message is a fallback.</td></tr>
+      <tr><td>12</td><td>Provider credentials stay in the runner's local config (<code>CLAUDE_CODE_OAUTH_TOKEN</code> / <code>ANTHROPIC_API_KEY</code>) or are linked from the user's default Claude config; never sent to the site.</td></tr>
+      <tr><td>13</td><td>Vault sync, rebases, worktree management and completion actions are deterministic runner code; LLM DevOps shifts handle only ad-hoc requests.</td></tr>
+      <tr><td>14</td><td>Decision files and taste rules reach the vault through <code>vault.write</code> runner commands, since the site holds no vault content.</td></tr>
+      <tr><td>15</td><td>Escalation chain (M7 replaced the M2 default of going straight to the desk): a question goes to the card's previous holder or a senior agent of the asker's role (an online agent only), then to the BA, then to the manager's desk. A question nobody takes within 10 minutes moves on by itself; without a peer or BA it goes straight to the desk.</td></tr>
+      <tr><td>16</td><td>DevOps engineer is auto-hired per (user, workstation) at pairing (it cannot be fired, only reset: <code>docs/SPEC.md</code>, Operating model).</td></tr>
+      <tr><td>17</td><td>Project sharing requires the invitee to accept (pending until then).</td></tr>
+      <tr><td>18</td><td>Scheduled overflow is limited to one extra shift per organization at a time.</td></tr>
+      <tr><td>19</td><td>Research and feed roles (researcher, checker, scout, curator) ship as built-in roles.</td></tr>
+      <tr><td>20</td><td>Operational, non-event state: auth sessions, heartbeats and lease refresh, connection flags, shift progress tails, runner inbox and command queue.</td></tr>
+      <tr><td>21</td><td>Risk tier is computed by the runner at build handoff: ≥ 200 changed lines, any architectural glob, or refactor ⇒ large.</td></tr>
+      <tr><td>22</td><td>Finalize before the BA exists (M4–M6): the manager triggers it from the card. From M7 the BA claims the Finalize stage and reports <code>aom finalize --action ...</code>; the runner executes the completion action (pr, push_branch or merge; large merges wait for desk approval), and the manager's Finalize button remains as an override.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="s13-2"><span class="mk">TOCMARK_s13x2_</span>13.2 Known limitations</h3>
+  <table>
+    <thead><tr><th style="width:28%">Limitation</th><th style="width:32%">Effect</th><th>Workaround</th></tr></thead>
+    <tbody>
+      <tr><td>Single server instance for v1</td><td>No horizontal scaling; one VPS instance only.</td><td>Size the VPS for it; v1 has no clustering. Event store appends use a global lock (see <code>docs/DEPLOY.md</code>).</td></tr>
+      <tr><td>Point-in-time recovery not built</td><td>Database backups are snapshots, not transaction logs.</td><td>Set up automated VPS snapshots (daily). Restore from the most recent backup if needed.</td></tr>
+      <tr><td>No agent-to-agent blocking (intentional)</td><td>Agents never wait on another; work always flows forward or is explicitly blocked by a manager question.</td><td>By design: reduces queuing and communicates blockers to the manager explicitly.</td></tr>
+      <tr><td>Agents run only on user workstations</td><td>Agents cannot run on the server or on shared CI infrastructure (v1 scoping).</td><td>Pair a dedicated low-power machine as a workstation if you need always-on agents.</td></tr>
+      <tr><td>No cost tracking per agent or project</td><td>No token accounting or cost forecasting (v1 scope).</td><td>Use the HR board and metrics for token counts per agent; check cost with your provider.</td></tr>
+      <tr><td>Vault URLs may not carry credentials</td><td>A URL with a password or token is refused when you register or edit a vault</td><td>Use SSH keys or a git credential helper on the workstation</td></tr>
+      <tr><td>No native Windows sandbox</td><td>Windows requires WSL2; unsandboxed native Windows is an explicit opt-in only.</td><td>Use WSL2 (recommended); see docs/RUNNER.md for setup.</td></tr>
+      <tr><td>No agent pool or autoscaling</td><td>You must hire agents manually and manage capacity.</td><td>The HR board recommends hiring, and a desk alert fires when testers are busy while E2E work waits.</td></tr>
+      <tr><td>A resumed shift re-runs the agent from the start</td><td>After a runner restart within the 1-hour lease the shift keeps its id and worktree, but the agent process is restarted, not re-attached (Claude starts a fresh run on the card branch).</td><td>Expect repeated work after a runner crash; keep the runner under systemd/launchd so restarts are quick.</td></tr>
+      <tr><td>Jira resolution posts a comment only</td><td>A resolution update is posted as a comment; the ticket is not transitioned (transitions are workflow specific).</td><td>Move the ticket yourself after approving the update.</td></tr>
+      <tr><td>Definition files are not published retroactively</td><td>A definition file is written to the vault when a role or workflow version is approved (without a vault only the site copy exists); a vault added later does not receive earlier approved definitions.</td><td>Copy the YAML files into the vault by hand, or approve new versions after the vault exists.</td></tr>
+      <tr><td>A manually finalized card gets no BA-drafted ticket update</td><td>The BA drafts the outbound update in its Finalize shift; if you finalize the card yourself that shift never runs.</td><td>Write the outbound update yourself from the card (the manager can write a draft).</td></tr>
+      <tr><td>No model advice for other models</td><td>The HR board recommends model changes only along the ladder haiku, sonnet, opus; models outside it get no advice.</td><td>Change such an agent's model by hand.</td></tr>
+      <tr><td>Real Claude Code only run on Linux</td><td>The real adapter was exercised on Linux only. WSL2 uses the same sandbox (bubblewrap and socat); macOS (Seatbelt) and native Windows were not tested with real Claude Code.</td><td>On macOS, run <code>aom-runner doctor</code> and a small card first. On Windows use WSL2.</td></tr>
+      <tr><td>MSW dev mocks are partial</td><td>The web app can run against MSW mocks (<code>VITE_MSW=1</code>), but they cover only part of the API.</td><td>Use the real server for anything beyond basic screens.</td></tr>
+      <tr><td>Biome reports lint warnings</td><td><code>pnpm lint</code> finishes with warnings (about 690) and no errors.</td><td>None needed; the check passes.</td></tr>
+      <tr><td>At most 4 shifts per workstation at once</td><td>The server tells each runner a limit of 4 concurrent shifts, whatever <code>maxConcurrentShifts</code> says in the runner config.</td><td>Pair another workstation for more parallel work.</td></tr>
+      <tr><td>Demo and E2E use a mock runtime</td><td>The test suites and the demo do not run real agents; the mock adapter plays a script per card.</td><td>Run real Claude Code on a workstation for real behavior (<code>AOM_CLAUDE_SMOKE=1</code> runs a smoke test and spends tokens).</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="s13-3"><span class="mk">TOCMARK_s13x3_</span>13.3 Things that look odd but are intended</h3>
+  <div class="callout"><b class="t">Why card refs are not globally unique</b>
+    Card refs are the project key plus a number (e.g., WEB-1). Project keys are unique within one organization, so two users can each have a project WEB with a card WEB-1. A ref that matches cards in more than one of your projects is answered with <code>409 ambiguous_ref</code>; the web app links by card ID.</div>
+  <div class="callout"><b class="t">Why the runner connects outbound, not inbound</b>
+    The runner on your workstation connects to the server over outbound WebSocket (WSS port 443) and stays connected. This eliminates firewall complexity (no inbound ports), keeps credentials and code on your machine, and works everywhere (VPN, office, home, mobile hotspot). The trade-off is that only one runner per workstation can be active; a second connection with the same token closes the first (the runner exits with code 3).</div>
+  <div class="callout"><b class="t">Why DevOps cannot be fired</b>
+    The DevOps engineer per workstation can only be reset (sandbox wiped), not fired. Every user gets one DevOps engineer on each workstation, which other agents and the manager ask directly; every request and action is logged on a thread. A reset wipes its sandbox the way a firing does.</div>
+  <div class="callout"><b class="t">Why card dependencies do not affect branching</b>
+    When a card depends on another, the dependent card must wait for the dependency to finalize before it claims the Build stage. However, it still branches from the working branch (main), not from the dependency's branch. This keeps branches simple and allows parallel builds once dependencies are done. Rebase conflicts are detected by the runner before the completion action.</div>
+  <div class="callout"><b class="t">Why decisions can only be answered by the owner (by default)</b>
+    Card decision policy defaults to owner_only so the card creator stays accountable for decisions on their work. On a shared project, the policy can be changed to any_manager to distribute decision authority. This is explicit: changing the policy is a deliberate choice, not an accident.</div>
+
+</section>

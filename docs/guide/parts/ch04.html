@@ -1,0 +1,163 @@
+<section class="chapter" id="s4">
+  <h2><span class="mk">TOCMARK_s4_</span>4&nbsp;&nbsp;Intake, outbox and external systems</h2>
+  <p class="lead">Work arrives from tickets in Jira or GitHub. The BA reads the ticket through the integration, drafts cards with full requirements in a conversation with the manager, and posts updates back. Nothing leaves the organization without the manager's approval.</p>
+
+  <h3 id="s4-1" style="margin-top:4px"><span class="mk">TOCMARK_s4x1_</span>4.1 Intake from a ticket</h3>
+  <p>Open <b>Intake</b> from the desk and type a Jira key, a GitHub issue (URL or <code>owner/repo#12</code>) or a free-text description of the need in the field <b>Ticket or need</b>, then press <b>Start intake</b>. The BA reads the ticket, talks to the manager in a conversation, drafts cards with all required fields and a completion action, and specifies them so they enter the build queue (the To do column).</p>
+
+  <figure><img src="assets/intake-new.jpg"><figcaption>The Intake page: the empty form with Start intake, and the list of earlier intakes (OPS-77 waiting for a project, example/web#31, example/web#12, SUP-231) (Pieter Demo)</figcaption></figure>
+
+  <p>As you type, a hint line under the field says how the input is read: "Jira ticket SUP-231: the BA reads it on your workstation (read-only)", the same for a GitHub issue, or "Free text: the BA works from your description." A free-text intake has no ticket, so its cards carry no external reference and no updates can be posted for them (see 4.3).</p>
+
+  <figure class="w70"><img src="assets/intake-typed.jpg"><figcaption>Typing the Jira key SUP-231: the hint line names it as a Jira ticket (Pieter Demo)</figcaption></figure>
+
+  <figure class="w70"><img src="assets/intake-gh.jpg"><figcaption>Intake of the GitHub issue example/web#12: the pasted issue URL, mapped to WEB, card WEB-23 created (Pieter Demo)</figcaption></figure>
+
+  <p>A pasted GitHub issue URL, <code>owner/repo#12</code>, a Jira browse URL or a Jira key such as <code>SUP-231</code> is recognized as the ticket. The BA's own messages in the figure ("Read GitHub issue ...", "Mapped to project WEB.") are scripted by the mock runtime; a real BA writes its own.</p>
+
+  <p><b>What the BA does, in order:</b></p>
+  <div class="callout rule"><b class="t">Intake workflow</b>
+    <ol style="margin:0">
+      <li><b>Read the ticket:</b> a Jira ticket is read by the BA itself with the Jira skill and the Jira tool of its runtime (read-only: it never creates, edits, comments on or transitions a ticket). A GitHub issue is read with <code>aom source read</code>, which uses the <code>gh</code> login on the workstation. Free text needs no reading.</li>
+      <li><b>Map to a project:</b> the BA picks the project from your project list (the Jira project key, repositories and names help, and it searches the ledger for earlier mapping decisions). If no project fits, it does not guess: it raises an unmapped-ticket question on the desk (see 4.2) and the conversation continues after you answer.</li>
+      <li><b>Investigate and ask:</b> the BA reads the project's PROJECT.md, the repository (read-only) and the ledger, and asks you in the conversation only what these sources cannot answer.</li>
+      <li><b>Draft cards:</b> one card per independently deliverable change, with the fields a builder needs: Context, Requirements, Acceptance criteria, Affected areas, Constraints, Test plan, a Completion action (pr, push_branch or merge), Docs needed, Priority and the ticket as external reference. The card type is feature, bug, support, refactor or docs.</li>
+      <li><b>Specify:</b> the BA runs <code>aom card specify</code>. The server refuses a card with missing fields and says what is missing; the BA fixes it and tries again. A specified card enters the build queue and the BA tells you which cards it created.</li>
+    </ol>
+  </div>
+
+  <p><b>The intake view</b> has the header "Intake" plus the ticket key, a connection dot, "BA" and the BA's name, the status badge, and links <b>All intakes</b> and <b>Back to the desk</b>. Below it the conversation with the BA is on the left (with a Message field and <b>Send</b>) and the list <b>Cards created</b> is on the right: each entry shows ref, title, stage and status. Until the BA has drafted a card it reads "None yet. The BA drafts them as you talk."</p>
+
+  <figure><img src="assets/intake-view.jpg"><figcaption>Intake SUP-231, mapped to WEB: the conversation with Olga (BA) and the card WEB-22 it created (Pieter Demo)</figcaption></figure>
+
+  <p><b>The status badge</b> shows one of three texts:</p>
+  <ul>
+    <li><b>Mapped to WEB</b> (green; the key of the project): the BA found the project and is drafting or has drafted cards.</li>
+    <li><b>Waiting for you to pick the project</b> (amber): the BA could not map the ticket and asked on the desk. An amber banner under the header says so and its link <b>Pick the project</b> goes straight to the desk question. Once you pick, the status changes to mapped and the BA carries on in the same conversation.</li>
+    <li><b>Open</b>: the intake has been started and the BA has not mapped it yet.</li>
+  </ul>
+
+  <p><b>Earlier intakes</b> appear on the Intake page showing the ticket key ("No ticket" for free text), the status text, the number of cards and the age. Clicking a row opens that intake's conversation.</p>
+
+  <div class="callout"><b class="t">How the BA reads the ticket</b>
+    <b>Jira:</b> the BA reads the ticket with the Jira skill and whatever Jira tool its runtime offers (an Atlassian MCP server, a CLI or the REST API). The credentials are in that tool's configuration on the workstation; the runner holds no Jira credentials for reading. <b>GitHub:</b> the runner runs <code>gh issue view</code> with the <code>gh</code> login of the workstation. <b>Free text:</b> you type the need directly; no ticket is read. In all cases nothing is written to the ticket during intake.</div>
+</section>
+
+<section>
+  <h3 id="s4-2"><span class="mk">TOCMARK_s4x2_</span>4.2 Tickets that match no project</h3>
+
+  <p>When the BA cannot determine which project a ticket belongs to, it raises an unmapped-ticket question on the desk ("Which project does OPS-77 belong to?"). You pick a project and press <b>Map to project</b>. The choice is always saved in the ledger as a decision.</p>
+
+  <figure class="w70"><img src="assets/intake-unmapped.jpg"><figcaption>Intake OPS-77 waiting for the manager to pick a project: amber banner with the link Pick the project, no cards yet (Pieter Demo)</figcaption></figure>
+
+  <p>On the desk the item carries the violet badge "Unmapped ticket" and "Non-blocking". It shows the asking agent (Olga, BA), what it was doing, the question, a link <b>open the intake</b>, and one radio button per project (here NEWS, SHOOT and WEB). Buttons: <b>Map to project</b> and <b>Dismiss</b>. If you press Map to project without choosing, it says "Pick the project this ticket belongs to".</p>
+
+  <figure class="w70"><img src="assets/desk-unmapped.jpg"><figcaption>Unmapped ticket desk item for OPS-77: choose NEWS, SHOOT or WEB and press Map to project (Pieter Demo)</figcaption></figure>
+
+  <div class="callout rule"><b class="t">Mapping rule</b>
+    Map to project tells the BA which project to use and records a ledger decision titled "&lt;ticket&gt; belongs to &lt;project&gt;". There is no separate choice to make. When the BA meets a similar ticket later it searches the ledger for earlier mapping decisions and can use them; the ledger entry is a record the BA reads, not an automatic rule that skips the question.</div>
+</section>
+
+<section>
+  <h3 id="s4-3"><span class="mk">TOCMARK_s4x3_</span>4.3 The outbox: updates back to a ticket</h3>
+
+  <p>When a card that came from a ticket reaches Finalize, the BA drafts an update for that ticket before it finalizes the card (one draft per card and kind). The draft lands on the desk for approval. Only the card's owner can approve it, and only an approved draft is posted, by the owner's own workstation with the owner's own credentials. You can also write an update yourself in the Updates panel of the card (see 4.4); it goes to the desk like any other draft. A card with no ticket reference cannot have updates.</p>
+
+  <p><b>Kinds of outbound update:</b></p>
+  <ul>
+    <li><b>Comment:</b> a comment on the ticket (Jira or GitHub).</li>
+    <li><b>Resolution:</b> the work resolves the ticket. On GitHub the issue is closed with the text as its closing comment. On Jira the text is posted as a comment only; no transition is sent, so you close the ticket in Jira yourself.</li>
+    <li><b>Design decision</b> (kind <code>decision</code>): a design decision you made. It is posted as a comment, on both systems.</li>
+  </ul>
+
+  <figure class="w70"><img src="assets/desk-outbound.jpg"><figcaption>Outbound approval: Olga's draft "Approve resolution for Jira SUP-231" for card WEB-22, with the buttons Approve and post and Reject (Pieter Demo)</figcaption></figure>
+
+  <p>The approval item on the desk has the violet badge "Update to a ticket" and shows the title "Approve &lt;kind&gt; for Jira|GitHub &lt;key&gt;", the card link and the draft in an editable text area. You may approve it as it is (<b>Approve and post</b>), edit it and approve (<b>Approve and post my edit</b>), or reject it (<b>Reject</b>).</p>
+
+  <div class="callout rule"><b class="t">What happens after you approve, in order</b>
+    <ol style="margin:0">
+      <li>The server sends the approved text to one of your own workstations (a connected one first). Only the card owner's workstation is used, so the credentials are always the owner's.</li>
+      <li>The runner scrubs the text once more (see 4.4). A draft that leaks is refused here even if it was approved.</li>
+      <li>The runner posts it exactly as approved. GitHub: <code>gh issue comment</code>, or <code>gh issue close --comment</code> for a resolution, with your <code>gh</code> login. Jira: a comment through the Jira REST API with the API token in the runner's <code>config.json</code> (<code>jira</code>: <code>baseUrl</code>, <code>email</code>, <code>apiToken</code>).</li>
+      <li>On success the card's Updates panel shows "Posted" with a link to the result and the thread gets a message. If the same text is already on the ticket (a retry after an unclear failure), it is not posted twice.</li>
+      <li>On failure the desk gets a non-blocking "Posting failed" item with the error, the thread gets a message, and the approved text is kept. The owner presses <b>Retry posting</b> on the card's Updates panel once the cause is fixed.</li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <h3 id="s4-4"><span class="mk">TOCMARK_s4x4_</span>4.4 Edit, reject, failed posts and blocked drafts</h3>
+
+  <p><b>Edit the draft:</b> the text area is editable and the update is posted as you leave it. When you change it, a <b>Your changes</b> section appears showing the word diff (added words in green, removed words in red). The button changes to <b>Approve and post my edit</b>. An edit goes through the scrubber again; if it names internal details the approval is refused with the reason.</p>
+
+  <figure class="w70"><img src="assets/desk-outbound-edit.jpg"><figcaption>Approval for GitHub example/web#31 (card WEB-24): the manager added a sentence; the diff shows it in green and the button reads Approve and post my edit (Pieter Demo)</figcaption></figure>
+
+  <p><b>Reject:</b> click Reject and an optional field "Why not (optional, kept on the card)" appears, with the button <b>Reject, never post</b>. The draft is never posted and the card's Updates panel shows it as "Rejected, never posted" with your reason.</p>
+
+  <p><b>Posting failed:</b> if the post does not work (no <code>gh</code> or Jira credentials on the workstation, the system answers with an error, a network problem), a non-blocking desk item with the badge "Posting failed" appears. Its title is "Could not post the update to GitHub example/web#40" (or Jira) and it shows the error. The item has the buttons <b>Acknowledge</b> and <b>Dismiss</b>; the retry is not on the desk but on the card: the <b>Retry posting</b> button in the card's Updates panel, which only the card owner sees.</p>
+
+  <figure class="w70"><img src="assets/desk-failed.jpg"><figcaption>Posting failed for card WEB-28: "gh issue comment failed: HTTP 502: Bad Gateway", with Acknowledge and Dismiss; the text says to retry from the card's updates (Pieter Demo)</figcaption></figure>
+
+  <p><b>Blocked drafts:</b> a scrubber (a leak check) runs on every draft before it reaches the desk, on every edit you make before approving, and once more on the runner before posting. A draft by the BA that names internal details is recorded as blocked, never reaches the desk, and the BA gets the reason and is told to rewrite it without them. The card's thread and the Updates panel show the blocked draft. If you write a draft yourself and it is refused, you see the reason on the spot and nothing is saved.</p>
+
+  <div class="callout warn"><b class="t">What the scrubber refuses</b>
+    <ul style="margin:0">
+      <li>The name of any agent of the organization, retired agents included (whole word, case-insensitive; names that are also everyday words, such as Grace or Sky, only when written with a capital letter).</li>
+      <li>The words agent or agents.</li>
+      <li>Review and bounce talk: "bounce", "review comments", "reviewer feedback", "changes requested", "rework".</li>
+      <li>Decision desk, "desk item", "the desk", "question thread", escalation, ledger, standing orders.</li>
+      <li>Role titles: builder, reviewer, business analyst, BA, scout, curator.</li>
+      <li>The product name (Agent Org Manager, AOM) and internal branch names starting with <code>aom/</code>.</li>
+    </ul>
+    The check is pattern based: it looks for these words and phrases, it does not judge meaning. Write the update in your own voice and say what was done, not how the team did it.</div>
+
+  <p><b>Updates panel on the card:</b> a card that came from a ticket (or has drafts) shows a panel <b>Updates to &lt;ticket&gt; (n)</b> with the history of every draft. Each entry shows a status badge, the kind and the system and ticket key ("Resolution for GitHub example/web#12"), who drafted it, who approved it, and an Edited badge when the manager changed the text. An edited update is shown as the diff and "Posted as edited"; a posted update shows "Posted:" with a link; a failed one shows the error and <b>Retry posting</b>; a blocked one shows the words that were refused. The panel ends with a form "Write an update yourself" (kind and text, button <b>Draft update</b>); it goes to the desk like any other draft.</p>
+
+  <figure><img src="assets/card-outbound-edited.jpg"><figcaption>Card WEB-23 (from GitHub issue example/web#12): the Updates panel shows the resolution posted as edited, with the added sentence marked, and the link to the GitHub comment (Pieter Demo)</figcaption></figure>
+
+  <figure><img src="assets/card-outbound-failed.jpg"><figcaption>Card WEB-28 (example/web#40): the Updates panel shows a failed post with Retry posting and a draft blocked because it named Ada and Linus (Pieter Demo)</figcaption></figure>
+
+  <figure class="w70"><img src="assets/panel-outbound.jpg"><figcaption>Updates panel of WEB-23: one posted, edited resolution (Pieter Demo)</figcaption></figure>
+
+  <figure class="w70"><img src="assets/panel-outbound-failed.jpg"><figcaption>Updates panel of WEB-28: "Posting failed" with the error and Retry posting, and "Blocked: internal details" with the refused agent names (Pieter Demo)</figcaption></figure>
+
+  <table class="compact">
+    <thead><tr><th style="width:30%">Status badge</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Waiting for approval</td><td>On your desk, not yet decided.</td></tr>
+      <tr><td>Approved, waiting to be posted</td><td>Approved; the workstation has not reported the result yet.</td></tr>
+      <tr><td>Rejected, never posted</td><td>You rejected it. The reason, if any, is shown.</td></tr>
+      <tr><td>Posted</td><td>Sent to the external system; the reference or link is shown.</td></tr>
+      <tr><td>Posting failed</td><td>Approved but the post failed. The error is shown; the owner can press Retry posting.</td></tr>
+      <tr><td>Blocked: internal details</td><td>The scrubber refused the draft before it reached the desk. The refused words are shown.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h3 id="s4-5"><span class="mk">TOCMARK_s4x5_</span>4.5 Guardrails and credentials</h3>
+
+  <p><b>What never leaves without approval</b> is enforced in three places:</p>
+  <ul>
+    <li><b>Scrubber:</b> blocks drafts with internal details on the server (every draft and every edit) and again on the runner before posting.</li>
+    <li><b>Manual approval:</b> the card owner approves every draft on the desk before it is posted. Nobody else can approve it.</li>
+    <li><b>Read-only intake:</b> during intake the BA only reads tickets; it never writes to Jira or GitHub.</li>
+  </ul>
+
+  <p><b>Credentials stay on the workstation:</b></p>
+  <ul>
+    <li>Reading a Jira ticket uses the Jira tool configured in the agent's runtime on the workstation.</li>
+    <li>Posting to Jira uses the API token in the runner's <code>config.json</code> (<code>jira</code>: <code>baseUrl</code>, <code>email</code>, <code>apiToken</code>, file mode 0600).</li>
+    <li>GitHub reading and posting use the <code>gh</code> login of the workstation.</li>
+    <li>The server holds none of these secrets and makes no calls to Jira or GitHub. Only the workstation that posts an update uses them, and only after the owner approved it on the desk.</li>
+  </ul>
+
+  <p><b>Rule:</b> the credentials of the card owner's workstation are the ones used. The ticket shows the owner's own GitHub login or Jira account as the poster, not a shared bot account.</p>
+
+  <div class="callout ok"><b class="t">Verified</b>
+    Every outbound draft is approved by the card owner before posting. A failed post appears on the desk with the error, and the approved text is kept so the owner can retry it from the card.</div>
+</section>
+
+</section>
+
+<!-- NOTES: The screenshots show the demo running on the MOCK runtime (agent replies prefixed with "[mock]"). The Jira key recognition and GitHub issue URL parsing are implemented; no special characters in free-text intakes. The outbound drafts in the screenshots show they are written in the manager's voice and may be edited before approval. -->
