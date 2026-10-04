@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { FinalizeExecutePayload, FinalizeResult } from '@aom/shared';
+import { type FinalizeExecutePayload, type FinalizeResult, isSafeGitRef } from '@aom/shared';
 import type { PrCreator } from './gh.ts';
 import { git, gitOk, hasRemote, revParse } from './git.ts';
 import { baseTarget, RebaseConflictError, rebaseOntoBase } from './rebase.ts';
@@ -12,6 +12,8 @@ export interface CompletionInput {
   repoPath: string;
   /** Where the card worktree lives (or is recreated) on this workstation. */
   worktreePath: string;
+  /** The runner's `worktrees/` directory: card worktrees are confined to it. */
+  worktreesDir: string;
   /** Directory for the throwaway integration worktree of a merge. */
   integrationDir: string;
   pr: PrCreator;
@@ -37,6 +39,9 @@ const fail = (action: FinalizeResult['action'], error: string): FinalizeResult =
 export async function executeCompletion(input: CompletionInput): Promise<FinalizeResult> {
   const { payload: p } = input;
   const action = p.action;
+  // Owner-controlled refs: refuse anything git could parse as an option or an odd refspec.
+  for (const ref of [p.branchName, p.baseBranch, `aom-integration/${p.ref.toLowerCase()}`])
+    if (!isSafeGitRef(ref)) return fail(action, `refusing unsafe branch name ${JSON.stringify(ref)}`);
   let wt: string;
   try {
     const w = await ensureWorktree({
@@ -50,6 +55,7 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
         path: p.worktreePath ?? input.worktreePath,
       },
       defaultPath: input.worktreePath,
+      roots: [input.worktreesDir],
     });
     wt = w.path;
   } catch (err) {
@@ -74,7 +80,7 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
       action,
       `cannot ${action === 'pr' ? 'open a PR' : 'push'}: the repository has no origin remote`,
     );
-  const push = await git(wt, ['push', '-u', 'origin', p.branchName]);
+  const push = await git(wt, ['push', '-u', 'origin', '--', p.branchName]);
   if (push.exitCode !== 0) return fail(action, `git push failed: ${(push.stderr || push.stdout).trim()}`);
   if (action === 'push_branch') return { ok: true, action, pushedBranch: p.branchName };
 
@@ -103,7 +109,7 @@ async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult
   const { payload: p, repoPath } = input;
   const base = p.baseBranch;
   const remote = await hasRemote(repoPath);
-  if (remote) await git(repoPath, ['fetch', 'origin', base]);
+  if (remote) await git(repoPath, ['fetch', '--', 'origin', base]);
   const startPoint = await baseTarget(repoPath, base);
   if (!(await revParse(repoPath, startPoint))) return fail('merge', `base branch ${base} not found`);
 
@@ -121,9 +127,14 @@ async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult
   };
   const integration = join(input.integrationDir, p.ref);
   const tempBranch = `aom-integration/${p.ref.toLowerCase()}`;
-  await removeWorktree({ path: integration, branchName: tempBranch, deleteBranch: true });
+  await removeWorktree({
+    path: integration,
+    branchName: tempBranch,
+    deleteBranch: true,
+    roots: [input.integrationDir],
+  });
   await mkdir(dirname(integration), { recursive: true });
-  const add = await git(repoPath, ['worktree', 'add', '-B', tempBranch, integration, startPoint]);
+  const add = await git(repoPath, ['worktree', 'add', '-B', tempBranch, '--', integration, startPoint]);
   if (add.exitCode !== 0)
     return fail('merge', `could not create the integration worktree: ${add.stderr.trim()}`);
   try {
@@ -154,7 +165,12 @@ async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult
     await advanceLocalBase(repoPath, base, mergeCommit);
     return { ok: true, action: 'merge', mergeCommit };
   } finally {
-    await removeWorktree({ path: integration, branchName: tempBranch, deleteBranch: true });
+    await removeWorktree({
+      path: integration,
+      branchName: tempBranch,
+      deleteBranch: true,
+      roots: [input.integrationDir],
+    });
   }
 }
 

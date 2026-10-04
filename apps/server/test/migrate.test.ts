@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
@@ -39,6 +39,42 @@ describe('migrate', () => {
       [SCHEMA],
     );
     expect(tables.rows[0].n).toBe(4);
+  });
+
+  it('scrubs credentials from stored remote URLs, in projections and in event payloads (review M5)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aom-mig-'));
+    await cp(defaultMigrationsDir(), dir, { recursive: true });
+    await rm(join(dir, '1100_scrub_url_credentials.sql'));
+    await migrate(TEST_DB_URL, { schema: SCHEMA, dir });
+    const dirty = 'https://bob:ghp_secret@github.com/acme/web.git';
+    const token = 'https://ghp_tokenonly@github.com/acme/web.git';
+    const ssh = 'ssh://git@github.com/acme/web.git';
+    await client.query(`SET search_path TO ${SCHEMA}`);
+    await client.query(`SET session_replication_role = replica`);
+    const vault = (id: string, kind: string, url: string) =>
+      client.query(
+        `INSERT INTO vaults (id, org_id, kind, name, remote_url, created_at) VALUES ($1, gen_random_uuid(), $2, 'v', $3, now())`,
+        [id, kind, url],
+      );
+    await vault('00000000-0000-4000-8000-000000000001', 'work', dirty);
+    await vault('00000000-0000-4000-8000-000000000002', 'personal', ssh);
+    await client.query(
+      `INSERT INTO events (stream_id, stream_version, type, payload, actor_kind, audience) VALUES ('vault-x', 1, 'VaultRegistered', $1, 'system', 'org'), ('vault-x', 2, 'VaultUpdated', $2, 'system', 'org')`,
+      [JSON.stringify({ remoteUrl: dirty }), JSON.stringify({ remoteUrl: token })],
+    );
+    await client.query(`SET session_replication_role = DEFAULT`);
+
+    await migrate(TEST_DB_URL, { schema: SCHEMA, dir: defaultMigrationsDir() });
+    const urls = (await client.query(`SELECT remote_url FROM vaults ORDER BY id`)).rows.map(
+      (r) => r.remote_url,
+    );
+    expect(urls).toEqual(['https://github.com/acme/web.git', ssh]);
+    const ev = (await client.query(`SELECT payload->>'remoteUrl' AS u FROM events ORDER BY seq`)).rows.map(
+      (r) => r.u,
+    );
+    expect(ev).toEqual(['https://github.com/acme/web.git', 'https://github.com/acme/web.git']);
+    // the append-only guard is back on
+    await expect(client.query(`UPDATE events SET type = type`)).rejects.toThrow(/append-only/);
   });
 
   it('aborts if an applied migration file changed (checksum)', async () => {

@@ -34,6 +34,7 @@ export async function queueExecute(tx: Tx, card: Row, action: CompletionAction):
     ref: card.ref,
     title: card.title,
     projectKey: project.key,
+    projectId: project.id,
     action,
     repoId: repo.id,
     remoteUrlNormalized: repo.remote_url_normalized,

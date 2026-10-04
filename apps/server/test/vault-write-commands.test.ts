@@ -49,7 +49,7 @@ describe('decision files (QuestionAnswered -> vault.write)', () => {
 
   it('writes projects/<name>/decisions/<date>-<slug>.md into the domain vault through a durable command', async () => {
     const vault = await ok<any>(
-      owner('POST', '/api/vaults', { kind: 'work', remoteUrl: '/srv/work.git' }),
+      owner('POST', '/api/vaults', { kind: 'work', remoteUrl: 'git@example.test:srv/work.git' }),
       201,
     );
     const res = await writeDecisionFile(ctx(), record());
@@ -132,7 +132,11 @@ describe('decision files (QuestionAnswered -> vault.write)', () => {
 
   it('a project vault takes precedence and goes to a member workstation when the owner has none online', async () => {
     const pv = await ok<any>(
-      owner('POST', '/api/vaults', { kind: 'project', projectId: w.projectId, remoteUrl: '/srv/pv.git' }),
+      owner('POST', '/api/vaults', {
+        kind: 'project',
+        projectId: w.projectId,
+        remoteUrl: 'git@example.test:srv/pv.git',
+      }),
       201,
     );
     const res = await writeDecisionFile(

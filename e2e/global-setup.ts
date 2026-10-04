@@ -94,6 +94,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_WEB_DIST: paths.webDist,
     AOM_RATE_LIMIT: 'false',
     AOM_TEST_CLOCK: 'true',
+    AOM_ALLOW_LOCAL_REMOTES: 'true',
     LOG_LEVEL: 'info',
   };
   sh(

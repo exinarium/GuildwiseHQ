@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ProjectChangesSchema, ProjectDomain } from '../events/project.ts';
 import { ProjectKeySchema } from '../ids.ts';
+import { BranchPrefixSchema, GitRefSchema, RemoteUrlSchema, VaultFolderSchema } from '../safe.ts';
 import { IsoTime } from './common.ts';
 
 export const ProjectRepoDtoSchema = z.object({
@@ -60,10 +61,10 @@ export const CreateProjectRequestSchema = z.object({
   domain: ProjectDomain.default('work'),
   workflowKey: z.string().min(1).default('code'),
   priorityTier: z.number().int().min(1).max(4).default(2),
-  branchPrefix: z.string().default('aom/'),
-  workingBranch: z.string().min(1).default('main'),
+  branchPrefix: BranchPrefixSchema.default('aom/'),
+  workingBranch: GitRefSchema.default('main'),
   subCategories: z.array(z.string()).default([]),
-  vaultFolder: z.string().nullable().default(null),
+  vaultFolder: VaultFolderSchema.nullable().default(null),
 });
 export type CreateProjectRequest = z.infer<typeof CreateProjectRequestSchema>;
 
@@ -72,8 +73,8 @@ export type PatchProjectRequest = z.infer<typeof PatchProjectRequestSchema>;
 
 export const AddRepoRequestSchema = z.object({
   name: z.string().min(1).max(120),
-  remoteUrl: z.string().min(1),
-  workingBranch: z.string().min(1).optional(),
+  remoteUrl: RemoteUrlSchema,
+  workingBranch: GitRefSchema.optional(),
 });
 export type AddRepoRequest = z.infer<typeof AddRepoRequestSchema>;
 export const RepoParamsSchema = z.object({ id: z.uuid(), repoId: z.uuid() });

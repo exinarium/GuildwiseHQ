@@ -153,6 +153,7 @@ export class Runner {
   async start(): Promise<void> {
     await writeShims(this.paths.bin);
     await this.ipc.start();
+    await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
     this.repos = await scanRepos(this.opts.config.repoRoots);
     this.supervisor.resumePersisted();
     this.vaults.start();
@@ -301,7 +302,12 @@ export class Runner {
         const p = CommandPayloadSchemas['worktree.remove'].parse(payload);
         done(
           true,
-          await removeWorktree({ path: p.path, branchName: p.branchName, deleteBranch: p.deleteBranch }),
+          await removeWorktree({
+            path: p.path,
+            branchName: p.branchName,
+            deleteBranch: p.deleteBranch,
+            roots: [this.paths.worktrees],
+          }),
         );
       } else if (command === 'repos.rescan') {
         await this.rescan();
@@ -322,7 +328,8 @@ export class Runner {
             await executeCompletion({
               payload: p,
               repoPath: repo.localPath,
-              worktreePath: this.paths.worktreePath(p.projectKey, p.ref),
+              worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
+              worktreesDir: this.paths.worktrees,
               integrationDir: this.paths.integration,
               pr: this.opts.prCreator ?? ghPrCreator,
             }),

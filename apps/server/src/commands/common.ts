@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { ThreadMessageKind } from '@aom/shared';
-import { streamId } from '@aom/shared';
+import { remoteUrlError, streamId } from '@aom/shared';
+import type { Ctx } from '../context.ts';
+import { badRequest } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 
 export const projectScope = (orgId: string, projectId: string) =>
@@ -43,4 +45,10 @@ export function cardMessage(
           : SYSTEM_ACTOR,
     scope: projectScope(card.org_id, card.project_id),
   };
+}
+
+/** Applies the deployment's remote policy (local paths only where the config allows them); the schema did the rest. */
+export function assertRemoteUrl(ctx: Ctx, url: string): void {
+  const err = remoteUrlError(url, ctx.config.allowLocalRemotes);
+  if (err) throw badRequest('invalid_remote_url', err);
 }

@@ -16,6 +16,7 @@ async function cardWorktree(repo = makeRepo(), file = 'thing.txt') {
   const path = join(tmp(), 'wt');
   await ensureWorktree({
     repoPath: repo.clone,
+    roots: ['/'],
     spec: {
       mode: 'create',
       repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
@@ -63,6 +64,7 @@ const run = (repo: { clone: string }, p: FinalizeExecutePayload, pr: PrCreator =
     payload: p,
     repoPath: repo.clone,
     worktreePath: p.worktreePath as string,
+    worktreesDir: '/',
     integrationDir: join(tmp(), 'integration'),
     pr,
   });

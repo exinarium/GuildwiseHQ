@@ -58,16 +58,36 @@ function statusTone(status: string) {
   return 'neutral' as const;
 }
 
+interface AmbiguousCandidate {
+  id: string;
+  ref: string;
+  title: string;
+  projectName: string;
+}
+
 export function CardDetail() {
   const { ref = '' } = useParams();
   const q = useCard(ref);
   const workflows = useWorkflows(q.data?.card.projectId);
   if (q.isPending) return <Spinner label="Loading card" />;
   if (q.isError) {
+    const err = q.error as { code?: string; details?: { candidates?: AmbiguousCandidate[] } };
     return (
       <div>
         <PageHeader title="Card" />
         <ErrorBox error={q.error} />
+        {err.code === 'ambiguous_ref' && (
+          <ul data-testid="ambiguous-card-candidates" className="mt-2 list-disc pl-5 text-sm">
+            {(err.details?.candidates ?? []).map((c) => (
+              <li key={c.id}>
+                <Link to={`/cards/${c.id}`} className="underline">
+                  {c.ref} {c.title}
+                </Link>{' '}
+                in {c.projectName}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     );
   }

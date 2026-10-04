@@ -1,6 +1,6 @@
 import { type ProjectRole, parseCardRef } from '@aom/shared';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { notFound } from '../errors.ts';
+import { conflict, notFound } from '../errors.ts';
 
 /** Projects the user can see: active members (owner + managers). */
 export const VISIBLE_PROJECTS_SQL = `SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active'`;
@@ -56,13 +56,31 @@ export async function loadVisibleCard(
       [userId, idOrRef],
     );
   } else if (parseCardRef(idOrRef)) {
-    card = await one(
+    // Project keys are unique per organization only, so a ref can match cards in several of the user's projects
+    // (their own `WEB` and a shared one from another org). Never guess: the caller must use the card id.
+    const found = await rows(
       db,
-      `SELECT c.*, pm.role AS my_role FROM cards c JOIN project_members pm
-         ON pm.project_id = c.project_id AND pm.user_id = $1 AND pm.status = 'active'
-        WHERE c.ref = $2 ORDER BY c.created_at LIMIT 1`,
+      `SELECT c.*, pm.role AS my_role, p.key AS project_key, p.name AS project_name FROM cards c
+         JOIN project_members pm ON pm.project_id = c.project_id AND pm.user_id = $1 AND pm.status = 'active'
+         JOIN projects p ON p.id = c.project_id
+        WHERE c.ref = $2 ORDER BY c.created_at LIMIT 10`,
       [userId, idOrRef],
     );
+    if (found.length > 1)
+      throw conflict(
+        'ambiguous_ref',
+        `${idOrRef} matches cards in more than one of your projects; use the card id`,
+        {
+          candidates: found.map((c) => ({
+            id: c.id,
+            ref: c.ref,
+            title: c.title,
+            projectId: c.project_id,
+            projectName: c.project_name,
+          })),
+        },
+      );
+    card = found[0];
   }
   if (!card) throw notFound('card not found');
   return { card, role: card.my_role };

@@ -237,3 +237,17 @@ describe('VaultManager', () => {
     m.stop();
   });
 });
+
+describe('syncVault refuses dangerous remotes (review M1, M5)', () => {
+  it.each([
+    ['option-like', '--upload-pack=touch /tmp/aom-pwned'],
+    ['credentials', 'https://user:token@example.com/v.git'],
+    ['ext transport', 'ext::sh -c touch% /tmp/aom-pwned'],
+  ])('does not clone a %s URL', async (_name, remoteUrl) => {
+    const dir = join(tmp(), 'clone');
+    const r = await syncVault({ dir, remoteUrl, identity: IDENTITY, workstationName: 'Desk' });
+    expect(r.status).toBe('error');
+    expect(existsSync(dir)).toBe(false);
+    expect(existsSync('/tmp/aom-pwned')).toBe(false);
+  });
+});

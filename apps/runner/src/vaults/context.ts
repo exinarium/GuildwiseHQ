@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type ShiftBrief, type ShiftVault, TASTE_FILE } from '@aom/shared';
+import { isSafeVaultFolder, type ShiftBrief, type ShiftVault, TASTE_FILE } from '@aom/shared';
+import { confine } from '../fs-safe.ts';
 
 export interface VaultShiftContext {
   /** The one directory passed to the runtime as `--add-dir`. */
@@ -12,8 +13,13 @@ export interface VaultShiftContext {
   taste?: string;
 }
 
-const read = async (file: string): Promise<string | undefined> => {
+const read = async (file: string, root: string): Promise<string | undefined> => {
   if (!existsSync(file)) return undefined;
+  try {
+    confine(root, file); // a symlink inside the clone must not lead out of it
+  } catch {
+    return undefined;
+  }
   const text = (await readFile(file, 'utf8')).trim();
   return text || undefined;
 };
@@ -27,15 +33,20 @@ export async function readVaultContext(
   vaultsDir: string,
   vault: ShiftVault,
 ): Promise<VaultShiftContext | null> {
-  const root = join(vaultsDir, vault.vaultId);
-  if (!existsSync(join(root, '.git'))) return null;
+  let root: string;
+  try {
+    root = confine(vaultsDir, join(vaultsDir, vault.vaultId));
+  } catch {
+    return null;
+  }
+  if (!isSafeVaultFolder(vault.folder) || !existsSync(join(root, '.git'))) return null;
   const orders: Array<{ title: string; body: string }> = [];
-  const global = await read(join(root, 'standing-orders.md'));
+  const global = await read(join(root, 'standing-orders.md'), root);
   if (global) orders.push({ title: 'Vault standing orders', body: global });
-  const project = await read(join(root, ...vault.folder.split('/'), 'standing-orders.md'));
+  const project = await read(join(root, ...vault.folder.split('/'), 'standing-orders.md'), root);
   if (project) orders.push({ title: 'Project standing orders (vault)', body: project });
-  const projectDoc = await read(join(root, ...vault.folder.split('/'), 'PROJECT.md'));
-  const taste = await read(join(root, ...vault.folder.split('/'), TASTE_FILE));
+  const projectDoc = await read(join(root, ...vault.folder.split('/'), 'PROJECT.md'), root);
+  const taste = await read(join(root, ...vault.folder.split('/'), TASTE_FILE), root);
   return {
     addDir: root,
     standingOrders: orders,

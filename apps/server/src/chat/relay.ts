@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto';
 import {
   CHAT_ERROR,
   type ChatContext,
+  canDirectAgent,
   type RunnerToServerOf,
   type ServerToBrowser,
   streamId,
 } from '@aom/shared';
+import { projectRole } from '../authz/scope.ts';
 import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../commands/common.ts';
 import { intakeContext } from '../commands/intake.ts';
 import type { Ctx } from '../context.ts';
@@ -66,13 +68,29 @@ export class ChatRelay {
     const { ctx } = this;
     const row = await one(
       ctx.pool,
-      `SELECT a.*, t.kind AS thread_kind, t.project_id AS thread_project_id, t.card_id AS thread_card_id, p.key AS project_key, c.ref AS card_ref
+      `SELECT a.*, t.kind AS thread_kind, t.project_id AS thread_project_id, t.card_id AS thread_card_id, p.key AS project_key, c.ref AS card_ref, c.worktree_path AS card_worktree_path
          FROM threads t JOIN agents a ON a.id = t.agent_id
          LEFT JOIN projects p ON p.id = t.project_id LEFT JOIN cards c ON c.id = t.card_id
         WHERE t.id = $1 AND t.kind IN ('chat','intake') AND t.created_by = $2`,
       [msg.threadId, userId],
     );
     if (!row) return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);
+    // Rights are re-checked on every send: the thread outlives a removed membership, a re-homed agent or a
+    // deactivated account (being its creator is not enough).
+    const rolePerm = row.project_id ? await projectRole(ctx.pool, userId, row.project_id) : null;
+    const roleThread = row.thread_project_id
+      ? await projectRole(ctx.pool, userId, row.thread_project_id)
+      : null;
+    const active = await one(ctx.pool, `SELECT 1 FROM users WHERE id=$1 AND status='active'`, [userId]);
+    const mayDirect = canDirectAgent({
+      userId,
+      orgId: row.org_id,
+      managerUserId: row.manager_user_id,
+      agentProjectId: row.project_id,
+      projectRole: rolePerm,
+    });
+    if (!active || !mayDirect || (row.thread_project_id && roleThread === null))
+      return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);
     if (this.byThread.has(msg.threadId)) return this.fail(userId, msg.threadId, CHAT_ERROR.busy);
     // Nothing is queued: an offline workstation is reported immediately and the message is not saved.
     if (row.status !== 'active' || !row.workstation_id || !ctx.services.runners.isOnline(row.workstation_id))
@@ -143,6 +161,7 @@ export class ChatRelay {
       const context: ChatContext = {
         ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),
         ...(row.thread_card_id ? { cardId: row.thread_card_id, cardRef: row.card_ref } : {}),
+        ...(row.thread_card_id && row.card_worktree_path ? { cardWorktreePath: row.card_worktree_path } : {}),
         ...(intake ? { intake } : {}),
       };
       const sent = ctx.services.runners.send(

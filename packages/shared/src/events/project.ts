@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ProjectKeySchema } from '../ids.ts';
+import { BranchPrefixSchema, GitRefSchema, VaultFolderSchema } from '../safe.ts';
 import { defineEvent, Id } from './define.ts';
 
 export const ProjectDomain = z.enum(['work', 'personal']);
@@ -12,10 +13,10 @@ export const ProjectChangesSchema = z
     domain: ProjectDomain,
     workflowKey: z.string().min(1),
     priorityTier: z.number().int().min(1).max(4),
-    branchPrefix: z.string(),
-    workingBranch: z.string().min(1),
+    branchPrefix: BranchPrefixSchema,
+    workingBranch: GitRefSchema,
     subCategories: z.array(z.string()),
-    vaultFolder: z.string().nullable(),
+    vaultFolder: VaultFolderSchema.nullable(),
     architecturalGlobs: z.array(z.string()),
     e2eGlobs: z.array(z.string()),
   })

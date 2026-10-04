@@ -28,7 +28,11 @@ export interface RunnerPaths {
   /** Persisted `shift.start` messages of running shifts, so a restarted runner can resume them. */
   activeShifts: string;
   agentDir(agentId: string): string;
-  worktreePath(projectKey: string, cardRef: string): string;
+  /**
+   * Default worktree location. Project keys are only unique per organization, so the project id (first 8 hex
+   * digits) is part of the directory name; without it (old callers) the legacy `<KEY>/<REF>` path is returned.
+   */
+  worktreePath(projectKey: string, cardRef: string, projectId?: string): string;
 }
 
 export function runnerPaths(root: string): RunnerPaths {
@@ -49,6 +53,7 @@ export function runnerPaths(root: string): RunnerPaths {
     mockState: join(root, 'mock-state'),
     activeShifts: join(root, 'active-shifts'),
     agentDir: (agentId) => join(root, 'agents', agentId),
-    worktreePath: (projectKey, cardRef) => join(root, 'worktrees', projectKey, cardRef),
+    worktreePath: (projectKey, cardRef, projectId) =>
+      join(root, 'worktrees', projectId ? `${projectKey}-${projectId.slice(0, 8)}` : projectKey, cardRef),
   };
 }

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WorktreeSpec } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
@@ -36,7 +36,12 @@ describe('worktrees', () => {
     sh(other, 'git', ['push', 'origin', 'main']);
 
     const path = join(tmp(), 'wt', 'TOY-1');
-    const created = await ensureWorktree({ repoPath: repo.clone, spec: spec(), defaultPath: path });
+    const created = await ensureWorktree({
+      repoPath: repo.clone,
+      roots: ['/'],
+      spec: spec(),
+      defaultPath: path,
+    });
     expect(created).toMatchObject({
       path,
       branchName: 'aom/toy-1-add-greeting',
@@ -51,6 +56,7 @@ describe('worktrees', () => {
     sh(path, 'git', ['commit', '-m', 'work']);
     const reused = await ensureWorktree({
       repoPath: repo.clone,
+      roots: ['/'],
       spec: spec({ mode: 'reuse', path }),
       defaultPath: path,
     });
@@ -61,21 +67,27 @@ describe('worktrees', () => {
   it('create is idempotent (retry after a rejected first shift)', async () => {
     const repo = makeRepo();
     const path = join(tmp(), 'wt');
-    await ensureWorktree({ repoPath: repo.clone, spec: spec(), defaultPath: path });
-    const again = await ensureWorktree({ repoPath: repo.clone, spec: spec(), defaultPath: path });
+    await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec: spec(), defaultPath: path });
+    const again = await ensureWorktree({
+      repoPath: repo.clone,
+      roots: ['/'],
+      spec: spec(),
+      defaultPath: path,
+    });
     expect(again.created).toBe(false);
   });
 
   it('recreates the worktree from the branch when the directory vanished', async () => {
     const repo = makeRepo();
     const path = join(tmp(), 'wt');
-    await ensureWorktree({ repoPath: repo.clone, spec: spec(), defaultPath: path });
+    await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec: spec(), defaultPath: path });
     writeFileSync(join(path, 'kept.txt'), 'k');
     sh(path, 'git', ['add', '-A']);
     sh(path, 'git', ['commit', '-m', 'kept']);
     rmSync(path, { recursive: true, force: true });
     const r = await ensureWorktree({
       repoPath: repo.clone,
+      roots: ['/'],
       spec: spec({ mode: 'reuse' }),
       defaultPath: path,
     });
@@ -88,6 +100,7 @@ describe('worktrees', () => {
     await expect(
       ensureWorktree({
         repoPath: repo.clone,
+        roots: ['/'],
         spec: spec({ mode: 'reuse', branchName: 'aom/gone' }),
         defaultPath: join(tmp(), 'wt'),
       }),
@@ -99,6 +112,7 @@ describe('worktrees', () => {
     await expect(
       ensureWorktree({
         repoPath: repo.clone,
+        roots: ['/'],
         spec: spec({ baseBranch: 'nope' }),
         defaultPath: join(tmp(), 'wt'),
       }),
@@ -112,25 +126,35 @@ describe('worktrees', () => {
     writeFileSync(join(solo, 'a.txt'), 'a');
     sh(solo, 'git', ['add', '-A']);
     sh(solo, 'git', ['commit', '-m', 'init']);
-    const r = await ensureWorktree({ repoPath: solo, spec: spec(), defaultPath: join(root, 'wt') });
+    const r = await ensureWorktree({
+      repoPath: solo,
+      roots: ['/'],
+      spec: spec(),
+      defaultPath: join(root, 'wt'),
+    });
     expect(r.created).toBe(true);
   });
 
   it('worktree.remove is idempotent and can delete the branch', async () => {
     const repo = makeRepo();
     const path = join(tmp(), 'wt');
-    await ensureWorktree({ repoPath: repo.clone, spec: spec(), defaultPath: path });
-    const first = await removeWorktree({ path, branchName: 'aom/toy-1-add-greeting', deleteBranch: true });
+    await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec: spec(), defaultPath: path });
+    const first = await removeWorktree({
+      path,
+      branchName: 'aom/toy-1-add-greeting',
+      deleteBranch: true,
+      roots: ['/'],
+    });
     expect(first).toEqual({ removed: true, branchDeleted: true });
     expect(existsSync(path)).toBe(false);
     expect(sh(repo.clone, 'git', ['branch', '--list', 'aom/*'])).toBe('');
-    expect(await removeWorktree({ path })).toEqual({ removed: false, branchDeleted: false });
+    expect(await removeWorktree({ path, roots: ['/'] })).toEqual({ removed: false, branchDeleted: false });
   });
 
   it('rebase conflict is aborted and reports the conflicted files', async () => {
     const repo = makeRepo();
     const path = join(tmp(), 'wt');
-    await ensureWorktree({ repoPath: repo.clone, spec: spec(), defaultPath: path });
+    await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec: spec(), defaultPath: path });
     writeFileSync(join(path, 'README.md'), 'branch change\n');
     sh(path, 'git', ['commit', '-am', 'branch']);
     writeFileSync(join(repo.clone, 'README.md'), 'main change\n');
@@ -160,7 +184,7 @@ describe('diffstat and risk tier', () => {
   const setup = async () => {
     const repo = makeRepo();
     const path = join(tmp(), 'wt');
-    await ensureWorktree({ repoPath: repo.clone, spec: spec(), defaultPath: path });
+    await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec: spec(), defaultPath: path });
     return path;
   };
 
@@ -225,5 +249,74 @@ describe('diffstat and risk tier', () => {
     sh(path, 'git', ['commit', '-m', 'code and test']);
     const stats = await computeDiffStats({ worktree: path, baseBranch: 'main', architecturalGlobs: [] });
     expect(stats).toMatchObject({ files: 2, testFiles: 1 });
+  });
+});
+
+describe('server-supplied values are untrusted (review M1)', () => {
+  const roots = () => {
+    const root = join(tmp(), 'worktrees');
+    mkdirSync(root, { recursive: true });
+    return root;
+  };
+
+  it('refuses option-like and malformed branch names before running git', async () => {
+    const repo = makeRepo();
+    const root = roots();
+    for (const branchName of ['--upload-pack=touch /tmp/pwned', '-D', 'a..b', 'a b']) {
+      await expect(
+        ensureWorktree({
+          repoPath: repo.clone,
+          spec: spec({ branchName }),
+          defaultPath: join(root, 'p', 'TOY-1'),
+          roots: [root],
+        }),
+      ).rejects.toThrow(/unsafe branch/);
+    }
+    await expect(
+      ensureWorktree({
+        repoPath: repo.clone,
+        spec: spec({ baseBranch: '--orphan=x' }),
+        defaultPath: join(root, 'p', 'TOY-1'),
+        roots: [root],
+      }),
+    ).rejects.toThrow(/unsafe base/);
+  });
+
+  it('never creates or deletes outside the worktrees directory (reuse path with ..)', async () => {
+    const repo = makeRepo();
+    const root = roots();
+    const victim = join(tmp(), 'victim');
+    mkdirSync(victim, { recursive: true });
+    writeFileSync(join(victim, 'precious.txt'), 'keep');
+    await expect(
+      ensureWorktree({
+        repoPath: repo.clone,
+        spec: spec({ mode: 'reuse', path: join(root, '..', 'victim') }),
+        defaultPath: join(root, 'p', 'TOY-1'),
+        roots: [root],
+      }),
+    ).rejects.toBeInstanceOf(WorktreeError);
+    // an absolute path elsewhere, as a manipulated server would send it
+    await expect(
+      ensureWorktree({
+        repoPath: repo.clone,
+        spec: spec({ mode: 'reuse', path: victim }),
+        defaultPath: join(root, 'p', 'TOY-1'),
+        roots: [root],
+      }),
+    ).rejects.toBeInstanceOf(WorktreeError);
+    expect(existsSync(join(victim, 'precious.txt'))).toBe(true);
+    await expect(removeWorktree({ path: victim, roots: [root] })).rejects.toThrow(/outside/);
+    expect(existsSync(join(victim, 'precious.txt'))).toBe(true);
+  });
+
+  it('does not follow a symlink out of the worktrees directory', async () => {
+    const root = roots();
+    const victim = join(tmp(), 'victim2');
+    mkdirSync(victim, { recursive: true });
+    writeFileSync(join(victim, 'precious.txt'), 'keep');
+    symlinkSync(victim, join(root, 'link'));
+    await expect(removeWorktree({ path: join(root, 'link'), roots: [root] })).rejects.toThrow(/outside/);
+    expect(existsSync(join(victim, 'precious.txt'))).toBe(true);
   });
 });

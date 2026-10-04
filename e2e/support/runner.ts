@@ -14,6 +14,7 @@ function runnerEnv(home: string, extra: Record<string, string> = {}): NodeJS.Pro
   return {
     ...process.env,
     AOM_RUNNER_MOCK: '1',
+    AOM_ALLOW_LOCAL_REMOTES: '1',
     AOM_MOCK_STEP_MS: process.env.AOM_MOCK_STEP_MS ?? '1000',
     AOM_RUNNER_HOME: home,
     ...extra,

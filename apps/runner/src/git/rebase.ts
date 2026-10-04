@@ -1,3 +1,4 @@
+import { isSafeGitRef } from '@aom/shared';
 import { git, hasRemote, revParse } from './git.ts';
 
 /** Rebasing rewrites commits, which needs a committer; the author of each commit is kept. */
@@ -25,7 +26,8 @@ export async function baseTarget(worktree: string, baseBranch: string): Promise<
  * half-done rebase behind) and `RebaseConflictError` is thrown: the card becomes Rework, no agent resolves it.
  */
 export async function rebaseOntoBase(worktree: string, baseBranch: string): Promise<void> {
-  if (await hasRemote(worktree)) await git(worktree, ['fetch', 'origin', baseBranch]);
+  if (!isSafeGitRef(baseBranch)) throw new Error(`refusing unsafe base branch ${JSON.stringify(baseBranch)}`);
+  if (await hasRemote(worktree)) await git(worktree, ['fetch', '--', 'origin', baseBranch]);
   const target = await baseTarget(worktree, baseBranch);
   const r = await git(worktree, ['rebase', target], { env: REBASE_ENV });
   if (r.exitCode === 0) return;

@@ -10,8 +10,9 @@ import { FeedItemInputSchema } from '../feed/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
+import { VaultFolderSchema } from '../safe.ts';
 import { FinalizeExecutePayloadSchema } from '../testing/index.ts';
-import { VaultConfigureCommandSchema, VaultWriteCommandSchema } from '../vaults/index.ts';
+import { VaultConfigureCommandSchema, VaultIdSchema, VaultWriteCommandSchema } from '../vaults/index.ts';
 import { LedgerMatchSchema, RpcMethodSchema, ShiftReportSchema } from './ipc.ts';
 
 /**
@@ -173,6 +174,8 @@ export const ChatContextSchema = z.object({
   cardId: z.uuid().optional(),
   projectKey: z.string().optional(),
   cardRef: z.string().optional(),
+  /** Where the card's worktree lives on its home workstation (read-only context for the chat). */
+  cardWorktreePath: z.string().optional(),
   /** M7: set for the BA's intake chat (project list, mapping state, cards created so far). */
   intake: IntakeContextSchema.optional(),
 });
@@ -191,10 +194,10 @@ export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
 /** The one vault a card shift may read (docs/ARCHITECTURE.md section 16.1): its domain vault or the project vault. */
 export const ShiftVaultSchema = z.object({
-  vaultId: z.string().min(1),
+  vaultId: VaultIdSchema,
   kind: VaultKind,
   /** `projects/<name>` inside the vault. */
-  folder: z.string().min(1),
+  folder: VaultFolderSchema,
 });
 export type ShiftVault = z.infer<typeof ShiftVaultSchema>;
 

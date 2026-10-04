@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 import {
+  type ChatContext,
   type IpcReportRequest,
   type IpcReportResponse,
   type IpcRpcRequest,
@@ -13,6 +14,7 @@ import {
 } from '@aom/shared';
 import type { RuntimeAdapter, RuntimeSession } from '../adapters/types.ts';
 import { type ExternalAdapters, formatSource } from '../external/index.ts';
+import { confine } from '../fs-safe.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
@@ -177,10 +179,7 @@ export class ChatManager {
     }
     const sandbox = await ensureSandbox(paths, msg.agent.agentId, msg.agent.name);
     // A card in context: read its worktree (if this workstation has it) without being able to change it.
-    const wt =
-      msg.context.projectKey && msg.context.cardRef
-        ? paths.worktreePath(msg.context.projectKey, msg.context.cardRef)
-        : undefined;
+    const wt = chatWorktree(paths, msg.context);
     const readOnly = !!wt && existsSync(wt);
     const cwd = readOnly && wt ? wt : sandbox.scratch;
 
@@ -192,6 +191,7 @@ export class ChatManager {
     const env = {
       ...sandboxEnv(sandbox),
       AOM_IPC_URL: this.deps.ipc.url,
+      ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
       AOM_SHIFT_TOKEN: chat.token,
       AOM_SHIFT_ID: msg.chatId,
       PATH: `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
@@ -235,5 +235,21 @@ export class ChatManager {
       usage: chat.session.usage() ?? zeroUsage(),
       ...(sessionId ? { runtimeSessionId: sessionId } : {}),
     });
+  }
+}
+
+/**
+ * The card worktree a chat may read: the path the server knows for the card (old or new layout), else the default
+ * location. Either way it must lie inside this runner's `worktrees/` directory.
+ */
+function chatWorktree(paths: RunnerPaths, c: ChatContext): string | undefined {
+  const candidate =
+    c.cardWorktreePath ??
+    (c.projectKey && c.cardRef ? paths.worktreePath(c.projectKey, c.cardRef, c.projectId) : undefined);
+  if (!candidate) return undefined;
+  try {
+    return confine(paths.worktrees, candidate);
+  } catch {
+    return undefined;
   }
 }

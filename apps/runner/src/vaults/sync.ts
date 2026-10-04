@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { remoteUrlError } from '@aom/shared';
 import { currentBranch, git, gitOk } from '../git/git.ts';
 
 export interface VaultIdentity {
@@ -30,6 +31,11 @@ export const identityEnv = (id: VaultIdentity): Record<string, string> => ({
   GIT_COMMITTER_EMAIL: id.email,
 });
 
+/** `file://` and path remotes exist for the test suites only: `AOM_ALLOW_LOCAL_REMOTES=1`. */
+export const allowLocalRemotes = (): boolean => process.env.AOM_ALLOW_LOCAL_REMOTES === '1';
+
+const redactUrl = (u: string): string => u.replace(/\/\/[^/@\s]*@/, '//***@').slice(0, 200);
+
 export const isCloned = (dir: string): boolean => existsSync(join(dir, '.git'));
 
 /** `git clone <remote> <dir>` if the clone is missing. Returns true if it cloned. */
@@ -39,8 +45,12 @@ export async function ensureClone(
   env: Record<string, string>,
 ): Promise<boolean> {
   if (isCloned(dir)) return false;
+  // The URL comes from the vault owner via the server: only plain https/ssh remotes are cloned (never `ext::`, a
+  // leading `-`, or credentials), and `--` keeps it from ever being read as an option.
+  const bad = remoteUrlError(remoteUrl, allowLocalRemotes());
+  if (bad) throw new Error(`refusing to clone ${JSON.stringify(redactUrl(remoteUrl))}: ${bad}`);
   await mkdir(dirname(dir), { recursive: true });
-  const r = await git(dirname(dir), ['clone', remoteUrl, dir], { env });
+  const r = await git(dirname(dir), ['clone', '--', remoteUrl, dir], { env });
   if (r.exitCode !== 0) throw new Error(`git clone failed: ${r.stderr.trim() || r.stdout.trim()}`);
   return true;
 }

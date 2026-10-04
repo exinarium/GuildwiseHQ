@@ -1,4 +1,4 @@
-import type { EventOf } from '@aom/shared';
+import { type EventOf, scrubRemoteUrl } from '@aom/shared';
 import { exec } from '../db/sql.ts';
 import type { Projector } from '../eventstore/types.ts';
 
@@ -9,7 +9,16 @@ export const vaultProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO vaults (id, org_id, project_id, kind, name, remote_url, sync_interval_sec, created_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [p.vaultId, p.orgId, p.projectId ?? null, p.kind, p.name, p.remoteUrl, p.syncIntervalSec, e.createdAt],
+      [
+        p.vaultId,
+        p.orgId,
+        p.projectId ?? null,
+        p.kind,
+        p.name,
+        scrubRemoteUrl(p.remoteUrl),
+        p.syncIntervalSec,
+        e.createdAt,
+      ],
     );
   },
   VaultUpdated: async (tx, e) => {
@@ -17,7 +26,7 @@ export const vaultProjectors: Record<string, Projector> = {
     await exec(tx, `UPDATE vaults SET name=$2, remote_url=$3, sync_interval_sec=$4 WHERE id=$1`, [
       p.vaultId,
       p.name,
-      p.remoteUrl,
+      scrubRemoteUrl(p.remoteUrl),
       p.syncIntervalSec,
     ]);
   },

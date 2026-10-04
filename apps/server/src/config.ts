@@ -20,6 +20,7 @@ const EnvSchema = z.object({
   AOM_WEB_DIST: z.string().optional(),
   AOM_RATE_LIMIT: bool(true),
   AOM_TEST_CLOCK: bool(false),
+  AOM_ALLOW_LOCAL_REMOTES: bool(false),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -35,6 +36,8 @@ export interface Config {
   webDist: string | undefined;
   rateLimit: boolean;
   testClock: boolean;
+  /** Accept `file://` and absolute-path git remotes (tests and the e2e harness only). */
+  allowLocalRemotes: boolean;
   logLevel: string;
   /** Cookie `Secure` flag: true when the public origin is https. */
   secureCookies: boolean;
@@ -55,6 +58,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     webDist: e.AOM_WEB_DIST,
     rateLimit: e.AOM_RATE_LIMIT,
     testClock: e.AOM_TEST_CLOCK,
+    allowLocalRemotes: e.AOM_ALLOW_LOCAL_REMOTES,
     logLevel: e.LOG_LEVEL,
     secureCookies: publicOrigin.startsWith('https://'),
   };

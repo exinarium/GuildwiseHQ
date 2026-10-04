@@ -6,7 +6,7 @@ import type { PrCreator } from '../src/git/gh.ts';
 import { ensureWorktree } from '../src/git/worktrees.ts';
 import { defaultEnvChecker } from '../src/testing/environment.ts';
 import { makeShiftStart } from './fixtures.ts';
-import { type Harness, startHarness } from './harness.ts';
+import { type Harness, startHarness, worktreeOf } from './harness.ts';
 import { cleanupTmp, sh, tmp, waitUntil } from './helpers.ts';
 import { ScriptedAdapter } from './scripted-adapter.ts';
 
@@ -170,9 +170,10 @@ describe('finalize.execute command', () => {
     ...over,
   });
   async function cardBranch(file = 'thing.txt') {
-    const path = join(h!.dataDir, 'worktrees', 'TOY', 'TOY-1');
+    const path = worktreeOf(h!);
     await ensureWorktree({
       repoPath: h!.repo.clone,
+      roots: ['/'],
       spec: {
         mode: 'create',
         repoId: uuidv7(),
@@ -203,12 +204,7 @@ describe('finalize.execute command', () => {
     expect((res.result as any).mergeCommit).toBe(sh(h!.repo.origin, 'git', ['rev-parse', 'main']));
 
     const path2 = await (async () => {
-      sh(h!.repo.clone, 'git', [
-        'worktree',
-        'remove',
-        '--force',
-        join(h!.dataDir, 'worktrees', 'TOY', 'TOY-1'),
-      ]);
+      sh(h!.repo.clone, 'git', ['worktree', 'remove', '--force', worktreeOf(h!)]);
       sh(h!.repo.clone, 'git', ['branch', '-D', 'aom/toy-1-add-thing']);
       return cardBranch('second.txt');
     })();

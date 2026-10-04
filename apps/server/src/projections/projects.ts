@@ -1,4 +1,4 @@
-import type { EventOf } from '@aom/shared';
+import { type EventOf, scrubRemoteUrl } from '@aom/shared';
 import { exec } from '../db/sql.ts';
 import type { Projector } from '../eventstore/types.ts';
 
@@ -66,7 +66,14 @@ export const projectProjectors: Record<string, Projector> = {
        ON CONFLICT (project_id, remote_url_normalized) DO UPDATE
          SET removed_at = NULL, name = EXCLUDED.name, remote_url = EXCLUDED.remote_url,
              working_branch = EXCLUDED.working_branch`,
-      [p.repoId, p.projectId, p.name, p.remoteUrl, p.remoteUrlNormalized, p.workingBranch ?? null],
+      [
+        p.repoId,
+        p.projectId,
+        p.name,
+        scrubRemoteUrl(p.remoteUrl),
+        p.remoteUrlNormalized,
+        p.workingBranch ?? null,
+      ],
     );
   },
   ProjectRepoRemoved: async (tx, e) => {

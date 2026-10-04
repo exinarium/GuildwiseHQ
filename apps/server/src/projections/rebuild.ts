@@ -24,9 +24,13 @@ const SAVED: Array<{ table: string; restoreWhere: string }> = [
 /**
  * Truncates every projection table and replays all events in seq order (batches of 1000) inside one transaction
  * (docs/ARCHITECTURE.md section 3.3). Operational data (sessions, pairing codes, runner command queue, presence,
- * heartbeats, shift progress) is preserved; leases are recomputed as `claimed_at + 1h` by the projector.
+ * heartbeats, shift progress) is preserved; live leases are carried over (a claim unknown before the rebuild gets `now + 1h`).
  */
-export async function rebuildProjections(pool: Pool, store: PgEventStore): Promise<{ events: number }> {
+export async function rebuildProjections(
+  pool: Pool,
+  store: PgEventStore,
+  now: Date = new Date(),
+): Promise<{ events: number }> {
   return withTx(pool, async (tx) => {
     await tx.query('SELECT pg_advisory_xact_lock(7311)'); // no appends while rebuilding
     for (const s of SAVED)
@@ -35,6 +39,12 @@ export async function rebuildProjections(pool: Pool, store: PgEventStore): Promi
     await exec(
       tx,
       'CREATE TEMP TABLE _save_ws ON COMMIT DROP AS SELECT id, connected, last_seen_at, runtimes, hostname, platform, runner_version FROM workstations',
+    );
+    // Live claims keep the lease the heartbeats extended: replay alone would reset it to `claimed_at + 1h`, which
+    // for a long shift is already in the past and would make the reaper release a claim that is still working.
+    await exec(
+      tx,
+      'CREATE TEMP TABLE _save_leases ON COMMIT DROP AS SELECT id, claim_id, lease_expires_at FROM cards WHERE claim_id IS NOT NULL',
     );
     await exec(
       tx,
@@ -68,6 +78,20 @@ export async function rebuildProjections(pool: Pool, store: PgEventStore): Promi
     await exec(
       tx,
       `UPDATE shifts x SET progress_tail = s.progress_tail, accepted_at = s.accepted_at FROM _save_shifts s WHERE x.id = s.id`,
+    );
+    await exec(
+      tx,
+      `UPDATE cards c SET lease_expires_at = s.lease_expires_at
+         FROM _save_leases s WHERE c.id = s.id AND c.claim_id = s.claim_id`,
+    );
+    // A claim the saved copy does not know (made between the copy and the replay cannot happen under the lock;
+    // this covers events appended by an older version): a fresh lease rather than an already-expired one.
+    await exec(
+      tx,
+      `UPDATE cards SET lease_expires_at = $1
+        WHERE claim_id IS NOT NULL AND (lease_expires_at IS NULL OR lease_expires_at < $1)
+          AND id NOT IN (SELECT id FROM _save_leases)`,
+      [new Date(now.getTime() + 3600_000)],
     );
     return { events: count };
   });

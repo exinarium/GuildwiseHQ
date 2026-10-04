@@ -7,7 +7,7 @@ export function CardTile({ card, now }: { card: BoardCard; now?: number }) {
   return (
     <li>
       <Link
-        to={`/cards/${card.ref}`}
+        to={`/cards/${card.id}`}
         data-testid={`card-tile-${card.ref}`}
         aria-label={`${card.ref} ${card.title}`}
         className="block rounded-md border border-zinc-200 bg-white p-2 text-sm shadow-sm hover:border-indigo-500 dark:border-zinc-800 dark:bg-zinc-900"
@@ -51,7 +51,7 @@ export function CardTile({ card, now }: { card: BoardCard; now?: number }) {
       </Link>
       {card.status === 'waiting' && card.waitingOn && (
         <Link
-          to={`/cards/${card.waitingOn.ref}`}
+          to={`/cards/${card.waitingOn.id}`}
           data-testid={`waiting-on-link-${card.waitingOn.ref}`}
           className="mt-0.5 ml-2 inline-block text-xs underline"
         >

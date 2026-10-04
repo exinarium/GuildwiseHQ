@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { VaultKind } from '../events/vault.ts';
+import { RemoteUrlSchema } from '../safe.ts';
 import { IsoTime } from './common.ts';
 
 /** Per-workstation sync state of a vault (reported by the runner with `vault.status`; the viewer's own workstations). */
@@ -37,7 +38,7 @@ export const RegisterVaultRequestSchema = z
   .object({
     kind: VaultKind,
     name: z.string().min(1).max(120).optional(),
-    remoteUrl: z.string().min(1),
+    remoteUrl: RemoteUrlSchema,
     projectId: z.uuid().optional(),
     syncIntervalSec: z.number().int().min(1).max(86_400).default(300),
   })
@@ -50,7 +51,7 @@ export type RegisterVaultRequest = z.infer<typeof RegisterVaultRequestSchema>;
 export const PatchVaultRequestSchema = z
   .object({
     name: z.string().min(1).max(120),
-    remoteUrl: z.string().min(1),
+    remoteUrl: RemoteUrlSchema,
     syncIntervalSec: z.number().int().min(1).max(86_400),
   })
   .partial();

@@ -32,6 +32,8 @@ export const FinalizeExecutePayloadSchema = z.object({
   ref: z.string(),
   title: z.string(),
   projectKey: z.string(),
+  /** Keeps worktree directories of same-keyed projects (other organizations) apart; absent in old commands. */
+  projectId: z.uuid().optional(),
   action: CompletionAction,
   repoId: z.uuid(),
   remoteUrlNormalized: z.string(),

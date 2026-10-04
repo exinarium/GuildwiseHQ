@@ -39,7 +39,7 @@ export function RegressionDialog({ projectId }: { projectId: string }) {
               {run.data.cards.map((c) => (
                 <li key={c.id}>
                   Created{' '}
-                  <Link to={`/cards/${c.ref}`} className="font-medium underline">
+                  <Link to={`/cards/${c.id}`} className="font-medium underline">
                     {c.ref}
                   </Link>{' '}
                   ({c.platform})

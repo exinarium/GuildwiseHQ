@@ -62,23 +62,38 @@ describe('registering vaults', () => {
     expect(work.body.workstations).toEqual([
       expect.objectContaining({ workstationId: w.workstationId, localPath: null, paused: false }),
     ]);
-    expect((await owner().post('/api/vaults', { kind: 'work', remoteUrl: 'x' })).body.error.code).toBe(
-      'vault_exists',
-    );
+    expect(
+      (await owner().post('/api/vaults', { kind: 'work', remoteUrl: 'git@example.test:x.git' })).body.error
+        .code,
+    ).toBe('vault_exists');
     const personal = await owner().post('/api/vaults', {
       kind: 'personal',
-      remoteUrl: '/srv/personal.git',
+      remoteUrl: 'git@example.test:srv/personal.git',
       syncIntervalSec: 60,
     });
     expect(personal.status).toBe(201);
     expect(personal.body.syncIntervalSec).toBe(60);
     // validation
-    expect((await owner().post('/api/vaults', { kind: 'project', remoteUrl: 'x' })).status).toBe(400);
     expect(
-      (await owner().post('/api/vaults', { kind: 'work', remoteUrl: 'x', projectId: w.projectId })).status,
+      (await owner().post('/api/vaults', { kind: 'project', remoteUrl: 'git@example.test:x.git' })).status,
     ).toBe(400);
     expect(
-      (await owner().post('/api/vaults', { kind: 'personal', remoteUrl: 'y', syncIntervalSec: 0 })).status,
+      (
+        await owner().post('/api/vaults', {
+          kind: 'work',
+          remoteUrl: 'git@example.test:x.git',
+          projectId: w.projectId,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await owner().post('/api/vaults', {
+          kind: 'personal',
+          remoteUrl: 'git@example.test:y.git',
+          syncIntervalSec: 0,
+        })
+      ).status,
     ).toBe(400);
   });
 
@@ -88,15 +103,18 @@ describe('registering vaults', () => {
     const list = (await owner().get('/api/vaults')).body.vaults;
     expect(list.map((v: any) => v.kind)).toEqual(['personal', 'work']);
     const work = list.find((v: any) => v.kind === 'work');
-    expect((await as(other.cookie).patch(`/api/vaults/${work.id}`, { remoteUrl: 'evil' })).status).toBe(404);
+    expect(
+      (await as(other.cookie).patch(`/api/vaults/${work.id}`, { remoteUrl: 'git@example.test:evil.git' }))
+        .status,
+    ).toBe(404);
     const patched = await owner().patch(`/api/vaults/${work.id}`, {
-      remoteUrl: '/srv/work.git',
+      remoteUrl: 'git@example.test:srv/work.git',
       syncIntervalSec: 120,
       name: 'Work notes',
     });
     expect(patched.status).toBe(200);
     expect(patched.body).toMatchObject({
-      remoteUrl: '/srv/work.git',
+      remoteUrl: 'git@example.test:srv/work.git',
       syncIntervalSec: 120,
       name: 'Work notes',
     });
@@ -108,7 +126,8 @@ describe('registering vaults', () => {
   it('the runner gets the full vault set (replace semantics) with the DevOps identity, also after changes', async () => {
     const p = await configured(
       r,
-      (c) => c.vaults.length === 2 && c.vaults.some((v: any) => v.remoteUrl === '/srv/work.git'),
+      (c) =>
+        c.vaults.length === 2 && c.vaults.some((v: any) => v.remoteUrl === 'git@example.test:srv/work.git'),
     );
     expect(p.identity).toEqual({
       name: expect.stringMatching(/ \(aom\)$/),
@@ -275,30 +294,43 @@ describe('project vaults and shared projects', () => {
     const noVault = await configured(mr, () => true);
     expect(noVault.vaults).toEqual([]); // the owner's work and personal vaults never reach a member
     expect(
-      (await as(m.cookie).post('/api/vaults', { kind: 'project', projectId: w.projectId, remoteUrl: 'x' }))
-        .status,
+      (
+        await as(m.cookie).post('/api/vaults', {
+          kind: 'project',
+          projectId: w.projectId,
+          remoteUrl: 'git@example.test:x.git',
+        })
+      ).status,
     ).toBe(403);
     const pv = await owner().post('/api/vaults', {
       kind: 'project',
       projectId: w.projectId,
-      remoteUrl: '/srv/toy-vault.git',
+      remoteUrl: 'git@example.test:srv/toy-vault.git',
       name: 'Toy knowledge',
     });
     expect(pv.status).toBe(201);
     expect(pv.body).toMatchObject({ kind: 'project', projectId: w.projectId, canEdit: true });
     expect(
-      (await owner().post('/api/vaults', { kind: 'project', projectId: w.projectId, remoteUrl: 'y' })).body
-        .error.code,
+      (
+        await owner().post('/api/vaults', {
+          kind: 'project',
+          projectId: w.projectId,
+          remoteUrl: 'git@example.test:y.git',
+        })
+      ).body.error.code,
     ).toBe('vault_exists');
     const mine = (await as(m.cookie).get('/api/vaults')).body.vaults;
     expect(mine).toHaveLength(1);
     expect(mine[0]).toMatchObject({ kind: 'project', name: 'Toy knowledge', canEdit: false });
-    expect((await as(m.cookie).patch(`/api/vaults/${pv.body.id}`, { remoteUrl: 'evil' })).status).toBe(403);
+    expect(
+      (await as(m.cookie).patch(`/api/vaults/${pv.body.id}`, { remoteUrl: 'git@example.test:evil.git' }))
+        .status,
+    ).toBe(403);
     const cfg = await configured(mr, (c) => c.vaults.length === 1);
     expect(cfg.vaults[0]).toMatchObject({
       vaultId: pv.body.id,
       kind: 'project',
-      remoteUrl: '/srv/toy-vault.git',
+      remoteUrl: 'git@example.test:srv/toy-vault.git',
       projectId: w.projectId,
     });
     // the owner's runner syncs all three
@@ -411,7 +443,11 @@ describe('a card shift sees only its domain vault', () => {
 
   it("a project vault wins over the owner's domain vault", async () => {
     const pv = await ok<any>(
-      owner().post('/api/vaults', { kind: 'project', projectId: w.projectId, remoteUrl: '/srv/pv.git' }),
+      owner().post('/api/vaults', {
+        kind: 'project',
+        projectId: w.projectId,
+        remoteUrl: 'git@example.test:srv/pv.git',
+      }),
       201,
     );
     await q(`UPDATE cards SET status='cancelled' WHERE project_id=$1 AND status IN ('queued','claimed')`, [

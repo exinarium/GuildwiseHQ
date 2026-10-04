@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type VaultWriteCommand, VaultWriteCommandSchema } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
@@ -185,5 +185,27 @@ describe('VaultManager.write: committed and pushed', () => {
     const { m } = setup();
     await expect(m.write(cmd({ vaultId: 'nope' }))).rejects.toThrow(/not configured/);
     m.stop();
+  });
+});
+
+describe('vault writes refuse symlinks (review low)', () => {
+  it('does not write through a symlinked directory inside the clone', async () => {
+    const v = await clone();
+    const outside = join(tmp(), 'outside');
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, join(v.mine, 'docs'));
+    await expect(writeVaultFile(v.mine, cmd({ path: 'docs/evil.md' }), IDENTITY)).rejects.toThrow(/symlink/);
+    expect(existsSync(join(outside, 'evil.md'))).toBe(false);
+  });
+
+  it('does not overwrite a symlinked file', async () => {
+    const v = await clone();
+    const target = join(tmp(), 'target.md');
+    writeFileSync(target, 'precious');
+    symlinkSync(target, join(v.mine, 'note.md'));
+    await expect(
+      writeVaultFile(v.mine, cmd({ path: 'note.md', mode: 'replace', content: 'x' }), IDENTITY),
+    ).rejects.toThrow(/symlink/);
+    expect(readFileSync(target, 'utf8')).toBe('precious');
   });
 });

@@ -3,8 +3,11 @@ import { VaultKind } from '../events/vault.ts';
 import { slugify } from '../ids.ts';
 
 /** `vault.configure`: the full set of vaults one workstation syncs (replace semantics) plus resume requests. */
+/** Vault ids name a directory on the runner: plain ids only. */
+export const VaultIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/, 'invalid vault id');
+
 export const VaultConfigSchema = z.object({
-  vaultId: z.string().min(1),
+  vaultId: VaultIdSchema,
   kind: VaultKind,
   projectId: z.string().optional(),
   name: z.string(),
@@ -25,7 +28,7 @@ export type VaultConfigureCommand = z.infer<typeof VaultConfigureCommandSchema>;
 
 /** `vault.write` (docs/ARCHITECTURE.md section 16.4). Idempotent: identical content is success. */
 export const VaultWriteCommandSchema = z.object({
-  vaultId: z.string().min(1),
+  vaultId: VaultIdSchema,
   /** Vault-relative, forward slashes, no `..`. */
   path: z.string().min(1),
   mode: z.enum(['create', 'append', 'replace']),

@@ -6,6 +6,7 @@ import {
   VaultConfigureCommandSchema,
   type VaultWriteCommand,
 } from '@aom/shared';
+import { confine } from '../fs-safe.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { ensureClone, identityEnv, isClean, isCloned, syncVault, type VaultSyncResult } from './sync.ts';
@@ -62,7 +63,7 @@ export class VaultManager {
   }
 
   dir(vaultId: string): string {
-    return join(this.opts.paths.vaults, vaultId);
+    return confine(this.opts.paths.vaults, join(this.opts.paths.vaults, vaultId));
   }
 
   /** Starts the sync timers for the persisted configuration (before the server connection exists). */

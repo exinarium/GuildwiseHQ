@@ -15,6 +15,7 @@ async function setup(roleKey: string) {
   const path = join(tmp(), 'wt');
   const w = await ensureWorktree({
     repoPath: repo.clone,
+    roots: ['/'],
     spec: {
       mode: 'create',
       repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
@@ -80,6 +81,7 @@ describe('tester guard: E2E globs only', () => {
     const path = join(tmp(), 'wt');
     const w = await ensureWorktree({
       repoPath: repo.clone,
+      roots: ['/'],
       spec: {
         mode: 'create',
         repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',

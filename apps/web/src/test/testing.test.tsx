@@ -65,7 +65,7 @@ describe('board waiting state', () => {
     };
     wrap(<BoardView board={board} />);
     expect(screen.getByTestId('waiting-badge').textContent).toBe('waiting on bug');
-    expect(screen.getByTestId('waiting-on-link-TOY-3').getAttribute('href')).toBe('/cards/TOY-3');
+    expect(screen.getByTestId('waiting-on-link-TOY-3').getAttribute('href')).toBe(`/cards/${ID(3)}`);
     expect(screen.getByTestId('suite-badge').textContent).toBe('regression');
   });
 });

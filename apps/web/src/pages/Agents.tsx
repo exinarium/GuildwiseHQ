@@ -228,13 +228,13 @@ function AgentCard({
         {a.activeCards.length === 0
           ? hr.blockedOn.length
             ? hr.blockedOn.map((c) => (
-                <Link key={c.cardId} to={`/cards/${c.ref}`} className="underline">
+                <Link key={c.cardId} to={`/cards/${c.cardId}`} className="underline">
                   {c.ref} {c.title} (blocked)
                 </Link>
               ))
             : 'No current card'
           : a.activeCards.map((c) => (
-              <Link key={c.cardId} to={`/cards/${c.ref}`} className="underline">
+              <Link key={c.cardId} to={`/cards/${c.cardId}`} className="underline">
                 {c.ref} {c.title}
               </Link>
             ))}

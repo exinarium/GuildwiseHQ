@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Runner, type RunnerOptions } from '../src/runner.ts';
 import { FakeServer, type FakeServerOptions } from './fake-server.ts';
@@ -46,4 +47,9 @@ export async function startHarness(
   };
 }
 
-export const worktreeOf = (h: Harness, key = 'TOY', ref = 'TOY-1') => join(h.dataDir, 'worktrees', key, ref);
+/** The card's worktree: `worktrees/<KEY>-<project>/<REF>` (the project id keeps same-keyed projects apart). */
+export const worktreeOf = (h: Harness, key = 'TOY', ref = 'TOY-1'): string => {
+  const root = join(h.dataDir, 'worktrees');
+  const dir = existsSync(root) ? readdirSync(root).find((d) => d.startsWith(`${key}-`)) : undefined;
+  return join(root, dir ?? key, ref);
+};

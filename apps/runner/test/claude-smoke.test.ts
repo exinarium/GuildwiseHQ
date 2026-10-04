@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ClaudeCodeAdapter } from '../src/adapters/claude-code.ts';
 import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
-import { startHarness } from './harness.ts';
+import { startHarness, worktreeOf } from './harness.ts';
 import { cleanupTmp } from './helpers.ts';
 
 cleanupTmp();
@@ -44,7 +44,7 @@ describe.skipIf(!enabled)('claude smoke (real Claude Code shift)', () => {
         const ended = await h.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId, 10 * 60_000);
         expect(ended.outcome).toBe('reported');
         expect(h.server.of('shift.report').some((r) => r.shiftId === msg.shiftId)).toBe(true);
-        expect(existsSync(join(h.dataDir, 'worktrees', 'TOY', 'TOY-1', 'hello.txt'))).toBe(true);
+        expect(existsSync(join(worktreeOf(h), 'hello.txt'))).toBe(true);
       } finally {
         await h.stop();
       }

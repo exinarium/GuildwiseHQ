@@ -29,7 +29,7 @@ describe('rebase step before test and finalize (section 13.6)', () => {
   it('rebases the card branch onto the fetched working branch', async () => {
     const repo = makeRepo();
     const path = join(tmp(), 'wt');
-    await ensureWorktree({ repoPath: repo.clone, spec, defaultPath: path });
+    await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec, defaultPath: path });
     writeFileSync(join(path, 'mine.txt'), 'mine');
     sh(path, 'git', ['add', '-A']);
     sh(path, 'git', ['commit', '-m', 'mine']);
@@ -43,7 +43,7 @@ describe('rebase step before test and finalize (section 13.6)', () => {
   it('a changed working branch that conflicts: lists the files, aborts, leaves no half-done rebase', async () => {
     const repo = makeRepo();
     const path = join(tmp(), 'wt');
-    await ensureWorktree({ repoPath: repo.clone, spec, defaultPath: path });
+    await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec, defaultPath: path });
     writeFileSync(join(path, 'README.md'), '# mine\n');
     writeFileSync(join(path, 'ok.txt'), 'fine');
     sh(path, 'git', ['add', '-A']);
@@ -67,7 +67,7 @@ describe('rebase step before test and finalize (section 13.6)', () => {
     const repo = makeRepo();
     sh(repo.clone, 'git', ['remote', 'remove', 'origin']);
     const path = join(tmp(), 'wt');
-    await ensureWorktree({ repoPath: repo.clone, spec, defaultPath: path });
+    await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec, defaultPath: path });
     writeFileSync(join(path, 'a.txt'), 'a');
     sh(path, 'git', ['add', '-A']);
     sh(path, 'git', ['commit', '-m', 'a']);

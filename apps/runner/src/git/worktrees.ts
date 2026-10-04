@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { WorktreeSpec } from '@aom/shared';
+import { isSafeGitRef } from '@aom/shared';
+import { confineAny } from '../fs-safe.ts';
 import { currentBranch, git, gitOk, hasRemote, revParse } from './git.ts';
 
 export class WorktreeError extends Error {}
@@ -17,8 +19,13 @@ export interface WorktreeResult {
 export interface EnsureWorktreeInput {
   repoPath: string;
   spec: WorktreeSpec;
-  /** Default location `<dataDir>/worktrees/<KEY>/<REF>`; `spec.path` wins for `reuse`. */
+  /** Default location `<dataDir>/worktrees/<KEY>-<project>/<REF>`; `spec.path` wins for `reuse`. */
   defaultPath: string;
+  /**
+   * Directories a worktree may live in (the runner's `worktrees/`; `integration/` for merges). Every path is
+   * confined to them, whatever the server sent; nothing outside is created or deleted.
+   */
+  roots: string[];
 }
 
 async function branchExists(repo: string, branch: string): Promise<boolean> {
@@ -37,13 +44,21 @@ async function isWorktreeOn(path: string, branch: string): Promise<boolean> {
  */
 export async function ensureWorktree(input: EnsureWorktreeInput): Promise<WorktreeResult> {
   const { repoPath, spec } = input;
-  const path = spec.mode === 'reuse' && spec.path ? spec.path : input.defaultPath;
   const branch = spec.branchName;
   const base = spec.baseBranch;
 
   const fail = (m: string): never => {
     throw new WorktreeError(m);
   };
+  // Refs come from the server (owner-controlled): never let one parse as an option or escape ref syntax.
+  if (!isSafeGitRef(branch)) fail(`refusing unsafe branch name ${JSON.stringify(branch)}`);
+  if (!isSafeGitRef(base)) fail(`refusing unsafe base branch ${JSON.stringify(base)}`);
+  let path: string;
+  try {
+    path = confineAny(input.roots, spec.mode === 'reuse' && spec.path ? spec.path : input.defaultPath);
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err));
+  }
 
   await git(repoPath, ['worktree', 'prune']);
 
@@ -68,7 +83,7 @@ export async function ensureWorktree(input: EnsureWorktreeInput): Promise<Worktr
   await mkdir(dirname(path), { recursive: true });
 
   if (await branchExists(repoPath, branch)) {
-    const r = await git(repoPath, ['worktree', 'add', path, branch]);
+    const r = await git(repoPath, ['worktree', 'add', '--', path, branch]);
     if (r.exitCode !== 0) fail(`git worktree add ${branch} failed: ${r.stderr.trim()}`);
     return result(false);
   }
@@ -77,13 +92,13 @@ export async function ensureWorktree(input: EnsureWorktreeInput): Promise<Worktr
 
   let startPoint = base;
   if (await hasRemote(repoPath)) {
-    const f = await git(repoPath, ['fetch', 'origin', base]);
+    const f = await git(repoPath, ['fetch', '--', 'origin', base]);
     if (f.exitCode === 0 || (await revParse(repoPath, `refs/remotes/origin/${base}`))) {
       if (await revParse(repoPath, `refs/remotes/origin/${base}`)) startPoint = `origin/${base}`;
     }
   }
   if (!(await revParse(repoPath, startPoint))) fail(`Base branch ${base} not found in ${repoPath}`);
-  const r = await git(repoPath, ['worktree', 'add', '-b', branch, path, startPoint]);
+  const r = await git(repoPath, ['worktree', 'add', '-b', branch, '--', path, startPoint]);
   if (r.exitCode !== 0) fail(`git worktree add -b ${branch} failed: ${r.stderr.trim()}`);
   return result(true);
 }
@@ -93,26 +108,31 @@ export async function removeWorktree(input: {
   path: string;
   branchName?: string;
   deleteBranch?: boolean;
+  /** See `EnsureWorktreeInput.roots`; a path outside them is refused, never deleted. */
+  roots: string[];
 }): Promise<{ removed: boolean; branchDeleted: boolean }> {
+  const path = confineAny(input.roots, input.path);
+  if (input.branchName !== undefined && !isSafeGitRef(input.branchName))
+    throw new WorktreeError(`refusing unsafe branch name ${JSON.stringify(input.branchName)}`);
   let repo: string | null = null;
-  if (existsSync(input.path)) {
-    const r = await git(input.path, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (existsSync(path)) {
+    const r = await git(path, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
     if (r.exitCode === 0) {
       const common = r.stdout.trim();
       repo = /[\\/]\.git$/.test(common) ? common.slice(0, -5) : common;
     }
   }
   let removed = false;
-  if (existsSync(input.path)) {
-    if (repo) await git(repo, ['worktree', 'remove', '--force', input.path]);
-    if (existsSync(input.path)) await rm(input.path, { recursive: true, force: true });
+  if (existsSync(path)) {
+    if (repo) await git(repo, ['worktree', 'remove', '--force', '--', path]);
+    if (existsSync(path)) await rm(path, { recursive: true, force: true });
     removed = true;
   }
   let branchDeleted = false;
   if (repo) {
     await git(repo, ['worktree', 'prune']);
     if (input.deleteBranch && input.branchName) {
-      branchDeleted = (await git(repo, ['branch', '-D', input.branchName])).exitCode === 0;
+      branchDeleted = (await git(repo, ['branch', '-D', '--', input.branchName])).exitCode === 0;
     }
   }
   return { removed, branchDeleted };

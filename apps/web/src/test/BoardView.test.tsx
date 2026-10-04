@@ -99,7 +99,10 @@ describe('Board columns follow columnFor', () => {
     expect(within(tile).getByText('3h')).toBeInTheDocument();
     expect(within(screen.getByTestId('card-tile-TOY-3')).getByText('Rework 2')).toBeInTheDocument();
     expect(within(screen.getByTestId('card-tile-TOY-5')).getByText('Blocked')).toBeInTheDocument();
-    expect(screen.getByTestId('card-tile-TOY-1')).toHaveAttribute('href', '/cards/TOY-1');
+    expect(screen.getByTestId('card-tile-TOY-1')).toHaveAttribute(
+      'href',
+      '/cards/0192f3a0-0000-7000-8000-000000000100', // by card id: refs are only unique per organization
+    );
   });
 
   it('shows the column count', () => {

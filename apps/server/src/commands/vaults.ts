@@ -17,7 +17,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { orgScope, projectScope, userActor } from './common.ts';
+import { assertRemoteUrl, orgScope, projectScope, userActor } from './common.ts';
 
 const vaultScope = (v: Row) => (v.project_id ? projectScope(v.org_id, v.project_id) : orgScope(v.org_id));
 
@@ -94,6 +94,7 @@ export async function registerVault(
     ) {
       throw conflict('vault_exists', `you already registered a ${req.kind} vault; edit it instead`);
     }
+    assertRemoteUrl(ctx, req.remoteUrl.trim());
     const payload = {
       vaultId,
       orgId,
@@ -153,6 +154,7 @@ export async function updateVault(
   await withAppendTx(ctx.pool, async (tx) => {
     const v = await editableVault(tx, user, vaultId);
     if (Object.keys(changes).length === 0) return;
+    if (changes.remoteUrl !== undefined) assertRemoteUrl(ctx, changes.remoteUrl.trim());
     await ctx.store.append(
       [
         {

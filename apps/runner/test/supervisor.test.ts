@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { extractFallbackReport } from '../src/shifts/supervisor.ts';
 import { makeShiftStart } from './fixtures.ts';
-import { type Harness, startHarness } from './harness.ts';
+import { type Harness, startHarness, worktreeOf } from './harness.ts';
 import { cleanupTmp, sh, waitUntil } from './helpers.ts';
 import { ScriptedAdapter } from './scripted-adapter.ts';
 
@@ -285,7 +285,7 @@ describe('supervisor', () => {
     const ended = await h!.server.waitFor('shift.ended');
     expect(ended.outcome).toBe('stopped');
     expect(h!.runner.outbox.list().some((e) => e.type === 'shift.report')).toBe(false);
-    expect(existsSync(join(h!.dataDir, 'worktrees', 'TOY', 'TOY-1'))).toBe(true);
+    expect(existsSync(worktreeOf(h!))).toBe(true);
   });
 
   it('resumes a persisted shift after a runner restart without re-sending shift.accepted/started', async () => {
@@ -309,7 +309,7 @@ describe('supervisor', () => {
     await start(async () => undefined);
     await h!.runShift({ stage: 'build' });
     const spec = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized }) as any;
-    const wtPath = join(h!.dataDir, 'worktrees', 'TOY', 'TOY-1');
+    const wtPath = worktreeOf(h!);
     h!.server.send('command', {
       commandId: 'c1',
       command: 'worktree.remove',

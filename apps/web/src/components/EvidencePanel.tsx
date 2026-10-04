@@ -74,7 +74,7 @@ export function TestingLinks({ testing, status }: { testing: Testing; status: st
         <p data-testid="waiting-line">
           Waiting on{' '}
           {waitingOn ? (
-            <Link to={`/cards/${waitingOn.ref}`} className="font-medium underline">
+            <Link to={`/cards/${waitingOn.id}`} className="font-medium underline">
               {waitingOn.ref}
             </Link>
           ) : (
@@ -106,7 +106,7 @@ export function TestingLinks({ testing, status }: { testing: Testing; status: st
           {children.map((c) => (
             <li key={c.id}>
               <Link
-                to={`/cards/${c.ref}`}
+                to={`/cards/${c.id}`}
                 data-testid={`child-card-link-${c.ref}`}
                 className="font-medium underline"
               >

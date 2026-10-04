@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { isSafeVaultPath, type VaultWriteCommand } from '@aom/shared';
@@ -25,6 +25,7 @@ export async function writeVaultFile(
 ): Promise<VaultWriteResult> {
   if (!isSafeVaultPath(cmd.path)) throw new VaultWriteError(`unsafe vault path: ${cmd.path}`);
   const file = join(dir, ...cmd.path.split('/'));
+  refuseSymlinks(dir, cmd.path);
   const exists = existsSync(file);
   const current = exists ? await readFile(file, 'utf8') : '';
   let next: string;
@@ -57,4 +58,19 @@ export async function writeVaultFile(
     env,
   });
   return { written: true, committed: true };
+}
+
+/** Refuses a path that runs through a symlink (a vault committed with `docs -> /etc` must not redirect a write). */
+function refuseSymlinks(root: string, path: string): void {
+  let cur = root;
+  for (const part of path.split('/')) {
+    cur = join(cur, part);
+    let st: ReturnType<typeof lstatSync>;
+    try {
+      st = lstatSync(cur);
+    } catch {
+      return; // the rest does not exist yet: it will be created as plain directories
+    }
+    if (st.isSymbolicLink()) throw new VaultWriteError(`refusing to write through a symlink: ${path}`);
+  }
 }

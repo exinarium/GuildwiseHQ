@@ -13,7 +13,7 @@ import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
-import { projectScope, userActor } from './common.ts';
+import { assertRemoteUrl, projectScope, userActor } from './common.ts';
 
 export async function createProject(
   ctx: Ctx,
@@ -81,6 +81,7 @@ export async function addRepo(
   projectId: string,
   input: AddRepoRequest,
 ): Promise<string> {
+  assertRemoteUrl(ctx, input.remoteUrl);
   const normalized = normalizeRemoteUrl(input.remoteUrl);
   if (!normalized.includes('/'))
     throw badRequest('invalid_remote_url', 'remote URL must include a host and a path');
