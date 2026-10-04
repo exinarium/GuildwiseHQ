@@ -11,7 +11,9 @@ export default defineConfig({
   noExternal: [/^@aom\//],
   outExtension: () => ({ js: '.mjs' }),
   // `yaml` (a dependency of @aom/shared, bundled in) is CommonJS and calls `require`: give the ESM bundle one.
-  banner: { js: "import { createRequire as __aomCreateRequire } from 'node:module'; const require = __aomCreateRequire(import.meta.url);" },
+  banner: {
+    js: "import { createRequire as __aomCreateRequire } from 'node:module'; const require = __aomCreateRequire(import.meta.url);",
+  },
   clean: true,
   sourcemap: true,
 });
