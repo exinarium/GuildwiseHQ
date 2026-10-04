@@ -1,7 +1,11 @@
 import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { buildClaudeCommand, sessionEnv } from '../src/adapters/claude-code.ts';
-import { buildShiftSettings } from '../src/adapters/claude-policy.ts';
+import {
+  buildShiftSettings,
+  SESSION_TOOLS_DENIED,
+  toolchainReadPaths,
+} from '../src/adapters/claude-policy.ts';
 import type { ShiftStartInput } from '../src/adapters/types.ts';
 import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
 import { type Sandbox, sandboxEnv } from '../src/sandbox/sandbox.ts';
@@ -208,11 +212,7 @@ describe('claude settings.json: OS sandbox per role (review H2)', () => {
       ]),
     );
     expect(fs?.allowRead).toEqual(
-      expect.arrayContaining([
-        '/data/worktrees/TOY-0192abcd/TOY-1',
-        '/data/vaults/v1',
-        '/data/bin',
-      ]),
+      expect.arrayContaining(['/data/worktrees/TOY-0192abcd/TOY-1', '/data/vaults/v1', '/data/bin']),
     );
     // another agent's sandbox or another card's worktree is not among them
     expect(fs?.allowRead.some((p) => p.includes('agents/a2'))).toBe(false);
@@ -253,12 +253,40 @@ describe('claude settings.json: OS sandbox per role (review H2)', () => {
     const fs = settings(builder.permissions).sandbox?.filesystem;
     // the worktree itself is the session cwd, which Claude Code always makes writable; its admin dir is under the git dir
     expect(fs?.allowWrite).toContain('/home/me/toy/.git');
-    expect(fs?.denyWrite).toEqual(expect.arrayContaining(['/home/me/toy/.git/hooks', '/home/me/toy/.git/config']));
+    expect(fs?.denyWrite).toEqual(
+      expect.arrayContaining(['/home/me/toy/.git/hooks', '/home/me/toy/.git/config']),
+    );
     expect(fs?.allowRead).toContain('/data/worktrees/TOY-0192abcd/TOY-1');
   });
 
   it('aom runs outside the sandbox (Linux cannot connect Unix sockets from inside it)', () => {
-    expect(settings(builder.permissions).sandbox?.excludedCommands).toEqual(['aom']);
+    // Bash(...) rule syntax: a bare word matches only the command with no arguments, so `aom *` is required for
+    // `aom handoff ...`; agents also call the shim by its absolute path. Found by a real Claude Code smoke run.
+    const ex = settings(builder.permissions).sandbox?.excludedCommands ?? [];
+    expect(ex).toContain('aom');
+    expect(ex).toContain('aom *');
+    expect(ex.some((e) => e.endsWith('/bin/aom *'))).toBe(true);
+    expect(ex.every((e) => /(^|\/)aom( \*)?$/.test(e))).toBe(true); // nothing but aom leaves the sandbox
+  });
+
+  it('tools that reach outside the shift (other sessions, triggers, schedules) are denied by name', () => {
+    // dontAsk still runs tools that need no approval; a real smoke run showed an agent calling ListAgents.
+    for (const role of [builder, reviewer]) {
+      const deny = settings(role.permissions).permissions.deny;
+      for (const t of SESSION_TOOLS_DENIED) expect(deny).toContain(t);
+    }
+  });
+
+  it('toolchains: the Node install is readable under the read block, home and credential dirs never are', () => {
+    const home = '/home/u';
+    const paths = toolchainReadPaths(
+      ['~/.dotnet', '~', '/home', '/', '~/.ssh', '~/.ssh/keys', '~/.config', '/opt/go'],
+      '/home/u/.nvm/versions/node/v22.0.0/bin/node',
+      home,
+    );
+    expect(paths).toEqual(['/home/u/.nvm/versions/node/v22.0.0', '/home/u/.dotnet', '/opt/go']);
+    const s = settings(builder.permissions, { toolchainReadPaths: paths });
+    expect(s.sandbox?.filesystem.allowRead).toEqual(expect.arrayContaining(paths));
   });
 
   it('network: shell roles reach package registries only, others nothing; the IPC socket is allowed', () => {
@@ -314,7 +342,10 @@ describe('the agent process gets a minimal environment (review H2a)', () => {
       expect(env[k], k).toBeUndefined();
   });
   it('gives the session a private, writable temp dir instead of the shared /tmp', () => {
-    const env = sessionEnv(input(), ClaudeRuntimeConfigSchema.parse({}), { PATH: '/usr/bin', TMPDIR: '/tmp' });
+    const env = sessionEnv(input(), ClaudeRuntimeConfigSchema.parse({}), {
+      PATH: '/usr/bin',
+      TMPDIR: '/tmp',
+    });
     expect(env.CLAUDE_CODE_TMPDIR).toBe('/data/agents/a1/tmp');
     expect(sandboxEnv(input().sandbox as Sandbox)).toMatchObject({
       TMPDIR: '/data/agents/a1/tmp',

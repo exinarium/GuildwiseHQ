@@ -22,6 +22,12 @@ export const ClaudeRuntimeConfigSchema = z.object({
   /** Extra hosts agents' shell commands may reach (private package mirrors, an internal git host). */
   extraAllowedDomains: z.array(z.string()).default([]),
   /**
+   * Extra toolchain directories sandboxed shell commands may read (e.g. ~/.dotnet, ~/.cargo, ~/.local/bin). The
+   * read block hides /home from sandboxed commands; the Node install the runner itself runs on is re-opened
+   * automatically. Never list a directory that holds credentials.
+   */
+  toolchainPaths: z.array(z.string()).default([]),
+  /**
    * Sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1: Claude Code removes credentials from the environment of everything its
    * shell starts and, on Linux, isolates the PID namespace so `/proc/<pid>/environ` of other processes is unreadable.
    * Off by default because it also removes variables Claude Code considers credentials, which may include the

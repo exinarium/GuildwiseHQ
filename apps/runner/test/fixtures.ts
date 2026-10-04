@@ -46,7 +46,10 @@ const projectIds = new Map<string, string>();
  */
 export function projectIdFor(key: string): string {
   let id = projectIds.get(key);
-  if (!id) projectIds.set(key, (id = uuidv7()));
+  if (!id) {
+    id = uuidv7();
+    projectIds.set(key, id);
+  }
   return id;
 }
 

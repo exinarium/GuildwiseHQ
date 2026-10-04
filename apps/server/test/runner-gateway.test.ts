@@ -729,12 +729,15 @@ describe('agent retirement, unlinking and runner commands', () => {
     // a result is applied once: a second answer for the finished command changes nothing
     r2.send('command.result', { commandId: again.commandId, ok: true });
     await until(
-      async () => (await q('SELECT status FROM runner_commands WHERE id=$1', [again.commandId]))[0]!.status === 'done',
+      async () =>
+        (await q('SELECT status FROM runner_commands WHERE id=$1', [again.commandId]))[0]!.status === 'done',
       3000,
     );
     r2.send('command.result', { commandId: again.commandId, ok: false, error: 'late' });
     await r2.barrier();
-    expect((await q('SELECT status FROM runner_commands WHERE id=$1', [again.commandId]))[0]!.status).toBe('done');
+    expect((await q('SELECT status FROM runner_commands WHERE id=$1', [again.commandId]))[0]!.status).toBe(
+      'done',
+    );
     r2.close();
   });
 

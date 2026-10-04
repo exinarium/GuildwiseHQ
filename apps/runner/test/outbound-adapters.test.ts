@@ -216,7 +216,7 @@ describe('the outbound executor (the outbound.post command)', () => {
     });
   });
 
-  it('a refused command delivered again posts nothing; the manager\'s retry (a new command) posts once', async () => {
+  it("a refused command delivered again posts nothing; the manager's retry (a new command) posts once", async () => {
     let fail = true;
     const calls: string[][] = [];
     const exec: Exec = async (_bin, args) => {

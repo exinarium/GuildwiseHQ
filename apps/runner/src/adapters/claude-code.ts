@@ -14,6 +14,7 @@ import {
   type ClaudePolicyContext,
   gitDirsOf,
   sandboxMissing,
+  toolchainReadPaths,
 } from './claude-policy.ts';
 import { ClaudeStreamParser } from './claude-stream-parser.ts';
 import { spawnSession } from './process-session.ts';
@@ -155,6 +156,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       realHome: homedir(),
       mode: this.cfg.sandbox,
       extraAllowedDomains: this.cfg.extraAllowedDomains,
+      toolchainReadPaths: toolchainReadPaths(this.cfg.toolchainPaths ?? []),
     };
   }
 

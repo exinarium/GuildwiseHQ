@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { delimiter, join, resolve } from 'node:path';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AgentPermissions } from '@aom/shared';
 
 /**
@@ -38,6 +39,8 @@ export interface ClaudePolicyContext {
   realHome: string;
   mode: SandboxMode;
   extraAllowedDomains?: string[];
+  /** Toolchain dirs (the Node install, configured toolchainPaths) sandboxed commands may read despite the read block. */
+  toolchainReadPaths?: string[];
 }
 
 /** Hosts a shell may reach: package registries and source hosts, enough to install dependencies. */
@@ -93,7 +96,25 @@ export const RUNNER_PRIVATE = [
   'mock-state',
 ];
 
+/**
+ * Claude Code tools that reach outside the shift: other sessions on this machine, remote triggers, schedules and
+ * notifications. In dontAsk mode a tool that needs no approval still runs, so these are denied by name.
+ */
+export const SESSION_TOOLS_DENIED = [
+  'ListAgents',
+  'SendMessage',
+  'RemoteTrigger',
+  'CronCreate',
+  'CronDelete',
+  'CronList',
+  'ScheduleWakeup',
+  'PushNotification',
+  'EnterWorktree',
+  'ExitWorktree',
+];
+
 const ALWAYS_DENIED = [
+  ...SESSION_TOOLS_DENIED,
   'Bash(git push:*)',
   'Bash(git rebase:*)',
   'Bash(git checkout:*)',
@@ -177,12 +198,14 @@ function sandboxBlock(
       // Never a directory that holds a writable path (the agent's own dir holds home, scratch and tmp): bubblewrap
       // re-opens an allowed read as read-only over the writable binds beneath it, and every Bash call then fails
       // on its first write. Home, scratch and tmp are readable anyway; the Claude config dir stays hidden.
-      allowRead: [ctx.cwd, ...ctx.addDirs, ...ctx.aomReadPaths],
+      allowRead: [ctx.cwd, ...ctx.addDirs, ...ctx.aomReadPaths, ...(ctx.toolchainReadPaths ?? [])],
     },
     // On Linux the sandbox blocks creating any Unix socket (seccomp cannot filter by path), so the `aom` CLI cannot
     // reach the runner's IPC socket from inside it: it runs outside the sandbox, like git does for hooks. It only
     // talks to the runner with the shift's token and writes nothing itself.
-    excludedCommands: ['aom'],
+    // Patterns use Bash(...) rule syntax: a bare word matches only the command with no arguments, so `aom *` is
+    // needed for `aom handoff ...`; the shim's absolute path is covered too.
+    excludedCommands: aomExcluded(ctx.aomReadPaths),
     network: {
       // Bash only: WebFetch/WebSearch are governed by the permission rules ('web' tool), not by this list.
       allowedDomains: shell ? [...REGISTRY_DOMAINS, ...(ctx.extraAllowedDomains ?? [])] : [],
@@ -191,6 +214,14 @@ function sandboxBlock(
       allowLocalBinding: shell,
     },
   };
+}
+
+/** `aom`, `aom *` and the same for the shim's absolute path in the runner's bin dir. */
+export function aomExcluded(aomReadPaths: string[]): string[] {
+  const out = ['aom', 'aom *'];
+  const bin = aomReadPaths[0];
+  if (bin) out.push(join(bin, 'aom'), `${join(bin, 'aom')} *`);
+  return out;
 }
 
 /** Rules every session gets: private runner state, credentials and the session's own settings are off limits. */
@@ -268,7 +299,13 @@ export function buildChatSettings(
     includeCoAuthoredBy: false,
   };
   // The chat may only run `aom`: no registries needed, only the IPC socket.
-  const sb = sandboxBlock(new Set(['shell']), { ...ctx, extraAllowedDomains: [] }, paths.home, paths.scratch, paths.tmp);
+  const sb = sandboxBlock(
+    new Set(['shell']),
+    { ...ctx, extraAllowedDomains: [] },
+    paths.home,
+    paths.scratch,
+    paths.tmp,
+  );
   if (sb) {
     sb.network.allowedDomains = [];
     out.sandbox = sb;
@@ -360,4 +397,43 @@ export function sandboxMissing(
     return missing.length ? `${missing.join(' and ')} not installed` : null;
   }
   return 'the Claude Code sandbox is not available on this platform (use WSL2)';
+}
+
+// ------------------------------------------------------------------------------------------- toolchains
+
+const inside = (child: string, parent: string): boolean => {
+  const r = relative(parent, child);
+  return r === '' || (!r.startsWith('..') && !r.startsWith(sep) && r !== '..');
+};
+
+/**
+ * Directories sandboxed shell commands may read although the read block hides /home: the Node install the runner
+ * runs on (so `node`, `npm` and the `aom` shim work) plus the configured toolchain paths. `~` expands to the real
+ * home. The home directory itself, anything containing it, and any credential store are refused.
+ */
+export function toolchainReadPaths(
+  configured: string[],
+  execPath: string = process.execPath,
+  realHome: string = homedir(),
+): string[] {
+  const out = new Set<string>();
+  let node = execPath;
+  try {
+    node = realpathSync(execPath);
+  } catch {
+    /* keep the path as given */
+  }
+  // <prefix>/bin/node -> <prefix>
+  out.add(dirname(dirname(node)));
+  for (const raw of configured) {
+    const p = resolve(raw.startsWith('~') ? join(realHome, raw.slice(1)) : raw);
+    out.add(p);
+  }
+  const secrets = HOME_SECRETS.map((s) => join(realHome, s));
+  return [...out].filter(
+    (p) =>
+      p !== '/' &&
+      !inside(realHome, p) && // never the home dir itself or a parent of it
+      !secrets.some((s) => inside(p, s) || inside(s, p)),
+  );
 }
