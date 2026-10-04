@@ -185,7 +185,7 @@ const role = (r: Omit<RoleDefinition, 'version' | 'builtIn'> & { version?: numbe
 export const BUILTIN_ROLES: RoleDefinition[] = [
   role({
     key: 'ba',
-    version: 4,
+    version: 5,
     name: 'Business analyst',
     purpose: 'Specifies cards, runs intake and finalizes finished work.',
     department: 'delivery',
@@ -267,6 +267,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'devops',
+    version: 2,
     name: 'DevOps engineer',
     purpose: 'Maintains the workstation environment. One per user per workstation.',
     department: 'operations',
