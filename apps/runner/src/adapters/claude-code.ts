@@ -49,6 +49,8 @@ export function sessionEnv(
     CLAUDE_CONFIG_DIR: input.sandbox.configDir,
     HOME: input.sandbox.home,
     USERPROFILE: input.sandbox.home,
+    // Claude Code's own temp root and the TMPDIR of its sandboxed shell (default /tmp/claude): private and writable.
+    CLAUDE_CODE_TMPDIR: input.sandbox.tmp,
   };
   // Opt-in: Claude Code strips credentials from what Bash and MCP children see and isolates their PID namespace.
   if (cfg.scrubSubprocessEnv) extra.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
@@ -205,6 +207,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       args: cmd.args,
       cwd: input.cwd,
       env: cmd.env,
+      inheritEnv: false,
       parseLine: (l) => parser.parseLine(l),
       usage: () => parser.usage(),
       logFile: input.logFile,
@@ -245,6 +248,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       args: cmd.args,
       cwd: input.cwd,
       env: cmd.env,
+      inheritEnv: false,
       parseLine: (l) => parser.parseLine(l),
       usage: () => parser.usage(),
       logFile: input.logFile,

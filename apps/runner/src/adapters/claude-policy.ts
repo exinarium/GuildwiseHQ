@@ -132,6 +132,7 @@ export interface ClaudeSettings {
     allowUnsandboxedCommands: false;
     autoAllowBashIfSandboxed: true;
     filesystem: { allowWrite: string[]; denyWrite: string[]; denyRead: string[]; allowRead: string[] };
+    excludedCommands: string[];
     network: {
       allowedDomains: string[];
       strictAllowlist: true;
@@ -147,6 +148,7 @@ function sandboxBlock(
   ctx: ClaudePolicyContext,
   agentHome: string,
   scratch: string,
+  tmp: string,
 ): ClaudeSettings['sandbox'] {
   if (ctx.mode === 'off') return undefined;
   const runnerPrivate = RUNNER_PRIVATE.map((p) => join(ctx.runnerRoot, p));
@@ -163,7 +165,7 @@ function sandboxBlock(
     allowUnsandboxedCommands: false,
     autoAllowBashIfSandboxed: true,
     filesystem: {
-      allowWrite: [agentHome, scratch, ...ctx.gitDirs],
+      allowWrite: [agentHome, scratch, tmp, ...ctx.gitDirs],
       // never the repository's hooks or config (they run outside the sandbox when the user next uses git), the
       // vault, or the runner's private state
       denyWrite: [
@@ -172,8 +174,15 @@ function sandboxBlock(
         ...runnerPrivate,
       ],
       denyRead,
-      allowRead: [ctx.agentDir, ctx.cwd, ...ctx.addDirs, ...ctx.aomReadPaths],
+      // Never a directory that holds a writable path (the agent's own dir holds home, scratch and tmp): bubblewrap
+      // re-opens an allowed read as read-only over the writable binds beneath it, and every Bash call then fails
+      // on its first write. Home, scratch and tmp are readable anyway; the Claude config dir stays hidden.
+      allowRead: [ctx.cwd, ...ctx.addDirs, ...ctx.aomReadPaths],
     },
+    // On Linux the sandbox blocks creating any Unix socket (seccomp cannot filter by path), so the `aom` CLI cannot
+    // reach the runner's IPC socket from inside it: it runs outside the sandbox, like git does for hooks. It only
+    // talks to the runner with the shift's token and writes nothing itself.
+    excludedCommands: ['aom'],
     network: {
       // Bash only: WebFetch/WebSearch are governed by the permission rules ('web' tool), not by this list.
       allowedDomains: shell ? [...REGISTRY_DOMAINS, ...(ctx.extraAllowedDomains ?? [])] : [],
@@ -201,7 +210,7 @@ function commonDenies(ctx: ClaudePolicyContext, configDir: string): string[] {
 export function buildShiftSettings(
   p: AgentPermissions,
   ctx: ClaudePolicyContext,
-  paths: { home: string; configDir: string; scratch: string },
+  paths: { home: string; configDir: string; scratch: string; tmp: string },
 ): ClaudeSettings {
   const tools = new Set(p.allowedTools);
   const allow: string[] = [];
@@ -230,7 +239,7 @@ export function buildShiftSettings(
     },
     includeCoAuthoredBy: false,
   };
-  const sb = sandboxBlock(tools, ctx, paths.home, paths.scratch);
+  const sb = sandboxBlock(tools, ctx, paths.home, paths.scratch, paths.tmp);
   if (sb) out.sandbox = sb;
   return out;
 }
@@ -240,7 +249,7 @@ export function buildChatSettings(
   readOnly: boolean,
   extraAllow: string[],
   ctx: ClaudePolicyContext,
-  paths: { home: string; configDir: string; scratch: string },
+  paths: { home: string; configDir: string; scratch: string; tmp: string },
 ): ClaudeSettings {
   const deny = [
     ...ALWAYS_DENIED,
@@ -259,7 +268,7 @@ export function buildChatSettings(
     includeCoAuthoredBy: false,
   };
   // The chat may only run `aom`: no registries needed, only the IPC socket.
-  const sb = sandboxBlock(new Set(['shell']), { ...ctx, extraAllowedDomains: [] }, paths.home, paths.scratch);
+  const sb = sandboxBlock(new Set(['shell']), { ...ctx, extraAllowedDomains: [] }, paths.home, paths.scratch, paths.tmp);
   if (sb) {
     sb.network.allowedDomains = [];
     out.sandbox = sb;
@@ -295,6 +304,7 @@ const INHERITED_ENV = [
   'TERM',
   'TZ',
   'COLORTERM',
+  'SRT_DEBUG', // sandbox diagnostics, opt-in
   'NODE_EXTRA_CA_CERTS',
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',

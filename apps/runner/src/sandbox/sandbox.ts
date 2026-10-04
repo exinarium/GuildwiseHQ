@@ -11,6 +11,8 @@ export interface Sandbox {
   /** CLAUDE_CONFIG_DIR. */
   configDir: string;
   scratch: string;
+  /** Private temp dir (TMPDIR/TMP/TEMP): the agent's shell and tools write here, never to the shared /tmp. */
+  tmp: string;
 }
 
 export function sandboxFor(paths: RunnerPaths, agentId: string): Sandbox {
@@ -21,6 +23,7 @@ export function sandboxFor(paths: RunnerPaths, agentId: string): Sandbox {
     home: join(root, 'home'),
     configDir: join(root, 'claude'),
     scratch: join(root, 'scratch'),
+    tmp: join(root, 'tmp'),
   };
 }
 
@@ -28,14 +31,14 @@ export function agentEmail(agentId: string): string {
   return `${agentId}@agents.aom.invalid`;
 }
 
-/** Creates `agents/<id>/{home,claude,scratch}` and the agent's `.gitconfig` (idempotent; refreshes the name). */
+/** Creates `agents/<id>/{home,claude,scratch,tmp}` and the agent's `.gitconfig` (idempotent; refreshes the name). */
 export async function ensureSandbox(
   paths: RunnerPaths,
   agentId: string,
   agentName: string,
 ): Promise<Sandbox> {
   const sb = sandboxFor(paths, agentId);
-  await Promise.all([sb.home, sb.configDir, sb.scratch].map((d) => mkdir(d, { recursive: true })));
+  await Promise.all([sb.home, sb.configDir, sb.scratch, sb.tmp].map((d) => mkdir(d, { recursive: true })));
   const gitconfig = [
     '[user]',
     `\tname = ${agentName} (aom)`,
@@ -60,7 +63,9 @@ export function sandboxEnv(sb: Sandbox): Record<string, string> {
     GIT_CONFIG_GLOBAL: join(sb.home, '.gitconfig'),
     GIT_CONFIG_NOSYSTEM: '1',
     CLAUDE_CONFIG_DIR: sb.configDir,
-    TMPDIR: sb.scratch,
+    TMPDIR: sb.tmp,
+    TMP: sb.tmp,
+    TEMP: sb.tmp,
   };
 }
 

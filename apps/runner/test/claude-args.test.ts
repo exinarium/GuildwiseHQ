@@ -4,6 +4,7 @@ import { buildClaudeCommand, sessionEnv } from '../src/adapters/claude-code.ts';
 import { buildShiftSettings } from '../src/adapters/claude-policy.ts';
 import type { ShiftStartInput } from '../src/adapters/types.ts';
 import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
+import { type Sandbox, sandboxEnv } from '../src/sandbox/sandbox.ts';
 import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
 
 const builder = BUILTIN_ROLES.find((r) => r.key === 'builder');
@@ -20,6 +21,7 @@ const input = (over: Partial<ShiftStartInput> = {}): ShiftStartInput => ({
     home: '/data/agents/a1/home',
     configDir: '/data/agents/a1/claude',
     scratch: '/data/agents/a1/scratch',
+    tmp: '/data/agents/a1/tmp',
   },
   agent: {
     agentId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
@@ -207,7 +209,6 @@ describe('claude settings.json: OS sandbox per role (review H2)', () => {
     );
     expect(fs?.allowRead).toEqual(
       expect.arrayContaining([
-        '/data/agents/a1',
         '/data/worktrees/TOY-0192abcd/TOY-1',
         '/data/vaults/v1',
         '/data/bin',
@@ -219,7 +220,12 @@ describe('claude settings.json: OS sandbox per role (review H2)', () => {
 
   it('writes: own home and scratch plus the repo git dir, never its hooks/config or the vault', () => {
     const fs = settings(builder.permissions, { addDirs: ['/data/vaults/v1'] }).sandbox?.filesystem;
-    expect(fs?.allowWrite).toEqual(['/data/agents/a1/home', '/data/agents/a1/scratch', '/home/me/toy/.git']);
+    expect(fs?.allowWrite).toEqual([
+      '/data/agents/a1/home',
+      '/data/agents/a1/scratch',
+      '/data/agents/a1/tmp',
+      '/home/me/toy/.git',
+    ]);
     expect(fs?.denyWrite).toEqual(
       expect.arrayContaining([
         '/home/me/toy/.git/hooks',
@@ -228,6 +234,31 @@ describe('claude settings.json: OS sandbox per role (review H2)', () => {
         '/data/config.json',
       ]),
     );
+  });
+
+  it('no allowed read is a directory that holds a writable path (bubblewrap would make that path read-only)', () => {
+    for (const ctx of [{}, { addDirs: ['/data/vaults/v1'] }, { gitDirs: [] }]) {
+      const fs = settings(builder.permissions, ctx).sandbox?.filesystem;
+      for (const r of fs?.allowRead ?? [])
+        for (const w of fs?.allowWrite ?? [])
+          expect(w === r || !w.startsWith(`${r}/`), `${r} holds writable ${w}`).toBe(true);
+    }
+    // the agent's own writable areas are readable because they are writable; its Claude config dir is not exposed
+    const fs = settings(builder.permissions).sandbox?.filesystem;
+    expect(fs?.allowRead).not.toContain('/data/agents/a1');
+    expect(fs?.allowRead).not.toContain('/data/agents/a1/claude');
+  });
+
+  it('the worktree and the main repo git dir (which holds .git/worktrees/<name>) are writable; hooks and config are not', () => {
+    const fs = settings(builder.permissions).sandbox?.filesystem;
+    // the worktree itself is the session cwd, which Claude Code always makes writable; its admin dir is under the git dir
+    expect(fs?.allowWrite).toContain('/home/me/toy/.git');
+    expect(fs?.denyWrite).toEqual(expect.arrayContaining(['/home/me/toy/.git/hooks', '/home/me/toy/.git/config']));
+    expect(fs?.allowRead).toContain('/data/worktrees/TOY-0192abcd/TOY-1');
+  });
+
+  it('aom runs outside the sandbox (Linux cannot connect Unix sockets from inside it)', () => {
+    expect(settings(builder.permissions).sandbox?.excludedCommands).toEqual(['aom']);
   });
 
   it('network: shell roles reach package registries only, others nothing; the IPC socket is allowed', () => {
@@ -281,6 +312,17 @@ describe('the agent process gets a minimal environment (review H2a)', () => {
       'NPM_TOKEN',
     ])
       expect(env[k], k).toBeUndefined();
+  });
+  it('gives the session a private, writable temp dir instead of the shared /tmp', () => {
+    const env = sessionEnv(input(), ClaudeRuntimeConfigSchema.parse({}), { PATH: '/usr/bin', TMPDIR: '/tmp' });
+    expect(env.CLAUDE_CODE_TMPDIR).toBe('/data/agents/a1/tmp');
+    expect(sandboxEnv(input().sandbox as Sandbox)).toMatchObject({
+      TMPDIR: '/data/agents/a1/tmp',
+      TMP: '/data/agents/a1/tmp',
+      TEMP: '/data/agents/a1/tmp',
+    });
+    // the same dir is in the sandbox's write list
+    expect(settings(builder.permissions).sandbox?.filesystem.allowWrite).toContain('/data/agents/a1/tmp');
   });
   it("does not forward the runner's ANTHROPIC_API_KEY in default auth mode, and scrubbing is opt-in", () => {
     const def = sessionEnv(input(), ClaudeRuntimeConfigSchema.parse({}), parent);

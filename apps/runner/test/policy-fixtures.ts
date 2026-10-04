@@ -4,6 +4,7 @@ export const POLICY_PATHS = {
   home: '/data/agents/a1/home',
   configDir: '/data/agents/a1/claude',
   scratch: '/data/agents/a1/scratch',
+  tmp: '/data/agents/a1/tmp',
 };
 export const policyCtx = (over: Partial<ClaudePolicyContext> = {}): ClaudePolicyContext => ({
   runnerRoot: '/data',

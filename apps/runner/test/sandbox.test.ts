@@ -13,7 +13,7 @@ describe('sandbox', () => {
     const paths = runnerPaths(tmp());
     const sb = await ensureSandbox(paths, AGENT, 'Ada');
     expect(sb.home).toBe(join(paths.root, 'agents', AGENT, 'home'));
-    for (const d of [sb.home, sb.configDir, sb.scratch]) expect(existsSync(d)).toBe(true);
+    for (const d of [sb.home, sb.configDir, sb.scratch, sb.tmp]) expect(existsSync(d)).toBe(true);
     const gitconfig = readFileSync(join(sb.home, '.gitconfig'), 'utf8');
     expect(gitconfig).toContain('name = Ada (aom)');
     expect(gitconfig).toContain(`email = ${AGENT}@agents.aom.invalid`);

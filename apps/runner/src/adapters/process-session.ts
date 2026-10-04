@@ -13,6 +13,8 @@ export interface ProcessSpec {
   /** Maps one stdout line to runtime events. */
   parseLine: (line: string) => RuntimeEvent[];
   usage: () => Usage;
+  /** Also pass the runner's own environment to the child (default). Agent sessions with an allow-listed `env` set false. */
+  inheritEnv?: boolean;
   /** Raw stdout lines are appended here. */
   logFile?: string;
   /** Appended to the exit event's error when the process fails (e.g. a parsed API error). */
@@ -57,7 +59,7 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
   const sub = execa(spec.bin, spec.args, {
     cwd: spec.cwd,
     env: spec.env,
-    extendEnv: true,
+    extendEnv: spec.inheritEnv ?? true,
     reject: false,
     stdin: 'ignore',
     stdout: 'pipe',

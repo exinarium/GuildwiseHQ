@@ -251,6 +251,7 @@ describe('claude code chat adapter', () => {
       home: '/data/agents/a1/home',
       configDir: '/data/agents/a1/claude',
       scratch: '/data/agents/a1/scratch',
+      tmp: '/data/agents/a1/tmp',
     },
     agent: agent({ runtime: 'claude-code', model: 'sonnet', effort: 'low' }) as ChatStartInput['agent'],
     env: { AOM_IPC_URL: 'http://127.0.0.1:1', AOM_SHIFT_TOKEN: 't', PATH: '/bin' },
