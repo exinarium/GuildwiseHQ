@@ -297,14 +297,40 @@ describe('claude code chat adapter', () => {
       'Glob',
       'Grep',
       'Bash(aom:*)',
+      'Edit(//data/agents/a1/scratch/**)',
     ]);
     expect(buildChatSettings(false, [], policyCtx(), POLICY_PATHS).permissions.deny).toContain(
       'Bash(git push:*)',
     );
     expect(buildChatSettings(false, [], policyCtx(), POLICY_PATHS).permissions.deny).not.toContain('Edit');
     expect(buildChatSettings(true, [], policyCtx(), POLICY_PATHS).permissions.deny).toEqual(
-      expect.arrayContaining(['Edit', 'Write']),
+      expect.arrayContaining([`Edit(//${policyCtx().cwd.replace(/^\//, '')}/**)`]),
     );
+  });
+
+  it('chat may write only its scratch dir (desk chat, card chat and intake chat) and never the vault or config dir', () => {
+    for (const [label, readOnly, extra] of [
+      ['desk chat', false, []],
+      ['card chat', true, []],
+      ['intake chat', false, ['mcp__atlassian']],
+    ] as const) {
+      const s = buildChatSettings(
+        readOnly,
+        [...extra],
+        policyCtx({ addDirs: ['/data/vaults/v1'] }),
+        POLICY_PATHS,
+      );
+      const edits = s.permissions.allow.filter((r) => r.startsWith('Edit') || r === 'Write');
+      expect(edits, label).toEqual(['Edit(//data/agents/a1/scratch/**)']);
+      expect(s.permissions.deny, label).toEqual(
+        expect.arrayContaining(['Edit(//data/agents/a1/claude/**)', 'Edit(//data/vaults/v1/**)']),
+      );
+      // a bare Edit deny would beat the scratch allow
+      expect(s.permissions.deny, label).not.toContain('Edit');
+      expect(s.permissions.deny, label).not.toContain('Write');
+    }
+    const ro = buildChatSettings(true, [], policyCtx({ cwd: '/data/worktrees/c1' }), POLICY_PATHS);
+    expect(ro.permissions.deny).toContain('Edit(//data/worktrees/c1/**)');
   });
 
   it('parses partial-message deltas, the session id, usage and the final text', () => {

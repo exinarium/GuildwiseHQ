@@ -22,6 +22,11 @@ export const intakeEvents = [
       baAgentId: Id,
       /** What the manager typed (free text, or the ticket key). */
       note: z.string().max(20000).optional(),
+      /**
+       * `chat`: the BA turned an existing chat (`threadId`, kind 'chat') into an intake the first time it created a
+       * card there. The thread already exists and keeps its kind; there is no external ticket.
+       */
+      source: z.literal('chat').optional(),
     }),
   ),
   /**

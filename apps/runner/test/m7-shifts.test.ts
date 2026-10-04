@@ -386,13 +386,14 @@ describe('the Claude runtime in an intake chat (no real session is ever started)
     expect(cfg.intake).toEqual({ mcpConfig: '/home/me/jira-mcp.json', allowedTools: ['mcp__atlassian'] });
     expect(
       buildChatSettings(false, cfg.intake?.allowedTools ?? [], policyCtx(), POLICY_PATHS).permissions.allow,
-    ).toEqual(['Read', 'Glob', 'Grep', 'Bash(aom:*)', 'mcp__atlassian']);
+    ).toEqual(['Read', 'Glob', 'Grep', 'Bash(aom:*)', 'Edit(//data/agents/a1/scratch/**)', 'mcp__atlassian']);
     // a normal chat keeps the minimal allow list
     expect(buildChatSettings(false, [], policyCtx(), POLICY_PATHS).permissions.allow).toEqual([
       'Read',
       'Glob',
       'Grep',
       'Bash(aom:*)',
+      'Edit(//data/agents/a1/scratch/**)',
     ]);
     expect(ClaudeRuntimeConfigSchema.parse({}).intake).toBeUndefined();
   });

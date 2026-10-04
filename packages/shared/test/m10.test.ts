@@ -271,3 +271,29 @@ describe('BA design instructions', () => {
     ).not.toContain('Designing the organization');
   });
 });
+
+describe('BA chat card creation', () => {
+  const ba = { name: 'Ben', roleKey: 'ba', seniority: 'senior' } as const;
+  it('tells a desk-chat BA it can create cards with inline JSON, mapping the project first', () => {
+    const t = renderChatInstructions(ba, {});
+    expect(t).toContain('# Creating cards from this chat');
+    expect(t).toContain("aom card create --json '<draft json>'");
+    expect(t).toContain('aom intake map --project <KEY>');
+    expect(t).toContain('# Designing the organization');
+    expect(renderChatInstructions(ba, { projectKey: 'TOY' })).toContain('Project TOY is in context');
+  });
+  it('only the BA gets it, and an intake chat keeps its own section', () => {
+    expect(
+      renderChatInstructions({ name: 'Bea', roleKey: 'builder', seniority: 'junior' }, {}),
+    ).not.toContain('Creating cards from this chat');
+    const intake = { intakeId: U, projects: [], cards: [] };
+    const t = renderChatInstructions(ba, { intake });
+    expect(t).toContain('# Intake');
+    expect(t).not.toContain('# Creating cards from this chat');
+    const lazy = renderChatInstructions(ba, {
+      intake: { ...intake, fromChat: true, mappedProjectKey: 'TOY' },
+    });
+    expect(lazy).toContain('mapped to project TOY');
+    expect(lazy).not.toContain('# Intake\n');
+  });
+});

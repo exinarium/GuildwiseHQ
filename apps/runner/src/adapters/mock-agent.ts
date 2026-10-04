@@ -670,7 +670,70 @@ async function designMain(): Promise<number> {
   return finish();
 }
 
+/**
+ * The BA in a chat that is not an intake, scripted: `create card [KEY:] <title>` maps the project (unless the chat has
+ * one in context), creates a card with the draft passed inline (`--json`) and specifies it.
+ */
+async function deskMain(): Promise<number> {
+  const message = process.env.AOM_MOCK_MESSAGE ?? '';
+  const raw = JSON.parse(process.env.AOM_MOCK_CONTEXT ?? '{}') as {
+    projectKey?: string;
+    intake?: { mappedProjectKey?: string };
+  };
+  const ctx = { projectKey: raw.projectKey ?? raw.intake?.mappedProjectKey };
+  const said: string[] = [];
+  const say = (text: string) => {
+    said.push(text);
+    emit({ kind: 'delta', text: `${text}\n` });
+  };
+  emit({ kind: 'session', runtimeSessionId: process.env.AOM_MOCK_SESSION ?? 'mock-desk' });
+  emit({ kind: 'usage', usage: { inputTokens: message.length, outputTokens: 120 } });
+  const finish = (): number => {
+    emit({ kind: 'final', text: said.join('\n') });
+    return 0;
+  };
+  const m = /^\s*create card\s+(?:([A-Za-z0-9]+):\s*)?(.+)$/is.exec(message);
+  const title = m?.[2]?.trim().slice(0, 80);
+  const key = m?.[1] ?? ctx.projectKey;
+  if (!title) {
+    say('Tell me the card: `create card <KEY>: <title>`.');
+    return finish();
+  }
+  if (key && !ctx.projectKey) {
+    const r = aom(['intake', 'map', '--project', key]);
+    if (r.code !== 0) {
+      say(`Mapping failed: ${(r.err || r.out).trim()}`);
+      return finish();
+    }
+  }
+  const draft = {
+    title,
+    cardType: 'feature',
+    completionAction: 'push_branch',
+    docsNeeded: false,
+    fields: {
+      context: title,
+      requirements: title,
+      acceptanceCriteria: [`Implements: ${title}`],
+      affectedAreas: 'src/',
+      constraints: 'none',
+      testPlan: 'Run the unit tests',
+    },
+  };
+  const c = aom(['card', 'create', '--json', JSON.stringify(draft)]);
+  const ref = /Created (\S+) /.exec(c.out)?.[1];
+  if (c.code !== 0 || !ref) {
+    say(`Could not create "${title}": ${(c.err || c.out).trim()}`);
+    return finish();
+  }
+  const s = aom(['card', 'specify', ref]);
+  say(s.code === 0 ? s.out.trim() : `Could not specify ${ref}: ${(s.err || s.out).trim()}`);
+  say(`Created ${ref} from this chat.`);
+  return finish();
+}
+
 async function main(): Promise<number> {
+  if (process.env.AOM_MOCK_CHAT === 'desk') return deskMain();
   if (process.env.AOM_MOCK_CHAT === 'intake') return intakeMain();
   if (process.env.AOM_MOCK_CHAT === 'design') return designMain();
   const card = aom(['card', '--json']);

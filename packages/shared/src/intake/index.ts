@@ -82,6 +82,8 @@ export const IntakeContextSchema = z.object({
   mappedProjectKey: z.string().optional(),
   /** The manager's work vault: its `skills/jira.md` (if any) replaces the built-in Jira skill text. */
   workVaultId: z.string().optional(),
+  /** The intake was started lazily from a desk chat (no ticket): the chat keeps its normal instructions. */
+  fromChat: z.boolean().optional(),
   projects: z.array(IntakeProjectSchema),
   cards: z.array(z.object({ ref: z.string(), title: z.string(), status: z.string() })).default([]),
 });

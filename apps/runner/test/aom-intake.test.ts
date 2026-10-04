@@ -121,6 +121,23 @@ describe('aom intake and card drafting', () => {
     expect(await t.run('card', 'update', '--file', 'p.json')).toBe(1);
   });
 
+  it('accepts the draft inline (--json), from a file and from stdin (--file -)', async () => {
+    const draft = { title: 'Login', completionAction: 'pr', fields: { context: 'c' } };
+    const t = await cli({ '-': JSON.stringify(draft), 'd.json': JSON.stringify(draft) }, () => ({
+      ref: 'TOY-1',
+      missing: [],
+    }));
+    expect(await t.run('card', 'create', '--json', JSON.stringify(draft))).toBe(0);
+    expect(await t.run('card', 'create', '--file', '-')).toBe(0);
+    expect(await t.run('card', 'create', '--file', 'd.json')).toBe(0);
+    expect(await t.run('card', 'update', 'TOY-1', '--json', '{"priority":1}')).toBe(0);
+    expect(t.rpcs.map((r) => r.params)).toEqual([draft, draft, draft, { priority: 1, ref: 'TOY-1' }]);
+    expect(await t.run('card', 'create', '--json', '{')).toBe(1);
+    expect(t.err.join('')).toMatch(/cannot read --json as JSON/);
+    expect(await t.run('card', 'create', '--json', '{}', '--file', 'd.json')).toBe(1);
+    expect(await t.run('card', 'create', '--json', '[1]')).toBe(1);
+  });
+
   it('reads a source through the runner', async () => {
     const t = await cli({}, () => 'acme/toy#12: Add dark mode\n\nUsers want it.');
     expect(await t.run('source', 'read', '--ref', 'acme/toy#12')).toBe(0);

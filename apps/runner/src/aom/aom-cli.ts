@@ -39,7 +39,12 @@ interface Parsed {
 
 const BOOLEAN_FLAGS = new Set(['json', 'non-blocking', 'force', 'help', 'none', 'role', 'workflow']);
 
-export function parseArgs(argv: string[]): Parsed {
+/** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
+const takesInlineJson = (verb: string | undefined, argv: string[]): boolean =>
+  (verb === 'card' && (argv[0] === 'create' || argv[0] === 'update')) || verb === 'org';
+
+export function parseArgs(argv: string[], verb?: string): Parsed {
+  const inlineJson = takesInlineJson(verb, argv);
   const flags = new Map<string, string[]>();
   const positionals: string[] = [];
   for (let i = 0; i < argv.length; i++) {
@@ -49,7 +54,7 @@ export function parseArgs(argv: string[]): Parsed {
       const key = eq === -1 ? a.slice(2) : a.slice(2, eq);
       let value: string;
       if (eq !== -1) value = a.slice(eq + 1);
-      else if (BOOLEAN_FLAGS.has(key)) value = 'true';
+      else if (BOOLEAN_FLAGS.has(key) && !(inlineJson && key === 'json')) value = 'true';
       else {
         const next = argv[i + 1];
         if (next === undefined) throw new UsageError(`--${key} needs a value`);
@@ -63,6 +68,23 @@ export function parseArgs(argv: string[]): Parsed {
 }
 
 class UsageError extends Error {}
+
+/** A JSON object given inline (`--json '<json>'`), in a file (`--file <path>`) or on stdin (`--file -`). Null when none was given. */
+function jsonBody(ctx: AomContext, p: Parsed): Record<string, unknown> | null {
+  const inline = one(p, 'json');
+  const file = one(p, 'file');
+  if (inline !== undefined && file !== undefined) throw new UsageError('use either --json or --file');
+  if (inline === undefined && file === undefined) return null;
+  try {
+    const v = JSON.parse(inline ?? ctx.readFile(file as string)) as unknown;
+    if (v === null || typeof v !== 'object' || Array.isArray(v)) throw new Error('expected a JSON object');
+    return v as Record<string, unknown>;
+  } catch (err) {
+    throw new UsageError(
+      `cannot read ${inline !== undefined ? '--json' : file === '-' ? 'stdin' : file} as JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
 /** The runner answered but the feature is not available (exit 2). */
 class NotAvailable extends Error {}
 
@@ -157,17 +179,13 @@ type Verb = (ctx: AomContext, p: Parsed) => Promise<number>;
 /** `aom card create|update|specify` (the BA's intake chat): drafts and validates cards through the server. */
 async function cardDraft(ctx: AomContext, p: Parsed, sub: 'create' | 'update' | 'specify'): Promise<number> {
   const ref = p.positionals[1];
-  const file = one(p, 'file');
   const fileJson = (): Record<string, unknown> => {
-    if (!file)
-      throw new UsageError(`usage: aom card ${sub}${sub === 'update' ? ' <REF>' : ''} --file <draft.json>`);
-    try {
-      return JSON.parse(ctx.readFile(file)) as Record<string, unknown>;
-    } catch (err) {
+    const body = jsonBody(ctx, p);
+    if (!body)
       throw new UsageError(
-        `cannot read ${file} as JSON: ${err instanceof Error ? err.message : String(err)}`,
+        `usage: aom card ${sub}${sub === 'update' ? ' <REF>' : ''} --json '<json>' | --file <draft.json> | --file - (stdin)`,
       );
-    }
+    return body;
   };
   if (sub === 'create') {
     const r = (await rpc(ctx, 'card.create', fileJson())) as { ref: string; missing?: string[] };
@@ -177,7 +195,9 @@ async function cardDraft(ctx: AomContext, p: Parsed, sub: 'create' | 'update' | 
     return 0;
   }
   if (!ref)
-    throw new UsageError(`usage: aom card ${sub} <REF>${sub === 'update' ? ' --file <patch.json>' : ''}`);
+    throw new UsageError(
+      `usage: aom card ${sub} <REF>${sub === 'update' ? " --json '<json>' | --file <patch.json>" : ''}`,
+    );
   if (sub === 'update') {
     const r = (await rpc(ctx, 'card.update', { ...fileJson(), ref })) as { ref: string; missing?: string[] };
     ctx.io.out(
@@ -191,8 +211,8 @@ async function cardDraft(ctx: AomContext, p: Parsed, sub: 'create' | 'update' | 
 }
 
 const ORG_USAGE = `usage: aom org catalogue
-       aom org role draft --file <role.json>
-       aom org workflow draft --file <workflow.json>
+       aom org role draft --json '<json>' | --file <role.json> | --file -
+       aom org workflow draft --json '<json>' | --file <workflow.json> | --file -
        aom org validate <key> [--role|--workflow]
        aom org submit <key> [--role|--workflow]
        aom org department --name "<name>"`;
@@ -202,15 +222,9 @@ async function orgDesign(ctx: AomContext, p: Parsed): Promise<number> {
   const [sub, ...rest] = p.positionals;
   const kind = has(p, 'role') ? 'role' : has(p, 'workflow') ? 'workflow' : undefined;
   const readJson = (): Record<string, unknown> => {
-    const file = one(p, 'file');
-    if (!file) throw new UsageError(ORG_USAGE);
-    try {
-      return JSON.parse(ctx.readFile(file)) as Record<string, unknown>;
-    } catch (err) {
-      throw new UsageError(
-        `cannot read ${file} as JSON: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    const body = jsonBody(ctx, p);
+    if (!body) throw new UsageError(ORG_USAGE);
+    return body;
   };
   const print = (r: unknown): number => {
     const m = (r as { message?: string } | null)?.message;
@@ -526,11 +540,11 @@ export const USAGE = `usage: aom <verb> [options]
   escalate --item <id> --note "<what must be decided>"   pass the question on (peer -> BA -> manager's desk)
   finalize --action <pr|push_branch|merge> [--note "<why>"]   BA: run the completion action (revise it with a different action)
   intake map --project <KEY> | intake unmapped --note "<why>"   BA intake: map the ticket, or ask the manager
-  card create --file <draft.json> | card update <REF> --file <patch.json> | card specify <REF>   BA intake: draft cards
+  card create --json '<json>' | --file <draft.json|-> | card update <REF> --json '<json>' | --file <patch.json> | card specify <REF>   BA intake: draft cards
   outbound draft --kind <comment|resolution|decision> --body "<text>"   BA: draft the update for the card's ticket (the manager approves it)
   risk <small|large> --reason "<why>"      BA: override the card's risk tier (drives the review tier and the merge approval)
   source read --ref <owner/repo#12 | ticket URL>        BA intake: read a GitHub issue (Jira: the Jira skill)
-  org catalogue | org role draft --file <json> | org workflow draft --file <json> | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
+  org catalogue | org role draft --json '<json>' | --file <json|-> | org workflow draft (same) | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed
@@ -549,7 +563,7 @@ export async function runAom(argv: string[], ctx: AomContext): Promise<number> {
     return 2;
   }
   try {
-    return await handler(ctx, parseArgs(rest));
+    return await handler(ctx, parseArgs(rest, verb));
   } catch (err) {
     if (err instanceof NotAvailable) {
       ctx.io.err(`aom ${verb}: ${err.message}\n`);
@@ -613,6 +627,6 @@ if (isEntry) {
     env: process.env,
     io: { out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s) },
     fetch: process.env.AOM_IPC_SOCKET ? socketFetch(process.env.AOM_IPC_SOCKET, fetch) : fetch,
-    readFile: (p) => readFileSync(p, 'utf8'),
+    readFile: (p) => readFileSync(p === '-' ? 0 : p, 'utf8'),
   }).then((code) => process.exit(code));
 }

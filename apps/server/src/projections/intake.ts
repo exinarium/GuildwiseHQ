@@ -35,12 +35,13 @@ export const intakeProjectors: Record<string, Projector> = {
   IntakeStarted: async (tx, e) => {
     const p = ev<'IntakeStarted'>(e).payload;
     const label = p.externalKey ?? (p.note ?? 'new request').replace(/\s+/g, ' ').slice(0, 60);
-    await exec(
-      tx,
-      `INSERT INTO threads (id, org_id, project_id, card_id, kind, agent_id, title, created_by, created_at)
-       VALUES ($1,$2,NULL,NULL,'intake',$3,$4,$5,$6)`,
-      [p.threadId, e.scope.orgId, p.baAgentId, `Intake: ${label}`, p.startedBy, e.createdAt],
-    );
+    if (p.source !== 'chat')
+      await exec(
+        tx,
+        `INSERT INTO threads (id, org_id, project_id, card_id, kind, agent_id, title, created_by, created_at)
+         VALUES ($1,$2,NULL,NULL,'intake',$3,$4,$5,$6)`,
+        [p.threadId, e.scope.orgId, p.baAgentId, `Intake: ${label}`, p.startedBy, e.createdAt],
+      );
     await exec(
       tx,
       `INSERT INTO intakes (id, org_id, thread_id, external_system, external_key, note, started_by, ba_agent_id, created_at)

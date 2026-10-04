@@ -34,9 +34,44 @@ export function renderChatInstructions(
       '- Run every `aom` command on its own: no pipes, redirects, `;`, `&&`, `cd` or `$(...)` around it (for example `aom ledger search "tech stack"`, not `aom ledger search "tech stack" | head`). Otherwise it runs inside the shell sandbox and cannot reach the runner.',
     ].join('\n'),
   );
-  if (agent.roleKey === 'ba' && !ctx.intake) out.push(renderDesignSection());
-  if (ctx.intake) out.push(renderIntakeSection(ctx.intake, opts.jiraSkill));
+  const intakeChat = ctx.intake && !ctx.intake.fromChat;
+  if (agent.roleKey === 'ba' && !intakeChat) out.push(renderDesignSection());
+  if (agent.roleKey === 'ba' && !intakeChat) out.push(renderChatCardsSection(ctx));
+  if (ctx.intake && intakeChat) out.push(renderIntakeSection(ctx.intake, opts.jiraSkill));
   return `${out.join('\n\n')}\n`;
+}
+
+/**
+ * The BA in a chat that is not an intake: it can still create cards (the chat becomes an intake without a ticket the
+ * first time it does), reusing the intake verbs. Rights are the chatting manager's.
+ */
+function renderChatCardsSection(ctx: ChatContext): string {
+  const intake = ctx.intake;
+  const out: string[] = ['# Creating cards from this chat'];
+  out.push(
+    [
+      'You can create cards from any chat, not only from an intake: when the manager asks for work to be specced or ticketed, draft the cards yourself. The conversation is then linked to every card you create.',
+      ctx.projectKey
+        ? `Project ${ctx.projectKey} is in context: cards go to it without mapping.`
+        : intake?.mappedProjectKey
+          ? `This chat is mapped to project ${intake.mappedProjectKey}.`
+          : 'Map the project first with `aom intake map --project <KEY>` (the answer lists the projects the manager may use).',
+    ].join('\n'),
+  );
+  if (intake && intake.cards.length > 0) {
+    out.push('Cards created in this chat:');
+    out.push(intake.cards.map((c) => `- ${c.ref} ${c.title} (${c.status})`).join('\n'));
+  }
+  out.push(
+    [
+      '- `aom intake map --project <KEY>`: cards of this chat belong to this project (skip it when a project is in context).',
+      `- \`aom card create --json '<draft json>'\`: draft a card (project, title, cardType, completionAction, docsNeeded, priority, repo, dependencies, externalRef, fields). Prints the new ref and what is still missing. \`--file <path>\` or \`--file -\` (stdin) also work.`,
+      "- `aom card update <REF> --json '<patch json>'`: change a card you created.",
+      '- `aom card specify <REF>`: validate the card and move it to the build queue; refused while required fields are missing.',
+      'You may write drafts and notes in your scratch directory with the file tools, but you do not need a file to create a card: pass the JSON inline.',
+    ].join('\n'),
+  );
+  return out.join('\n\n');
 }
 
 /**
@@ -50,8 +85,8 @@ export function renderDesignSection(): string {
     [
       '- `aom org catalogue`: roles, workflows, departments and their versions.',
       '- `aom org department --name "<name>"`: create a department for a function.',
-      '- `aom org role draft --file <role.json>`: save a custom role (name, purpose, instructions, permissions, skills, default model, seniority levels, claimable stages). Prints every issue.',
-      '- `aom org workflow draft --file <workflow.json>`: save a custom workflow (stages with claiming role, required fields, done criteria, outcomes and failure routes). Prints every issue: unreachable stages, failure paths that never end, stages no role may claim.',
+      "- `aom org role draft --json '<json>'` (or `--file <role.json>`, `--file -`): save a custom role (name, purpose, instructions, permissions, skills, default model, seniority levels, claimable stages). Prints every issue.",
+      "- `aom org workflow draft --json '<json>'` (or `--file <workflow.json>`): save a custom workflow (stages with claiming role, required fields, done criteria, outcomes and failure routes). Prints every issue: unreachable stages, failure paths that never end, stages no role may claim.",
       '- `aom org validate <key>`: check a draft again.',
       "- `aom org submit <key> --role|--workflow`: put a valid draft on the owner's desk. Nothing is available until they approve it; submit roles before the workflow that uses them.",
     ].join('\n'),
@@ -103,8 +138,8 @@ function renderIntakeSection(intake: NonNullable<ChatContext['intake']>, jiraSki
       '- `aom source read --ref <owner/repo#n>`: read a GitHub issue (read-only, through `gh` on this workstation). Jira is read with the Jira skill below.',
       '- `aom intake map --project <KEY>`: the ticket belongs to this project.',
       '- `aom intake unmapped --note "<why>"`: no project fits; the manager is asked on the desk and you are told the answer.',
-      '- `aom card create --file <draft.json>`: draft a card (project, title, cardType, completionAction, docsNeeded, priority, repo, dependencies, externalRef, fields). Prints the new ref and what is still missing.',
-      '- `aom card update <REF> --file <patch.json>`: change a card you created.',
+      "- `aom card create --json '<draft json>'`: draft a card (project, title, cardType, completionAction, docsNeeded, priority, repo, dependencies, externalRef, fields). Prints the new ref and what is still missing. `--file <path>` and `--file -` (stdin) also work: you do not need to write a file first.",
+      "- `aom card update <REF> --json '<patch json>'`: change a card you created.",
       '- `aom card specify <REF>`: validate the card and move it to the build queue; refused while required fields are missing.',
       '',
       'Intake is read-only towards external systems: never post, comment on or transition a ticket.',

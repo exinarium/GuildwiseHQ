@@ -423,10 +423,10 @@ aom test pass --evidence "<text>" [--command "<cmd>"]...
 aom test fail --title "<bug>" --note "<text>" [--evidence "<text>"] [--command "<cmd>"]...
 ```
 
-**BA shifts (Spec, Intake, Finalize, Answer):**
+**BA shifts (Spec, Intake, Finalize, Answer) and the BA in any chat (the chat becomes an intake without a ticket on first use):**
 ```sh
-aom card create --file <draft.json>
-aom card update <REF> --file <patch.json>
+aom card create --json '<draft json>'      # or --file <draft.json>, or --file - to read stdin
+aom card update <REF> --json '<patch json>' # or --file <patch.json> / --file -
 aom card specify <REF>
 aom finalize --action <pr|push_branch|merge> --note "<why>"  # pr requires `gh`; falls back to push_branch otherwise
 aom answer --item <id> --text "<answer>" [--option <id>]
@@ -434,7 +434,7 @@ aom escalate --item <id> --note "<what must be decided>"
 aom intake map --project <KEY> | aom intake unmapped --note "<why>"
 aom outbound draft --kind <comment|resolution|decision> --body "<text>"
 aom source read --ref <owner/repo#12 | ticket URL>
-aom org ...                                            (design chat: draft roles/workflows)
+aom org ...                                            (design chat: draft roles/workflows; role/workflow drafts take --json, --file or --file - too)
 ```
 
 **Scout/curator shifts (Feed, Digest):**
@@ -579,7 +579,7 @@ cannot loosen anything.
 | `sandbox.network` | `strictAllowlist: true`; `allowedDomains`: package registries and source hosts for roles with `shell` (npm, yarn, PyPI, crates.io, Go proxy, RubyGems, Maven/Gradle, github.com), nothing for others; `allowUnixSockets`: the runner's IPC socket; `allowLocalBinding` for `shell` roles | scouts and researchers reach the web through `WebFetch`/`WebSearch` (permission rules, not the sandbox); builders reach registries from the shell. Add private mirrors with `runtimes.claude-code.extraAllowedDomains` |
 
 Claude Code's sandbox wraps shell commands only; the Read/Edit/Write/WebFetch tools are governed by the permission rules
-above, which is why both exist. Chat sessions get the same layer with only `Read, Glob, Grep, Bash(aom:*)`, and `Edit`
+above, which is why both exist. Chat sessions get the same layer with only `Read, Glob, Grep, Bash(aom:*)` and `Edit(//<scratch>/**)` (Edit covers Write and NotebookEdit; the agent's scratch dir only, so a card's worktree and the vault stay read-only), and `Edit`
 denied when a card worktree is in context.
 
 Config keys (`runtimes.claude-code`): `sandbox` (`required` default, `best_effort`, `off`), `extraAllowedDomains`

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
+import { addMember, connectMemberRunner, hireFor } from './helpers/members.ts';
 import { freshState } from './helpers/shifts.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
 
@@ -308,7 +309,7 @@ describe('the BA drafts cards in the intake chat', () => {
     const cs = (await r.waitFor('chat.start', (f) => f.threadId === chat.threadId, 15_000, from)) as any;
     const denied = await rpc(cs.chatId, 'intake.map', { project: 'TOY' });
     expect(denied.ok).toBe(false);
-    expect(denied.error).toMatch(/not an intake/);
+    expect(denied.error).toMatch(/only the BA can do this/);
   });
 });
 
@@ -380,3 +381,136 @@ describe('unmapped tickets', () => {
     expect((await rpc(next.chatId, 'card.create', draft())).ok).toBe(true);
   });
 });
+
+/** A chat started from the desk (not an intake): the first message, with the runner's `chat.start`. */
+async function openDeskChat(
+  agentId: string,
+  extra: Record<string, unknown> = {},
+  runner = r,
+  cookie = w.owner.cookie,
+  userId = w.owner.id,
+) {
+  const chat = (await post('/api/chats', { agentId, ...extra }, 201, cookie)).chat;
+  const from = runner.received.length;
+  w.t.app.ctx.services.chat.send(userId, {
+    threadId: chat.threadId,
+    body: 'Spec this',
+    clientMsgId: randomUUID(),
+  });
+  const start = (await runner.waitFor(
+    'chat.start',
+    (f) => f.threadId === chat.threadId,
+    15_000,
+    from,
+  )) as any;
+  return { chat, start };
+}
+
+describe('card creation from a BA chat started on the desk', () => {
+  it('turns the chat into an intake with no ticket, then creates, updates and specifies a linked card', async () => {
+    await setup(false);
+    const ba = await w.hire('Grace', 'ba', 'senior');
+    const { chat, start } = await openDeskChat(ba.id);
+    expect(start.context.intake).toBeUndefined();
+    const unmapped = await rpc(start.chatId, 'card.create', draft());
+    expect(unmapped.ok).toBe(false);
+    expect(unmapped.error).toMatch(/map the ticket to a project first/);
+    expect((await rpc(start.chatId, 'intake.map', { project: 'TOY' })).ok).toBe(true);
+    const made = await rpc(start.chatId, 'card.create', draft({ externalRef: undefined }));
+    expect(made.ok).toBe(true);
+    expect((await rpc(start.chatId, 'card.update', { ref: made.result.ref, title: 'Renamed' })).ok).toBe(
+      true,
+    );
+    const spec = await rpc(start.chatId, 'card.specify', { ref: made.result.ref });
+    expect(spec.ok).toBe(true);
+
+    const started = await eventsOfType('IntakeStarted');
+    expect(started).toHaveLength(1);
+    expect(started[0].payload).toMatchObject({
+      threadId: chat.threadId,
+      source: 'chat',
+      startedBy: w.owner.id,
+    });
+    expect(started[0].payload.externalKey).toBeUndefined();
+    expect(started[0].actor_id).toBe(w.owner.id);
+    // still one chat thread (no second thread, kind unchanged), linked to the card through the intake
+    const threads = await q('SELECT kind FROM threads WHERE id=$1', [chat.threadId]);
+    expect(threads).toEqual([{ kind: 'chat' }]);
+    const linked = await q(
+      `SELECT c.ref, c.title, c.status, c.origin FROM intakes i JOIN intake_cards ic ON ic.intake_id=i.id JOIN cards c ON c.id=ic.card_id WHERE i.thread_id=$1`,
+      [chat.threadId],
+    );
+    expect(linked).toMatchObject([{ ref: made.result.ref, title: 'Renamed', origin: 'intake' }]);
+    expect(linked[0]!.status).not.toBe('draft');
+    await finishChat(start);
+    // the next message tells the BA about the intake it has (marked as from the chat)
+    const from = r.received.length;
+    w.t.app.ctx.services.chat.send(w.owner.id, {
+      threadId: chat.threadId,
+      body: 'more',
+      clientMsgId: randomUUID(),
+    });
+    const next = (await r.waitFor('chat.start', (f) => f.threadId === chat.threadId, 15_000, from)) as any;
+    expect(next.context.intake).toMatchObject({ fromChat: true, mappedProjectKey: 'TOY' });
+    expect(next.context.intake.cards.map((c: any) => c.ref)).toEqual([made.result.ref]);
+  });
+
+  it('pre-maps the project in the chat context', async () => {
+    await setup(false);
+    const ba = await w.hire('Grace', 'ba', 'senior');
+    const { start } = await openDeskChat(ba.id, { projectId: w.projectId });
+    const made = await rpc(start.chatId, 'card.create', draft({ externalRef: undefined }));
+    expect(made.ok).toBe(true);
+    expect(made.result.ref).toMatch(/^TOY-/);
+    const wrong = await rpc(start.chatId, 'intake.map', { project: 'NOPE' });
+    expect(wrong.ok).toBe(false);
+  });
+
+  it('refuses other agents, which keep the existing refusal and get no intake', async () => {
+    await setup(false);
+    const other = await w.hire('Una', 'builder', 'senior');
+    const { chat, start } = await openDeskChat(other.id);
+    const denied = await rpc(start.chatId, 'card.create', draft());
+    expect(denied.ok).toBe(false);
+    expect(denied.error).toMatch(/only the BA can do this/);
+    expect(await q('SELECT 1 FROM intakes WHERE thread_id=$1', [chat.threadId])).toHaveLength(0);
+  });
+
+  it('follows the chatting user: a manager cannot map or create in a project they are not a member of', async () => {
+    await setup(false);
+    const m = await addMember(w, 'bamgr');
+    await ok(
+      w.t.req('POST', '/api/projects', { cookie: w.owner.cookie, body: { key: 'PRIV', name: 'Private' } }),
+      201,
+    );
+    const mr = await connectMemberRunner(w, m);
+    const ba = await hireFor(w, m, 'Gina', 'ba', 'senior');
+    const { start } = await openDeskChat(ba.id, {}, mr, m.cookie, m.id);
+    const denied = await rpc2(mr, start.chatId, 'intake.map', { project: 'PRIV' });
+    expect(denied.ok).toBe(false);
+    expect(denied.error).toMatch(/unknown project/);
+    expect((await rpc2(mr, start.chatId, 'card.create', draft())).ok).toBe(false);
+    expect((await rpc2(mr, start.chatId, 'intake.map', { project: 'TOY' })).ok).toBe(true);
+    const made = await rpc2(mr, start.chatId, 'card.create', draft({ externalRef: undefined }));
+    expect(made.ok).toBe(true);
+    const intake = (await q('SELECT started_by FROM intakes ORDER BY created_at DESC LIMIT 1'))[0];
+    expect(intake!.started_by).toBe(m.id);
+    mr.close();
+  });
+});
+
+async function rpc2(
+  runner: FakeRunner,
+  chatId: string,
+  method: string,
+  params: Record<string, unknown> = {},
+) {
+  const rpcId = randomUUID();
+  const from = runner.received.length;
+  runner.send('rpc.request', { rpcId, shiftId: chatId, method, params });
+  return (await runner.waitFor('rpc.response', (f) => f.rpcId === rpcId, 15_000, from)) as {
+    ok: boolean;
+    result?: any;
+    error?: string;
+  };
+}

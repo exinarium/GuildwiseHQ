@@ -157,7 +157,7 @@ export class ChatRelay {
           scope: orgScope(row.org_id),
         },
       ]);
-      const intake = row.thread_kind === 'intake' ? await intakeContext(ctx, msg.threadId) : undefined;
+      const intake = await intakeContext(ctx, msg.threadId);
       const context: ChatContext = {
         ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),
         ...(row.thread_card_id ? { cardId: row.thread_card_id, cardRef: row.card_ref } : {}),

@@ -51,9 +51,12 @@ export class MockAdapter implements RuntimeAdapter {
    * `mock-<agentId>-<n>`, so resuming counts turns. No process, no tokens.
    */
   async startChat(input: ChatStartInput): Promise<RuntimeSession> {
-    if (input.agent.roleKey === 'ba' && input.context?.intake) return this.startIntakeChat(input);
+    if (input.agent.roleKey === 'ba' && input.context?.intake && !input.context.intake.fromChat)
+      return this.startIntakeChat(input);
     if (input.agent.roleKey === 'ba' && /^\s*design\b/i.test(input.message))
       return this.startIntakeChat(input, 'design');
+    if (input.agent.roleKey === 'ba' && /^\s*create card\b/i.test(input.message))
+      return this.startIntakeChat(input, 'desk');
     const prior = /-(\d+)$/.exec(input.resumeSessionId ?? '');
     const turn = (prior ? Number(prior[1]) : 0) + 1;
     const sessionId = `mock-${input.agent.agentId}-${turn}`;
@@ -106,7 +109,7 @@ export class MockAdapter implements RuntimeAdapter {
    */
   private async startIntakeChat(
     input: ChatStartInput,
-    mode: 'intake' | 'design' = 'intake',
+    mode: 'intake' | 'design' | 'desk' = 'intake',
   ): Promise<RuntimeSession> {
     const [bin, ...pre] = selfCommand('mock-agent') as [string, ...string[]];
     const prior = /-(\d+)$/.exec(input.resumeSessionId ?? '');

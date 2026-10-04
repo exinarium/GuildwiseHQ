@@ -106,6 +106,7 @@ async function visibleProjects(db: Queryable, userId: string): Promise<Row[]> {
 export async function intakeContext(ctx: Ctx, threadId: string): Promise<IntakeContext | undefined> {
   const i = await one(ctx.pool, `${INTAKE_SELECT} WHERE i.thread_id = $1`, [threadId]);
   if (!i) return undefined;
+  const fromChat = !!(await one(ctx.pool, `SELECT 1 FROM threads WHERE id=$1 AND kind='chat'`, [threadId]));
   const projects = await visibleProjects(ctx.pool, i.started_by);
   const cards = (await toDto(ctx, [i]))[0]?.cards ?? [];
   const work = await one(
@@ -115,6 +116,7 @@ export async function intakeContext(ctx: Ctx, threadId: string): Promise<IntakeC
   );
   return {
     intakeId: i.id,
+    ...(fromChat ? { fromChat: true } : {}),
     ...(work ? { workVaultId: work.id } : {}),
     ...(i.external_system ? { externalSystem: i.external_system as ExternalSystem } : {}),
     ...(i.external_key ? { externalKey: i.external_key } : {}),
@@ -279,10 +281,70 @@ interface Responder {
 async function intakeOf(ctx: Ctx, shift: Row): Promise<Responder | null> {
   const threadId = ctx.services.chat.threadOfChat(shift.id);
   if (!threadId) return null;
-  const intake = await one(ctx.pool, 'SELECT * FROM intakes WHERE thread_id=$1', [threadId]);
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [shift.agent_id]);
-  if (!intake || !agent || intake.ba_agent_id !== agent.id) return null;
+  if (!agent) return null;
+  const find = () => one(ctx.pool, 'SELECT * FROM intakes WHERE thread_id=$1', [threadId]);
+  let intake = await find();
+  // The BA in any other chat with its manager: the chat becomes an intake without a ticket (lazily, on first use).
+  if (!intake && agent.role_key === BA_ROLE_KEY) {
+    const userId = ctx.services.chat.userOfChat(shift.id);
+    if (userId) {
+      try {
+        intake = await startChatIntake(ctx, threadId, agent, userId);
+      } catch (err) {
+        intake = await find(); // a concurrent verb created it first
+        if (!intake) throw err;
+      }
+    }
+  }
+  if (!intake || intake.ba_agent_id !== agent.id) return null;
   return { intake, agent };
+}
+
+/**
+ * Turns a BA chat that was not started as an intake into one with no external ticket (docs/SPEC.md: chat "is how
+ * intake ... happen[s]", every conversation "linked to any card or request it creates"). The intake belongs to the
+ * chatting user, so every right is theirs; a project in the chat's context is mapped straight away.
+ */
+async function startChatIntake(
+  ctx: Ctx,
+  threadId: string,
+  agent: Row,
+  userId: string,
+): Promise<Row | undefined> {
+  const thread = await one(ctx.pool, `SELECT * FROM threads WHERE id=$1 AND kind='chat' AND created_by=$2`, [
+    threadId,
+    userId,
+  ]);
+  if (!thread || thread.agent_id !== agent.id) return undefined;
+  const intakeId = randomUUID();
+  const scope = orgScope(thread.org_id);
+  const events: AppendInput[] = [
+    {
+      streamId: streamId.intake(intakeId),
+      event: {
+        type: 'IntakeStarted',
+        payload: { intakeId, threadId, startedBy: userId, baAgentId: agent.id, source: 'chat' },
+      },
+      actor: userActor(userId),
+      scope,
+    },
+  ];
+  if (thread.project_id) {
+    const project = (await visibleProjects(ctx.pool, userId)).find((p) => p.id === thread.project_id);
+    if (project)
+      events.push({
+        streamId: streamId.intake(intakeId),
+        event: {
+          type: 'TicketMapped',
+          payload: { intakeId, projectId: project.id, unmapped: false },
+        },
+        actor: agentActor(agent.id),
+        scope,
+      });
+  }
+  await ctx.store.append(events);
+  return one(ctx.pool, 'SELECT * FROM intakes WHERE id=$1', [intakeId]);
 }
 
 /**
@@ -301,7 +363,7 @@ export async function intakeRpc(
     return [
       false,
       undefined,
-      'this conversation is not an intake: only the BA in an intake chat can do this',
+      'only the BA can do this, in a chat with its manager (an intake or any other chat)',
     ];
   try {
     switch (method) {

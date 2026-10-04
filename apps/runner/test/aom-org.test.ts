@@ -43,6 +43,16 @@ async function cli(
 }
 
 describe('aom org', () => {
+  it('drafts from inline JSON and from stdin too', async () => {
+    const t = await cli({ '-': '{"key":"support"}' });
+    expect(await t.run('org', 'role', 'draft', '--json', '{"key":"triager"}')).toBe(0);
+    expect(await t.run('org', 'workflow', 'draft', '--file', '-')).toBe(0);
+    expect(t.rpcs.map((r) => r.params)).toEqual([
+      { definition: { key: 'triager' } },
+      { definition: { key: 'support' } },
+    ]);
+  });
+
   it('drafts a role and a workflow from JSON files', async () => {
     const t = await cli({ 'r.json': '{"key":"triager"}', 'w.json': '{"key":"support"}' });
     expect(await t.run('org', 'role', 'draft', '--file', 'r.json')).toBe(0);

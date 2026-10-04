@@ -402,3 +402,34 @@ test('AC finalize: the BA claims Finalize and finalizes a small card without the
   expect((await card(large.ref)).status).toBe('waiting');
   expect(existsSync(GH_LOG)).toBe(true);
 });
+
+test('AC desk chat: the BA in a plain chat from the desk creates and specifies a card, linked to the conversation', async () => {
+  await page.goto('/desk');
+  await page.getByRole('button', { name: 'Chat', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: 'Chat' });
+  await drawer.getByLabel('Agent').selectOption({ label: 'Ben (ba)' });
+  await drawer.getByRole('button', { name: 'Start chat' }).click();
+  await expect(drawer.getByTestId('chat-panel')).toBeVisible();
+  await drawer.getByLabel('Message').fill('create card INT: Add a settings page');
+  await drawer.getByRole('button', { name: 'Send' }).click();
+  await expect(drawer.getByTestId('chat-message').last()).toContainText('from this chat', {
+    timeout: 60_000,
+  });
+  const thread = (
+    await q<any>(
+      `SELECT id, kind FROM threads WHERE kind='chat' AND title LIKE '%Ben%' ORDER BY created_at DESC LIMIT 1`,
+    )
+  )[0];
+  expect(thread.kind).toBe('chat');
+  const linked = await q<any>(
+    `SELECT c.ref, c.title, c.stage, c.status, c.origin FROM intakes i
+       JOIN intake_cards ic ON ic.intake_id = i.id JOIN cards c ON c.id = ic.card_id WHERE i.thread_id=$1`,
+    [thread.id],
+  );
+  expect(linked).toHaveLength(1);
+  expect(linked[0]).toMatchObject({ title: 'Add a settings page', origin: 'intake' });
+  expect(linked[0].status).not.toBe('draft');
+  const started = (await events('IntakeStarted')).filter((e) => e.payload.threadId === thread.id);
+  expect(started).toHaveLength(1);
+  expect(started[0]?.payload.source).toBe('chat');
+});

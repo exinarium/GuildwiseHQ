@@ -462,6 +462,10 @@ Click an agent card on the board to open its detail, then click **Chat**. This o
 - Offer suggestions
 - Discuss blockers or decisions
 
+A chat with the business analyst (BA) is also how you get work specified: ask the BA in any chat, including one you started from the desk's **Chat** button, to create cards. The BA maps the project (or uses the project the chat is tied to), drafts and specifies the cards, and the conversation is linked to every card it creates (the chat becomes an intake with no external ticket). The BA works with your rights: it can only use projects you are a member of. Other agents cannot create cards from chat.
+
+In any chat the agent may write notes and drafts in its own scratch folder; it still cannot change your repositories, the vault or its configuration from a chat.
+
 Chat is saved to a thread and appears in the card's history. A chat that belongs to a project is marked "visible to this project's managers". Rights are checked on every message: if you are removed from the project, you can no longer talk to its agents through an old chat.
 
 ## Windows workstation notes

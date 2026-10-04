@@ -285,12 +285,14 @@ export function buildChatSettings(
   const deny = [
     ...ALWAYS_DENIED,
     'WebSearch',
-    ...(readOnly ? ['Edit', 'Write', 'NotebookEdit'] : []),
+    // A card's worktree is read-only; a bare `Edit` deny would also beat the scratch allow, so it is path-scoped.
+    ...(readOnly ? [`Edit(${ruleAbs(ctx.cwd)}/**)`] : []),
     ...commonDenies(ctx, paths.configDir),
   ];
   const out: ClaudeSettings = {
     permissions: {
-      allow: ['Read', 'Glob', 'Grep', 'Bash(aom:*)', ...extraAllow],
+      // Edit (which covers Write and NotebookEdit) only in the agent's own scratch dir; the denies below still win.
+      allow: ['Read', 'Glob', 'Grep', 'Bash(aom:*)', `Edit(${ruleAbs(paths.scratch)}/**)`, ...extraAllow],
       deny: [...new Set(deny)],
       defaultMode: 'dontAsk',
       blockReadsOutsideWorkingDirectories: true,
