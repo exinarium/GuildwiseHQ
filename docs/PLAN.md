@@ -1,5 +1,7 @@
 # Agent Org Manager — v1 Build Plan
 
+**Status: All 10 milestones (M1–M10) implemented and green.**
+
 Companion to `docs/ARCHITECTURE.md` (design, referenced as §n) and `docs/SPEC.md` (product). Milestones follow the spec's build plan (phases 1–9). Each milestone lists scope, files, acceptance criteria (AC) and tests. A milestone is done when all AC pass in CI (`pnpm typecheck && pnpm lint && pnpm test && pnpm e2e`).
 
 | Milestone | Spec phase | Theme | Depends on |

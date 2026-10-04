@@ -1,0 +1,615 @@
+# Agent Org Manager — Runner Guide
+
+The runner is a Node.js CLI that runs on your workstation, connects to the server over WebSocket, and executes agent shifts. Each shift runs an agent in an isolated git worktree with its own home directory and config.
+
+## Installation and setup
+
+### Requirements
+
+- **Node 22.23** (use `nvm use` or download from https://nodejs.org)
+- **Git 2.40 or later** (for worktree support)
+- **Docker** (optional; needed for testers to run containers)
+
+### Getting the runner
+
+Build it from source:
+```sh
+pnpm package:runner      # outputs release/aom-runner-<version>.tgz
+```
+
+Or download a pre-built binary from your system (available after deployment).
+
+### Install and pair
+
+Extract the tarball and run `pair`:
+
+```sh
+tar xzf aom-runner-0.1.0.tgz && cd aom-runner
+./aom-runner pair --server https://aom.example.com --code XXXX-XXXX --name "Desktop"
+./aom-runner repos add ~/src ~/work    # scan for git repos (depth 3)
+./aom-runner start                     # run in foreground or as a service
+```
+
+On Windows:
+```cmd
+aom-runner.cmd pair --server https://aom.example.com --code XXXX-XXXX --name "Desktop"
+aom-runner.cmd repos add C:\src
+aom-runner.cmd start
+```
+
+The pairing code is valid for 10 minutes and valid for one pair attempt. See **Pairing** section below for details.
+
+### Run as a service
+
+Keep the runner running using systemd (Linux), launchd (macOS), or Task Scheduler (Windows).
+
+**Linux (systemd user service):**
+
+Create `~/.config/systemd/user/aom-runner.service`:
+
+```ini
+[Unit]
+Description=Agent Org Manager Runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/you/aom-runner/aom-runner start
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+```
+
+Enable and start:
+```sh
+systemctl --user enable aom-runner
+systemctl --user start aom-runner
+systemctl --user status aom-runner      # check status
+journalctl --user -u aom-runner -f      # watch logs
+```
+
+**macOS (launchd):**
+
+Create `~/Library/LaunchAgents/com.aom.runner.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.aom.runner</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/you/aom-runner/aom-runner</string>
+    <string>start</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/you/.aom-runner/logs/runner.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/you/.aom-runner/logs/runner.log</string>
+</dict>
+</plist>
+```
+
+Enable and start:
+```sh
+launchctl load ~/Library/LaunchAgents/com.aom.runner.plist
+launchctl start com.aom.runner
+launchctl list | grep aom.runner      # check status
+```
+
+**Windows (Task Scheduler):**
+
+1. Open Task Scheduler
+2. Create Task
+3. General tab: check "Run whether user is logged in or not"
+4. Triggers tab: add trigger "At log on"
+5. Actions tab: set program to `C:\Users\you\aom-runner\aom-runner.cmd` and arguments to `start --data-dir %LOCALAPPDATA%\aom-runner`
+6. Click OK
+
+## Data directory structure
+
+The runner stores all data in `~/.aom-runner` (Linux/macOS) or `%LOCALAPPDATA%\aom-runner` (Windows). You can override with `--data-dir <path>` or `AOM_RUNNER_HOME` env var.
+
+```
+config.json                     runner config (mode 0600: server URL, token, repos, runtimes)
+status.json                     updated by start (process state, connection status)
+outbox/                         pending messages (persisted, retried on reconnect)
+agents/
+  <agentId>/
+    home/                       HOME for the agent (contains git .gitconfig identity)
+    claude/                     CLAUDE_CONFIG_DIR (credentials, memory, cache)
+    scratch/                    working directory for the agent's own files
+worktrees/
+  <PROJECT>-<number>/
+    aom/toy-1-...               git worktrees on branch aom/<ref>-<slug>
+    aom/toy-2-...
+mock-state/                     per-card attempt counters for mock script (test only)
+logs/
+  runner.log                    JSON Lines log of runner events
+  shifts/
+    <shiftId>.jsonl             raw runtime output for each shift
+```
+
+## Configuration
+
+The runner config is stored in `config.json` (mode 0600: readable/writable by owner only).
+
+### Viewing and checking config
+
+```sh
+aom-runner status             # shows config summary and process state
+aom-runner doctor             # checks node, git, claude, docker, repos, server
+```
+
+### Config file format
+
+```json
+{
+  "serverUrl": "https://aom.example.com",
+  "workstationId": "...",
+  "runnerToken": "...",
+  "repoRoots": [
+    "/home/you/src",
+    "/home/you/work"
+  ],
+  "runtimes": {
+    "claude-code": {
+      "bin": "claude",
+      "authMode": "oauth",
+      "oauthToken": "...",
+      "intake": {
+        "mcpConfig": "/path/to/mcp-config.json",
+        "allowedTools": ["mcp__jira", "WebFetch"]
+      }
+    },
+    "mock": {
+      "enabled": false,
+      "capabilities": ["builder", "reviewer"]
+    }
+  },
+  "jira": {
+    "baseUrl": "https://jira.example.com",
+    "email": "your-email@example.com",
+    "apiToken": "..."
+  },
+  "maxConcurrentShifts": 4,
+  "vaultSyncIntervalSec": 300
+}
+```
+
+### Configuration keys
+
+#### Server and auth
+- **serverUrl** (required): server URL, e.g., `https://aom.example.com`
+- **workstationId** (required): UUID issued during pairing
+- **runnerToken** (required): WebSocket auth token (keep secret, stored mode 0600)
+
+#### Repositories
+- **repoRoots** (array, default `[]`): folders to scan for git repositories (recursively, depth 3)
+
+#### Runtimes
+
+**Claude Code** (the default):
+- **bin** (default `"claude"`): path or command to the claude CLI
+- **authMode** (default `"default"`):
+  - `"oauth"`: use `oauthToken` (from `claude setup-token`)
+  - `"api_key"`: use `apiKey` (Jira Data Center, self-hosted)
+  - `"default"`: symlink to your `~/.claude/.credentials.json`
+- **oauthToken** (optional): from `claude setup-token` (when authMode is `"oauth"`)
+- **apiKey** (optional): API key (when authMode is `"api_key"`)
+- **intake** (optional, M7): MCP integration for BA intake
+  - **mcpConfig**: path to MCP config file with Jira server and credentials
+  - **allowedTools** (array): tools the intake chat can use (`mcp__jira`, `WebFetch`, etc.)
+
+**Mock** (test-only, token-free):
+- **enabled** (default `false`): turn on for testing
+- **capabilities** (optional array): limit advertised roles (e.g., `["builder"]`)
+
+#### External integrations
+
+**Jira** (M8 outbox, optional):
+- **baseUrl** (required): Jira server URL
+- **email** (optional): Jira Cloud username (if provided, use basic auth)
+- **apiToken** (required): Jira Cloud API token or Data Center personal access token
+
+GitHub uses your machine's `gh` CLI login (run `gh auth login` once).
+
+#### Agent and vault settings
+- **maxConcurrentShifts** (default `4`): max cards running at once
+- **vaultSyncIntervalSec** (default `300`): how often to pull/commit/push vaults
+
+### Setting credentials
+
+Edit `config.json` manually (mode 0600) or use the pair command with `--mock` flag.
+
+**OAuth token (recommended for Claude Code):**
+1. Run `claude setup-token` to get a token
+2. Edit `~/.aom-runner/config.json`:
+   ```json
+   { "runtimes": { "claude-code": { "authMode": "oauth", "oauthToken": "..." } } }
+   ```
+
+**Jira API token:**
+1. Go to https://id.atlassian.com/manage-profile/security/api-tokens
+2. Create a token and copy it
+3. Edit config.json:
+   ```json
+   { "jira": { "baseUrl": "https://jira.example.com", "email": "you@example.com", "apiToken": "..." } }
+   ```
+
+**GitHub setup (for PR creation):**
+1. Install the GitHub CLI: `brew install gh` (macOS), `choco install gh` (Windows), apt/dnf (Linux)
+2. Authenticate: `gh auth login` (one-time setup)
+3. Test: `gh pr list`
+
+The `gh` CLI is optional; if not available, finalize with action `pr` falls back to pushing the branch and posting a desk notice for manual PR creation. See the BA's `aom finalize --action <pr|push_branch|merge>` command.
+
+**Rotate runner token** (invalidates old token):
+```sh
+aom-runner rotate-token    # runner must be stopped
+aom-runner start           # restart with new token
+```
+
+## Running and connecting
+
+### Start command
+
+```sh
+aom-runner start [--mock] [--data-dir <path>]
+```
+
+Connects to the server and listens for work. Runs in foreground (Ctrl+C to stop).
+
+- `--mock`: enable mock runtime for this process (does not edit config)
+- `--data-dir <path>`: override data directory (default `~/.aom-runner`)
+
+Exit codes:
+- `0`: stopped by SIGINT/SIGTERM
+- `2`: server rejected token (re-pair needed)
+- `3`: another runner connected to the same workstation (only one per workstation)
+
+### Heartbeat and reconnect
+
+- Sends heartbeat every 15 seconds
+- Reconnects with full-jitter backoff on disconnect (1 s → 30 s)
+- Resends outbox (pending messages) on each reconnect
+
+Shift state is persisted in `active-shifts/` and resumed when the runner restarts, so killing and restarting within the one-hour lease keeps the card claim.
+
+### Status command
+
+```sh
+aom-runner status [--data-dir <path>]
+```
+
+Shows config summary and whether a runner process is alive (with PID, connection state, active shifts, pending outbox).
+
+### Troubleshooting
+
+```sh
+aom-runner doctor [--data-dir <path>]
+```
+
+Checks prerequisites and connectivity:
+- Node version ≥ 22
+- Git version ≥ 2.40
+- Claude CLI is available (if using claude-code runtime)
+- Docker is available (if testers will run)
+- Repos found under repoRoots
+- Server is reachable
+
+## Environment variables
+
+The runner respects these environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `AOM_RUNNER_HOME` | Data directory (default `~/.aom-runner` or Windows `%LOCALAPPDATA%\aom-runner`) |
+| `AOM_RUNNER_MOCK` | Set to `1` to enable mock runtime (alternative to `--mock` flag) |
+| `AOM_RUNNER_MAX_SHIFT_MS` | Override `maxShiftMinutes` for testing (milliseconds, e.g., 5000 for 5 seconds) |
+| `AOM_MOCK_STEP_MS` | Speed up mock adapter progress steps (default 100 ms) |
+| `AOM_GH_BIN` | Path to `gh` binary (default `gh`; for GitHub API integration) |
+| `AOM_CLAUDE_SMOKE` | Set to `1` to run the real-Claude smoke test (spends tokens) |
+| `AOM_CLAUDE_SMOKE_MODEL` | Smoke test model (default `opus`; try `haiku` to save tokens) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Claude Code (from `claude setup-token`) |
+
+## The `aom` command (inside a shift)
+
+Inside a shift, agents use the `aom` CLI to read the card, report outcomes, ask questions, and interact with the runner.
+
+**Available everywhere (all shifts):**
+```sh
+aom card [--json]                                      print the card and brief
+aom ledger search "<query>" [--scope all|feature|decision|standing_order]
+                                                       search answers, decisions and standing orders
+aom comment --note "<text>"                            post a note without ending
+aom question --text "<q>" [--option "<a>"]... [--recommend <n>] [--doing "<x>"] [--non-blocking] [--force]
+aom devops "<request>"                                 ask the DevOps engineer
+```
+
+Agents must run `aom ledger search` before raising a question: every answer (from the manager, a senior or the BA) is recorded in the ledger once and should never be asked twice. `aom question` also runs a duplicate check and returns matching ledger entries; a non-blocking question that matches needs `--force`.
+
+**Builder/researcher shifts (To do, Rework, Research):**
+```sh
+aom handoff --note "<text>" [--data-file <json>]       hand the card on
+aom question ...                                       ask a blocking question
+```
+
+**Reviewer shifts (Review stage):**
+```sh
+aom review approve --score <1-5> --note "<text>"
+aom review changes --reason <r>[,<r>] --score <1-5> [--criteria-missed "<c>"]... --note "<text>"
+```
+
+**Tester shifts (Test stage):**
+```sh
+aom test pass --evidence "<text>" [--command "<cmd>"]...
+aom test fail --title "<bug>" --note "<text>" [--evidence "<text>"] [--command "<cmd>"]...
+```
+
+**BA shifts (Spec, Intake, Finalize, Answer):**
+```sh
+aom card create --file <draft.json>
+aom card update <REF> --file <patch.json>
+aom card specify <REF>
+aom finalize --action <pr|push_branch|merge> --note "<why>"  # pr requires `gh`; falls back to push_branch otherwise
+aom answer --item <id> --text "<answer>" [--option <id>]
+aom escalate --item <id> --note "<what must be decided>"
+aom intake map --project <KEY> | aom intake unmapped --note "<why>"
+aom outbound draft --kind <comment|resolution|decision> --body "<text>"
+aom source read --ref <owner/repo#12 | ticket URL>
+aom org ...                                            (design chat: draft roles/workflows)
+```
+
+**Scout/curator shifts (Feed, Digest):**
+```sh
+aom digest --file <json> [--note "<text>"] | --none
+aom handoff --note "<text>"                            (scout: handoff with candidates)
+```
+
+**Researcher/checker shifts (Research):**
+```sh
+aom publish --file <note.md> [--title "<t>"] [--citations-file <json>]
+```
+
+**Exit codes:**
+- `0`: recorded successfully
+- `1`: error or rejected report (reason printed; can fix and retry within the shift)
+- `2`: verb not available in this version (or feature not yet implemented)
+
+**Full reference:** see `docs/USER-GUIDE.md` for the full `aom` reference and examples.
+
+## Adapters: Claude Code and Mock
+
+### Claude Code adapter
+
+Runs the `claude` CLI in a shift, builds the full environment, and streams the output.
+
+**Environment setup** (per shift):
+- `HOME=~/.aom-runner/agents/<agentId>/home`
+- `CLAUDE_CONFIG_DIR=~/.aom-runner/agents/<agentId>/claude`
+- `GIT_CONFIG_FILE=~/.aom-runner/agents/<agentId>/home/.gitconfig` (with agent name and email)
+- `AOM_IPC_URL=http://127.0.0.1:<ephemeral>` (for `aom` CLI)
+- `AOM_SHIFT_TOKEN=<per-shift-token>` (ephemeral, valid only during the shift)
+
+**Session startup:**
+```sh
+claude -p --resume --include-partial-messages --no-input
+  --context-file=/path/to/shift-prompt.md
+  --effort=<effort>
+  [--model=<model>]
+```
+
+The shift prompt includes:
+- The card spec, context, requirements, acceptance criteria
+- Relevant vault files (project `.md` files, standing orders)
+- Previous related decisions from the ledger
+- Agent role and permissions
+- Org and team context
+
+### Mock adapter
+
+Token-free test adapter driven by a script in `card.fields.mock`.
+
+**Behavior per stage (default):**
+- `build`: write files, commit, report `aom handoff`
+- `review`: approve (score 4)
+- `test`: pass
+- Other stages: first success outcome
+
+**Script format:** `{ "<stage>": ["<action>", ...] }`
+
+Actions (consumed by attempt index):
+
+| action | effect | outcome |
+| --- | --- | --- |
+| `ok` | stage default | reported |
+| `changes` | review bounces (score 2); test fails | reported |
+| `fail` | review/test fails | reported |
+| `question` | raises a blocking question | no_report |
+| `crash` | exits 1 immediately | crashed |
+| `hang` | never exits; stopped at `maxShiftMinutes` | timeout |
+| `no_report` | finishes work but exits 0 without reporting | no_report |
+| `edit_outside_scope` | writes out-of-scope file; reported as ok; guard rejects | no_report + guardViolations |
+
+**Example:**
+```json
+{
+  "review": ["changes", "ok"],
+  "test": ["fail", "pass"]
+}
+```
+
+First review bounces, second approves; first test fails (creates bug card), second passes.
+
+**Testing options:**
+- `AOM_MOCK_STEP_MS=50` (default 100): speed up mock progress steps (in milliseconds)
+- `AOM_RUNNER_MAX_SHIFT_MS=5000`: override maxShiftMinutes for testing (milliseconds)
+- `--mock` flag or `AOM_RUNNER_MOCK=1` env var: enable mock runtime
+
+## Sandbox isolation
+
+Each agent runs with its own home directory and config, wiped when the agent is fired (or when the DevOps engineer is reset).
+
+### Per-agent directories
+
+- `agents/<agentId>/home/`: HOME directory with `.gitconfig` identity (name and email)
+- `agents/<agentId>/claude/`: CLAUDE_CONFIG_DIR for Claude Code (credentials, auto-memory, caches)
+- `agents/<agentId>/scratch/`: working directory for agent's scratch files
+
+All are cleaned up when the agent is fired.
+
+### Git worktrees
+
+Worktrees are created under `worktrees/<PROJECT>-<number>/aom/<ref>-<slug>/` and reused across stages of the same card. They are removed after finalize.
+
+## Vaults: sync and write
+
+(M3 and later)
+
+### Vault sync loop
+
+Every `vaultSyncIntervalSec` (default 300 s = 5 min):
+
+1. **Pull**: `git pull` all vaults
+2. **Discover changes**: find local edits from agent shifts
+3. **Commit**: stage and commit new files/edits
+4. **Push**: `git push` to origin
+
+If a push conflicts, sync pauses and a desk item is posted asking you to resolve it.
+
+### Vault write from shifts
+
+Agents can write to vaults via `aom` commands (BA intake, posting decisions, ratings):
+```sh
+aom answer --item <id> --text "..."        # writes decision to vault
+aom digest --file <...>                    # appends to feed file
+```
+
+Vault writes are staged and included in the next sync commit.
+
+### Domain vaults
+
+- **Work vault**: shared with your team
+- **Personal vault**: visible only to you
+- **Project vault**: shared with project members
+
+A builder on a work-domain card sees only the work vault; personal cards see only personal.
+
+## Credentials and secrets
+
+**Credentials stay on the machine:**
+- Runner token: stored in `config.json` (mode 0600)
+- Claude credentials: stored in agent's `CLAUDE_CONFIG_DIR` (mode 0700) or symlinked to your `~/.claude`
+- Jira token: stored in `config.json` (mode 0600)
+- GitHub: uses machine's `gh` login (via `gh auth login`)
+- Vault SSH keys: used from machine's SSH agent or keyfiles
+
+**Nothing leaves the runner:**
+- Credentials are never sent to the server
+- Vault content stays local (only commits/pushes pushed to origin)
+- Session transcripts stay in the agent's sandbox
+
+## Testing and smoke tests
+
+### Test environment check
+
+Testers need Docker and the application running. Before a tester shift starts, the runner checks:
+
+1. Docker is installed and responsive (`docker info`)
+2. If `.aom/test-env.json` exists in the repository root, the app's health endpoint is reachable
+
+**Test environment file** (`.aom/test-env.json`):
+
+```json
+{
+  "healthUrl": "http://localhost:3000/health"
+}
+```
+
+The tester's DevOps engineer (or setup job) creates this file once the app is deployed. If the health check fails, the tester shift is blocked with a desk notice; DevOps resolves it.
+
+**Mock mode** (testing): the card's `fields.mockEnv` field names a problem (`"docker_missing"` or `"app_not_deployed"`). The mock persists the problem in `.aom-runner/mock-state/` until fixed by mock DevOps.
+
+### Unit and integration tests
+
+Run the test suite (uses the in-process fake server):
+```sh
+pnpm --filter @aom/runner test
+```
+
+### Smoke test (real Claude)
+
+Spends tokens; requires Claude credentials:
+
+```sh
+export AOM_CLAUDE_SMOKE=1
+export CLAUDE_CODE_OAUTH_TOKEN=...       # or `claude setup-token`, or omit for local login
+export AOM_CLAUDE_SMOKE_MODEL=haiku      # optional (default opus)
+pnpm --filter @aom/runner test:smoke
+```
+
+Runs one real builder shift on a toy repo and asserts a handoff was recorded.
+
+## Troubleshooting
+
+### Check runner status and logs
+
+```sh
+aom-runner status                         # shows process and connection state
+aom-runner doctor                         # checks prerequisites
+tail -f ~/.aom-runner/logs/runner.log     # watch runner events
+tail -f ~/.aom-runner/logs/shifts/*.jsonl # watch specific shifts
+```
+
+### Runner is not connecting
+
+1. Check `aom-runner doctor` output for server connectivity
+2. Verify `config.json` has the correct `serverUrl`
+3. Check the server is running: `curl https://aom.example.com/api/health`
+4. Check the firewall allows WebSocket connections to the server
+
+### Shift did not complete
+
+1. Check the shift log in `logs/shifts/<shiftId>.jsonl`
+2. If the runner crashed, check `logs/runner.log` for errors
+3. If the shift timed out (>1 hour), the card was returned to the queue with the last handoff
+4. Check agent permissions and vault access; restart the runner and retry
+
+### "already reported" error
+
+The agent tried to report twice in the same shift. Only one terminal report (handoff, review, test, finalize) is accepted per shift.
+
+### Vault sync conflicts
+
+Sync pauses and a desk item is posted. Resolve the conflict manually:
+1. Go to `~/.aom-runner/worktrees/<vault>/` (or wherever the vault is cloned)
+2. Resolve the conflict using `git` (e.g., `git status`, `git add`, `git commit`)
+3. `git push` to clear the conflict
+4. Restart the runner to resume sync
+
+### Agent sandbox is full
+
+Clear old shift logs and agent caches:
+```sh
+rm -rf ~/.aom-runner/logs/shifts/*.old
+rm -rf ~/.aom-runner/agents/*/claude/cache
+```
+
+## See also
+
+- `apps/runner/README.md`: quick reference
+- `docs/USER-GUIDE.md`: manager features and agent hiring
+- `docs/DEPLOY.md`: server deployment
+- `docs/ARCHITECTURE.md`: technical design and protocol
