@@ -1,5 +1,5 @@
 import type { EventOf, EventType } from '@aom/shared';
-import { exec, one } from '../db/sql.ts';
+import { exec, one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { Projector, StoredEvent } from '../eventstore/types.ts';
 import { getCard, leaseExpiry, mutateCard, recordTransition } from './util.ts';
@@ -17,6 +17,53 @@ const CARD_CHANGE_COLUMNS: Record<string, string> = {
   riskTierOverridden: 'risk_tier_overridden',
   ownerUserId: 'owner_user_id',
 };
+
+const EDIT_LABELS: Record<string, string> = {
+  title: 'title',
+  priority: 'priority',
+  repoId: 'repository',
+  docsNeeded: 'docs needed',
+  completionAction: 'completion action',
+  dependencies: 'dependencies',
+};
+
+/** Timeline rows for a CardUpdated: a risk tier override, and/or a list of what was edited. */
+async function recordActivity(
+  tx: Tx,
+  e: StoredEvent,
+  p: EventOf<'CardUpdated'>['payload'],
+  before: Row | undefined,
+) {
+  const userId = e.actor.kind === 'user' ? e.actor.id : null;
+  const agentId = e.actor.kind === 'agent' ? e.actor.id : null;
+  const add = (kind: 'edited' | 'risk_tier', summary: string, reason: string | null) =>
+    exec(
+      tx,
+      `INSERT INTO card_activity (card_id, kind, summary, reason, user_id, agent_id, event_seq, at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [p.cardId, kind, summary, reason, userId, agentId, e.seq.toString(), e.createdAt],
+    );
+  const c = p.changes;
+  const edited: string[] = [];
+  for (const [k, label] of Object.entries(EDIT_LABELS))
+    if ((c as Record<string, unknown>)[k] !== undefined) edited.push(label);
+  if (c.fields) {
+    const was = (before?.fields ?? {}) as Record<string, unknown>;
+    for (const k of new Set([...Object.keys(c.fields), ...Object.keys(was)]))
+      if (JSON.stringify(c.fields[k]) !== JSON.stringify(was[k])) edited.push(k);
+  }
+  if (edited.length > 0) await add('edited', `Edited ${edited.join(', ')}`, null);
+  if (c.riskTier !== undefined) {
+    const was = before?.risk_tier ?? 'not set';
+    await add(
+      'risk_tier',
+      c.riskTier === null
+        ? `Risk tier override cleared (was ${was}); it is computed from the diff again`
+        : `Risk tier set to ${c.riskTier} by override (was ${was})`,
+      p.reason ?? null,
+    );
+  }
+}
 
 /** Moves a card to a stage and queue state (the shape most outcome events share). */
 async function moveTo(
@@ -103,7 +150,9 @@ export const cardProjectors: Record<string, Projector> = {
       params.push(k === 'fields' ? JSON.stringify(v) : v);
       sets.push(`${col} = $${params.length}`);
     }
+    const before = await getCard(tx, p.cardId);
     await exec(tx, `UPDATE cards SET ${[...sets, 'updated_at = $2'].join(', ')} WHERE id=$1`, params);
+    await recordActivity(tx, e, p, before);
     if (p.changes.dependencies) {
       await exec(tx, 'DELETE FROM card_dependencies WHERE card_id=$1', [p.cardId]);
       for (const dep of p.changes.dependencies) {

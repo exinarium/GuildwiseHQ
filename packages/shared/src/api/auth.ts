@@ -21,6 +21,8 @@ export const MeResponseSchema = z.object({
   user: UserDtoSchema,
   isAdmin: z.boolean(),
   visibleProjectIds: z.array(z.uuid()),
+  /** Server feature flags the UI follows. `mockUi`: show the mock-runtime card fields (dev and e2e only). */
+  features: z.object({ mockUi: z.boolean() }).default({ mockUi: false }),
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
 

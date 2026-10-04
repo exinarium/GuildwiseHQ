@@ -20,6 +20,7 @@ export async function meResponse(ctx: Ctx, userId: string): Promise<MeResponse> 
     user: toUserDto(u as Record<string, any>),
     isAdmin: u?.role === 'admin',
     visibleProjectIds: projects.map((p) => p.project_id),
+    features: { mockUi: ctx.config.mockUi },
   };
 }
 

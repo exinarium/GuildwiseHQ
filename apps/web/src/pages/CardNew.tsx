@@ -1,18 +1,13 @@
-import { CompletionAction, ResearchDepth } from '@aom/shared';
 import { type FormEvent, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
 import { useWorkflows } from '../api/queries/agents.ts';
+import { useMe } from '../api/queries/auth.ts';
 import { missingFromError, useCreateCard } from '../api/queries/cards.ts';
 import { useProject, useProjects } from '../api/queries/projects.ts';
-import { Button, ErrorBox, PageHeader, Select, Spinner, TextArea, TextInput } from '../components/ui.tsx';
-import {
-  buildCardRequest,
-  type CardFormValues,
-  emptyForm,
-  fieldLabel,
-  formFieldList,
-} from '../lib/cardForm.ts';
+import { CardFormFields } from '../components/CardFormFields.tsx';
+import { Button, ErrorBox, PageHeader, Select, Spinner } from '../components/ui.tsx';
+import { buildCardRequest, type CardFormValues, emptyForm, fieldLabel } from '../lib/cardForm.ts';
 import { getLastProjectKey } from '../lib/lastProject.ts';
 
 export function CardNew() {
@@ -25,6 +20,7 @@ export function CardNew() {
   // The workflow of a shared project is its owner's (custom ones included).
   const workflows = useWorkflows(project?.id);
   const detail = useProject(project?.id);
+  const mockUi = useMe().data?.features?.mockUi ?? false;
   const workflow = useMemo(
     () =>
       workflows.data
@@ -58,6 +54,7 @@ export function CardNew() {
       onProject={setChosen}
       workflow={workflow}
       repos={(detail.data?.repos ?? []).filter((r) => !r.removedAt)}
+      mockUi={mockUi}
     />
   );
 }
@@ -71,6 +68,7 @@ export function CardNewForm({
   onProject,
   workflow,
   repos,
+  mockUi = false,
 }: {
   projectId: string;
   projectKey: string;
@@ -78,19 +76,16 @@ export function CardNewForm({
   onProject: (key: string) => void;
   workflow: Workflow;
   repos: Array<{ id: string; name: string }>;
+  /** Show the mock-runtime fields (server `AOM_MOCK_UI`); off for real users. */
+  mockUi?: boolean;
 }) {
   const nav = useNavigate();
   const create = useCreateCard();
   const [v, setV] = useState<CardFormValues>(() => emptyForm(workflow.cardTypes[0] ?? ''));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [note, setNote] = useState<{ id: string; ref: string; missing: string[] } | null>(null);
-  const list = formFieldList(workflow);
-  // Repository and completion action belong to code work; research and feed cards live in the vault.
-  const codeCard = workflow.fieldSet !== 'research' && workflow.fieldSet !== 'feed';
-  const setField = (k: string, val: string) => setV((s) => ({ ...s, fields: { ...s.fields, [k]: val } }));
-
   const submit = (specify: boolean) => {
-    const r = buildCardRequest(workflow, v, specify);
+    const r = buildCardRequest(workflow, v, specify, mockUi);
     setErrors(r.errors);
     setNote(null);
     if (Object.keys(r.errors).length) {
@@ -158,110 +153,14 @@ export function CardNewForm({
             ))}
           </Select>
         </div>
-        <TextInput
-          label="Title"
-          value={v.title}
-          onChange={(e) => setV({ ...v, title: e.target.value })}
-          error={errors.title}
-          maxLength={300}
+        <CardFormFields
+          workflow={workflow}
+          values={v}
+          onChange={setV}
+          errors={errors}
+          repos={repos}
+          mockUi={mockUi}
         />
-        <div className="grid gap-3 sm:grid-cols-2">
-          {codeCard && (
-            <>
-              <Select
-                label="Repository"
-                value={v.repoId}
-                onChange={(e) => setV({ ...v, repoId: e.target.value })}
-                error={errors.repoId}
-              >
-                <option value="">None</option>
-                {repos.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </Select>
-              <Select
-                label="Completion action"
-                value={v.completionAction}
-                onChange={(e) => setV({ ...v, completionAction: e.target.value })}
-                error={errors.completionAction}
-              >
-                <option value="">None</option>
-                {CompletionAction.options.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-              </Select>
-            </>
-          )}
-          <TextInput
-            label="Priority (1-9)"
-            inputMode="numeric"
-            value={v.priority}
-            onChange={(e) => setV({ ...v, priority: e.target.value })}
-            error={errors.priority}
-          />
-          {codeCard && (
-            <label className="flex items-center gap-2 self-end pb-2 text-sm">
-              <input
-                type="checkbox"
-                checked={v.docsNeeded}
-                onChange={(e) => setV({ ...v, docsNeeded: e.target.checked })}
-              />
-              Docs needed
-            </label>
-          )}
-        </div>
-        {list.map(([k, meta]) => {
-          const common = {
-            label: meta.label,
-            value: v.fields[k] ?? '',
-            error: errors[k],
-          };
-          if (meta.kind === 'text') {
-            return <TextInput key={k} {...common} onChange={(e) => setField(k, e.target.value)} />;
-          }
-          if (meta.kind === 'number') {
-            return (
-              <TextInput
-                key={k}
-                {...common}
-                inputMode="numeric"
-                onChange={(e) => setField(k, e.target.value)}
-              />
-            );
-          }
-          if (meta.kind === 'enum' && k === 'depth') {
-            return (
-              <Select key={k} {...common} onChange={(e) => setField(k, e.target.value)}>
-                <option value="">Choose...</option>
-                {ResearchDepth.options.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </Select>
-            );
-          }
-          const hint =
-            meta.kind === 'list' || meta.kind === 'url-list'
-              ? 'One item per line'
-              : meta.kind === 'json'
-                ? 'JSON, optional'
-                : undefined;
-          return (
-            <TextArea
-              key={k}
-              {...common}
-              {...(hint ? { hint } : {})}
-              rows={meta.kind === 'markdown' || meta.kind === 'list' ? 4 : 3}
-              className={meta.kind === 'json' ? 'font-mono' : undefined}
-              onChange={(e) => setField(k, e.target.value)}
-            />
-          );
-        })}
         {errors._form && <ErrorBox error={new Error(errors._form)} />}
         {Object.keys(errors).some((k) => k !== '_form') && (
           <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">

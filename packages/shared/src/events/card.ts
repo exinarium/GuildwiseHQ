@@ -61,7 +61,15 @@ export const cardEvents = [
       requiredCapabilities: z.array(z.string()).default([]),
     }),
   ),
-  defineEvent('CardUpdated', z.object({ cardId: Id, changes: CardChangesSchema })),
+  defineEvent(
+    'CardUpdated',
+    z.object({
+      cardId: Id,
+      changes: CardChangesSchema,
+      /** Why the risk tier was overridden (set with `changes.riskTier`). */
+      reason: z.string().optional(),
+    }),
+  ),
   defineEvent('CardSpecified', z.object({ cardId: Id, fromStage: Stage, toStage: Stage })),
   defineEvent('DecisionPolicyChanged', z.object({ cardId: Id, policy: DecisionPolicy })),
   defineEvent(

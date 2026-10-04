@@ -95,6 +95,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_RATE_LIMIT: 'false',
     AOM_TEST_CLOCK: 'true',
     AOM_ALLOW_LOCAL_REMOTES: 'true',
+    AOM_MOCK_UI: 'true',
     LOG_LEVEL: 'info',
   };
   sh(

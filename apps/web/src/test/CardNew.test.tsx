@@ -9,7 +9,7 @@ import { CardNewForm } from '../pages/CardNew.tsx';
 const PROJECT = '0192f3a0-0000-7000-8000-000000000001';
 const REPO = '0192f3a0-0000-7000-8000-000000000002';
 
-function setup() {
+function setup(mockUi = true) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
@@ -21,12 +21,28 @@ function setup() {
           onProject={() => {}}
           workflow={codeWorkflowV1}
           repos={[{ id: REPO, name: 'toy' }]}
+          mockUi={mockUi}
         />
       </MemoryRouter>
     </QueryClientProvider>,
   );
   return userEvent.setup();
 }
+
+describe('CardNew mock fields', () => {
+  it('are not offered to real users', () => {
+    setup(false);
+    for (const label of ['Mock script', 'Mock test environment', 'Mock outbound draft'])
+      expect(screen.queryByLabelText(label)).toBeNull();
+    expect(screen.getByLabelText('Requirements')).toBeInTheDocument();
+  });
+
+  it('are offered in mock mode', () => {
+    setup(true);
+    for (const label of ['Mock script', 'Mock test environment', 'Mock outbound draft'])
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+  });
+});
 
 describe('CardNew validation', () => {
   const fetchMock = vi.fn();

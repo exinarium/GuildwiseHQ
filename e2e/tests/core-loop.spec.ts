@@ -159,6 +159,37 @@ test('AC4 (negative): an incomplete card cannot be specified; the UI lists what 
   await api.post(`/api/cards/${(await partial.json()).card.ref}/cancel`, { data: { reason: 'e2e cleanup' } });
 });
 
+test('AC4c: a draft can be edited on its card page; the edit is in the timeline; a closed card cannot be edited', async () => {
+  const res = await api.post('/api/cards', {
+    data: { projectId, title: 'Typo in the titel', cardType: 'feature', fields: { context: 'old context' } },
+  });
+  expect(res.status()).toBe(201);
+  const ref = (await res.json()).card.ref as string;
+  await page.goto(`/cards/${ref}`);
+  await page.getByTestId('edit-card').click();
+  const form = page.getByRole('form', { name: 'Edit card' });
+  await expect(form.getByLabel('Title', { exact: true })).toHaveValue('Typo in the titel');
+  await expect(form.getByLabel('Context', { exact: true })).toHaveValue('old context');
+  await form.getByLabel('Title', { exact: true }).fill('');
+  await form.getByRole('button', { name: 'Save changes' }).click();
+  await expect(form.getByText('Title is required')).toBeVisible();
+  await form.getByLabel('Title', { exact: true }).fill('Fixed the title');
+  await form.getByLabel('Requirements').fill('Now with requirements');
+  await form.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByRole('heading', { name: new RegExp(`${ref} Fixed the title`) })).toBeVisible();
+  await expect(page.getByText('Now with requirements')).toBeVisible();
+  await expect(
+    page.getByTestId('timeline-activity').filter({ hasText: 'Edited title, requirements' }),
+  ).toBeVisible();
+  const row = (await q('SELECT title, fields FROM cards WHERE ref=$1', [ref]))[0];
+  expect(row?.title).toBe('Fixed the title');
+  // a closed card is refused by the server and the page offers no Edit (a claimed card: server suite)
+  await api.post(`/api/cards/${ref}/cancel`, { data: { reason: 'e2e cleanup' } });
+  const closed = await api.patch(`/api/cards/${ref}`, { data: { title: 'Too late' } });
+  expect(closed.status()).toBe(409);
+  await expect(page.getByTestId('edit-card')).toHaveCount(0);
+});
+
 test('AC5: TOY-1 goes In progress -> Review -> Rework -> Review -> Test with two build handoffs', async () => {
   await openBoard();
   // Live board: the tile appears in the In progress column with a builder, within 30 s, without reloading.

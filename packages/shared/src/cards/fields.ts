@@ -57,6 +57,13 @@ export type MockAction = z.infer<typeof MockActionSchema>;
 export const MockScriptSchema = z.record(z.string(), z.array(MockActionSchema));
 export type MockScript = z.infer<typeof MockScriptSchema>;
 
+/**
+ * Fields that only script the mock runtime. They are shown, and accepted by the API, only when the server runs with
+ * `AOM_MOCK_UI=true` (dev and e2e).
+ */
+export const MOCK_FIELD_KEYS = ['mock', 'mockEnv', 'mockOutbound', 'mockResearch', 'mockFeed'] as const;
+export const isMockField = (key: string): boolean => (MOCK_FIELD_KEYS as readonly string[]).includes(key);
+
 // ------------------------------------------------------------------ code set
 
 /** All keys optional: draft cards may be incomplete. Completeness is checked with `requiredMissing`. */

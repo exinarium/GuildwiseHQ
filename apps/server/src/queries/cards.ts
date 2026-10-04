@@ -25,7 +25,13 @@ async function cardColumn(ctx: Ctx, c: Row): Promise<{ column: string; key: stri
   const stage = wf ? getStage(wf.definition, c.stage) : undefined;
   const column = stage
     ? columnFor(
-        { status: c.status, stage: c.stage, reworkRound: c.rework_round, cardType: c.card_type },
+        {
+          status: c.status,
+          stage: c.stage,
+          reworkRound: c.rework_round,
+          cardType: c.card_type,
+          finalizeState: c.finalize_state,
+        },
         stage,
       )
     : COLUMN_FALLBACK;
@@ -123,6 +129,13 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
   const transitions = await rows(ctx.pool, 'SELECT * FROM card_transitions WHERE card_id=$1 ORDER BY id', [
     card.id,
   ]);
+  const activity = await rows(
+    ctx.pool,
+    `SELECT a.*, u.display_name AS user_name, ag.name AS agent_name FROM card_activity a
+       LEFT JOIN users u ON u.id = a.user_id LEFT JOIN agents ag ON ag.id = a.agent_id
+      WHERE a.card_id=$1 ORDER BY a.id`,
+    [card.id],
+  );
   const thread = await rows(
     ctx.pool,
     `SELECT m.*, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
@@ -166,6 +179,16 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
       reason: t.reason,
       at: iso(t.at) as string,
     })),
+    activity: activity.map((a) => ({
+      id: Number(a.id),
+      kind: a.kind,
+      summary: a.summary,
+      reason: a.reason,
+      userId: a.user_id,
+      agentId: a.agent_id,
+      actorName: a.user_name ?? a.agent_name ?? null,
+      at: iso(a.at) as string,
+    })),
     threadId: card.id,
     thread: thread.map((m) => ({
       id: m.id,
@@ -181,7 +204,8 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     })),
     currentShift: shiftRow ? toShiftDto(shiftRow) : null,
     permissions: {
-      canEdit: manage && open,
+      canEdit: manage && (card.status === 'draft' || (card.status === 'queued' && !card.claim_id)),
+      canSetRisk: manage && open && !['awaiting_approval', 'running'].includes(card.finalize_state ?? ''),
       canSpecify: manage && card.status === 'draft',
       canMove: manage && open,
       canRelease: manage && !!card.claim_id,
@@ -234,6 +258,16 @@ export async function getBoard(ctx: Ctx, userId: string, projectId: string): Pro
       blocked: c.status === 'blocked',
       reworkRound: c.rework_round,
       priority: c.priority,
+      waitingFor:
+        c.status !== 'waiting'
+          ? null
+          : c.finalize_state === 'awaiting_approval'
+            ? 'approval'
+            : c.finalize_state === 'running'
+              ? 'finalizing'
+              : c.parked_request_id && !c.waiting_on_id
+                ? 'devops'
+                : 'bug',
       waitingOn: c.waiting_on_id ? { id: c.waiting_on_id, ref: c.waiting_on_ref } : null,
       origin: c.origin,
     });

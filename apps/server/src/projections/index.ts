@@ -82,6 +82,7 @@ export const PROJECTION_TABLES = [
   'card_dependencies',
   'card_handoffs',
   'card_transitions',
+  'card_activity',
   'shifts',
   'threads',
   'thread_messages',

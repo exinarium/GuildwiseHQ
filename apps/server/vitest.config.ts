@@ -17,6 +17,8 @@ export default defineConfig({
       DATABASE_URL: TEST_DB,
       AOM_PUBLIC_ORIGIN: 'http://aom.test',
       AOM_RATE_LIMIT: 'false',
+      // Most suites script the mock runtime through card fields; the flag-off behaviour has its own test.
+      AOM_MOCK_UI: 'true',
       LOG_LEVEL: process.env.TEST_LOG ? 'info' : 'silent',
     },
   },

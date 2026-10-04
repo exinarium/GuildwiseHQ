@@ -55,6 +55,7 @@ const meBody = () => ({
   user: ME,
   isAdmin: ME.role === 'admin',
   visibleProjectIds: db.projects.map((p) => p.id),
+  features: { mockUi: true },
 });
 
 const A = '/api';

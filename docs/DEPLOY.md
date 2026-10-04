@@ -141,6 +141,8 @@ Set these in `.env` before starting the server. All have defaults suitable for d
 | `AOM_WEB_DIST` | — | Path to built web assets (auto-set in Docker to `/app/dist/web`) |
 | `AOM_RATE_LIMIT` | `true` | Enable request rate limiting |
 | `AOM_ALLOW_LOCAL_REMOTES` | `false` | **Tests only.** Accept `file://` and local-path git remotes for repositories and vaults; production refuses them |
+| `AOM_MOCK_UI` | `false` | **Dev and tests only.** Show the mock-runtime card fields (Mock script, ...) in the UI and accept them on the API; off, the API refuses them with 422 |
+| `AOM_MAX_SHIFTS_PER_WORKSTATION` | `16` | Ceiling for a workstation's `maxConcurrentShifts` (the runner's own setting, default 4, is what normally applies) |
 | `AOM_TEST_CLOCK` | `false` | **Never enable in production.** Exposes `POST /api/test/clock` for testing |
 | `LOG_LEVEL` | `info` | Logging level (`debug`, `info`, `warn`, `error`) |
 

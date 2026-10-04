@@ -7,7 +7,9 @@ import {
   type FieldMeta,
   fieldCatalogue,
   isBuiltinFieldSet,
+  isMockField,
   MockScriptSchema,
+  type PatchCardRequest,
   requiredMissing,
   type Stage,
   type WorkflowDefinition,
@@ -44,13 +46,18 @@ export function specifyTargetStage(def: WorkflowDefinition): Stage | undefined {
 /** Not editable in the card form (ledger linking arrives with the ledger in M2). */
 const HIDDEN_FIELDS = new Set(['linkedLedgerIds']);
 
-/** Field-set fields (excluding real card columns), in schema order, with their kinds. */
-export function formFieldList(def: WorkflowDefinition): Array<[string, FieldMeta]> {
+/**
+ * Field-set fields (excluding real card columns), in schema order, with their kinds. The mock-runtime fields (Mock
+ * script, ...) are listed only in mock mode (`AOM_MOCK_UI` on the server, `features.mockUi` on `/auth/me`).
+ */
+export function formFieldList(def: WorkflowDefinition, mockUi = false): Array<[string, FieldMeta]> {
   const own = isBuiltinFieldSet(def.fieldSet) ? Object.keys(FIELD_SETS[def.fieldSet].fields) : [];
   const cat = fieldCatalogue(def.fieldSet, def.customFields);
   const keys = [...own, ...def.customFields.map((c) => c.key)];
   return keys
-    .filter((k) => !(k in CARD_COLUMN_FIELDS) && !HIDDEN_FIELDS.has(k) && cat[k])
+    .filter(
+      (k) => !(k in CARD_COLUMN_FIELDS) && !HIDDEN_FIELDS.has(k) && cat[k] && (mockUi || !isMockField(k)),
+    )
     .map((k) => [k, cat[k] as FieldMeta]);
 }
 
@@ -110,11 +117,12 @@ export function buildCardRequest(
   def: WorkflowDefinition,
   v: CardFormValues,
   specify: boolean,
+  mockUi = false,
 ): CardFormResult {
   const errors: Record<string, string> = {};
   const cat = fieldCatalogue(def.fieldSet, def.customFields);
   const fields: Record<string, unknown> = {};
-  for (const [key, meta] of formFieldList(def)) {
+  for (const [key, meta] of formFieldList(def, mockUi)) {
     const parsed = parseFieldValue(meta.kind, v.fields[key] ?? '');
     if (parsed instanceof Error) errors[key] = parsed.message;
     else if (parsed !== undefined) {
@@ -165,5 +173,75 @@ export function buildCardRequest(
     docsNeeded: v.docsNeeded,
     ...(priority !== undefined && !errors.priority ? { priority } : {}),
     errors,
+  };
+}
+
+/** A stored field value as the text the form edits (the inverse of `parseFieldValue`). */
+export function fieldToText(kind: FieldKind, value: unknown): string {
+  if (value === undefined || value === null) return '';
+  switch (kind) {
+    case 'list':
+    case 'url-list':
+      return Array.isArray(value) ? value.map(String).join('\n') : String(value);
+    case 'json':
+      return JSON.stringify(value, null, 2);
+    default:
+      return typeof value === 'string' ? value : String(value);
+  }
+}
+
+/** The card as form state, for the Edit dialog. */
+export function formValuesFromCard(
+  def: WorkflowDefinition,
+  card: {
+    title: string;
+    cardType: string;
+    repoId: string | null;
+    completionAction: string | null;
+    docsNeeded: boolean;
+    priority: number;
+    fields: Record<string, unknown>;
+  },
+  mockUi = false,
+): CardFormValues {
+  const fields: Record<string, string> = {};
+  for (const [key, meta] of formFieldList(def, mockUi))
+    fields[key] = fieldToText(meta.kind, card.fields[key]);
+  return {
+    title: card.title,
+    cardType: card.cardType,
+    repoId: card.repoId ?? '',
+    completionAction: card.completionAction ?? '',
+    docsNeeded: card.docsNeeded,
+    priority: String(card.priority),
+    fields,
+  };
+}
+
+/**
+ * The `PATCH /api/cards/:id` body for an edit: same validation as the new-card form. A field the user emptied is sent
+ * as `null` (the server removes it); a card that is already queued must still have every field of the stage it entered.
+ */
+export function buildPatchRequest(
+  def: WorkflowDefinition,
+  v: CardFormValues,
+  card: { status: string; fields: Record<string, unknown> },
+  mockUi = false,
+): { patch: PatchCardRequest; errors: Record<string, string> } {
+  const r = buildCardRequest(def, v, card.status === 'queued', mockUi);
+  const fields: Record<string, unknown> = { ...r.fields };
+  for (const [key] of formFieldList(def, mockUi)) {
+    if (!(key in fields) && card.fields[key] !== undefined) fields[key] = null;
+  }
+  return {
+    errors: r.errors,
+    patch: {
+      title: r.title,
+      docsNeeded: r.docsNeeded,
+      completionAction: r.completionAction ?? null,
+      repoId: r.repoId ?? null,
+      ...(r.priority !== undefined ? { priority: r.priority } : {}),
+      fields,
+    },
   };
 }

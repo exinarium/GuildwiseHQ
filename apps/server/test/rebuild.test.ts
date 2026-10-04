@@ -20,6 +20,7 @@ const OPERATIONAL: Record<string, string[]> = {
   cards: ['lease_expires_at'],
   shifts: ['progress_tail', 'accepted_at'],
   card_transitions: ['id'],
+  card_activity: ['id'],
 };
 
 async function snapshot(): Promise<Record<string, string[]>> {
@@ -115,7 +116,14 @@ describe('projections:rebuild', () => {
     const sessionsBefore = (await q('SELECT count(*)::int AS n FROM auth_sessions'))[0]!.n;
     const reposBefore = (await q('SELECT count(*)::int AS n FROM workstation_repos'))[0]!.n;
     const commandsBefore = await q('SELECT id, status FROM runner_commands ORDER BY id');
+    await ok(
+      w.t.req('PATCH', `/api/cards/${keep.id}`, {
+        cookie: w.owner.cookie,
+        body: { riskTier: 'large', reason: 'rebuild coverage' },
+      }),
+    );
     const before = await snapshot();
+    expect(before.card_activity!.length).toBeGreaterThanOrEqual(1);
     expect(before.cards).toHaveLength(3);
     expect(before.card_handoffs).toHaveLength(2);
     expect(before.card_transitions!.length).toBeGreaterThan(8);

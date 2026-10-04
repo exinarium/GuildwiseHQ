@@ -35,6 +35,8 @@ describe('research card form', () => {
     renderForm();
     for (const label of ['Question', 'Scope', 'Depth', 'Sub-category', 'Preferred sites'])
       expect(screen.getByLabelText(label)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Mock research claims')).toBeNull();
+    expect(screen.queryByLabelText('Mock script')).toBeNull();
     expect(screen.queryByLabelText('Repository')).toBeNull();
     expect(screen.queryByLabelText('Completion action')).toBeNull();
     expect(screen.queryByText('Docs needed')).toBeNull();

@@ -324,12 +324,23 @@ test('AC finalize merge (small): the runner merges to the working branch without
 test('AC finalize merge (large): waits for the manager on the desk; approving merges; the suite card runs green', async () => {
   const ref = await createCard('A large change');
   await atFinalize(ref);
-  // the risk tier of a finished card is the manager's call (the builder diff of the mock is always small)
-  const patched = await api.patch(`/api/cards/${ref}`, { data: { riskTier: 'large' } });
-  expect(patched.ok(), await patched.text()).toBeTruthy();
-
+  // the risk tier of a finished card is the manager's call (the builder diff of the mock is always small):
+  // override it on the card page, with a reason that lands in the timeline
   const before = originMain();
   await page.goto(`/cards/${ref}`);
+  await expect(page.getByTestId('risk-tier')).toContainText('small');
+  await page.getByTestId('set-risk').click();
+  const riskForm = page.getByRole('form', { name: 'Risk tier' });
+  await riskForm.getByLabel('Risk tier').selectOption('large');
+  await riskForm.getByRole('button', { name: 'Set risk tier' }).click();
+  await expect(riskForm.getByText('A reason is required')).toBeVisible();
+  await riskForm.getByLabel('Reason').fill('It rewrites how the toy greets everyone');
+  await riskForm.getByRole('button', { name: 'Set risk tier' }).click();
+  await expect(page.getByTestId('risk-tier')).toContainText('large');
+  await expect(page.getByTestId('risk-tier')).toContainText('override');
+  const entry = page.getByTestId('timeline-activity').filter({ hasText: 'Risk tier set to large' });
+  await expect(entry).toContainText('It rewrites how the toy greets everyone');
+  expect((await card(ref))?.risk_tier).toBe('large');
   const panel = page.getByTestId('finalize-panel');
   await expect(panel.getByTestId('finalize-approval-note')).toBeVisible();
   await panel.getByTestId('finalize-button').click();
@@ -340,9 +351,19 @@ test('AC finalize merge (large): waits for the manager on the desk; approving me
   expect(approvals[0]).toMatchObject({ kind: 'approval', pinned: true, status: 'open' });
   await expect(panel).toHaveAttribute('data-state', 'awaiting_approval');
 
+  // on the board the card stays in Finalize (not "Test (waiting on bug)") and says it waits for the manager
+  await page.goto('/p/TST/board');
+  const tile = page.getByTestId('column-Finalize').getByTestId(`card-tile-${ref}`);
+  await expect(tile).toBeVisible();
+  await expect(tile.getByTestId('waiting-badge')).toHaveText('Awaiting your approval');
+  await expect(page.getByTestId('column-Test (waiting on bug)').getByTestId(`card-tile-${ref}`)).toHaveCount(
+    0,
+  );
+
   await page.goto('/desk');
   const item = page.getByRole('article', { name: /Approve merge of TST-6/ });
   await expect(item).toBeVisible();
+  await expect(item.getByTestId('desk-kind')).toHaveText('Merge approval');
   await item.getByRole('button', { name: 'Approve merge' }).click();
   await waitCard(ref, 'done', (c) => c?.status === 'done');
   expect(originMain()).not.toBe(before);

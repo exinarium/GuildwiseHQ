@@ -1218,7 +1218,7 @@ step('test stage: bug loop, conflict, review queue, large merge, busy agents, to
   );
   S.ids['card:large'] = lm.ref;
   await inStage(lm.ref, 'test', 'queued');
-  await p.patch(`/api/cards/${lm.ref}`, { data: { riskTier: 'large' } });
+  await p.patch(`/api/cards/${lm.ref}`, { data: { riskTier: 'large', reason: 'Touches the sign-in flow' } });
   const mv = await p.post(`/api/cards/${lm.id}/move`, {
     data: { toStage: 'finalize', reason: 'Reviewed together in a pairing session' },
   });

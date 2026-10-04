@@ -80,6 +80,18 @@ export const TransitionDtoSchema = z.object({
   reason: z.string(),
   at: IsoTime,
 });
+/** A timeline entry that is not a stage or status change: a field edit or a risk tier override. */
+export const CardActivityDtoSchema = z.object({
+  id: z.number().int(),
+  kind: z.enum(['edited', 'risk_tier']),
+  summary: z.string(),
+  reason: z.string().nullable(),
+  userId: z.uuid().nullable(),
+  agentId: z.uuid().nullable(),
+  actorName: z.string().nullable(),
+  at: IsoTime,
+});
+export type CardActivityDto = z.infer<typeof CardActivityDtoSchema>;
 export const ThreadMessageDtoSchema = z.object({
   id: z.uuid(),
   threadId: z.uuid(),
@@ -99,6 +111,8 @@ export const CardDetailResponseSchema = z.object({
   card: CardDtoSchema,
   handoffs: z.array(HandoffDtoSchema),
   transitions: z.array(TransitionDtoSchema),
+  /** Edits and risk tier overrides, shown in the timeline between the transitions (ordered by time). */
+  activity: z.array(CardActivityDtoSchema).default([]),
   threadId: z.uuid().nullable(),
   thread: z.array(ThreadMessageDtoSchema),
   currentShift: ShiftDtoSchema.nullable(),
@@ -110,6 +124,8 @@ export const CardDetailResponseSchema = z.object({
     canRelease: z.boolean(),
     canCancel: z.boolean(),
     canComment: z.boolean(),
+    /** Set or clear the risk tier override: while the card is open and no merge is pending. */
+    canSetRisk: z.boolean().default(false),
   }),
   diffStats: DiffStats.nullable().optional(),
   /** Open desk items blocking this card (M2). */
@@ -144,8 +160,20 @@ export const CreateCardResponseSchema = z.object({
 });
 
 /** `PATCH /api/cards/:id` (owner). */
-export const PatchCardRequestSchema = CardChangesSchema.omit({ riskTierOverridden: true, ownerUserId: true });
+export const PatchCardRequestSchema = CardChangesSchema.omit({
+  riskTierOverridden: true,
+  ownerUserId: true,
+}).extend({
+  /** Why the risk tier is overridden (required when `riskTier` is sent; `null` clears the override). */
+  reason: z.string().trim().min(1).max(1000).optional(),
+});
 export type PatchCardRequest = z.infer<typeof PatchCardRequestSchema>;
+
+/** The BA's `card.risk` RPC (`aom risk <small|large> --reason "..."`), checked on the server. */
+export const RiskTierRpcParamsSchema = z.object({
+  tier: RiskTier,
+  reason: z.string().trim().min(1).max(1000),
+});
 
 /** `POST /api/cards/:id/specify` -> CardDetailResponse, or 422 with this body. */
 export const SpecifyMissingResponseSchema = z.object({

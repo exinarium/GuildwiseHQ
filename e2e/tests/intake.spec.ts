@@ -383,7 +383,9 @@ test('AC finalize: the BA claims Finalize and finalizes a small card without the
   // A large card merging into main waits for the manager even though the BA finalizes it.
   const large = await makeCard('INT', 'Large merge', { build: ['ok'] }, { completionAction: 'merge' });
   await cardWhen(large.ref, 'in review', (x) => x.stage === 'review', 120_000);
-  const patched = await api.patch(`/api/cards/${large.id}`, { data: { riskTier: 'large' } });
+  const patched = await api.patch(`/api/cards/${large.id}`, {
+    data: { riskTier: 'large', reason: 'e2e: a large change' },
+  });
   expect(patched.ok(), await patched.text()).toBeTruthy();
   const move2 = await api.post(`/api/cards/${large.id}/move`, {
     data: { toStage: 'finalize', reason: 'skip review in this spec' },

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "AOM_MOCK_UI=${AOM_MOCK_UI:-true} AOM_SMTP_URL=${AOM_SMTP_URL:-smtp://127.0.0.1:1026} tsx watch src/main.ts",
     "build": "tsup",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",

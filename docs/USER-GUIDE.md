@@ -34,7 +34,9 @@ tar xzf aom-runner-*.tgz && cd aom-runner
 
 Run the runner under systemd (Linux and WSL2), launchd (macOS) so it reconnects automatically on reboot. See `docs/RUNNER.md` for service setup.
 
-**Sandbox warnings.** If a workstation's runner reports that agents run without an OS sandbox, the Workstations page, each affected agent card on the HR board and the Hire form show an amber warning that cannot be dismissed, and hiring onto it needs a confirmation. A workstation that cannot run agents at all shows why (for example "Native Windows: install the runner in WSL2").
+**Sandbox warnings.** If a workstation's runner reports that agents run without an OS sandbox, the Workstations page, each affected agent card on the HR board and the Hire form show an amber warning that cannot be dismissed, and hiring onto it needs a confirmation. A workstation that cannot run agents at all shows why (for example "Native Windows: install the runner in WSL2"). The reason names the actual cause: the platform, the runtime's sandbox set to `off` in the runner config, a missing `bubblewrap` or `socat`, or (tests only) a forced state, and the advice below it fits that cause.
+
+Each workstation also shows **Shifts running**, for example "2 of 4": how many agent shifts it runs now and the most it takes at once. That limit is the runner's `maxConcurrentShifts` setting (default 4; see `docs/RUNNER.md`). A shift offered beyond it is refused as busy and the card waits for the next free slot.
 
 The Workstations page will show your repos once you create a project with one of them.
 
@@ -135,6 +137,7 @@ The board shows all cards in a workflow, from left to right by stage. Each card 
 - **Assignee** (the agent working on it, if claimed)
 - **Age** (time in current stage)
 - **Risk tier** (small/large; auto-computed from diff, overridable)
+- **Waiting badge** (a card waiting on a bug it spawned says "waiting on bug" in the Test (waiting on bug) column; a large merge waiting for your approval stays in the Finalize column and says "Awaiting your approval")
 - **Rework round** (number of times bounced from review)
 - **Blocked badge** (if waiting on a decision)
 
@@ -157,6 +160,12 @@ The Blocked column shows cards waiting on an answer from the decision desk.
 
 Cards can stay as drafts until you are ready. The BA can also draft cards via intake.
 
+The form shows only fields that matter to real work. The mock-runtime fields (**Mock script**, **Mock test environment**, **Mock outbound draft**, **Mock research claims**, **Mock feed items**) exist for development and the test suite: they appear, and the API accepts them, only when the server runs with `AOM_MOCK_UI=true`. Without it the API refuses them with a 422 (`mock_fields_disabled`) and the card page does not show them.
+
+### Editing a card
+
+The card owner and the project owner can change a card with **Edit** on its page while it is a draft (Spec) or queued and unclaimed: title, repository, completion action, priority, docs needed and the workflow's fields, with the same checks as the New card form (a queued card must keep the fields its stage needs). Empty a field to remove it. A card an agent holds (claimed) cannot be edited: the page offers no Edit and the server answers that the card is being worked on; release the claim first. Every edit appears in the card's **Timeline** ("Edited title, requirements", who, when).
+
 ### Moving and releasing cards
 
 Clicking a card shows its detail view. Actions:
@@ -171,7 +180,9 @@ Auto-computed from the diff size of similar PRs:
 - **Small** (≤100 lines changed): one reviewer approval, one tester
 - **Large** (>100 lines): two distinct senior reviewers, full test suite run after finalize
 
-Override on the card detail if the auto-computed tier does not match the risk (e.g., a 50-line change to a critical system deserves large-tier review).
+Override on the card detail if the auto-computed tier does not match the risk (e.g., a 50-line change to a critical system deserves large-tier review). The card owner and the project owner click **Change** next to the risk tier, pick small or large (or go back to the computed tier) and give a reason; the override shows as an "override" badge, the reason and who set it appear in the Timeline, and from then on the diff no longer changes it. It works like the computed tier: it sets how many reviewers must approve and whether a merge at Finalize waits for your approval. It can be changed while the card is open, except while a merge is pending.
+
+The BA can do the same from its shift with `aom risk <small|large> --reason "<why>"`; the override is recorded with the BA as the actor.
 
 ## Hiring and firing agents
 
@@ -226,6 +237,7 @@ The decision desk is where every question and approval reaches you. Cards do not
 
 A desk item shows:
 
+- **What kind it is**, as a label: Question, DevOps approval, Merge approval, Outbound update, Digest to rate, Escalation, Vault conflict, Tester bottleneck and so on (the same label in the list and in the item)
 - **Who asked**: agent name and role
 - **What they're doing**: card, stage, workflow context
 - **The question**: options and recommendation
@@ -326,6 +338,8 @@ Once a reviewer approves, the card moves to Test. A tester:
 The original card waits ("waiting on bug") until the bug passes review and the tester re-runs the full suite.
 
 ### Finalization
+
+A large merge waits for your approval on the desk; until you answer, its card stays in the Finalize column with an "Awaiting your approval" badge.
 
 On the Finalize stage, the BA chooses the completion action:
 

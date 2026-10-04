@@ -8,6 +8,7 @@ import {
   emptyFields,
   type FillableCard,
   getStage,
+  isMockField,
   type PatchCardRequest,
   parseCardFields,
   requiredMissing,
@@ -46,6 +47,20 @@ export function cardView(c: Row): FillableCard {
     priority: c.priority,
     fields: c.fields,
   };
+}
+
+/** Mock-runtime fields are refused unless the server runs with `AOM_MOCK_UI=true`. */
+function assertNoMockFields(ctx: Ctx, fields: Record<string, unknown> | undefined) {
+  if (ctx.config.mockUi || !fields) return;
+  const used = Object.keys(fields).filter(
+    (k) => isMockField(k) && fields[k] !== undefined && fields[k] !== null,
+  );
+  if (used.length)
+    throw unprocessable(
+      'mock_fields_disabled',
+      `mock runtime fields (${used.join(', ')}) are only available when the server runs with AOM_MOCK_UI=true`,
+      { fields: used },
+    );
 }
 
 async function assertRepoInProject(tx: Tx, projectId: string, repoId: string) {
@@ -102,6 +117,7 @@ export async function createCardIn(
       `card type '${req.cardType}' is not allowed in workflow '${def.key}'`,
     );
   }
+  assertNoMockFields(ctx, req.fields);
   const parsed = parseCardFields(def.fieldSet, { ...emptyFields(def.fieldSet), ...req.fields });
   if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
 
@@ -191,13 +207,47 @@ export async function loadManageable(tx: Tx, user: AuthSession['user'], idOrRef:
   return card;
 }
 
+/** Open cards only; a draft or a queued (unclaimed) card may be edited, any open card may get a risk tier override. */
+export function editRefusal(card: Row, patch: PatchCardRequest): { code: string; message: string } | null {
+  const { riskTier, reason: _reason, ...rest } = patch;
+  const edits = Object.entries(rest).some(([, v]) => v !== undefined);
+  if (edits) {
+    if (card.claim_id || card.status === 'claimed')
+      return {
+        code: 'card_claimed',
+        message: `${card.ref} is being worked on right now: release the claim (or wait for the shift to end) before editing it`,
+      };
+    if (card.status !== 'draft' && card.status !== 'queued')
+      return {
+        code: 'card_not_editable',
+        message: `${card.ref} is ${card.status}: only a draft or a queued, unclaimed card can be edited`,
+      };
+  }
+  if (riskTier !== undefined) {
+    if (card.finalize_state === 'awaiting_approval' || card.finalize_state === 'running')
+      return {
+        code: 'finalize_pending',
+        message: `${card.ref} has a merge pending: settle it before changing the risk tier`,
+      };
+  }
+  return null;
+}
+
 export async function patchCard(
   ctx: Ctx,
   user: AuthSession['user'],
   idOrRef: string,
   patch: PatchCardRequest,
 ): Promise<string> {
-  return withAppendTx(ctx.pool, (tx) => patchCardIn(ctx, tx, user, idOrRef, patch));
+  return withAppendTx(ctx.pool, async (tx) => {
+    const card = await loadManageable(tx, user, idOrRef);
+    if (['done', 'cancelled'].includes(card.status)) throw conflict('card_closed', `card is ${card.status}`);
+    if (patch.riskTier !== undefined && !patch.reason)
+      throw unprocessable('reason_required', 'a reason is required to override the risk tier');
+    const refusal = editRefusal(card, patch);
+    if (refusal) throw conflict(refusal.code, refusal.message);
+    return patchCardIn(ctx, tx, user, idOrRef, patch);
+  });
 }
 
 export async function patchCardIn(
@@ -223,12 +273,22 @@ export async function patchCardIn(
     if (patch.repoId) await assertRepoInProject(tx, card.project_id, patch.repoId);
     changes.repoId = patch.repoId;
   }
-  if (patch.riskTier !== undefined && patch.riskTier !== card.risk_tier) {
+  // An override sticks even when it names the tier the diff computed: from now on the diff cannot change it.
+  if (
+    patch.riskTier !== undefined &&
+    (patch.riskTier !== card.risk_tier || (patch.riskTier !== null && !card.risk_tier_overridden))
+  ) {
     changes.riskTier = patch.riskTier;
     changes.riskTierOverridden = patch.riskTier !== null;
   }
   if (patch.fields !== undefined) {
-    const merged = { ...card.fields, ...patch.fields };
+    assertNoMockFields(ctx, patch.fields);
+    // A field sent as null is removed from the card.
+    const merged: Record<string, unknown> = { ...card.fields };
+    for (const [k, v] of Object.entries(patch.fields)) {
+      if (v === null) delete merged[k];
+      else merged[k] = v;
+    }
     const parsed = parseCardFields(wf?.definition.fieldSet ?? 'code', merged);
     if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
     changes.fields = parsed.data;
@@ -242,7 +302,14 @@ export async function patchCardIn(
     [
       {
         streamId: streamId.card(card.id),
-        event: { type: 'CardUpdated', payload: { cardId: card.id, changes } },
+        event: {
+          type: 'CardUpdated',
+          payload: {
+            cardId: card.id,
+            changes,
+            ...(changes.riskTier !== undefined && patch.reason ? { reason: patch.reason } : {}),
+          },
+        },
         actor: acting.actor ?? userActor(user.id),
         scope: projectScope(card.org_id, card.project_id),
       },

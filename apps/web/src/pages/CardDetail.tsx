@@ -1,4 +1,4 @@
-import { type CardDetailResponse, fieldCatalogue, type WorkflowDefinition } from '@aom/shared';
+import { type CardDetailResponse, fieldCatalogue, isMockField, type WorkflowDefinition } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useWorkflows } from '../api/queries/agents.ts';
@@ -13,6 +13,7 @@ import {
   useSpecifyCard,
 } from '../api/queries/cards.ts';
 import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
+import { EditCardDialog, RiskTierDialog } from '../components/CardEdit.tsx';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
 import { FinalizePanel } from '../components/FinalizePanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
@@ -106,16 +107,26 @@ export function CardDetailView({
   data: CardDetailResponse;
   workflow: WorkflowDefinition | undefined;
 }) {
-  const { card, handoffs, transitions, thread, currentShift, permissions, blockers } = data;
+  const { card, handoffs, transitions, activity, thread, currentShift, permissions, blockers } = data;
   const specify = useSpecifyCard(card.id);
   const release = useReleaseCard(card.id);
   const policy = useDecisionPolicy(card.id);
   const rehome = useRehomeCard(card.id);
   const me = useMe();
-  const [dialog, setDialog] = useState<'move' | 'cancel' | null>(null);
+  const [dialog, setDialog] = useState<'move' | 'cancel' | 'edit' | 'risk' | null>(null);
+  const mockUi = me.data?.features?.mockUi ?? false;
   const missing = missingFromError(specify.error);
   const catalogue = workflow ? fieldCatalogue(workflow.fieldSet, workflow.customFields) : {};
-  const keys = Object.keys(card.fields);
+  // Mock-runtime fields (Mock script, ...) are shown only in mock mode.
+  const keys = Object.keys(card.fields).filter((k) => mockUi || !isMockField(k));
+  const timeline = [
+    ...transitions.map((t) => ({ ...t, sort: t.at, tie: t.id, entry: 'transition' as const })),
+    ...activity.map((a) => ({ ...a, sort: a.at, tie: a.id, entry: 'activity' as const })),
+  ].sort(
+    (a, b) =>
+      a.sort.localeCompare(b.sort) ||
+      (a.entry === b.entry ? a.tie - b.tie : a.entry === 'transition' ? -1 : 1),
+  );
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -144,6 +155,11 @@ export function CardDetailView({
                 onClick={() => specify.mutate(undefined)}
               >
                 Specify
+              </Button>
+            )}
+            {permissions.canEdit && workflow && (
+              <Button data-testid="edit-card" onClick={() => setDialog('edit')}>
+                Edit
               </Button>
             )}
             {permissions.canMove && <Button onClick={() => setDialog('move')}>Move</Button>}
@@ -216,7 +232,23 @@ export function CardDetailView({
             <h2 className="mb-2 text-sm font-semibold">Details</h2>
             <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
               <Meta k="Stage" v={card.stage} />
-              <Meta k="Risk tier" v={card.riskTier ?? 'not set'} />
+              <div>
+                <dt className="text-xs font-medium text-zinc-500">Risk tier</dt>
+                <dd className="flex flex-wrap items-center gap-1.5" data-testid="risk-tier">
+                  <span>{card.riskTier ?? 'not set'}</span>
+                  {card.riskTierOverridden && <Badge tone="violet">override</Badge>}
+                  {permissions.canSetRisk && (
+                    <button
+                      type="button"
+                      data-testid="set-risk"
+                      className="text-xs underline"
+                      onClick={() => setDialog('risk')}
+                    >
+                      Change
+                    </button>
+                  )}
+                </dd>
+              </div>
               <Meta k="Completion action" v={card.completionAction ?? 'not set'} />
               <Meta k="Docs needed" v={card.docsNeeded ? 'yes' : 'no'} />
               {card.branchName && <Meta k="Branch" v={card.branchName} mono />}
@@ -307,18 +339,34 @@ export function CardDetailView({
           <Panel>
             <h2 className="mb-2 text-sm font-semibold">Timeline</h2>
             <ol className="flex flex-col gap-1.5 text-sm" data-testid="timeline">
-              {transitions.map((t) => (
-                <li key={t.id} className="flex flex-col">
-                  <span>
-                    <span className="font-medium">{t.fromStage ?? 'new'}</span> →{' '}
-                    <span className="font-medium">{t.toStage}</span>{' '}
-                    <span className="text-xs text-zinc-500">({t.toStatus})</span>
-                  </span>
-                  <span className="text-xs text-zinc-500">
-                    {t.reason} · {formatDateTime(t.at)}
-                  </span>
-                </li>
-              ))}
+              {timeline.map((t) =>
+                t.entry === 'transition' ? (
+                  <li key={`t${t.id}`} className="flex flex-col">
+                    <span>
+                      <span className="font-medium">{t.fromStage ?? 'new'}</span> →{' '}
+                      <span className="font-medium">{t.toStage}</span>{' '}
+                      <span className="text-xs text-zinc-500">({t.toStatus})</span>
+                    </span>
+                    <span className="text-xs text-zinc-500">
+                      {t.reason} · {formatDateTime(t.at)}
+                    </span>
+                  </li>
+                ) : (
+                  <li
+                    key={`a${t.id}`}
+                    className="flex flex-col"
+                    data-testid="timeline-activity"
+                    data-kind={t.kind}
+                  >
+                    <span>{t.summary}</span>
+                    {t.reason && <span className="text-xs">Reason: {t.reason}</span>}
+                    <span className="text-xs text-zinc-500">
+                      {t.actorName ? `${t.actorName} · ` : ''}
+                      {formatDateTime(t.at)}
+                    </span>
+                  </li>
+                ),
+              )}
             </ol>
           </Panel>
           <ThreadPanel cardId={card.id} thread={thread} canComment={permissions.canComment} />
@@ -333,6 +381,18 @@ export function CardDetailView({
           workflow={workflow}
           current={card.stage}
         />
+      )}
+      {workflow && permissions.canEdit && dialog === 'edit' && (
+        <EditCardDialog
+          open
+          onOpenChange={(o) => !o && setDialog(null)}
+          card={card}
+          workflow={workflow}
+          mockUi={mockUi}
+        />
+      )}
+      {permissions.canSetRisk && dialog === 'risk' && (
+        <RiskTierDialog open onOpenChange={(o) => !o && setDialog(null)} card={card} />
       )}
       <CancelDialog open={dialog === 'cancel'} onOpenChange={(o) => !o && setDialog(null)} cardId={card.id} />
     </div>
