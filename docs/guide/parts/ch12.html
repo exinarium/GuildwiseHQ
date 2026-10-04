@@ -6,11 +6,11 @@
   <table>
     <thead><tr><th>Suite</th><th>Command</th><th class="r">Result</th><th>What it covers</th></tr></thead>
     <tbody>
-      <tr><td>Shared contract</td><td><code>pnpm --filter @aom/shared test</code></td><td class="r yes">277 / 277</td><td>Zod schemas, workflows and their validation, roles, authorization predicates, HR rules, prompt building</td></tr>
-      <tr><td>Server</td><td><code>pnpm --filter @aom/server test</code></td><td class="r yes">393 / 393</td><td>Event store, projections, dispatcher, commands, routes, runner gateway against a real database</td></tr>
-      <tr><td>Web</td><td><code>pnpm --filter @aom/web test</code></td><td class="r yes">104 / 104</td><td>Pages and components with mocked API (MSW)</td></tr>
-      <tr><td>Runner</td><td><code>pnpm --filter @aom/runner test</code></td><td class="r yes">288 passed, 1 skipped</td><td>Shift supervisor, sandbox policy, git, adapters, vault sync, external posting</td></tr>
-      <tr><td>End to end</td><td><code>pnpm e2e</code></td><td class="r yes">102 / 102</td><td>Real browser against a built server and a mock-runtime runner: every milestone, one spec each</td></tr>
+      <tr><td>Shared contract</td><td><code>pnpm --filter @aom/shared test</code></td><td class="r yes">280 / 280</td><td>Zod schemas, workflows and their validation, roles, authorization predicates, HR rules, prompt building</td></tr>
+      <tr><td>Server</td><td><code>pnpm --filter @aom/server test</code></td><td class="r yes">407 / 407</td><td>Event store, projections, dispatcher, commands, routes, runner gateway against a real database</td></tr>
+      <tr><td>Web</td><td><code>pnpm --filter @aom/web test</code></td><td class="r yes">134 / 134</td><td>Pages and components with mocked API (MSW)</td></tr>
+      <tr><td>Runner</td><td><code>pnpm --filter @aom/runner test</code></td><td class="r yes">291 passed, 1 skipped</td><td>Shift supervisor, sandbox policy, git, adapters, vault sync, external posting</td></tr>
+      <tr><td>End to end</td><td><code>pnpm e2e</code></td><td class="r yes">103 / 103</td><td>Real browser against a built server and a mock-runtime runner: every milestone, one spec each</td></tr>
       <tr><td>Types and style</td><td><code>pnpm typecheck</code>, <code>pnpm lint</code></td><td class="r yes">0 errors</td><td>TypeScript strict, Biome. Lint reports warnings (mostly <code>any</code> in tests); see chapter 13</td></tr>
     </tbody>
   </table>

@@ -2,25 +2,26 @@
   <h2><span class="mk">TOCMARK_s10_</span>10&nbsp;&nbsp;Workstations and the runner</h2>
 
   <h3 id="s10-1" style="margin-top:4px"><span class="mk">TOCMARK_s10x1_</span>10.1 The Workstations page</h3>
-  <p>The <b>Workstations</b> page lists the workstations you have paired, and has the button <b>Pair workstation</b>. Each card shows the workstation's name, platform, hostname, runner version, connection status, runtimes and repositories, when it was last seen, and its DevOps engineer panel (section 7.6). You see only your own workstations here; administrators see all of them on the Admin page (section 9.1). With none paired the page says "No workstations paired. Pair one to run agents on your machine."</p>
-  <figure><img src="assets/workstations.jpg"><figcaption>Workstations page: Pieter's desktop (WSL2) and Build mini-PC, both Connected, with runtimes, repositories and a DevOps engineer panel under each; Build mini-PC has an amber sandbox warning (Pieter Demo)</figcaption></figure>
+  <p>The <b>Workstations</b> page lists the workstations you have paired, and has the button <b>Pair workstation</b>. Each card shows the workstation's name, platform, hostname, runner version, connection status, runtimes and repositories, how many shifts are running, when it was last seen, and its DevOps engineer panel (section 7.6). You see only your own workstations here; administrators see all of them on the Admin page (section 9.1). With none paired the page says "No workstations paired. Pair one to run agents on your machine."</p>
+  <figure><img src="assets/workstations.jpg"><figcaption>Workstations page: Pieter's desktop (WSL2), Connected, Shifts running "4 of 4", repository /home/demo/src/web and a DevOps engineer panel with a request that needs approval (Build mini-PC is further down the page) (Pieter Demo)</figcaption></figure>
   <h4>Workstation card details</h4>
   <ul>
     <li><b>Connection status:</b> a green dot and <b>Connected</b> when the runner is online, a grey dot and <b>Offline</b> when it is not.</li>
     <li><b>Platform, hostname and runner version:</b> for example <code>linux &middot; desktop-wsl &middot; runner 0.1.0</code>. The platform is the Node platform name (<code>linux</code>, <code>darwin</code>, <code>win32</code>).</li>
     <li><b>Runtimes:</b> one badge per runtime with its version, for example <code>mock mock-1</code>. A green badge means the runtime can run agents; a grey one means it cannot (in the demo <code>claude-code blocked</code>). When the OS sandbox is missing, a note under the card says why, for example "Native Windows: install the runner in WSL2".</li>
+    <li><b>Shifts running:</b> how many agent shifts run on this workstation now, out of its limit, for example "0 of 4". The limit is the runner's <code>maxConcurrentShifts</code> (section 10.8), capped by the server.</li>
     <li><b>Repositories:</b> the local paths of the clones the runner found that match a repository of one of your projects (for example <code>/home/demo/src/web</code>), or "None reported". Add folders to scan with <code>aom-runner repos add</code>.</li>
     <li><b>Last seen:</b> when the workstation last connected.</li>
   </ul>
   <p>Click <b>Unlink</b> to remove the workstation. A dialog asks you to confirm; section 9.2 lists what unlinking does. The owner of a workstation can unlink it; so can an administrator.</p>
-  <figure class="w70"><img src="assets/ws-sandbox.jpg"><figcaption>Card of Build mini-PC with the amber warning "Warning: no OS sandbox", runtimes claude-code blocked and mock mock-1, no repositories reported, and its DevOps engineer panel (Pieter Demo)</figcaption></figure>
-  <div class="callout"><b class="t">Good to know</b>The demo makes the mock runtime report "unsandboxed" for Build mini-PC, so the warning text says "native Windows" although the card shows <code>linux</code>.</div>
+  <figure class="w70"><img src="assets/ws-sandbox.jpg"><figcaption>Card of Build mini-PC with the amber warning "Warning: no OS sandbox ... (test override: AOM_RUNNER_MOCK_SANDBOX=unsandboxed) ... This state is forced by a test override.", runtimes claude-code blocked and mock mock-1, Shifts running "0 of 4", no repositories reported, and its DevOps engineer panel (Pieter Demo)</figcaption></figure>
+  <div class="callout"><b class="t">Good to know</b>The demo makes the mock runtime report "unsandboxed" for Build mini-PC through the test override <code>AOM_RUNNER_MOCK_SANDBOX=unsandboxed</code>. The warning therefore names the override as its cause and says "This state is forced by a test override." instead of advice for a real machine; the card itself shows <code>linux</code>.</div>
 </section>
 
 <section>
   <h3 id="s10-2"><span class="mk">TOCMARK_s10x2_</span>10.2 Pairing a workstation</h3>
-  <p><b>Pair workstation</b> on the Workstations page opens a dialog. Press <b>Generate pairing code</b>: the dialog shows a code (for example <code>G360-RN71</code>), the text "Expires [time]. Shown once.", the pair command with the server address and your code filled in, a <b>Copy command</b> button and the reminder "Then run aom-runner start. This page updates when it connects." The code is valid for 10 minutes and for one pairing. Run the command on the machine that will host your agents.</p>
-  <figure class="w55"><img src="assets/dlg-pair.jpg"><figcaption>Pair workstation dialog: the code G360-RN71, its expiry time, the pair command and Copy command (Pieter Demo)</figcaption></figure>
+  <p><b>Pair workstation</b> on the Workstations page opens a dialog. Press <b>Generate pairing code</b>: the dialog shows a code (for example <code>3S44-7DX8</code>), the text "Expires [time]. Shown once.", the pair command with the server address and your code filled in, a <b>Copy command</b> button and the reminder "Then run aom-runner start. This page updates when it connects." The code is valid for 10 minutes and for one pairing. Run the command on the machine that will host your agents.</p>
+  <figure class="w55"><img src="assets/dlg-pair.jpg"><figcaption>Pair workstation dialog: the one-time code (here 3S44-7DX8), its expiry time, the pair command and Copy command (Pieter Demo)</figcaption></figure>
   <h4>The runner CLI: pair, repos add, start, status, doctor, rotate-token</h4>
   <p>The runner is installed as <code>aom-runner</code> (<code>./aom-runner</code> in the tarball). Every command accepts <code>--data-dir &lt;path&gt;</code>, which overrides the data directory (default: <code>$AOM_RUNNER_HOME</code>, else <code>~/.aom-runner</code>, on Windows <code>%LOCALAPPDATA%\aom-runner</code>).</p>
   <table>
@@ -81,7 +82,7 @@
   <p>Native Windows cannot sandbox agents. With the default configuration (<code>sandbox</code> is <code>required</code>), the <code>claude-code</code> runtime reports <code>unavailable</code> ("Native Windows: install the runner in WSL2") and no shifts are scheduled. To run agents on native Windows anyway, you must opt in explicitly in the runner's <code>config.json</code>:</p>
   <div class="callout"><code>{ "runtimes": { "claude-code": { "sandbox": "best_effort", "allowUnsandboxed": true } } }</code></div>
   <p><code>best_effort</code> alone is not enough on Windows: without <code>allowUnsandboxed: true</code> the runtime stays <code>unavailable</code>. (<code>"sandbox": "off"</code> is also an explicit opt-in and reports <code>unsandboxed</code> on every platform.) With this configuration, the runtime reports <code>unsandboxed</code> and the web UI shows a persistent amber warning on the workstation, on every affected agent card, and on the hire and re-home forms (section 10.9). Agents run without an OS-level boundary. The permission rules and the reduced environment still apply, but a prompt-injected agent can read anything your Windows user can read: your SSH keys, browser profiles, the runner token and the provider credentials in <code>config.json</code>.</p>
-  <figure class="w70"><img src="assets/hr-sal.jpg"><figcaption>Agent card of Sal (technical writer, junior, mock haiku, idle) on Build mini-PC: the amber warning "Runs without an OS sandbox on Build mini-PC", stats against the team, and Change model, Change role and Fire (Pieter Demo)</figcaption></figure>
+  <figure class="w70"><img src="assets/hr-sal.jpg"><figcaption>Agent card of Sal (technical writer, junior, mock haiku, idle) on Build mini-PC: the amber warning "Runs without an OS sandbox on Build mini-PC: ... This state is forced by a test override.", stats against the team, and Change model, Change role and Fire (Pieter Demo)</figcaption></figure>
   <p><b>Recommendation:</b> Use WSL2 instead. If you must use native Windows, use a dedicated low-privilege Windows user for the runner.</p>
 </section>
 
@@ -142,6 +143,7 @@
       <tr><td><code>devops "&lt;request&gt;"</code></td><td>Any</td><td>Ask this workstation's DevOps engineer for help; the shift goes on.</td></tr>
       <tr><td><code>devops-approval --action --reason [--command]...</code></td><td>DevOps engineer</td><td>Ask the manager to approve an action outside the granted access.</td></tr>
       <tr><td><code>devops-done --summary [--command]...</code></td><td>DevOps engineer</td><td>Report the request is finished, with the commands that changed the machine.</td></tr>
+      <tr><td><code>risk &lt;small|large&gt; --reason</code></td><td>BA</td><td>Override the card's risk tier with a reason (the same as the Change link on the card; refused while a merge is pending).</td></tr>
       <tr><td><code>outcome &lt;id&gt; --note [--data-file]</code></td><td>Any</td><td>Report an outcome by its id, the general form behind several verbs above.</td></tr>
     </tbody>
   </table>
@@ -157,11 +159,11 @@
     <li><b>runtimes</b>: settings per runtime.
       <ul>
         <li><code>claude-code</code>: <code>bin</code> (default <code>claude</code>); <code>authMode</code> (default <code>default</code>) with <code>oauthToken</code> or <code>apiKey</code>; <code>sandbox</code> (<code>required</code> by default, <code>best_effort</code> or <code>off</code>); <code>allowUnsandboxed</code> (default false); <code>extraAllowedDomains</code> (default empty); <code>toolchainPaths</code> (default empty); <code>scrubSubprocessEnv</code> (default false); optional <code>intake</code> with <code>mcpConfig</code> and <code>allowedTools</code> for the BA's intake chat.</li>
-        <li><code>mock</code>: <code>enabled</code> (default false), for tests and demos.</li>
+        <li><code>mock</code>: <code>enabled</code> (default false), for tests and demos. The mock runtime has no controls in the UI unless the server runs with <code>AOM_MOCK_UI=true</code>.</li>
       </ul>
     </li>
     <li><b>jira</b> (optional): <code>baseUrl</code>, <code>email</code> and <code>apiToken</code>, used to post approved updates to Jira. GitHub uses this machine's <code>gh</code> login.</li>
-    <li><b>maxConcurrentShifts</b> (default 4): how many shifts run at once on this workstation.</li>
+    <li><b>maxConcurrentShifts</b> (default 4): how many shifts run at once on this workstation. The runner announces it to the server, which caps it at the server setting <code>AOM_MAX_SHIFTS_PER_WORKSTATION</code> (default 16). A shift offered beyond the limit is rejected as busy and the card waits. The Workstations page shows "Shifts running" as running of limit. Restart the runner after changing it.</li>
     <li><b>vaultSyncIntervalSec</b> (default 300): how often vaults are pulled and pushed.</li>
   </ul>
   <p><b>toolchainPaths</b> is a key of <code>runtimes["claude-code"]</code>. It lists extra directories that sandboxed shell commands may read, for example <code>~/.dotnet</code> or <code>~/.cargo</code> (<code>~</code> means the real home). The sandbox hides <code>/home</code>, so a toolchain installed under your home is invisible to agents until you list it; the Node install the runner itself runs on is opened automatically. The home directory itself and credential stores are refused, so never list a directory that holds credentials.</p>
@@ -177,14 +179,22 @@
 
 <section>
   <h3 id="s10-9"><span class="mk">TOCMARK_s10x9_</span>10.9 The unsandboxed warning everywhere</h3>
-  <p>When a runtime on a workstation runs agents unsandboxed (<code>"sandbox": "off"</code>, or <code>best_effort</code> with <code>allowUnsandboxed: true</code> on a platform without a sandbox such as native Windows), a persistent amber warning appears. It cannot be dismissed and stays as long as the runner reports the state:</p>
+  <p>When a runtime on a workstation runs agents unsandboxed (<code>"sandbox": "off"</code>, or <code>best_effort</code> with <code>allowUnsandboxed: true</code> on a platform without a sandbox such as native Windows), a persistent amber warning appears. It cannot be dismissed and stays as long as the runner reports the state. The reason and the advice at the end of the warning follow the real cause:</p>
+  <ul>
+    <li><b>Platform without a sandbox</b> (native Windows): "Run the runner in WSL2 to sandbox it."</li>
+    <li><b>Runtime sandbox set to <code>"off"</code></b> in the runner config: "Set the runtime sandbox back to "required" in the runner config to sandbox it."</li>
+    <li><b>bubblewrap or socat missing</b> (Linux): "Install bubblewrap and socat to sandbox it."</li>
+    <li><b>A forced test state</b> (a test override such as <code>AOM_RUNNER_MOCK_SANDBOX</code>): "This state is forced by a test override."</li>
+    <li>Any other cause: "Run the runner in WSL2, or on Linux with bubblewrap and socat, to sandbox it."</li>
+  </ul>
+  <p>The warning appears in these places:</p>
   <ul>
     <li><b>Workstations page:</b> the workstation card shows <b>Warning: no OS sandbox.</b> and says which runtime runs without a sandbox and what an agent could read, with a link "How to run the runner in WSL2". (A workstation whose runtime is unavailable shows "[runtime] is unavailable: [reason]" with a "Setup guide" link instead.)</li>
     <li><b>HR board:</b> the agent card of each agent on that workstation shows "Warning: Runs without an OS sandbox on [workstation]: ...".</li>
     <li><b>Hire form:</b> hiring onto an unsandboxed workstation shows the warning and a checkbox <b>I understand this agent runs without an OS sandbox on [workstation]</b>. If it is not ticked, the form stops with "Confirm that you accept hiring onto an unsandboxed workstation". A request sent to the server without the acknowledgement is refused with the error <code>unsandboxed_ack_required</code> (HTTP 409).</li>
     <li><b>Re-home dialog:</b> when you move an agent to another workstation, the same warning shows if the destination is unsandboxed.</li>
   </ul>
-  <figure class="w55"><img src="assets/dlg-hire-unsandboxed.jpg" alt="dlg-hire-unsandboxed"><figcaption>Hire form with Build mini-PC chosen: the amber warning, the unticked box "I understand this agent runs without an OS sandbox on Build mini-PC", and the error "Confirm that you accept hiring onto an unsandboxed workstation" after pressing Hire (Pieter Demo)</figcaption></figure>
+  <figure class="w55"><img src="assets/dlg-hire-unsandboxed.jpg" alt="dlg-hire-unsandboxed"><figcaption>Hire form with Build mini-PC chosen: the amber warning (ending "This state is forced by a test override."), the unticked box "I understand this agent runs without an OS sandbox on Build mini-PC", and the error "Confirm that you accept hiring onto an unsandboxed workstation" after pressing Hire (Pieter Demo)</figcaption></figure>
 
 <p>Hiring onto a workstation whose runtime is <code>unavailable</code> is refused outright (<code>sandbox_unavailable</code>). The warnings are there to remind you of the trade-off: on an unsandboxed workstation an agent can read what your operating system user can read.</p>
 </section>

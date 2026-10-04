@@ -16,18 +16,19 @@ git clone https://github.com/your-org/agent-org-manager.git
 cd agent-org-manager
 corepack enable                  # Enable pnpm
 pnpm install                     # Install dependencies
-docker compose -f docker-compose.dev.yml up -d  # Start Postgres (127.0.0.1:5433, user/password/db aom)
+docker compose -f docker-compose.dev.yml up -d  # Start Postgres (127.0.0.1:5433, user/password/db aom) and Mailpit (SMTP 1026, web 8026)
 pnpm db:migrate                  # Apply migrations to the aom database
 pnpm dev                         # Start server (localhost:4600) and web (localhost:5173)
 pnpm --filter @aom/server admin:create --email you@example.com --name "You" --password 'at-least-12-chars'  # Bootstrap first admin
   </pre>
+  <p>The dev Mailpit catches the invitation emails: open <code>http://localhost:8026</code>. Its host ports are 1026 and 8026 so they do not clash with another Mailpit on 1025 and 8025; change them with <code>AOM_MAILPIT_SMTP_PORT</code> and <code>AOM_MAILPIT_UI_PORT</code>. The server's default <code>AOM_SMTP_URL</code> is <code>smtp://127.0.0.1:1025</code>, so start it with <code>AOM_SMTP_URL=smtp://127.0.0.1:1026</code> to use the dev Mailpit.</p>
   <p>The server reads real environment variables only (it does not load a <code>.env</code> file); the built-in defaults match the dev compose file. The web app proxies <code>/api</code> to the server and works with WebSocket. Open <code>http://localhost:5173</code> and sign in with the admin account.</p>
   <h4>Run tests and checks</h4>
   <pre>
 pnpm typecheck                   # TypeScript type check
 pnpm lint                        # Biome linter
 pnpm test                        # Unit and integration tests (vitest)
-pnpm e2e                         # End-to-end tests with Playwright (needs Postgres on 5433, Mailpit on 1025, Chromium)
+pnpm e2e                         # End-to-end tests with Playwright (needs Postgres on 5433, a Mailpit on 1025 / 8025 by default, Chromium; AOM_E2E_SMTP_URL and AOM_MAILPIT_API point it at another one)
 pnpm --filter @aom/server projections:rebuild   # Rebuild all projections from events (stop the server first)
   </pre>
 
@@ -95,11 +96,13 @@ curl https://aom.example.com/api/health
       <tr><td><code>AOM_SERVE_WEB</code></td><td><code>false</code></td><td>Serve built web app from server (enabled in <code>docker-compose.prod.yml</code>)</td></tr>
       <tr><td><code>AOM_HTTP_PORT</code>, <code>AOM_HTTPS_PORT</code></td><td><code>80</code>, <code>443</code></td><td>Host ports Caddy publishes (compose)</td></tr>
       <tr><td><code>LOG_LEVEL</code></td><td><code>info</code></td><td>Logging level: <code>debug</code>, <code>info</code>, <code>warn</code>, <code>error</code></td></tr>
+      <tr><td><code>AOM_MOCK_UI</code></td><td><code>false</code></td><td>Dev and tests only. Shows the mock-runtime card fields (Mock script and others) in the UI and accepts them on the API; off, the API refuses them with 422. Leave it off in production</td></tr>
+      <tr><td><code>AOM_MAX_SHIFTS_PER_WORKSTATION</code></td><td><code>16</code></td><td>Ceiling for a workstation's <code>maxConcurrentShifts</code>. The runner's own setting (default 4) is what normally applies</td></tr>
       <tr><td><code>AOM_RATE_LIMIT</code></td><td><code>true</code></td><td>Enable rate limiting on the sensitive routes (login, invitations, pairing); there is no global limit</td></tr>
     </tbody>
   </table>
   <div class="callout warn"><b class="t">Never in production</b>
-    Do not set <code>AOM_TEST_CLOCK</code>, <code>AOM_ALLOW_LOCAL_REMOTES</code> or use <code>.env.example</code> in production. Always use <code>.env.prod.example</code> as your template and review all values before deploying.</div>
+    Do not set <code>AOM_TEST_CLOCK</code>, <code>AOM_ALLOW_LOCAL_REMOTES</code> or <code>AOM_MOCK_UI</code>, and do not use <code>.env.example</code> in production. Always use <code>.env.prod.example</code> as your template and review all values before deploying.</div>
 
   <h3 id="s11-4"><span class="mk">TOCMARK_s11x4_</span>11.4 Backups, upgrades and operations</h3>
   <h4>Backup strategy</h4>

@@ -1356,6 +1356,19 @@ step('test stage: bug loop, conflict, review queue, large merge, busy agents, to
   );
 });
 
+step('an edited card and a risk override', async () => {
+  const p = await pieter();
+  const rq = await card(S.ids['card:rq'] as string);
+  const edited = await p.patch(`/api/cards/${rq.id}`, {
+    data: { fields: { ...rq.fields, affectedAreas: 'src/auth/, src/session/' } },
+  });
+  expect(edited.ok(), await edited.text()).toBeTruthy();
+  const risk = await p.patch(`/api/cards/${rq.id}`, {
+    data: { riskTier: 'large', reason: 'It changes how sessions are stored' },
+  });
+  expect(risk.ok(), await risk.text()).toBeTruthy();
+});
+
 step('polish: realistic wording for the questions the mock agents raised', async () => {
   const swap = async (ref: string, title: string, options: string) => {
     const mock = `Mock question for ${ref}?`;
@@ -1522,12 +1535,12 @@ cap('new card', async () => {
   await open(pPage, '/cards/new?project=WEB');
   await snap(pPage, 'card-new', { maxH: 1500, noHeader: true, cx: { x: 230, width: 820 } });
   await pPage.getByRole('button', { name: 'Specify' }).click();
-  await snap(pPage, 'card-new-errors', { maxH: 1500, noHeader: true, cx: { x: 230, width: 820 } });
+  await snap(pPage, 'card-new-errors', { maxH: 1900, noHeader: true, cx: { x: 230, width: 820 } });
   await open(pPage, '/cards/new?project=SHOOT');
   await snap(pPage, 'card-new-research', { maxH: 1300, noHeader: true, cx: { x: 230, width: 820 } });
   await open(pPage, '/cards/new?project=NEWS');
   await snap(pPage, 'card-new-feed', { maxH: 1100, noHeader: true, cx: { x: 230, width: 820 } });
-  if (!S.ids.draftNote) {
+  {
     // creates one more draft card (once)
     await open(pPage, '/cards/new?project=WEB');
     const form = pPage.getByRole('form', { name: 'New card' });
@@ -1537,9 +1550,7 @@ cap('new card', async () => {
     await expect(
       pPage.getByText('still missing').or(pPage.getByText('Fix the highlighted fields')),
     ).toBeVisible();
-    await snap(pPage, 'card-new-missing', { maxH: 1500, noHeader: true, cx: { x: 230, width: 820 } });
-    S.ids.draftNote = '1';
-    saveState(S);
+    await snap(pPage, 'card-new-missing', { maxH: 1900, noHeader: true, cx: { x: 230, width: 820 } });
   }
 });
 
@@ -1562,6 +1573,17 @@ cap('card detail', async () => {
   await detail('card-published', S.ids.research1 as string, { maxH: 1500 });
   await detail('card-research-rework', S.ids.research2 as string, { maxH: 1500 });
   await detail('card-draft', 'WEB-43', { maxH: 900 });
+  // Edit card dialog (a draft) and the risk tier dialog (a queued card)
+  await pPage.setViewportSize({ width: 1280, height: 1500 });
+  await open(pPage, '/cards/WEB-43');
+  await pPage.getByTestId('edit-card').click();
+  await snap(pPage, 'dlg-edit-card', { sel: pPage.getByRole('dialog') });
+  await pPage.keyboard.press('Escape');
+  await pPage.setViewportSize({ width: 1280, height: 800 });
+  await open(pPage, `/cards/${S.ids['card:rq']}`);
+  await pPage.getByTestId('set-risk').click();
+  await snap(pPage, 'dlg-risk', { sel: pPage.getByRole('dialog') });
+  await pPage.keyboard.press('Escape');
   await detail('card-feed-run', 'NEWS-2', { maxH: 1100 });
   const panel = async (name: string, ref: string, heading: RegExp) => {
     await open(pPage, `/cards/${ref}`);
@@ -1575,6 +1597,8 @@ cap('card detail', async () => {
   await panel('panel-handoffs', S.ids['card:bounced0'] as string, /^Handoffs/);
   await panel('panel-thread', S.ids['card:bounced0'] as string, /^Thread$/);
   await panel('panel-timeline', S.ids['card:bounced0'] as string, /^Timeline$/);
+  await panel('panel-risk', S.ids['card:rq'] as string, /^Details$/);
+  await panel('panel-timeline-edit', S.ids['card:rq'] as string, /^Timeline$/);
   await panel('panel-live', 'WEB-10', /^Live shift/);
   await panel('panel-finalize', S.ids['card:large'] as string, /^Finalize$/);
   await panel('panel-evidence', 'WEB-1', /^Test evidence/);

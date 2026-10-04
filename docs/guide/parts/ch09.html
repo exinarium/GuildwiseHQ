@@ -3,7 +3,7 @@
 
   <h3 id="s9-1" style="margin-top:4px"><span class="mk">TOCMARK_s9x1_</span>9.1 The Admin page</h3>
   <p>The <b>Admin</b> item in the top menu (shown only to administrators) manages users, invitations and workstations for the whole system. Someone who is not an administrator and opens the page is sent back to the home page. Being an administrator gives no access to other people's projects, cards, agents or desk.</p>
-  <figure><img src="assets/admin.jpg"><figcaption>Admin page: Invite a user, Invitations (lee@demo.local revoked, sam@demo.local pending with Resend and Revoke, maya and pieter accepted), Users (Admin Demo admin, Pieter Demo and Maya Demo members) and All workstations (Pieter's desktop (WSL2), Build mini-PC with the amber sandbox warning, Maya's laptop offline) (Admin Demo)</figcaption></figure>
+  <figure><img src="assets/admin.jpg"><figcaption>Admin page: Invite a user, Invitations (lee@demo.local revoked, sam@demo.local pending with Resend and Revoke, maya and pieter accepted), Users (Admin Demo admin, Pieter Demo and Maya Demo members) and All workstations (Pieter's desktop (WSL2), each with "Shifts running" (4 of 4, 0 of 4, 0 offline); Build mini-PC with the amber sandbox warning that names the test override AOM_RUNNER_MOCK_SANDBOX=unsandboxed; Maya's laptop offline) (Admin Demo)</figcaption></figure>
   <h4>Invite a user</h4>
   <p>Enter an email address, choose a role (<b>member</b> or <b>admin</b>) and press <b>Send invitation</b>. The invitee receives an email with an accept link. On the accept page they enter a display name and a password (12 to 256 characters) and then sign in with their email. If a user with that email exists, or a pending invitation for it exists, the server refuses the new invitation. If the email cannot be sent, the invitation still exists and you can use <b>Resend</b> later.</p>
   <h4>Invitations list</h4>
@@ -24,7 +24,7 @@
     <li>Click <b>Deactivate</b> on an active user, or <b>Reactivate</b> on a deactivated one. The button is disabled for yourself. The last active administrator cannot be deactivated.</li>
   </ul>
   <h4>All workstations</h4>
-  <p>Every workstation paired by any user is listed here with the platform, hostname, runner version and the owner's email, the connection status, runtimes, repositories and last-seen time, and an <b>Unlink</b> button. Administrators see this list. The DevOps panel is not shown here; it is on the Workstations page of the workstation's owner, who sees only their own workstations (and can unlink them too).</p>
+  <p>Every workstation paired by any user is listed here with the platform, hostname, runner version and the owner's email, the connection status, runtimes, <b>Shifts running</b> (<i>n of limit</i>: the shifts running now against the runner's <code>maxConcurrentShifts</code>, default 4, which the server caps at <code>AOM_MAX_SHIFTS_PER_WORKSTATION</code>, default 16; an offline workstation shows 0 with "limit shown while connected"), repositories and last-seen time, and an <b>Unlink</b> button. A workstation whose runtime runs agents without an OS sandbox shows an amber warning with the real cause; in the demo it reads "test override: AOM_RUNNER_MOCK_SANDBOX=unsandboxed" and "This state is forced by a test override." Administrators see this list. The DevOps panel is not shown here; it is on the Workstations page of the workstation's owner, who sees only their own workstations (and can unlink them too).</p>
   <h4>Creating the first administrator</h4>
   <p>When you first deploy the system there are no users. Create the first administrator on the server with:</p>
   <div class="callout"><code>pnpm --filter @aom/server admin:create --email you@example.com --name "You"</code></div>
@@ -52,12 +52,12 @@
   <div class="phones">
     <figure><img src="assets/m-board.jpg"><figcaption>Board of WEB on a phone: the Spec column (WEB-42, WEB-43) and the start of To do, with the department and project filters, Run regression and New card (390 px, Pieter Demo)</figcaption></figure>
     <figure><img src="assets/m-desk.jpg"><figcaption>Decision desk on a phone: 12 open, 3 blocking, with Grace's blocking question for WEB-21 about guest data retention, its options and Answer and Dismiss (390 px, Pieter Demo)</figcaption></figure>
-    <figure><img src="assets/m-card.jpg"><figcaption>Card WEB-21 on a phone: blocked banner, Move, Re-home and Cancel card buttons, and the Details panel (390 px, Pieter Demo)</figcaption></figure>
+    <figure><img src="assets/m-card.jpg"><figcaption>Card WEB-21 on a phone: blocked banner, Move, Re-home and Cancel card buttons, and the Details panel with the Risk tier (not set) and its Change link (390 px, Pieter Demo)</figcaption></figure>
   </div>
   <div class="phones">
     <figure><img src="assets/m-hr.jpg"><figcaption>HR board on a phone: the New defaults for built-in roles section (Tester) and the first recommendations (390 px, Pieter Demo)</figcaption></figure>
     <figure><img src="assets/m-new-card.jpg"><figcaption>New card form for WEB on a phone (390 px, Pieter Demo)</figcaption></figure>
-    <figure><img src="assets/m-workstations.jpg"><figcaption>Workstations page on a phone: Pieter's desktop (WSL2) with its DevOps engineer panel (390 px, Pieter Demo)</figcaption></figure>
+    <figure><img src="assets/m-workstations.jpg"><figcaption>Workstations page on a phone: Pieter's desktop (WSL2) with Shifts running 4 of 4 and its DevOps engineer panel (390 px, Pieter Demo)</figcaption></figure>
   </div>
   <div class="phones">
     <figure><img src="assets/m-ledger.jpg"><figcaption>Ledger on a phone: search, scope and project filters and the first entries (390 px, Pieter Demo)</figcaption></figure>

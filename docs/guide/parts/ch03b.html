@@ -2,7 +2,7 @@
 
 <p>The <b>Decision desk</b> is the manager's page where every question needing an answer, every approval, and every alert lands. The main menu shows a red badge with the number of open items next to <code>Desk</code> (for example 12), so the manager sees at a glance that something is waiting. Under the page title the desk shows the same numbers as text: <code>12 open · 3 blocking</code>. At the top right are three buttons: <code>Add to ledger</code>, <code>Intake</code> and <code>Chat</code>. When nothing is waiting the page says <i>"Nothing is waiting on you."</i></p>
 
-<figure><img src="assets/desk.jpg" alt="desk"><figcaption>Decision desk top: "12 open · 3 blocking", the Add to ledger, Intake and Chat buttons, then the pinned items: two Urgent blocking questions from Grace (WEB-21, WEB-30), a DevOps approval and the WEB-35 large merge (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/desk.jpg" alt="desk"><figcaption>Decision desk top: "12 open · 3 blocking", the Add to ledger, Intake and Chat buttons, then the first pinned item: an Urgent, blocking Question from Grace on WEB-21 with its ledger box, escalation trail, options and the Answer and Dismiss buttons (Pieter Demo)</figcaption></figure>
 
 <h4>What reaches the desk</h4>
 
@@ -25,7 +25,7 @@
 <p>Every desk item shows a row of badges, then (when an agent raised it) who asked, the card it is about, and what the agent was doing. Then the title and body.</p>
 
 <ul>
-  <li><b>Badges</b>: <code>Urgent</code> (red; the item is pinned to the top); the item's kind in violet (some are shown raw: <code>question</code>, <code>devops</code>, <code>large_merge</code>, <code>tester_bottleneck</code>, <code>taste_rule</code>; others have a plain label: <code>Unmapped ticket</code>, <code>Update to a ticket</code>, <code>Posting failed</code>, <code>Role or workflow</code>); <code>Blocking</code> or <code>Non-blocking</code>; <code>Affects n card(s)</code> (how many cards wait on this item); and <code>asked 6m ago</code>.</li>
+  <li><b>Badges</b>: <code>Urgent</code> (red; the item is pinned to the top); the item's kind in violet, as a plain label: <code>Question</code>, <code>DevOps approval</code>, <code>Merge approval</code>, <code>Outbound update</code>, <code>Posting failed</code>, <code>Unmapped ticket</code>, <code>Role or workflow</code>, <code>Digest to rate</code>, <code>Taste rule</code>, <code>Standing order</code>, <code>Tester bottleneck</code>, <code>Test environment</code>, <code>Bug reported</code>, <code>Finalize failed</code>, <code>Pull request notice</code>, <code>Schedule failed</code> or <code>Vault conflict</code>; <code>Blocking</code> or <code>Non-blocking</code>; <code>Affects n card(s)</code> (how many cards wait on this item); and <code>asked 6m ago</code>.</li>
   <li><b>Who asked</b>: avatar, agent name and its role in parentheses (builder, reviewer, ba, and so on). Items raised by the app itself (a large-merge approval, the tester alert) have no asker.</li>
   <li><b>Card</b>: a linked card reference if the question is about a card. Clicking it opens the card.</li>
   <li><b>Was doing</b>: a short line the agent wrote about what it was doing (for example <i>"Was doing: Designing the guest order table"</i>).</li>
@@ -81,7 +81,7 @@
 
 <p>Every card has a setting <code>Who answers its questions</code> in its Details panel: <code>Only the card owner</code> (the default) or <code>Any manager of the project</code>. With the default, another manager of the project sees the item but gets <code>Read only: only the card owner can answer this.</code> instead of the form. Items that belong to no card (for example the tester alert) can be answered only by the project owner (<code>Read only: only the project owner can answer.</code>). Ratings of a digest can be given by any active member of the project.</p>
 
-<figure><img src="assets/desk-maya.jpg" alt="desk-maya"><figcaption>Desk as Maya sees it: "7 open · 2 blocking". WEB-21 and the WEB-35 large merge show "Read only: only the card owner can answer this."; WEB-30 is Maya's own card and shows the full answer form (Maya Demo)</figcaption></figure>
+<figure><img src="assets/desk-maya.jpg" alt="desk-maya"><figcaption>Desk as Maya sees it, top part: "7 open · 2 blocking". The question on WEB-21 shows "Read only: only the card owner can answer this."; the question on WEB-30 is on Maya's own card and continues with the answer form below (Maya Demo)</figcaption></figure>
 
 <p>A manager of a shared project like Maya sees the items of every project she is an active member of, but not the owner's organization-level items (DevOps approvals, vault conflicts). In the figure, WEB-21 and WEB-35 are cards of Pieter, so Maya can read them but not answer. WEB-30 is Maya's own card, so she answers it. Standing orders for a project can only be added by the project owner, also when answering.</p>
 
@@ -278,7 +278,7 @@
 
 <h4>Page structure: filters and tiles</h4>
 
-<figure><img src="assets/metrics.jpg" alt="metrics"><figcaption>Metrics dashboard: Project and Range lists ("All projects", "Last 30 days"); tiles Throughput (17 finalized, 0.5 per day), Time blocked on you (11.9m, 3 cards), Bounce rate per builder (Ada, Grace), Bugs escaped past test (1), Duration and Queue depth per column (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/metrics.jpg" alt="metrics"><figcaption>Metrics dashboard: Project and Range lists ("All projects", "Last 30 days"); tiles Throughput (17 finalized, 0.5 per day), Time blocked on you (13.0m, 3 cards), Bounce rate per builder (Ada, Grace), Bugs escaped past test (1), Duration and Queue depth per column (Pieter Demo)</figcaption></figure>
 
 <p>Two lists filter the page: <code>Project</code> and <code>Range</code>. Below are six tiles in two columns.</p>
 
@@ -359,7 +359,7 @@
 
 <p>Code-board columns come in board order, <code>Test (waiting on bug)</code> and the columns of other workflows after them. A column with no cards does not appear; with no open cards the tile says <i>"No open cards."</i></p>
 
-<div class="callout"><b class="t">Good to know about the demo and "waiting on"</b>
-All agents in the demo run on the MOCK runtime, so chat replies, shift logs and notes are scripted (<code>[mock]</code>, "mock peer", "mock ba"); real agents write real text. The large-risk card WEB-35 is at Finalize with status waiting, because it waits for the manager's approval of the merge. The board puts every waiting card in the column <code>Test (waiting on bug)</code>, and the Queue depth tile uses the same column name, although WEB-35 waits for the manager and not for a bug.</div>
+<div class="callout"><b class="t">Good to know about the demo</b>
+All agents in the demo run on the MOCK runtime, so chat replies, shift logs and notes are scripted (<code>[mock]</code>, "mock peer", "mock ba"); real agents write real text. The large-risk card WEB-35 is at Finalize with an amber badge "Awaiting your approval", because it waits for the manager's approval of the merge; the Queue depth tile lists it under Finalize.</div>
 
 </section>

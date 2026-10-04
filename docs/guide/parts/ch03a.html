@@ -112,7 +112,7 @@ The board header shows the project name and key. On the right are a department f
 
 <figure>
 <img src="assets/board-right.jpg" alt="board-right">
-<figcaption>Board of WEB, right side: Test (waiting on bug), Docs, Finalize (empty), Done (Pieter Demo)</figcaption>
+<figcaption>Board of WEB, right side: Test (waiting on bug), Docs, Finalize with WEB-35 "Awaiting your approval", Done (Pieter Demo)</figcaption>
 </figure>
 
 <h4>Columns and workflow stages</h4>
@@ -129,7 +129,7 @@ Columns are ordered left to right in the workflow. Each column header shows the 
 <li>Risk tier badge if set (amber for "large", gray for "small").</li>
 <li><code>Rework n</code> badge if the card has been sent back for rework n times (violet badge).</li>
 <li><code>Blocked</code> badge if the card is blocked on a question (red badge).</li>
-<li><code>waiting on bug</code> badge if the card is waiting for a bug fix (amber badge).</li>
+<li>An amber waiting badge if the card is waiting: <code>waiting on bug</code> (a bug card it spawned), <code>Awaiting your approval</code> (a large merge at Finalize waits for you), <code>Finalizing</code> (the completion action is running) or <code>waiting on DevOps</code> (the card is parked on a DevOps request).</li>
 <li><code>full suite</code> or <code>regression</code> badge if the card was created by a full-suite run or a regression run (blue badge).</li>
 </ul>
 
@@ -185,8 +185,8 @@ The column a card appears in depends on its status and stage. The table below sh
 </tr>
 <tr>
 <td><span class="badge b-pend">waiting</span></td>
-<td>Test (waiting on bug)</td>
-<td>The card waits for something else. In Test it waits for a bug card it spawned (a "waiting on WEB-xx" line shows). At Finalize it waits for the manager to approve a large merge, or for the merge itself. The board shows every waiting card in this column.</td>
+<td>Test (waiting on bug); Finalize</td>
+<td>The card waits for something else. In Test it waits for a bug card it spawned (a "waiting on WEB-xx" line shows) or for the DevOps engineer to fix the test environment; both show in the column "Test (waiting on bug)". At Finalize it waits for you to approve a large merge, or for the merge itself: the card stays in the Finalize column and the badge says "Awaiting your approval" or "Finalizing".</td>
 <td>The bug card's builder, or the manager (large merge)</td>
 </tr>
 <tr>
@@ -205,7 +205,7 @@ The column a card appears in depends on its status and stage. The table below sh
 </table>
 
 <p>
-The card's stage determines its column when the status is not "draft", "blocked", or "waiting". For example, a card in the build stage with status "claimed" appears in the "In progress" column. A card in the review stage appears in the "Review" column whether it is queued or claimed.
+The card's stage determines its column when the status is not "draft", "blocked", or "waiting" (a card waiting for the approval of a merge also stays in its own stage column, Finalize). For example, a card in the build stage with status "claimed" appears in the "In progress" column. A card in the review stage appears in the "Review" column whether it is queued or claimed.
 </p>
 
 <div class="figrow">
@@ -248,7 +248,7 @@ The card's stage determines its column when the status is not "draft", "blocked"
 </figure>
 <figure>
 <img src="assets/col-waiting.jpg" alt="col-waiting" class="w55">
-<figcaption>Test (waiting on bug) column: WEB-33 waits on its bug card WEB-38 (link under the tile). WEB-35 (large) carries the same amber "waiting on bug" badge, but it waits for the manager's approval at Finalize: the board shows every card with status "waiting" here (Pieter Demo)</figcaption>
+<figcaption>Test (waiting on bug) column: WEB-33 waits on its bug card WEB-38 (link under the tile) (Pieter Demo)</figcaption>
 </figure>
 </div>
 
@@ -259,7 +259,7 @@ The card's stage determines its column when the status is not "draft", "blocked"
 </figure>
 <figure>
 <img src="assets/col-finalize.jpg" alt="col-finalize" class="w55">
-<figcaption>Finalize column: empty in the demo (count 0). A card waiting at Finalize shows in the Test (waiting on bug) column instead (Pieter Demo)</figcaption>
+<figcaption>Finalize column: WEB-35, a large change whose merge waits for the manager, with the badge "Awaiting your approval" (Pieter Demo)</figcaption>
 </figure>
 </div>
 
@@ -302,10 +302,8 @@ The form has these fields (for code projects; research and feed projects have di
 <li><strong>Constraints</strong> (required to Specify) — Limits the change must respect.</li>
 <li><strong>Test plan</strong> (required to Specify) — How to test the change.</li>
 <li><strong>External reference</strong> (optional) — The ticket this card comes from (for example a Jira key or a GitHub issue).</li>
-<li><strong>Mock script</strong> (JSON, optional) — A test aid for the mock runtime only; real users leave it blank.</li>
 <li><strong>Platform</strong> (optional) — For regression and full-suite cards: the platform under test, <code>web</code> or <code>mobile</code>. The field is a plain text box.</li>
 <li><strong>Suite branch</strong> (optional) — For suite cards: the branch the suite runs on.</li>
-<li>Below these the form has two more fields for the mock runtime, <strong>Mock test environment</strong> and <strong>Mock outbound draft</strong>. Real users leave them blank.</li>
 </ul>
 
 <h4>Save draft vs. Specify</h4>
@@ -341,7 +339,7 @@ The same checks apply when you fill in only some fields. In the next picture the
 <h4>Research card form</h4>
 
 <p>
-Research projects like SHOOT use a different card form. It has no Repository, Completion action or Docs needed. After Title and Priority (1-9) it has <strong>Question</strong>, <strong>Scope</strong>, <strong>Depth</strong> (a select: <code>quick</code>, <code>standard</code> or <code>deep</code>), <strong>Sub-category</strong>, <strong>Preferred sites</strong> (one per line), <strong>Max per kind</strong> (JSON) and two mock-runtime fields, <strong>Mock script</strong> and <strong>Mock research claims</strong>. The card type is <code>research</code>.
+Research projects like SHOOT use a different card form. It has no Repository, Completion action or Docs needed. After Title and Priority (1-9) it has <strong>Question</strong>, <strong>Scope</strong>, <strong>Depth</strong> (a select: <code>quick</code>, <code>standard</code> or <code>deep</code>), <strong>Sub-category</strong>, <strong>Preferred sites</strong> (one per line), <strong>Max per kind</strong> (JSON). The card type is <code>research</code>.
 </p>
 
 <figure>
@@ -352,7 +350,7 @@ Research projects like SHOOT use a different card form. It has no Repository, Co
 <h4>Feed card form</h4>
 
 <p>
-Feed projects like NEWS have their own form. After Title and Priority (1-9) it has <strong>Topic</strong>, <strong>Window (hours)</strong>, <strong>Preferred sites</strong>, <strong>Max per kind</strong> (JSON) and the mock-runtime fields <strong>Mock script</strong> and <strong>Mock feed items</strong>. The card type is <code>feed</code>.
+Feed projects like NEWS have their own form. After Title and Priority (1-9) it has <strong>Topic</strong>, <strong>Window (hours)</strong>, <strong>Preferred sites</strong>, <strong>Max per kind</strong> (JSON). The card type is <code>feed</code>.
 </p>
 
 <figure>
@@ -363,12 +361,12 @@ Feed projects like NEWS have their own form. After Title and Priority (1-9) it h
 <h4>Draft and specifying later</h4>
 
 <p>
-A draft card appears in the Spec column. Its detail page has a <strong>Specify</strong> button for the card owner and the project owner. If required fields are still empty, the page shows "Cannot specify yet. Missing:" followed by the field names, and the card stays a draft. The card page has no form to edit fields, so fill in all required fields when you create the card.
+A draft card appears in the Spec column. Its detail page has a <strong>Specify</strong> button for the card owner and the project owner. If required fields are still empty, the page shows "Cannot specify yet. Missing:" followed by the field names, and the card stays a draft. You can fill in what is missing with <strong>Edit</strong> (next section) and then press Specify.
 </p>
 
 <figure>
 <img src="assets/card-draft.jpg" alt="card-draft">
-<figcaption>The draft card WEB-43 with the Specify, Move, Re-home and Cancel card buttons; the "Who answers its questions" select is in the Details panel (Pieter Demo)</figcaption>
+<figcaption>The draft card WEB-43 with the Specify, Edit, Move, Re-home and Cancel card buttons; the "Who answers its questions" select is in the Details panel (Pieter Demo)</figcaption>
 </figure>
 
 <div class="callout rule"><b class="t">What Specify does, in this order:</b>
@@ -399,11 +397,43 @@ At the top of the page is the card ref and title (e.g., "WEB-11 Dark mode for th
 
 <ul>
 <li><strong>Specify</strong> (blue, draft only) — Move the draft to the build stage if all required fields are filled in.</li>
+<li><strong>Edit</strong> — Change the card: opens the Edit card dialog (below). Shown while the card is a draft or queued and not held by an agent.</li>
 <li><strong>Move</strong> — Override the workflow and move the card to another stage. Shown while the card is open (not done or cancelled); opens a dialog.</li>
 <li><strong>Release</strong> — Release the active claim: the card goes back to the queue. Shown while an agent holds the card.</li>
 <li><strong>Re-home</strong> — Forget this card's workstation and worktree, so its current stage restarts from the base branch. Shown while nobody holds the card and it is not done or cancelled.</li>
 <li><strong>Cancel card</strong> (red) — Cancel the card (it leaves the board). Shown while the card is open; opens a dialog.</li>
 </ul>
+
+<h4>Edit card</h4>
+
+<p>
+<strong>Edit</strong> is shown to the card owner and the project owner while the card is a draft (in Spec) or queued and not claimed. It opens the dialog <strong>Edit WEB-43</strong> ("Change the card while it is a draft or waiting in a queue. The edit shows in the timeline."). The dialog has the same fields and the same checks as the New card form, filled with the card's values: Title, Repository, Completion action, Priority, Docs needed and the workflow's fields. Empty a field to remove it. A queued card must keep the fields its stage needs; a draft may stay incomplete. Buttons are <strong>Close</strong> and <strong>Save changes</strong>; errors show under the fields with "Fix the highlighted fields.".
+</p>
+
+<div class="figrow">
+<figure><img src="assets/dlg-edit-card.jpg" alt="dlg-edit-card"><figcaption>Edit WEB-43, upper part: Title, Repository, Completion action, Priority, Docs needed and Context (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/dlg-edit-card-b.jpg" alt="dlg-edit-card-b"><figcaption>Edit WEB-43, lower part: the remaining fields and the Close and Save changes buttons (Pieter Demo)</figcaption></figure>
+</div>
+
+<p>
+A card an agent holds (claimed) cannot be edited: the page shows no Edit button, and the server answers that the card is being worked on. Release the claim first. A card that is done or cancelled cannot be edited either. Every edit is recorded in the Timeline with who made it and when.
+</p>
+
+<h4>Risk tier and the override</h4>
+
+<p>
+The risk tier is computed from the diff when the builder hands off (section 5.1). The card owner and the project owner can override it with the link <strong>Change</strong> next to <strong>Risk tier</strong> in the Details panel, while the card is open and no merge is pending. The dialog <strong>Risk tier</strong> offers <code>small</code> (one reviewer, merges without approval) and <code>large</code> (two reviewers, a merge waits for your approval), plus "Back to computed from the diff" on a card that has an override. A <strong>Reason</strong> is required ("A reason is required"). After <strong>Set risk tier</strong> the Details panel shows the tier with an <code>override</code> badge, the Timeline records the change with the reason and the person, and the diff no longer changes the tier. The BA can do the same from its shift with <code>aom risk &lt;small|large&gt; --reason "..."</code>.
+</p>
+
+<div class="figrow">
+<figure><img src="assets/dlg-risk.jpg" alt="dlg-risk"><figcaption>The Risk tier dialog on WEB-37 with "large" chosen and the Reason box still empty (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/panel-risk.jpg" alt="panel-risk"><figcaption>Details panel of WEB-37 after the override: "large", the override badge and the Change link (Pieter Demo)</figcaption></figure>
+</div>
+
+<figure class="w55">
+<img src="assets/panel-timeline-edit.jpg" alt="panel-timeline-edit">
+<figcaption>Timeline of WEB-37: "Edited affectedAreas" and "Risk tier set to large by override (was small)" with the reason "It changes how sessions are stored" (Pieter Demo)</figcaption>
+</figure>
 
 <h4>Move card dialog</h4>
 
@@ -446,7 +476,7 @@ The left panel shows card metadata organized in rows:
 
 <ul>
 <li><strong>Stage</strong> — Current workflow stage (e.g., "done").</li>
-<li><strong>Risk tier</strong> — "small" or "large" (or "not set").</li>
+<li><strong>Risk tier</strong> — "small" or "large" (or "not set"). An <code>override</code> badge shows that it was set by hand; the link <strong>Change</strong> opens the Risk tier dialog (below).</li>
 <li><strong>Completion action</strong> — How the work merges (<code>pr</code>, <code>push_branch</code>, <code>merge</code>, or "not set").</li>
 <li><strong>Docs needed</strong> — "yes" or "no".</li>
 <li><strong>Priority</strong> — Priority number 1 to 9 (2 if none was given).</li>
@@ -455,12 +485,12 @@ The left panel shows card metadata organized in rows:
 </ul>
 
 <p>
-Below the metadata rows are the spec fields the card has (for example Context, Requirements, Acceptance criteria, Constraints, Test plan, Affected areas, External reference), shown as read-only text or bullet lists. The demo cards also show their <strong>Mock script</strong> as JSON.
+Below the metadata rows are the spec fields the card has (for example Context, Requirements, Acceptance criteria, Constraints, Test plan, Affected areas, External reference), shown as read-only text or bullet lists.
 </p>
 
 <figure>
 <img src="assets/panel-details.jpg" alt="panel-details" class="w70">
-<figcaption>Details panel of WEB-11: metadata, the Mock script and the spec fields (Pieter Demo)</figcaption>
+<figcaption>Details panel of WEB-11: metadata and the spec fields (Pieter Demo)</figcaption>
 </figure>
 
 <h4>Who answers its questions (decision policy)</h4>
@@ -487,7 +517,7 @@ A review handoff can carry more: a grey badge "Score n/5", a red badge for each 
 <h4>Timeline panel</h4>
 
 <p>
-The Timeline panel (right column, above the Thread) shows the history of the card. Each row shows the previous stage, an arrow, the new stage and the resulting status in brackets (e.g., "build -> review (queued)"), and below it the name of the event that caused it (e.g., CardCreated, CardSpecified, CardClaimed, ReviewRequested, ChangesRequested, ReviewApproved) and the time.
+The Timeline panel (right column, above the Thread) shows the history of the card. Each row shows the previous stage, an arrow, the new stage and the resulting status in brackets (e.g., "build -> review (queued)"), and below it the name of the event that caused it (e.g., CardCreated, CardSpecified, CardClaimed, ReviewRequested, ChangesRequested, ReviewApproved) and the time. Between the stage moves the timeline also lists what a person changed on the card: "Edited requirements" and "Risk tier set to large by override (was small)" with the reason, the person and the time (see Figure below).
 </p>
 
 <figure>

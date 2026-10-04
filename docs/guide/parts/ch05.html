@@ -16,7 +16,9 @@
 
   <p>The <b>architectural globs</b> are a setting of the project (Project settings, "Architectural globs", one glob per line). One matching file makes the card large, whatever the size of the diff. Bug cards created by a failed test use a shorter route: one reviewer approval, whatever the tier.</p>
 
-  <p><b>Overriding the tier:</b> the tier can be set on a card by its manager through the card API (<code>PATCH</code> with <code>riskTier</code>); a tier set this way is kept and the runner's computation no longer replaces it. The web page shows the tier in the Details panel and on the card tile but has no control to change it.</p>
+  <p><b>Overriding the tier:</b> when the computed tier is wrong, the card owner or the project owner can change it. In the Details panel of the card, click <b>Change</b> next to <b>Risk tier</b>. The dialog "Risk tier" offers <b>small</b>, <b>large</b> or back to the computed tier, and requires a <b>Reason</b>. The tier you set drives the review (one or two reviewers) and the large-merge approval (5.6), and it is refused while a merge is pending (awaiting approval or running). From then on the override replaces the computed tier: the runner's computation no longer changes it. The card shows an <b>override</b> badge next to the tier, and the timeline records "Risk tier set to large by override (was small)" with the reason and who set it; chapter 3.4 shows the override badge and the timeline entry. The BA can do the same from a shift with <code>aom risk &lt;small|large&gt; --reason "&lt;why&gt;"</code>.</p>
+
+  <figure class="w55"><img src="assets/dlg-risk.jpg" alt="dlg-risk"><figcaption>Risk tier dialog: the select set to "large (two reviewers, a merge waits for your approval)", an empty Reason field, and the buttons Close and Set risk tier</figcaption></figure>
 
   <p><b>Review flow:</b> when a card reaches Review it is claimed by a senior reviewer agent (reviewers are always senior). The reviewer reads the card, the diff, the tests and the acceptance criteria, and reports an outcome with <code>aom review approve</code> or <code>aom review changes</code>. Both carry a score from 1 to 5; a request for changes also carries one or more reasons (missed requirement, broke convention, weak tests, poor structure, spec unclear, out of scope test change) and the criteria that were missed. There are no Approve or Request changes buttons in the web UI: reviewers are agents.</p>
 
@@ -99,7 +101,7 @@
 
   <p>The pr and push_branch actions need an <code>origin</code> remote; without one the action fails. As soon as the action succeeds the card moves to <b>Done</b>, its worktree is removed (the branch is deleted only after a merge) and a separate full-suite card is queued for a tester (see 5.7). The full suite does not hold the card back.</p>
 
-  <figure class="w70"><img src="assets/card-large.jpg"><figcaption>Card WEB-35, risk tier large, completion action merge, waiting at Finalize: the Finalize panel says "Awaiting your approval of the merge on the desk" (Pieter Demo)</figcaption></figure>
+  <figure class="w70"><img src="assets/card-large.jpg"><figcaption>Card WEB-35, risk tier large with the override badge, completion action merge, at Finalize: the Finalize panel says "Awaiting your approval of the merge on the desk", and the timeline shows "Risk tier set to large by override (was small)" with its reason (Pieter Demo)</figcaption></figure>
 
   <figure class="w70"><img src="assets/panel-finalize.jpg"><figcaption>The Finalize panel of WEB-35 while the merge awaits approval (Pieter Demo)</figcaption></figure>
 
@@ -126,12 +128,14 @@
 
   <p>When a card with risk tier large reaches Finalize with the completion action <b>merge</b>, the merge is not executed until you approve it on the desk. The same holds when you press Finalize yourself. The completion actions pr and push_branch never need an approval, whatever the tier.</p>
 
-  <figure class="w70"><img src="assets/desk-large-merge.jpg"><figcaption>Large merge approval for WEB-35: badges Urgent, large_merge and Non-blocking, and the buttons Approve merge, Reject and Dismiss (Pieter Demo)</figcaption></figure>
+  <figure class="w70"><img src="assets/desk-large-merge.jpg"><figcaption>Large merge approval for WEB-35: badges Urgent, Merge approval and Non-blocking, and the buttons Approve merge, Reject and Dismiss (Pieter Demo)</figcaption></figure>
 
   <p>The item is pinned (shown as Urgent) and non-blocking. Its title is "Approve merge of WEB-35: &lt;title&gt;" and its text says that the card is a large change, which branch will be merged into which working branch, that the runner does the merge and that a full E2E suite runs on the result. <b>Approve merge</b> sends the merge to the workstation. <b>Reject</b> ends the attempt: the card is marked "Finalize failed: Merge not approved" and returns to the Finalize queue.</p>
 
+  <p>While the merge awaits approval the card stays in the Finalize column of the board with the amber badge <b>Awaiting your approval</b>. The other waiting badges are "waiting on bug", "Finalizing" and "waiting on DevOps".</p>
+
   <div class="callout"><b class="t">Good to know</b>
-    While the merge awaits approval the card has the status <b>waiting</b>, so the board shows it in the column "Test (waiting on bug)" and the card page says "Waiting on a bug fix", although no bug is involved: it is waiting for you. The Details panel shows the stage Finalize. In the demo, WEB-35 was moved to Finalize by hand ("Reviewed together in a pairing session"), so its thread shows one review although the desk text says two reviewers approved.</div>
+    In the demo, WEB-35 was moved to Finalize by hand ("Reviewed together in a pairing session"), so its thread shows one review although the desk text says two reviewers approved.</div>
 
   <div class="callout"><b class="t">Why large merges need approval</b>
     A large card is one with a big diff, a refactor or a change in an architectural area. Approving the merge is your last chance to stop it before it reaches the working branch.</div>
@@ -154,7 +158,7 @@
 
   <p><b>Tester bottleneck alert:</b> when a card has been waiting in a tester queue for more than 5 minutes and every tester of the project is busy or offline, you get one alert on the desk per project. It is pinned (shown as Urgent) and non-blocking. The alert is only raised for projects that have at least one tester; a project without testers never gets it. It closes itself when no card waits for a tester any more. Its buttons are <b>Hire tester</b>, <b>Acknowledge</b> and <b>Dismiss</b>; Hire tester opens the Hire form with the Tester role already chosen.</p>
 
-  <figure class="w70"><img src="assets/desk-alert.jpg"><figcaption>Tester bottleneck alert: "1 card waiting for a tester for over 5 minutes", with Hire tester, Acknowledge and Dismiss (Pieter Demo)</figcaption></figure>
+  <figure class="w70"><img src="assets/desk-alert.jpg"><figcaption>Tester bottleneck alert (badges Urgent, Tester bottleneck and Non-blocking): "1 card waiting for a tester for over 5 minutes", with Hire tester, Acknowledge and Dismiss (Pieter Demo)</figcaption></figure>
 
   <figure class="w70"><img src="assets/dlg-hire-tester.jpg"><figcaption>The Hire agent form opened from the alert: Role is Tester, Project is WEB, Seniority junior (Pieter Demo)</figcaption></figure>
 
@@ -164,12 +168,12 @@
     <li>If the repository has a file <code>.aom/test-env.json</code> with a <code>healthUrl</code>, that URL answers with a success status within 5 seconds. Without that file the application is not checked.</li>
   </ul>
 
-  <p>If the check fails, the shift is not started. The server asks the DevOps engineer of that workstation (a DevOps request: install Docker, or start the application) and parks the card: it gets the status waiting, so it also shows in the board column "Test (waiting on bug)", with a notice that it is parked on a DevOps request. When the request is done or has failed, the card returns to the Test queue and the check runs again.</p>
+  <p>If the check fails, the shift is not started. The server asks the DevOps engineer of that workstation (a DevOps request: install Docker, or start the application) and parks the card: it gets the status waiting, so it shows the badge "waiting on DevOps" and sits in the board column "Test (waiting on bug)", with a notice that it is parked on a DevOps request. When the request is done or has failed, the card returns to the Test queue and the check runs again.</p>
 
   <div class="callout warn"><b class="t">Hard stop</b>
-    The card is not parked but stopped with a blocking desk item "WEB-xx cannot be tested: ..." when Docker is missing and the DevOps engineer is not allowed to install Docker on that workstation (it needs both the install and the Docker access), when the DevOps engineer already tried twice, or when the workstation has no DevOps engineer. Fix the environment or grant the access, then resolve the item and the card returns to the Test queue. Separately, the DevOps engineer itself asks for your approval (a "devops" item on the desk) before it does anything destructive or outside its granted access.</div>
+    The card is not parked but stopped with a blocking desk item "WEB-xx cannot be tested: ..." when Docker is missing and the DevOps engineer is not allowed to install Docker on that workstation (it needs both the install and the Docker access), when the DevOps engineer already tried twice, or when the workstation has no DevOps engineer. Fix the environment or grant the access, then resolve the item and the card returns to the Test queue. Separately, the DevOps engineer itself asks for your approval (a "DevOps approval" item on the desk) before it does anything destructive or outside its granted access.</div>
 </section>
 
 </section>
 
-<!-- NOTES: The demo uses the MOCK runtime; shift logs show "[mock]" prefixes. Risk tier calculation is from diff size and a config list of architectural areas. Large merges show a "waiting on bug" badge on the board even though they are waiting for manager approval; this is how the card state "awaiting_approval" maps to the board column logic. -->
+<!-- NOTES: The demo uses the MOCK runtime; shift logs show "[mock]" prefixes. Risk tier calculation is from diff size and a config list of architectural areas. A large merge awaiting approval stays in the Finalize column with the badge "Awaiting your approval". -->

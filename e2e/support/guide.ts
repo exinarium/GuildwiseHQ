@@ -46,10 +46,7 @@ export async function maskDemo(page: Page): Promise<void> {
       [new RegExp(`${dir}/repos/toy`, 'g'), '/home/demo/src/web'],
       [new RegExp(`${dir}/[^\\s)"']*`, 'g'), '/home/demo'],
     ];
-    const extra: Array<[RegExp, string]> = [
-      [/WIN-HOST/g, 'desktop-wsl'],
-      [/test override: AOM_RUNNER_MOCK_SANDBOX=unsandboxed/g, 'native Windows, unsandboxed by choice'],
-    ];
+    const extra: Array<[RegExp, string]> = [[/WIN-HOST/g, 'desktop-wsl']];
     const fix = (s: string): string => [...map, ...extra].reduce((acc, [re, to]) => acc.replace(re, to), s);
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {

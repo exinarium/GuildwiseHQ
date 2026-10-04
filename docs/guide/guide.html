@@ -261,11 +261,11 @@
 
   <h3>Status on 4 October 2026</h3>
   <div class="kpis">
-    <div><b>277 / 277</b><span>shared contract tests</span></div>
-    <div><b>393 / 393</b><span>server unit and integration tests (real Postgres)</span></div>
-    <div><b>104 / 104</b><span>web tests</span></div>
-    <div><b>288 passed, 1 skipped</b><span>runner tests</span></div>
-    <div><b>102 / 102</b><span>Playwright end-to-end tests (real UI, server, runner)</span></div>
+    <div><b>280 / 280</b><span>shared contract tests</span></div>
+    <div><b>407 / 407</b><span>server unit and integration tests (real Postgres)</span></div>
+    <div><b>134 / 134</b><span>web tests</span></div>
+    <div><b>291 passed, 1 skipped</b><span>runner tests</span></div>
+    <div><b>103 / 103</b><span>Playwright end-to-end tests (real UI, server, runner)</span></div>
     <div><b>PASSED</b><span>real Claude Code smoke run in the sandbox</span></div>
   </div>
   <p>All ten milestones of the plan are built and tested. An independent security review found issues from high to low severity; all were fixed and re-tested (chapter 12). A real Claude Code run in the sandbox found four more problems, now fixed. Not yet verified with a real Claude: macOS and native Windows (chapter 13).</p>
@@ -473,7 +473,7 @@ The board header shows the project name and key. On the right are a department f
 
 <figure>
 <img src="assets/board-right.jpg" alt="board-right">
-<figcaption>Board of WEB, right side: Test (waiting on bug), Docs, Finalize (empty), Done (Pieter Demo)</figcaption>
+<figcaption>Board of WEB, right side: Test (waiting on bug), Docs, Finalize with WEB-35 "Awaiting your approval", Done (Pieter Demo)</figcaption>
 </figure>
 
 <h4>Columns and workflow stages</h4>
@@ -490,7 +490,7 @@ Columns are ordered left to right in the workflow. Each column header shows the 
 <li>Risk tier badge if set (amber for "large", gray for "small").</li>
 <li><code>Rework n</code> badge if the card has been sent back for rework n times (violet badge).</li>
 <li><code>Blocked</code> badge if the card is blocked on a question (red badge).</li>
-<li><code>waiting on bug</code> badge if the card is waiting for a bug fix (amber badge).</li>
+<li>An amber waiting badge if the card is waiting: <code>waiting on bug</code> (a bug card it spawned), <code>Awaiting your approval</code> (a large merge at Finalize waits for you), <code>Finalizing</code> (the completion action is running) or <code>waiting on DevOps</code> (the card is parked on a DevOps request).</li>
 <li><code>full suite</code> or <code>regression</code> badge if the card was created by a full-suite run or a regression run (blue badge).</li>
 </ul>
 
@@ -546,8 +546,8 @@ The column a card appears in depends on its status and stage. The table below sh
 </tr>
 <tr>
 <td><span class="badge b-pend">waiting</span></td>
-<td>Test (waiting on bug)</td>
-<td>The card waits for something else. In Test it waits for a bug card it spawned (a "waiting on WEB-xx" line shows). At Finalize it waits for the manager to approve a large merge, or for the merge itself. The board shows every waiting card in this column.</td>
+<td>Test (waiting on bug); Finalize</td>
+<td>The card waits for something else. In Test it waits for a bug card it spawned (a "waiting on WEB-xx" line shows) or for the DevOps engineer to fix the test environment; both show in the column "Test (waiting on bug)". At Finalize it waits for you to approve a large merge, or for the merge itself: the card stays in the Finalize column and the badge says "Awaiting your approval" or "Finalizing".</td>
 <td>The bug card's builder, or the manager (large merge)</td>
 </tr>
 <tr>
@@ -566,7 +566,7 @@ The column a card appears in depends on its status and stage. The table below sh
 </table>
 
 <p>
-The card's stage determines its column when the status is not "draft", "blocked", or "waiting". For example, a card in the build stage with status "claimed" appears in the "In progress" column. A card in the review stage appears in the "Review" column whether it is queued or claimed.
+The card's stage determines its column when the status is not "draft", "blocked", or "waiting" (a card waiting for the approval of a merge also stays in its own stage column, Finalize). For example, a card in the build stage with status "claimed" appears in the "In progress" column. A card in the review stage appears in the "Review" column whether it is queued or claimed.
 </p>
 
 <div class="figrow">
@@ -609,7 +609,7 @@ The card's stage determines its column when the status is not "draft", "blocked"
 </figure>
 <figure>
 <img src="assets/col-waiting.jpg" alt="col-waiting" class="w55">
-<figcaption>Test (waiting on bug) column: WEB-33 waits on its bug card WEB-38 (link under the tile). WEB-35 (large) carries the same amber "waiting on bug" badge, but it waits for the manager's approval at Finalize: the board shows every card with status "waiting" here (Pieter Demo)</figcaption>
+<figcaption>Test (waiting on bug) column: WEB-33 waits on its bug card WEB-38 (link under the tile) (Pieter Demo)</figcaption>
 </figure>
 </div>
 
@@ -620,7 +620,7 @@ The card's stage determines its column when the status is not "draft", "blocked"
 </figure>
 <figure>
 <img src="assets/col-finalize.jpg" alt="col-finalize" class="w55">
-<figcaption>Finalize column: empty in the demo (count 0). A card waiting at Finalize shows in the Test (waiting on bug) column instead (Pieter Demo)</figcaption>
+<figcaption>Finalize column: WEB-35, a large change whose merge waits for the manager, with the badge "Awaiting your approval" (Pieter Demo)</figcaption>
 </figure>
 </div>
 
@@ -640,6 +640,10 @@ A project member creates a card by clicking <strong>New card</strong> in the men
 <figure>
 <img src="assets/card-new.jpg" alt="card-new">
 <figcaption>New card form for the Code workflow (Pieter Demo)</figcaption>
+</figure>
+<figure>
+<img src="assets/card-new-b.jpg" alt="card-new">
+<figcaption>New card form for the Code workflow (continued: lower part, Pieter Demo)</figcaption>
 </figure>
 
 <h4>Card form fields (Code workflow)</h4>
@@ -663,10 +667,8 @@ The form has these fields (for code projects; research and feed projects have di
 <li><strong>Constraints</strong> (required to Specify) — Limits the change must respect.</li>
 <li><strong>Test plan</strong> (required to Specify) — How to test the change.</li>
 <li><strong>External reference</strong> (optional) — The ticket this card comes from (for example a Jira key or a GitHub issue).</li>
-<li><strong>Mock script</strong> (JSON, optional) — A test aid for the mock runtime only; real users leave it blank.</li>
 <li><strong>Platform</strong> (optional) — For regression and full-suite cards: the platform under test, <code>web</code> or <code>mobile</code>. The field is a plain text box.</li>
 <li><strong>Suite branch</strong> (optional) — For suite cards: the branch the suite runs on.</li>
-<li>Below these the form has two more fields for the mock runtime, <strong>Mock test environment</strong> and <strong>Mock outbound draft</strong>. Real users leave them blank.</li>
 </ul>
 
 <h4>Save draft vs. Specify</h4>
@@ -689,6 +691,10 @@ When you press <strong>Specify</strong> with missing required fields, the form s
 <img src="assets/card-new-errors.jpg" alt="card-new-errors">
 <figcaption>Validation errors after pressing Specify on a blank form: "Title is required" and one error per missing required field; the buttons are further down the page (Pieter Demo)</figcaption>
 </figure>
+<figure>
+<img src="assets/card-new-errors-b.jpg" alt="card-new-errors">
+<figcaption>Validation errors after pressing Specify on a blank form: "Title is required" and one error per missing required field; the buttons are further down the page (continued: lower part, Pieter Demo)</figcaption>
+</figure>
 
 <p>
 The same checks apply when you fill in only some fields. In the next picture the title and Context are filled in, and every other required field is flagged (Repository, Completion action, Requirements, Acceptance criteria, Affected areas, Constraints, Test plan); nothing is saved. Only if the server finds a required field missing that the form did not, the card is saved as a draft and the form shows "Saved as draft", the card ref and "still missing" with the field names.
@@ -698,11 +704,15 @@ The same checks apply when you fill in only some fields. In the next picture the
 <img src="assets/card-new-missing.jpg" alt="card-new-missing">
 <figcaption>Title and Context filled in, Specify pressed: the missing required fields are flagged (Pieter Demo)</figcaption>
 </figure>
+<figure>
+<img src="assets/card-new-missing-b.jpg" alt="card-new-missing">
+<figcaption>Title and Context filled in, Specify pressed: the missing required fields are flagged (continued: lower part, Pieter Demo)</figcaption>
+</figure>
 
 <h4>Research card form</h4>
 
 <p>
-Research projects like SHOOT use a different card form. It has no Repository, Completion action or Docs needed. After Title and Priority (1-9) it has <strong>Question</strong>, <strong>Scope</strong>, <strong>Depth</strong> (a select: <code>quick</code>, <code>standard</code> or <code>deep</code>), <strong>Sub-category</strong>, <strong>Preferred sites</strong> (one per line), <strong>Max per kind</strong> (JSON) and two mock-runtime fields, <strong>Mock script</strong> and <strong>Mock research claims</strong>. The card type is <code>research</code>.
+Research projects like SHOOT use a different card form. It has no Repository, Completion action or Docs needed. After Title and Priority (1-9) it has <strong>Question</strong>, <strong>Scope</strong>, <strong>Depth</strong> (a select: <code>quick</code>, <code>standard</code> or <code>deep</code>), <strong>Sub-category</strong>, <strong>Preferred sites</strong> (one per line), <strong>Max per kind</strong> (JSON). The card type is <code>research</code>.
 </p>
 
 <figure>
@@ -713,7 +723,7 @@ Research projects like SHOOT use a different card form. It has no Repository, Co
 <h4>Feed card form</h4>
 
 <p>
-Feed projects like NEWS have their own form. After Title and Priority (1-9) it has <strong>Topic</strong>, <strong>Window (hours)</strong>, <strong>Preferred sites</strong>, <strong>Max per kind</strong> (JSON) and the mock-runtime fields <strong>Mock script</strong> and <strong>Mock feed items</strong>. The card type is <code>feed</code>.
+Feed projects like NEWS have their own form. After Title and Priority (1-9) it has <strong>Topic</strong>, <strong>Window (hours)</strong>, <strong>Preferred sites</strong>, <strong>Max per kind</strong> (JSON). The card type is <code>feed</code>.
 </p>
 
 <figure>
@@ -724,12 +734,12 @@ Feed projects like NEWS have their own form. After Title and Priority (1-9) it h
 <h4>Draft and specifying later</h4>
 
 <p>
-A draft card appears in the Spec column. Its detail page has a <strong>Specify</strong> button for the card owner and the project owner. If required fields are still empty, the page shows "Cannot specify yet. Missing:" followed by the field names, and the card stays a draft. The card page has no form to edit fields, so fill in all required fields when you create the card.
+A draft card appears in the Spec column. Its detail page has a <strong>Specify</strong> button for the card owner and the project owner. If required fields are still empty, the page shows "Cannot specify yet. Missing:" followed by the field names, and the card stays a draft. You can fill in what is missing with <strong>Edit</strong> (next section) and then press Specify.
 </p>
 
 <figure>
 <img src="assets/card-draft.jpg" alt="card-draft">
-<figcaption>The draft card WEB-43 with the Specify, Move, Re-home and Cancel card buttons; the "Who answers its questions" select is in the Details panel (Pieter Demo)</figcaption>
+<figcaption>The draft card WEB-43 with the Specify, Edit, Move, Re-home and Cancel card buttons; the "Who answers its questions" select is in the Details panel (Pieter Demo)</figcaption>
 </figure>
 
 <div class="callout rule"><b class="t">What Specify does, in this order:</b>
@@ -760,11 +770,43 @@ At the top of the page is the card ref and title (e.g., "WEB-11 Dark mode for th
 
 <ul>
 <li><strong>Specify</strong> (blue, draft only) — Move the draft to the build stage if all required fields are filled in.</li>
+<li><strong>Edit</strong> — Change the card: opens the Edit card dialog (below). Shown while the card is a draft or queued and not held by an agent.</li>
 <li><strong>Move</strong> — Override the workflow and move the card to another stage. Shown while the card is open (not done or cancelled); opens a dialog.</li>
 <li><strong>Release</strong> — Release the active claim: the card goes back to the queue. Shown while an agent holds the card.</li>
 <li><strong>Re-home</strong> — Forget this card's workstation and worktree, so its current stage restarts from the base branch. Shown while nobody holds the card and it is not done or cancelled.</li>
 <li><strong>Cancel card</strong> (red) — Cancel the card (it leaves the board). Shown while the card is open; opens a dialog.</li>
 </ul>
+
+<h4>Edit card</h4>
+
+<p>
+<strong>Edit</strong> is shown to the card owner and the project owner while the card is a draft (in Spec) or queued and not claimed. It opens the dialog <strong>Edit WEB-43</strong> ("Change the card while it is a draft or waiting in a queue. The edit shows in the timeline."). The dialog has the same fields and the same checks as the New card form, filled with the card's values: Title, Repository, Completion action, Priority, Docs needed and the workflow's fields. Empty a field to remove it. A queued card must keep the fields its stage needs; a draft may stay incomplete. Buttons are <strong>Close</strong> and <strong>Save changes</strong>; errors show under the fields with "Fix the highlighted fields.".
+</p>
+
+<div class="figrow">
+<figure><img src="assets/dlg-edit-card.jpg" alt="dlg-edit-card"><figcaption>Edit WEB-43, upper part: Title, Repository, Completion action, Priority, Docs needed and Context (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/dlg-edit-card-b.jpg" alt="dlg-edit-card-b"><figcaption>Edit WEB-43, lower part: the remaining fields and the Close and Save changes buttons (Pieter Demo)</figcaption></figure>
+</div>
+
+<p>
+A card an agent holds (claimed) cannot be edited: the page shows no Edit button, and the server answers that the card is being worked on. Release the claim first. A card that is done or cancelled cannot be edited either. Every edit is recorded in the Timeline with who made it and when.
+</p>
+
+<h4>Risk tier and the override</h4>
+
+<p>
+The risk tier is computed from the diff when the builder hands off (section 5.1). The card owner and the project owner can override it with the link <strong>Change</strong> next to <strong>Risk tier</strong> in the Details panel, while the card is open and no merge is pending. The dialog <strong>Risk tier</strong> offers <code>small</code> (one reviewer, merges without approval) and <code>large</code> (two reviewers, a merge waits for your approval), plus "Back to computed from the diff" on a card that has an override. A <strong>Reason</strong> is required ("A reason is required"). After <strong>Set risk tier</strong> the Details panel shows the tier with an <code>override</code> badge, the Timeline records the change with the reason and the person, and the diff no longer changes the tier. The BA can do the same from its shift with <code>aom risk &lt;small|large&gt; --reason "..."</code>.
+</p>
+
+<div class="figrow">
+<figure><img src="assets/dlg-risk.jpg" alt="dlg-risk"><figcaption>The Risk tier dialog on WEB-37 with "large" chosen and the Reason box still empty (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/panel-risk.jpg" alt="panel-risk"><figcaption>Details panel of WEB-37 after the override: "large", the override badge and the Change link (Pieter Demo)</figcaption></figure>
+</div>
+
+<figure class="w55">
+<img src="assets/panel-timeline-edit.jpg" alt="panel-timeline-edit">
+<figcaption>Timeline of WEB-37: "Edited affectedAreas" and "Risk tier set to large by override (was small)" with the reason "It changes how sessions are stored" (Pieter Demo)</figcaption>
+</figure>
 
 <h4>Move card dialog</h4>
 
@@ -807,7 +849,7 @@ The left panel shows card metadata organized in rows:
 
 <ul>
 <li><strong>Stage</strong> — Current workflow stage (e.g., "done").</li>
-<li><strong>Risk tier</strong> — "small" or "large" (or "not set").</li>
+<li><strong>Risk tier</strong> — "small" or "large" (or "not set"). An <code>override</code> badge shows that it was set by hand; the link <strong>Change</strong> opens the Risk tier dialog (below).</li>
 <li><strong>Completion action</strong> — How the work merges (<code>pr</code>, <code>push_branch</code>, <code>merge</code>, or "not set").</li>
 <li><strong>Docs needed</strong> — "yes" or "no".</li>
 <li><strong>Priority</strong> — Priority number 1 to 9 (2 if none was given).</li>
@@ -816,12 +858,12 @@ The left panel shows card metadata organized in rows:
 </ul>
 
 <p>
-Below the metadata rows are the spec fields the card has (for example Context, Requirements, Acceptance criteria, Constraints, Test plan, Affected areas, External reference), shown as read-only text or bullet lists. The demo cards also show their <strong>Mock script</strong> as JSON.
+Below the metadata rows are the spec fields the card has (for example Context, Requirements, Acceptance criteria, Constraints, Test plan, Affected areas, External reference), shown as read-only text or bullet lists.
 </p>
 
 <figure>
 <img src="assets/panel-details.jpg" alt="panel-details" class="w70">
-<figcaption>Details panel of WEB-11: metadata, the Mock script and the spec fields (Pieter Demo)</figcaption>
+<figcaption>Details panel of WEB-11: metadata and the spec fields (Pieter Demo)</figcaption>
 </figure>
 
 <h4>Who answers its questions (decision policy)</h4>
@@ -848,7 +890,7 @@ A review handoff can carry more: a grey badge "Score n/5", a red badge for each 
 <h4>Timeline panel</h4>
 
 <p>
-The Timeline panel (right column, above the Thread) shows the history of the card. Each row shows the previous stage, an arrow, the new stage and the resulting status in brackets (e.g., "build -> review (queued)"), and below it the name of the event that caused it (e.g., CardCreated, CardSpecified, CardClaimed, ReviewRequested, ChangesRequested, ReviewApproved) and the time.
+The Timeline panel (right column, above the Thread) shows the history of the card. Each row shows the previous stage, an arrow, the new stage and the resulting status in brackets (e.g., "build -> review (queued)"), and below it the name of the event that caused it (e.g., CardCreated, CardSpecified, CardClaimed, ReviewRequested, ChangesRequested, ReviewApproved) and the time. Between the stage moves the timeline also lists what a person changed on the card: "Edited requirements" and "Risk tier set to large by override (was small)" with the reason, the person and the time (see Figure below).
 </p>
 
 <figure>
@@ -934,7 +976,8 @@ Maya is a second manager of the WEB project. She sees the same panels as Pieter:
 
 <p>The <b>Decision desk</b> is the manager's page where every question needing an answer, every approval, and every alert lands. The main menu shows a red badge with the number of open items next to <code>Desk</code> (for example 12), so the manager sees at a glance that something is waiting. Under the page title the desk shows the same numbers as text: <code>12 open · 3 blocking</code>. At the top right are three buttons: <code>Add to ledger</code>, <code>Intake</code> and <code>Chat</code>. When nothing is waiting the page says <i>"Nothing is waiting on you."</i></p>
 
-<figure><img src="assets/desk.jpg" alt="desk"><figcaption>Decision desk top: "12 open · 3 blocking", the Add to ledger, Intake and Chat buttons, then the pinned items: two Urgent blocking questions from Grace (WEB-21, WEB-30), a DevOps approval and the WEB-35 large merge (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/desk.jpg" alt="desk"><figcaption>Decision desk top: "12 open · 3 blocking", the Add to ledger, Intake and Chat buttons, then the first pinned item: an Urgent, blocking Question from Grace on WEB-21 with its ledger box, escalation trail, options and the Answer and Dismiss buttons (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/desk-b.jpg" alt="desk"><figcaption>Decision desk top: "12 open · 3 blocking", the Add to ledger, Intake and Chat buttons, then the first pinned item: an Urgent, blocking Question from Grace on WEB-21 with its ledger box, escalation trail, options and the Answer and Dismiss buttons (continued: lower part, Pieter Demo)</figcaption></figure>
 
 <h4>What reaches the desk</h4>
 
@@ -957,7 +1000,7 @@ Maya is a second manager of the WEB project. She sees the same panels as Pieter:
 <p>Every desk item shows a row of badges, then (when an agent raised it) who asked, the card it is about, and what the agent was doing. Then the title and body.</p>
 
 <ul>
-  <li><b>Badges</b>: <code>Urgent</code> (red; the item is pinned to the top); the item's kind in violet (some are shown raw: <code>question</code>, <code>devops</code>, <code>large_merge</code>, <code>tester_bottleneck</code>, <code>taste_rule</code>; others have a plain label: <code>Unmapped ticket</code>, <code>Update to a ticket</code>, <code>Posting failed</code>, <code>Role or workflow</code>); <code>Blocking</code> or <code>Non-blocking</code>; <code>Affects n card(s)</code> (how many cards wait on this item); and <code>asked 6m ago</code>.</li>
+  <li><b>Badges</b>: <code>Urgent</code> (red; the item is pinned to the top); the item's kind in violet, as a plain label: <code>Question</code>, <code>DevOps approval</code>, <code>Merge approval</code>, <code>Outbound update</code>, <code>Posting failed</code>, <code>Unmapped ticket</code>, <code>Role or workflow</code>, <code>Digest to rate</code>, <code>Taste rule</code>, <code>Standing order</code>, <code>Tester bottleneck</code>, <code>Test environment</code>, <code>Bug reported</code>, <code>Finalize failed</code>, <code>Pull request notice</code>, <code>Schedule failed</code> or <code>Vault conflict</code>; <code>Blocking</code> or <code>Non-blocking</code>; <code>Affects n card(s)</code> (how many cards wait on this item); and <code>asked 6m ago</code>.</li>
   <li><b>Who asked</b>: avatar, agent name and its role in parentheses (builder, reviewer, ba, and so on). Items raised by the app itself (a large-merge approval, the tester alert) have no asker.</li>
   <li><b>Card</b>: a linked card reference if the question is about a card. Clicking it opens the card.</li>
   <li><b>Was doing</b>: a short line the agent wrote about what it was doing (for example <i>"Was doing: Designing the guest order table"</i>).</li>
@@ -1013,7 +1056,8 @@ Maya is a second manager of the WEB project. She sees the same panels as Pieter:
 
 <p>Every card has a setting <code>Who answers its questions</code> in its Details panel: <code>Only the card owner</code> (the default) or <code>Any manager of the project</code>. With the default, another manager of the project sees the item but gets <code>Read only: only the card owner can answer this.</code> instead of the form. Items that belong to no card (for example the tester alert) can be answered only by the project owner (<code>Read only: only the project owner can answer.</code>). Ratings of a digest can be given by any active member of the project.</p>
 
-<figure><img src="assets/desk-maya.jpg" alt="desk-maya"><figcaption>Desk as Maya sees it: "7 open · 2 blocking". WEB-21 and the WEB-35 large merge show "Read only: only the card owner can answer this."; WEB-30 is Maya's own card and shows the full answer form (Maya Demo)</figcaption></figure>
+<figure><img src="assets/desk-maya.jpg" alt="desk-maya"><figcaption>Desk as Maya sees it, top part: "7 open · 2 blocking". The question on WEB-21 shows "Read only: only the card owner can answer this."; the question on WEB-30 is on Maya's own card and continues with the answer form below (Maya Demo)</figcaption></figure>
+<figure><img src="assets/desk-maya-b.jpg" alt="desk-maya"><figcaption>Desk as Maya sees it, top part: "7 open · 2 blocking". The question on WEB-21 shows "Read only: only the card owner can answer this."; the question on WEB-30 is on Maya's own card and continues with the answer form below (continued: lower part, Maya Demo)</figcaption></figure>
 
 <p>A manager of a shared project like Maya sees the items of every project she is an active member of, but not the owner's organization-level items (DevOps approvals, vault conflicts). In the figure, WEB-21 and WEB-35 are cards of Pieter, so Maya can read them but not answer. WEB-30 is Maya's own card, so she answers it. Standing orders for a project can only be added by the project owner, also when answering.</p>
 
@@ -1082,6 +1126,7 @@ Maya is a second manager of the WEB project. She sees the same panels as Pieter:
 <h4>Page structure: subtitle, filters, recommendations, agent cards</h4>
 
 <figure><img src="assets/hr.jpg" alt="hr"><figcaption>HR board: subtitle with the 30-day window, Project and Department lists, the "New defaults for built-in roles" banner, three recommendations, then agent cards in three columns (Atlas, Ada, Linus; Tess, Olga, Grace) (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/hr-b.jpg" alt="hr"><figcaption>HR board: subtitle with the 30-day window, Project and Department lists, the "New defaults for built-in roles" banner, three recommendations, then agent cards in three columns (Atlas, Ada, Linus; Tess, Olga, Grace) (continued: lower part, Pieter Demo)</figcaption></figure>
 
 <p>The page subtitle shows the time window: <i>"Stats over the last 30 days, each against the average of the agents in the role."</i> At the top right are a link <code>Metrics</code> and the button <code>Hire agent</code>. The list <code>Project</code> appears only when you belong to more than one project, and <code>Department</code> only when the organization has departments. Below come the role-update banner (if any), the <b>Recommendations</b> (if any), then the agent cards in a grid of up to 3 columns. Retired agents are listed in a collapsed line <code>Retired (n)</code> at the bottom.</p>
 
@@ -1201,6 +1246,7 @@ Maya is a second manager of the WEB project. She sees the same panels as Pieter:
 <h4>What Maya sees on the HR board</h4>
 
 <figure><img src="assets/hr-maya.jpg" alt="hr-maya"><figcaption>HR board as Maya sees it: only the Department list; two recommendations about Pieter's agents with the badge "Not yours to apply"; Ada, Linus, Tess and Grace read "Hired by another manager (read only)"; Atlas and Gus were hired by Maya (Maya Demo)</figcaption></figure>
+<figure><img src="assets/hr-maya-b.jpg" alt="hr-maya"><figcaption>HR board as Maya sees it: only the Department list; two recommendations about Pieter's agents with the badge "Not yours to apply"; Ada, Linus, Tess and Grace read "Hired by another manager (read only)"; Atlas and Gus were hired by Maya (continued: lower part, Maya Demo)</figcaption></figure>
 
 <p>Maya, a manager of the shared project but not its owner, sees the agents of that project. Pieter's agents show <i>"Hired by another manager (read only)"</i> and the recommendations about them show <code>Not yours to apply</code>. Maya's own agents (Gus, and Atlas, the DevOps engineer of her laptop) have the usual buttons. A manager of a shared project can hire agents for that project onto her own workstations, using the owner's role catalogue. Standing-order proposals are for the organization owner only.</p>
 
@@ -1210,7 +1256,7 @@ Maya is a second manager of the WEB project. She sees the same panels as Pieter:
 
 <h4>Page structure: filters and tiles</h4>
 
-<figure><img src="assets/metrics.jpg" alt="metrics"><figcaption>Metrics dashboard: Project and Range lists ("All projects", "Last 30 days"); tiles Throughput (17 finalized, 0.5 per day), Time blocked on you (11.9m, 3 cards), Bounce rate per builder (Ada, Grace), Bugs escaped past test (1), Duration and Queue depth per column (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/metrics.jpg" alt="metrics"><figcaption>Metrics dashboard: Project and Range lists ("All projects", "Last 30 days"); tiles Throughput (17 finalized, 0.5 per day), Time blocked on you (13.0m, 3 cards), Bounce rate per builder (Ada, Grace), Bugs escaped past test (1), Duration and Queue depth per column (Pieter Demo)</figcaption></figure>
 
 <p>Two lists filter the page: <code>Project</code> and <code>Range</code>. Below are six tiles in two columns.</p>
 
@@ -1291,8 +1337,8 @@ Maya is a second manager of the WEB project. She sees the same panels as Pieter:
 
 <p>Code-board columns come in board order, <code>Test (waiting on bug)</code> and the columns of other workflows after them. A column with no cards does not appear; with no open cards the tile says <i>"No open cards."</i></p>
 
-<div class="callout"><b class="t">Good to know about the demo and "waiting on"</b>
-All agents in the demo run on the MOCK runtime, so chat replies, shift logs and notes are scripted (<code>[mock]</code>, "mock peer", "mock ba"); real agents write real text. The large-risk card WEB-35 is at Finalize with status waiting, because it waits for the manager's approval of the merge. The board puts every waiting card in the column <code>Test (waiting on bug)</code>, and the Queue depth tile uses the same column name, although WEB-35 waits for the manager and not for a bug.</div>
+<div class="callout"><b class="t">Good to know about the demo</b>
+All agents in the demo run on the MOCK runtime, so chat replies, shift logs and notes are scripted (<code>[mock]</code>, "mock peer", "mock ba"); real agents write real text. The large-risk card WEB-35 is at Finalize with an amber badge "Awaiting your approval", because it waits for the manager's approval of the merge; the Queue depth tile lists it under Finalize.</div>
 
 </section>
 
@@ -1371,7 +1417,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
 
   <figure class="w70"><img src="assets/desk-outbound.jpg"><figcaption>Outbound approval: Olga's draft "Approve resolution for Jira SUP-231" for card WEB-22, with the buttons Approve and post and Reject (Pieter Demo)</figcaption></figure>
 
-  <p>The approval item on the desk has the violet badge "Update to a ticket" and shows the title "Approve &lt;kind&gt; for Jira|GitHub &lt;key&gt;", the card link and the draft in an editable text area. You may approve it as it is (<b>Approve and post</b>), edit it and approve (<b>Approve and post my edit</b>), or reject it (<b>Reject</b>).</p>
+  <p>The approval item on the desk has the violet badge "Outbound update" and shows the title "Approve &lt;kind&gt; for Jira|GitHub &lt;key&gt;", the card link and the draft in an editable text area. You may approve it as it is (<b>Approve and post</b>), edit it and approve (<b>Approve and post my edit</b>), or reject it (<b>Reject</b>).</p>
 
   <div class="callout rule"><b class="t">What happens after you approve, in order</b>
     <ol style="margin:0">
@@ -1413,8 +1459,10 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   <p><b>Updates panel on the card:</b> a card that came from a ticket (or has drafts) shows a panel <b>Updates to &lt;ticket&gt; (n)</b> with the history of every draft. Each entry shows a status badge, the kind and the system and ticket key ("Resolution for GitHub example/web#12"), who drafted it, who approved it, and an Edited badge when the manager changed the text. An edited update is shown as the diff and "Posted as edited"; a posted update shows "Posted:" with a link; a failed one shows the error and <b>Retry posting</b>; a blocked one shows the words that were refused. The panel ends with a form "Write an update yourself" (kind and text, button <b>Draft update</b>); it goes to the desk like any other draft.</p>
 
   <figure><img src="assets/card-outbound-edited.jpg"><figcaption>Card WEB-23 (from GitHub issue example/web#12): the Updates panel shows the resolution posted as edited, with the added sentence marked, and the link to the GitHub comment (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/card-outbound-edited-b.jpg"><figcaption>Card WEB-23 (from GitHub issue example/web#12): the Updates panel shows the resolution posted as edited, with the added sentence marked, and the link to the GitHub comment (continued: lower part, Pieter Demo)</figcaption></figure>
 
   <figure><img src="assets/card-outbound-failed.jpg"><figcaption>Card WEB-28 (example/web#40): the Updates panel shows a failed post with Retry posting and a draft blocked because it named Ada and Linus (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/card-outbound-failed-b.jpg"><figcaption>Card WEB-28 (example/web#40): the Updates panel shows a failed post with Retry posting and a draft blocked because it named Ada and Linus (continued: lower part, Pieter Demo)</figcaption></figure>
 
   <figure class="w70"><img src="assets/panel-outbound.jpg"><figcaption>Updates panel of WEB-23: one posted, edited resolution (Pieter Demo)</figcaption></figure>
 
@@ -1480,7 +1528,9 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
 
   <p>The <b>architectural globs</b> are a setting of the project (Project settings, "Architectural globs", one glob per line). One matching file makes the card large, whatever the size of the diff. Bug cards created by a failed test use a shorter route: one reviewer approval, whatever the tier.</p>
 
-  <p><b>Overriding the tier:</b> the tier can be set on a card by its manager through the card API (<code>PATCH</code> with <code>riskTier</code>); a tier set this way is kept and the runner's computation no longer replaces it. The web page shows the tier in the Details panel and on the card tile but has no control to change it.</p>
+  <p><b>Overriding the tier:</b> when the computed tier is wrong, the card owner or the project owner can change it. In the Details panel of the card, click <b>Change</b> next to <b>Risk tier</b>. The dialog "Risk tier" offers <b>small</b>, <b>large</b> or back to the computed tier, and requires a <b>Reason</b>. The tier you set drives the review (one or two reviewers) and the large-merge approval (5.6), and it is refused while a merge is pending (awaiting approval or running). From then on the override replaces the computed tier: the runner's computation no longer changes it. The card shows an <b>override</b> badge next to the tier, and the timeline records "Risk tier set to large by override (was small)" with the reason and who set it; chapter 3.4 shows the override badge and the timeline entry. The BA can do the same from a shift with <code>aom risk &lt;small|large&gt; --reason "&lt;why&gt;"</code>.</p>
+
+  <figure class="w55"><img src="assets/dlg-risk.jpg" alt="dlg-risk"><figcaption>Risk tier dialog: the select set to "large (two reviewers, a merge waits for your approval)", an empty Reason field, and the buttons Close and Set risk tier</figcaption></figure>
 
   <p><b>Review flow:</b> when a card reaches Review it is claimed by a senior reviewer agent (reviewers are always senior). The reviewer reads the card, the diff, the tests and the acceptance criteria, and reports an outcome with <code>aom review approve</code> or <code>aom review changes</code>. Both carry a score from 1 to 5; a request for changes also carries one or more reasons (missed requirement, broke convention, weak tests, poor structure, spec unclear, out of scope test change) and the criteria that were missed. There are no Approve or Request changes buttons in the web UI: reviewers are agents.</p>
 
@@ -1506,6 +1556,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   <p><b>Test evidence:</b> the tester reports <code>aom test pass</code> with the evidence (what ran, the commands, an output excerpt) or <code>aom test fail</code> with a bug title, reproduction notes and evidence. These are agent commands, not buttons in the web UI. On a pass the card goes to Docs (if Docs needed is set) or to Finalize. On a fail a bug card is created (see 5.3).</p>
 
   <figure class="w70"><img src="assets/card-evidence.jpg"><figcaption>Finished card WEB-1: the Test evidence panel shows one feature run that passed, with its command, and the tester's handoff note; the Handoffs panel lists Ada, Linus (score 4/5), Tess and Olga (Pieter Demo)</figcaption></figure>
+<figure class="w70"><img src="assets/card-evidence-b.jpg"><figcaption>Finished card WEB-1: the Test evidence panel shows one feature run that passed, with its command, and the tester's handoff note; the Handoffs panel lists Ada, Linus (score 4/5), Tess and Olga (continued: lower part, Pieter Demo)</figcaption></figure>
 
   <p><b>Evidence panel on the card:</b> "Test evidence (n)" lists every test run with a badge for the kind (feature, full suite or regression), a platform badge when the run has one (suite and regression runs), the result (passed or failed), the time, a summary, the commands that ran and an output excerpt. Below that, "Test handoff notes" shows the tester's notes. In the demo the texts are scripted by the mock runtime ("mock: 1 passed", command "mock test").</p>
 
@@ -1539,6 +1590,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   <p>Before a tester shift starts and again before the completion action runs, the runner does <code>git fetch</code> and rebases the card branch onto the working branch. If this conflicts, the runner lists the conflicted files, aborts the rebase (it never leaves a half-done rebase behind) and never resolves the conflict itself. The card goes back to Build, shows in the Rework column with the Rework counter increased by one, and the conflicted files are listed in a system message on the thread.</p>
 
   <figure class="w70"><img src="assets/card-conflict.jpg"><figcaption>Card WEB-32 after a rebase conflict: Rework 1, the thread message "Rebase onto main conflicted before the test stage ... conflicted files: aom-mock/WEB-32.txt", and Grace's second build round (Pieter Demo)</figcaption></figure>
+<figure class="w70"><img src="assets/card-conflict-b.jpg"><figcaption>Card WEB-32 after a rebase conflict: Rework 1, the thread message "Rebase onto main conflicted before the test stage ... conflicted files: aom-mock/WEB-32.txt", and Grace's second build round (continued: lower part, Pieter Demo)</figcaption></figure>
 
   <div class="callout rule"><b class="t">Conflict handling</b>
     <ol style="margin:0">
@@ -1563,7 +1615,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
 
   <p>The pr and push_branch actions need an <code>origin</code> remote; without one the action fails. As soon as the action succeeds the card moves to <b>Done</b>, its worktree is removed (the branch is deleted only after a merge) and a separate full-suite card is queued for a tester (see 5.7). The full suite does not hold the card back.</p>
 
-  <figure class="w70"><img src="assets/card-large.jpg"><figcaption>Card WEB-35, risk tier large, completion action merge, waiting at Finalize: the Finalize panel says "Awaiting your approval of the merge on the desk" (Pieter Demo)</figcaption></figure>
+  <figure class="w70"><img src="assets/card-large.jpg"><figcaption>Card WEB-35, risk tier large with the override badge, completion action merge, at Finalize: the Finalize panel says "Awaiting your approval of the merge on the desk", and the timeline shows "Risk tier set to large by override (was small)" with its reason (Pieter Demo)</figcaption></figure>
 
   <figure class="w70"><img src="assets/panel-finalize.jpg"><figcaption>The Finalize panel of WEB-35 while the merge awaits approval (Pieter Demo)</figcaption></figure>
 
@@ -1590,12 +1642,14 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
 
   <p>When a card with risk tier large reaches Finalize with the completion action <b>merge</b>, the merge is not executed until you approve it on the desk. The same holds when you press Finalize yourself. The completion actions pr and push_branch never need an approval, whatever the tier.</p>
 
-  <figure class="w70"><img src="assets/desk-large-merge.jpg"><figcaption>Large merge approval for WEB-35: badges Urgent, large_merge and Non-blocking, and the buttons Approve merge, Reject and Dismiss (Pieter Demo)</figcaption></figure>
+  <figure class="w70"><img src="assets/desk-large-merge.jpg"><figcaption>Large merge approval for WEB-35: badges Urgent, Merge approval and Non-blocking, and the buttons Approve merge, Reject and Dismiss (Pieter Demo)</figcaption></figure>
 
   <p>The item is pinned (shown as Urgent) and non-blocking. Its title is "Approve merge of WEB-35: &lt;title&gt;" and its text says that the card is a large change, which branch will be merged into which working branch, that the runner does the merge and that a full E2E suite runs on the result. <b>Approve merge</b> sends the merge to the workstation. <b>Reject</b> ends the attempt: the card is marked "Finalize failed: Merge not approved" and returns to the Finalize queue.</p>
 
+  <p>While the merge awaits approval the card stays in the Finalize column of the board with the amber badge <b>Awaiting your approval</b>. The other waiting badges are "waiting on bug", "Finalizing" and "waiting on DevOps".</p>
+
   <div class="callout"><b class="t">Good to know</b>
-    While the merge awaits approval the card has the status <b>waiting</b>, so the board shows it in the column "Test (waiting on bug)" and the card page says "Waiting on a bug fix", although no bug is involved: it is waiting for you. The Details panel shows the stage Finalize. In the demo, WEB-35 was moved to Finalize by hand ("Reviewed together in a pairing session"), so its thread shows one review although the desk text says two reviewers approved.</div>
+    In the demo, WEB-35 was moved to Finalize by hand ("Reviewed together in a pairing session"), so its thread shows one review although the desk text says two reviewers approved.</div>
 
   <div class="callout"><b class="t">Why large merges need approval</b>
     A large card is one with a big diff, a refactor or a change in an architectural area. Approving the merge is your last chance to stop it before it reaches the working branch.</div>
@@ -1618,7 +1672,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
 
   <p><b>Tester bottleneck alert:</b> when a card has been waiting in a tester queue for more than 5 minutes and every tester of the project is busy or offline, you get one alert on the desk per project. It is pinned (shown as Urgent) and non-blocking. The alert is only raised for projects that have at least one tester; a project without testers never gets it. It closes itself when no card waits for a tester any more. Its buttons are <b>Hire tester</b>, <b>Acknowledge</b> and <b>Dismiss</b>; Hire tester opens the Hire form with the Tester role already chosen.</p>
 
-  <figure class="w70"><img src="assets/desk-alert.jpg"><figcaption>Tester bottleneck alert: "1 card waiting for a tester for over 5 minutes", with Hire tester, Acknowledge and Dismiss (Pieter Demo)</figcaption></figure>
+  <figure class="w70"><img src="assets/desk-alert.jpg"><figcaption>Tester bottleneck alert (badges Urgent, Tester bottleneck and Non-blocking): "1 card waiting for a tester for over 5 minutes", with Hire tester, Acknowledge and Dismiss (Pieter Demo)</figcaption></figure>
 
   <figure class="w70"><img src="assets/dlg-hire-tester.jpg"><figcaption>The Hire agent form opened from the alert: Role is Tester, Project is WEB, Seniority junior (Pieter Demo)</figcaption></figure>
 
@@ -1628,20 +1682,20 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
     <li>If the repository has a file <code>.aom/test-env.json</code> with a <code>healthUrl</code>, that URL answers with a success status within 5 seconds. Without that file the application is not checked.</li>
   </ul>
 
-  <p>If the check fails, the shift is not started. The server asks the DevOps engineer of that workstation (a DevOps request: install Docker, or start the application) and parks the card: it gets the status waiting, so it also shows in the board column "Test (waiting on bug)", with a notice that it is parked on a DevOps request. When the request is done or has failed, the card returns to the Test queue and the check runs again.</p>
+  <p>If the check fails, the shift is not started. The server asks the DevOps engineer of that workstation (a DevOps request: install Docker, or start the application) and parks the card: it gets the status waiting, so it shows the badge "waiting on DevOps" and sits in the board column "Test (waiting on bug)", with a notice that it is parked on a DevOps request. When the request is done or has failed, the card returns to the Test queue and the check runs again.</p>
 
   <div class="callout warn"><b class="t">Hard stop</b>
-    The card is not parked but stopped with a blocking desk item "WEB-xx cannot be tested: ..." when Docker is missing and the DevOps engineer is not allowed to install Docker on that workstation (it needs both the install and the Docker access), when the DevOps engineer already tried twice, or when the workstation has no DevOps engineer. Fix the environment or grant the access, then resolve the item and the card returns to the Test queue. Separately, the DevOps engineer itself asks for your approval (a "devops" item on the desk) before it does anything destructive or outside its granted access.</div>
+    The card is not parked but stopped with a blocking desk item "WEB-xx cannot be tested: ..." when Docker is missing and the DevOps engineer is not allowed to install Docker on that workstation (it needs both the install and the Docker access), when the DevOps engineer already tried twice, or when the workstation has no DevOps engineer. Fix the environment or grant the access, then resolve the item and the card returns to the Test queue. Separately, the DevOps engineer itself asks for your approval (a "DevOps approval" item on the desk) before it does anything destructive or outside its granted access.</div>
 </section>
 
 </section>
 
-<!-- NOTES: The demo uses the MOCK runtime; shift logs show "[mock]" prefixes. Risk tier calculation is from diff size and a config list of architectural areas. Large merges show a "waiting on bug" badge on the board even though they are waiting for manager approval; this is how the card state "awaiting_approval" maps to the board column logic. -->
+<!-- NOTES: The demo uses the MOCK runtime; shift logs show "[mock]" prefixes. Risk tier calculation is from diff size and a config list of architectural areas. A large merge awaiting approval stays in the Finalize column with the badge "Awaiting your approval". -->
 
 
 <section class="chapter" id="s6">
   <h2><span class="mk">TOCMARK_s6_</span>6&nbsp;&nbsp;Research, feeds and schedules</h2>
-  <p class="lead">Research and feed projects run facts and news on the same kind of board as code. A researcher writes and a checker verifies and publishes; scouts find candidates and curators filter them. You rate the digest items to teach the system what matters. The demo runs on the MOCK runtime: the notes, sources and items in the figures are scripted ("Source 1", "mock scout found 3 candidate(s)"); real agents open real pages.</p>
+  <p class="lead">Research and feed projects run facts and news on the same kind of board as code. A researcher writes and a checker verifies and publishes; scouts find candidates and curators filter them. You rate the digest items to teach the system what matters. The demo runs on the MOCK runtime: the notes, sources and items in the figures are scripted ("Source 1", "mock scout found 3 candidate(s)"); real agents open real pages. A test-only mock runtime exists for development and tests; the UI switches it on only when the server runs with <code>AOM_MOCK_UI=true</code>.</p>
 
   <h3 id="s6-1" style="margin-top:4px"><span class="mk">TOCMARK_s6x1_</span>6.1 Research projects: question to published note</h3>
 
@@ -1670,12 +1724,14 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   <p><b>Fact check outcome:</b> the checker reports either "published" or "unsupported". These are agent commands, there are no Fact check passed or Request rework buttons in the web UI. The note of the checker explains each unsupported claim and shows in the card's thread and handoffs.</p>
 
   <figure class="w70"><img src="assets/card-published.jpg"><figcaption>SHOOT-1 "Is a 6mm bullet enough for deer at 300 yards?": the Published note panel with the vault path, the preview and three citations; Rhea's and Chuck's handoffs in the thread (Pieter Demo)</figcaption></figure>
+<figure class="w70"><img src="assets/card-published-b.jpg"><figcaption>SHOOT-1 "Is a 6mm bullet enough for deer at 300 yards?": the Published note panel with the vault path, the preview and three citations; Rhea's and Chuck's handoffs in the thread (continued: lower part, Pieter Demo)</figcaption></figure>
 
   <p><b>Published note panel:</b> the heading "Published note" with a green "fact-checked" badge, the title, the vault path in monospace (<code>projects/shoot/hunting/is-a-6mm-bullet-enough-for-deer-at-300-yards.md</code>), a quoted preview of the start of the note, and "Citations (n)" as a numbered list of links.</p>
 
   <figure class="w70"><img src="assets/panel-published.jpg"><figcaption>The Published note panel of SHOOT-1: title, vault path, preview with its references, and Citations (3) Source 1 to Source 3 (Pieter Demo)</figcaption></figure>
 
   <figure class="w70"><img src="assets/card-research-rework.jpg"><figcaption>SHOOT-2 "How long does a barrel last with hot handloads?": Rework 1. The checker (Chuck) rejected "Hot loads always halve barrel life" as not supported by the cited page, Rhea dropped it, and the note was published with 2 citations (Pieter Demo)</figcaption></figure>
+<figure class="w70"><img src="assets/card-research-rework-b.jpg"><figcaption>SHOOT-2 "How long does a barrel last with hot handloads?": Rework 1. The checker (Chuck) rejected "Hot loads always halve barrel life" as not supported by the cited page, Rhea dropped it, and the note was published with 2 citations (continued: lower part, Pieter Demo)</figcaption></figure>
 
   <div class="callout rule"><b class="t">Fact check rules</b>
     <ul style="margin:0">
@@ -1686,8 +1742,6 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
       <li>Open questions that agents cannot answer go to the desk like any other card question.</li>
     </ul></div>
 
-  <div class="callout"><b class="t">Good to know</b>
-    The card form and the Details panel show a field "Mock research claims" (JSON). It is a test aid of the mock runtime: it scripts the claims the pretend researcher "finds" and whether the pretend checker can verify them. Real users leave it empty. In SHOOT-2 it is the claim with <code>"supported": false</code> that caused the rework round.</div>
 </section>
 
 <section>
@@ -1715,12 +1769,13 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   <p>The feed project page (<b>Feed</b> button on the board) has the buttons <b>Board</b> and <b>Run now</b> and three panels: <b>Schedules</b> (name, recurrence, time zone and next run of each), <b>Running list</b> (the entries with their rating, and rating buttons for unrated ones) and <b>taste.md</b> (a preview of the file, or "No ratings yet.").</p>
 
   <figure><img src="assets/feed.jpg"><figcaption>Feed page of NEWS: two schedules (Daily at 07:00, and Weekend long reads whose next run is "not scheduled"), the running list with four rated entries from NEWS-1 and three unrated from NEWS-2, and the taste.md preview (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/feed-b.jpg"><figcaption>Feed page of NEWS: two schedules (Daily at 07:00, and Weekend long reads whose next run is "not scheduled"), the running list with four rated entries from NEWS-1 and three unrated from NEWS-2, and the taste.md preview (continued: lower part, Pieter Demo)</figcaption></figure>
 </section>
 
 <section>
   <h3 id="s6-4"><span class="mk">TOCMARK_s6x4_</span>6.4 Rating digests and taste.md</h3>
 
-  <p>When a digest is posted, one desk item "Rate the AI news feed digest (3 items)" appears. It has the violet badge "digest", is non-blocking, and names the curator and the feed card. Each item shows its kind, source, publication date, card ref, a linked title and the summary, with an optional field "Why? (optional)" and three buttons: <b>Useful</b>, <b>Irrelevant</b> and <b>Boring</b>. You can also rate from the running list on the feed page, where a rating can be changed with <b>Change</b>. When the last item of a digest is rated, the desk item closes by itself; <b>Acknowledge</b> or <b>Dismiss</b> closes it without rating the rest.</p>
+  <p>When a digest is posted, one desk item "Rate the AI news feed digest (3 items)" appears. It has the violet badge "Digest to rate", is non-blocking, and names the curator and the feed card. Each item shows its kind, source, publication date, card ref, a linked title and the summary, with an optional field "Why? (optional)" and three buttons: <b>Useful</b>, <b>Irrelevant</b> and <b>Boring</b>. You can also rate from the running list on the feed page, where a rating can be changed with <b>Change</b>. When the last item of a digest is rated, the desk item closes by itself; <b>Acknowledge</b> or <b>Dismiss</b> closes it without rating the rest.</p>
 
   <figure class="w70"><img src="assets/desk-digest.jpg"><figcaption>Digest item on the desk from Cora (curator) for NEWS-2: three articles, none rated yet, each with Useful, Irrelevant and Boring, and the buttons Acknowledge and Dismiss (Pieter Demo)</figcaption></figure>
 
@@ -1734,7 +1789,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
 
   <figure class="w70"><img src="assets/desk-taste.jpg"><figcaption>Taste-rule proposal from Cora (curator) for NEWS-2: "Add a taste rule for AI news feed?" with the editable rule "Prefer posts that include benchmark or study data" and the buttons Approve, Reject and Dismiss (Pieter Demo)</figcaption></figure>
 
-  <p><b>Curator taste-rule proposal:</b> when the verdicts show a pattern that no rule covers yet, the curator may attach a proposed rule (one sentence, with the URLs that are its evidence) to its digest. It appears on the desk as an approval item (badge "taste_rule") with the text editable. <b>Approve</b> appends the rule, in your edited wording if you changed it, to <code>taste.md</code> as <code>- Rule: &lt;text&gt;</code>. <b>Reject</b> and <b>Dismiss</b> add nothing. The curator never edits <code>taste.md</code> itself.</p>
+  <p><b>Curator taste-rule proposal:</b> when the verdicts show a pattern that no rule covers yet, the curator may attach a proposed rule (one sentence, with the URLs that are its evidence) to its digest. It appears on the desk as an approval item (badge "Taste rule") with the text editable. <b>Approve</b> appends the rule, in your edited wording if you changed it, to <code>taste.md</code> as <code>- Rule: &lt;text&gt;</code>. <b>Reject</b> and <b>Dismiss</b> add nothing. The curator never edits <code>taste.md</code> itself.</p>
 
   <p><b>Curators read taste.md before filtering:</b> the next feed run shows the curator the taste rules. It prefers what you rated useful, skips what you rated irrelevant, deprioritises what you rated boring, and follows explicit rules exactly. The rules are plain lines you can read and edit, not a hidden model.</p>
 
@@ -1791,7 +1846,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
     <li>Only one extra shift may run at a time in the whole organization. While it runs, a second late scheduled card waits in the queue until an agent becomes free; it does not start another extra shift.</li>
   </ul>
 
-  <p>This is a limit per organization, not per agent. The runner of a workstation also limits how many shifts run at once (4 by default, set in its config) and refuses more ("Shift rejected by the runner (busy: 4 shifts already running)"); the card then goes back to the queue.</p>
+  <p>This is a limit per organization, not per agent. The runner of a workstation also limits how many shifts run at once (the setting <code>maxConcurrentShifts</code> in its config, 4 by default; the server caps it at 16) and refuses more ("Shift rejected by the runner (busy: 4 shifts already running)" when the limit is 4); the card then goes back to the queue.</p>
 
   <div class="callout"><b class="t">Why the overflow rule exists</b>
     A feed that fires late or not at all would break the running list and the digest cycle. One extra shift is an acceptable cost; one extra shift per late schedule would overload the workstations. So the first late scheduled card jumps ahead and gets an extra shift, and later ones wait their turn.</div>
@@ -1830,6 +1885,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   <h3 id="s7-2"><span class="mk">TOCMARK_s7x2_</span>7.2 Project settings and repositories</h3>
   <p><b>Projects &rarr; [Project] &rarr; Settings</b> opens the project settings page. It has three panels one below the other: General, Repositories and Members. Only the project owner can change the settings; the server refuses changes from an additional manager.</p>
   <figure><img src="assets/project-settings.jpg"><figcaption>Project settings of WEB: General (working branch main, E2E globs), Repositories (one repository, web) and Members (Pieter Demo owner, Maya Demo manager) (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/project-settings-b.jpg"><figcaption>Project settings of WEB: General (working branch main, E2E globs), Repositories (one repository, web) and Members (Pieter Demo owner, Maya Demo manager) (continued: lower part, Pieter Demo)</figcaption></figure>
   <h4>General settings</h4>
   <p>The panel has the fields Name, Working branch (default <code>main</code>), Architectural globs and E2E globs, and a <b>Save settings</b> button. The two glob fields take one glob per line:</p>
   <ul>
@@ -1893,6 +1949,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   </ul>
   <p>The owner's catalogue (roles, workflows, departments) applies to the shared project's cards. Cards and agents are claimed and worked by agents, not by managers.</p>
   <figure class="w70"><img src="assets/project-settings-maya.jpg"><figcaption>Project settings of WEB as Maya (additional manager): the Members panel lists the two members and has no invite form and no Remove button (Maya Demo)</figcaption></figure>
+<figure class="w70"><img src="assets/project-settings-maya-b.jpg"><figcaption>Project settings of WEB as Maya (additional manager): the Members panel lists the two members and has no invite form and no Remove button (continued: lower part, Maya Demo)</figcaption></figure>
 </section>
 
 <section>
@@ -1920,7 +1977,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   <h3 id="s7-6"><span class="mk">TOCMARK_s7x6_</span>7.6 The DevOps engineer</h3>
   <p>Every workstation has one DevOps engineer, an agent with the role <b>DevOps engineer</b> that is hired automatically when the workstation is paired (the demo's is named Atlas). It never claims cards. It works requests for setting up and maintaining the machine (installing tools, Docker, starting the app for a tester) and keeps the vaults in sync.</p>
   <p>The DevOps engineer cannot be hired or fired by hand; it can only be reset, which wipes its sandbox. You, the workstation's owner, give it access and approve or reject what falls outside that access in the <b>DevOps engineer</b> panel of the workstation card.</p>
-  <figure><img src="assets/ws-devops.jpg"><figcaption>DevOps engineer panel of Pieter's desktop (WSL2): three access checkboxes (all unchecked), writable paths, the Ask DevOps field, and two requests: Install Docker so the end-to-end suite can run (needs approval, thread by Atlas with Approve and Reject) and Start the app on port 3000 (done) (Pieter Demo)</figcaption></figure>
+  <figure><img src="assets/ws-devops.jpg"><figcaption>DevOps engineer panel of Pieter's desktop (WSL2), under the workstation's "Shifts running 4 of 4": three access checkboxes (all unchecked), writable paths, the Ask DevOps field, and two requests: Install Docker so the end-to-end suite can run (needs approval, thread by Atlas with Approve and Reject) and Start the app on port 3000 (done) (Pieter Demo)</figcaption></figure>
   <h4>Access checkboxes</h4>
   <p>Three checkboxes say what the DevOps engineer may do without asking. A checkbox saves as soon as you click it:</p>
   <ul>
@@ -1949,7 +2006,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
       <li>If rejected: the request ends <span class="badge b-rej">failed</span> with the result "Approval rejected" and your note. There is no separate "rejected" badge.</li>
     </ol>
   </div>
-<figure class="w70"><img src="assets/desk-devops.jpg" alt="desk-devops"><figcaption>The same approval on the decision desk: "DevOps needs approval: Install Docker so the end-to-end suite can run", badges Urgent, devops and Blocking, with Approve, Reject and Dismiss (Pieter Demo)</figcaption></figure>
+<figure class="w70"><img src="assets/desk-devops.jpg" alt="desk-devops"><figcaption>The same approval on the decision desk: "DevOps needs approval: Install Docker so the end-to-end suite can run", badges Urgent, DevOps approval and Blocking, with Approve, Reject and Dismiss (Pieter Demo)</figcaption></figure>
 
 </section>
 <!-- NOTES: Request statuses: needs_approval (amber), queued (grey), running (blue), done (green), failed (red); a rejected approval ends as failed. Definition files are written to the vault only at approval time; there is no backfill when a vault is registered later. DevOps approvals appear on the desk and on the Workstations page. The runner matches repositories by normalized remote URL, not by name. -->
@@ -2008,6 +2065,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   <h3 id="s8-4"><span class="mk">TOCMARK_s8x4_</span>8.4 The editor and validation</h3>
   <p>Click <b>New custom workflow</b> (or <b>New version</b> / <b>Edit</b> on a custom workflow) to open the editor above the list. Only the organization owner can do this. The editor checks your definition while you type and shows the result under <b>Validation</b>.</p>
   <figure class="w70"><img src="assets/org-workflow-editor.jpg"><figcaption>Workflow editor with a deliberately broken draft (key bad-flow): the Work and Stage 4 rows are marked red and the Validation list shows errors and warnings (Pieter Demo)</figcaption></figure>
+<figure class="w70"><img src="assets/org-workflow-editor-b.jpg"><figcaption>Workflow editor with a deliberately broken draft (key bad-flow): the Work and Stage 4 rows are marked red and the Validation list shows errors and warnings (continued: lower part, Pieter Demo)</figcaption></figure>
   <h4>Editor fields</h4>
   <ul>
     <li><b>Key</b>, <b>Name</b> and <b>Department</b> (a list of departments, or None). The key is lowercase letters, digits, <code>-</code> and <code>_</code>, and starts with a letter. It cannot be a built-in key (<code>code</code>, <code>code-bugfix</code>, <code>feed</code>, <code>research</code>).</li>
@@ -2046,6 +2104,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   </ul>
   <p>The editor for roles works the same way. <b>New custom role</b> opens the form in the figure below: Key, Name, Department, Purpose, Instructions, Core rules (one per line), Seniority levels (junior, senior), Default runtime, Default model, Effort, Tools (read, edit, shell, web, may commit), Denied shell patterns, Skills and May claim (<code>workflow.stage</code>, comma separated; <code>*</code> for any stage). The error in the figure, "key: Invalid string: must match pattern", appears because the key is still empty.</p>
   <figure class="w70"><img src="assets/org-role-editor.jpg"><figcaption>New custom role form with an empty key and the validation error; the custom and built-in roles are listed below it (Pieter Demo)</figcaption></figure>
+<figure class="w70"><img src="assets/org-role-editor-b.jpg"><figcaption>New custom role form with an empty key and the validation error; the custom and built-in roles are listed below it (continued: lower part, Pieter Demo)</figcaption></figure>
 </section>
 
 <section>
@@ -2086,7 +2145,8 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
 
   <h3 id="s9-1" style="margin-top:4px"><span class="mk">TOCMARK_s9x1_</span>9.1 The Admin page</h3>
   <p>The <b>Admin</b> item in the top menu (shown only to administrators) manages users, invitations and workstations for the whole system. Someone who is not an administrator and opens the page is sent back to the home page. Being an administrator gives no access to other people's projects, cards, agents or desk.</p>
-  <figure><img src="assets/admin.jpg"><figcaption>Admin page: Invite a user, Invitations (lee@demo.local revoked, sam@demo.local pending with Resend and Revoke, maya and pieter accepted), Users (Admin Demo admin, Pieter Demo and Maya Demo members) and All workstations (Pieter's desktop (WSL2), Build mini-PC with the amber sandbox warning, Maya's laptop offline) (Admin Demo)</figcaption></figure>
+  <figure><img src="assets/admin.jpg"><figcaption>Admin page: Invite a user, Invitations (lee@demo.local revoked, sam@demo.local pending with Resend and Revoke, maya and pieter accepted), Users (Admin Demo admin, Pieter Demo and Maya Demo members) and All workstations (Pieter's desktop (WSL2), each with "Shifts running" (4 of 4, 0 of 4, 0 offline); Build mini-PC with the amber sandbox warning that names the test override AOM_RUNNER_MOCK_SANDBOX=unsandboxed; Maya's laptop offline) (Admin Demo)</figcaption></figure>
+<figure><img src="assets/admin-b.jpg"><figcaption>Admin page: Invite a user, Invitations (lee@demo.local revoked, sam@demo.local pending with Resend and Revoke, maya and pieter accepted), Users (Admin Demo admin, Pieter Demo and Maya Demo members) and All workstations (Pieter's desktop (WSL2), each with "Shifts running" (4 of 4, 0 of 4, 0 offline); Build mini-PC with the amber sandbox warning that names the test override AOM_RUNNER_MOCK_SANDBOX=unsandboxed; Maya's laptop offline) (continued: lower part, Admin Demo)</figcaption></figure>
   <h4>Invite a user</h4>
   <p>Enter an email address, choose a role (<b>member</b> or <b>admin</b>) and press <b>Send invitation</b>. The invitee receives an email with an accept link. On the accept page they enter a display name and a password (12 to 256 characters) and then sign in with their email. If a user with that email exists, or a pending invitation for it exists, the server refuses the new invitation. If the email cannot be sent, the invitation still exists and you can use <b>Resend</b> later.</p>
   <h4>Invitations list</h4>
@@ -2107,7 +2167,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
     <li>Click <b>Deactivate</b> on an active user, or <b>Reactivate</b> on a deactivated one. The button is disabled for yourself. The last active administrator cannot be deactivated.</li>
   </ul>
   <h4>All workstations</h4>
-  <p>Every workstation paired by any user is listed here with the platform, hostname, runner version and the owner's email, the connection status, runtimes, repositories and last-seen time, and an <b>Unlink</b> button. Administrators see this list. The DevOps panel is not shown here; it is on the Workstations page of the workstation's owner, who sees only their own workstations (and can unlink them too).</p>
+  <p>Every workstation paired by any user is listed here with the platform, hostname, runner version and the owner's email, the connection status, runtimes, <b>Shifts running</b> (<i>n of limit</i>: the shifts running now against the runner's <code>maxConcurrentShifts</code>, default 4, which the server caps at <code>AOM_MAX_SHIFTS_PER_WORKSTATION</code>, default 16; an offline workstation shows 0 with "limit shown while connected"), repositories and last-seen time, and an <b>Unlink</b> button. A workstation whose runtime runs agents without an OS sandbox shows an amber warning with the real cause; in the demo it reads "test override: AOM_RUNNER_MOCK_SANDBOX=unsandboxed" and "This state is forced by a test override." Administrators see this list. The DevOps panel is not shown here; it is on the Workstations page of the workstation's owner, who sees only their own workstations (and can unlink them too).</p>
   <h4>Creating the first administrator</h4>
   <p>When you first deploy the system there are no users. Create the first administrator on the server with:</p>
   <div class="callout"><code>pnpm --filter @aom/server admin:create --email you@example.com --name "You"</code></div>
@@ -2135,12 +2195,12 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   <div class="phones">
     <figure><img src="assets/m-board.jpg"><figcaption>Board of WEB on a phone: the Spec column (WEB-42, WEB-43) and the start of To do, with the department and project filters, Run regression and New card (390 px, Pieter Demo)</figcaption></figure>
     <figure><img src="assets/m-desk.jpg"><figcaption>Decision desk on a phone: 12 open, 3 blocking, with Grace's blocking question for WEB-21 about guest data retention, its options and Answer and Dismiss (390 px, Pieter Demo)</figcaption></figure>
-    <figure><img src="assets/m-card.jpg"><figcaption>Card WEB-21 on a phone: blocked banner, Move, Re-home and Cancel card buttons, and the Details panel (390 px, Pieter Demo)</figcaption></figure>
+    <figure><img src="assets/m-card.jpg"><figcaption>Card WEB-21 on a phone: blocked banner, Move, Re-home and Cancel card buttons, and the Details panel with the Risk tier (not set) and its Change link (390 px, Pieter Demo)</figcaption></figure>
   </div>
   <div class="phones">
     <figure><img src="assets/m-hr.jpg"><figcaption>HR board on a phone: the New defaults for built-in roles section (Tester) and the first recommendations (390 px, Pieter Demo)</figcaption></figure>
     <figure><img src="assets/m-new-card.jpg"><figcaption>New card form for WEB on a phone (390 px, Pieter Demo)</figcaption></figure>
-    <figure><img src="assets/m-workstations.jpg"><figcaption>Workstations page on a phone: Pieter's desktop (WSL2) with its DevOps engineer panel (390 px, Pieter Demo)</figcaption></figure>
+    <figure><img src="assets/m-workstations.jpg"><figcaption>Workstations page on a phone: Pieter's desktop (WSL2) with Shifts running 4 of 4 and its DevOps engineer panel (390 px, Pieter Demo)</figcaption></figure>
   </div>
   <div class="phones">
     <figure><img src="assets/m-ledger.jpg"><figcaption>Ledger on a phone: search, scope and project filters and the first entries (390 px, Pieter Demo)</figcaption></figure>
@@ -2156,25 +2216,27 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   <h2><span class="mk">TOCMARK_s10_</span>10&nbsp;&nbsp;Workstations and the runner</h2>
 
   <h3 id="s10-1" style="margin-top:4px"><span class="mk">TOCMARK_s10x1_</span>10.1 The Workstations page</h3>
-  <p>The <b>Workstations</b> page lists the workstations you have paired, and has the button <b>Pair workstation</b>. Each card shows the workstation's name, platform, hostname, runner version, connection status, runtimes and repositories, when it was last seen, and its DevOps engineer panel (section 7.6). You see only your own workstations here; administrators see all of them on the Admin page (section 9.1). With none paired the page says "No workstations paired. Pair one to run agents on your machine."</p>
-  <figure><img src="assets/workstations.jpg"><figcaption>Workstations page: Pieter's desktop (WSL2) and Build mini-PC, both Connected, with runtimes, repositories and a DevOps engineer panel under each; Build mini-PC has an amber sandbox warning (Pieter Demo)</figcaption></figure>
+  <p>The <b>Workstations</b> page lists the workstations you have paired, and has the button <b>Pair workstation</b>. Each card shows the workstation's name, platform, hostname, runner version, connection status, runtimes and repositories, how many shifts are running, when it was last seen, and its DevOps engineer panel (section 7.6). You see only your own workstations here; administrators see all of them on the Admin page (section 9.1). With none paired the page says "No workstations paired. Pair one to run agents on your machine."</p>
+  <figure><img src="assets/workstations.jpg"><figcaption>Workstations page: Pieter's desktop (WSL2), Connected, Shifts running "4 of 4", repository /home/demo/src/web and a DevOps engineer panel with a request that needs approval (Build mini-PC is further down the page) (Pieter Demo)</figcaption></figure>
+<figure><img src="assets/workstations-b.jpg"><figcaption>Workstations page: Pieter's desktop (WSL2), Connected, Shifts running "4 of 4", repository /home/demo/src/web and a DevOps engineer panel with a request that needs approval (Build mini-PC is further down the page) (continued: lower part, Pieter Demo)</figcaption></figure>
   <h4>Workstation card details</h4>
   <ul>
     <li><b>Connection status:</b> a green dot and <b>Connected</b> when the runner is online, a grey dot and <b>Offline</b> when it is not.</li>
     <li><b>Platform, hostname and runner version:</b> for example <code>linux &middot; desktop-wsl &middot; runner 0.1.0</code>. The platform is the Node platform name (<code>linux</code>, <code>darwin</code>, <code>win32</code>).</li>
     <li><b>Runtimes:</b> one badge per runtime with its version, for example <code>mock mock-1</code>. A green badge means the runtime can run agents; a grey one means it cannot (in the demo <code>claude-code blocked</code>). When the OS sandbox is missing, a note under the card says why, for example "Native Windows: install the runner in WSL2".</li>
+    <li><b>Shifts running:</b> how many agent shifts run on this workstation now, out of its limit, for example "0 of 4". The limit is the runner's <code>maxConcurrentShifts</code> (section 10.8), capped by the server.</li>
     <li><b>Repositories:</b> the local paths of the clones the runner found that match a repository of one of your projects (for example <code>/home/demo/src/web</code>), or "None reported". Add folders to scan with <code>aom-runner repos add</code>.</li>
     <li><b>Last seen:</b> when the workstation last connected.</li>
   </ul>
   <p>Click <b>Unlink</b> to remove the workstation. A dialog asks you to confirm; section 9.2 lists what unlinking does. The owner of a workstation can unlink it; so can an administrator.</p>
-  <figure class="w70"><img src="assets/ws-sandbox.jpg"><figcaption>Card of Build mini-PC with the amber warning "Warning: no OS sandbox", runtimes claude-code blocked and mock mock-1, no repositories reported, and its DevOps engineer panel (Pieter Demo)</figcaption></figure>
-  <div class="callout"><b class="t">Good to know</b>The demo makes the mock runtime report "unsandboxed" for Build mini-PC, so the warning text says "native Windows" although the card shows <code>linux</code>.</div>
+  <figure class="w70"><img src="assets/ws-sandbox.jpg"><figcaption>Card of Build mini-PC with the amber warning "Warning: no OS sandbox ... (test override: AOM_RUNNER_MOCK_SANDBOX=unsandboxed) ... This state is forced by a test override.", runtimes claude-code blocked and mock mock-1, Shifts running "0 of 4", no repositories reported, and its DevOps engineer panel (Pieter Demo)</figcaption></figure>
+  <div class="callout"><b class="t">Good to know</b>The demo makes the mock runtime report "unsandboxed" for Build mini-PC through the test override <code>AOM_RUNNER_MOCK_SANDBOX=unsandboxed</code>. The warning therefore names the override as its cause and says "This state is forced by a test override." instead of advice for a real machine; the card itself shows <code>linux</code>.</div>
 </section>
 
 <section>
   <h3 id="s10-2"><span class="mk">TOCMARK_s10x2_</span>10.2 Pairing a workstation</h3>
-  <p><b>Pair workstation</b> on the Workstations page opens a dialog. Press <b>Generate pairing code</b>: the dialog shows a code (for example <code>G360-RN71</code>), the text "Expires [time]. Shown once.", the pair command with the server address and your code filled in, a <b>Copy command</b> button and the reminder "Then run aom-runner start. This page updates when it connects." The code is valid for 10 minutes and for one pairing. Run the command on the machine that will host your agents.</p>
-  <figure class="w55"><img src="assets/dlg-pair.jpg"><figcaption>Pair workstation dialog: the code G360-RN71, its expiry time, the pair command and Copy command (Pieter Demo)</figcaption></figure>
+  <p><b>Pair workstation</b> on the Workstations page opens a dialog. Press <b>Generate pairing code</b>: the dialog shows a code (for example <code>3S44-7DX8</code>), the text "Expires [time]. Shown once.", the pair command with the server address and your code filled in, a <b>Copy command</b> button and the reminder "Then run aom-runner start. This page updates when it connects." The code is valid for 10 minutes and for one pairing. Run the command on the machine that will host your agents.</p>
+  <figure class="w55"><img src="assets/dlg-pair.jpg"><figcaption>Pair workstation dialog: the one-time code (here 3S44-7DX8), its expiry time, the pair command and Copy command (Pieter Demo)</figcaption></figure>
   <h4>The runner CLI: pair, repos add, start, status, doctor, rotate-token</h4>
   <p>The runner is installed as <code>aom-runner</code> (<code>./aom-runner</code> in the tarball). Every command accepts <code>--data-dir &lt;path&gt;</code>, which overrides the data directory (default: <code>$AOM_RUNNER_HOME</code>, else <code>~/.aom-runner</code>, on Windows <code>%LOCALAPPDATA%\aom-runner</code>).</p>
   <table>
@@ -2235,7 +2297,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
   <p>Native Windows cannot sandbox agents. With the default configuration (<code>sandbox</code> is <code>required</code>), the <code>claude-code</code> runtime reports <code>unavailable</code> ("Native Windows: install the runner in WSL2") and no shifts are scheduled. To run agents on native Windows anyway, you must opt in explicitly in the runner's <code>config.json</code>:</p>
   <div class="callout"><code>{ "runtimes": { "claude-code": { "sandbox": "best_effort", "allowUnsandboxed": true } } }</code></div>
   <p><code>best_effort</code> alone is not enough on Windows: without <code>allowUnsandboxed: true</code> the runtime stays <code>unavailable</code>. (<code>"sandbox": "off"</code> is also an explicit opt-in and reports <code>unsandboxed</code> on every platform.) With this configuration, the runtime reports <code>unsandboxed</code> and the web UI shows a persistent amber warning on the workstation, on every affected agent card, and on the hire and re-home forms (section 10.9). Agents run without an OS-level boundary. The permission rules and the reduced environment still apply, but a prompt-injected agent can read anything your Windows user can read: your SSH keys, browser profiles, the runner token and the provider credentials in <code>config.json</code>.</p>
-  <figure class="w70"><img src="assets/hr-sal.jpg"><figcaption>Agent card of Sal (technical writer, junior, mock haiku, idle) on Build mini-PC: the amber warning "Runs without an OS sandbox on Build mini-PC", stats against the team, and Change model, Change role and Fire (Pieter Demo)</figcaption></figure>
+  <figure class="w70"><img src="assets/hr-sal.jpg"><figcaption>Agent card of Sal (technical writer, junior, mock haiku, idle) on Build mini-PC: the amber warning "Runs without an OS sandbox on Build mini-PC: ... This state is forced by a test override.", stats against the team, and Change model, Change role and Fire (Pieter Demo)</figcaption></figure>
   <p><b>Recommendation:</b> Use WSL2 instead. If you must use native Windows, use a dedicated low-privilege Windows user for the runner.</p>
 </section>
 
@@ -2296,6 +2358,7 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
       <tr><td><code>devops "&lt;request&gt;"</code></td><td>Any</td><td>Ask this workstation's DevOps engineer for help; the shift goes on.</td></tr>
       <tr><td><code>devops-approval --action --reason [--command]...</code></td><td>DevOps engineer</td><td>Ask the manager to approve an action outside the granted access.</td></tr>
       <tr><td><code>devops-done --summary [--command]...</code></td><td>DevOps engineer</td><td>Report the request is finished, with the commands that changed the machine.</td></tr>
+      <tr><td><code>risk &lt;small|large&gt; --reason</code></td><td>BA</td><td>Override the card's risk tier with a reason (the same as the Change link on the card; refused while a merge is pending).</td></tr>
       <tr><td><code>outcome &lt;id&gt; --note [--data-file]</code></td><td>Any</td><td>Report an outcome by its id, the general form behind several verbs above.</td></tr>
     </tbody>
   </table>
@@ -2311,11 +2374,11 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
     <li><b>runtimes</b>: settings per runtime.
       <ul>
         <li><code>claude-code</code>: <code>bin</code> (default <code>claude</code>); <code>authMode</code> (default <code>default</code>) with <code>oauthToken</code> or <code>apiKey</code>; <code>sandbox</code> (<code>required</code> by default, <code>best_effort</code> or <code>off</code>); <code>allowUnsandboxed</code> (default false); <code>extraAllowedDomains</code> (default empty); <code>toolchainPaths</code> (default empty); <code>scrubSubprocessEnv</code> (default false); optional <code>intake</code> with <code>mcpConfig</code> and <code>allowedTools</code> for the BA's intake chat.</li>
-        <li><code>mock</code>: <code>enabled</code> (default false), for tests and demos.</li>
+        <li><code>mock</code>: <code>enabled</code> (default false), for tests and demos. The mock runtime has no controls in the UI unless the server runs with <code>AOM_MOCK_UI=true</code>.</li>
       </ul>
     </li>
     <li><b>jira</b> (optional): <code>baseUrl</code>, <code>email</code> and <code>apiToken</code>, used to post approved updates to Jira. GitHub uses this machine's <code>gh</code> login.</li>
-    <li><b>maxConcurrentShifts</b> (default 4): how many shifts run at once on this workstation.</li>
+    <li><b>maxConcurrentShifts</b> (default 4): how many shifts run at once on this workstation. The runner announces it to the server, which caps it at the server setting <code>AOM_MAX_SHIFTS_PER_WORKSTATION</code> (default 16). A shift offered beyond the limit is rejected as busy and the card waits. The Workstations page shows "Shifts running" as running of limit. Restart the runner after changing it.</li>
     <li><b>vaultSyncIntervalSec</b> (default 300): how often vaults are pulled and pushed.</li>
   </ul>
   <p><b>toolchainPaths</b> is a key of <code>runtimes["claude-code"]</code>. It lists extra directories that sandboxed shell commands may read, for example <code>~/.dotnet</code> or <code>~/.cargo</code> (<code>~</code> means the real home). The sandbox hides <code>/home</code>, so a toolchain installed under your home is invisible to agents until you list it; the Node install the runner itself runs on is opened automatically. The home directory itself and credential stores are refused, so never list a directory that holds credentials.</p>
@@ -2331,14 +2394,22 @@ All agents in the demo run on the MOCK runtime, so chat replies, shift logs and 
 
 <section>
   <h3 id="s10-9"><span class="mk">TOCMARK_s10x9_</span>10.9 The unsandboxed warning everywhere</h3>
-  <p>When a runtime on a workstation runs agents unsandboxed (<code>"sandbox": "off"</code>, or <code>best_effort</code> with <code>allowUnsandboxed: true</code> on a platform without a sandbox such as native Windows), a persistent amber warning appears. It cannot be dismissed and stays as long as the runner reports the state:</p>
+  <p>When a runtime on a workstation runs agents unsandboxed (<code>"sandbox": "off"</code>, or <code>best_effort</code> with <code>allowUnsandboxed: true</code> on a platform without a sandbox such as native Windows), a persistent amber warning appears. It cannot be dismissed and stays as long as the runner reports the state. The reason and the advice at the end of the warning follow the real cause:</p>
+  <ul>
+    <li><b>Platform without a sandbox</b> (native Windows): "Run the runner in WSL2 to sandbox it."</li>
+    <li><b>Runtime sandbox set to <code>"off"</code></b> in the runner config: "Set the runtime sandbox back to "required" in the runner config to sandbox it."</li>
+    <li><b>bubblewrap or socat missing</b> (Linux): "Install bubblewrap and socat to sandbox it."</li>
+    <li><b>A forced test state</b> (a test override such as <code>AOM_RUNNER_MOCK_SANDBOX</code>): "This state is forced by a test override."</li>
+    <li>Any other cause: "Run the runner in WSL2, or on Linux with bubblewrap and socat, to sandbox it."</li>
+  </ul>
+  <p>The warning appears in these places:</p>
   <ul>
     <li><b>Workstations page:</b> the workstation card shows <b>Warning: no OS sandbox.</b> and says which runtime runs without a sandbox and what an agent could read, with a link "How to run the runner in WSL2". (A workstation whose runtime is unavailable shows "[runtime] is unavailable: [reason]" with a "Setup guide" link instead.)</li>
     <li><b>HR board:</b> the agent card of each agent on that workstation shows "Warning: Runs without an OS sandbox on [workstation]: ...".</li>
     <li><b>Hire form:</b> hiring onto an unsandboxed workstation shows the warning and a checkbox <b>I understand this agent runs without an OS sandbox on [workstation]</b>. If it is not ticked, the form stops with "Confirm that you accept hiring onto an unsandboxed workstation". A request sent to the server without the acknowledgement is refused with the error <code>unsandboxed_ack_required</code> (HTTP 409).</li>
     <li><b>Re-home dialog:</b> when you move an agent to another workstation, the same warning shows if the destination is unsandboxed.</li>
   </ul>
-  <figure class="w55"><img src="assets/dlg-hire-unsandboxed.jpg" alt="dlg-hire-unsandboxed"><figcaption>Hire form with Build mini-PC chosen: the amber warning, the unticked box "I understand this agent runs without an OS sandbox on Build mini-PC", and the error "Confirm that you accept hiring onto an unsandboxed workstation" after pressing Hire (Pieter Demo)</figcaption></figure>
+  <figure class="w55"><img src="assets/dlg-hire-unsandboxed.jpg" alt="dlg-hire-unsandboxed"><figcaption>Hire form with Build mini-PC chosen: the amber warning (ending "This state is forced by a test override."), the unticked box "I understand this agent runs without an OS sandbox on Build mini-PC", and the error "Confirm that you accept hiring onto an unsandboxed workstation" after pressing Hire (Pieter Demo)</figcaption></figure>
 
 <p>Hiring onto a workstation whose runtime is <code>unavailable</code> is refused outright (<code>sandbox_unavailable</code>). The warnings are there to remind you of the trade-off: on an unsandboxed workstation an agent can read what your operating system user can read.</p>
 </section>
@@ -2364,18 +2435,19 @@ git clone https://github.com/your-org/agent-org-manager.git
 cd agent-org-manager
 corepack enable                  # Enable pnpm
 pnpm install                     # Install dependencies
-docker compose -f docker-compose.dev.yml up -d  # Start Postgres (127.0.0.1:5433, user/password/db aom)
+docker compose -f docker-compose.dev.yml up -d  # Start Postgres (127.0.0.1:5433, user/password/db aom) and Mailpit (SMTP 1026, web 8026)
 pnpm db:migrate                  # Apply migrations to the aom database
 pnpm dev                         # Start server (localhost:4600) and web (localhost:5173)
 pnpm --filter @aom/server admin:create --email you@example.com --name "You" --password 'at-least-12-chars'  # Bootstrap first admin
   </pre>
+  <p>The dev Mailpit catches the invitation emails: open <code>http://localhost:8026</code>. Its host ports are 1026 and 8026 so they do not clash with another Mailpit on 1025 and 8025; change them with <code>AOM_MAILPIT_SMTP_PORT</code> and <code>AOM_MAILPIT_UI_PORT</code>. The server's default <code>AOM_SMTP_URL</code> is <code>smtp://127.0.0.1:1025</code>, so start it with <code>AOM_SMTP_URL=smtp://127.0.0.1:1026</code> to use the dev Mailpit.</p>
   <p>The server reads real environment variables only (it does not load a <code>.env</code> file); the built-in defaults match the dev compose file. The web app proxies <code>/api</code> to the server and works with WebSocket. Open <code>http://localhost:5173</code> and sign in with the admin account.</p>
   <h4>Run tests and checks</h4>
   <pre>
 pnpm typecheck                   # TypeScript type check
 pnpm lint                        # Biome linter
 pnpm test                        # Unit and integration tests (vitest)
-pnpm e2e                         # End-to-end tests with Playwright (needs Postgres on 5433, Mailpit on 1025, Chromium)
+pnpm e2e                         # End-to-end tests with Playwright (needs Postgres on 5433, a Mailpit on 1025 / 8025 by default, Chromium; AOM_E2E_SMTP_URL and AOM_MAILPIT_API point it at another one)
 pnpm --filter @aom/server projections:rebuild   # Rebuild all projections from events (stop the server first)
   </pre>
 
@@ -2443,11 +2515,13 @@ curl https://aom.example.com/api/health
       <tr><td><code>AOM_SERVE_WEB</code></td><td><code>false</code></td><td>Serve built web app from server (enabled in <code>docker-compose.prod.yml</code>)</td></tr>
       <tr><td><code>AOM_HTTP_PORT</code>, <code>AOM_HTTPS_PORT</code></td><td><code>80</code>, <code>443</code></td><td>Host ports Caddy publishes (compose)</td></tr>
       <tr><td><code>LOG_LEVEL</code></td><td><code>info</code></td><td>Logging level: <code>debug</code>, <code>info</code>, <code>warn</code>, <code>error</code></td></tr>
+      <tr><td><code>AOM_MOCK_UI</code></td><td><code>false</code></td><td>Dev and tests only. Shows the mock-runtime card fields (Mock script and others) in the UI and accepts them on the API; off, the API refuses them with 422. Leave it off in production</td></tr>
+      <tr><td><code>AOM_MAX_SHIFTS_PER_WORKSTATION</code></td><td><code>16</code></td><td>Ceiling for a workstation's <code>maxConcurrentShifts</code>. The runner's own setting (default 4) is what normally applies</td></tr>
       <tr><td><code>AOM_RATE_LIMIT</code></td><td><code>true</code></td><td>Enable rate limiting on the sensitive routes (login, invitations, pairing); there is no global limit</td></tr>
     </tbody>
   </table>
   <div class="callout warn"><b class="t">Never in production</b>
-    Do not set <code>AOM_TEST_CLOCK</code>, <code>AOM_ALLOW_LOCAL_REMOTES</code> or use <code>.env.example</code> in production. Always use <code>.env.prod.example</code> as your template and review all values before deploying.</div>
+    Do not set <code>AOM_TEST_CLOCK</code>, <code>AOM_ALLOW_LOCAL_REMOTES</code> or <code>AOM_MOCK_UI</code>, and do not use <code>.env.example</code> in production. Always use <code>.env.prod.example</code> as your template and review all values before deploying.</div>
 
   <h3 id="s11-4"><span class="mk">TOCMARK_s11x4_</span>11.4 Backups, upgrades and operations</h3>
   <h4>Backup strategy</h4>
@@ -2496,11 +2570,11 @@ curl https://aom.example.com/api/health
   <table>
     <thead><tr><th>Suite</th><th>Command</th><th class="r">Result</th><th>What it covers</th></tr></thead>
     <tbody>
-      <tr><td>Shared contract</td><td><code>pnpm --filter @aom/shared test</code></td><td class="r yes">277 / 277</td><td>Zod schemas, workflows and their validation, roles, authorization predicates, HR rules, prompt building</td></tr>
-      <tr><td>Server</td><td><code>pnpm --filter @aom/server test</code></td><td class="r yes">393 / 393</td><td>Event store, projections, dispatcher, commands, routes, runner gateway against a real database</td></tr>
-      <tr><td>Web</td><td><code>pnpm --filter @aom/web test</code></td><td class="r yes">104 / 104</td><td>Pages and components with mocked API (MSW)</td></tr>
-      <tr><td>Runner</td><td><code>pnpm --filter @aom/runner test</code></td><td class="r yes">288 passed, 1 skipped</td><td>Shift supervisor, sandbox policy, git, adapters, vault sync, external posting</td></tr>
-      <tr><td>End to end</td><td><code>pnpm e2e</code></td><td class="r yes">102 / 102</td><td>Real browser against a built server and a mock-runtime runner: every milestone, one spec each</td></tr>
+      <tr><td>Shared contract</td><td><code>pnpm --filter @aom/shared test</code></td><td class="r yes">280 / 280</td><td>Zod schemas, workflows and their validation, roles, authorization predicates, HR rules, prompt building</td></tr>
+      <tr><td>Server</td><td><code>pnpm --filter @aom/server test</code></td><td class="r yes">407 / 407</td><td>Event store, projections, dispatcher, commands, routes, runner gateway against a real database</td></tr>
+      <tr><td>Web</td><td><code>pnpm --filter @aom/web test</code></td><td class="r yes">134 / 134</td><td>Pages and components with mocked API (MSW)</td></tr>
+      <tr><td>Runner</td><td><code>pnpm --filter @aom/runner test</code></td><td class="r yes">291 passed, 1 skipped</td><td>Shift supervisor, sandbox policy, git, adapters, vault sync, external posting</td></tr>
+      <tr><td>End to end</td><td><code>pnpm e2e</code></td><td class="r yes">103 / 103</td><td>Real browser against a built server and a mock-runtime runner: every milestone, one spec each</td></tr>
       <tr><td>Types and style</td><td><code>pnpm typecheck</code>, <code>pnpm lint</code></td><td class="r yes">0 errors</td><td>TypeScript strict, Biome. Lint reports warnings (mostly <code>any</code> in tests); see chapter 13</td></tr>
     </tbody>
   </table>
@@ -2593,7 +2667,7 @@ curl https://aom.example.com/api/health
       <tr><td>Real Claude Code only run on Linux</td><td>The real adapter was exercised on Linux only. WSL2 uses the same sandbox (bubblewrap and socat); macOS (Seatbelt) and native Windows were not tested with real Claude Code.</td><td>On macOS, run <code>aom-runner doctor</code> and a small card first. On Windows use WSL2.</td></tr>
       <tr><td>MSW dev mocks are partial</td><td>The web app can run against MSW mocks (<code>VITE_MSW=1</code>), but they cover only part of the API.</td><td>Use the real server for anything beyond basic screens.</td></tr>
       <tr><td>Biome reports lint warnings</td><td><code>pnpm lint</code> finishes with warnings (about 690) and no errors.</td><td>None needed; the check passes.</td></tr>
-      <tr><td>At most 4 shifts per workstation at once</td><td>The server tells each runner a limit of 4 concurrent shifts, whatever <code>maxConcurrentShifts</code> says in the runner config.</td><td>Pair another workstation for more parallel work.</td></tr>
+      <tr><td>Limited shifts per workstation at once</td><td>Each workstation runs at most <code>maxConcurrentShifts</code> shifts at once (a runner config setting, default 4). The server caps it at <code>AOM_MAX_SHIFTS_PER_WORKSTATION</code> (default 16); a shift offered beyond the limit is rejected as busy and the card waits.</td><td>Raise <code>maxConcurrentShifts</code> in the runner config (ceiling 16) and restart the runner, or pair another workstation.</td></tr>
       <tr><td>Demo and E2E use a mock runtime</td><td>The test suites and the demo do not run real agents; the mock adapter plays a script per card.</td><td>Run real Claude Code on a workstation for real behavior (<code>AOM_CLAUDE_SMOKE=1</code> runs a smoke test and spends tokens).</td></tr>
     </tbody>
   </table>
@@ -2778,7 +2852,7 @@ curl https://aom.example.com/api/health
   </table>
 
   <h3 id="s15-2"><span class="mk">TOCMARK_s15x2_</span>15.2 Commit history by milestone</h3>
-  <p>All 74 commits on main, grouped by milestone (M1 through M10 are all implemented and merged), newest groups last. Within a group the commits are listed oldest first. Full history: <code>git log --format='%h %ad %s' --date=short</code>.</p>
+  <p>All 80 commits on main, grouped by milestone (M1 through M10 are all implemented and merged), newest groups last. Within a group the commits are listed oldest first. Full history: <code>git log --format='%h %ad %s' --date=short</code>.</p>
   <table class="compact">
     <thead><tr><th style="width:12%">Hash</th><th style="width:14%">Date</th><th>Subject</th></tr></thead>
     <tbody>
@@ -2871,6 +2945,13 @@ curl https://aom.example.com/api/health
       <tr><td><code>217b453</code></td><td>2026-10-04</td><td>docs: threat model, Claude sandbox settings, deactivation, permissions, headers</td></tr>
       <tr><td colspan="3" style="background:#f3f4f6; font-weight:600">Other (test stability) (1 commits)</td></tr>
       <tr><td><code>007de51</code></td><td>2026-10-04</td><td>test: make the suites deterministic under load</td></tr>
+      <tr><td colspan="3" style="background:#f3f4f6; font-weight:600">Guide and later changes (6 commits)</td></tr>
+      <tr><td><code>9006684</code></td><td>2026-10-04</td><td>docs: illustrated user guide and handover (PDF, screenshots, build pipeline)</td></tr>
+      <tr><td><code>ca781c2</code></td><td>2026-10-04</td><td>fix: a large merge waiting for approval stays in Finalize with an Awaiting your approval badge</td></tr>
+      <tr><td><code>b7329ca</code></td><td>2026-10-04</td><td>feat: human labels for desk item kinds in the list and the item</td></tr>
+      <tr><td><code>226bb64</code></td><td>2026-10-04</td><td>fix: dev compose has a Mailpit on 1026/8026; e2e mail ports are configurable</td></tr>
+      <tr><td><code>0c8ddb6</code></td><td>2026-10-04</td><td>feat: sandbox warnings follow the real cause; workstations show running shifts of their limit</td></tr>
+      <tr><td><code>11c2633</code></td><td>2026-10-04</td><td>feat: mock-runtime fields behind AOM_MOCK_UI, edit cards in Spec or queue, risk tier override</td></tr>
     </tbody>
   </table>
 

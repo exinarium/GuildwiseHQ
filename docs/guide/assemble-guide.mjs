@@ -18,8 +18,16 @@ const body = chapters
   .join('\n\n')
   .replace(/<figure(?![^>]*chat)([^>]*)>(\s*<img src="assets\/(?:chat-[\w-]+|m-chat)\.jpg")/g, (_m, a, b) => `<figure${a.includes('class=') ? a : `${a} class="chat"`}>${b}`);
 
+// Tall pictures were cut in two by prepare-assets.mjs (ID.jpg and ID-b.jpg): the lower half follows as its own figure.
+const withB = fs.readdirSync(path.join(here, 'assets')).filter((f) => f.endsWith('-b.jpg')).map((f) => f.replace('-b.jpg', ''));
+let bodyB = body;
+for (const id of withB) {
+  if (bodyB.includes(`assets/${id}-b.jpg`)) continue;
+  const re = new RegExp(`(<figure[^>]*>\\s*<img src="assets/${id}\\.jpg"[^>]*>\\s*<figcaption>)([\\s\\S]*?)(</figcaption>\\s*</figure>)`);
+  bodyB = bodyB.replace(re, (m, a, cap, c) => `${m}\n${a.replace(`${id}.jpg`, `${id}-b.jpg`)}${cap.replace(/\s*\(([^()]*)\)\s*$/, ' (continued: lower part, $1)')}${c}`);
+}
 const toc = [];
-for (const m of body.matchAll(/<h2><span class="mk">TOCMARK_(s\d+)_<\/span>([\s\S]*?)<\/h2>|<h3 id="(s\d+-\d+)"[^>]*><span class="mk">TOCMARK_\w+_<\/span>([\s\S]*?)<\/h3>/g)) {
+for (const m of bodyB.matchAll(/<h2><span class="mk">TOCMARK_(s\d+)_<\/span>([\s\S]*?)<\/h2>|<h3 id="(s\d+-\d+)"[^>]*><span class="mk">TOCMARK_\w+_<\/span>([\s\S]*?)<\/h3>/g)) {
   if (m[1]) toc.push(`    <a class="l1" href="#${m[1]}" data-id="${m[1]}"><span class="t">${m[2]}</span><span class="dots"></span><span class="pg"></span></a>`);
   else toc.push(`    <a class="l2" href="#${m[3]}" data-id="${m[3]}"><span class="t">${m[4]}</span><span class="dots"></span><span class="pg"></span></a>`);
 }
@@ -44,7 +52,7 @@ const extraCss = `<style>
   figure.chat img { max-height: 100mm; }
 </style>
 `;
-const html = `${P('head.html').replace(/<body>\s*$/, `${extraCss}</head>\n<body>`)}\n${P('cover.html')}\n${tocSection}\n${body}\n</body>\n</html>\n`;
+const html = `${P('head.html').replace(/<body>\s*$/, `${extraCss}</head>\n<body>`)}\n${P('cover.html')}\n${tocSection}\n${bodyB}\n</body>\n</html>\n`;
 fs.writeFileSync(path.join(here, 'guide.html'), html);
 console.log(`guide.html: ${(html.length / 1024).toFixed(0)} KB, ${toc.length} contents entries, ${(html.match(/<figure/g) ?? []).length} figures`);
 const missing = [...html.matchAll(/src="assets\/([\w-]+\.jpg)"/g)].map((m) => m[1]).filter((f) => !fs.existsSync(path.join(here, 'assets', f)));

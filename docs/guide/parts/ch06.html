@@ -1,6 +1,6 @@
 <section class="chapter" id="s6">
   <h2><span class="mk">TOCMARK_s6_</span>6&nbsp;&nbsp;Research, feeds and schedules</h2>
-  <p class="lead">Research and feed projects run facts and news on the same kind of board as code. A researcher writes and a checker verifies and publishes; scouts find candidates and curators filter them. You rate the digest items to teach the system what matters. The demo runs on the MOCK runtime: the notes, sources and items in the figures are scripted ("Source 1", "mock scout found 3 candidate(s)"); real agents open real pages.</p>
+  <p class="lead">Research and feed projects run facts and news on the same kind of board as code. A researcher writes and a checker verifies and publishes; scouts find candidates and curators filter them. You rate the digest items to teach the system what matters. The demo runs on the MOCK runtime: the notes, sources and items in the figures are scripted ("Source 1", "mock scout found 3 candidate(s)"); real agents open real pages. A test-only mock runtime exists for development and tests; the UI switches it on only when the server runs with <code>AOM_MOCK_UI=true</code>.</p>
 
   <h3 id="s6-1" style="margin-top:4px"><span class="mk">TOCMARK_s6x1_</span>6.1 Research projects: question to published note</h3>
 
@@ -45,8 +45,6 @@
       <li>Open questions that agents cannot answer go to the desk like any other card question.</li>
     </ul></div>
 
-  <div class="callout"><b class="t">Good to know</b>
-    The card form and the Details panel show a field "Mock research claims" (JSON). It is a test aid of the mock runtime: it scripts the claims the pretend researcher "finds" and whether the pretend checker can verify them. Real users leave it empty. In SHOOT-2 it is the claim with <code>"supported": false</code> that caused the rework round.</div>
 </section>
 
 <section>
@@ -79,7 +77,7 @@
 <section>
   <h3 id="s6-4"><span class="mk">TOCMARK_s6x4_</span>6.4 Rating digests and taste.md</h3>
 
-  <p>When a digest is posted, one desk item "Rate the AI news feed digest (3 items)" appears. It has the violet badge "digest", is non-blocking, and names the curator and the feed card. Each item shows its kind, source, publication date, card ref, a linked title and the summary, with an optional field "Why? (optional)" and three buttons: <b>Useful</b>, <b>Irrelevant</b> and <b>Boring</b>. You can also rate from the running list on the feed page, where a rating can be changed with <b>Change</b>. When the last item of a digest is rated, the desk item closes by itself; <b>Acknowledge</b> or <b>Dismiss</b> closes it without rating the rest.</p>
+  <p>When a digest is posted, one desk item "Rate the AI news feed digest (3 items)" appears. It has the violet badge "Digest to rate", is non-blocking, and names the curator and the feed card. Each item shows its kind, source, publication date, card ref, a linked title and the summary, with an optional field "Why? (optional)" and three buttons: <b>Useful</b>, <b>Irrelevant</b> and <b>Boring</b>. You can also rate from the running list on the feed page, where a rating can be changed with <b>Change</b>. When the last item of a digest is rated, the desk item closes by itself; <b>Acknowledge</b> or <b>Dismiss</b> closes it without rating the rest.</p>
 
   <figure class="w70"><img src="assets/desk-digest.jpg"><figcaption>Digest item on the desk from Cora (curator) for NEWS-2: three articles, none rated yet, each with Useful, Irrelevant and Boring, and the buttons Acknowledge and Dismiss (Pieter Demo)</figcaption></figure>
 
@@ -93,7 +91,7 @@
 
   <figure class="w70"><img src="assets/desk-taste.jpg"><figcaption>Taste-rule proposal from Cora (curator) for NEWS-2: "Add a taste rule for AI news feed?" with the editable rule "Prefer posts that include benchmark or study data" and the buttons Approve, Reject and Dismiss (Pieter Demo)</figcaption></figure>
 
-  <p><b>Curator taste-rule proposal:</b> when the verdicts show a pattern that no rule covers yet, the curator may attach a proposed rule (one sentence, with the URLs that are its evidence) to its digest. It appears on the desk as an approval item (badge "taste_rule") with the text editable. <b>Approve</b> appends the rule, in your edited wording if you changed it, to <code>taste.md</code> as <code>- Rule: &lt;text&gt;</code>. <b>Reject</b> and <b>Dismiss</b> add nothing. The curator never edits <code>taste.md</code> itself.</p>
+  <p><b>Curator taste-rule proposal:</b> when the verdicts show a pattern that no rule covers yet, the curator may attach a proposed rule (one sentence, with the URLs that are its evidence) to its digest. It appears on the desk as an approval item (badge "Taste rule") with the text editable. <b>Approve</b> appends the rule, in your edited wording if you changed it, to <code>taste.md</code> as <code>- Rule: &lt;text&gt;</code>. <b>Reject</b> and <b>Dismiss</b> add nothing. The curator never edits <code>taste.md</code> itself.</p>
 
   <p><b>Curators read taste.md before filtering:</b> the next feed run shows the curator the taste rules. It prefers what you rated useful, skips what you rated irrelevant, deprioritises what you rated boring, and follows explicit rules exactly. The rules are plain lines you can read and edit, not a hidden model.</p>
 
@@ -150,7 +148,7 @@
     <li>Only one extra shift may run at a time in the whole organization. While it runs, a second late scheduled card waits in the queue until an agent becomes free; it does not start another extra shift.</li>
   </ul>
 
-  <p>This is a limit per organization, not per agent. The runner of a workstation also limits how many shifts run at once (4 by default, set in its config) and refuses more ("Shift rejected by the runner (busy: 4 shifts already running)"); the card then goes back to the queue.</p>
+  <p>This is a limit per organization, not per agent. The runner of a workstation also limits how many shifts run at once (the setting <code>maxConcurrentShifts</code> in its config, 4 by default; the server caps it at 16) and refuses more ("Shift rejected by the runner (busy: 4 shifts already running)" when the limit is 4); the card then goes back to the queue.</p>
 
   <div class="callout"><b class="t">Why the overflow rule exists</b>
     A feed that fires late or not at all would break the running list and the digest cycle. One extra shift is an acceptable cost; one extra shift per late schedule would overload the workstations. So the first late scheduled card jumps ahead and gets an extra shift, and later ones wait their turn.</div>

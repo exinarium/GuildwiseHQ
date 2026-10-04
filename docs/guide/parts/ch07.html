@@ -116,7 +116,7 @@
   <h3 id="s7-6"><span class="mk">TOCMARK_s7x6_</span>7.6 The DevOps engineer</h3>
   <p>Every workstation has one DevOps engineer, an agent with the role <b>DevOps engineer</b> that is hired automatically when the workstation is paired (the demo's is named Atlas). It never claims cards. It works requests for setting up and maintaining the machine (installing tools, Docker, starting the app for a tester) and keeps the vaults in sync.</p>
   <p>The DevOps engineer cannot be hired or fired by hand; it can only be reset, which wipes its sandbox. You, the workstation's owner, give it access and approve or reject what falls outside that access in the <b>DevOps engineer</b> panel of the workstation card.</p>
-  <figure><img src="assets/ws-devops.jpg"><figcaption>DevOps engineer panel of Pieter's desktop (WSL2): three access checkboxes (all unchecked), writable paths, the Ask DevOps field, and two requests: Install Docker so the end-to-end suite can run (needs approval, thread by Atlas with Approve and Reject) and Start the app on port 3000 (done) (Pieter Demo)</figcaption></figure>
+  <figure><img src="assets/ws-devops.jpg"><figcaption>DevOps engineer panel of Pieter's desktop (WSL2), under the workstation's "Shifts running 4 of 4": three access checkboxes (all unchecked), writable paths, the Ask DevOps field, and two requests: Install Docker so the end-to-end suite can run (needs approval, thread by Atlas with Approve and Reject) and Start the app on port 3000 (done) (Pieter Demo)</figcaption></figure>
   <h4>Access checkboxes</h4>
   <p>Three checkboxes say what the DevOps engineer may do without asking. A checkbox saves as soon as you click it:</p>
   <ul>
@@ -145,7 +145,7 @@
       <li>If rejected: the request ends <span class="badge b-rej">failed</span> with the result "Approval rejected" and your note. There is no separate "rejected" badge.</li>
     </ol>
   </div>
-<figure class="w70"><img src="assets/desk-devops.jpg" alt="desk-devops"><figcaption>The same approval on the decision desk: "DevOps needs approval: Install Docker so the end-to-end suite can run", badges Urgent, devops and Blocking, with Approve, Reject and Dismiss (Pieter Demo)</figcaption></figure>
+<figure class="w70"><img src="assets/desk-devops.jpg" alt="desk-devops"><figcaption>The same approval on the decision desk: "DevOps needs approval: Install Docker so the end-to-end suite can run", badges Urgent, DevOps approval and Blocking, with Approve, Reject and Dismiss (Pieter Demo)</figcaption></figure>
 
 </section>
 <!-- NOTES: Request statuses: needs_approval (amber), queued (grey), running (blue), done (green), failed (red); a rejected approval ends as failed. Definition files are written to the vault only at approval time; there is no backfill when a vault is registered later. DevOps approvals appear on the desk and on the Workstations page. The runner matches repositories by normalized remote URL, not by name. -->
