@@ -126,7 +126,10 @@ export function RoleUpdates({ updates }: { updates: RoleUpdate[] }) {
             <Panel className="flex flex-wrap items-center gap-2">
               <p className="min-w-0 flex-1 text-sm">
                 <span className="font-medium">{u.roleName}</span> has a new default (version {u.latestVersion}
-                ); your extensions were written for version {u.extensionBaseVersion}.
+                )
+                {u.extensionBaseVersion !== null
+                  ? `; your extensions were written for version ${u.extensionBaseVersion}.`
+                  : '.'}
                 {u.agentsOnOlderVersion > 0 &&
                   ` ${u.agentsOnOlderVersion} agent${u.agentsOnOlderVersion === 1 ? ' is' : 's are'} still on the old version.`}
               </p>

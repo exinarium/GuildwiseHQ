@@ -302,13 +302,23 @@ export async function applyRecommendation(
 export async function roleUpdates(ctx: Ctx, userId: string): Promise<RoleUpdate[]> {
   const list = await rows(
     ctx.pool,
-    `SELECT e.role_key, e.base_version, e.extensions, r.version AS latest, r.definition
-       FROM role_extensions e
+    // A built-in role has an update for this org when the owner's extensions were written against an older default,
+    // or when any of the org's active agents still runs an older version (the usual case: no extensions at all).
+    `WITH keys AS (
+       SELECT role_key FROM role_extensions WHERE org_id = $1
+       UNION
+       SELECT role_key FROM agents WHERE org_id = $1 AND status <> 'retired'
+     )
+     SELECT k.role_key, e.base_version, e.extensions, r.version AS latest, r.definition
+       FROM keys k
        JOIN LATERAL (SELECT version, definition FROM role_definitions
-                      WHERE org_id IS NULL AND key = e.role_key AND status = 'active'
+                      WHERE org_id IS NULL AND key = k.role_key AND status = 'active'
                       ORDER BY version DESC LIMIT 1) r ON true
-      WHERE e.org_id = $1 AND r.version > e.base_version
-      ORDER BY e.role_key`,
+       LEFT JOIN role_extensions e ON e.org_id = $1 AND e.role_key = k.role_key
+      WHERE (e.role_key IS NOT NULL AND r.version > e.base_version)
+         OR EXISTS (SELECT 1 FROM agents a WHERE a.org_id = $1 AND a.role_key = k.role_key
+                     AND a.status <> 'retired' AND a.role_version < r.version)
+      ORDER BY k.role_key`,
     [userId],
   );
   const out: RoleUpdate[] = [];
@@ -321,10 +331,12 @@ export async function roleUpdates(ctx: Ctx, userId: string): Promise<RoleUpdate[
     out.push({
       roleKey: r.role_key,
       roleName: r.definition.name,
-      extensionBaseVersion: r.base_version,
+      extensionBaseVersion: r.base_version ?? null,
       latestVersion: r.latest,
       purpose: r.definition.purpose,
-      extensions: RoleExtensionsSchema.parse(r.extensions),
+      extensions: RoleExtensionsSchema.parse(
+        r.extensions ?? { instructions: '', skills: [], standingOrders: [] },
+      ),
       agentsOnOlderVersion: Number(stale?.n ?? 0),
     });
   }

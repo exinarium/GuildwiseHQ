@@ -106,7 +106,8 @@ export const RoleUpdateSchema = z.object({
   roleKey: z.string(),
   roleName: z.string(),
   /** Version the owner's extensions were written against. */
-  extensionBaseVersion: z.number().int(),
+  /** Version the owner's extensions were written for; null when the role has no extensions. */
+  extensionBaseVersion: z.number().int().nullable(),
   latestVersion: z.number().int(),
   purpose: z.string(),
   /** What a reset removes. */

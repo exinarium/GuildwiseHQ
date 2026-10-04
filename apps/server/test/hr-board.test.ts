@@ -172,6 +172,27 @@ describe('built-in role defaults', () => {
     ).toBe(404);
   });
 
+  it('a role without extensions is offered when an agent runs an older default, and reset moves the agent', async () => {
+    // Real use: a new app version shipped BA v5; agents hired on v4 never saw it because the list required extensions.
+    await q('DELETE FROM role_extensions');
+    const tess = await w.hire('Tara', 'tester', 'junior');
+    await q('UPDATE agents SET role_version = 1 WHERE id=$1', [tess.id]);
+    const b = await board(w);
+    expect(b.roleUpdates).toEqual([
+      expect.objectContaining({
+        roleKey: 'tester',
+        extensionBaseVersion: null,
+        latestVersion: 2,
+        extensions: { instructions: '', skills: [], standingOrders: [] },
+        agentsOnOlderVersion: 1,
+      }),
+    ]);
+    const res = await ok<any>(w.t.req('POST', '/api/hr/roles/tester/reset', { cookie: w.owner.cookie }));
+    expect(res).toMatchObject({ roleKey: 'tester', toVersion: 2, updatedAgentIds: [tess.id] });
+    expect((await q('SELECT role_version FROM agents WHERE id=$1', [tess.id]))[0]!.role_version).toBe(2);
+    expect((await board(w)).roleUpdates).toEqual([]);
+  });
+
   it('an extension already on the latest version is not an update', async () => {
     await q('DELETE FROM role_extensions');
     await extend(2);
