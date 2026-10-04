@@ -17,6 +17,14 @@ export const workstationEvents = [
   defineEvent('WorkstationRenamed', z.object({ workstationId: Id, name: z.string().min(1) })),
   defineEvent('WorkstationUnlinked', z.object({ workstationId: Id, by: z.enum(['owner', 'admin']) })),
   defineEvent('WorkstationConnected', z.object({ workstationId: Id, runnerVersion: z.string().optional() })),
+  /** A runner re-probe changed a runtime's availability or sandbox state (drives live refresh; no projection). */
+  defineEvent(
+    'WorkstationRuntimesChanged',
+    z.object({
+      workstationId: Id,
+      runtimes: z.array(z.object({ id: z.string(), available: z.boolean(), sandbox: z.string().optional() })),
+    }),
+  ),
   defineEvent('WorkstationDisconnected', z.object({ workstationId: Id })),
   defineEvent('WorkstationTokenRotated', z.object({ workstationId: Id, tokenHash: z.string().min(1) })),
 ] as const;

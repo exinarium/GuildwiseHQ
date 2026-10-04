@@ -38,8 +38,20 @@ test('an unsandboxed runtime is warned about on the workstation, the agent card 
     expect(
       (await api.patch(`/api/agents/${devops.id}`, { data: { runtime: 'mock', model: 'mock' } })).status(),
     ).toBe(200);
-  const hired = await api.post('/api/agents', {
+  let hired = await api.post('/api/agents', {
     data: { name: 'Sal', roleKey: 'reviewer', seniority: 'senior', workstationId, runtime: 'mock' },
+  });
+  expect(hired.status()).toBe(409);
+  expect((await hired.json()).error.code).toBe('unsandboxed_ack_required');
+  hired = await api.post('/api/agents', {
+    data: {
+      name: 'Sal',
+      roleKey: 'reviewer',
+      seniority: 'senior',
+      workstationId,
+      runtime: 'mock',
+      acknowledgeUnsandboxed: true,
+    },
   });
   expect(hired.status(), await hired.text()).toBe(201);
   expect((await hired.json()).agent?.sandbox ?? 'unsandboxed').toBe('unsandboxed');

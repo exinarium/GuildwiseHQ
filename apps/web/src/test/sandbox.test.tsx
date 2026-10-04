@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Agents } from '../pages/Agents.tsx';
 import { Workstations } from '../pages/Workstations.tsx';
+import { keysForEvent } from '../ws/invalidate.ts';
 
 const ID = (n: number) => `0192f3a0-0000-7000-8000-${String(n).padStart(12, '0')}`;
 const USER = ID(1);
@@ -215,7 +216,9 @@ describe('hire form', () => {
 
     await user.click(within(form).getByRole('checkbox', { name: /runs without an OS sandbox/ }));
     await user.click(within(form).getByRole('button', { name: 'Hire' }));
-    await waitFor(() => expect(hired).toMatchObject({ name: 'Newt', workstationId: WS_BAD }));
+    await waitFor(() =>
+      expect(hired).toMatchObject({ name: 'Newt', workstationId: WS_BAD, acknowledgeUnsandboxed: true }),
+    );
   });
 
   it('shows no warning or checkbox for a sandboxed workstation, and asks again for another unsandboxed one', async () => {
@@ -226,5 +229,16 @@ describe('hire form', () => {
     await user.type(within(form).getByLabelText('Name'), 'Fern');
     await user.click(within(form).getByRole('button', { name: 'Hire' }));
     await waitFor(() => expect(hired).toMatchObject({ name: 'Fern', workstationId: WS_OK }));
+  });
+});
+
+describe('live refresh', () => {
+  it('a workstation event refetches workstations, agents and the HR board', () => {
+    const keys = keysForEvent({
+      type: 'WorkstationRuntimesChanged',
+      streamId: `workstation-${WS_BAD}`,
+      projectId: null,
+    }).map((k) => k[0]);
+    expect(keys).toEqual(expect.arrayContaining(['workstations', 'agents', 'hr']));
   });
 });

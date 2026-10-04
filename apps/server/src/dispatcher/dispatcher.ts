@@ -30,6 +30,7 @@ const TRIGGER_TYPES = new Set([
   'AgentChanged',
   'AgentRehomed',
   'WorkstationConnected',
+  'WorkstationRuntimesChanged',
   'ScheduleFired',
   'RebaseConflict',
   'CardMovedByManager',

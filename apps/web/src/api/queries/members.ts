@@ -71,6 +71,7 @@ export function useRehomeAgent() {
         workstationId: v.workstationId,
         runtime: v.runtime,
         model: v.model,
+        ...(v.acknowledgeUnsandboxed ? { acknowledgeUnsandboxed: true } : {}),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
   });

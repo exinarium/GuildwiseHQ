@@ -295,6 +295,8 @@ function RehomeDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () 
   const station = active.find((w) => w.id === eff);
   const runtimes = station?.runtimes.filter((r) => r.available).map((r) => r.id) ?? [];
   const effRuntime = runtime && runtimes.includes(runtime) ? runtime : (runtimes[0] ?? agent?.runtime ?? '');
+  const rehomeUnsandboxed = !!station && isRuntimeUnsandboxed(station.runtimes, effRuntime);
+  const [rehomeAck, setRehomeAck] = useState(false);
   return (
     <Dialog
       open={!!agent}
@@ -315,6 +317,7 @@ function RehomeDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () 
                 workstationId: eff,
                 runtime: effRuntime,
                 model: model.trim() || agent.model,
+                ...(rehomeUnsandboxed && rehomeAck ? { acknowledgeUnsandboxed: true } : {}),
               },
               { onSuccess: onClose },
             );
@@ -341,6 +344,22 @@ function RehomeDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () 
             value={model}
             onChange={(e) => setModel(e.target.value)}
           />
+          {rehomeUnsandboxed && station && (
+            <div className="flex flex-col gap-2">
+              <SandboxWarning testId="rehome-sandbox-warning" role="alert" lead="Warning:">
+                {agentWarning(station.name)}
+              </SandboxWarning>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={rehomeAck}
+                  onChange={(e) => setRehomeAck(e.target.checked)}
+                  className="mt-1"
+                />
+                <span>I understand this agent runs without an OS sandbox on {station.name}</span>
+              </label>
+            </div>
+          )}
           <ErrorBox error={rehome.error} />
           <div className="flex justify-end gap-2">
             <Button onClick={onClose}>Cancel</Button>
@@ -485,6 +504,7 @@ function HireDialog({
         ...(runtime ? { runtime } : {}),
         ...(model.trim() ? { model: model.trim() } : {}),
         ...(effort ? { effort } : {}),
+        ...(unsandboxed && ackUnsandboxed ? { acknowledgeUnsandboxed: true } : {}),
         skills: skills
           .split(',')
           .map((s) => s.trim())

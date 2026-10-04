@@ -6,6 +6,7 @@ import {
   checkPermissions,
   type HireAgentRequest,
   streamId,
+  type UnsandboxedAck,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
@@ -176,6 +177,36 @@ export async function suggestNames(
   return out;
 }
 
+/**
+ * A workstation's runtime may only take an agent when it can run one: `unavailable` is refused with the runner's reason;
+ * `unsandboxed` needs the caller's explicit acknowledgement, which is returned for the event (who and when).
+ */
+export async function sandboxGate(
+  ctx: Ctx,
+  tx: Tx,
+  userId: string,
+  workstationId: string,
+  runtimeId: string,
+  acknowledged: boolean | undefined,
+): Promise<UnsandboxedAck | undefined> {
+  const ws = await one(tx, 'SELECT name, runtimes FROM workstations WHERE id=$1', [workstationId]);
+  const rt = (
+    ws?.runtimes as Array<{ id: string; sandbox?: string; sandboxReason?: string }> | undefined
+  )?.find((r) => r.id === runtimeId);
+  if (rt?.sandbox === 'unavailable')
+    throw conflict(
+      'sandbox_unavailable',
+      `${ws?.name}: the ${runtimeId} runtime cannot run agents: ${rt.sandboxReason ?? 'the OS sandbox is unavailable'}`,
+    );
+  if (rt?.sandbox !== 'unsandboxed') return undefined;
+  if (!acknowledged)
+    throw conflict(
+      'unsandboxed_ack_required',
+      `${ws?.name} runs the ${runtimeId} runtime without an OS sandbox: an agent could read files your user can read, including the runner token. Run the runner in WSL2 to sandbox it, or set acknowledgeUnsandboxed to accept the risk.`,
+    );
+  return { by: userId, at: ctx.clock.now().toISOString() };
+}
+
 export async function hireAgent(ctx: Ctx, user: AuthSession['user'], req: HireAgentRequest): Promise<string> {
   const agentId = randomUUID();
   await withAppendTx(ctx.pool, async (tx) => {
@@ -214,6 +245,14 @@ export async function hireAgent(ctx: Ctx, user: AuthSession['user'], req: HireAg
       );
     }
     const dm = roleDef.definition.defaultModel;
+    const unsandboxedAck = await sandboxGate(
+      ctx,
+      tx,
+      user.id,
+      req.workstationId,
+      req.runtime ?? dm.runtime,
+      req.acknowledgeUnsandboxed,
+    );
     await ctx.store.append(
       [
         {
@@ -237,6 +276,7 @@ export async function hireAgent(ctx: Ctx, user: AuthSession['user'], req: HireAg
               permissions: roleDef.definition.permissions,
               capacity: req.capacity,
               isDevops: false,
+              ...(unsandboxedAck ? { unsandboxedAck } : {}),
             },
           },
           actor: userActor(user.id),
@@ -273,6 +313,7 @@ export async function patchAgent(
   user: AuthSession['user'],
   agentId: string,
   changes: AgentChanges,
+  acknowledgeUnsandboxed?: boolean,
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     const a = await manageableAgent(tx, user, agentId);
@@ -298,11 +339,18 @@ export async function patchAgent(
       if (check.widened.length && user.id !== a.org_id)
         throw forbidden(`only the organization owner can widen permissions (${check.widened.join(', ')})`);
     }
+    const unsandboxedAck =
+      next.runtime && next.runtime !== a.runtime && a.workstation_id
+        ? await sandboxGate(ctx, tx, user.id, a.workstation_id, next.runtime, acknowledgeUnsandboxed)
+        : undefined;
     await ctx.store.append(
       [
         {
           streamId: streamId.agent(agentId),
-          event: { type: 'AgentChanged', payload: { agentId, changes: next } },
+          event: {
+            type: 'AgentChanged',
+            payload: { agentId, changes: next, ...(unsandboxedAck ? { unsandboxedAck } : {}) },
+          },
           actor: userActor(user.id),
           scope: agentScope(a),
         },

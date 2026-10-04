@@ -49,7 +49,8 @@ export function agentRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: PatchAgentRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        await patchAgent(ctx, s.user, req.params.id, req.body);
+        const { acknowledgeUnsandboxed, ...changes } = req.body;
+        await patchAgent(ctx, s.user, req.params.id, changes, acknowledgeUnsandboxed);
         return one(s.user.id, req.params.id);
       },
     );

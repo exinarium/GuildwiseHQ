@@ -53,10 +53,14 @@ export const HireAgentRequestSchema = z.object({
   effort: z.string().optional(),
   skills: z.array(z.string()).optional(),
   capacity: z.number().int().min(1).max(8).default(1),
+  /** Required to hire onto a runtime that reports `unsandboxed` (409 `unsandboxed_ack_required` without it). */
+  acknowledgeUnsandboxed: z.boolean().optional(),
 });
 export type HireAgentRequest = z.infer<typeof HireAgentRequestSchema>;
 
-export const PatchAgentRequestSchema = AgentChangesSchema;
+export const PatchAgentRequestSchema = AgentChangesSchema.extend({
+  acknowledgeUnsandboxed: z.boolean().optional(),
+});
 export type PatchAgentRequest = z.infer<typeof PatchAgentRequestSchema>;
 
 /** `POST /api/agents/:id/rehome` (M3). */
@@ -64,6 +68,7 @@ export const RehomeAgentRequestSchema = z.object({
   workstationId: z.uuid(),
   runtime: z.string(),
   model: z.string(),
+  acknowledgeUnsandboxed: z.boolean().optional(),
 });
 export type RehomeAgentRequest = z.infer<typeof RehomeAgentRequestSchema>;
 

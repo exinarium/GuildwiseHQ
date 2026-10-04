@@ -15,6 +15,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { sandboxGate } from './agents.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
 
 // ------------------------------------------------------------------------------------- invitations
@@ -298,13 +299,27 @@ export async function rehomeAgent(
       [req.workstationId, user.id],
     );
     if (!ws) throw notFound('workstation not found');
+    const unsandboxedAck = await sandboxGate(
+      ctx,
+      tx,
+      user.id,
+      req.workstationId,
+      req.runtime,
+      req.acknowledgeUnsandboxed,
+    );
     await ctx.store.append(
       [
         {
           streamId: streamId.agent(agentId),
           event: {
             type: 'AgentRehomed',
-            payload: { agentId, workstationId: req.workstationId, runtime: req.runtime, model: req.model },
+            payload: {
+              agentId,
+              workstationId: req.workstationId,
+              runtime: req.runtime,
+              model: req.model,
+              ...(unsandboxedAck ? { unsandboxedAck } : {}),
+            },
           },
           actor: userActor(user.id),
           scope: a.project_id ? projectScope(a.org_id, a.project_id) : orgScope(a.org_id),

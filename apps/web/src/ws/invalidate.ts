@@ -61,7 +61,7 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
     case 'departments':
       return [['roles'], ['workflows'], ['org'], ['hr'], ['agents'], ['projects']];
     case 'workstation':
-      return [['workstations'], ['admin', 'workstations'], ['agents']];
+      return [['workstations'], ['admin', 'workstations'], ['agents'], ['hr']];
     case 'project':
       return [['projects'], ['project'], ['board'], ['project-invitations'], ['agents']];
     case 'user':

@@ -6,7 +6,7 @@ import { BASE_URL } from './support/env.ts';
 export default defineConfig({
   testDir: './tests',
   testMatch: '**/*.spec.ts',
-  globalSetup: './global-setup.ts',
+  globalSetup: process.env.AOM_E2E_GUIDE === '1' ? './guide-global-setup.ts' : './global-setup.ts',
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -30,5 +30,7 @@ export default defineConfig({
     { name: 'sandbox', testMatch: 'sandbox.spec.ts', dependencies: ['intake'] },
     { name: 'outbox', testMatch: 'outbox.spec.ts', dependencies: ['intake'] },
     { name: 'org-designer', testMatch: 'org-designer.spec.ts', dependencies: ['intake'] },
+    // The screenshot run for docs/guide (never part of `pnpm e2e`): AOM_E2E_GUIDE=1 playwright test --project=guide
+    ...(process.env.AOM_E2E_GUIDE === '1' ? [{ name: 'guide', testMatch: 'guide-screenshots.spec.ts', timeout: 600_000 }] : []),
   ],
 });

@@ -17,6 +17,10 @@ export const AgentChangesSchema = z
   .partial();
 export type AgentChanges = z.infer<typeof AgentChangesSchema>;
 
+/** Who accepted, and when, that the agent runs on a runtime with no OS sandbox. */
+export const UnsandboxedAckSchema = z.object({ by: Id, at: z.iso.datetime() });
+export type UnsandboxedAck = z.infer<typeof UnsandboxedAckSchema>;
+
 export const agentEvents = [
   defineEvent(
     'AgentHired',
@@ -37,13 +41,23 @@ export const agentEvents = [
       permissions: AgentPermissionsSchema,
       capacity: z.number().int().min(1).max(8),
       isDevops: z.boolean(),
+      unsandboxedAck: UnsandboxedAckSchema.optional(),
     }),
   ),
-  defineEvent('AgentChanged', z.object({ agentId: Id, changes: AgentChangesSchema })),
+  defineEvent(
+    'AgentChanged',
+    z.object({ agentId: Id, changes: AgentChangesSchema, unsandboxedAck: UnsandboxedAckSchema.optional() }),
+  ),
   defineEvent('AgentRetired', z.object({ agentId: Id, by: Id, releasedCardIds: z.array(Id) })),
   defineEvent('AgentReset', z.object({ agentId: Id })),
   defineEvent(
     'AgentRehomed',
-    z.object({ agentId: Id, workstationId: Id, runtime: z.string(), model: z.string() }),
+    z.object({
+      agentId: Id,
+      workstationId: Id,
+      runtime: z.string(),
+      model: z.string(),
+      unsandboxedAck: UnsandboxedAckSchema.optional(),
+    }),
   ),
 ] as const;

@@ -116,11 +116,7 @@ export class RunnerHandlers {
         await this.matchRepos(conn);
         return;
       case 'runtimes.report':
-        await exec(this.ctx.pool, 'UPDATE workstations SET runtimes=$2 WHERE id=$1', [
-          conn.workstationId,
-          JSON.stringify(msg.runtimes),
-        ]);
-        await alignDevopsRuntime(this.ctx, conn.workstationId, msg.runtimes);
+        await this.runtimesReport(conn, msg.runtimes);
         return;
       case 'shift.accepted':
         await markShiftAccepted(this.ctx, ws, msg.shiftId);
@@ -227,6 +223,32 @@ export class RunnerHandlers {
       default:
         return; // ack: nothing to do
     }
+  }
+
+  /** A re-probe: store the runtimes and, when availability or sandbox state moved, tell the browsers (live refresh). */
+  private async runtimesReport(conn: RunnerConn, runtimes: RunnerToServerOf<'hello'>['runtimes']) {
+    const { ctx } = this;
+    const before = await one(ctx.pool, 'SELECT runtimes FROM workstations WHERE id=$1', [conn.workstationId]);
+    await exec(ctx.pool, 'UPDATE workstations SET runtimes=$2 WHERE id=$1', [
+      conn.workstationId,
+      JSON.stringify(runtimes),
+    ]);
+    await alignDevopsRuntime(ctx, conn.workstationId, runtimes);
+    const brief = (rs: Array<{ id: string; available: boolean; sandbox?: string }>) =>
+      rs.map((r) => ({ id: r.id, available: r.available, ...(r.sandbox ? { sandbox: r.sandbox } : {}) }));
+    const now = brief(runtimes);
+    if (JSON.stringify(brief(before?.runtimes ?? [])) === JSON.stringify(now)) return;
+    await ctx.store.append([
+      {
+        streamId: streamId.workstation(conn.workstationId),
+        event: {
+          type: 'WorkstationRuntimesChanged',
+          payload: { workstationId: conn.workstationId, runtimes: now },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: orgScope(conn.userId),
+      },
+    ]);
   }
 
   // ------------------------------------------------------------------------------------ hello
