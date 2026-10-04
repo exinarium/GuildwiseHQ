@@ -151,7 +151,9 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
               ? 'Update to a ticket'
               : item.subkind === 'outbound_failed'
                 ? 'Posting failed'
-                : (item.subkind ?? item.kind)}
+                : item.subkind === 'definition'
+                  ? 'Role or workflow'
+                  : (item.subkind ?? item.kind)}
         </Badge>
         <Badge tone={item.blocking ? 'red' : 'neutral'}>{item.blocking ? 'Blocking' : 'Non-blocking'}</Badge>
         <span data-testid="affected-count">
@@ -181,6 +183,14 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
       )}
       <h2 className="mt-2 text-base font-semibold whitespace-pre-wrap">{item.title}</h2>
       {item.body && item.kind !== 'rating' && <p className="mt-1 text-sm whitespace-pre-wrap">{item.body}</p>}
+      {item.subkind === 'definition' && (
+        <p className="mt-1 text-xs">
+          <Link to="/org?tab=workflows" className="underline" data-testid="open-org">
+            Open the Organization page
+          </Link>{' '}
+          to see the stage table, graph and validation. Nothing is available until you approve.
+        </p>
+      )}
       {item.kind === 'rating' && item.digestItems && (
         <DigestRating items={item.digestItems} canRate={item.status === 'open' && item.canAnswer} />
       )}

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useBoard } from '../api/queries/board.ts';
 import { useProjects } from '../api/queries/projects.ts';
@@ -6,6 +6,7 @@ import { useRunFeed } from '../api/queries/schedules.ts';
 import { BoardView } from '../components/BoardView.tsx';
 import { RegressionDialog } from '../components/RegressionDialog.tsx';
 import { Button, ErrorBox, PageHeader, Spinner } from '../components/ui.tsx';
+import { departmentsOf, inDepartment } from '../lib/designer.ts';
 import { setLastProjectKey } from '../lib/lastProject.ts';
 
 export function Board() {
@@ -15,6 +16,7 @@ export function Board() {
   const project = projects.data?.find((p) => p.key === projectKey);
   const board = useBoard(project?.id);
   const runFeed = useRunFeed();
+  const [department, setDepartment] = useState('');
 
   useEffect(() => {
     if (project) setLastProjectKey(project.key);
@@ -46,17 +48,43 @@ export function Board() {
             <label className="sr-only" htmlFor="project-switch">
               Project
             </label>
+            {departmentsOf(projects.data ?? []).length > 0 && (
+              <>
+                <label className="sr-only" htmlFor="department-filter">
+                  Department
+                </label>
+                <select
+                  id="department-filter"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                >
+                  <option value="">All departments</option>
+                  {departmentsOf(projects.data ?? []).map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
             <select
               id="project-switch"
               value={project.key}
               onChange={(e) => nav(`/p/${e.target.value}/board`)}
               className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
             >
-              {projects.data?.map((p) => (
-                <option key={p.id} value={p.key}>
-                  {p.key}
-                </option>
-              ))}
+              {inDepartment(projects.data ?? [], department)
+                .concat(
+                  project && !inDepartment(projects.data ?? [], department).includes(project)
+                    ? [project]
+                    : [],
+                )
+                .map((p) => (
+                  <option key={p.id} value={p.key}>
+                    {p.key}
+                  </option>
+                ))}
             </select>
             <RegressionDialog projectId={project.id} />
             {project.workflowKey === 'feed' && (

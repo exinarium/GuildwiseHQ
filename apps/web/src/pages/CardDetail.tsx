@@ -61,7 +61,7 @@ function statusTone(status: string) {
 export function CardDetail() {
   const { ref = '' } = useParams();
   const q = useCard(ref);
-  const workflows = useWorkflows();
+  const workflows = useWorkflows(q.data?.card.projectId);
   if (q.isPending) return <Spinner label="Loading card" />;
   if (q.isError) {
     return (

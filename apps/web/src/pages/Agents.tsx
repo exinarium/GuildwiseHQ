@@ -6,6 +6,7 @@ import { useMe } from '../api/queries/auth.ts';
 import { useResetAgent } from '../api/queries/devops.ts';
 import { useHrBoard } from '../api/queries/hr.ts';
 import { useRehomeAgent } from '../api/queries/members.ts';
+import { useDepartments } from '../api/queries/org.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
 import { AgentStats, WorkQualityPanel } from '../components/hr/AgentStats.tsx';
@@ -31,7 +32,9 @@ import { getLastProjectKey } from '../lib/lastProject.ts';
  */
 export function Agents() {
   const [projectFilter, setProjectFilter] = useState('');
-  const board = useHrBoard(projectFilter || undefined);
+  const [departmentFilter, setDepartmentFilter] = useState('');
+  const board = useHrBoard(projectFilter || undefined, departmentFilter || undefined);
+  const orgCatalogue = useDepartments();
   const agents = useAgents();
   const roles = useRoles();
   const workstations = useWorkstations();
@@ -73,18 +76,36 @@ export function Agents() {
           </>
         }
       />
-      {(projects.data?.length ?? 0) > 1 && (
-        <div className="mb-3 max-w-xs">
-          <Select label="Project" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
-            <option value="">All projects</option>
-            {projects.data?.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.key} {p.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-      )}
+      <div className="mb-3 flex flex-wrap gap-3">
+        {(projects.data?.length ?? 0) > 1 && (
+          <div className="w-full max-w-xs">
+            <Select label="Project" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+              <option value="">All projects</option>
+              {projects.data?.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.key} {p.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
+        {(orgCatalogue.data?.length ?? 0) > 0 && (
+          <div className="w-full max-w-xs">
+            <Select
+              label="Department"
+              value={departmentFilter}
+              onChange={(e) => setDepartmentFilter(e.target.value)}
+            >
+              <option value="">All departments</option>
+              {orgCatalogue.data?.map((d) => (
+                <option key={d.name} value={d.name}>
+                  {d.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
+      </div>
       {board.isPending && <Spinner />}
       {board.isError && <ErrorBox error={board.error} />}
       <ErrorBox error={reset.error} />
@@ -379,7 +400,6 @@ function HireDialog({
   onOpenChange: (o: boolean) => void;
   prefill?: { roleKey: string; projectId: string } | null;
 }) {
-  const roles = useRoles();
   const stations = useWorkstations();
   const projects = useProjects();
   const hire = useHire();
@@ -390,6 +410,13 @@ function HireDialog({
   const [seniority, setSeniority] = useState(prefill ? 'junior' : '');
   const [workstationId, setWorkstationId] = useState('');
   const [projectId, setProjectId] = useState(prefill?.projectId ?? '');
+  // A shared project runs on its owner's catalogue: the Hire form lists that organization's roles (custom ones too).
+  const roles = useRoles(
+    projectId ||
+      projects.data?.find((p) => p.key === getLastProjectKey())?.id ||
+      projects.data?.[0]?.id ||
+      undefined,
+  );
   const [runtime, setRuntime] = useState('');
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState('');
@@ -475,6 +502,7 @@ function HireDialog({
           {hireable.map((r) => (
             <option key={r.definition.key} value={r.definition.key}>
               {r.definition.name}
+              {r.definition.department ? ` (${r.definition.department})` : ''}
             </option>
           ))}
         </Select>

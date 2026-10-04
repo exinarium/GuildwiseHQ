@@ -18,6 +18,10 @@ const notFound = () =>
   );
 
 export const extraHandlers = [
+  // M10 organization designer: built-in departments only; drafting needs the real server.
+  http.get(`${A}/departments`, empty({ departments: [] })),
+  http.post(`${A}/departments`, unavailable),
+  http.get(`${A}/org/catalogue`, notFound),
   // M2 desk, ledger, chats
   http.get(`${A}/desk`, empty({ items: [], counts: { open: 0, blocking: 0, urgent: 0 } })),
   http.post(`${A}/desk/:id/answer`, unavailable),

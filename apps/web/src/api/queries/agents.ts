@@ -8,10 +8,10 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, post, qs } from '../client.ts';
 
-export function useAgents(projectId?: string) {
+export function useAgents(projectId?: string, department?: string) {
   return useQuery({
-    queryKey: ['agents', projectId ?? 'all'],
-    queryFn: async () => (await get(`/agents${qs({ projectId })}`, AgentsResponseSchema)).agents,
+    queryKey: ['agents', projectId ?? 'all', department ?? 'any'],
+    queryFn: async () => (await get(`/agents${qs({ projectId, department })}`, AgentsResponseSchema)).agents,
   });
 }
 
@@ -25,19 +25,20 @@ export function useNameSuggestions(enabled: boolean, nonce: number, theme = 'def
   });
 }
 
-export function useRoles() {
+/** Active roles of the organization the work runs in: with `projectId`, the owner's catalogue of a shared project. */
+export function useRoles(projectId?: string) {
   return useQuery({
-    queryKey: ['roles'],
+    queryKey: ['roles', projectId ?? 'own'],
     staleTime: 300_000,
-    queryFn: async () => (await get('/roles', RolesResponseSchema)).roles,
+    queryFn: async () => (await get(`/roles${qs({ projectId })}`, RolesResponseSchema)).roles,
   });
 }
 
-export function useWorkflows() {
+export function useWorkflows(projectId?: string) {
   return useQuery({
-    queryKey: ['workflows'],
+    queryKey: ['workflows', projectId ?? 'own'],
     staleTime: 300_000,
-    queryFn: async () => (await get('/workflows', WorkflowsResponseSchema)).workflows,
+    queryFn: async () => (await get(`/workflows${qs({ projectId })}`, WorkflowsResponseSchema)).workflows,
   });
 }
 

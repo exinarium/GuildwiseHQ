@@ -9,10 +9,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, patch, post, qs } from '../client.ts';
 
 /** The HR board: agents with stats against the role average, work quality, recommendations, role updates. */
-export function useHrBoard(projectId?: string) {
+export function useHrBoard(projectId?: string, department?: string) {
   return useQuery({
-    queryKey: ['hr', 'board', projectId ?? 'all'],
-    queryFn: () => get(`/hr/board${qs({ projectId })}`, HrBoardResponseSchema),
+    queryKey: ['hr', 'board', projectId ?? 'all', department ?? 'any'],
+    queryFn: () => get(`/hr/board${qs({ projectId, department })}`, HrBoardResponseSchema),
   });
 }
 

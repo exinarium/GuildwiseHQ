@@ -15,10 +15,14 @@ import {
   Spinner,
   TextInput,
 } from '../components/ui.tsx';
+import { departmentsOf, inDepartment } from '../lib/designer.ts';
 
 export function Projects() {
   const projects = useProjects();
   const [open, setOpen] = useState(false);
+  const [department, setDepartment] = useState('');
+  const departments = departmentsOf(projects.data ?? []);
+  const shown = inDepartment(projects.data ?? [], department);
   return (
     <div className="mx-auto max-w-4xl">
       <PageHeader
@@ -30,6 +34,18 @@ export function Projects() {
         }
       />
       <ProjectInvitations />
+      {departments.length > 0 && (
+        <div className="mb-3 max-w-xs">
+          <Select label="Department" value={department} onChange={(e) => setDepartment(e.target.value)}>
+            <option value="">All departments</option>
+            {departments.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
       {projects.isPending && <Spinner />}
       {projects.isError && <ErrorBox error={projects.error} />}
       {projects.data?.length === 0 && (
@@ -38,7 +54,7 @@ export function Projects() {
         </Panel>
       )}
       <ul className="flex flex-col gap-2">
-        {projects.data?.map((p) => (
+        {shown.map((p) => (
           <li key={p.id}>
             <Panel className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -48,6 +64,7 @@ export function Projects() {
                 </p>
                 <p className="mt-0.5 flex gap-1.5 text-xs text-zinc-500">
                   <Badge>{p.workflowKey}</Badge>
+                  {p.department && <Badge tone="violet">{p.department}</Badge>}
                   <Badge>{p.domain}</Badge>
                   <Badge tone="blue">{p.myRole}</Badge>
                 </p>

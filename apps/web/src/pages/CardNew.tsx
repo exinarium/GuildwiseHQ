@@ -18,11 +18,12 @@ import { getLastProjectKey } from '../lib/lastProject.ts';
 export function CardNew() {
   const [params] = useSearchParams();
   const projects = useProjects();
-  const workflows = useWorkflows();
   const key = params.get('project') ?? getLastProjectKey();
   const [chosen, setChosen] = useState<string | null>(null);
   const project =
     projects.data?.find((p) => p.key === (chosen ?? key)) ?? (chosen ? undefined : projects.data?.[0]);
+  // The workflow of a shared project is its owner's (custom ones included).
+  const workflows = useWorkflows(project?.id);
   const detail = useProject(project?.id);
   const workflow = useMemo(
     () =>

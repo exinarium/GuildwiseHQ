@@ -66,6 +66,9 @@ function Shell({ isAdmin, name, live }: { isAdmin: boolean; name: string; live: 
             <NavLink to="/agents" className={link}>
               HR
             </NavLink>
+            <NavLink to="/org" className={link}>
+              Organization
+            </NavLink>
             <NavLink to="/metrics" className={link}>
               Metrics
             </NavLink>
