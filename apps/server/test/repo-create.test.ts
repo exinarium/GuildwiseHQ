@@ -369,6 +369,27 @@ describe('approved repository setup', () => {
       expect(await status()).toMatchObject({ status: 'approved' });
     });
 
+    // Real use: the owner acknowledged the failure alert straight away, then wanted to retry the request.
+    it('an alert that was already acknowledged can still retry a request that is failed', async () => {
+      await setup();
+      const { cmd, alert } = await failedRequest();
+      expect((await resolve(alert.id, { resolution: 'acknowledged' })).status).toBe(200);
+      const from = r.received.length;
+      expect((await resolve(alert.id, { resolution: 'approved' })).status).toBe(200);
+      expect((await nextCommand(r, from)).payload).toEqual(cmd.payload);
+      expect(await status()).toMatchObject({ status: 'approved' });
+      expect(
+        (
+          await q(
+            `SELECT count(*)::int AS n FROM events WHERE type='DeskItemResolved' AND payload->>'deskItemId'=$1`,
+            [alert.id],
+          )
+        )[0]!.n,
+      ).toBe(1);
+      // any other resolution of a closed alert is still refused
+      expect((await resolve(alert.id, { resolution: 'acknowledged' })).status).toBe(409);
+    });
+
     it('only the project owner can retry', async () => {
       await setup();
       const m = await addMember(w, 'retrymgr');

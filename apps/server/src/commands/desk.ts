@@ -209,7 +209,15 @@ async function closeItem(
   let devops = false;
   await withAppendTx(ctx.pool, async (tx) => {
     const { item, mayAct } = await lockItem(tx, user, id);
-    if (item.status !== 'open') throw conflict('already_resolved', `this item is already ${item.status}`);
+    // Acknowledging a "repository not created" alert is not giving up on the request: Retry still works on it while
+    // the request is failed (retryRepoCreateIn enforces that), and the alert is not resolved a second time.
+    const retryClosedAlert =
+      item.status !== 'open' &&
+      item.kind === 'alert' &&
+      item.subkind === 'repo_create_failed' &&
+      resolution === 'approved';
+    if (item.status !== 'open' && !retryClosedAlert)
+      throw conflict('already_resolved', `this item is already ${item.status}`);
     if (item.kind === 'question' && resolution !== 'dismissed')
       throw badRequest('wrong_kind', 'questions are answered (POST /api/desk/:id/answer) or dismissed');
     if (!mayAct) throw forbidden('only the card owner (or any manager, per the decision policy) can do this');
@@ -264,26 +272,27 @@ async function closeItem(
       await resolveVaultConflictIn(ctx, tx, user, wv.vault_id, wv.workstation_id);
       workstationToDeliver = wv.workstation_id;
     }
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.desk(item.id),
-          event: {
-            type: 'DeskItemResolved',
-            payload: {
-              deskItemId: item.id,
-              resolution,
-              ...(note ? { note } : {}),
-              ...(editedBody ? { editedBody } : {}),
-              by: { kind: 'user', userId: user.id },
+    if (!retryClosedAlert)
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.desk(item.id),
+            event: {
+              type: 'DeskItemResolved',
+              payload: {
+                deskItemId: item.id,
+                resolution,
+                ...(note ? { note } : {}),
+                ...(editedBody ? { editedBody } : {}),
+                by: { kind: 'user', userId: user.id },
+              },
             },
+            actor: userActor(user.id),
+            scope: itemScope(item),
           },
-          actor: userActor(user.id),
-          scope: itemScope(item),
-        },
-      ],
-      { tx },
-    );
+        ],
+        { tx },
+      );
   });
   if (devops) ctx.services.dispatcher.trigger();
   if (workstationToDeliver) await ctx.services.gateway.deliverPending(workstationToDeliver);
