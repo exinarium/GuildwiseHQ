@@ -37,6 +37,7 @@ export class MockAdapter implements RuntimeAdapter {
       version: 'mock-1',
       available: this.cfg.enabled,
       capabilities: this.cfg.capabilities ?? ALL_CAPABILITIES,
+      ...(this.cfg.sandbox ? { sandbox: this.cfg.sandbox, sandboxReason: this.cfg.sandboxReason } : {}),
     };
   }
 

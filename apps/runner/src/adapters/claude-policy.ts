@@ -399,6 +399,77 @@ export function sandboxMissing(
   return 'the Claude Code sandbox is not available on this platform (use WSL2)';
 }
 
+/** What the runner reports per runtime: is an OS boundary around the agent's shell in force, and why not. */
+export type SandboxStateName = 'enforced' | 'unsandboxed' | 'unavailable';
+export interface SandboxState {
+  state: SandboxStateName;
+  reason: string;
+}
+
+/** A user-facing reason for a platform that cannot run the sandbox (what to do about it included). */
+function missingAdvice(platform: NodeJS.Platform, missing: string): string {
+  if (platform === 'win32')
+    return 'Native Windows: install the runner in WSL2 (docs/RUNNER.md, "Windows: run the runner inside WSL2")';
+  if (platform === 'linux') return `${missing}: install them (apt install bubblewrap socat)`;
+  return `${missing}: run the runner in WSL2 or on macOS/Linux`;
+}
+
+/**
+ * The effective sandbox state of the claude-code runtime.
+ * - `required` (default): `enforced`, or `unavailable` when the platform cannot sandbox.
+ * - `best_effort`: `enforced` when it can; otherwise `unsandboxed` only with the explicit `allowUnsandboxed`
+ *   acknowledgement, else `unavailable` (no agent is scheduled).
+ * - `off`: `unsandboxed` (an explicit opt-in in itself).
+ * `platform` and `pathVar` are injectable for tests.
+ */
+export function sandboxState(
+  cfg: { sandbox: SandboxMode; allowUnsandboxed?: boolean },
+  platform: NodeJS.Platform = process.platform,
+  pathVar?: string,
+): SandboxState {
+  if (cfg.sandbox === 'off')
+    return { state: 'unsandboxed', reason: 'sandbox is set to "off" in the runner config' };
+  const missing = sandboxMissing(platform, pathVar);
+  if (!missing)
+    return { state: 'enforced', reason: platform === 'darwin' ? 'macOS Seatbelt' : 'bubblewrap + socat' };
+  const advice = missingAdvice(platform, missing);
+  if (cfg.sandbox === 'best_effort' && cfg.allowUnsandboxed)
+    return { state: 'unsandboxed', reason: `${advice}; running unsandboxed because allowUnsandboxed is set` };
+  return {
+    state: 'unavailable',
+    reason:
+      cfg.sandbox === 'best_effort'
+        ? `${advice}. Or set runtimes["claude-code"].allowUnsandboxed to true to run without an OS sandbox (not recommended)`
+        : advice,
+  };
+}
+
+/** The `sandbox` lines of `aom-runner doctor`; on native Windows the exact WSL2 steps. Exported for tests. */
+export function sandboxDoctorLines(
+  sb: SandboxState,
+  os: NodeJS.Platform,
+): Array<{ ok: boolean | 'warn'; name: string; detail: string }> {
+  const out: Array<{ ok: boolean | 'warn'; name: string; detail: string }> = [
+    {
+      ok: sb.state === 'enforced' ? true : sb.state === 'unsandboxed' ? 'warn' : false,
+      name: 'sandbox',
+      detail: `${sb.state} (${sb.reason})`,
+    },
+  ];
+  if (os === 'win32' && sb.state !== 'enforced')
+    for (const [i, step] of [
+      'Recommended: run the runner inside WSL2, where the Claude Code sandbox works.',
+      'In an admin PowerShell: wsl --install -d Ubuntu   (then reboot and create the Linux user)',
+      'In Ubuntu: sudo apt update && sudo apt install -y git gh bubblewrap socat curl',
+      'Install Node 22 (nvm install 22) and Claude Code (npm i -g @anthropic-ai/claude-code), then clone repos under ~/ (not /mnt/c)',
+      'Install and pair the runner inside Ubuntu (aom-runner pair ...), then run it as a systemd user service',
+      'Full steps: docs/RUNNER.md, "Windows: run the runner inside WSL2"',
+      'Opt-in without sandbox (not recommended): runtimes["claude-code"] { "sandbox": "best_effort", "allowUnsandboxed": true } in config.json',
+    ].entries())
+      out.push({ ok: 'warn', name: i === 0 ? 'windows' : '       ', detail: step });
+  return out;
+}
+
 // ------------------------------------------------------------------------------------------- toolchains
 
 const inside = (child: string, parent: string): boolean => {

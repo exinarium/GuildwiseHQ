@@ -7,6 +7,9 @@ export interface RuntimeCapabilities {
   available: boolean;
   /** 'shell','edit','web','mcp','skills','sandbox_config','resume' */
   capabilities: string[];
+  /** Effective OS-sandbox state and why (absent: the runtime has no such concept). */
+  sandbox?: 'enforced' | 'unsandboxed' | 'unavailable';
+  sandboxReason?: string;
 }
 
 export interface ShiftStartInput {

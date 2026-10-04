@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AgentChangesSchema } from '../events/agent.ts';
+import { SandboxStateSchema } from '../protocol/runner.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import { IsoTime } from './common.ts';
 
@@ -27,6 +28,9 @@ export const AgentDtoSchema = z.object({
   /** M10: the department of the agent's role. */
   department: z.string().nullable().optional(),
   lastShiftEndedAt: IsoTime.nullable(),
+  /** The OS-sandbox state its workstation reports for the agent's runtime (null/absent: not reported). */
+  sandbox: SandboxStateSchema.nullable().optional(),
+  sandboxReason: z.string().nullable().optional(),
   /** Active claims right now. */
   activeCards: z.array(z.object({ cardId: z.uuid(), ref: z.string(), title: z.string() })).default([]),
 });

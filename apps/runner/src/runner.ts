@@ -68,6 +68,8 @@ export class Runner {
   private readonly adapters: Map<string, RuntimeAdapter>;
   private readonly external: ExternalAdapters;
   private repos: RepoReport[] = [];
+  /** The runtimes last reported (hello or runtimes.report), to send a new report only on change. */
+  private lastRuntimes: string | undefined;
   private maxConcurrent: number;
   private readonly rpcs = new Map<string, (r: IpcRpcResponse) => void>();
   private timers: NodeJS.Timeout[] = [];
@@ -196,7 +198,13 @@ export class Runner {
     const out: RuntimeInfo[] = [];
     for (const a of this.adapters.values()) {
       const c = await a.capabilities();
-      out.push({ id: c.runtime, version: c.version, available: c.available, capabilities: c.capabilities });
+      out.push({
+        id: c.runtime,
+        version: c.version,
+        available: c.available,
+        capabilities: c.capabilities,
+        ...(c.sandbox ? { sandbox: c.sandbox, sandboxReason: c.sandboxReason } : {}),
+      });
     }
     return out;
   }
@@ -208,7 +216,10 @@ export class Runner {
       protocol: 1,
       platform: platform(),
       hostname: hostname(),
-      runtimes: await this.runtimeInfos(),
+      runtimes: await this.runtimeInfos().then((r) => {
+        this.lastRuntimes = JSON.stringify(r);
+        return r;
+      }),
       repos: this.repos,
       vaults: await this.vaults.report(),
       activeShifts: this.supervisor.activeShifts(),
@@ -218,6 +229,12 @@ export class Runner {
   private async rescan(): Promise<void> {
     this.repos = await scanRepos(this.opts.config.repoRoots);
     this.client.send('repos.report', { repos: this.repos });
+    // A re-probe may change a runtime (bubblewrap installed, claude upgraded): tell the server when it did.
+    const runtimes = await this.runtimeInfos();
+    const key = JSON.stringify(runtimes);
+    if (this.lastRuntimes !== undefined && key !== this.lastRuntimes)
+      this.client.send('runtimes.report', { runtimes });
+    this.lastRuntimes = key;
   }
 
   private async findRepo(normalized: string): Promise<RepoReport | undefined> {

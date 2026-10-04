@@ -74,3 +74,10 @@ export const DESIGNGUEST = {
   name: 'E2E Design Guest',
   password: 'designguest-password-12345',
 };
+
+/** Sandbox spec: own user and a mock runner that reports `unsandboxed` (AOM_RUNNER_MOCK_SANDBOX, test only). */
+export const SANDBOXER = {
+  email: 'sandboxer@e2e.test',
+  name: 'E2E Sandboxer',
+  password: 'sandboxer-password-12345',
+};

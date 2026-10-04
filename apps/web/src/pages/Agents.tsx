@@ -12,6 +12,7 @@ import { useWorkstations } from '../api/queries/workstations.ts';
 import { AgentStats, WorkQualityPanel } from '../components/hr/AgentStats.tsx';
 import { ChangeModelDialog, ChangeRoleDialog } from '../components/hr/ChangeDialogs.tsx';
 import { RecommendationList, RoleUpdates } from '../components/hr/Recommendations.tsx';
+import { SandboxWarning } from '../components/SandboxWarning.tsx';
 import {
   Avatar,
   Badge,
@@ -25,6 +26,7 @@ import {
   TextInput,
 } from '../components/ui.tsx';
 import { getLastProjectKey } from '../lib/lastProject.ts';
+import { agentWarning, isRuntimeUnsandboxed } from '../lib/sandbox.ts';
 
 /**
  * The HR board (docs/SPEC.md "HR board"): one card per agent with avatar, role, model, status, hiring manager, stats
@@ -221,6 +223,11 @@ function AgentCard({
         {a.effort ? ` · ${a.effort}` : ''}
         {station && ` · ${station}`}
       </p>
+      {a.sandbox === 'unsandboxed' && (
+        <SandboxWarning testId="agent-sandbox-warning" lead="Warning:">
+          {agentWarning(station || 'its workstation')}
+        </SandboxWarning>
+      )}
       <p className="text-xs text-zinc-500" data-testid="agent-hired-by">
         Hired by {hr.hiredByName}
       </p>
@@ -423,6 +430,8 @@ function HireDialog({
   const [skills, setSkills] = useState('');
   const [name, setName] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  /** The workstation+runtime the unsandboxed confirmation was given for: choosing another asks again. */
+  const [ackedFor, setAckedFor] = useState('');
 
   const hireable = useMemo(
     () => (roles.data ?? []).filter((r) => r.definition.key !== 'devops'),
@@ -451,10 +460,17 @@ function HireDialog({
     ),
   ];
 
+  const effectiveRuntime = runtime || role?.defaultModel.runtime || '';
+  const unsandboxed = !!station && isRuntimeUnsandboxed(station.runtimes, effectiveRuntime);
+  const ackKey = `${effectiveStation}:${effectiveRuntime}`;
+  const ackUnsandboxed = ackedFor === ackKey;
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (!role) errs.role = 'Choose a role';
+    if (unsandboxed && !ackUnsandboxed)
+      errs.sandbox = 'Confirm that you accept hiring onto an unsandboxed workstation';
     if (!name.trim()) errs.name = 'A name is required';
     if (!effectiveStation) errs.workstation = 'Pair a workstation first';
     setErrors(errs);
@@ -606,6 +622,28 @@ function HireDialog({
             </button>
           </div>
         </div>
+        {unsandboxed && station && (
+          <div className="flex flex-col gap-2" data-testid="hire-unsandboxed">
+            <SandboxWarning testId="hire-sandbox-warning" role="alert" lead="Warning:">
+              {agentWarning(station.name)}
+            </SandboxWarning>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={ackUnsandboxed}
+                onChange={(e) => setAckedFor(e.target.checked ? ackKey : '')}
+                aria-describedby={errors.sandbox ? 'hire-sandbox-error' : undefined}
+                className="mt-1"
+              />
+              <span>I understand this agent runs without an OS sandbox on {station.name}</span>
+            </label>
+            {errors.sandbox && (
+              <p id="hire-sandbox-error" role="alert" className="text-sm text-red-700 dark:text-red-400">
+                {errors.sandbox}
+              </p>
+            )}
+          </div>
+        )}
         <ErrorBox error={hire.error} />
         <div className="flex justify-end gap-2">
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>

@@ -37,11 +37,21 @@ const msg = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =>
 
 // ---------------------------------------------------------------- shared shapes
 
+/**
+ * Is an OS-level boundary around the agent's shell in force? `enforced`: yes. `unsandboxed`: no, and the owner opted
+ * in (config `off`, or `best_effort` + `allowUnsandboxed`). `unavailable`: no, and the runtime refuses to run agents.
+ */
+export const SandboxStateSchema = z.enum(['enforced', 'unsandboxed', 'unavailable']);
+export type SandboxState = z.infer<typeof SandboxStateSchema>;
+
 export const RuntimeInfoSchema = z.object({
   id: z.string(),
   version: z.string(),
   available: z.boolean(),
   capabilities: z.array(z.string()),
+  /** Absent from older runners and from runtimes without a sandbox concept: no warning is shown then. */
+  sandbox: SandboxStateSchema.optional(),
+  sandboxReason: z.string().optional(),
 });
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
 
@@ -267,6 +277,8 @@ export const HeartbeatSchema = msg('heartbeat', {
   activeShifts: z.array(z.string()),
   load: z.object({ runningShifts: z.number().int().nonnegative() }),
 });
+/** The runtimes' probe result changed (sandbox state, availability): sent after a re-probe, not only in `hello`. */
+export const RuntimesReportSchema = msg('runtimes.report', { runtimes: z.array(RuntimeInfoSchema) });
 export const ReposReportSchema = msg('repos.report', { repos: z.array(RepoReportSchema) });
 export const ShiftAcceptedSchema = msg('shift.accepted', { shiftId: z.uuid() });
 export const ShiftRejectedSchema = msg('shift.rejected', {
@@ -416,6 +428,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   OutboxFlushedSchema,
   HeartbeatSchema,
   ReposReportSchema,
+  RuntimesReportSchema,
   ShiftAcceptedSchema,
   ShiftRejectedSchema,
   ShiftStartedSchema,

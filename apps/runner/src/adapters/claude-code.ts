@@ -13,7 +13,8 @@ import {
   buildShiftSettings,
   type ClaudePolicyContext,
   gitDirsOf,
-  sandboxMissing,
+  type SandboxState,
+  sandboxState,
   toolchainReadPaths,
 } from './claude-policy.ts';
 import { ClaudeStreamParser } from './claude-stream-parser.ts';
@@ -136,7 +137,19 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   constructor(
     private readonly cfg: ClaudeConfig,
     private readonly paths?: RunnerPaths,
+    /** Test hook: simulate the platform and PATH the sandbox check sees. */
+    private readonly host: { platform?: NodeJS.Platform; pathVar?: string } = {},
   ) {}
+
+  private assertCanRun(): void {
+    const sb = this.sandboxStatus();
+    if (sb.state === 'unavailable') throw new Error(`the Claude Code sandbox is unavailable: ${sb.reason}`);
+  }
+
+  /** Effective OS-sandbox state of this runtime (see `sandboxState`). */
+  sandboxStatus(): SandboxState {
+    return sandboxState(this.cfg, this.host.platform, this.host.pathVar);
+  }
 
   /** What this session may touch (see claude-policy.ts); without runner paths (unit tests) the data dir is unknown. */
   private policy(
@@ -165,11 +178,13 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     // Reported unavailable in mock/test mode so the server never picks it for an agent (it also refuses to start).
     if (realClaudeBlocked())
       return { runtime: this.id, version: 'blocked', available: false, capabilities: [] };
+    const sb = this.sandboxStatus();
+    const sandbox = { sandbox: sb.state, sandboxReason: sb.reason };
     try {
       const r = await execa(this.cfg.bin, ['--version'], { reject: false, timeout: 10_000, stdin: 'ignore' });
       const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(r.stdout));
       if (r.exitCode !== 0 || !m)
-        return { runtime: this.id, version: 'unknown', available: false, capabilities: [] };
+        return { runtime: this.id, version: 'unknown', available: false, capabilities: [], ...sandbox };
       const major = Number(m[1]);
       const minor = Number(m[2]);
       let ok = major > 2 || (major === 2 && minor >= 1);
@@ -179,10 +194,11 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         !(major > 2 || (major === 2 && minor >= 1 && Number(m[3] ?? 0) >= 257))
       )
         ok = false;
-      if (this.cfg.sandbox === 'required' && sandboxMissing()) ok = false;
-      return { runtime: this.id, version: m[0], available: ok, capabilities: ok ? caps : [] };
+      // `unavailable`: required and missing, or best_effort without the allowUnsandboxed acknowledgement.
+      if (sb.state === 'unavailable') ok = false;
+      return { runtime: this.id, version: m[0], available: ok, capabilities: ok ? caps : [], ...sandbox };
     } catch {
-      return { runtime: this.id, version: 'unknown', available: false, capabilities: [] };
+      return { runtime: this.id, version: 'unknown', available: false, capabilities: [], ...sandbox };
     }
   }
 
@@ -193,6 +209,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   async start(input: ShiftStartInput): Promise<RuntimeSession> {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
+    this.assertCanRun();
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     await writeFile(
@@ -219,6 +236,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   async startChat(input: ChatStartInput): Promise<RuntimeSession> {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
+    this.assertCanRun();
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     await writeFile(

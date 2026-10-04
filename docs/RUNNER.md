@@ -19,6 +19,70 @@ pnpm package:runner      # outputs release/aom-runner-<version>.tgz
 
 Or download a pre-built binary from your system (available after deployment).
 
+### Windows: run the runner inside WSL2
+
+This is the default and recommended setup for a Windows workstation. Claude Code's sandbox runs on macOS (Seatbelt) and
+on Linux/WSL2 (bubblewrap + socat) but not on native Windows, where Claude Code runs commands unsandboxed (see
+https://code.claude.com/docs/en/sandboxing). Inside WSL2 the runner gets the same OS-level boundary as on Linux:
+agents cannot read the runner token, your SSH keys or anything else outside their worktree. On native Windows the
+runtime reports itself unavailable (no agent is scheduled) unless you opt out explicitly, see
+[Native Windows (unsandboxed, not recommended)](#native-windows-unsandboxed-not-recommended).
+
+macOS needs none of this: it uses the built-in Seatbelt sandbox and no extra installs. Linux needs `bubblewrap` and
+`socat` (step 4).
+
+1. **Enable WSL2.** In an administrator PowerShell: `wsl --install -d Ubuntu`, then reboot when asked and create the Linux
+   user when Ubuntu first starts. Check with `wsl -l -v` that Ubuntu runs as VERSION 2.
+2. **Turn on systemd** (needed for the service in step 8). In Ubuntu, `sudo tee /etc/wsl.conf <<'EOF'` with the content
+   `[boot]` and `systemd=true`, then in PowerShell `wsl --shutdown` and open Ubuntu again.
+3. **Install the base tools** in Ubuntu: `sudo apt update && sudo apt install -y git curl ca-certificates`.
+   Then GitHub CLI `gh` (follow https://github.com/cli/cli/blob/trunk/docs/install_linux.md) and `gh auth login`.
+4. **Install the sandbox dependencies:** `sudo apt install -y bubblewrap socat`. (On Ubuntu 24.04 and later see the AppArmor
+   note in the Claude Code sandboxing docs if `bwrap` is refused.)
+5. **Install Node 22 with nvm:**
+   `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash`, open a new shell, then
+   `nvm install 22 && nvm alias default 22`.
+6. **Install Claude Code** (2.1.257 or newer): `npm install -g @anthropic-ai/claude-code`, run `claude` once to sign in (or
+   put an OAuth token in the config, see Setting credentials).
+7. **Clone your repositories inside the WSL filesystem** (`~/src`), never under `/mnt/c`: file access through `/mnt/c` is
+   many times slower and breaks git file modes. Set up git identity and SSH keys inside Ubuntu too.
+8. **Install, pair and run the runner inside Ubuntu:**
+   ```sh
+   cp /mnt/c/Users/you/Downloads/aom-runner-*.tgz ~ && tar xzf ~/aom-runner-*.tgz -C ~ && cd ~/aom-runner
+   ./aom-runner pair --server https://aom.example.com --code XXXX-XXXX --name "Desktop (WSL2)"
+   ./aom-runner repos add ~/src
+   ./aom-runner doctor            # sandbox line must say "enforced"
+   ```
+   Then run it as a systemd user service, exactly as in "Run as a service" below (Linux). Make it survive logout with
+   `sudo loginctl enable-linger $USER`. WSL2 shuts a distribution down when nothing is running in it; to keep the
+   runner up from Windows login, add a Task Scheduler task "At log on" that runs
+   `wsl.exe -d Ubuntu -- sleep infinity`.
+
+`aom-runner doctor` prints the sandbox state and, on native Windows, these steps again. The Workstations page shows an
+amber warning for any workstation whose runtime reports `unsandboxed`, and why when it reports `unavailable`.
+
+### Native Windows (unsandboxed, not recommended)
+
+Native Windows cannot sandbox agents. With the default `sandbox: "required"` the `claude-code` runtime reports
+`unavailable` ("Native Windows: install the runner in WSL2") and no agent is scheduled on that workstation. To run agents
+there anyway you must opt in explicitly in `config.json`:
+
+```json
+{ "runtimes": { "claude-code": { "sandbox": "best_effort", "allowUnsandboxed": true } } }
+```
+
+`best_effort` alone is not enough on a platform without a sandbox: without `allowUnsandboxed: true` the runtime stays
+`unavailable` and the reason tells you to use WSL2 or set the flag. (`sandbox: "off"` is also an explicit opt-in and
+reports `unsandboxed` everywhere.)
+
+The risk: the permission rules and the minimal environment still apply, but there is no OS-level boundary. A
+prompt-injected agent can read anything your Windows user can read: the runner token and provider credentials in
+`config.json`, your SSH keys, browser profiles, other projects. Use a dedicated low-privilege Windows user for the runner if you
+must do this. The web UI shows a non-dismissable warning on the workstation, on every affected agent card and on the Hire
+form (hiring onto it needs a confirmation checkbox) for as long as the runner reports `unsandboxed`.
+
+Install and pair natively as shown in "Install and pair" (Windows tab) and run it with Task Scheduler.
+
 ### Install and pair
 
 Extract the tarball and run `pair`:
@@ -30,7 +94,7 @@ tar xzf aom-runner-0.1.0.tgz && cd aom-runner
 ./aom-runner start                     # run in foreground or as a service
 ```
 
-On Windows:
+On native Windows (unsandboxed, not recommended; prefer WSL2 above):
 ```cmd
 aom-runner.cmd pair --server https://aom.example.com --code XXXX-XXXX --name "Desktop"
 aom-runner.cmd repos add C:\src
@@ -41,9 +105,9 @@ The pairing code is valid for 10 minutes and valid for one pair attempt. See **P
 
 ### Run as a service
 
-Keep the runner running using systemd (Linux), launchd (macOS), or Task Scheduler (Windows).
+Keep the runner running using systemd (Linux and WSL2), launchd (macOS), or Task Scheduler (native Windows, not recommended).
 
-**Linux (systemd user service):**
+**Linux and WSL2 (systemd user service):**
 
 Create `~/.config/systemd/user/aom-runner.service`:
 
@@ -108,7 +172,7 @@ launchctl start com.aom.runner
 launchctl list | grep aom.runner      # check status
 ```
 
-**Windows (Task Scheduler):**
+**Native Windows (Task Scheduler, unsandboxed, not recommended):**
 
 1. Open Task Scheduler
 2. Create Task
@@ -523,7 +587,20 @@ Config keys (`runtimes.claude-code`): `sandbox` (`required` default, `best_effor
 the home directory itself and credential stores are refused), `scrubSubprocessEnv` (boolean, default `false`). With `sandbox: "required"` the runtime reports itself
 unavailable (no agent is scheduled on it) when `bwrap` and `socat` are missing on Linux (`sudo apt-get install
 bubblewrap socat`; on Ubuntu 24.04+ see the AppArmor note in the Claude Code sandboxing docs) or on native Windows (use
-WSL2); `claude` must be 2.1.257 or newer.
+WSL2; see "Windows: run the runner inside WSL2"); `claude` must be 2.1.257 or newer.
+
+Effective sandbox state, reported per runtime in `hello` (and again whenever a re-probe changes it), shown by
+`aom-runner doctor` and in the web UI:
+
+| State | Meaning |
+|---|---|
+| `enforced` | the OS sandbox (Seatbelt, or bubblewrap + socat) is in force |
+| `unsandboxed` | no OS boundary, by explicit opt-in: `sandbox: "off"`, or `sandbox: "best_effort"` with `allowUnsandboxed: true` on a platform that cannot sandbox |
+| `unavailable` | no sandbox and no opt-in: the runtime refuses agents. The reason says why (native Windows: install the runner in WSL2; Linux: `bwrap`/`socat` missing; `best_effort` without `allowUnsandboxed`) |
+
+`allowUnsandboxed` (boolean, default `false`, `runtimes.claude-code`) is the acknowledgement that agents may run with no
+OS sandbox; it only matters for `best_effort`. Test only: `AOM_RUNNER_MOCK_SANDBOX=unsandboxed|unavailable|enforced`
+makes the mock runtime report that state.
 
 `scrubSubprocessEnv: true` sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`: Claude Code then strips credentials from the
 environment of everything its shell starts and, on Linux, isolates the PID namespace so `/proc/<pid>/environ` of other

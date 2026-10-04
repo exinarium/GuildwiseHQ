@@ -28,14 +28,13 @@ tar xzf aom-runner-*.tgz && cd aom-runner
 ./aom-runner start                     # keep running; run under systemd (see below)
 ```
 
-**On Windows:**
-```cmd
-aom-runner.cmd pair --server https://aom.example.com --code XXXX-XXXX --name "Desktop"
-aom-runner.cmd repos add C:\Users\you\src
-aom-runner.cmd start
-```
+**On macOS:** the same commands as Linux. Agents run inside the built-in Seatbelt sandbox; nothing extra to install.
 
-Run the runner under systemd (Linux), launchd (macOS) or Task Scheduler (Windows) so it reconnects automatically on reboot. See `docs/RUNNER.md` for service setup.
+**On Windows:** run the runner inside WSL2 (the default and recommended setup). Windows cannot sandbox agents natively, but inside WSL2 the runner gets the same sandbox as on Linux. In short: `wsl --install -d Ubuntu`, then in Ubuntu install Node 22 (nvm), git, gh, `bubblewrap` and `socat`, Claude Code, clone repos under `~/src` (not `/mnt/c`), and run the Linux commands above. The full step-by-step guide is in `docs/RUNNER.md`, section "Windows: run the runner inside WSL2". Running natively on Windows is possible only as an explicit, unsandboxed opt-in (see "Windows workstation notes" below).
+
+Run the runner under systemd (Linux and WSL2), launchd (macOS) so it reconnects automatically on reboot. See `docs/RUNNER.md` for service setup.
+
+**Sandbox warnings.** If a workstation's runner reports that agents run without an OS sandbox, the Workstations page, each affected agent card on the HR board and the Hire form show an amber warning that cannot be dismissed, and hiring onto it needs a confirmation. A workstation that cannot run agents at all shows why (for example "Native Windows: install the runner in WSL2").
 
 The Workstations page will show your repos once you create a project with one of them.
 
@@ -453,7 +452,21 @@ Chat is saved to a thread and appears in the card's history. A chat that belongs
 
 ## Windows workstation notes
 
-### Installation
+### Default: WSL2
+
+Install the runner inside a WSL2 Ubuntu distribution and follow the Linux instructions: `docs/RUNNER.md`, section
+"Windows: run the runner inside WSL2" (enable WSL2, install Ubuntu, Node 22 via nvm, git, gh, bubblewrap and socat, Claude
+Code, clone repos in the WSL filesystem rather than `/mnt/c`, pair, and run the runner as a systemd user service). This is
+the only Windows setup where agents run inside an OS sandbox.
+
+### Native Windows (unsandboxed, not recommended)
+
+Native Windows cannot sandbox agents. By default the runtime then reports itself unavailable and no agent is scheduled.
+To run agents there anyway, set `"sandbox": "best_effort", "allowUnsandboxed": true` under `runtimes.claude-code` in
+`%LOCALAPPDATA%\aom-runner\config.json`. A prompt-injected agent could then read any file your Windows user can read,
+including the runner token. The web UI warns about it everywhere the workstation and its agents appear.
+
+### Installation (native)
 
 1. Download `aom-runner-*.tgz` from the system
 2. Extract to `C:\Users\you\aom-runner` (or your preferred location)
@@ -466,7 +479,7 @@ If your vault URLs use SSH:
 - Ensure `git` can reach your SSH keys (configure `OpenSSH` in Windows or use `PuTTY` with Pageant)
 - Or use HTTPS URLs with a GitHub PAT stored in `~/.git-credentials`
 
-### Run as a service
+### Run as a service (native)
 
 Use **Task Scheduler** to run `aom-runner.cmd start` on login:
 1. Task Scheduler > Create Task

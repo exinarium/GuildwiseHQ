@@ -2,6 +2,7 @@ import type { WorkstationDto } from '@aom/shared';
 import { useState } from 'react';
 import { usePairingCode, useUnlinkWorkstation, useWorkstations } from '../api/queries/workstations.ts';
 import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
+import { SandboxUnavailable, SandboxWarning } from '../components/SandboxWarning.tsx';
 import {
   Badge,
   Button,
@@ -12,6 +13,7 @@ import {
   Panel,
   Spinner,
 } from '../components/ui.tsx';
+import { UNSANDBOXED_CONSEQUENCE, unavailableRuntimes, unsandboxedRuntimes } from '../lib/sandbox.ts';
 import { formatDateTime } from '../lib/time.ts';
 
 export function pairCommand(code: string, origin: string = location.origin): string {
@@ -81,6 +83,19 @@ export function WorkstationCard({
             </Button>
           </div>
         </div>
+        {unsandboxedRuntimes(w.runtimes).map((r) => (
+          <div key={r.id} className="mt-2" data-testid={`sandbox-warning-${r.id}`}>
+            <SandboxWarning testId="sandbox-warning">
+              The {r.id} runtime on {w.name} runs agents without an OS sandbox
+              {r.sandboxReason ? ` (${r.sandboxReason})` : ''}: {UNSANDBOXED_CONSEQUENCE}
+            </SandboxWarning>
+          </div>
+        ))}
+        {unavailableRuntimes(w.runtimes).map((r) => (
+          <div key={r.id} className="mt-2">
+            <SandboxUnavailable runtime={r.id} reason={r.sandboxReason} />
+          </div>
+        ))}
         <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
           <div>
             <p className="text-xs font-medium text-zinc-500">Runtimes</p>

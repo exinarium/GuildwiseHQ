@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { RunnerPairRequestSchema, RunnerPairResponseSchema } from '@aom/shared';
 import { Command } from 'commander';
 import { execa } from 'execa';
+import { sandboxDoctorLines, sandboxState } from './adapters/claude-policy.ts';
 import { applyOverrides, loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
 import { toWsUrl } from './connection/client.ts';
 import { requestRotatedToken } from './connection/rotate.ts';
@@ -160,6 +161,8 @@ async function doctor(opts: { dataDir?: string }): Promise<void> {
       ? String(c.stdout).trim()
       : `\`${claudeBin}\` not found (only needed for the claude-code runtime)`,
   );
+  const sbCfg = config?.runtimes['claude-code'] ?? RunnerConfigSchema.shape.runtimes.parse({})['claude-code'];
+  for (const l of sandboxDoctorLines(sandboxState(sbCfg), platform())) line(l.ok, l.name, l.detail);
   const d = await execa('docker', ['--version'], { reject: false, stdin: 'ignore', timeout: 10_000 }).catch(
     () => undefined,
   );

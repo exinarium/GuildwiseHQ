@@ -19,6 +19,12 @@ export const ClaudeRuntimeConfigSchema = z.object({
    * `best_effort`: run unsandboxed when it cannot start. `off`: no sandbox (permission rules still apply).
    */
   sandbox: z.enum(['required', 'best_effort', 'off']).default('required'),
+  /**
+   * Explicit acknowledgement that agents may run with no OS sandbox. `best_effort` on a platform that cannot sandbox
+   * (native Windows) starts unsandboxed only with this set; without it the runtime reports itself unavailable.
+   * `off` needs no flag (it is the opt-in). Default false.
+   */
+  allowUnsandboxed: z.boolean().default(false),
   /** Extra hosts agents' shell commands may reach (private package mirrors, an internal git host). */
   extraAllowedDomains: z.array(z.string()).default([]),
   /**
@@ -55,6 +61,9 @@ export const MockRuntimeConfigSchema = z.object({
   enabled: z.boolean().default(false),
   /** Narrow the advertised capabilities (default: all). */
   capabilities: z.array(z.string()).optional(),
+  /** Test only: report this sandbox state in `hello` (the mock runs nothing in an OS sandbox either way). */
+  sandbox: z.enum(['enforced', 'unsandboxed', 'unavailable']).optional(),
+  sandboxReason: z.string().optional(),
 });
 
 export const RunnerConfigSchema = z.object({
@@ -96,8 +105,18 @@ export function saveConfig(path: string, config: RunnerConfig): void {
 /** `AOM_RUNNER_MOCK=1` or `--mock` enable the mock runtime for this process without editing config.json. */
 export function applyOverrides(config: RunnerConfig, opts: { mock?: boolean }): RunnerConfig {
   if (!opts.mock) return config;
+  // AOM_RUNNER_MOCK_SANDBOX=unsandboxed|unavailable|enforced: test-only, makes the mock runtime report that state.
+  const forced = process.env.AOM_RUNNER_MOCK_SANDBOX;
+  const sandbox = MockRuntimeConfigSchema.shape.sandbox.safeParse(forced).data;
   return {
     ...config,
-    runtimes: { ...config.runtimes, mock: { ...(config.runtimes.mock ?? {}), enabled: true } },
+    runtimes: {
+      ...config.runtimes,
+      mock: {
+        ...(config.runtimes.mock ?? {}),
+        enabled: true,
+        ...(sandbox ? { sandbox, sandboxReason: `${sandbox} (forced by AOM_RUNNER_MOCK_SANDBOX)` } : {}),
+      },
+    },
   };
 }

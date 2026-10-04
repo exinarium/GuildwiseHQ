@@ -47,6 +47,19 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
   'outbox.flushed': { ...env('outbox.flushed') },
   heartbeat: { ...env('heartbeat'), activeShifts: [U.a], load: { runningShifts: 1 } },
   'repos.report': { ...env('repos.report'), repos },
+  'runtimes.report': {
+    ...env('runtimes.report'),
+    runtimes: [
+      {
+        id: 'claude-code',
+        version: '2.1.288',
+        available: false,
+        capabilities: [],
+        sandbox: 'unavailable',
+        sandboxReason: 'Native Windows: install the runner in WSL2',
+      },
+    ],
+  },
   'shift.accepted': { ...env('shift.accepted'), shiftId: U.a },
   'shift.rejected': {
     ...env('shift.rejected'),

@@ -115,6 +115,13 @@ export class RunnerHandlers {
         conn.lastRepos = msg.repos;
         await this.matchRepos(conn);
         return;
+      case 'runtimes.report':
+        await exec(this.ctx.pool, 'UPDATE workstations SET runtimes=$2 WHERE id=$1', [
+          conn.workstationId,
+          JSON.stringify(msg.runtimes),
+        ]);
+        await alignDevopsRuntime(this.ctx, conn.workstationId, msg.runtimes);
+        return;
       case 'shift.accepted':
         await markShiftAccepted(this.ctx, ws, msg.shiftId);
         return this.ack(conn, msg);

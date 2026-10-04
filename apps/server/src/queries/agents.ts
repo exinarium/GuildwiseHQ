@@ -26,6 +26,8 @@ export function toAgentDto(a: Row, active: Array<{ cardId: string; ref: string; 
     retiredAt: iso(a.retired_at),
     department: a.department ?? null,
     lastShiftEndedAt: iso(a.last_shift_ended_at),
+    sandbox: a.sandbox ?? null,
+    sandboxReason: a.sandbox_reason ?? null,
     activeCards: active,
   };
 }
@@ -41,8 +43,11 @@ export async function listAgents(
     ctx.pool,
     `SELECT a.*, (SELECT r.department FROM role_definitions r
                    WHERE r.key = a.role_key AND (r.org_id = a.org_id OR r.org_id IS NULL)
-                   ORDER BY (r.version = a.role_version) DESC, (r.org_id IS NULL), r.version DESC LIMIT 1) AS department
+                   ORDER BY (r.version = a.role_version) DESC, (r.org_id IS NULL), r.version DESC LIMIT 1) AS department,
+            rt.info->>'sandbox' AS sandbox, rt.info->>'sandboxReason' AS sandbox_reason
        FROM agents a
+       LEFT JOIN workstations ws ON ws.id = a.workstation_id
+       LEFT JOIN LATERAL (SELECT e AS info FROM jsonb_array_elements(ws.runtimes) e WHERE e->>'id' = a.runtime LIMIT 1) rt ON true
       WHERE (a.org_id = $1 OR a.project_id IN (SELECT project_id FROM project_members WHERE user_id=$1 AND status='active'))
         AND ($2::uuid IS NULL
              OR a.project_id = $2
