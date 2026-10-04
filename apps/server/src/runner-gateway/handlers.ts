@@ -29,7 +29,7 @@ import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { buildBrief } from './brief.ts';
-import { completeCommand, markCommandSent, pendingCommands } from './commands-queue.ts';
+import { claimPendingCommands, completeCommand, requeueSentCommands } from './commands-queue.ts';
 import { ledgerSearchRpc } from './ledger-rpc.ts';
 import type { RunnerConn } from './registry.ts';
 import { issueRotatedToken } from './rotation.ts';
@@ -154,7 +154,7 @@ export class RunnerHandlers {
       case 'command.result': {
         const cmd = await one(
           this.ctx.pool,
-          'SELECT type, payload, workstation_id FROM runner_commands WHERE id=$1',
+          'SELECT type, payload, workstation_id, status FROM runner_commands WHERE id=$1',
           [msg.commandId],
         );
         // A runner may only answer its own commands: a result for another workstation's command (or an unknown
@@ -166,6 +166,8 @@ export class RunnerHandlers {
           );
           return this.ack(conn, msg);
         }
+        // A command is answered once: a second answer (a redelivered command run again) must not apply again.
+        if (cmd.status === 'done') return this.ack(conn, msg);
         if (cmd?.type === 'finalize.execute') {
           // Terminal: the outcome (finalized, conflict or failure) is recorded on the card, never retried blindly.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -233,6 +235,8 @@ export class RunnerHandlers {
       `UPDATE workstations SET runtimes=$2, runner_version=$3, hostname=$4, platform=$5, last_seen_at=$6 WHERE id=$1`,
       [conn.workstationId, JSON.stringify(msg.runtimes), msg.runnerVersion, msg.hostname, msg.platform, now],
     );
+    // Whatever the previous connection was sent may not have arrived: it is due again on this one.
+    await requeueSentCommands(ctx.pool, conn.workstationId);
     await this.matchRepos(conn);
     await this.recordVaults(conn, msg.vaults);
     await alignDevopsRuntime(ctx, conn.workstationId, msg.runtimes);
@@ -377,8 +381,7 @@ export class RunnerHandlers {
   async deliverPending(workstationId: string): Promise<void> {
     const conn = this.ctx.services.runners.get(workstationId);
     if (!conn || conn.socket.readyState !== 1) return;
-    for (const c of await pendingCommands(this.ctx.pool, workstationId)) {
-      await markCommandSent(this.ctx.pool, c.id, this.ctx.clock.now());
+    for (const c of await claimPendingCommands(this.ctx.pool, workstationId, this.ctx.clock.now())) {
       this.send(conn, 'command', { commandId: c.id, command: c.type, payload: c.payload });
     }
   }

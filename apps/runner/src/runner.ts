@@ -337,7 +337,7 @@ export class Runner {
         }
       } else if (command === 'outbound.post') {
         // Failures are answered as `ok:true, result.ok:false`: the server turns them into a desk alert, not a blind retry.
-        done(true, await this.outbound.run(CommandPayloadSchemas['outbound.post'].parse(payload)));
+        done(true, await this.outbound.run(CommandPayloadSchemas['outbound.post'].parse(payload), commandId));
       } else {
         done(false, undefined, `command ${command} is not supported by this runner version`);
       }

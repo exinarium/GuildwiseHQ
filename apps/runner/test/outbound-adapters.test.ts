@@ -216,6 +216,34 @@ describe('the outbound executor (the outbound.post command)', () => {
     });
   });
 
+  it('a refused command delivered again posts nothing; the manager\'s retry (a new command) posts once', async () => {
+    let fail = true;
+    const calls: string[][] = [];
+    const exec: Exec = async (_bin, args) => {
+      calls.push(args);
+      return fail
+        ? { exitCode: 1, stdout: '', stderr: 'HTTP 502: Bad Gateway' }
+        : { exitCode: 0, stdout: 'https://github.com/acme/toy/issues/3#issuecomment-1\n', stderr: '' };
+    };
+    const ex = executor(ExternalAdapters.defaults({ exec }));
+    const p = payload({ ref: { system: 'github', key: 'acme/toy#3' }, kind: 'resolution' });
+    expect(await ex.run(p, 'cmd-1')).toMatchObject({ ok: false, error: expect.stringMatching(/HTTP 502/) });
+    expect(calls).toHaveLength(1);
+    // the server sends the same command again (a late redelivery) after the cause is gone: nothing goes out
+    fail = false;
+    expect(await ex.run(p, 'cmd-1')).toMatchObject({ ok: false, error: expect.stringMatching(/HTTP 502/) });
+    expect(calls).toHaveLength(1);
+    // a restarted runner reads the same record
+    const restarted = executor(ExternalAdapters.defaults({ exec }));
+    expect(await restarted.run(p, 'cmd-1')).toMatchObject({ ok: false });
+    expect(calls).toHaveLength(1);
+    // the manager's retry is a new command: it posts, once, however often it is delivered
+    expect(await ex.run(p, 'cmd-2')).toMatchObject({ ok: true });
+    expect(await ex.run(p, 'cmd-2')).toMatchObject({ ok: true, duplicate: true });
+    expect(await ex.run(p, 'cmd-1')).toMatchObject({ ok: true, duplicate: true });
+    expect(calls).toHaveLength(2);
+  });
+
   it('after an ambiguous failure it looks for the exact text before posting again', async () => {
     pool()
       .intercept({ path: '/rest/api/2/issue/ABC-1/comment', method: 'POST' })

@@ -12,8 +12,11 @@ import { PostError } from './github.ts';
 import type { ExternalAdapters } from './index.ts';
 
 interface PostRecord {
-  state: 'attempting' | 'posted';
+  state: 'attempting' | 'posted' | 'refused';
   externalRef?: string;
+  /** `refused`: the command whose refusal this is, and the refusal; see `post`. */
+  commandId?: string;
+  error?: string;
   at: string;
 }
 
@@ -25,7 +28,11 @@ interface PostRecord {
  *   leaks is refused here even if it was approved (defence in depth).
  * - Idempotent: a record per draft (`outbound/<draftId>.json`). A draft already posted answers with its recorded
  *   result and sends nothing. A record still 'attempting' (a crash or timeout after sending) asks the system whether
- *   the exact text is already there before posting again. A refusal by the system (`PostError`) leaves no record.
+ *   the exact text is already there before posting again. A refusal by the system (`PostError`) is recorded as
+ *   'refused' for that command: the same command delivered again (the server redelivers a command whose result it has
+ *   not seen, e.g. on reconnect) answers with the refusal and sends nothing, while a new command (the manager's retry)
+ *   posts. Without that, a redelivered stale command would post behind the manager's back and the retry would then
+ *   double it.
  * - Never throws: the answer is `{ok, externalRef | error}`; failures go back to the manager's desk.
  */
 export class OutboundExecutor {
@@ -53,16 +60,21 @@ export class OutboundExecutor {
     );
   }
 
-  run(payload: OutboundPostPayload): Promise<OutboundPostResult> {
+  run(payload: OutboundPostPayload, commandId?: string): Promise<OutboundPostResult> {
     const running = this.inFlight.get(payload.draftId);
     if (running) return running;
-    const p = this.post(payload).finally(() => this.inFlight.delete(payload.draftId));
+    const p = this.post(payload, commandId).finally(() => this.inFlight.delete(payload.draftId));
     this.inFlight.set(payload.draftId, p);
     return p;
   }
 
-  private async post(payload: OutboundPostPayload): Promise<OutboundPostResult> {
-    const done = this.read(payload.draftId);
+  private async post(payload: OutboundPostPayload, commandId?: string): Promise<OutboundPostResult> {
+    let done = this.read(payload.draftId);
+    if (done?.state === 'refused') {
+      // Redelivery of the command already refused: answer again, post nothing. A different command is a retry.
+      if (commandId && done.commandId === commandId) return { ok: false, error: done.error ?? 'refused' };
+      done = null;
+    }
     if (done?.state === 'posted')
       return { ok: true, duplicate: true, ...(done.externalRef ? { externalRef: done.externalRef } : {}) };
     const leak = checkOutboundLeaks(payload.body, payload.agentNames);
@@ -100,7 +112,10 @@ export class OutboundExecutor {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // The system said no: nothing was posted, so there is nothing to look for on a retry.
-      if (err instanceof PostError) rmSync(this.file(payload.draftId), { force: true });
+      if (err instanceof PostError) {
+        if (commandId) this.write(payload.draftId, { state: 'refused', commandId, error: message });
+        else rmSync(this.file(payload.draftId), { force: true });
+      }
       return { ok: false, error: message };
     }
   }

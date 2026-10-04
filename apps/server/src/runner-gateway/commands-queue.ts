@@ -25,21 +25,35 @@ export interface PendingCommand {
   attempts: number;
 }
 
-export async function pendingCommands(db: Queryable, workstationId: string): Promise<PendingCommand[]> {
+/**
+ * Takes the commands to deliver on a live connection: only 'pending' ones, each claimed atomically (marked 'sent' in
+ * the same statement) so concurrent deliveries (a report, a desk action, a repo change... all call `deliverPending`)
+ * can never send the same command twice. A 'sent' command is not sent again on the same connection: its result is on
+ * its way. `requeueSentCommands` hands it out again when the connection is lost.
+ */
+export async function claimPendingCommands(
+  db: Queryable,
+  workstationId: string,
+  now: Date,
+): Promise<PendingCommand[]> {
   return (
     await rows(
       db,
-      `SELECT id, type, payload, attempts FROM runner_commands
-        WHERE workstation_id=$1 AND status IN ('pending','sent') ORDER BY created_at, id`,
-      [workstationId],
+      `UPDATE runner_commands SET status='sent', attempts = attempts + 1, sent_at=$2
+        WHERE id IN (SELECT id FROM runner_commands WHERE workstation_id=$1 AND status='pending'
+                      ORDER BY created_at, id FOR UPDATE SKIP LOCKED)
+        RETURNING id, type, payload, attempts, created_at`,
+      [workstationId, now],
     )
-  ).map((r) => ({ id: r.id, type: r.type, payload: r.payload, attempts: r.attempts }));
+  )
+    .sort((a, b) => +a.created_at - +b.created_at || (a.id < b.id ? -1 : 1))
+    .map((r) => ({ id: r.id, type: r.type, payload: r.payload, attempts: r.attempts }));
 }
 
-export const markCommandSent = (db: Queryable, id: string, now: Date) =>
-  exec(db, `UPDATE runner_commands SET status='sent', attempts = attempts + 1, sent_at=$2 WHERE id=$1`, [
-    id,
-    now,
+/** A (re)connect: commands sent on the lost connection may not have arrived, so they are due again. */
+export const requeueSentCommands = (db: Queryable, workstationId: string) =>
+  exec(db, `UPDATE runner_commands SET status='pending' WHERE workstation_id=$1 AND status='sent'`, [
+    workstationId,
   ]);
 
 export async function completeCommand(

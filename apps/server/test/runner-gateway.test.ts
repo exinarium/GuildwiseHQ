@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { enqueueRunnerCommand } from '../src/runner-gateway/commands-queue.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { createWorld, fullFields, ok, until, type World } from './helpers/world.ts';
@@ -705,6 +706,36 @@ describe('agent retirement, unlinking and runner commands', () => {
       3000,
     );
     r.close();
+  });
+
+  it('delivers a command once however many deliveries race, and again only after a reconnect', async () => {
+    await freshState();
+    const r = await w.connectRunner();
+    const ctx = w.t.app.ctx;
+    await enqueueRunnerCommand(ctx.pool, w.workstationId, 'repos.rescan', {});
+    // a report, a desk action and a repo change may all deliver at the same moment
+    await Promise.all(Array.from({ length: 8 }, () => ctx.services.gateway.deliverPending(w.workstationId)));
+    await r.barrier();
+    expect(r.of('command').filter((f) => f.command === 'repos.rescan')).toHaveLength(1);
+    // still unanswered: a later delivery on the same connection does not send it again
+    await ctx.services.gateway.deliverPending(w.workstationId);
+    await r.barrier();
+    expect(r.of('command').filter((f) => f.command === 'repos.rescan')).toHaveLength(1);
+    r.close();
+    // the connection is gone with the command unanswered: the next one gets it again
+    const r2 = await w.connectRunner();
+    const again = await r2.waitFor('command', (f) => f.command === 'repos.rescan');
+    expect(r2.of('command').filter((f) => f.command === 'repos.rescan')).toHaveLength(1);
+    // a result is applied once: a second answer for the finished command changes nothing
+    r2.send('command.result', { commandId: again.commandId, ok: true });
+    await until(
+      async () => (await q('SELECT status FROM runner_commands WHERE id=$1', [again.commandId]))[0]!.status === 'done',
+      3000,
+    );
+    r2.send('command.result', { commandId: again.commandId, ok: false, error: 'late' });
+    await r2.barrier();
+    expect((await q('SELECT status FROM runner_commands WHERE id=$1', [again.commandId]))[0]!.status).toBe('done');
+    r2.close();
   });
 
   it('unlinking releases claimed cards (workstation_unlinked) and clears their home workstation', async () => {
