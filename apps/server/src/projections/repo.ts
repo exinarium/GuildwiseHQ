@@ -6,6 +6,7 @@ const ev = <
   T extends
     | 'RepoCreateRequested'
     | 'RepoCreateApproved'
+    | 'RepoCreateRetried'
     | 'RepoCreateRejected'
     | 'RepoCreateCompleted'
     | 'RepoCreateFailed',
@@ -39,6 +40,14 @@ export const repoProjectors: Record<string, Projector> = {
       tx,
       `UPDATE repo_requests SET status='approved', approved_by=$2, workstation_id=$3, updated_at=$4 WHERE id=$1`,
       [p.requestId, p.approvedBy, p.workstationId, e.createdAt],
+    );
+  },
+  RepoCreateRetried: async (tx, e) => {
+    const p = ev<'RepoCreateRetried'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE repo_requests SET status='approved', workstation_id=$2, error=NULL, updated_at=$3 WHERE id=$1`,
+      [p.requestId, p.workstationId, e.createdAt],
     );
   },
   RepoCreateRejected: async (tx, e) => {

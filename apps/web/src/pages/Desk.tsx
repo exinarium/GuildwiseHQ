@@ -351,6 +351,14 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
               Reject
             </Button>
           </>
+        ) : item.subkind === 'repo_create_failed' ? (
+          // Also for alerts the server stored without options: Retry queues the same request again.
+          <Button
+            variant="primary"
+            onClick={() => resolve.mutate({ id: item.id, body: { resolution: 'approved' } })}
+          >
+            Retry
+          </Button>
         ) : (
           <>
             {item.subkind === 'tester_bottleneck' && (

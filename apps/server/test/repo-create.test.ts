@@ -302,6 +302,119 @@ describe('approved repository setup', () => {
     expect((await request(r, start.chatId)).result).toMatchObject({ status: 'pending' });
   });
 
+  describe('retrying a failed request from its alert', () => {
+    /** Asks, approves and fails once; returns what the retry tests need. */
+    async function failedRequest(runner = r, over: { oldAlert?: boolean } = {}) {
+      const ba = await w.hire('Grace', 'ba', 'senior');
+      const { chat, start } = await openChat(runner, ba.id, w.owner.id, w.owner.cookie);
+      await request(runner, start.chatId);
+      const from = runner.received.length;
+      await resolve((await deskItems())[0].id, { resolution: 'approved' });
+      const cmd = await nextCommand(runner, from);
+      runner.send('command.result', {
+        commandId: cmd.commandId ?? cmd.id,
+        ok: true,
+        result: { ok: false, error: 'gh repo create failed: HTTP 502' },
+      });
+      await until(
+        async () => (await deskItems()).some((i: any) => i.subkind === 'repo_create_failed'),
+        5000,
+        'alert',
+      );
+      const alert = (await deskItems()).find((i: any) => i.subkind === 'repo_create_failed');
+      if (over.oldAlert) await q(`UPDATE desk_items SET options='[]'::jsonb WHERE id=$1`, [alert.id]);
+      return { chat, start, cmd, alert };
+    }
+    const status = async () => (await q('SELECT status, workstation_id, error FROM repo_requests'))[0] as any;
+
+    it('offers Retry and Dismiss; retry re-queues the same command and success adds the repo', async () => {
+      await setup();
+      const { chat, cmd, alert } = await failedRequest();
+      expect(alert.options.map((o: any) => o.label)).toEqual(['Retry', 'Dismiss']);
+      expect(alert.body).toContain('retry here');
+      const from = r.received.length;
+      expect((await resolve(alert.id, { resolution: 'approved' })).status).toBe(200);
+      const again = await nextCommand(r, from);
+      expect(again.payload).toEqual(cmd.payload);
+      expect(await status()).toMatchObject({
+        status: 'approved',
+        workstation_id: w.workstationId,
+        error: null,
+      });
+      expect((await deskItems()).some((i: any) => i.id === alert.id)).toBe(false);
+      expect((await threadBodies(chat.threadId)).join('\n')).toMatch(
+        /The project owner retried creating repository acme\/newrepo; .* is creating it now\./,
+      );
+      r.send('command.result', {
+        commandId: again.commandId ?? again.id,
+        ok: true,
+        result: {
+          ok: true,
+          remoteUrl: 'https://github.com/acme/newrepo.git',
+          localPath: '/home/me/src/newrepo',
+        },
+      });
+      await until(async () => (await projectRepos()).length === 2, 5000, 'repo added');
+      expect(await status()).toMatchObject({ status: 'created' });
+      expect((await q('SELECT 1 FROM events WHERE type=$1', ['RepoCreateRetried'])).length).toBe(1);
+    });
+
+    it('an alert stored by the old code (no options) is retryable too', async () => {
+      await setup();
+      const { cmd, alert } = await failedRequest(r, { oldAlert: true });
+      expect((await deskItems()).find((i: any) => i.id === alert.id).options).toEqual([]);
+      const from = r.received.length;
+      expect((await resolve(alert.id, { resolution: 'approved' })).status).toBe(200);
+      expect((await nextCommand(r, from)).payload).toEqual(cmd.payload);
+      expect(await status()).toMatchObject({ status: 'approved' });
+    });
+
+    it('only the project owner can retry', async () => {
+      await setup();
+      const m = await addMember(w, 'retrymgr');
+      const { alert } = await failedRequest();
+      expect((await resolve(alert.id, { resolution: 'approved' }, m.cookie)).status).toBeGreaterThanOrEqual(
+        403,
+      );
+      expect(await status()).toMatchObject({ status: 'failed' });
+    });
+
+    it('a request that is not failed cannot be retried; a second retry of the same alert is refused', async () => {
+      await setup();
+      const { alert } = await failedRequest();
+      expect((await resolve(alert.id, { resolution: 'approved' })).status).toBe(200);
+      const second = await resolve(alert.id, { resolution: 'approved' });
+      expect(second.status).toBe(409);
+      // the alert is open again but the request moved on (here: forced back to pending)
+      await q("UPDATE desk_items SET status='open' WHERE id=$1", [alert.id]);
+      const notFailed = await resolve(alert.id, { resolution: 'approved' });
+      expect(notFailed.status).toBe(409);
+      expect(notFailed.body.error?.code ?? notFailed.body.code).toBe('not_failed');
+    });
+
+    it('needs a connected workstation; the alert stays open and the request failed', async () => {
+      await setup();
+      const { alert } = await failedRequest();
+      await hangUp(r);
+      const refused = await resolve(alert.id, { resolution: 'approved' });
+      expect(refused.status).toBe(409);
+      expect(refused.body.error?.code ?? refused.body.code).toBe('no_workstation');
+      expect(await status()).toMatchObject({ status: 'failed' });
+      expect((await deskItems()).some((i: any) => i.id === alert.id)).toBe(true);
+      r = await w.connectRunner();
+    });
+
+    it('dismissing leaves the request failed and queues nothing', async () => {
+      await setup();
+      const { alert } = await failedRequest();
+      const n = (await q('SELECT 1 FROM runner_commands WHERE type=$1', ['repo.create'])).length;
+      expect((await post(`/api/desk/${alert.id}/dismiss`, {})).ok ?? true).toBeTruthy();
+      expect(await status()).toMatchObject({ status: 'failed' });
+      expect((await q('SELECT 1 FROM runner_commands WHERE type=$1', ['repo.create'])).length).toBe(n);
+      expect((await deskItems()).some((i: any) => i.id === alert.id)).toBe(false);
+    });
+  });
+
   it('a result for a request that was not approved, or from another workstation, changes nothing', async () => {
     await setup();
     const ba = await w.hire('Grace', 'ba', 'senior');

@@ -90,6 +90,8 @@ case "$1 $2" in
     echo "{\\"url\\":\\"$D/$K.git\\",\\"isEmpty\\":true,\\"owner\\":{\\"login\\":\\"octo\\"}}"
     exit 0 ;;
   "repo create")
+    # the test arms a one-off failure by creating this file (the owner then retries from the desk)
+    if [ -f "$D/fail-once" ]; then rm -f "$D/fail-once"; echo "HTTP 502: GitHub is having a bad day" >&2; exit 1; fi
     K=$(echo "$3" | tr '/' '_')
     git init --bare -q "$D/$K.git"
     exit 0 ;;
@@ -471,7 +473,19 @@ test('AC repository setup: the BA asks for a repository, the owner approves on t
   await expect(item).toContainText('Visibility: private');
   await expect(item).toContainText('Project: INT');
   await expect(item).toContainText('GitHub login');
+  // The first attempt fails (fake gh refuses once); the owner retries from the alert and it succeeds.
+  mkdirSync(join(paths.vaults, 'fake-github'), { recursive: true });
+  writeFileSync(join(paths.vaults, 'fake-github', 'fail-once'), '');
   await item.getByRole('button', { name: 'Create repository' }).click();
+  const alert = page.locator('[data-testid^="desk-item-"]', {
+    hasText: 'Could not create repository acme/e2e-new',
+  });
+  await expect(alert).toBeVisible({ timeout: 60_000 });
+  await expect(alert).toContainText('bad day');
+  await expect(alert).toContainText('retry here');
+  await expect(alert.getByRole('button', { name: 'Dismiss' })).toBeVisible();
+  expect((await (await api.get(`/api/projects/${projects.INT?.id}`)).json()).repos).toHaveLength(1);
+  await alert.getByRole('button', { name: 'Retry' }).click();
 
   const repo = await waitFor(
     'the repository was added to the project',

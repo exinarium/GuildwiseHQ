@@ -303,7 +303,12 @@ export async function resolveRepoCreateIn(
     ],
     { tx },
   );
-  const payload: RepoCreatePayload = {
+  await enqueueRunnerCommand(tx, ws.id, 'repo.create', repoCreatePayload(req) as never);
+  return ws.id;
+}
+
+function repoCreatePayload(req: Row): RepoCreatePayload {
+  return {
     requestId: req.id,
     name: req.name,
     visibility: req.visibility,
@@ -312,7 +317,57 @@ export async function resolveRepoCreateIn(
     projectName: req.project_name,
     branch: req.working_branch || 'main',
   };
-  await enqueueRunnerCommand(tx, ws.id, 'repo.create', payload as never);
+}
+
+/**
+ * Retry from the "Repository not created" alert (inside the desk resolve transaction). Same rules as approval: only the
+ * project owner, with a connected workstation of theirs. The request must be `failed`. The same request id is queued
+ * again; the runner's create is idempotent (it reuses an empty repository the owner already owns and its own clone).
+ */
+export async function retryRepoCreateIn(ctx: Ctx, tx: Tx, user: { id: string }, item: Row): Promise<string> {
+  const req = await one(
+    tx,
+    `SELECT r.*, p.key AS project_key, p.name AS project_name, p.working_branch FROM repo_requests r
+       JOIN projects p ON p.id = r.project_id
+      WHERE r.id = (SELECT (payload->>'requestId')::uuid FROM events
+                     WHERE type='RepoCreateFailed' AND payload->>'alertDeskItemId' = $1
+                     ORDER BY seq DESC LIMIT 1) FOR UPDATE OF r`,
+    [item.id],
+  );
+  if (!req) throw notFound('repository request not found');
+  if (req.org_id !== user.id)
+    throw forbidden(
+      'only the project owner can approve this: the repository is created with their GitHub login',
+    );
+  if (req.status !== 'failed')
+    throw conflict('not_failed', `this request is ${req.status}, only a failed request can be retried`);
+  const ws = await connectedWorkstation(tx, user.id);
+  if (!ws)
+    throw conflict(
+      'no_workstation',
+      'None of your workstations is connected, so the repository cannot be created now. Start your runner and retry.',
+    );
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.repo(req.id),
+        event: {
+          type: 'RepoCreateRetried',
+          payload: { requestId: req.id, by: user.id, workstationId: ws.id },
+        },
+        actor: userActor(user.id),
+        scope: projectScope(req.org_id, req.project_id),
+      },
+      ...(await threadNote(
+        tx,
+        req.thread_id,
+        `The project owner retried creating repository ${req.name}; ${ws.name} is creating it now.`,
+        { repoRequestId: req.id },
+      )),
+    ],
+    { tx },
+  );
+  await enqueueRunnerCommand(tx, ws.id, 'repo.create', repoCreatePayload(req) as never);
   return ws.id;
 }
 
@@ -404,8 +459,11 @@ export async function applyRepoCreateResult(
               kind: 'alert',
               subkind: DESK_SUBKIND.repoCreateFailed,
               title: `Could not create repository ${req.name}`,
-              body: `${failure}\n\nNothing was added to project ${req.project_key}. Ask the agent to request it again once this is fixed.`,
-              options: [],
+              body: `${failure}\n\nNothing was added to project ${req.project_key}. Once this is fixed, retry here (the same request is run again on your workstation) or dismiss this and ask the agent to request it again.`,
+              options: [
+                { id: 'retry', label: 'Retry' },
+                { id: 'dismiss', label: 'Dismiss' },
+              ],
               blocking: false,
               pinned: false,
               projectId: req.project_id,

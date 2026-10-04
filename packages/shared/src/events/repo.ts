@@ -23,6 +23,8 @@ export const repoEvents = [
     }),
   ),
   defineEvent('RepoCreateApproved', z.object({ requestId: Id, approvedBy: Id, workstationId: Id })),
+  /** The owner retried a failed request from its alert: back to approved for that workstation, error cleared. */
+  defineEvent('RepoCreateRetried', z.object({ requestId: Id, by: Id, workstationId: Id })),
   defineEvent('RepoCreateRejected', z.object({ requestId: Id, by: Id, reason: z.string().optional() })),
   /** The runner created (or reused) the repository and the server added it to the project. */
   defineEvent(

@@ -237,6 +237,38 @@ describe('DeskItem', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Choose an option or write an answer');
   });
 
+  it.each([
+    [
+      'with options',
+      [
+        { id: 'retry', label: 'Retry' },
+        { id: 'dismiss', label: 'Dismiss' },
+      ],
+    ],
+    ['stored by the old code without options', []],
+  ])('a failed repository creation alert %s offers Retry and Dismiss', async (_n, options) => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        calls.push({ url, body: JSON.parse(String(init.body)) });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }),
+    );
+    renderItem(item({ kind: 'alert', subkind: 'repo_create_failed', options, blocking: false }));
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Acknowledge' })).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toEqual({ url: `/api/desk/${base.id}/resolve`, body: { resolution: 'approved' } });
+  });
+
+  it('a failed repository creation alert is read only for someone who is not the project owner', () => {
+    renderItem(item({ kind: 'alert', subkind: 'repo_create_failed', options: [], canAnswer: false }));
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.getByTestId('read-only')).toBeInTheDocument();
+  });
+
   it('approvals offer approve/reject instead of a text answer', () => {
     renderItem(item({ kind: 'approval', subkind: 'large_merge', options: [], blocking: false }));
     expect(screen.getByRole('button', { name: 'Approve merge' })).toBeInTheDocument();

@@ -23,7 +23,7 @@ import { mergedAnswerNotes } from './escalation.ts';
 import { resolveLargeMergeIn } from './finalize.ts';
 import { continueIntake, mappingAnsweredEvents } from './intake.ts';
 import { resolveOutboundIn } from './outbox.ts';
-import { resolveRepoCreateIn } from './repo-create.ts';
+import { resolveRepoCreateIn, retryRepoCreateIn } from './repo-create.ts';
 import { resolveVaultConflictIn } from './vaults.ts';
 
 const itemScope = (item: Row) =>
@@ -244,6 +244,10 @@ async function closeItem(
     } else if (item.kind === 'approval' && item.subkind === 'repo_create') {
       // Approved repository setup: only the project owner decides; their own workstation creates it with their gh login.
       workstationToDeliver = (await resolveRepoCreateIn(ctx, tx, user, item, resolution, note)) ?? undefined;
+    } else if (item.kind === 'alert' && item.subkind === 'repo_create_failed' && resolution === 'approved') {
+      // Retry of a failed repository creation (works for alerts stored without options, too): owner only, and the
+      // request must still be failed; the same request goes to the owner's workstation again.
+      workstationToDeliver = await retryRepoCreateIn(ctx, tx, user, item);
     } else if (
       item.kind === 'escalation' &&
       item.subkind === 'vault_conflict' &&
