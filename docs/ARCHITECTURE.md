@@ -1607,3 +1607,7 @@ Root scripts: `pnpm test` (all vitest), `pnpm e2e`, `pnpm typecheck` (`tsc --noE
 20. **Operational, non-event state**: auth sessions, heartbeats/lease refresh, connection flags, shift progress tails, runner inbox and command queue.
 21. **Risk tier** computed by the runner at build handoff: ≥ 200 changed lines, any architectural glob, or refactor ⇒ large.
 22. **Finalize before the BA exists** (M4–M6): the manager triggers finalize from the card; the runner executes the completion action. From M7 the BA claims the Finalize stage and reports `aom finalize --action ...` (revising the completion action if it should); the server then queues the same `finalize.execute` (large merges wait for desk approval). The manager's Finalize button remains as an override.
+
+### 24.x Not built (accepted by the owner, 4 Oct 2026)
+
+- Couchbase bucket or scope per worktree, and a one-at-a-time queue for heavy builds (e.g. MAUI) per workstation (spec, "Worktrees, testing, review and integration"). Deferred as a later enhancement; until then keep Couchbase-backed or MAUI projects to one tester and one builder per workstation.

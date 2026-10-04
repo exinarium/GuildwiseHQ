@@ -2651,6 +2651,7 @@ curl https://aom.example.com/api/health
   <table>
     <thead><tr><th style="width:28%">Limitation</th><th style="width:32%">Effect</th><th>Workaround</th></tr></thead>
     <tbody>
+      <tr><td>Couchbase isolation and heavy-build queue not built</td><td>The spec asks for one Couchbase bucket or scope per worktree and for heavy builds such as MAUI to queue one at a time per workstation. Neither exists: testers on different cards of a Couchbase-backed project share data, and two heavy builds can run at once on one workstation.</td><td>Keep Couchbase-backed or MAUI projects to one tester and one builder per workstation until this is added (planned as a later enhancement).</td></tr>
       <tr><td>Single server instance for v1</td><td>No horizontal scaling; one VPS instance only.</td><td>Size the VPS for it; v1 has no clustering. Event store appends use a global lock (see <code>docs/DEPLOY.md</code>).</td></tr>
       <tr><td>Point-in-time recovery not built</td><td>Database backups are snapshots, not transaction logs.</td><td>Set up automated VPS snapshots (daily). Restore from the most recent backup if needed.</td></tr>
       <tr><td>No agent-to-agent blocking (intentional)</td><td>Agents never wait on another; work always flows forward or is explicitly blocked by a manager question.</td><td>By design: reduces queuing and communicates blockers to the manager explicitly.</td></tr>

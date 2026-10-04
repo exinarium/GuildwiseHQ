@@ -547,3 +547,7 @@ The agent reported work outside the scope of its role. Review the shift log in `
 - `docs/DEPLOY.md`: server deployment, scaling, backups
 - `docs/SPEC.md`: complete product spec and organization design
 - `docs/ARCHITECTURE.md`: technical design, event store, dispatcher, protocol
+
+## Known gap: Couchbase isolation and heavy-build queue
+
+The spec's testing section asks for one Couchbase bucket or scope per worktree and for heavy builds (for example MAUI) to queue one at a time per workstation. Neither is built yet. Until it is, keep Couchbase-backed or MAUI projects to one tester and one builder per workstation.
