@@ -19,6 +19,8 @@ export const BoardCardSchema = z.object({
   priority: z.number().int(),
   /** M4: the open bug card this (waiting) card waits on, for the Test column's "waiting on bug" state. */
   waitingOn: z.object({ id: z.uuid(), ref: z.string() }).nullable().optional(),
+  /** Why a `waiting` card waits: a bug it spawned, the manager's merge approval, a running merge, or DevOps. */
+  waitingFor: z.enum(['bug', 'approval', 'finalizing', 'devops']).nullable().optional(),
   /** M4: suite (full E2E / regression) cards are marked on the board. */
   origin: z.string().optional(),
 });

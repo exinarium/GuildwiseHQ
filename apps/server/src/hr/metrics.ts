@@ -125,7 +125,7 @@ export async function metrics(
   // Queue depth per board column, now.
   const open = await rows(
     ctx.pool,
-    `SELECT status, stage, rework_round, card_type, workflow_version_id FROM cards
+    `SELECT status, stage, rework_round, card_type, finalize_state, workflow_version_id FROM cards
       WHERE project_id = ANY($1::uuid[]) AND status NOT IN ('done','cancelled')`,
     [projectIds],
   );
@@ -135,7 +135,13 @@ export async function metrics(
     const stage = wf ? getStage(wf.definition, c.stage) : undefined;
     const column = stage
       ? columnFor(
-          { status: c.status, stage: c.stage, reworkRound: c.rework_round, cardType: c.card_type },
+          {
+            status: c.status,
+            stage: c.stage,
+            reworkRound: c.rework_round,
+            cardType: c.card_type,
+            finalizeState: c.finalize_state,
+          },
           stage,
         )
       : 'Other';

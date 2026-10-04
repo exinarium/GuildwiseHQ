@@ -70,6 +70,41 @@ describe('board waiting state', () => {
   });
 });
 
+describe('board finalize approval state', () => {
+  it('shows the Awaiting your approval badge for a merge waiting on the manager', () => {
+    const board: BoardResponse = {
+      projectId: ID(1),
+      workflowKey: 'code',
+      columns: [
+        {
+          name: 'Finalize',
+          cards: [
+            {
+              id: ID(2),
+              ref: 'TOY-2',
+              title: 'Big change',
+              assignee: null,
+              updatedAt: new Date().toISOString(),
+              queuedAt: null,
+              riskTier: 'large',
+              blocked: false,
+              reworkRound: 0,
+              priority: 5,
+              cardType: 'feature',
+              stage: 'finalize',
+              status: 'waiting',
+              waitingFor: 'approval',
+              waitingOn: null,
+            },
+          ],
+        },
+      ],
+    };
+    wrap(<BoardView board={board} />);
+    expect(screen.getByTestId('waiting-badge').textContent).toBe('Awaiting your approval');
+  });
+});
+
 const testing = (over: Partial<Testing> = {}): Testing => ({
   testRuns: [],
   parent: null,

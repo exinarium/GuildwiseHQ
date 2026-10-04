@@ -29,7 +29,14 @@ export interface ColumnCard {
   stage: string;
   reworkRound: number;
   cardType?: string;
+  /** `awaiting_approval` / `running` while a Finalize merge is pending: such a waiting card stays in its stage column. */
+  finalizeState?: string | null;
 }
+
+/** True while a Finalize attempt holds the card in `waiting` (waiting for the manager's approval, or running). */
+export const isFinalizeWait = (card: Pick<ColumnCard, 'status' | 'finalizeState'>): boolean =>
+  card.status === 'waiting' &&
+  (card.finalizeState === 'awaiting_approval' || card.finalizeState === 'running');
 
 /**
  * Board column of a card (section 6.5). `draft` -> Spec; `blocked` -> Blocked; `waiting` -> Test (waiting on bug);
@@ -39,7 +46,7 @@ export interface ColumnCard {
 export function columnFor(card: ColumnCard, stage: Pick<Stage, 'id' | 'column'>): string {
   if (card.status === 'draft') return COLUMN.spec;
   if (card.status === 'blocked') return COLUMN.blocked;
-  if (card.status === 'waiting') return COLUMN.waiting;
+  if (card.status === 'waiting' && !isFinalizeWait(card)) return COLUMN.waiting;
   if (stage.id === 'build') {
     if (card.status === 'claimed') return COLUMN.inProgress;
     if (card.status === 'queued')

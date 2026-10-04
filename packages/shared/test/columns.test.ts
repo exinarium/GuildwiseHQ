@@ -17,6 +17,45 @@ describe('columnFor', () => {
   it('draft is Spec', () => expect(col('draft', 'spec')).toBe('Spec'));
   it('blocked is Blocked whatever the stage', () => expect(col('blocked', 'build')).toBe('Blocked'));
   it('waiting is Test (waiting on bug)', () => expect(col('waiting', 'test')).toBe('Test (waiting on bug)'));
+  it('waiting on a Finalize merge approval stays in Finalize', () => {
+    expect(
+      columnFor(
+        { status: 'waiting', stage: 'finalize', reworkRound: 0, finalizeState: 'awaiting_approval' },
+        stageOf('finalize'),
+      ),
+    ).toBe('Finalize');
+    expect(
+      columnFor(
+        { status: 'waiting', stage: 'finalize', reworkRound: 0, finalizeState: 'running' },
+        stageOf('finalize'),
+      ),
+    ).toBe('Finalize');
+  });
+  it('waiting with a stale or failed finalize state is still the bug column', () => {
+    expect(
+      columnFor(
+        { status: 'waiting', stage: 'test', reworkRound: 0, finalizeState: 'failed' },
+        stageOf('test'),
+      ),
+    ).toBe('Test (waiting on bug)');
+    expect(
+      columnFor({ status: 'waiting', stage: 'test', reworkRound: 0, finalizeState: null }, stageOf('test')),
+    ).toBe('Test (waiting on bug)');
+  });
+  it('a non-waiting card ignores finalizeState', () => {
+    expect(
+      columnFor(
+        { status: 'queued', stage: 'finalize', reworkRound: 0, finalizeState: 'awaiting_approval' },
+        stageOf('finalize'),
+      ),
+    ).toBe('Finalize');
+    expect(
+      columnFor(
+        { status: 'claimed', stage: 'build', reworkRound: 0, finalizeState: 'running' },
+        stageOf('build'),
+      ),
+    ).toBe('In progress');
+  });
   it('build claimed is In progress', () => expect(col('claimed', 'build')).toBe('In progress'));
   it('build queued is To do', () => expect(col('queued', 'build')).toBe('To do'));
   it('build queued with rework is Rework', () => expect(col('queued', 'build', 1)).toBe('Rework'));

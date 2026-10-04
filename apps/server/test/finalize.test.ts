@@ -131,6 +131,20 @@ describe('finalize', () => {
     expect(item).toMatchObject({ kind: 'approval', subkind: 'large_merge', pinned: true, status: 'open' });
     const d = await ok<any>(w.t.req('GET', `/api/cards/${card.id}`, { cookie: w.owner.cookie }));
     expect(d.testing.finalize).toMatchObject({ state: 'awaiting_approval', requiresApproval: true });
+    // The card sits in the Finalize column (not "Test (waiting on bug)") with an approval reason.
+    expect(d.card.column).toBe('Finalize');
+    const board = await ok<any>(
+      w.t.req('GET', `/api/board?projectId=${w.projectId}`, { cookie: w.owner.cookie }),
+    );
+    const fin = board.columns
+      .find((c: any) => c.name === 'Finalize')
+      .cards.find((c: any) => c.id === card.id);
+    expect(fin).toMatchObject({ status: 'waiting', waitingFor: 'approval' });
+    expect(
+      board.columns
+        .find((c: any) => c.name === 'Test (waiting on bug)')
+        .cards.some((c: any) => c.id === card.id),
+    ).toBe(false);
 
     await ok(
       w.t.req('POST', `/api/desk/${out.deskItemId}/resolve`, {

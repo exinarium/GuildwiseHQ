@@ -3,6 +3,13 @@ import { Link } from 'react-router';
 import { ageLabel } from '../lib/time.ts';
 import { Avatar, Badge } from './ui.tsx';
 
+const WAITING_LABEL = {
+  bug: 'waiting on bug',
+  approval: 'Awaiting your approval',
+  finalizing: 'Finalizing',
+  devops: 'waiting on DevOps',
+} as const;
+
 export function CardTile({ card, now }: { card: BoardCard; now?: number }) {
   return (
     <li>
@@ -39,7 +46,7 @@ export function CardTile({ card, now }: { card: BoardCard; now?: number }) {
           {card.blocked && <Badge tone="red">Blocked</Badge>}
           {card.status === 'waiting' && (
             <span data-testid="waiting-badge">
-              <Badge tone="amber">waiting on bug</Badge>
+              <Badge tone="amber">{WAITING_LABEL[card.waitingFor ?? 'bug']}</Badge>
             </span>
           )}
           {(card.origin === 'full_suite' || card.origin === 'regression') && (
