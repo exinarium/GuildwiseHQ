@@ -1,12 +1,20 @@
 import { copyFileSync, existsSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
-import type { AgentPermissions } from '@aom/shared';
+import { dirname, join } from 'node:path';
 import { execa } from 'execa';
 import type { z } from 'zod';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { selfCommand } from '../shims.ts';
+import {
+  agentEnv,
+  buildChatSettings,
+  buildShiftSettings,
+  type ClaudePolicyContext,
+  gitDirsOf,
+  sandboxMissing,
+} from './claude-policy.ts';
 import { ClaudeStreamParser } from './claude-stream-parser.ts';
 import { spawnSession } from './process-session.ts';
 import type {
@@ -19,44 +27,32 @@ import type {
 
 type ClaudeConfig = z.infer<typeof ClaudeRuntimeConfigSchema>;
 
-const ALWAYS_DENIED = [
-  'Bash(git push:*)',
-  'Bash(git rebase:*)',
-  'Bash(git checkout:*)',
-  'Bash(git switch:*)',
-  'Bash(git reset --hard:*)',
-];
-
-/** `git push*` -> `Bash(git push:*)`, `rm -rf /*` -> `Bash(rm -rf /*)`. */
-function shellDeny(pattern: string): string {
-  const p = pattern.trim();
-  if (p.endsWith(' *')) return `Bash(${p.slice(0, -2)}:*)`;
-  if (p.endsWith('*') && !p.endsWith('/*')) return `Bash(${p.slice(0, -1).trimEnd()}:*)`;
-  return `Bash(${p})`;
-}
-
-export function buildClaudeSettings(p: AgentPermissions): {
-  permissions: { allow: string[]; deny: string[]; defaultMode: 'acceptEdits' };
-  includeCoAuthoredBy: false;
-} {
-  const allow: string[] = [];
-  for (const tool of p.allowedTools) {
-    if (tool === 'read') allow.push('Read', 'Glob', 'Grep');
-    else if (tool === 'edit') {
-      if (p.writableGlobs === null) allow.push('Edit', 'Write', 'NotebookEdit');
-      else for (const g of p.writableGlobs) allow.push(`Edit(${g})`, `Write(${g})`);
-    } else if (tool === 'shell') allow.push('Bash');
-    else if (tool === 'web') allow.push('WebFetch', 'WebSearch');
-    else if (tool.startsWith('mcp:')) allow.push(`mcp__${tool.slice(4)}`);
-  }
-  const deny = [...new Set([...ALWAYS_DENIED, ...p.deniedShellPatterns.map(shellDeny)])];
-  return { permissions: { allow, deny, defaultMode: 'acceptEdits' }, includeCoAuthoredBy: false };
-}
-
 export interface ClaudeCommand {
   bin: string;
   args: string[];
   env: Record<string, string>;
+}
+
+/**
+ * The complete environment of the agent process (it is spawned without inheriting the runner's own): an allow-list of
+ * harmless variables, the session's variables, and the one provider credential this runtime is configured with.
+ */
+export function sessionEnv(
+  input: Pick<ShiftStartInput, 'env' | 'sandbox'>,
+  cfg: ClaudeConfig,
+  parent: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const provider: Record<string, string> = {};
+  if (cfg.authMode === 'oauth' && cfg.oauthToken) provider.CLAUDE_CODE_OAUTH_TOKEN = cfg.oauthToken;
+  else if (cfg.authMode === 'api_key' && cfg.apiKey) provider.ANTHROPIC_API_KEY = cfg.apiKey;
+  const extra: Record<string, string> = {
+    CLAUDE_CONFIG_DIR: input.sandbox.configDir,
+    HOME: input.sandbox.home,
+    USERPROFILE: input.sandbox.home,
+  };
+  // Opt-in: Claude Code strips credentials from what Bash and MCP children see and isolates their PID namespace.
+  if (cfg.scrubSubprocessEnv) extra.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
+  return agentEnv(input.env, provider, parent, extra);
 }
 
 /** The exact argv/env of docs/ARCHITECTURE.md section 12.2. Pure; unit tested. */
@@ -73,41 +69,18 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
   if (input.agent.effort) args.push('--effort', input.agent.effort);
   args.push(
     '--permission-mode',
-    'acceptEdits',
+    'dontAsk',
+    // Only the agent's own settings file (in its CLAUDE_CONFIG_DIR): a cloned repository's .claude/settings*.json
+    // must not loosen the permission rules or the sandbox.
+    '--setting-sources',
+    'user',
     '--strict-mcp-config',
     '--mcp-config',
     join(input.sandbox.configDir, 'mcp.json'),
   );
   for (const d of input.addDirs) args.push('--add-dir', d);
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
-
-  const env: Record<string, string> = {
-    ...input.env,
-    CLAUDE_CONFIG_DIR: input.sandbox.configDir,
-    HOME: input.sandbox.home,
-    USERPROFILE: input.sandbox.home,
-  };
-  if (cfg.authMode === 'oauth' && cfg.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = cfg.oauthToken;
-  else if (cfg.authMode === 'api_key' && cfg.apiKey) env.ANTHROPIC_API_KEY = cfg.apiKey;
-  return { bin: cfg.bin, args, env };
-}
-
-/** Chat sessions read and talk; the only shell command they may run is `aom` (comment, ledger search). */
-export function buildClaudeChatSettings(
-  readOnly: boolean,
-  extraAllow: string[] = [],
-): {
-  permissions: { allow: string[]; deny: string[]; defaultMode: 'default' };
-  includeCoAuthoredBy: false;
-} {
-  return {
-    permissions: {
-      allow: ['Read', 'Glob', 'Grep', 'Bash(aom:*)', ...extraAllow],
-      deny: [...ALWAYS_DENIED, ...(readOnly ? ['Edit', 'Write', 'NotebookEdit'] : [])],
-      defaultMode: 'default',
-    },
-    includeCoAuthoredBy: false,
-  };
+  return { bin: cfg.bin, args, env: sessionEnv(input, cfg) };
 }
 
 /** `claude -p <message> --resume <id> --output-format stream-json --verbose --include-partial-messages` (section 14). */
@@ -123,17 +96,17 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
     input.agent.model,
   ];
   if (input.agent.effort) args.push('--effort', input.agent.effort);
-  args.push('--strict-mcp-config', '--mcp-config', join(input.sandbox.configDir, 'mcp.json'));
+  args.push(
+    '--permission-mode',
+    'dontAsk',
+    '--setting-sources',
+    'user',
+    '--strict-mcp-config',
+    '--mcp-config',
+    join(input.sandbox.configDir, 'mcp.json'),
+  );
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
-  const env: Record<string, string> = {
-    ...input.env,
-    CLAUDE_CONFIG_DIR: input.sandbox.configDir,
-    HOME: input.sandbox.home,
-    USERPROFILE: input.sandbox.home,
-  };
-  if (cfg.authMode === 'oauth' && cfg.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = cfg.oauthToken;
-  else if (cfg.authMode === 'api_key' && cfg.apiKey) env.ANTHROPIC_API_KEY = cfg.apiKey;
-  return { bin: cfg.bin, args, env };
+  return { bin: cfg.bin, args, env: sessionEnv(input, cfg) };
 }
 
 /**
@@ -159,8 +132,29 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   constructor(
     private readonly cfg: ClaudeConfig,
-    _paths?: RunnerPaths,
+    private readonly paths?: RunnerPaths,
   ) {}
+
+  /** What this session may touch (see claude-policy.ts); without runner paths (unit tests) the data dir is unknown. */
+  private policy(
+    input: Pick<ShiftStartInput, 'env' | 'sandbox'> & { addDirs?: string[] },
+    cwd: string,
+  ): ClaudePolicyContext {
+    const root = this.paths?.root ?? dirname(dirname(input.sandbox.home));
+    const script = selfCommand('aom').at(-1);
+    return {
+      runnerRoot: root,
+      agentDir: dirname(input.sandbox.home),
+      cwd,
+      addDirs: input.addDirs ?? [],
+      gitDirs: gitDirsOf(cwd),
+      aomReadPaths: [this.paths?.bin ?? join(root, 'bin'), ...(script ? [dirname(script)] : [])],
+      ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
+      realHome: homedir(),
+      mode: this.cfg.sandbox,
+      extraAllowedDomains: this.cfg.extraAllowedDomains,
+    };
+  }
 
   async capabilities(): Promise<RuntimeCapabilities> {
     const caps = ['shell', 'edit', 'web', 'mcp', 'skills', 'sandbox_config', 'resume'];
@@ -174,7 +168,14 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         return { runtime: this.id, version: 'unknown', available: false, capabilities: [] };
       const major = Number(m[1]);
       const minor = Number(m[2]);
-      const ok = major > 2 || (major === 2 && minor >= 1);
+      let ok = major > 2 || (major === 2 && minor >= 1);
+      // The permission/sandbox settings used below need 2.1.257 (blockReadsOutsideWorkingDirectories).
+      if (
+        this.cfg.sandbox !== 'off' &&
+        !(major > 2 || (major === 2 && minor >= 1 && Number(m[3] ?? 0) >= 257))
+      )
+        ok = false;
+      if (this.cfg.sandbox === 'required' && sandboxMissing()) ok = false;
       return { runtime: this.id, version: m[0], available: ok, capabilities: ok ? caps : [] };
     } catch {
       return { runtime: this.id, version: 'unknown', available: false, capabilities: [] };
@@ -192,7 +193,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     await mkdir(dir, { recursive: true });
     await writeFile(
       join(dir, 'settings.json'),
-      `${JSON.stringify(buildClaudeSettings(input.agent.permissions), null, 2)}\n`,
+      `${JSON.stringify(buildShiftSettings(input.agent.permissions, this.policy(input, input.cwd), input.sandbox), null, 2)}\n`,
     );
     await writeFile(join(dir, 'mcp.json'), `${JSON.stringify({ mcpServers: {} })}\n`);
     this.linkCredentials(dir);
@@ -217,7 +218,16 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     await mkdir(dir, { recursive: true });
     await writeFile(
       join(dir, 'settings.json'),
-      `${JSON.stringify(buildClaudeChatSettings(input.readOnly, input.intake ? (this.cfg.intake?.allowedTools ?? []) : []), null, 2)}\n`,
+      `${JSON.stringify(
+        buildChatSettings(
+          input.readOnly,
+          input.intake ? (this.cfg.intake?.allowedTools ?? []) : [],
+          this.policy(input, input.cwd),
+          input.sandbox,
+        ),
+        null,
+        2,
+      )}\n`,
     );
     // The BA's intake reads Jira with the user's own MCP server (configured on this workstation); other chats have none.
     const intakeMcp = input.intake ? this.cfg.intake?.mcpConfig : undefined;

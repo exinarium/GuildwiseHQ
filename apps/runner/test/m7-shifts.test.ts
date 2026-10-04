@@ -377,21 +377,23 @@ describe('the BA intake chat on the mock runtime', () => {
 
 describe('the Claude runtime in an intake chat (no real session is ever started)', () => {
   it('lets only the BA intake use the Jira tool configured on this workstation', async () => {
-    const { buildClaudeChatSettings } = await import('../src/adapters/claude-code.ts');
+    const { buildChatSettings } = await import('../src/adapters/claude-policy.ts');
+    const { POLICY_PATHS, policyCtx } = await import('./policy-fixtures.ts');
     const { ClaudeRuntimeConfigSchema } = await import('../src/config.ts');
     const cfg = ClaudeRuntimeConfigSchema.parse({
       intake: { mcpConfig: '/home/me/jira-mcp.json', allowedTools: ['mcp__atlassian'] },
     });
     expect(cfg.intake).toEqual({ mcpConfig: '/home/me/jira-mcp.json', allowedTools: ['mcp__atlassian'] });
-    expect(buildClaudeChatSettings(false, cfg.intake?.allowedTools).permissions.allow).toEqual([
+    expect(
+      buildChatSettings(false, cfg.intake?.allowedTools ?? [], policyCtx(), POLICY_PATHS).permissions.allow,
+    ).toEqual(['Read', 'Glob', 'Grep', 'Bash(aom:*)', 'mcp__atlassian']);
+    // a normal chat keeps the minimal allow list
+    expect(buildChatSettings(false, [], policyCtx(), POLICY_PATHS).permissions.allow).toEqual([
       'Read',
       'Glob',
       'Grep',
       'Bash(aom:*)',
-      'mcp__atlassian',
     ]);
-    // a normal chat keeps the minimal allow list
-    expect(buildClaudeChatSettings(false).permissions.allow).toEqual(['Read', 'Glob', 'Grep', 'Bash(aom:*)']);
     expect(ClaudeRuntimeConfigSchema.parse({}).intake).toBeUndefined();
   });
 });

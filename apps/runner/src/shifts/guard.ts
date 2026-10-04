@@ -57,19 +57,46 @@ export async function changedPaths(worktree: string, startSha: string): Promise<
 }
 
 /**
- * Paths a path-scoped role (tester: E2E globs, writer: documentation globs) changed outside its scope; empty for other
- * roles. The guard rejects these, and the runner discards them instead of auto-committing them.
+ * The globs a role may change, or null for the whole worktree. Testers use the project's E2E globs (resolved by the
+ * runner); every other role, built-in or custom, uses its definition's `writableGlobs` (an empty list means nothing).
+ */
+export function effectiveWritableGlobs(input: GuardInput): string[] | null {
+  if (input.roleKey === 'tester') return input.e2eGlobs.length ? input.e2eGlobs : ['!**'];
+  const g = input.permissions.writableGlobs;
+  if (g === undefined || g === null) return null;
+  return g.length ? g : ['!**'];
+}
+
+/**
+ * Paths a path-scoped role changed outside its scope (tester: E2E globs; any role with `writableGlobs`, such as the
+ * writer or a custom role); empty for unscoped roles. The guard rejects these, and the runner discards them instead
+ * of auto-committing them.
  */
 export function outOfScope(input: GuardInput, changed: string[]): string[] {
-  if (input.roleKey === 'tester') {
-    const isE2e = picomatch(input.e2eGlobs.length ? input.e2eGlobs : ['!**'], { dot: true });
-    return changed.filter((p) => !isE2e(p));
-  }
-  if (input.roleKey === 'writer' && input.permissions.writableGlobs?.length) {
-    const isDoc = picomatch(input.permissions.writableGlobs, { dot: true });
-    return changed.filter((p) => !isDoc(p));
-  }
-  return [];
+  const globs = effectiveWritableGlobs(input);
+  if (!globs) return [];
+  const inScope = picomatch(globs, { dot: true });
+  return changed.filter((p) => !inScope(p));
+}
+
+/**
+ * A role that may not commit leaves nothing behind: whatever it changed (committed, staged, edited, untracked) is
+ * rolled back to the start of the shift. The worktree returns to its branch first so a stray checkout cannot make
+ * the reset hit another branch. Returns true when something had to be undone.
+ */
+export async function resetReadOnlyWorktree(input: {
+  worktree: string;
+  branchName: string;
+  startSha: string;
+}): Promise<boolean> {
+  const head = (await git(input.worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+  const dirty = (await git(input.worktree, ['status', '--porcelain', '--untracked-files=all'])).stdout.trim();
+  const branch = await currentBranch(input.worktree);
+  if (head === input.startSha && !dirty && branch === input.branchName) return false;
+  await git(input.worktree, ['checkout', '-f', input.branchName]);
+  await git(input.worktree, ['reset', '--hard', input.startSha]);
+  await git(input.worktree, ['clean', '-fd']);
+  return true;
 }
 
 /**
@@ -113,13 +140,13 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
     }
   }
 
-  // Writers change documentation only (their role's writable globs).
-  if (input.roleKey === 'writer' && input.permissions.writableGlobs?.length) {
+  // Any other role with a write scope (writers: documentation; custom roles: their definition's writable globs).
+  if (input.roleKey !== 'tester' && effectiveWritableGlobs(input)) {
     const bad = outOfScope(input, changed);
     if (bad.length > 0) {
       violations.push({
-        rule: 'writer_edited_non_docs',
-        detail: `Writers may only change documentation (${input.permissions.writableGlobs.join(', ')}); changed: ${bad.slice(0, 10).join(', ')}`,
+        rule: input.roleKey === 'writer' ? 'writer_edited_non_docs' : 'edited_outside_writable_globs',
+        detail: `${input.roleKey === 'writer' ? 'Writers may only change documentation' : 'This role may only change paths matching'} (${(input.permissions.writableGlobs ?? []).join(', ') || 'nothing'}); changed: ${bad.slice(0, 10).join(', ')}`,
       });
     }
   }

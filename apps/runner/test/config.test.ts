@@ -1,7 +1,13 @@
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { applyOverrides, loadConfig, RunnerConfigSchema, saveConfig } from '../src/config.ts';
+import {
+  applyOverrides,
+  ClaudeRuntimeConfigSchema,
+  loadConfig,
+  RunnerConfigSchema,
+  saveConfig,
+} from '../src/config.ts';
 import { resolveDataDir, runnerPaths } from '../src/paths.ts';
 import { cleanupTmp, makeConfig, tmp } from './helpers.ts';
 
@@ -33,7 +39,9 @@ describe('config', () => {
   });
 
   it('mock override enables the mock runtime without touching other settings', () => {
-    const c = makeConfig('http://x', { runtimes: { 'claude-code': { bin: 'c', authMode: 'default' } } });
+    const c = makeConfig('http://x', {
+      runtimes: { 'claude-code': ClaudeRuntimeConfigSchema.parse({ bin: 'c' }) },
+    });
     expect(applyOverrides(c, { mock: true }).runtimes.mock?.enabled).toBe(true);
     expect(applyOverrides(c, {})).toBe(c);
   });

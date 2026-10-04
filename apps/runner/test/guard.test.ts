@@ -1,10 +1,10 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { ensureWorktree } from '../src/git/worktrees.ts';
 import { autoCommit } from '../src/shifts/autocommit.ts';
-import { runGuard, snapshotBranches } from '../src/shifts/guard.ts';
+import { discardOutOfScope, resetReadOnlyWorktree, runGuard, snapshotBranches } from '../src/shifts/guard.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -19,6 +19,7 @@ async function setup(roleKey: string) {
   const path = join(tmp(), 'wt');
   const w = await ensureWorktree({
     repoPath: repo.clone,
+    roots: ['/'],
     spec: {
       mode: 'create',
       repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
@@ -104,6 +105,7 @@ describe('guard with concurrent shifts', () => {
     const otherPath = join(tmp(), 'wt-other');
     await ensureWorktree({
       repoPath: repo.clone,
+      roots: ['/'],
       spec: {
         mode: 'create',
         repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
@@ -143,5 +145,63 @@ describe('autocommit', () => {
       'aom: TOY-1 build leftovers (shift 019e3f6a)|Ada (aom)',
     );
     expect(sh(path, 'git', ['status', '--porcelain'])).toBe('');
+  });
+});
+
+describe('writable globs are enforced for every role (review M3)', () => {
+  it('a custom role with writableGlobs may only change matching paths', async () => {
+    const { path, repo } = await setup('builder');
+    const startSha = sh(path, 'git', ['rev-parse', 'HEAD']);
+    const input = (globs: string[] | null) => ({
+      worktree: path,
+      roleKey: 'release-notes',
+      permissions: { mayCommit: true, writableGlobs: globs },
+      branchName: 'aom/toy-1-x',
+      startSha,
+      branchesAtStart: {},
+      e2eGlobs: [],
+    });
+    mkdirSync(join(path, 'notes'), { recursive: true });
+    writeFileSync(join(path, 'notes', 'a.md'), 'ok');
+    expect((await runGuard(input(['notes/**']))).map((v) => v.rule)).not.toContain(
+      'edited_outside_writable_globs',
+    );
+    writeFileSync(join(path, 'src.ts'), 'nope');
+    const v = await runGuard(input(['notes/**']));
+    expect(v.map((x) => x.rule)).toContain('edited_outside_writable_globs');
+    expect(v.find((x) => x.rule === 'edited_outside_writable_globs')?.detail).toContain('src.ts');
+    // null means the whole worktree; an empty list means nothing
+    expect((await runGuard(input(null))).map((x) => x.rule)).not.toContain('edited_outside_writable_globs');
+    expect((await runGuard(input([]))).map((x) => x.rule)).toContain('edited_outside_writable_globs');
+    // and the runner throws the out-of-scope edit away instead of committing it
+    const dropped = await discardOutOfScope(input(['notes/**']));
+    expect(dropped).toEqual(['src.ts']);
+    expect(repo.clone).toBeTruthy();
+  });
+});
+
+describe('read-only roles are rolled back (review M4)', () => {
+  it('reset --hard to the start sha and clean, also after a commit or a stray branch', async () => {
+    const { path } = await setup('reviewer');
+    const startSha = sh(path, 'git', ['rev-parse', 'HEAD']);
+    const input = { worktree: path, branchName: 'aom/toy-1-x', startSha };
+    expect(await resetReadOnlyWorktree(input)).toBe(false);
+
+    writeFileSync(join(path, 'x.txt'), 'untracked');
+    writeFileSync(join(path, 'README.md'), 'edited');
+    mkdirSync(join(path, 'newdir'));
+    writeFileSync(join(path, 'newdir', 'n.txt'), 'n');
+    sh(path, 'git', ['checkout', '-b', 'rogue']);
+    writeFileSync(join(path, 'c.txt'), 'c');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'sneaky']);
+    writeFileSync(join(path, 'again.txt'), 'dirty');
+
+    expect(await resetReadOnlyWorktree(input)).toBe(true);
+    expect(sh(path, 'git', ['rev-parse', 'HEAD'])).toBe(startSha);
+    expect(sh(path, 'git', ['branch', '--show-current'])).toBe('aom/toy-1-x');
+    expect(sh(path, 'git', ['status', '--porcelain'])).toBe('');
+    expect(existsSync(join(path, 'newdir'))).toBe(false);
+    expect(existsSync(join(path, 'x.txt'))).toBe(false);
   });
 });

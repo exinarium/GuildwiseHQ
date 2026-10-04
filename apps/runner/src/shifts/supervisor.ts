@@ -43,7 +43,13 @@ import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
 import { readVaultContext, withVaultContext } from '../vaults/context.ts';
 import { autoCommit } from './autocommit.ts';
-import { type BranchSnapshot, discardOutOfScope, runGuard, snapshotBranches } from './guard.ts';
+import {
+  type BranchSnapshot,
+  discardOutOfScope,
+  resetReadOnlyWorktree,
+  runGuard,
+  snapshotBranches,
+} from './guard.ts';
 
 type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
 type ReportResultMsg = ServerToRunnerOf<'shift.report.result'>;
@@ -306,7 +312,8 @@ export class ShiftSupervisor {
         s.worktree = await ensureWorktree({
           repoPath: repo.localPath,
           spec: msg.worktree,
-          defaultPath: paths.worktreePath(msg.brief.project.key, msg.brief.card.ref),
+          defaultPath: paths.worktreePath(msg.brief.project.key, msg.brief.card.ref, msg.brief.project.id),
+          roots: [paths.worktrees],
         });
         if (msg.prepare.rebase && !s.resumed) await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch);
       } catch (err) {
@@ -348,6 +355,7 @@ export class ShiftSupervisor {
     s.env = {
       ...sandboxEnv(sandbox),
       AOM_IPC_URL: this.deps.ipc.url,
+      ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
       AOM_SHIFT_TOKEN: s.token,
       AOM_SHIFT_ID: msg.shiftId,
       PATH: `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
@@ -459,6 +467,17 @@ export class ShiftSupervisor {
         shiftId: msg.shiftId,
         env: s.env,
       });
+    }
+
+    // A role that may not commit (reviewer, scout, ...) leaves nothing behind, whatever it did to the worktree.
+    if (msg.worktree && s.worktree && !msg.agent.permissions.mayCommit && s.startSha) {
+      const undone = await resetReadOnlyWorktree({
+        worktree: s.worktree.path,
+        branchName: s.worktree.branchName,
+        startSha: s.startSha,
+      });
+      if (undone)
+        this.log.warn(`rolled back changes a read-only role made in the worktree of shift ${msg.shiftId}`);
     }
 
     let outcome: 'reported' | 'no_report' | 'stopped' | 'crashed' | 'timeout';

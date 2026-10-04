@@ -1,8 +1,10 @@
 import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
-import { buildClaudeCommand, buildClaudeSettings } from '../src/adapters/claude-code.ts';
+import { buildClaudeCommand, sessionEnv } from '../src/adapters/claude-code.ts';
+import { buildShiftSettings } from '../src/adapters/claude-policy.ts';
 import type { ShiftStartInput } from '../src/adapters/types.ts';
 import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
+import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
 
 const builder = BUILTIN_ROLES.find((r) => r.key === 'builder');
 const reviewer = BUILTIN_ROLES.find((r) => r.key === 'reviewer');
@@ -60,7 +62,9 @@ describe('claude command builder (ARCHITECTURE section 12.2)', () => {
       '--effort',
       'medium',
       '--permission-mode',
-      'acceptEdits',
+      'dontAsk',
+      '--setting-sources',
+      'user',
       '--strict-mcp-config',
       '--mcp-config',
       '/data/agents/a1/claude/mcp.json',
@@ -112,12 +116,21 @@ describe('claude command builder (ARCHITECTURE section 12.2)', () => {
   });
 });
 
-describe('claude settings.json', () => {
-  it('maps tools to allow and always denies git push/rebase/checkout/switch/reset --hard', () => {
-    const s = buildClaudeSettings(builder.permissions);
+const settings = (p: typeof builder.permissions, over = {}) =>
+  buildShiftSettings(p, policyCtx(over), POLICY_PATHS);
+const CWD = '//data/worktrees/TOY-0192abcd/TOY-1';
+
+describe('claude settings.json: permissions per role (review M3)', () => {
+  it('dontAsk, never acceptEdits: only what a rule allows runs', () => {
+    const s = settings(builder.permissions);
+    expect(s.permissions.defaultMode).toBe('dontAsk');
+    expect(s.permissions.blockReadsOutsideWorkingDirectories).toBe(true);
     expect(s.includeCoAuthoredBy).toBe(false);
-    expect(s.permissions.defaultMode).toBe('acceptEdits');
-    expect(s.permissions.allow).toEqual(['Read', 'Glob', 'Grep', 'Edit', 'Write', 'NotebookEdit', 'Bash']);
+  });
+
+  it('builder: edits only inside its worktree; denies git push/rebase/checkout/switch/reset --hard', () => {
+    const s = settings(builder.permissions);
+    expect(s.permissions.allow).toEqual(['Read', 'Glob', 'Grep', `Edit(${CWD}/**)`, 'Bash']);
     for (const d of [
       'Bash(git push:*)',
       'Bash(git rebase:*)',
@@ -126,20 +139,154 @@ describe('claude settings.json', () => {
       'Bash(git reset --hard:*)',
       'Bash(sudo:*)',
       'Bash(rm -rf /*)',
+      'WebFetch',
     ]) {
       expect(s.permissions.deny).toContain(d);
     }
+    expect(s.permissions.deny).not.toContain('Edit');
   });
 
-  it('restricts Edit/Write to the writable globs (tester)', () => {
-    const s = buildClaudeSettings(tester.permissions);
-    expect(s.permissions.allow).toContain('Edit(e2e/**)');
-    expect(s.permissions.allow).toContain('Write(e2e/**)');
+  it('restricts Edit to the writable globs inside the worktree (tester, writer, custom roles)', () => {
+    const s = settings(tester.permissions);
+    expect(s.permissions.allow).toContain(`Edit(${CWD}/e2e/**)`);
     expect(s.permissions.allow).not.toContain('Edit');
+    const custom = settings({ ...builder.permissions, writableGlobs: ['notes/**', '*.md'] });
+    expect(custom.permissions.allow).toEqual(
+      expect.arrayContaining([`Edit(${CWD}/notes/**)`, `Edit(${CWD}/*.md)`]),
+    );
+    expect(custom.permissions.allow.some((a) => a === `Edit(${CWD}/**)`)).toBe(false);
   });
 
-  it('read-only roles get no edit tools', () => {
-    const s = buildClaudeSettings({ ...reviewer.permissions, allowedTools: ['read', 'shell', 'web'] });
+  it('roles without the edit tool deny Edit, Write and NotebookEdit outright', () => {
+    const s = settings({ ...reviewer.permissions, allowedTools: ['read', 'shell', 'web'] });
     expect(s.permissions.allow).toEqual(['Read', 'Glob', 'Grep', 'Bash', 'WebFetch', 'WebSearch']);
+    expect(s.permissions.deny).toEqual(expect.arrayContaining(['Edit', 'Write', 'NotebookEdit']));
+    expect(s.permissions.deny).not.toContain('WebFetch');
+  });
+
+  it('nobody edits the vault, the agent config dir or the worktree .git; runner state is unreadable', () => {
+    const s = settings(builder.permissions, { addDirs: ['/data/vaults/v1'] });
+    expect(s.permissions.deny).toEqual(
+      expect.arrayContaining([
+        'Edit(//data/vaults/v1/**)',
+        'Edit(//data/agents/a1/claude/**)',
+        `Edit(${CWD}/.git/**)`,
+        'Read(//data/config.json)',
+        'Read(//data/outbox/**)',
+        'Read(//data/active-shifts/**)',
+        'Read(//home/me/.ssh/**)',
+        'Read(//home/me/.claude/**)',
+      ]),
+    );
+  });
+});
+
+describe('claude settings.json: OS sandbox per role (review H2)', () => {
+  it('turns the sandbox on, strict: no unsandboxed retry, fail rather than run unsandboxed', () => {
+    const sb = settings(builder.permissions).sandbox;
+    expect(sb).toMatchObject({
+      enabled: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false,
+      autoAllowBashIfSandboxed: true,
+    });
+    expect(settings(builder.permissions, { mode: 'best_effort' }).sandbox?.failIfUnavailable).toBe(false);
+    expect(settings(builder.permissions, { mode: 'off' }).sandbox).toBeUndefined();
+  });
+
+  it("denies reads of the runner data dir and credential stores, re-opening only the agent's own areas", () => {
+    const fs = settings(builder.permissions, { addDirs: ['/data/vaults/v1'] }).sandbox?.filesystem;
+    expect(fs?.denyRead).toEqual(
+      expect.arrayContaining([
+        '/data',
+        '/home/me/.ssh',
+        '/home/me/.aws',
+        '/home/me/.claude',
+        '/home/me/.config/gh',
+      ]),
+    );
+    expect(fs?.allowRead).toEqual(
+      expect.arrayContaining([
+        '/data/agents/a1',
+        '/data/worktrees/TOY-0192abcd/TOY-1',
+        '/data/vaults/v1',
+        '/data/bin',
+      ]),
+    );
+    // another agent's sandbox or another card's worktree is not among them
+    expect(fs?.allowRead.some((p) => p.includes('agents/a2'))).toBe(false);
+  });
+
+  it('writes: own home and scratch plus the repo git dir, never its hooks/config or the vault', () => {
+    const fs = settings(builder.permissions, { addDirs: ['/data/vaults/v1'] }).sandbox?.filesystem;
+    expect(fs?.allowWrite).toEqual(['/data/agents/a1/home', '/data/agents/a1/scratch', '/home/me/toy/.git']);
+    expect(fs?.denyWrite).toEqual(
+      expect.arrayContaining([
+        '/home/me/toy/.git/hooks',
+        '/home/me/toy/.git/config',
+        '/data/vaults/v1',
+        '/data/config.json',
+      ]),
+    );
+  });
+
+  it('network: shell roles reach package registries only, others nothing; the IPC socket is allowed', () => {
+    const b = settings(builder.permissions, {
+      ipcSocket: '/tmp/aom-ipc/x.sock',
+      extraAllowedDomains: ['npm.corp'],
+    });
+    expect(b.sandbox?.network).toMatchObject({
+      strictAllowlist: true,
+      allowUnixSockets: ['/tmp/aom-ipc/x.sock'],
+      allowLocalBinding: true,
+    });
+    expect(b.sandbox?.network.allowedDomains).toEqual(
+      expect.arrayContaining(['registry.npmjs.org', 'pypi.org', 'npm.corp']),
+    );
+    const noShell = settings({ ...reviewer.permissions, allowedTools: ['read', 'edit'] });
+    expect(noShell.sandbox?.network.allowedDomains).toEqual([]);
+    expect(noShell.sandbox?.network.allowLocalBinding).toBe(false);
+  });
+});
+
+describe('the agent process gets a minimal environment (review H2a)', () => {
+  const parent = {
+    PATH: '/usr/bin',
+    LANG: 'en_US.UTF-8',
+    GH_TOKEN: 'ghp_secret',
+    GITHUB_TOKEN: 'ghp_secret2',
+    SSH_AUTH_SOCK: '/tmp/agent.sock',
+    AWS_SECRET_ACCESS_KEY: 'aws',
+    ANTHROPIC_API_KEY: 'sk-parent',
+    NPM_TOKEN: 'npm',
+    HOME: '/home/me',
+  };
+  it('drops everything not allow-listed and keeps only the configured provider credential', () => {
+    const env = sessionEnv(
+      input(),
+      ClaudeRuntimeConfigSchema.parse({ authMode: 'oauth', oauthToken: 'sk-ant-oat-x' }),
+      parent,
+    );
+    expect(env.PATH).toBe('/data/bin:/usr/bin'); // the session's PATH (aom shim first) wins
+    expect(env.LANG).toBe('en_US.UTF-8');
+    expect(env.HOME).toBe('/data/agents/a1/home');
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat-x');
+    expect(env.AOM_SHIFT_TOKEN).toBe('tok');
+    for (const k of [
+      'GH_TOKEN',
+      'GITHUB_TOKEN',
+      'SSH_AUTH_SOCK',
+      'AWS_SECRET_ACCESS_KEY',
+      'ANTHROPIC_API_KEY',
+      'NPM_TOKEN',
+    ])
+      expect(env[k], k).toBeUndefined();
+  });
+  it("does not forward the runner's ANTHROPIC_API_KEY in default auth mode, and scrubbing is opt-in", () => {
+    const def = sessionEnv(input(), ClaudeRuntimeConfigSchema.parse({}), parent);
+    expect(def.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(def.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
+    const scrub = sessionEnv(input(), ClaudeRuntimeConfigSchema.parse({ scrubSubprocessEnv: true }), parent);
+    expect(scrub.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
   });
 });

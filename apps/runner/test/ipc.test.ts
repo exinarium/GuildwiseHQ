@@ -83,3 +83,32 @@ describe('ipc server', () => {
     expect((await post(s.url, '/v1/other', token, {})).status).toBe(404);
   });
 });
+
+describe('ipc over a unix socket (the sandboxed aom CLI)', () => {
+  it('serves the same endpoints with the same token rules, from a private directory, and cleans up', async () => {
+    const { socketFetch } = await import('../src/aom/aom-cli.ts');
+    const { existsSync, statSync } = await import('node:fs');
+    const { dirname } = await import('node:path');
+    const s = await start();
+    const path = await s.startSocket();
+    if (process.platform === 'win32') return;
+    expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
+    const token = s.registerShift(handler);
+    const f = socketFetch(path);
+    const ok = await f('http://localhost/v1/report', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ report: { kind: 'comment', note: 'hi' } }),
+    });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ accepted: true, message: 'ok comment' });
+    const denied = await f('http://localhost/v1/report', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer nope' },
+      body: '{}',
+    });
+    expect(denied.status).toBe(401);
+    await s.stop();
+    expect(existsSync(path)).toBe(false);
+  });
+});

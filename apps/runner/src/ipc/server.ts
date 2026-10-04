@@ -1,5 +1,8 @@
 import { randomBytes } from 'node:crypto';
+import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   IPC_REPORT_PATH,
   IPC_RPC_PATH,
@@ -22,11 +25,15 @@ export interface ShiftIpcHandler {
  */
 export class IpcServer {
   private server: Server | null = null;
+  private socketServer: Server | null = null;
+  private socketDir: string | null = null;
+  /** Unix socket twin of the TCP endpoint (`AOM_IPC_SOCKET`): the sandboxed `aom` CLI has no loopback route. */
+  socketPath = '';
   private readonly shifts = new Map<string, ShiftIpcHandler>();
   url = '';
 
-  async start(host = '127.0.0.1'): Promise<string> {
-    this.server = createServer((req, res) => {
+  private makeServer(): Server {
+    return createServer((req, res) => {
       void this.handle(req).then(
         ({ status, body }) => {
           res.writeHead(status, { 'content-type': 'application/json' });
@@ -38,6 +45,33 @@ export class IpcServer {
         },
       );
     });
+  }
+
+  /**
+   * Also listens on a Unix socket in a private (0700) temp directory outside the runner's data dir, which the agent
+   * sandbox may connect to. Not available on Windows (the TCP endpoint is used there).
+   */
+  async startSocket(): Promise<string> {
+    if (process.platform === 'win32') return '';
+    this.socketDir = mkdtempSync(join(tmpdir(), 'aom-ipc-'));
+    chmodSync(this.socketDir, 0o700);
+    const path = join(this.socketDir, 'ipc.sock');
+    this.socketServer = this.makeServer();
+    await new Promise<void>((resolve, reject) => {
+      this.socketServer?.once('error', reject);
+      this.socketServer?.listen(path, resolve);
+    });
+    try {
+      chmodSync(path, 0o600);
+    } catch {
+      // best effort
+    }
+    this.socketPath = path;
+    return path;
+  }
+
+  async start(host = '127.0.0.1'): Promise<string> {
+    this.server = this.makeServer();
     await new Promise<void>((resolve) => this.server?.listen(0, host, resolve));
     const addr = this.server.address();
     if (!addr || typeof addr === 'string') throw new Error('IPC server has no address');
@@ -50,6 +84,12 @@ export class IpcServer {
     const s = this.server;
     this.server = null;
     if (s) await new Promise<void>((resolve) => s.close(() => resolve()));
+    const u = this.socketServer;
+    this.socketServer = null;
+    if (u) await new Promise<void>((resolve) => u.close(() => resolve()));
+    if (this.socketDir) rmSync(this.socketDir, { recursive: true, force: true });
+    this.socketDir = null;
+    this.socketPath = '';
   }
 
   /** Returns a fresh 32 byte token valid until `revoke(token)`. */

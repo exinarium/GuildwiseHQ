@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildClaudeChatCommand, buildClaudeChatSettings } from '../src/adapters/claude-code.ts';
+import { buildClaudeChatCommand } from '../src/adapters/claude-code.ts';
+import { buildChatSettings } from '../src/adapters/claude-policy.ts';
 import { ClaudeStreamParser } from '../src/adapters/claude-stream-parser.ts';
 import { MockAdapter } from '../src/adapters/mock.ts';
 import type { ChatStartInput, RuntimeEvent } from '../src/adapters/types.ts';
@@ -10,6 +11,7 @@ import { ClaudeRuntimeConfigSchema, MockRuntimeConfigSchema } from '../src/confi
 import { runnerPaths } from '../src/paths.ts';
 import { type Harness, startHarness } from './harness.ts';
 import { cleanupTmp, tmp, waitUntil } from './helpers.ts';
+import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
 import { ScriptedAdapter } from './scripted-adapter.ts';
 
 cleanupTmp();
@@ -271,6 +273,10 @@ describe('claude code chat adapter', () => {
       'sonnet',
       '--effort',
       'low',
+      '--permission-mode',
+      'dontAsk',
+      '--setting-sources',
+      'user',
       '--strict-mcp-config',
       '--mcp-config',
       '/data/agents/a1/claude/mcp.json',
@@ -285,10 +291,19 @@ describe('claude code chat adapter', () => {
   });
 
   it('chat tools: read and aom only; a card worktree is also denied edits', () => {
-    expect(buildClaudeChatSettings(false).permissions.allow).toEqual(['Read', 'Glob', 'Grep', 'Bash(aom:*)']);
-    expect(buildClaudeChatSettings(false).permissions.deny).toContain('Bash(git push:*)');
-    expect(buildClaudeChatSettings(false).permissions.deny).not.toContain('Edit');
-    expect(buildClaudeChatSettings(true).permissions.deny).toEqual(expect.arrayContaining(['Edit', 'Write']));
+    expect(buildChatSettings(false, [], policyCtx(), POLICY_PATHS).permissions.allow).toEqual([
+      'Read',
+      'Glob',
+      'Grep',
+      'Bash(aom:*)',
+    ]);
+    expect(buildChatSettings(false, [], policyCtx(), POLICY_PATHS).permissions.deny).toContain(
+      'Bash(git push:*)',
+    );
+    expect(buildChatSettings(false, [], policyCtx(), POLICY_PATHS).permissions.deny).not.toContain('Edit');
+    expect(buildChatSettings(true, [], policyCtx(), POLICY_PATHS).permissions.deny).toEqual(
+      expect.arrayContaining(['Edit', 'Write']),
+    );
   });
 
   it('parses partial-message deltas, the session id, usage and the final text', () => {

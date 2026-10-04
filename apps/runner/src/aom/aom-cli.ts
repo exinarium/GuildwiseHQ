@@ -2,6 +2,7 @@
 // The in-session `aom` command (docs/ARCHITECTURE.md section 13.4). Talks to the runner's local IPC server with the
 // per-shift token from the environment. Verb table: one line per verb.
 import { readFileSync, realpathSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import {
   type DevopsShift,
@@ -558,11 +559,38 @@ const isEntry = (() => {
   }
 })();
 
+/** `fetch` over a Unix socket (`AOM_IPC_SOCKET`): the agent sandbox has no network route to the loopback endpoint. */
+export function socketFetch(socketPath: string, fallback?: typeof fetch): typeof fetch {
+  return ((input: unknown, init?: RequestInit) =>
+    new Promise<Response>((resolve, reject) => {
+      const url = new URL(String(input));
+      const req = httpRequest(
+        {
+          socketPath,
+          path: `${url.pathname}${url.search}`,
+          method: init?.method ?? 'GET',
+          headers: init?.headers as Record<string, string>,
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () =>
+            resolve(new Response(Buffer.concat(chunks), { status: res.statusCode ?? 500 })),
+          );
+        },
+      );
+      req.on('error', (err) =>
+        fallback ? fallback(input as string, init).then(resolve, reject) : reject(err),
+      );
+      req.end(typeof init?.body === 'string' ? init.body : undefined);
+    })) as typeof fetch;
+}
+
 if (isEntry) {
   runAom(process.argv.slice(2), {
     env: process.env,
     io: { out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s) },
-    fetch,
+    fetch: process.env.AOM_IPC_SOCKET ? socketFetch(process.env.AOM_IPC_SOCKET, fetch) : fetch,
     readFile: (p) => readFileSync(p, 'utf8'),
   }).then((code) => process.exit(code));
 }

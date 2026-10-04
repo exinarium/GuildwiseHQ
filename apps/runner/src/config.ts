@@ -13,6 +13,21 @@ export const ClaudeRuntimeConfigSchema = z.object({
    * Jira server and its credentials, which never leave this machine); `allowedTools` lists what the chat may use
    * without asking (`mcp__<server>`, `WebFetch`, ...). Without it the chat has no tools beyond `aom`, `gh` and reading.
    */
+  /**
+   * OS-level sandbox around the agent's shell (Claude Code's own: bubblewrap + socat on Linux/WSL2, Seatbelt on
+   * macOS). `required` (default): the runtime is unavailable, and sessions refuse to start, without it.
+   * `best_effort`: run unsandboxed when it cannot start. `off`: no sandbox (permission rules still apply).
+   */
+  sandbox: z.enum(['required', 'best_effort', 'off']).default('required'),
+  /** Extra hosts agents' shell commands may reach (private package mirrors, an internal git host). */
+  extraAllowedDomains: z.array(z.string()).default([]),
+  /**
+   * Sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1: Claude Code removes credentials from the environment of everything its
+   * shell starts and, on Linux, isolates the PID namespace so `/proc/<pid>/environ` of other processes is unreadable.
+   * Off by default because it also removes variables Claude Code considers credentials, which may include the
+   * shift token the `aom` CLI needs; try it on one workstation first (docs/RUNNER.md).
+   */
+  scrubSubprocessEnv: z.boolean().default(false),
   intake: z
     .object({ mcpConfig: z.string().optional(), allowedTools: z.array(z.string()).default([]) })
     .optional(),
