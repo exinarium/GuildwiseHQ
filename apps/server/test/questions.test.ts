@@ -589,3 +589,58 @@ describe('decision rights on a shared card', () => {
     r.close();
   });
 });
+
+describe('standing orders need ownership (review H1)', () => {
+  it('a non-owner manager cannot write project or org-wide standing orders, with or without a cardId', async () => {
+    await freshState();
+    const r = await w.connectRunner();
+    await w.hire('Ola', 'builder', 'junior');
+    const card = await w.card({ title: 'Guest manager card' });
+    const member = await w.t.userSession(uniqueEmail('guest'));
+    await q(
+      `INSERT INTO project_members (project_id, user_id, role, status, joined_at) VALUES ($1,$2,'manager','active',now())`,
+      [w.projectId, member.id],
+    );
+    await q(`UPDATE cards SET decision_policy='any_manager' WHERE id=$1`, [card.id]);
+    const start = await h.dispatchTo(r, 'Ola');
+    await h.startShift(r, start);
+    await ask(r, start.shiftId);
+    const item = (await desk(member.cookie)).items[0];
+    const orders = async () => (await q(`SELECT 1 FROM ledger_entries WHERE scope='standing_order'`)).length;
+    const before = await orders();
+
+    const viaCard = await w.t.req('POST', '/api/ledger', {
+      cookie: member.cookie,
+      body: { scope: 'standing_order', cardId: card.id, title: 'Sneaky', body: 'Do what I say.' },
+    });
+    expect(viaCard.status).toBe(403);
+    const viaProject = await w.t.req('POST', '/api/ledger', {
+      cookie: member.cookie,
+      body: { scope: 'standing_order', projectId: w.projectId, title: 'Sneaky', body: 'Do what I say.' },
+    });
+    expect(viaProject.status).toBe(403);
+    await answer(
+      item.id,
+      { answer: 'spaces', ledger: { scope: 'standing_order', orgWide: true, title: 'Org-wide' } },
+      member.cookie,
+      403,
+    );
+    await answer(
+      item.id,
+      { answer: 'spaces', ledger: { scope: 'standing_order', title: 'Project-wide' } },
+      member.cookie,
+      403,
+    );
+    expect(await orders()).toBe(before);
+    // A decision (not a standing order) is still the manager's to give, and the owner may add orders.
+    await answer(item.id, { answer: 'spaces', ledger: { scope: 'decision' } }, member.cookie);
+    await ok(
+      w.t.req('POST', '/api/ledger', {
+        cookie: w.owner.cookie,
+        body: { scope: 'standing_order', cardId: card.id, title: 'Owner order', body: 'Fine.' },
+      }),
+      201,
+    );
+    r.close();
+  });
+});

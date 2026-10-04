@@ -21,20 +21,22 @@ export async function addLedgerEntry(
     let projectId = req.projectId;
     let cardId = req.cardId;
     let orgId = user.id;
+    let myRole: string | null = null;
     if (cardId) {
       const { card } = await loadVisibleCard(tx, user.id, cardId);
       projectId = card.project_id;
       cardId = card.id;
       orgId = card.org_id;
+      myRole = card.my_role;
     } else if (projectId) {
       const project = await loadVisibleProject(tx, user.id, projectId);
       orgId = project.org_id;
+      myRole = project.my_role;
     }
-    if (projectId && !cardId && req.scope === 'standing_order') {
-      // Project standing orders bind the project's agents: the project owner decides.
-      const p = await loadVisibleProject(tx, user.id, projectId);
-      if (p.my_role !== 'owner') throw forbidden('only the project owner can add project standing orders');
-    }
+    // Standing orders bind the project's agents (a card-scoped request still writes a project-wide order):
+    // the project owner decides, whether or not a cardId was supplied.
+    if (projectId && req.scope === 'standing_order' && myRole !== 'owner')
+      throw forbidden('only the project owner can add project standing orders');
     const entryId = randomUUID();
     // Only standing orders are mirrored to the vault from here; decisions come from answered questions.
     const vaultPath =

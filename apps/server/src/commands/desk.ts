@@ -75,6 +75,14 @@ export async function answerDeskItem(
     const entryId = randomUUID();
     const scope = req.ledger.scope;
     const orgWide = scope === 'standing_order' && req.ledger.orgWide === true;
+    // Standing orders bind agents beyond this card: project-wide ones need the project owner, org-wide ones the
+    // org owner (the item's org is the project owner's org; other managers are only guests in it).
+    if (scope === 'standing_order') {
+      if (orgWide && item.org_id !== user.id)
+        throw forbidden('only the organization owner can add organization-wide standing orders');
+      if (!orgWide && item.project_id && (await projectRole(tx, user.id, item.project_id)) !== 'owner')
+        throw forbidden('only the project owner can add project standing orders');
+    }
     const title = req.ledger.title ?? truncate(item.title, 120);
     const body = `Question: ${item.title.trim()}\n\nAnswer: ${req.answer.trim()}`;
 
