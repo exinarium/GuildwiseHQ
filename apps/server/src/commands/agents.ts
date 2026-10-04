@@ -3,6 +3,7 @@ import {
   type AgentChanges,
   canHireAgent,
   canManageAgent,
+  checkPermissions,
   type HireAgentRequest,
   streamId,
 } from '@aom/shared';
@@ -189,6 +190,8 @@ export async function hireAgent(ctx: Ctx, user: AuthSession['user'], req: HireAg
       const p = await one(tx, 'SELECT org_id, status FROM projects WHERE id=$1', [req.projectId]);
       role = await projectRole(tx, user.id, req.projectId);
       if (!p || !role) throw notFound('project not found');
+      if (p.status === 'archived')
+        throw conflict('project_archived', 'this project is archived; unarchive it to hire');
       orgId = p.org_id;
     }
     if (!canHireAgent({ userId: user.id, orgId, projectRole: role, projectScoped: !!req.projectId })) {
@@ -277,10 +280,23 @@ export async function patchAgent(
     if (a.is_devops && (changes.roleKey || changes.seniority || changes.capacity))
       throw badRequest('devops_fixed', 'the DevOps engineer keeps its role, seniority and capacity');
     const next: AgentChanges = { ...changes };
-    if (changes.roleKey && changes.roleKey !== a.role_key) {
-      const role = await loadRole(tx, a.org_id, changes.roleKey);
+    const roleChanged = !!changes.roleKey && changes.roleKey !== a.role_key;
+    const role = roleChanged
+      ? await loadRole(tx, a.org_id, changes.roleKey as string)
+      : await loadRole(tx, a.org_id, a.role_key, a.role_version);
+    if (roleChanged) {
       if (!role) throw badRequest('unknown_role', `role '${changes.roleKey}' does not exist`);
       next.roleVersion = role.version;
+      // A new role brings its own permissions; the old role's (a builder's commit right) must not carry over.
+      if (!changes.permissions) next.permissions = role.definition.permissions;
+    }
+    if (changes.permissions && role) {
+      // Permissions only ever narrow relative to the role definition; widening needs the organization owner and
+      // never reaches past the role's hard limits (docs/ARCHITECTURE.md section on agent permissions).
+      const check = checkPermissions(role.definition.permissions, changes.permissions);
+      if (check.forbidden.length) throw badRequest('permissions_exceed_role', check.forbidden.join('; '));
+      if (check.widened.length && user.id !== a.org_id)
+        throw forbidden(`only the organization owner can widen permissions (${check.widened.join(', ')})`);
     }
     await ctx.store.append(
       [
