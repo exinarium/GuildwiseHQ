@@ -62,3 +62,15 @@ export const OUTBOXER = {
   name: 'E2E Outboxer',
   password: 'outboxer-password-12345',
 };
+
+/** M10 organization designer spec: the owner of the organization and an additional manager of its project. */
+export const DESIGNER = {
+  email: 'designer@e2e.test',
+  name: 'E2E Designer',
+  password: 'designer-password-12345',
+};
+export const DESIGNGUEST = {
+  email: 'designguest@e2e.test',
+  name: 'E2E Design Guest',
+  password: 'designguest-password-12345',
+};

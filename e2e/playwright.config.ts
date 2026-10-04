@@ -28,5 +28,6 @@ export default defineConfig({
     { name: 'intake', testMatch: 'intake.spec.ts', dependencies: ['research'] },
     { name: 'hr', testMatch: 'hr.spec.ts', dependencies: ['intake'] },
     { name: 'outbox', testMatch: 'outbox.spec.ts', dependencies: ['intake'] },
+    { name: 'org-designer', testMatch: 'org-designer.spec.ts', dependencies: ['intake'] },
   ],
 });

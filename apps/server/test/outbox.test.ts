@@ -214,6 +214,24 @@ describe('internal stays internal', () => {
   });
 });
 
+describe('agent names stay internal, retired agents included', () => {
+  it('blocks the names of every agent of the organization, also retired ones and ones hired later', async () => {
+    await freshState();
+    const gone = await w.hire('Quincy', 'builder', 'junior');
+    expect((await owner().post(`/api/agents/${gone.id}/fire`)).status).toBe(200);
+    const card = await ticketCard('LEAK-3');
+    const retired = await draft(card.id, 'Quincy took care of this one.');
+    expect(retired.status).toBe(422);
+    expect(retired.body.error.details.matches.join(' ')).toMatch(/Quincy/);
+    // hired after the first check ran: the next draft knows the new name too
+    await w.hire('Zelda', 'reviewer', 'senior');
+    const later = await draft(card.id, 'Zelda signed this off.');
+    expect(later.status).toBe(422);
+    expect(later.body.error.details.matches.join(' ')).toMatch(/Zelda/);
+    expect((await draft(card.id, 'The export is done.')).status).toBe(201);
+  });
+});
+
 describe('the card owner posts, with their own access', () => {
   let member: Member;
   let mr: FakeRunner;

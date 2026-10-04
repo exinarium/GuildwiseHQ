@@ -602,7 +602,7 @@ CREATE TABLE runner_inbox (                     -- idempotency for runner->serve
 | `intakes` | M7 | `id, org_id, thread_id, external_system, external_key, mapped_project_id, card_id, status, created_at` |
 | `outbound_drafts` | M8 | `id, org_id, project_id, card_id, external_system, external_key, external_url, kind ('comment','resolution','decision'), body (the draft), final_body (what was approved and is posted), edited, status ('pending','approved','rejected','posted','failed','blocked'), desk_item_id, drafted_by_kind/_id, approved_by, reject_reason, blocked_matches, external_ref (URL or id returned), error, attempts, created_at, approved_at, posted_at, updated_at` |
 | `agent_card_stats`, `agent_review_log`, `agent_stats_daily`, `hr_applied` | M9 | HR track record, projected from events by `projections/track-record.ts` (no refresh job; a rebuild reproduces them): per agent and card (questions, rework rounds, bugs, tokens, diff and test files), per review verdict (score, reasons, criteria missed), per agent and day (shift time, tokens, cards done), applied recommendations. Stats over the rolling 30-day window are computed from them at read time (`hr/track-record.ts`). `schedules` gains `fail_count`, `last_error`, `failure_desk_item_id` |
-| `departments` | M10 | `id, org_id, name, created_at` and `department` column on `role_definitions` / `workflow_versions` |
+| `departments` | M10 | `id, org_id, name, created_at` (unique per org, case-insensitive); built-in department names (delivery, research, feeds, operations) are not rows. `role_definitions` gains `department, desk_item_id, drafted_by_kind, vault_path`; `workflow_versions` gains `desk_item_id, drafted_by_kind, vault_path` (migration 1000) |
 
 ---
 
@@ -776,6 +776,9 @@ Heartbeats are not events.
 | `RoleExtended` | `{orgId, roleKey, baseVersion, extensions}` | role_extensions |
 | `RoleResetToDefault` | `{orgId, roleKey, toVersion, droppedExtensions}` | delete role_extensions row |
 | `DepartmentCreated` | `{departmentId, orgId, name}` | departments |
+| `WorkflowDraftUpdated` / `RoleDraftUpdated` | `{workflowVersionId, name, department?, definition}` / `{roleVersionId, definition}` | M10: edits an open draft (status `draft` only) |
+| `WorkflowVersionSubmitted` / `RoleVersionSubmitted` | `{…VersionId, deskItemId}` | M10: status `pending_approval`; the desk approval (`kind approval`, subkind `definition`) is raised in the same append |
+| `DefinitionDraftDiscarded` | `{kind:'role'|'workflow', versionId}` | M10: deletes a draft or rejected version; approved and superseded versions are never removed |
 
 ---
 
@@ -892,6 +895,10 @@ Invariants (asserted in projector tests):
 Warnings (shown, not blocking): stage with no `doneCriteria` text; more than 12 stages.
 
 ---
+
+### 6.7 Organization designer (M10)
+
+Custom roles and workflows (org-owned rows, `org_id` = the owner) are drafted by the owner (`POST /api/roles|workflows`, `PUT …/:id`) or by the BA in a chat (`aom org role|workflow draft`, rpc `org.*`, only in the owner's own chat with a BA), validated on every save (`validateCustomWorkflow` = the nine rules of 6.6 plus: not a built-in key, field set `custom`, card types of `feature|bug|support|refactor|docs`, `StageCompleted`/`CardSpecified` outcomes only, no data and no effects, `manual` only as the first stage, department exists), and submitted with `…/:id/submit`, which raises one desk approval per definition. Approving re-validates against the catalogue as it is then (a workflow whose custom role is not approved yet is refused), emits `…VersionApproved` (the previous active version becomes `superseded`) and a hook writes the YAML file (`organization/<roles|workflows>/<key>/v<N>.yaml`, `shared/definitions`) to the owner's vault with `vault.write` (no vault: only the site copy). Roles and workflows of built-in keys cannot be drafted, replaced or removed; approved versions are never removed. The dispatcher needs nothing new: it routes by `workflow_stages.claim_role`, and every card is pinned to its `workflow_version_id`, so approving v2 changes only cards created afterwards. A custom role claims stages of custom workflows only (`claimableStages`, `*` for any stage). All writes take `?projectId=` to name the organization of a shared project and are refused for anyone but its owner; reads (`GET /api/roles|workflows|org/catalogue|departments?projectId=`) work for every member, so the Hire form of a shared project lists the owner's catalogue. Owner extensions of a built-in role (`PUT /api/roles/:key/extensions`, strict body: instructions, skills, standing orders) are added to the shift brief; core rules are never part of the request or the effective role.
 
 ## 7. Role catalogue
 
@@ -1521,7 +1528,7 @@ Errors: `{error: {code, message, details?}}` with 400 validation, 401 unauthenti
 | `POST /api/intakes` `{externalSystem?, externalKey?, note}` | start BA intake chat | M7 |
 | `GET /api/outbound` · (approval via desk resolve) | | M8 |
 | `GET /api/metrics?projectId=&from=&to=` · `GET /api/agents/:id/stats` · `GET /api/hr/recommendations` · `POST /api/hr/recommendations/:id/apply` | | M9 |
-| `POST /api/roles` · `POST /api/workflows` (draft) · `POST /api/workflows/:id/validate` · `POST /api/workflows/:id/submit` · `PUT /api/roles/:key/extensions` · `POST /api/roles/:key/reset` · `GET/POST /api/departments` | org designer | M10 |
+| `POST /api/roles` · `POST /api/workflows` (draft) · `PUT /api/roles/:id` · `PUT /api/workflows/:id` · `POST /api/roles/:id\|workflows/:id/validate` · `…/submit` · `DELETE /api/roles/:id\|workflows/:id` (drafts only) · `PUT /api/roles/:key/extensions` · `POST /api/roles/:key/reset` · `GET/POST /api/departments` · `GET /api/org/catalogue` · `GET /api/org/definitions/:id/file`; all take `?projectId=` | org designer | M10 |
 
 ## 20. Browser WebSocket (`/api/ws`, `packages/shared/src/protocol/browser.ts`)
 
