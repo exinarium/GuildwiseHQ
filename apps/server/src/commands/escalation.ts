@@ -110,7 +110,7 @@ const STOP_WORDS = new Set(
   ),
 );
 const wordsOf = (text: string): Set<string> =>
-  new Set((text.toLowerCase().match(/[a-z0-9]{2,}/g) ?? []).filter((w) => !STOP_WORDS.has(w)));
+  new Set((text.toLowerCase().match(/[a-z0-9]{2,}|\d/g) ?? []).filter((w) => !STOP_WORDS.has(w)));
 const hasDigit = (w: string): boolean => /\d/.test(w);
 
 /**
