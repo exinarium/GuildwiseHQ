@@ -169,6 +169,7 @@ describe('renderInstructions', () => {
       Other commands:
       - \`aom card [--json]\`: print this card and brief again.
       - \`aom ledger search "<query>"\`: search decisions and standing orders. Do this before asking a question.
+      - Run every \`aom\` command on its own: no pipes, redirects, \`;\`, \`&&\`, \`cd\` or \`$(...)\` around it (for example \`aom ledger search "tech stack"\`, not \`aom ledger search "tech stack" | head\`). Otherwise it runs inside the shell sandbox and cannot reach the runner.
       - \`aom comment --note "<text>"\`: post a note on the card thread without ending the shift.
       - \`aom question --text "<question>" [--option "<answer a>"]... [--recommend <n>] --doing "<what you were doing>"\`: ask the manager when the card and ledger cannot answer; this ends the shift and parks the card as Blocked.
       - \`aom question ... --non-blocking\`: ask the manager without ending the shift (add \`--force\` if the ledger already has a similar entry).
@@ -231,6 +232,7 @@ describe('renderInstructions', () => {
       Other commands:
       - \`aom card [--json]\`: print this card and brief again.
       - \`aom ledger search "<query>"\`: search decisions and standing orders. Do this before asking a question.
+      - Run every \`aom\` command on its own: no pipes, redirects, \`;\`, \`&&\`, \`cd\` or \`$(...)\` around it (for example \`aom ledger search "tech stack"\`, not \`aom ledger search "tech stack" | head\`). Otherwise it runs inside the shell sandbox and cannot reach the runner.
       - \`aom comment --note "<text>"\`: post a note on the card thread without ending the shift.
       - \`aom question --text "<question>" [--option "<answer a>"]... [--recommend <n>] --doing "<what you were doing>"\`: ask the manager when the card and ledger cannot answer; this ends the shift and parks the card as Blocked.
       - \`aom question ... --non-blocking\`: ask the manager without ending the shift (add \`--force\` if the ledger already has a similar entry).

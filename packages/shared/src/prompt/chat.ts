@@ -31,6 +31,7 @@ export function renderChatInstructions(
     [
       '- `aom ledger search "<query>"`: search recorded decisions and standing orders.',
       '- `aom comment --note "<text>"`: post a note on the card thread (only when a card is in context).',
+      '- Run every `aom` command on its own: no pipes, redirects, `;`, `&&`, `cd` or `$(...)` around it (for example `aom ledger search "tech stack"`, not `aom ledger search "tech stack" | head`). Otherwise it runs inside the shell sandbox and cannot reach the runner.',
     ].join('\n'),
   );
   if (agent.roleKey === 'ba' && !ctx.intake) out.push(renderDesignSection());

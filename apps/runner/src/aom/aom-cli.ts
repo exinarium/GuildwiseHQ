@@ -570,6 +570,10 @@ const isEntry = (() => {
   }
 })();
 
+/** Shown when neither the IPC socket nor the loopback endpoint can be reached (typically: called inside the sandbox). */
+export const SANDBOX_HINT =
+  'aom cannot reach the runner from inside the shell sandbox. Run aom as a standalone command (no pipes, redirects, `;`, `&&` or `cd`) so it runs outside the sandbox';
+
 /** `fetch` over a Unix socket (`AOM_IPC_SOCKET`): the agent sandbox has no network route to the loopback endpoint. */
 export function socketFetch(socketPath: string, fallback?: typeof fetch): typeof fetch {
   return ((input: unknown, init?: RequestInit) =>
@@ -590,9 +594,16 @@ export function socketFetch(socketPath: string, fallback?: typeof fetch): typeof
           );
         },
       );
-      req.on('error', (err) =>
-        fallback ? fallback(input as string, init).then(resolve, reject) : reject(err),
-      );
+      req.on('error', (err) => {
+        const fail = (e: unknown) =>
+          reject(
+            new Error(
+              `${SANDBOX_HINT} (${(err as NodeJS.ErrnoException).code ?? err.message}${e === err ? '' : `; ${e instanceof Error ? e.message : String(e)}`})`,
+            ),
+          );
+        if (fallback) fallback(input as string, init).then(resolve, fail);
+        else fail(err);
+      });
       req.end(typeof init?.body === 'string' ? init.body : undefined);
     })) as typeof fetch;
 }
