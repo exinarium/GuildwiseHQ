@@ -122,6 +122,18 @@ export class FakeRunner {
     });
   }
 
+  /**
+   * Resolves once the server has finished handling every frame this runner sent before it. The gateway handles one
+   * connection's frames in order and always answers an `rpc.request`, so the answer is a barrier: use it instead of
+   * sleeping before asserting that something did NOT happen.
+   */
+  async barrier(): Promise<void> {
+    const rpcId = randomUUID();
+    const from = this.received.length;
+    this.send('rpc.request', { rpcId, shiftId: randomUUID(), method: 'ledger.search', params: {} });
+    await this.waitFor('rpc.response', (f) => f.rpcId === rpcId, 30_000, from);
+  }
+
   /** Waits for the next matching frame (including ones already received but not yet consumed by a waiter). */
   waitFor<T extends Frame['type']>(
     type: T,
@@ -133,6 +145,7 @@ export class FakeRunner {
     const existing = this.received.slice(fromIndex).find(match);
     if (existing) return Promise.resolve(existing);
     return new Promise((resolve, reject) => {
+      // The wait ends when the frame arrives: the bound is a failure guard, not an expectation of speed.
       const timer = setTimeout(
         () =>
           reject(
@@ -140,7 +153,7 @@ export class FakeRunner {
               `timed out waiting for ${type} (from ${fromIndex}; received: ${this.received.map((f, i) => `${i}:${f.type}`).join(' ')})`,
             ),
           ),
-        timeoutMs,
+        Math.max(timeoutMs, 30_000),
       );
       this.waiters.push({
         pred: match,
@@ -159,7 +172,10 @@ export class FakeRunner {
   waitClosed(timeoutMs = 5000): Promise<{ code: number; reason: string }> {
     if (this.closed) return Promise.resolve(this.closed);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('timed out waiting for close')), timeoutMs);
+      const timer = setTimeout(
+        () => reject(new Error('timed out waiting for close')),
+        Math.max(timeoutMs, 30_000),
+      );
       this.closeWaiters.push((c) => {
         clearTimeout(timer);
         resolve(c);

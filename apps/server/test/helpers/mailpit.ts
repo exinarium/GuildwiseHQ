@@ -21,7 +21,8 @@ export async function waitForMessages(email: string, count = 1, timeoutMs = 5000
   for (;;) {
     const msgs = await messagesTo(email);
     if (msgs.length >= count) return msgs;
-    if (Date.now() - start > timeoutMs) throw new Error(`timed out waiting for ${count} mail(s) to ${email}`);
+    if (Date.now() - start > Math.max(timeoutMs, 30_000))
+      throw new Error(`timed out waiting for ${count} mail(s) to ${email}`);
     await new Promise((r) => setTimeout(r, 100));
   }
 }

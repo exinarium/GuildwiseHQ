@@ -186,7 +186,7 @@ export class FakeServer {
     for (;;) {
       const hit = this.of(type).find(pred);
       if (hit) return hit;
-      if (Date.now() - start > timeoutMs) {
+      if (Date.now() - start > Math.max(timeoutMs, 30_000)) {
         throw new Error(
           `timed out waiting for ${type}; received: ${this.received.map((m) => m.type).join(', ')}`,
         );

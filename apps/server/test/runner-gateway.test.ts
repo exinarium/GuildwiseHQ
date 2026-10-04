@@ -31,6 +31,7 @@ async function freshState() {
 
 /** Dispatches and returns the shift.start frame the runner receives for `agentName`. */
 async function dispatchTo(r: FakeRunner, agentName: string, from = 0) {
+  await r.barrier(); // what the runner reported before is recorded before a pass looks at the claims
   await dispatcher().run();
   return r.waitFor('shift.start', (f) => f.agent.name === agentName, 5000, from);
 }
@@ -586,14 +587,7 @@ describe('claim lifecycle and recovery', () => {
     const s = await dispatchTo(r, 'Ned');
     await startShift(r, s);
     r.heartbeat([]);
-    await until(
-      async () =>
-        new Date(
-          (await q('SELECT last_seen_at FROM workstations WHERE id=$1', [w.workstationId]))[0]!.last_seen_at,
-        ).getTime() >
-        Date.now() - 2000,
-    );
-    await new Promise((res) => setTimeout(res, 100));
+    await r.barrier(); // the heartbeat is handled: the miss is counted
     expect((await cardRow(card.id)).status).toBe('claimed'); // one miss is tolerated
     r.heartbeat([]);
     await until(async () => (await cardRow(card.id)).claim_id === null, 3000, 'lost');

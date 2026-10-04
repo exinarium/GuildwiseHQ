@@ -72,6 +72,7 @@ async function asked(over: Record<string, unknown> = {}, who = 'Bea') {
 /** Dispatches the question shift for `name` and starts it. */
 const usedShifts = new Set<string>();
 async function questionShift(name: string) {
+  await r.barrier(); // the previous shift's end must be recorded before a pass
   await h.dispatcher().run();
   // The dispatcher may already have sent it (a QuestionEscalated triggers a pass): take the first one not yet used.
   const start = (await r.waitFor(

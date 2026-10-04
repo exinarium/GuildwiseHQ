@@ -149,7 +149,7 @@ describe('runner websocket auth', () => {
     expect(rows.map((x) => x.local_path)).toEqual(['/a']);
     // a later repos.report re-matches
     r.send('repos.report', { repos: [{ remoteUrl: REPO_SSH, localPath: '/c', headBranch: 'main' }] });
-    await new Promise((res) => setTimeout(res, 200));
+    await r.barrier();
     expect(
       (await q('SELECT local_path FROM workstation_repos WHERE workstation_id=$1', [w.workstationId]))[0]!
         .local_path,

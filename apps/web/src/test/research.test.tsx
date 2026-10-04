@@ -49,16 +49,22 @@ describe('research card form', () => {
       );
     vi.stubGlobal('fetch', fetchMock);
     const user = renderForm();
-    await user.type(screen.getByLabelText('Title'), 'Is 6mm ARC enough for deer?');
+    // Pasting, not typing: keystroke-by-keystroke typing re-renders the whole form per character, which is what made
+    // this test time out when the packages' suites ran side by side.
+    await user.click(screen.getByLabelText('Title'));
+    await user.paste('Is 6mm ARC enough for deer?');
     await user.click(screen.getByRole('button', { name: 'Specify' }));
     expect(screen.getByText('Question is required to specify this card')).toBeInTheDocument();
     expect(screen.getByText('Depth is required to specify this card')).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
 
-    await user.type(screen.getByLabelText('Question'), 'Is the 6mm ARC enough for deer at 300 yards?');
+    await user.click(screen.getByLabelText('Question'));
+    await user.paste('Is the 6mm ARC enough for deer at 300 yards?');
     await user.selectOptions(screen.getByLabelText('Depth'), 'deep');
-    await user.type(screen.getByLabelText('Sub-category'), 'hunting');
-    await user.type(screen.getByLabelText('Preferred sites'), 'https://a.test{Enter}https://b.test');
+    await user.click(screen.getByLabelText('Sub-category'));
+    await user.paste('hunting');
+    await user.click(screen.getByLabelText('Preferred sites'));
+    await user.paste('https://a.test\nhttps://b.test');
     await user.click(screen.getByRole('button', { name: 'Specify' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];

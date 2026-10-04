@@ -84,8 +84,11 @@ export const waitUntil = async (
   what = 'condition',
 ): Promise<void> => {
   const start = Date.now();
+  // The wait ends the moment the condition holds: the bound only matters on failure, and git/process work under a
+  // loaded machine is far slower than the per-call guesses.
+  const bound = Math.max(ms, 30_000);
   while (!(await pred())) {
-    if (Date.now() - start > ms) throw new Error(`timed out waiting for ${what}`);
+    if (Date.now() - start > bound) throw new Error(`timed out waiting for ${what}`);
     await new Promise((r) => setTimeout(r, 25));
   }
 };

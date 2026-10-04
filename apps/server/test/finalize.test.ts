@@ -108,7 +108,7 @@ describe('finalize', () => {
     expect(started[0]).toMatchObject({ branch: 'main', suiteCardId: suite.id });
     // result is idempotent: a redelivered result changes nothing
     result(cmd.commandId, { ok: true, action: 'merge', mergeCommit: 'zzz' });
-    await new Promise((x) => setTimeout(x, 200));
+    await r.barrier();
     expect((await eventsOfType('CardFinalized')).filter((e) => e.cardId === card.id)).toHaveLength(1);
   });
 
@@ -120,7 +120,9 @@ describe('finalize', () => {
     expect(out.state).toBe('awaiting_approval');
     expect(out.deskItemId).toBeTruthy();
     expect(await cardRow(card.id)).toMatchObject({ status: 'waiting', finalize_state: 'awaiting_approval' });
-    await new Promise((x) => setTimeout(x, 200));
+    // The command is queued in the same transaction that approves it: nothing queued means nothing can be sent.
+    expect(await q(`SELECT 1 FROM runner_commands WHERE type='finalize.execute'`)).toHaveLength(0);
+    await r.barrier();
     expect(r.received.slice(from).some((f) => f.type === 'command' && f.command === 'finalize.execute')).toBe(
       false,
     );

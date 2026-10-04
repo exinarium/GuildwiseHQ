@@ -50,6 +50,12 @@ class Browser {
   async until(fn: () => boolean, ms = 3000) {
     await until(async () => fn(), ms, 'browser message');
   }
+  /** Resolves once the server has handled every message sent before (it handles one socket's messages in order). */
+  async barrier() {
+    const seen = this.of('pong').length;
+    this.send({ type: 'ping' });
+    await this.until(() => this.of('pong').length > seen);
+  }
   async hello(lastSeq?: number) {
     this.send({ type: 'hello', ...(lastSeq !== undefined ? { lastSeq } : {}) });
     await this.until(() => this.of('ready').length > 0);
@@ -211,7 +217,8 @@ describe('browser websocket', () => {
     await nosy.hello();
     nosy.send({ type: 'shift.watch', shiftId: start.shiftId });
     owner.send({ type: 'shift.watch', shiftId: start.shiftId });
-    await new Promise((res) => setTimeout(res, 200));
+    await owner.barrier();
+    await nosy.barrier();
     r.send('shift.progress', {
       shiftId: start.shiftId,
       items: [{ at: new Date().toISOString(), kind: 'text', text: 'thinking' }],
@@ -222,7 +229,7 @@ describe('browser websocket', () => {
       cardId: card.id,
       items: [{ kind: 'text', text: 'thinking' }],
     });
-    await new Promise((res) => setTimeout(res, 200));
+    await nosy.barrier();
     expect(nosy.of('shift.progress')).toHaveLength(0);
     // tail is also visible on the card detail
     const detail = await ok<any>(w.t.req('GET', `/api/cards/${card.id}`, { cookie: w.owner.cookie }));

@@ -124,7 +124,8 @@ describe('BA finalize', () => {
     const out = await p.run('Ben', finalized('merge'));
     expect(out.res.message).toMatch(/needs the manager/);
     expect(await cardRow(card.id)).toMatchObject({ status: 'waiting', finalize_state: 'awaiting_approval' });
-    await new Promise((x) => setTimeout(x, 200));
+    expect(await q(`SELECT 1 FROM runner_commands WHERE type='finalize.execute'`)).toHaveLength(0);
+    await r.barrier();
     expect(r.received.slice(from).some((f) => f.type === 'command' && f.command === 'finalize.execute')).toBe(
       false,
     );

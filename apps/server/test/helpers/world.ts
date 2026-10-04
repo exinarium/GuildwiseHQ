@@ -157,16 +157,22 @@ export async function createWorld(
   return world;
 }
 
+/** Failure-only bound of every wait on an observable condition. */
+export const MIN_WAIT_MS = 30_000;
+
 export async function until<T>(
   fn: () => Promise<T | false | undefined | null>,
   timeoutMs = 5000,
   what = 'condition',
 ): Promise<T> {
   const start = Date.now();
+  // The wait ends the moment the condition holds, so the bound only matters when something is really wrong. The
+  // per-call guesses (3 s, 5 s) were tuned for an idle machine; the suites run side by side with the runner's.
+  const bound = Math.max(timeoutMs, MIN_WAIT_MS);
   for (;;) {
     const v = await fn();
     if (v) return v;
-    if (Date.now() - start > timeoutMs) throw new Error(`timed out waiting for ${what}`);
+    if (Date.now() - start > bound) throw new Error(`timed out waiting for ${what}`);
     await new Promise((r) => setTimeout(r, 25));
   }
 }

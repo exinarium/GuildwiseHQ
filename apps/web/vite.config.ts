@@ -18,5 +18,9 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     globals: false,
     css: false,
+    // jsdom renders are CPU-bound and the packages' suites run side by side: the 5 s default is a guess at an idle
+    // machine, not a property of the tests (they wait on conditions, never on fixed sleeps).
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });

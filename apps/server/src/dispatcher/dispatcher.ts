@@ -55,12 +55,20 @@ export class Dispatcher {
   private debounce: NodeJS.Timeout | null = null;
   private unsubscribe: (() => void) | null = null;
   private stopped = false;
+  /** Event/timer-driven passes (production). Off, a pass runs only when `run()` is called: tests drive it by hand. */
+  private auto = false;
   /** agentId -> epoch ms until which the agent is skipped (after a runner rejection). */
   readonly cooldown = new Map<string, number>();
 
   constructor(private readonly ctx: Ctx) {}
 
+  /** Turns on the debounced passes `trigger()` asks for (the background mode of `start()`, or a test that wants them). */
+  enableAuto(): void {
+    this.auto = true;
+  }
+
   start(): void {
+    this.auto = true;
     this.unsubscribe = this.ctx.store.subscribe((e: StoredEvent) => {
       if (TRIGGER_TYPES.has(e.event.type)) this.trigger();
     });
@@ -69,7 +77,7 @@ export class Dispatcher {
   }
 
   trigger(): void {
-    if (this.stopped || this.debounce) return;
+    if (!this.auto || this.stopped || this.debounce) return;
     this.debounce = setTimeout(() => {
       this.debounce = null;
       this.run().catch((err) => this.ctx.log.error({ err }, 'dispatch failed'));

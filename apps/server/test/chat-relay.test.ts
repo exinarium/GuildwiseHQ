@@ -157,7 +157,7 @@ describe('chat with an agent', () => {
     expect(await q(`SELECT 1 FROM runner_commands`)).toHaveLength(0);
     // Nothing is delivered when the runner connects later.
     const r = await w.connectRunner();
-    await new Promise((res) => setTimeout(res, 200));
+    await r.barrier();
     expect(r.of('chat.start')).toHaveLength(0);
     b.close();
     await hangUp(r);
@@ -212,7 +212,7 @@ describe('chat with an agent', () => {
     sb.send({ type: 'chat.send', threadId: randomUUID(), body: 'nowhere', clientMsgId: 'y' });
     await sb.until(() => sb.of('chat.error').length === 2);
     expect(sb.of('chat.error').map((m) => m.reason)).toEqual(['unknown_thread', 'unknown_thread']);
-    await new Promise((res) => setTimeout(res, 150));
+    await r.barrier();
     expect(r.of('chat.cancel')).toHaveLength(0);
     expect(b.of('chat.delta')).toHaveLength(0);
 
@@ -240,7 +240,7 @@ describe('chat with an agent', () => {
     reply(r, start, 'pong', {}, id);
     reply(r, start, 'pong', {}, id);
     await b.until(() => b.of('chat.done').length >= 1);
-    await new Promise((res) => setTimeout(res, 200));
+    await r.barrier(); // both redeliveries are handled by now
     expect(b.of('chat.done')).toHaveLength(1);
     expect((await messages(chat.threadId)).map((m) => m.body)).toEqual(['ping', 'pong']);
     b.close();

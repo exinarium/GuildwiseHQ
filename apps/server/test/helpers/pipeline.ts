@@ -48,6 +48,7 @@ export function pipeline(w: World, r: FakeRunner) {
   const used = new Set<string>();
   /** The next not yet consumed `shift.start` for `agentName` (dispatching may already have happened eagerly). */
   async function next(agentName: string) {
+    await r.barrier(); // see dispatchTo: the previous shift's end must be recorded before a pass
     await h.dispatcher().run();
     const start = (await r.waitFor(
       'shift.start',

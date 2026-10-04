@@ -365,7 +365,8 @@ describe('unmapped tickets', () => {
       mappedProjectKey: 'TOY',
     });
     // the BA is told, in the same chat, to continue: once its turn is over
-    await new Promise((x) => setTimeout(x, 700));
+    // (the continuation waits for the turn to end: while the conversation is busy nothing can be sent)
+    expect(w.t.app.ctx.services.chat.isBusy(intake.threadId)).toBe(true);
     expect(r.received.slice(from).some((f) => f.type === 'chat.start')).toBe(false);
     await finishChat(start);
     const next = (await r.waitFor('chat.start', (f) => f.threadId === intake.threadId, 15_000, from)) as any;

@@ -60,6 +60,7 @@ describe('projection rebuild', () => {
     const it = (await q('SELECT * FROM desk_items WHERE card_id=$1', [card.id]))[0]!;
     const used = new Set<string>();
     const run = async (name: string, report: Record<string, unknown>) => {
+      await r.barrier();
       await h.dispatcher().run();
       const s = (await r.waitFor(
         'shift.start',

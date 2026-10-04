@@ -36,8 +36,14 @@ export class Browser {
   of(type: string) {
     return this.msgs.filter((m) => m.type === type);
   }
-  async until(fn: () => boolean, ms = 3000) {
+  async until(fn: () => boolean, ms = 30_000) {
     await until(async () => fn(), ms, 'browser message');
+  }
+  /** Resolves once the server has handled every message sent before (it handles one socket's messages in order). */
+  async barrier() {
+    const seen = this.of('pong').length;
+    this.send({ type: 'ping' });
+    await this.until(() => this.of('pong').length > seen, 30_000);
   }
   async hello(lastSeq?: number) {
     this.send({ type: 'hello', ...(lastSeq !== undefined ? { lastSeq } : {}) });

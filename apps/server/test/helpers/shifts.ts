@@ -17,6 +17,9 @@ export function shiftHelpers(w: World) {
 
   /** Runs a dispatch pass and returns the `shift.start` the runner receives for `agentName` (after `from` frames). */
   async function dispatchTo(r: FakeRunner, agentName: string, from = 0): Promise<ShiftStart> {
+    // Everything the runner reported before (a shift ended, a report) must be recorded: a pass that starts earlier
+    // sees the old claim and, with no timer-driven dispatch in tests, nothing would run it again.
+    await r.barrier();
     await dispatcher().run();
     return (await r.waitFor('shift.start', (f) => f.agent.name === agentName, 5000, from)) as ShiftStart;
   }
