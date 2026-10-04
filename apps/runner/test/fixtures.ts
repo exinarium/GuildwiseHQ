@@ -38,6 +38,18 @@ export interface ShiftOptions {
   fields?: Record<string, unknown>;
 }
 
+const projectIds = new Map<string, string>();
+/**
+ * One stable project id per key, as in production: the worktree directory is `<KEY>-<project id prefix>/<REF>`, so a
+ * fresh id per shift would put each shift of a card in a different directory. (A fresh uuidv7 keeps its first 8 hex
+ * digits for ~65 s, which is why that bug only showed when a run crossed the boundary.)
+ */
+export function projectIdFor(key: string): string {
+  let id = projectIds.get(key);
+  if (!id) projectIds.set(key, (id = uuidv7()));
+  return id;
+}
+
 /** A valid `shift.start` payload for the runner (the server's gateway builds the real one). */
 export function makeShiftStart(o: ShiftOptions): Record<string, unknown> {
   const stage = o.stage ?? 'build';
@@ -79,7 +91,7 @@ export function makeShiftStart(o: ShiftOptions): Record<string, unknown> {
       dependencies: [],
     },
     project: {
-      id: uuidv7(),
+      id: projectIdFor(key),
       key,
       name: 'Toy',
       domain: 'work',

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type Harness, startHarness, worktreeOf } from './harness.ts';
+import { makeShiftStart } from './fixtures.ts';
 import { cleanupTmp, sh } from './helpers.ts';
 
 cleanupTmp();
@@ -111,4 +112,15 @@ describe('mock adapter through the real aom CLI', () => {
     const log = readFileSync(join(h.dataDir, 'logs', 'shifts', `${shiftId}.jsonl`), 'utf8');
     expect(log).toContain('"kind":"usage"');
   }, 60_000);
+});
+
+describe('shift fixtures', () => {
+  it('keep one project id per key so every shift of a card shares its worktree directory', () => {
+    const id = (key?: string) =>
+      (makeShiftStart({ remoteNormalized: 'x', ...(key ? { projectKey: key } : {}) }) as {
+        brief: { project: { id: string } };
+      }).brief.project.id;
+    expect(id()).toBe(id());
+    expect(id('OTH')).not.toBe(id());
+  });
 });
