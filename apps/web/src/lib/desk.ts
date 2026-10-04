@@ -65,6 +65,8 @@ const SUBKIND_LABEL: Record<string, string> = {
   unmapped_ticket: 'Unmapped ticket',
   definition: 'Role or workflow',
   large_merge: 'Merge approval',
+  repo_create: 'Create repository',
+  repo_create_failed: 'Repository not created',
   tester_bottleneck: 'Tester bottleneck',
   test_environment: 'Test environment',
   bug_reported: 'Bug reported',

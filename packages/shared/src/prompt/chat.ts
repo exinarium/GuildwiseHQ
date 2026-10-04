@@ -68,6 +68,7 @@ function renderChatCardsSection(ctx: ChatContext): string {
       `- \`aom card create --json '<draft json>'\`: draft a card (project, title, cardType, completionAction, docsNeeded, priority, repo, dependencies, externalRef, fields). Prints the new ref and what is still missing. \`--file <path>\` or \`--file -\` (stdin) also work.`,
       "- `aom card update <REF> --json '<patch json>'`: change a card you created.",
       '- `aom card specify <REF>`: validate the card and move it to the build queue; refused while required fields are missing.',
+      '- `aom repo create --name <owner/repo> --private|--public --project <KEY> [--description "<text>"]`: ask the project owner to create a new GitHub repository for the project. They approve on the desk and their own runner creates it, so never try `gh` or `git push` yourself; you are told the result in the conversation, then use the repo in your cards.',
       'You may write drafts and notes in your scratch directory with the file tools, but you do not need a file to create a card: pass the JSON inline.',
     ].join('\n'),
   );

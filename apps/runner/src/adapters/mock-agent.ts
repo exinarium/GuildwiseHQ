@@ -692,8 +692,28 @@ async function deskMain(): Promise<number> {
     emit({ kind: 'final', text: said.join('\n') });
     return 0;
   };
+  const rq = /^\s*request repo\s+(\S+)\s+(\S+)(?:\s+(public|private))?/i.exec(message);
+  if (rq) {
+    const r = aom([
+      'repo',
+      'create',
+      '--name',
+      rq[1] as string,
+      '--project',
+      rq[2] as string,
+      rq[3]?.toLowerCase() === 'public' ? '--public' : '--private',
+      '--description',
+      'Created by the mock BA',
+    ]);
+    say(r.code === 0 ? r.out.trim() : `Could not request the repository: ${(r.err || r.out).trim()}`);
+    return finish();
+  }
   const m = /^\s*create card\s+(?:([A-Za-z0-9]+):\s*)?(.+)$/is.exec(message);
-  const title = m?.[2]?.trim().slice(0, 80);
+  const repoName = /\brepo=(\S+)/.exec(message)?.[1];
+  const title = m?.[2]
+    ?.replace(/\brepo=\S+/, '')
+    .trim()
+    .slice(0, 80);
   const key = m?.[1] ?? ctx.projectKey;
   if (!title) {
     say('Tell me the card: `create card <KEY>: <title>`.');
@@ -711,6 +731,7 @@ async function deskMain(): Promise<number> {
     cardType: 'feature',
     completionAction: 'push_branch',
     docsNeeded: false,
+    ...(repoName ? { repo: repoName } : {}),
     fields: {
       context: title,
       requirements: title,

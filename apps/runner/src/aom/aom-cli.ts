@@ -37,7 +37,17 @@ interface Parsed {
   positionals: string[];
 }
 
-const BOOLEAN_FLAGS = new Set(['json', 'non-blocking', 'force', 'help', 'none', 'role', 'workflow']);
+const BOOLEAN_FLAGS = new Set([
+  'json',
+  'non-blocking',
+  'force',
+  'help',
+  'none',
+  'role',
+  'workflow',
+  'private',
+  'public',
+]);
 
 /** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
 const takesInlineJson = (verb: string | undefined, argv: string[]): boolean =>
@@ -417,6 +427,23 @@ const VERBS: Record<string, Verb> = {
     );
     return 0;
   },
+  repo: async (ctx, p) => {
+    const usage =
+      'usage: aom repo create --name <owner/repo> --private|--public --project <KEY> [--description "<text>"]';
+    if (p.positionals[0] !== 'create') throw new UsageError(usage);
+    const name = one(p, 'name');
+    const project = one(p, 'project');
+    if (!name || !project || has(p, 'private') === has(p, 'public')) throw new UsageError(usage);
+    const description = one(p, 'description');
+    const r = (await rpc(ctx, 'repo.create', {
+      name,
+      project,
+      visibility: has(p, 'public') ? 'public' : 'private',
+      ...(description ? { description } : {}),
+    })) as { message?: string; requestId?: string };
+    ctx.io.out(`${r.message ?? 'Asked the project owner to approve creating the repository.'}\n`);
+    return 0;
+  },
   'devops-approval': async (ctx, p) => {
     const action = one(p, 'action');
     const reason = one(p, 'reason');
@@ -539,6 +566,7 @@ export const USAGE = `usage: aom <verb> [options]
   answer --item <id> --text "<answer>" [--option <id>]   answer a colleague's question (question shifts)
   escalate --item <id> --note "<what must be decided>"   pass the question on (peer -> BA -> manager's desk)
   finalize --action <pr|push_branch|merge> [--note "<why>"]   BA: run the completion action (revise it with a different action)
+  repo create --name <owner/repo> --private|--public --project <KEY> [--description "<t>"]   BA chat / DevOps: ask the project owner to create a GitHub repository (they approve on the desk; the runner creates it)
   intake map --project <KEY> | intake unmapped --note "<why>"   BA intake: map the ticket, or ask the manager
   card create --json '<json>' | --file <draft.json|-> | card update <REF> --json '<json>' | --file <patch.json> | card specify <REF>   BA intake: draft cards
   outbound draft --kind <comment|resolution|decision> --body "<text>"   BA: draft the update for the card's ticket (the manager approves it)

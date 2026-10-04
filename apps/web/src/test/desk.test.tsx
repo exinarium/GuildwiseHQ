@@ -150,6 +150,8 @@ describe('desk kind labels', () => {
     ['approval', 'devops', 'DevOps approval'],
     ['approval', 'outbound', 'Outbound update'],
     ['approval', 'large_merge', 'Merge approval'],
+    ['approval', 'repo_create', 'Create repository'],
+    ['alert', 'repo_create_failed', 'Repository not created'],
     ['rating', 'digest', 'Digest to rate'],
     ['escalation', null, 'Escalation'],
     ['escalation', 'vault_conflict', 'Vault conflict'],

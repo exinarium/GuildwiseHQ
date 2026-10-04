@@ -79,6 +79,21 @@ test('setup: a paired mock runner (fake gh), projects INT and OTH on the toy rep
     fakeGh,
     `#!/bin/sh
 echo "$@" >> "${GH_LOG}"
+# repository setup (aom repo create): a bare repository under the vaults dir stands in for GitHub
+D="${join(paths.vaults, 'fake-github')}"
+mkdir -p "$D"
+case "$1 $2" in
+  "api user") echo octo; exit 0 ;;
+  "repo view")
+    K=$(echo "$3" | tr '/' '_')
+    if [ ! -d "$D/$K.git" ]; then echo "GraphQL: Could not resolve to a Repository" >&2; exit 1; fi
+    echo "{\\"url\\":\\"$D/$K.git\\",\\"isEmpty\\":true,\\"owner\\":{\\"login\\":\\"octo\\"}}"
+    exit 0 ;;
+  "repo create")
+    K=$(echo "$3" | tr '/' '_')
+    git init --bare -q "$D/$K.git"
+    exit 0 ;;
+esac
 cat <<'JSON'
 {"title":"Add dark mode","body":"Users want a dark theme for the toy.","state":"OPEN","url":"https://github.com/acme/toy/issues/7","labels":[{"name":"enhancement"}],"comments":[{"author":{"login":"octo"},"body":"Please!","createdAt":"2026-10-01T10:00:00Z"}]}
 JSON
@@ -432,4 +447,52 @@ test('AC desk chat: the BA in a plain chat from the desk creates and specifies a
   const started = (await events('IntakeStarted')).filter((e) => e.payload.threadId === thread.id);
   expect(started).toHaveLength(1);
   expect(started[0]?.payload.source).toBe('chat');
+});
+
+test('AC repository setup: the BA asks for a repository, the owner approves on the desk, the runner creates it, the project gets it and the BA creates a card on it', async () => {
+  const bas = (await (await api.get('/api/agents')).json()).agents as any[];
+  const ben = bas.find((a) => a.name === 'Ben');
+  const chat = (await (await api.post('/api/chats', { data: { agentId: ben.id } })).json()).chat as {
+    threadId: string;
+  };
+  await page.goto(`/chat/${chat.threadId}`);
+  const send = async (text: string, expected: RegExp) => {
+    await page.getByLabel('Message').fill(text);
+    await page.getByRole('button', { name: 'Send' }).click();
+    await expect(
+      page.locator('[data-testid="chat-message"][data-author-kind="agent"]').filter({ hasText: expected }),
+    ).toHaveCount(1, { timeout: 60_000 });
+  };
+  await send('request repo acme/e2e-new INT private', /Asked the project owner/);
+
+  await page.goto('/desk');
+  const item = page.locator('[data-testid^="desk-item-"]', { hasText: 'Create repository acme/e2e-new' });
+  await expect(item).toBeVisible();
+  await expect(item).toContainText('Visibility: private');
+  await expect(item).toContainText('Project: INT');
+  await expect(item).toContainText('GitHub login');
+  await item.getByRole('button', { name: 'Create repository' }).click();
+
+  const repo = await waitFor(
+    'the repository was added to the project',
+    async () => (await (await api.get(`/api/projects/${projects.INT?.id}`)).json()).repos as any[],
+    (repos) => repos.some((r) => r.name === 'e2e-new'),
+    60_000,
+  );
+  const added = repo.find((r) => r.name === 'e2e-new');
+  expect(added.workingBranch).toBe('main');
+  expect(existsSync(join(paths.repoRoot, 'e2e-new', 'README.md'))).toBe(true);
+  expect(
+    git(join(paths.vaults, 'fake-github', 'acme_e2e-new.git'), 'log', '--format=%s', 'main').trim(),
+  ).toBe('Initial commit');
+  expect(readFileSync(GH_LOG, 'utf8')).toContain('repo create acme/e2e-new --private');
+
+  await page.goto(`/chat/${chat.threadId}`);
+  await expect(page.getByText(/Repository acme\/e2e-new is ready/)).toBeVisible();
+  await send('create card INT: Use the new repo repo=e2e-new', /from this chat/);
+  const made = await q<any>(
+    `SELECT c.ref, pr.name AS repo FROM cards c JOIN project_repos pr ON pr.id = c.repo_id WHERE c.title = 'Use the new repo'`,
+  );
+  expect(made).toHaveLength(1);
+  expect(made[0].repo).toBe('e2e-new');
 });

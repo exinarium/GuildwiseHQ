@@ -341,7 +341,11 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
                 })
               }
             >
-              {item.subkind === 'large_merge' ? 'Approve merge' : 'Approve'}
+              {item.subkind === 'large_merge'
+                ? 'Approve merge'
+                : item.subkind === 'repo_create'
+                  ? 'Create repository'
+                  : 'Approve'}
             </Button>
             <Button onClick={() => resolve.mutate({ id: item.id, body: { resolution: 'rejected' } })}>
               Reject

@@ -317,7 +317,9 @@ Edit `config.json` manually (mode 0600) or use the pair command with `--mock` fl
 2. Authenticate: `gh auth login` (one-time setup)
 3. Test: `gh pr list`
 
-The `gh` CLI is optional; if not available, finalize with action `pr` falls back to pushing the branch and posting a desk notice for manual PR creation. See the BA's `aom finalize --action <pr|push_branch|merge>` command.
+The `gh` CLI is required for approved repository setup (`aom repo create`, below): the runner creates the repository with your own `gh` login after you approve it on the desk. It needs a repository root (`aom-runner repos add <path>`; the new clone goes under the first one) and `gh auth login`. The command runs only on the project owner's workstation, with no shell (`gh` and `git` are run directly; `AOM_GH_BIN` overrides the `gh` path), refuses an existing GitHub repository unless it is empty and yours, confines the clone to the repository root and records each request so a retry never creates a second repository.
+
+Otherwise `gh` is optional; if not available, finalize with action `pr` falls back to pushing the branch and posting a desk notice for manual PR creation. See the BA's `aom finalize --action <pr|push_branch|merge>` command.
 
 **Rotate runner token** (invalidates old token):
 ```sh
@@ -432,6 +434,7 @@ aom finalize --action <pr|push_branch|merge> --note "<why>"  # pr requires `gh`;
 aom answer --item <id> --text "<answer>" [--option <id>]
 aom escalate --item <id> --note "<what must be decided>"
 aom intake map --project <KEY> | aom intake unmapped --note "<why>"
+aom repo create --name <owner/repo> --private|--public --project <KEY> [--description "<text>"]   # BA chat and DevOps: asks the project owner; their runner creates it after approval
 aom outbound draft --kind <comment|resolution|decision> --body "<text>"
 aom source read --ref <owner/repo#12 | ticket URL>
 aom org ...                                            (design chat: draft roles/workflows; role/workflow drafts take --json, --file or --file - too)

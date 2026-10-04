@@ -25,6 +25,7 @@ import { removeWorktree } from './git/worktrees.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
+import { RepoCreator } from './repo/create.ts';
 import { wipeAgent } from './sandbox/sandbox.ts';
 import { ShiftSupervisor } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
@@ -64,6 +65,7 @@ export class Runner {
   readonly vaults: VaultManager;
   /** M8: posts approved drafts to Jira and the code host with this workstation's credentials. */
   readonly outbound: OutboundExecutor;
+  readonly repoCreator: RepoCreator;
   private readonly log: Logger;
   private readonly adapters: Map<string, RuntimeAdapter>;
   private readonly external: ExternalAdapters;
@@ -137,6 +139,11 @@ export class Runner {
       external: this.external,
     });
     this.outbound = new OutboundExecutor({ dir: this.paths.outbound, adapters: this.external });
+    this.repoCreator = new RepoCreator({
+      dir: this.paths.outbound,
+      repoRoots: () => this.opts.config.repoRoots,
+      ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
+    });
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
       this.maxConcurrent = Math.min(w.limits.maxConcurrentShifts, opts.config.maxConcurrentShifts);
@@ -356,6 +363,9 @@ export class Runner {
       } else if (command === 'outbound.post') {
         // Failures are answered as `ok:true, result.ok:false`: the server turns them into a desk alert, not a blind retry.
         done(true, await this.outbound.run(CommandPayloadSchemas['outbound.post'].parse(payload), commandId));
+      } else if (command === 'repo.create') {
+        // Failures are answered as `ok:true, result.ok:false`: the server puts them on the desk.
+        done(true, await this.repoCreator.run(CommandPayloadSchemas['repo.create'].parse(payload)));
       } else {
         done(false, undefined, `command ${command} is not supported by this runner version`);
       }

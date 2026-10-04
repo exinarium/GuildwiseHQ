@@ -121,14 +121,18 @@ When a card reaches Finalize, check the branch is ready and the completion actio
 
 ## Outbound updates (background)
 Company systems (Jira, GitHub) are never written to without the manager's approval. When a card that came from a ticket (its \`externalRef\` field is set) reaches Finalize, draft the update for that ticket before you finalize: \`aom outbound draft --kind <comment|resolution|decision> --body "<text>"\`. Use \`resolution\` when the work resolves the ticket, \`decision\` for a design decision the manager made, \`comment\` otherwise. The draft lands on the manager's desk; they approve, edit or reject it, and only an approved draft is posted, by the card owner's workstation.
-Write it in the manager's voice, as the person who runs the project: what was delivered or decided and what the reader needs to know, from the card, its acceptance criteria and the ledger. Plain prose, short, no headings. It must never name an agent or a role, mention reviews, review comments, bounces or rework, quote the question threads, or refer to this tool. Internal details stay internal: a draft that mentions any is refused and you must rewrite it. Draft once per card.`;
+Write it in the manager's voice, as the person who runs the project: what was delivered or decided and what the reader needs to know, from the card, its acceptance criteria and the ledger. Plain prose, short, no headings. It must never name an agent or a role, mention reviews, review comments, bounces or rework, quote the question threads, or refer to this tool. Internal details stay internal: a draft that mentions any is refused and you must rewrite it. Draft once per card.
+
+## New repositories
+You cannot create a GitHub repository yourself (no GitHub login in your sandbox, \`git push\` is denied). When work needs a new repository, ask for it: \`aom repo create --name <owner/repo> --private|--public --project <KEY> [--description "<text>"]\`. The project owner approves on the desk, their own runner creates it, clones it and adds it to the project, and you are told the result in the conversation. Then use the repository in your cards (\`repo\` field). Never try \`gh repo create\` or \`git push\` yourself.`;
 
 const DEVOPS_INSTRUCTIONS = `You are the DevOps engineer for one workstation. Other agents and the manager ask you for environment changes: start or deploy the app, install a tool, fix a broken setup. You work one request per shift.
 
 1. Read the request and the workstation's granted access (installs, Docker, sudo, writable paths).
 2. Check the current state first; do the least that satisfies the request.
 3. Anything destructive, or anything outside the granted access, is not yours to run: stop and ask with \`aom devops-approval\`. After the manager approves, the request resumes with the approval attached.
-4. When done, log every command that changed the machine with \`aom devops-done\`; that record is the audit trail.
+4. A new GitHub repository is not yours to create: you have no GitHub login and cannot push. Ask the project owner with \`aom repo create --name <owner/repo> --private|--public --project <KEY> [--description "<text>"]\`; they approve on the desk and their runner creates it, clones it and adds it to the project. Do not try \`gh\` or \`git push\` yourself.
+5. When done, log every command that changed the machine with \`aom devops-done\`; that record is the audit trail.
 
 Vault syncing and git housekeeping are done by the runner, not by you.`;
 

@@ -216,6 +216,12 @@ DevOps is always available and outside the queue. It handles:
 - Pulling/pushing vault changes
 - Granting access to internal systems (with your approval on the desk)
 
+#### Creating a new repository
+
+Agents cannot create GitHub repositories themselves: their sandbox has no GitHub login and cannot push. When a project needs a new repository, the BA (in any chat or intake) or the DevOps engineer asks for it with `aom repo create`. The request appears on your desk as **Create repository `<owner/repo>`**, showing the repository name, its visibility (private or public), the project, which of your workstations will run it, and that it uses your own GitHub login (`gh`) on that workstation. Nothing is created until you click **Create repository**.
+
+On approval your own runner creates the repository with `gh`, pushes a first commit (a `README.md` named after the project) to `main`, clones it under the first repository root of your workstation (for example `~/src/<repo>`) and reports the URL. The server adds it to the project (working branch `main`), exactly as if you had added it in the project settings, and the agent's conversation is told the result so it can go on to create cards on it. Only the project owner can approve, and your workstation must be connected (and `gh` installed and logged in); an existing GitHub repository of that name is never touched unless it is empty and yours. Any failure comes back to the desk as an alert, and nothing is added to the project. Asking twice for the same repository never creates a second one.
+
 ### Firing an agent
 
 1. Go to **Agents** and click the agent's row
@@ -279,6 +285,8 @@ When answering a desk question, you can also add it to the ledger as:
 The BA handles intake: reading tickets from Jira or GitHub, mapping them to projects, and drafting cards with full specs.
 
 ### Intake workflow
+
+(You can also ask the BA to create cards in any chat, not only in an intake; see "Chat with agents".)
 
 1. Click **Intake** on the desk (or go to Projects > Intake)
 2. Paste a Jira key or GitHub issue URL

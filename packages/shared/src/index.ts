@@ -11,6 +11,7 @@ export * from './ids.ts';
 export * from './intake/index.ts';
 export * from './prompt/index.ts';
 export * from './protocol/index.ts';
+export * from './repo/index.ts';
 export * from './research/index.ts';
 export * from './roles/index.ts';
 export * from './safe.ts';

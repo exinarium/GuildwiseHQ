@@ -9,6 +9,7 @@ import { OutboundPostPayloadSchema } from '../external/index.ts';
 import { FeedItemInputSchema } from '../feed/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
+import { RepoCreatePayloadSchema } from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import { VaultFolderSchema } from '../safe.ts';
 import { FinalizeExecutePayloadSchema } from '../testing/index.ts';
@@ -199,6 +200,7 @@ export const RunnerCommandNameSchema = z.enum([
   'vault.write',
   'finalize.execute',
   'outbound.post',
+  'repo.create',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -225,6 +227,7 @@ export const CommandPayloadSchemas = {
   'repos.rescan': z.object({}),
   'finalize.execute': FinalizeExecutePayloadSchema,
   'outbound.post': OutboundPostPayloadSchema,
+  'repo.create': RepoCreatePayloadSchema,
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([

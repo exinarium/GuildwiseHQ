@@ -10,8 +10,8 @@ import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import { resolveWorkflow } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
-import { one } from '../db/sql.ts';
-import { withAppendTx } from '../db/tx.ts';
+import { one, type Row } from '../db/sql.ts';
+import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { assertRemoteUrl, projectScope, userActor } from './common.ts';
 
@@ -87,37 +87,52 @@ export async function addRepo(
     throw badRequest('invalid_remote_url', 'remote URL must include a host and a path');
   return withAppendTx(ctx.pool, async (tx) => {
     const p = await ownedProject(tx, user.id, projectId);
-    const existing = await one(
-      tx,
-      'SELECT id, removed_at FROM project_repos WHERE project_id=$1 AND remote_url_normalized=$2',
-      [projectId, normalized],
-    );
-    if (existing && !existing.removed_at)
-      throw conflict('repo_exists', 'this repository is already added to the project');
-    const repoId = existing?.id ?? randomUUID();
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.project(projectId),
-          event: {
-            type: 'ProjectRepoAdded',
-            payload: {
-              projectId,
-              repoId,
-              name: input.name,
-              remoteUrl: input.remoteUrl,
-              remoteUrlNormalized: normalized,
-              workingBranch: input.workingBranch,
-            },
-          },
-          actor: userActor(user.id),
-          scope: projectScope(p.org_id, projectId),
-        },
-      ],
-      { tx },
-    );
-    return repoId as string;
+    return addRepoIn(ctx, tx, p, input, userActor(user.id));
   });
+}
+
+/** Adds a repository to a project (the owner in settings, or an approved repository setup): one `ProjectRepoAdded`. */
+export async function addRepoIn(
+  ctx: Ctx,
+  tx: Tx,
+  project: Row,
+  input: AddRepoRequest,
+  actor: Parameters<typeof ctx.store.append>[0][number]['actor'],
+): Promise<string> {
+  assertRemoteUrl(ctx, input.remoteUrl);
+  const normalized = normalizeRemoteUrl(input.remoteUrl);
+  if (!normalized.includes('/'))
+    throw badRequest('invalid_remote_url', 'remote URL must include a host and a path');
+  const existing = await one(
+    tx,
+    'SELECT id, removed_at FROM project_repos WHERE project_id=$1 AND remote_url_normalized=$2',
+    [project.id, normalized],
+  );
+  if (existing && !existing.removed_at)
+    throw conflict('repo_exists', 'this repository is already added to the project');
+  const repoId = existing?.id ?? randomUUID();
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.project(project.id),
+        event: {
+          type: 'ProjectRepoAdded',
+          payload: {
+            projectId: project.id,
+            repoId,
+            name: input.name,
+            remoteUrl: input.remoteUrl,
+            remoteUrlNormalized: normalized,
+            workingBranch: input.workingBranch,
+          },
+        },
+        actor,
+        scope: projectScope(project.org_id, project.id),
+      },
+    ],
+    { tx },
+  );
+  return repoId as string;
 }
 
 export async function removeRepo(ctx: Ctx, user: AuthSession['user'], projectId: string, repoId: string) {

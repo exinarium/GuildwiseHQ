@@ -19,6 +19,8 @@ export const DESK_SUBKIND = {
   prNotice: 'pr_notice',
   outbound: 'outbound',
   outboundFailed: 'outbound_failed',
+  repoCreate: 'repo_create',
+  repoCreateFailed: 'repo_create_failed',
 } as const;
 
 /** Card origins whose card is a suite (full E2E suite or regression run) rather than a feature under test. */

@@ -62,6 +62,8 @@ const CHAT_RPC = new Set([
   'org.validate',
   'org.submit',
   'org.department',
+  /** Approved repository setup: the BA asks, the project owner approves on the desk. */
+  'repo.create',
 ]);
 
 const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });

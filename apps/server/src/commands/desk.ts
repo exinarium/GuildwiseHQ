@@ -23,6 +23,7 @@ import { mergedAnswerNotes } from './escalation.ts';
 import { resolveLargeMergeIn } from './finalize.ts';
 import { continueIntake, mappingAnsweredEvents } from './intake.ts';
 import { resolveOutboundIn } from './outbox.ts';
+import { resolveRepoCreateIn } from './repo-create.ts';
 import { resolveVaultConflictIn } from './vaults.ts';
 
 const itemScope = (item: Row) =>
@@ -240,6 +241,9 @@ async function closeItem(
       // M8: only the card's owner decides; an approved draft is posted by their own workstation, exactly as approved.
       workstationToDeliver =
         (await resolveOutboundIn(ctx, tx, user, item, resolution, note, editedBody)) ?? undefined;
+    } else if (item.kind === 'approval' && item.subkind === 'repo_create') {
+      // Approved repository setup: only the project owner decides; their own workstation creates it with their gh login.
+      workstationToDeliver = (await resolveRepoCreateIn(ctx, tx, user, item, resolution, note)) ?? undefined;
     } else if (
       item.kind === 'escalation' &&
       item.subkind === 'vault_conflict' &&

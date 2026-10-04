@@ -146,6 +146,8 @@ export const RpcMethodSchema = z.enum([
   'org.validate',
   'org.submit',
   'org.department',
+  /** Approved repository setup: the BA (chat) or the DevOps engineer asks; the project owner approves on the desk. */
+  'repo.create',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

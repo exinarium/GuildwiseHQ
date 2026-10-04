@@ -138,6 +138,37 @@ describe('aom intake and card drafting', () => {
     expect(await t.run('card', 'create', '--json', '[1]')).toBe(1);
   });
 
+  it('asks for a repository (aom repo create) and validates its flags', async () => {
+    const t = await cli({}, () => ({ requestId: 'r1', message: 'Asked the project owner.' }));
+    expect(
+      await t.run(
+        'repo',
+        'create',
+        '--name',
+        'acme/new',
+        '--public',
+        '--project',
+        'TOY',
+        '--description',
+        'D',
+      ),
+    ).toBe(0);
+    expect(await t.run('repo', 'create', '--name', 'acme/new', '--project', 'TOY')).toBe(0 + 1);
+    expect(
+      await t.run('repo', 'create', '--name', 'acme/new', '--private', '--public', '--project', 'TOY'),
+    ).toBe(1);
+    expect(await t.run('repo', 'create', '--private', '--project', 'TOY')).toBe(1);
+    expect(await t.run('repo', 'create', '--name', 'acme/p', '--private', '--project', 'TOY')).toBe(0);
+    expect(t.rpcs).toEqual([
+      {
+        method: 'repo.create',
+        params: { name: 'acme/new', project: 'TOY', visibility: 'public', description: 'D' },
+      },
+      { method: 'repo.create', params: { name: 'acme/p', project: 'TOY', visibility: 'private' } },
+    ]);
+    expect(t.out.join('')).toContain('Asked the project owner.');
+  });
+
   it('reads a source through the runner', async () => {
     const t = await cli({}, () => 'acme/toy#12: Add dark mode\n\nUsers want it.');
     expect(await t.run('source', 'read', '--ref', 'acme/toy#12')).toBe(0);

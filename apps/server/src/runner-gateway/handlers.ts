@@ -15,6 +15,7 @@ import { endQuestionShift } from '../commands/escalation.ts';
 import { applyFinalizeResult } from '../commands/finalize.ts';
 import { intakeRpc } from '../commands/intake.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
+import { applyRepoCreateResult, repoCreateRpc } from '../commands/repo-create.ts';
 import { riskTierRpc } from '../commands/risk.ts';
 import {
   applyShiftEnded,
@@ -189,6 +190,17 @@ export class RunnerHandlers {
             this.ctx,
             conn.workstationId,
             cmd.payload.draftId,
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
+        } else if (cmd?.type === 'repo.create') {
+          // Terminal like outbound.post: created and added to the project, or a failure on the desk (no blind retry).
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyRepoCreateResult(
+            this.ctx,
+            conn.workstationId,
+            cmd.payload.requestId,
             msg.ok,
             msg.result,
             msg.error,
@@ -564,6 +576,7 @@ export class RunnerHandlers {
         return reply(...(await this.devopsRequest(conn, shift, msg.params)));
       if (msg.method === 'outbound.draft') return reply(...(await outboundDraftRpc(ctx, shift, msg.params)));
       if (msg.method === 'card.risk') return reply(...(await riskTierRpc(ctx, shift, msg.params)));
+      if (msg.method === 'repo.create') return reply(...(await repoCreateRpc(ctx, shift, msg.params)));
       if (DESIGN_METHODS.has(msg.method))
         return reply(...(await designRpc(ctx, shift, msg.method, msg.params)));
       if (INTAKE_METHODS.has(msg.method))

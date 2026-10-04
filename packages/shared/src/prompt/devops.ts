@@ -36,6 +36,7 @@ export function renderDevopsInstructions(brief: ShiftBrief, devops: DevopsShift)
       ...accessLines(devops.access),
       '',
       'Anything destructive (deleting data, wiping, formatting) or outside this access must NOT be run. Ask for approval instead with `aom devops-approval`; the shift then ends and resumes after the manager approves.',
+      "A new GitHub repository is created by the owner's runner after they approve it on the desk: ask with `aom repo create --name <owner/repo> --private|--public --project <KEY>` (never `gh` or `git push` yourself).",
     ].join('\n'),
   );
   out.push('# How to report');

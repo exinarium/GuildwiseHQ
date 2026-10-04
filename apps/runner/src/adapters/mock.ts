@@ -55,7 +55,7 @@ export class MockAdapter implements RuntimeAdapter {
       return this.startIntakeChat(input);
     if (input.agent.roleKey === 'ba' && /^\s*design\b/i.test(input.message))
       return this.startIntakeChat(input, 'design');
-    if (input.agent.roleKey === 'ba' && /^\s*create card\b/i.test(input.message))
+    if (input.agent.roleKey === 'ba' && /^\s*(create card|request repo)\b/i.test(input.message))
       return this.startIntakeChat(input, 'desk');
     const prior = /-(\d+)$/.exec(input.resumeSessionId ?? '');
     const turn = (prior ? Number(prior[1]) : 0) + 1;
