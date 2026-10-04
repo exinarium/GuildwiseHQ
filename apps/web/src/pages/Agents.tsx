@@ -498,11 +498,11 @@ function HireDialog({
           value={effectiveRoleKey}
           onChange={(e) => setRoleKey(e.target.value)}
           error={errors.role}
+          hint={role?.department ? `Department: ${role.department}` : undefined}
         >
           {hireable.map((r) => (
             <option key={r.definition.key} value={r.definition.key}>
               {r.definition.name}
-              {r.definition.department ? ` (${r.definition.department})` : ''}
             </option>
           ))}
         </Select>

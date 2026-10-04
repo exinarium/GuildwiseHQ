@@ -338,8 +338,9 @@ test('hire: the custom roles are on the HR board Hire form, grouped by departmen
   await page.getByRole('button', { name: 'Hire agent' }).first().click();
   const form = page.getByRole('form', { name: 'Hire agent' });
   const roleSelect = form.getByLabel('Role', { exact: true });
-  await expect(roleSelect.locator('option', { hasText: 'Triager (support)' })).toHaveCount(1);
-  await roleSelect.selectOption({ label: 'Triager (support)' });
+  await expect(roleSelect.locator('option', { hasText: 'Triager' })).toHaveCount(1);
+  await roleSelect.selectOption({ label: 'Triager' });
+  await expect(form.getByText('Department: support')).toBeVisible();
   await form.getByLabel('Project').selectOption('SUP');
   await form.getByLabel('Runtime').selectOption('mock');
   await form.getByLabel('Name', { exact: true }).fill('Tara');
@@ -396,7 +397,9 @@ test('a custom workflow with custom roles runs a card end to end; a failure rout
 
 test('changing a workflow creates v2; a card in flight finishes on v1, new cards start on v2', async () => {
   // No responder is on shift: the card waits in Resolve, in flight on v1, while the workflow changes.
-  const rhea = (await q<{ id: string }>(`SELECT id FROM agents WHERE name='Rhea'`))[0]?.id;
+  const rhea = (
+    await q<{ id: string }>(`SELECT id FROM agents WHERE name='Rhea' AND org_id=$1`, [ownerId])
+  )[0]?.id;
   expect((await api.post(`/api/agents/${rhea}/fire`, { data: {} })).status()).toBe(200);
   const inFlight = await createTicket('Refund request');
   await stageWait(inFlight, 'resolve', 'queued', 120_000);
