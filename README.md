@@ -92,7 +92,7 @@ pnpm --filter @aom/server admin:create --email you@example.com --name "You" --pa
 pnpm dev
 # Server: http://localhost:4600 (also serves /api)
 # Web UI: http://localhost:5173 (proxies /api to server)
-# Mailpit: http://localhost:8025 (for email testing)
+# Mailpit: http://localhost:8026 (invitation emails; SMTP on 1026, see docker-compose.dev.yml)
 ```
 
 4. In the web UI, create a Workstations pairing code, then pair a runner and add repos:
@@ -109,7 +109,7 @@ node apps/runner/dist/aom-runner.mjs start --mock --data-dir .dev/runner
 
 - **Board** page: create project `TOY` with your repo URL
 - **Agents** page: hire a builder and reviewer (mock runtime)
-- **Board** page: create a card with spec, requirements, acceptance criteria, test plan; set `fields.mock = {"review": ["changes", "ok"]}` to bounce review once; specify it
+- **Board** page: create a card with spec, requirements, acceptance criteria, test plan; fill the **Mock script** field (shown because `pnpm dev` runs the server with `AOM_MOCK_UI=true`) with `{"review": ["changes", "ok"]}` to bounce review once; specify it
 - Watch the card move through the board as the mock agents work
 
 ## Running tests
@@ -120,7 +120,7 @@ pnpm e2e                                      # Playwright E2E (needs fresh aom_
 pnpm e2e:prod                                 # Runs prod compose setup (M1 AC 10: full stack HTTPS, Docker)
 ```
 
-**E2E prerequisites**: Postgres on 127.0.0.1:5433 (aom/aom), Mailpit SMTP on 1025, Chromium (`pnpm --filter @aom/e2e exec playwright install chromium`). Tests run in `/tmp/aom-e2e` and create/drop the `aom_e2e` database.
+**E2E prerequisites**: Postgres on 127.0.0.1:5433 (aom/aom), a Mailpit (SMTP 1025 / API 8025 by default; point the suite at another one with `AOM_E2E_SMTP_URL` and `AOM_MAILPIT_API`, for example the dev Mailpit on 1026 / 8026), Chromium (`pnpm --filter @aom/e2e exec playwright install chromium`). Tests run in `/tmp/aom-e2e` and create/drop the `aom_e2e` database.
 
 ## Workspace scripts
 

@@ -14,5 +14,13 @@ services:
       test: ["CMD-SHELL", "pg_isready -U aom"]
       interval: 2s
       retries: 30
+  # Catch-all mail sink: invitations need an SMTP server in dev. Host ports default to 1026/8026 so they do not
+  # clash with another project's Mailpit on 1025/8025; override with AOM_MAILPIT_SMTP_PORT / AOM_MAILPIT_UI_PORT.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: aom-mailpit
+    ports:
+      - "127.0.0.1:${AOM_MAILPIT_SMTP_PORT:-1026}:1025"
+      - "127.0.0.1:${AOM_MAILPIT_UI_PORT:-8026}:8025"
 volumes:
   aom-pgdata:

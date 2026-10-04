@@ -58,7 +58,7 @@ Rules that hold everywhere:
 | Lint/format | Biome | Deviation from eslint+prettier: one fast tool, zero plugin config. |
 | IDs | `uuidv7()` (built into Postgres 18) as column default; `uuid` v7 in TS where IDs are minted client-side (message ids) | Time-ordered keys. |
 
-Dev ports: server **4600**, web (Vite) **5173** with proxy `/api` → `http://127.0.0.1:4600` (including WS). Postgres 127.0.0.1:5433, Mailpit SMTP 127.0.0.1:1025 (UI 8025). Runner IPC binds `127.0.0.1:0` (ephemeral).
+Dev ports: server **4600**, web (Vite) **5173** with proxy `/api` → `http://127.0.0.1:4600` (including WS). Postgres 127.0.0.1:5433, dev Mailpit SMTP 127.0.0.1:1026 (UI 8026; `docker-compose.dev.yml`, host ports `AOM_MAILPIT_SMTP_PORT`/`AOM_MAILPIT_UI_PORT`; the e2e suite uses `AOM_E2E_SMTP_URL`/`AOM_MAILPIT_API`, default 1025/8025). Runner IPC binds `127.0.0.1:0` (ephemeral).
 
 ```
 agent-org-manager/
