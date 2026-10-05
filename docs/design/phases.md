@@ -782,3 +782,21 @@ These override the recommended defaults above where they differ.
 3. BA reporter (Part B)
 4. Scheduled DevOps repo hygiene with working-branch confirmation (addendum above)
 5. The global Interests page (separate design)
+
+## Addendum: worktree and branch cleanup once work is merged (owner decision, 2026-10-05)
+
+Rule: a card's worktree and branch are removed as soon as its code is in the working branch. The runner does this
+deterministically; agents do not have to remember it.
+
+- **Today:** a successful finalize already enqueues `worktree.remove` (apps/server/src/commands/finalize.ts). The branch
+  is deleted only for `merge`.
+- **`pr` / `push_branch`:** the same git check that decides A2 (the card branch's head is an ancestor of the working
+  branch) also removes the card branch, locally and, for `push_branch`, on the remote, once it is merged. That avoids a
+  second mechanism.
+- **Cards that end without a merge** (cancelled, moved to Done by hand, project archived, agent fired): the server
+  enqueues `worktree.remove`. An unmerged branch is kept and listed in the BA's report.
+- **Safety net:** the DevOps repo-hygiene job, and a runner sweep at start-up, remove worktrees under
+  `~/.aom-runner/worktrees` whose card is finalized, cancelled or unknown to the server, plus empty project folders, and
+  run `git worktree prune`.
+- Agent instructions: builders, testers and reviewers never create worktrees outside the runner, and leave nothing
+  behind in scratch that references a worktree.
