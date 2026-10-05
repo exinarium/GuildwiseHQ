@@ -57,6 +57,8 @@ export const post = <T>(path: string, body?: unknown, schema?: ZodType<T>) =>
   api<T>('POST', path, body, schema);
 export const patch = <T>(path: string, body?: unknown, schema?: ZodType<T>) =>
   api<T>('PATCH', path, body, schema);
+export const put = <T>(path: string, body?: unknown, schema?: ZodType<T>) =>
+  api<T>('PUT', path, body, schema);
 export const del = <T>(path: string) => api<T>('DELETE', path);
 
 export function qs(params: Record<string, string | number | undefined | null>): string {

@@ -141,6 +141,26 @@ describe('BA finalize', () => {
     expect(cmd.payload).toMatchObject({ action: 'merge' });
   });
 
+  it('with the project setting on, the BA merges a large change without the desk approval', async () => {
+    const card = await cardAtFinalize({ title: 'Large, owner override' }, true);
+    await q('UPDATE projects SET merge_large_without_approval=true WHERE id=$1', [w.projectId]);
+    try {
+      const from = r.received.length;
+      const out = await p.run('Ben', finalized('merge'));
+      expect(out.res.message).toMatch(/executing the completion action \(merge\)/);
+      expect(await cardRow(card.id)).toMatchObject({ status: 'waiting', finalize_state: 'running' });
+      expect((await desk()).items.filter((i: any) => i.subkind === 'large_merge')).toHaveLength(0);
+      const cmd = await nextCommand(from);
+      expect(cmd.payload).toMatchObject({ action: 'merge' });
+      const msgs = await q(`SELECT body FROM thread_messages WHERE thread_id=$1`, [card.id]);
+      expect(msgs.map((m) => m.body).join('\n')).toMatch(
+        /merged without manager approval \(project setting\)/,
+      );
+    } finally {
+      await q('UPDATE projects SET merge_large_without_approval=false WHERE id=$1', [w.projectId]);
+    }
+  });
+
   it('refuses an unknown completion action', async () => {
     await cardAtFinalize({ title: 'Bad action' });
     const start = await p.next('Ben');

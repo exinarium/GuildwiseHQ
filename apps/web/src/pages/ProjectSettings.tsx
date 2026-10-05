@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAddRepo, usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
 import { MembersPanel } from '../components/MembersPanel.tsx';
+import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
 import {
   Badge,
   Button,
@@ -171,6 +172,9 @@ export function ProjectSettings() {
           </Button>
         </form>
       </Panel>
+      {project && (
+        <MergePolicyPanel projectId={id} project={project} history={q.data.mergePolicyHistory ?? []} />
+      )}
       <MembersPanel projectId={id} members={members} isOwner={project?.myRole === 'owner'} />
     </div>
   );

@@ -14,6 +14,9 @@ export const PROJECT_DEPARTMENT_SQL = `(SELECT w.department FROM workflow_versio
     WHERE w.key = p.workflow_key AND w.status = 'active' AND (w.org_id = p.org_id OR w.org_id IS NULL)
     ORDER BY (w.org_id IS NULL), w.version DESC LIMIT 1) AS department`;
 
+/** Display name of whoever last changed the large-merge setting. */
+const MERGE_CHANGED_BY_SQL = `(SELECT u.display_name FROM users u WHERE u.id = p.merge_large_changed_by) AS merge_large_changed_by_name`;
+
 export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
   return {
     id: p.id,
@@ -31,6 +34,10 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     architecturalGlobs: p.architectural_globs,
     e2eGlobs: p.e2e_globs,
     status: p.status,
+    mergeLargeWithoutApproval: p.merge_large_without_approval ?? false,
+    mergeLargeChanged: p.merge_large_changed_at
+      ? { byName: p.merge_large_changed_by_name ?? 'unknown', at: iso(p.merge_large_changed_at) as string }
+      : null,
     createdAt: iso(p.created_at) as string,
     myRole,
   };
@@ -40,7 +47,7 @@ export async function listProjects(ctx: Ctx, userId: string, department?: string
   const r = (
     await rows(
       ctx.pool,
-      `SELECT p.*, pm.role AS my_role, ${PROJECT_DEPARTMENT_SQL} FROM projects p JOIN project_members pm
+      `SELECT p.*, pm.role AS my_role, ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL} FROM projects p JOIN project_members pm
          ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active' ORDER BY p.created_at`,
       [userId],
     )
@@ -55,7 +62,7 @@ export async function getProjectDetail(
 ): Promise<ProjectDetailResponse> {
   const p = await one(
     ctx.pool,
-    `SELECT p.*, pm.role AS my_role, ${PROJECT_DEPARTMENT_SQL} FROM projects p JOIN project_members pm
+    `SELECT p.*, pm.role AS my_role, ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL} FROM projects p JOIN project_members pm
        ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active' WHERE p.id = $2`,
     [userId, projectId],
   );
@@ -69,6 +76,13 @@ export async function getProjectDetail(
     ctx.pool,
     `SELECT pm.*, u.display_name, u.email FROM project_members pm JOIN users u ON u.id = pm.user_id
       WHERE pm.project_id=$1 AND pm.status <> 'removed' ORDER BY pm.role DESC, u.display_name`,
+    [projectId],
+  );
+  const history = await rows(
+    ctx.pool,
+    `SELECT e.payload, e.created_at, u.display_name AS by_name FROM events e
+       LEFT JOIN users u ON u.id = (e.payload->>'changedBy')::uuid
+      WHERE e.type = 'ProjectMergePolicyChanged' AND e.project_id = $1 ORDER BY e.seq DESC LIMIT 20`,
     [projectId],
   );
   return {
@@ -88,6 +102,11 @@ export async function getProjectDetail(
       email: m.email,
       role: m.role,
       status: m.status,
+    })),
+    mergePolicyHistory: history.map((h) => ({
+      enabled: h.payload.mergeLargeWithoutApproval === true,
+      byName: h.by_name ?? 'unknown',
+      at: iso(h.created_at) as string,
     })),
   };
 }

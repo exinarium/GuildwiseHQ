@@ -176,6 +176,15 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
       )}
       <h2 className="mt-2 text-base font-semibold whitespace-pre-wrap">{item.title}</h2>
       {item.body && item.kind !== 'rating' && <p className="mt-1 text-sm whitespace-pre-wrap">{item.body}</p>}
+      {item.hint && (
+        <p
+          role="note"
+          data-testid="desk-hint"
+          className="mt-1 rounded-md bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+        >
+          {item.hint}
+        </p>
+      )}
       {item.subkind === 'definition' && (
         <p className="mt-1 text-xs">
           <Link to="/org?tab=workflows" className="underline" data-testid="open-org">

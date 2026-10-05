@@ -53,5 +53,13 @@ export const projectEvents = [
     }),
   ),
   defineEvent('ProjectRepoRemoved', z.object({ projectId: Id, repoId: Id })),
+  /**
+   * The project owner turned the large-merge approval off or on: with it on, a large-tier `merge` finalizes without the
+   * manager's desk approval (default off). Recorded with who and when; shown in the project settings.
+   */
+  defineEvent(
+    'ProjectMergePolicyChanged',
+    z.object({ projectId: Id, mergeLargeWithoutApproval: z.boolean(), changedBy: Id }),
+  ),
   defineEvent('ProjectArchived', z.object({ projectId: Id })),
 ] as const;

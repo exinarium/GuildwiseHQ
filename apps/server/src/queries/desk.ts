@@ -11,7 +11,7 @@ import { digestItemsForDesk } from './digests.ts';
 
 const SELECT = `
 SELECT d.*, c.ref AS card_ref, c.title AS card_title, c.stage AS card_stage, c.status AS card_status,
-       c.owner_user_id AS card_owner, c.decision_policy AS card_policy, p.key AS project_key,
+       c.owner_user_id AS card_owner, c.decision_policy AS card_policy, p.key AS project_key, p.merge_large_without_approval AS project_merge_large_ok,
        a.name AS agent_name, u.display_name AS answered_by_name, aa.name AS answered_by_agent_name,
        (SELECT i.id FROM intakes i WHERE i.mapping_desk_item_id = d.id) AS intake_id
   FROM desk_items d
@@ -101,6 +101,10 @@ export function toDeskDto(
     answeredByName: r.answered_by_name,
     answeredByAgentName: r.answered_by_agent_name ?? null,
     escalationTrail: r.escalation_trail ?? [],
+    hint:
+      r.status === 'open' && r.subkind === 'large_merge' && r.project_merge_large_ok
+        ? "The project setting 'Merge large changes without my approval' is now on, so this merge would no longer need your approval. You can still approve it here."
+        : null,
     intakeId: r.intake_id ?? null,
     decisionPolicy: r.card_policy ?? null,
     canAnswer: r.status === 'open' && canAnswerItem(r, userId, role),

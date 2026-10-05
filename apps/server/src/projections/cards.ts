@@ -393,6 +393,19 @@ export const cardProjectors: Record<string, Projector> = {
     await mutateCard(tx, e, p.cardId, () =>
       exec(tx, `UPDATE cards SET status='waiting', updated_at=$2 WHERE id=$1`, [p.cardId, e.createdAt]),
     );
+    if (p.withoutApproval)
+      await exec(
+        tx,
+        `INSERT INTO card_activity (card_id, kind, summary, reason, user_id, agent_id, event_seq, at)
+         VALUES ($1,'merge_policy','Large change merged without manager approval (project setting)',NULL,$2,$3,$4,$5)`,
+        [
+          p.cardId,
+          e.actor.kind === 'user' ? e.actor.id : null,
+          e.actor.kind === 'agent' ? e.actor.id : null,
+          e.seq.toString(),
+          e.createdAt,
+        ],
+      );
   },
 
   CardFinalized: async (tx, e) => {

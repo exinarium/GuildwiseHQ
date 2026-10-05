@@ -32,6 +32,10 @@ export const ProjectDtoSchema = z.object({
   architecturalGlobs: z.array(z.string()),
   e2eGlobs: z.array(z.string()),
   status: z.enum(['active', 'archived']),
+  /** Owner-only setting: large-tier merges finalize without the manager's desk approval (default off). */
+  mergeLargeWithoutApproval: z.boolean().optional(),
+  /** Who last changed the setting and when (null: never). */
+  mergeLargeChanged: z.object({ byName: z.string(), at: IsoTime }).nullable().optional(),
   createdAt: IsoTime,
   /** The requesting user's relation to the project. */
   myRole: z.enum(['owner', 'manager']),
@@ -52,6 +56,10 @@ export const ProjectDetailResponseSchema = z.object({
   project: ProjectDtoSchema,
   repos: z.array(ProjectRepoDtoSchema),
   members: z.array(ProjectMemberDtoSchema),
+  /** The setting's change history, newest first (who turned it on or off, when). */
+  mergePolicyHistory: z
+    .array(z.object({ enabled: z.boolean(), byName: z.string(), at: IsoTime }))
+    .default([]),
 });
 export type ProjectDetailResponse = z.infer<typeof ProjectDetailResponseSchema>;
 
@@ -67,6 +75,10 @@ export const CreateProjectRequestSchema = z.object({
   vaultFolder: VaultFolderSchema.nullable().default(null),
 });
 export type CreateProjectRequest = z.infer<typeof CreateProjectRequestSchema>;
+
+/** `PUT /api/projects/:id/merge-policy` (owner only). */
+export const SetMergePolicyRequestSchema = z.object({ mergeLargeWithoutApproval: z.boolean() });
+export type SetMergePolicyRequest = z.infer<typeof SetMergePolicyRequestSchema>;
 
 export const PatchProjectRequestSchema = ProjectChangesSchema;
 export type PatchProjectRequest = z.infer<typeof PatchProjectRequestSchema>;

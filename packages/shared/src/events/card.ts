@@ -185,7 +185,16 @@ export const cardEvents = [
     'CardMovedByManager',
     z.object({ cardId: Id, fromStage: Stage, toStage: Stage, status: CardStatus, reason: z.string() }),
   ),
-  defineEvent('FinalizeRequested', z.object({ cardId: Id, action: CompletionAction, requestedBy: Id })),
+  defineEvent(
+    'FinalizeRequested',
+    z.object({
+      cardId: Id,
+      action: CompletionAction,
+      requestedBy: Id,
+      /** A large-tier merge that skipped the desk approval because the project setting allows it. */
+      withoutApproval: z.boolean().optional(),
+    }),
+  ),
   defineEvent(
     'CardFinalized',
     z.object({

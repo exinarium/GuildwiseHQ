@@ -57,6 +57,15 @@ export const projectProjectors: Record<string, Projector> = {
     }
     if (sets.length) await exec(tx, `UPDATE projects SET ${sets.join(', ')} WHERE id=$1`, params);
   },
+  ProjectMergePolicyChanged: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectMergePolicyChanged'>).payload;
+    await exec(
+      tx,
+      `UPDATE projects SET merge_large_without_approval=$2, merge_large_changed_by=$3, merge_large_changed_at=$4
+        WHERE id=$1`,
+      [p.projectId, p.mergeLargeWithoutApproval, p.changedBy, e.createdAt],
+    );
+  },
   ProjectRepoAdded: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectRepoAdded'>).payload;
     await exec(

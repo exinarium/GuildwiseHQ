@@ -238,7 +238,7 @@ Untested code stays quarantined in its card's worktree until it passes review an
 
 **Staleness**: before test and again before finalize, the worktree is rebased on the working branch. A conflict becomes a Rework card; no agent resolves conflicts silently.
 
-**Finalize**: the BA executes the card's completion action (PR, push branch, or merge to working branch) and re-runs the suite after any merge. Small-tier cards merge to the working branch without the manager; large-tier merges wait for the manager's approval on the desk. The completion action is set at intake and the BA may revise it before finalize.
+**Finalize**: the BA executes the card's completion action (PR, push branch, or merge to working branch) and re-runs the suite after any merge. Small-tier cards merge to the working branch without the manager; large-tier merges wait for the manager's approval on the desk, unless the project owner has turned on the per-project setting "Merge large changes without my approval" (default off; owner only; recorded with who and when). The completion action is set at intake and the BA may revise it before finalize.
 
 ## Testing strategy
 

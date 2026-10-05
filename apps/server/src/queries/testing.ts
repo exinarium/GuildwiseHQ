@@ -1,5 +1,5 @@
 import type { CardTesting, RelatedCard } from '@aom/shared';
-import { needsMergeApproval } from '../commands/finalize.ts';
+import { mergeGate } from '../commands/finalize.ts';
 import type { Ctx } from '../context.ts';
 import { iso, type Row, rows } from '../db/sql.ts';
 
@@ -50,7 +50,7 @@ export async function cardTesting(ctx: Ctx, card: Row, canManage: boolean): Prom
     finalize: {
       available: canManage && open_,
       action,
-      requiresApproval: action ? needsMergeApproval(card, action) : false,
+      requiresApproval: action ? (await mergeGate(ctx.pool, card, action)) === 'approval' : false,
       state: card.finalize_state ?? 'idle',
       deskItemId: card.finalize_desk_item_id ?? null,
       lastError: card.finalize_error ?? null,

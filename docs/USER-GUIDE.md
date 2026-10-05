@@ -359,6 +359,8 @@ The original card waits ("waiting on bug") until the bug passes review and the t
 
 A large merge waits for your approval on the desk; until you answer, its card stays in the Finalize column with an "Awaiting your approval" badge.
 
+**Owner override: merge large changes without waiting for you.** In **Project settings**, the **Large changes** panel has the setting **Merge large changes without my approval** (off by default). Only the project owner can change it; additional managers see its state read-only. Turning it on asks for a confirmation, because from then on a large change is merged into the working branch as soon as it is finalized: only the two reviews, the tests and the full suite that runs after the merge stand in between. The card's timeline then says "Large change merged without manager approval (project setting)". Every change of the setting is recorded with who made it and when (shown in the panel and its history). Turning it on does not touch approvals already waiting on the desk: they stay, show a hint that the project setting now allows merging without your approval, and **Approve merge** still works with one click. Turn it off again and large merges wait for you as before.
+
 On the Finalize stage, the BA chooses the completion action:
 
 | Action | What happens |

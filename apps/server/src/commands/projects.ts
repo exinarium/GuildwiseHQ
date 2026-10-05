@@ -75,6 +75,36 @@ export async function updateProject(
   });
 }
 
+/**
+ * "Merge large changes without my approval" (owner only; additional managers cannot): recorded as an event with who
+ * and when. It does not touch approvals already waiting on the desk (they show a hint and can still be approved).
+ */
+export async function setMergePolicy(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  mergeLargeWithoutApproval: boolean,
+) {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await ownedProject(tx, user.id, projectId);
+    if (Boolean(p.merge_large_without_approval) === mergeLargeWithoutApproval) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: {
+            type: 'ProjectMergePolicyChanged',
+            payload: { projectId, mergeLargeWithoutApproval, changedBy: user.id },
+          },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
 export async function addRepo(
   ctx: Ctx,
   user: AuthSession['user'],

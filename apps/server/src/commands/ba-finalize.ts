@@ -3,7 +3,7 @@ import type { Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, cardMessage, projectScope } from './common.ts';
-import { mergeApprovalEvents, needsMergeApproval, queueExecute } from './finalize.ts';
+import { mergeApprovalEvents, mergeGate, queueExecute } from './finalize.ts';
 
 export type BaFinalize =
   | { ok: true; events: AppendInput[]; message: string; workstationId?: string }
@@ -42,7 +42,8 @@ export async function baFinalizeEvents(
     );
   }
   const by = `${agent.name} (BA)`;
-  if (needsMergeApproval(card, action)) {
+  const gate = await mergeGate(tx, card, action);
+  if (gate === 'approval') {
     const approval = mergeApprovalEvents(card, action, { requestedBy: agent.id, actor, by });
     events.push(...approval.events);
     return {
@@ -60,11 +61,24 @@ export async function baFinalizeEvents(
   events.push(
     {
       streamId: streamId.card(card.id),
-      event: { type: 'FinalizeRequested', payload: { cardId: card.id, action, requestedBy: agent.id } },
+      event: {
+        type: 'FinalizeRequested',
+        payload: {
+          cardId: card.id,
+          action,
+          requestedBy: agent.id,
+          ...(gate === 'waived' ? { withoutApproval: true } : {}),
+        },
+      },
       actor,
       scope,
     },
-    cardMessage(card, { kind: 'system' }, 'system', `Finalize (${action}) requested by ${by}: ${input.note}`),
+    cardMessage(
+      card,
+      { kind: 'system' },
+      'system',
+      `Finalize (${action}) requested by ${by}${gate === 'waived' ? ' and merged without manager approval (project setting)' : ''}: ${input.note}`,
+    ),
   );
   return {
     ok: true,

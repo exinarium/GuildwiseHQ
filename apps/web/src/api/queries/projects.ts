@@ -8,7 +8,7 @@ import {
   ProjectsResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { del, get, patch, post } from '../client.ts';
+import { del, get, patch, post, put } from '../client.ts';
 
 export function useProjects() {
   return useQuery({
@@ -41,6 +41,20 @@ export function usePatchProject(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['project', id] });
       qc.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
+export function useSetMergePolicy(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (mergeLargeWithoutApproval: boolean) =>
+      put(`/projects/${id}/merge-policy`, { mergeLargeWithoutApproval }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['desk'] });
+      qc.invalidateQueries({ queryKey: ['card'] });
     },
   });
 }

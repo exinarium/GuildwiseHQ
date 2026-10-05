@@ -666,6 +666,7 @@ Heartbeats are not events.
 | `ProjectShareAccepted` | `{projectId, userId}` | status active, joined_at |
 | `ProjectShareDeclined` | `{projectId, userId}` | status removed |
 | `ProjectMemberRemoved` | `{projectId, userId, inheritedAgentIds[], transferredCardIds[]}` | status removed; agents → manager_user_id = owner, status needs_rehome, workstation_id NULL; cards owner_user_id → owner (claims released via separate ClaimReleased events in same append) |
+| `ProjectMergePolicyChanged` | `{projectId, mergeLargeWithoutApproval, changedBy}` | `projects.merge_large_without_approval/_changed_by/_changed_at`; owner only (`PUT /api/projects/:id/merge-policy`); `mergeGate()` in `commands/finalize.ts` reads it for the manager's Finalize button and the BA's `aom finalize` |
 | `ProjectArchived` | `{projectId}` | status archived |
 
 #### Cards (`events/card.ts`) — stream `card-<id>`, audience `project`
@@ -688,7 +689,7 @@ Heartbeats are not events.
 | **`RebaseConflict`** | `{cardId, stage, baseBranch, conflictedFiles[]}` | stage build, rework_round+1, queued |
 | `StageCompleted` | `{cardId, fromStage, toStage, outcome}` | generic move for custom/research/feed workflows and docs stage |
 | `CardMovedByManager` | `{cardId, fromStage, toStage, status, reason}` | manual override (manager) |
-| `FinalizeRequested` | `{cardId, action, requestedBy}` | (M4) status `waiting`; runner command `finalize.execute` queued to the card's home workstation; its `command.result` produces `CardFinalized` (or a desk escalation on failure) |
+| `FinalizeRequested` | `{cardId, action, requestedBy, withoutApproval?}` (`withoutApproval`: a large merge that skipped the desk because the project setting allows it; adds a `merge_policy` row to the card timeline) | (M4) status `waiting`; runner command `finalize.execute` queued to the card's home workstation; its `command.result` produces `CardFinalized` (or a desk escalation on failure) |
 | **`CardFinalized`** | `{cardId, action, resultRef: {mergeCommit?, prUrl?, pushedBranch?}, toStage:'done'}` | stage done, status done, finalized_at; queues `worktree.remove` runner command; dependents become claimable |
 | `CardCancelled` | `{cardId, reason}` | status cancelled; claim released first |
 | `ThreadMessagePosted` | `{threadId, messageId, cardId?, authorKind, authorUserId?, authorAgentId?, kind, body, data}` | thread_messages |

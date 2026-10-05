@@ -84,7 +84,7 @@ export const TransitionDtoSchema = z.object({
 /** A timeline entry that is not a stage or status change: a field edit or a risk tier override. */
 export const CardActivityDtoSchema = z.object({
   id: z.number().int(),
-  kind: z.enum(['edited', 'risk_tier']),
+  kind: z.enum(['edited', 'risk_tier', 'merge_policy']),
   summary: z.string(),
   reason: z.string().nullable(),
   userId: z.uuid().nullable(),

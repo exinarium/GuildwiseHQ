@@ -10,7 +10,7 @@ import {
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
-import { one, type Row } from '../db/sql.ts';
+import { one, type Queryable, type Row } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -20,8 +20,23 @@ import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts'
 import { rebaseConflictEvents } from './rebase.ts';
 import { spawnCardEvent } from './spawn.ts';
 
-export const needsMergeApproval = (card: Row, action: CompletionAction): boolean =>
+/** A large-tier merge, the kind that waits for the manager unless the owner's project setting lets it through. */
+export const isLargeMerge = (card: Row, action: CompletionAction): boolean =>
   action === 'merge' && card.risk_tier === 'large';
+
+export type MergeGate = 'none' | 'approval' | 'waived';
+
+/**
+ * Does finalizing `card` with `action` wait for the manager's desk approval? `waived`: it is a large merge but the
+ * project's "merge large changes without my approval" setting (owner only, default off) skips the approval.
+ */
+export async function mergeGate(db: Queryable, card: Row, action: CompletionAction): Promise<MergeGate> {
+  if (!isLargeMerge(card, action)) return 'none';
+  const p = await one(db, 'SELECT merge_large_without_approval AS waived FROM projects WHERE id=$1', [
+    card.project_id,
+  ]);
+  return p?.waived ? 'waived' : 'approval';
+}
 
 /** `finalize.execute` for the card's home workstation (the runner executes the completion action; no agent). */
 export async function queueExecute(tx: Tx, card: Row, action: CompletionAction): Promise<string> {
@@ -137,7 +152,8 @@ export async function requestFinalize(
         actor: userActor(user.id),
         scope,
       });
-    if (needsMergeApproval(card, action)) {
+    const gate = await mergeGate(tx, card, action);
+    if (gate === 'approval') {
       const approval = mergeApprovalEvents(card, action, {
         requestedBy: user.id,
         actor: userActor(user.id),
@@ -151,7 +167,15 @@ export async function requestFinalize(
     events.push(
       {
         streamId: streamId.card(card.id),
-        event: { type: 'FinalizeRequested', payload: { cardId: card.id, action, requestedBy: user.id } },
+        event: {
+          type: 'FinalizeRequested',
+          payload: {
+            cardId: card.id,
+            action,
+            requestedBy: user.id,
+            ...(gate === 'waived' ? { withoutApproval: true } : {}),
+          },
+        },
         actor: userActor(user.id),
         scope,
       },
@@ -159,7 +183,7 @@ export async function requestFinalize(
         card,
         { kind: 'system' },
         'system',
-        `Finalize (${action}) requested by ${user.displayName}.`,
+        `Finalize (${action}) requested by ${user.displayName}${gate === 'waived' ? ': merged without manager approval (project setting)' : ''}.`,
       ),
     );
     workstationId = await queueExecute(tx, { ...card, completion_action: action }, action);
