@@ -828,7 +828,7 @@ Where the build differs from the text above (owner decisions of 2026-10-05 win):
 - Added: phase status `cancelled` and event `PhaseCancelled` (archiving a project), `BaTaskRequeued.attempt`, desk item re-issue when the follow-up list changes between empty and non-empty while the report waits.
 - The merge-check interval is `AOM_MERGE_CHECK_SECONDS` (default 180).
 
-**Deferred** (listed in the addenda, not part of this step): the runner start-up sweep of stale worktrees and the DevOps repo-hygiene job (including the working-branch confirmation, the active phase's branch for hygiene and the BA reporter signals); the cleanup for "agent fired" (the card returns to the queue there, so nothing ends); the phase "wait for PR merges" flag (replaced by the git check).
+**Deferred** (listed in the addenda, not part of this step; built afterwards, see "Implementation status (repository hygiene ...)" below): the runner start-up sweep of stale worktrees and the DevOps repo-hygiene job (including the working-branch confirmation, the active phase's branch for hygiene and the BA reporter signals); the cleanup for "agent fired" (the card returns to the queue there, so nothing ends); the phase "wait for PR merges" flag (replaced by the git check).
 
 ## Implementation status (Part B, built Oct 5-6, 2026)
 
@@ -857,3 +857,31 @@ Where the build differs from the text above (owner decisions win):
 - Reports go to the organization owner (org-level desk items). Other project members do not get a floor report.
 
 **Deferred**: nothing from the owner decisions. Not built because the design left it open or optional: quiet hours (decided against), a per-project report, the supersede flag on `aom report` (the triage `merge` action covers it), org-level threshold settings (one constants object, as decided in B1).
+
+## Implementation status (repository hygiene and the working branch, built Oct 6, 2026)
+
+Migration `1305_repo_hygiene.sql`. Built with the owner decisions 1-6 of the hygiene addendum and the remaining part of the worktree cleanup addendum (the runner start-up sweep and the hygiene job's sweep).
+
+| Part | Where |
+| --- | --- |
+| Contract (`HygieneSpec`, `HygieneReport`, sweep result, cadence, the working-branch question's ids) | `packages/shared/src/hygiene`, `events/hygiene.ts`, `ProjectRepoWorkingBranchSet` (`events/project.ts`), `DevOpsRequested.hygiene`, `QuestionRaised.triage/data`; protocol `worktrees.query` / `worktrees.live`, runner command `worktrees.sweep` |
+| Stale-worktree sweep (owner decision 4) | runner `git/sweep.ts` (conservative: needs the server's answer and an empty outbox, never removes a running shift's worktree or one with uncommitted changes, branches are kept), `runner.ts` (15 s after the first connection, and the `worktrees.sweep` command); server `commands/worktree-sweep.ts` (live = card of this workstation not done or cancelled, or done with a finalize pending, or whose worktree a live card shares) |
+| Hygiene git (decisions 1 and 2) | runner `devops/hygiene.ts`, verb `aom hygiene run` (ends the request with `devops_done` + the structured report); mock DevOps runs the same verb |
+| Scheduled job, request, findings (decisions 1 and 5) | server `commands/hygiene.ts` (`hygieneSpecFor`, `requestHygiene`, `fireDueHygiene`, `hygieneReportEvents`, sweep result), `Scheduler.runHygiene`, projections `projections/hygiene.ts`, table `hygiene_findings`, `routes/devops.ts` (cadence, run now), `reporter/detectors.ts detectHygiene` (signal kind `repo_hygiene`) |
+| Working-branch question and answer (decisions 2 and 3) | `workingBranchQuestionEvents`, `workingBranchAnsweredEvents` (hook in `commands/desk.ts answerDeskItem`), `commands/branch-confirm.ts` (intake, phase created or activated), routing hold in `reporter/routing.ts`, `PUT /api/projects/:id/repos/:repoId/working-branch` |
+| Web (decision 5) | `DevOpsPanel` (cadence, Run hygiene now), `WorkingBranchControl` (project settings repository row), `WorkingBranchQuestion` (desk) |
+| Tests | runner `sweep`, `hygiene` (real git); server `worktree-sweep`, `repo-hygiene`, `hygiene-schedule`, `hygiene-routing`; shared `protocol`; web `hygiene`; e2e `hygiene.spec.ts` (`playwright test --project=hygiene --no-deps`) |
+| Docs | USER-GUIDE "Repository hygiene and the working branch", RUNNER.md "Stale-worktree sweep" and "Repository hygiene (DevOps)", ARCHITECTURE 5.2, 9.10, 11.2, 11.3, 16.2, 19, 22 |
+
+Where the build differs from the text above (decisions of the task win):
+
+- **The git work is deterministic runner code, not the model's.** The DevOps agent runs `aom hygiene run`; the model neither commits nor pushes. This keeps the "never commit to an unconfirmed branch" rule enforceable and makes the mock DevOps run the real thing. (The DevOps permission set denies the agent's own `git push`; the verb's push is the runner's.)
+- **Unset branch:** the effective branch is the active phase's `working_branch`, else `project_repos.working_branch`; the project-level default (`main`) is not a fallback. A repository counts as confirmed when `project_repos.working_branch` is set: by the answer, by the project settings, or when the repository was added with a branch (including repositories created through `aom repo create`, which start on `main`).
+- **The question is a `question` desk item** (`subkind working_branch`, asked by the project owner's DevOps engineer, no card, `routedTo manager`), not an approval or alert, so the standard answer form and ledger entry apply. Non-urgent ones are held for the BA's triage window like other non-urgent items (they are not routed to the BA as a question to answer, because a card-less question shift does not exist); a blocking one (changes are waiting) goes straight to the manager with the BA's urgent note.
+- **Re-confirmation** asks only for repositories that already have a confirmed branch and are cloned on some workstation; an unconfirmed one is asked about by the hygiene run, with its branches. Not asked again within an hour of the last confirmation, nor while a question is open, nor for a phase that names its own branch. Naming another branch sets it on the repository (the phase's own `working_branch` is still set in the phase).
+- **On another branch** hygiene never switches the user's checkout: it reports a dirty tree there, and only moves and pushes the working branch ref.
+- **A hygiene request per workstation at a time**; a workstation with no clone of a project repository gets none (409 for "Run hygiene now"). Cadences: off, hourly, 6 h, 12 h, daily (default), weekly; the first scheduled run is one cadence after pairing.
+- A confirmed answer for a repository that had none starts a `branch_confirmed` hygiene run on the workstations that hold it, so held-back work is committed at once.
+- `AOM_HYGIENE_SCHEDULE=false` turns the scheduled job off (the e2e stack, whose specs move the clock by days); "Run hygiene now" works regardless.
+
+**Deferred**: nothing from the owner decisions. Not built: deleting branches on the remote (the `branch.check_merged` check does that for `push_branch`), hygiene for repositories no runner has reported (it needs a clone), per-repository cadence, and a web mock-API (`apps/web/src/mocks`) handler set for the new endpoints.

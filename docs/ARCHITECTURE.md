@@ -827,6 +827,12 @@ Streams `user-<id>`, `desk-<id>`, `ba-signal-<id>`, `ba-task-<id>`; audience `or
 | `DeskItemAnnotated` | `{deskItemId, note, by, relatedDeskItemIds[], signalId?}` | `desk_items.ba_note` |
 | `BaSignalRaised` / `BaSignalUpdated` / `BaSignalReported` / `BaSignalResolved` | `{signalId, kind, fingerprint, urgency, subject, evidence, count}` … | `ba_signals`: one open row per `(org, fingerprint)` |
 | `BaTaskQueued` (extended), `BaTaskItemsAdded` | `…, signalIds?, deskItemIds?, localDate?` / `{taskId, deskItemIds?, signalIds?}` | `ba_tasks.signal_ids / desk_item_ids / local_date`; a `floor_report` also sets `users.floor_report_day` |
+| `WorkstationHygieneChanged` | `{workstationId, intervalHours (0,1,6,12,24,168), changedBy}` | `workstations.hygiene_interval_hours` |
+| `DevOpsRequested` (extended) | `…, hygiene?: HygieneSpec` | `devops_requests.hygiene` (the repositories the run covers); sets `workstations.hygiene_last_at` |
+| `ProjectRepoWorkingBranchSet` | `{projectId, repoId, workingBranch, previousBranch, reason:'unconfirmed'\|'phase'\|'intake'\|'manual', setBy, deskItemId?}` | `project_repos.working_branch / working_branch_set_by / working_branch_set_at` |
+| `HygieneRepoReported` | `{requestId, workstationId, repos:[{repoId, projectId, name, problem:{kind, detail}\|null, files[], branches[]}]}` | `hygiene_findings` (one open row per workstation, repository and kind; other kinds of the repository close; a repository in order closes all; `needs_branch` is a question, not a finding), `project_repos.known_branches` |
+| `WorktreeSweepReported` | `{workstationId, requestId?, removed, kept, dirty:[{path, branch, files[]}]}` | `hygiene_findings` kind `dirty_worktree` (those no longer reported close) |
+| `QuestionRaised` (extended) | `…, triage?:{deadline}, data?` | `desk_items.triage / triage_deadline / data` (the working-branch question carries `{repoId, reason, current?, phaseId?}`) |
 
 ---
 
@@ -1175,6 +1181,24 @@ The first-run cap (2 builders, 1 of each other role) and `AOM_FIRST_RUN_HIRE_CAP
 
 ---
 
+### 9.10 Repository hygiene and the working branch
+
+Owner decisions of 2026-10-05 (docs/design/phases.md, addendum "DevOps repository hygiene and the working branch"). Migration `1305_repo_hygiene.sql`: `workstations.hygiene_interval_hours / hygiene_last_at`, `devops_requests.hygiene`, `project_repos.working_branch_set_by / working_branch_set_at / known_branches`, table `hygiene_findings`.
+
+**The working branch is confirmed, never guessed.** `project_repos.working_branch` is NULL until the manager names a branch (`ProjectRepoWorkingBranchSet`). The branch hygiene uses is `effectiveWorkingBranch`: the latest non-final phase's `working_branch`, else the repository's, else none; the project-level `projects.working_branch` default (`main`) is deliberately not a fallback. With none, nothing is committed, pulled or pushed there.
+
+**The scheduled job (`commands/hygiene.ts`, `Scheduler.runHygiene`).** Every 15 s the scheduler tick (when `AOM_HYGIENE_SCHEDULE`, default on) finds active workstations with a DevOps engineer whose `COALESCE(hygiene_last_at, paired_at) + hygiene_interval_hours` has passed (default 24 h; the cadence is per workstation, `PUT /api/workstations/:id/hygiene`) and calls `requestHygiene`. "Run hygiene now" calls the same function. `requestHygiene` builds a `HygieneSpec` (`hygieneSpecFor`: `workstation_repos` joined to `project_repos` and `projects`: local path, remote, effective branch and its source, the project's branch prefix, up to 200 branches of done or cancelled cards), creates one DevOps request carrying it, and queues the runner command `worktrees.sweep`. One hygiene request is open per workstation: a second click or tick returns the open one; a workstation with no clone of a project repository gets none.
+
+**The DevOps shift (`aom hygiene run`, `apps/runner/src/devops/hygiene.ts`).** The agent (or the mock) runs one deterministic command that does the git work per repository and ends the request with `devops_done` whose data carries the structured `HygieneReport`. Rules, in order: fetch `origin` (failure: `auth_failed` or `error`); list the clone's branches (agent branches under the prefix left out); unset working branch: report the uncommitted files and the branches, `needs_branch`, and stop; a working branch that exists nowhere: `branch_missing`. Checkout on the working branch: `git add -A` and commit uncommitted changes (`chore: save work in progress`), `pull --ff-only`, else `pull --rebase` (a failure aborts the rebase: `conflict`), push if ahead (`push -u`). Checkout on another branch: its working tree is not touched (dirty: `dirty_other_branch`, reported); the working branch ref is moved forward from `origin` or pushed when it is only ahead (`conflict` when it diverged). Then local branches of finished cards under the prefix are deleted when they are merged into the working branch, not checked out in any worktree; `git worktree prune`. Every mutating git command is logged in `commands` of `devops_done`.
+
+**Applying the report (`hygieneReportEvents`, inside `applyDevopsReport`).** One `HygieneRepoReported`, plus for each `needs_branch` repository a `QuestionRaised` (`subkind 'working_branch'`, asked by the DevOps agent, no card): options are the clone's branches (`branch:<name>`) and `other`; blocking and pinned only when uncommitted changes wait for the answer, otherwise non-urgent. At most one open question per repository (`desk_items.data->>'repoId'`). The routing interceptor treats the non-urgent one like other non-urgent items: held for the BA's triage until `REPORTER.triageWindowMinutes`, then shown unchanged; the blocking one goes straight to the manager with an `urgent_note` task. Answering (`answerDeskItem` hook `workingBranchAnsweredEvents`) maps the option (`branch:<name>`, `keep`, or `other` with the typed name, validated with `isSafeGitRef`) to a `ProjectRepoWorkingBranchSet`, in the same append as the standard `QuestionAnswered` + `LedgerEntryAdded` (the ledger entry is what keeps later shifts from asking again); a branch confirmed for a repository that had none starts a `branch_confirmed` hygiene run right after the commit. The project owner can also set it directly (`PUT /api/projects/:id/repos/:repoId/working-branch`), which settles an open question.
+
+**Re-confirming on change (`commands/branch-confirm.ts`, called from the gateway's event reactions).** `TicketMapped` (an intake mapped to a project), `PhaseCreated{status:'open'}` without its own `workingBranch` and `PhaseConfirmed` raise the same question (`reason 'intake'` or `'phase'`, "Keep `<branch>` ... or use another branch?", recommendation `keep`) for each repository of the project that some workstation holds and that already has a confirmed branch. Skipped when a question is open or the branch was set in the last hour; an unconfirmed repository is left to the hygiene run. Keeping changes nothing; naming another sets it on the repository.
+
+**Findings and signals.** `hygiene_findings` (see events above) feed `detectHygiene` (`reporter/detectors.ts`): signal kind `repo_hygiene`, normal urgency, fingerprint `hygiene:<workstation>:<subject>:<kind>`, resolved by the reporter when the finding closes. The daily floor report lists them under "Failures".
+
+**The stale-worktree sweep (runner `git/sweep.ts`, server `commands/worktree-sweep.ts`).** At start-up (15 s after the first connection, once per process), and for each hygiene run (`worktrees.sweep`), the runner lists `worktrees/<KEY>-<id>/<REF>`, asks the server `worktrees.query`, and removes the worktrees the server does not call live, removes empty project folders and runs `git worktree prune` in the known clones. The server answers with the paths of cards of this workstation that are not done or cancelled, or are done with a finalize still pending (`finalize_state` set, `finalized_at` null), or whose worktree a live card shares. Conservative: no answer, or messages still in the outbox: nothing is removed; a running shift's worktree is never touched; a worktree with uncommitted changes is never deleted: for a dead card it is reported (`WorktreeSweepReported`, a `dirty_worktree` finding); branches are never deleted by the sweep.
+
 ## 10. Scheduler (M5)
 
 `apps/server/src/scheduler/scheduler.ts`, every 15 s and on boot:
@@ -1241,6 +1265,7 @@ Runner → server:
 | `chat.delta` | `{chatId, threadId, text}` | no |
 | `chat.done` | `{chatId, threadId, messageText, usage}` | yes |
 | `chat.error` | `{chatId, threadId, error}` | yes |
+| `worktrees.query` | `{queryId, paths: string[]}`: the card worktrees the runner found under `worktrees/`; which are still in use? (stale-worktree sweep) | no; reply `worktrees.live` |
 | `command.result` | `{commandId, ok, result?, error?}` | yes |
 | `vault.status` | `{vaultId, lastPullAt, lastPushAt, error?}` (M3) | no |
 | `vault.conflict` | `{vaultId, files[]}` (M3) | yes |
@@ -1254,9 +1279,10 @@ Server → runner:
 | `shift.stop` | `{shiftId, reason:'timeout'|'claim_lost'|'agent_retired'|'manager'|'card_cancelled'}` | yes |
 | `shift.report.result` | `{reportId, accepted, error?}` | — |
 | `rpc.response` | `{rpcId, ok, result?, error?}` | — |
+| `worktrees.live` | `{queryId, live: string[]}`: the subset of the queried paths that belongs to a live card (not done-and-finalized, not cancelled, known to the server, on this workstation) | — |
 | `chat.start` | `{chatId, threadId, agent: AgentRuntimeSpec, message:string, resumeSessionId?, context: ChatContext}` | runner replies with chat.* |
 | `chat.cancel` | `{chatId}` | — |
-| `command` | `{commandId, command: 'agent.wipe'|'worktree.remove'|'repos.rescan'|'vault.configure'|'vault.write'|'finalize.execute'|'outbound.post', payload}` | runner replies `command.result` |
+| `command` | `{commandId, command: 'agent.wipe'|'worktree.remove'|'repos.rescan'|'vault.configure'|'vault.write'|'finalize.execute'|'outbound.post'|'repo.create'|'branch.check_merged'|'worktrees.sweep', payload}` | runner replies `command.result` |
 | `ack` | `{ackOf}` | — |
 
 ```ts
@@ -1285,7 +1311,7 @@ Presence: server marks `connected=true` + `WorkstationConnected` on `welcome`, `
 
 ### 11.3 Runner command queue
 
-`runner_commands` gives durable delivery to offline runners (`agent.wipe` after a firing, `worktree.remove` after finalize, `vault.write` after an answer, `finalize.execute`, `outbound.post`). Delivered on connect and immediately if connected; marked `done` on `command.result ok`; retried with backoff (max 10 attempts, then `failed` + desk escalation). Command handlers on the runner must be idempotent (wiping a missing dir is success; writing an identical vault file is success).
+`runner_commands` gives durable delivery to offline runners (`agent.wipe` after a firing, `worktree.remove` after finalize, `vault.write` after an answer, `finalize.execute`, `outbound.post`, `worktrees.sweep` with each repository hygiene run). Delivered on connect and immediately if connected; marked `done` on `command.result ok`; retried with backoff (max 10 attempts, then `failed` + desk escalation). Command handlers on the runner must be idempotent (wiping a missing dir is success; writing an identical vault file is success).
 
 ---
 
@@ -1484,6 +1510,7 @@ A violation rejects the report (the CLI prints why so the agent can fix it withi
 - Auto-hired on `WorkstationPaired` (same append): `AgentHired{isDevops:true, roleKey:'devops', name:'<generated>', runtime: first available runtime}`. Cannot be fired (`POST /fire` → 409); `POST /api/agents/:id/reset` → `AgentReset` + `agent.wipe`.
 - Requests: `aom devops "<text>"` from any shift, or the manager's chat, or `POST /api/devops/requests` → `DevOpsRequested` (thread opened). The dispatcher starts a `devops` shift on that workstation's DevOps agent (capacity 1, FIFO). The DevOps instructions include the workstation's granted access (`workstations.devops_access` jsonb, M3: `{allowInstall:boolean, allowDocker:boolean, allowedPaths:[], sudo:false}`) and the rule: anything destructive or outside access → `aom devops-approval --action ... --reason ... --command ...` (terminal, creates `DevOpsApprovalNeeded` + desk approval). Completion: `aom devops-done --summary ... --command ...` → `EnvironmentChanged` + `DevOpsRequestCompleted`. On approval the request is re-queued with the approval attached.
 - Project setup is a DevOps request created by the manager from project settings ("Set up on <workstation>").
+- Repository hygiene (a request carrying `hygiene`, see 9.10) is ended with `aom hygiene run` instead of `devops-done`: the runner's deterministic git code does the work and the terminal `devops_done` report carries the structured result.
 
 ### 16.3 Vault sync (deterministic runner code, `vaults/sync.ts`)
 
@@ -1582,6 +1609,9 @@ Errors: `{error: {code, message, details?}}` with 400 validation, 401 unauthenti
 | Method & path | Purpose | Milestone |
 | --- | --- | --- |
 | `GET /api/health` | liveness + DB check | M1 |
+| `PUT /api/workstations/:id/hygiene` `{intervalHours: 0|1|6|12|24|168}` | the workstation's repository hygiene cadence (0 = off; owner of the workstation) → the workstation DTO with `hygiene` | hygiene |
+| `POST /api/workstations/:id/hygiene/run` | "Run hygiene now": one hygiene DevOps request (201), or the one already queued/running (200, `alreadyRunning`); 409 `no_repositories` when the workstation holds no clone of a project repository | hygiene |
+| `PUT /api/projects/:id/repos/:repoId/working-branch` `{branch}` | the project owner confirms or changes the repository's working branch (`ProjectRepoWorkingBranchSet`) → project detail | hygiene |
 | `POST /api/auth/login` `{email,password}` | set session cookie | M1 |
 | `POST /api/auth/logout` | | M1 |
 | `GET /api/auth/me` | user, isAdmin, visible project ids | M1 |
@@ -1658,6 +1688,7 @@ Server env (`apps/server/src/config.ts`, zod-validated):
 | `AOM_SERVE_WEB` | `false` (dev), `true` (prod) | serve `apps/web/dist` |
 | `LOG_LEVEL` | `info` | |
 | `AOM_REPORTER_SECONDS` | `60` | BA reporter sweep: signal detectors, expired triage holds, the daily floor report |
+| `AOM_HYGIENE_SCHEDULE` | `true` | the scheduled repository hygiene job (each workstation's own cadence, default daily); `false` leaves only "Run hygiene now" (the e2e stack) |
 | `AOM_TEST_CLOCK` | unset | test only: enables `POST /api/test/clock {offsetMs}`; all server time comes from `clock.now()` |
 
 First admin: `pnpm --filter @aom/server admin:create --email ... --name ...` (prompts for password) → `UserBootstrapped`.

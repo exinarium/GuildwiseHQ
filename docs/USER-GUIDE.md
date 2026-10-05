@@ -250,6 +250,16 @@ DevOps is always available and outside the queue. It handles:
 - Pulling/pushing vault changes
 - Granting access to internal systems (with your approval on the desk)
 
+#### Repository hygiene and the working branch
+
+Once a day per workstation (you can change that, or switch it off, under **Workstations**, **Repository hygiene**, and start one with **Run hygiene now**) the DevOps engineer tidies the project repositories on that machine. For each repository it fetches and pulls, **commits any uncommitted changes to the working branch** and pushes them, pushes commits that were not pushed yet, and removes branches and worktrees of cards that are finished and merged. The same pass cleans up leftover card worktrees (the runner also does that when it starts). Everything it did is logged in the request on the Workstations page.
+
+**The working branch is something you confirm, it is never guessed.** While a repository has no confirmed working branch (the project settings show *not confirmed*), the DevOps engineer does not commit, pull or push in it. It only reports the uncommitted changes and asks you on the desk, **Which branch is the working branch of `<repository>`?**, with the repository's branches as options and *Another branch* (type its name). The question is pinned and blocking when changes are waiting for the answer. Your answer is stored on the repository, written to the ledger so nobody asks again, and the DevOps engineer commits and pushes right away. You can also set or change it any time in the project settings, in the repository row (**Change**). The project owner decides.
+
+When something changes, you are asked again: when a new intake starts for the project, and when a new phase is created or activated, the DevOps engineer asks **Keep `<branch>` as the working branch ... or use another branch?** (a normal item: your BA may look at it first). A phase can have its own working branch; hygiene then uses the active phase's branch.
+
+What hygiene cannot resolve it does not force: a conflict while pulling, uncommitted changes on a branch that is not the working branch, an authentication failure, a missing clone, a leftover worktree with uncommitted changes (never deleted). These show up as a failure in your BA's daily report until a later run finds the repository in order.
+
 #### Creating a new repository
 
 Agents cannot create GitHub repositories themselves: their sandbox has no GitHub login and cannot push. When a project needs a new repository, the BA (in any chat or intake) or the DevOps engineer asks for it with `aom repo create`. The request appears on your desk as **Create repository `<owner/repo>`**, showing the repository name, its visibility (private or public), the project, which of your workstations will run it, and that it uses your own GitHub login (`gh`) on that workstation. Nothing is created until you click **Create repository**.
@@ -456,6 +466,7 @@ The server checks the floor every minute, without using any tokens (the BA only 
 | Blocked too long | A blocked card waits more than 4 hours | Daily report |
 | Nobody can take it | A queued card nobody is able to take for more than 30 minutes | Daily report |
 | Repeated failures | A card in rework round 3, or a failed finalize twice | Daily report |
+| Repository hygiene problem | The DevOps engineer could not resolve something in a repository (conflict, changes on the wrong branch, authentication, missing clone) or found a leftover worktree with uncommitted changes | Daily report, under Failures |
 
 A signal appears once however long it lasts, and clears by itself when the cause is gone (a notice the BA posted is then acknowledged for you).
 

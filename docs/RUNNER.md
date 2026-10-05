@@ -441,6 +441,12 @@ aom source read --ref <owner/repo#12 | ticket URL>
 aom org ...                                            (design chat: draft roles/workflows; role/workflow drafts take --json, --file or --file - too)
 ```
 
+**DevOps shifts (repository hygiene requests):**
+```sh
+aom hygiene run [--note "<text>"]                      tidy the project repositories listed in the request, then end the request
+```
+See "Repository hygiene" below.
+
 **Scout/curator shifts (Feed, Digest):**
 ```sh
 aom digest --file <json> [--note "<text>"] | --none
@@ -570,7 +576,25 @@ All are cleaned up when the agent is fired.
 Worktrees are created under `worktrees/<KEY>-<project id prefix>/<REF>/` (project keys are only unique per
 organization, so the project id keeps two same-keyed projects on one workstation apart) and reused across stages of the
 same card. Worktrees created by older runner versions under `worktrees/<KEY>/<REF>` keep working: reuse follows the path
-the server recorded for the card. They are removed after finalize.
+the server recorded for the card. They are removed after finalize (`worktree.remove`), when the card ends without a merge, and by the sweep below.
+
+#### Stale-worktree sweep
+
+A safety net for worktrees nobody removed (a crash, a card cancelled while the runner was offline, a database that was
+reset). About 15 seconds after the first connection of the runner process, and again for every repository hygiene run
+(the server sends the command `worktrees.sweep`), the runner:
+
+1. lists `worktrees/<KEY>-<project id prefix>/<REF>` and asks the server (`worktrees.query`) which of those paths still
+   belong to a live card of this workstation (a card that is not done or cancelled, or is done with its finalize still
+   pending). A worktree of a finalized or cancelled card, or one the server has never heard of, is stale;
+2. removes the stale ones (`git worktree remove`; the branch is kept);
+3. removes empty project folders and runs `git worktree prune` in every known clone.
+
+It is conservative: it removes nothing when the server does not answer within 15 s (`sweepAnswerMs`) or when messages
+to the server are still queued in `outbox/`; it never touches the worktree of a running shift; and it never deletes a
+worktree with uncommitted changes. For a stale worktree that has some, nothing is deleted: the server records a
+finding (a BA signal in the daily report) with the paths of the changed files. A non-empty folder that is not a git
+worktree is left alone. The result is logged to `logs/runner.log` when anything was removed or reported.
 
 Everything the server sends that ends up in git or on the filesystem is treated as untrusted:
 branch names and base branches must be valid git refs without a leading `-` (checked again on the runner, `--` is passed
@@ -667,6 +691,31 @@ and is still recorded as a guard violation: `git checkout -f <branch>`,
 E2E globs; writer: documentation; any custom role) may only change matching paths: the post-shift guard reports
 `edited_outside_writable_globs` (or the tester/writer rules), and out-of-scope edits are discarded before the shift-end
 autocommit.
+
+### Repository hygiene (DevOps)
+
+Once a day per workstation (the cadence is set on the Workstations page, `AOM_HYGIENE_SCHEDULE` on the server turns the
+schedule off) and on "Run hygiene now", the server sends the DevOps engineer a request listing the workstation's project
+repositories: local path, remote and working branch (the active phase's, else the repository's). The engineer runs
+`aom hygiene run`; the runner's own git code, running as your user with your git credentials, then for each repository:
+
+- fetches `origin`, lists the branches (agent branches `aom/...` left out);
+- **working branch not confirmed** (`project_repos.working_branch` is empty): does nothing else. It does not commit,
+  pull or push. The uncommitted files and the branches are reported, and the server asks you on the desk which branch is
+  the working branch (the answer is stored on the repository and in the ledger, so it is not asked again);
+- **on the working branch**: commits uncommitted changes (`chore: save work in progress (aom repository hygiene)`, with
+  your git identity, else `AOM repository hygiene <hygiene@aom.invalid>`), pulls (fast-forward, else rebase; a rebase
+  that conflicts is aborted), and pushes what is unpushed;
+- **on another branch**: leaves the working tree alone (uncommitted changes there are reported), moves the working
+  branch forward from `origin` and pushes it when it is only ahead;
+- deletes local `aom/...` branches of finished cards that are merged into the working branch and not checked out in a
+  worktree, and runs `git worktree prune`.
+
+It never force-pushes, resets or discards anything. What it cannot resolve (a conflict, a branch that is not there, an
+authentication failure, a missing clone, uncommitted changes on the wrong branch) is reported and becomes a signal in the
+BA's daily report; it closes when a later run finds the repository in order. The commands that changed something are
+logged in the request's record (`aom devops-done`). The DevOps permission set denies `git push` to the agent's own shell;
+the push in `aom hygiene run` is done by the runner, not by the model.
 
 ### DevOps shifts are unsandboxed
 
