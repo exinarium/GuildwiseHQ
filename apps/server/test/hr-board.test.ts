@@ -1,4 +1,4 @@
-import { streamId } from '@aom/shared';
+import { BUILTIN_ROLES, streamId } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { board, kindsOf, recommendations } from './helpers/hr.ts';
@@ -90,6 +90,9 @@ describe('HR recommendations in a shared project', () => {
   });
 });
 
+/** The shipped default version of the tester role (bumped whenever its definition changes). */
+const TESTER_V = BUILTIN_ROLES.find((r) => r.key === 'tester')?.version ?? 0;
+
 describe('built-in role defaults', () => {
   const extend = (baseVersion: number) =>
     w.t.app.ctx.store.append([
@@ -116,14 +119,14 @@ describe('built-in role defaults', () => {
   it('the owner sees a new default version and resets, which drops the extensions shown beforehand', async () => {
     const tess = await w.hire('Tess', 'tester', 'junior');
     await q('UPDATE agents SET role_version = 1 WHERE id=$1', [tess.id]);
-    await extend(1); // written against v1; the shipped default is v2 (tester)
+    await extend(1); // written against v1; the shipped default is newer (tester)
     const b = await board(w);
     expect(b.roleUpdates).toEqual([
       {
         roleKey: 'tester',
         roleName: 'Tester',
         extensionBaseVersion: 1,
-        latestVersion: 2,
+        latestVersion: TESTER_V,
         purpose: expect.any(String),
         extensions: {
           instructions: 'Always run lint first.',
@@ -137,7 +140,7 @@ describe('built-in role defaults', () => {
     const res = await ok<any>(w.t.req('POST', '/api/hr/roles/tester/reset', { cookie: w.owner.cookie }));
     expect(res).toMatchObject({
       roleKey: 'tester',
-      toVersion: 2,
+      toVersion: TESTER_V,
       droppedExtensions: {
         instructions: 'Always run lint first.',
         skills: ['lint'],
@@ -146,11 +149,13 @@ describe('built-in role defaults', () => {
       updatedAgentIds: [tess.id],
     });
     expect(await q(`SELECT 1 FROM role_extensions WHERE org_id=$1`, [w.owner.id])).toHaveLength(0);
-    expect((await q('SELECT role_version FROM agents WHERE id=$1', [tess.id]))[0]!.role_version).toBe(2);
+    expect((await q('SELECT role_version FROM agents WHERE id=$1', [tess.id]))[0]!.role_version).toBe(
+      TESTER_V,
+    );
     const ev = (await q(`SELECT payload, actor_id FROM events WHERE type='RoleResetToDefault'`))[0]!;
     expect(ev.payload).toMatchObject({
       roleKey: 'tester',
-      toVersion: 2,
+      toVersion: TESTER_V,
       droppedExtensions: { skills: ['lint'] },
     });
     expect(ev.actor_id).toBe(w.owner.id);
@@ -182,20 +187,22 @@ describe('built-in role defaults', () => {
       expect.objectContaining({
         roleKey: 'tester',
         extensionBaseVersion: null,
-        latestVersion: 2,
+        latestVersion: TESTER_V,
         extensions: { instructions: '', skills: [], standingOrders: [] },
         agentsOnOlderVersion: 1,
       }),
     ]);
     const res = await ok<any>(w.t.req('POST', '/api/hr/roles/tester/reset', { cookie: w.owner.cookie }));
-    expect(res).toMatchObject({ roleKey: 'tester', toVersion: 2, updatedAgentIds: [tess.id] });
-    expect((await q('SELECT role_version FROM agents WHERE id=$1', [tess.id]))[0]!.role_version).toBe(2);
+    expect(res).toMatchObject({ roleKey: 'tester', toVersion: TESTER_V, updatedAgentIds: [tess.id] });
+    expect((await q('SELECT role_version FROM agents WHERE id=$1', [tess.id]))[0]!.role_version).toBe(
+      TESTER_V,
+    );
     expect((await board(w)).roleUpdates).toEqual([]);
   });
 
   it('an extension already on the latest version is not an update', async () => {
     await q('DELETE FROM role_extensions');
-    await extend(2);
+    await extend(TESTER_V);
     expect((await board(w)).roleUpdates).toEqual([]);
   });
 });
