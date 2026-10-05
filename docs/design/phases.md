@@ -94,7 +94,9 @@ pending ──(phase approved)──► queued ──PhaseFollowupBriefed──�
 - Defaults: `deploy` is `stop`; `regression` and `custom` are `continue`.
 - `briefed` means the BA wrote the delegation text and picked the delegate (`devops` | `tester` | `ba`). Without a BA, the system writes a template brief (see A5.4).
 
-### A3. Data model: migration `apps/server/migrations/1300_phases.sql`
+### A3. Data model: migration `apps/server/migrations/NNNN_phases.sql`
+
+> Migration number: use the next free number at build time (1300 is taken by transcripts, the loop breaker takes the next one, and interests reserves 1500).
 
 Numbering follows the post-M10 pattern (`1100_`, `1102_`, `1103_`, `1200_`): one hundred-block per feature. Part B gets `1400_`.
 
@@ -399,7 +401,7 @@ Add `PHASE_DESK_SUBKIND` labels to `SUBKIND_LABEL` in `apps/web/src/lib/desk.ts`
 
 ### A6. Phase timeline and threads
 
-A phase gets a thread for agent comments and system notes, so the BA's working notes and "follow-up 1 started: DevOps request …" are readable. Add `'phase'` to `threads.kind` (the CHECK constraint, changed in `1300_`; and the `api/threads.ts` enum). The thread id is the phase id (the DevOps pattern, where `thread_id = requestId`), with `card_id` NULL; `PhaseCreated`'s projector creates it. `phasePass` posts a `system` message on each follow-up start and finish.
+A phase gets a thread for agent comments and system notes, so the BA's working notes and "follow-up 1 started: DevOps request …" are readable. Add `'phase'` to `threads.kind` (the CHECK constraint, changed in `NNNN_phases.sql`; and the `api/threads.ts` enum). The thread id is the phase id (the DevOps pattern, where `thread_id = requestId`), with `card_id` NULL; `PhaseCreated`'s projector creates it. `phasePass` posts a `system` message on each follow-up start and finish.
 
 ### A7. Remote host target configuration
 
@@ -664,7 +666,7 @@ Each step ends green (`pnpm typecheck && pnpm lint && pnpm test`). Paths are rel
    - `api/cards.ts`: `phase` on the detail.
    - `api/desk.ts`: optional `phase` block on `DeskItemDto`.
    - `api/threads.ts`: `'phase'` kind.
-4. **Migration.** Create `apps/server/migrations/1300_phases.sql` (A3); update `apps/server/test/migrate.test.ts` if it lists versions.
+4. **Migration.** Create `apps/server/migrations/NNNN_phases.sql` (A3); update `apps/server/test/migrate.test.ts` if it lists versions.
 5. **Projections.**
    - Create `apps/server/src/projections/phases.ts` (phases, follow-ups, deploy targets, defaults, ba_tasks, the phase thread).
    - `projections/cards.ts`: `CardCreated` new columns, `CardPhaseChanged` + `card_activity`.
