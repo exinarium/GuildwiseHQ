@@ -172,7 +172,7 @@ export class Dispatcher {
     for (const { row, caps, active } of agents) {
       if (active >= row.capacity || this.skip(row, nowMs)) continue;
       const view = agentView(row, caps);
-      const cands = await candidateCards(this.ctx.pool, view);
+      const cands = await candidateCards(this.ctx.pool, view, new Date(nowMs));
       for (const c of cands) {
         const r = await claim(this.ctx, { cardId: c.id, agentId: row.id, expectedStage: c.stage });
         if (r) {
@@ -212,7 +212,7 @@ export class Dispatcher {
         .filter((a) => a.row.org_id === card.org_id && a.active >= a.row.capacity && !this.skip(a.row, nowMs))
         .sort((x, y) => x.active - y.active);
       for (const a of atCapacity) {
-        if (!(await isCandidate(this.ctx.pool, agentView(a.row, a.caps), card.id))) continue;
+        if (!(await isCandidate(this.ctx.pool, agentView(a.row, a.caps), card.id, new Date(nowMs)))) continue;
         const r = await claim(this.ctx, {
           cardId: card.id,
           agentId: a.row.id,

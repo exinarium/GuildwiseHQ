@@ -39,6 +39,8 @@ export const BoardCardSchema = z.object({
   origin: z.string().optional(),
   /** Absent or `ok` for a workable card; see `WorkabilitySchema`. */
   workability: WorkabilitySchema.optional(),
+  /** Loop breaker: the card is held back until `until` after `failures` failed shifts. */
+  backoff: z.object({ until: IsoTime, failures: z.number().int() }).nullable().optional(),
 });
 export type BoardCard = z.infer<typeof BoardCardSchema>;
 

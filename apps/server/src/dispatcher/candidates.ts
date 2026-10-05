@@ -107,6 +107,7 @@ WHERE c.status = 'queued'
   AND ${E.repo}
   AND ${E.vault}
   AND ${E.worktree}
+  AND (c.retry_after IS NULL OR c.retry_after <= $9::timestamptz)
   AND NOT EXISTS (
         SELECT 1 FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id
          WHERE d.card_id = c.id AND c.stage = 'build' AND c.rework_round = 0
@@ -126,7 +127,7 @@ ORDER BY
   c.created_at ASC
 LIMIT 5`;
 
-const params = (a: AgentView) => [
+const params = (a: AgentView, now: Date) => [
   a.id,
   a.orgId,
   a.projectId,
@@ -135,18 +136,25 @@ const params = (a: AgentView) => [
   a.workstationId,
   a.capabilities,
   a.riskTiers,
+  now,
 ];
 
-/** Claimable cards for `agent` in priority order (limit 5). */
+/** Claimable cards for `agent` in priority order (limit 5). A card in loop-breaker back-off is skipped until it expires. */
 export async function candidateCards(
   db: Queryable,
   agent: AgentView,
+  now: Date = new Date(),
 ): Promise<Array<{ id: string; stage: string }>> {
-  return rows(db, CANDIDATES_SQL(''), params(agent));
+  return rows(db, CANDIDATES_SQL(''), params(agent, now));
 }
 
 /** Is this specific card currently claimable by this agent? (used inside the claim transaction) */
-export async function isCandidate(db: Queryable, agent: AgentView, cardId: string): Promise<boolean> {
-  const r = await one(db, CANDIDATES_SQL('AND c.id = $9'), [...params(agent), cardId]);
+export async function isCandidate(
+  db: Queryable,
+  agent: AgentView,
+  cardId: string,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const r = await one(db, CANDIDATES_SQL('AND c.id = $10'), [...params(agent, now), cardId]);
   return !!r;
 }

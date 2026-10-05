@@ -278,6 +278,28 @@ export const cardProjectors: Record<string, Projector> = {
         e.createdAt,
       ],
     );
+    // A report is a successful shift: the loop breaker's episode ends.
+    await exec(
+      tx,
+      'UPDATE cards SET retry_after=NULL, retry_failures=0, retry_episode_id=NULL WHERE id=$1 AND retry_failures > 0',
+      [p.cardId],
+    );
+  },
+
+  CardRetryDeferred: async (tx, e) => {
+    const p = ev<'CardRetryDeferred'>(e).payload;
+    await exec(tx, 'UPDATE cards SET retry_after=$2, retry_failures=$3, retry_episode_id=$4 WHERE id=$1', [
+      p.cardId,
+      p.until,
+      p.failures,
+      p.episodeId,
+    ]);
+  },
+
+  // Released by hand: dispatchable now. The failure count stays, so the next failure backs off longer.
+  CardRetryReleased: async (tx, e) => {
+    const p = ev<'CardRetryReleased'>(e).payload;
+    await exec(tx, 'UPDATE cards SET retry_after=NULL WHERE id=$1', [p.cardId]);
   },
 
   ReviewRequested: async (tx, e) => {
@@ -381,7 +403,8 @@ export const cardProjectors: Record<string, Projector> = {
         exec(
           tx,
           `UPDATE cards SET stage=$2, status=$3, queued_at = CASE WHEN $3 = 'queued' THEN $4::timestamptz ELSE queued_at END,
-                  excluded_agent_ids='{}', review_approvals=0, updated_at=$4 WHERE id=$1`,
+                  excluded_agent_ids='{}', review_approvals=0, updated_at=$4,
+                  retry_after=NULL, retry_failures=0, retry_episode_id=NULL WHERE id=$1`,
           [p.cardId, p.toStage, p.status, e.createdAt],
         ),
       { agentId: null },

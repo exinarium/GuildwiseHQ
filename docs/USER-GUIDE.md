@@ -184,7 +184,14 @@ Clicking a card shows its detail view. Actions:
 
 - **Move**: reassign to a different stage (manager only; used to fix stuck cards)
 - **Release**: return to the queue (if an agent dropped it mid-shift or you need to reassign)
+- **Release back-off**: appears only on a card showing the badge below
 - **Cancel**: mark as cancelled (keeps the history, does not queue it again)
+
+#### "Backing off until 14:32 (3 failures)"
+
+When three shifts on the same card end without a report within 10 minutes (the agent crashed, timed out, or was stopped by a denied tool and ended with nothing), the dispatcher stops handing the card out and shows this amber badge on the board and on the card page. The wait starts at 1 minute and doubles with every further failure, up to 1 hour. A shift that reports resets it. You also get one alert on the desk per episode, and the card thread holds a single note instead of one per failure.
+
+The usual cause is something the agent cannot do (a tool that is denied, a missing capability). Fix that, then click **Release back-off** on the card page to retry at once. If the card fails again, the next wait is longer than before. Moving the card to another stage also clears the back-off.
 
 ### Risk tier
 

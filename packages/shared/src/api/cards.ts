@@ -55,6 +55,8 @@ export const CardDtoSchema = z.object({
   createdAt: IsoTime,
   updatedAt: IsoTime,
   finalizedAt: IsoTime.nullable(),
+  /** Loop breaker: set while the card is held back after repeated failed shifts. */
+  backoff: z.object({ until: IsoTime, failures: z.number().int() }).nullable().optional(),
 });
 export type CardDto = z.infer<typeof CardDtoSchema>;
 
@@ -125,6 +127,8 @@ export const CardDetailResponseSchema = z.object({
     canSpecify: z.boolean(),
     canMove: z.boolean(),
     canRelease: z.boolean(),
+    /** Release the loop breaker's back-off by hand. */
+    canReleaseBackoff: z.boolean().optional(),
     canCancel: z.boolean(),
     canComment: z.boolean(),
     /** Set or clear the risk tier override: while the card is open and no merge is pending. */

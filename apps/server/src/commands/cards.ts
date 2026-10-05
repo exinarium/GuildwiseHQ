@@ -25,6 +25,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { cardMessage, projectScope, userActor } from './common.ts';
+import { openLoopAlerts } from './loop-breaker.ts';
 
 /** The stage a `CardSpecified` moves the card into, and the outcome's resolved stage. */
 export function specifyTarget(def: WorkflowDefinition): { from: string; to: string; stage: Stage } {
@@ -439,6 +440,50 @@ export async function releaseCard(ctx: Ctx, user: AuthSession['user'], idOrRef: 
       ],
       { tx },
     );
+    return card.id as string;
+  });
+}
+
+/** Releases the loop breaker's back-off by hand: the card is dispatchable at once (docs/design/phases.md B0). */
+export async function releaseBackoff(ctx: Ctx, user: AuthSession['user'], idOrRef: string, reason?: string) {
+  return withAppendTx(ctx.pool, async (tx) => {
+    const card = await loadManageable(tx, user, idOrRef);
+    if (!card.retry_after || !card.retry_episode_id)
+      throw conflict('not_backing_off', 'card is not in back-off');
+    const scope = projectScope(card.org_id, card.project_id);
+    const events: AppendInput[] = [
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'CardRetryReleased',
+          payload: { cardId: card.id, episodeId: card.retry_episode_id, releasedBy: user.id, reason },
+        },
+        actor: userActor(user.id),
+        scope,
+      },
+      cardMessage(
+        card,
+        { kind: 'system' },
+        'system',
+        `Back-off released by ${user.displayName}${reason ? `: ${reason}` : ''}; the card can be dispatched again.`,
+      ),
+    ];
+    for (const deskItemId of await openLoopAlerts(tx, card.id))
+      events.push({
+        streamId: streamId.desk(deskItemId),
+        event: {
+          type: 'DeskItemResolved',
+          payload: {
+            deskItemId,
+            resolution: 'acknowledged',
+            note: 'The manager released the back-off.',
+            by: { kind: 'user', userId: user.id },
+          },
+        },
+        actor: userActor(user.id),
+        scope,
+      });
+    await ctx.store.append(events, { tx });
     return card.id as string;
   });
 }

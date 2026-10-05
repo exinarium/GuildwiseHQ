@@ -15,10 +15,12 @@ import {
   useCard,
   useComment,
   useMoveCard,
+  useReleaseBackoff,
   useReleaseCard,
   useSpecifyCard,
 } from '../api/queries/cards.ts';
 import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
+import { BackoffBadge } from '../components/BackoffBadge.tsx';
 import { EditCardDialog, RiskTierDialog } from '../components/CardEdit.tsx';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
 import { FinalizePanel } from '../components/FinalizePanel.tsx';
@@ -117,6 +119,7 @@ export function CardDetailView({
   const { card, handoffs, transitions, activity, thread, currentShift, permissions, blockers } = data;
   const specify = useSpecifyCard(card.id);
   const release = useReleaseCard(card.id);
+  const releaseBackoff = useReleaseBackoff(card.id);
   const policy = useDecisionPolicy(card.id);
   const rehome = useRehomeCard(card.id);
   const me = useMe();
@@ -145,6 +148,7 @@ export function CardDetailView({
             <span data-testid="card-column">{card.column}</span>
             <span>· {card.cardType}</span>
             {card.reworkRound > 0 && <Badge tone="violet">Rework {card.reworkRound}</Badge>}
+            <BackoffBadge backoff={card.backoff} />
             <WorkabilityWarning workability={data.workability} projectId={card.projectId} />
             {card.claimedByAgentName && (
               <span className="inline-flex items-center gap-1">
@@ -176,6 +180,16 @@ export function CardDetailView({
                 Release
               </Button>
             )}
+            {permissions.canReleaseBackoff && (
+              <Button
+                data-testid="release-backoff"
+                disabled={releaseBackoff.isPending}
+                title="Retry the card now instead of waiting for the back-off to end"
+                onClick={() => releaseBackoff.mutate(undefined)}
+              >
+                Release back-off
+              </Button>
+            )}
             {permissions.canMove &&
               !card.claimedByAgentName &&
               card.status !== 'done' &&
@@ -202,7 +216,11 @@ export function CardDetailView({
           {missing.map((m) => (workflow ? fieldLabel(workflow, m) : m)).join(', ')}
         </p>
       )}
-      {!missing.length && <ErrorBox error={specify.error ?? release.error ?? rehome.error ?? policy.error} />}
+      {!missing.length && (
+        <ErrorBox
+          error={specify.error ?? release.error ?? releaseBackoff.error ?? rehome.error ?? policy.error}
+        />
+      )}
       {blockers.length > 0 && (
         <div
           role="status"

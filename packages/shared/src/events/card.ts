@@ -186,6 +186,23 @@ export const cardEvents = [
     z.object({ cardId: Id, fromStage: Stage, toStage: Stage, status: CardStatus, reason: z.string() }),
   ),
   defineEvent(
+    'CardRetryDeferred',
+    z.object({
+      cardId: Id,
+      /** The card is not dispatched again before this time. */
+      until: z.string(),
+      /** Failed shifts of the episode so far. */
+      failures: z.number().int().positive(),
+      episodeId: Id,
+      /** First back-off of the episode: the desk alert is raised with it. */
+      newEpisode: z.boolean(),
+    }),
+  ),
+  defineEvent(
+    'CardRetryReleased',
+    z.object({ cardId: Id, episodeId: Id, releasedBy: Id, reason: z.string().optional() }),
+  ),
+  defineEvent(
     'FinalizeRequested',
     z.object({
       cardId: Id,

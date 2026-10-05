@@ -39,6 +39,12 @@ async function cardColumn(ctx: Ctx, c: Row): Promise<{ column: string; key: stri
   return { column, key: wf?.key ?? '', version: wf?.version ?? 0 };
 }
 
+/** The loop breaker's back-off while it is in force; an expired one is not shown. */
+function backoffOf(c: Row, now: Date): { until: string; failures: number } | null {
+  if (!c.retry_after || new Date(c.retry_after) <= now) return null;
+  return { until: iso(c.retry_after) as string, failures: Number(c.retry_failures) };
+}
+
 export async function toCardDto(ctx: Ctx, c: Row): Promise<CardDto> {
   const { column, key, version } = await cardColumn(ctx, c);
   const deps = await rows(
@@ -86,6 +92,7 @@ export async function toCardDto(ctx: Ctx, c: Row): Promise<CardDto> {
     createdAt: iso(c.created_at) as string,
     updatedAt: iso(c.updated_at) as string,
     finalizedAt: iso(c.finalized_at),
+    backoff: backoffOf(c, ctx.clock.now()),
   };
 }
 
@@ -212,6 +219,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
       canSpecify: manage && card.status === 'draft',
       canMove: manage && open,
       canRelease: manage && !!card.claim_id,
+      canReleaseBackoff: manage && open && !!backoffOf(card, ctx.clock.now()),
       canCancel: manage && open,
       canComment: canCommentOnCard(role),
     },
@@ -274,6 +282,7 @@ export async function getBoard(ctx: Ctx, userId: string, projectId: string): Pro
                 : 'bug',
       waitingOn: c.waiting_on_id ? { id: c.waiting_on_id, ref: c.waiting_on_ref } : null,
       origin: c.origin,
+      backoff: backoffOf(c, ctx.clock.now()),
       ...(workability.get(c.id)?.ok === false ? { workability: workability.get(c.id) } : {}),
     });
   }

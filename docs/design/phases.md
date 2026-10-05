@@ -727,7 +727,7 @@ Each step ends green (`pnpm typecheck && pnpm lint && pnpm test`). Paths are rel
 
 **Part B: reporter (separately shippable, after Part A)**
 
-- **B0. Loop breaker** (independent, can ship any time): `cards.retry_after` (in `1400_`, or a small `1301_card_retry_after.sql` if it ships before Part B), set by `commands/shifts.ts` on the 3rd `shift_failed` in 10 min (a new event `CardRetryDeferred{cardId, until, failures}`). `dispatcher/candidates.ts` honours it; a manager release or move clears it. Test: `apps/server/test/shift-loop-backoff.test.ts`.
+- **B0. Loop breaker: implemented** (migration `1301_card_retry_backoff.sql`; events `CardRetryDeferred`, `CardRetryReleased`; test `apps/server/test/shift-loop-backoff.test.ts`; see ARCHITECTURE section 9.7). Original plan: (independent, can ship any time): `cards.retry_after` (in `1400_`, or a small `1301_card_retry_after.sql` if it ships before Part B), set by `commands/shifts.ts` on the 3rd `shift_failed` in 10 min (a new event `CardRetryDeferred{cardId, until, failures}`). `dispatcher/candidates.ts` honours it; a manager release or move clears it. Test: `apps/server/test/shift-loop-backoff.test.ts`.
 - **B1. Contract**: `packages/shared/src/reporter/index.ts` (signal kinds, thresholds, prefs schema), `events/reporter.ts`, the `aom report` outcome ids, and `ba_tasks` kinds `floor_alert`/`floor_report`.
 - **B2. Migration**: `1400_ba_reporter.sql`; `projections/reporter.ts`.
 - **B3. Detectors and timer**: `apps/server/src/reporter/detectors.ts`, `reporter/reporter.ts` (60 s timer started in `main.ts` beside the reaper; queues tasks; daily report; quiet hours); fallback in `baTaskPass`. Test: `apps/server/test/reporter-detectors.test.ts`.
@@ -779,7 +779,7 @@ These override the recommended defaults above where they differ.
 | B5/B6 | The loop breaker ships first: after 3 failures in 10 min the card backs off from 1 min, doubling to a 1 h cap, and the manager can release it by hand. Each report is a desk item linking to a standing BA chat thread. |
 
 ### Build order
-1. Loop breaker
+1. Loop breaker (B0 implemented)
 2. Phases and follow-ups (Part A)
 3. BA reporter (Part B)
 4. Scheduled DevOps repo hygiene with working-branch confirmation (addendum above)

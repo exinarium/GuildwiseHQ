@@ -21,6 +21,7 @@ export const DESK_SUBKIND = {
   outboundFailed: 'outbound_failed',
   repoCreate: 'repo_create',
   repoCreateFailed: 'repo_create_failed',
+  loopBackoff: 'loop_backoff',
 } as const;
 
 /** Card origins whose card is a suite (full E2E suite or regression run) rather than a feature under test. */
@@ -79,4 +80,15 @@ export function bugDescription(input: { note: string; evidence: TestEvidence; pa
     lines.push('', 'Commands:', ...input.evidence.commands.map((c) => `- ${c}`));
   if (input.evidence.outputExcerpt.trim()) lines.push('', 'Output:', input.evidence.outputExcerpt.trim());
   return lines.join('\n');
+}
+
+/** Loop breaker (docs/design/phases.md B0): failed shifts on one card within a window put the card in back-off. */
+export const LOOP_BREAKER = { failures: 3, windowMinutes: 10, baseMinutes: 1, capMinutes: 60 } as const;
+
+/** Back-off after the `failures`-th failed shift of an episode (3 -> 1 min, 4 -> 2 min, ... capped at 1 h). */
+export function loopBackoffMinutes(failures: number): number {
+  return Math.min(
+    LOOP_BREAKER.capMinutes,
+    LOOP_BREAKER.baseMinutes * 2 ** Math.max(0, failures - LOOP_BREAKER.failures),
+  );
 }

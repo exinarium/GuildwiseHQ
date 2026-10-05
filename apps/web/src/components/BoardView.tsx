@@ -1,6 +1,7 @@
 import type { BoardCard, BoardResponse } from '@aom/shared';
 import { Link } from 'react-router';
 import { ageLabel } from '../lib/time.ts';
+import { BackoffBadge } from './BackoffBadge.tsx';
 import { Avatar, Badge } from './ui.tsx';
 import { WorkabilityWarning } from './WorkabilityWarning.tsx';
 
@@ -46,6 +47,7 @@ export function CardTile({ card, now, projectId }: { card: BoardCard; now?: numb
               Rework {card.reworkRound}
             </Badge>
           )}
+          <BackoffBadge backoff={card.backoff} />
           {card.blocked && <Badge tone="red">Blocked</Badge>}
           {card.status === 'waiting' && (
             <span data-testid="waiting-badge">

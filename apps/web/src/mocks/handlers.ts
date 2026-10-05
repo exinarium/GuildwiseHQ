@@ -309,6 +309,12 @@ export const handlers = [
     transition(c, c.stage, 'queued', 'manual release');
     return HttpResponse.json(detail(c));
   }),
+  http.post(`${A}/cards/:key/release-backoff`, ({ params }) => {
+    const c = findCard(String(params.key));
+    if (!c) return err(404, 'not_found', 'Card not found');
+    c.backoff = null;
+    return HttpResponse.json(detail(c));
+  }),
   http.post(`${A}/cards/:key/cancel`, ({ params }) => {
     const c = findCard(String(params.key));
     if (!c) return err(404, 'not_found', 'Card not found');

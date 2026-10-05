@@ -17,6 +17,7 @@ import {
   createCard,
   moveCard,
   patchCard,
+  releaseBackoff,
   releaseCard,
   specifyCard,
 } from '../commands/cards.ts';
@@ -106,6 +107,16 @@ export function cardRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         const id = await releaseCard(ctx, s.user, req.params.id, req.body?.reason);
+        return getCardDetail(ctx, s.user.id, id);
+      },
+    );
+
+    app.post(
+      '/api/cards/:id/release-backoff',
+      { schema: { params: CardParamsSchema, body: ReleaseCardRequestSchema.optional() } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        const id = await releaseBackoff(ctx, s.user, req.params.id, req.body?.reason);
         return getCardDetail(ctx, s.user.id, id);
       },
     );

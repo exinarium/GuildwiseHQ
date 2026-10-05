@@ -679,6 +679,8 @@ Heartbeats are not events.
 | `DecisionPolicyChanged` | `{cardId, policy}` | decision_policy |
 | **`CardClaimed`** | `{cardId, claimId, agentId, workstationId, shiftId, stage, overflow, worktree: {repoId, baseBranch, branchName, worktreePath, homeWorkstationId, created: boolean}}` | claim columns, status claimed, lease = createdAt + 1h, last_agent_id; original_builder_agent_id set if stage claim role is builder and it is NULL; branch/worktree/home set on first; transition |
 | `ClaimReleased` | `{cardId, claimId, agentId, reason:'handoff'|'question'|'agent_retired'|'lease_expired'|'runner_rejected'|'runner_lost_shift'|'shift_failed'|'manual'|'workstation_unlinked'|'member_removed', lastHandoffId?}` | clear claim columns; if status was claimed → queued (queued_at = createdAt); transition |
+| **`CardRetryDeferred`** | `{cardId, until, failures, episodeId, newEpisode}` | cards.retry_after = until, retry_failures, retry_episode_id (loop breaker, §9.7) |
+| **`CardRetryReleased`** | `{cardId, episodeId, releasedBy, reason?}` | cards.retry_after = NULL (the failure count stays) |
 | **`HandoffWritten`** | `{cardId, handoffId, shiftId, agentId, stage, outcome, note, data}` | insert card_handoffs; thread_messages kind handoff. Does **not** move the card. |
 | **`ReviewRequested`** | `{cardId, fromStage:'build', toStage:'review', riskTier, diffStats:{files, added, removed, architecturalPaths[]}}` | stage review, status queued, risk_tier (unless overridden), review_approvals 0, excluded_agent_ids = {original builder} |
 | **`ChangesRequested`** | `{cardId, fromStage:'review', toStage:'build', reviewerAgentId, reasons: ReworkReason[], score:1..5, criteriaMissed: string[], comments}` | stage build, rework_round+1, status queued, excluded_agent_ids '{}', thread message kind review |
@@ -1032,7 +1034,7 @@ An agent claims at most one card per pass. Agents with capacity > 1 (and agents 
 
 ```sql
 -- $1 agent_id, $2 org_id, $3 project_scope (uuid|null), $4 role_key, $5 is_senior,
--- $6 workstation_id, $7 runtime capabilities text[], $8 agent risk tiers text[]
+-- $6 workstation_id, $7 runtime capabilities text[], $8 agent risk tiers text[], $9 now (the server clock)
 SELECT c.id, c.stage
 FROM cards c
 JOIN projects p          ON p.id = c.project_id AND p.status = 'active'
@@ -1053,6 +1055,7 @@ WHERE c.status = 'queued'
          WHERE wr.workstation_id = $6 AND wr.project_repo_id = c.repo_id))
   AND (c.worktree_card_id IS NULL OR EXISTS (                   -- bug child: parent's worktree must be here
         SELECT 1 FROM cards pc WHERE pc.id = c.worktree_card_id AND pc.home_workstation_id = $6))
+  AND (c.retry_after IS NULL OR c.retry_after <= $9)            -- loop breaker (§9.7): not while in back-off
   AND NOT EXISTS (                                              -- dependencies: only gate the first build
         SELECT 1 FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id
          WHERE d.card_id = c.id AND c.stage = 'build' AND c.rework_round = 0
@@ -1091,6 +1094,12 @@ Overflow is per organization (one extra shift at a time per org).
 ### 9.5 Tester bottleneck (M4)
 
 At the end of each pass: for each project with queued cards in a stage claimed by `tester` older than 5 min and no free tester agent (all testers at capacity), append `TesterBottleneck` unless an open bottleneck desk item exists for that project. Resolved automatically (DeskItemResolved acknowledged) when the queue drains.
+
+### 9.7 Loop breaker (B0)
+
+A card whose shifts keep ending without a report would be re-claimed every pass. `commands/loop-breaker.ts`, called from `applyShiftEnded` when a card shift ends without a report (not `stopped`, no handoff, no question), counts the card's failed shifts (`no_report`, `crashed`, `timeout`, `lost`, without a report) since its last report. The 3rd failure within 10 minutes starts an **episode**: `CardRetryDeferred{cardId, until, failures, episodeId, newEpisode}` sets `cards.retry_after`, `retry_failures` and `retry_episode_id`. The back-off is 1 minute for the 3rd failure and doubles with each further failure of the episode, capped at 1 hour (`loopBackoffMinutes` in `packages/shared/src/testing`). The candidate query (§9.3) and therefore the claim and overflow paths skip a card until `retry_after` has passed; no pass runs when the back-off ends, the 10 s tick picks the card up. An episode ends when a `HandoffWritten` clears the three columns (any report), or when the manager moves the card (`CardMovedByManager`). `POST /api/cards/:id/release-backoff` appends `CardRetryReleased` (clears only `retry_after`, so a failure after a manual release backs off longer) and resolves the alert.
+
+Thread messages collapse: the 1st failure posts the usual "Shift ended without a report", the 2nd none, the engaging 3rd one message that names the hold; later failures of the episode post nothing. The episode's first back-off also creates one desk alert (`DeskItemCreated`, kind alert, subkind `loop_backoff`, bound to the card, same append). Not counted: shifts of other kinds, runner rejections (they have their own cooldown) and server-side lost-shift releases from the reaper, which do not pass through `applyShiftEnded`.
 
 ### 9.6 Hire cap for first runs (removed in M9)
 
@@ -1516,7 +1525,7 @@ Errors: `{error: {code, message, details?}}` with 400 validation, 401 unauthenti
 | `PATCH /api/cards/:id` | edit fields (owner) | M1 |
 | `POST /api/cards/:id/specify` | → 422 with `missing[]` if required fields absent | M1 |
 | `POST /api/cards/:id/comments` `{body}` | | M1 |
-| `POST /api/cards/:id/move` `{toStage, reason}` · `POST /api/cards/:id/release` · `POST /api/cards/:id/cancel` | manager overrides | M1 |
+| `POST /api/cards/:id/move` `{toStage, reason}` · `POST /api/cards/:id/release` · `POST /api/cards/:id/release-backoff` · `POST /api/cards/:id/cancel` | manager overrides | M1 |
 | `POST /api/cards/:id/decision-policy` `{policy}` | | M3 |
 | `POST /api/cards/:id/rehome` | | M3 |
 | `POST /api/cards/:id/finalize` `{action?}` | manager-triggered finalize | M4 |

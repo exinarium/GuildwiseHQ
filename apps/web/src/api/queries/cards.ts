@@ -60,5 +60,7 @@ export const useMoveCard = (id: string) =>
   useCardAction(id, (b: { toStage: string; reason: string }) => post(`/cards/${id}/move`, b));
 export const useReleaseCard = (id: string) =>
   useCardAction(id, (reason?: string) => post(`/cards/${id}/release`, reason ? { reason } : {}));
+export const useReleaseBackoff = (id: string) =>
+  useCardAction(id, (reason?: string) => post(`/cards/${id}/release-backoff`, reason ? { reason } : {}));
 export const useCancelCard = (id: string) =>
   useCardAction(id, (reason: string) => post(`/cards/${id}/cancel`, { reason }));

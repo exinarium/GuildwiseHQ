@@ -24,6 +24,7 @@ import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_AC
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { applyQuestionReport, endQuestionShift } from './escalation.ts';
 import { buildDigestEvents } from './feeds.ts';
+import { loopBreakerPlan } from './loop-breaker.ts';
 import { raiseQuestion } from './questions.ts';
 import { rebaseConflictEvents } from './rebase.ts';
 import { buildPublicationEvents } from './research.ts';
@@ -108,7 +109,7 @@ export async function releaseClaimEvents(
   tx: Tx,
   card: Row,
   reason: ClaimReleaseReason,
-  message: string,
+  message: string | null,
   shiftOutcome: ShiftEndOutcome | null,
   extraEvents: AppendInput[] = [],
 ): Promise<AppendInput[]> {
@@ -128,7 +129,7 @@ export async function releaseClaimEvents(
     actor: SYSTEM_ACTOR,
     scope: projectScope(card.org_id, card.project_id),
   });
-  events.push(cardMessage(card, { kind: 'system' }, 'system', message));
+  if (message !== null) events.push(cardMessage(card, { kind: 'system' }, 'system', message));
   if (shiftOutcome && card.claim_shift_id) {
     const s = await one(tx, `SELECT * FROM shifts WHERE id=$1 AND status <> 'ended'`, [card.claim_shift_id]);
     if (s) events.push(await shiftEndedFor(tx, s, shiftOutcome));
@@ -573,7 +574,21 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
     const text = stopped
       ? 'Shift stopped; the card is back in the queue.'
       : `Shift ended without a report (${msg.outcome}); the card is back in the queue.${msg.finalText ? `\n\n${msg.finalText}` : ''}`;
-    events.push(...(await releaseClaimEvents(tx, card, stopped ? 'manual' : 'shift_failed', text, null)));
+    // Loop breaker: repeated failures put the card in back-off and collapse the repeated thread message.
+    const plan =
+      stopped || handoff || asked
+        ? { message: text, events: [] as AppendInput[] }
+        : await loopBreakerPlan(ctx, tx, card, text, msg.finalText);
+    events.push(
+      ...(await releaseClaimEvents(
+        tx,
+        card,
+        stopped ? 'manual' : 'shift_failed',
+        plan.message,
+        null,
+        plan.events,
+      )),
+    );
   }
   events.push(
     await shiftEndedFor(tx, s, msg.outcome, {

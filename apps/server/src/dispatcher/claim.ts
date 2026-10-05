@@ -65,7 +65,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
       );
       if (Number(active?.n) >= a.capacity) return null;
     }
-    if (!(await isCandidate(tx, view, args.cardId))) return null;
+    if (!(await isCandidate(tx, view, args.cardId, ctx.clock.now()))) return null;
 
     const now = ctx.clock.now();
     const claimId = randomUUID();
