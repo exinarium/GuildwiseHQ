@@ -429,8 +429,8 @@ export const phaseProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO ba_tasks (id, org_id, project_id, phase_id, followup_id, kind, status, preferred_agent_id,
-         created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'queued',$7,$8,$8)`,
+         signal_ids, desk_item_ids, local_date, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9,$10,$11,$11)`,
       [
         p.taskId,
         org,
@@ -439,9 +439,15 @@ export const phaseProjectors: Record<string, Projector> = {
         p.followupId ?? null,
         p.kind,
         p.preferredAgentId ?? null,
+        p.signalIds ?? [],
+        p.deskItemIds ?? [],
+        p.localDate ?? null,
         e.createdAt,
       ],
     );
+    // A floor report is queued once per local day: remember the day on the owner.
+    if (p.kind === 'floor_report' && p.localDate)
+      await exec(tx, 'UPDATE users SET floor_report_day=$2 WHERE id=$1', [org, p.localDate]);
   },
 
   BaTaskDispatched: async (tx, e) => {

@@ -13,6 +13,8 @@ export const UserDtoSchema = z.object({
   status: z.enum(['active', 'deactivated']),
   createdAt: IsoTime,
   lastLoginAt: IsoTime.nullable(),
+  /** IANA zone (`Europe/Amsterdam`): browser-detected on first login, editable. Null until set. */
+  timezone: z.string().nullable().optional(),
 });
 export type UserDto = z.infer<typeof UserDtoSchema>;
 

@@ -228,6 +228,10 @@ export const phaseEvents = [
       followupId: Id.optional(),
       kind: BaTaskKind,
       preferredAgentId: Id.optional(),
+      /** Part B reporter tasks: the signals / held or urgent desk items they cover, and the floor report's local date. */
+      signalIds: z.array(Id).optional(),
+      deskItemIds: z.array(Id).optional(),
+      localDate: z.string().optional(),
     }),
   ),
   /** A `ba_task` shift was dispatched to the runner (creates the shift row). */

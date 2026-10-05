@@ -107,6 +107,12 @@ export const deskEvents = [
       projectId: Id.optional(),
       affectedCardIds: z.array(Id).default([]),
       askedBy: DeskActorSchema.optional(),
+      /** Part B: the item is held for the BA's triage until `deadline`; the manager does not see it before. */
+      triage: z.object({ deadline: z.iso.datetime() }).optional(),
+      /** Part B: structured data a renderer needs (the floor report's digest). */
+      data: z.record(z.string(), z.unknown()).optional(),
+      /** Part B: the standing BA chat thread the report links to. */
+      chatThreadId: Id.optional(),
     }),
   ),
   defineEvent(

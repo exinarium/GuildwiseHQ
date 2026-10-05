@@ -1,8 +1,12 @@
 import type { BaTaskShift } from '../phases/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { commandForOutcome } from './commands.ts';
+import { renderReporterInstructions, renderReporterPrompt } from './reporter-task.ts';
 
-const TASK_TITLE: Record<BaTaskShift['kind'], string> = {
+const TASK_TITLE: Record<
+  'phase_report' | 'followups_brief' | 'followup_custom' | 'followups_report',
+  string
+> = {
   phase_report: 'Phase done: report to the manager',
   followups_brief: 'Follow-ups approved: brief the delegates',
   followup_custom: 'Custom follow-up: carry it out',
@@ -14,10 +18,13 @@ const TASK_TITLE: Record<BaTaskShift['kind'], string> = {
  * background, with no card and no worktree. The server runs the sequence; the BA writes, delegates and reports.
  */
 export function renderBaTaskInstructions(brief: ShiftBrief, task: BaTaskShift): string {
+  if (!task.phase) return renderReporterInstructions(brief, task);
+  const phase = task.phase;
+  const kind = task.kind as keyof typeof TASK_TITLE;
   const out: string[] = [];
   out.push('# Who you are');
   out.push(
-    `You are ${brief.agent.name}, the business analyst (BA), working for the manager in the background on phase ${task.phase.ref} "${task.phase.name}" of project ${task.phase.projectKey}. Names are handles, not personas: do not roleplay.`,
+    `You are ${brief.agent.name}, the business analyst (BA), working for the manager in the background on phase ${phase.ref} "${phase.name}" of project ${phase.projectKey}. Names are handles, not personas: do not roleplay.`,
   );
   out.push('# Role instructions');
   out.push(brief.role.instructions.trim());
@@ -28,7 +35,7 @@ export function renderBaTaskInstructions(brief: ShiftBrief, task: BaTaskShift): 
   out.push('# Your job in this shift');
   out.push(
     [
-      `Task: ${TASK_TITLE[task.kind]}.`,
+      `Task: ${TASK_TITLE[kind]}.`,
       'You are read-only: you read the prompt (and `aom card <REF>` for a member card), you change nothing else.',
       'Never ask questions in this shift and never wait: anything the manager must decide goes into your report.',
     ].join('\n'),
@@ -59,10 +66,12 @@ function followupLine(f: BaTaskShift['followups'][number]): string {
 
 /** The prompt of a `ba_task` shift: the phase, its cards, the follow-ups and what is outstanding. */
 export function renderBaTaskPrompt(task: BaTaskShift): string {
+  if (!task.phase) return renderReporterPrompt(task);
+  const phase = task.phase;
   const out: string[] = [];
-  out.push(`# ${TASK_TITLE[task.kind]}`);
+  out.push(`# ${TASK_TITLE[task.kind as keyof typeof TASK_TITLE]}`);
   out.push(
-    `Phase ${task.phase.ref}: ${task.phase.name} (${task.phase.status}). Working branch: ${task.phase.workingBranch}.${task.phase.description.trim() ? `\n\n${task.phase.description.trim()}` : ''}`,
+    `Phase ${phase.ref}: ${phase.name} (${phase.status}). Working branch: ${phase.workingBranch}.${phase.description.trim() ? `\n\n${phase.description.trim()}` : ''}`,
   );
   out.push('## Cards');
   out.push(

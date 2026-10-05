@@ -27,6 +27,7 @@ export const streamId = {
   schedule: (id: string) => `schedule-${id}`,
   phase: (id: string) => `phase-${id}`,
   baTask: (id: string) => `ba-task-${id}`,
+  baSignal: (id: string) => `ba-signal-${id}`,
   shift: (id: string) => `shift-${id}`,
   vault: (id: string) => `vault-${id}`,
   workflow: (orgId: string | null, key: string) => `workflow-${orgId ?? 'builtin'}-${key}`,

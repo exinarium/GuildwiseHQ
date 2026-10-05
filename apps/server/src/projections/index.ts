@@ -12,6 +12,7 @@ import { outboundProjectors } from './outbound.ts';
 import { phaseProjectors } from './phases.ts';
 import { projectProjectors } from './projects.ts';
 import { repoProjectors } from './repo.ts';
+import { reporterProjectors } from './reporter.ts';
 import { researchProjectors } from './research.ts';
 import { scheduleProjectors } from './schedules.ts';
 import { sharingProjectors } from './sharing.ts';
@@ -51,6 +52,7 @@ const domains: Array<Record<string, Projector>> = [
   outboundProjectors,
   repoProjectors,
   phaseProjectors,
+  reporterProjectors,
 ];
 
 export function buildProjectors(): ProjectorMap {
@@ -113,4 +115,5 @@ export const PROJECTION_TABLES = [
   'phases',
   'phase_followups',
   'ba_tasks',
+  'ba_signals',
 ];

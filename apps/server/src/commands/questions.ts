@@ -12,6 +12,7 @@ import { type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { dedupMatches } from '../queries/ledger.ts';
+import { reportingOf } from '../reporter/settings.ts';
 import { agentActor, cardMessage, projectScope } from './common.ts';
 import { findOpenDuplicate, mergeEvents, nextRoute, routedMessage } from './escalation.ts';
 import { releaseClaimEvents } from './shifts.ts';
@@ -68,6 +69,9 @@ export async function raiseQuestion(
   const options: DeskOption[] = report.options.map((label, i) => ({ id: optionId(i), label }));
   const deskItemId = randomUUID();
   const affected = report.blocking ? await affectedCards(tx, card) : [card.id];
+  // Part B: with BA routing on, a blocking question is urgent and goes straight to the manager (the BA annotates it
+  // afterwards); a non-blocking one starts at the BA, which answers it, merges it or passes it on. Off: peer, BA, desk.
+  const viaBa = (await reportingOf(tx, card.org_id)).routeViaBa;
   const route = await nextRoute(ctx, tx, {
     orgId: card.org_id,
     projectId: card.project_id,
@@ -76,6 +80,7 @@ export async function raiseQuestion(
     askerRole: agent.role_key,
     from: 'raise',
     tried: [],
+    ...(viaBa ? { via: report.blocking ? ('desk' as const) : ('ba' as const) } : {}),
   });
   const scope = projectScope(card.org_id, card.project_id);
   // Going to the BA or the desk while the same question is already open: attach to it instead of a second item.

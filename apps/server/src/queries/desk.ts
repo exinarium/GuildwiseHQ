@@ -24,8 +24,8 @@ SELECT d.*, c.ref AS card_ref, c.title AS card_title, c.stage AS card_stage, c.s
   LEFT JOIN agents aa ON aa.id = d.answered_by_agent_id`;
 
 /** Desk items the user may see: their project items (any active member) and their own org-level items. */
-export const DESK_VISIBLE = `(d.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')
-   OR (d.project_id IS NULL AND d.org_id = $1))`;
+export const DESK_VISIBLE = `((d.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')
+   OR (d.project_id IS NULL AND d.org_id = $1)) AND d.triage <> 'pending')`;
 
 /** May `userId` answer this item? (docs/ARCHITECTURE.md section 17.2) */
 export function canAnswerItem(r: Row, userId: string, role: ProjectRole): boolean {
@@ -111,6 +111,12 @@ export function toDeskDto(
         : null,
     intakeId: r.intake_id ?? null,
     decisionPolicy: r.card_policy ?? null,
+    baNote: r.ba_note ?? null,
+    baNoteAt: iso(r.ba_note_at),
+    triage: r.triage,
+    supersededBy: r.superseded_by ?? null,
+    chatThreadId: r.chat_thread_id ?? null,
+    floor: r.subkind === 'floor_report' ? (r.data ?? null) : null,
     canAnswer: r.status === 'open' && canAnswerItem(r, userId, role),
     createdAt: iso(r.created_at) as string,
   };

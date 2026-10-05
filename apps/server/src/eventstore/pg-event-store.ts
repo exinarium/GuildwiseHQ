@@ -30,9 +30,12 @@ export function rowToEvent(r: Record<string, any>): StoredEvent {
 }
 
 export type Subscriber = (e: StoredEvent) => void | Promise<void>;
+/** Runs inside the append transaction, before the events are stored: may adjust payloads and add events to the batch. */
+export type Interceptor = (tx: Tx, inputs: AppendInput[]) => Promise<AppendInput[]>;
 
 export class PgEventStore implements EventStore {
   private subscribers = new Set<Subscriber>();
+  private interceptors: Interceptor[] = [];
 
   constructor(
     private readonly pool: pg.Pool,
@@ -43,13 +46,16 @@ export class PgEventStore implements EventStore {
   async append(inputs: AppendInput[], opts: { tx?: Tx } = {}): Promise<StoredEvent[]> {
     if (inputs.length === 0) return [];
     // Validate before touching the DB.
-    const parsed = inputs.map((i) => DomainEventSchema.parse(i.event));
+    inputs.forEach((i) => void DomainEventSchema.parse(i.event));
     const run = async (tx: Tx): Promise<StoredEvent[]> => {
       // Re-entrant: commands that took the lock via withAppendTx already hold it.
       await tx.query('SELECT pg_advisory_xact_lock($1)', [APPEND_LOCK_ID]);
+      let batch = inputs;
+      for (const intercept of this.interceptors) batch = await intercept(tx, batch);
+      const parsed = batch.map((i) => DomainEventSchema.parse(i.event));
       const stored: StoredEvent[] = [];
       const versions = new Map<string, number>();
-      for (const [idx, input] of inputs.entries()) {
+      for (const [idx, input] of batch.entries()) {
         const ev = parsed[idx] as StoredEvent['event'];
         let current = versions.get(input.streamId);
         if (current === undefined) {
@@ -96,6 +102,11 @@ export class PgEventStore implements EventStore {
       return stored;
     };
     return opts.tx ? run(opts.tx) : withTx(this.pool, run);
+  }
+
+  /** Registers a hook that runs inside every append transaction (the BA routing, `reporter/routing.ts`). */
+  intercept(fn: Interceptor): void {
+    this.interceptors.push(fn);
   }
 
   /** Runs the projectors for an already stored event (used by `projections:rebuild`). */

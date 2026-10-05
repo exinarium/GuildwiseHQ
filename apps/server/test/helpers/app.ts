@@ -95,6 +95,14 @@ export async function createTestApp(
         actor: { kind: 'system', id: null },
         scope: { orgId: null, projectId: null, audience: 'admin' },
       },
+      // BA routing is on for new organizations; the existing suites assert the direct flows, so test users start
+      // with it off (tests of the routing turn it on through PUT /api/reporting).
+      {
+        streamId: streamId.user(userId),
+        event: { type: 'ReportingPrefsChanged', payload: { userId, routeViaBa: false } },
+        actor: { kind: 'system', id: null },
+        scope: { orgId: userId, projectId: null, audience: 'org' },
+      },
     ]);
     return userId;
   };

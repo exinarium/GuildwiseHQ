@@ -16,7 +16,9 @@ export async function ledgerSearchRpc(
     ? await one(ctx.pool, 'SELECT project_id FROM cards WHERE id=$1', [shift.card_id])
     : shift.desk_item_id
       ? await one(ctx.pool, 'SELECT project_id FROM desk_items WHERE id=$1', [shift.desk_item_id])
-      : undefined;
+      : shift.ba_task_id
+        ? await one(ctx.pool, 'SELECT project_id FROM ba_tasks WHERE id=$1', [shift.ba_task_id])
+        : undefined;
   const entries = await searchLedger(ctx.pool, p.data.query, {
     orgId: shift.org_id,
     projectId: card?.project_id ?? null,

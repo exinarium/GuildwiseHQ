@@ -10,6 +10,7 @@ export const toUserDto = (r: Row): UserDto => ({
   status: r.status,
   createdAt: iso(r.created_at) as string,
   lastLoginAt: iso(r.last_login_at),
+  timezone: r.timezone ?? null,
 });
 
 export const toInvitationDto = (r: Row): InvitationDto => ({

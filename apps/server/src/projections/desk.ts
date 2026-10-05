@@ -32,6 +32,9 @@ interface NewItem {
   askedBy?: Asker | undefined;
   pinned: boolean;
   dedupLedgerIds?: string[] | undefined;
+  triageDeadline?: string | undefined;
+  data?: Record<string, unknown> | undefined;
+  chatThreadId?: string | undefined;
 }
 
 async function insertItem(tx: Tx, e: StoredEvent, i: NewItem): Promise<void> {
@@ -40,8 +43,8 @@ async function insertItem(tx: Tx, e: StoredEvent, i: NewItem): Promise<void> {
     tx,
     `INSERT INTO desk_items (id, org_id, project_id, card_id, kind, subkind, status, routed_to, routed_agent_id, title, body,
        doing, options, recommendation, blocking, affected_card_ids, asked_by_kind, asked_by_agent_id, asked_by_user_id,
-       asked_by_role, shift_id, pinned, dedup_ledger_ids, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,'open',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$23)`,
+       asked_by_role, shift_id, pinned, dedup_ledger_ids, triage, triage_deadline, data, chat_thread_id, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,'open',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$27)`,
     [
       i.id,
       e.scope.orgId,
@@ -65,6 +68,10 @@ async function insertItem(tx: Tx, e: StoredEvent, i: NewItem): Promise<void> {
       i.shiftId ?? null,
       i.pinned,
       i.dedupLedgerIds ?? [],
+      i.triageDeadline ? 'pending' : 'none',
+      i.triageDeadline ?? null,
+      i.data ? JSON.stringify(i.data) : null,
+      i.chatThreadId ?? null,
       e.createdAt,
     ],
   );
@@ -153,6 +160,9 @@ export const deskProjectors: Record<string, Projector> = {
       affectedCardIds: p.affectedCardIds,
       askedBy: p.askedBy,
       pinned: p.pinned,
+      triageDeadline: p.triage?.deadline,
+      data: p.data,
+      chatThreadId: p.chatThreadId,
     });
   },
 

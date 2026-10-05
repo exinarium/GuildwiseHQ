@@ -40,6 +40,11 @@ export interface RouteInput {
   from: 'raise' | ChainLevel;
   /** Agents that already looked at it. */
   tried: string[];
+  /**
+   * BA routing (Part B, owner decision B2/B3): `desk` sends an urgent blocking question straight to the manager,
+   * `ba` starts a non-blocking one at the BA instead of a peer.
+   */
+  via?: 'desk' | 'ba';
 }
 
 /** Active, non-DevOps agents of the org on a connected workstation whose runtime is available, least recently busy first. */
@@ -69,9 +74,9 @@ const asRoute = (a: Row, level: ChainLevel): Route => ({
 /** Who gets the question next (docs/ARCHITECTURE.md section 15). Pure of side effects. */
 export async function nextRoute(ctx: Ctx, db: Queryable, i: RouteInput): Promise<Route> {
   const desk: Route = { routedTo: 'manager', level: 'desk' };
-  if (i.from === 'ba' || i.askerRole === 'ba' || i.from === 'desk') return desk;
+  if (i.from === 'ba' || i.askerRole === 'ba' || i.from === 'desk' || i.via === 'desk') return desk;
   const agents = await onlineAgents(ctx, db, i);
-  if (i.from === 'raise') {
+  if (i.from === 'raise' && i.via !== 'ba') {
     // The card's previous holder (someone else's last handoff), then seniors of the asker's role.
     const prev = i.cardId
       ? await one<{ agent_id: string }>(

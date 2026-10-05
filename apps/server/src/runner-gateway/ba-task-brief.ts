@@ -3,6 +3,7 @@ import {
   BA_TASK_MAX_SHIFT_MINUTES,
   type BaTaskShift,
   baTaskBriefOutcomes,
+  isReporterTaskKind,
   type ServerToRunnerOf,
   type ShiftBrief,
 } from '@aom/shared';
@@ -10,6 +11,7 @@ import { loadRole } from '../catalogue/loader.ts';
 import { cardOutcomes, computeOutstanding, followupRows, suiteOf } from '../commands/phase-events.ts';
 import { toTargetBrief } from '../commands/phase-followups.ts';
 import { workingBranchOf } from '../commands/phases.ts';
+import { buildReporterTask } from '../commands/reporter-tasks.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
@@ -86,11 +88,22 @@ export async function buildBaTaskShiftStart(
   shiftId: string,
 ): Promise<ShiftStartPayload | null> {
   const task = await one(ctx.pool, 'SELECT * FROM ba_tasks WHERE id=$1', [taskId]);
-  if (!task?.phase_id) return null;
+  if (!task) return null;
+  const reporter = isReporterTaskKind(task.kind);
+  if (!task.phase_id && !reporter) return null;
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [task.agent_id]);
   if (!agent) return null;
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
-  const baTask = await buildBaTask(ctx.pool, task);
+  const baTask: BaTaskShift | null = reporter
+    ? {
+        taskId: task.id,
+        kind: task.kind,
+        cards: [],
+        followups: [],
+        outstanding: [],
+        reporter: await buildReporterTask(ctx, ctx.pool, task),
+      }
+    : await buildBaTask(ctx.pool, task);
   const project = await one(ctx.pool, 'SELECT * FROM projects WHERE id=$1', [task.project_id]);
   if (!role || !baTask || !project) return null;
   const brief: ShiftBrief = {
@@ -98,16 +111,16 @@ export async function buildBaTaskShiftStart(
       id: shiftId,
       kind: 'ba_task',
       stage: 'ba_task',
-      stageLabel: 'Phase task',
+      stageLabel: reporter ? 'Reporter task' : 'Phase task',
       doneCriteria: 'The task is reported to the manager with the command for it.',
       outcomes: baTaskBriefOutcomes(task.kind),
       maxShiftMinutes: BA_TASK_MAX_SHIFT_MINUTES,
     },
     agent: { id: agent.id, name: agent.name, seniority: agent.seniority },
     card: {
-      id: baTask.phase.id,
-      ref: baTask.phase.ref,
-      title: baTask.phase.name,
+      id: baTask.phase?.id ?? task.id,
+      ref: baTask.phase?.ref ?? 'REPORT',
+      title: baTask.phase?.name ?? 'Report to the manager',
       cardType: 'support',
       fields: {},
       riskTier: null,
@@ -121,7 +134,7 @@ export async function buildBaTaskShiftStart(
       key: project.key,
       name: project.name,
       domain: project.domain,
-      workingBranch: baTask.phase.workingBranch,
+      workingBranch: baTask.phase?.workingBranch ?? project.working_branch ?? 'main',
       e2eGlobs: [],
       architecturalGlobs: [],
     },

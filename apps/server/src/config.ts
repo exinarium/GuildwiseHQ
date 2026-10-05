@@ -22,6 +22,7 @@ const EnvSchema = z.object({
   AOM_TEST_CLOCK: bool(false),
   AOM_ALLOW_LOCAL_REMOTES: bool(false),
   AOM_MOCK_UI: bool(false),
+  AOM_REPORTER_SECONDS: z.coerce.number().int().min(1).max(3600).default(60),
   AOM_MAX_SHIFTS_PER_WORKSTATION: z.coerce.number().int().min(1).max(256).default(16),
   LOG_LEVEL: z.string().default('info'),
 });
@@ -43,6 +44,8 @@ export interface Config {
   /** Mock-runtime card fields (Mock script, ...) are shown in the UI and accepted on the API (dev and e2e only). */
   mockUi: boolean;
   /** Ceiling for a workstation's `maxConcurrentShifts` (the runner's own setting, default 4, is what applies). */
+  /** How often the reporter sweeps for signals, expired triage holds and the daily floor report (docs/design/phases.md B4). */
+  reporterSeconds: number;
   maxShiftsPerWorkstation: number;
   logLevel: string;
   /** Cookie `Secure` flag: true when the public origin is https. */
@@ -66,6 +69,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     testClock: e.AOM_TEST_CLOCK,
     allowLocalRemotes: e.AOM_ALLOW_LOCAL_REMOTES,
     mockUi: e.AOM_MOCK_UI,
+    reporterSeconds: e.AOM_REPORTER_SECONDS,
     maxShiftsPerWorkstation: e.AOM_MAX_SHIFTS_PER_WORKSTATION,
     logLevel: e.LOG_LEVEL,
     secureCookies: publicOrigin.startsWith('https://'),

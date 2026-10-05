@@ -3,6 +3,7 @@ import { DecisionPolicy } from '../cards/types.ts';
 import { DeskItemKind, DeskItemStatus, DeskOptionSchema } from '../events/desk.ts';
 import { LedgerScope } from '../events/ledger.ts';
 import { EscalationStepSchema } from '../intake/index.ts';
+import { FloorDigestSchema } from '../reporter/index.ts';
 import { IsoTime } from './common.ts';
 import { DigestItemDtoSchema } from './digest.ts';
 import { PhaseDeskBlockSchema } from './phases.ts';
@@ -71,6 +72,16 @@ export const DeskItemDtoSchema = z.object({
   digestItems: z.array(DigestItemDtoSchema).optional(),
   /** Phases: the phase a `phase_proposal`, `phase_done` or `phase_results` item is about (live data). */
   phase: PhaseDeskBlockSchema.nullable().optional(),
+  /** Part B: the BA's note on this item (context, how often it was asked, a recommendation). */
+  baNote: z.string().nullable().optional(),
+  baNoteAt: IsoTime.nullable().optional(),
+  /** Part B: how the routing handled the item (`passed`: the BA looked at it; `released`: the BA ran out of time). */
+  triage: z.enum(['none', 'pending', 'passed', 'released', 'dismissed', 'merged']).optional(),
+  supersededBy: z.uuid().nullable().optional(),
+  /** Part B: the standing BA chat the report links to. */
+  chatThreadId: z.uuid().nullable().optional(),
+  /** Part B: the structured digest behind a floor report. */
+  floor: FloorDigestSchema.nullable().optional(),
   /** False for members who may see but not answer (owner_only on a shared card). */
   canAnswer: z.boolean(),
   createdAt: IsoTime,

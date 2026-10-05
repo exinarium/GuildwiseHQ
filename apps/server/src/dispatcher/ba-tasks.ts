@@ -45,9 +45,9 @@ export async function baTaskPass(
          FROM agents a JOIN workstations ws ON ws.id = a.workstation_id AND ws.status = 'active'
                        JOIN users wu ON wu.id = ws.user_id AND wu.status = 'active'
         WHERE a.org_id = $1 AND a.role_key = 'ba' AND a.status = 'active' AND NOT a.is_devops
-          AND (a.project_id IS NULL OR a.project_id = $2)
+          AND (a.project_id IS NULL OR a.project_id = $2 OR $4::boolean)
         ORDER BY (a.id = $3::uuid) DESC, a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
-      [t.org_id, t.project_id, t.preferred_agent_id],
+      [t.org_id, t.project_id, t.preferred_agent_id, t.kind === 'floor_report'],
     );
     const stalled = now.getTime() - new Date(t.updated_at).getTime() > BA_TASK_STALL_MS;
     if (bas.length === 0 || t.attempts >= BA_TASK_MAX_ATTEMPTS || stalled) {

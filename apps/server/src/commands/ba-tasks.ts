@@ -5,6 +5,7 @@ import {
   FollowupDoneDataSchema,
   FollowupFailedDataSchema,
   type FollowupKind,
+  isReporterTaskKind,
   PHASE_DESK_SUBKIND,
   PHASE_OUTCOME,
   type PhaseOutstanding,
@@ -36,6 +37,7 @@ import {
 } from './phase-events.ts';
 import { followupFinishedEvent, outcomesOf, toTargetBrief } from './phase-followups.ts';
 import { workingBranchOf } from './phases.ts';
+import { applyReporterReport, runReporterFallback } from './reporter-tasks.ts';
 import type { ReportResult, WsRef } from './shifts.ts';
 
 // ------------------------------------------------------------------------------- results report
@@ -112,6 +114,7 @@ export async function applyBaTaskReport(
       accepted: false,
       error: 'this task is no longer open; there is nothing left to do. Finish now.',
     };
+  if (isReporterTaskKind(task.kind)) return applyReporterReport(ctx, tx, _ws, msg, shift, task);
   const phase = await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [task.phase_id]);
   if (!phase) return { accepted: false, error: 'the phase is gone. Finish now.' };
   const by = agentBy(shift.agent_id);
@@ -431,6 +434,7 @@ export async function endBaTaskShift(
  * manager is told so. Appends in `tx`.
  */
 export async function runBaTaskFallback(ctx: Ctx, tx: Tx, task: Row): Promise<void> {
+  if (isReporterTaskKind(task.kind)) return runReporterFallback(ctx, tx, task);
   const phase = await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [task.phase_id]);
   const done = (note: string) =>
     baTaskCompleted(

@@ -32,6 +32,8 @@ import { ConcurrencyError } from './eventstore/types.ts';
 import { registerHrHook } from './hr/hr.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
 import { buildProjectors } from './projections/index.ts';
+import { Reporter } from './reporter/reporter.ts';
+import { createRoutingInterceptor } from './reporter/routing.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { agentRoutes } from './routes/agents.ts';
 import { authRoutes } from './routes/auth.ts';
@@ -49,6 +51,7 @@ import { ledgerRoutes } from './routes/ledger.ts';
 import { outboundRoutes } from './routes/outbound.ts';
 import { phaseRoutes } from './routes/phases.ts';
 import { projectRoutes } from './routes/projects.ts';
+import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
 import { scheduleRoutes } from './routes/schedules.ts';
 import { sharingRoutes } from './routes/sharing.ts';
@@ -166,6 +169,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     log: app.log,
     services: {} as Ctx['services'],
   };
+  store.intercept(createRoutingInterceptor(ctx));
   app.decorate('ctx', ctx);
   app.decorateRequest('auth', null);
 
@@ -269,6 +273,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(designerRoutes(ctx));
   await app.register(outboundRoutes(ctx));
   await app.register(phaseRoutes(ctx));
+  await app.register(reportingRoutes(ctx));
 
   // Gateways: runner WS (/api/runner/ws) and browser WS (/api/ws).
   const runners = new RunnerRegistry();
@@ -277,7 +282,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const dispatcher = new Dispatcher(ctx);
   const reaper = new Reaper(ctx);
   const scheduler = new Scheduler(ctx);
-  Object.assign(ctx.services, { runners, gateway, browser, dispatcher, reaper, scheduler });
+  const reporter = new Reporter(ctx);
+  Object.assign(ctx.services, { runners, gateway, browser, dispatcher, reaper, scheduler, reporter });
   ctx.services.chat = new ChatRelay(ctx);
   await app.register(websocket, {
     options: {
@@ -299,6 +305,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
       // Time-dependent housekeeping (lease expiry, accept timeout) runs immediately instead of on the next tick.
       await ctx.services.reaper.run();
       await ctx.services.scheduler.run();
+      await ctx.services.reporter.run();
       ctx.services.dispatcher.trigger();
       return { now: clock.now().toISOString(), offsetMs: clock.offsetMs };
     });
@@ -319,6 +326,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     dispatcher.start();
     reaper.start();
     scheduler.start();
+    reporter.start();
   }
 
   app.addHook('onClose', async () => {
@@ -326,6 +334,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     unhookTaste();
     unhookHr();
     unhookDefinitions();
+    await reporter.stop();
     await scheduler.stop();
     await dispatcher.stop();
     await reaper.stop();

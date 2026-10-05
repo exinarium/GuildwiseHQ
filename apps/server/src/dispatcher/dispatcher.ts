@@ -52,6 +52,7 @@ const TRIGGER_TYPES = new Set([
   'PhaseFollowupBriefed',
   'PhaseFollowupFinished',
   'BaTaskQueued',
+  'BaTaskItemsAdded',
   'BaTaskCompleted',
   'BaTaskRequeued',
   'FullSuitePassed',

@@ -42,5 +42,6 @@ export const userEvents = [
   defineEvent('UserRoleChanged', z.object({ userId: Id, role: UserRole })),
   defineEvent('UserDeactivated', z.object({ userId: Id })),
   defineEvent('UserReactivated', z.object({ userId: Id })),
+  defineEvent('UserTimezoneChanged', z.object({ userId: Id, timezone: z.string().min(1).max(64) })),
   defineEvent('PasswordChanged', z.object({ userId: Id, passwordHash: z.string().min(1) })),
 ] as const;

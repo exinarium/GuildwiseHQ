@@ -9,6 +9,7 @@ import type { Reaper } from './dispatcher/reaper.ts';
 import type { Notifier } from './eventstore/notifier.ts';
 import type { PgEventStore } from './eventstore/pg-event-store.ts';
 import type { Mailer } from './mail/mailer.ts';
+import type { Reporter } from './reporter/reporter.ts';
 import type { RunnerGateway } from './runner-gateway/gateway.ts';
 import type { RunnerRegistry } from './runner-gateway/registry.ts';
 import type { Scheduler } from './scheduler/scheduler.ts';
@@ -32,6 +33,7 @@ export interface Services {
   dispatcher: Dispatcher;
   reaper: Reaper;
   scheduler: Scheduler;
+  reporter: Reporter;
   browser: BrowserGateway;
   chat: ChatRelay;
 }

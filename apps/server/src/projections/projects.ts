@@ -94,6 +94,7 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
   await exec(tx, `DELETE FROM desk_items WHERE id IN (${desk})`, P);
   await exec(tx, 'DELETE FROM cards WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM phases WHERE project_id=$1', P);
+  await exec(tx, 'DELETE FROM ba_signals WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM deploy_targets WHERE project_id=$1', P);
   // Project-level rows.
   for (const t of ['feed_seen', 'transcripts', 'repo_requests', 'schedules']) {

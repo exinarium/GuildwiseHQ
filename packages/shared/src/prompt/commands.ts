@@ -37,6 +37,14 @@ export function commandForOutcome(outcome: BriefOutcome): string {
       return 'aom phase followup done <n> --summary "<what you did>" [--link <url>]...';
     case 'followup_failed':
       return 'aom phase followup fail <n> --summary "<why it could not be done>"';
+    case 'triage_done':
+      return 'aom report triage --file <decisions.json>   # { "decisions": [ { "itemId", "action": "pass|dismiss|merge", "note"?, "into"? } ] }';
+    case 'notes_done':
+      return 'aom report notes --file <notes.json>   # { "notes": [ { "itemId", "note", "related"? } ] }';
+    case 'signal_report':
+      return 'aom report signals --file <reports.json>   # { "reports": [ { "signalId", "summary" (markdown), "annotateItemId"? } ] }';
+    case 'floor_report':
+      return 'aom report floor --summary-file <report.md>';
     case 'phase_results':
       return 'aom phase results --summary-file <report.md>';
     default:

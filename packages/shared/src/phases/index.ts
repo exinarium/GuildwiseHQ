@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { MockScriptSchema } from '../cards/fields.ts';
 import { CompletionAction } from '../cards/types.ts';
 import { RegressionPlatform } from '../events/testing.ts';
+import type { ReporterTaskKind } from '../reporter/index.ts';
+import { ReporterTaskSchema, reporterBriefOutcomes } from '../reporter/index.ts';
 
 /**
  * Named phases with post-phase follow-ups (docs/design/phases.md, Part A): the contract shared by the server, the
@@ -288,7 +290,17 @@ export const FollowupFailedDataSchema = z.object({
 });
 export const PhaseResultsDataSchema = z.object({ report: z.string().min(1).max(40000) });
 
-export const BaTaskKind = z.enum(['phase_report', 'followups_brief', 'followup_custom', 'followups_report']);
+export const BaTaskKind = z.enum([
+  'phase_report',
+  'followups_brief',
+  'followup_custom',
+  'followups_report',
+  // Part B reporter tasks (org level: no phase).
+  'desk_triage',
+  'urgent_note',
+  'floor_alert',
+  'floor_report',
+]);
 export type BaTaskKind = z.infer<typeof BaTaskKind>;
 export const BaTaskStatus = z.enum(['queued', 'running', 'done', 'failed', 'fallback', 'cancelled']);
 export type BaTaskStatus = z.infer<typeof BaTaskStatus>;
@@ -320,43 +332,51 @@ export type DeployTargetBrief = z.infer<typeof DeployTargetBriefSchema>;
 export const BaTaskShiftSchema = z.object({
   taskId: z.uuid(),
   kind: BaTaskKind,
-  phase: z.object({
-    id: z.uuid(),
-    ref: z.string(),
-    name: z.string(),
-    description: z.string(),
-    status: PhaseStatus,
-    projectKey: z.string(),
-    workingBranch: z.string(),
-  }),
-  cards: z.array(
-    PhaseCardOutcome.extend({
-      suite: z
-        .object({
-          ref: z.string(),
-          status: z.string(),
-          result: z.enum(['passed', 'failed', 'running']).optional(),
-          bugRefs: z.array(z.string()).default([]),
-        })
-        .optional(),
-    }),
-  ),
-  followups: z.array(
-    z.object({
+  /** Phase tasks. Reporter tasks (Part B) have no phase and carry `reporter` instead. */
+  phase: z
+    .object({
       id: z.uuid(),
-      position: z.number().int().positive(),
-      kind: FollowupKind,
-      target: DeployTargetBriefSchema.nullable(),
-      platform: z.string().nullable(),
-      instruction: z.string(),
-      note: z.string(),
-      status: FollowupStatus,
-      delegate: FollowupDelegate.nullable(),
-      brief: z.string().nullable(),
-      resultSummary: z.string().nullable(),
-      evidence: z.record(z.string(), z.unknown()),
-    }),
-  ),
+      ref: z.string(),
+      name: z.string(),
+      description: z.string(),
+      status: PhaseStatus,
+      projectKey: z.string(),
+      workingBranch: z.string(),
+    })
+    .optional(),
+  reporter: ReporterTaskSchema.optional(),
+  cards: z
+    .array(
+      PhaseCardOutcome.extend({
+        suite: z
+          .object({
+            ref: z.string(),
+            status: z.string(),
+            result: z.enum(['passed', 'failed', 'running']).optional(),
+            bugRefs: z.array(z.string()).default([]),
+          })
+          .optional(),
+      }),
+    )
+    .default([]),
+  followups: z
+    .array(
+      z.object({
+        id: z.uuid(),
+        position: z.number().int().positive(),
+        kind: FollowupKind,
+        target: DeployTargetBriefSchema.nullable(),
+        platform: z.string().nullable(),
+        instruction: z.string(),
+        note: z.string(),
+        status: FollowupStatus,
+        delegate: FollowupDelegate.nullable(),
+        brief: z.string().nullable(),
+        resultSummary: z.string().nullable(),
+        evidence: z.record(z.string(), z.unknown()),
+      }),
+    )
+    .default([]),
   /** `followup_custom`: the follow-up the BA carries out itself. */
   followupId: z.uuid().optional(),
   outstanding: z.array(PhaseOutstandingSchema).default([]),
@@ -511,6 +531,8 @@ export type BranchCheckMergedResult = z.infer<typeof BranchCheckMergedResultSche
 
 /** Outcomes placed in the synthetic brief of a `ba_task` shift (the runner validates reports against them). */
 export function baTaskBriefOutcomes(kind: BaTaskKind) {
+  if (kind === 'desk_triage' || kind === 'urgent_note' || kind === 'floor_alert' || kind === 'floor_report')
+    return reporterBriefOutcomes(kind as ReporterTaskKind);
   const o = (id: string, label: string, data: string) => ({ id, label, kind: 'success' as const, data });
   switch (kind) {
     case 'phase_report':
@@ -527,5 +549,7 @@ export function baTaskBriefOutcomes(kind: BaTaskKind) {
       ];
     case 'followups_report':
       return [o(PHASE_OUTCOME.results, 'Report the follow-up results to the manager', 'phaseResults')];
+    default:
+      return [];
   }
 }
