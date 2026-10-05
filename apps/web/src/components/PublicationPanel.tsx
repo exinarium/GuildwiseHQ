@@ -1,5 +1,6 @@
 import type { PublicationDto } from '@aom/shared';
 import { safeHref } from '../lib/links.ts';
+import { TranscriptExpander } from './Transcript.tsx';
 import { Badge, Panel } from './ui.tsx';
 
 /** The published note of a research card: where it lives in the vault, a preview and the citations it carries. */
@@ -36,6 +37,14 @@ export function PublicationPanel({ publication }: { publication: PublicationDto 
                 </a>
               ) : (
                 <span data-testid="unsafe-link">{c.title}</span>
+              )}
+              {c.transcriptPath && (
+                <TranscriptExpander
+                  projectId={publication.projectId}
+                  url={c.url}
+                  available
+                  label="Transcript"
+                />
               )}
             </li>
           ))}

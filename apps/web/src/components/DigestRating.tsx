@@ -1,8 +1,9 @@
-import type { DigestItemDto } from '@aom/shared';
+import { type DigestItemDto, hasTranscript } from '@aom/shared';
 import { useState } from 'react';
 import { useRateDigestItem } from '../api/queries/digest.ts';
 import { VERDICTS, verdictTone } from '../lib/feeds.ts';
 import { safeHref } from '../lib/links.ts';
+import { TranscriptExpander } from './Transcript.tsx';
 import { Badge, Button, ErrorBox } from './ui.tsx';
 
 /**
@@ -53,6 +54,13 @@ export function DigestItemRow({ item, canRate }: { item: DigestItemDto; canRate:
         </span>
       )}
       <p className="mt-0.5 text-sm text-zinc-700 dark:text-zinc-300">{item.summary}</p>
+      {hasTranscript(item.kind) && (
+        <TranscriptExpander
+          projectId={item.projectId}
+          url={item.url}
+          available={item.transcript?.status === 'ok'}
+        />
+      )}
       {rated && item.verdict ? (
         <p className="mt-2 flex flex-wrap items-center gap-2 text-sm" data-testid="verdict">
           <Badge tone={verdictTone(item.verdict)}>{VERDICTS.find((v) => v.id === item.verdict)?.label}</Badge>

@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import {
   type Citation,
   defaultNotePath,
@@ -28,6 +29,8 @@ export function preparePublication(i: {
   folder: string;
   card: { ref: string; subCategory?: string | undefined };
   fetched: FetchedUrls;
+  /** Transcripts saved in the vault in this shift (`aom transcript`), by normalized URL: linked from the note. */
+  transcripts?: ReadonlyMap<string, { path: string; title: string }>;
   /** Start of the shift: dates are derived from it so a retried publish writes identical content. */
   at: Date;
 }): PreparedPublication {
@@ -45,8 +48,10 @@ export function preparePublication(i: {
   for (const c of [...(fm?.citations ?? []), ...request.citations]) {
     const key = normalizeUrl(c.url);
     if (!/^https?:\/\//.test(c.url) || byUrl.has(key)) continue;
+    const transcriptPath = i.transcripts?.get(key)?.path;
     byUrl.set(key, {
       url: c.url,
+      ...(transcriptPath ? { transcriptPath } : {}),
       title: ('title' in c && c.title ? c.title : c.url).slice(0, 300),
       accessedAt: ('accessedAt' in c && c.accessedAt ? c.accessedAt : stamp) as string,
     });
@@ -74,9 +79,19 @@ export function preparePublication(i: {
       error: `the note must go under ${i.folder}/ (the project's vault folder), not ${path}`,
     };
 
+  // Sources with a transcript are linked from the note (relative to the note, so the link works in the vault).
+  const withTranscript = citations.filter((c) => c.transcriptPath);
+  const linked = withTranscript.length
+    ? `${body.trim()}\n\n## Transcripts\n\n${withTranscript
+        .map(
+          (c) =>
+            `- [${c.title.replace(/[[\]]/g, '')}](${posix.relative(posix.dirname(path), c.transcriptPath as string)})`,
+        )
+        .join('\n')}\n`
+    : body;
   const content = renderNote({
     title,
-    body,
+    body: linked,
     cardRef: i.card.ref,
     ...(i.card.subCategory ? { subCategory: i.card.subCategory } : {}),
     published: stamp.slice(0, 10),

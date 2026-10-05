@@ -233,6 +233,31 @@ describe('mock researcher and checker through the real aom CLI', () => {
     expect(rep.note).toMatch(/1\. Mock source 1 - https:\/\/example\.test\/research\/1/);
   }, 120_000);
 
+  it('researcher: fetches the transcript of a video source before relying on it', async () => {
+    h = await startHarness();
+    const fields = {
+      mockResearch: {
+        claims: [
+          {
+            text: 'The talk says X',
+            url: 'https://video.example.test/watch/1',
+            kind: 'video',
+            title: 'Talk',
+          },
+        ],
+      },
+    };
+    const msg = makeResearchShiftStart({ stage: 'research', fields });
+    await run(msg);
+    expect(reportOf(msg.shiftId as string).note).toContain('video.example.test/watch/1');
+    const log = h!.server
+      .of('shift.progress')
+      .flatMap((p) => p.items)
+      .map((i) => i.text)
+      .join('\n');
+    expect(log).toContain('mock researcher: transcript of https://video.example.test/watch/1: Status: ok');
+  }, 120_000);
+
   it('researcher in a rework round drops the claims the checker could not verify', async () => {
     h = await startHarness();
     const fields = {
@@ -265,6 +290,44 @@ describe('mock researcher and checker through the real aom CLI', () => {
     const note = originFile(vault, data.vaultPath);
     expect(parseNoteFrontMatter(note)?.citations).toHaveLength(2);
     expect(note).toContain('6mm ARC delivers about 1500 ft-lb');
+  }, 120_000);
+
+  it('checker: a cited video is accepted once its transcript was fetched, the transcript lands in the vault and the note links it', async () => {
+    const seen: Record<string, any> = {};
+    const VIDEO = 'https://video.example.test/watch/9';
+    const adapter = new ScriptedAdapter(async (_i, ctl) => {
+      const publish = () =>
+        ctl.post('/v1/report', {
+          report: {
+            kind: 'outcome',
+            outcomeId: 'published',
+            note: 'verified',
+            data: {
+              content: '# Talk findings\n\nThe talk says reloading helps. [1]',
+              citations: [{ url: VIDEO, title: 'The talk' }],
+            },
+          },
+        });
+      seen.before = await publish(); // not opened yet
+      seen.fetch = await ctl.post('/v1/rpc', { method: 'transcript.fetch', params: { url: VIDEO } });
+      seen.ok = await publish();
+    });
+    const vault = await startWithVault(adapter);
+    const msg = makeResearchShiftStart({ stage: 'factcheck', handoffs: researchHandoff(), vault: VAULT });
+    expect((await run(msg)).outcome).toBe('reported');
+    expect(seen.before.status).toBe(422);
+    expect(seen.before.json.error).toMatch(/not pages you opened/);
+    const tpath = seen.fetch.json.result.path as string;
+    expect(tpath).toMatch(
+      /^projects\/shooting\/transcripts\/\d{4}-\d{2}-\d{2}-mock-transcript-[a-z0-9]{1,4}\.md$/,
+    );
+    expect(seen.ok.status).toBe(200);
+    const data = reportOf(msg.shiftId as string).data;
+    expect(data.citations[0]).toMatchObject({ url: VIDEO, transcriptPath: tpath });
+    expect(originFile(vault, tpath)).toContain('Welcome to the mock talk');
+    const note = originFile(vault, data.vaultPath);
+    expect(note).toContain('## Transcripts');
+    expect(note).toContain(`(../transcripts/${tpath.split('/').pop()})`);
   }, 120_000);
 
   it('checker action uncited: the first try without citations is refused, then it publishes properly', async () => {

@@ -26,6 +26,7 @@ import {
   type ReportResult,
   releaseClaimEvents,
 } from '../commands/shifts.ts';
+import { transcriptStoreRpc } from '../commands/transcripts.ts';
 import { applyVaultConflict, markVaultStatus, queueVaultConfigure } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
@@ -576,6 +577,8 @@ export class RunnerHandlers {
         return reply(...(await this.devopsRequest(conn, shift, msg.params)));
       if (msg.method === 'outbound.draft') return reply(...(await outboundDraftRpc(ctx, shift, msg.params)));
       if (msg.method === 'card.risk') return reply(...(await riskTierRpc(ctx, shift, msg.params)));
+      if (msg.method === 'transcript.store')
+        return reply(...(await transcriptStoreRpc(ctx, shift, msg.params)));
       if (msg.method === 'repo.create') return reply(...(await repoCreateRpc(ctx, shift, msg.params)));
       if (DESIGN_METHODS.has(msg.method))
         return reply(...(await designRpc(ctx, shift, msg.method, msg.params)));

@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
-  applyMaxPerKind,
+  applyMaxItems,
   type CandidatesData,
   type DigestData,
   type DigestItem,
-  FEED_FIELD_DEFAULTS,
+  feedMaxItems,
   isSameStory,
   normalizeUrl,
   streamId,
@@ -46,7 +46,7 @@ export type DigestResult =
 /**
  * Turns a curator's digest into events (docs/SPEC.md "Feed and research rules"): items must be among the scout's
  * candidates (real pages), duplicates (seen URL or the same story already listed or inside the digest) are skipped,
- * at most the card's maximum per kind is kept in the curator's order, and a digest with nothing left logs nothing.
+ * at most the card's maximum number of items (the best overall, whatever the kind) is kept in the curator's order, and a digest with nothing left logs nothing.
  * The first event is the `DigestPosted`; the rest are the desk items and the card thread note that go with it.
  */
 export async function buildDigestEvents(
@@ -90,12 +90,12 @@ export async function buildDigestEvents(
     else accepted.push(item);
   }
 
-  const max = (card.fields?.maxPerKind as Record<string, number> | undefined) ?? {
-    ...FEED_FIELD_DEFAULTS.maxPerKind,
-  };
-  const { kept, dropped } = applyMaxPerKind(accepted, max);
+  const { kept, dropped } = applyMaxItems(accepted, feedMaxItems(card.fields));
+  // The transcript reference is the runner's record on the scout's candidate, not whatever the curator wrote.
+  const transcriptOf = new Map((candidates ?? []).map((c) => [normalizeUrl(c.url), c.transcript] as const));
   const items: DigestItem[] = kept.map((i) => ({
     ...i,
+    ...(transcriptOf.get(normalizeUrl(i.url)) ? { transcript: transcriptOf.get(normalizeUrl(i.url)) } : {}),
     itemId: randomUUID(),
     urlNormalized: normalizeUrl(i.url),
     publishedAt: new Date(i.publishedAt).toISOString(),
@@ -127,7 +127,7 @@ export async function buildDigestEvents(
 
   const left = [
     duplicatesDropped ? `${duplicatesDropped} duplicate(s) skipped` : '',
-    dropped.length ? `${dropped.length} over the maximum per kind left out` : '',
+    dropped.length ? `${dropped.length} over the maximum number of items left out` : '',
   ].filter(Boolean);
   const summary = nothingQualified
     ? `Nothing qualified in this run; nothing was logged.${left.length ? ` (${left.join(', ')})` : ''}`

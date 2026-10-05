@@ -839,7 +839,7 @@ step('research and the feed', async () => {
         fields: {
           topic: 'AI agents and coding assistants',
           preferredSites: ['https://news.example.com'],
-          maxPerKind: { article: 5, video: 3 },
+          maxItems: 10,
           mockFeed: { items, ...(rule ? { proposeRule: rule } : {}) },
         },
         specify: true,
@@ -902,7 +902,7 @@ step('research and the feed', async () => {
           fields: {
             topic: 'AI agents and coding assistants',
             preferredSites: ['https://news.example.com'],
-            maxPerKind: { article: 5, video: 3 },
+            maxItems: 10,
             mockFeed: { items: [] },
           },
         },

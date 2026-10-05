@@ -171,6 +171,16 @@ async function doctor(opts: { dataDir?: string }): Promise<void> {
     'docker',
     d && d.exitCode === 0 ? String(d.stdout).trim() : 'not found (optional)',
   );
+  const y = await execa('yt-dlp', ['--version'], { reject: false, stdin: 'ignore', timeout: 10_000 }).catch(
+    () => undefined,
+  );
+  line(
+    y && y.exitCode === 0 ? true : 'warn',
+    'yt-dlp',
+    y && y.exitCode === 0
+      ? String(y.stdout).trim()
+      : 'not found (optional: `aom transcript` needs it for YouTube and other video sites; ask DevOps to install it)',
+  );
   if (config) {
     const repos = await scanRepos(config.repoRoots);
     line(

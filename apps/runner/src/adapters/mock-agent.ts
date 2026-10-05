@@ -29,6 +29,7 @@ interface FeedItem {
   source: string;
   publishedAt: string;
   summary: string;
+  transcript?: { status: string; path?: string };
 }
 
 interface Brief {
@@ -169,14 +170,25 @@ async function report(brief: Brief, action: Action): Promise<{ code: number; out
   return aom(args);
 }
 
-const DEFAULT_ITEMS: FeedItem[] = [1, 2].map((n) => ({
-  kind: 'article',
-  url: `https://example.test/${n}`,
-  title: `Mock item ${n}`,
-  source: 'example.test',
-  publishedAt: '2026-10-02',
-  summary: `Mock summary of item ${n}`,
-}));
+const DEFAULT_ITEMS: FeedItem[] = [
+  ...[1, 2].map((n) => ({
+    kind: 'article',
+    url: `https://example.test/${n}`,
+    title: `Mock item ${n}`,
+    source: 'example.test',
+    publishedAt: '2026-10-02',
+    summary: `Mock summary of item ${n}`,
+  })),
+  // The mock runtime answers `aom transcript` for it with a fake transcript.
+  {
+    kind: 'video',
+    url: 'https://video.example.test/watch/3',
+    title: 'Mock video 3',
+    source: 'video.example.test',
+    publishedAt: '2026-10-02',
+    summary: 'Mock summary of video 3',
+  },
+];
 
 const tmpText = (name: string, text: string): string => {
   const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), 'mock-agent-'));
@@ -204,12 +216,21 @@ const skipTitles = (taste: string | undefined): string[] =>
 async function feedWork(brief: Brief, action: Action): Promise<{ code: number; out: string; err: string }> {
   const fields = brief.card.fields as {
     mockFeed?: { items?: FeedItem[]; proposeRule?: string };
+    maxItems?: number;
     maxPerKind?: Record<string, number>;
   };
   const wantsCandidates = brief.shift.outcomes.some((o) => o.data === 'candidates');
   if (wantsCandidates) {
     const items = fields.mockFeed?.items ?? DEFAULT_ITEMS;
     for (const i of items) await openPage(i.url);
+    // Videos and podcasts: the scout looks up their transcript (the runner stores it and attaches the reference).
+    for (const i of items.filter((x) => x.kind === 'video' || x.kind === 'podcast')) {
+      const t = aom(['transcript', '--url', i.url]);
+      emit({
+        kind: 'progress',
+        text: `mock scout: transcript of ${i.url}: ${t.out.split('\n')[0]?.trim() ?? ''}`.slice(0, 300),
+      });
+    }
     if (action === 'fabricate') {
       const fake: FeedItem = {
         ...DEFAULT_ITEMS[0],
@@ -244,13 +265,14 @@ async function feedWork(brief: Brief, action: Action): Promise<{ code: number; o
   emit({ kind: 'progress', text: `mock taste: ${taste ? `${tasteLines.length} rule line(s)` : 'none'}` });
   for (const l of tasteLines) emit({ kind: 'progress', text: `mock taste rule: ${l.slice(0, 400)}` });
   const skip = skipTitles(taste);
-  const max = fields.maxPerKind ?? { article: 5, video: 3 };
-  const used: Record<string, number> = {};
+  // One top-N across kinds (a legacy per-kind maximum counts as the sum of its values).
+  const max =
+    fields.maxItems ??
+    (fields.maxPerKind ? Object.values(fields.maxPerKind).reduce((a, b) => a + b, 0) || 10 : 10);
   const picked: FeedItem[] = [];
   for (const c of brief.feed?.candidates ?? []) {
     if (skip.includes(c.title)) continue;
-    if ((used[c.kind] ?? 0) >= (max[c.kind] ?? 0)) continue;
-    used[c.kind] = (used[c.kind] ?? 0) + 1;
+    if (picked.length >= max) break;
     picked.push(c);
   }
   const data: Record<string, unknown> = { items: picked };
@@ -270,6 +292,8 @@ interface MockClaim {
   text: string;
   url: string;
   title?: string;
+  /** `video` or `podcast`: the researcher and the checker fetch its transcript with `aom transcript`. */
+  kind?: string;
   supported?: boolean;
 }
 
@@ -292,7 +316,16 @@ const claimsOf = (brief: Brief): MockClaim[] =>
 async function researcherWork(brief: Brief): Promise<{ code: number; out: string; err: string }> {
   const all = claimsOf(brief);
   const claims = brief.card.reworkRound > 0 ? all.filter((c) => c.supported !== false) : all;
-  for (const c of claims) await openPage(c.url);
+  for (const c of claims) {
+    await openPage(c.url);
+    if (c.kind === 'video' || c.kind === 'podcast') {
+      const t = aom(['transcript', '--url', c.url]);
+      emit({
+        kind: 'progress',
+        text: `mock researcher: transcript of ${c.url}: ${t.out.split('\n')[0]?.trim() ?? ''}`.slice(0, 300),
+      });
+    }
+  }
   const question = (brief.card.fields as { question?: string }).question ?? brief.card.title;
   const draft = [
     `# ${brief.card.title}`,
@@ -333,7 +366,16 @@ async function checkerWork(
     });
     if (first.code === 0) return first;
   }
-  for (const r of refs) await openPage(r.url);
+  const media = new Set(
+    claimsOf(brief)
+      .filter((c) => c.kind === 'video' || c.kind === 'podcast')
+      .map((c) => c.url),
+  );
+  for (const r of refs) {
+    // A video or podcast source is verified against its transcript (which also counts as opening it).
+    if (media.has(r.url)) aom(['transcript', '--url', r.url]);
+    else await openPage(r.url);
+  }
   const cites = tmpJson(
     'citations.json',
     refs.map((r) => ({ url: r.url, title: r.title })),

@@ -120,6 +120,8 @@ export const MockResearchSchema = z.object({
       text: z.string().min(1),
       url: z.url(),
       title: z.string().optional(),
+      /** `video` or `podcast`: the mock researcher fetches its transcript. */
+      kind: z.enum(['article', 'video', 'podcast']).optional(),
       supported: z.boolean().optional(),
     }),
   ),
@@ -158,23 +160,54 @@ export const MockFeedSchema = z.object({
 });
 export type MockFeed = z.infer<typeof MockFeedSchema>;
 
-export const FeedFieldsSchema = z.object({
+const FeedFieldsBase = z.object({
+  /** Short label of the feed ("Rust async"). */
   topic: z.string().optional(),
+  /** Markdown: what the manager actually wants (angle, include/exclude, level). The primary statement of intent. */
+  description: z.string().optional(),
   windowHours: z.number().int().positive().optional(),
   preferredSites: z.array(z.string()).optional(),
+  /** The digest holds the best N items overall, whatever their kind. */
+  maxItems: z.number().int().positive().max(100).optional(),
+  /** Legacy (read only): per-kind maxima, converted to `maxItems` on read. */
   maxPerKind: z.record(z.string(), z.number().int().nonnegative()).optional(),
   mock: MockScriptSchema.optional(),
   mockFeed: MockFeedSchema.optional(),
 });
+
+/** The overall maximum of a feed card's fields: `maxItems`, else the sum of a legacy `maxPerKind`, else the default. */
+export function feedMaxItems(fields: Record<string, unknown> | undefined | null): number {
+  const f = fields ?? {};
+  if (typeof f.maxItems === 'number' && f.maxItems > 0) return f.maxItems;
+  if (f.maxPerKind && typeof f.maxPerKind === 'object') {
+    const sum = Object.values(f.maxPerKind as Record<string, unknown>).reduce<number>(
+      (a, v) => a + (typeof v === 'number' && v > 0 ? v : 0),
+      0,
+    );
+    if (sum > 0) return sum;
+  }
+  return FEED_DEFAULT_MAX_ITEMS;
+}
+
+export const FEED_DEFAULT_MAX_ITEMS = 10;
+
+/** Accepts the legacy `maxPerKind` on read and converts it (sum of the values, else the default); new writes use `maxItems`. */
+export const FeedFieldsSchema = FeedFieldsBase.transform(({ maxPerKind, ...rest }) =>
+  maxPerKind !== undefined && rest.maxItems === undefined
+    ? { ...rest, maxItems: Math.min(100, feedMaxItems({ maxPerKind })) }
+    : rest,
+);
 export type FeedFields = z.infer<typeof FeedFieldsSchema>;
 
-export const FEED_FIELD_DEFAULTS = { windowHours: 24, maxPerKind: { article: 5, video: 3 } } as const;
+/** Stored defaults of a new feed card. `maxItems` is not stored: it is resolved on read (`feedMaxItems`) so a legacy `maxPerKind` is not shadowed. */
+export const FEED_FIELD_DEFAULTS = { windowHours: 24 } as const;
 
 export const FEED_FIELDS: Record<string, FieldMeta> = {
   topic: { label: 'Topic', kind: 'text' },
+  description: { label: 'Description', kind: 'markdown' },
   windowHours: { label: 'Window (hours)', kind: 'number' },
   preferredSites: { label: 'Preferred sites', kind: 'url-list' },
-  maxPerKind: { label: 'Max per kind', kind: 'json' },
+  maxItems: { label: 'Max items', kind: 'number' },
   mock: { label: 'Mock script', kind: 'json' },
   mockFeed: { label: 'Mock feed items', kind: 'json' },
 };

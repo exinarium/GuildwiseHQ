@@ -3,6 +3,7 @@ import { delimiter, join } from 'node:path';
 import {
   type AgentRuntimeSpec,
   type GuardViolation,
+  hasTranscript,
   type IpcReportRequest,
   type IpcReportResponse,
   type IpcRpcRequest,
@@ -10,6 +11,7 @@ import {
   isPublishRequest,
   isTerminalReport,
   type LedgerMatch,
+  normalizeUrl,
   outcomeDataSchema,
   type PublishRequest,
   type RepoReport,
@@ -17,6 +19,7 @@ import {
   type ShiftBrief,
   type ShiftReport,
   ShiftReportSchema,
+  type TranscriptRef,
   type Usage,
   uuidv7,
   type VaultWriteCommand,
@@ -41,6 +44,16 @@ import type { RunnerPaths } from '../paths.ts';
 import { preparePublication } from '../research/publish.ts';
 import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
+import type { TranscriptDeps, TranscriptResult } from '../transcript/fetch.ts';
+import {
+  defaultTranscriptDeps,
+  fetchTranscript,
+  mockTranscript,
+  refOf,
+  renderTranscriptFile,
+  renderTranscriptMessage,
+  transcriptPath,
+} from '../transcript/service.ts';
 import { readVaultContext, withVaultContext } from '../vaults/context.ts';
 import { autoCommit } from './autocommit.ts';
 import {
@@ -87,6 +100,8 @@ export interface SupervisorDeps {
   progressFlushMs?: number;
   /** Tester environment check before the session starts (default: Docker and the deployed app). */
   envChecker?: EnvChecker;
+  /** How `aom transcript` reaches yt-dlp and the web (default: the real ones; tests inject fakes). */
+  transcript?: TranscriptDeps;
 }
 
 /** The server's answer to a `shift.report`: what the agent is told (and any ledger matches for a question). */
@@ -115,6 +130,8 @@ interface ActiveShift {
   graceTimer?: NodeJS.Timeout;
   /** Pages the agent opened with its web tools (no fabrication: reported feed items must be among them). */
   fetched: FetchedUrls;
+  /** Transcripts fetched in this shift with `aom transcript`, by normalized URL. */
+  transcripts: Map<string, { ref: TranscriptRef; title: string }>;
   /** The brief the agent sees: the server's brief plus what the runner read from the vault (PROJECT.md, taste.md). */
   brief?: ShiftBrief;
   /** Resumed after a runner restart: the server already holds the claim and has seen accepted/started. */
@@ -172,6 +189,7 @@ export class ShiftSupervisor {
       guardViolations: [],
       progress: [],
       fetched: new FetchedUrls(),
+      transcripts: new Map(),
       env: {},
       ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
     };
@@ -524,9 +542,71 @@ export class ShiftSupervisor {
       rpc: async (req: IpcRpcRequest) => {
         if (req.method === 'card.get')
           return { ok: true, result: cardPayload({ ...s.msg, brief: s.brief ?? s.msg.brief }) };
+        if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
         return this.deps.rpc(s.msg.shiftId, req.method, req.params);
       },
     };
+  }
+
+  /**
+   * `aom transcript --url <url>`: finds the transcript outside the agent sandbox, writes it into the card's vault
+   * (`projects/<name>/transcripts/`), sends the text to the site (for the web pages) and counts the URL as opened.
+   */
+  private async transcriptFetch(s: ActiveShift, params: Record<string, unknown>): Promise<IpcRpcResponse> {
+    const url = typeof params.url === 'string' ? params.url.trim() : '';
+    if (!/^https?:\/\//i.test(url))
+      return { ok: false, error: '--url must be an http(s) URL' } as IpcRpcResponse;
+    const { msg } = s;
+    const result: TranscriptResult =
+      msg.agent.runtime === 'mock'
+        ? mockTranscript(url)
+        : await fetchTranscript(url, this.deps.transcript ?? defaultTranscriptDeps());
+    let path: string | undefined;
+    if (result.status === 'ok' && result.text) {
+      if (msg.vault && this.deps.writeVault) {
+        const p = transcriptPath(msg.vault.folder, s.startedAt, result.title ?? url, url);
+        try {
+          await this.deps.writeVault({
+            vaultId: msg.vault.vaultId,
+            path: p,
+            mode: 'replace',
+            content: renderTranscriptFile(result, s.startedAt),
+            commitMessage: `aom: transcript ${msg.brief.card.ref} ${result.title ?? url}`.slice(0, 120),
+            push: true,
+          });
+          path = p;
+          this.addProgress(s, 'status', `transcript saved ${p}`);
+        } catch (err) {
+          this.addProgress(
+            s,
+            'status',
+            `transcript not saved to the vault: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      // The site keeps the text for the web pages; the vault file is the durable copy.
+      await this.deps
+        .rpc(msg.shiftId, 'transcript.store', {
+          url,
+          title: result.title ?? url,
+          ...(result.language ? { language: result.language } : {}),
+          ...(result.autoGenerated !== undefined ? { autoGenerated: result.autoGenerated } : {}),
+          ...(path ? { vaultPath: path } : {}),
+          text: result.text,
+          truncated: result.truncated ?? false,
+        })
+        .catch(() => undefined);
+      // A transcript fetched here counts as opening the source (research citations, feed items).
+      s.fetched.add(url);
+    }
+    s.transcripts.set(normalizeUrl(url), {
+      ref: refOf(result, path),
+      title: result.title ?? url,
+    });
+    return {
+      ok: true,
+      result: { status: result.status, path, message: renderTranscriptMessage(result, path) },
+    } as IpcRpcResponse;
   }
 
   /** `aom publish`: checks the note (citations, opened sources, path), writes it into the card's vault and commits it. */
@@ -551,6 +631,11 @@ export class ShiftSupervisor {
         ...(typeof sub === 'string' && sub.trim() ? { subCategory: sub.trim() } : {}),
       },
       fetched: s.fetched,
+      transcripts: new Map(
+        [...s.transcripts].flatMap(([k, v]) =>
+          v.ref.path ? [[k, { path: v.ref.path, title: v.title }]] : [],
+        ),
+      ),
       at: s.startedAt,
     });
     if (!prepared.ok) return prepared;
@@ -575,6 +660,30 @@ export class ShiftSupervisor {
       };
     }
     return { ok: true, data: prepared.publication as unknown as Record<string, unknown> };
+  }
+
+  /** Sets `transcript` on every video or podcast candidate from the lookups of this shift; rejects when one was skipped. */
+  private attachTranscripts(
+    s: ActiveShift,
+    data: Record<string, unknown>,
+  ): { data: Record<string, unknown> } | { error: string } {
+    const items = Array.isArray(data.items) ? (data.items as Array<Record<string, unknown>>) : [];
+    const missing: string[] = [];
+    const next = items.map((i) => {
+      const { transcript: _agentWrote, ...rest } = i;
+      if (typeof i.kind !== 'string' || typeof i.url !== 'string' || !hasTranscript(i.kind)) return rest;
+      const t = s.transcripts.get(normalizeUrl(i.url));
+      if (!t) {
+        missing.push(i.url);
+        return rest;
+      }
+      return { ...rest, transcript: t.ref };
+    });
+    if (missing.length > 0)
+      return {
+        error: `these video/podcast candidates have no transcript lookup: ${missing.join(', ')}. Run \`aom transcript --url <url>\` for each (it reports "no transcript available" when there is none), or leave the item out.`,
+      };
+    return { data: { ...data, items: next } };
   }
 
   /** Validates, guards, attaches runner data, sends `shift.report` and waits for the server's verdict. */
@@ -609,6 +718,13 @@ export class ShiftSupervisor {
         );
       }
       toSend = { ...report, data: parsed.data as Record<string, unknown> };
+
+      // Transcripts (videos and podcasts): the scout must have looked each one up; the runner attaches the reference.
+      if (outcome.data === 'candidates') {
+        const filled = this.attachTranscripts(s, toSend.data);
+        if ('error' in filled) return rejected(filled.error);
+        toSend = { ...toSend, data: filled.data };
+      }
 
       // No fabrication: scouts and curators may only report pages that were opened during this shift (feeds, M5).
       const unopened = checkFeedItemsFetched({

@@ -102,7 +102,6 @@ describe('the scheduler fires on time (clock-controlled)', () => {
     expect(card?.fields).toMatchObject({
       topic: 'reloading',
       windowHours: 24,
-      maxPerKind: { article: 5, video: 3 },
     });
 
     const after = await ok<any>(owner('GET', `/api/schedules?projectId=${feedId}`));

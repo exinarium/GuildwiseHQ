@@ -173,8 +173,9 @@ test('AC1: a due schedule fires on time and its card is claimed ahead of normal 
         fields: {
           topic: 'reloading',
           preferredSites: ['https://feeds.example.test'],
-          maxPerKind: { article: 2, video: 1 },
-          mockFeed: { items: [A1, A2, A3, V1, V2], proposeRule: RULE },
+          description: 'Only posts with measured data, no press releases.',
+          maxItems: 3,
+          mockFeed: { items: [A1, A2, V1, A3, V2], proposeRule: RULE },
         },
       },
     },
@@ -229,10 +230,10 @@ test('AC1: a due schedule fires on time and its card is claimed ahead of normal 
   await done(normal);
 });
 
-test('AC2: the feed run appends only the best items up to the maximum per kind, oldest to newest, and puts the digest on the desk', async () => {
+test('AC2: the feed run appends only the best N items overall (any kind), oldest to newest, and puts the digest on the desk', async () => {
   const posted = (await digestEvents()).map((e) => e.payload);
   const scheduled = posted.find((p) => p.items.some((i: any) => i.url === A1.url));
-  // candidates: 3 articles + 2 videos; maximum 2 articles and 1 video
+  // candidates: 3 articles + 2 videos in the scout's order; maximum 3 items overall, whatever the kind
   expect(scheduled.items.map((i: any) => i.url)).toEqual([A1.url, A2.url, V1.url]);
   expect(scheduled.nothingQualified).toBe(false);
   const normal = posted.find((p) => p.items.some((i: any) => i.url === V2.url));
@@ -260,6 +261,10 @@ test('AC2: the feed run appends only the best items up to the maximum per kind, 
   await expect(rating).toBeVisible();
   await expect(rating.getByTestId('digest-items').getByRole('listitem')).toHaveCount(3);
   await expect(rating).toContainText(A1.title);
+  // a video carries its transcript (the mock scout fetched a fake one)
+  const video = rating.getByTestId('digest-items').getByRole('listitem').filter({ hasText: V1.title });
+  await video.getByRole('button', { name: 'Transcript' }).click();
+  await expect(video.getByTestId('transcript-text')).toContainText('mock talk');
   await expect(rating).toContainText('Summary of story 1');
   await page.screenshot({ path: `${paths.vaults}/feeds-desk.png` });
 });
@@ -409,13 +414,17 @@ test('AC6: the Schedules page creates a schedule from a preset with a time zone 
   await form.getByLabel('Runs').selectOption({ label: 'Daily at 07:00' });
   await form.getByLabel('Time zone').fill('Africa/Johannesburg');
   await form.getByLabel('Topic').fill('hunting optics');
-  await form.getByLabel('Max videos').fill('1');
+  await form.getByLabel('Description').fill('Only long-range optics with owner reviews.');
+  await form.getByLabel(/Max items/).fill('7');
   await form.getByRole('button', { name: 'Create schedule' }).click();
   const row = page.getByTestId('schedule-UI created');
   await expect(row.getByTestId('schedule-when')).toContainText('Daily at 07:00 (Africa/Johannesburg)');
   const created = await q<any>(`SELECT * FROM schedules WHERE name='UI created'`);
   expect(created[0]).toMatchObject({ cron: '0 7 * * *', timezone: 'Africa/Johannesburg', enabled: true });
-  expect(created[0].card_template.fields.maxPerKind).toEqual({ article: 5, video: 1 });
+  expect(created[0].card_template.fields).toMatchObject({
+    description: 'Only long-range optics with owner reviews.',
+    maxItems: 7,
+  });
   // 07:00 in Johannesburg (UTC+2)
   expect(new Date(created[0].next_fire_at).getUTCHours()).toBe(5);
   await page.screenshot({ path: `${paths.vaults}/feeds-schedules.png` });

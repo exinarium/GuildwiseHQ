@@ -420,17 +420,24 @@ If all scouts are busy, an overflow shift starts; a second late schedule waits f
 Feed projects run curated scans (e.g., daily news, AI articles, research opportunities) and post digests.
 
 1. Create a project with type **Feed**
-2. Add a **Schedule** to run the scout (scan for items)
-3. The scout appends to a project feed file in your vault
-4. A curator reads the feed, filters and rates items, posts a digest
-5. You rate digest items (useful, irrelevant, boring) and add your taste preferences
-6. Future curators learn from your ratings
+2. Add a **Schedule** to run the scout (scan for items). The form has:
+   - **Topic**: a short label for the feed
+   - **Description**: markdown, optional but encouraged. Say in detail what you want: the angle, what to include or leave out, the level. The scout and curator treat it as the main statement of what you want, ahead of the topic. Schedules created before this field existed keep working without it
+   - **Max items**: one number (default 10). The curator ranks everything the scout found, whatever the kind (article, video, podcast), and posts the best N overall. Older schedules that set a maximum per kind are read as the sum of their numbers
+   - **Preferred sites**: searched first
+3. The scout collects a few more candidates than Max items; the curator picks the best and appends them to the project feed file in your vault
+4. You rate digest items (useful, irrelevant, boring) and add your taste preferences
+5. Future curators learn from your ratings
 
 Feed rules (added to vault):
 - General search patterns
 - Preferred sources (prioritize these)
 - Deduplication
-- Per-type limits
+- One top-N limit across kinds
+
+**Transcripts for videos and podcasts.** Every video or podcast in a digest comes with its transcript so you can read it quickly instead of watching it. On the desk rating item and on the feed project page each such item has a **Transcript** button that shows the text (or "No transcript available"). The transcript is also saved in your vault as `projects/<name>/transcripts/<date>-<title>.md`, and the curator writes the item's summary from it. Research cards do the same for video and podcast sources: the transcript is saved in the same folder, the fact checker verifies claims against it, and the published note links it.
+
+Transcripts for YouTube and other video sites need **yt-dlp** on the workstation. If it is missing, the scout reports "transcript tool missing: yt-dlp" and asks the DevOps engineer to install it (you can also ask DevOps yourself: "install yt-dlp"); `aom-runner doctor` lists it as an optional tool. Podcasts use the transcript the episode page or feed publishes, when there is one. Where no transcript exists the item shows "No transcript available"; text is never made up.
 
 See `docs/SPEC.md` §5 for the full feed design.
 

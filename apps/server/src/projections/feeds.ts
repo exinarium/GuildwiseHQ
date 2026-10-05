@@ -11,8 +11,8 @@ export const feedProjectors: Record<string, Projector> = {
       await exec(
         tx,
         `INSERT INTO digest_items (id, card_id, project_id, desk_item_id, kind, url, url_normalized, title, source,
-           published_at, summary, position, event_seq, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+           published_at, summary, position, event_seq, created_at, transcript)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
         [
           item.itemId,
           p.cardId,
@@ -28,6 +28,7 @@ export const feedProjectors: Record<string, Projector> = {
           position++,
           e.seq.toString(),
           e.createdAt,
+          item.transcript ? JSON.stringify(item.transcript) : null,
         ],
       );
       await exec(

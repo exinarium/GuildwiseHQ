@@ -11,6 +11,11 @@ export class FetchedUrls {
     if (url) this.urls.add(normalizeUrl(url));
   }
 
+  /** A transcript fetched with `aom transcript` counts as opening the source. */
+  add(url: string): void {
+    this.urls.add(normalizeUrl(url));
+  }
+
   has(url: string): boolean {
     return this.urls.has(normalizeUrl(url));
   }

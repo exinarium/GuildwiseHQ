@@ -534,6 +534,13 @@ const VERBS: Record<string, Verb> = {
     return 0;
   },
   org: async (ctx, p) => orgDesign(ctx, p),
+  transcript: async (ctx, p) => {
+    const url = one(p, 'url');
+    if (!url) throw new UsageError('usage: aom transcript --url <video or podcast URL>');
+    const r = (await rpc(ctx, 'transcript.fetch', { url })) as { message?: string } | null;
+    ctx.io.out(`${r?.message ?? 'no transcript available'}\n`);
+    return 0;
+  },
   source: async (ctx, p) => {
     if (p.positionals[0] !== 'read' || !one(p, 'ref'))
       throw new UsageError('usage: aom source read --ref <owner/repo#12 | ABC-123 | ticket URL>');
@@ -573,6 +580,7 @@ export const USAGE = `usage: aom <verb> [options]
   risk <small|large> --reason "<why>"      BA: override the card's risk tier (drives the review tier and the merge approval)
   source read --ref <owner/repo#12 | ticket URL>        BA intake: read a GitHub issue (Jira: the Jira skill)
   org catalogue | org role draft --json '<json>' | --file <json|-> | org workflow draft (same) | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
+  transcript --url <url>                     fetch the transcript of a video or podcast (the runner saves it in the vault; prints a header and the text)
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed

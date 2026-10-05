@@ -267,14 +267,16 @@ Each role tests at its own level and may change only the tests it owns: builders
 
 Research and feed projects run on the same board and desk as code; what changes is the pipeline and what "done" means: a fact-checked note in the vault, or a digest the manager rates.
 
-**Research cards** carry a question, scope, depth, and the sub-category they belong to. A researcher gathers and writes, a checker verifies claims against the sources, and the result is published to the project's vault folder with citations. Open questions go to the desk like any other.
+**Research cards** carry a question, scope, depth, and the sub-category they belong to. A researcher gathers and writes, a checker verifies claims against the sources (for a video or podcast source, against its transcript, saved in the same `transcripts/` folder and linked from the note), and the result is published to the project's vault folder with citations. Open questions go to the desk like any other.
 
 **Feeds** are recurring tasks that search the last 24 hours, daily by default; the manager can also run any feed immediately from the board. Each run emits a card; a scout collects candidates and a curator picks the best and appends them to the project's list.
 
 **Feed and research rules**
 
 - Searches are general for the topic; a card may list preferred sites, searched first, and otherwise the agent chooses where to look
-- Each card sets a maximum per item kind, for example 5 articles and 3 videos; the agent picks the best up to that maximum and logs only those, and fewer is fine
+- Each card sets one maximum number of items (default 10); the curator ranks everything across kinds (article, video, podcast) and logs the best N overall, and fewer is fine. Older cards that set a maximum per kind are read as the sum of their values
+- A feed card has a short topic label and an optional description (markdown) saying in detail what the manager wants; the agents treat the description as the primary statement of intent
+- Videos and podcasts come with a transcript: the scout fetches it (`aom transcript`, run by the runner), it is saved in the vault under `projects/<name>/transcripts/` and shown on the site, and the curator writes the summary from it. When there is none the item says so; text is never invented
 - Results append to the project's running list, ordered oldest to newest; a new run never drops, rewrites or reorders earlier entries
 - No duplicates: a candidate is skipped if its URL is on the seen-list or it is the same story already listed from another source
 - No fabrication: every logged item is a real page the agent opened during the run, with title, source, date and a summary written from that page; if nothing qualifies, the run logs nothing and says so on the card

@@ -1,4 +1,11 @@
-import { DEFAULT_SCHEDULE_CRON, type ProjectDto, SCHEDULE_PRESETS, type ScheduleDto } from '@aom/shared';
+import {
+  DEFAULT_SCHEDULE_CRON,
+  FEED_DEFAULT_MAX_ITEMS,
+  feedMaxItems,
+  type ProjectDto,
+  SCHEDULE_PRESETS,
+  type ScheduleDto,
+} from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
 import { useProjects } from '../api/queries/projects.ts';
@@ -62,7 +69,9 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
   const patch = usePatchSchedule();
   const run = useRunSchedule();
   const del = useDeleteSchedule();
-  const fields = s.cardTemplate.fields as { topic?: string; maxPerKind?: Record<string, number> };
+  const fields = s.cardTemplate.fields as Record<string, unknown>;
+  const topic = typeof fields.topic === 'string' ? fields.topic : undefined;
+  const description = typeof fields.description === 'string' ? fields.description.trim() : '';
   return (
     <Panel>
       <div className="flex flex-wrap items-center gap-2">
@@ -98,8 +107,20 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
         </div>
         <div>
           <dt className="text-xs text-zinc-500">Topic</dt>
-          <dd>{fields.topic ?? s.cardTemplate.title}</dd>
+          <dd>{topic ?? s.cardTemplate.title}</dd>
         </div>
+        <div>
+          <dt className="text-xs text-zinc-500">Max items</dt>
+          <dd data-testid="schedule-max-items">{feedMaxItems(fields)}</dd>
+        </div>
+        {description && (
+          <div className="sm:col-span-2">
+            <dt className="text-xs text-zinc-500">Description</dt>
+            <dd className="whitespace-pre-wrap" data-testid="schedule-description">
+              {description}
+            </dd>
+          </div>
+        )}
         <div>
           <dt className="text-xs text-zinc-500">Last run</dt>
           <dd data-testid="schedule-last">{s.lastFiredAt ? formatDateTime(s.lastFiredAt) : 'never'}</dd>
@@ -144,8 +165,8 @@ function NewSchedule({ projects }: { projects: ProjectDto[] }) {
   const [timezone, setTimezone] = useState(defaultTimezone());
   const [topic, setTopic] = useState('');
   const [sites, setSites] = useState('');
-  const [maxArticles, setMaxArticles] = useState('5');
-  const [maxVideos, setMaxVideos] = useState('3');
+  const [description, setDescription] = useState('');
+  const [maxItems, setMaxItems] = useState(String(FEED_DEFAULT_MAX_ITEMS));
   const [err, setErr] = useState('');
   const chosen = projects.find((p) => p.id === projectId) ?? projects[0];
 
@@ -165,15 +186,16 @@ function NewSchedule({ projects }: { projects: ProjectDto[] }) {
         cardTemplate: buildFeedTemplate({
           title: `${name.trim()}`,
           topic,
+          description,
           sites,
-          maxArticles,
-          maxVideos,
+          maxItems,
         }),
       },
       {
         onSuccess: () => {
           setName('');
           setTopic('');
+          setDescription('');
           setSites('');
         },
       },
@@ -223,23 +245,32 @@ function NewSchedule({ projects }: { projects: ProjectDto[] }) {
               onChange={(e) => setCron(e.target.value)}
             />
           )}
-          <TextInput label="Topic" value={topic} onChange={(e) => setTopic(e.target.value)} />
+          <TextInput
+            label="Topic"
+            hint="A short label"
+            value={topic}
+            onChange={(e) => setTopic(e.target.value)}
+          />
+          <TextInput
+            label="Max items"
+            hint="The best N items overall, whatever their kind (articles, videos, podcasts)"
+            inputMode="numeric"
+            value={maxItems}
+            onChange={(e) => setMaxItems(e.target.value)}
+          />
+          <div className="sm:col-span-2">
+            <TextArea
+              label="Description"
+              hint="Markdown. What you want in detail: the angle, what to include or leave out, the level. Optional, but the agents follow it over the topic."
+              rows={5}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
           <TextArea
             label="Preferred sites (searched first, one per line)"
             value={sites}
             onChange={(e) => setSites(e.target.value)}
-          />
-          <TextInput
-            label="Max articles"
-            inputMode="numeric"
-            value={maxArticles}
-            onChange={(e) => setMaxArticles(e.target.value)}
-          />
-          <TextInput
-            label="Max videos"
-            inputMode="numeric"
-            value={maxVideos}
-            onChange={(e) => setMaxVideos(e.target.value)}
           />
           <div className="flex flex-col gap-2 sm:col-span-2">
             {err && (

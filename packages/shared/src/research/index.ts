@@ -13,6 +13,8 @@ export const CitationSchema = z.object({
   url: HttpUrlSchema.max(2000),
   title: z.string().min(1).max(300),
   accessedAt: z.iso.datetime(),
+  /** Vault path of the transcript of a video or podcast source (`aom transcript`), when one was fetched. */
+  transcriptPath: z.string().max(400).optional(),
 });
 export type Citation = z.infer<typeof CitationSchema>;
 
@@ -47,7 +49,7 @@ export const isPublishRequest = (data: Record<string, unknown>): boolean => type
 
 export interface NoteFrontMatter {
   title?: string;
-  citations: Array<{ url: string; title?: string; accessedAt?: string }>;
+  citations: Array<{ url: string; title?: string; accessedAt?: string; transcriptPath?: string }>;
 }
 
 const FRONT = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
@@ -106,9 +108,10 @@ export function parseNoteFrontMatter(md: string): NoteFrontMatter | null {
       else if (/^https?:\/\//.test(unquote(rest))) current = { url: unquote(rest) };
       continue;
     }
-    const field = /^\s+(title|accessed|accessedAt):\s*(.+)$/.exec(line);
+    const field = /^\s+(title|accessed|accessedAt|transcript):\s*(.+)$/.exec(line);
     if (field && current) {
       if (field[1] === 'title') current.title = unquote(field[2] as string);
+      else if (field[1] === 'transcript') current.transcriptPath = unquote(field[2] as string);
       else current.accessedAt = unquote(field[2] as string);
     }
   }
@@ -131,8 +134,10 @@ export function renderNote(n: {
   if (n.cardRef) lines.push(`card: ${n.cardRef}`);
   if (n.subCategory) lines.push(`subCategory: ${q(n.subCategory)}`);
   lines.push(`published: ${n.published}`, 'citations:');
-  for (const c of n.citations)
+  for (const c of n.citations) {
     lines.push(`  - url: ${c.url}`, `    title: ${q(c.title)}`, `    accessed: ${c.accessedAt}`);
+    if (c.transcriptPath) lines.push(`    transcript: ${c.transcriptPath}`);
+  }
   lines.push('---', '', n.body.trim(), '');
   return lines.join('\n');
 }

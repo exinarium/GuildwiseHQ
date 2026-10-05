@@ -28,6 +28,7 @@ export const toDigestDto = (r: Row): DigestItemDto => ({
   source: r.source,
   publishedAt: iso(r.published_at),
   summary: r.summary,
+  transcript: r.transcript ?? null,
   verdict: r.verdict,
   verdictReason: r.verdict_reason,
   ratedAt: iso(r.rated_at),

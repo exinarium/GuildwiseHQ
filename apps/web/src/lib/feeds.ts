@@ -1,4 +1,4 @@
-import { FEED_FIELD_DEFAULTS, type FeedVerdict, SCHEDULE_PRESETS } from '@aom/shared';
+import { FEED_DEFAULT_MAX_ITEMS, FEED_FIELD_DEFAULTS, type FeedVerdict, SCHEDULE_PRESETS } from '@aom/shared';
 
 /** A readable name for a cron expression: the preset it equals, else the expression itself. */
 export function describeCron(cron: string): string {
@@ -25,10 +25,13 @@ export function parseSites(text: string): string[] {
 
 export interface FeedTemplateInput {
   title: string;
+  /** Short label. */
   topic: string;
+  /** Markdown: what the manager actually wants (optional but encouraged). */
+  description?: string;
   sites: string;
-  maxArticles: string;
-  maxVideos: string;
+  /** The best N items overall, whatever their kind. */
+  maxItems: string;
   windowHours?: string;
 }
 
@@ -37,21 +40,21 @@ const count = (s: string, fallback: number): number => {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 };
 
-/** The card template of a feed schedule from the form values (maximum per item kind, preferred sites, window). */
+/** The card template of a feed schedule from the form values (description, maximum items overall, preferred sites, window). */
 export function buildFeedTemplate(i: FeedTemplateInput) {
   const sites = parseSites(i.sites);
+  const description = (i.description ?? '').trim();
+  const maxItems = count(i.maxItems, FEED_DEFAULT_MAX_ITEMS);
   const windowHours = count(i.windowHours ?? '', FEED_FIELD_DEFAULTS.windowHours);
   return {
     title: i.title.trim(),
     cardType: 'feed',
     fields: {
       topic: i.topic.trim(),
+      ...(description ? { description } : {}),
       windowHours: windowHours > 0 ? windowHours : FEED_FIELD_DEFAULTS.windowHours,
       ...(sites.length ? { preferredSites: sites } : {}),
-      maxPerKind: {
-        article: count(i.maxArticles, FEED_FIELD_DEFAULTS.maxPerKind.article),
-        video: count(i.maxVideos, FEED_FIELD_DEFAULTS.maxPerKind.video),
-      },
+      maxItems: maxItems > 0 ? maxItems : FEED_DEFAULT_MAX_ITEMS,
     },
   };
 }
