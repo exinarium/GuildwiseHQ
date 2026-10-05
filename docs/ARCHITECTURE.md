@@ -176,6 +176,8 @@ Decision: projections update synchronously in the append transaction. A command'
 - Projectors must be deterministic functions of the event and prior projection state: they use `e.createdAt`, never `now()`, and never call external services.
 - `pnpm --filter @aom/server projections:rebuild` truncates every projection table (list in `projections/index.ts`) and replays all events in `seq` order in batches of 1000 within one transaction. Operational columns (lease expiry, `connected`, `last_seen_at`) are reset to safe values (leases recomputed as `claimed_at + 1h`).
 
+**Deleted projects and rebuild.** The event log is append-only and a project's events (its `project-`, `card-`, `thread-`, `shift-`... streams) are never purged. `ProjectDeleted` is a tombstone: its projector runs `deleteProjectRows()`, which deletes every row of the project in foreign-key order (cards and what hangs off them: transitions, handoffs, activity, dependencies, blockers, test runs, intake links, agent stats and review log, digest items, research publications, outbound drafts, shifts; threads and messages; desk items and project/card ledger entries; schedules, `feed_seen`, `transcripts`, repo requests, project repos and their `workstation_repos`, the project vault registration, members, the project row) and detaches rows that merely point at its cards (a parent/worktree reference from another project, a DevOps request's `card_id`, an intake's `mapped_project_id`). A rebuild replays the events in `seq` order, so the project's rows are recreated by its earlier events and removed again when the tombstone is reached: the end state equals the live state, and nothing is resurrected. Chosen over purging the streams because purging needs an exception to the append-only trigger (§3.5), leaves holes in `seq`/`stream_version` that subscribers and the optimistic-concurrency check do not expect, and loses the audit trail; the cost is that the deleted project's payloads (card titles, messages) remain in the `events` table, which is the accepted trade-off of an event-sourced audit log (the database *rows* the application reads are gone). Retired agents keep their `agents.project_id` as historical scope, so that foreign key was dropped (migration 1302); agents scoped to the deleted project are retired by the same append and wiped (`agent.wipe`). The vault folder is never touched. Covered by `apps/server/test/project-archive.test.ts` (including a rebuild after the delete).
+
 ### 3.4 Subscriptions
 
 `notifier.ts` holds one dedicated `pg.Client` with `LISTEN aom_events`. On each notification (and every 5 s as a safety poll) it reads `readAll(lastSeq, 500)` and fans out to in-process subscribers in order: browser gateway, runner gateway, dispatcher trigger, scheduler trigger. `lastSeq` starts at `max(seq)` on boot. v1 runs a single server instance; the design still works with two instances for browser fan-out because everything goes through NOTIFY (runner connections would need sticky routing; out of scope).
@@ -667,7 +669,9 @@ Heartbeats are not events.
 | `ProjectShareDeclined` | `{projectId, userId}` | status removed |
 | `ProjectMemberRemoved` | `{projectId, userId, inheritedAgentIds[], transferredCardIds[]}` | status removed; agents → manager_user_id = owner, status needs_rehome, workstation_id NULL; cards owner_user_id → owner (claims released via separate ClaimReleased events in same append) |
 | `ProjectMergePolicyChanged` | `{projectId, mergeLargeWithoutApproval, changedBy}` | `projects.merge_large_without_approval/_changed_by/_changed_at`; owner only (`PUT /api/projects/:id/merge-policy`); `mergeGate()` in `commands/finalize.ts` reads it for the manager's Finalize button and the BA's `aom finalize` |
-| `ProjectArchived` | `{projectId}` | status archived |
+| `ProjectArchived` | `{projectId, archivedBy?}` | status archived. Appended by `POST /api/projects/:id/archive` (any active member) together with, in one transaction: `ClaimReleased(manual)` + `CardCancelled{cause:'project_archived'}` + a system thread message for every open card (the runner gateway turns the release of a cancelled card into `shift.stop`), `ScheduleUpdated{enabled:false, nextFireAt:null}` for every enabled schedule, `DeskItemResolved{dismissed}` for every open desk item of the project, and a `worktree.remove` runner command (branch kept) per distinct worktree of those cards. Agents are not touched: the dispatcher, scheduler, intake mapping and hiring already skip a project whose status is not `active` |
+| `ProjectRestored` | `{projectId, restoredBy?}` | status active (`POST /api/projects/:id/restore`, any active member). Cards closed by the archive stay closed, schedules stay disabled; the manager re-enables what they want |
+| `ProjectDeleted` | `{projectId, key, name, deletedBy}` | `deleteProjectRows()` removes every row of the project (see "Permanent delete" below). Only for an archived project, only the owner, `POST /api/projects/:id/delete {confirmKey}` where `confirmKey` must equal the project key |
 
 #### Cards (`events/card.ts`) — stream `card-<id>`, audience `project`
 
@@ -1456,7 +1460,9 @@ Admins get the administration view only; being admin grants no visibility into o
 | Admin: invite / resend / revoke, change role, deactivate/reactivate user, list users, unlink any workstation | admins |
 | Pair / rename / unlink own workstation; set DevOps access | the workstation's user |
 | Create project | any user (in own org) |
-| Update project, add/remove repos, share/remove members, archive, register project vault | project owner |
+| Update project, add/remove repos, share/remove members, register project vault | project owner |
+| Archive and restore a project | any active project member |
+| Delete an archived project permanently | project owner (type-the-key confirmation) |
 | Accept/decline project share | invited user |
 | View board/cards/threads/desk of a project | active project members (owner + managers) |
 | Create card in project | any project member (becomes card owner) |
@@ -1516,7 +1522,8 @@ Errors: `{error: {code, message, details?}}` with 400 validation, 401 unauthenti
 | `GET /api/workstations` · `PATCH /api/workstations/:id` `{name}` · `POST /api/workstations/:id/unlink` | own workstations (incl. connected, runtimes, repos) | M1 |
 | `POST /api/workstations/pairing-codes` | → `{code, expiresAt}` | M1 |
 | `POST /api/runner/pair` `{code,name,platform,hostname,runnerVersion}` | unauthenticated; → `{workstationId, runnerToken}` | M1 |
-| `GET /api/projects` · `POST /api/projects` · `GET /api/projects/:id` · `PATCH /api/projects/:id` | | M1 |
+| `GET /api/projects` (`?status=active\|archived\|all`, default `active`: archived projects never appear unless asked for) · `POST /api/projects` · `GET /api/projects/:id` (also for an archived project, so shared members see the state) · `PATCH /api/projects/:id` | | M1 |
+| `GET /api/projects/:id/impact` (open shifts, open cards, enabled schedules, open desk items: the archive dialog) · `POST /api/projects/:id/archive` · `POST /api/projects/:id/restore` · `POST /api/projects/:id/delete` `{confirmKey}` | archive lifecycle | — |
 | `POST /api/projects/:id/repos` `{name, remoteUrl, workingBranch?}` · `DELETE /api/projects/:id/repos/:repoId` | | M1 |
 | `POST /api/projects/:id/members` `{email}` · `POST /api/projects/:id/members/accept` · `POST /api/projects/:id/members/decline` · `DELETE /api/projects/:id/members/:userId` | sharing | M3 |
 | `GET /api/board?projectId=` | columns with card summaries (ref, title, assignee, age, risk tier, blocked, rework round) | M1 |

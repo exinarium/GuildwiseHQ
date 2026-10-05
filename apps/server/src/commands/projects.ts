@@ -4,16 +4,20 @@ import {
   type CreateProjectRequest,
   normalizeRemoteUrl,
   type PatchProjectRequest,
+  type ProjectImpact,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import { resolveWorkflow } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
-import { one, type Row } from '../db/sql.ts';
+import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
-import { assertRemoteUrl, projectScope, userActor } from './common.ts';
+import type { AppendInput } from '../eventstore/types.ts';
+import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { releaseEvents } from './cards.ts';
+import { assertRemoteUrl, cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 
 export async function createProject(
   ctx: Ctx,
@@ -184,5 +188,193 @@ export async function removeRepo(ctx: Ctx, user: AuthSession['user'], projectId:
       ],
       { tx },
     );
+  });
+}
+
+// --------------------------------------------------------------------------- archive, restore, delete
+
+/** What archiving stops: shown in the confirmation dialog (any member may ask). */
+export async function projectImpact(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+): Promise<ProjectImpact> {
+  await loadVisibleProject(ctx.pool, user.id, projectId);
+  const n = async (sql: string) => Number((await one(ctx.pool, sql, [projectId]))?.n ?? 0);
+  return {
+    activeShifts: await n(
+      `SELECT count(*) AS n FROM shifts s JOIN cards c ON c.id = s.card_id
+        WHERE c.project_id=$1 AND s.status <> 'ended'`,
+    ),
+    openCards: await n(
+      `SELECT count(*) AS n FROM cards WHERE project_id=$1 AND status NOT IN ('done','cancelled')`,
+    ),
+    schedules: await n(`SELECT count(*) AS n FROM schedules WHERE project_id=$1 AND enabled`),
+    openDeskItems: await n(`SELECT count(*) AS n FROM desk_items WHERE project_id=$1 AND status='open'`),
+  };
+}
+
+/**
+ * Archives a project (any active member). One append: `ProjectArchived`, then for each open card a claim release (the
+ * runner gateway stops the shift on it) and `CardCancelled{cause:'project_archived'}`, `ScheduleUpdated{enabled:false}`
+ * for each enabled schedule and `DeskItemResolved{dismissed}` for each open desk item. The cards' worktrees are removed
+ * with `worktree.remove` (the branches are kept). Agents are not touched: the dispatcher simply finds no work for them.
+ */
+export async function archiveProject(ctx: Ctx, user: AuthSession['user'], projectId: string): Promise<void> {
+  const workstations = new Set<string>();
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    if (p.status === 'archived') throw conflict('already_archived', 'this project is already archived');
+    const scope = projectScope(p.org_id, projectId);
+    const actor = userActor(user.id);
+    const events: AppendInput[] = [
+      {
+        streamId: streamId.project(projectId),
+        event: { type: 'ProjectArchived', payload: { projectId, archivedBy: user.id } },
+        actor,
+        scope,
+      },
+    ];
+    const cards = await rows(
+      tx,
+      `SELECT * FROM cards WHERE project_id=$1 AND status NOT IN ('done','cancelled') ORDER BY number FOR UPDATE`,
+      [projectId],
+    );
+    const removed = new Set<string>();
+    for (const card of cards) {
+      events.push(
+        ...releaseEvents(card, user.id, 'manual'),
+        {
+          streamId: streamId.card(card.id),
+          event: {
+            type: 'CardCancelled',
+            payload: { cardId: card.id, reason: 'Project archived', cause: 'project_archived' },
+          },
+          actor,
+          scope,
+        },
+        cardMessage(card, { kind: 'system' }, 'system', `Closed: ${user.displayName} archived the project.`),
+      );
+      if (card.worktree_path && card.home_workstation_id) {
+        const key = `${card.home_workstation_id}:${card.worktree_path}`;
+        if (!removed.has(key)) {
+          removed.add(key);
+          workstations.add(card.home_workstation_id);
+          await enqueueRunnerCommand(tx, card.home_workstation_id, 'worktree.remove', {
+            repoId: card.repo_id ?? undefined,
+            path: card.worktree_path,
+            branchName: card.branch_name ?? undefined,
+            deleteBranch: false,
+          });
+        }
+      }
+    }
+    for (const s of await rows(tx, 'SELECT * FROM schedules WHERE project_id=$1 AND enabled FOR UPDATE', [
+      projectId,
+    ])) {
+      events.push({
+        streamId: streamId.schedule(s.id),
+        event: {
+          type: 'ScheduleUpdated',
+          payload: {
+            scheduleId: s.id,
+            projectId,
+            name: s.name,
+            kind: s.kind,
+            cron: s.cron,
+            timezone: s.timezone,
+            cardTemplate: s.card_template,
+            enabled: false,
+            nextFireAt: null,
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope,
+      });
+    }
+    for (const d of await rows(tx, `SELECT id FROM desk_items WHERE project_id=$1 AND status='open'`, [
+      projectId,
+    ])) {
+      events.push({
+        streamId: streamId.desk(d.id),
+        event: {
+          type: 'DeskItemResolved',
+          payload: {
+            deskItemId: d.id,
+            resolution: 'dismissed',
+            note: 'The project was archived.',
+            by: { kind: 'user', userId: user.id },
+          },
+        },
+        actor,
+        scope,
+      });
+    }
+    await ctx.store.append(events, { tx });
+  });
+  for (const ws of workstations) await ctx.services.gateway.deliverPending(ws);
+}
+
+/** Restores an archived project (any active member). Closed cards stay closed; schedules stay disabled. */
+export async function restoreProject(ctx: Ctx, user: AuthSession['user'], projectId: string): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    if (p.status !== 'archived') throw conflict('not_archived', 'this project is not archived');
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: { type: 'ProjectRestored', payload: { projectId, restoredBy: user.id } },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
+/**
+ * Deletes an archived project permanently (owner only; the caller types the project key). Appends `ProjectDeleted`;
+ * its projector removes every row of the project. Agents scoped to the project are retired (with `agent.wipe`): their
+ * scope no longer exists. The vault folder is never touched.
+ */
+export async function deleteProject(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  confirmKey: string,
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await ownedProject(tx, user.id, projectId);
+    if (p.status !== 'archived')
+      throw conflict('not_archived', 'archive the project first: only an archived project can be deleted');
+    if (confirmKey !== p.key) throw badRequest('key_mismatch', 'type the project key to confirm');
+    const scope = projectScope(p.org_id, projectId);
+    const events: AppendInput[] = [];
+    const agents = await rows(
+      tx,
+      `SELECT * FROM agents WHERE project_id=$1 AND status <> 'retired' AND NOT is_devops FOR UPDATE`,
+      [projectId],
+    );
+    for (const a of agents)
+      events.push({
+        streamId: streamId.agent(a.id),
+        event: { type: 'AgentRetired', payload: { agentId: a.id, by: user.id, releasedCardIds: [] } },
+        actor: userActor(user.id),
+        scope,
+      });
+    events.push({
+      streamId: streamId.project(projectId),
+      event: {
+        type: 'ProjectDeleted',
+        payload: { projectId, key: p.key, name: p.name, deletedBy: user.id },
+      },
+      actor: userActor(user.id),
+      scope,
+    });
+    await ctx.store.append(events, { tx });
+    for (const a of agents)
+      if (a.workstation_id) await enqueueRunnerCommand(tx, a.workstation_id, 'agent.wipe', { agentId: a.id });
   });
 }

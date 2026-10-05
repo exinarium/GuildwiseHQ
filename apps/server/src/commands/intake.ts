@@ -653,7 +653,7 @@ export async function mappingAnsweredEvents(
   const project = await one(
     tx,
     `SELECT p.key, p.name FROM projects p JOIN project_members m ON m.project_id = p.id AND m.user_id = $2 AND m.status = 'active'
-      WHERE p.id = $1`,
+      WHERE p.id = $1 AND p.status = 'active'`,
     [projectId, user.id],
   );
   if (!intake || !project) return null;

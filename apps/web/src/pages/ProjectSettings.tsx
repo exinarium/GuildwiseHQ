@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router';
 import { useAddRepo, usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
 import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
+import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
 import {
   Badge,
   Button,
@@ -86,7 +87,7 @@ export function ProjectSettings() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
       <PageHeader
-        title={`${project?.key} settings`}
+        title={`${project?.key} settings${project?.status === 'archived' ? ' (archived)' : ''}`}
         actions={
           <Link to={`/p/${project?.key}/board`} className="text-sm underline">
             Back to board
@@ -188,6 +189,7 @@ export function ProjectSettings() {
         <MergePolicyPanel projectId={id} project={project} history={q.data.mergePolicyHistory ?? []} />
       )}
       <MembersPanel projectId={id} members={members} isOwner={project?.myRole === 'owner'} />
+      {project && <ProjectDangerZone project={project} />}
     </div>
   );
 }

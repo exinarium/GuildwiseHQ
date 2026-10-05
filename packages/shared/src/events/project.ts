@@ -61,5 +61,21 @@ export const projectEvents = [
     'ProjectMergePolicyChanged',
     z.object({ projectId: Id, mergeLargeWithoutApproval: z.boolean(), changedBy: Id }),
   ),
-  defineEvent('ProjectArchived', z.object({ projectId: Id })),
+  /**
+   * A member archived the project: it disappears from boards, pickers, the dispatcher, schedules, intake mapping and the
+   * desk; history, cards and the vault folder are kept. The same append closes the open cards (`CardCancelled` with
+   * cause `project_archived`), disables the schedules and dismisses the open desk items.
+   */
+  defineEvent('ProjectArchived', z.object({ projectId: Id, archivedBy: Id.optional() })),
+  /** A member brought an archived project back. Closed cards stay closed and schedules stay disabled. */
+  defineEvent('ProjectRestored', z.object({ projectId: Id, restoredBy: Id.optional() })),
+  /**
+   * The project owner deleted an archived project permanently. The projector removes every row of the project; the
+   * event (with the key and name, for the audit trail) and the project's earlier events stay in the append-only log,
+   * and a projection rebuild replays this tombstone after them so the project is not resurrected.
+   */
+  defineEvent(
+    'ProjectDeleted',
+    z.object({ projectId: Id, key: z.string(), name: z.string(), deletedBy: Id }),
+  ),
 ] as const;

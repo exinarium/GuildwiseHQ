@@ -121,6 +121,21 @@ When you remove a member, their agents are re-homed to your workstation and acco
 
 Only the project owner can add standing orders (also from a card or when answering a question); a guest manager can answer questions with decisions and requirements. Organization-wide standing orders can only come from the organization owner. An agent's permissions can be narrowed by its hiring manager but never widened beyond its role (a reviewer never commits); widening other limits (web, extra tools, risk tiers) is for the organization owner.
 
+### Archiving, restoring and deleting a project
+
+**Archive** a project you no longer use: **Projects** > **Settings** > **Danger zone** > **Archive project**. The dialog lists what will stop before you confirm (active shifts, open cards, schedules, open desk items). On confirm:
+
+- running shifts are cancelled and their worktrees removed (the branches are kept);
+- open cards are closed as *archived* (they show as cancelled with the reason "Project archived", so you can tell them from cards you cancelled yourself);
+- schedules are switched off and open desk items for the project are dismissed;
+- the project disappears from boards, project pickers, the Schedules and Desk pages, and from intake mapping, and the dispatcher stops giving its work to agents.
+
+Agents hired for the project are not fired; they simply stop getting its work. Cards, history and the vault folder are kept. Any member of the project (owner or manager) can archive and restore it, and members of a shared project see it as archived.
+
+**Restore**: **Projects** > **Archived** > **Restore** (or **Settings** > **Danger zone** > **Restore project**). The project is back on the boards and pickers and takes work again. Cards that the archive closed stay closed and schedules stay off; create new cards and switch schedules back on as needed.
+
+**Delete permanently**: only the project owner, and only for an archived project. **Projects** > **Archived** > **Delete permanently**, then type the project key to confirm. The project's cards, threads and messages, schedules, desk items, repositories, members, digests, transcripts and research notes are removed from the database and cannot be recovered. The audit log keeps a record that the project was deleted, and the vault folder is never touched. Agents that were hired for that project only are let go. The project key becomes free for a new project.
+
 ### Decision policy
 
 By default, only the card's owner (who created it) can answer questions and approve decisions on it. To let any manager answer:

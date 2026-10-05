@@ -157,7 +157,42 @@ export const handlers = [
   http.post(`${A}/workstations/:id/unlink`, ({ params }) => unlink(String(params.id))),
 
   // projects
-  http.get(`${A}/projects`, () => HttpResponse.json({ projects: db.projects })),
+  http.get(`${A}/projects`, ({ request }) => {
+    const status = new URL(request.url).searchParams.get('status') ?? 'active';
+    return HttpResponse.json({
+      projects: db.projects.filter((p) => status === 'all' || p.status === status),
+    });
+  }),
+  http.get(`${A}/projects/:id/impact`, ({ params }) => {
+    const id = String(params.id);
+    if (!db.projects.some((p) => p.id === id)) return err(404, 'not_found', 'Project not found');
+    const cards = db.cards.filter((c) => c.projectId === id && !['done', 'cancelled'].includes(c.status));
+    return HttpResponse.json({ activeShifts: 0, openCards: cards.length, schedules: 0, openDeskItems: 0 });
+  }),
+  http.post(`${A}/projects/:id/archive`, ({ params }) => {
+    const project = db.projects.find((p) => p.id === params.id);
+    if (!project) return err(404, 'not_found', 'Project not found');
+    project.status = 'archived';
+    emit('ProjectArchived', `project-${project.id}`, project.id);
+    return HttpResponse.json({ project, repos: [], members: [], mergePolicyHistory: [] });
+  }),
+  http.post(`${A}/projects/:id/restore`, ({ params }) => {
+    const project = db.projects.find((p) => p.id === params.id);
+    if (!project) return err(404, 'not_found', 'Project not found');
+    project.status = 'active';
+    emit('ProjectRestored', `project-${project.id}`, project.id);
+    return HttpResponse.json({ project, repos: [], members: [], mergePolicyHistory: [] });
+  }),
+  http.post(`${A}/projects/:id/delete`, async ({ params, request }) => {
+    const project = db.projects.find((p) => p.id === params.id);
+    const b = (await request.json()) as { confirmKey?: string };
+    if (!project) return err(404, 'not_found', 'Project not found');
+    if (project.status !== 'archived') return err(409, 'not_archived', 'Archive the project first');
+    if (b.confirmKey !== project.key) return err(400, 'key_mismatch', 'Type the project key to confirm');
+    db.projects.splice(db.projects.indexOf(project), 1);
+    emit('ProjectDeleted', `project-${project.id}`, project.id);
+    return HttpResponse.json({ ok: true });
+  }),
   http.post(`${A}/projects`, async ({ request }) => {
     const b = await body(request, CreateProjectRequestSchema);
     if (!b) return err(400, 'validation', 'Invalid request');

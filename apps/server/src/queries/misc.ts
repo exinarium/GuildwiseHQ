@@ -43,13 +43,19 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
   };
 }
 
-export async function listProjects(ctx: Ctx, userId: string, department?: string): Promise<ProjectDto[]> {
+export async function listProjects(
+  ctx: Ctx,
+  userId: string,
+  department?: string,
+  status: 'active' | 'archived' | 'all' = 'active',
+): Promise<ProjectDto[]> {
   const r = (
     await rows(
       ctx.pool,
       `SELECT p.*, pm.role AS my_role, ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL} FROM projects p JOIN project_members pm
-         ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active' ORDER BY p.created_at`,
-      [userId],
+         ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
+        WHERE ($2 = 'all' OR p.status = $2) ORDER BY p.created_at`,
+      [userId, status],
     )
   ).filter((p) => !department || p.department === department);
   return r.map((p) => toProjectDto(p, p.my_role));

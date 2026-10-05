@@ -1,6 +1,7 @@
 import {
   AddRepoRequestSchema,
   CreateProjectRequestSchema,
+  DeleteProjectRequestSchema,
   IdParamsSchema,
   PatchProjectRequestSchema,
   ProjectsQuerySchema,
@@ -9,7 +10,17 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
-import { addRepo, createProject, removeRepo, setMergePolicy, updateProject } from '../commands/projects.ts';
+import {
+  addRepo,
+  archiveProject,
+  createProject,
+  deleteProject,
+  projectImpact,
+  removeRepo,
+  restoreProject,
+  setMergePolicy,
+  updateProject,
+} from '../commands/projects.ts';
 import type { Ctx } from '../context.ts';
 import { getProjectDetail, listProjects } from '../queries/misc.ts';
 import { typed } from './util.ts';
@@ -20,7 +31,7 @@ export function projectRoutes(ctx: Ctx) {
 
     app.get('/api/projects', { schema: { querystring: ProjectsQuerySchema } }, async (req) => {
       const s = await requireUser(ctx, req);
-      return { projects: await listProjects(ctx, s.user.id, req.query.department) };
+      return { projects: await listProjects(ctx, s.user.id, req.query.department, req.query.status) };
     });
 
     app.post('/api/projects', { schema: { body: CreateProjectRequestSchema } }, async (req, reply) => {
@@ -42,6 +53,33 @@ export function projectRoutes(ctx: Ctx) {
         const s = await requireUser(ctx, req);
         await updateProject(ctx, s.user, req.params.id, req.body);
         return getProjectDetail(ctx, s.user.id, req.params.id);
+      },
+    );
+
+    app.get('/api/projects/:id/impact', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return projectImpact(ctx, s.user, req.params.id);
+    });
+
+    app.post('/api/projects/:id/archive', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await archiveProject(ctx, s.user, req.params.id);
+      return getProjectDetail(ctx, s.user.id, req.params.id);
+    });
+
+    app.post('/api/projects/:id/restore', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await restoreProject(ctx, s.user, req.params.id);
+      return getProjectDetail(ctx, s.user.id, req.params.id);
+    });
+
+    app.post(
+      '/api/projects/:id/delete',
+      { schema: { params: IdParamsSchema, body: DeleteProjectRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await deleteProject(ctx, s.user, req.params.id, req.body.confirmKey);
+        return { ok: true };
       },
     );
 

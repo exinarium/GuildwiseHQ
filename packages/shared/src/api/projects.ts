@@ -50,7 +50,22 @@ export const ProjectMemberDtoSchema = z.object({
   status: z.enum(['invited', 'active', 'removed']),
 });
 
-export const ProjectsQuerySchema = z.object({ department: z.string().optional() });
+/** `status` defaults to `active`: archived projects never appear unless asked for (`archived`, or `all`). */
+export const ProjectsQuerySchema = z.object({
+  department: z.string().optional(),
+  status: z.enum(['active', 'archived', 'all']).optional(),
+});
+/** What archiving a project stops (shown in the confirmation dialog). */
+export const ProjectImpactSchema = z.object({
+  activeShifts: z.number().int(),
+  openCards: z.number().int(),
+  schedules: z.number().int(),
+  openDeskItems: z.number().int(),
+});
+export type ProjectImpact = z.infer<typeof ProjectImpactSchema>;
+/** Permanent delete: the caller types the project key, the server checks it matches. */
+export const DeleteProjectRequestSchema = z.object({ confirmKey: z.string().min(1) });
+export type DeleteProjectRequest = z.infer<typeof DeleteProjectRequestSchema>;
 export const ProjectsResponseSchema = z.object({ projects: z.array(ProjectDtoSchema) });
 export const ProjectDetailResponseSchema = z.object({
   project: ProjectDtoSchema,

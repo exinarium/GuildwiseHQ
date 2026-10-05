@@ -366,7 +366,7 @@ export async function commentOnCard(ctx: Ctx, user: AuthSession['user'], idOrRef
   });
 }
 
-function releaseEvents(card: Row, actorUserId: string, reason: 'manual'): AppendInput[] {
+export function releaseEvents(card: Row, actorUserId: string, reason: 'manual'): AppendInput[] {
   if (!card.claim_id) return [];
   return [
     {

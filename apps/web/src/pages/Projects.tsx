@@ -1,8 +1,15 @@
+import type { ProjectDto } from '@aom/shared';
 import { CreateProjectRequestSchema, workflowUsesRepos } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
 import { useWorkflows } from '../api/queries/agents.ts';
-import { useCreateProject, useProjects } from '../api/queries/projects.ts';
+import {
+  useArchivedProjects,
+  useCreateProject,
+  useProjects,
+  useRestoreProject,
+} from '../api/queries/projects.ts';
+import { DeleteProjectDialog } from '../components/DeleteProjectDialog.tsx';
 import { ProjectInvitations } from '../components/ProjectInvitations.tsx';
 import {
   Badge,
@@ -19,6 +26,8 @@ import { departmentsOf, inDepartment } from '../lib/designer.ts';
 
 export function Projects() {
   const projects = useProjects();
+  const archived = useArchivedProjects();
+  const [showArchived, setShowArchived] = useState(false);
   const [open, setOpen] = useState(false);
   const [department, setDepartment] = useState('');
   const departments = departmentsOf(projects.data ?? []);
@@ -46,14 +55,35 @@ export function Projects() {
           </Select>
         </div>
       )}
-      {projects.isPending && <Spinner />}
-      {projects.isError && <ErrorBox error={projects.error} />}
-      {projects.data?.length === 0 && (
+      <div className="mb-3 flex gap-1" role="tablist" aria-label="Project filter">
+        <Button
+          role="tab"
+          aria-selected={!showArchived}
+          variant={showArchived ? 'ghost' : 'secondary'}
+          data-testid="filter-active"
+          onClick={() => setShowArchived(false)}
+        >
+          Active
+        </Button>
+        <Button
+          role="tab"
+          aria-selected={showArchived}
+          variant={showArchived ? 'secondary' : 'ghost'}
+          data-testid="filter-archived"
+          onClick={() => setShowArchived(true)}
+        >
+          Archived{archived.data && archived.data.length > 0 ? ` (${archived.data.length})` : ''}
+        </Button>
+      </div>
+      {showArchived && <ArchivedProjects />}
+      {!showArchived && projects.isPending && <Spinner />}
+      {!showArchived && projects.isError && <ErrorBox error={projects.error} />}
+      {!showArchived && projects.data?.length === 0 && (
         <Panel>
           <p className="text-sm text-zinc-500">No projects yet. Create one to start a board.</p>
         </Panel>
       )}
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-2" hidden={showArchived}>
         {shown.map((p) => (
           <li key={p.id}>
             <Panel className="flex flex-wrap items-center justify-between gap-2">
@@ -87,6 +117,75 @@ export function Projects() {
       </ul>
       <NewProjectDialog open={open} onOpenChange={setOpen} />
     </div>
+  );
+}
+
+/** Archived projects: Restore for any member, "Delete permanently" (type the key) for the project owner. */
+function ArchivedProjects() {
+  const archived = useArchivedProjects();
+  const restore = useRestoreProject();
+  const [deleting, setDeleting] = useState<ProjectDto | null>(null);
+  return (
+    <section aria-label="Archived projects" data-testid="archived-projects">
+      {archived.isPending && <Spinner />}
+      {archived.isError && <ErrorBox error={archived.error} />}
+      {archived.data?.length === 0 && (
+        <Panel>
+          <p className="text-sm text-zinc-500" data-testid="archived-empty">
+            No archived projects.
+          </p>
+        </Panel>
+      )}
+      <ErrorBox error={restore.error} />
+      <ul className="flex flex-col gap-2">
+        {archived.data?.map((p) => (
+          <li key={p.id} data-testid={`archived-${p.key}`}>
+            <Panel className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="font-medium">
+                  <span className="mr-2 font-mono text-xs text-zinc-500">{p.key}</span>
+                  {p.name}
+                </p>
+                <p className="mt-0.5 flex gap-1.5 text-xs text-zinc-500">
+                  <Badge tone="amber">Archived</Badge>
+                  <Badge tone="blue">{p.myRole}</Badge>
+                </p>
+              </div>
+              <div className="flex gap-2 text-sm">
+                <Button
+                  variant="primary"
+                  aria-label={`Restore ${p.key}`}
+                  disabled={restore.isPending}
+                  data-testid={`restore-${p.key}`}
+                  onClick={() => restore.mutate(p.id)}
+                >
+                  Restore
+                </Button>
+                {p.myRole === 'owner' && (
+                  <Button
+                    variant="danger"
+                    aria-label={`Delete ${p.key} permanently`}
+                    data-testid={`delete-${p.key}`}
+                    onClick={() => setDeleting(p)}
+                  >
+                    Delete permanently
+                  </Button>
+                )}
+              </div>
+            </Panel>
+          </li>
+        ))}
+      </ul>
+      {deleting && (
+        <DeleteProjectDialog
+          project={deleting}
+          open
+          onOpenChange={(o) => {
+            if (!o) setDeleting(null);
+          }}
+        />
+      )}
+    </section>
   );
 }
 

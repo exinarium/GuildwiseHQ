@@ -84,7 +84,7 @@ export async function listSchedules(
 ): Promise<ScheduleDto[]> {
   const r = await rows(
     db,
-    `${SELECT} WHERE ${VISIBLE} AND ($2::uuid IS NULL OR s.project_id = $2) ORDER BY p.key, s.created_at, s.id`,
+    `${SELECT} WHERE ${VISIBLE} AND p.status = 'active' AND ($2::uuid IS NULL OR s.project_id = $2) ORDER BY p.key, s.created_at, s.id`,
     [userId, projectId ?? null],
   );
   return r.map(toDto);

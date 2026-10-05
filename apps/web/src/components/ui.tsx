@@ -254,9 +254,18 @@ export function PageHeader({ title, actions, sub }: { title: string; sub?: React
   );
 }
 
-export function Panel({ children, className }: { children: ReactNode; className?: string }) {
+export function Panel({
+  children,
+  className,
+  'data-testid': testId,
+}: {
+  children: ReactNode;
+  className?: string;
+  'data-testid'?: string;
+}) {
   return (
     <section
+      data-testid={testId}
       className={cx(
         'rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900',
         className,
