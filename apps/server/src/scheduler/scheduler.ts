@@ -19,11 +19,12 @@ export class Scheduler {
   start(): void {
     this.timer = setInterval(() => {
       void this.run().catch(() => {});
-      void this.runHygiene().catch(() => {});
+      if (this.ctx.config.hygieneSchedule) void this.runHygiene().catch(() => {});
     }, TICK_MS);
     this.timer.unref();
     void this.run().catch((err) => this.ctx.log.error({ err }, 'scheduler failed'));
-    void this.runHygiene().catch((err) => this.ctx.log.error({ err }, 'hygiene scheduler failed'));
+    if (this.ctx.config.hygieneSchedule)
+      void this.runHygiene().catch((err) => this.ctx.log.error({ err }, 'hygiene scheduler failed'));
   }
 
   /** The workstations' repository hygiene jobs that are due (their own cadence, default daily). Returns the request ids. */

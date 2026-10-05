@@ -305,7 +305,7 @@ export async function workingBranchQuestionEvents(
     {
       id: WORKING_BRANCH_OTHER_OPTION,
       label: 'Another branch',
-      description: 'Type the branch name in the answer.',
+      description: 'Name it when you answer.',
     },
   ];
   const uncommitted = q.uncommitted ?? [];

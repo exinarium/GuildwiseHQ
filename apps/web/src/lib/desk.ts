@@ -82,6 +82,7 @@ const SUBKIND_LABEL: Record<string, string> = {
   ba_report: 'BA report',
   floor_report: 'Floor report',
   loop_backoff: 'Card keeps failing',
+  working_branch: 'Working branch',
 };
 
 const titleCase = (raw: string) => {

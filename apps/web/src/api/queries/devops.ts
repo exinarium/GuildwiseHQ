@@ -5,9 +5,10 @@ import {
   DevOpsRequestsResponseSchema,
   type PatchDevOpsAccessRequest,
   type ResolveDevOpsApprovalRequest,
+  type RunHygieneResponse,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { get, patch, post, qs } from '../client.ts';
+import { get, patch, post, put, qs } from '../client.ts';
 
 export function useDevOpsRequests(workstationId?: string) {
   return useQuery({
@@ -61,5 +62,28 @@ export function useResetAgent() {
   return useMutation({
     mutationFn: (agentId: string) => post(`/agents/${agentId}/reset`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+  });
+}
+
+/** Repository hygiene (docs/design/phases.md addendum): the cadence of the scheduled job. */
+export function useSetHygieneInterval() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { workstationId: string; intervalHours: number }) =>
+      put(`/workstations/${v.workstationId}/hygiene`, { intervalHours: v.intervalHours }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['workstations'] }),
+  });
+}
+
+/** "Run hygiene now". */
+export function useRunHygiene() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (workstationId: string) =>
+      post<RunHygieneResponse>(`/workstations/${workstationId}/hygiene/run`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['devops'] });
+      qc.invalidateQueries({ queryKey: ['workstations'] });
+    },
   });
 }

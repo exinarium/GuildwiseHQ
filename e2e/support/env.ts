@@ -94,3 +94,10 @@ export const REPORTER = {
   name: 'E2E Reporter',
   password: 'reporter-password-12345',
 };
+
+/** Repository hygiene spec (docs/design/phases.md addendum): own user, own runner (mock), project HYG on its own repo `notes-app`. */
+export const HYGIENER = {
+  email: 'hygiener@e2e.test',
+  name: 'E2E Hygiener',
+  password: 'hygiener-password-12345',
+};

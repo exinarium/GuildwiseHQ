@@ -23,6 +23,7 @@ const EnvSchema = z.object({
   AOM_ALLOW_LOCAL_REMOTES: bool(false),
   AOM_MOCK_UI: bool(false),
   AOM_REPORTER_SECONDS: z.coerce.number().int().min(1).max(3600).default(60),
+  AOM_HYGIENE_SCHEDULE: bool(true),
   AOM_MAX_SHIFTS_PER_WORKSTATION: z.coerce.number().int().min(1).max(256).default(16),
   LOG_LEVEL: z.string().default('info'),
 });
@@ -46,6 +47,8 @@ export interface Config {
   /** Ceiling for a workstation's `maxConcurrentShifts` (the runner's own setting, default 4, is what applies). */
   /** How often the reporter sweeps for signals, expired triage holds and the daily floor report (docs/design/phases.md B4). */
   reporterSeconds: number;
+  /** Run the workstations' scheduled repository hygiene (each workstation's own cadence). "Run hygiene now" always works. */
+  hygieneSchedule: boolean;
   maxShiftsPerWorkstation: number;
   logLevel: string;
   /** Cookie `Secure` flag: true when the public origin is https. */
@@ -70,6 +73,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     allowLocalRemotes: e.AOM_ALLOW_LOCAL_REMOTES,
     mockUi: e.AOM_MOCK_UI,
     reporterSeconds: e.AOM_REPORTER_SECONDS,
+    hygieneSchedule: e.AOM_HYGIENE_SCHEDULE,
     maxShiftsPerWorkstation: e.AOM_MAX_SHIFTS_PER_WORKSTATION,
     logLevel: e.LOG_LEVEL,
     secureCookies: publicOrigin.startsWith('https://'),

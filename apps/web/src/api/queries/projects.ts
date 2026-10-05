@@ -128,3 +128,16 @@ export function useRemoveRepo(projectId: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   });
 }
+
+/** The owner confirms or changes a repository's working branch. */
+export function useSetWorkingBranch(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { repoId: string; branch: string }) =>
+      put(`/projects/${projectId}/repos/${v.repoId}/working-branch`, { branch: v.branch }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', projectId] });
+      qc.invalidateQueries({ queryKey: ['desk'] });
+    },
+  });
+}

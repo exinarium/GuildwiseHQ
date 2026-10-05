@@ -82,6 +82,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       'outboxer@e2e.test',
       'phaser@e2e.test',
       'reporter@e2e.test',
+      'hygiener@e2e.test',
     ].map(deleteMailFor),
   );
 
@@ -102,6 +103,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_MERGE_CHECK_SECONDS: '4',
     // BA reporter: sweep for signals, expired holds and the daily report every few seconds
     AOM_REPORTER_SECONDS: '3',
+    // repository hygiene runs only when a spec asks ("Run hygiene now"): the specs move the clock by days
+    AOM_HYGIENE_SCHEDULE: 'false',
     LOG_LEVEL: 'info',
   };
   sh(

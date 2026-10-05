@@ -6,16 +6,8 @@ import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
 import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
 import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
-import {
-  Badge,
-  Button,
-  ErrorBox,
-  PageHeader,
-  Panel,
-  Spinner,
-  TextArea,
-  TextInput,
-} from '../components/ui.tsx';
+import { Button, ErrorBox, PageHeader, Panel, Spinner, TextArea, TextInput } from '../components/ui.tsx';
+import { WorkingBranchControl } from '../components/WorkingBranchControl.tsx';
 import { useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 
 const lines = (s: string) =>
@@ -138,19 +130,23 @@ export function ProjectSettings() {
           )}
           <ul className="mb-3 flex flex-col gap-1.5" data-testid="repos">
             {activeRepos.map((r) => (
-              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span>
-                  <span className="font-medium">{r.name}</span>{' '}
-                  <span className="font-mono text-xs text-zinc-500 break-all">{r.remoteUrl}</span>{' '}
-                  {r.workingBranch && <Badge>{r.workingBranch}</Badge>}
-                </span>
-                <Button
-                  variant="ghost"
-                  aria-label={`Remove repository ${r.name}`}
-                  onClick={() => removeRepo.mutate(r.id)}
-                >
-                  Remove
-                </Button>
+              <li key={r.id} className="flex flex-col text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    <span className="font-medium">{r.name}</span>{' '}
+                    <span className="font-mono text-xs text-zinc-500 break-all">{r.remoteUrl}</span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    aria-label={`Remove repository ${r.name}`}
+                    onClick={() => removeRepo.mutate(r.id)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+                {traits.usesRepos && (
+                  <WorkingBranchControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
+                )}
               </li>
             ))}
             {activeRepos.length === 0 && <li className="text-sm text-zinc-500">No repositories yet.</li>}

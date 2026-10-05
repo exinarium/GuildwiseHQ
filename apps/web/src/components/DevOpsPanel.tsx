@@ -1,4 +1,9 @@
-import type { DevOpsRequestDto, WorkstationDto } from '@aom/shared';
+import {
+  type DevOpsRequestDto,
+  HYGIENE_CADENCES_HOURS,
+  hygieneCadenceLabel,
+  type WorkstationDto,
+} from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import {
   useCreateDevOpsRequest,
@@ -6,9 +11,11 @@ import {
   useDevOpsRequests,
   usePatchDevOpsAccess,
   useResolveDevOpsApproval,
+  useRunHygiene,
+  useSetHygieneInterval,
 } from '../api/queries/devops.ts';
 import { formatDateTime } from '../lib/time.ts';
-import { Badge, Button, ErrorBox, TextArea, TextInput } from './ui.tsx';
+import { Badge, Button, ErrorBox, Select, TextArea, TextInput } from './ui.tsx';
 
 const TONE = {
   queued: 'neutral',
@@ -91,6 +98,7 @@ export function DevOpsPanel({ w }: { w: WorkstationDto }) {
         </Button>
       </div>
       <ErrorBox error={patch.error} />
+      <HygieneSettings w={w} />
       <AskDevOps workstationId={w.id} name={w.name} />
       <ul
         className="mt-3 flex flex-col gap-2"
@@ -103,6 +111,58 @@ export function DevOpsPanel({ w }: { w: WorkstationDto }) {
         ))}
       </ul>
     </section>
+  );
+}
+
+/** Repository hygiene: how often the DevOps engineer tidies this machine's project repositories, and a manual run. */
+function HygieneSettings({ w }: { w: WorkstationDto }) {
+  const set = useSetHygieneInterval();
+  const run = useRunHygiene();
+  const h = w.hygiene;
+  const hours = h?.intervalHours ?? 24;
+  return (
+    <div
+      className="mt-3 rounded-md border border-zinc-200 p-2 dark:border-zinc-800"
+      data-testid={`hygiene-${w.name}`}
+    >
+      <h4 className="text-sm font-semibold">Repository hygiene</h4>
+      <p className="text-xs text-zinc-500">
+        The DevOps engineer fetches and pulls this machine's project repositories, commits unsaved work to the
+        working branch you confirmed, pushes, and removes merged agent branches and stale worktrees. A
+        repository with no confirmed working branch is never committed to: you are asked which branch it is.
+      </p>
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
+        <div className="w-full sm:w-48">
+          <Select
+            label="Run"
+            value={String(hours)}
+            disabled={set.isPending}
+            onChange={(e) => set.mutate({ workstationId: w.id, intervalHours: Number(e.target.value) })}
+          >
+            {HYGIENE_CADENCES_HOURS.map((n) => (
+              <option key={n} value={n}>
+                {hygieneCadenceLabel(n)}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <Button variant="primary" disabled={run.isPending} onClick={() => run.mutate(w.id)}>
+          Run hygiene now
+        </Button>
+      </div>
+      <p className="mt-2 text-xs text-zinc-500" data-testid="hygiene-status">
+        {h?.lastRunAt ? `Last run ${formatDateTime(h.lastRunAt)}` : 'Not run yet'}
+        {h?.lastStatus ? ` (${h.lastStatus.replace('_', ' ')})` : ''}
+        {h?.nextRunAt ? `; next ${formatDateTime(h.nextRunAt)}` : '; the schedule is off'}
+        {h && h.openFindings > 0 ? `; ${h.openFindings} open finding${h.openFindings === 1 ? '' : 's'}` : ''}.
+      </p>
+      {run.isSuccess && (
+        <p role="status" className="text-sm text-emerald-600">
+          {run.data.alreadyRunning ? 'A hygiene run is already queued or running.' : 'Hygiene run requested.'}
+        </p>
+      )}
+      <ErrorBox error={set.error ?? run.error} />
+    </div>
   );
 }
 

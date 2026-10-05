@@ -1,4 +1,4 @@
-import { type DeskItemDto, isPhaseDeskSubkind } from '@aom/shared';
+import { type DeskItemDto, isPhaseDeskSubkind, WORKING_BRANCH_SUBKIND } from '@aom/shared';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
@@ -21,6 +21,7 @@ import {
   Spinner,
   TextArea,
 } from '../components/ui.tsx';
+import { WorkingBranchQuestion } from '../components/WorkingBranchQuestion.tsx';
 import {
   answerText,
   choiceFor,
@@ -243,6 +244,8 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
         <MappingForm item={item} />
       ) : item.kind === 'approval' && item.subkind === 'outbound' ? (
         <OutboundApproval item={item} />
+      ) : item.subkind === WORKING_BRANCH_SUBKIND ? (
+        <WorkingBranchQuestion item={item} />
       ) : item.kind === 'question' || (item.kind === 'escalation' && item.subkind !== 'vault_conflict') ? (
         <AnswerForm item={item} />
       ) : (
