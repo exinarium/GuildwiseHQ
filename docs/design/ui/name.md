@@ -1,38 +1,57 @@
-# Name
+# Name and brand: Guildwise
 
 Only user-facing branding changes. Package names (`@aom/*`), the `aom` CLI, `aom-runner`, env vars (`AOM_*`), DB names and the repo folder stay as they are.
 
-## What the name has to do
+- **Name:** Guildwise (written "Guildwise" in prose, lowercase `guildwise` in the wordmark)
+- **Descriptor:** "Guildwise: your guild of AI agents"
+- **Slogan:** "Many hands. One master." (login screen, marketing)
+- **Domain:** guildwisehq.com (registered). Marketing lock-up: `logo-hq.svg` ("guildwise HQ").
+- History: provisional name "Muster" (rejected candidates then: Brigade, Gaffer, Guildhall, Rota) was replaced by the owner's choice.
 
-The product is a floor of AI agents that a single manager runs: hire and fire, assign work through stages, answer questions at a desk, read the shift log. The name should feel like *a person in charge of a crew*, be short (5 to 8 letters), easy to say aloud, work as a lowercase wordmark, and not collide with a well-known developer product.
+## Meaning and story
 
-## Five candidates
+A guild is a body of skilled craftspeople who hold each other to a standard of work. "Wise" is the older sense of the suffix, "in the manner of" (likewise, otherwise), and also the plain meaning: knowing the trade. Guildwise is a guild run wisely: agents with defined roles (the HR board), a shared workflow (spec, build, review, test, finalize), a standard they must meet (the review and test gates), and one master who sets that standard and answers their questions at the desk.
 
-| # | Name | Rationale | Collision check (by reasoning, no web access) |
-| --- | --- | --- | --- |
-| 1 | **Muster** | To muster is to call the crew together for roll call, and to "pass muster" is to survive inspection, which is exactly the Review and Test stages. One word covers hiring, assembling and quality. Reads well as `muster` in lowercase and as an `M` monogram. | No major dev product. Generic English word, so expect small unrelated hits (npm package names, local scheduling tools). Owner should still run an npm, domain and trademark search. |
-| 2 | **Brigade** | The kitchen brigade: named stations (spec, build, review, test, finalize) passing work along "the pass" under one head. Strong metaphor for the board. | "Brigade" is a political-engagement app and a civic-tech network. Not a dev tool, but it is a known name. Longer wordmark, less ownable. |
-| 3 | **Gaffer** | British for the boss of a crew. Friendly, short, memorable. | "Gaffer" is a VFX software suite and a GCHQ graph database. Developer-adjacent collision, so rejected. |
-| 4 | **Guildhall** | The hall where a guild of specialists is run; fits roles, HR board and the desk. | Nine letters, heavy; "Guild" is used by an ML experiment tracker. Feels corporate rather than lively. |
-| 5 | **Rota** | A rota is the shift roster; agents work in shifts, and the tool is mostly about who is on. Very short, easy as an icon. | Common word with several scheduling products named Rota; weak as a brand because the product is more than scheduling. |
+The product is exactly that shape: many agents working in parallel, a single human accountable for the result. The slogan says it in five words: **Many hands. One master.** "Master" is meant in the guild sense (master craftsperson), the person whose standard the work is held to, not a hierarchy for its own sake.
 
-Rejected on sight: Foreman (a well-known server lifecycle tool and a Ruby process manager), Stagehand (a popular browser automation SDK), Wrangler (Cloudflare CLI), Apiary (API docs product), Hivemind (overused), Dispatch (too generic).
+Tone: calm, competent, crafted. No medieval imagery (no shields, scrolls, banners).
 
-## Pick: **Muster**
+## Slogans
 
-Why:
+| Use | Line |
+| --- | --- |
+| **Primary slogan** (login, marketing hero) | Many hands. One master. |
+| **Descriptor** (page meta description, app store line, footer) | Guildwise: your guild of AI agents |
+| Alternative | Your guild of AI agents. |
+| Alternative (longer marketing copy) | You set the standard. Your guild does the work. |
+| Alternative (docs, blog) | Master the craft of running agents. |
+| Alternative (hiring/onboarding pages) | Where AI agents learn the trade. |
 
-1. **Metaphor fits every feature.** Roll call (hire and the HR board), the gathering of a crew (the board), "pass muster" (review and test gates), "muster" as an inventory of people (the roster).
-2. **It is visual.** The `M` is two peaks that converge on one point. That point is the manager's node: the whole logo says "many agents, one person steering". See `logo.svg`.
-3. **Short and sayable.** Two syllables, lowercase wordmark has clean geometry (all round-cap strokes, no complex letterforms).
-4. **Tone.** Slightly military/maritime, calm and competent, not cute. Fits a self-hosted tool for one serious operator.
+## Logo
 
-Tagline options (use one in the login panel): "Run your crew of agents." / "Your crew. Your call." / "Many agents. One desk."
+Files in this folder: `logo.svg` (mark + wordmark, wordmark in `currentColor`), `logo-light.svg` (for light backgrounds), `logo-dark.svg` (for dark and the ink sidebar), `logo-mark.svg` (square mark), `favicon.svg` (16 px optimised), `logo-hq.svg` (marketing lock-up with an "HQ" tag). Previews: `brand-preview/`.
+
+**Concept.** A modern maker's mark: a **G** built from three separate arc segments (the skilled agents of the guild) whose crossbar runs into one **lime node** at the centre (the master, the same node that anchors the login constellation). Segments are separated by hairline gaps so it reads as a team, not a ring. Everything is geometric (butt-cut arcs, one round node), sits on the ink tile, and has no ornament.
+
+**Wordmark case: lowercase.** Reasons: (1) it keeps the monoline, round-cap construction of the previous mark, which pairs with the geometric G and with Geist; (2) the tall `l`, `d` and the dotted `i`s give a distinctive rhythm that titlecase `G` would flatten, and the capital G already lives in the mark; (3) lowercase reads as calm and approachable for a self-hosted tool, while the full-name uses in running text and titles keep "Guildwise" in titlecase. Lowercase wordmark, titlecase everywhere text is typed.
+
+**Palette.** Unchanged: ink `#0D1220` tile, white mark, lime `#D4F24A` node, cobalt stays the UI accent. No tweak was needed: the lime node on ink is the strongest single point of contrast in the system (12:1+), which is what the concept needs. Wordmark colours: `#0D1220` on light, `#FFFFFF` on dark.
+
+**Small sizes.** The full mark has three gaps, which close up below about 24 px. `favicon.svg` is redrawn for 16 px: one continuous arc, 9/64 stroke, larger node, no hairline border. Use the favicon artwork for any rendering under 24 px.
+
+**Usage.** On the ink sidebar use `logo-dark.svg` (the tile gets a faint white hairline so it does not vanish into the ink). Collapsed rail: `logo-mark.svg` at 32 px. Clear space: the diameter of the node on every side. Never recolour the node, never stretch.
 
 ## Where the name appears (for the builder)
 
-- `index.html` `<title>`: `Muster`. Per page: `Board · WEB · Muster`.
-- Sidebar header, login brand panel, accept-invite page, 404.
+All strings come from one module, see "Brand constants" in `implementation-plan.md`.
+
+- `index.html` `<title>`: `Guildwise`. Per page: `Board · WEB · Guildwise`. Meta description: the descriptor.
+- Sidebar header (`logo-dark.svg`), login brand panel (logo, slogan, descriptor), accept-invite page, 404.
+- Favicon, `apple-touch-icon.png`, `theme-color` `#0D1220`.
 - Email subjects/bodies in `apps/server` (invitation mail) may still say "Agent Org Manager"; flag to the owner, out of scope for the web app.
 - README and USER-GUIDE headings: owner decision, not part of this UI work.
-- Keep a plain-text "Agent Org Manager" mention in the About/footer line of the login page only if the owner wants continuity ("Muster, formerly Agent Org Manager"). Decision for the owner.
+- Optional login footer line "Guildwise, formerly Agent Org Manager": decision for the owner.
+
+## Domain
+
+guildwisehq.com is registered. Use `guildwisehq.com` for the marketing site and as the default sender domain for invitation mail when the owner is ready. Still to check by the owner: trademark search for "Guildwise" (reasoned collisions: generic words "guild" and "wise" are common in unrelated products; no known developer tool named Guildwise at the time of writing, unverified), npm/GitHub org availability, and social handles.

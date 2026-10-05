@@ -3,8 +3,8 @@
 The owner delegated the naming and visual design ("come up with a creative name", "really improve the UI") and is away
 overnight. These are provisional decisions on the designer's open questions. The owner reviews them on the deployed result.
 
-1. **Name: Muster.** Use it everywhere a user sees the product: web UI, page titles, login, invitation emails, README
-   title ("Muster: formerly Agent Org Manager") and the user guide. Internal identifiers stay unchanged: `@aom/*`, `aom`
+1. **Name: Guildwise** (owner decision, replaces the provisional "Muster"; domain guildwisehq.com; descriptor "Guildwise: your guild of AI agents"; slogan "Many hands. One master."). Use it everywhere a user sees the product: web UI, page titles, login, invitation emails, README
+   title ("Guildwise: formerly Agent Org Manager") and the user guide. Internal identifiers stay unchanged: `@aom/*`, `aom`
    CLI, `aom-runner`, env vars, DB.
 2. **Sidebar:** always dark (ink #0D1220) with the lime accent, as designed; content areas follow light/dark.
 3. **Dependencies:** approved. Self-hosted Geist via fontsource (CSP `font-src 'self'`), `lucide-react` icons, and the

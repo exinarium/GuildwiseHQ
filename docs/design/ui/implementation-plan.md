@@ -12,7 +12,7 @@ Scope rules that apply to every step:
 
 ## Step 0 , Decisions, dependencies, branch
 
-1. Confirm with the owner (see "Decisions needed" at the end): name Muster, palette, Geist font, lucide icons, no bottom tab bar.
+1. Confirm with the owner (see "Decisions needed" at the end): name Guildwise, palette, Geist font, lucide icons, no bottom tab bar.
 2. Add dependencies to `apps/web`: `@fontsource-variable/geist`, `@fontsource-variable/geist-mono`, `lucide-react`, `@radix-ui/react-popover`, `@radix-ui/react-tooltip`, `@radix-ui/react-toast` (or skip toast and write the 60-line custom provider). Dev: `@axe-core/playwright` in `e2e` (for step 7).
 3. Verify: `pnpm install` clean; `pnpm --filter @aom/web build` passes.
 
@@ -22,11 +22,11 @@ Files: `apps/web/src/index.css`, `apps/web/index.html`, `apps/web/public/theme-i
 
 Do:
 1. Replace `index.css` with the block from `design-system.md` section 1.8 (tokens for light and `[data-theme=dark]`, `@theme inline`, `@custom-variant dark`, focus ring, reduced motion). Fill in the "repeat for warning, danger, info" lines.
-2. `public/theme-init.js`: ~12 lines. Read `localStorage.getItem('muster-theme')` (try/catch), `'light'|'dark'` wins, else `matchMedia('(prefers-color-scheme: dark)')`; set `document.documentElement.dataset.theme`. Also listen for system changes when the stored value is absent. **External file, not inline** (server CSP `script-src 'self'`).
-3. `index.html`: `<title>Muster</title>`, `<script src="/theme-init.js"></script>` first in `<head>`, `<link rel="icon" href="/favicon.svg" type="image/svg+xml">`, `<link rel="apple-touch-icon" href="/apple-touch-icon.png">`, `<meta name="theme-color" content="#0D1220">`, keep `color-scheme` meta, add `viewport-fit=cover` to the viewport meta.
+2. `public/theme-init.js`: ~12 lines. Read `localStorage.getItem('guildwise-theme')` (try/catch), `'light'|'dark'` wins, else `matchMedia('(prefers-color-scheme: dark)')`; set `document.documentElement.dataset.theme`. Also listen for system changes when the stored value is absent. **External file, not inline** (server CSP `script-src 'self'`).
+3. `index.html`: `<title>Guildwise</title>`, `<script src="/theme-init.js"></script>` first in `<head>`, `<link rel="icon" href="/favicon.svg" type="image/svg+xml">`, `<link rel="apple-touch-icon" href="/apple-touch-icon.png">`, `<meta name="theme-color" content="#0D1220">`, keep `color-scheme` meta, add `viewport-fit=cover` to the viewport meta.
 4. Copy `favicon.svg`. Render `logo-mark.svg` to a 180 px PNG for the touch icon (Playwright screenshot of the SVG is enough).
 5. `main.tsx`: `import '@fontsource-variable/geist/wght.css'; import '@fontsource-variable/geist-mono/wght.css';` before `./index.css`.
-6. Create `src/lib/useTheme.ts` (`'system'|'light'|'dark'`, persists to `muster-theme`, updates `dataset.theme`).
+6. Create `src/lib/useTheme.ts` (`'system'|'light'|'dark'`, persists to `guildwise-theme`, updates `dataset.theme`).
 
 Because the `dark:` variant now keys off `[data-theme=dark]`, all existing `dark:` classes keep working during migration.
 
@@ -126,7 +126,7 @@ const sizes = { d: { width: 1440, height: 900 }, m: { width: 390, height: 844, i
 const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox'] });
 for (const [sk, vp] of Object.entries(sizes)) for (const scheme of ['light', 'dark']) {
   const ctx = await browser.newContext({ viewport: vp, colorScheme: scheme, reducedMotion: 'reduce', ...(vp.isMobile ? { isMobile: true, hasTouch: true } : {}) });
-  await ctx.addInitScript((s) => localStorage.setItem('muster-theme', s), scheme);
+  await ctx.addInitScript((s) => localStorage.setItem('guildwise-theme', s), scheme);
   const p = await ctx.newPage();
   await p.goto(base + '/login'); await p.screenshot({ path: `${out}/login-${sk}-${scheme}.png` });
   await p.getByLabel('Email').fill('admin@example.com'); await p.getByLabel('Password').fill('password123456');
@@ -197,9 +197,29 @@ Per README: `docker compose -f docker-compose.dev.yml up -d`, then `pnpm e2e` (t
 - **Performance**: Geist variable fonts add about 70 KB woff2; use `font-display: swap`; keep the login art as a single SVG (13 KB).
 - **Do not** introduce a CSS-in-JS or component library; Tailwind v4 + Radix stay.
 
+## Brand constants (do this first, so a future rename is one edit)
+
+- Create `apps/web/src/brand.ts` as the single source of truth and import it everywhere. No component, page title, `aria-label`, toast or test may hard-code the strings.
+
+  ```ts
+  export const BRAND = {
+    name: 'Guildwise',
+    descriptor: 'Guildwise: your guild of AI agents',
+    slogan: 'Many hands. One master.',
+    domain: 'guildwisehq.com',
+    storagePrefix: 'guildwise', // keys: guildwise-theme, guildwise-sidebar
+  } as const;
+  export const pageTitle = (...parts: string[]) => [...parts, BRAND.name].join(' · ');
+  ```
+- Copy the logo files from `docs/design/ui/` into `apps/web/public/brand/`: `logo.svg`, `logo-light.svg`, `logo-dark.svg`, `logo-mark.svg`, `logo-hq.svg`, and `favicon.svg` (also served at `/favicon.svg`). `components/Logo.tsx` loads them from `/brand/` (or inlines them) and takes `aria-label` and `alt` from `BRAND.name`.
+- `index.html` `<title>` cannot import TS: have Vite replace a `%BRAND_NAME%` placeholder from `brand.ts` (small `transformIndexHtml` plugin), so it is still one edit.
+- `theme-init.js` is an external static file and cannot import `brand.ts`; keep its storage key in a `// keep in sync with brand.ts` comment, or generate it in the same Vite plugin.
+- A rename then means: edit `brand.ts`, replace the files in `public/brand/`, regenerate `apple-touch-icon.png`.
+- Tests assert against `BRAND.name`, not string literals.
+
 ## Decisions needed from the owner
 
-1. Name **Muster** (alternatives in `name.md`): also whether the README/USER-GUIDE/server emails should be renamed, and whether "formerly Agent Org Manager" appears on the login page.
+1. Name **Guildwise** (chosen by the owner; see `name.md`) (alternatives in `name.md`): also whether the README/USER-GUIDE/server emails should be renamed, and whether "formerly Agent Org Manager" appears on the login page.
 2. Always-dark sidebar with lime accent (recommended) versus a sidebar that follows the theme.
 3. Self-hosted Geist fonts and `lucide-react` (two new dependency families), or system font + hand-made icons.
 4. Mobile navigation: drawer only (recommended) versus adding a bottom tab bar (Board, Desk, New, Menu).

@@ -15,7 +15,7 @@ Replaces `components/Layout.tsx` (`RequireAuth` + `Shell`). Routes and URLs do *
 ## 2. Information architecture
 
 ```
-[logo]  Muster                                  [collapse]
+[logo]  Guildwise                                  [collapse]
 [ project switcher:  WEB  Web shop         v ]
 [ + New card ]
 
@@ -81,13 +81,13 @@ Playwright's `getByRole('link', { name: 'Projects' })` is a case-insensitive sub
 - Layout: CSS grid `grid-template-columns: var(--sidebar-w) 1fr` on >= 768; `--sidebar-w` is 256 px expanded, 64 px collapsed, 0 on mobile. Sidebar is `position: sticky; top: 0; height: 100dvh; overflow-y: auto`. Transition `grid-template-columns 200ms var(--ease-out)`.
 - The content column is `min-h-dvh flex flex-col`; `main` is `flex-1 min-w-0` so pages can opt into full-height layouts (`Chat`, `Intake` view) with `flex flex-col min-h-0` children instead of the current `h-[calc(100dvh-6rem)]` which is tied to the old 3 rem top bar.
 - Page container classes: `mx-auto w-full px-4 sm:px-6 lg:px-8 py-6` and a width token from design-system section 3 (`narrow` 640, `default` 960, `wide` 1200, `full`).
-- On route change: move focus to `main` (or its `h1`), set `document.title = "<Page> · <Project> · Muster"`, announce via a polite live region. Scroll to top unless there is a hash (the desk uses `#desk-item-<id>`).
+- On route change: move focus to `main` (or its `h1`), set `document.title = "<Page> · <Project> · Guildwise"`, announce via a polite live region. Scroll to top unless there is a hash (the desk uses `#desk-item-<id>`).
 
 ### 3.1 Sidebar, expanded (>= 1024 by default)
 
 ```
 +--------------------------------+   256 px, bg-side (#0D1220), text-side-fg
-|  [M] muster                 [<]|   56 px header: logo-dark.svg, collapse button (aria-label "Collapse menu")
+|  [G] guildwise                 [<]|   56 px header: logo-dark.svg, collapse button (aria-label "Collapse menu")
 |--------------------------------|
 | [WEB] Web shop             [v] |   project switcher: key chip (mono) + name + chevron   (button, aria-haspopup=listbox)
 | [ + New card               ]   |   lime button (bg-accent text-accent-fg), 40 px
@@ -142,7 +142,7 @@ User menu (Radix DropdownMenu): name + email header, Theme (System / Light / Dar
 +------+
 ```
 
-Collapsed items keep `<span class="sr-only">Board</span>` so `getByRole('link', {name:'Board'})` still resolves. Tooltips appear after 300 ms on hover and immediately on keyboard focus. The preference (`muster-sidebar` = `expanded|collapsed`) is stored in `localStorage` (try/catch); first-visit default is by breakpoint.
+Collapsed items keep `<span class="sr-only">Board</span>` so `getByRole('link', {name:'Board'})` still resolves. Tooltips appear after 300 ms on hover and immediately on keyboard focus. The preference (`guildwise-sidebar` = `expanded|collapsed`) is stored in `localStorage` (try/catch); first-visit default is by breakpoint.
 
 ### 3.3 Mobile (< 768): top bar plus off-canvas drawer
 
@@ -165,7 +165,7 @@ Drawer (Radix Dialog configured as a side sheet; mounted only when open):
 
 ```
 +---------------------------------+----------+
-| [M] muster                  [x] |          |  width min(86vw, 320px), full height 100dvh
+| [G] guildwise                  [x] |          |  width min(86vw, 320px), full height 100dvh
 | [WEB] Web shop             [v]  |  scrim   |  scrim = --overlay, tap to close
 | [ + New card ]                  |          |
 | WORK                            |          |
@@ -238,7 +238,7 @@ Landscape phones (height < 500): the drawer scrolls, the top bar is 48 px.
 
 ```
 +------------------+---------------------------------------------------------------------------------------+
-| [M] muster    [<]| Web shop > Board                                  [Ctrl K]            o Live   [Chat]  |
+| [G] guildwise    [<]| Web shop > Board                                  [Ctrl K]            o Live   [Chat]  |
 | [WEB] Web shop [v]+---------------------------------------------------------------------------------------+
 | [ + New card    ]| Web shop                                                                               |
 |                  | WEB · Code · 11 open · 2 blocked                [Search cards] [Assignee v] [Run regression] |
@@ -285,7 +285,7 @@ Landscape phones (height < 500): the drawer scrolls, the top bar is 48 px.
 ```
  closed                                   drawer open
 +--------------------------------+       +--------------------------+---+
-| [=]  Board         [+] [Desk3] |       | [M] muster           [x] |///|
+| [=]  Board         [+] [Desk3] |       | [G] guildwise           [x] |///|
 |      WEB                  o    |       | [WEB] Web shop       [v] |///|
 +--------------------------------+       | [ + New card          ]  |///|
 | ( Spec 2 )( To do 2 )( Rework 2)>      | WORK                     |///|

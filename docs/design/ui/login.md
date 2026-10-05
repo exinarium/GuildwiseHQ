@@ -28,17 +28,17 @@ Implementation: render the art as a React component (`<LoginArt/>`) built from t
 +----------------------------------------------------------+---------------------------------+
 |  ink field #0D1220 with the constellation                |  canvas (light or dark theme)   |
 |                                                          |                                 |
-|  [M] muster                       (logo-dark, 28 px)     |                                 |
+|  [G] guildwise                       (logo-dark, 28 px)     |                                 |
 |                                                          |        Welcome back             |   h1, text-3xl
-|                                .  .   .                  |        Sign in to run your crew |   muted
+|                                .  .   .                  |        Sign in to your guild |   muted
 |                         .   o   .   o      .              |                                 |
 |                    .         o  .  (@)  .   o              |   Email                         |
 |                         o   .   o   .    o                |   [ you@company.com           ] |
 |                              .  o    .                    |   Password                      |
 |                                                          |   [ ************        (eye)  ] |
 |                                                          |   Caps Lock is on               |   shown only when true
-|  Run your crew of agents.             (text-3xl, white)  |                                 |
-|  Hire, assign and review AI agents from one calm desk.   |   [        Sign in            ] |   full width, 44 px
+|  Many hands. One master.              (text-3xl, white)  |                                 |
+|  Guildwise: your guild of AI agents   |   [        Sign in            ] |   full width, 44 px
 |  . Every question reaches you with context               |                                 |
 |  . Nothing leaves without your approval                  |   Forgot access? Ask your admin |   subtle
 |  . Your machines, your repos, your vaults                |                                 |
@@ -60,12 +60,12 @@ Brand panel becomes a 220 px high header band across the top (art cropped by `sl
 ```
 +--------------------------------+
 | ink band 168 px                |
-|   [M] muster                   |
+|   [G] guildwise                   |
 |   constellation (cropped)      |
-|   Run your crew of agents.     |
+|   Many hands. One master.     |
 +--------------------------------+   rounded-b-[24px] overlap: form card pulled up 16 px
 |  Welcome back                  |
-|  Sign in to run your crew      |
+|  Sign in to your guild      |
 |                                |
 |  Email                         |
 |  [ you@company.com           ] |   44 px, 16 px text (no iOS zoom)
@@ -83,7 +83,7 @@ The ink band scales down gracefully; the three benefit bullets are dropped on mo
 
 ## 4. Sign-in form spec
 
-- Heading `h1`: "Welcome back". Sub: "Sign in to run your crew." (Alternative copy for a fresh install is not needed.)
+- Heading `h1`: "Welcome back". Sub: "Sign in to your guild." (Alternative copy for a fresh install is not needed.)
 - Fields (use `TextInput`):
   - **Email**: `type="email"`, `name="email"`, `autoComplete="username"`, `inputMode="email"`, `autoCapitalize="none"`, `spellCheck={false}`, autofocus on desktop only (not on touch, to avoid the keyboard covering the art).
   - **Password**: `type="password"` with a trailing reveal button (`aria-pressed`, toggles `type`), `autoComplete="current-password"`.
@@ -98,12 +98,12 @@ The ink band scales down gracefully; the three benefit bullets are dropped on mo
 
 | Place | Text |
 | --- | --- |
-| Tab title | `Sign in · Muster` |
-| Panel headline | Run your crew of agents. |
-| Panel sub | Hire, assign and review AI agents from one calm desk. |
+| Tab title | `Sign in · Guildwise` |
+| Panel headline | Many hands. One master. |
+| Panel sub | Guildwise: your guild of AI agents |
 | Bullets | Every question reaches you with context / Nothing leaves without your approval / Your machines, your repos, your vaults |
 | H1 | Welcome back |
-| Sub | Sign in to run your crew. |
+| Sub | Sign in to your guild. |
 | Email label | Email |
 | Password label | Password |
 | Button | Sign in |
@@ -130,7 +130,7 @@ Same frame (brand panel + form column; same mobile band). Differences:
 
 - H1 "Join {Organization}" is not available (the API returns only the email); use "You are invited". Sub: "Create your account for **ada@company.com**" (email shown bold, read-only, also in a disabled input labelled "Email" for password managers so the username is captured; `autoComplete="username"`).
 - Fields: Display name (autofocus), Password (hint "At least 12 characters"; strength meter below: a 4-segment bar labelled by text "Too short / OK / Good / Strong", based on length plus variety, purely advisory; the only rule enforced is the schema's 12 to 256), Confirm password. Each with the reveal toggle, named "Show characters" for the first and "Show characters (confirmation)" for the second so labels stay unique (`getByLabel('Password', { exact: true })` and `getByLabel('Confirm password')` are used by e2e; neither may match the toggles).
-- Button "Create account" (the e2e regexp `/accept|create|continue|join/i` matches it). After success the app lands on `/`; consider a one-time welcome toast "Welcome to Muster, {name}".
+- Button "Create account" (the e2e regexp `/accept|create|continue|join/i` matches it). After success the app lands on `/`; consider a one-time welcome toast "Welcome to Guildwise, {name}".
 - Inline mismatch check on blur of the confirmation: "Passwords do not match" (`role="alert"` on submit as today).
 - **Invalid/expired/used link** (`info.isError`): same frame, centre card: key icon in a `warning-soft` circle, H1 "This invitation link does not work", body "It may have expired or already been used. Ask your admin to send a new one.", secondary button "Go to sign in" (a link styled as a button, keeps the destination `/login`). `Invitation unavailable` text can stay as the `sr-only` heading if any test wants it (no test does today).
 - **Checking invitation** (`info.isPending`): skeleton of the form (two shimmer bars) rather than text.
@@ -157,7 +157,7 @@ Same frame (brand panel + form column; same mobile band). Differences:
 
 ## 9. Implementation notes
 
-- Files: `pages/Login.tsx`, `pages/AcceptInvite.tsx` use a new `components/auth/AuthFrame.tsx` (brand panel + children slot) and `components/auth/LoginArt.tsx`, `components/Logo.tsx` (`<Logo variant="dark|light|auto" />`, `<LogoMark />`, inline SVG from `logo*.svg`, `role="img" aria-label="Muster"`).
+- Files: `pages/Login.tsx`, `pages/AcceptInvite.tsx` use a new `components/auth/AuthFrame.tsx` (brand panel + children slot) and `components/auth/LoginArt.tsx`, `components/Logo.tsx` (`<Logo variant="dark|light|auto" />`, `<LogoMark />`, inline SVG from `logo*.svg`, `role="img" aria-label="Guildwise"`).
 - Keep `safeNext()` export (it is imported by tests/other files), the `LoginRequestSchema` validation, the `aria-label="Sign in"` / `"Accept invitation"` form names and the field labels `Email`, `Password`, `Display name`, `Confirm password`.
 - Copy `docs/design/ui/login-art.svg` to `apps/web/src/assets/login-art.svg` (Vite hashes and serves it same-origin; the CSP `img-src 'self' data:` allows it). Do not reference remote images or fonts.
-- Add the favicons in `index.html`: `<link rel="icon" href="/favicon.svg" type="image/svg+xml">` (copy `favicon.svg` to `public/`), plus a `public/apple-touch-icon.png` (180 px render of `logo-mark.svg`) and `<meta name="theme-color" content="#0D1220">`; update `<title>` to `Muster`.
+- Add the favicons in `index.html`: `<link rel="icon" href="/favicon.svg" type="image/svg+xml">` (copy `favicon.svg` to `public/`), plus a `public/apple-touch-icon.png` (180 px render of `logo-mark.svg`) and `<meta name="theme-color" content="#0D1220">`; update `<title>` to `Guildwise`.

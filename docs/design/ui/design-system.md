@@ -1,4 +1,4 @@
-# Muster design system
+# Guildwise design system
 
 Target: `apps/web` (React 19, Vite, Tailwind CSS v4 via `@tailwindcss/vite`, no `tailwind.config.*` file; Tailwind v4 is configured in CSS with `@theme`). Light and dark. All values below were checked with a script; ratios are WCAG 2.x relative-luminance ratios.
 
@@ -227,7 +227,7 @@ h1,h2,h3 { text-wrap: balance; }
 Notes for the builder:
 
 - Tailwind v4 `@theme inline` makes `bg-surface`, `text-muted`, `border-line`, `ring-ring`, `bg-stage-spec/15` (opacity modifiers work on `var()` colours with `color-mix`) available.
-- `/theme-init.js` goes in `apps/web/public/` and is loaded with `<script src="/theme-init.js"></script>` in `index.html` `<head>`. **Inline scripts are blocked by the server CSP** (`script-src 'self'`, see `apps/server/src/app.ts`), so it must be an external file. It reads `localStorage['muster-theme']` (`light` | `dark` | absent=system), else `matchMedia('(prefers-color-scheme: dark)')`, and sets `document.documentElement.dataset.theme`. Wrap storage access in try/catch.
+- `/theme-init.js` goes in `apps/web/public/` and is loaded with `<script src="/theme-init.js"></script>` in `index.html` `<head>`. **Inline scripts are blocked by the server CSP** (`script-src 'self'`, see `apps/server/src/app.ts`), so it must be an external file. It reads `localStorage['guildwise-theme']` (`light` | `dark` | absent=system), else `matchMedia('(prefers-color-scheme: dark)')`, and sets `document.documentElement.dataset.theme`. Wrap storage access in try/catch.
 - CSP also has `font-src 'self'` and `img-src 'self' data:`. **Google Fonts cannot be used.** Self-host Geist with `pnpm --filter @aom/web add @fontsource-variable/geist @fontsource-variable/geist-mono` and import `@fontsource-variable/geist/wght.css` in `main.tsx`; Vite emits same-origin woff2. This also suits a LAN-hosted site that may be offline. If the owner rejects new dependencies, the system stack is the fallback and the design still works (Geist is metrics-close to system UI fonts).
 
 ---
