@@ -405,6 +405,31 @@ After finalize, a full suite card is spawned for testers to run the entire E2E s
 
 **Regression runs**: on the Projects page, click **Run regression** to test the entire suite on all platforms (web, mobile).
 
+## Phases and follow-ups
+
+A **phase** is a named slice of a project's work ("Phase 2: autosave"): the cards you want to ship and check together. When all of them are done and merged, the BA tells you, and you decide what happens next: deploy, run the regression suite, do something custom. Nothing runs until you approve. Every active member of a project can do everything described here.
+
+### Setting up (project settings)
+
+- **Deploy targets**: where a phase can be deployed. A **local Docker stack** is deployed on *every workstation of every project member* (one DevOps request each, and the deploy only counts as successful when all succeed). A **remote host** names the workstation whose DevOps engineer deploys over SSH, the SSH host alias (from that user's `~/.ssh/config`) and, optionally, the app URL. The notes ("how to deploy": the compose file, the script, the environment) are what the DevOps engineer reads. No passwords or keys are stored in the site: SSH keys and Docker stay on the workstation, and anything destructive still goes through the DevOps approval on your desk.
+- **Default follow-ups**: the list every new phase starts with, for example *Deploy to local*, then *Regression run (web) against local*.
+
+### Creating a phase and putting cards in it
+
+Create a phase from **Project settings > Phases > New phase**, or let the BA propose one in an intake chat ("this is phase 2"): it proposes the phase, the cards and the follow-ups, and you confirm them on the desk (**Phase proposal**). Put a card in a phase from the phase page (**Add a card**) or the card page (**Phase** select). A card belongs to at most one phase; suite and regression cards and bug fixes that ride on another card's branch cannot be members. The board has a phase filter and a chip on each card; a "proposed" mark means the BA suggested it and you have not confirmed it yet. A bug card filed after finalize (for example by the full E2E suite) joins the phase it came from automatically, and the phase waits for it.
+
+### When is a phase done?
+
+When every card is **finalized and its work is in the project's working branch**, closed by hand, or cancelled. A card finalized with *merge* counts at once. A card finalized with *PR* or *push branch* counts once the runner finds its branch merged into the working branch (it checks with git every few minutes; no GitHub status is needed) and then deletes the branch. If the check cannot see it (a squash merge, a branch that was deleted), click **Mark merged** on the phase page. A card that ends without a merge (cancelled, closed by hand) gives its worktree back; its branch is kept and listed in the report. Full E2E suites that run after a merge never delay the phase: the report lists them as passed, failed or still running.
+
+### The "phase done" desk item
+
+The BA writes a report (what was delivered with the merge commits, what was cancelled, what is outstanding) and the desk shows **Phase done: approve N follow-ups?**. You can **Edit follow-ups** (add, remove, reorder, change targets) before you decide, **Approve all**, **Reject** (nothing runs), or **Reopen the phase** (it waits for its cards again; possible until you approve). With no follow-ups the item is just an acknowledgement. If no BA is available (none hired, or none online for 15 minutes) the server writes a template report ("Your BA was not available; this summary was generated.") so you are never left waiting.
+
+### What runs after you approve
+
+The follow-ups are frozen. The BA writes the instructions for each delegate, then the server runs them **in order, one at a time**: a deploy becomes DevOps request(s) with the target's details; a regression run becomes a regression card pinned to the workstation that was just deployed, testing the target URL (the tester gets it in the card and as `AOM_TARGET_URL`); a custom item goes to DevOps, a tester or the BA. **If any follow-up fails, the ones after it are skipped.** At the end a **Phase results** notice lists each result with its evidence (pinned when something failed). The phase page shows live status, the DevOps requests, the regression cards and the progress thread. Archiving a project cancels its phases and their pending follow-ups.
+
 ## Ledger and search
 
 The ledger is the shared memory of your org. It records:

@@ -80,6 +80,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       'scholar@e2e.test',
       'intaker@e2e.test',
       'outboxer@e2e.test',
+      'phaser@e2e.test',
     ].map(deleteMailFor),
   );
 
@@ -96,6 +97,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_TEST_CLOCK: 'true',
     AOM_ALLOW_LOCAL_REMOTES: 'true',
     AOM_MOCK_UI: 'true',
+    // phases: re-check a finalized pull request / pushed branch against the working branch every few seconds
+    AOM_MERGE_CHECK_SECONDS: '4',
     LOG_LEVEL: 'info',
   };
   sh(

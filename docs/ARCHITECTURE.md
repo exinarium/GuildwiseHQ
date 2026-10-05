@@ -604,6 +604,7 @@ CREATE TABLE runner_inbox (                     -- idempotency for runner->serve
 | `intakes` | M7 | `id, org_id, thread_id, external_system, external_key, mapped_project_id, card_id, status, created_at` |
 | `outbound_drafts` | M8 | `id, org_id, project_id, card_id, external_system, external_key, external_url, kind ('comment','resolution','decision'), body (the draft), final_body (what was approved and is posted), edited, status ('pending','approved','rejected','posted','failed','blocked'), desk_item_id, drafted_by_kind/_id, approved_by, reject_reason, blocked_matches, external_ref (URL or id returned), error, attempts, created_at, approved_at, posted_at, updated_at` |
 | `agent_card_stats`, `agent_review_log`, `agent_stats_daily`, `hr_applied` | M9 | HR track record, projected from events by `projections/track-record.ts` (no refresh job; a rebuild reproduces them): per agent and card (questions, rework rounds, bugs, tokens, diff and test files), per review verdict (score, reasons, criteria missed), per agent and day (shift time, tokens, cards done), applied recommendations. Stats over the rolling 30-day window are computed from them at read time (`hr/track-record.ts`). `schedules` gains `fail_count`, `last_error`, `failure_desk_item_id` |
+| `deploy_targets`, `phases`, `phase_followups`, `ba_tasks` | phases (migration 1303) | Named phases of a project and what runs after them (`docs/design/phases.md`, Part A). `deploy_targets`: `id, org_id, project_id, name, kind ('local_docker','remote_ssh'), workstation_id (remote_ssh only; NULL for a local target, which fans out to every member workstation), host, app_url, notes, removed_at`. `phases`: `id, org_id, project_id, number, ref ('WEB-P2'), name, description, status ('proposed','open','reporting','awaiting_approval','running_followups','reporting_results','done','done_with_failures','followups_rejected','discarded','cancelled'), working_branch, created_by_*, intake_id, proposal/report/results_desk_item_id, card_outcomes jsonb, report, outstanding jsonb, results_report, completed_at, approved_by/at, finished_at`. `phase_followups`: `id, phase_id, position, kind ('deploy','regression','custom'), target_id, platform, instruction, note, status ('pending','queued','briefed','running','succeeded','failed','skipped','cancelled'), delegate ('devops','tester','ba'), brief, devops_request_ids uuid[], regression_card_ids uuid[], ba_task_id, result_summary, evidence jsonb, mock jsonb`. `ba_tasks`: `id, org_id, project_id, phase_id, followup_id, kind ('phase_report','followups_brief','followup_custom','followups_report'), status ('queued','running','done','failed','fallback','cancelled'), preferred_agent_id, agent_id, shift_id, attempts, note`. `projects` gains `next_phase_number, default_followups`; `cards` gains `phase_id, phase_assignment ('proposed','confirmed'), phase_followup_id, merged_into_working_at`; `shifts` gains `kind 'ba_task'` and `ba_task_id`; `threads.kind` gains `'phase'` (thread id = phase id) |
 | `departments` | M10 | `id, org_id, name, created_at` (unique per org, case-insensitive); built-in department names (delivery, research, feeds, operations) are not rows. `role_definitions` gains `department, desk_item_id, drafted_by_kind, vault_path`; `workflow_versions` gains `desk_item_id, drafted_by_kind, vault_path` (migration 1000) |
 
 ---
@@ -786,6 +787,31 @@ Heartbeats are not events.
 | `WorkflowDraftUpdated` / `RoleDraftUpdated` | `{workflowVersionId, name, department?, definition}` / `{roleVersionId, definition}` | M10: edits an open draft (status `draft` only) |
 | `WorkflowVersionSubmitted` / `RoleVersionSubmitted` | `{…VersionId, deskItemId}` | M10: status `pending_approval`; the desk approval (`kind approval`, subkind `definition`) is raised in the same append |
 | `DefinitionDraftDiscarded` | `{kind:'role'|'workflow', versionId}` | M10: deletes a draft or rejected version; approved and superseded versions are never removed |
+
+#### Phases (`events/phase.ts`) — audience `project`; streams `phase-<id>`, `ba-task-<id>`, `project-<id>`, `card-<id>`
+
+A phase groups cards of one project; when every confirmed member card's work is in the working branch the BA reports to the manager, who approves the follow-ups (deploy, regression run, custom instruction) that the server then runs in order. Any active project member may do everything (owner decision A1).
+
+| Event | Payload | Projection effect |
+| --- | --- | --- |
+| `PhaseCreated` | `{phaseId, projectId, number, ref, name, description, status:'proposed'\|'open', createdBy, intakeId?, workingBranch?, followups[]}` | insert `phases` + `phase_followups` (pending) + the phase thread; `projects.next_phase_number` |
+| `PhaseUpdated`, `PhaseFollowupsSet` | `{phaseId, changes}` / `{phaseId, followups[]}` | edit; the follow-up list is replaced (ids kept) |
+| `CardPhaseChanged` (card stream) | `{cardId, phaseId\|null, previousPhaseId?, assignment, by, cause?}` | `cards.phase_id/phase_assignment`, timeline entry. `cause 'bug_filed'`: a bug card filed after finalize joined the phase it came from |
+| `CardMergeVerified` (card stream) | `{cardId, workingBranch, branchName?, branchDeleted, remoteBranchDeleted, manual}` | `cards.merged_into_working_at`; the runner checked it with git (`branch.check_merged`) or a member confirmed it by hand. A `CardFinalized` with action `merge` sets the same column |
+| `PhaseProposalSubmitted`, `PhaseConfirmed`, `PhaseProposalRejected` | `{phaseId, deskItemId, proposedCardIds…}` | the BA's proposal and the manager's answer: status `open` and the listed cards `confirmed`, or `discarded` and the assignments cleared |
+| `PhaseCompleted` | `{phaseId, cardOutcomes[], baTaskId}` | status `reporting`; the `phase_report` BA task is queued in the same append |
+| `PhaseReportPosted` | `{phaseId, deskItemId, report, outstanding[], by}` | status `awaiting_approval` (desk item `phase_done`: an approval of N follow-ups, or an alert when there are none) |
+| `PhaseReopened` | `{phaseId, by, reason}` | back to `open` (allowed before approval only); the desk item is dismissed |
+| `PhaseFollowupsApproved` / `PhaseFollowupsRejected` | `{phaseId, by, followups[] (the approved snapshot), baTaskId?}` | `running_followups` (follow-ups `queued`, a `followups_brief` task queued) / `followups_rejected` (follow-ups cancelled) |
+| `PhaseFollowupBriefed` | `{phaseId, followupId, delegate, brief, by}` | follow-up `briefed` |
+| `PhaseFollowupStarted` | `{phaseId, followupId, delegate, devopsRequestIds[], regressionCardIds[], baTaskId?}` | `running`; a local deploy has one DevOps request per workstation |
+| `PhaseFollowupFinished` | `{phaseId, followupId, status, summary, evidence}` | `succeeded`, `failed`, `skipped` or `cancelled` |
+| `PhaseFollowupsFinished`, `PhaseResultsReported` | `{phaseId, status, baTaskId?}` / `{phaseId, deskItemId, report, finalStatus, by}` | `reporting_results`, then `done` or `done_with_failures` (desk notice `phase_results`, pinned when something failed) |
+| `PhaseCancelled` | `{phaseId, reason}` | the project was archived: status `cancelled`, pending follow-ups cancelled |
+| `ProjectFollowupDefaultsSet`, `DeployTargetAdded/Updated/Removed` | on the project stream | `projects.default_followups`, `deploy_targets` |
+| `BaTaskQueued`, `BaTaskDispatched`, `BaTaskRequeued{attempt}`, `BaTaskCompleted{status}` | `{taskId, phaseId, kind…}` | `ba_tasks`; `BaTaskDispatched` also creates the `ba_task` shift row |
+
+`CardCreated` gained `homeWorkstationId?` (a regression card of a follow-up runs where the local stack was deployed) and `phaseFollowupId?`; card fields gained `targetUrl` and `deployTarget`.
 
 ---
 
@@ -1013,11 +1039,12 @@ Pending shift starts: if `shift.accepted` is not received within 30 s of `CardCl
 
 ### 9.1 Triggering
 
-`apps/server/src/dispatcher/dispatcher.ts` runs a **pass** when (a) an event of type `CardSpecified, CardCreated(status queued), ClaimReleased, ShiftEnded, ReviewRequested, ChangesRequested, ReviewApproved, TestPassed, StageCompleted, ChildCardResolved, QuestionAnswered, AgentHired, AgentChanged, AgentRehomed, WorkstationConnected, ScheduleFired, RebaseConflict` is observed (debounced 250 ms), or (b) every 10 s. Passes are serialized in-process and guarded by `pg_try_advisory_lock(7320)` on a dedicated connection so only one server instance dispatches.
+`apps/server/src/dispatcher/dispatcher.ts` runs a **pass** when (a) an event of type `CardSpecified, CardCreated(status queued), ClaimReleased, ShiftEnded, ReviewRequested, ChangesRequested, ReviewApproved, TestPassed, StageCompleted, ChildCardResolved, QuestionAnswered, AgentHired, AgentChanged, AgentRehomed, WorkstationConnected, ScheduleFired, RebaseConflict, CardCancelled, CardPhaseChanged, CardMergeVerified, PhaseConfirmed, PhaseReopened, PhaseFollowupsApproved, PhaseFollowupBriefed, PhaseFollowupFinished, BaTaskQueued, BaTaskCompleted, BaTaskRequeued, FullSuitePassed, FullSuiteFailed` is observed (debounced 250 ms), or (b) every 10 s. Passes are serialized in-process and guarded by `pg_try_advisory_lock(7320)` on a dedicated connection so only one server instance dispatches.
 
 ### 9.2 Pass algorithm
 
 ```
+phasePass()                                          -- §9.8, first: what it creates is dispatched in this pass
 freeAgents = SELECT a.*, ws.runtimes, count(active claims) AS active
              FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
              WHERE a.status='active' AND NOT a.is_devops
@@ -1029,6 +1056,7 @@ for agent in freeAgents:
     for card in candidates(agent) LIMIT 5:          -- §9.3, already in priority order
         if claim(card, agent): send shift.start; break
 overflowPass()                                       -- §9.4
+devopsPass(); questionPass(); baTaskPass()           -- non-card queues, one shift at a time per agent (§9.8)
 testerBottleneckCheck()                              -- M4 (§9.5)
 ```
 
@@ -1104,6 +1132,17 @@ At the end of each pass: for each project with queued cards in a stage claimed b
 A card whose shifts keep ending without a report would be re-claimed every pass. `commands/loop-breaker.ts`, called from `applyShiftEnded` when a card shift ends without a report (not `stopped`, no handoff, no question), counts the card's failed shifts (`no_report`, `crashed`, `timeout`, `lost`, without a report) since its last report. The 3rd failure within 10 minutes starts an **episode**: `CardRetryDeferred{cardId, until, failures, episodeId, newEpisode}` sets `cards.retry_after`, `retry_failures` and `retry_episode_id`. The back-off is 1 minute for the 3rd failure and doubles with each further failure of the episode, capped at 1 hour (`loopBackoffMinutes` in `packages/shared/src/testing`). The candidate query (§9.3) and therefore the claim and overflow paths skip a card until `retry_after` has passed; no pass runs when the back-off ends, the 10 s tick picks the card up. An episode ends when a `HandoffWritten` clears the three columns (any report), or when the manager moves the card (`CardMovedByManager`). `POST /api/cards/:id/release-backoff` appends `CardRetryReleased` (clears only `retry_after`, so a failure after a manual release backs off longer) and resolves the alert.
 
 Thread messages collapse: the 1st failure posts the usual "Shift ended without a report", the 2nd none, the engaging 3rd one message that names the hold; later failures of the episode post nothing. The episode's first back-off also creates one desk alert (`DeskItemCreated`, kind alert, subkind `loop_backoff`, bound to the card, same append). Not counted: shifts of other kinds, runner rejections (they have their own cooldown) and server-side lost-shift releases from the reaper, which do not pass through `applyShiftEnded`.
+
+### 9.8 Phases: `phasePass` and the BA task queue
+
+`dispatcher/phases.ts phasePass` is state based and idempotent: each step locks the phase row (`FOR UPDATE`), re-checks its status and appends in one transaction, and a failure in one phase is logged without starving the others. Archived projects are skipped. Steps:
+
+1. **Merge checks (owner decision A2).** For a finalized `pr` / `push_branch` card of an `open` phase whose branch is not merged yet, a `branch.check_merged` runner command goes to the card's home workstation (one at a time per card, repeated every `AOM_MERGE_CHECK_SECONDS`, default 180). The runner fetches and tests `git merge-base --is-ancestor <card branch> <working branch>`; a merged branch is deleted (locally; on the remote for `push_branch`) and `command.result` appends `CardMergeVerified`. A `merge` finalize counts at once. A member can confirm a merge the check cannot see (a squash merge, a deleted branch) with `POST /api/cards/:id/confirm-merged`. The working branch is `phases.working_branch`, else the card's base branch, else the repository's, else the project's.
+2. **Completion.** An `open` phase with at least one confirmed member, no member that is only proposed, and every confirmed member resolved (`finalized` and merged, `closed_manually` = done without a completion action, or `cancelled`; `phaseCompletion` in `packages/shared/src/phases`) appends `PhaseCompleted` and queues the BA's `phase_report` task. Completion does not wait for post-merge full suites (they are listed as outstanding). A bug card filed after finalize joins the phase it came from (`bugJoinEvents`, owner decision A6) and reopens a phase that still awaits its report.
+3. **Results.** A running DevOps follow-up succeeds when all its requests are `done` and fails as soon as one failed; a regression follow-up decides from the latest `test_runs` row of each of its cards (bug cards are named in the evidence).
+4. **Sequencing.** Follow-ups run strictly in order, one at a time (`nextFollowup`). Any failed follow-up skips the ones after it (owner decision A7). The next `briefed` follow-up starts: a deploy creates DevOps requests through `createDevOpsRequestIn` (a remote target: its workstation; the local stack: one request per workstation of every active project member, owner decision A9), a regression follow-up creates regression cards through `regressionRunEvents` pinned (`home_workstation_id`) to a workstation that was just deployed and has a tester, with `targetUrl` and `deployTarget` in the card fields (testers also get `AOM_TARGET_URL`), a custom one for the BA queues a `followup_custom` task. When all are terminal, `PhaseFollowupsFinished` queues the `followups_report` task.
+
+`dispatcher/ba-tasks.ts baTaskPass` is the structure of `questionPass`: queued tasks oldest first, one `ba_task` shift at a time per BA agent (outside card capacity), the intake's BA preferred. The shift has no card or worktree (`shift.start kind 'ba_task'`, a placeholder card, `baTask` with the phase, its cards and suites, the follow-ups and what is outstanding) and ends with exactly one terminal `aom phase` report, validated by `commands/ba-tasks.ts applyBaTaskReport`; questions are refused. A shift that is rejected, lost or stopped requeues the task unharmed; a crash, timeout or missing report counts an attempt. **No agent ever blocks:** a task with no BA hired, no BA online for 15 minutes or two failed attempts is done by the server from a template (`runBaTaskFallback`: a report starting "Your BA was not available; this summary was generated.", template briefs, "no BA was available" for a custom follow-up the BA was to do) and marked `fallback`. Archiving a project cancels its phases (`PhaseCancelled`), their pending follow-ups and queued tasks; a DevOps request already running is left to finish.
 
 ### 9.6 Hire cap for first runs (removed in M9)
 
@@ -1354,6 +1393,10 @@ aom digest --file <items.json>                     # M5 curator
 aom finalize --action pr|push_branch|merge         # M7 BA
 aom answer --item <deskItemId> --text ...          # M7 BA/senior in a question shift
 aom escalate --item <deskItemId> --note ...        # M7
+aom phase list|propose|assign|submit ...           # BA intake chat: propose a phase and its cards (the manager confirms on the desk)
+aom phase followup brief <n> --to devops|tester|ba --text ... ; aom phase ready      # BA task: delegate each follow-up, then say all are briefed (terminal)
+aom phase report --summary-file <md> [--outstanding ...]... ; aom phase results --summary-file <md>   # BA task: report the finished phase / the follow-up results (terminal)
+aom phase followup done|fail <n> --summary ... [--link <url>]...   # BA task: a custom follow-up the BA did itself (terminal)
 ```
 
 `ShiftReport` (zod discriminated union on `kind`): `{kind:'outcome', outcomeId, note, data}` (all sugar verbs map to this) | `{kind:'question', text, options, recommend?, doing, blocking}` | `{kind:'comment', note}` (non-terminal). The server validates `outcomeId` against the card's current stage and `data` against the outcome's `data` schema (`review` = `{score, reasons?, criteriaMissed?}`, `testEvidence` = `{commands[], summary, outputExcerpt}`, `diffStats` = attached by the runner, not the agent). Exactly one terminal report per shift; a second one gets `409 already reported`.
@@ -1471,6 +1514,8 @@ Admins get the administration view only; being admin grants no visibility into o
 | Manual move / release claim | card owner or project owner |
 | Answer desk item for a card | `owner_only`: card owner; `any_manager`: any active member. Items always visible to all members |
 | Answer project-level desk item (no card) | project owner; DevOps/vault/bottleneck items: the user whose workstation/vault it concerns |
+| Create and edit phases, assign cards, edit follow-ups, project default follow-ups, deploy targets, confirm a BA proposal, approve / reject the follow-ups, reopen a phase, confirm a merge | any active project member (owner decision A1); every route uses `loadVisibleProject` / `loadVisibleCard`, other users get 404. A remote deploy target's workstation must be an active workstation of a project member |
+| The BA's `aom phase` verbs | the BA of the conversation (propose, assign, submit: its intake chat) or of the task (`ba_task` shift: only that phase) |
 | Hire agent org-wide | the org owner, onto own workstation |
 | Hire agent for a shared project | any active member, onto own workstation, from the owner's role catalogue; `project_id` is set; refused on archived projects |
 | Add a standing order (`POST /api/ledger`, or `ledger.scope=standing_order` when answering a desk item) | project owner for project-wide orders (also when a `cardId` is given: the order is still project-wide); the organization owner for organization-wide orders (a guest manager's answer may carry decisions and requirements, never standing orders) |
@@ -1551,6 +1596,9 @@ Errors: `{error: {code, message, details?}}` with 400 validation, 401 unauthenti
 | `POST /api/intakes` `{externalSystem?, externalKey?, note}` | start BA intake chat | M7 |
 | `GET /api/outbound` · (approval via desk resolve) | | M8 |
 | `GET /api/metrics?projectId=&from=&to=` · `GET /api/agents/:id/stats` · `GET /api/hr/recommendations` · `POST /api/hr/recommendations/:id/apply` | | M9 |
+| `GET/POST /api/projects/:id/phases` · `GET /api/phases/:id` · `GET /api/phases/by-number/:key/:number` · `PATCH /api/phases/:id` · `PUT /api/phases/:id/followups` (409 `followups_frozen` once approved) · `POST /api/phases/:id/reopen` `{reason}` (409 `cannot_reopen` after approval) | phases and their follow-ups | phases |
+| `PUT /api/cards/:id/phase` `{phaseId\|null}` (409 `card_terminal`, `phase_not_open`, `wrong_project`, `not_a_member_card`) · `POST /api/cards/:id/confirm-merged` · `GET /api/board?projectId=&phaseId=\|none` (cards carry a `phase` chip) | assignment, merge confirmation, board filter | phases |
+| `GET/PUT /api/projects/:id/followup-defaults` · `GET/POST /api/projects/:id/deploy-targets` · `PATCH/DELETE /api/deploy-targets/:id` (409 `target_in_use`) | defaults and deploy targets | phases |
 | `POST /api/roles` · `POST /api/workflows` (draft) · `PUT /api/roles/:id` · `PUT /api/workflows/:id` · `POST /api/roles/:id\|workflows/:id/validate` · `…/submit` · `DELETE /api/roles/:id\|workflows/:id` (drafts only) · `PUT /api/roles/:key/extensions` · `POST /api/roles/:key/reset` · `GET/POST /api/departments` · `GET /api/org/catalogue` · `GET /api/org/definitions/:id/file`; all take `?projectId=` | org designer | M10 |
 
 ## 20. Browser WebSocket (`/api/ws`, `packages/shared/src/protocol/browser.ts`)

@@ -20,8 +20,10 @@ import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 const inTx = (ctx: Ctx, what: string, fn: (tx: Tx) => Promise<void>): Promise<void> =>
   withAppendTx(ctx.pool, fn).catch((err) => ctx.log.error({ err, what }, 'phase pass failed for one phase'));
 
-/** A finalized pr / push_branch card is checked against the working branch this often (per card). */
+/** A finalized pr / push_branch card is checked against the working branch this often (per card; AOM_MERGE_CHECK_SECONDS). */
 export const MERGE_CHECK_INTERVAL_SECONDS = 180;
+const mergeCheckSeconds = (): number =>
+  Number(process.env.AOM_MERGE_CHECK_SECONDS) || MERGE_CHECK_INTERVAL_SECONDS;
 
 /**
  * Phase bookkeeping, one pass (docs/design/phases.md A5.4). State based and idempotent: every step locks the phase row,
@@ -65,7 +67,7 @@ async function mergeChecks(ctx: Ctx): Promise<void> {
           SELECT 1 FROM runner_commands rc
            WHERE rc.type = 'branch.check_merged' AND rc.payload->>'cardId' = c.id::text
              AND (rc.status IN ('pending','sent') OR rc.created_at > now() - make_interval(secs => $1)))`,
-    [MERGE_CHECK_INTERVAL_SECONDS],
+    [mergeCheckSeconds()],
   );
   const touched = new Set<string>();
   for (const c of due) {

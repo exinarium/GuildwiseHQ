@@ -148,7 +148,7 @@ export async function applyBaTaskReport(
     const outstanding: PhaseOutstanding[] = [
       ...(await computeOutstanding(tx, outcomes)),
       ...data.data.outstanding.map((text) => ({ kind: 'other' as const, text })),
-    ];
+    ].filter((o, i, all) => all.findIndex((x) => x.text.trim() === o.text.trim()) === i);
     await ctx.store.append(
       [
         ...(await phaseReportEvents(tx, phase, { report: data.data.report, outstanding, by })),

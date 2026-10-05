@@ -1,6 +1,6 @@
 # Design: named phases, post-phase follow-ups, and the BA as the manager's reporter
 
-Oct 5, 2026 · status: proposed (design only, nothing built) · companion to `docs/SPEC.md`, `docs/ARCHITECTURE.md` (referenced as §n)
+Oct 5, 2026 · status: Part A implemented (see "Implementation status" at the end), Part B not built · companion to `docs/SPEC.md`, `docs/ARCHITECTURE.md` (referenced as §n)
 
 Part A (phases and follow-ups) is the feature the owner decided. Part B (the BA as the manager's reporter) is the broader role that phases are the first instance of; it ships separately, after Part A, and reuses Part A's BA task queue.
 
@@ -642,7 +642,7 @@ Files:
 
 Each step ends green (`pnpm typecheck && pnpm lint && pnpm test`). Paths are relative to the repo root.
 
-**Part A: phases**
+**Part A: phases (all 19 steps built, see "Implementation status")**
 
 1. **Contract: schemas.**
    - Create `packages/shared/src/phases/index.ts` (FollowupSpec, statuses, `PhaseCardOutcome`, `PHASE_DESK_SUBKIND`, `phaseRef`, `phaseCompletion`, `nextFollowup`, fallback renderers, outcome ids and data schemas).
@@ -802,3 +802,30 @@ deterministically; agents do not have to remember it.
   run `git worktree prune`.
 - Agent instructions: builders, testers and reviewers never create worktrees outside the runner, and leave nothing
   behind in scratch that references a worktree.
+
+## Implementation status (Part A, built Oct 5, 2026)
+
+Built in the order of the implementation plan, migration `1303_phases.sql`:
+
+| Steps | Where |
+| --- | --- |
+| 1-5 contract, events, migration, projections | `packages/shared/src/phases`, `events/phase.ts`, `apps/server/src/projections/phases.ts`, `apps/server/test/phases-rebuild.test.ts` |
+| 6-8 manager commands, routes, BA intake RPCs, desk | `commands/phases.ts`, `commands/deploy-targets.ts`, `commands/phase-events.ts`, `routes/phases.ts`, `queries/phases.ts`; tests `phases.test.ts`, `phase-proposal.test.ts` |
+| 9, 11 completion, merge check, follow-up orchestration | `dispatcher/phases.ts`, `commands/phase-followups.ts`; tests `phase-completion.test.ts`, `phase-followups.test.ts` |
+| 10 BA task queue | `dispatcher/ba-tasks.ts`, `commands/ba-tasks.ts`, `runner-gateway/ba-task-brief.ts`; test `ba-tasks.test.ts` |
+| 12-14 runner, mock, instructions | `aom phase`, `branch.check_merged` (`git/merged.ts`), `AOM_TARGET_URL`, `mock-agent.ts baTaskMain`, BA v6, tester v4 |
+| 15-17 web | `pages/Phase.tsx`, `FollowupEditor`, `PhasesPanel`, `DeployTargetsPanel`, `PhaseDeskItem`, `CardPhase`, `PhaseFilter` |
+| 18 e2e | `e2e/tests/phases.spec.ts` |
+| 19 docs | ARCHITECTURE sections 4.2, 5.2, 9.8, 13.4, 17.2, 19; USER-GUIDE "Phases and follow-ups" |
+
+Where the build differs from the text above (owner decisions of 2026-10-05 win):
+
+- **A1**: every route needs only active project membership; there is no owner-only phase action. A remote deploy target's workstation may belong to any active member.
+- **A2**: completion needs the working-branch merge, not just a completion action. New: `cards.merged_into_working_at`, `CardMergeVerified`, the runner command `branch.check_merged`, the manual `POST /api/cards/:id/confirm-merged`, and `phases.working_branch` (used by the check; the claim path still branches from the repository's working branch).
+- **A6**: bug cards filed by a suite or a regression follow-up join the phase (`CardPhaseChanged.cause 'bug_filed'`); a phase waiting for its report or approval is reopened.
+- **A7**: no per-item `onFailure`; any failure skips the rest.
+- **A9**: `deploy_targets.workstation_id` is NULL for `local_docker`; `phase_followups.devops_request_ids` is an array; the regression card is pinned to a deployed workstation that has a tester.
+- Added: phase status `cancelled` and event `PhaseCancelled` (archiving a project), `BaTaskRequeued.attempt`, desk item re-issue when the follow-up list changes between empty and non-empty while the report waits.
+- The merge-check interval is `AOM_MERGE_CHECK_SECONDS` (default 180).
+
+**Deferred** (listed in the addenda, not part of this step): the runner start-up sweep of stale worktrees and the DevOps repo-hygiene job (including the working-branch confirmation, the active phase's branch for hygiene and the BA reporter signals); the cleanup for "agent fired" (the card returns to the queue there, so nothing ends); Part B (the BA as the manager's reporter); the phase "wait for PR merges" flag (replaced by the git check).

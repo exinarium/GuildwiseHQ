@@ -84,3 +84,6 @@ export const SANDBOXER = {
 
 /** Workability spec: own user, own runner (mock), project WRK on the toy repo, a builder and ONE senior reviewer. */
 export const WORKER = { email: 'worker@e2e.test', name: 'E2E Worker', password: 'worker-password-12345' };
+
+/** Phases spec: own user, own runner (mock), project PHS on the toy repo, a BA, a builder, a reviewer and a tester. */
+export const PHASER = { email: 'phaser@e2e.test', name: 'E2E Phaser', password: 'phaser-password-12345' };
