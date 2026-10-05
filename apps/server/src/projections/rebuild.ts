@@ -15,6 +15,8 @@ const SAVED: Array<{ table: string; restoreWhere: string }> = [
     restoreWhere:
       'workstation_id IN (SELECT id FROM workstations) AND project_repo_id IN (SELECT id FROM project_repos)',
   },
+  // Written by the runner's rpc, not a projection (migration 1300), but it references `projects`: the CASCADE below empties it.
+  { table: 'transcripts', restoreWhere: 'project_id IN (SELECT id FROM projects)' },
   {
     table: 'workstation_vaults',
     restoreWhere: 'workstation_id IN (SELECT id FROM workstations) AND vault_id IN (SELECT id FROM vaults)',

@@ -147,4 +147,15 @@ describe('projections:rebuild', () => {
       expect(new Date(c.lease_expires_at).getTime() - new Date(c.claimed_at).getTime()).toBe(5 * 3600_000);
     r.close();
   });
+
+  it('leaves the non-projection transcripts table alone (the CASCADE truncate would empty it)', async () => {
+    await q(
+      `INSERT INTO transcripts (project_id, url_normalized, url, title, chars, text, created_at)
+       VALUES ($1, 'https://x.test/v', 'https://x.test/v', 'A video', 5, 'hello', now())`,
+      [w.projectId],
+    );
+    await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);
+    const rows = await q('SELECT title, text FROM transcripts WHERE project_id = $1', [w.projectId]);
+    expect(rows).toEqual([{ title: 'A video', text: 'hello' }]);
+  });
 });
