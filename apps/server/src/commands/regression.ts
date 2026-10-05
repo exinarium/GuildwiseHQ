@@ -26,6 +26,12 @@ export interface RegressionCardsInput {
   /** Scheduled runs jump the queue and may get an overflow shift (one extra shift per organization). */
   scheduled: boolean;
   startedBy: string;
+  /** A phase follow-up's run: pin the cards to a workstation, tag them with the follow-up, add card fields. */
+  extra?: {
+    homeWorkstationId?: string;
+    phaseFollowupId?: string;
+    fields?: Record<string, unknown>;
+  };
 }
 
 /**
@@ -70,9 +76,15 @@ export async function regressionRunEvents(
         stage: 'test',
         status: 'queued',
         scheduled: input.scheduled,
-        fields: { context: `Regression run for ${p}, started by ${input.startedBy}.`, platform: p },
+        fields: {
+          context: `Regression run for ${p}, started by ${input.startedBy}.`,
+          platform: p,
+          ...(input.extra?.fields ?? {}),
+        },
         actor: input.actor,
         ownerUserId: input.ownerUserId,
+        ...(input.extra?.homeWorkstationId ? { homeWorkstationId: input.extra.homeWorkstationId } : {}),
+        ...(input.extra?.phaseFollowupId ? { phaseFollowupId: input.extra.phaseFollowupId } : {}),
       },
       i,
     );

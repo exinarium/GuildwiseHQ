@@ -24,6 +24,7 @@ import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { cardMessage, projectScope, userActor } from './common.ts';
 import { openLoopAlerts } from './loop-breaker.ts';
 
@@ -489,7 +490,8 @@ export async function releaseBackoff(ctx: Ctx, user: AuthSession['user'], idOrRe
 }
 
 export async function cancelCard(ctx: Ctx, user: AuthSession['user'], idOrRef: string, reason: string) {
-  return withAppendTx(ctx.pool, async (tx) => {
+  let workstation: string | undefined;
+  const id = await withAppendTx(ctx.pool, async (tx) => {
     const card = await loadManageable(tx, user, idOrRef);
     if (['done', 'cancelled'].includes(card.status))
       throw conflict('card_closed', `card is already ${card.status}`);
@@ -538,6 +540,18 @@ export async function cancelCard(ctx: Ctx, user: AuthSession['user'], idOrRef: s
       ],
       { tx },
     );
+    // A card that ends without a merge gives its worktree back (the branch is kept and listed in the phase report).
+    if (card.worktree_path && card.home_workstation_id && !card.worktree_card_id) {
+      await enqueueRunnerCommand(tx, card.home_workstation_id, 'worktree.remove', {
+        repoId: card.repo_id ?? undefined,
+        path: card.worktree_path,
+        branchName: card.branch_name ?? undefined,
+        deleteBranch: false,
+      });
+      workstation = card.home_workstation_id;
+    }
     return card.id as string;
   });
+  if (workstation) await ctx.services.gateway.deliverPending(workstation);
+  return id;
 }

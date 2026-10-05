@@ -8,6 +8,7 @@ import { testingPass } from './bottleneck.ts';
 import { agentView, candidateCards, isCandidate, ONLINE_WINDOW_MS } from './candidates.ts';
 import { type ClaimResult, claim } from './claim.ts';
 import { devopsPass } from './devops.ts';
+import { phasePass } from './phases.ts';
 import { questionPass } from './questions.ts';
 
 /** Events that make a dispatch pass worthwhile (docs/ARCHITECTURE.md section 9.1). */
@@ -41,6 +42,19 @@ const TRIGGER_TYPES = new Set([
   'DevOpsRequestCompleted',
   'FinalizeFailed',
   'TestEnvironmentReady',
+  'CardCancelled',
+  'CardPhaseChanged',
+  'CardMergeVerified',
+  'PhaseConfirmed',
+  'PhaseReopened',
+  'PhaseFollowupsApproved',
+  'PhaseFollowupBriefed',
+  'PhaseFollowupFinished',
+  'BaTaskQueued',
+  'BaTaskCompleted',
+  'BaTaskRequeued',
+  'FullSuitePassed',
+  'FullSuiteFailed',
 ]);
 
 const REJECT_COOLDOWN_MS = 30_000;
@@ -167,6 +181,8 @@ export class Dispatcher {
   private async pass(): Promise<ClaimResult[]> {
     if (this.stopped || !(await this.ensureLock())) return [];
     const nowMs = this.ctx.clock.now().getTime();
+    // Phases first: the requests, cards and tasks it creates are dispatched in this same pass.
+    await phasePass(this.ctx);
     const made: ClaimResult[] = [];
     const agents = await this.freeAgents();
     for (const { row, caps, active } of agents) {

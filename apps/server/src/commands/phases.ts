@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   type AssignCardPhaseRequest,
+  BranchCheckMergedResultSchema,
   type CreatePhaseRequest,
   type DeskActor,
   FollowupListSchema,
@@ -1078,4 +1079,54 @@ async function submit(
   } catch (err) {
     return [false, undefined, err instanceof Error ? err.message : String(err)];
   }
+}
+
+// ------------------------------------------------------------------------- merge check (A2)
+
+/**
+ * `command.result` of `branch.check_merged`: the card's branch is (or is not yet) merged into the working branch. A
+ * merged answer appends `CardMergeVerified`; anything else changes nothing (the check repeats on a timer).
+ */
+export async function applyBranchCheckResult(
+  ctx: Ctx,
+  cardId: string,
+  workingBranch: string,
+  ok: boolean,
+  raw: unknown,
+): Promise<void> {
+  const parsed = BranchCheckMergedResultSchema.safeParse(raw);
+  if (!ok || !parsed.success || !parsed.data.merged) return;
+  const result = parsed.data;
+  await withAppendTx(ctx.pool, async (tx) => {
+    const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [cardId]);
+    if (!card || card.merged_into_working_at) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.card(card.id),
+          event: {
+            type: 'CardMergeVerified',
+            payload: {
+              cardId: card.id,
+              workingBranch,
+              ...(card.branch_name ? { branchName: card.branch_name } : {}),
+              branchDeleted: result.branchDeleted,
+              remoteBranchDeleted: result.remoteBranchDeleted,
+              manual: false,
+            },
+          },
+          actor: actorOf(systemBy),
+          scope: projectScope(card.org_id, card.project_id),
+        },
+        cardMessage(
+          card,
+          { kind: 'system' },
+          'system',
+          `The branch is merged into ${workingBranch}${result.branchDeleted ? '; the card branch was deleted' : ''}${result.remoteBranchDeleted ? ' (also on the remote)' : ''}.`,
+        ),
+      ],
+      { tx },
+    );
+  });
+  ctx.services.dispatcher.trigger();
 }

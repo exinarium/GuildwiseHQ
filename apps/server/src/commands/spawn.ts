@@ -24,6 +24,10 @@ export interface SpawnInput {
   riskTier?: RiskTier | null;
   actor?: AppendInput['actor'];
   ownerUserId?: string;
+  /** The card runs on this workstation (a phase follow-up's regression run). */
+  homeWorkstationId?: string;
+  /** The phase follow-up that created the card (never a phase member). */
+  phaseFollowupId?: string;
 }
 
 /**
@@ -75,6 +79,8 @@ export async function spawnCardEvent(
           riskTier: input.riskTier ?? undefined,
           dependencies: [],
           requiredCapabilities: [],
+          ...(input.homeWorkstationId ? { homeWorkstationId: input.homeWorkstationId } : {}),
+          ...(input.phaseFollowupId ? { phaseFollowupId: input.phaseFollowupId } : {}),
         },
       },
       actor: input.actor ?? SYSTEM_ACTOR,

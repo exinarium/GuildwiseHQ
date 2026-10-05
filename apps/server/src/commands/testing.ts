@@ -16,6 +16,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { agentActor, cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
 import { createDevOpsRequestIn } from './devops.ts';
+import { bugJoinEvents } from './phases.ts';
 import { spawnCardEvent } from './spawn.ts';
 
 /** Bug child of a failed feature test (spec "Testing strategy"): shares the parent's worktree and branch. */
@@ -165,6 +166,11 @@ export async function suiteOutcomeEvents(
         actor: SYSTEM_ACTOR,
         scope,
       },
+      // A bug filed after finalize joins the phase it came from, and the phase waits for it (owner decision A6).
+      ...(await bugJoinEvents(tx, bug.cardId, bug.ref, card, {
+        orgId: card.org_id,
+        projectId: card.project_id,
+      })),
     );
   }
   events.push(

@@ -20,6 +20,7 @@ import { ExternalAdapters } from './external/index.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { executeCompletion } from './git/completion.ts';
 import { ghPrCreator, type PrCreator } from './git/gh.ts';
+import { checkBranchMerged } from './git/merged.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { removeWorktree } from './git/worktrees.ts';
 import { IpcServer } from './ipc/server.ts';
@@ -363,6 +364,16 @@ export class Runner {
       } else if (command === 'outbound.post') {
         // Failures are answered as `ok:true, result.ok:false`: the server turns them into a desk alert, not a blind retry.
         done(true, await this.outbound.run(CommandPayloadSchemas['outbound.post'].parse(payload), commandId));
+      } else if (command === 'branch.check_merged') {
+        // "Not merged" and "no clone here" are answers (ok:true); the server asks again later.
+        const p = CommandPayloadSchemas['branch.check_merged'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        done(
+          true,
+          repo
+            ? await checkBranchMerged({ repoPath: repo.localPath, payload: p })
+            : { merged: false, reason: `no local clone for ${p.remoteUrlNormalized}` },
+        );
       } else if (command === 'repo.create') {
         // Failures are answered as `ok:true, result.ok:false`: the server puts them on the desk.
         done(true, await this.repoCreator.run(CommandPayloadSchemas['repo.create'].parse(payload)));
