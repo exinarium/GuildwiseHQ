@@ -61,10 +61,12 @@ export function createRoutingInterceptor(ctx: Ctx) {
           out.push(input);
           continue;
         }
-        const urgent = p.blocking || p.pinned || p.kind !== 'alert';
+        // A shift loop burns tokens while it runs (owner decision B1): its alert is never held.
+        const loop = subkind === DESK_SUBKIND.loopBackoff;
+        const urgent = p.blocking || p.pinned || p.kind !== 'alert' || loop;
         if (urgent) {
-          // The loop breaker's alert is analysed by the loop signal instead.
-          if (subkind !== DESK_SUBKIND.loopBackoff) add(noted, orgId, projectId, p.deskItemId);
+          // The loop breaker's alert is analysed by the loop signal (`floor_alert`) instead of a note task.
+          if (!loop) add(noted, orgId, projectId, p.deskItemId);
           out.push(input);
         } else {
           const deadline = new Date(now.getTime() + REPORTER.triageWindowMinutes * 60_000).toISOString();

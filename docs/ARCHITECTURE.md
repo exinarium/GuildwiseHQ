@@ -813,6 +813,21 @@ A phase groups cards of one project; when every confirmed member card's work is 
 
 `CardCreated` gained `homeWorkstationId?` (a regression card of a follow-up runs where the local stack was deployed) and `phaseFollowupId?`; card fields gained `targetUrl` and `deployTarget`.
 
+#### BA reporter (`events/reporter.ts`, plus `UserTimezoneChanged` in `events/user.ts`) — Part B of `docs/design/phases.md`
+
+Streams `user-<id>`, `desk-<id>`, `ba-signal-<id>`, `ba-task-<id>`; audience `org` (preferences, floor report) or `project`. The routing decision is always recorded in the event (`DeskItemCreated.triage`), never recomputed from settings on replay.
+
+| Event | Payload | Projection effect |
+| --- | --- | --- |
+| `UserTimezoneChanged` | `{userId, timezone}` (IANA, validated) | `users.timezone` |
+| `ReportingPrefsChanged` | `{userId, routeViaBa?, dailyAt?}` | merged into `users.reporting` (absent keys = defaults: routing on, `08:00`) |
+| `BaChatLinked` | `{userId, threadId}` | `users.ba_chat_thread_id`: the standing "BA reports" chat of the organization owner |
+| `DeskItemCreated` (extended) | `…, triage?:{deadline}, data?, chatThreadId?` | `triage 'pending'` + `triage_deadline` (held: hidden from the desk list), `data` (the floor digest), `chat_thread_id` |
+| `DeskItemTriaged` | `{deskItemId, outcome:'passed'\|'released'\|'dismissed'\|'merged', note?, intoDeskItemId?, by}` | `triage`, `ba_note`; `dismissed` → status `dismissed`, `merged` → status `superseded` + `superseded_by` |
+| `DeskItemAnnotated` | `{deskItemId, note, by, relatedDeskItemIds[], signalId?}` | `desk_items.ba_note` |
+| `BaSignalRaised` / `BaSignalUpdated` / `BaSignalReported` / `BaSignalResolved` | `{signalId, kind, fingerprint, urgency, subject, evidence, count}` … | `ba_signals`: one open row per `(org, fingerprint)` |
+| `BaTaskQueued` (extended), `BaTaskItemsAdded` | `…, signalIds?, deskItemIds?, localDate?` / `{taskId, deskItemIds?, signalIds?}` | `ba_tasks.signal_ids / desk_item_ids / local_date`; a `floor_report` also sets `users.floor_report_day` |
+
 ---
 
 ## 6. Workflows as data and the card lifecycle
@@ -1144,6 +1159,16 @@ Thread messages collapse: the 1st failure posts the usual "Shift ended without a
 
 `dispatcher/ba-tasks.ts baTaskPass` is the structure of `questionPass`: queued tasks oldest first, one `ba_task` shift at a time per BA agent (outside card capacity), the intake's BA preferred. The shift has no card or worktree (`shift.start kind 'ba_task'`, a placeholder card, `baTask` with the phase, its cards and suites, the follow-ups and what is outstanding) and ends with exactly one terminal `aom phase` report, validated by `commands/ba-tasks.ts applyBaTaskReport`; questions are refused. A shift that is rejected, lost or stopped requeues the task unharmed; a crash, timeout or missing report counts an attempt. **No agent ever blocks:** a task with no BA hired, no BA online for 15 minutes or two failed attempts is done by the server from a template (`runBaTaskFallback`: a report starting "Your BA was not available; this summary was generated.", template briefs, "no BA was available" for a custom follow-up the BA was to do) and marked `fallback`. Archiving a project cancels its phases (`PhaseCancelled`), their pending follow-ups and queued tasks; a DevOps request already running is left to finish.
 
+### 9.9 The BA as the manager's reporter (Part B)
+
+**Routing (`reporter/routing.ts`).** `PgEventStore.intercept` registers a hook that runs inside every append transaction (so every emitter of `DeskItemCreated` and `QuestionRaised` is covered, and the decision lands in the stored event). For an organization with `users.reporting.routeViaBa` (default true) and a reachable BA (active, on a connected workstation with its runtime available, within the agent's project scope), an item is **urgent** when it is blocking, pinned, not an `alert` (approvals, escalations) or the loop breaker's alert; it is stored unchanged and joins a queued `urgent_note` task (one BA shift per burst: `enqueueReporterTask` adds to a task that is still queued). Any other item is **held**: the payload gets `triage:{deadline: now + 10 min}`, the projection sets `triage='pending'`, `DESK_VISIBLE` hides it from the manager (its `status` stays `open`, so the emitters' own dedup checks still see it), and it joins a queued `desk_triage` task. Exempt: ratings, phase items and the reporter's own items (`ROUTING_EXEMPT_SUBKINDS`), and the mapping question of an intake. Questions raised by agents keep the escalation chain (§15) but with routing on a blocking question goes straight to the desk (`nextRoute` `via:'desk'`; the interceptor queues the note) and a non-blocking one starts at the BA instead of a peer (`via:'ba'`; the BA's `QUESTION_STALL_MS` of 10 minutes is its window).
+
+**The BA never blocks.** The deadline is enforced by the reporter sweep (below): `DeskItemTriaged{outcome:'released'}` ends the hold and the item reaches the desk exactly as raised. With no reachable BA nothing is held (the interceptor checks `baAvailable` first); a `desk_triage` task no BA takes is done by `runReporterFallback`, which releases every item still held. A BA decision on an item that was already released can only add a note. The BA can `dismiss` or `merge` only items that are `alert`, non-blocking and non-pinned.
+
+**Reporter tasks** reuse `ba_tasks` and `baTaskPass` (`kind` `desk_triage`, `urgent_note`, `floor_alert`, `floor_report`; no phase; filed under the item's project, or the organization's oldest active project; `floor_report` can be taken by any BA of the org). The `shift.start` carries `baTask.reporter` (items, signals, the floor digest, open items it may merge into) instead of a phase; the shift ends with one `aom report triage|notes|signals|floor` command, validated by `commands/reporter-tasks.ts applyReporterReport` (`triage_done`, `notes_done`, `signal_report`, `floor_report`). Fallbacks: held items pass through unchanged, urgent items need no note, signals and the floor report are posted from templates (`renderSignalFallback`, `renderFloorReportFallback`).
+
+**The sweep (`reporter/reporter.ts`, `AOM_REPORTER_SECONDS`, default 60; `POST /api/test/clock` runs it too).** (1) Releases expired holds. (2) Runs the deterministic detectors (`reporter/detectors.ts`; thresholds are the single `REPORTER` object in `packages/shared/src/reporter`): `loop` (an open loop-breaker episode: `retry_failures >= 3` with `retry_after` set), `repeated_approval` (approval desk items clustered by subkind and `topicWords` overlap ≥ 0.6, ≥ 3 in 24 h; urgent if one was rejected), `blocked` (> 4 h), `unclaimed` (queued > 30 min and `cardWorkability` not ok), `rework` (round ≥ 3) and `finalize_failures` (≥ 2); and reconciles `ba_signals` by fingerprint (raise, update when count/urgency/subject changed, resolve when the condition clears, acknowledging the signal's open `ba_report` item). (3) Queues a `floor_alert` task for each urgent signal no task has covered; the BA's analysis becomes a `DeskItemAnnotated` note on the signal's own desk item (the loop alert) or a new `alert/ba_report`. (4) Queues the daily `floor_report` when the manager's local clock passes `dailyAt` (`floorReportDue`: local date from `users.timezone` via `Intl`, UTC while unset; once per local date, tracked in `users.floor_report_day`; an organization created after today's boundary waits for tomorrow's; skipped when the digest is empty). The digest (`reporter/digest.ts buildFloorDigest`) is deterministic SQL: open phases and the open bug cards that hold them (`origin 'test_failure'`, created after `completed_at`), signals, cards in back-off, open DevOps requests, items the BA resolved (`triage` dismissed/merged, or questions answered by a BA) and failed shifts since the previous report. The report item (`alert/floor_report`, `data` = the digest) and each `alert/ba_report` link to the standing chat thread (`ensureReportThread`: one `ChatThreadCreated` with the BA per organization owner, kept in `users.ba_chat_thread_id`).
+
 ### 9.6 Hire cap for first runs (removed in M9)
 
 The first-run cap (2 builders, 1 of each other role) and `AOM_FIRST_RUN_HIRE_CAP` are gone; the HR board's recommendations (model, split, fire or reassign) replace the guard rail.
@@ -1397,6 +1422,7 @@ aom phase list|propose|assign|submit ...           # BA intake chat: propose a p
 aom phase followup brief <n> --to devops|tester|ba --text ... ; aom phase ready      # BA task: delegate each follow-up, then say all are briefed (terminal)
 aom phase report --summary-file <md> [--outstanding ...]... ; aom phase results --summary-file <md>   # BA task: report the finished phase / the follow-up results (terminal)
 aom phase followup done|fail <n> --summary ... [--link <url>]...   # BA task: a custom follow-up the BA did itself (terminal)
+aom report triage|notes|signals --file <json> ; aom report floor --summary-file <md>   # BA reporter task: held items, notes on urgent items, urgent signals, the daily floor report (terminal)
 ```
 
 `ShiftReport` (zod discriminated union on `kind`): `{kind:'outcome', outcomeId, note, data}` (all sugar verbs map to this) | `{kind:'question', text, options, recommend?, doing, blocking}` | `{kind:'comment', note}` (non-terminal). The server validates `outcomeId` against the card's current stage and `data` against the outcome's `data` schema (`review` = `{score, reasons?, criteriaMissed?}`, `testEvidence` = `{commands[], summary, outputExcerpt}`, `diffStats` = attached by the runner, not the agent). Exactly one terminal report per shift; a second one gets `409 already reported`.
@@ -1515,6 +1541,7 @@ Admins get the administration view only; being admin grants no visibility into o
 | Answer desk item for a card | `owner_only`: card owner; `any_manager`: any active member. Items always visible to all members |
 | Answer project-level desk item (no card) | project owner; DevOps/vault/bottleneck items: the user whose workstation/vault it concerns |
 | Create and edit phases, assign cards, edit follow-ups, project default follow-ups, deploy targets, confirm a BA proposal, approve / reject the follow-ups, reopen a phase, confirm a merge | any active project member (owner decision A1); every route uses `loadVisibleProject` / `loadVisibleCard`, other users get 404. A remote deploy target's workstation must be an active workstation of a project member |
+| Reporting preferences, time zone | the signed-in user for their own organization (each user owns their organization); the BA's `aom report` verbs: the BA of the reporter task only (`applyReporterReport`), which can annotate any item of the org, and dismiss or merge only held non-urgent alerts |
 | The BA's `aom phase` verbs | the BA of the conversation (propose, assign, submit: its intake chat) or of the task (`ba_task` shift: only that phase) |
 | Hire agent org-wide | the org owner, onto own workstation |
 | Hire agent for a shared project | any active member, onto own workstation, from the owner's role catalogue; `project_id` is set; refused on archived projects |
@@ -1599,6 +1626,7 @@ Errors: `{error: {code, message, details?}}` with 400 validation, 401 unauthenti
 | `GET/POST /api/projects/:id/phases` · `GET /api/phases/:id` · `GET /api/phases/by-number/:key/:number` · `PATCH /api/phases/:id` · `PUT /api/phases/:id/followups` (409 `followups_frozen` once approved) · `POST /api/phases/:id/reopen` `{reason}` (409 `cannot_reopen` after approval) | phases and their follow-ups | phases |
 | `PUT /api/cards/:id/phase` `{phaseId\|null}` (409 `card_terminal`, `phase_not_open`, `wrong_project`, `not_a_member_card`) · `POST /api/cards/:id/confirm-merged` · `GET /api/board?projectId=&phaseId=\|none` (cards carry a `phase` chip) | assignment, merge confirmation, board filter | phases |
 | `GET/PUT /api/projects/:id/followup-defaults` · `GET/POST /api/projects/:id/deploy-targets` · `PATCH/DELETE /api/deploy-targets/:id` (409 `target_in_use`) | defaults and deploy targets | phases |
+| `GET/PUT /api/reporting` `{routeViaBa?, dailyAt?}` · `PUT /api/auth/timezone` `{timezone}` (400 `invalid_timezone`) | BA reporting preferences of the caller's organization; the manager's IANA time zone (`UserDto.timezone`, `DeskItemDto.baNote / triage / chatThreadId / floor`) | reporter |
 | `POST /api/roles` · `POST /api/workflows` (draft) · `PUT /api/roles/:id` · `PUT /api/workflows/:id` · `POST /api/roles/:id\|workflows/:id/validate` · `…/submit` · `DELETE /api/roles/:id\|workflows/:id` (drafts only) · `PUT /api/roles/:key/extensions` · `POST /api/roles/:key/reset` · `GET/POST /api/departments` · `GET /api/org/catalogue` · `GET /api/org/definitions/:id/file`; all take `?projectId=` | org designer | M10 |
 
 ## 20. Browser WebSocket (`/api/ws`, `packages/shared/src/protocol/browser.ts`)
@@ -1629,6 +1657,7 @@ Server env (`apps/server/src/config.ts`, zod-validated):
 | `AOM_FIRST_RUN_HIRE_CAP` | `true` | until M9 |
 | `AOM_SERVE_WEB` | `false` (dev), `true` (prod) | serve `apps/web/dist` |
 | `LOG_LEVEL` | `info` | |
+| `AOM_REPORTER_SECONDS` | `60` | BA reporter sweep: signal detectors, expired triage holds, the daily floor report |
 | `AOM_TEST_CLOCK` | unset | test only: enables `POST /api/test/clock {offsetMs}`; all server time comes from `clock.now()` |
 
 First admin: `pnpm --filter @aom/server admin:create --email ... --name ...` (prompts for password) → `UserBootstrapped`.

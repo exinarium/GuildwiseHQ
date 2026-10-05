@@ -87,3 +87,10 @@ export const WORKER = { email: 'worker@e2e.test', name: 'E2E Worker', password: 
 
 /** Phases spec: own user, own runner (mock), project PHS on the toy repo, a BA, a builder, a reviewer and a tester. */
 export const PHASER = { email: 'phaser@e2e.test', name: 'E2E Phaser', password: 'phaser-password-12345' };
+
+/** BA reporter spec (docs/design/phases.md Part B): own user, own runner (mock), project RPT, a BA and a builder. */
+export const REPORTER = {
+  email: 'reporter@e2e.test',
+  name: 'E2E Reporter',
+  password: 'reporter-password-12345',
+};

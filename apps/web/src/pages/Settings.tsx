@@ -12,8 +12,12 @@ export function Settings() {
   const update = useUpdateReporting();
   const zone = reporting.data?.timezone ?? me.data?.user.timezone ?? null;
   const [dailyAt, setDailyAt] = useState('08:00');
+  const [route, setRoute] = useState(true);
   useEffect(() => {
-    if (reporting.data) setDailyAt(reporting.data.dailyAt);
+    if (reporting.data) {
+      setDailyAt(reporting.data.dailyAt);
+      setRoute(reporting.data.routeViaBa);
+    }
   }, [reporting.data]);
 
   if (reporting.isPending) return <Spinner label="Loading settings" />;
@@ -66,9 +70,12 @@ export function Settings() {
             type="checkbox"
             data-testid="route-via-ba"
             className="mt-0.5"
-            checked={prefs?.routeViaBa ?? true}
-            disabled={!prefs?.canEdit || update.isPending}
-            onChange={(e) => update.mutate({ routeViaBa: e.target.checked })}
+            checked={route}
+            disabled={!prefs?.canEdit}
+            onChange={(e) => {
+              setRoute(e.target.checked);
+              update.mutate({ routeViaBa: e.target.checked });
+            }}
           />
           <span>
             Route agent-raised items through the BA first

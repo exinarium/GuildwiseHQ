@@ -92,7 +92,7 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
       ];
     case 'user':
     case 'invitation':
-      return [['admin'], ['me']];
+      return [['admin'], ['me'], ['reporting']];
     default:
       return [];
   }

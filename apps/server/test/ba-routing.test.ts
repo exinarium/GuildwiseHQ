@@ -299,6 +299,15 @@ describe('urgent items go straight to the manager; the BA annotates afterwards',
     expect((await deskItem(approval)).baNote).toBeNull();
   });
 
+  it('the loop breaker alert is urgent: on the desk at once, analysed through the loop signal rather than a note task', async () => {
+    await clean();
+    const id = await alert('TOY-1 keeps failing', { subkind: 'loop_backoff' });
+    expect((await row(id)).triage).toBe('none');
+    expect(await deskIds()).toContain(id);
+    expect(await tasks('desk_triage')).toHaveLength(0);
+    expect(await tasks('urgent_note')).toHaveLength(0);
+  });
+
   it('a blocking question skips the peer and the BA hop and is on the desk at once', async () => {
     await clean();
     const from = r.received.length;

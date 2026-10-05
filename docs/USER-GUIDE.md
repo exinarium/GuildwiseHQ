@@ -430,6 +430,52 @@ The BA writes a report (what was delivered with the merge commits, what was canc
 
 The follow-ups are frozen. The BA writes the instructions for each delegate, then the server runs them **in order, one at a time**: a deploy becomes DevOps request(s) with the target's details; a regression run becomes a regression card pinned to the workstation that was just deployed, testing the target URL (the tester gets it in the card and as `AOM_TARGET_URL`); a custom item goes to DevOps, a tester or the BA. **If any follow-up fails, the ones after it are skipped.** At the end a **Phase results** notice lists each result with its evidence (pinned when something failed). The phase page shows live status, the DevOps requests, the regression cards and the progress thread. Archiving a project cancels its phases and their pending follow-ups.
 
+## Your BA reports to you
+
+Your BA is your eyes and ears on the floor and your one consolidated voice. It reports in three ways, and it never slows an agent down.
+
+### What goes through the BA
+
+With **routing** on (it is on for every new organization; **Settings > Your BA reports to you**), what agents and the system raise goes to your BA first:
+
+- **Urgent items reach your desk at once, unchanged**: blocking questions, approvals (DevOps, merges, outbound updates, new repositories, roles and workflows), pinned alerts and a card that keeps failing. The BA adds a **BA note** under the item a little later: how often it was asked, what the ledger says, what it recommends.
+- **Everything else** (for example a "bug reported" or "posting failed" alert) is held for the BA for up to **10 minutes**. The BA passes it on (often with a note), folds duplicates into one item, or dismisses noise it can show is already covered. You see the result: "Your BA looked at this first and passed it on", and what the BA resolved itself is listed in the daily report.
+- **A non-blocking question** reaches your BA before any colleague. It answers from the ledger when it can, otherwise it escalates with the context you need.
+- **The BA never blocks anyone.** An item it has not looked at within ten minutes reaches you unchanged ("Your BA had not looked at this in time"), and with no BA online nothing is held at all. The BA can only dismiss or merge non-urgent alerts, never a question or an approval.
+
+Turn routing off in Settings to see everything as it is raised, exactly as before.
+
+### Signals the server watches for
+
+The server checks the floor every minute, without using any tokens (the BA only works when something fires):
+
+| Signal | Threshold | How you hear about it |
+| --- | --- | --- |
+| A card keeps failing (shift loop) | 3 failed shifts on one card in 10 minutes | At once: the loop alert gets the BA's analysis as a note |
+| The same approval asked again and again | The same DevOps or approval action 3 times in 24 hours (at once if it was rejected before) | In the daily report (at once when it was rejected before) |
+| Blocked too long | A blocked card waits more than 4 hours | Daily report |
+| Nobody can take it | A queued card nobody is able to take for more than 30 minutes | Daily report |
+| Repeated failures | A card in rework round 3, or a failed finalize twice | Daily report |
+
+A signal appears once however long it lasts, and clears by itself when the cause is gone (a notice the BA posted is then acknowledged for you).
+
+### The daily floor report
+
+At **08:00 on your clock** the BA posts one **Floor report** on your desk (only on days with something to say; urgent notices never wait for it, at any hour). It lists:
+
+1. phases waiting or open, and the ones held open by late bug cards;
+2. stuck, blocked and backing-off cards;
+3. repeated approvals;
+4. failures;
+5. DevOps requests that are open;
+6. what the BA resolved itself without bothering you.
+
+Open **The facts behind this report** for the same lists straight from the server, with links. Every report links to your standing **BA reports** chat (one per organization): ask "why?" there. The desk item stays the record; the chat holds the discussion. With no BA available (none hired, or none online for 15 minutes) the server posts the same report from a template, and passes items on unchanged.
+
+### Settings: your time zone and the report time
+
+**Settings** (top bar) holds your **time zone**, which the app takes from your browser the first time you sign in (change it any time; until it is set, reports use UTC), the **routing** switch and the **time of the daily report** (default 08:00).
+
 ## Ledger and search
 
 The ledger is the shared memory of your org. It records:

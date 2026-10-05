@@ -1,6 +1,6 @@
 # Design: named phases, post-phase follow-ups, and the BA as the manager's reporter
 
-Oct 5, 2026 · status: Part A implemented (see "Implementation status" at the end), Part B not built · companion to `docs/SPEC.md`, `docs/ARCHITECTURE.md` (referenced as §n)
+Oct 5, 2026 · status: Part A and Part B implemented (see "Implementation status" at the end) · companion to `docs/SPEC.md`, `docs/ARCHITECTURE.md` (referenced as §n)
 
 Part A (phases and follow-ups) is the feature the owner decided. Part B (the BA as the manager's reporter) is the broader role that phases are the first instance of; it ships separately, after Part A, and reuses Part A's BA task queue.
 
@@ -828,4 +828,32 @@ Where the build differs from the text above (owner decisions of 2026-10-05 win):
 - Added: phase status `cancelled` and event `PhaseCancelled` (archiving a project), `BaTaskRequeued.attempt`, desk item re-issue when the follow-up list changes between empty and non-empty while the report waits.
 - The merge-check interval is `AOM_MERGE_CHECK_SECONDS` (default 180).
 
-**Deferred** (listed in the addenda, not part of this step): the runner start-up sweep of stale worktrees and the DevOps repo-hygiene job (including the working-branch confirmation, the active phase's branch for hygiene and the BA reporter signals); the cleanup for "agent fired" (the card returns to the queue there, so nothing ends); Part B (the BA as the manager's reporter); the phase "wait for PR merges" flag (replaced by the git check).
+**Deferred** (listed in the addenda, not part of this step): the runner start-up sweep of stale worktrees and the DevOps repo-hygiene job (including the working-branch confirmation, the active phase's branch for hygiene and the BA reporter signals); the cleanup for "agent fired" (the card returns to the queue there, so nothing ends); the phase "wait for PR merges" flag (replaced by the git check).
+
+## Implementation status (Part B, built Oct 5-6, 2026)
+
+Migration `1304_ba_reporter.sql` (the design's `1400_ba_reporter.sql`, renumbered to the next free number). Built with the owner decisions B1-B6 of 2026-10-05; the first commit of the step fixed `rebuildProjections` so a rebuild keeps the non-projection `transcripts` table.
+
+| Part | Where |
+| --- | --- |
+| Contract, thresholds (one `REPORTER` object), prefs, signals, digest, task data, template texts | `packages/shared/src/reporter`, `events/reporter.ts`, `prompt/reporter-task.ts` |
+| Migration, projections | `migrations/1304_ba_reporter.sql`, `projections/reporter.ts`, `users` (timezone, reporting, standing chat, last report day), `desk_items` (ba_note, triage, data, chat_thread_id), `ba_signals`, `ba_tasks` (signal_ids, desk_item_ids, local_date) |
+| Routing (B2/B3) | `eventstore/pg-event-store.ts` interceptor hook, `reporter/routing.ts`, `reporter/tasks.ts`, `commands/questions.ts` + `escalation.ts` (`via`) |
+| Detectors, signals, sweep (B1, B4, B5) | `reporter/detectors.ts`, `reporter/reporter.ts` (60 s, `AOM_REPORTER_SECONDS`), `reporter/digest.ts` |
+| BA tasks, fallback (B6) | `commands/reporter-tasks.ts`, `reporter/report-items.ts`, `dispatcher/ba-tasks.ts`, `runner-gateway/ba-task-brief.ts` |
+| Settings | `commands/reporting.ts`, `routes/reporting.ts`; web `pages/Settings.tsx`, first-login time zone in `components/Layout.tsx` |
+| Runner, mock BA, instructions | `aom report` verb, `mock-agent.ts reporterTaskMain`, BA instructions v7 ("Reporting to the manager") |
+| Web | `components/BaNote.tsx` (BA note, triage hints, chat link, floor report sections), `lib/desk.ts` labels |
+| Tests | server `ba-routing`, `reporter-detectors`, `ba-reporter`; shared `reporter`; runner `aom-cli-report`, `ba-task-shift`; web `reporter`; e2e `reporter.spec.ts` (`playwright test --project=reporter --no-deps`) |
+| Docs | USER-GUIDE "Your BA reports to you", ARCHITECTURE §5.2, §9.9, §19, §22 |
+
+Where the build differs from the text above (owner decisions win):
+
+- **B2/B3 routing** is the "route everything through the BA" variant, not "annotate and consolidate". Urgent = blocking, pinned, any approval or escalation, and the loop alert; it is delivered unchanged and noted afterwards. Non-urgent alerts are held up to 10 minutes (`REPORTER.triageWindowMinutes`) for a `desk_triage` task; a blocking question skips the chain (`via 'desk'`) and a non-blocking one starts at the BA (`via 'ba'`), which is the existing escalation step with its own 10-minute stall. The setting is `users.reporting.routeViaBa` (default on), edited on the Settings page; the test helpers create users with it off.
+- **B4** the report time is `users.reporting.dailyAt` (default 08:00) on the manager's `users.timezone` (browser-detected at first login, editable; UTC while unset). A report is skipped on a day with nothing to say, and an organization created after today's boundary waits for tomorrow's. There are no quiet hours; urgent notices are immediate.
+- **B5** the loop breaker's alert is never held. The loop episode (`retry_failures >= 3` with `retry_after` set) is a signal; the BA's analysis is a note on that alert instead of a second item.
+- **B6** `alert/floor_report` carries the digest in `desk_items.data`; `alert/ba_report` is used for urgent signals that have no alert of their own. Both link to one standing BA chat per organization owner.
+- Signals use fingerprints per card (`loop:card:<id>`, `blocked:card:<id>`, ...) and per approval cluster. `finalize_failures` and `rework` are the "repeated failures" of B1; "stuck" is the blocked and unclaimed detectors.
+- Reports go to the organization owner (org-level desk items). Other project members do not get a floor report.
+
+**Deferred**: nothing from the owner decisions. Not built because the design left it open or optional: quiet hours (decided against), a per-project report, the supersede flag on `aom report` (the triage `merge` action covers it), org-level threshold settings (one constants object, as decided in B1).
