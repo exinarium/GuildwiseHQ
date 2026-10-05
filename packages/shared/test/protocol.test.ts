@@ -103,6 +103,11 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
     finalText: 'bye',
     guardViolations: [{ rule: 'reviewer_modified_code', detail: 'x' }],
   },
+  'worktrees.query': {
+    ...env('worktrees.query'),
+    queryId: 'q1',
+    paths: ['/home/u/.aom-runner/worktrees/TOY-1a2b3c4d/TOY-1'],
+  },
   'rpc.request': {
     ...env('rpc.request'),
     rpcId: 'r1',
@@ -147,6 +152,11 @@ const serverToRunner: Record<string, Record<string, unknown>> = {
   },
   'shift.stop': { ...env('shift.stop'), shiftId: U.a, reason: 'timeout' },
   'shift.report.result': { ...env('shift.report.result'), reportId: U.d, accepted: false, error: 'nope' },
+  'worktrees.live': {
+    ...env('worktrees.live'),
+    queryId: 'q1',
+    live: ['/home/u/.aom-runner/worktrees/TOY-1a2b3c4d/TOY-1'],
+  },
   'rpc.response': { ...env('rpc.response'), rpcId: 'r1', ok: true, result: { hits: [] } },
   'chat.start': {
     ...env('chat.start'),

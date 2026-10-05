@@ -27,6 +27,8 @@ export interface FakeServerOptions {
   ) => { accepted: boolean; error?: string; message?: string; matches?: unknown[] } | 'ignore';
   rpc?: (msg: RunnerToServerOf<'rpc.request'>) => { ok: boolean; result?: unknown; error?: string };
   pairCode?: string;
+  /** Answer to each `worktrees.query`: the paths still in use. Unset: the query is not answered. */
+  worktreesLive?: (paths: string[]) => string[];
 }
 
 /**
@@ -152,6 +154,8 @@ export class FakeServer {
       if (verdict !== 'ignore')
         this.sendRaw(ws, 'shift.report.result', { reportId: msg.reportId, ...verdict });
     }
+    if (msg.type === 'worktrees.query' && this.opts.worktreesLive)
+      this.sendRaw(ws, 'worktrees.live', { queryId: msg.queryId, live: this.opts.worktreesLive(msg.paths) });
     if (msg.type === 'rpc.request') {
       const r = this.opts.rpc?.(msg) ?? { ok: false, error: 'not implemented in fake' };
       this.sendRaw(ws, 'rpc.response', { rpcId: msg.rpcId, ...r });

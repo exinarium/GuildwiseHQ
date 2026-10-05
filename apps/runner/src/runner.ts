@@ -9,6 +9,7 @@ import {
   type RuntimeInfo,
   type ServerToRunner,
   uuidv7,
+  type WorktreeSweepResult,
 } from '@aom/shared';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
@@ -22,6 +23,7 @@ import { executeCompletion } from './git/completion.ts';
 import { ghPrCreator, type PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { scanRepos } from './git/repo-scan.ts';
+import { sweepWorktrees } from './git/sweep.ts';
 import { removeWorktree } from './git/worktrees.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
@@ -53,6 +55,10 @@ export interface RunnerOptions {
   external?: ExternalAdapters;
   /** Test hook: replaces the tester environment check (docker, deployed app). */
   envChecker?: import('./testing/environment.ts').EnvChecker;
+  /** Sweep stale worktrees this long after the first connection of the process (default 15 s); a negative value turns it off. */
+  startupSweepMs?: number;
+  /** How long a sweep waits for the server's answer about live worktrees (default 15 s). */
+  sweepAnswerMs?: number;
 }
 
 /** The long-running runner process: connection, IPC server, supervisor and command handlers. */
@@ -75,6 +81,9 @@ export class Runner {
   private lastRuntimes: string | undefined;
   private maxConcurrent: number;
   private readonly rpcs = new Map<string, (r: IpcRpcResponse) => void>();
+  private readonly sweepQueries = new Map<string, (live: string[]) => void>();
+  private startupSweepDone = false;
+  private sweeping: Promise<WorktreeSweepResult> | null = null;
   private timers: NodeJS.Timeout[] = [];
   private fatalResolve?: (code: number) => void;
   /** Resolves with an exit code when the server makes further retries pointless (4401/4403/4409). */
@@ -149,6 +158,7 @@ export class Runner {
     this.client.on('welcome', (w) => {
       this.maxConcurrent = Math.min(w.limits.maxConcurrentShifts, opts.config.maxConcurrentShifts);
       this.writeStatus(true);
+      this.scheduleStartupSweep();
     });
     this.client.on('disconnected', () => {
       this.writeStatus(false);
@@ -246,6 +256,59 @@ export class Runner {
     this.lastRuntimes = key;
   }
 
+  /** Once per process, shortly after the first connection: the stale-worktree sweep (owner decision 4). */
+  private scheduleStartupSweep(): void {
+    const delay = this.opts.startupSweepMs ?? 15_000;
+    if (this.startupSweepDone || delay < 0) return;
+    this.startupSweepDone = true;
+    const t = setTimeout(() => {
+      this.sweepWorktrees()
+        .then((r) => {
+          if (r.removed.length || r.dirty.length || r.emptyDirsRemoved.length || r.skipped)
+            this.log.info(`worktree sweep: ${JSON.stringify(r)}`);
+        })
+        .catch((err) => this.log.warn(`worktree sweep failed: ${String(err)}`));
+    }, delay);
+    t.unref();
+    this.timers.push(t);
+  }
+
+  /** Asks the server which worktrees are live (null: no answer in time). */
+  private askLiveWorktrees(paths: string[]): Promise<Set<string> | null> {
+    if (!this.client.isReady) return Promise.resolve(null);
+    const queryId = uuidv7();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.sweepQueries.delete(queryId);
+        resolve(null);
+      }, this.opts.sweepAnswerMs ?? 15_000);
+      timer.unref();
+      this.sweepQueries.set(queryId, (live) => {
+        clearTimeout(timer);
+        resolve(new Set(live.map((p) => p)));
+      });
+      this.client.send('worktrees.query', { queryId, paths });
+    });
+  }
+
+  /** Removes the worktrees of finalized, cancelled and unknown cards, empty project folders and runs `git worktree prune`. */
+  sweepWorktrees(): Promise<WorktreeSweepResult> {
+    // One sweep at a time: a second request joins the one in flight.
+    this.sweeping ??= sweepWorktrees({
+      worktreesDir: this.paths.worktrees,
+      liveOf: async (paths) => {
+        // The server answers in chunks of at most SWEEP_QUERY_MAX_PATHS; ask in one go while it fits.
+        return this.askLiveWorktrees(paths);
+      },
+      busyPaths: this.supervisor.worktreePaths(),
+      repoPaths: this.repos.map((r) => r.localPath),
+      outboxPending: this.outbox.count(),
+    }).finally(() => {
+      this.sweeping = null;
+    });
+    return this.sweeping;
+  }
+
   private async findRepo(normalized: string): Promise<RepoReport | undefined> {
     const match = (r: RepoReport) => normalizeRemoteUrl(r.remoteUrl) === normalized;
     let found = this.repos.find(match);
@@ -294,6 +357,12 @@ export class Runner {
         });
         break;
       }
+      case 'worktrees.live': {
+        const cb = this.sweepQueries.get(msg.queryId);
+        this.sweepQueries.delete(msg.queryId);
+        cb?.(msg.live);
+        break;
+      }
       case 'command':
         void this.runCommand(msg.commandId, msg.command, msg.payload);
         break;
@@ -335,6 +404,10 @@ export class Runner {
             roots: [this.paths.worktrees],
           }),
         );
+      } else if (command === 'worktrees.sweep') {
+        // The hygiene job's sweep: the result is an answer (ok:true) even when nothing could be swept.
+        CommandPayloadSchemas['worktrees.sweep'].parse(payload);
+        done(true, await this.sweepWorktrees());
       } else if (command === 'repos.rescan') {
         await this.rescan();
         done(true, { repos: this.repos.length });

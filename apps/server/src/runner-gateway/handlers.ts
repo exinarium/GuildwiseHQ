@@ -30,6 +30,7 @@ import {
 } from '../commands/shifts.ts';
 import { transcriptStoreRpc } from '../commands/transcripts.ts';
 import { applyVaultConflict, markVaultStatus, queueVaultConfigure } from '../commands/vaults.ts';
+import { liveWorktreePaths } from '../commands/worktree-sweep.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -162,6 +163,12 @@ export class RunnerHandlers {
         return this.ack(conn, msg);
       case 'rpc.request':
         return this.rpc(conn, msg);
+      case 'worktrees.query':
+        this.send(conn, 'worktrees.live', {
+          queryId: msg.queryId,
+          live: await liveWorktreePaths(this.ctx.pool, conn.workstationId, msg.paths),
+        });
+        return;
       case 'command.result': {
         const cmd = await one(
           this.ctx.pool,

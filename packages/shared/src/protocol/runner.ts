@@ -7,6 +7,7 @@ import { TestEnvProblem } from '../events/testing.ts';
 import { VaultKind } from '../events/vault.ts';
 import { OutboundPostPayloadSchema } from '../external/index.ts';
 import { FeedItemInputSchema } from '../feed/index.ts';
+import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
@@ -203,6 +204,7 @@ export const RunnerCommandNameSchema = z.enum([
   'outbound.post',
   'repo.create',
   'branch.check_merged',
+  'worktrees.sweep',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -231,6 +233,7 @@ export const CommandPayloadSchemas = {
   'outbound.post': OutboundPostPayloadSchema,
   'repo.create': RepoCreatePayloadSchema,
   'branch.check_merged': BranchCheckMergedPayloadSchema,
+  'worktrees.sweep': WorktreesSweepPayloadSchema,
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([
@@ -337,6 +340,14 @@ export const RpcRequestSchema = msg('rpc.request', {
   method: RpcMethodSchema,
   params: z.record(z.string(), z.unknown()),
 });
+/**
+ * The runner's sweep of stale worktrees (start-up and the hygiene job) asks which of the card worktrees it found are
+ * still in use. Answered by `worktrees.live`; a runner that gets no answer sweeps nothing.
+ */
+export const WorktreesQuerySchema = msg('worktrees.query', {
+  queryId: z.string().min(1),
+  paths: z.array(z.string()).max(SWEEP_QUERY_MAX_PATHS),
+});
 export const ChatDeltaSchema = msg('chat.delta', {
   chatId: z.string(),
   threadId: z.uuid(),
@@ -415,6 +426,11 @@ export const RpcResponseSchema = msg('rpc.response', {
   result: z.unknown().optional(),
   error: z.string().optional(),
 });
+/** The subset of `worktrees.query.paths` that belongs to a live card (not finalized, cancelled or unknown). */
+export const WorktreesLiveSchema = msg('worktrees.live', {
+  queryId: z.string(),
+  live: z.array(z.string()),
+});
 export const ChatStartSchema = msg('chat.start', {
   chatId: z.string(),
   threadId: z.uuid(),
@@ -446,6 +462,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   ShiftReportMsgSchema,
   ShiftEndedSchema,
   RpcRequestSchema,
+  WorktreesQuerySchema,
   ChatDeltaSchema,
   ChatDoneSchema,
   ChatErrorSchema,
@@ -463,6 +480,7 @@ export const ServerToRunnerSchema = z.discriminatedUnion('type', [
   ShiftStopSchema,
   ShiftReportResultSchema,
   RpcResponseSchema,
+  WorktreesLiveSchema,
   ChatStartSchema,
   ChatCancelSchema,
   CommandSchema,

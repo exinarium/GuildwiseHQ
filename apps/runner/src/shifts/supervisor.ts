@@ -172,6 +172,22 @@ export class ShiftSupervisor {
     return this.active.size;
   }
 
+  /** Worktree paths of the shifts that are running or starting (the stale-worktree sweep leaves them alone). */
+  worktreePaths(): string[] {
+    const out: string[] = [];
+    for (const s of this.active.values()) {
+      if (s.worktree) out.push(s.worktree.path);
+      const spec = s.msg.worktree;
+      if (spec) {
+        if (spec.path) out.push(spec.path);
+        out.push(
+          this.deps.paths.worktreePath(s.msg.brief.project.key, s.msg.brief.card.ref, s.msg.brief.project.id),
+        );
+      }
+    }
+    return out;
+  }
+
   /** Resolves when the shift has fully ended (or was rejected). Never throws. */
   async handleStart(msg: ShiftStartMsg, resume?: { startedSent: boolean }): Promise<void> {
     if (this.active.has(msg.shiftId)) return; // redelivery
