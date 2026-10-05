@@ -232,7 +232,11 @@ export const phaseEvents = [
   ),
   /** A `ba_task` shift was dispatched to the runner (creates the shift row). */
   defineEvent('BaTaskDispatched', z.object({ taskId: Id, shiftId: Id, agentId: Id, workstationId: Id })),
-  defineEvent('BaTaskRequeued', z.object({ taskId: Id, reason: z.string() })),
+  /** `attempt`: the shift failed (crash, timeout, no report) and counts toward the retry limit. */
+  defineEvent(
+    'BaTaskRequeued',
+    z.object({ taskId: Id, reason: z.string(), attempt: z.boolean().default(false) }),
+  ),
   defineEvent(
     'BaTaskCompleted',
     z.object({

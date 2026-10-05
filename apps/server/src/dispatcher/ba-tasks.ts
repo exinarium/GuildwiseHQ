@@ -52,13 +52,17 @@ export async function baTaskPass(
     const stalled = now.getTime() - new Date(t.updated_at).getTime() > BA_TASK_STALL_MS;
     if (bas.length === 0 || t.attempts >= BA_TASK_MAX_ATTEMPTS || stalled) {
       await withAppendTx(ctx.pool, async (tx) => {
-        const cur = await one(tx, `SELECT * FROM ba_tasks WHERE id=$1 AND status='queued' FOR UPDATE`, [t.id]);
+        const cur = await one(tx, `SELECT * FROM ba_tasks WHERE id=$1 AND status='queued' FOR UPDATE`, [
+          t.id,
+        ]);
         if (cur) await runBaTaskFallback(ctx, tx, cur);
       });
       continue;
     }
     for (const a of bas) {
-      const rt = (a.runtimes as Array<{ id: string; available: boolean }> | null)?.find((x) => x.id === a.runtime);
+      const rt = (a.runtimes as Array<{ id: string; available: boolean }> | null)?.find(
+        (x) => x.id === a.runtime,
+      );
       const reachable =
         a.connected && a.last_seen_at && new Date(a.last_seen_at) > onlineSince && rt?.available === true;
       if (!reachable || busy.has(a.id) || skipAgent(a.id)) continue;
@@ -66,7 +70,9 @@ export async function baTaskPass(
       if (!conn || !conn.reconciled) continue;
       const shiftId = randomUUID();
       const ok = await withAppendTx(ctx.pool, async (tx) => {
-        const task = await one(tx, `SELECT * FROM ba_tasks WHERE id=$1 AND status='queued' FOR UPDATE`, [t.id]);
+        const task = await one(tx, `SELECT * FROM ba_tasks WHERE id=$1 AND status='queued' FOR UPDATE`, [
+          t.id,
+        ]);
         if (!task) return false;
         const open = await one(
           tx,
@@ -83,7 +89,9 @@ export async function baTaskPass(
                 payload: { taskId: t.id, shiftId, agentId: a.id, workstationId: a.ws_id },
               },
               actor: SYSTEM_ACTOR,
-              scope: t.project_id ? projectScope(t.org_id, t.project_id) : { orgId: t.org_id, projectId: null, audience: 'org' },
+              scope: t.project_id
+                ? projectScope(t.org_id, t.project_id)
+                : { orgId: t.org_id, projectId: null, audience: 'org' },
             },
           ],
           { tx },

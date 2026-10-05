@@ -106,19 +106,30 @@ describe('phase completion', () => {
     });
     await until(
       async () =>
-        (await q(`SELECT status FROM runner_commands WHERE type='branch.check_merged'`))[0]?.status ===
-        'done',
+        (
+          await q(
+            `SELECT status FROM runner_commands WHERE type='branch.check_merged' AND workstation_id=$1`,
+            [w.workstationId],
+          )
+        )[0]?.status === 'done',
       3000,
       'check answered',
     );
     await pass();
     expect(
-      (await q(`SELECT count(*)::int AS n FROM runner_commands WHERE type='branch.check_merged'`))[0]?.n,
+      (
+        await q(
+          `SELECT count(*)::int AS n FROM runner_commands WHERE type='branch.check_merged' AND workstation_id=$1`,
+          [w.workstationId],
+        )
+      )[0]?.n,
     ).toBe(1);
     expect(await status(p.id)).toBe('open');
 
     // the next check finds it merged (the runner deleted the branch)
-    await q(`UPDATE runner_commands SET created_at = now() - interval '1 hour'`);
+    await q(`UPDATE runner_commands SET created_at = now() - interval '1 hour' WHERE workstation_id=$1`, [
+      w.workstationId,
+    ]);
     const from2 = r.received.length;
     await pass();
     const cmd2 = await r.waitFor('command', (f) => f.command === 'branch.check_merged', 5000, from2);
@@ -276,10 +287,24 @@ describe('a bug filed after finalize (owner decision A6)', () => {
 
     // the post-finalize full suite fails: its bug card joins the phase and reopens it
     await t.run('Tess', testFail('Suite bug'));
-    const bug = (await q(`SELECT * FROM cards WHERE card_type='bug' AND origin='full_suite'`))[0]!;
+    const bug = (
+      await q(`SELECT * FROM cards WHERE project_id=$1 AND card_type='bug' AND origin='full_suite'`, [
+        w.projectId,
+      ])
+    )[0]!;
     expect(bug).toMatchObject({ phase_id: p.id, phase_assignment: 'confirmed' });
     expect(await status(p.id)).toBe('open');
-    expect((await q('SELECT status FROM ba_tasks WHERE phase_id=$1', [p.id]))[0]?.status).toBe('cancelled');
+    // the report task is no longer pending: cancelled, or already done from a template while the phase waited
+    expect(['cancelled', 'fallback']).toContain(
+      (await q('SELECT status FROM ba_tasks WHERE phase_id=$1', [p.id]))[0]?.status,
+    );
+    expect(
+      (
+        await q(`SELECT 1 FROM desk_items WHERE subkind='phase_done' AND status='open' AND title LIKE $1`, [
+          `${p.ref} %`,
+        ])
+      ).length,
+    ).toBe(0);
     await pass();
     expect(await status(p.id)).toBe('open'); // the bug is not done: the phase waits for it
     const detail = await ok<any>(owner('GET', `/api/phases/${p.id}`));

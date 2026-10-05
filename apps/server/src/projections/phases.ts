@@ -471,9 +471,9 @@ export const phaseProjectors: Record<string, Projector> = {
     const p = ev<'BaTaskRequeued'>(e).payload;
     await exec(
       tx,
-      `UPDATE ba_tasks SET status='queued', shift_id=NULL, agent_id=NULL, attempts = attempts + 1, note=$2, updated_at=$3
+      `UPDATE ba_tasks SET status='queued', shift_id=NULL, agent_id=NULL, attempts = attempts + $4::int, note=$2, updated_at=$3
         WHERE id=$1`,
-      [p.taskId, p.reason, e.createdAt],
+      [p.taskId, p.reason, e.createdAt, p.attempt ? 1 : 0],
     );
   },
 

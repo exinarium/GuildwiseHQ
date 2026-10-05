@@ -20,6 +20,7 @@ import { exec, one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { baFinalizeEvents } from './ba-finalize.ts';
+import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { applyQuestionReport, endQuestionShift } from './escalation.ts';
@@ -150,6 +151,7 @@ export async function applyShiftReport(
   if (shift.status === 'ended') return { accepted: false, error: 'this shift has already ended' };
   if (shift.kind === 'devops') return applyDevopsReport(ctx, tx, ws, msg, shift);
   if (shift.kind === 'question') return applyQuestionReport(ctx, tx, ws, msg.report, shift);
+  if (shift.kind === 'ba_task') return applyBaTaskReport(ctx, tx, ws, msg, shift);
   if (!shift.card_id) return { accepted: false, error: 'this shift has no card to report on' };
   const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [shift.card_id]);
   if (!card) return { accepted: false, error: 'card not found' };
@@ -508,6 +510,10 @@ export async function applyShiftRejected(
     await ctx.store.append(endQuestionShift(s, 'rejected'), { tx });
     return;
   }
+  if (s.kind === 'ba_task') {
+    await ctx.store.append(await endBaTaskShift(tx, s, 'rejected'), { tx });
+    return;
+  }
   const card = s.card_id
     ? await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [s.card_id])
     : undefined;
@@ -539,6 +545,18 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
         usage: msg.usage,
         exitCode: msg.exitCode,
         finalText: msg.finalText,
+        guardViolations: msg.guardViolations,
+      }),
+      { tx },
+    );
+    return;
+  }
+  if (s.kind === 'ba_task') {
+    await ctx.store.append(
+      await endBaTaskShift(tx, s, msg.outcome, {
+        durationMs: msg.durationMs,
+        usage: msg.usage,
+        exitCode: msg.exitCode,
         guardViolations: msg.guardViolations,
       }),
       { tx },

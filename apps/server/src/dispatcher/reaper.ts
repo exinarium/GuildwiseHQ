@@ -1,5 +1,6 @@
 import { getStage, streamId } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
+import { endBaTaskShift } from '../commands/ba-tasks.ts';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { endDevopsShift } from '../commands/devops.ts';
 import { endQuestionShift } from '../commands/escalation.ts';
@@ -95,6 +96,11 @@ export class Reaper {
         if (shift.kind === 'question') {
           ctx.services.dispatcher.cooldown.set(shift.agent_id, ctx.clock.now().getTime() + 30_000);
           await ctx.store.append(endQuestionShift(shift, 'rejected'), { tx });
+          return;
+        }
+        if (shift.kind === 'ba_task') {
+          ctx.services.dispatcher.cooldown.set(shift.agent_id, ctx.clock.now().getTime() + 30_000);
+          await ctx.store.append(await endBaTaskShift(tx, shift, 'rejected'), { tx });
           return;
         }
         const card = shift.card_id

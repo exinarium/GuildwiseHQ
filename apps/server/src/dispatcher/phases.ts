@@ -13,8 +13,12 @@ import { followupFinishedEvent, followupVerdict, startFollowup } from '../comman
 import { workingBranchOf } from '../commands/phases.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
-import { withAppendTx } from '../db/tx.ts';
+import { type Tx, withAppendTx } from '../db/tx.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+
+/** One phase's transaction: a failure is logged and does not starve the phases after it. */
+const inTx = (ctx: Ctx, what: string, fn: (tx: Tx) => Promise<void>): Promise<void> =>
+  withAppendTx(ctx.pool, fn).catch((err) => ctx.log.error({ err, what }, 'phase pass failed for one phase'));
 
 /** A finalized pr / push_branch card is checked against the working branch this often (per card). */
 export const MERGE_CHECK_INTERVAL_SECONDS = 180;
@@ -95,7 +99,7 @@ async function completionStep(ctx: Ctx): Promise<void> {
       ORDER BY ph.created_at`,
   );
   for (const { id } of open) {
-    await withAppendTx(ctx.pool, async (tx) => {
+    await inTx(ctx, 'completion', async (tx) => {
       const phase = await one(tx, `SELECT * FROM phases WHERE id=$1 AND status='open' FOR UPDATE`, [id]);
       if (!phase) return;
       const members = await memberRows(tx, phase.id);
@@ -138,7 +142,7 @@ async function resultsStep(ctx: Ctx): Promise<void> {
       WHERE f.status = 'running' AND f.delegate IN ('devops','tester') ORDER BY f.phase_id, f.position`,
   );
   for (const r of running) {
-    await withAppendTx(ctx.pool, async (tx) => {
+    await inTx(ctx, 'phase', async (tx) => {
       const phase = await one(
         tx,
         `SELECT * FROM phases WHERE id=$1 AND status='running_followups' FOR UPDATE`,
@@ -174,7 +178,7 @@ async function sequenceStep(ctx: Ctx): Promise<void> {
       WHERE ph.status = 'running_followups' ORDER BY ph.approved_at`,
   );
   for (const { id } of active) {
-    await withAppendTx(ctx.pool, async (tx) => {
+    await inTx(ctx, 'phase', async (tx) => {
       const phase = await one(
         tx,
         `SELECT * FROM phases WHERE id=$1 AND status='running_followups' FOR UPDATE`,

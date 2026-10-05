@@ -4,6 +4,7 @@ import { type Row, rows } from '../db/sql.ts';
 import { DISPATCH_LOCK_ID } from '../db/tx.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
+import { baTaskPass } from './ba-tasks.ts';
 import { testingPass } from './bottleneck.ts';
 import { agentView, candidateCards, isCandidate, ONLINE_WINDOW_MS } from './candidates.ts';
 import { type ClaimResult, claim } from './claim.ts';
@@ -200,6 +201,7 @@ export class Dispatcher {
     made.push(...(await this.overflowPass(agents, nowMs)));
     await devopsPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
     await questionPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
+    await baTaskPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
     await testingPass(this.ctx);
     for (const r of made) await this.sendShiftStart(r);
     return made;

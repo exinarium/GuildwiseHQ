@@ -74,6 +74,60 @@ describe('two-user isolation', () => {
     expect(own.card.status).toBe('queued');
   });
 
+  it('phases, follow-ups and deploy targets of one user are invisible and untouchable to another (admins included)', async () => {
+    const target = await ok<any>(
+      w.t.req('POST', `/api/projects/${w.projectId}/deploy-targets`, {
+        cookie: w.owner.cookie,
+        body: { name: 'local', kind: 'local_docker' },
+      }),
+      201,
+    );
+    const phase = await ok<any>(
+      w.t.req('POST', `/api/projects/${w.projectId}/phases`, {
+        cookie: w.owner.cookie,
+        body: { name: 'Private phase', followups: [{ kind: 'deploy', targetId: target.id }] },
+      }),
+      201,
+    );
+    const card = await w.card({ title: 'In the private phase', specify: false });
+    const other = await w.t.userSession(uniqueEmail('phase-intruder'));
+    const admin = await w.t.userSession(uniqueEmail('phase-admin'), 'admin');
+    for (const who of [other, admin]) {
+      const c = who.cookie;
+      for (const [m, url, body] of [
+        ['GET', `/api/projects/${w.projectId}/phases`, undefined],
+        ['POST', `/api/projects/${w.projectId}/phases`, { name: 'Mine now' }],
+        ['GET', `/api/phases/${phase.id}`, undefined],
+        ['GET', `/api/phases/by-number/TOY/${phase.number}`, undefined],
+        ['PATCH', `/api/phases/${phase.id}`, { name: 'pwned' }],
+        ['PUT', `/api/phases/${phase.id}/followups`, { followups: [] }],
+        ['POST', `/api/phases/${phase.id}/reopen`, { reason: 'x' }],
+        ['PUT', `/api/cards/${card.id}/phase`, { phaseId: phase.id }],
+        ['POST', `/api/cards/${card.id}/confirm-merged`, {}],
+        ['GET', `/api/projects/${w.projectId}/deploy-targets`, undefined],
+        ['POST', `/api/projects/${w.projectId}/deploy-targets`, { name: 'x', kind: 'local_docker' }],
+        ['PATCH', `/api/deploy-targets/${target.id}`, { notes: 'x' }],
+        ['DELETE', `/api/deploy-targets/${target.id}`, undefined],
+        ['GET', `/api/projects/${w.projectId}/followup-defaults`, undefined],
+        ['PUT', `/api/projects/${w.projectId}/followup-defaults`, { followups: [] }],
+        ['GET', `/api/board?projectId=${w.projectId}&phaseId=${phase.id}`, undefined],
+      ] as const) {
+        expect((await w.t.req(m, url, { cookie: c, body })).status, `${m} ${url}`).toBe(404);
+      }
+    }
+    // the threads of a phase are readable by members only
+    expect((await w.t.req('GET', `/api/threads/${phase.id}/messages`, { cookie: other.cookie })).status).toBe(
+      404,
+    );
+    expect(
+      (await w.t.req('GET', `/api/threads/${phase.id}/messages`, { cookie: w.owner.cookie })).status,
+    ).toBe(200);
+    // and the owner's phase is untouched
+    expect((await ok<any>(w.t.req('GET', `/api/phases/${phase.id}`, { cookie: w.owner.cookie }))).name).toBe(
+      'Private phase',
+    );
+  });
+
   it("admins get no visibility into other users' projects, cards or agents", async () => {
     const admin = await w.t.userSession(uniqueEmail('adm'), 'admin');
     const card = (

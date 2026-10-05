@@ -7,6 +7,7 @@ import {
   streamId,
 } from '@aom/shared';
 import type { ChatTerminal } from '../chat/relay.ts';
+import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
 import { cardMessage, orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { designRpc } from '../commands/design-rpc.ts';
 import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
@@ -359,6 +360,7 @@ export class RunnerHandlers {
     for (const shiftId of known) await this.stopIfClaimLost(conn, shiftId);
     await this.reconcileDevops(conn, known, helloAt);
     await this.reconcileQuestions(conn, known, helloAt);
+    await this.reconcileBaTasks(conn, known, helloAt);
     await queueVaultConfigure(ctx, ctx.pool, conn.workstationId);
     await queueApprovedFor(ctx, conn.userId, conn.workstationId);
     await this.deliverPending(conn.workstationId);
@@ -416,6 +418,23 @@ export class RunnerHandlers {
     }
   }
 
+  /** BA task shifts the server holds as running but the reconnected runner does not: the task goes back to the queue. */
+  private async reconcileBaTasks(conn: RunnerConn, known: Set<string>, helloAt: Date): Promise<void> {
+    const { ctx } = this;
+    const open = await rows(
+      ctx.pool,
+      `SELECT id FROM shifts WHERE workstation_id=$1 AND kind='ba_task' AND status <> 'ended' AND started_at <= $2`,
+      [conn.workstationId, helloAt],
+    );
+    for (const s of open) {
+      if (known.has(s.id)) continue;
+      await withAppendTx(ctx.pool, async (tx) => {
+        const shift = await one(tx, `SELECT * FROM shifts WHERE id=$1 AND status <> 'ended'`, [s.id]);
+        if (shift) await ctx.store.append(await endBaTaskShift(tx, shift, 'lost'), { tx });
+      });
+    }
+  }
+
   private async stopIfClaimLost(conn: RunnerConn, shiftId: string): Promise<void> {
     const holder =
       (await one(this.ctx.pool, 'SELECT 1 FROM cards WHERE claim_shift_id=$1 AND claim_id IS NOT NULL', [
@@ -425,10 +444,10 @@ export class RunnerHandlers {
       (await one(this.ctx.pool, `SELECT 1 FROM devops_requests WHERE shift_id=$1 AND status='running'`, [
         shiftId,
       ])) ??
-      // A question shift is held while it has not ended.
+      // Question and BA task shifts are held while they have not ended.
       (await one(
         this.ctx.pool,
-        `SELECT 1 FROM shifts WHERE id=$1 AND kind='question' AND status <> 'ended'`,
+        `SELECT 1 FROM shifts WHERE id=$1 AND kind IN ('question','ba_task') AND status <> 'ended'`,
         [shiftId],
       ));
     if (holder) return;
@@ -588,6 +607,8 @@ export class RunnerHandlers {
       ]);
       if (!shift) return reply(false, undefined, 'unknown shift');
       if (msg.method === 'ledger.search') return reply(true, await ledgerSearchRpc(ctx, shift, msg.params));
+      // A BA task shift is read-only and has no card: only the phase verbs and reading are available.
+      if (shift.kind === 'ba_task') return reply(...(await baTaskRpc(ctx, shift, msg.method, msg.params)));
       if (msg.method === 'devops.request')
         return reply(...(await this.devopsRequest(conn, shift, msg.params)));
       if (msg.method === 'outbound.draft') return reply(...(await outboundDraftRpc(ctx, shift, msg.params)));

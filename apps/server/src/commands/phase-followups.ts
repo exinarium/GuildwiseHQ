@@ -67,7 +67,7 @@ export async function deployWorkstations(db: Queryable, project: Row, target: Ro
       db,
       `${WS_SELECT} JOIN project_members pm ON pm.user_id = w.user_id AND pm.project_id = $1 AND pm.status = 'active'
         WHERE w.status='active' AND ${HAS_DEVOPS}
-        ORDER BY (w.user_id = $2) DESC, w.created_at, w.id`,
+        ORDER BY (w.user_id = $2) DESC, w.paired_at, w.id`,
       [project.id, project.org_id],
     )
   ).map(toWs);
