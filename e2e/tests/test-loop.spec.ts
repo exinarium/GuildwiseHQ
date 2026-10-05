@@ -575,3 +575,42 @@ test('AC regression schedule: a due regression schedule creates a regression car
     await api.delete(`/api/schedules/${s.id}`);
   }
 });
+
+// Owner override: with "Merge large changes without my approval" on, a large merge does not wait on the desk.
+test('AC owner override: the project owner turns the setting on; a large merge finalizes without a desk approval and the timeline says so', async () => {
+  const ref = await createCard('A large change, owner override');
+  await atFinalize(ref);
+  const c = (await card(ref))!;
+  const risk = await api.patch(`/api/cards/${c.id}`, {
+    data: { riskTier: 'large', reason: 'It rewrites how the toy greets everyone' },
+  });
+  expect(risk.ok(), await risk.text()).toBeTruthy();
+  const approvalsBefore = (await deskItems('large_merge')).length;
+  const before = originMain();
+
+  // off by default; the owner turns it on after reading the warning
+  await page.goto(`/projects/${projectId}/settings`);
+  await expect(page.getByTestId('merge-policy-state')).toHaveText('Approval required');
+  await expect(page.getByTestId('merge-policy-warning')).toContainText('without asking anyone');
+  await page.getByTestId('merge-policy-enable').click();
+  await page.getByTestId('merge-policy-confirm').click();
+  await expect(page.getByTestId('merge-policy-state')).toHaveText('Merge without approval');
+  await expect(page.getByTestId('merge-policy-changed')).toContainText('Turned on by E2E Tester');
+
+  await page.goto(`/cards/${ref}`);
+  const panel = page.getByTestId('finalize-panel');
+  await expect(panel.getByTestId('finalize-approval-note')).toHaveCount(0);
+  await panel.getByTestId('finalize-button').click();
+  await waitCard(ref, 'done', (x) => x?.status === 'done');
+  expect(originMain()).not.toBe(before);
+  expect(await deskItems('large_merge')).toHaveLength(approvalsBefore);
+  await expect(
+    page.getByTestId('timeline-activity').filter({ hasText: 'merged without manager approval' }),
+  ).toContainText('project setting');
+
+  // and the owner can put the approval back
+  await page.goto(`/projects/${projectId}/settings`);
+  await page.getByTestId('merge-policy-disable').click();
+  await expect(page.getByTestId('merge-policy-state')).toHaveText('Approval required');
+  await expect(page.getByTestId('merge-policy-history').getByRole('listitem')).toHaveCount(2);
+});
