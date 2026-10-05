@@ -227,6 +227,7 @@ export const blankRole = (): RoleDraftInput => ({
     deniedShellPatterns: [],
     writableGlobs: null,
     mayCommit: false,
+    browser: false,
     riskTiers: ['small', 'large'],
     repoIds: null,
   },

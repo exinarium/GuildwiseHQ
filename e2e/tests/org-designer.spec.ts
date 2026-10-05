@@ -50,6 +50,7 @@ const triager = (over: Record<string, unknown> = {}) => ({
     deniedShellPatterns: [],
     writableGlobs: null,
     mayCommit: false,
+    browser: false,
     riskTiers: ['small', 'large'],
     repoIds: null,
   },

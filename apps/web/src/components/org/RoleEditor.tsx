@@ -166,6 +166,18 @@ export function RoleEditor({
           />
           may commit
         </label>
+        <label
+          className="inline-flex items-center gap-1"
+          title="Lets the shell create Unix sockets so Playwright/Chromium can start. Docker, WSL interop, dbus and ssh-agent sockets stay hidden."
+        >
+          <input
+            type="checkbox"
+            checked={value.permissions.browser ?? false}
+            disabled={readOnly}
+            onChange={(e) => set({ permissions: { ...value.permissions, browser: e.target.checked } })}
+          />
+          runs browsers
+        </label>
       </fieldset>
       <ListInput
         label="Denied shell patterns (comma separated)"

@@ -44,7 +44,31 @@ export interface GuardInput {
   e2eGlobs: string[];
 }
 
-/** Changed paths: committed since the shift start plus uncommitted (tracked and untracked). */
+/**
+ * Output directories test runners (Playwright, mostly) write into the worktree. They are build artifacts, not
+ * changes: they never count as a violation or an out-of-scope edit, and untracked ones are removed before the
+ * shift-end autocommit so they are never committed.
+ */
+export const TEST_ARTIFACT_DIRS = ['test-results', 'playwright-report', 'blob-report'];
+const ARTIFACT_RE = new RegExp(`(^|/)(${TEST_ARTIFACT_DIRS.join('|')})(/|$)`);
+export const isTestArtifact = (path: string): boolean => ARTIFACT_RE.test(path);
+
+/** Removes untracked test output directories (quietly: this is not a finding). Returns true when something was removed. */
+export async function discardTestArtifacts(worktree: string): Promise<boolean> {
+  const status = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
+  const dirs = new Set<string>();
+  for (const l of status.stdout.split('\n')) {
+    if (!l.startsWith('?? ')) continue;
+    const path = l.slice(3).replace(/^"|"$/g, '');
+    const parts = path.split('/');
+    const i = parts.findIndex((seg) => TEST_ARTIFACT_DIRS.includes(seg));
+    if (i >= 0) dirs.add(parts.slice(0, i + 1).join('/'));
+  }
+  for (const d of dirs) await git(worktree, ['clean', '-fdxq', '--', d]);
+  return dirs.size > 0;
+}
+
+/** Changed paths: committed since the shift start plus uncommitted (tracked and untracked), minus test output dirs. */
 export async function changedPaths(worktree: string, startSha: string): Promise<string[]> {
   const committed = await git(worktree, ['diff', '--name-only', `${startSha}..HEAD`]);
   const dirty = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
@@ -53,7 +77,7 @@ export async function changedPaths(worktree: string, startSha: string): Promise<
   for (const l of dirty.stdout.split('\n')) {
     if (l.length > 3) out.add(l.slice(3).replace(/^"|"$/g, '').split(' -> ').pop() as string);
   }
-  return [...out];
+  return [...out].filter((p) => !isTestArtifact(p));
 }
 
 /**

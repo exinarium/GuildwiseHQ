@@ -15,6 +15,7 @@ const perms = (p: Partial<AgentPermissions> = {}): AgentPermissions => ({
   deniedShellPatterns: COMMON_DENIED_SHELL,
   writableGlobs: null,
   mayCommit: true,
+  browser: false,
   riskTiers: ['small', 'large'],
   repoIds: null,
   ...p,
@@ -43,15 +44,17 @@ const REVIEWER_INSTRUCTIONS = `You are a senior code reviewer. You decide whethe
 
 How to work:
 1. Read the card (requirements and acceptance criteria are the contract) and the builder's handoff notes.
-2. Inspect the diff against the base branch (\`git diff <base>...HEAD\`) and read the changed code in context. Run the build and the unit tests.
+2. Inspect the diff against the base branch (\`git diff <base>...HEAD\`) and read the changed code in context. Run the build and the unit tests, in a copy (see below).
 3. Check each acceptance criterion individually. Check the change follows the repository's conventions, is structured sensibly, and that its tests really exercise the behaviour.
 4. Approve with \`aom review approve --score <1-5> --note "<why>"\` when the work meets the card.
 5. Otherwise request changes with \`aom review changes --reason <reason>[,<reason>] --score <1-5> --criteria-missed "<criterion>" --note "<specific, actionable comments>"\`. Reasons: missed_requirement, broke_convention, weak_tests, poor_structure, spec_unclear, out_of_scope_test_change.
 
+Your worktree is read-only: the sandbox refuses every write to it, and whatever the shift changes is rolled back and recorded as a violation. To run anything that writes (a build, tests that create caches or reports), copy the worktree into your scratch directory first and run it there, for example \`rsync -a --exclude node_modules ./ "$TMPDIR/review/"\` or \`cp -a . "$TMPDIR/review"\` (reuse the installed dependencies by copying or symlinking them), then \`cd\` into the copy. Your scratch and temp directories are writable; nothing you do there reaches the card's branch.
+
 Be specific: name files and lines. Do not ask for work outside the card's scope.`;
 
 const REVIEWER_CORE_RULES = [
-  'Never modify, create or delete files in the worktree; review is read-only.',
+  'Never modify, create or delete files in the worktree; review is read-only (the sandbox enforces it). Build and test in a copy under your scratch directory.',
   'Do not approve work that does not meet every acceptance criterion.',
   'Flag unit-test changes outside the card scope with the out_of_scope_test_change reason: it is an automatic bounce (the server refuses an approval while the diff carries that flag).',
 ];
@@ -218,6 +221,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'reviewer',
+    version: 2,
     name: 'Reviewer',
     purpose: 'Reviews builder output against the card and the repository conventions.',
     department: 'delivery',
@@ -238,7 +242,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'tester',
-    version: 2,
+    version: 3,
     name: 'Tester',
     purpose: 'Runs the test plan and owns end-to-end tests.',
     department: 'delivery',
@@ -247,7 +251,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     seniorityLevels: ['junior', 'senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },
     // writableGlobs is resolved by the runner from project.e2e_globs for this role.
-    permissions: perms({ writableGlobs: ['e2e/**', 'tests/e2e/**', 'playwright/**'] }),
+    permissions: perms({ writableGlobs: ['e2e/**', 'tests/e2e/**', 'playwright/**'], browser: true }),
     skills: [],
     claimableStages: [{ workflowKey: 'code', stageId: 'test' }],
   }),

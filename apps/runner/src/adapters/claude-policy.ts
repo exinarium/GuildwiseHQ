@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AgentPermissions } from '@aom/shared';
@@ -41,6 +41,18 @@ export interface ClaudePolicyContext {
   extraAllowedDomains?: string[];
   /** Toolchain dirs (the Node install, configured toolchainPaths) sandboxed commands may read despite the read block. */
   toolchainReadPaths?: string[];
+  /** OS user id (default: the runner's), for `/run/user/<uid>`. Injectable for tests. */
+  uid?: number;
+  /** Names in `/tmp` (default: read from the disk), to mask ssh-agent directories. Injectable for tests. */
+  tmpEntries?: string[];
+}
+
+/** What a shift's sandbox is allowed, beyond what its tools imply. */
+export interface SandboxProfile {
+  /** Runs browsers: Unix sockets are open (see `BROWSER_MASKED`), and the mask below is added. */
+  browser: boolean;
+  /** Cannot edit and may not commit: the worktree is read-only to its shell. */
+  readOnlyWorktree: boolean;
 }
 
 /** Hosts a shell may reach: package registries and source hosts, enough to install dependencies. */
@@ -83,6 +95,41 @@ const HOME_SECRETS = [
   '.claude',
   '.claude.json',
 ];
+
+/**
+ * Browsers (Playwright/Chromium) need `socket(AF_UNIX)`, which the Linux sandbox's seccomp filter blocks entirely
+ * (`allowUnixSockets` is ignored on Linux; the only switch is `allowAllUnixSockets`, which on WSL2 also reopens
+ * the interop socket that launches Windows binaries). Opening it lets a shell connect to any socket it can reach,
+ * so the sockets worth connecting to are hidden instead: a path in `denyRead` is masked and cannot be connected to.
+ */
+export const BROWSER_MASKED = [
+  '/var/run/docker.sock',
+  '/run/docker.sock',
+  '/run/containerd',
+  '/run/podman',
+  '/run/WSL', // WSL2 interop: launches Windows binaries
+  '/run/dbus', // system bus
+  '/run/systemd',
+];
+
+/** `/run/user/<uid>` (session bus, keyrings, ssh/gpg agent sockets) and ssh-agent directories in `/tmp`. */
+export function browserMask(ctx: Pick<ClaudePolicyContext, 'uid' | 'tmpEntries'>): string[] {
+  const uid = ctx.uid ?? process.getuid?.();
+  let tmpNames = ctx.tmpEntries;
+  if (!tmpNames) {
+    try {
+      tmpNames = readdirSync('/tmp');
+    } catch {
+      tmpNames = [];
+    }
+  }
+  return [
+    ...BROWSER_MASKED,
+    ...(uid !== undefined ? [`/run/user/${uid}`] : []),
+    // ssh-agent: /tmp/ssh-XXXXXX/agent.<pid>; gpg-agent and keyring sockets may sit directly in /tmp too
+    ...tmpNames.filter((n) => /^(ssh-|keyring-|gpg-|\.?dbus-)/.test(n)).map((n) => join('/tmp', n)),
+  ];
+}
 
 /** The runner's own state: nothing in it is for an agent (its own sandbox and worktree are carved out below). */
 export const RUNNER_PRIVATE = [
@@ -158,6 +205,8 @@ export interface ClaudeSettings {
       allowedDomains: string[];
       strictAllowlist: true;
       allowUnixSockets: string[];
+      /** Browser roles only (Linux seccomp blocks every AF_UNIX socket otherwise). */
+      allowAllUnixSockets?: true;
       allowLocalBinding: boolean;
     };
   };
@@ -170,6 +219,7 @@ function sandboxBlock(
   agentHome: string,
   scratch: string,
   tmp: string,
+  profile: SandboxProfile = { browser: false, readOnlyWorktree: false },
 ): ClaudeSettings['sandbox'] {
   if (ctx.mode === 'off') return undefined;
   const runnerPrivate = RUNNER_PRIVATE.map((p) => join(ctx.runnerRoot, p));
@@ -179,7 +229,11 @@ function sandboxBlock(
     // sandbox and every other card's worktree; the agent's own areas are re-opened below.
     ctx.runnerRoot,
     ...HOME_SECRETS.map((p) => join(ctx.realHome, p)),
+    ...(profile.browser ? browserMask(ctx) : []),
   ];
+  // A role that cannot edit and may not commit gets a read-only worktree; its scratch, tmp and home stay writable.
+  // (When its cwd is its own scratch dir there is no worktree to protect.)
+  const worktreeLocked = profile.readOnlyWorktree && !inside(ctx.cwd, ctx.agentDir);
   return {
     enabled: true,
     failIfUnavailable: ctx.mode === 'required',
@@ -193,6 +247,7 @@ function sandboxBlock(
         ...ctx.gitDirs.flatMap((g) => [join(g, 'hooks'), join(g, 'config')]),
         ...ctx.addDirs,
         ...runnerPrivate,
+        ...(worktreeLocked ? [ctx.cwd] : []),
       ],
       denyRead,
       // Never a directory that holds a writable path (the agent's own dir holds home, scratch and tmp): bubblewrap
@@ -211,6 +266,7 @@ function sandboxBlock(
       allowedDomains: shell ? [...REGISTRY_DOMAINS, ...(ctx.extraAllowedDomains ?? [])] : [],
       strictAllowlist: true,
       allowUnixSockets: ctx.ipcSocket ? [ctx.ipcSocket] : [],
+      ...(profile.browser ? { allowAllUnixSockets: true as const } : {}),
       allowLocalBinding: shell,
     },
   };
@@ -238,10 +294,15 @@ function commonDenies(ctx: ClaudePolicyContext, configDir: string): string[] {
   ];
 }
 
+/** The built-in tester always runs browsers (agents hired before the flag existed carry none); custom roles opt in. */
+export const runsBrowsers = (p: Pick<AgentPermissions, 'browser'>, roleKey?: string): boolean =>
+  p.browser === true || roleKey === 'tester';
+
 export function buildShiftSettings(
   p: AgentPermissions,
   ctx: ClaudePolicyContext,
   paths: { home: string; configDir: string; scratch: string; tmp: string },
+  roleKey?: string,
 ): ClaudeSettings {
   const tools = new Set(p.allowedTools);
   const allow: string[] = [];
@@ -270,7 +331,10 @@ export function buildShiftSettings(
     },
     includeCoAuthoredBy: false,
   };
-  const sb = sandboxBlock(tools, ctx, paths.home, paths.scratch, paths.tmp);
+  const sb = sandboxBlock(tools, ctx, paths.home, paths.scratch, paths.tmp, {
+    browser: runsBrowsers(p, roleKey),
+    readOnlyWorktree: !tools.has('edit') && !p.mayCommit,
+  });
   if (sb) out.sandbox = sb;
   return out;
 }

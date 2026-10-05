@@ -11,6 +11,11 @@ export const AgentPermissionsSchema = z.object({
   /** null = whole worktree; tester: project.e2e_globs (resolved by the runner). */
   writableGlobs: z.array(z.string()).nullable(),
   mayCommit: z.boolean(),
+  /**
+   * The role runs browsers (Playwright, Chromium): its sandbox may create Unix sockets, which the Linux sandbox
+   * otherwise blocks entirely. Tester: true. Opt-in for custom roles; see docs/RUNNER.md (threat model).
+   */
+  browser: z.boolean().default(false),
   riskTiers: z.array(z.enum(['small', 'large'])).default(['small', 'large']),
   /** null = all project repos. */
   repoIds: z.array(z.uuid()).nullable(),

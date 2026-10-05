@@ -214,7 +214,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     await mkdir(dir, { recursive: true });
     await writeFile(
       join(dir, 'settings.json'),
-      `${JSON.stringify(buildShiftSettings(input.agent.permissions, this.policy(input, input.cwd), input.sandbox), null, 2)}\n`,
+      `${JSON.stringify(buildShiftSettings(input.agent.permissions, this.policy(input, input.cwd), input.sandbox, input.agent.roleKey), null, 2)}\n`,
     );
     await writeFile(join(dir, 'mcp.json'), `${JSON.stringify({ mcpServers: {} })}\n`);
     this.linkCredentials(dir);

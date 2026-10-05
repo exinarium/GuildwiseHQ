@@ -4,7 +4,13 @@ import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { ensureWorktree } from '../src/git/worktrees.ts';
 import { autoCommit } from '../src/shifts/autocommit.ts';
-import { discardOutOfScope, resetReadOnlyWorktree, runGuard, snapshotBranches } from '../src/shifts/guard.ts';
+import {
+  discardOutOfScope,
+  discardTestArtifacts,
+  resetReadOnlyWorktree,
+  runGuard,
+  snapshotBranches,
+} from '../src/shifts/guard.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -203,5 +209,34 @@ describe('read-only roles are rolled back (review M4)', () => {
     expect(sh(path, 'git', ['status', '--porcelain'])).toBe('');
     expect(existsSync(join(path, 'newdir'))).toBe(false);
     expect(existsSync(join(path, 'x.txt'))).toBe(false);
+  });
+});
+
+describe('test output directories are artifacts, not changes', () => {
+  it('are no violation for a tester, are not out of scope, and are removed before the autocommit', async () => {
+    const { path, guard } = await setup('tester');
+    for (const d of ['test-results', 'playwright-report', 'blob-report', 'apps/web/test-results']) {
+      mkdirSync(join(path, d), { recursive: true });
+      writeFileSync(join(path, d, 'out.txt'), 'x');
+    }
+    expect(await guard()).toEqual([]);
+    const startSha = sh(path, 'git', ['rev-parse', 'HEAD']);
+    const input = {
+      worktree: path,
+      roleKey: 'tester',
+      permissions: role('tester').permissions,
+      branchName: 'aom/toy-1-x',
+      startSha,
+      branchesAtStart: {},
+      e2eGlobs: ['e2e/**'],
+    };
+    expect(await discardOutOfScope(input)).toEqual([]);
+    expect(await discardTestArtifacts(path)).toBe(true);
+    expect(existsSync(join(path, 'test-results'))).toBe(false);
+    expect(existsSync(join(path, 'apps/web/test-results'))).toBe(false);
+    expect(
+      await autoCommit({ worktree: path, ref: 'TOY-1', stage: 'test', shiftId: 's1234567', env: {} }),
+    ).toBe(false);
+    expect(await discardTestArtifacts(path)).toBe(false);
   });
 });

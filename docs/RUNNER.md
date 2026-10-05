@@ -578,8 +578,8 @@ cannot loosen anything.
 | `sandbox.filesystem.denyRead` | the runner data dir, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.config/gh`, `~/.config/gcloud`, `~/.claude`, `~/.claude.json` | runner token, Jira and provider credentials, the linked `.credentials.json` |
 | `sandbox.filesystem.allowRead` | its worktree, the vault, the `aom` shim and script, the Node install the runner runs on, and `runtimes.claude-code.toolchainPaths` | with the read block on, sandboxed commands lose read access to all of `/home`; this re-opens only what the shift needs (toolchains such as `~/.nvm/...` included) |
 | `sandbox.excludedCommands` | `aom`, `aom *`, `<runner>/bin/aom`, `<runner>/bin/aom *` | entries use `Bash(...)` rule syntax, so a bare `aom` would only match `aom` with no arguments; `aom` must run outside because Linux sandboxes cannot connect Unix sockets |
-| `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + the main repository's `.git` (a linked worktree commits into it) / the repository's `.git/hooks` and `.git/config`, the vault, the runner's private files | hooks and git config run outside the sandbox the next time the user uses git |
-| `sandbox.network` | `strictAllowlist: true`; `allowedDomains`: package registries and source hosts for roles with `shell` (npm, yarn, PyPI, crates.io, Go proxy, RubyGems, Maven/Gradle, github.com), nothing for others; `allowUnixSockets`: the runner's IPC socket; `allowLocalBinding` for `shell` roles | scouts and researchers reach the web through `WebFetch`/`WebSearch` (permission rules, not the sandbox); builders reach registries from the shell. Add private mirrors with `runtimes.claude-code.extraAllowedDomains` |
+| `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + the main repository's `.git` (a linked worktree commits into it) / the repository's `.git/hooks` and `.git/config`, the vault, the runner's private files, and the worktree itself for roles with no `edit` tool that may not commit | hooks and git config run outside the sandbox the next time the user uses git |
+| `sandbox.network` | `strictAllowlist: true`; `allowedDomains`: package registries and source hosts for roles with `shell` (npm, yarn, PyPI, crates.io, Go proxy, RubyGems, Maven/Gradle, github.com), nothing for others; `allowUnixSockets`: the runner's IPC socket; `allowAllUnixSockets: true` for browser roles only (see below); `allowLocalBinding` for `shell` roles | scouts and researchers reach the web through `WebFetch`/`WebSearch` (permission rules, not the sandbox); builders reach registries from the shell. Add private mirrors with `runtimes.claude-code.extraAllowedDomains` |
 
 Claude Code's sandbox wraps shell commands only; the Read/Edit/Write/WebFetch tools are governed by the permission rules
 above, which is why both exist. Chat sessions get the same layer with only `Read, Glob, Grep, Bash(aom:*)` and `Edit(//<scratch>/**)` (Edit covers Write and NotebookEdit; the agent's scratch dir only, so a card's worktree and the vault stay read-only), and `Edit`
@@ -611,9 +611,40 @@ processes is unreadable. It is off by default because Claude Code also removes v
 and we could not verify (without running a real session) that `AOM_SHIFT_TOKEN` survives. Turn it on for one
 workstation, run a shift and check that `aom card` still works; the per-shift IPC token is the only secret it protects.
 
+### Browser roles (testers) and Unix sockets
+
+Playwright/Chromium needs `socket(AF_UNIX)` (Chromium's profile singleton fails with `process_singleton_posix.cc:297
+socket() failed: Operation not permitted` without it). On Linux/WSL2 Claude Code's sandbox seccomp filter blocks every
+Unix socket, `sandbox.network.allowUnixSockets` is ignored there, and the only switch is
+`sandbox.network.allowAllUnixSockets: true` (settings reference; on WSL2 it also reopens the interop socket that
+launches Windows binaries). The runner sets it only for shifts of roles that run browsers: the built-in tester (always,
+including agents hired before the flag existed) and any role whose permissions say `"browser": true` (default `false`;
+a checkbox "runs browsers" in the role editor; granting it to an agent beyond its role definition needs the
+organization owner). It also keeps `aom` working, since a browser role may now connect to the runner's IPC socket directly.
+
+What that opens, and how it is compensated: a shell that can create Unix sockets can connect to any socket it can reach
+by path. A path in the sandbox's `filesystem.denyRead` is masked and cannot be connected to, so browser shifts
+additionally hide `/var/run/docker.sock`, `/run/docker.sock`, `/run/containerd`, `/run/podman`, `/run/WSL` (WSL interop),
+`/run/dbus`, `/run/systemd`, `/run/user/<uid>` (session bus, keyrings, ssh/gpg agents) and any `/tmp/ssh-*`, `keyring-*`,
+`gpg-*`, `dbus-*` entries present when the shift starts, on top of the credential stores listed above (`~/.ssh`, ...).
+`WSL_INTEROP`, `SSH_AUTH_SOCK`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` and `DOCKER_HOST` never reach any agent
+(the agent environment is an allow-list; there is a test). Residual risk: a socket in a location not listed (a custom
+agent socket under `/var/tmp` or a project directory, a service listening on an abstract socket such as the X server
+or `@/tmp/.X11-unix`) is reachable from tester shifts. Run the runner as the dedicated unprivileged user recommended
+below, and keep the host's own agents out of paths the runner user can read.
+
+Playwright's `test-results/`, `playwright-report/` and `blob-report/` (at the worktree root or in a package folder) are
+treated as artifacts: they are no guard finding, are removed (untracked ones) before the shift-end autocommit, and are
+never committed. Ignore them in `.gitignore` too.
+
 ### Read-only roles and path scopes
 
-A role that may not commit (reviewer, scout, ...) is rolled back after every shift: `git checkout -f <branch>`,
+A role without the `edit` tool that may not commit (reviewer, business analyst, custom read-only roles) gets a
+read-only worktree in the sandbox: its worktree path is in `sandbox.filesystem.denyWrite`, while its scratch, temp and
+home directories stay writable. A reviewer that needs a build or tests that write caches copies the worktree into its
+scratch dir (`rsync -a ./ "$TMPDIR/review/"`) and runs it there; the reviewer instructions say so (role version 2).
+A role that may not commit (reviewer, scout, ...) is also rolled back after every shift, which stays as the safety net
+and is still recorded as a guard violation: `git checkout -f <branch>`,
 `git reset --hard <start sha>`, `git clean -fd` inside its worktree. Roles with `writableGlobs` (tester: the project's
 E2E globs; writer: documentation; any custom role) may only change matching paths: the post-shift guard reports
 `edited_outside_writable_globs` (or the tester/writer rules), and out-of-scope edits are discarded before the shift-end

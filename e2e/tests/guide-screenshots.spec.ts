@@ -946,6 +946,7 @@ step('organization: custom roles, workflow, departments, extensions', async () =
       deniedShellPatterns: [],
       writableGlobs: null,
       mayCommit: false,
+      browser: false,
       riskTiers: ['small', 'large'],
       repoIds: null,
     },

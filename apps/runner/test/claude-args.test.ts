@@ -315,6 +315,11 @@ describe('the agent process gets a minimal environment (review H2a)', () => {
     GH_TOKEN: 'ghp_secret',
     GITHUB_TOKEN: 'ghp_secret2',
     SSH_AUTH_SOCK: '/tmp/agent.sock',
+    WSL_INTEROP: '/run/WSL/1_interop',
+    DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+    XDG_RUNTIME_DIR: '/run/user/1000',
+    DOCKER_HOST: 'unix:///var/run/docker.sock',
+    GPG_AGENT_INFO: '/tmp/gpg',
     AWS_SECRET_ACCESS_KEY: 'aws',
     ANTHROPIC_API_KEY: 'sk-parent',
     NPM_TOKEN: 'npm',
@@ -335,6 +340,11 @@ describe('the agent process gets a minimal environment (review H2a)', () => {
       'GH_TOKEN',
       'GITHUB_TOKEN',
       'SSH_AUTH_SOCK',
+      'WSL_INTEROP',
+      'DBUS_SESSION_BUS_ADDRESS',
+      'XDG_RUNTIME_DIR',
+      'DOCKER_HOST',
+      'GPG_AGENT_INFO',
       'AWS_SECRET_ACCESS_KEY',
       'ANTHROPIC_API_KEY',
       'NPM_TOKEN',
@@ -361,5 +371,89 @@ describe('the agent process gets a minimal environment (review H2a)', () => {
     expect(def.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
     const scrub = sessionEnv(input(), ClaudeRuntimeConfigSchema.parse({ scrubSubprocessEnv: true }), parent);
     expect(scrub.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
+  });
+});
+
+describe('browser roles and read-only worktrees in the sandbox', () => {
+  const ctx = { uid: 1000, tmpEntries: ['ssh-AbC123', 'keyring-x', 'other', '.X11-unix'] };
+  const forRole = (key: string, p: typeof builder.permissions, over = {}) =>
+    buildShiftSettings(p, policyCtx({ ...ctx, ...over }), POLICY_PATHS, key).sandbox;
+
+  it('tester: Unix sockets open, and the dangerous sockets and credential dirs are masked', () => {
+    const sb = forRole('tester', tester.permissions);
+    expect(sb?.network.allowAllUnixSockets).toBe(true);
+    expect(sb?.filesystem.denyRead).toEqual(
+      expect.arrayContaining([
+        '/data', // existing denies are kept
+        '/home/me/.ssh',
+        '/var/run/docker.sock',
+        '/run/docker.sock',
+        '/run/WSL',
+        '/run/user/1000',
+        '/tmp/ssh-AbC123',
+        '/tmp/keyring-x',
+      ]),
+    );
+    expect(sb?.filesystem.denyRead).not.toContain('/tmp/other');
+    expect(sb?.filesystem.denyRead).not.toContain('/tmp');
+  });
+
+  it('a hired tester without the flag (older agent) still gets browser access', () => {
+    expect(forRole('tester', { ...tester.permissions, browser: false })?.network.allowAllUnixSockets).toBe(
+      true,
+    );
+  });
+
+  it('a custom role opts in with permissions.browser', () => {
+    expect(forRole('qa-lead', { ...builder.permissions, browser: true })?.network.allowAllUnixSockets).toBe(
+      true,
+    );
+    expect(forRole('qa-lead', { ...builder.permissions })?.network.allowAllUnixSockets).toBeUndefined();
+  });
+
+  it('builder and reviewer: no open Unix sockets and no browser mask', () => {
+    for (const [k, r] of [
+      ['builder', builder],
+      ['reviewer', reviewer],
+    ] as const) {
+      const sb = forRole(k, r.permissions);
+      expect(sb?.network.allowAllUnixSockets, k).toBeUndefined();
+      expect(sb?.filesystem.denyRead, k).not.toContain('/var/run/docker.sock');
+      expect(sb?.filesystem.denyRead, k).not.toContain('/run/user/1000');
+    }
+    expect(forRole('builder', builder.permissions)?.network.allowUnixSockets).toEqual([]);
+  });
+
+  it('the built-in roles: only the tester declares browser', () => {
+    expect(BUILTIN_ROLES.filter((r) => r.permissions.browser).map((r) => r.key)).toEqual(['tester']);
+  });
+
+  it('reviewer (no edit, may not commit): the worktree is read-only to its shell; scratch and tmp stay writable', () => {
+    const fs = forRole('reviewer', reviewer.permissions)?.filesystem;
+    expect(fs?.denyWrite).toContain('/data/worktrees/TOY-0192abcd/TOY-1');
+    expect(fs?.allowWrite).toEqual(
+      expect.arrayContaining(['/data/agents/a1/scratch', '/data/agents/a1/tmp', '/data/agents/a1/home']),
+    );
+    const s = buildShiftSettings(reviewer.permissions, policyCtx(), POLICY_PATHS, 'reviewer');
+    expect(s.permissions.deny).toEqual(expect.arrayContaining(['Edit', 'Write', 'NotebookEdit']));
+  });
+
+  it('BA and any custom role without edit and commit are read-only too; builder and tester are not', () => {
+    const ba = BUILTIN_ROLES.find((r) => r.key === 'ba');
+    if (!ba) throw new Error('ba');
+    const wt = '/data/worktrees/TOY-0192abcd/TOY-1';
+    expect(forRole('ba', ba.permissions)?.filesystem.denyWrite).toContain(wt);
+    expect(forRole('x', { ...reviewer.permissions, mayCommit: false })?.filesystem.denyWrite).toContain(wt);
+    expect(forRole('builder', builder.permissions)?.filesystem.denyWrite).not.toContain(wt);
+    expect(forRole('tester', tester.permissions)?.filesystem.denyWrite).not.toContain(wt);
+    // a role that can edit without committing (researcher) keeps its edits
+    expect(
+      forRole('r', { ...reviewer.permissions, allowedTools: ['read', 'edit'] })?.filesystem.denyWrite,
+    ).not.toContain(wt);
+  });
+
+  it('a read-only role working in its own scratch dir has nothing to lock', () => {
+    const fs = forRole('reviewer', reviewer.permissions, { cwd: '/data/agents/a1/scratch' })?.filesystem;
+    expect(fs?.denyWrite).not.toContain('/data/agents/a1/scratch');
   });
 });

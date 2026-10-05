@@ -46,6 +46,7 @@ import { autoCommit } from './autocommit.ts';
 import {
   type BranchSnapshot,
   discardOutOfScope,
+  discardTestArtifacts,
   resetReadOnlyWorktree,
   runGuard,
   snapshotBranches,
@@ -447,6 +448,7 @@ export class ShiftSupervisor {
 
     if (msg.worktree && s.worktree && msg.agent.permissions.mayCommit) {
       // A guard rejection leaves the agent's out-of-scope edits in the worktree: discard them, never commit them.
+      await discardTestArtifacts(s.worktree.path);
       if (s.startSha) {
         const dropped = await discardOutOfScope({
           worktree: s.worktree.path,
