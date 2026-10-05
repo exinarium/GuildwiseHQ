@@ -76,6 +76,9 @@ const SUBKIND_LABEL: Record<string, string> = {
   standing_order: 'Standing order',
   schedule_failed: 'Schedule failed',
   vault_conflict: 'Vault conflict',
+  phase_proposal: 'Phase proposal',
+  phase_done: 'Phase done',
+  phase_results: 'Phase results',
 };
 
 const titleCase = (raw: string) => {

@@ -19,6 +19,20 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['intakes'],
         ['hr'],
         ['metrics'],
+        // CardPhaseChanged and CardMergeVerified are on the card stream
+        ['phases'],
+        ['phase'],
+      ];
+    case 'phase':
+    case 'ba':
+      // Phase* events and the BA's background tasks
+      return [
+        ['phases'],
+        ['phase'],
+        ['board'],
+        ['desk'],
+        ['card'],
+        ['thread', event.streamId.slice('phase-'.length)],
       ];
     case 'intake':
       return [['intakes'], ['desk'], ['card'], ['board']];
@@ -63,7 +77,19 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
     case 'workstation':
       return [['workstations'], ['admin', 'workstations'], ['agents'], ['hr'], ['board'], ['card']];
     case 'project':
-      return [['projects'], ['project'], ['board'], ['project-invitations'], ['agents'], ['desk'], ['card']];
+      return [
+        ['projects'],
+        ['project'],
+        ['board'],
+        ['project-invitations'],
+        ['agents'],
+        ['desk'],
+        ['card'],
+        // deploy targets and the default follow-ups live on the project stream
+        ['deploy-targets'],
+        ['followup-defaults'],
+        ['phases'],
+      ];
     case 'user':
     case 'invitation':
       return [['admin'], ['me']];

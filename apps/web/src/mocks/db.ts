@@ -224,6 +224,7 @@ export function detail(card: CardDto): CardDetailResponse {
     currentShift: shift && card.status === 'claimed' ? shift : null,
     permissions: {
       canEdit: card.status === 'draft' || card.status === 'queued',
+      canSetPhase: false,
       canSetRisk: card.status !== 'cancelled' && card.status !== 'done',
       canSpecify: card.status === 'draft',
       canMove: card.status !== 'cancelled' && card.status !== 'done',

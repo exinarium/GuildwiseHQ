@@ -48,6 +48,14 @@ export function CardTile({ card, now, projectId }: { card: BoardCard; now?: numb
             </Badge>
           )}
           <BackoffBadge backoff={card.backoff} />
+          {card.phase && (
+            <span data-testid="phase-chip">
+              <Badge tone={card.phase.assignment === 'proposed' ? 'amber' : 'blue'} title="Phase">
+                {card.phase.ref}
+                {card.phase.assignment === 'proposed' ? ' (proposed)' : ''}
+              </Badge>
+            </span>
+          )}
           {card.blocked && <Badge tone="red">Blocked</Badge>}
           {card.status === 'waiting' && (
             <span data-testid="waiting-badge">

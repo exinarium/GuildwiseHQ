@@ -59,6 +59,14 @@ export const extraHandlers = [
       queueDepth: [],
     }),
   ),
+  // Phases: none in the mock server; the pages show their empty states.
+  http.get(`${A}/projects/:id/phases`, empty({ phases: [] })),
+  http.get(`${A}/projects/:id/deploy-targets`, empty({ targets: [] })),
+  http.get(`${A}/projects/:id/followup-defaults`, empty({ followups: [] })),
+  http.post(`${A}/projects/:id/phases`, unavailable),
+  http.post(`${A}/projects/:id/deploy-targets`, unavailable),
+  http.put(`${A}/projects/:id/followup-defaults`, unavailable),
+  http.get(`${A}/phases/by-number/:key/:number`, notFound),
   // M4 testing
   http.post(`${A}/cards/:key/finalize`, unavailable),
   http.post(`${A}/projects/:id/regression`, empty({ cards: [] })),

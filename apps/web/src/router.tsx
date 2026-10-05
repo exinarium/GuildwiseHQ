@@ -17,6 +17,7 @@ import { Ledger } from './pages/Ledger.tsx';
 import { Login } from './pages/Login.tsx';
 import { Metrics } from './pages/Metrics.tsx';
 import { OrgDesigner } from './pages/OrgDesigner.tsx';
+import { Phase } from './pages/Phase.tsx';
 import { ProjectSettings } from './pages/ProjectSettings.tsx';
 import { Projects } from './pages/Projects.tsx';
 import { Schedules } from './pages/Schedules.tsx';
@@ -40,6 +41,7 @@ export const routes = [
       { path: '/', element: <Home /> },
       { path: '/p/:projectKey/board', element: <Board /> },
       { path: '/p/:projectKey/feed', element: <FeedProject /> },
+      { path: '/p/:projectKey/phases/:number', element: <Phase /> },
       { path: '/schedules', element: <Schedules /> },
       { path: '/cards/new', element: <CardNew /> },
       { path: '/cards/:ref', element: <CardDetail /> },

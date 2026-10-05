@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useBoard } from '../api/queries/board.ts';
+import { usePhases } from '../api/queries/phases.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useRunFeed } from '../api/queries/schedules.ts';
 import { BoardView } from '../components/BoardView.tsx';
+import { PhaseFilter } from '../components/PhaseFilter.tsx';
 import { RegressionDialog } from '../components/RegressionDialog.tsx';
 import { Button, ErrorBox, PageHeader, Spinner } from '../components/ui.tsx';
 import { departmentsOf, inDepartment } from '../lib/designer.ts';
@@ -15,7 +17,9 @@ export function Board() {
   const nav = useNavigate();
   const projects = useProjects();
   const project = projects.data?.find((p) => p.key === projectKey);
-  const board = useBoard(project?.id);
+  const [phaseId, setPhaseId] = useState('');
+  const board = useBoard(project?.id, phaseId || undefined);
+  const phases = usePhases(project?.id);
   const runFeed = useRunFeed();
   const [department, setDepartment] = useState('');
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
@@ -88,6 +92,7 @@ export function Board() {
                   </option>
                 ))}
             </select>
+            <PhaseFilter phases={phases.data ?? []} value={phaseId} onChange={setPhaseId} />
             {traits.hasTestStage && <RegressionDialog projectId={project.id} />}
             {project.workflowKey === 'feed' && (
               <>

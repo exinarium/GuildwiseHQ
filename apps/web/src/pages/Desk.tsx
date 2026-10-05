@@ -1,4 +1,4 @@
-import type { DeskItemDto } from '@aom/shared';
+import { type DeskItemDto, isPhaseDeskSubkind } from '@aom/shared';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
@@ -8,6 +8,7 @@ import { EscalationTrail } from '../components/EscalationTrail.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
 import { MappingForm } from '../components/MappingForm.tsx';
 import { OutboundApproval } from '../components/OutboundApproval.tsx';
+import { PhaseDeskItem } from '../components/PhaseDeskItem.tsx';
 import {
   Avatar,
   Badge,
@@ -226,6 +227,8 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
           Read only:{' '}
           {item.card ? 'only the card owner can answer this.' : 'only the project owner can answer.'}
         </p>
+      ) : isPhaseDeskSubkind(item.subkind) ? (
+        <PhaseDeskItem item={item} />
       ) : item.subkind === 'unmapped_ticket' ? (
         <MappingForm item={item} />
       ) : item.kind === 'approval' && item.subkind === 'outbound' ? (

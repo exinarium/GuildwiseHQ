@@ -1,8 +1,10 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAddRepo, usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
+import { DeployTargetsPanel } from '../components/DeployTargetsPanel.tsx';
 import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
+import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
 import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
 import {
   Badge,
@@ -185,6 +187,9 @@ export function ProjectSettings() {
           )}
         </Panel>
       )}
+      {project && traits.usesRepos && <PhasesPanel projectId={id} />}
+      {project && traits.usesRepos && <DeployTargetsPanel projectId={id} />}
+      {project && traits.usesRepos && <FollowupDefaultsPanel projectId={id} />}
       {project && traits.usesRepos && (
         <MergePolicyPanel projectId={id} project={project} history={q.data.mergePolicyHistory ?? []} />
       )}

@@ -22,6 +22,7 @@ import {
 import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
 import { BackoffBadge } from '../components/BackoffBadge.tsx';
 import { EditCardDialog, RiskTierDialog } from '../components/CardEdit.tsx';
+import { CardPhase } from '../components/CardPhase.tsx';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
 import { FinalizePanel } from '../components/FinalizePanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
@@ -285,6 +286,20 @@ export function CardDetailView({
               )}
               {card.branchName && <Meta k="Branch" v={card.branchName} mono />}
               <Meta k="Priority" v={String(card.priority)} />
+              {(data.phase || permissions.canSetPhase) && (
+                <div className="sm:col-span-2">
+                  <dt className="sr-only">Phase</dt>
+                  <dd>
+                    <CardPhase
+                      cardId={card.id}
+                      projectId={card.projectId}
+                      phase={data.phase ?? null}
+                      canSet={!!permissions.canSetPhase}
+                      status={card.status}
+                    />
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt className="text-xs font-medium text-zinc-500">Who answers its questions</dt>
                 <dd>
