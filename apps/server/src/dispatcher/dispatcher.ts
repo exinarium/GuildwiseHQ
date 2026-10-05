@@ -5,7 +5,7 @@ import { DISPATCH_LOCK_ID } from '../db/tx.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
 import { testingPass } from './bottleneck.ts';
-import { agentView, candidateCards, isCandidate } from './candidates.ts';
+import { agentView, candidateCards, isCandidate, ONLINE_WINDOW_MS } from './candidates.ts';
 import { type ClaimResult, claim } from './claim.ts';
 import { devopsPass } from './devops.ts';
 import { questionPass } from './questions.ts';
@@ -43,7 +43,6 @@ const TRIGGER_TYPES = new Set([
   'TestEnvironmentReady',
 ]);
 
-const ONLINE_WINDOW_MS = 45_000;
 const REJECT_COOLDOWN_MS = 30_000;
 const LATE_SCHEDULED_MS = 30_000;
 const MAX_CONSECUTIVE_PASSES = 20;

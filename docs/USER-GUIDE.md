@@ -138,10 +138,20 @@ The board shows all cards in a workflow, from left to right by stage. Each card 
 - **Age** (time in current stage)
 - **Risk tier** (small/large; auto-computed from diff, overridable)
 - **Waiting badge** (a card waiting on a bug it spawned says "waiting on bug" in the Test (waiting on bug) column; a large merge waiting for your approval stays in the Finalize column and says "Awaiting your approval")
+- **Warning icon** (a card in the queue that nobody may be able to take; see below)
 - **Rework round** (number of times bounced from review)
 - **Blocked badge** (if waiting on a decision)
 
 The Blocked column shows cards waiting on an answer from the decision desk.
+
+#### The warning icon: why a card does not move
+
+A queued card that no agent has claimed gets a warning icon on its board tile and next to its status on the card page when the dispatcher could not hand it out. Hover the icon or focus it with the keyboard to read the reason.
+
+- **Red, "Not workable"**: nobody hired could ever take the card's current stage, so waiting will not help. Typical reasons: no builder is hired; the Review stage needs a senior reviewer and only juniors exist; the only reviewer built the card (nobody reviews their own work); a large change needs two different senior reviewers but only one is hired ("needs a second senior reviewer other than Linus"). The tooltip has a **Hire** link that opens the HR board's Hire form with the missing role and seniority already chosen.
+- **Amber, "Waiting"**: agents exist but cannot work right now: their workstation is offline ("Reviewer Linus is offline"), no workstation with an eligible agent holds the card's repository, or every eligible agent has been busy for more than ten minutes. It clears by itself when the machine is back, the repository is cloned or the agent is free.
+
+The icon follows hiring, firing, role changes and claims live, and offline workstations within about 30 seconds.
 
 ### Creating and specifying a card
 

@@ -59,9 +59,9 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
     case 'role':
     case 'workflow':
     case 'departments':
-      return [['roles'], ['workflows'], ['org'], ['hr'], ['agents'], ['projects']];
+      return [['roles'], ['workflows'], ['org'], ['hr'], ['agents'], ['projects'], ['board'], ['card']];
     case 'workstation':
-      return [['workstations'], ['admin', 'workstations'], ['agents'], ['hr']];
+      return [['workstations'], ['admin', 'workstations'], ['agents'], ['hr'], ['board'], ['card']];
     case 'project':
       return [['projects'], ['project'], ['board'], ['project-invitations'], ['agents']];
     case 'user':

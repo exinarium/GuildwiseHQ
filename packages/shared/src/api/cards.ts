@@ -10,6 +10,7 @@ import {
   ThreadMessageKind,
 } from '../cards/types.ts';
 import { CardChangesSchema } from '../events/card.ts';
+import { WorkabilitySchema } from './board.ts';
 import { IsoTime } from './common.ts';
 import { PublicationDtoSchema } from './research.ts';
 import { ShiftDtoSchema } from './shifts.ts';
@@ -109,6 +110,8 @@ export type ThreadMessageDto = z.infer<typeof ThreadMessageDtoSchema>;
 /** `GET /api/cards/:id` (also by ref, `WEB-12`): card + handoffs + transitions + thread + current shift. */
 export const CardDetailResponseSchema = z.object({
   card: CardDtoSchema,
+  /** Could any agent ever take the card's current stage (queued, unclaimed cards only). */
+  workability: WorkabilitySchema.optional(),
   handoffs: z.array(HandoffDtoSchema),
   transitions: z.array(TransitionDtoSchema),
   /** Edits and risk tier overrides, shown in the timeline between the transitions (ordered by time). */

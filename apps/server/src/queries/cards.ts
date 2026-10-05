@@ -17,6 +17,7 @@ import { iso, one, type Row, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 import { publicationOfCard } from './research.ts';
 import { cardTesting } from './testing.ts';
+import { cardWorkability } from './workability.ts';
 
 const COLUMN_FALLBACK = 'Other';
 
@@ -154,8 +155,10 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
   const manage = canManageCard(ctxAuth);
   const open = !['done', 'cancelled'].includes(card.status);
   const lastDiff = [...handoffs].reverse().find((h) => h.data?.diffStats);
+  const workability = (await cardWorkability(ctx, [card])).get(card.id);
   return {
     card: await toCardDto(ctx, card),
+    ...(workability ? { workability } : {}),
     handoffs: handoffs.map((h) => ({
       id: h.id,
       cardId: h.card_id,
@@ -240,6 +243,7 @@ export async function getBoard(ctx: Ctx, userId: string, projectId: string): Pro
       WHERE c.project_id=$1 AND c.status <> 'cancelled' ORDER BY c.priority, c.queued_at NULLS LAST, c.number`,
     [projectId],
   );
+  const workability = await cardWorkability(ctx, cards);
   const byColumn = new Map<string, BoardResponse['columns'][number]['cards']>(columns.map((c) => [c, []]));
   for (const c of cards) {
     const { column } = await cardColumn(ctx, c);
@@ -270,6 +274,7 @@ export async function getBoard(ctx: Ctx, userId: string, projectId: string): Pro
                 : 'bug',
       waitingOn: c.waiting_on_id ? { id: c.waiting_on_id, ref: c.waiting_on_ref } : null,
       origin: c.origin,
+      ...(workability.get(c.id)?.ok === false ? { workability: workability.get(c.id) } : {}),
     });
   }
   return {

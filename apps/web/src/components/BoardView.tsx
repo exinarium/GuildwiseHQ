@@ -2,6 +2,7 @@ import type { BoardCard, BoardResponse } from '@aom/shared';
 import { Link } from 'react-router';
 import { ageLabel } from '../lib/time.ts';
 import { Avatar, Badge } from './ui.tsx';
+import { WorkabilityWarning } from './WorkabilityWarning.tsx';
 
 const WAITING_LABEL = {
   bug: 'waiting on bug',
@@ -10,9 +11,9 @@ const WAITING_LABEL = {
   devops: 'waiting on DevOps',
 } as const;
 
-export function CardTile({ card, now }: { card: BoardCard; now?: number }) {
+export function CardTile({ card, now, projectId }: { card: BoardCard; now?: number; projectId?: string }) {
   return (
-    <li>
+    <li className="relative">
       <Link
         to={`/cards/${card.id}`}
         data-testid={`card-tile-${card.ref}`}
@@ -24,7 +25,9 @@ export function CardTile({ card, now }: { card: BoardCard; now?: number }) {
           <span title={`Updated ${card.updatedAt}`}>{ageLabel(card.updatedAt, now)}</span>
         </div>
         <p className="mt-1 line-clamp-2 font-medium leading-snug">{card.title}</p>
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <div
+          className={`mt-2 flex flex-wrap items-center gap-1.5 ${card.workability && !card.workability.ok ? 'pr-6' : ''}`}
+        >
           {card.assignee ? (
             <span className="inline-flex items-center gap-1 text-xs" data-testid="tile-assignee">
               <Avatar name={card.assignee.name} size={18} />
@@ -56,6 +59,11 @@ export function CardTile({ card, now }: { card: BoardCard; now?: number }) {
           )}
         </div>
       </Link>
+      <WorkabilityWarning
+        workability={card.workability}
+        projectId={projectId}
+        className="absolute right-1.5 bottom-1.5"
+      />
       {card.status === 'waiting' && card.waitingOn && (
         <Link
           to={`/cards/${card.waitingOn.id}`}
@@ -94,7 +102,12 @@ export function BoardView({ board, now }: { board: BoardResponse; now?: number }
           </h2>
           <ul className="flex flex-col gap-2">
             {col.cards.map((c) => (
-              <CardTile key={c.id} card={c} {...(now !== undefined ? { now } : {})} />
+              <CardTile
+                key={c.id}
+                card={c}
+                projectId={board.projectId}
+                {...(now !== undefined ? { now } : {})}
+              />
             ))}
           </ul>
         </section>

@@ -12,6 +12,7 @@ export function useCard(ref: string | undefined) {
   return useQuery({
     queryKey: ['card', ref],
     enabled: !!ref,
+    refetchInterval: 30_000,
     queryFn: () =>
       get<CardDetailResponse>(`/cards/${encodeURIComponent(ref ?? '')}`, CardDetailResponseSchema),
   });

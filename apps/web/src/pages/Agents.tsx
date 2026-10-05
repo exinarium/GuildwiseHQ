@@ -44,7 +44,13 @@ export function Agents() {
   /** `/agents?hire=tester&projectId=<id>` (the desk's "Hire tester" button) opens the form prefilled. */
   const [prefill] = useState(() => {
     const role = params.get('hire');
-    return role ? { roleKey: role, projectId: params.get('projectId') ?? '' } : null;
+    return role
+      ? {
+          roleKey: role,
+          projectId: params.get('projectId') ?? '',
+          seniority: params.get('seniority') ?? '',
+        }
+      : null;
   });
   const [hireOpen, setHireOpen] = useState(!!prefill);
   const [firing, setFiring] = useState<AgentDto | null>(null);
@@ -424,7 +430,7 @@ function HireDialog({
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
-  prefill?: { roleKey: string; projectId: string } | null;
+  prefill?: { roleKey: string; projectId: string; seniority?: string } | null;
 }) {
   const stations = useWorkstations();
   const projects = useProjects();
@@ -433,7 +439,7 @@ function HireDialog({
   const [theme, setTheme] = useState('default');
   const suggestions = useNameSuggestions(open, nonce, theme);
   const [roleKey, setRoleKey] = useState(prefill?.roleKey ?? '');
-  const [seniority, setSeniority] = useState(prefill ? 'junior' : '');
+  const [seniority, setSeniority] = useState(prefill ? prefill.seniority || 'junior' : '');
   const [workstationId, setWorkstationId] = useState('');
   const [projectId, setProjectId] = useState(prefill?.projectId ?? '');
   // A shared project runs on its owner's catalogue: the Hire form lists that organization's roles (custom ones too).

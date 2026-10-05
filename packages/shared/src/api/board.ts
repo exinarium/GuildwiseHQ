@@ -1,6 +1,20 @@
 import { z } from 'zod';
 import { CardStatus, CardType, RiskTier } from '../cards/types.ts';
+import { Seniority } from '../roles/schema.ts';
 import { IsoTime } from './common.ts';
+
+/**
+ * Could any agent ever take this card's current stage? `blocked`: nobody hired could (hire one); `waiting`: agents
+ * exist but are offline, busy or their workstation lacks what the card needs. `ok: true` carries nothing else.
+ */
+export const WorkabilitySchema = z.object({
+  ok: z.boolean(),
+  level: z.enum(['blocked', 'waiting']).optional(),
+  reason: z.string().optional(),
+  /** What to hire to fix a `blocked` card: the HR board's Hire form is prefilled with it. */
+  hire: z.object({ roleKey: z.string(), seniority: Seniority.optional() }).optional(),
+});
+export type Workability = z.infer<typeof WorkabilitySchema>;
 
 export const BoardCardSchema = z.object({
   id: z.uuid(),
@@ -23,6 +37,8 @@ export const BoardCardSchema = z.object({
   waitingFor: z.enum(['bug', 'approval', 'finalizing', 'devops']).nullable().optional(),
   /** M4: suite (full E2E / regression) cards are marked on the board. */
   origin: z.string().optional(),
+  /** Absent or `ok` for a workable card; see `WorkabilitySchema`. */
+  workability: WorkabilitySchema.optional(),
 });
 export type BoardCard = z.infer<typeof BoardCardSchema>;
 

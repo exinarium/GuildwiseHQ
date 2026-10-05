@@ -31,6 +31,7 @@ import {
   Spinner,
   TextArea,
 } from '../components/ui.tsx';
+import { WorkabilityWarning } from '../components/WorkabilityWarning.tsx';
 import { fieldLabel } from '../lib/cardForm.ts';
 import { formatDateTime } from '../lib/time.ts';
 
@@ -138,6 +139,7 @@ export function CardDetailView({
             <span data-testid="card-column">{card.column}</span>
             <span>· {card.cardType}</span>
             {card.reworkRound > 0 && <Badge tone="violet">Rework {card.reworkRound}</Badge>}
+            <WorkabilityWarning workability={data.workability} projectId={card.projectId} />
             {card.claimedByAgentName && (
               <span className="inline-flex items-center gap-1">
                 <Avatar name={card.claimedByAgentName} size={18} />

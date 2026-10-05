@@ -81,3 +81,6 @@ export const SANDBOXER = {
   name: 'E2E Sandboxer',
   password: 'sandboxer-password-12345',
 };
+
+/** Workability spec: own user, own runner (mock), project WRK on the toy repo, a builder and ONE senior reviewer. */
+export const WORKER = { email: 'worker@e2e.test', name: 'E2E Worker', password: 'worker-password-12345' };
