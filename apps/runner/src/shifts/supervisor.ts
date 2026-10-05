@@ -377,6 +377,10 @@ export class ShiftSupervisor {
       ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
       AOM_SHIFT_TOKEN: s.token,
       AOM_SHIFT_ID: msg.shiftId,
+      // A suite or regression card of a phase follow-up tests the deployed app: Playwright configs read this.
+      ...(msg.agent.roleKey === 'tester' && typeof msg.brief.card.fields.targetUrl === 'string'
+        ? { AOM_TARGET_URL: msg.brief.card.fields.targetUrl }
+        : {}),
       PATH: `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
     };
 
@@ -540,6 +544,9 @@ export class ShiftSupervisor {
     return {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
       rpc: async (req: IpcRpcRequest) => {
+        // A BA task reads a member card of the phase by ref (`aom card <REF>`): the server answers that.
+        if (req.method === 'card.get' && s.msg.kind === 'ba_task' && req.params.ref)
+          return this.deps.rpc(s.msg.shiftId, req.method, req.params);
         if (req.method === 'card.get')
           return { ok: true, result: cardPayload({ ...s.msg, brief: s.brief ?? s.msg.brief }) };
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);

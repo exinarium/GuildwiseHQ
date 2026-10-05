@@ -5,6 +5,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import {
+  type BaTaskShift,
   type DevopsShift,
   formatLedgerMatches,
   IPC_REPORT_PATH,
@@ -13,6 +14,7 @@ import {
   type IpcRpcResponse,
   type LedgerMatch,
   type QuestionShift,
+  renderBaTaskPrompt,
   renderDevopsPrompt,
   renderQuestionPrompt,
   renderShiftPrompt,
@@ -220,6 +222,165 @@ async function cardDraft(ctx: AomContext, p: Parsed, sub: 'create' | 'update' | 
   return 0;
 }
 
+const PHASE_USAGE = `usage: aom phase list [--project <KEY>]
+       aom phase propose --name "<name>" [--project <KEY>] [--description "<text>"] [--followups-file <json>]
+       aom phase assign <CARD-REF> --phase <ref|"name"> | --none [--project <KEY>]
+       aom phase submit <phase ref> [--project <KEY>]
+       aom phase followup brief <n> --to devops|tester|ba --text "<instructions>"
+       aom phase ready [--note "<text>"]
+       aom phase report --summary-file <report.md> [--outstanding "<item>"]...
+       aom phase followup done <n> --summary "<what you did>" [--link <url>]...
+       aom phase followup fail <n> --summary "<why not>"
+       aom phase results --summary-file <report.md>`;
+
+/** `aom phase ...`: the BA proposes phases in its intake chat and works the phase tasks (report, briefs, results). */
+async function phaseVerb(ctx: AomContext, p: Parsed): Promise<number> {
+  const [sub, ...rest] = p.positionals;
+  const project = one(p, 'project');
+  const scope = project ? { project } : {};
+  const say = (r: unknown, fallback: string): number => {
+    ctx.io.out(`${(r as { message?: string } | null)?.message ?? fallback}\n`);
+    return 0;
+  };
+  const position = (raw: string | undefined): number => {
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1) throw new UsageError(PHASE_USAGE);
+    return n;
+  };
+  switch (sub) {
+    case 'list': {
+      const r = (await rpc(ctx, 'phase.list', scope)) as {
+        project: string;
+        phases: Array<{ ref: string; name: string; status: string; members: number; followups: string[] }>;
+        deployTargets: Array<{
+          name: string;
+          kind: string;
+          host: string | null;
+          appUrl: string | null;
+          workstation: string | null;
+          testerOnWorkstation: boolean | null;
+          notes: string;
+        }>;
+        defaultFollowups: unknown[];
+      };
+      const lines = [
+        `Project ${r.project}`,
+        '',
+        'Phases:',
+        ...(r.phases.length
+          ? r.phases.map(
+              (x) =>
+                `- ${x.ref} ${x.name} (${x.status}, ${x.members} card(s))${x.followups.length ? `; follow-ups: ${x.followups.join(' > ')}` : ''}`,
+            )
+          : ['- none']),
+        '',
+        'Deploy targets (use these ids or names in follow-ups; never invent one):',
+        ...(r.deployTargets.length
+          ? r.deployTargets.map(
+              (t) =>
+                `- ${t.name}: ${t.kind === 'local_docker' ? 'local Docker (every member workstation)' : `remote ${t.host}${t.workstation ? ` via ${t.workstation}` : ''}`}${t.appUrl ? `, ${t.appUrl}` : ''}${t.testerOnWorkstation === false ? ' [no tester on that workstation]' : ''}`,
+            )
+          : ['- none (ask the manager to add one in the project settings)']),
+        '',
+        `Default follow-ups: ${JSON.stringify(r.defaultFollowups)}`,
+      ];
+      ctx.io.out(`${lines.join('\n')}\n`);
+      return 0;
+    }
+    case 'propose': {
+      const name = one(p, 'name');
+      if (!name) throw new UsageError(PHASE_USAGE);
+      const file = one(p, 'followups-file');
+      const description = one(p, 'description');
+      let followups: unknown;
+      if (file) {
+        try {
+          followups = JSON.parse(ctx.readFile(file));
+        } catch (err) {
+          throw new UsageError(
+            `cannot read --followups-file as JSON: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      return say(
+        await rpc(ctx, 'phase.propose', {
+          ...scope,
+          name,
+          ...(description ? { description } : {}),
+          ...(followups !== undefined ? { followups } : {}),
+        }),
+        'Proposed.',
+      );
+    }
+    case 'assign': {
+      const card = rest[0];
+      const phase = one(p, 'phase');
+      if (!card || (!phase && !has(p, 'none'))) throw new UsageError(PHASE_USAGE);
+      return say(
+        await rpc(ctx, 'phase.assign', { ...scope, card, phase: has(p, 'none') ? null : phase }),
+        'Done.',
+      );
+    }
+    case 'submit': {
+      if (!rest[0]) throw new UsageError(PHASE_USAGE);
+      return say(await rpc(ctx, 'phase.submit', { ...scope, phase: rest[0] }), 'Submitted.');
+    }
+    case 'ready':
+      return report(
+        ctx,
+        outcome('phase_ready', textFlag(ctx, p, 'note', false)?.trim() || 'Every follow-up is briefed', {
+          note: textFlag(ctx, p, 'note', false) ?? '',
+        }),
+      );
+    case 'report': {
+      const text = textFlag(ctx, p, 'summary', true) as string;
+      return report(
+        ctx,
+        outcome('phase_report', 'Phase report', { report: text, outstanding: many(p, 'outstanding') }),
+      );
+    }
+    case 'results': {
+      const text = textFlag(ctx, p, 'summary', true) as string;
+      return report(ctx, outcome('phase_results', 'Follow-up results report', { report: text }));
+    }
+    case 'followup': {
+      const [verb, n] = rest;
+      if (verb === 'brief') {
+        const to = one(p, 'to');
+        if (to !== 'devops' && to !== 'tester' && to !== 'ba') throw new UsageError(PHASE_USAGE);
+        return say(
+          await rpc(ctx, 'phase.followup.brief', {
+            position: position(n),
+            to,
+            text: textFlag(ctx, p, 'text', true),
+          }),
+          'Briefed.',
+        );
+      }
+      if (verb === 'done')
+        return report(
+          ctx,
+          outcome('followup_done', `Follow-up ${n} done`, {
+            position: position(n),
+            summary: textFlag(ctx, p, 'summary', true),
+            links: many(p, 'link'),
+          }),
+        );
+      if (verb === 'fail')
+        return report(
+          ctx,
+          outcome('followup_failed', `Follow-up ${n} failed`, {
+            position: position(n),
+            summary: textFlag(ctx, p, 'summary', true),
+          }),
+        );
+      throw new UsageError(PHASE_USAGE);
+    }
+    default:
+      throw new UsageError(PHASE_USAGE);
+  }
+}
+
 const ORG_USAGE = `usage: aom org catalogue
        aom org role draft --json '<json>' | --file <role.json> | --file -
        aom org workflow draft --json '<json>' | --file <workflow.json> | --file -
@@ -269,9 +430,15 @@ const VERBS: Record<string, Verb> = {
   card: async (ctx, p) => {
     const sub = p.positionals[0];
     if (sub === 'create' || sub === 'update' || sub === 'specify') return cardDraft(ctx, p, sub);
+    // `aom card <REF>` (a BA task): a member card of the phase, read-only.
+    if (sub) {
+      ctx.io.out(`${JSON.stringify(await rpc(ctx, 'card.get', { ref: sub }), null, 2)}\n`);
+      return 0;
+    }
     const brief = (await rpc(ctx, 'card.get')) as ShiftBrief & {
       devops?: DevopsShift;
       question?: QuestionShift;
+      baTask?: BaTaskShift;
     };
     if (has(p, 'json')) ctx.io.out(`${JSON.stringify(brief, null, 2)}\n`);
     else
@@ -279,9 +446,11 @@ const VERBS: Record<string, Verb> = {
         `${
           brief.devops
             ? renderDevopsPrompt(brief.devops)
-            : brief.question
-              ? renderQuestionPrompt(brief, brief.question)
-              : renderShiftPrompt(brief)
+            : brief.baTask
+              ? renderBaTaskPrompt(brief.baTask)
+              : brief.question
+                ? renderQuestionPrompt(brief, brief.question)
+                : renderShiftPrompt(brief)
         }\n`,
       );
     return 0;
@@ -534,6 +703,7 @@ const VERBS: Record<string, Verb> = {
     return 0;
   },
   org: async (ctx, p) => orgDesign(ctx, p),
+  phase: async (ctx, p) => phaseVerb(ctx, p),
   transcript: async (ctx, p) => {
     const url = one(p, 'url');
     if (!url) throw new UsageError('usage: aom transcript --url <video or podcast URL>');
@@ -581,6 +751,11 @@ export const USAGE = `usage: aom <verb> [options]
   source read --ref <owner/repo#12 | ticket URL>        BA intake: read a GitHub issue (Jira: the Jira skill)
   org catalogue | org role draft --json '<json>' | --file <json|-> | org workflow draft (same) | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
   transcript --url <url>                     fetch the transcript of a video or podcast (the runner saves it in the vault; prints a header and the text)
+  phase list | propose --name "<n>" [--description "<t>"] [--followups-file <json>] | assign <REF> --phase <ref>|--none | submit <ref>   BA intake: propose a phase, put cards in it, ask the manager to confirm
+  phase followup brief <n> --to devops|tester|ba --text "<t>" | phase ready   BA task (follow-ups approved): delegate each follow-up, then say all are briefed (terminal)
+  phase report --summary-file <md> [--outstanding "<item>"]...   BA task (phase done): report it to the manager (terminal)
+  phase followup done|fail <n> --summary "<t>" [--link <url>]...   BA task (custom follow-up): you did it, or could not (terminal)
+  phase results --summary-file <md>          BA task (follow-ups finished): report the results (terminal)
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed

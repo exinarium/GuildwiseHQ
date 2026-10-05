@@ -506,6 +506,144 @@ async function questionMain(brief: Brief): Promise<number> {
   return 0;
 }
 
+interface BaTaskBrief extends Brief {
+  baTask: {
+    kind: 'phase_report' | 'followups_brief' | 'followup_custom' | 'followups_report';
+    followupId?: string;
+    phase: { ref: string; name: string; description: string; workingBranch: string };
+    cards: Array<{
+      ref: string;
+      title: string;
+      outcome: string;
+      action?: string;
+      resultRef?: { mergeCommit?: string; prUrl?: string; pushedBranch?: string };
+      reason?: string;
+      unmergedBranch?: string;
+      suite?: { ref: string; result?: string; bugRefs: string[] };
+    }>;
+    followups: Array<{
+      id: string;
+      position: number;
+      kind: 'deploy' | 'regression' | 'custom';
+      target: { name: string; kind: string; appUrl: string | null } | null;
+      instruction: string;
+      note: string;
+      status: string;
+      resultSummary: string | null;
+    }>;
+    outstanding: Array<{ text: string }>;
+  };
+}
+
+/**
+ * A BA background task (phases), scripted and deterministic. Report: markdown from the cards, the open pull requests
+ * and the suites as the outstanding items. Briefs: one `aom phase followup brief` per queued follow-up (the note or
+ * instruction travels into the brief, so tokens like `[no_report]` reach the mock DevOps engineer), then `ready`.
+ * Custom: `[fail]` in the instruction fails it. Results: one line per follow-up. `[ba_no_report]` in the phase
+ * description ends the shift without reporting (retries, then the server's template).
+ */
+async function baTaskMain(brief: BaTaskBrief): Promise<number> {
+  const t = brief.baTask;
+  for (let i = 1; i <= 2; i++) {
+    emit({ kind: 'progress', text: `mock BA ${t.phase.ref} ${t.kind}: step ${i}/2` });
+    await sleep(stepMs);
+  }
+  emit({ kind: 'usage', usage: { inputTokens: 600, outputTokens: 150 } });
+  if (t.phase.description.includes('[ba_no_report]')) {
+    emit({ kind: 'final', text: 'mock BA finished without reporting' });
+    return 0;
+  }
+  const cardLine = (c: BaTaskBrief['baTask']['cards'][number]) =>
+    `- ${c.ref} ${c.title}: ${c.outcome}${c.resultRef?.mergeCommit ? ` (${c.resultRef.mergeCommit.slice(0, 10)})` : ''}${c.resultRef?.prUrl ? ` ${c.resultRef.prUrl}` : ''}${c.reason ? ` (${c.reason})` : ''}${c.suite ? `; full suite ${c.suite.ref}: ${c.suite.result ?? 'running'}` : ''}`;
+  let r: { code: number; out: string; err: string };
+  if (t.kind === 'phase_report') {
+    const md = [
+      `# ${t.phase.ref} ${t.phase.name} is done`,
+      '',
+      '## Delivered',
+      ...t.cards.map(cardLine),
+      '',
+      '## Follow-ups if you approve',
+      ...(t.followups.length
+        ? t.followups.map(
+            (f) =>
+              `${f.position}. ${f.kind}${f.target ? ` to ${f.target.name}` : ''}${f.instruction ? `: ${f.instruction}` : ''}`,
+          )
+        : ['none']),
+    ].join('\n');
+    r = aom([
+      'phase',
+      'report',
+      '--summary-file',
+      tmpText('report.md', md),
+      ...t.outstanding.flatMap((o) => ['--outstanding', o.text]),
+    ]);
+  } else if (t.kind === 'followups_brief') {
+    r = { code: 0, out: '', err: '' };
+    for (const f of t.followups.filter((x) => x.status === 'queued' || x.status === 'briefed')) {
+      const to =
+        f.kind === 'deploy'
+          ? 'devops'
+          : f.kind === 'regression'
+            ? 'tester'
+            : f.instruction.includes('[ba]')
+              ? 'ba'
+              : f.instruction.includes('[tester]')
+                ? 'tester'
+                : 'devops';
+      const what =
+        f.kind === 'deploy'
+          ? `deploy ${f.target?.name ?? ''} ${f.target?.appUrl ?? ''}`.trim()
+          : f.kind === 'regression'
+            ? `run the regression suite${f.target ? ` against ${f.target.name}` : ''}`
+            : f.instruction;
+      const b = aom([
+        'phase',
+        'followup',
+        'brief',
+        String(f.position),
+        '--to',
+        to,
+        '--text',
+        `mock brief: ${what} ${f.note}`.trim(),
+      ]);
+      if (b.code !== 0) r = b;
+    }
+    if (r.code === 0) r = aom(['phase', 'ready', '--note', 'mock: every follow-up is briefed']);
+  } else if (t.kind === 'followup_custom') {
+    const f = t.followups.find((x) => x.id === t.followupId);
+    if (!f) return 1;
+    r = f.instruction.includes('[fail]')
+      ? aom([
+          'phase',
+          'followup',
+          'fail',
+          String(f.position),
+          '--summary',
+          `mock: could not do "${f.instruction}"`,
+        ])
+      : aom(['phase', 'followup', 'done', String(f.position), '--summary', `mock: did ${f.instruction}`]);
+  } else {
+    const md = [
+      `# ${t.phase.ref} follow-ups finished`,
+      '',
+      ...t.followups.map(
+        (f) =>
+          `${f.position}. ${f.kind}: ${f.status}${f.resultSummary ? ` - ${f.resultSummary.split('\n')[0]}` : ''}`,
+      ),
+    ].join('\n');
+    r = aom(['phase', 'results', '--summary-file', tmpText('results.md', md)]);
+  }
+  emit({
+    kind: 'final',
+    text:
+      r.code === 0
+        ? `mock BA reported: ${r.out.trim()}`
+        : `mock BA report failed: ${(r.err || r.out).trim()}`,
+  });
+  return 0;
+}
+
 interface MockSource {
   title?: string;
   body?: string;
@@ -517,7 +655,9 @@ interface MockSource {
   acceptanceCriteria?: string[];
   mock?: unknown;
   /** Several cards from one ticket: `dependsOn` lists indexes of earlier cards. */
-  cards?: Array<MockSource & { dependsOn?: number[] }>;
+  cards?: Array<MockSource & { dependsOn?: number[]; phase?: boolean }>;
+  /** Phases: the BA proposes this phase (reusing an open one with the name) and puts the cards marked `phase: true` in it. */
+  phase?: { name: string; description?: string; followups?: unknown[] };
 }
 
 interface IntakeCtx {
@@ -612,6 +752,21 @@ async function intakeMain(): Promise<number> {
   const repo = ctx.projects.find((p) => p.key === project)?.repos[0];
   const drafts = source.cards ?? [source];
   const refs: string[] = [];
+  // Phases: propose (or reuse) the phase first; the cards marked `phase: true` are drafted into it.
+  let phaseRef: string | undefined;
+  if (source.phase) {
+    const args = ['phase', 'propose', '--name', source.phase.name];
+    if (source.phase.description) args.push('--description', source.phase.description);
+    if (source.phase.followups)
+      args.push('--followups-file', tmpJson('followups.json', source.phase.followups));
+    const pr = aom(args);
+    phaseRef = /\b([A-Z][A-Z0-9]+-P\d+)\b/.exec(pr.out)?.[1];
+    if (pr.code !== 0 || !phaseRef) {
+      say(`Could not propose the phase: ${(pr.err || pr.out).trim()}`);
+      return finish();
+    }
+    say(`Proposed phase ${phaseRef}: ${source.phase.name}.`);
+  }
   for (const d of drafts) {
     const title = d.title ?? source.title ?? 'Untitled';
     const draft = {
@@ -621,6 +776,7 @@ async function intakeMain(): Promise<number> {
       docsNeeded: d.docsNeeded ?? false,
       ...((d.repo ?? repo) ? { repo: d.repo ?? repo } : {}),
       ...(key ? { externalRef: key } : {}),
+      ...(phaseRef && (d as { phase?: boolean }).phase ? { phase: phaseRef } : {}),
       dependencies: ((d as { dependsOn?: number[] }).dependsOn ?? []).map((i) => refs[i]).filter(Boolean),
       fields: {
         context: `${key ? `${key}: ` : ''}${title}\n\n${d.body ?? source.body ?? ''}`.trim(),
@@ -643,6 +799,14 @@ async function intakeMain(): Promise<number> {
   for (const ref of refs) {
     const s = aom(['card', 'specify', ref]);
     say(s.code === 0 ? s.out.trim() : `Could not specify ${ref}: ${(s.err || s.out).trim()}`);
+  }
+  if (phaseRef) {
+    const sub = aom(['phase', 'submit', phaseRef]);
+    say(
+      sub.code === 0
+        ? `Asked you to confirm ${phaseRef} on the desk.`
+        : `Could not submit ${phaseRef}: ${(sub.err || sub.out).trim()}`,
+    );
   }
   say(`Created ${refs.join(', ')} from ${key ?? 'your request'}.`);
   return finish();
@@ -807,6 +971,7 @@ async function main(): Promise<number> {
   const brief = JSON.parse(card.out) as Brief;
   if ((brief.shift as { kind?: string }).kind === 'devops') return devopsMain(brief as DevopsBrief);
   if (brief.shift.kind === 'question') return questionMain(brief);
+  if ((brief.shift as { kind?: string }).kind === 'ba_task') return baTaskMain(brief as BaTaskBrief);
   const stage = brief.shift.stage;
   const action = pickAction(brief, attemptIndex(brief));
 

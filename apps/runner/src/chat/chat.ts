@@ -55,6 +55,11 @@ const CHAT_RPC = new Set([
   'card.specify',
   'intake.map',
   'intake.unmapped',
+  /** Phases: the BA proposes a phase and its cards in an intake chat; the manager confirms on the desk. */
+  'phase.list',
+  'phase.propose',
+  'phase.assign',
+  'phase.submit',
   /** M10: the BA's design chat (the server only allows these in the owner's chat with their BA). */
   'org.catalogue',
   'org.role.draft',
