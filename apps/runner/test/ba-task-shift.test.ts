@@ -212,4 +212,156 @@ describe('ba_task shifts on the mock runtime', () => {
     expect(ended.outcome).toBe('no_report');
     expect(reports(h, silent.shiftId)).toEqual([]);
   }, 60_000);
+
+  describe('reporter tasks (Part B)', () => {
+    /** A reporter task: no phase, the data in `reporter`. */
+    function reporterShift(hh: Harness, kind: BaTaskShift['kind'], reporter: Record<string, unknown>) {
+      const msg = taskShift(hh, kind);
+      const { phase: _phase, ...rest } = msg.baTask;
+      (msg as { baTask: unknown }).baTask = {
+        ...rest,
+        kind,
+        cards: [],
+        followups: [],
+        outstanding: [],
+        reporter: { items: [], signals: [], openItems: [], triageWindowMinutes: 10, ...reporter },
+      };
+      return msg;
+    }
+    const id = () => uuidv7();
+
+    it('desk_triage: dismisses, merges, passes; the instructions are the reporter ones', async () => {
+      h = await startHarness();
+      const [a, b, c, open] = [id(), id(), id(), id()];
+      const item = (itemId: string, title: string) => ({
+        id: itemId,
+        kind: 'alert',
+        subkind: 'bug_reported',
+        title,
+        body: '',
+        projectKey: 'TOY',
+        cardRef: null,
+        blocking: false,
+        askedBy: 'system',
+        createdAt: new Date().toISOString(),
+        held: true,
+      });
+      const msg = reporterShift(h, 'desk_triage', {
+        items: [item(a, 'Bug [dismiss] noise'), item(b, 'Bug [merge] same'), item(c, 'Real bug')],
+        openItems: [{ id: open, title: 'Existing' }],
+      });
+      const ended = await run(h, msg);
+      expect(ended.outcome).toBe('reported');
+      const rep = reports(h, msg.shiftId)[0]?.report as any;
+      expect(rep).toMatchObject({ kind: 'outcome', outcomeId: 'triage_done' });
+      expect(rep.data.decisions).toEqual([
+        expect.objectContaining({ itemId: a, action: 'dismiss' }),
+        expect.objectContaining({ itemId: b, action: 'merge', into: open }),
+        expect.objectContaining({ itemId: c, action: 'pass' }),
+      ]);
+      const md = readFileSync(join(h.dataDir, 'agents', msg.agent.agentId, 'claude', 'CLAUDE.md'), 'utf8');
+      expect(md).toContain('reporting to the manager in the background');
+      expect(md).toContain('aom report triage');
+      expect(h.server.invalid).toEqual([]);
+    }, 60_000);
+
+    it("urgent_note and floor_alert: a note per item, an analysis per signal (on the signal's own item)", async () => {
+      h = await startHarness();
+      const [i1, s1, alert] = [id(), id(), id()];
+      const notes = reporterShift(h, 'urgent_note', {
+        items: [
+          {
+            id: i1,
+            kind: 'approval',
+            subkind: 'devops',
+            title: 'Approve docker',
+            body: '',
+            projectKey: 'TOY',
+            cardRef: null,
+            blocking: true,
+            askedBy: 'Atlas',
+            createdAt: new Date().toISOString(),
+            held: false,
+          },
+        ],
+      });
+      await run(h, notes);
+      expect(reports(h, notes.shiftId)[0]?.report).toMatchObject({
+        outcomeId: 'notes_done',
+        data: { notes: [{ itemId: i1, note: expect.stringContaining('Approve docker') }] },
+      });
+      const sig = reporterShift(h, 'floor_alert', {
+        signals: [
+          {
+            id: s1,
+            kind: 'loop',
+            urgency: 'urgent',
+            fingerprint: 'loop:card:x',
+            count: 3,
+            status: 'open',
+            firstSeenAt: 'a',
+            lastSeenAt: 'b',
+            subject: { title: 'TOY-1 keeps failing', detail: '3 shifts', deskItemId: alert },
+            evidence: {},
+          },
+        ],
+      });
+      await run(h, sig);
+      expect(reports(h, sig.shiftId)[0]?.report).toMatchObject({
+        outcomeId: 'signal_report',
+        data: { reports: [{ signalId: s1, annotateItemId: alert }] },
+      });
+    }, 60_000);
+
+    it('floor_report: the six sections from the digest', async () => {
+      h = await startHarness();
+      const msg = reporterShift(h, 'floor_report', {
+        digest: {
+          generatedAt: new Date().toISOString(),
+          localDate: '2026-11-10',
+          since: null,
+          phases: [
+            { ref: 'TOY-P1', name: 'Autosave', status: 'open', projectKey: 'TOY', lateBugs: ['TOY-9'] },
+          ],
+          signals: [],
+          backingOff: [{ ref: 'TOY-2', title: 'x', failures: 4, until: 'later' }],
+          devopsOpen: [{ id: id(), summary: 'Deploy staging', status: 'needs_approval', workstation: 'WS' }],
+          resolvedByBa: [{ id: id(), title: 'Noise', how: 'dismissed', note: null }],
+          failures: [],
+        },
+      });
+      await run(h, msg);
+      const rep = reports(h, msg.shiftId)[0]?.report as any;
+      const text = rep.data.report as string;
+      expect((text.match(/^## /gm) ?? []).length).toBe(6);
+      expect(text).toContain('TOY-P1 Autosave: open (late bugs TOY-9)');
+      expect(text).toContain('TOY-2 backing off after 4 failed shifts');
+      expect(text).toContain('Deploy staging: needs_approval');
+      expect(text).toContain('Noise (dismissed)');
+    }, 60_000);
+
+    it('[ba_no_report] in an item ends the shift without a report', async () => {
+      h = await startHarness();
+      const msg = reporterShift(h, 'desk_triage', {
+        items: [
+          {
+            id: id(),
+            kind: 'alert',
+            subkind: null,
+            title: 'Slow [ba_no_report]',
+            body: '',
+            projectKey: null,
+            cardRef: null,
+            blocking: false,
+            askedBy: 'system',
+            createdAt: new Date().toISOString(),
+            held: true,
+          },
+        ],
+      });
+      const ended = await run(h, msg);
+      expect(ended.outcome).toBe('no_report');
+      expect(reports(h, msg.shiftId)).toEqual([]);
+    }, 60_000);
+  });
 });

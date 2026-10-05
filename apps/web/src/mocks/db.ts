@@ -32,6 +32,7 @@ export const ME: UserDto = {
   status: 'active',
   createdAt: iso(10_000),
   lastLoginAt: iso(5),
+  timezone: 'UTC',
 };
 
 export const db = {

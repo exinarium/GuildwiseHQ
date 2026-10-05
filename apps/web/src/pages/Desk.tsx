@@ -2,6 +2,7 @@ import { type DeskItemDto, isPhaseDeskSubkind } from '@aom/shared';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
+import { BaNote, FloorReport } from '../components/BaNote.tsx';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
 import { DigestRating } from '../components/DigestRating.tsx';
 import { EscalationTrail } from '../components/EscalationTrail.tsx';
@@ -177,6 +178,15 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
       )}
       <h2 className="mt-2 text-base font-semibold whitespace-pre-wrap">{item.title}</h2>
       {item.body && item.kind !== 'rating' && <p className="mt-1 text-sm whitespace-pre-wrap">{item.body}</p>}
+      {item.floor && (
+        <details className="mt-2" data-testid="floor-facts">
+          <summary className="cursor-pointer text-xs font-medium text-zinc-600 dark:text-zinc-400">
+            The facts behind this report
+          </summary>
+          <FloorReport digest={item.floor} />
+        </details>
+      )}
+      <BaNote item={item} />
       {item.hint && (
         <p
           role="note"

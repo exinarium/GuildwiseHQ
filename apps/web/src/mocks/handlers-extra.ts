@@ -1,4 +1,5 @@
 import { HttpResponse, http } from 'msw';
+import { ME } from './db.ts';
 
 /**
  * Stubs for the M2 to M6 pages (desk, chats, devops, vaults, ledger, schedules, feeds, testing) so `VITE_MSW=1` dev
@@ -17,7 +18,31 @@ const notFound = () =>
     { status: 404 },
   );
 
+let reporting = { routeViaBa: true, dailyAt: '08:00', timezone: 'UTC' as string | null };
+const reportingBody = () => ({
+  ...reporting,
+  effectiveTimezone: reporting.timezone ?? 'UTC',
+  canEdit: true,
+});
+
 export const extraHandlers = [
+  // Part B: the BA as the manager's reporter (preferences and the manager's time zone).
+  http.get(`${A}/reporting`, () => HttpResponse.json(reportingBody())),
+  http.put(`${A}/auth/timezone`, async ({ request }) => {
+    const { timezone } = (await request.json()) as { timezone: string };
+    reporting = { ...reporting, timezone };
+    return HttpResponse.json({
+      user: { ...ME, timezone },
+      isAdmin: true,
+      visibleProjectIds: [],
+      features: { mockUi: true },
+    });
+  }),
+  http.put(`${A}/reporting`, async ({ request }) => {
+    reporting = { ...reporting, ...((await request.json()) as object) };
+    return HttpResponse.json(reportingBody());
+  }),
+
   // M10 organization designer: built-in departments only; drafting needs the real server.
   http.get(`${A}/departments`, empty({ departments: [] })),
   http.post(`${A}/departments`, unavailable),

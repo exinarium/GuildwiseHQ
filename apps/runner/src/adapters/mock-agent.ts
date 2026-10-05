@@ -508,9 +508,37 @@ async function questionMain(brief: Brief): Promise<number> {
 
 interface BaTaskBrief extends Brief {
   baTask: {
-    kind: 'phase_report' | 'followups_brief' | 'followup_custom' | 'followups_report';
+    kind:
+      | 'phase_report'
+      | 'followups_brief'
+      | 'followup_custom'
+      | 'followups_report'
+      | 'desk_triage'
+      | 'urgent_note'
+      | 'floor_alert'
+      | 'floor_report';
     followupId?: string;
-    phase: { ref: string; name: string; description: string; workingBranch: string };
+    phase?: { ref: string; name: string; description: string; workingBranch: string };
+    reporter?: {
+      items: Array<{ id: string; title: string; held: boolean }>;
+      openItems: Array<{ id: string; title: string }>;
+      signals: Array<{
+        id: string;
+        kind: string;
+        urgency: string;
+        count: number;
+        subject: { title: string; detail: string; deskItemId?: string };
+      }>;
+      digest?: {
+        localDate: string;
+        phases: Array<{ ref: string; name: string; status: string; lateBugs: string[] }>;
+        signals: Array<{ kind: string; count: number; subject: { title: string; detail: string } }>;
+        backingOff: Array<{ ref: string; title: string; failures: number }>;
+        devopsOpen: Array<{ summary: string; status: string }>;
+        resolvedByBa: Array<{ title: string; how: string }>;
+        failures: Array<{ ref: string; failedShifts: number }>;
+      };
+    };
     cards: Array<{
       ref: string;
       title: string;
@@ -536,6 +564,103 @@ interface BaTaskBrief extends Brief {
 }
 
 /**
+ * A BA reporter task (Part B), scripted and deterministic. Triage: `[dismiss]` in an item title dismisses it, `[merge]`
+ * merges it into the first open item, anything else is passed with a note; `[ba_no_report]` ends the shift without
+ * reporting (the held items then reach the manager unchanged). Notes: one note per item. Signals: one analysis per
+ * signal, written onto the signal's own desk item when it has one. Floor: the six sections from the digest.
+ */
+async function reporterTaskMain(
+  t: BaTaskBrief['baTask'] & { reporter: NonNullable<BaTaskBrief['baTask']['reporter']> },
+): Promise<number> {
+  const r = t.reporter;
+  for (let i = 1; i <= 2; i++) {
+    emit({ kind: 'progress', text: `mock BA ${t.kind}: step ${i}/2` });
+    await sleep(stepMs);
+  }
+  emit({ kind: 'usage', usage: { inputTokens: 500, outputTokens: 120 } });
+  const silent = [...r.items.map((i) => i.title), ...r.signals.map((s) => s.subject.title)].some((x) =>
+    x.includes('[ba_no_report]'),
+  );
+  if (silent) {
+    emit({ kind: 'final', text: 'mock BA finished without reporting' });
+    return 0;
+  }
+  let res: { code: number; out: string; err: string };
+  if (t.kind === 'desk_triage') {
+    const decisions = r.items.map((i) => {
+      if (i.title.includes('[dismiss]'))
+        return { itemId: i.id, action: 'dismiss', note: 'mock: duplicate of something already known' };
+      const into = i.title.includes('[merge]') ? r.openItems[0]?.id : undefined;
+      if (into) return { itemId: i.id, action: 'merge', into, note: 'mock: same as the open item' };
+      return { itemId: i.id, action: 'pass', note: `mock: looked at "${i.title}"` };
+    });
+    res = aom(['report', 'triage', '--file', tmpJson('decisions.json', { decisions })]);
+  } else if (t.kind === 'urgent_note') {
+    const notes = r.items.map((i) => ({ itemId: i.id, note: `mock note: the BA saw "${i.title}"` }));
+    res = aom(['report', 'notes', '--file', tmpJson('notes.json', { notes })]);
+  } else if (t.kind === 'floor_alert') {
+    const reports = r.signals.map((s) => ({
+      signalId: s.id,
+      summary: `mock analysis of ${s.kind}: ${s.subject.title}\n\n${s.subject.detail}`,
+      ...(s.subject.deskItemId ? { annotateItemId: s.subject.deskItemId } : {}),
+    }));
+    res = aom(['report', 'signals', '--file', tmpJson('reports.json', { reports })]);
+  } else {
+    const d = r.digest;
+    const list = (xs: string[]) => (xs.length ? xs.map((x) => `- ${x}`) : ['- none']);
+    const md = [
+      `# Floor report ${d?.localDate ?? ''} (mock BA)`,
+      '',
+      '## Phases waiting or open',
+      ...list(
+        (d?.phases ?? []).map(
+          (p) =>
+            `${p.ref} ${p.name}: ${p.status}${p.lateBugs.length ? ` (late bugs ${p.lateBugs.join(', ')})` : ''}`,
+        ),
+      ),
+      '',
+      '## Stuck, blocked and backing-off cards',
+      ...list([
+        ...(d?.signals ?? [])
+          .filter((s) => ['blocked', 'unclaimed', 'loop'].includes(s.kind))
+          .map((s) => s.subject.title),
+        ...(d?.backingOff ?? []).map((b) => `${b.ref} backing off after ${b.failures} failed shifts`),
+      ]),
+      '',
+      '## Repeated approvals',
+      ...list(
+        (d?.signals ?? [])
+          .filter((s) => s.kind === 'repeated_approval')
+          .map((s) => `${s.subject.title} (${s.count}x)`),
+      ),
+      '',
+      '## Failures',
+      ...list([
+        ...(d?.signals ?? [])
+          .filter((s) => ['rework', 'finalize_failures'].includes(s.kind))
+          .map((s) => s.subject.title),
+        ...(d?.failures ?? []).map((f) => `${f.ref}: ${f.failedShifts} failed shifts`),
+      ]),
+      '',
+      '## DevOps requests that are open',
+      ...list((d?.devopsOpen ?? []).map((x) => `${x.summary}: ${x.status}`)),
+      '',
+      '## Resolved without bothering you',
+      ...list((d?.resolvedByBa ?? []).map((x) => `${x.title} (${x.how})`)),
+    ].join('\n');
+    res = aom(['report', 'floor', '--summary-file', tmpText('floor.md', md)]);
+  }
+  emit({
+    kind: 'final',
+    text:
+      res.code === 0
+        ? `mock reporter ${t.kind}: ${res.out.trim()}`
+        : `mock reporter ${t.kind} failed: ${(res.err || res.out).trim()}`,
+  });
+  return res.code === 0 ? 0 : 1;
+}
+
+/**
  * A BA background task (phases), scripted and deterministic. Report: markdown from the cards, the open pull requests
  * and the suites as the outstanding items. Briefs: one `aom phase followup brief` per queued follow-up (the note or
  * instruction travels into the brief, so tokens like `[no_report]` reach the mock DevOps engineer), then `ready`.
@@ -544,12 +669,17 @@ interface BaTaskBrief extends Brief {
  */
 async function baTaskMain(brief: BaTaskBrief): Promise<number> {
   const t = brief.baTask;
+  if (t.reporter)
+    return reporterTaskMain(
+      t as BaTaskBrief['baTask'] & { reporter: NonNullable<BaTaskBrief['baTask']['reporter']> },
+    );
+  const phase = t.phase as NonNullable<BaTaskBrief['baTask']['phase']>;
   for (let i = 1; i <= 2; i++) {
-    emit({ kind: 'progress', text: `mock BA ${t.phase.ref} ${t.kind}: step ${i}/2` });
+    emit({ kind: 'progress', text: `mock BA ${phase.ref} ${t.kind}: step ${i}/2` });
     await sleep(stepMs);
   }
   emit({ kind: 'usage', usage: { inputTokens: 600, outputTokens: 150 } });
-  if (t.phase.description.includes('[ba_no_report]')) {
+  if (phase.description.includes('[ba_no_report]')) {
     emit({ kind: 'final', text: 'mock BA finished without reporting' });
     return 0;
   }
@@ -558,7 +688,7 @@ async function baTaskMain(brief: BaTaskBrief): Promise<number> {
   let r: { code: number; out: string; err: string };
   if (t.kind === 'phase_report') {
     const md = [
-      `# ${t.phase.ref} ${t.phase.name} is done`,
+      `# ${phase.ref} ${phase.name} is done`,
       '',
       '## Delivered',
       ...t.cards.map(cardLine),
@@ -625,7 +755,7 @@ async function baTaskMain(brief: BaTaskBrief): Promise<number> {
       : aom(['phase', 'followup', 'done', String(f.position), '--summary', `mock: did ${f.instruction}`]);
   } else {
     const md = [
-      `# ${t.phase.ref} follow-ups finished`,
+      `# ${phase.ref} follow-ups finished`,
       '',
       ...t.followups.map(
         (f) =>

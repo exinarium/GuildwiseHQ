@@ -222,6 +222,38 @@ async function cardDraft(ctx: AomContext, p: Parsed, sub: 'create' | 'update' | 
   return 0;
 }
 
+const REPORT_USAGE = `usage: aom report triage --file <decisions.json>      # { "decisions": [ { "itemId", "action": "pass|dismiss|merge", "note"?, "into"? } ] }
+       aom report notes --file <notes.json>          # { "notes": [ { "itemId", "note", "related"? } ] }
+       aom report signals --file <reports.json>     # { "reports": [ { "signalId", "summary", "annotateItemId"? } ] }
+       aom report floor --summary-file <report.md>`;
+
+/** `aom report ...`: the BA's reporter tasks (held items, urgent notes, urgent signals, the daily floor report). */
+async function reportVerb(ctx: AomContext, p: Parsed): Promise<number> {
+  const sub = p.positionals[0];
+  const data = (): Record<string, unknown> => {
+    const body = jsonBody(ctx, p);
+    if (!body) throw new UsageError(REPORT_USAGE);
+    return body;
+  };
+  switch (sub) {
+    case 'triage':
+      return report(ctx, outcome('triage_done', 'Triage decisions', data()));
+    case 'notes':
+      return report(ctx, outcome('notes_done', 'Notes on urgent items', data()));
+    case 'signals':
+      return report(ctx, outcome('signal_report', 'Urgent signal reports', data()));
+    case 'floor':
+      return report(
+        ctx,
+        outcome('floor_report', 'Daily floor report', {
+          report: textFlag(ctx, p, 'summary', true) as string,
+        }),
+      );
+    default:
+      throw new UsageError(REPORT_USAGE);
+  }
+}
+
 const PHASE_USAGE = `usage: aom phase list [--project <KEY>]
        aom phase propose --name "<name>" [--project <KEY>] [--description "<text>"] [--followups-file <json>]
        aom phase assign <CARD-REF> --phase <ref|"name"> | --none [--project <KEY>]
@@ -704,6 +736,7 @@ const VERBS: Record<string, Verb> = {
   },
   org: async (ctx, p) => orgDesign(ctx, p),
   phase: async (ctx, p) => phaseVerb(ctx, p),
+  report: async (ctx, p) => reportVerb(ctx, p),
   transcript: async (ctx, p) => {
     const url = one(p, 'url');
     if (!url) throw new UsageError('usage: aom transcript --url <video or podcast URL>');
@@ -756,6 +789,7 @@ export const USAGE = `usage: aom <verb> [options]
   phase report --summary-file <md> [--outstanding "<item>"]...   BA task (phase done): report it to the manager (terminal)
   phase followup done|fail <n> --summary "<t>" [--link <url>]...   BA task (custom follow-up): you did it, or could not (terminal)
   phase results --summary-file <md>          BA task (follow-ups finished): report the results (terminal)
+  report triage|notes|signals --file <json> | report floor --summary-file <md>   BA reporter task (held items, urgent notes, urgent signals, the daily floor report): report to the manager (terminal)
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed

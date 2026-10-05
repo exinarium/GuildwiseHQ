@@ -3,7 +3,9 @@ import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { useLogout, useMe } from '../api/queries/auth.ts';
 import { useDesk } from '../api/queries/desk.ts';
 import { useProjects } from '../api/queries/projects.ts';
+import { useSetTimezone } from '../api/queries/reporting.ts';
 import { getLastProjectKey } from '../lib/lastProject.ts';
+import { browserTimeZone } from '../lib/timezone.ts';
 import { getSocket, useSocketState } from '../ws/socket.ts';
 import { Avatar, Spinner } from './ui.tsx';
 
@@ -22,6 +24,14 @@ export function RequireAuth() {
     if (me.data) getSocket()?.start();
     else getSocket()?.stop();
   }, [me.data]);
+  // First login: take the manager's time zone from the browser (the daily BA report is posted on their clock).
+  const setZone = useSetTimezone();
+  const needsZone = !!me.data && !me.data.user.timezone;
+  const detected = needsZone ? browserTimeZone() : null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per session when the zone is unset
+  useEffect(() => {
+    if (detected) setZone.mutate(detected);
+  }, [detected]);
   if (me.isPending) return <Spinner label="Loading session" />;
   if (!me.data) {
     const next = loc.pathname + loc.search;
@@ -83,6 +93,9 @@ function Shell({ isAdmin, name, live }: { isAdmin: boolean; name: string; live: 
             </NavLink>
             <NavLink to="/settings/vaults" className={link}>
               Vaults
+            </NavLink>
+            <NavLink to="/settings" end className={link}>
+              Settings
             </NavLink>
             {isAdmin && (
               <NavLink to="/admin" className={link}>

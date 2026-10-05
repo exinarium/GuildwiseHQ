@@ -21,6 +21,7 @@ import { Phase } from './pages/Phase.tsx';
 import { ProjectSettings } from './pages/ProjectSettings.tsx';
 import { Projects } from './pages/Projects.tsx';
 import { Schedules } from './pages/Schedules.tsx';
+import { Settings } from './pages/Settings.tsx';
 import { Vaults } from './pages/Vaults.tsx';
 import { Workstations } from './pages/Workstations.tsx';
 
@@ -52,6 +53,7 @@ export const routes = [
       { path: '/metrics', element: <Metrics /> },
       { path: '/org', element: <OrgDesigner /> },
       { path: '/workstations', element: <Workstations /> },
+      { path: '/settings', element: <Settings /> },
       { path: '/settings/vaults', element: <Vaults /> },
       { path: '/admin', element: <Admin /> },
       { path: '/desk', element: <Desk /> },
