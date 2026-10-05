@@ -29,6 +29,16 @@ export function commandForOutcome(outcome: BriefOutcome): string {
       return 'aom devops-done --summary "<what you did>" --command "<command you ran>"';
     case 'devops_approval':
       return 'aom devops-approval --action "<what needs approval>" --reason "<why>" --command "<command you would run>"';
+    case 'phase_report':
+      return 'aom phase report --summary-file <report.md> [--outstanding "<item>"]...';
+    case 'phase_ready':
+      return 'aom phase ready --note "<every follow-up is briefed>"';
+    case 'followup_done':
+      return 'aom phase followup done <n> --summary "<what you did>" [--link <url>]...';
+    case 'followup_failed':
+      return 'aom phase followup fail <n> --summary "<why it could not be done>"';
+    case 'phase_results':
+      return 'aom phase results --summary-file <report.md>';
     default:
       return `aom outcome ${outcome.id} --note "<summary>"${outcome.data !== 'none' ? ' --data-file <json>' : ''}`;
   }

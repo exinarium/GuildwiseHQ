@@ -48,6 +48,20 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
         AND NOT (project_id IS NOT DISTINCT FROM $1::uuid OR card_id IN (${cards}))`,
     P,
   );
+  // Phases, their follow-ups, deploy targets and the BA tasks (the follow-ups' DevOps requests belong to workstations).
+  const phases = 'SELECT id FROM phases WHERE project_id=$1';
+  await exec(
+    tx,
+    `DELETE FROM shifts WHERE ba_task_id IN (SELECT id FROM ba_tasks WHERE project_id=$1 OR phase_id IN (${phases}))`,
+    P,
+  );
+  await exec(tx, `DELETE FROM ba_tasks WHERE project_id=$1 OR phase_id IN (${phases})`, P);
+  await exec(tx, `DELETE FROM phase_followups WHERE phase_id IN (${phases})`, P);
+  await exec(
+    tx,
+    `UPDATE cards SET phase_id = NULL, phase_assignment = NULL WHERE phase_id IN (${phases})`,
+    P,
+  );
   // Rows hanging off the cards.
   await exec(
     tx,
@@ -79,6 +93,8 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
   );
   await exec(tx, `DELETE FROM desk_items WHERE id IN (${desk})`, P);
   await exec(tx, 'DELETE FROM cards WHERE project_id=$1', P);
+  await exec(tx, 'DELETE FROM phases WHERE project_id=$1', P);
+  await exec(tx, 'DELETE FROM deploy_targets WHERE project_id=$1', P);
   // Project-level rows.
   for (const t of ['feed_seen', 'transcripts', 'repo_requests', 'schedules']) {
     await exec(tx, `DELETE FROM ${t} WHERE project_id=$1`, P);

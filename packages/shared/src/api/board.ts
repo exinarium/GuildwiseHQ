@@ -41,13 +41,22 @@ export const BoardCardSchema = z.object({
   workability: WorkabilitySchema.optional(),
   /** Loop breaker: the card is held back until `until` after `failures` failed shifts. */
   backoff: z.object({ until: IsoTime, failures: z.number().int() }).nullable().optional(),
+  /** The phase this card belongs to (a small chip on the card). */
+  phase: z
+    .object({ id: z.uuid(), ref: z.string(), assignment: z.enum(['proposed', 'confirmed']) })
+    .nullable()
+    .optional(),
 });
 export type BoardCard = z.infer<typeof BoardCardSchema>;
 
 export const BoardColumnSchema = z.object({ name: z.string(), cards: z.array(BoardCardSchema) });
 export type BoardColumn = z.infer<typeof BoardColumnSchema>;
 
-export const BoardQuerySchema = z.object({ projectId: z.uuid() });
+/** `phaseId`: a phase id, or `none` for cards without a phase. */
+export const BoardQuerySchema = z.object({
+  projectId: z.uuid(),
+  phaseId: z.union([z.uuid(), z.literal('none')]).optional(),
+});
 /** `GET /api/board?projectId=` : columns in display order (see `boardColumns`), cancelled cards omitted. */
 export const BoardResponseSchema = z.object({
   projectId: z.uuid(),

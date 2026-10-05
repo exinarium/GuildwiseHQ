@@ -12,9 +12,11 @@ import {
 } from '@aom/shared';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
+import { memberRefusal } from '../commands/phases.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
+import { cardPhaseRef } from './phases.ts';
 import { publicationOfCard } from './research.ts';
 import { cardTesting } from './testing.ts';
 import { cardWorkability } from './workability.ts';
@@ -216,6 +218,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     permissions: {
       canEdit: manage && (card.status === 'draft' || (card.status === 'queued' && !card.claim_id)),
       canSetRisk: manage && open && !['awaiting_approval', 'running'].includes(card.finalize_state ?? ''),
+      canSetPhase: open && memberRefusal(card) === null,
       canSpecify: manage && card.status === 'draft',
       canMove: manage && open,
       canRelease: manage && !!card.claim_id,
@@ -234,22 +237,31 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
       )
     ).map((b) => ({ deskItemId: b.id, title: b.title })),
     publication: await publicationOfCard(ctx.pool, card.id),
+    phase: await cardPhaseRef(ctx.pool, card),
   };
 }
 
-export async function getBoard(ctx: Ctx, userId: string, projectId: string): Promise<BoardResponse> {
+export async function getBoard(
+  ctx: Ctx,
+  userId: string,
+  projectId: string,
+  phaseId?: string,
+): Promise<BoardResponse> {
   const project = await loadVisibleProject(ctx.pool, userId, projectId);
   const wf = await resolveWorkflow(ctx.pool, project.org_id, project.workflow_key);
   if (!wf) throw notFound('workflow not found');
   const columns = boardColumns(wf.definition as WorkflowDefinition);
   const cards = await rows(
     ctx.pool,
-    `SELECT c.*, a.name AS agent_name, wo.id AS waiting_on_id, wo.ref AS waiting_on_ref
+    `SELECT c.*, a.name AS agent_name, wo.id AS waiting_on_id, wo.ref AS waiting_on_ref, ph.ref AS phase_ref
        FROM cards c LEFT JOIN agents a ON a.id = c.claimed_by_agent_id
+       LEFT JOIN phases ph ON ph.id = c.phase_id
        LEFT JOIN LATERAL (SELECT ch.id, ch.ref FROM cards ch WHERE ch.parent_card_id = c.id AND ch.origin = 'test_failure'
                              AND ch.status NOT IN ('done','cancelled') ORDER BY ch.number DESC LIMIT 1) wo ON c.status = 'waiting'
-      WHERE c.project_id=$1 AND c.status <> 'cancelled' ORDER BY c.priority, c.queued_at NULLS LAST, c.number`,
-    [projectId],
+      WHERE c.project_id=$1 AND c.status <> 'cancelled'
+        AND ($2::text IS NULL OR ($2 = 'none' AND c.phase_id IS NULL) OR c.phase_id::text = $2)
+      ORDER BY c.priority, c.queued_at NULLS LAST, c.number`,
+    [projectId, phaseId ?? null],
   );
   const workability = await cardWorkability(ctx, cards);
   const byColumn = new Map<string, BoardResponse['columns'][number]['cards']>(columns.map((c) => [c, []]));
@@ -283,6 +295,7 @@ export async function getBoard(ctx: Ctx, userId: string, projectId: string): Pro
       waitingOn: c.waiting_on_id ? { id: c.waiting_on_id, ref: c.waiting_on_ref } : null,
       origin: c.origin,
       backoff: backoffOf(c, ctx.clock.now()),
+      phase: c.phase_id ? { id: c.phase_id, ref: c.phase_ref, assignment: c.phase_assignment } : null,
       ...(workability.get(c.id)?.ok === false ? { workability: workability.get(c.id) } : {}),
     });
   }

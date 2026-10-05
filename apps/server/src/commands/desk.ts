@@ -3,6 +3,7 @@ import {
   type AnswerDeskItemRequest,
   type DeskActor,
   type DeskResolution,
+  isPhaseDeskSubkind,
   type ResolveDeskItemRequest,
   streamId,
   UNMAPPED_TICKET_SUBKIND,
@@ -23,6 +24,7 @@ import { mergedAnswerNotes } from './escalation.ts';
 import { resolveLargeMergeIn } from './finalize.ts';
 import { continueIntake, mappingAnsweredEvents } from './intake.ts';
 import { resolveOutboundIn } from './outbox.ts';
+import { resolvePhaseDeskItemIn } from './phases.ts';
 import { resolveRepoCreateIn, retryRepoCreateIn } from './repo-create.ts';
 import { resolveVaultConflictIn } from './vaults.ts';
 
@@ -207,6 +209,7 @@ async function closeItem(
 ) {
   let workstationToDeliver: string | undefined;
   let devops = false;
+  let phases = false;
   await withAppendTx(ctx.pool, async (tx) => {
     const { item, mayAct } = await lockItem(tx, user, id);
     // Acknowledging a "repository not created" alert is not giving up on the request: Retry still works on it while
@@ -242,6 +245,10 @@ async function closeItem(
       if (resolution === 'acknowledged')
         throw badRequest('wrong_resolution', 'a merge approval is approved or rejected');
       workstationToDeliver = (await resolveLargeMergeIn(ctx, tx, user, item, resolution, note)) ?? undefined;
+    } else if (isPhaseDeskSubkind(item.subkind)) {
+      // Phases: confirm a BA proposal, approve or reject the follow-ups, acknowledge the results (any member).
+      await resolvePhaseDeskItemIn(ctx, tx, user, item, resolution, note);
+      phases = true;
     } else if (item.kind === 'approval' && item.subkind === 'definition') {
       // M10: approving makes the role or workflow available; only the owner decides.
       await resolveDefinitionIn(ctx, tx, user, item, resolution, note);
@@ -294,6 +301,6 @@ async function closeItem(
         { tx },
       );
   });
-  if (devops) ctx.services.dispatcher.trigger();
+  if (devops || phases) ctx.services.dispatcher.trigger();
   if (workstationToDeliver) await ctx.services.gateway.deliverPending(workstationToDeliver);
 }

@@ -45,6 +45,10 @@ const INTAKE_METHODS = new Set([
   'card.specify',
   'intake.map',
   'intake.unmapped',
+  'phase.list',
+  'phase.propose',
+  'phase.assign',
+  'phase.submit',
 ]);
 /** M10: what the BA does in a design chat. */
 const DESIGN_METHODS = new Set([

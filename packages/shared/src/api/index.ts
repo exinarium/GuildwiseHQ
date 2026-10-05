@@ -18,6 +18,7 @@ export * from './members.ts';
 export * from './metrics.ts';
 export * from './org.ts';
 export * from './outbound.ts';
+export * from './phases.ts';
 export * from './projects.ts';
 export * from './research.ts';
 export * from './schedules.ts';

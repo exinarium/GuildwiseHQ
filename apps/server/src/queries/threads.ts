@@ -17,7 +17,7 @@ export async function threadMessages(
     `SELECT t.* FROM threads t
       WHERE t.id = $1 AND (
         (t.kind = 'chat' AND (t.created_by = $2 OR t.project_id IN (SELECT project_id FROM project_members WHERE user_id=$2 AND status='active')))
-        OR (t.kind = 'card' AND t.project_id IN (SELECT project_id FROM project_members WHERE user_id=$2 AND status='active'))
+        OR (t.kind IN ('card','phase') AND t.project_id IN (SELECT project_id FROM project_members WHERE user_id=$2 AND status='active'))
         OR (t.kind IN ('devops','intake') AND t.org_id = $2))`,
     [threadId, userId],
   );

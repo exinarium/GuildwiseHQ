@@ -9,6 +9,7 @@ import { OutboundPostPayloadSchema } from '../external/index.ts';
 import { FeedItemInputSchema } from '../feed/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
+import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { RepoCreatePayloadSchema } from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import { VaultFolderSchema } from '../safe.ts';
@@ -201,6 +202,7 @@ export const RunnerCommandNameSchema = z.enum([
   'finalize.execute',
   'outbound.post',
   'repo.create',
+  'branch.check_merged',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -228,6 +230,7 @@ export const CommandPayloadSchemas = {
   'finalize.execute': FinalizeExecutePayloadSchema,
   'outbound.post': OutboundPostPayloadSchema,
   'repo.create': RepoCreatePayloadSchema,
+  'branch.check_merged': BranchCheckMergedPayloadSchema,
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([
@@ -381,7 +384,7 @@ export const WelcomeSchema = msg('welcome', {
 export const ShiftStartSchema = msg('shift.start', {
   shiftId: z.uuid(),
   claimId: z.uuid(),
-  kind: z.enum(['card', 'question', 'devops']),
+  kind: z.enum(['card', 'question', 'devops', 'ba_task']),
   agent: AgentRuntimeSpecSchema,
   brief: ShiftBriefSchema,
   worktree: WorktreeSpecSchema.nullable(),
@@ -391,6 +394,8 @@ export const ShiftStartSchema = msg('shift.start', {
   devops: DevopsShiftSchema.optional(),
   /** M7: for `kind: 'question'` the desk item to answer or escalate (the brief then carries the card in question). */
   question: QuestionShiftSchema.optional(),
+  /** Phases: for `kind: 'ba_task'` the background task (phase report, follow-up briefs, ...); the brief carries a placeholder card. */
+  baTask: BaTaskShiftSchema.optional(),
   /** M3: the card's domain vault; the runner reads only this vault and passes only it as `--add-dir`. */
   vault: ShiftVaultSchema.nullable().optional(),
 });

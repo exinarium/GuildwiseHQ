@@ -18,6 +18,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { releaseEvents } from './cards.ts';
 import { assertRemoteUrl, cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { cancelPhasesEvents } from './phases.ts';
 
 export async function createProject(
   ctx: Ctx,
@@ -310,6 +311,8 @@ export async function archiveProject(ctx: Ctx, user: AuthSession['user'], projec
         scope,
       });
     }
+    // Phases: pending follow-ups and BA tasks are cancelled (a running DevOps request is left to finish).
+    events.push(...(await cancelPhasesEvents(tx, projectId, 'Project archived')));
     await ctx.store.append(events, { tx });
   });
   for (const ws of workstations) await ctx.services.gateway.deliverPending(ws);

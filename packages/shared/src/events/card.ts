@@ -59,6 +59,10 @@ export const cardEvents = [
       riskTier: RiskTier.optional(),
       dependencies: z.array(Id).default([]),
       requiredCapabilities: z.array(z.string()).default([]),
+      /** A regression card of a phase follow-up runs where the local stack was deployed. */
+      homeWorkstationId: Id.optional(),
+      /** Set on the regression cards a phase follow-up created (never phase members). */
+      phaseFollowupId: Id.optional(),
     }),
   ),
   defineEvent(

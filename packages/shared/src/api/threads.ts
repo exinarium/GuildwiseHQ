@@ -11,7 +11,7 @@ export type ThreadMessagesQuery = z.infer<typeof ThreadMessagesQuerySchema>;
 
 export const ThreadMessagesResponseSchema = z.object({
   threadId: z.uuid(),
-  kind: z.enum(['card', 'chat', 'devops', 'intake']),
+  kind: z.enum(['card', 'chat', 'devops', 'intake', 'phase']),
   messages: z.array(ThreadMessageDtoSchema),
   hasMore: z.boolean(),
 });

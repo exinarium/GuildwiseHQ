@@ -32,7 +32,7 @@ export function cardRoutes(ctx: Ctx) {
 
     app.get('/api/board', { schema: { querystring: BoardQuerySchema } }, async (req) => {
       const s = await requireUser(ctx, req);
-      return getBoard(ctx, s.user.id, req.query.projectId);
+      return getBoard(ctx, s.user.id, req.query.projectId, req.query.phaseId);
     });
 
     app.post('/api/cards', { schema: { body: CreateCardRequestSchema } }, async (req, reply) => {

@@ -86,7 +86,7 @@ export const TransitionDtoSchema = z.object({
 /** A timeline entry that is not a stage or status change: a field edit or a risk tier override. */
 export const CardActivityDtoSchema = z.object({
   id: z.number().int(),
-  kind: z.enum(['edited', 'risk_tier', 'merge_policy']),
+  kind: z.enum(['edited', 'risk_tier', 'merge_policy', 'phase', 'merge_verified']),
   summary: z.string(),
   reason: z.string().nullable(),
   userId: z.uuid().nullable(),
@@ -133,6 +133,8 @@ export const CardDetailResponseSchema = z.object({
     canComment: z.boolean(),
     /** Set or clear the risk tier override: while the card is open and no merge is pending. */
     canSetRisk: z.boolean().default(false),
+    /** Put the card in a phase or take it out (the card is open and not a suite or bug child). */
+    canSetPhase: z.boolean().optional(),
   }),
   diffStats: DiffStats.nullable().optional(),
   /** Open desk items blocking this card (M2). */
@@ -141,6 +143,17 @@ export const CardDetailResponseSchema = z.object({
   testing: CardTestingSchema.optional(),
   /** M6: the published research note of a research card. */
   publication: PublicationDtoSchema.nullable().optional(),
+  /** The phase this card belongs to, if any. */
+  phase: z
+    .object({
+      id: z.uuid(),
+      ref: z.string(),
+      name: z.string(),
+      status: z.string(),
+      assignment: z.enum(['proposed', 'confirmed']),
+    })
+    .nullable()
+    .optional(),
 });
 export type CardDetailResponse = z.infer<typeof CardDetailResponseSchema>;
 

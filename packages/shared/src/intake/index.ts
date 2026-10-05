@@ -46,6 +46,8 @@ export const CardDraftSchema = z.object({
   repo: z.string().optional(),
   /** Card refs (`TOY-3`) this card depends on. */
   dependencies: z.array(z.string()).optional(),
+  /** A phase of the project (`WEB-P2`, or its name): the card is proposed for it; the manager confirms. */
+  phase: z.string().max(200).optional(),
   /** The ticket key; copied into `fields.externalRef`. */
   externalRef: z.string().optional(),
   fields: CardDraftFieldsSchema.default({}),

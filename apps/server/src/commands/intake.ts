@@ -27,6 +27,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { dedupMatches } from '../queries/ledger.ts';
 import { cardView, createCardIn, patchCardIn, specifyCardIn, specifyTarget } from './cards.ts';
 import { agentActor, cardMessage, orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { phaseChatRpc, proposeCardPhaseIn } from './phases.ts';
 
 /** Reply of a chat-scoped rpc: `[ok, result?, error?]` (the gateway turns it into `rpc.response`). */
 export type RpcReply = [boolean, unknown?, string?];
@@ -272,7 +273,7 @@ async function missingFor(tx: Queryable, cardId: string): Promise<string[]> {
   return card && wf ? requiredMissing(cardView(card), specifyTarget(wf.definition).stage) : [];
 }
 
-interface Responder {
+export interface Responder {
   intake: Row;
   agent: Row;
 }
@@ -377,6 +378,11 @@ export async function intakeRpc(
         return await updateDraft(ctx, who, params);
       case 'card.specify':
         return await specifyDraft(ctx, who, params);
+      case 'phase.list':
+      case 'phase.propose':
+      case 'phase.assign':
+      case 'phase.submit':
+        return await phaseChatRpc(ctx, who, method, params);
       default:
         return [false, undefined, `${method} is not available`];
     }
@@ -543,6 +549,7 @@ async function createDraft(
           actor: agentActor(agent.id),
         },
       );
+    if (draft.phase) await proposeCardPhaseIn(ctx, tx, { intake, agent }, created.cardId, draft.phase);
     const card = (await one(tx, 'SELECT * FROM cards WHERE id=$1', [created.cardId])) as Row;
     await ctx.store.append(
       [
@@ -610,6 +617,9 @@ async function updateDraft(
     await patchCardIn(ctx, tx, pseudoUser(intake.started_by), card.id, changes, {
       actor: agentActor(agent.id),
     });
+    // `phase: ""` takes the draft out of its phase.
+    if (patch.phase !== undefined)
+      await proposeCardPhaseIn(ctx, tx, { intake, agent }, card.id, patch.phase === '' ? null : patch.phase);
     return { ref: card.ref, missing: await missingFor(tx, card.id) };
   });
   return [true, out];

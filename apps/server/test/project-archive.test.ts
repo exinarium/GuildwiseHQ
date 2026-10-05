@@ -22,6 +22,9 @@ let questionId: string;
 let scheduleId: string;
 let shiftId: string;
 let allCardIds: string[] = [];
+let phaseId: string;
+let allPhaseIds: string[] = [];
+let baTaskId: string;
 
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
@@ -97,6 +100,32 @@ describe('archiving a project', () => {
     const done = await w.card({ title: 'Already done', specify: false });
     doneCardId = done.id;
     await q(`UPDATE cards SET status='done', stage='done' WHERE id=$1`, [doneCardId]);
+    // a phase with pending follow-ups, a deploy target and a queued BA task
+    const target = await ok<any>(
+      owner('POST', `/api/projects/${w.projectId}/deploy-targets`, { name: 'local', kind: 'local_docker' }),
+      201,
+    );
+    const phase = await ok<any>(
+      owner('POST', `/api/projects/${w.projectId}/phases`, {
+        name: 'Doomed phase',
+        followups: [{ kind: 'deploy', targetId: target.id }, { kind: 'regression' }],
+      }),
+      201,
+    );
+    phaseId = phase.id;
+    await ok(owner('PUT', `/api/cards/${cardB.id}/phase`, { phaseId }));
+    baTaskId = randomUUID();
+    await seed(w, [
+      {
+        streamId: streamId.baTask(baTaskId),
+        event: {
+          type: 'BaTaskQueued',
+          payload: { taskId: baTaskId, projectId: w.projectId, phaseId, kind: 'phase_report' },
+        },
+        actor: { kind: 'system', id: null },
+        scope: { orgId: w.owner.id, projectId: w.projectId, audience: 'project' },
+      },
+    ]);
     const impact = await ok<any>(asMember('GET', `/api/projects/${w.projectId}/impact`));
     expect(impact).toMatchObject({ activeShifts: 1, schedules: 1, openDeskItems: 1 });
     expect(impact.openCards).toBeGreaterThanOrEqual(2);
@@ -134,6 +163,18 @@ describe('archiving a project', () => {
     expect(sched.enabled).toBe(false);
     expect(sched.next_fire_at).toBeNull();
     expect((await q('SELECT status FROM desk_items WHERE id=$1', [questionId]))[0]?.status).toBe('dismissed');
+
+    // the phase and its pending follow-ups are cancelled, its queued BA task too; nothing is started
+    expect((await q('SELECT status FROM phases WHERE id=$1', [phaseId]))[0]?.status).toBe('cancelled');
+    expect(
+      (await q('SELECT DISTINCT status FROM phase_followups WHERE phase_id=$1', [phaseId])).map(
+        (r) => r.status,
+      ),
+    ).toEqual(['cancelled']);
+    expect((await q('SELECT status FROM ba_tasks WHERE id=$1', [baTaskId]))[0]?.status).toBe('cancelled');
+    expect((await q('SELECT 1 FROM devops_requests WHERE summary ILIKE $1', ['%Doomed phase%'])).length).toBe(
+      0,
+    );
 
     // agents are kept
     expect((await q(`SELECT status FROM agents WHERE name='Una'`))[0]?.status).toBe('active');
@@ -237,6 +278,8 @@ describe('deleting a project permanently', () => {
 
   it('removes every row of the project and keeps the audit record', async () => {
     allCardIds = (await q('SELECT id FROM cards WHERE project_id=$1', [w.projectId])).map((r) => r.id);
+    allPhaseIds = (await q('SELECT id FROM phases WHERE project_id=$1', [w.projectId])).map((r) => r.id);
+    expect(allPhaseIds).toEqual([phaseId]);
     expect(allCardIds.length).toBeGreaterThan(3);
     await ok(owner('POST', `/api/projects/${w.projectId}/delete`, { confirmKey: 'TOY' }));
 
@@ -244,15 +287,22 @@ describe('deleting a project permanently', () => {
     // historical scope; the scoped one is retired below)
     const cols = await q<{ table_name: string; column_name: string }>(
       `SELECT table_name, column_name FROM information_schema.columns
-        WHERE table_schema='public' AND column_name IN ('project_id','card_id','mapped_project_id')
+        WHERE table_schema='public' AND column_name IN ('project_id','card_id','mapped_project_id','phase_id')
           AND table_name NOT IN ('events', 'agents')`,
     );
     expect(cols.length).toBeGreaterThan(10);
     for (const { table_name: t, column_name: c } of cols) {
-      const ids = c === 'card_id' ? allCardIds : [w.projectId];
+      const ids = c === 'card_id' ? allCardIds : c === 'phase_id' ? allPhaseIds : [w.projectId];
       const left = await q(`SELECT count(*)::int AS n FROM "${t}" WHERE "${c}" = ANY($1::uuid[])`, [ids]);
       expect(left[0]?.n, `${t}.${c}`).toBe(0);
     }
+    expect((await q('SELECT 1 FROM phases WHERE id = ANY($1::uuid[])', [allPhaseIds])).length).toBe(0);
+    expect(
+      (await q('SELECT 1 FROM phase_followups WHERE phase_id = ANY($1::uuid[])', [allPhaseIds])).length,
+    ).toBe(0);
+    expect((await q('SELECT 1 FROM deploy_targets WHERE project_id=$1', [w.projectId])).length).toBe(0);
+    expect((await q('SELECT 1 FROM ba_tasks WHERE id=$1', [baTaskId])).length).toBe(0);
+    expect((await q('SELECT 1 FROM threads WHERE id = ANY($1::uuid[])', [allPhaseIds])).length).toBe(0);
     expect((await q('SELECT 1 FROM projects WHERE id=$1', [w.projectId])).length).toBe(0);
     expect(
       (await q('SELECT 1 FROM thread_messages WHERE thread_id = ANY($1::uuid[])', [allCardIds])).length,

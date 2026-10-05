@@ -3,6 +3,13 @@ import { ReviewData, TestEvidence } from '../cards/types.ts';
 import { DevopsApprovalDataSchema, DevopsDoneDataSchema } from '../devops/index.ts';
 import { CandidatesDataSchema, DigestDataSchema } from '../feed/index.ts';
 import { AnswerReportSchema, EscalateReportSchema, FinalizeReportDataSchema } from '../intake/index.ts';
+import {
+  FollowupDoneDataSchema,
+  FollowupFailedDataSchema,
+  PhaseReadyDataSchema,
+  PhaseReportDataSchema,
+  PhaseResultsDataSchema,
+} from '../phases/index.ts';
 import { PublicationOutcomeSchema } from '../research/index.ts';
 
 /**
@@ -76,6 +83,16 @@ export function outcomeDataSchema(kind: string): z.ZodType {
       return PublicationOutcomeSchema;
     case 'finalize':
       return FinalizeReportDataSchema;
+    case 'phaseReport':
+      return PhaseReportDataSchema;
+    case 'phaseReady':
+      return PhaseReadyDataSchema;
+    case 'followupDone':
+      return FollowupDoneDataSchema;
+    case 'followupFailed':
+      return FollowupFailedDataSchema;
+    case 'phaseResults':
+      return PhaseResultsDataSchema;
     default:
       return z.record(z.string(), z.unknown());
   }
@@ -151,6 +168,13 @@ export const RpcMethodSchema = z.enum([
   /** Videos and podcasts: `transcript.fetch` is answered by the runner itself; `transcript.store` goes on to the site. */
   'transcript.fetch',
   'transcript.store',
+  /** Phases, the BA's intake chat: list phases and deploy targets, propose a phase, assign cards, submit for confirmation. */
+  'phase.list',
+  'phase.propose',
+  'phase.assign',
+  'phase.submit',
+  /** Phases, a `followups_brief` BA task: delegate one follow-up. */
+  'phase.followup.brief',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

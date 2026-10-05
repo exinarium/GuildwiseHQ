@@ -9,6 +9,7 @@ import { feedProjectors } from './feeds.ts';
 import { intakeProjectors } from './intake.ts';
 import { ledgerProjectors } from './ledger.ts';
 import { outboundProjectors } from './outbound.ts';
+import { phaseProjectors } from './phases.ts';
 import { projectProjectors } from './projects.ts';
 import { repoProjectors } from './repo.ts';
 import { researchProjectors } from './research.ts';
@@ -49,6 +50,7 @@ const domains: Array<Record<string, Projector>> = [
   trackRecordProjectors,
   outboundProjectors,
   repoProjectors,
+  phaseProjectors,
 ];
 
 export function buildProjectors(): ProjectorMap {
@@ -107,4 +109,8 @@ export const PROJECTION_TABLES = [
   'hr_applied',
   'outbound_drafts',
   'repo_requests',
+  'deploy_targets',
+  'phases',
+  'phase_followups',
+  'ba_tasks',
 ];

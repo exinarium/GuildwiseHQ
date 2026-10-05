@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { FeedItemInputSchema } from '../feed/index.ts';
+import { HttpUrlSchema } from '../safe.ts';
 import type { Stage } from '../workflows/schema.ts';
 
 export type FieldKind =
@@ -81,6 +82,10 @@ export const CodeFieldsSchema = z.object({
   platform: z.enum(['web', 'mobile']).optional(),
   /** M4 suite cards: the branch the suite runs on (the pushed card branch for `pr` / `push_branch`; default: the working branch). */
   suiteBranch: z.string().optional(),
+  /** Phase regression cards: run the suite against this deployed app (also exported to the tester as `AOM_TARGET_URL`). */
+  targetUrl: HttpUrlSchema.optional(),
+  /** Phase regression cards: the name of the deploy target the suite runs against. */
+  deployTarget: z.string().max(120).optional(),
   /** M4 mock runtime: the test environment problem a tester shift finds until DevOps fixed it. */
   mockEnv: z.enum(['app_not_deployed', 'docker_missing']).optional(),
   /** M8 mock runtime: the update the mock BA drafts for the card's ticket (default: a plain resolution). */
@@ -102,6 +107,8 @@ export const CODE_FIELDS: Record<string, FieldMeta> = {
   mock: { label: 'Mock script', kind: 'json' },
   platform: { label: 'Platform', kind: 'enum' },
   suiteBranch: { label: 'Suite branch', kind: 'text' },
+  targetUrl: { label: 'Target URL', kind: 'text' },
+  deployTarget: { label: 'Deploy target', kind: 'text' },
   mockEnv: { label: 'Mock test environment', kind: 'enum' },
   mockOutbound: { label: 'Mock outbound draft', kind: 'json' },
 };
