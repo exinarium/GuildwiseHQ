@@ -756,7 +756,7 @@ These override the recommended defaults above where they differ.
 | # | Decision |
 |---|---|
 | A1 | Any project member may do everything: create phases, assign cards, edit follow-ups and deploy targets, and approve. |
-| A2 | **A phase waits for its PRs to be merged.** A card with completion action `pr` counts as done only once its PR is merged. |
+| A2 | **A phase waits until every card's work is merged into the project's working branch.** This is the internal working branch (see the working-branch addendum), not `main` on the Git server. A card finalized with `merge` counts at once. A card finalized with `pr` or `push_branch` counts once its branch is merged into the working branch, checked with git (the card branch's head is an ancestor of the working branch) by the workstation's runner or the DevOps repo-hygiene job. No GitHub PR status is needed. |
 | A3 | Cards moved to Done by hand count, and are listed as "closed manually". |
 | A4 | If every card was cancelled, the phase completes and the desk item recommends rejecting the follow-ups. |
 | A5 | Completion does not wait for post-merge full suites; they are listed in the report. |
