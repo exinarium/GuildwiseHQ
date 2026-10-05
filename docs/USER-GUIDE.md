@@ -355,6 +355,10 @@ Once a reviewer approves, the card moves to Test. A tester:
 
 The original card waits ("waiting on bug") until the bug passes review and the tester re-runs the full suite.
 
+Testers run browsers (Playwright/Chromium). For that, a tester's sandbox allows Unix sockets, while Docker, WSL interop, the desktop session bus, keyrings and ssh-agent sockets stay hidden from it. A custom role that needs a browser opts in with the **runs browsers** option in the role editor (granting it to a single agent beyond its role is for the organization owner). Playwright's `test-results/`, `playwright-report/` and `blob-report/` folders are treated as scratch output: they are discarded after the shift and never committed. Details and the trade-off: docs/RUNNER.md, "Browser roles (testers) and Unix sockets".
+
+Reviewers, business analysts and other roles that cannot edit or commit work in a read-only worktree: their shell cannot write to it. A reviewer who needs a build or tests runs them in a copy under its scratch directory. Anything that still changes the worktree is rolled back after the shift and recorded as a guard violation.
+
 ### Finalization
 
 A large merge waits for your approval on the desk; until you answer, its card stays in the Finalize column with an "Awaiting your approval" badge.
