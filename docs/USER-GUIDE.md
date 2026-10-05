@@ -78,11 +78,13 @@ With `default`, each agent gets a symlink to your `~/.claude/.credentials.json`.
 1. Go to **Projects**
 2. Click **Create project**
 3. Enter a name and key (e.g., `WEB`, `DOCS`), type (Code/Research/Feed), and domain (Work/Personal)
-4. Add repositories (by URL or by linking to one already scanned on a workstation)
+4. For a Code project, add repositories (by URL or by linking to one already scanned on a workstation). Research and Feed projects need no repository
 5. For work domain projects, set up vaults (work/personal folders in your knowledge system)
 6. Click **Create**
 
 ### Project types and workflows
+
+Research and Feed projects need no repository and have no testing or regression controls: their project settings show no Repositories section, E2E or architectural globs, or large-merge setting, and their boards have no Regression button. Results go to the project's vault folder. (A research or feed project that already has repositories still lists them so you can remove them.)
 
 | Type | Stages | Typical roles | When to use |
 | --- | --- | --- | --- |

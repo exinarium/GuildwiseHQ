@@ -15,6 +15,8 @@ import {
   validateWorkflow,
   type WorkflowDefinition,
   WorkflowResolveError,
+  workflowHasTestStage,
+  workflowUsesRepos,
 } from '../src/index.ts';
 
 const clone = (): WorkflowDefinition => structuredClone(codeWorkflowV1);
@@ -297,5 +299,16 @@ describe('resolveOutcome', () => {
   it('throws typed errors for unknown stage/outcome', () => {
     expect(() => resolveOutcome(codeWorkflowV1, {}, 'nope', 'x')).toThrow(WorkflowResolveError);
     expect(() => resolveOutcome(codeWorkflowV1, {}, 'build', 'x')).toThrow(/no outcome/);
+  });
+});
+
+describe('workflow capability predicates', () => {
+  it('code uses repos and has a test stage; research and feed have neither', () => {
+    expect(workflowUsesRepos(codeWorkflowV1)).toBe(true);
+    expect(workflowHasTestStage(codeWorkflowV1)).toBe(true);
+    for (const wf of [researchWorkflowV1, feedWorkflowV1]) {
+      expect(workflowUsesRepos(wf)).toBe(false);
+      expect(workflowHasTestStage(wf)).toBe(false);
+    }
   });
 });

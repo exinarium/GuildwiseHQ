@@ -13,6 +13,7 @@ import {
   TextArea,
   TextInput,
 } from '../components/ui.tsx';
+import { useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 
 const lines = (s: string) =>
   s
@@ -35,6 +36,7 @@ export function ProjectSettings() {
   const [repoBranch, setRepoBranch] = useState('');
   const [repoErr, setRepoErr] = useState<Record<string, string>>({});
   const project = q.data?.project;
+  const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
 
   useEffect(() => {
     if (!project) return;
@@ -47,14 +49,15 @@ export function ProjectSettings() {
   if (q.isPending) return <Spinner />;
   if (q.isError) return <ErrorBox error={q.error} />;
   const { repos, members } = q.data;
+  const activeRepos = repos.filter((r) => !r.removedAt);
 
   const save = (e: FormEvent) => {
     e.preventDefault();
     patch.mutate({
       name: name.trim(),
       workingBranch: branch.trim(),
-      architecturalGlobs: lines(arch),
-      e2eGlobs: lines(e2e),
+      ...(traits.usesRepos ? { architecturalGlobs: lines(arch) } : {}),
+      ...(traits.hasTestStage ? { e2eGlobs: lines(e2e) } : {}),
     });
   };
   const add = (e: FormEvent) => {
@@ -95,18 +98,22 @@ export function ProjectSettings() {
         <form onSubmit={save} className="flex flex-col gap-3" aria-label="Project settings">
           <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} />
           <TextInput label="Working branch" value={branch} onChange={(e) => setBranch(e.target.value)} />
-          <TextArea
-            label="Architectural globs"
-            hint="One glob per line. Large diffs touching these are risk tier large."
-            value={arch}
-            onChange={(e) => setArch(e.target.value)}
-          />
-          <TextArea
-            label="E2E globs"
-            hint="One glob per line"
-            value={e2e}
-            onChange={(e) => setE2e(e.target.value)}
-          />
+          {traits.usesRepos && (
+            <TextArea
+              label="Architectural globs"
+              hint="One glob per line. Large diffs touching these are risk tier large."
+              value={arch}
+              onChange={(e) => setArch(e.target.value)}
+            />
+          )}
+          {traits.hasTestStage && (
+            <TextArea
+              label="E2E globs"
+              hint="One glob per line"
+              value={e2e}
+              onChange={(e) => setE2e(e.target.value)}
+            />
+          )}
           <ErrorBox error={patch.error} />
           <Button type="submit" variant="primary" className="self-start" disabled={patch.isPending}>
             Save settings
@@ -118,12 +125,16 @@ export function ProjectSettings() {
           )}
         </form>
       </Panel>
-      <Panel>
-        <h2 className="mb-2 text-sm font-semibold">Repositories</h2>
-        <ul className="mb-3 flex flex-col gap-1.5" data-testid="repos">
-          {repos
-            .filter((r) => !r.removedAt)
-            .map((r) => (
+      {(traits.usesRepos || activeRepos.length > 0) && (
+        <Panel>
+          <h2 className="mb-2 text-sm font-semibold">Repositories</h2>
+          {!traits.usesRepos && (
+            <p className="mb-2 text-sm text-zinc-500">
+              This workflow needs no repository. Existing ones are listed so you can remove them.
+            </p>
+          )}
+          <ul className="mb-3 flex flex-col gap-1.5" data-testid="repos">
+            {activeRepos.map((r) => (
               <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
                 <span>
                   <span className="font-medium">{r.name}</span>{' '}
@@ -139,40 +150,41 @@ export function ProjectSettings() {
                 </Button>
               </li>
             ))}
-          {repos.filter((r) => !r.removedAt).length === 0 && (
-            <li className="text-sm text-zinc-500">No repositories yet.</li>
+            {activeRepos.length === 0 && <li className="text-sm text-zinc-500">No repositories yet.</li>}
+          </ul>
+          {traits.usesRepos && (
+            <form onSubmit={add} noValidate aria-label="Add repository" className="grid gap-3 sm:grid-cols-3">
+              <TextInput
+                label="Repository name"
+                value={repoName}
+                onChange={(e) => setRepoName(e.target.value)}
+                error={repoErr.name}
+              />
+              <TextInput
+                label="Remote URL"
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                error={repoErr.url}
+              />
+              <TextInput
+                label="Branch (optional)"
+                value={repoBranch}
+                onChange={(e) => setRepoBranch(e.target.value)}
+              />
+              <ErrorBox error={addRepo.error ?? removeRepo.error} />
+              <Button
+                type="submit"
+                variant="primary"
+                className="self-start sm:col-span-3"
+                disabled={addRepo.isPending}
+              >
+                Add repository
+              </Button>
+            </form>
           )}
-        </ul>
-        <form onSubmit={add} noValidate aria-label="Add repository" className="grid gap-3 sm:grid-cols-3">
-          <TextInput
-            label="Repository name"
-            value={repoName}
-            onChange={(e) => setRepoName(e.target.value)}
-            error={repoErr.name}
-          />
-          <TextInput
-            label="Remote URL"
-            value={repoUrl}
-            onChange={(e) => setRepoUrl(e.target.value)}
-            error={repoErr.url}
-          />
-          <TextInput
-            label="Branch (optional)"
-            value={repoBranch}
-            onChange={(e) => setRepoBranch(e.target.value)}
-          />
-          <ErrorBox error={addRepo.error ?? removeRepo.error} />
-          <Button
-            type="submit"
-            variant="primary"
-            className="self-start sm:col-span-3"
-            disabled={addRepo.isPending}
-          >
-            Add repository
-          </Button>
-        </form>
-      </Panel>
-      {project && (
+        </Panel>
+      )}
+      {project && traits.usesRepos && (
         <MergePolicyPanel projectId={id} project={project} history={q.data.mergePolicyHistory ?? []} />
       )}
       <MembersPanel projectId={id} members={members} isOwner={project?.myRole === 'owner'} />

@@ -1,4 +1,4 @@
-import { CreateProjectRequestSchema } from '@aom/shared';
+import { CreateProjectRequestSchema, workflowUsesRepos } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
 import { useWorkflows } from '../api/queries/agents.ts';
@@ -97,6 +97,8 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
   const [name, setName] = useState('');
   const [workflowKey, setWorkflowKey] = useState('code');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const selected = workflows.data?.find((w) => w.definition.key === workflowKey)?.definition;
+  const noRepo = selected ? !workflowUsesRepos(selected) : false;
   const keys = [...new Set(workflows.data?.map((w) => w.definition.key) ?? ['code'])];
 
   const submit = (e: FormEvent) => {
@@ -127,7 +129,7 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
       open={open}
       onOpenChange={onOpenChange}
       title="New project"
-      description="A project owns a board, repositories and agents."
+      description="A project owns a board and agents. Code projects also own repositories."
     >
       <form onSubmit={submit} noValidate className="flex flex-col gap-3">
         <TextInput
@@ -146,6 +148,11 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
             </option>
           ))}
         </Select>
+        <p className="-mt-2 text-xs text-zinc-500" data-testid="workflow-hint">
+          {noRepo
+            ? "No repository needed; results go to the project's vault folder."
+            : 'Add repositories in project settings.'}
+        </p>
         <ErrorBox error={create.error} />
         <div className="flex justify-end gap-2">
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>

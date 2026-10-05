@@ -1,4 +1,10 @@
-import { type CardDetailResponse, fieldCatalogue, isMockField, type WorkflowDefinition } from '@aom/shared';
+import {
+  type CardDetailResponse,
+  fieldCatalogue,
+  isMockField,
+  type WorkflowDefinition,
+  workflowUsesRepos,
+} from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useWorkflows } from '../api/queries/agents.ts';
@@ -234,25 +240,31 @@ export function CardDetailView({
             <h2 className="mb-2 text-sm font-semibold">Details</h2>
             <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
               <Meta k="Stage" v={card.stage} />
-              <div>
-                <dt className="text-xs font-medium text-zinc-500">Risk tier</dt>
-                <dd className="flex flex-wrap items-center gap-1.5" data-testid="risk-tier">
-                  <span>{card.riskTier ?? 'not set'}</span>
-                  {card.riskTierOverridden && <Badge tone="violet">override</Badge>}
-                  {permissions.canSetRisk && (
-                    <button
-                      type="button"
-                      data-testid="set-risk"
-                      className="text-xs underline"
-                      onClick={() => setDialog('risk')}
-                    >
-                      Change
-                    </button>
-                  )}
-                </dd>
-              </div>
-              <Meta k="Completion action" v={card.completionAction ?? 'not set'} />
-              <Meta k="Docs needed" v={card.docsNeeded ? 'yes' : 'no'} />
+              {(!workflow || workflowUsesRepos(workflow)) && (
+                <div>
+                  <dt className="text-xs font-medium text-zinc-500">Risk tier</dt>
+                  <dd className="flex flex-wrap items-center gap-1.5" data-testid="risk-tier">
+                    <span>{card.riskTier ?? 'not set'}</span>
+                    {card.riskTierOverridden && <Badge tone="violet">override</Badge>}
+                    {permissions.canSetRisk && (
+                      <button
+                        type="button"
+                        data-testid="set-risk"
+                        className="text-xs underline"
+                        onClick={() => setDialog('risk')}
+                      >
+                        Change
+                      </button>
+                    )}
+                  </dd>
+                </div>
+              )}
+              {(!workflow || workflowUsesRepos(workflow)) && (
+                <>
+                  <Meta k="Completion action" v={card.completionAction ?? 'not set'} />
+                  <Meta k="Docs needed" v={card.docsNeeded ? 'yes' : 'no'} />
+                </>
+              )}
               {card.branchName && <Meta k="Branch" v={card.branchName} mono />}
               <Meta k="Priority" v={String(card.priority)} />
               <div>

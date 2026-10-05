@@ -111,3 +111,13 @@ export function getOutcome(
 export function firstAgentStage(def: Pick<WorkflowDefinition, 'stages' | 'initialStage'>): Stage | undefined {
   return def.stages.find((s) => s.kind === 'agent');
 }
+
+/** Same check the server's regression command uses: a workflow has a test stage when a stage has the id 'test'. */
+export function workflowHasTestStage(def: Pick<WorkflowDefinition, 'stages'>): boolean {
+  return getStage(def, 'test') !== undefined;
+}
+
+/** True when any stage works in a git worktree, i.e. the project needs repositories (code); false for research/feed. */
+export function workflowUsesRepos(def: Pick<WorkflowDefinition, 'stages'>): boolean {
+  return def.stages.some((s) => s.worktree !== 'none');
+}

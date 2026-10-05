@@ -8,6 +8,7 @@ import { RegressionDialog } from '../components/RegressionDialog.tsx';
 import { Button, ErrorBox, PageHeader, Spinner } from '../components/ui.tsx';
 import { departmentsOf, inDepartment } from '../lib/designer.ts';
 import { setLastProjectKey } from '../lib/lastProject.ts';
+import { useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 
 export function Board() {
   const { projectKey = '' } = useParams();
@@ -17,6 +18,7 @@ export function Board() {
   const board = useBoard(project?.id);
   const runFeed = useRunFeed();
   const [department, setDepartment] = useState('');
+  const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
 
   useEffect(() => {
     if (project) setLastProjectKey(project.key);
@@ -86,7 +88,7 @@ export function Board() {
                   </option>
                 ))}
             </select>
-            <RegressionDialog projectId={project.id} />
+            {traits.hasTestStage && <RegressionDialog projectId={project.id} />}
             {project.workflowKey === 'feed' && (
               <>
                 <Link
