@@ -612,5 +612,6 @@ test('AC owner override: the project owner turns the setting on; a large merge f
   await page.goto(`/projects/${projectId}/settings`);
   await page.getByTestId('merge-policy-disable').click();
   await expect(page.getByTestId('merge-policy-state')).toHaveText('Approval required');
-  await expect(page.getByTestId('merge-policy-history').getByRole('listitem')).toHaveCount(2);
+  // the history sits in a collapsed <details>: count its entries, visible or not
+  await expect(page.locator('[data-testid=merge-policy-history] li')).toHaveCount(2);
 });
