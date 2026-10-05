@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Muster">
+  <title>Muster</title>
+  <rect width="64" height="64" rx="15" fill="#0D1220"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="14.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.12"/>
+  <!-- the crew converging on the manager: an M whose centre vertex is the manager node -->
+  <path d="M17 46V20L32 35L47 20V46" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32" cy="35" r="6" fill="#D4F24A"/>
+</svg>
