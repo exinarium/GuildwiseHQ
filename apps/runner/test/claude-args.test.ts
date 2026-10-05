@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { buildClaudeCommand, sessionEnv } from '../src/adapters/claude-code.ts';
@@ -464,5 +465,76 @@ describe('browser roles and read-only worktrees in the sandbox', () => {
     expect(s2.sandbox?.filesystem.denyRead).toEqual(
       expect.arrayContaining(['/tmp/aom-aaaaaaaaaa', '/tmp/aom-bbbbbbbbbb']),
     );
+  });
+});
+
+describe('the DevOps engineer runs unsandboxed (owner decision)', () => {
+  const devopsRole = BUILTIN_ROLES.find((r) => r.key === 'devops');
+  if (!devopsRole) throw new Error('devops role');
+  const dev = () => buildShiftSettings(devopsRole.permissions, policyCtx(), POLICY_PATHS, 'devops', true);
+
+  it('has no sandbox block and broad permissions', () => {
+    const s = dev();
+    expect(s.sandbox).toBeUndefined();
+    expect(s.permissions.defaultMode).toBe('dontAsk');
+    expect(s.permissions.blockReadsOutsideWorkingDirectories).toBeUndefined();
+    expect(s.permissions.allow).toEqual(
+      expect.arrayContaining(['Bash', 'Read', 'Glob', 'Grep', 'Edit', 'WebFetch', 'WebSearch']),
+    );
+    expect(s.permissions.allow.some((a) => a.startsWith('Edit('))).toBe(false);
+  });
+
+  it('may read ~/.ssh, ~/.docker and ~/.kube, but not the runner state or the Claude login', () => {
+    const deny = dev().permissions.deny;
+    for (const d of ['.ssh', '.docker', '.kube', '.aws', '.config/gh'])
+      expect(deny.some((r) => r.includes(`/home/me/${d}`))).toBe(false);
+    expect(deny).toEqual(
+      expect.arrayContaining([
+        'Read(//data/config.json)',
+        'Edit(//data/config.json)',
+        'Read(//data/outbox/**)',
+        'Read(//data/active-shifts/**)',
+        'Edit(//data/agents/a1/claude/**)',
+        'Read(//home/me/.claude/**)',
+        'ListAgents',
+      ]),
+    );
+    expect(deny).not.toContain('Bash(git push:*)');
+    expect(deny).not.toContain('Bash');
+    expect(deny).not.toContain('Edit');
+  });
+
+  it('is decided by the isDevops flag only: other roles keep the sandbox and the worktree-only rules', () => {
+    for (const [key, role] of [
+      ['builder', builder],
+      ['reviewer', reviewer],
+      ['tester', tester],
+    ] as const) {
+      const s = buildShiftSettings(role.permissions, policyCtx(), POLICY_PATHS, key, false);
+      expect(s.sandbox?.enabled).toBe(true);
+      expect(s.sandbox?.failIfUnavailable).toBe(true);
+      expect(s.permissions.blockReadsOutsideWorkingDirectories).toBe(true);
+      expect(s.permissions.deny).toContain('Read(//home/me/.ssh/**)');
+    }
+    // the role key alone does not unsandbox
+    expect(
+      buildShiftSettings(devopsRole.permissions, policyCtx(), POLICY_PATHS, 'devops').sandbox,
+    ).toBeDefined();
+  });
+
+  it('shift env: real HOME, agent CLAUDE_CONFIG_DIR, no env scrub; chats and other roles keep the private home', () => {
+    const cfg = ClaudeRuntimeConfigSchema.parse({ scrubSubprocessEnv: true });
+    const parent = { PATH: '/usr/bin', SSH_AUTH_SOCK: '/tmp/ssh-x/agent.1', DOCKER_HOST: 'unix:///x' };
+    const env = { ...sandboxEnv(input().sandbox as Sandbox), AOM_SHIFT_ID: 's1' };
+    const d = sessionEnv({ env, sandbox: input().sandbox, agent: { isDevops: true } }, cfg, parent);
+    expect(d.HOME).toBe(homedir());
+    expect(d.CLAUDE_CONFIG_DIR).toBe('/data/agents/a1/claude');
+    expect(d.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
+    expect(d.SSH_AUTH_SOCK).toBe('/tmp/ssh-x/agent.1');
+    expect(d.DOCKER_HOST).toBe('unix:///x');
+    const o = sessionEnv({ env, sandbox: input().sandbox, agent: { isDevops: false } }, cfg, parent);
+    expect(o.HOME).toBe('/data/agents/a1/home');
+    expect(o.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
+    expect(o.SSH_AUTH_SOCK).toBeUndefined();
   });
 });

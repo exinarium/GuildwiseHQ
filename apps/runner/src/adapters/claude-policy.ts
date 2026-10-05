@@ -193,7 +193,8 @@ export interface ClaudeSettings {
     allow: string[];
     deny: string[];
     defaultMode: 'dontAsk';
-    blockReadsOutsideWorkingDirectories: true;
+    /** Absent for the workstation's DevOps engineer, which reads anywhere. */
+    blockReadsOutsideWorkingDirectories?: true;
     additionalDirectories: string[];
   };
   sandbox?: {
@@ -301,12 +302,52 @@ function commonDenies(ctx: ClaudePolicyContext, configDir: string): string[] {
 export const runsBrowsers = (p: Pick<AgentPermissions, 'browser'>, roleKey?: string): boolean =>
   p.browser === true || roleKey === 'tester';
 
+/**
+ * The workstation's DevOps engineer (`AgentRuntimeSpec.isDevops`, built-in role `devops`) runs OUTSIDE the agent
+ * sandbox by design: it deploys to the local Docker stack (docker.sock), reaches remote hosts (ssh, scp, docker
+ * contexts), installs tools and uses sudo, none of which bubblewrap allows. It acts with the user's own privileges.
+ * What stays denied: the runner's private files, the agent's own Claude config and the user's Claude login. Whether a
+ * given action is within its granted access is guidance in its prompt plus `aom devops-approval`, not enforced here.
+ * Everything else about the DevOps agent is decided by this one flag, so the other roles' settings do not change.
+ */
+function buildDevopsSettings(
+  p: AgentPermissions,
+  ctx: ClaudePolicyContext,
+  paths: { home: string; configDir: string; scratch: string; tmp: string },
+): ClaudeSettings {
+  const claudeLogin = ['.claude', '.claude.json'].map((f) => ruleAbs(join(ctx.realHome, f)));
+  const deny = [
+    ...SESSION_TOOLS_DENIED,
+    // git push is allowed (owner decision): it keeps the vaults in sync across workstations with the user's git
+    // credentials. Creating a new repository still goes through `aom repo create`.
+    ...p.deniedShellPatterns.map(shellDeny),
+    ...RUNNER_PRIVATE.flatMap((f) => {
+      const abs = ruleAbs(join(ctx.runnerRoot, f));
+      return [`Read(${abs}/**)`, `Read(${abs})`, `Edit(${abs}/**)`, `Edit(${abs})`];
+    }),
+    ...claudeLogin.flatMap((a) => [`Read(${a}/**)`, `Read(${a})`]),
+    `Edit(${ruleAbs(paths.configDir)}/**)`,
+    ...ctx.addDirs.map((d) => `Edit(${ruleAbs(d)}/**)`),
+  ];
+  return {
+    permissions: {
+      allow: ['Bash', 'Read', 'Glob', 'Grep', 'Edit', 'WebFetch', 'WebSearch'],
+      deny: [...new Set(deny)],
+      defaultMode: 'dontAsk',
+      additionalDirectories: [paths.scratch],
+    },
+    includeCoAuthoredBy: false,
+  };
+}
+
 export function buildShiftSettings(
   p: AgentPermissions,
   ctx: ClaudePolicyContext,
   paths: { home: string; configDir: string; scratch: string; tmp: string },
   roleKey?: string,
+  isDevops = false,
 ): ClaudeSettings {
+  if (isDevops) return buildDevopsSettings(p, ctx, paths);
   const tools = new Set(p.allowedTools);
   const allow: string[] = [];
   const deny: string[] = [...ALWAYS_DENIED, ...p.deniedShellPatterns.map(shellDeny)];
@@ -434,6 +475,16 @@ const INHERITED_ENV = [
  * session (private HOME and CLAUDE_CONFIG_DIR, the IPC variables) and only the provider credential this runtime
  * needs. Nothing else of the runner's environment reaches an agent.
  */
+/** Extra variables the DevOps engineer inherits so docker, ssh and kubectl work as they do for the user. */
+export const DEVOPS_INHERITED_ENV = [
+  'SSH_AUTH_SOCK',
+  'DOCKER_HOST',
+  'DOCKER_CONTEXT',
+  'DOCKER_CONFIG',
+  'KUBECONFIG',
+  'XDG_RUNTIME_DIR',
+];
+
 export function agentEnv(
   sessionEnv: Record<string, string>,
   provider: Record<string, string>,

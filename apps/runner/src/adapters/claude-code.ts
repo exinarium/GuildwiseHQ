@@ -13,6 +13,7 @@ import {
   buildChatSettings,
   buildShiftSettings,
   type ClaudePolicyContext,
+  DEVOPS_INHERITED_ENV,
   gitDirsOf,
   type SandboxState,
   sandboxState,
@@ -41,10 +42,11 @@ export interface ClaudeCommand {
  * harmless variables, the session's variables, and the one provider credential this runtime is configured with.
  */
 export function sessionEnv(
-  input: Pick<ShiftStartInput, 'env' | 'sandbox'>,
+  input: Pick<ShiftStartInput, 'env' | 'sandbox'> & { agent?: Pick<ShiftStartInput['agent'], 'isDevops'> },
   cfg: ClaudeConfig,
   parent: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
+  const devops = input.agent?.isDevops === true;
   const provider: Record<string, string> = {};
   if (cfg.authMode === 'oauth' && cfg.oauthToken) provider.CLAUDE_CODE_OAUTH_TOKEN = cfg.oauthToken;
   else if (cfg.authMode === 'api_key' && cfg.apiKey) provider.ANTHROPIC_API_KEY = cfg.apiKey;
@@ -56,8 +58,27 @@ export function sessionEnv(
     CLAUDE_CODE_TMPDIR: input.sandbox.tmp,
   };
   // Opt-in: Claude Code strips credentials from what Bash and MCP children see and isolates their PID namespace.
-  if (cfg.scrubSubprocessEnv) extra.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
-  return agentEnv(input.env, provider, parent, extra);
+  // The DevOps engineer is unsandboxed and works as the user: their HOME (docker, ssh, kube configs) and the agent
+  // variables docker/ssh/kubectl rely on; the Claude config dir stays the agent's own. Env scrubbing (which isolates
+  // the PID namespace and strips credentials from Bash) would break that, so it is skipped.
+  if (devops) {
+    const home = homedir();
+    extra.HOME = home;
+    extra.USERPROFILE = home;
+    for (const k of DEVOPS_INHERITED_ENV) {
+      const v = parent[k];
+      if (v !== undefined) extra[k] = v;
+    }
+  } else if (cfg.scrubSubprocessEnv) extra.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
+  // input.env carries the agent's private HOME (sandboxEnv); the DevOps HOME above must win over it
+  return agentEnv(
+    devops
+      ? { ...input.env, HOME: extra.HOME as string, USERPROFILE: extra.USERPROFILE as string }
+      : input.env,
+    provider,
+    parent,
+    extra,
+  );
 }
 
 /** The exact argv/env of docs/ARCHITECTURE.md section 12.2. Pure; unit tested. */
@@ -111,7 +132,8 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
     join(input.sandbox.configDir, 'mcp.json'),
   );
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
-  return { bin: cfg.bin, args, env: sessionEnv(input, cfg) };
+  // chats stay sandboxed, even a DevOps agent's: only shifts get its real home
+  return { bin: cfg.bin, args, env: sessionEnv({ env: input.env, sandbox: input.sandbox }, cfg) };
 }
 
 /**
@@ -211,12 +233,13 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   async start(input: ShiftStartInput): Promise<RuntimeSession> {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
-    this.assertCanRun();
+    // The DevOps engineer runs without the OS sandbox, so a missing bwrap/socat does not stop it.
+    if (!input.agent.isDevops) this.assertCanRun();
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     await writeFile(
       join(dir, 'settings.json'),
-      `${JSON.stringify(buildShiftSettings(input.agent.permissions, this.policy(input, input.cwd), input.sandbox, input.agent.roleKey), null, 2)}\n`,
+      `${JSON.stringify(buildShiftSettings(input.agent.permissions, this.policy(input, input.cwd), input.sandbox, input.agent.roleKey, input.agent.isDevops), null, 2)}\n`,
     );
     await writeFile(join(dir, 'mcp.json'), `${JSON.stringify({ mcpServers: {} })}\n`);
     this.linkCredentials(dir);

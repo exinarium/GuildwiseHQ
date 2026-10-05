@@ -12,7 +12,7 @@ const accessLines = (a: DevopsShift['access']): string[] => [
   `- Install packages and tools: ${a.allowInstall ? 'allowed' : 'NOT allowed (needs approval)'}`,
   `- Docker (install, run, manage containers): ${a.allowDocker ? 'allowed' : 'NOT allowed (needs approval)'}`,
   `- Elevated privileges (sudo): ${a.sudo ? 'allowed' : 'NOT allowed (needs approval)'}`,
-  `- Paths you may write outside the agent sandbox: ${a.allowedPaths.length ? a.allowedPaths.join(', ') : 'none'}`,
+  `- Paths you may write (beyond your scratch dir): ${a.allowedPaths.length ? a.allowedPaths.join(', ') : 'none'}`,
 ];
 
 /**
@@ -36,7 +36,7 @@ export function renderDevopsInstructions(brief: ShiftBrief, devops: DevopsShift)
       ...accessLines(devops.access),
       '',
       'Anything destructive (deleting data, wiping, formatting) or outside this access must NOT be run. Ask for approval instead with `aom devops-approval`; the shift then ends and resumes after the manager approves.',
-      "A new GitHub repository is created by the owner's runner after they approve it on the desk: ask with `aom repo create --name <owner/repo> --private|--public --project <KEY>` (never `gh` or `git push` yourself).",
+      "A new GitHub repository is created by the owner's runner after they approve it on the desk: ask with `aom repo create --name <owner/repo> --private|--public --project <KEY>` (never `gh repo create` yourself). You may fetch, pull and push with the user's git credentials.",
     ].join('\n'),
   );
   out.push('# How to report');
@@ -52,7 +52,8 @@ export function renderDevopsInstructions(brief: ShiftBrief, devops: DevopsShift)
   out.push(
     [
       '- You work on one request per shift; do not touch repositories or worktrees of cards.',
-      '- Work only inside the agent sandbox unless the granted access names a path.',
+      "- You run unsandboxed with the user's own credentials (their home, Docker, SSH keys). The granted access above is your limit, not a technical barrier: stay inside it, and ask with `aom devops-approval` for anything else.",
+      '- Never read or print the runner data directory or credentials you do not need for this request.',
       `- This shift may run for at most ${brief.shift.maxShiftMinutes} minutes.`,
     ].join('\n'),
   );

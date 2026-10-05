@@ -552,6 +552,11 @@ All are cleaned up when the agent is fired.
 Worktrees are created under `worktrees/<KEY>-<project id prefix>/<REF>/` (project keys are only unique per
 organization, so the project id keeps two same-keyed projects on one workstation apart) and reused across stages of the
 same card. Worktrees created by older runner versions under `worktrees/<KEY>/<REF>` keep working: reuse follows the path
+**Exception: the DevOps engineer.** The workstation's DevOps engineer (the agent with `isDevops`, built-in role `devops`)
+runs its shifts outside this sandbox by design, so that it can deploy to the local Docker stack
+(`docker compose -p aom-uat ... up -d --build`), to remote hosts (ssh, scp, docker contexts), install tools and use sudo.
+See [DevOps shifts are unsandboxed](#devops-shifts-are-unsandboxed).
+
 the server recorded for the card. They are removed after finalize.
 
 Everything the server sends that ends up in git or on the filesystem is treated as untrusted:
@@ -662,7 +667,32 @@ Where the runner token lives: in `config.json` (mode 0600) inside the runner dat
 is denied (sandbox `denyRead` and a `Read` deny rule). We did not move it to the OS keyring: the runner needs it
 unattended at boot, and a keyring that is unlocked for the runner is as reachable by a same-user process as the file.
 
-**Residual risk, stated plainly.** Agents run as the same OS user as the runner. That is not a hard security boundary:
+**Residual risk, stated plainly.** Agents run as the same OS user as the runner. That is not a hard security boundary.
+The DevOps engineer is outside the sandbox altogether (previous section): everything below applies to it in full.
+### DevOps shifts are unsandboxed
+
+For a DevOps shift (`agent.isDevops`) `settings.json` has no `sandbox` block, whatever `runtimes.claude-code.sandbox` says
+(`required` does not refuse the shift when `bwrap`/`socat` are missing; the runtime's own `unavailable` state still stops
+every agent, DevOps included, because the runtime is reported unavailable as a whole). The permissions are:
+
+- allow: `Bash`, `Read`, `Glob`, `Grep`, `Edit` (covers Write), `WebFetch`, `WebSearch`, anywhere on the machine; no
+  `blockReadsOutsideWorkingDirectories`; `defaultMode` stays `dontAsk` (no human at the terminal);
+- deny: the session tools (`ListAgents`, `SendMessage`, ...), `git push`, the role's shell patterns (`rm -rf /*`), Read and
+  Edit of the runner's private files (`config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`,
+  `logs`, `mock-state`), Read of the user's `~/.claude` and `~/.claude.json`, and Edit of the agent's own Claude config dir.
+  The credential-store read denies (`~/.ssh`, `~/.docker`, `~/.kube`, ...) are dropped: it needs them.
+- environment: `HOME` is the user's real home (docker, ssh and kube configs work); `CLAUDE_CONFIG_DIR` and `TMPDIR` stay the
+  agent's own; `SSH_AUTH_SOCK`, `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `KUBECONFIG` and `XDG_RUNTIME_DIR` are
+  passed through when set; `scrubSubprocessEnv` is not applied. Chat sessions of the same agent stay sandboxed.
+
+What this implies: a DevOps shift has the full privileges of the runner's OS user on that workstation, and root through
+`sudo` or the Docker socket (access to `docker.sock` is root). The `devops_access` flags (install, Docker, sudo, paths) and
+`aom devops-approval` are guidance in the agent's prompt, not enforcement. The Read/Edit denies above do not stop a shell
+command from reading the runner's `config.json` (no sandbox `denyRead` applies), so a prompt-injected DevOps agent can reach
+the runner token and every credential of the user. Treat the DevOps agent as you would an admin shell: only hire it on a
+workstation you are willing to give it to, keep it to requests from your own cards, and prefer a dedicated runner user and
+machine (see the recommendation below).
+
 - Anything outside the sandbox boundary runs with the runner user's rights: Claude Code itself, MCP servers, hooks, and
   any command you add to `sandbox.excludedCommands` yourself.
 - Without `scrubSubprocessEnv`, a process of the same user can read `/proc/<pid>/environ` of the runner's other child
