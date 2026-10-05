@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DevOpsAccessSchema, DevOpsRequester } from '../events/devops.ts';
+import { HygieneReportSchema, HygieneSpecSchema } from '../hygiene/index.ts';
 
 /**
  * DevOps shifts (docs/ARCHITECTURE.md section 16.2). A DevOps shift has no card: it works one request and ends with
@@ -12,6 +13,8 @@ export const DEVOPS_OUTCOME_APPROVAL = 'devops_approval';
 export const DevopsDoneDataSchema = z.object({
   summary: z.string().min(1).max(20000),
   commands: z.array(z.string()).default([]),
+  /** Repository hygiene (`aom hygiene run`): what was done and found per repository. */
+  hygiene: HygieneReportSchema.optional(),
 });
 export type DevopsDoneData = z.infer<typeof DevopsDoneDataSchema>;
 
@@ -40,6 +43,8 @@ export const DevopsShiftSchema = z.object({
       note: z.string().optional(),
     })
     .optional(),
+  /** Repository hygiene: the repositories of this workstation to tidy (see `aom hygiene run`). */
+  hygiene: HygieneSpecSchema.optional(),
   /** Earlier messages of the request thread, oldest first. */
   history: z
     .array(z.object({ authorName: z.string(), kind: z.string(), body: z.string(), at: z.iso.datetime() }))

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { HygieneSpecSchema } from '../hygiene/index.ts';
 import { defineEvent, Id } from './define.ts';
 
 /** What the workstation's DevOps engineer may do without asking (`workstations.devops_access`). */
@@ -38,6 +39,8 @@ export const devopsEvents = [
       requestedBy: DevOpsRequester,
       cardId: Id.optional(),
       summary: z.string().min(1).max(20000),
+      /** A repository hygiene run (scheduled or started by the manager): the repositories it covers. */
+      hygiene: HygieneSpecSchema.optional(),
     }),
   ),
   /** A DevOps shift for the request was dispatched to the runner (creates the shift row). */

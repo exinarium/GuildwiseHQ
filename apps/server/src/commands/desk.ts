@@ -7,6 +7,7 @@ import {
   type ResolveDeskItemRequest,
   streamId,
   UNMAPPED_TICKET_SUBKIND,
+  WORKING_BRANCH_SUBKIND,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
@@ -22,6 +23,7 @@ import { resolveDefinitionIn } from './designer.ts';
 import { resolveDevOpsApprovalIn } from './devops.ts';
 import { mergedAnswerNotes } from './escalation.ts';
 import { resolveLargeMergeIn } from './finalize.ts';
+import { runHygieneForConfirmedRepo, workingBranchAnsweredEvents } from './hygiene.ts';
 import { continueIntake, mappingAnsweredEvents } from './intake.ts';
 import { resolveOutboundIn } from './outbox.ts';
 import { resolvePhaseDeskItemIn } from './phases.ts';
@@ -65,7 +67,7 @@ export async function answerDeskItem(
   id: string,
   req: AnswerDeskItemRequest,
 ): Promise<{ ledgerEntryId: string; unblockedCardIds: string[] }> {
-  const after: { mapped?: { intake: Row; projectKey: string } } = {};
+  const after: { mapped?: { intake: Row; projectKey: string }; hygieneRepo?: string } = {};
   const answered = await withAppendTx(ctx.pool, async (tx) => {
     const { item, mayAct } = await lockItem(tx, user, id);
     if (item.status !== 'open') throw conflict('already_answered', `this item is already ${item.status}`);
@@ -173,10 +175,17 @@ export async function answerDeskItem(
         after.mapped = { intake: m.intake, projectKey: m.projectKey };
       }
     }
+    // Hygiene: the answer to a working-branch question stores the branch on the repository.
+    if (item.subkind === WORKING_BRANCH_SUBKIND) {
+      const b = await workingBranchAnsweredEvents(tx, item, user, req);
+      events.push(...b.events);
+      if (b.hygieneForRepo) after.hygieneRepo = b.hygieneForRepo;
+    }
     await ctx.store.append(events, { tx });
     return { ledgerEntryId: entryId, unblockedCardIds: blocked.map((b) => b.card_id) };
   });
   if (after.mapped) continueIntake(ctx, after.mapped.intake, after.mapped.projectKey);
+  if (after.hygieneRepo) await runHygieneForConfirmedRepo(ctx, after.hygieneRepo);
   return answered;
 }
 

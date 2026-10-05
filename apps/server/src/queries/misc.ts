@@ -5,6 +5,7 @@ import type {
   WorkstationDto,
 } from '@aom/shared';
 import type { z } from 'zod';
+import { hygieneDtos } from '../commands/hygiene.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
@@ -78,6 +79,12 @@ export async function getProjectDetail(
     'SELECT * FROM project_repos WHERE project_id=$1 AND removed_at IS NULL ORDER BY name',
     [projectId],
   );
+  const questions = await rows(
+    ctx.pool,
+    `SELECT id, data->>'repoId' AS repo_id FROM desk_items
+      WHERE project_id=$1 AND subkind='working_branch' AND status='open' AND triage <> 'pending' ORDER BY created_at`,
+    [projectId],
+  );
   const members = await rows(
     ctx.pool,
     `SELECT pm.*, u.display_name, u.email FROM project_members pm JOIN users u ON u.id = pm.user_id
@@ -101,6 +108,9 @@ export async function getProjectDetail(
       remoteUrlNormalized: r.remote_url_normalized,
       workingBranch: r.working_branch,
       removedAt: iso(r.removed_at),
+      knownBranches: r.known_branches ?? [],
+      workingBranchSetAt: iso(r.working_branch_set_at),
+      branchQuestionId: questions.find((q) => q.repo_id === r.id)?.id ?? null,
     })),
     members: members.map((m) => ({
       userId: m.user_id,
@@ -140,6 +150,7 @@ export async function workstationDtos(
       WHERE workstation_id = ANY($1::uuid[]) AND status <> 'ended' GROUP BY workstation_id`,
     [list.map((w) => w.id)],
   );
+  const hygiene = await hygieneDtos(ctx.pool, list as never);
   return list.map((w) => ({
     id: w.id,
     userId: w.user_id,
@@ -161,6 +172,7 @@ export async function workstationDtos(
     pairedAt: iso(w.paired_at) as string,
     devopsAccess: w.devops_access,
     devopsAgentId: w.devops_agent_id ?? null,
+    hygiene: hygiene.get(w.id),
     shifts: {
       running: running.find((r) => r.workstation_id === w.id)?.n ?? 0,
       limit: ctx.services.runners.isOnline(w.id) ? (ctx.services.runners.get(w.id)?.maxShifts ?? null) : null,

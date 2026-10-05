@@ -8,6 +8,7 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
+import { confirmBranchOnEvent } from '../commands/branch-confirm.ts';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { refreshVaultConfig, vaultAudience } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
@@ -179,6 +180,11 @@ export class RunnerGateway {
   private async onEvent(e: StoredEvent): Promise<void> {
     const { ctx } = this;
     switch (e.event.type) {
+      case 'TicketMapped':
+      case 'PhaseCreated':
+      case 'PhaseConfirmed':
+        await confirmBranchOnEvent(ctx, e);
+        return;
       case 'WorkstationUnlinked': {
         const p = (e.event as EventOf<'WorkstationUnlinked'>).payload;
         ctx.services.runners.close(p.workstationId, WS_CLOSE.forbidden, 'workstation unlinked');

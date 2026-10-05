@@ -1,3 +1,4 @@
+import { fireDueHygiene } from '../commands/hygiene.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
 import type { Ctx } from '../context.ts';
 
@@ -16,9 +17,21 @@ export class Scheduler {
   constructor(private readonly ctx: Ctx) {}
 
   start(): void {
-    this.timer = setInterval(() => void this.run().catch(() => {}), TICK_MS);
+    this.timer = setInterval(() => {
+      void this.run().catch(() => {});
+      void this.runHygiene().catch(() => {});
+    }, TICK_MS);
     this.timer.unref();
     void this.run().catch((err) => this.ctx.log.error({ err }, 'scheduler failed'));
+    void this.runHygiene().catch((err) => this.ctx.log.error({ err }, 'hygiene scheduler failed'));
+  }
+
+  /** The workstations' repository hygiene jobs that are due (their own cadence, default daily). Returns the request ids. */
+  runHygiene(): Promise<string[]> {
+    if (this.stopped) return Promise.resolve([]);
+    const next = this.chain.then(() => fireDueHygiene(this.ctx));
+    this.chain = next.catch(() => {});
+    return next;
   }
 
   /** One pass, serialized in-process. Returns the cards it created. */

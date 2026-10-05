@@ -10,6 +10,7 @@ import {
   type DevOpsRequester,
   DevopsApprovalDataSchema,
   DevopsDoneDataSchema,
+  type HygieneSpec,
   type PatchDevOpsAccessRequest,
   type RunnerToServerOf,
   streamId,
@@ -24,6 +25,7 @@ import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { hygieneReportEvents } from './hygiene.ts';
 import type { ReportResult, WsRef } from './shifts.ts';
 
 const DEVOPS_NAMES = [
@@ -135,7 +137,7 @@ export async function alignDevopsRuntime(
 
 // ---------------------------------------------------------------------------------------- requests
 
-function threadMessage(
+export function threadMessage(
   threadId: string,
   orgId: string,
   author: { kind: 'user'; userId: string } | { kind: 'agent'; agentId: string } | { kind: 'system' },
@@ -172,7 +174,13 @@ function threadMessage(
 export async function createDevOpsRequestIn(
   ctx: Ctx,
   tx: Tx,
-  input: { workstationId: string; summary: string; requestedBy: DevOpsRequester; cardId?: string },
+  input: {
+    workstationId: string;
+    summary: string;
+    requestedBy: DevOpsRequester;
+    cardId?: string;
+    hygiene?: HygieneSpec;
+  },
 ): Promise<{ requestId: string; threadId: string }> {
   const ws = await one(tx, `SELECT id, user_id FROM workstations WHERE id=$1 AND status='active'`, [
     input.workstationId,
@@ -205,6 +213,7 @@ export async function createDevOpsRequestIn(
             requestedBy: input.requestedBy,
             cardId: input.cardId,
             summary: input.summary,
+            ...(input.hygiene ? { hygiene: input.hygiene } : {}),
           },
         },
         actor:
@@ -478,6 +487,9 @@ export async function applyDevopsReport(
           actor: agentActor(shift.agent_id),
           scope,
         },
+        ...(data.data.hygiene
+          ? await hygieneReportEvents(ctx, tx, req, shift.agent_id as string, data.data.hygiene)
+          : []),
         threadMessage(
           req.thread_id,
           ws.userId,

@@ -6,6 +6,7 @@ import { chatProjectors } from './chats.ts';
 import { deskProjectors } from './desk.ts';
 import { devopsProjectors } from './devops.ts';
 import { feedProjectors } from './feeds.ts';
+import { hygieneProjectors } from './hygiene.ts';
 import { intakeProjectors } from './intake.ts';
 import { ledgerProjectors } from './ledger.ts';
 import { outboundProjectors } from './outbound.ts';
@@ -42,6 +43,7 @@ const domains: Array<Record<string, Projector>> = [
   chatProjectors,
   vaultProjectors,
   devopsProjectors,
+  hygieneProjectors,
   sharingProjectors,
   testingProjectors,
   scheduleProjectors,
@@ -116,4 +118,5 @@ export const PROJECTION_TABLES = [
   'phase_followups',
   'ba_tasks',
   'ba_signals',
+  'hygiene_findings',
 ];

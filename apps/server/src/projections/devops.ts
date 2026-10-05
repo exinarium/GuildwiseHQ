@@ -14,8 +14,8 @@ export const devopsProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO devops_requests (id, org_id, workstation_id, devops_agent_id, thread_id, requested_by_kind,
-         requested_by_id, requested_by_name, card_id, summary, status, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'queued',$11,$11)`,
+         requested_by_id, requested_by_name, card_id, summary, hygiene, status, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$12::jsonb,'queued',$11,$11)`,
       [
         p.requestId,
         ws?.user_id,
@@ -28,8 +28,14 @@ export const devopsProjectors: Record<string, Projector> = {
         p.cardId ?? null,
         p.summary,
         e.createdAt,
+        p.hygiene ? JSON.stringify(p.hygiene) : null,
       ],
     );
+    if (p.hygiene)
+      await exec(tx, 'UPDATE workstations SET hygiene_last_at=$2 WHERE id=$1', [
+        p.workstationId,
+        e.createdAt,
+      ]);
     await exec(
       tx,
       `INSERT INTO threads (id, org_id, project_id, card_id, kind, agent_id, title, created_by, created_at)

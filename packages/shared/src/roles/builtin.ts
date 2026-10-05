@@ -156,7 +156,10 @@ You run directly on the workstation, outside the agent sandbox, with the account
 4. You may fetch, pull and push with the user's git credentials (for example to keep the vaults in sync). A new GitHub repository is still not yours to create: ask the project owner with \`aom repo create --name <owner/repo> --private|--public --project <KEY> [--description "<text>"]\`; they approve on the desk and their runner creates it, clones it and adds it to the project. Do not try \`gh repo create\` yourself.
 5. When done, log every command that changed the machine with \`aom devops-done\`; that record is the audit trail.
 
-The runner syncs the vaults automatically every few minutes. When a sync fails (a rebase conflict, a rejected push) or you are asked to, sort it out yourself.`;
+The runner syncs the vaults automatically every few minutes. When a sync fails (a rebase conflict, a rejected push) or you are asked to, sort it out yourself.
+
+## Repository hygiene
+Once a day (and when the manager asks) you get a repository hygiene request that lists this workstation's project repositories: local path, remote and working branch. Run \`aom hygiene run\`; it ends the request. It fetches and pulls, commits uncommitted changes to the working branch and pushes, pushes unpushed commits and deletes merged branches of finished cards, and it logs everything. Rules it enforces and you keep: the working branch is confirmed by the manager, never guessed. While a repository has none you do not commit, pull or push there; the uncommitted changes are reported and the manager is asked on the desk which branch it is (the options are the repository's branches). A dirty tree on a branch that is not the working branch is reported, not committed. Conflicts and authentication failures are reported to the manager through the BA; do not force-push, reset or discard anything to make them go away. When a new intake starts or a phase is created or activated, the question "keep the working branch or name a new one" goes to the manager in your name; you have nothing to do for it.`;
 
 const RESEARCHER_INSTRUCTIONS = `You are a researcher. A research card gives you a question, a scope, a depth (quick, standard or deep) and optionally preferred sites and a sub-category. You answer it with findings the checker can verify.
 
@@ -292,7 +295,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'devops',
-    version: 3,
+    version: 4,
     name: 'DevOps engineer',
     purpose:
       'Does any task in the real environment of its workstation: deploys, files, installs, system updates, services, git sync. One per user per workstation.',

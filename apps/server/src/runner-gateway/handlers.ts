@@ -14,6 +14,7 @@ import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../co
 import { outboundDraftRpc } from '../commands/drafts.ts';
 import { endQuestionShift } from '../commands/escalation.ts';
 import { applyFinalizeResult } from '../commands/finalize.ts';
+import { applyWorktreeSweepResult } from '../commands/hygiene.ts';
 import { intakeRpc } from '../commands/intake.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
@@ -218,6 +219,10 @@ export class RunnerHandlers {
             msg.ok,
             msg.result,
           );
+        } else if (cmd?.type === 'worktrees.sweep') {
+          // Terminal: the sweep ran (or was skipped); what it found is recorded, never retried blindly.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyWorktreeSweepResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
         } else if (cmd?.type === 'repo.create') {
           // Terminal like outbound.post: created and added to the project, or a failure on the desk (no blind retry).
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

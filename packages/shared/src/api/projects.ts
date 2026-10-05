@@ -10,8 +10,14 @@ export const ProjectRepoDtoSchema = z.object({
   name: z.string(),
   remoteUrl: z.string(),
   remoteUrlNormalized: z.string(),
+  /** The confirmed working branch; null until the manager named one (hygiene commits nothing then). */
   workingBranch: z.string().nullable(),
   removedAt: IsoTime.nullable(),
+  /** Branches of the clone, as the last hygiene run saw them (the options of the working-branch question). */
+  knownBranches: z.array(z.string()).optional(),
+  workingBranchSetAt: IsoTime.nullable().optional(),
+  /** The open desk question that asks for this repository's working branch. */
+  branchQuestionId: z.uuid().nullable().optional(),
 });
 export type ProjectRepoDto = z.infer<typeof ProjectRepoDtoSchema>;
 

@@ -55,7 +55,9 @@ const Section = ({ title, children, count }: { title: string; children: React.Re
 export function FloorReport({ digest }: { digest: FloorDigest }) {
   const stuck = digest.signals.filter((s) => ['blocked', 'unclaimed', 'loop'].includes(s.kind));
   const approvals = digest.signals.filter((s) => s.kind === 'repeated_approval');
-  const failed = digest.signals.filter((s) => ['rework', 'finalize_failures'].includes(s.kind));
+  const failed = digest.signals.filter((s) =>
+    ['rework', 'finalize_failures', 'repo_hygiene'].includes(s.kind),
+  );
   return (
     <div data-testid="floor-report" className="mt-2 border-t border-zinc-200 pt-1 dark:border-zinc-800">
       <Section title="Phases waiting or open" count={digest.phases.length}>

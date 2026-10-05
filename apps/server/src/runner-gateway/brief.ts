@@ -300,6 +300,7 @@ export async function buildDevopsShiftStart(
       card: card ? { ref: card.ref, title: card.title } : undefined,
       workstationName: ws.name,
       access: DevOpsAccessSchema.parse(ws.devops_access ?? {}),
+      hygiene: req.hygiene ?? undefined,
       approval:
         ap?.resolution === 'approved'
           ? { action: ap.action, reason: ap.reason, commands: ap.commands ?? [], note: ap.note ?? undefined }

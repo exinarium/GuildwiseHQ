@@ -1,4 +1,10 @@
-import { DESK_SUBKIND, type DomainEvent, REPORTER, ROUTING_EXEMPT_SUBKINDS } from '@aom/shared';
+import {
+  DESK_SUBKIND,
+  type DomainEvent,
+  REPORTER,
+  ROUTING_EXEMPT_SUBKINDS,
+  WORKING_BRANCH_SUBKIND,
+} from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -78,14 +84,29 @@ export function createRoutingInterceptor(ctx: Ctx) {
       if (ev.type === 'QuestionRaised') {
         const p = ev.payload;
         const subkind = p.subkind ?? '';
+        const projectId = p.projectId ?? input.scope.projectId;
         if (
           p.blocking &&
           p.routedTo === 'manager' &&
           p.askedBy.kind === 'agent' &&
           !ROUTING_EXEMPT_SUBKINDS.includes(subkind) &&
-          (await active(orgId, p.projectId ?? input.scope.projectId))
+          (await active(orgId, projectId))
         )
-          add(noted, orgId, p.projectId ?? input.scope.projectId, p.deskItemId);
+          add(noted, orgId, projectId, p.deskItemId);
+        // The DevOps engineer's working-branch question is a non-urgent item unless it holds back a commit: held for
+        // the BA's triage like other non-urgent items (it may answer from the ledger or pass it on).
+        else if (
+          subkind === WORKING_BRANCH_SUBKIND &&
+          !p.blocking &&
+          p.routedTo === 'manager' &&
+          p.askedBy.kind === 'agent' &&
+          (await active(orgId, projectId))
+        ) {
+          const deadline = new Date(now.getTime() + REPORTER.triageWindowMinutes * 60_000).toISOString();
+          out.push({ ...input, event: { ...ev, payload: { ...p, triage: { deadline } } } });
+          add(held, orgId, projectId, p.deskItemId);
+          continue;
+        }
       }
       out.push(input);
     }

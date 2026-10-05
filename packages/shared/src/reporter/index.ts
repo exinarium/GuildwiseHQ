@@ -147,6 +147,8 @@ export const SignalKind = z.enum([
   'unclaimed',
   'rework',
   'finalize_failures',
+  /** Repository hygiene could not resolve something (conflict, dirty tree on another branch, auth failure, ...). */
+  'repo_hygiene',
 ]);
 export type SignalKind = z.infer<typeof SignalKind>;
 export const SignalUrgency = z.enum(['urgent', 'normal']);
@@ -161,6 +163,7 @@ export const SIGNAL_LABEL: Record<SignalKind, string> = {
   unclaimed: 'Unclaimed card',
   rework: 'Repeated rework',
   finalize_failures: 'Repeated finalize failures',
+  repo_hygiene: 'Repository hygiene',
 };
 
 /** What a signal is about; free-form evidence the BA and the template read. */
@@ -377,7 +380,7 @@ export function renderFloorReportFallback(d: FloorDigest): string {
   out.push(
     list([
       ...d.signals
-        .filter((s) => s.kind === 'rework' || s.kind === 'finalize_failures')
+        .filter((s) => s.kind === 'rework' || s.kind === 'finalize_failures' || s.kind === 'repo_hygiene')
         .map((s) => `${s.subject.title}${s.subject.detail ? ` (${s.subject.detail})` : ''}`),
       ...d.failures.map((f) => `${f.ref} ${f.title}: ${f.failedShifts} failed shifts`),
     ]),

@@ -1,5 +1,7 @@
 import {
   DESK_SUBKIND,
+  HYGIENE_PROBLEM_LABEL,
+  type HygieneProblemKind,
   REPORTER,
   type SignalKind,
   type SignalSubject,
@@ -231,6 +233,38 @@ export async function detectFailures(db: Queryable): Promise<Detected[]> {
   ];
 }
 
+/**
+ * Repository hygiene (docs/design/phases.md addendum): what a hygiene run could not resolve (a conflict, a dirty tree on a
+ * different branch, an auth failure, a dead card's worktree with uncommitted changes) stays a signal until a later run
+ * finds the repository in order. Normal urgency: the daily report carries it.
+ */
+export async function detectHygiene(db: Queryable): Promise<Detected[]> {
+  const list = await rows(
+    db,
+    `SELECT f.*, w.name AS workstation_name, p.key AS project_key
+       FROM hygiene_findings f JOIN workstations w ON w.id = f.workstation_id
+       LEFT JOIN projects p ON p.id = f.project_id
+      WHERE f.status = 'open' AND w.status = 'active' ORDER BY f.first_seen_at, f.id`,
+  );
+  return list.map((f) => ({
+    orgId: f.org_id,
+    projectId: f.project_id,
+    kind: 'repo_hygiene' as const,
+    fingerprint: `hygiene:${f.workstation_id}:${f.subject}:${f.kind}`,
+    urgency: 'normal' as const,
+    count: 1,
+    subject: {
+      title:
+        f.kind === 'dirty_worktree'
+          ? `Leftover worktree with changes on ${f.workstation_name}`
+          : `${HYGIENE_PROBLEM_LABEL[f.kind as HygieneProblemKind] ?? f.kind}: ${f.subject_name}`,
+      detail: `${f.detail}${f.files?.length ? ` Files: ${(f.files as string[]).slice(0, 8).join(', ')}${f.files.length > 8 ? ', ...' : ''}.` : ''} (workstation ${f.workstation_name})`,
+      ...(f.project_key ? { projectKey: f.project_key } : {}),
+    },
+    evidence: { kind: f.kind, workstationId: f.workstation_id, subject: f.subject, files: f.files },
+  }));
+}
+
 /** Every detector, run once. */
 export async function detectAll(ctx: Ctx, now: Date): Promise<Detected[]> {
   return [
@@ -239,5 +273,6 @@ export async function detectAll(ctx: Ctx, now: Date): Promise<Detected[]> {
     ...(await detectBlocked(ctx.pool, now)),
     ...(await detectUnclaimed(ctx, now)),
     ...(await detectFailures(ctx.pool)),
+    ...(await detectHygiene(ctx.pool)),
   ];
 }

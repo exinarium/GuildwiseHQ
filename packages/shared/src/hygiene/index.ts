@@ -83,7 +83,9 @@ export function summarizeSweep(r: WorktreeSweepResult): string {
 
 // ------------------------------------------------------------------------------------- hygiene request
 
-export const HygieneTrigger = z.enum(['schedule', 'manual']);
+/** `branch_confirmed`: the manager just named the working branch of a repository with uncommitted changes. */
+export const HygieneTrigger = z.enum(['schedule', 'manual', 'branch_confirmed']);
+export type HygieneTrigger = z.infer<typeof HygieneTrigger>;
 
 /** One project repository on the workstation, as the DevOps engineer receives it. */
 export const HygieneRepoSpecSchema = z.object({
@@ -100,6 +102,8 @@ export const HygieneRepoSpecSchema = z.object({
   /** Where `workingBranch` came from: the active phase, or the repository. */
   branchSource: z.enum(['phase', 'repo']).nullable(),
   phaseRef: z.string().optional(),
+  /** The project's agent-branch prefix (`aom/`): only branches under it are ever deleted. */
+  branchPrefix: z.string().default('aom/'),
   /** Branches of finished or cancelled cards: deleted locally when merged into the working branch. */
   finishedBranches: z.array(z.string()).default([]),
 });
@@ -140,7 +144,7 @@ export const HygieneRepoResultSchema = z.object({
   actions: z.array(z.string()).default([]),
   /** What could not be resolved; null: the repository is in order. */
   problem: z.object({ kind: HygieneProblemKind, detail: z.string() }).nullable().default(null),
-  /** `needs_branch`: the branches that exist, for the question's options. */
+  /** The branches that exist in the clone (local and origin, agent branches left out): the question's options. */
   branches: z.array(z.string()).default([]),
   /** Paths with uncommitted changes that were reported and not committed (first 50). */
   uncommitted: z.array(z.string()).default([]),
@@ -156,7 +160,7 @@ export type HygieneReport = z.infer<typeof HygieneReportSchema>;
 /** The request text a hygiene run shows on its thread and to the DevOps engineer. */
 export function renderHygieneRequest(spec: HygieneSpec, workstationName: string): string {
   const lines = [
-    `Repository hygiene on ${workstationName} (${spec.trigger === 'schedule' ? 'scheduled' : 'started by the manager'}).`,
+    `Repository hygiene on ${workstationName} (${spec.trigger === 'schedule' ? 'scheduled' : spec.trigger === 'branch_confirmed' ? 'the working branch was just confirmed' : 'started by the manager'}).`,
     '',
     'For each repository below: fetch and pull, commit uncommitted changes to the working branch and push, push unpushed commits, and remove merged branches of finished cards. Run `aom hygiene run`: it does exactly that, refuses to commit or push to a repository whose working branch is not confirmed, logs what it did and ends this request.',
     '',

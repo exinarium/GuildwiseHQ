@@ -4,6 +4,7 @@ import {
   IdParamsSchema,
   PatchDevOpsAccessRequestSchema,
   ResolveDevOpsApprovalRequestSchema,
+  UpdateHygieneRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
@@ -15,6 +16,7 @@ import {
   patchDevOpsAccess,
   resolveDevOpsApproval,
 } from '../commands/devops.ts';
+import { runHygieneNow, setHygieneInterval } from '../commands/hygiene.ts';
 import type { Ctx } from '../context.ts';
 import { notFound } from '../errors.ts';
 import { listAgents } from '../queries/agents.ts';
@@ -63,6 +65,31 @@ export function devopsRoutes(ctx: Ctx) {
         const [w] = await workstationDtos(ctx, 'w.id = $1 AND w.user_id = $2', [req.params.id, s.user.id]);
         if (!w) throw notFound('workstation not found');
         return w;
+      },
+    );
+
+    /** Repository hygiene (docs/design/phases.md addendum): the cadence of the scheduled job. */
+    app.put(
+      '/api/workstations/:id/hygiene',
+      { schema: { params: IdParamsSchema, body: UpdateHygieneRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setHygieneInterval(ctx, s.user, req.params.id, req.body.intervalHours);
+        const [w] = await workstationDtos(ctx, 'w.id = $1 AND w.user_id = $2', [req.params.id, s.user.id]);
+        if (!w) throw notFound('workstation not found');
+        return w;
+      },
+    );
+
+    /** "Run hygiene now": one DevOps request for this workstation's project repositories. */
+    app.post(
+      '/api/workstations/:id/hygiene/run',
+      { schema: { params: IdParamsSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const r = await runHygieneNow(ctx, s.user, req.params.id);
+        reply.code(r.alreadyRunning ? 200 : 201);
+        return r;
       },
     );
 

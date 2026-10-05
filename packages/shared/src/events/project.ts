@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { WorkingBranchReason } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { BranchPrefixSchema, GitRefSchema, VaultFolderSchema } from '../safe.ts';
 import { defineEvent, Id } from './define.ts';
@@ -53,6 +54,22 @@ export const projectEvents = [
     }),
   ),
   defineEvent('ProjectRepoRemoved', z.object({ projectId: Id, repoId: Id })),
+  /**
+   * The manager confirmed (or changed) the repository's working branch: the answer to the DevOps engineer's question on
+   * the desk, or a change in the project settings. Hygiene commits and pushes only to a confirmed branch.
+   */
+  defineEvent(
+    'ProjectRepoWorkingBranchSet',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      workingBranch: GitRefSchema,
+      previousBranch: z.string().nullable().default(null),
+      reason: WorkingBranchReason,
+      setBy: Id,
+      deskItemId: Id.optional(),
+    }),
+  ),
   /**
    * The project owner turned the large-merge approval off or on: with it on, a large-tier `merge` finalizes without the
    * manager's desk approval (default off). Recorded with who and when; shown in the project settings.

@@ -7,9 +7,11 @@ import {
   ProjectsQuerySchema,
   RepoParamsSchema,
   SetMergePolicyRequestSchema,
+  SetWorkingBranchRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
+import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import {
   addRepo,
   archiveProject,
@@ -100,6 +102,17 @@ export function projectRoutes(ctx: Ctx) {
         const s = await requireUser(ctx, req);
         await addRepo(ctx, s.user, req.params.id, req.body);
         reply.code(201);
+        return getProjectDetail(ctx, s.user.id, req.params.id);
+      },
+    );
+
+    /** The manager confirms (or changes) the repository's working branch. */
+    app.put(
+      '/api/projects/:id/repos/:repoId/working-branch',
+      { schema: { params: RepoParamsSchema, body: SetWorkingBranchRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setRepoWorkingBranch(ctx, s.user, req.params.id, req.params.repoId, req.body.branch);
         return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );

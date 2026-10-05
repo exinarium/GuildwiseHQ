@@ -89,7 +89,9 @@ export function renderDevopsPrompt(devops: DevopsShift): string {
   }
   out.push('## Your job in this shift');
   out.push(
-    'Do the request within your granted access, then report with `aom devops-done` or `aom devops-approval`.',
+    devops.hygiene
+      ? 'This is a repository hygiene request. Run `aom hygiene run`: it fetches, commits uncommitted changes to the confirmed working branch, pulls, pushes and deletes merged agent branches in the repositories above, tells you what it could not resolve and ends the request. Do not run the git commands yourself, and never commit or push to a repository whose working branch is not confirmed: the command already refuses and asks the manager.'
+      : 'Do the request within your granted access, then report with `aom devops-done` or `aom devops-approval`.',
   );
   return `${out.join('\n\n')}\n`;
 }

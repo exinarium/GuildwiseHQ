@@ -398,6 +398,7 @@ interface DevopsBrief extends Brief {
     summary: string;
     access: { allowInstall: boolean; allowDocker: boolean; allowedPaths: string[]; sudo: boolean };
     approval?: { action: string };
+    hygiene?: { repos: unknown[] };
   };
 }
 
@@ -429,6 +430,18 @@ async function devopsMain(brief: DevopsBrief): Promise<number> {
   }
   if (d.summary.includes('[no_report]')) {
     emit({ kind: 'final', text: 'mock devops finished without reporting' });
+    return 0;
+  }
+  // Repository hygiene: the deterministic `aom hygiene run` does the git work (and ends the request).
+  if (d.hygiene) {
+    const h = aom(['hygiene', 'run']);
+    emit({
+      kind: 'final',
+      text:
+        h.code === 0
+          ? `mock devops hygiene: ${h.out.trim().split('\n')[0]}`
+          : `mock devops hygiene failed: ${(h.err || h.out).trim()}`,
+    });
     return 0;
   }
   const r =
@@ -637,7 +650,7 @@ async function reporterTaskMain(
       '## Failures',
       ...list([
         ...(d?.signals ?? [])
-          .filter((s) => ['rework', 'finalize_failures'].includes(s.kind))
+          .filter((s) => ['rework', 'finalize_failures', 'repo_hygiene'].includes(s.kind))
           .map((s) => s.subject.title),
         ...(d?.failures ?? []).map((f) => `${f.ref}: ${f.failedShifts} failed shifts`),
       ]),

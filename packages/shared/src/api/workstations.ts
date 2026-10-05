@@ -3,6 +3,17 @@ import { DevOpsAccessSchema } from '../events/devops.ts';
 import { RuntimeInfoSchema } from '../protocol/runner.ts';
 import { IsoTime } from './common.ts';
 
+/** Repository hygiene of a workstation: its cadence and the last run (docs/design/phases.md addendum). */
+export const WorkstationHygieneSchema = z.object({
+  intervalHours: z.number().int().nonnegative(),
+  lastRunAt: IsoTime.nullable(),
+  nextRunAt: IsoTime.nullable(),
+  lastRequestId: z.uuid().nullable(),
+  lastStatus: z.string().nullable(),
+  openFindings: z.number().int().nonnegative(),
+});
+export type WorkstationHygiene = z.infer<typeof WorkstationHygieneSchema>;
+
 export const WorkstationDtoSchema = z.object({
   id: z.uuid(),
   userId: z.uuid(),
@@ -20,6 +31,7 @@ export const WorkstationDtoSchema = z.object({
   /** M3: what this workstation's DevOps engineer may do without asking, and who it is. */
   devopsAccess: DevOpsAccessSchema.optional(),
   devopsAgentId: z.uuid().nullable().optional(),
+  hygiene: WorkstationHygieneSchema.optional(),
   /** Shifts running now and how many this workstation takes at once (`limit` is null while it is offline). */
   shifts: z
     .object({ running: z.number().int().nonnegative(), limit: z.number().int().positive().nullable() })

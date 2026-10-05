@@ -58,6 +58,10 @@ export const deskEvents = [
       subkind: z.string().optional(),
       /** M7: where in the escalation chain the question starts (default: the desk). */
       chainLevel: ChainLevelSchema.optional(),
+      /** Part B: held for the BA's triage until `deadline` (non-urgent questions of the DevOps engineer). */
+      triage: z.object({ deadline: z.iso.datetime() }).optional(),
+      /** Structured data the answer handler needs (the working-branch question: repo and reason). */
+      data: z.record(z.string(), z.unknown()).optional(),
     }),
   ),
   defineEvent(

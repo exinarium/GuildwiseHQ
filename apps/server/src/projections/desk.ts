@@ -141,6 +141,8 @@ export const deskProjectors: Record<string, Projector> = {
       askedBy: p.askedBy,
       pinned: p.pinned,
       dedupLedgerIds: p.dedupLedgerIds,
+      triageDeadline: p.triage?.deadline,
+      data: p.data,
     });
   },
 

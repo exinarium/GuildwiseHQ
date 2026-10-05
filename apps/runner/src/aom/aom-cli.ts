@@ -21,6 +21,7 @@ import {
   type ShiftBrief,
   type ShiftReport,
 } from '@aom/shared';
+import { runHygiene } from '../devops/hygiene.ts';
 
 export interface AomIo {
   out(s: string): void;
@@ -665,6 +666,25 @@ const VERBS: Record<string, Verb> = {
     const summary = textFlag(ctx, p, 'summary', true) as string;
     return report(ctx, outcome('devops_done', summary, { summary, commands: many(p, 'command') }));
   },
+  /**
+   * `aom hygiene run` (the DevOps engineer, repository hygiene request): tidies the repositories of the request with
+   * deterministic git (commit to the confirmed working branch, pull, push, delete merged agent branches), reports what it
+   * could not resolve and ends the request like `aom devops-done`.
+   */
+  hygiene: async (ctx, p) => {
+    if (p.positionals[0] !== 'run') throw new UsageError('usage: aom hygiene run [--note "<text>"]');
+    const brief = (await rpc(ctx, 'card.get')) as { devops?: DevopsShift };
+    const spec = brief.devops?.hygiene;
+    if (!spec) throw new UsageError('this request is not a repository hygiene request: nothing to run');
+    const run = await runHygiene(spec);
+    const note = textFlag(ctx, p, 'note', false)?.trim();
+    const summary = `${run.summary}${note ? `\n\n${note}` : ''}`;
+    ctx.io.out(`${summary}\n`);
+    return report(
+      ctx,
+      outcome('devops_done', summary, { summary, commands: run.commands, hygiene: run.report }),
+    );
+  },
   answer: async (ctx, p) => {
     const itemId = one(p, 'item');
     if (!itemId)
@@ -793,6 +813,7 @@ export const USAGE = `usage: aom <verb> [options]
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed
+  hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
 `;
 
 /** Runs the CLI; returns the exit code (0 ok, 1 error or rejected report, 2 not available). */
