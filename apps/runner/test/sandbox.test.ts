@@ -1,8 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runnerPaths } from '../src/paths.ts';
-import { ensureSandbox, sandboxEnv, wipeAgent } from '../src/sandbox/sandbox.ts';
+import { agentTmpDir, ensureSandbox, sandboxEnv, wipeAgent } from '../src/sandbox/sandbox.ts';
 import { cleanupTmp, sh, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -43,4 +43,24 @@ describe('sandbox', () => {
     expect(existsSync(paths.agentDir(AGENT))).toBe(false);
     expect(await wipeAgent(paths, AGENT)).toEqual({ removed: false });
   });
+
+  // Real use: Chromium failed with "Socket path too long" because TMPDIR lived deep under the data dir; Unix socket
+  // paths are limited to 108 bytes and Claude Code nests `claude-<uid>` under TMPDIR.
+  it.skipIf(process.platform === 'win32')(
+    'TMPDIR is a short private dir under /tmp, removed when the agent is wiped',
+    async () => {
+      const paths = runnerPaths(tmp());
+      const id = '019e3f6a-7b1c-7a2d-8c3e-0123456789ab';
+      const sb = await ensureSandbox(paths, id, 'Kat');
+      expect(sb.tmp).toMatch(/^\/tmp\/aom-[0-9a-f]{10}$/);
+      expect(sandboxEnv(sb).TMPDIR).toBe(sb.tmp);
+      expect(statSync(sb.tmp).mode & 0o777).toBe(0o700);
+      const chromiumSocket = `${sb.tmp}/claude-1000/org.chromium.Chromium.AbC123/SingletonSocket`;
+      expect(Buffer.byteLength(chromiumSocket)).toBeLessThan(108);
+      // another runner data dir gets a different dir for the same agent id
+      expect(agentTmpDir(runnerPaths(tmp()), id)).not.toBe(sb.tmp);
+      await wipeAgent(paths, id);
+      expect(existsSync(sb.tmp)).toBe(false);
+    },
+  );
 });

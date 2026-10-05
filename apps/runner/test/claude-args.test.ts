@@ -456,4 +456,13 @@ describe('browser roles and read-only worktrees in the sandbox', () => {
     const fs = forRole('reviewer', reviewer.permissions, { cwd: '/data/agents/a1/scratch' })?.filesystem;
     expect(fs?.denyWrite).not.toContain('/data/agents/a1/scratch');
   });
+
+  it("other agents' private temp dirs are denied to sandboxed commands", () => {
+    const s2 = settings(builder.permissions, {
+      otherAgentTmps: ['/tmp/aom-aaaaaaaaaa', '/tmp/aom-bbbbbbbbbb'],
+    });
+    expect(s2.sandbox?.filesystem.denyRead).toEqual(
+      expect.arrayContaining(['/tmp/aom-aaaaaaaaaa', '/tmp/aom-bbbbbbbbbb']),
+    );
+  });
 });

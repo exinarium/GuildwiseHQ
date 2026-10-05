@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -6,6 +6,7 @@ import { execa } from 'execa';
 import type { z } from 'zod';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { agentTmpDir } from '../sandbox/sandbox.ts';
 import { selfCommand } from '../shims.ts';
 import {
   agentEnv,
@@ -170,6 +171,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       mode: this.cfg.sandbox,
       extraAllowedDomains: this.cfg.extraAllowedDomains,
       toolchainReadPaths: toolchainReadPaths(this.cfg.toolchainPaths ?? []),
+      otherAgentTmps: this.paths ? otherAgentTmps(this.paths, dirname(input.sandbox.home)) : [],
     };
   }
 
@@ -293,4 +295,13 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       // already linked by a concurrent shift
     }
   }
+}
+
+/** Private temp dirs of every other agent on this runner (they live under /tmp, outside the denied data dir). */
+function otherAgentTmps(paths: RunnerPaths, ownAgentDir: string): string[] {
+  const agentsDir = dirname(ownAgentDir);
+  if (!existsSync(agentsDir)) return [];
+  return readdirSync(agentsDir)
+    .filter((id) => join(agentsDir, id) !== ownAgentDir)
+    .map((id) => agentTmpDir(paths, id));
 }

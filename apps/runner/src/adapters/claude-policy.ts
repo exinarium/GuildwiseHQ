@@ -39,6 +39,8 @@ export interface ClaudePolicyContext {
   realHome: string;
   mode: SandboxMode;
   extraAllowedDomains?: string[];
+  /** Other agents' private temp dirs (under /tmp, outside the data dir): never readable by this agent. */
+  otherAgentTmps?: string[];
   /** Toolchain dirs (the Node install, configured toolchainPaths) sandboxed commands may read despite the read block. */
   toolchainReadPaths?: string[];
   /** OS user id (default: the runner's), for `/run/user/<uid>`. Injectable for tests. */
@@ -228,6 +230,7 @@ function sandboxBlock(
     // the whole data dir: config.json (runner token, Jira/provider credentials), the outbox, every other agent's
     // sandbox and every other card's worktree; the agent's own areas are re-opened below.
     ctx.runnerRoot,
+    ...(ctx.otherAgentTmps ?? []),
     ...HOME_SECRETS.map((p) => join(ctx.realHome, p)),
     ...(profile.browser ? browserMask(ctx) : []),
   ];
