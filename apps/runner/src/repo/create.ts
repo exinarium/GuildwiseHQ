@@ -195,7 +195,7 @@ export class RepoCreator {
       await this.git(target, ['add', 'README.md']);
       const hasId = (await this.git(target, ['config', 'user.email'])).exitCode === 0;
       const commit = await this.git(target, [
-        ...(hasId ? [] : ['-c', 'user.name=Agent Org Manager', '-c', 'user.email=aom@localhost']),
+        ...(hasId ? [] : ['-c', 'user.name=Guildwise HQ', '-c', 'user.email=aom@localhost']),
         'commit',
         '-m',
         'Initial commit',

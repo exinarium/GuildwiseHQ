@@ -1,4 +1,4 @@
-# Agent Org Manager — v1 Build Plan
+# Guildwise HQ — v1 Build Plan
 
 **Status: All 10 milestones (M1–M10) implemented and green.**
 

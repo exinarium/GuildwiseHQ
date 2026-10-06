@@ -76,7 +76,7 @@ describe('the leak check for outbound drafts', () => {
     'Per the ledger we use tabs.',
     'The builder implemented it.',
     'The BA drafted this.',
-    'Agent Org Manager did it.',
+    'Guildwise HQ did it.',
     'Our agents wrote it.',
   ])('finds internal workings: %s', (text) => {
     expect(checkOutboundLeaks(text).ok).toBe(false);

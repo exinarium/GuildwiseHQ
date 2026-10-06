@@ -28,7 +28,7 @@ services:
       # The URL users type, including the port when it is not 443. Cookies are Secure when it starts with https.
       AOM_PUBLIC_ORIGIN: ${AOM_PUBLIC_ORIGIN:?set AOM_PUBLIC_ORIGIN in .env}
       AOM_SMTP_URL: ${AOM_SMTP_URL:-smtp://mailpit:1025}
-      AOM_MAIL_FROM: ${AOM_MAIL_FROM:-Guildwise <noreply@aom.local>}
+      AOM_MAIL_FROM: ${AOM_MAIL_FROM:-Guildwise HQ <noreply@aom.local>}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     expose:
       - "4600"

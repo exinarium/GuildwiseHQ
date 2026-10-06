@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Agent Org Manager: one image with the API server and the built web app (served by the server).
+# Guildwise HQ: one image with the API server and the built web app (served by the server).
 
 FROM node:22.23-bookworm-slim AS build
 RUN npm install -g pnpm@12.8.1

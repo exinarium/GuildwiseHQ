@@ -1,7 +1,7 @@
 import type { MailMessage } from './mailer.ts';
 
 // User-facing product name (the web app keeps the same constant in apps/web/src/brand.ts).
-const PRODUCT = 'Guildwise';
+const PRODUCT = 'Guildwise HQ';
 
 const esc = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);

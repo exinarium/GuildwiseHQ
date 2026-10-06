@@ -1,4 +1,4 @@
-# Agent Org Manager — v1 Architecture
+# Guildwise HQ — v1 Architecture
 
 Status: design baseline for v1 · Source of truth for product behaviour: `docs/SPEC.md` · Build order: `docs/PLAN.md`
 

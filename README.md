@@ -1,8 +1,8 @@
-# Guildwise (formerly Agent Org Manager)
+# Guildwise HQ
 
-_Guildwise: your guild of AI agents. Many hands. One master._
+_Guildwise HQ: your guild of AI agents. Many hands. One master._
 
-Guildwise is the product name you see in the web app, the emails and the guides. The internal identifiers keep their names: the `@aom/*` packages, the `aom` CLI, `aom-runner`, the `AOM_*` environment variables and the database.
+Guildwise HQ is the product name you see in the web app, the emails and the guides. The internal identifiers keep their names: the `@aom/*` packages, the `aom` CLI, `aom-runner`, the `AOM_*` environment variables and the database.
 
 A self-hosted site for running an organization of AI coding agents. A manager creates projects and cards; builder, reviewer and other agents claim cards exclusively, work in git worktrees on the manager's own workstations (through a small runner), and hand work off through a board. State is event sourced in Postgres.
 

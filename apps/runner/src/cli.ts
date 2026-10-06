@@ -249,7 +249,7 @@ async function reposList(opts: { dataDir?: string }): Promise<void> {
 }
 
 export function buildProgram(): Command {
-  const program = new Command('aom-runner').description('Agent Org Manager runner').version(RUNNER_VERSION);
+  const program = new Command('aom-runner').description('Guildwise HQ runner').version(RUNNER_VERSION);
   program
     .command('pair')
     .description('pair this machine with the server using a code from the Workstations page')

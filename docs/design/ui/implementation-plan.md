@@ -219,7 +219,7 @@ Per README: `docker compose -f docker-compose.dev.yml up -d`, then `pnpm e2e` (t
 
 ## Decisions needed from the owner
 
-1. Name **Guildwise** (chosen by the owner; see `name.md`) (alternatives in `name.md`): also whether the README/USER-GUIDE/server emails should be renamed, and whether "formerly Agent Org Manager" appears on the login page.
+1. Name **Guildwise HQ** (chosen by the owner; see `name.md`): README, USER-GUIDE and server emails are renamed; no "formerly" wording anywhere.
 2. Always-dark sidebar with lime accent (recommended) versus a sidebar that follows the theme.
 3. Self-hosted Geist fonts and `lucide-react` (two new dependency families), or system font + hand-made icons.
 4. Mobile navigation: drawer only (recommended) versus adding a bottom tab bar (Board, Desk, New, Menu).

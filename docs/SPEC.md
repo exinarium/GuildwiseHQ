@@ -1,4 +1,4 @@
-# Agent Org Manager — Spec
+# Guildwise HQ — Spec
 
 Oct 2, 2026 · @Pieter
 

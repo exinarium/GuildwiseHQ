@@ -1,7 +1,7 @@
 /** The single source of truth for the product's user-facing name. A rename is an edit here plus public/brand/. */
 export const BRAND = {
-  name: 'Guildwise',
-  descriptor: 'Guildwise: your guild of AI agents',
+  name: 'Guildwise HQ',
+  descriptor: 'Guildwise HQ: your guild of AI agents',
   slogan: 'Many hands. One master.',
   domain: 'guildwisehq.com',
   storagePrefix: 'guildwise', // keys: guildwise-theme, guildwise-sidebar (public/theme-init.js mirrors the theme key)

@@ -21,7 +21,7 @@ export interface CompletionInput {
   identity?: { name: string; email: string };
 }
 
-const IDENTITY = { name: 'Agent Org Manager (aom)', email: 'aom@runner.aom.invalid' };
+const IDENTITY = { name: 'Guildwise HQ (aom)', email: 'aom@runner.aom.invalid' };
 
 const fail = (action: FinalizeResult['action'], error: string): FinalizeResult => ({
   ok: false,

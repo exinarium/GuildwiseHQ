@@ -19,7 +19,7 @@ const INTERNAL_TERMS: ReadonlyArray<readonly [string, RegExp]> = [
   ['ledger', /\bledger\b/i],
   ['role title', /\b(?:builders?|reviewers?|business\s+analyst)\b/i],
   ['role title', /\bBA\b/],
-  ['product name', /\b(?:Agent\s+Org(?:ani[sz]ation)?(?:\s+Manager)?|AOM)\b/i],
+  ['product name', /\b(?:Agent\s+Org(?:ani[sz]ation)?(?:\s+Manager)?|Guildwise(?:\s+HQ)?|AOM)\b/i],
   ['internal branch', /\baom\/[\w./-]+/i],
   ['role title', /\b(?:scouts?|curators?)\b/i],
   ['standing orders', /\bstanding\s+orders?\b/i],

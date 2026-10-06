@@ -52,7 +52,7 @@ export function renderDefinitionFile(
     definition: input.definition,
   };
   const parsed = DefinitionFileSchema.parse(doc);
-  return `# Agent Org Manager definition. Provider neutral; edit it through the Organization page, not by hand.\n${stringify(parsed, { lineWidth: 0 })}`;
+  return `# Guildwise HQ definition. Provider neutral; edit it through the Organization page, not by hand.\n${stringify(parsed, { lineWidth: 0 })}`;
 }
 
 export function parseDefinitionFile(text: string): DefinitionFile {

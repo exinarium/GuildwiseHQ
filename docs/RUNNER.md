@@ -1,4 +1,4 @@
-# Agent Org Manager — Runner Guide
+# Guildwise HQ — Runner Guide
 
 The runner is a Node.js CLI that runs on your workstation, connects to the server over WebSocket, and executes agent shifts. Each shift runs an agent in an isolated git worktree with its own home directory and config.
 
@@ -113,7 +113,7 @@ Create `~/.config/systemd/user/aom-runner.service`:
 
 ```ini
 [Unit]
-Description=Agent Org Manager Runner
+Description=Guildwise HQ Runner
 After=network-online.target
 Wants=network-online.target
 

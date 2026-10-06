@@ -3,7 +3,7 @@ import { git, hasRemote, revParse } from './git.ts';
 
 /** Rebasing rewrites commits, which needs a committer; the author of each commit is kept. */
 export const REBASE_ENV = {
-  GIT_COMMITTER_NAME: 'Agent Org Manager (aom)',
+  GIT_COMMITTER_NAME: 'Guildwise HQ (aom)',
   GIT_COMMITTER_EMAIL: 'aom@runner.aom.invalid',
 };
 

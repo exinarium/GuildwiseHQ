@@ -1,4 +1,4 @@
-# Deploying Agent Org Manager
+# Deploying Guildwise HQ
 
 Production deployment with Docker Compose, Caddy HTTPS, and Postgres. Agents run on your workstations via the runner (see `docs/RUNNER.md`).
 

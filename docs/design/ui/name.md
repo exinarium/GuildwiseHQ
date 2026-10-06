@@ -1,11 +1,11 @@
-# Name and brand: Guildwise
+# Name and brand: Guildwise HQ
 
 Only user-facing branding changes. Package names (`@aom/*`), the `aom` CLI, `aom-runner`, env vars (`AOM_*`), DB names and the repo folder stay as they are.
 
-- **Name:** Guildwise (written "Guildwise" in prose, lowercase `guildwise` in the wordmark)
-- **Descriptor:** "Guildwise: your guild of AI agents"
+- **Name:** Guildwise HQ (written "Guildwise HQ" in prose and titles, lowercase `guildwise` plus an HQ tag in the wordmark)
+- **Descriptor:** "Guildwise HQ: your guild of AI agents"
 - **Slogan:** "Many hands. One master." (login screen, marketing)
-- **Domain:** guildwisehq.com (registered). Marketing lock-up: `logo-hq.svg` ("guildwise HQ").
+- **Domain:** guildwisehq.com (registered). The full lock-up `logo-hq.svg` ("guildwise HQ"; `logo-hq-dark.svg` on dark) is the logo wherever the full name is shown (sidebar header, login, error page); the mark alone stays for the collapsed rail and favicon.
 - History: provisional name "Muster" (rejected candidates then: Brigade, Gaffer, Guildhall, Rota) was replaced by the owner's choice.
 
 ## Meaning and story
@@ -21,7 +21,7 @@ Tone: calm, competent, crafted. No medieval imagery (no shields, scrolls, banner
 | Use | Line |
 | --- | --- |
 | **Primary slogan** (login, marketing hero) | Many hands. One master. |
-| **Descriptor** (page meta description, app store line, footer) | Guildwise: your guild of AI agents |
+| **Descriptor** (page meta description, app store line, footer) | Guildwise HQ: your guild of AI agents |
 | Alternative | Your guild of AI agents. |
 | Alternative (longer marketing copy) | You set the standard. Your guild does the work. |
 | Alternative (docs, blog) | Master the craft of running agents. |
@@ -45,12 +45,10 @@ Files in this folder: `logo.svg` (mark + wordmark, wordmark in `currentColor`), 
 
 All strings come from one module, see "Brand constants" in `implementation-plan.md`.
 
-- `index.html` `<title>`: `Guildwise`. Per page: `Board · WEB · Guildwise`. Meta description: the descriptor.
-- Sidebar header (`logo-dark.svg`), login brand panel (logo, slogan, descriptor), accept-invite page, 404.
+- `index.html` `<title>`: `Guildwise HQ`. Per page: `Board · WEB · Guildwise HQ`. Meta description: the descriptor.
+- Sidebar header (`logo-hq-dark.svg`), login brand panel (logo, slogan, descriptor), accept-invite page, 404.
 - Favicon, `apple-touch-icon.png`, `theme-color` `#0D1220`.
-- Email subjects/bodies in `apps/server` (invitation mail) may still say "Agent Org Manager"; flag to the owner, out of scope for the web app.
-- README and USER-GUIDE headings: owner decision, not part of this UI work.
-- Optional login footer line "Guildwise, formerly Agent Org Manager": decision for the owner.
+- Email subject, body and From name (`apps/server/src/mail/templates.ts`, `AOM_MAIL_FROM` defaults), README and USER-GUIDE titles. No "formerly" wording anywhere (owner decision, 2026-10-06), and the product name does not appear in pull request text.
 
 ## Domain
 

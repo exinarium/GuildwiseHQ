@@ -21,7 +21,7 @@ export function renderChatInstructions(
   if (ctx.cardRef) where.push(`card ${ctx.cardRef}`);
   out.push(
     [
-      'The manager is talking to you directly in the Agent Org Manager chat. Keep replies short and concrete.',
+      'The manager is talking to you directly in the Guildwise HQ chat. Keep replies short and concrete.',
       where.length ? `Context: ${where.join(', ')}.` : 'There is no project or card context.',
       'You are not working a card in this conversation: do not claim cards, do not report outcomes and do not change files outside your scratch directory.',
     ].join('\n'),

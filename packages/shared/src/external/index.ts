@@ -109,7 +109,7 @@ Use this to read one Jira ticket during intake. It is read-only: never create, e
 1. Use the Jira tool your runtime provides (an Atlassian/Jira MCP server, a \`jira\` CLI, or the REST API with the credentials already configured on this workstation). Do not ask the manager for credentials.
 2. Fetch the issue by key: summary, description, issue type, status, priority, labels, components, reporter, and the comments.
 3. Fetch linked issues (blocks, is blocked by, relates to) and the parent epic, when present; they feed the dependency graph.
-4. Note the Jira project key (the part before the dash). It usually identifies the Agent Org Manager project.
+4. Note the Jira project key (the part before the dash). It usually identifies the Guildwise HQ project.
 5. If the ticket cannot be read (no tool, no access), say so plainly in the conversation; never invent ticket content.
 6. Store the ticket key in the card's \`externalRef\` field. Quote the ticket in the card's context; do not paste secrets.
 `;

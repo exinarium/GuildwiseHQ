@@ -1,7 +1,7 @@
 import { BRAND } from '../brand.ts';
 import { cx } from './ui/cx.ts';
 
-/** The wordmark (variant `dark` = for dark backgrounds: white letters; `light` = ink letters; `auto` follows the theme). */
+/** The full lock-up (mark, wordmark and HQ tag; variant `dark` = for dark backgrounds: white letters; `light` = ink letters; `auto` follows the theme). */
 export function Logo({
   variant = 'auto',
   height = 28,
@@ -11,10 +11,10 @@ export function Logo({
   height?: number;
   className?: string;
 }) {
-  const w = Math.round((height * 221) / 48);
+  const w = Math.round((height * 273) / 48);
   const img = (v: 'dark' | 'light', cls?: string) => (
     <img
-      src={`/brand/logo-${v}.svg`}
+      src={`/brand/logo-hq${v === 'dark' ? '-dark' : ''}.svg`}
       alt={cls ? '' : BRAND.name}
       aria-hidden={cls ? true : undefined}
       width={w}

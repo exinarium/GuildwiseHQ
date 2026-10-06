@@ -1,6 +1,6 @@
 # @aom/runner
 
-The Agent Org Manager runner: a small Node process that runs on a workstation, connects out to the server over a WebSocket and runs agent shifts (Claude Code or the token-free mock runtime) inside git worktrees. It ships two binaries:
+The Guildwise HQ runner: a small Node process that runs on a workstation, connects out to the server over a WebSocket and runs agent shifts (Claude Code or the token-free mock runtime) inside git worktrees. It ships two binaries:
 
 - `aom-runner`: pair, start, status, doctor, repos.
 - `aom`: the command an agent runs inside a shift to read its card and report back (talks to the runner over a local, per-shift-token HTTP endpoint).

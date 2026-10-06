@@ -14,7 +14,7 @@ const EnvSchema = z.object({
   AOM_HOST: z.string().default('127.0.0.1'),
   AOM_PUBLIC_ORIGIN: z.string().default('http://localhost:5173'),
   AOM_SMTP_URL: z.string().default('smtp://127.0.0.1:1025'),
-  AOM_MAIL_FROM: z.string().default('Guildwise <noreply@aom.local>'),
+  AOM_MAIL_FROM: z.string().default('Guildwise HQ <noreply@aom.local>'),
   AOM_MIGRATE_ON_BOOT: bool(true),
   AOM_SERVE_WEB: bool(false),
   AOM_WEB_DIST: z.string().optional(),

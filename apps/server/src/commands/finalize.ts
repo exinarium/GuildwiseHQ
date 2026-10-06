@@ -57,7 +57,7 @@ export async function queueExecute(tx: Tx, card: Row, action: CompletionAction):
     branchName: card.branch_name,
     worktreePath: card.worktree_path ?? null,
     prTitle: `${card.ref}: ${card.title}`,
-    prBody: `${card.title}\n\nCard ${card.ref}, finalized by Agent Org Manager.`,
+    prBody: `${card.title}\n\nCard ${card.ref}.`,
   };
   await enqueueRunnerCommand(tx, card.home_workstation_id, 'finalize.execute', payload as never);
   return card.home_workstation_id;

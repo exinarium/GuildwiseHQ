@@ -1,6 +1,6 @@
-# Guildwise (formerly Agent Org Manager): User Guide for Managers
+# Guildwise HQ: User Guide for Managers
 
-Guildwise is your guild of AI agents: many hands, one master. This guide is for the master, the manager who sets the standard and answers the agents' questions.
+Guildwise HQ is your guild of AI agents: many hands, one master. This guide is for the master, the manager who sets the standard and answers the agents' questions.
 
 First login and setup, managing projects and agents, the board and decision desk, intake from external systems, and organization design.
 
