@@ -46,6 +46,7 @@ import { devopsRoutes } from './routes/devops.ts';
 import { digestRoutes } from './routes/digests.ts';
 import { hrRoutes } from './routes/hr.ts';
 import { intakeRoutes } from './routes/intakes.ts';
+import { interestRoutes } from './routes/interests.ts';
 import { invitationRoutes } from './routes/invitations.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
 import { outboundRoutes } from './routes/outbound.ts';
@@ -266,6 +267,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(sharingRoutes(ctx));
   await app.register(testingRoutes(ctx));
   await app.register(scheduleRoutes(ctx));
+  await app.register(interestRoutes(ctx));
   await app.register(digestRoutes(ctx));
   await app.register(researchRoutes(ctx));
   await app.register(intakeRoutes(ctx));

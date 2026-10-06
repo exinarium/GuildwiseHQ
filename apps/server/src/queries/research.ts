@@ -28,12 +28,14 @@ export async function listPublications(
   db: Queryable,
   userId: string,
   projectId?: string,
+  interestId?: string,
 ): Promise<PublicationDto[]> {
   const r = await rows(
     db,
     `${SELECT} WHERE r.project_id IN (SELECT project_id FROM project_members WHERE user_id=$1 AND status='active')
-       AND ($2::uuid IS NULL OR r.project_id=$2) ORDER BY r.event_seq DESC`,
-    [userId, projectId ?? null],
+       AND ($2::uuid IS NULL OR r.project_id=$2) AND ($3::uuid IS NULL OR c.interest_id=$3)
+     ORDER BY r.event_seq DESC`,
+    [userId, projectId ?? null, interestId ?? null],
   );
   return r.map(toDto);
 }

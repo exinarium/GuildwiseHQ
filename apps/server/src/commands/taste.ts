@@ -5,11 +5,14 @@ import {
   renderFeedEntries,
   renderTasteEntry,
   renderTasteRule,
+  renderTasteSeedSection,
   TASTE_FILE,
   TASTE_HEADER,
+  TASTE_SEED_SECTION_ID,
+  type TasteSeedLine,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
-import { one } from '../db/sql.ts';
+import { one, rows } from '../db/sql.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { projectVault } from './decisions.ts';
 import { enqueueVaultWrite } from './vaults.ts';
@@ -80,6 +83,28 @@ export function registerTasteHook(ctx: Ctx): () => void {
           TASTE_HEADER,
           `aom: taste ${ev.payload.verdict} ${item.title}`.slice(0, 100),
         );
+      } else if (ev.type === 'TasteSeedSet') {
+        // The managed `seed` section of taste.md mirrors the explicit rules (the brief carries them either way).
+        const target = await projectVault(ctx.pool, ev.payload.projectId);
+        if (!target?.vaultId) return;
+        const names = Object.fromEntries(
+          (
+            await rows<{ id: string; name: string }>(
+              ctx.pool,
+              'SELECT id, name FROM interests WHERE feed_project_id=$1',
+              [ev.payload.projectId],
+            )
+          ).map((r) => [r.id, r.name]),
+        );
+        const r = await enqueueVaultWrite(ctx, ctx.pool, target.vaultId, {
+          path: `${target.folder}/${TASTE_FILE}`,
+          mode: 'section',
+          section: { id: TASTE_SEED_SECTION_ID, version: ev.payload.version },
+          content: renderTasteSeedSection(ev.payload.rules as TasteSeedLine[], names),
+          header: TASTE_HEADER,
+          commitMessage: `aom: taste rules v${ev.payload.version}`,
+        });
+        if (r.queued && r.workstationId) await ctx.services.gateway.deliverPending(r.workstationId);
       } else if (ev.type === 'DeskItemResolved' && ev.payload.resolution === 'approved') {
         const d = await one(
           ctx.pool,

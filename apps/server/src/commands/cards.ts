@@ -22,7 +22,7 @@ import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { badRequest, conflict, forbidden, unprocessable } from '../errors.ts';
+import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { cardMessage, projectScope, userActor } from './common.ts';
@@ -120,6 +120,19 @@ export async function createCardIn(
     );
   }
   assertNoMockFields(ctx, req.fields);
+  if (req.interestId) {
+    // "Research this": the interest must be visible and its research (or feed) project must be the card's project.
+    const interest = await one(
+      tx,
+      `SELECT feed_project_id, research_project_id FROM interests WHERE id=$1
+          AND (feed_project_id IN (SELECT project_id FROM project_members WHERE user_id=$2 AND status='active')
+            OR research_project_id IN (SELECT project_id FROM project_members WHERE user_id=$2 AND status='active'))`,
+      [req.interestId, user.id],
+    );
+    if (!interest) throw notFound('interest not found');
+    if (interest.feed_project_id !== project.id && interest.research_project_id !== project.id)
+      throw badRequest('interest_project_mismatch', "the card's project is not a project of this interest");
+  }
   const parsed = parseCardFields(def.fieldSet, { ...emptyFields(def.fieldSet), ...req.fields });
   if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
 
@@ -170,6 +183,7 @@ export async function createCardIn(
           status: 'draft',
           fields: parsed.data,
           ownerUserId: user.id,
+          ...(req.interestId ? { interestId: req.interestId } : {}),
           origin: acting.origin ?? 'manual',
           scheduled: false,
           repoId,

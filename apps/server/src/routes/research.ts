@@ -14,7 +14,14 @@ export function researchRoutes(ctx: Ctx) {
       { schema: { querystring: PublicationsQuerySchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        return { publications: await listPublications(ctx.pool, s.user.id, req.query.projectId) };
+        return {
+          publications: await listPublications(
+            ctx.pool,
+            s.user.id,
+            req.query.projectId,
+            req.query.interestId,
+          ),
+        };
       },
     );
   };

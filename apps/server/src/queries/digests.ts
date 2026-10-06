@@ -10,7 +10,7 @@ import {
   TASTE_HEADER,
   type TasteResponse,
 } from '@aom/shared';
-import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
+import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 
 const SELECT = `SELECT i.*, c.ref AS card_ref, p.key AS project_key FROM digest_items i
   JOIN cards c ON c.id = i.card_id JOIN projects p ON p.id = i.project_id`;
@@ -40,13 +40,14 @@ export const toDigestDto = (r: Row): DigestItemDto => ({
 export async function listDigestItems(
   db: Queryable,
   userId: string,
-  opts: { projectId?: string | undefined; status: 'unrated' | 'all' },
+  opts: { projectId?: string | undefined; interestId?: string | undefined; status: 'unrated' | 'all' },
 ): Promise<DigestItemDto[]> {
   const r = await rows(
     db,
     `${SELECT} WHERE ${VISIBLE} AND ($2::uuid IS NULL OR i.project_id = $2)
-       AND ($3 = 'all' OR i.verdict IS NULL) ORDER BY i.event_seq, i.position`,
-    [userId, opts.projectId ?? null, opts.status],
+       AND ($3 = 'all' OR i.verdict IS NULL) AND ($4::uuid IS NULL OR c.interest_id = $4)
+     ORDER BY i.event_seq, i.position`,
+    [userId, opts.projectId ?? null, opts.status, opts.interestId ?? null],
   );
   return r.map(toDigestDto);
 }
@@ -97,6 +98,24 @@ export async function tasteFor(db: Queryable, project: Row): Promise<TasteRespon
         AND answer_option='approved'`,
     [project.id],
   );
+  const seed = await one(db, 'SELECT rules FROM taste_seeds WHERE project_id=$1', [project.id]);
+  const seedRules = (
+    (seed?.rules as Array<{ text: string; interestId: string | null }> | undefined) ?? []
+  ).filter((r) => r.text.trim());
+  const names = new Map(
+    (
+      await rows<{ id: string; name: string }>(
+        db,
+        'SELECT id, name FROM interests WHERE feed_project_id=$1',
+        [project.id],
+      )
+    ).map((r) => [r.id, r.name]),
+  );
+  const seedLines = seedRules.map((r) =>
+    renderTasteRule(
+      r.interestId && names.has(r.interestId) ? `${r.text} (${names.get(r.interestId)})` : r.text,
+    ).trimEnd(),
+  );
   const entries = [
     ...rated.map((r) => ({
       at: new Date(r.rated_at).getTime(),
@@ -114,10 +133,12 @@ export async function tasteFor(db: Queryable, project: Row): Promise<TasteRespon
       line: renderTasteRule(r.body).trimEnd(),
     })),
   ].sort((a, b) => a.at - b.at);
-  const lines = entries.map((e) => e.line);
+  // Explicit rules (set on the Interests page) come first and win; rating lines follow, oldest first.
+  const lines = [...seedLines, ...entries.map((e) => e.line)];
   return {
     path: `${folder}/${TASTE_FILE}`,
     lines,
+    seedCount: seedLines.length,
     content: lines.length ? `${TASTE_HEADER}${lines.join('\n')}\n` : '',
   };
 }
