@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { phasePass } from '../src/dispatcher/phases.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
-import { addMember, type Member } from './helpers/members.ts';
+import { addMember, connectMemberRunner, type Member } from './helpers/members.ts';
 import { pipeline, testFail } from './helpers/pipeline.ts';
 import { seed } from './helpers/seed.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
@@ -11,6 +11,7 @@ import { createWorld, ok, type World } from './helpers/world.ts';
 let w: World;
 let r: FakeRunner;
 let member: Member;
+let memberRunner: FakeRunner;
 let local: any;
 let remote: any;
 
@@ -18,6 +19,7 @@ beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false', AOM_MOCK_UI: 'true' } });
   r = await w.connectRunner();
   member = await addMember(w, 'mgr');
+  memberRunner = await connectMemberRunner(w, member);
   local = await ok<any>(
     owner('POST', `/api/projects/${w.projectId}/deploy-targets`, {
       name: 'local',
@@ -40,6 +42,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   r.close();
+  memberRunner.close();
   await w.t.close();
   await closeAdminPool();
 });
@@ -380,5 +383,78 @@ describe('running the follow-ups in order (no BA: template briefs)', () => {
     await q(`UPDATE agents SET status='active' WHERE workstation_id=$1 AND is_devops`, [
       member.workstationId,
     ]);
+  });
+});
+
+describe('a local deploy skips workstations that are offline', () => {
+  it('skips the offline workstation, lists it in the message and the results, and sends the rest', async () => {
+    const { phase, itemId } = await awaitingApproval('Offline skip', [
+      { kind: 'deploy', targetId: local.id },
+      { kind: 'custom', instruction: 'After' },
+    ]);
+    await approve(itemId);
+    await dispatcher().runPass();
+    await q(`UPDATE workstations SET connected=false WHERE id=$1`, [member.workstationId]);
+    await phasePass(w.t.app.ctx);
+    const f1 = (await followups(phase.id))[0]!;
+    expect(f1.status).toBe('running');
+    const reqs = await requestsOf(f1.id);
+    expect(reqs.map((x) => x.workstation_id)).toEqual([w.workstationId]);
+    const notes = (
+      await q(
+        `SELECT body FROM thread_messages WHERE thread_id = (SELECT thread_id FROM phases WHERE id=$1)`,
+        [phase.id],
+      )
+    ).map((m) => m.body);
+    expect(notes.join('\n')).toContain('Skipped, offline when the deploy started: mgr-box');
+    await completeRequest(reqs[0]?.id, 'done', 'deployed abc1234');
+    await phasePass(w.t.app.ctx);
+    const done = (await followups(phase.id))[0]!;
+    expect(done.status).toBe('succeeded');
+    expect(done.result_summary).toContain('Skipped, offline when the deploy started: mgr-box');
+    expect(done.evidence.skippedOffline).toEqual([
+      expect.objectContaining({ id: member.workstationId, name: 'mgr-box' }),
+    ]);
+    await q(`UPDATE workstations SET connected=true WHERE id=$1`, [member.workstationId]);
+  });
+
+  it('fails at once when every workstation is offline', async () => {
+    const { phase, itemId } = await awaitingApproval('All offline', [{ kind: 'deploy', targetId: local.id }]);
+    await approve(itemId);
+    await dispatcher().runPass();
+    await q(`UPDATE workstations SET connected=false WHERE id = ANY($1::uuid[])`, [
+      [w.workstationId, member.workstationId],
+    ]);
+    await phasePass(w.t.app.ctx);
+    const f1 = (await followups(phase.id))[0]!;
+    expect(f1.status).toBe('failed');
+    expect(f1.result_summary).toContain('offline');
+    await q(`UPDATE workstations SET connected=true WHERE id = ANY($1::uuid[])`, [
+      [w.workstationId, member.workstationId],
+    ]);
+  });
+});
+
+describe('GET /api/projects/:id/workstations', () => {
+  it('lists the workstations of every member to any member, and refuses outsiders', async () => {
+    const mine = await ok<any>(owner('GET', `/api/projects/${w.projectId}/workstations`));
+    expect(mine.workstations.map((x: any) => [x.name, x.mine])).toEqual(
+      expect.arrayContaining([
+        ['mgr-box', false],
+        [expect.any(String), true],
+      ]),
+    );
+    expect(Object.keys(mine.workstations[0]).sort()).toEqual(
+      ['connected', 'hasDevops', 'id', 'mine', 'name', 'ownerId', 'ownerName'].sort(),
+    );
+    const asMember = await ok<any>(
+      w.t.req('GET', `/api/projects/${w.projectId}/workstations`, { cookie: member.cookie }),
+    );
+    expect(asMember.workstations.find((x: any) => x.name === 'mgr-box').mine).toBe(true);
+    const stranger = await w.t.userSession(`stranger-ws-${Date.now()}@example.com`);
+    const res = await w.t.req('GET', `/api/projects/${w.projectId}/workstations`, {
+      cookie: stranger.cookie,
+    });
+    expect([403, 404]).toContain(res.status);
   });
 });

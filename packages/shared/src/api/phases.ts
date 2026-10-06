@@ -55,6 +55,24 @@ export type PatchDeployTargetRequest = z.infer<typeof PatchDeployTargetRequestSc
 export const DeployTargetsResponseSchema = z.object({ targets: z.array(DeployTargetDtoSchema) });
 export type DeployTargetsResponse = z.infer<typeof DeployTargetsResponseSchema>;
 
+/** A workstation of an active project member, as the remote deploy-target form lists it (no paths or hostnames). */
+export const ProjectWorkstationSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  ownerId: z.uuid(),
+  ownerName: z.string(),
+  /** True when the workstation belongs to the viewer. */
+  mine: z.boolean(),
+  connected: z.boolean(),
+  /** Has an active DevOps engineer: a deploy needs one. */
+  hasDevops: z.boolean(),
+});
+export type ProjectWorkstation = z.infer<typeof ProjectWorkstationSchema>;
+export const ProjectWorkstationsResponseSchema = z.object({
+  workstations: z.array(ProjectWorkstationSchema),
+});
+export type ProjectWorkstationsResponse = z.infer<typeof ProjectWorkstationsResponseSchema>;
+
 // -------------------------------------------------------------------------------------------- phases
 
 export const PhaseRefDtoSchema = z.object({

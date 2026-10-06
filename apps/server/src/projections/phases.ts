@@ -300,8 +300,17 @@ export const phaseProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `UPDATE phase_followups SET status='running', delegate=$2, devops_request_ids=$3, regression_card_ids=$4,
-              ba_task_id=$5, started_at=$6, updated_at=$6 WHERE id=$1`,
-      [p.followupId, p.delegate, p.devopsRequestIds, p.regressionCardIds, p.baTaskId ?? null, e.createdAt],
+              ba_task_id=$5, started_at=$6, updated_at=$6,
+              evidence = COALESCE(evidence, '{}'::jsonb) || $7::jsonb WHERE id=$1`,
+      [
+        p.followupId,
+        p.delegate,
+        p.devopsRequestIds,
+        p.regressionCardIds,
+        p.baTaskId ?? null,
+        e.createdAt,
+        JSON.stringify(p.skippedOffline?.length ? { skippedOffline: p.skippedOffline } : {}),
+      ],
     );
   },
 

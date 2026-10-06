@@ -13,6 +13,8 @@ import {
   PhaseDetailDtoSchema,
   type PhasesResponse,
   PhasesResponseSchema,
+  type ProjectWorkstationsResponse,
+  ProjectWorkstationsResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, patch, post, put } from '../client.ts';
@@ -119,6 +121,20 @@ export function useDeployTargets(projectId: string | undefined) {
     queryFn: async () =>
       (await get<DeployTargetsResponse>(`/projects/${projectId}/deploy-targets`, DeployTargetsResponseSchema))
         .targets,
+  });
+}
+
+export function useProjectWorkstations(projectId: string | undefined) {
+  return useQuery({
+    queryKey: ['project-workstations', projectId],
+    enabled: !!projectId,
+    queryFn: async () =>
+      (
+        await get<ProjectWorkstationsResponse>(
+          `/projects/${projectId}/workstations`,
+          ProjectWorkstationsResponseSchema,
+        )
+      ).workstations,
   });
 }
 

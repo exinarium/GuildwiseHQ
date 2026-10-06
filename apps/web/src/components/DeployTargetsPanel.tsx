@@ -1,7 +1,11 @@
 import type { DeployTargetKind } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
-import { useAddDeployTarget, useDeployTargets, useRemoveDeployTarget } from '../api/queries/phases.ts';
-import { useWorkstations } from '../api/queries/workstations.ts';
+import {
+  useAddDeployTarget,
+  useDeployTargets,
+  useProjectWorkstations,
+  useRemoveDeployTarget,
+} from '../api/queries/phases.ts';
 import { Badge, Button, ErrorBox, Panel, Select, TextArea, TextInput } from './ui.tsx';
 
 /**
@@ -11,7 +15,7 @@ import { Badge, Button, ErrorBox, Panel, Select, TextArea, TextInput } from './u
  */
 export function DeployTargetsPanel({ projectId }: { projectId: string }) {
   const targets = useDeployTargets(projectId);
-  const workstations = useWorkstations();
+  const workstations = useProjectWorkstations(projectId);
   const add = useAddDeployTarget(projectId);
   const remove = useRemoveDeployTarget(projectId);
   const [name, setName] = useState('');
@@ -95,7 +99,8 @@ export function DeployTargetsPanel({ projectId }: { projectId: string }) {
               <option value="">Choose a workstation</option>
               {(workstations.data ?? []).map((w) => (
                 <option key={w.id} value={w.id}>
-                  {w.name}
+                  {w.name} ({w.mine ? 'yours' : w.ownerName}){w.hasDevops ? '' : ', no DevOps engineer'}
+                  {w.connected ? '' : ', offline'}
                 </option>
               ))}
             </Select>

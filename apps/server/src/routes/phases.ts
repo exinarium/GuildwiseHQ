@@ -19,6 +19,7 @@ import { requireProjectMember } from '../authz/scope.ts';
 import {
   addDeployTarget,
   listDeployTargets,
+  listMemberWorkstations,
   removeDeployTarget,
   toTargetDto,
   updateDeployTarget,
@@ -145,6 +146,13 @@ export function phaseRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       await requireProjectMember(ctx.pool, s.user.id, req.params.id);
       return { targets: (await listDeployTargets(ctx.pool, req.params.id)).map(toTargetDto) };
+    });
+
+    // Any project member sees the workstations of every member (needed to name one in a remote deploy target).
+    app.get('/api/projects/:id/workstations', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await requireProjectMember(ctx.pool, s.user.id, req.params.id);
+      return { workstations: await listMemberWorkstations(ctx.pool, req.params.id, s.user.id) };
     });
 
     app.post(

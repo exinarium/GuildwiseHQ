@@ -157,6 +157,8 @@ export const phaseEvents = [
       devopsRequestIds: z.array(Id).default([]),
       regressionCardIds: z.array(Id).default([]),
       baTaskId: Id.optional(),
+      /** Workstations that were offline when a local deploy started: skipped and listed in the results. */
+      skippedOffline: z.array(z.object({ id: Id, name: z.string(), owner: z.string() })).optional(),
     }),
   ),
   defineEvent(

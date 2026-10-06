@@ -32,6 +32,11 @@ export const toTargetBrief = (t: Row): DeployTargetBrief => ({
   notes: t.notes,
 });
 
+const skippedText = (skipped: Workstation[]): string =>
+  skipped.length
+    ? `\nSkipped, offline when the deploy started: ${skipped.map((s) => `${s.name} (${s.owner})`).join(', ')}.`
+    : '';
+
 const targetOf = (db: Queryable, id: string | null) =>
   id ? one(db, 'SELECT * FROM deploy_targets WHERE id=$1', [id]) : Promise.resolve(undefined);
 
@@ -42,25 +47,44 @@ interface Workstation {
   name: string;
   userId: string;
   owner: string;
+  /** Connected and seen within the online window when the query ran. */
+  online: boolean;
 }
 
-const WS_SELECT = `SELECT w.id, w.name, w.user_id, u.display_name AS owner FROM workstations w
+/** A workstation counts as online when its runner is connected and was seen this recently (as everywhere else). */
+const ONLINE_WINDOW_MS = 45_000;
+
+const WS_SELECT = `SELECT w.id, w.name, w.user_id, w.connected, w.last_seen_at, u.display_name AS owner FROM workstations w
   JOIN users u ON u.id = w.user_id AND u.status = 'active'`;
 const HAS_DEVOPS = `EXISTS (SELECT 1 FROM agents a WHERE a.workstation_id = w.id AND a.is_devops AND a.status = 'active')`;
 
-const toWs = (r: Row): Workstation => ({ id: r.id, name: r.name, userId: r.user_id, owner: r.owner });
+const toWs = (r: Row, now: Date = new Date()): Workstation => ({
+  id: r.id,
+  name: r.name,
+  userId: r.user_id,
+  owner: r.owner,
+  online:
+    !!r.connected &&
+    !!r.last_seen_at &&
+    new Date(r.last_seen_at).getTime() > now.getTime() - ONLINE_WINDOW_MS,
+});
 
 /**
  * Where a deploy runs. A remote host names its workstation; "deploy to the local stack" fans out to every workstation
  * of every active project member that has a DevOps engineer (owner decision A9), the owner's first.
  */
-export async function deployWorkstations(db: Queryable, project: Row, target: Row): Promise<Workstation[]> {
+export async function deployWorkstations(
+  db: Queryable,
+  project: Row,
+  target: Row,
+  now: Date,
+): Promise<Workstation[]> {
   if (target.kind === 'remote_ssh') {
     return (
       await rows(db, `${WS_SELECT} WHERE w.id=$1 AND w.status='active' AND ${HAS_DEVOPS}`, [
         target.workstation_id,
       ])
-    ).map(toWs);
+    ).map((r) => toWs(r, now));
   }
   return (
     await rows(
@@ -70,7 +94,7 @@ export async function deployWorkstations(db: Queryable, project: Row, target: Ro
         ORDER BY (w.user_id = $2) DESC, w.paired_at, w.id`,
       [project.id, project.org_id],
     )
-  ).map(toWs);
+  ).map((r) => toWs(r, now));
 }
 
 /** A custom follow-up for DevOps: the workstation of the phase's first remote target, else the owner's most recently seen one. */
@@ -165,9 +189,19 @@ export async function startFollowup(ctx: Ctx, tx: Tx, phase: Row, project: Row, 
 
   if (delegate === 'devops') {
     let stations: Workstation[];
+    let skipped: Workstation[] = [];
     if (f.kind === 'deploy') {
       if (!target) return void (await fail('the deploy target no longer exists'));
-      stations = await deployWorkstations(tx, project, target);
+      stations = await deployWorkstations(tx, project, target, ctx.clock.now());
+      // A local deploy fans out to every member's workstation; the ones offline right now are skipped, not waited for.
+      if (target.kind !== 'remote_ssh') {
+        skipped = stations.filter((s) => !s.online);
+        stations = stations.filter((s) => s.online);
+      }
+      if (stations.length === 0 && skipped.length > 0)
+        return void (await fail(
+          `every workstation with a DevOps engineer is offline (${skipped.map((s) => `${s.name} (${s.owner})`).join(', ')})`,
+        ));
       if (stations.length === 0)
         return void (await fail(
           target.kind === 'remote_ssh'
@@ -208,6 +242,7 @@ export async function startFollowup(ctx: Ctx, tx: Tx, phase: Row, project: Row, 
               delegate,
               devopsRequestIds: requestIds,
               regressionCardIds: [],
+              skippedOffline: skipped.map((s) => ({ id: s.id, name: s.name, owner: s.owner })),
             },
           },
           actor: SYSTEM_ACTOR,
@@ -216,7 +251,7 @@ export async function startFollowup(ctx: Ctx, tx: Tx, phase: Row, project: Row, 
         phaseMessage(
           phase,
           { kind: 'system' },
-          `${prefix}: ${stations.length} DevOps request${stations.length === 1 ? '' : 's'} sent.\n${lines.map((l) => `- ${l}`).join('\n')}`,
+          `${prefix}: ${stations.length} DevOps request${stations.length === 1 ? '' : 's'} sent.\n${lines.map((l) => `- ${l}`).join('\n')}${skippedText(skipped)}`,
         ),
       ],
       { tx },
@@ -342,19 +377,25 @@ export async function followupVerdict(db: Queryable, f: Row): Promise<FollowupVe
       })),
       deployedWorkstationIds: reqs.filter((r) => r.status === 'done').map((r) => r.workstation_id),
       commands,
+      ...(f.evidence?.skippedOffline?.length ? { skippedOffline: f.evidence.skippedOffline } : {}),
     };
+    const skippedNote = (evidence.skippedOffline as Array<{ name: string; owner: string }> | undefined)
+      ?.length
+      ? `\nSkipped, offline when the deploy started: ${(evidence.skippedOffline as Array<{ name: string; owner: string }>).map((s) => `${s.name} (${s.owner})`).join(', ')}.`
+      : '';
     const failed = reqs.filter((r) => r.status === 'failed');
     const say = (r: Row) => `${r.workstation}: ${r.result_summary ?? r.status}`;
     if (failed.length)
       return {
         status: 'failed',
-        summary: `Failed on ${failed.map((r) => r.workstation).join(', ')}: ${failed.map((r) => r.result_summary ?? 'failed').join('; ')}${reqs.length > 1 ? `\n${reqs.filter((r) => r.status === 'done').length} of ${reqs.length} succeeded.` : ''}`,
+        summary: `Failed on ${failed.map((r) => r.workstation).join(', ')}: ${failed.map((r) => r.result_summary ?? 'failed').join('; ')}${reqs.length > 1 ? `\n${reqs.filter((r) => r.status === 'done').length} of ${reqs.length} succeeded.` : ''}${skippedNote}`,
         evidence,
       };
     if (reqs.length > 0 && reqs.every((r) => r.status === 'done'))
       return {
         status: 'succeeded',
-        summary: reqs.length === 1 ? (reqs[0]?.result_summary ?? 'done') : reqs.map(say).join('\n'),
+        summary:
+          (reqs.length === 1 ? (reqs[0]?.result_summary ?? 'done') : reqs.map(say).join('\n')) + skippedNote,
         evidence,
       };
     return null;

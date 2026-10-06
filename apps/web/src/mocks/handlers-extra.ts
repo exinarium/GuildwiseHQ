@@ -87,6 +87,7 @@ export const extraHandlers = [
   // Phases: none in the mock server; the pages show their empty states.
   http.get(`${A}/projects/:id/phases`, empty({ phases: [] })),
   http.get(`${A}/projects/:id/deploy-targets`, empty({ targets: [] })),
+  http.get(`${A}/projects/:id/workstations`, empty({ workstations: [] })),
   http.get(`${A}/projects/:id/followup-defaults`, empty({ followups: [] })),
   http.post(`${A}/projects/:id/phases`, unavailable),
   http.post(`${A}/projects/:id/deploy-targets`, unavailable),

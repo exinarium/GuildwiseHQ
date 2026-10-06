@@ -3,6 +3,7 @@ import {
   type CreateDeployTargetRequest,
   type DeployTargetDto,
   type PatchDeployTargetRequest,
+  type ProjectWorkstation,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -35,6 +36,38 @@ export async function listDeployTargets(db: Queryable, projectId: string): Promi
   return rows(db, `${SELECT} WHERE t.project_id=$1 AND t.removed_at IS NULL ORDER BY lower(t.name)`, [
     projectId,
   ]);
+}
+
+/**
+ * Every active workstation of every active member of the project, for the remote deploy-target form (owner decision:
+ * the target may name any member's workstation). Only what the form needs: name, owner, whether it is online and has
+ * a DevOps engineer. The caller has already been checked as a member of the project.
+ */
+export async function listMemberWorkstations(
+  db: Queryable,
+  projectId: string,
+  viewerId: string,
+): Promise<ProjectWorkstation[]> {
+  const list = await rows(
+    db,
+    `SELECT w.id, w.name, w.user_id, w.connected, u.display_name AS owner,
+            EXISTS (SELECT 1 FROM agents a WHERE a.workstation_id = w.id AND a.is_devops AND a.status = 'active') AS has_devops
+       FROM workstations w
+       JOIN project_members pm ON pm.user_id = w.user_id AND pm.project_id = $1 AND pm.status = 'active'
+       JOIN users u ON u.id = w.user_id AND u.status = 'active'
+      WHERE w.status = 'active'
+      ORDER BY (w.user_id = $2) DESC, lower(u.display_name), lower(w.name), w.id`,
+    [projectId, viewerId],
+  );
+  return list.map((w) => ({
+    id: w.id,
+    name: w.name,
+    ownerId: w.user_id,
+    ownerName: w.owner,
+    mine: w.user_id === viewerId,
+    connected: !!w.connected,
+    hasDevops: !!w.has_devops,
+  }));
 }
 
 /** A target of the project that is not removed, or a 422 naming the problem. */
