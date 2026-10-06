@@ -5,6 +5,7 @@ import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, DEVOPS, paths } from '../support/env.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
+import { expandWorkstation } from '../support/ui.ts';
 import {
   makeVault,
   originFile,
@@ -194,6 +195,7 @@ test('AC5a: a builder running `aom devops "start the app"` opens a request threa
   );
 
   await page.goto('/workstations');
+  await expandWorkstation(page.getByTestId('workstation-Dev Box'));
   const row = requestRow('start the app');
   await expect(row).toHaveAttribute('data-status', 'done');
   await row.getByRole('button').first().click();
@@ -213,6 +215,7 @@ test('AC5b: a request outside the granted access waits on an approval and resume
   const ev = await q(`SELECT payload FROM events WHERE type='DevOpsApprovalNeeded'`);
   expect(ev).toHaveLength(1);
   await page.goto('/workstations');
+  await expandWorkstation(page.getByTestId('workstation-Dev Box'));
   const row = requestRow('install docker');
   await expect(row).toHaveAttribute('data-status', 'needs_approval');
   const approval = row.getByTestId('devops-approval');
@@ -237,6 +240,7 @@ test('AC5b: a request outside the granted access waits on an approval and resume
   );
   expect(closed).toEqual([{ status: 'answered', answer_option: 'approved' }]);
   await page.goto('/workstations');
+  await expandWorkstation(page.getByTestId('workstation-Dev Box'));
   await expect(row).toHaveAttribute('data-status', 'done', { timeout: 60_000 });
   const changes = await q('SELECT 1 FROM environment_changes');
   expect(changes).toHaveLength(2);
@@ -255,6 +259,7 @@ test('AC5b: a request outside the granted access waits on an approval and resume
 
 test('AC5c: with the access granted from the workstation page the same request needs no approval', async () => {
   await page.goto('/workstations');
+  await expandWorkstation(page.getByTestId('workstation-Dev Box'));
   const panel = page.getByTestId('devops-panel-Dev Box');
   await panel.getByLabel('Install packages and tools').click();
   await panel.getByLabel('Docker', { exact: true }).click();

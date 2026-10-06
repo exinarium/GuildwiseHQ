@@ -8,7 +8,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { cardMessage, orgScope, runnerActor, SYSTEM_ACTOR, userActor } from './common.ts';
-import { devopsHireEvent } from './devops.ts';
+import { devopsHireEvent, threadMessage } from './devops.ts';
 
 const CODE_TTL_MS = 10 * 60_000;
 const MAX_ACTIVE_CODES = 3;
@@ -117,7 +117,12 @@ export async function renameWorkstation(ctx: Ctx, user: AuthSession['user'], id:
   });
 }
 
-/** Owner or admin. Releases claims held on the workstation; the gateway closes the socket (4403). */
+/**
+ * Unpair (the web app's word for unlinking): owner or admin. The workstation is marked unlinked and its runner token
+ * is revoked (no connection is accepted any more, a pending rotated token is dropped); claims held on it are
+ * released, its shifts stop, and DevOps requests that were waiting for it fail with the reason. The gateway closes
+ * the socket (4403, "workstation unpaired"), which the runner turns into a clean exit with a message.
+ */
 export async function unlinkWorkstation(ctx: Ctx, user: AuthSession['user'], id: string) {
   await withAppendTx(ctx.pool, async (tx) => {
     const ws = await one(tx, 'SELECT user_id, status FROM workstations WHERE id=$1', [id]);
@@ -197,11 +202,52 @@ export async function unlinkWorkstationIn(
         scope: orgScope(ws.user_id),
       });
     }
+    // DevOps requests that were queued or in progress for this workstation can never run: fail them with the reason.
+    const wsName = (await one<{ name: string }>(tx, 'SELECT name FROM workstations WHERE id=$1', [id]))?.name;
+    const why = `The workstation${wsName ? ` "${wsName}"` : ''} was unpaired${by === 'admin' ? ' by an administrator' : ''}, so this request cannot run. Pair the machine again and ask once more.`;
+    const requests = await rows(
+      tx,
+      `SELECT id, thread_id, approval FROM devops_requests
+        WHERE workstation_id=$1 AND status IN ('queued','running','needs_approval') ORDER BY created_at`,
+      [id],
+    );
+    for (const r of requests) {
+      events.push(
+        {
+          streamId: streamId.thread(r.id),
+          event: {
+            type: 'DevOpsRequestCompleted',
+            payload: { requestId: r.id, status: 'failed', summary: why },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: orgScope(ws.user_id),
+        },
+        threadMessage(r.thread_id, ws.user_id, { kind: 'system' }, 'system', why),
+      );
+      const deskItemId = (r.approval as { deskItemId?: string } | null)?.deskItemId;
+      if (deskItemId)
+        events.push({
+          streamId: streamId.desk(deskItemId),
+          event: {
+            type: 'DeskItemResolved',
+            payload: {
+              deskItemId,
+              resolution: 'acknowledged',
+              note: 'The workstation was unpaired; the request failed.',
+              by: { kind: 'system' },
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: orgScope(ws.user_id),
+        });
+    }
     await ctx.store.append(events, { tx });
     await exec(
       tx,
-      `UPDATE runner_commands SET status='failed', last_error='workstation unlinked' WHERE workstation_id=$1 AND status IN ('pending','sent')`,
+      `UPDATE runner_commands SET status='failed', last_error='workstation unpaired' WHERE workstation_id=$1 AND status IN ('pending','sent')`,
       [id],
     );
+    // A pending rotated token must not let the runner back in.
+    await exec(tx, 'DELETE FROM runner_token_rotations WHERE workstation_id=$1', [id]);
   }
 }

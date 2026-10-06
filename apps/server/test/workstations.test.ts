@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniqueEmail } from './helpers/app.ts';
-import { closeAdminPool } from './helpers/db.ts';
+import { closeAdminPool, q } from './helpers/db.ts';
 import { createWorld, ok, pairWorkstation, type World } from './helpers/world.ts';
 
 let w: World;
@@ -55,5 +55,34 @@ describe('workstations', () => {
       (await w.t.req('POST', `/api/workstations/${extra.workstationId}/unlink`, { cookie: w.owner.cookie }))
         .status,
     ).toBe(409);
+  });
+
+  it('unpairing fails the DevOps requests that were queued for the workstation, with the reason', async () => {
+    const box = await pairWorkstation(w.t, w.owner, 'Doomed box');
+    const req = await ok<any>(
+      w.t.req('POST', '/api/devops/requests', {
+        cookie: w.owner.cookie,
+        body: { workstationId: box.workstationId, summary: 'Install the toolchain' },
+      }),
+      201,
+    );
+    expect(req.request.status).toBe('queued');
+    await q(
+      `INSERT INTO runner_token_rotations (workstation_id, token_hash, issued_at) VALUES ($1,$2,now())`,
+      [box.workstationId, 'pending-rotation-hash'],
+    );
+    await ok(w.t.req('POST', `/api/workstations/${box.workstationId}/unlink`, { cookie: w.owner.cookie }));
+    const after = await ok<any>(
+      w.t.req('GET', `/api/devops/requests/${req.request.id}`, { cookie: w.owner.cookie }),
+    );
+    expect(after.request.status).toBe('failed');
+    expect(after.request.resultSummary).toContain('was unpaired');
+    expect(after.messages.map((m: any) => m.body).join('\n')).toContain('Pair the machine again');
+    expect(
+      (await q('SELECT 1 FROM runner_token_rotations WHERE workstation_id=$1', [box.workstationId])).length,
+    ).toBe(0);
+    expect((await q('SELECT status FROM workstations WHERE id=$1', [box.workstationId]))[0]?.status).toBe(
+      'unlinked',
+    );
   });
 });

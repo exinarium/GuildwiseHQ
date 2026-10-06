@@ -27,6 +27,8 @@ import { LedgerMatchSchema, RpcMethodSchema, ShiftReportSchema } from './ipc.ts'
 export const RUNNER_SUBPROTOCOL = 'aom.runner.v1';
 export const RUNNER_TOKEN_PREFIX = 'aomr_';
 export const WS_CLOSE = { unauthorized: 4401, forbidden: 4403, superseded: 4409 } as const;
+/** The close reason of a 4403 sent because the workstation was unpaired in the web app: the runner then stops cleanly. */
+export const UNPAIRED_CLOSE_REASON = 'workstation unpaired';
 export const HEARTBEAT_SEC = 15;
 
 const msg = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =>

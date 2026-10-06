@@ -1,12 +1,15 @@
 import type { WorkstationDto } from '@aom/shared';
-import { Server } from 'lucide-react';
-import { useState } from 'react';
+import { ChevronRight, Server, TriangleAlert } from 'lucide-react';
+import { useCallback, useId, useState } from 'react';
+import { useMe } from '../api/queries/auth.ts';
 import { usePairingCode, useUnlinkWorkstation, useWorkstations } from '../api/queries/workstations.ts';
+import { BRAND } from '../brand.ts';
 import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
 import { SandboxUnavailable, SandboxWarning } from '../components/SandboxWarning.tsx';
 import {
   Badge,
   Button,
+  ConfirmDialog,
   ConnectionDot,
   Dialog,
   EmptyState,
@@ -20,12 +23,47 @@ import { unavailableRuntimes, unsandboxedConsequence, unsandboxedRuntimes } from
 import { copyText } from '../lib/secure.ts';
 import { formatDateTime } from '../lib/time.ts';
 
+/** Which workstation rows the user has expanded, remembered per user in this browser (never required: storage may be blocked). */
+function useOpenRows(userId: string | undefined): [Set<string>, (id: string, open: boolean) => void] {
+  const key = `${BRAND.storagePrefix}-workstations-open-${userId ?? 'anon'}`;
+  const read = useCallback((): Set<string> => {
+    try {
+      const raw = localStorage.getItem(key);
+      const list: unknown = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []);
+    } catch {
+      return new Set();
+    }
+  }, [key]);
+  const [open, setOpen] = useState<Set<string>>(read);
+  const [forKey, setForKey] = useState(key);
+  if (forKey !== key) {
+    setForKey(key);
+    setOpen(read());
+  }
+  const set = (id: string, on: boolean) =>
+    setOpen((cur) => {
+      const next = new Set(cur);
+      if (on) next.add(id);
+      else next.delete(id);
+      try {
+        localStorage.setItem(key, JSON.stringify([...next]));
+      } catch {
+        /* storage blocked: the row still opens for this page */
+      }
+      return next;
+    });
+  return [open, set];
+}
+
 export function pairCommand(code: string, origin: string = location.origin): string {
   return `aom-runner pair --server ${origin} --code ${code} --name "My workstation"`;
 }
 
 export function Workstations() {
   const q = useWorkstations();
+  const me = useMe();
+  const [open, setOpen] = useOpenRows(me.data?.user.id);
   const [pairOpen, setPairOpen] = useState(false);
   return (
     <div className="mx-auto max-w-4xl">
@@ -56,7 +94,12 @@ export function Workstations() {
         {q.data
           ?.filter((w) => w.status === 'active')
           .map((w) => (
-            <WorkstationCard key={w.id} w={w} />
+            <WorkstationCard
+              key={w.id}
+              w={w}
+              expanded={open.has(w.id)}
+              onExpandedChange={(v) => setOpen(w.id, v)}
+            />
           ))}
       </ul>
       <PairDialog open={pairOpen} onOpenChange={setPairOpen} />
@@ -67,120 +110,160 @@ export function Workstations() {
 export function WorkstationCard({
   w,
   admin = false,
+  expanded: expandedProp,
+  onExpandedChange,
 }: {
   w: WorkstationDto & { ownerEmail?: string };
   admin?: boolean;
+  /** Controlled by the page (remembered per user); a card used alone keeps its own state, collapsed at first. */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
-  const unlink = useUnlinkWorkstation(admin);
+  const unpair = useUnlinkWorkstation(admin);
   const toast = useToast();
   const [confirm, setConfirm] = useState(false);
+  const [own, setOwn] = useState(false);
+  const expanded = expandedProp ?? own;
+  const setExpanded = (v: boolean) => (onExpandedChange ? onExpandedChange(v) : setOwn(v));
+  const bodyId = useId();
+  const warnings = unsandboxedRuntimes(w.runtimes).length + unavailableRuntimes(w.runtimes).length;
   return (
     <li data-testid={`workstation-${w.name}`}>
       <Panel>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-lg font-semibold text-fg">{w.name}</p>
-            <p className="text-sm text-muted">
-              {[w.platform, w.hostname, w.runnerVersion && `runner ${w.runnerVersion}`]
-                .filter(Boolean)
-                .join(' · ')}
-              {w.ownerEmail && ` · ${w.ownerEmail}`}
-            </p>
-          </div>
+          <button
+            type="button"
+            data-testid="workstation-toggle"
+            aria-expanded={expanded}
+            aria-controls={bodyId}
+            aria-label={`${expanded ? 'Hide' : 'Show'} details of ${w.name}`}
+            onClick={() => setExpanded(!expanded)}
+            className="group -m-1 flex min-w-0 flex-1 items-center gap-2 rounded-control p-1 text-left focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+          >
+            <ChevronRight
+              aria-hidden="true"
+              className={`size-4 shrink-0 text-subtle transition-transform ${expanded ? 'rotate-90' : ''}`}
+            />
+            <span className="min-w-0">
+              <span className="block text-lg font-semibold text-fg">{w.name}</span>
+              <span className="block text-sm text-muted">
+                {[w.platform, w.hostname, w.runnerVersion && `runner ${w.runnerVersion}`]
+                  .filter(Boolean)
+                  .join(' · ')}
+                {w.ownerEmail && ` · ${w.ownerEmail}`}
+              </span>
+            </span>
+          </button>
           <div className="flex items-center gap-3">
+            {!expanded && warnings > 0 && (
+              <Badge
+                tone="amber"
+                title="A runtime on this workstation has a sandbox warning. Show the details."
+              >
+                <TriangleAlert aria-hidden="true" className="mr-1 size-3" />
+                {warnings} {warnings === 1 ? 'warning' : 'warnings'}
+              </Badge>
+            )}
+            {!expanded && w.shifts && (
+              <span className="hidden text-xs text-subtle sm:inline">
+                {w.shifts.running} {w.shifts.running === 1 ? 'shift' : 'shifts'} running
+              </span>
+            )}
             <ConnectionDot connected={w.connected} />
             <Button
               variant="danger-ghost"
               size="sm"
-              aria-label={`Unlink ${w.name}`}
+              aria-label={`Unpair ${w.name}`}
               onClick={() => setConfirm(true)}
             >
-              Unlink
+              Unpair
             </Button>
           </div>
         </div>
-        {unsandboxedRuntimes(w.runtimes).map((r) => (
-          <div key={r.id} className="mt-2" data-testid={`sandbox-warning-${r.id}`}>
-            <SandboxWarning testId="sandbox-warning">
-              The {r.id} runtime on {w.name} runs agents without an OS sandbox
-              {r.sandboxReason ? ` (${r.sandboxReason})` : ''}: {unsandboxedConsequence(r.sandboxReason)}
-            </SandboxWarning>
+        {expanded && (
+          <div id={bodyId} data-testid="workstation-details">
+            {unsandboxedRuntimes(w.runtimes).map((r) => (
+              <div key={r.id} className="mt-2" data-testid={`sandbox-warning-${r.id}`}>
+                <SandboxWarning testId="sandbox-warning">
+                  The {r.id} runtime on {w.name} runs agents without an OS sandbox
+                  {r.sandboxReason ? ` (${r.sandboxReason})` : ''}: {unsandboxedConsequence(r.sandboxReason)}
+                </SandboxWarning>
+              </div>
+            ))}
+            {unavailableRuntimes(w.runtimes).map((r) => (
+              <div key={r.id} className="mt-2">
+                <SandboxUnavailable runtime={r.id} reason={r.sandboxReason} />
+              </div>
+            ))}
+            <div className="mt-4 grid gap-4 border-t border-line pt-3 text-sm text-fg sm:grid-cols-2">
+              <div>
+                <p className="mb-1 text-xs font-medium text-subtle">Runtimes</p>
+                <p className="flex flex-wrap gap-1">
+                  {w.runtimes.length === 0 && <span className="text-subtle">None reported</span>}
+                  {w.runtimes.map((r) => (
+                    <Badge key={r.id} tone={r.available ? 'green' : 'neutral'}>
+                      {r.id} {r.version}
+                    </Badge>
+                  ))}
+                </p>
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-medium text-subtle">Shifts running</p>
+                <p
+                  data-testid="workstation-shifts"
+                  title="Set maxConcurrentShifts in the runner config.json (default 4)"
+                >
+                  {w.shifts
+                    ? w.shifts.limit
+                      ? `${w.shifts.running} of ${w.shifts.limit}`
+                      : `${w.shifts.running} (limit shown while connected)`
+                    : 'Not reported'}
+                </p>
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-medium text-subtle">Repositories</p>
+                <ul data-testid="workstation-repos">
+                  {w.repos.length === 0 && <li className="text-subtle">None reported</li>}
+                  {w.repos.map((r) => (
+                    <li key={r.projectRepoId} className="font-mono text-xs break-all">
+                      {r.localPath}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            {w.lastSeenAt && (
+              <p className="mt-1 text-xs text-subtle">Last seen {formatDateTime(w.lastSeenAt)}</p>
+            )}
+            {!admin && <DevOpsPanel w={w} />}
+            <ErrorBox error={unpair.error} />
           </div>
-        ))}
-        {unavailableRuntimes(w.runtimes).map((r) => (
-          <div key={r.id} className="mt-2">
-            <SandboxUnavailable runtime={r.id} reason={r.sandboxReason} />
-          </div>
-        ))}
-        <div className="mt-4 grid gap-4 border-t border-line pt-3 text-sm text-fg sm:grid-cols-2">
-          <div>
-            <p className="mb-1 text-xs font-medium text-subtle">Runtimes</p>
-            <p className="flex flex-wrap gap-1">
-              {w.runtimes.length === 0 && <span className="text-subtle">None reported</span>}
-              {w.runtimes.map((r) => (
-                <Badge key={r.id} tone={r.available ? 'green' : 'neutral'}>
-                  {r.id} {r.version}
-                </Badge>
-              ))}
-            </p>
-          </div>
-          <div>
-            <p className="mb-1 text-xs font-medium text-subtle">Shifts running</p>
-            <p
-              data-testid="workstation-shifts"
-              title="Set maxConcurrentShifts in the runner config.json (default 4)"
-            >
-              {w.shifts
-                ? w.shifts.limit
-                  ? `${w.shifts.running} of ${w.shifts.limit}`
-                  : `${w.shifts.running} (limit shown while connected)`
-                : 'Not reported'}
-            </p>
-          </div>
-          <div>
-            <p className="mb-1 text-xs font-medium text-subtle">Repositories</p>
-            <ul data-testid="workstation-repos">
-              {w.repos.length === 0 && <li className="text-subtle">None reported</li>}
-              {w.repos.map((r) => (
-                <li key={r.projectRepoId} className="font-mono text-xs break-all">
-                  {r.localPath}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-        {w.lastSeenAt && <p className="mt-1 text-xs text-subtle">Last seen {formatDateTime(w.lastSeenAt)}</p>}
-        {!admin && <DevOpsPanel w={w} />}
-        <ErrorBox error={unlink.error} />
+        )}
       </Panel>
-      <Dialog
+      <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
-        title={`Unlink ${w.name}?`}
-        description="Agents on this workstation will be released and its runner token stops working."
+        title={`Unpair ${w.name}?`}
+        description="The machine stops working for you: its runner token is revoked and its runner shuts down."
+        confirmLabel="Unpair"
+        pending={unpair.isPending}
+        onConfirm={() =>
+          unpair.mutate(w.id, {
+            onSuccess: () => {
+              setConfirm(false);
+              toast.success(`${w.name} unpaired`);
+            },
+          })
+        }
       >
-        <ul className="mb-4 list-disc pl-5 text-sm text-muted">
-          <li>Its agents are released and their cards go back to the queue.</li>
-          <li>The runner token stops working; pair the machine again to use it later.</li>
+        <ul className="list-disc space-y-1 pl-5 text-sm text-muted">
+          <li>Its runner token stops working. The runner exits with a message that it was unpaired.</li>
+          <li>Cards claimed there go back to the queue and its running shifts stop.</li>
+          <li>DevOps requests waiting for it fail with that reason.</li>
+          <li>Its agents wait until you re-home them. To use the machine again, pair it with a new code.</li>
         </ul>
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end [&>button]:max-sm:w-full">
-          <Button onClick={() => setConfirm(false)}>Cancel</Button>
-          <Button
-            variant="danger"
-            loading={unlink.isPending}
-            onClick={() =>
-              unlink.mutate(w.id, {
-                onSuccess: () => {
-                  setConfirm(false);
-                  toast.success(`${w.name} unlinked`);
-                },
-              })
-            }
-          >
-            Confirm unlink
-          </Button>
-        </div>
-      </Dialog>
+        <ErrorBox error={unpair.error} />
+      </ConfirmDialog>
     </li>
   );
 }

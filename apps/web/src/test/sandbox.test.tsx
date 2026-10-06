@@ -177,6 +177,16 @@ describe('workstations page', () => {
   it('warns on an unsandboxed workstation, explains an unavailable one, and says nothing for an enforced one', async () => {
     wrap(<Workstations />);
     const bad = await screen.findByTestId('workstation-Win desk');
+    // collapsed at first: only a warning chip shows; the details open per row
+    expect(within(bad).queryByTestId('sandbox-warning')).toBeNull();
+    expect(within(bad).getByText('1 warning')).toBeInTheDocument();
+    const user = userEvent.setup();
+    for (const name of ['Win desk', 'Win cold', 'Linux box'])
+      await user.click(
+        within(screen.getByTestId(`workstation-${name}`)).getByRole('button', {
+          name: `Show details of ${name}`,
+        }),
+      );
     const warning = within(bad).getByTestId('sandbox-warning');
     expect(warning).toHaveTextContent('without an OS sandbox');
     expect(warning).toHaveTextContent('including the runner token');

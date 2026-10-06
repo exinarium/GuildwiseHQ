@@ -3,6 +3,7 @@ import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, paths, SANDBOXER } from '../support/env.ts';
 import { pairRunner, startRunner } from '../support/runner.ts';
+import { expandWorkstation } from '../support/ui.ts';
 
 // A runner that reports its mock runtime as unsandboxed (test-only AOM_RUNNER_MOCK_SANDBOX, the real runtime reports it
 // from the platform and config): the warning shows on the workstation, on the agent's HR card, and the Hire form
@@ -58,6 +59,7 @@ test('an unsandboxed runtime is warned about on the workstation, the agent card 
 
   await page.goto('/workstations');
   const station = page.getByTestId('workstation-Sandbox Box');
+  await expandWorkstation(station);
   await expect(station.getByTestId('sandbox-warning')).toContainText('without an OS sandbox');
   await expect(station.getByTestId('sandbox-warning')).toContainText('runner token');
 

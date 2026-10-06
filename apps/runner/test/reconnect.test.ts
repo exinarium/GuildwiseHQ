@@ -1,6 +1,13 @@
 import { join } from 'node:path';
+import { UNPAIRED_CLOSE_REASON, WS_CLOSE } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
-import { backoffDelay, DEFAULT_BACKOFF, RunnerClient, toWsUrl } from '../src/connection/client.ts';
+import {
+  backoffDelay,
+  DEFAULT_BACKOFF,
+  RunnerClient,
+  toWsUrl,
+  UNPAIRED_MESSAGE,
+} from '../src/connection/client.ts';
 import { Outbox } from '../src/connection/outbox.ts';
 import { Runner } from '../src/runner.ts';
 import { FakeServer } from './fake-server.ts';
@@ -131,6 +138,40 @@ describe('connection', () => {
       expect(hello.runtimes.map((r) => r.id).sort()).toEqual(['claude-code', 'mock']);
       expect(hello.runtimes.find((r) => r.id === 'mock')?.available).toBe(true);
       expect(hello.activeShifts).toEqual([]);
+    } finally {
+      await runner.stop();
+      await server.close();
+    }
+  });
+
+  it('Runner stops cleanly (exit 0, no retry) with a clear message when the workstation was unpaired', async () => {
+    const server = await FakeServer.start();
+    const runner = new Runner({ config: makeConfig(server.url), dataDir: tmp() });
+    await runner.start();
+    try {
+      await server.waitFor('hello');
+      server.drop(WS_CLOSE.forbidden, UNPAIRED_CLOSE_REASON);
+      expect(await runner.fatal).toBe(0);
+      expect(runner.unpaired).toBe(true);
+      const connections = server.connections;
+      await new Promise((r) => setTimeout(r, 300));
+      expect(server.connections).toBe(connections);
+      expect(UNPAIRED_MESSAGE).toContain('unpaired');
+    } finally {
+      await runner.stop();
+      await server.close();
+    }
+  });
+
+  it('any other 4403 is still a failure exit', async () => {
+    const server = await FakeServer.start();
+    const runner = new Runner({ config: makeConfig(server.url), dataDir: tmp() });
+    await runner.start();
+    try {
+      await server.waitFor('hello');
+      server.drop(WS_CLOSE.forbidden, 'account deactivated');
+      expect(await runner.fatal).toBe(2);
+      expect(runner.unpaired).toBe(false);
     } finally {
       await runner.stop();
       await server.close();

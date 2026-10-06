@@ -152,7 +152,9 @@ describe('runner websocket auth', () => {
     await r.waitFor('welcome');
     const res = await t.req('POST', `/api/workstations/${p.workstationId}/unlink`, { cookie: owner.cookie });
     expect(res.status).toBe(200);
-    expect((await r.waitClosed()).code).toBe(4403);
+    const closed = await r.waitClosed();
+    expect(closed.code).toBe(4403);
+    expect(closed.reason).toBe('workstation unpaired');
     const again = await FakeRunner.connect(w.baseUrl, p.runnerToken);
     expect((await again.waitClosed()).code).toBe(4403);
     const list = await ok<any>(t.req('GET', '/api/workstations', { cookie: owner.cookie }));

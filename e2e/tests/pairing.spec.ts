@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { BASE_URL, MEMBER, paths } from '../support/env.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
+import { expandWorkstation } from '../support/ui.ts';
 
 test.use({ storageState: undefined });
 
@@ -55,6 +56,7 @@ test('AC2: pairing code, aom-runner pair + start, workstation Connected with the
   await expect(page.getByTestId('repos')).toContainText('toy');
 
   await page.getByRole('link', { name: 'Workstations' }).click();
+  await expandWorkstation(page.getByTestId('workstation-E2E Desktop'));
   await expect(page.getByTestId('workstation-E2E Desktop').getByTestId('workstation-repos')).toContainText(
     'toy',
   );

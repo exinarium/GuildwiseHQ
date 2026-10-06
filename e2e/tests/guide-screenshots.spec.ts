@@ -14,6 +14,7 @@ import { ADMIN, BASE_URL, paths } from '../support/env.ts';
 import { ADMIN_DEMO, loadState, MAYA, PIETER, saveState, snap, snapColumn } from '../support/guide.ts';
 import { waitForMail } from '../support/mail.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
+import { expandWorkstation } from '../support/ui.ts';
 import { git, makeVault } from '../support/vault.ts';
 
 /**
@@ -1792,6 +1793,10 @@ cap('projects, sharing, vaults', async () => {
 
 cap('workstations and the DevOps engineer', async () => {
   await open(pPage, '/workstations');
+  for (const card of await pPage
+    .locator('[data-testid^="workstation-"]:has([data-testid="workstation-toggle"])')
+    .all())
+    await expandWorkstation(card);
   await snap(pPage, 'workstations', { maxH: 1900, noHeader: true, cx: { x: 190, width: 900 } });
   await snap(pPage, 'ws-sandbox', { sel: pPage.getByTestId('workstation-Build mini-PC') });
   const dv = pPage.getByTestId("workstation-Pieter's desktop (WSL2)").locator('section').first();

@@ -8,6 +8,7 @@ import {
   type RunnerToServerType,
   type ServerToRunner,
   ServerToRunnerSchema,
+  UNPAIRED_CLOSE_REASON,
   WS_CLOSE,
 } from '@aom/shared';
 import WebSocket from 'ws';
@@ -63,6 +64,10 @@ export interface ClientEvents {
  * Runner side of the WebSocket protocol: hello/welcome, durable outbox for acked messages, heartbeats and
  * reconnect with jittered backoff (docs/ARCHITECTURE.md section 11.2).
  */
+/** What the runner says when the server tells it the workstation was unpaired. */
+export const UNPAIRED_MESSAGE =
+  'this workstation was unpaired in the web app: its runner token no longer works. Run `aom-runner pair` with a new code to use this machine again.';
+
 export class RunnerClient extends EventEmitter<ClientEvents> {
   private ws: WebSocket | null = null;
   private ready = false;
@@ -153,7 +158,7 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
       }
     });
     ws.on('error', (err) => this.log.warn(`websocket error: ${err.message}`));
-    ws.on('close', (code) => this.onClose(ws, code));
+    ws.on('close', (code, reason) => this.onClose(ws, code, reason.toString()));
   }
 
   private async sendHello(ws: WebSocket): Promise<void> {
@@ -214,7 +219,7 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
     this.hbTimer = null;
   }
 
-  private onClose(ws: WebSocket, code: number): void {
+  private onClose(ws: WebSocket, code: number, reason = ''): void {
     if (ws !== this.ws) return;
     this.ws = null;
     const wasReady = this.ready;
@@ -227,7 +232,9 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
       const why =
         code === WS_CLOSE.superseded
           ? 'another runner connected for this workstation'
-          : 'the server rejected the runner token (unlinked workstation? run `aom-runner pair` again)';
+          : code === WS_CLOSE.forbidden && reason === UNPAIRED_CLOSE_REASON
+            ? UNPAIRED_MESSAGE
+            : 'the server rejected the runner token (unpaired workstation? run `aom-runner pair` again)';
       this.emit('fatal', code, why);
       return;
     }

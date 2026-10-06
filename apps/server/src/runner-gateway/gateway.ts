@@ -4,6 +4,7 @@ import {
   RunnerToServerSchema,
   type ServerToRunnerOf,
   streamId,
+  UNPAIRED_CLOSE_REASON,
   WS_CLOSE,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -141,7 +142,7 @@ export class RunnerGateway {
       return null;
     }
     if (ws.status !== 'active') {
-      socket.close(WS_CLOSE.forbidden, 'workstation unlinked');
+      socket.close(WS_CLOSE.forbidden, UNPAIRED_CLOSE_REASON);
       return null;
     }
     // A deactivated account keeps no runner access (also covers workstations that predate the cut-off on deactivation).
@@ -187,7 +188,7 @@ export class RunnerGateway {
         return;
       case 'WorkstationUnlinked': {
         const p = (e.event as EventOf<'WorkstationUnlinked'>).payload;
-        ctx.services.runners.close(p.workstationId, WS_CLOSE.forbidden, 'workstation unlinked');
+        ctx.services.runners.close(p.workstationId, WS_CLOSE.forbidden, UNPAIRED_CLOSE_REASON);
         return;
       }
       case 'ClaimReleased': {

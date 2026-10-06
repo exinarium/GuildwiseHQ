@@ -7,7 +7,7 @@ import { Command } from 'commander';
 import { execa } from 'execa';
 import { sandboxDoctorLines, sandboxState } from './adapters/claude-policy.ts';
 import { applyOverrides, loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
-import { toWsUrl } from './connection/client.ts';
+import { toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { requestRotatedToken } from './connection/rotate.ts';
 import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
@@ -93,6 +93,7 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
     void runner.fatal.then(done);
   });
   await runner.stop();
+  if (runner.unpaired) console.log(`aom-runner: ${UNPAIRED_MESSAGE}`);
   process.exit(code);
 }
 

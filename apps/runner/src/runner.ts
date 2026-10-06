@@ -15,7 +15,7 @@ import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { ChatManager } from './chat/chat.ts';
 import type { RunnerConfig } from './config.ts';
-import { type BackoffOptions, RunnerClient, toWsUrl } from './connection/client.ts';
+import { type BackoffOptions, RunnerClient, toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
 import { ExternalAdapters } from './external/index.ts';
 import { OutboundExecutor } from './external/outbound.ts';
@@ -86,6 +86,8 @@ export class Runner {
   private sweeping: Promise<WorktreeSweepResult> | null = null;
   private timers: NodeJS.Timeout[] = [];
   private fatalResolve?: (code: number) => void;
+  /** The server said the workstation was unpaired: the runner stops cleanly. */
+  unpaired = false;
   /** Resolves with an exit code when the server makes further retries pointless (4401/4403/4409). */
   readonly fatal = new Promise<number>((resolve) => {
     this.fatalResolve = resolve;
@@ -165,8 +167,11 @@ export class Runner {
       void this.chat.cancelAll('workstation offline: the connection to the server dropped');
     });
     this.client.on('fatal', (code, why) => {
-      this.log.error(`connection closed for good (${code}): ${why}`);
-      this.fatalResolve?.(code === 4409 ? 3 : 2);
+      this.unpaired = why === UNPAIRED_MESSAGE;
+      if (this.unpaired) this.log.warn(`stopping: ${why}`);
+      else this.log.error(`connection closed for good (${code}): ${why}`);
+      // Unpaired is a normal end (exit 0, so a service manager does not restart a runner that cannot work).
+      this.fatalResolve?.(this.unpaired ? 0 : code === 4409 ? 3 : 2);
     });
   }
 

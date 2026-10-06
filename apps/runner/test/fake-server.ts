@@ -173,8 +173,8 @@ export class FakeServer {
   }
 
   /** Closes the runner's socket from the server side (simulates a network drop). */
-  drop(code = 1006): void {
-    this.socket?.close(code === 1006 ? 1001 : code);
+  drop(code = 1006, reason?: string): void {
+    this.socket?.close(code === 1006 ? 1001 : code, reason);
   }
 
   of<T extends RunnerToServerType>(type: T): RunnerToServerOf<T>[] {
