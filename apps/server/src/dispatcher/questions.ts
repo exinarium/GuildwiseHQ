@@ -38,6 +38,7 @@ export async function questionPass(
             (SELECT count(*)::int FROM shifts s WHERE s.desk_item_id = d.id AND s.agent_id = d.routed_agent_id
                AND s.status = 'ended' AND s.outcome IS DISTINCT FROM 'rejected' AND s.outcome IS DISTINCT FROM 'reported') AS failed
        FROM desk_items d JOIN agents a ON a.id = d.routed_agent_id LEFT JOIN workstations ws ON ws.id = a.workstation_id
+       JOIN organizations po ON po.id = d.org_id AND po.status IN ('trial','active')
       WHERE d.status = 'open' AND d.routed_to = 'agent'
         AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.desk_item_id = d.id AND s.status <> 'ended')
       ORDER BY d.blocking DESC, d.created_at, d.id`,

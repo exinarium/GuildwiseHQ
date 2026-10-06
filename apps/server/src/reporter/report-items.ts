@@ -7,6 +7,7 @@ import {
   type SignalBrief,
   streamId,
 } from '@aom/shared';
+import { orgOwnerId } from '../auth/org-context.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { actorOf, agentBy, systemBy } from '../commands/phase-events.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
@@ -29,7 +30,7 @@ export async function ensureReportThread(
 ): Promise<{ threadId: string | null; events: AppendInput[] }> {
   const cur = await one<{ ba_chat_thread_id: string | null }>(
     db,
-    'SELECT ba_chat_thread_id FROM users WHERE id=$1',
+    'SELECT ba_chat_thread_id FROM users WHERE id = COALESCE((SELECT owner_user_id FROM organizations WHERE id = $1), $1)',
     [orgId],
   );
   if (cur?.ba_chat_thread_id) {
@@ -54,6 +55,7 @@ export async function ensureReportThread(
     ));
   if (!ba) return { threadId: null, events: [] };
   const threadId = randomUUID();
+  const ownerId = await orgOwnerId(db, orgId);
   return {
     threadId,
     events: [
@@ -61,14 +63,14 @@ export async function ensureReportThread(
         streamId: streamId.thread(threadId),
         event: {
           type: 'ChatThreadCreated',
-          payload: { threadId, agentId: ba.id, title: 'BA reports', createdBy: orgId },
+          payload: { threadId, agentId: ba.id, title: 'BA reports', createdBy: ownerId },
         },
         actor: SYSTEM_ACTOR,
         scope: orgScope(orgId),
       },
       {
-        streamId: streamId.user(orgId),
-        event: { type: 'BaChatLinked', payload: { userId: orgId, threadId } },
+        streamId: streamId.user(ownerId),
+        event: { type: 'BaChatLinked', payload: { userId: ownerId, threadId } },
         actor: SYSTEM_ACTOR,
         scope: orgScope(orgId),
       },

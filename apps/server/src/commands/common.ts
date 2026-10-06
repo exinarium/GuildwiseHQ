@@ -8,6 +8,9 @@ import type { AppendInput } from '../eventstore/types.ts';
 export const projectScope = (orgId: string, projectId: string) =>
   ({ orgId, projectId, audience: 'project' }) as const;
 export const orgScope = (orgId: string) => ({ orgId, projectId: null, audience: 'org' }) as const;
+/** Per-user events (workstations, addressed items): only that user's browser receives them. */
+export const userScope = (userId: string) =>
+  ({ orgId: null, projectId: null, audience: 'user', userId }) as const;
 export const userActor = (id: string) => ({ kind: 'user', id }) as const;
 export const agentActor = (id: string) => ({ kind: 'agent', id }) as const;
 export const runnerActor = (workstationId: string) => ({ kind: 'runner', id: workstationId }) as const;

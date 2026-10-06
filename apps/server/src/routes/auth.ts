@@ -1,18 +1,39 @@
 import {
   ChangePasswordRequestSchema,
   IdParamsSchema,
+  Login2faRequestSchema,
   LoginRequestSchema,
   type MeResponse,
   SetMyAvatarRequestSchema,
+  streamId,
+  TwoFactorConfirmRequestSchema,
+  TwoFactorEnableRequestSchema,
+  TwoFactorSetupRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireSession } from '../auth/guards.ts';
 import { SlidingLimit } from '../auth/limits.ts';
 import { requestedOrgId } from '../auth/org-context.ts';
+import { verifyPassword } from '../auth/password.ts';
 import { createSession, deleteSession, SESSION_COOKIE, sessionOfUser } from '../auth/sessions.ts';
+import {
+  answerLoginChallenge,
+  beginEnrollment,
+  confirmEnrollment,
+  createLoginChallenge,
+  disableTwoFactorIn,
+  hasTwoFactor,
+  regenerateRecoveryCodes,
+  requiringOrgs,
+  unusedRecoveryCodes,
+  verifySecondFactor,
+} from '../auth/two-factor.ts';
 import { changePassword, verifyLogin } from '../commands/auth.ts';
 import { avatarImageFor, setMyAvatar } from '../commands/avatar.ts';
 import type { Ctx } from '../context.ts';
+import { one } from '../db/sql.ts';
+import { withAppendTx } from '../db/tx.ts';
+import { badRequest, conflict, unauthorized } from '../errors.ts';
 import { buildMe } from '../queries/me.ts';
 import { typed } from './util.ts';
 
@@ -33,6 +54,38 @@ export function setSessionCookie(ctx: Ctx, reply: { setCookie: Function }, token
     path: '/',
     maxAge: maxAgeSec,
   });
+}
+
+/** A password (and second factor) accepted: the session cookie, the audit entry of a super admin, and `me`. */
+async function startSession(
+  ctx: Ctx,
+  reply: { setCookie: Function },
+  userId: string,
+  meta: { userAgent?: string | undefined; ip?: string | undefined },
+  requestedOrg: string | null,
+): Promise<MeResponse> {
+  const s = await createSession(ctx, userId, meta);
+  setSessionCookie(ctx, reply, s.token, s.maxAgeSec);
+  const kind = await one<{ kind: string }>(ctx.pool, 'SELECT kind FROM users WHERE id=$1', [userId]);
+  if (kind?.kind === 'super_admin')
+    await ctx.store.append([
+      {
+        streamId: streamId.user(userId),
+        event: {
+          type: 'SuperAdminSignedIn',
+          payload: {
+            userId,
+            meta: {
+              ...(meta.ip ? { ip: meta.ip } : {}),
+              ...(meta.userAgent ? { userAgent: meta.userAgent.slice(0, 400) } : {}),
+            },
+          },
+        },
+        actor: { kind: 'user', id: userId },
+        scope: { orgId: null, projectId: null, audience: 'admin' },
+      },
+    ]);
+  return meResponse(ctx, userId, requestedOrg);
 }
 
 export function authRoutes(ctx: Ctx) {
@@ -59,9 +112,38 @@ export function authRoutes(ctx: Ctx) {
       async (req, reply) => {
         if (ctx.config.rateLimit) loginPerIp.hit(req.ip);
         const userId = await verifyLogin(ctx, req.body.email, req.body.password);
-        const s = await createSession(ctx, userId, { userAgent: req.headers['user-agent'], ip: req.ip });
-        setSessionCookie(ctx, reply, s.token, s.maxAgeSec);
-        return meResponse(ctx, userId, requestedOrgId(req));
+        const meta = { userAgent: req.headers['user-agent'], ip: req.ip };
+        // Two-factor accounts get a challenge, not a session, until the code is right.
+        if (await hasTwoFactor(ctx.pool, userId)) {
+          const challenge = await createLoginChallenge(ctx, userId, meta);
+          return {
+            twoFactorRequired: true as const,
+            challenge,
+            methods: ['totp', 'recovery'] as Array<'totp' | 'recovery'>,
+          };
+        }
+        return startSession(ctx, reply, userId, meta, requestedOrgId(req));
+      },
+    );
+
+    // The second step of a two-factor login: a 6-digit code (or a recovery code) answers the challenge.
+    app.post(
+      '/api/auth/login/2fa',
+      {
+        schema: { body: Login2faRequestSchema },
+        config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+      },
+      async (req, reply) => {
+        if (ctx.config.rateLimit) loginPerIp.hit(req.ip);
+        const userId = await answerLoginChallenge(ctx, req.body.challenge, req.body.code);
+        if (!userId) throw unauthorized('that code is not right, or the sign-in expired: sign in again');
+        return startSession(
+          ctx,
+          reply,
+          userId,
+          { userAgent: req.headers['user-agent'], ip: req.ip },
+          requestedOrgId(req),
+        );
       },
     );
 
@@ -79,6 +161,69 @@ export function authRoutes(ctx: Ctx) {
       await changePassword(ctx, s, req.body.current, req.body.new);
       return { ok: true };
     });
+
+    // ---- two-factor login (owner decision 7): set up, confirm, switch off, new recovery codes.
+    // These work in a session that still has to set it up (a super admin's first sign-in).
+    const mustPassword = async (userId: string, password: string) => {
+      const u = await one(ctx.pool, 'SELECT password_hash FROM users WHERE id=$1', [userId]);
+      if (!u || !(await verifyPassword(u.password_hash, password)))
+        throw badRequest('wrong_password', 'the password is incorrect');
+    };
+    const twoFactorLimit = new SlidingLimit(8, 60_000);
+
+    app.get('/api/auth/2fa', async (req) => {
+      const s = await requireSession(ctx, req);
+      return {
+        ...s.twoFactor,
+        recoveryCodesLeft: await unusedRecoveryCodes(ctx.pool, s.user.id),
+        requiredBy: await requiringOrgs(ctx.pool, s.user.id),
+      };
+    });
+
+    app.post('/api/auth/2fa/setup', { schema: { body: TwoFactorSetupRequestSchema } }, async (req) => {
+      const s = await requireSession(ctx, req);
+      if (ctx.config.rateLimit) twoFactorLimit.hit(s.user.id);
+      await mustPassword(s.user.id, req.body.password);
+      return beginEnrollment(ctx, s.user);
+    });
+
+    app.post('/api/auth/2fa/enable', { schema: { body: TwoFactorEnableRequestSchema } }, async (req) => {
+      const s = await requireSession(ctx, req);
+      if (ctx.config.rateLimit) twoFactorLimit.hit(s.user.id);
+      return { recoveryCodes: await confirmEnrollment(ctx, s.user.id, req.body.code) };
+    });
+
+    app.post('/api/auth/2fa/disable', { schema: { body: TwoFactorConfirmRequestSchema } }, async (req) => {
+      const s = await requireSession(ctx, req);
+      if (ctx.config.rateLimit) twoFactorLimit.hit(s.user.id);
+      if (s.twoFactor.required)
+        throw conflict(
+          'two_factor_required',
+          s.user.kind === 'super_admin'
+            ? 'platform accounts must keep two-factor login on'
+            : 'an organization you belong to requires two-factor login',
+        );
+      await mustPassword(s.user.id, req.body.password);
+      if (!(await verifySecondFactor(ctx, s.user.id, req.body.code)))
+        throw badRequest('invalid_code', 'that code is not right');
+      await withAppendTx(ctx.pool, (tx) =>
+        disableTwoFactorIn(ctx, tx, s.user.id, s.user.id, 'user', { kind: 'user', id: s.user.id }),
+      );
+      return { ok: true };
+    });
+
+    app.post(
+      '/api/auth/2fa/recovery-codes',
+      { schema: { body: TwoFactorConfirmRequestSchema } },
+      async (req) => {
+        const s = await requireSession(ctx, req);
+        if (ctx.config.rateLimit) twoFactorLimit.hit(s.user.id);
+        await mustPassword(s.user.id, req.body.password);
+        if (!(await verifySecondFactor(ctx, s.user.id, req.body.code)))
+          throw badRequest('invalid_code', 'that code is not right');
+        return { recoveryCodes: await regenerateRecoveryCodes(ctx, s.user.id) };
+      },
+    );
 
     // The signed-in user's own picture: a generated face, an uploaded (cropped, 256 px) image, or none.
     app.put('/api/me/avatar', { schema: { body: SetMyAvatarRequestSchema } }, async (req) => {

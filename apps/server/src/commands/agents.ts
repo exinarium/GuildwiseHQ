@@ -1,15 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import {
   type AgentChanges,
-  canHireAgent,
-  canManageAgent,
+  canHireAgentInOrg,
+  canManageAgentInOrg,
+  canWidenPermissions,
   checkPermissions,
   DEFAULT_AVATAR_STYLE,
+  DEVOPS_ROLE_KEY,
   type HireAgentRequest,
   randomAvatarSeed,
   streamId,
   type UnsandboxedAck,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
 import { loadRole } from '../catalogue/loader.ts';
@@ -18,6 +21,7 @@ import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
 
@@ -209,7 +213,17 @@ export async function sandboxGate(
   return { by: userId, at: ctx.clock.now().toISOString() };
 }
 
-export async function hireAgent(ctx: Ctx, user: AuthSession['user'], req: HireAgentRequest): Promise<string> {
+/**
+ * Hires an agent (docs/design/organizations.md section 4.2): the Owner and Admins hire anything in the organization;
+ * Members and Guests only onto their own workstation and only for a project they are on. `org` is the request's
+ * organization (an org-wide hire); a project-scoped hire belongs to the project's organization.
+ */
+export async function hireAgent(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  org: { id: string },
+  req: HireAgentRequest,
+): Promise<string> {
   const agentId = randomUUID();
   await withAppendTx(ctx.pool, async (tx) => {
     const ws = await one(tx, `SELECT id FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`, [
@@ -217,7 +231,7 @@ export async function hireAgent(ctx: Ctx, user: AuthSession['user'], req: HireAg
       user.id,
     ]);
     if (!ws) throw notFound('workstation not found');
-    let orgId = user.id;
+    let orgId = org.id;
     let role: Awaited<ReturnType<typeof projectRole>> = null;
     if (req.projectId) {
       const p = await one(tx, 'SELECT org_id, status FROM projects WHERE id=$1', [req.projectId]);
@@ -227,12 +241,27 @@ export async function hireAgent(ctx: Ctx, user: AuthSession['user'], req: HireAg
         throw conflict('project_archived', 'this project is archived; unarchive it to hire');
       orgId = p.org_id;
     }
-    if (!canHireAgent({ userId: user.id, orgId, projectRole: role, projectScoped: !!req.projectId })) {
+    const orgRole = await orgRoleOf(tx, user.id, orgId);
+    if (
+      !canHireAgentInOrg({
+        orgRole,
+        projectScoped: !!req.projectId,
+        projectMember: role !== null && role !== undefined,
+      })
+    ) {
       throw forbidden('you cannot hire agents here');
     }
+    await assertWithinLimit(tx, orgId, 'agents');
+    // A workstation the organization does not use yet counts as one more (the DevOps engineer does not count).
+    const uses = await one(
+      tx,
+      `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_devops LIMIT 1`,
+      [orgId, req.workstationId],
+    );
+    if (!uses) await assertWithinLimit(tx, orgId, 'workstations');
     const roleDef = await loadRole(tx, orgId, req.roleKey);
     if (!roleDef) throw badRequest('unknown_role', `role '${req.roleKey}' does not exist`);
-    if (roleDef.definition.key === 'devops')
+    if (roleDef.definition.key === DEVOPS_ROLE_KEY)
       throw badRequest('invalid_role', 'DevOps engineers are hired automatically per workstation');
     if (!roleDef.definition.seniorityLevels.includes(req.seniority)) {
       throw badRequest(
@@ -293,18 +322,25 @@ export async function hireAgent(ctx: Ctx, user: AuthSession['user'], req: HireAg
   return agentId;
 }
 
+/**
+ * The agent when the user may change it: the Owner and Admins of its organization (any agent), or the manager who
+ * hired it. An agent the user cannot see at all is a 404.
+ */
 export async function manageableAgent(tx: Tx, user: AuthSession['user'], agentId: string): Promise<Row> {
   const a = await one(
     tx,
     `SELECT a.* FROM agents a WHERE a.id=$1 AND (
-        a.org_id = $2 OR a.manager_user_id = $2
+        a.manager_user_id = $2
+        OR EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = a.org_id AND om.user_id = $2 AND om.status = 'active'
+                    AND om.role IN ('owner','admin'))
         OR (a.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_members pm
               WHERE pm.project_id = a.project_id AND pm.user_id = $2 AND pm.status='active')))`,
     [agentId, user.id],
   );
   if (!a) throw notFound('agent not found');
-  if (!canManageAgent({ userId: user.id, orgId: a.org_id, managerUserId: a.manager_user_id })) {
-    throw forbidden('only the organization owner or the hiring manager can do this');
+  const role = await orgRoleOf(tx, user.id, a.org_id);
+  if (!canManageAgentInOrg({ userId: user.id, orgRole: role, managerUserId: a.manager_user_id })) {
+    throw forbidden('only the organization Owner and Admins or the hiring manager can do this');
   }
   return a;
 }
@@ -322,8 +358,17 @@ export async function patchAgent(
   await withAppendTx(ctx.pool, async (tx) => {
     const a = await manageableAgent(tx, user, agentId);
     if (a.status === 'retired') throw conflict('agent_retired', 'agent is retired');
-    if (a.is_devops && (changes.roleKey || changes.seniority || changes.capacity))
-      throw badRequest('devops_fixed', 'the DevOps engineer keeps its role, seniority and capacity');
+    if (a.is_devops) {
+      // The built-in DevOps engineer is free, so it must not become a general-purpose agent (owner decision 15a):
+      // only its model, effort and runtime can change. No other skills, permissions, role, seniority or capacity.
+      const allowed = new Set(['model', 'effort', 'runtime']);
+      const rejected = Object.keys(changes).filter((k) => !allowed.has(k));
+      if (rejected.length)
+        throw badRequest(
+          'devops_fixed',
+          `the DevOps engineer cannot be extended: only its model, effort and runtime can change (not ${rejected.join(', ')})`,
+        );
+    }
     const next: AgentChanges = { ...changes };
     const roleChanged = !!changes.roleKey && changes.roleKey !== a.role_key;
     const role = roleChanged
@@ -340,8 +385,10 @@ export async function patchAgent(
       // never reaches past the role's hard limits (docs/ARCHITECTURE.md section on agent permissions).
       const check = checkPermissions(role.definition.permissions, changes.permissions);
       if (check.forbidden.length) throw badRequest('permissions_exceed_role', check.forbidden.join('; '));
-      if (check.widened.length && user.id !== a.org_id)
-        throw forbidden(`only the organization owner can widen permissions (${check.widened.join(', ')})`);
+      if (check.widened.length && !canWidenPermissions({ orgRole: await orgRoleOf(tx, user.id, a.org_id) }))
+        throw forbidden(
+          `only the organization Owner and Admins can widen permissions (${check.widened.join(', ')})`,
+        );
     }
     const unsandboxedAck =
       next.runtime && next.runtime !== a.runtime && a.workstation_id

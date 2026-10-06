@@ -64,10 +64,12 @@ export const PARAM_AGENT: AgentRefs = {
 export function eligibility(A: AgentRefs) {
   // Cards without a repo (research, feed) work on a vault: when the card's domain has a registered vault the agent's
   // workstation must hold a clone of it (docs/ARCHITECTURE.md section 9.3, M3). The vault applicable to a card is its
-  // project's vault, or the owner's vault of the project's domain (only for the owner's own workstations).
+  // project's vault, or the organization's vault of the project's domain (only for workstations of its Owner and Admins, decision 12).
   const vaultOfCard = `(v.project_id = c.project_id
          OR (v.project_id IS NULL AND v.org_id = c.org_id AND v.kind = p.domain
-             AND v.org_id = (SELECT w.user_id FROM workstations w WHERE w.id = ${A.workstationId})))`;
+             AND EXISTS (SELECT 1 FROM workstations w JOIN org_members om ON om.user_id = w.user_id
+                          AND om.org_id = v.org_id AND om.status = 'active' AND om.role IN ('owner','admin')
+                          WHERE w.id = ${A.workstationId})))`;
   return {
     scope: `c.org_id = ${A.orgId} AND (${A.projectId}::uuid IS NULL OR c.project_id = ${A.projectId})`,
     role: `st.kind = 'agent' AND st.claim_role = ${A.roleKey}`,
@@ -94,6 +96,7 @@ const CANDIDATES_SQL = (cardFilter: string) => `
 SELECT c.id, c.stage
 FROM cards c
 JOIN projects p          ON p.id = c.project_id AND p.status = 'active'
+JOIN organizations po   ON po.id = c.org_id AND po.status IN ('trial','active')
 JOIN workflow_stages st  ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
 WHERE c.status = 'queued'
   AND c.claim_id IS NULL

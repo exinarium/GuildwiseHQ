@@ -11,6 +11,8 @@ import {
   type IntakeDto,
   IntakeMapParamsSchema,
   IntakeUnmappedParamsSchema,
+  isOrgManager,
+  type OrgRole,
   type PatchCardRequest,
   parseExternalRef,
   requiredMissing,
@@ -22,7 +24,7 @@ import { loadWorkflowById } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { conflict, HttpError, notFound } from '../errors.ts';
+import { conflict, forbidden, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { dedupMatches } from '../queries/ledger.ts';
 import { cardView, createCardIn, patchCardIn, specifyCardIn, specifyTarget } from './cards.ts';
@@ -76,30 +78,30 @@ async function toDto(ctx: Ctx, list: Row[]): Promise<IntakeDto[]> {
   }));
 }
 
-export async function listIntakes(ctx: Ctx, userId: string): Promise<IntakeDto[]> {
+export async function listIntakes(ctx: Ctx, orgId: string): Promise<IntakeDto[]> {
   return toDto(
     ctx,
     await rows(ctx.pool, `${INTAKE_SELECT} WHERE i.org_id = $1 ORDER BY i.created_at DESC, i.id LIMIT 100`, [
-      userId,
+      orgId,
     ]),
   );
 }
 
-export async function getIntake(ctx: Ctx, userId: string, id: string): Promise<IntakeDto> {
-  const r = await one(ctx.pool, `${INTAKE_SELECT} WHERE i.id = $1 AND i.org_id = $2`, [id, userId]);
+export async function getIntake(ctx: Ctx, orgId: string, id: string): Promise<IntakeDto> {
+  const r = await one(ctx.pool, `${INTAKE_SELECT} WHERE i.id = $1 AND i.org_id = $2`, [id, orgId]);
   if (!r) throw notFound('intake not found');
   return (await toDto(ctx, [r]))[0] as IntakeDto;
 }
 
-/** Projects the user may map a ticket to: their own and the ones shared with them (active membership). */
-async function visibleProjects(db: Queryable, userId: string): Promise<Row[]> {
+/** Projects the user may map a ticket to: the organization's own first, then the ones shared with them. */
+async function visibleProjects(db: Queryable, userId: string, orgId: string): Promise<Row[]> {
   return rows(
     db,
     `SELECT p.id, p.key, p.name, p.domain, p.org_id,
             COALESCE((SELECT array_agg(r.name ORDER BY r.name) FROM project_repos r WHERE r.project_id = p.id AND r.removed_at IS NULL), '{}') AS repos
        FROM projects p JOIN project_members m ON m.project_id = p.id AND m.user_id = $1 AND m.status = 'active'
-      WHERE p.status = 'active' ORDER BY (p.org_id = $1) DESC, p.key`,
-    [userId],
+      WHERE p.status = 'active' ORDER BY (p.org_id = $2) DESC, p.key`,
+    [userId, orgId],
   );
 }
 
@@ -108,7 +110,7 @@ export async function intakeContext(ctx: Ctx, threadId: string): Promise<IntakeC
   const i = await one(ctx.pool, `${INTAKE_SELECT} WHERE i.thread_id = $1`, [threadId]);
   if (!i) return undefined;
   const fromChat = !!(await one(ctx.pool, `SELECT 1 FROM threads WHERE id=$1 AND kind='chat'`, [threadId]));
-  const projects = await visibleProjects(ctx.pool, i.started_by);
+  const projects = await visibleProjects(ctx.pool, i.started_by, i.org_id);
   const cards = (await toDto(ctx, [i]))[0]?.cards ?? [];
   const work = await one(
     ctx.pool,
@@ -137,8 +139,11 @@ export async function intakeContext(ctx: Ctx, threadId: string): Promise<IntakeC
 export async function startIntake(
   ctx: Ctx,
   user: AuthSession['user'],
+  org: { id: string; role: OrgRole | null },
   req: CreateIntakeRequest,
 ): Promise<IntakeDto> {
+  if (!isOrgManager({ orgRole: org.role }))
+    throw forbidden('only the organization Owner and Admins can start an intake');
   const ref = parseExternalRef(req.externalKey ?? req.note);
   const externalKey = req.externalKey ?? ref?.key;
   const externalSystem = req.externalSystem ?? ref?.system;
@@ -147,7 +152,7 @@ export async function startIntake(
     `SELECT a.id, a.workstation_id FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
       WHERE a.org_id = $1 AND a.role_key = $2 AND a.status = 'active' AND ws.status = 'active'
       ORDER BY a.hired_at, a.id`,
-    [user.id, BA_ROLE_KEY],
+    [org.id, BA_ROLE_KEY],
   );
   if (bas.length === 0)
     throw conflict('no_ba', 'Hire a business analyst (BA) first: intake is a conversation with the BA.');
@@ -175,11 +180,11 @@ export async function startIntake(
         },
       },
       actor: userActor(user.id),
-      scope: orgScope(user.id),
+      scope: orgScope(org.id),
     },
   ]);
   await ctx.services.chat.send(user.id, { threadId, body: req.note, clientMsgId: randomUUID() });
-  return getIntake(ctx, user.id, intakeId);
+  return getIntake(ctx, org.id, intakeId);
 }
 
 // ------------------------------------------------------------------------------------ chat-scoped rpcs
@@ -332,7 +337,9 @@ async function startChatIntake(
     },
   ];
   if (thread.project_id) {
-    const project = (await visibleProjects(ctx.pool, userId)).find((p) => p.id === thread.project_id);
+    const project = (await visibleProjects(ctx.pool, userId, thread.org_id)).find(
+      (p) => p.id === thread.project_id,
+    );
     if (project)
       events.push({
         streamId: streamId.intake(intakeId),
@@ -409,7 +416,7 @@ async function mapTicket(
       undefined,
       'The manager was asked which project this belongs to on the desk; wait for the answer.',
     ];
-  const projects = await visibleProjects(ctx.pool, intake.started_by);
+  const projects = await visibleProjects(ctx.pool, intake.started_by, intake.org_id);
   const project = projects.find((x) => x.key === p.data.project.toUpperCase());
   if (!project)
     return [
@@ -450,7 +457,7 @@ async function askMapping(
       ])
     : undefined;
   if (open) return [false, undefined, 'the manager was already asked; wait for the answer'];
-  const projects = await visibleProjects(ctx.pool, intake.started_by);
+  const projects = await visibleProjects(ctx.pool, intake.started_by, intake.org_id);
   const title = `Which project does ${intake.external_key ?? 'this request'} belong to?`;
   const deskItemId = randomUUID();
   const matches = await dedupMatches(ctx.pool, intake.org_id, null, `${intake.external_key ?? ''} ${title}`);

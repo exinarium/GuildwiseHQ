@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import {
   type AddRepoRequest,
   type CreateProjectRequest,
+  canCreateProject,
   normalizeRemoteUrl,
+  type OrgRole,
   type PatchProjectRequest,
   type ProjectImpact,
   streamId,
@@ -15,31 +17,40 @@ import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { releaseEvents } from './cards.ts';
 import { assertRemoteUrl, cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { cancelPhasesEvents } from './phases.ts';
 
+/** Only the organization's Owner and Admins create projects (owner decision 4). */
 export async function createProject(
   ctx: Ctx,
   user: AuthSession['user'],
+  org: { id: string; role: OrgRole | null },
   input: CreateProjectRequest,
 ): Promise<string> {
+  if (!canCreateProject({ orgRole: org.role }))
+    throw forbidden('only the organization Owner and Admins can create projects');
   const projectId = randomUUID();
   await withAppendTx(ctx.pool, async (tx) => {
-    if (!(await resolveWorkflow(tx, user.id, input.workflowKey))) {
+    await assertWithinLimit(tx, org.id, 'projects');
+    if (!(await resolveWorkflow(tx, org.id, input.workflowKey))) {
       throw badRequest('unknown_workflow', `workflow '${input.workflowKey}' does not exist`);
     }
-    if (await one(tx, 'SELECT 1 FROM projects WHERE org_id=$1 AND key=$2', [user.id, input.key])) {
+    if (await one(tx, 'SELECT 1 FROM projects WHERE org_id=$1 AND key=$2', [org.id, input.key])) {
       throw conflict('project_key_taken', `project key ${input.key} is already in use`);
     }
     await ctx.store.append(
       [
         {
           streamId: streamId.project(projectId),
-          event: { type: 'ProjectCreated', payload: { projectId, orgId: user.id, ...input } },
+          event: {
+            type: 'ProjectCreated',
+            payload: { projectId, orgId: org.id, createdByUserId: user.id, ...input },
+          },
           actor: userActor(user.id),
-          scope: projectScope(user.id, projectId),
+          scope: projectScope(org.id, projectId),
         },
       ],
       { tx },
@@ -323,6 +334,7 @@ export async function restoreProject(ctx: Ctx, user: AuthSession['user'], projec
   await withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.status !== 'archived') throw conflict('not_archived', 'this project is not archived');
+    await assertWithinLimit(tx, p.org_id, 'projects');
     await ctx.store.append(
       [
         {

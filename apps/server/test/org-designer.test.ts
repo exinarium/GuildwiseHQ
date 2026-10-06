@@ -290,7 +290,7 @@ describe('extending built-in roles', () => {
     const as = designer(w, member.cookie, `?projectId=${w.projectId}`);
     const ext = await as.req('PUT', '/api/roles/builder/extensions', { instructions: 'sneaky' });
     expect(ext.status).toBe(403);
-    expect(ext.body.error.message).toMatch(/organization owner/);
+    expect(ext.body.error.message).toMatch(/Owner and Admins/);
     expect((await as.req('POST', '/api/roles', roleInput('sneaky', [['x', '*']]))).status).toBe(403);
     expect((await as.req('POST', '/api/workflows', workflowInput('sneaky'))).status).toBe(403);
     expect((await as.req('POST', '/api/departments', { name: 'sneaky' })).status).toBe(403);

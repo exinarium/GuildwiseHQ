@@ -1,15 +1,36 @@
 import {
+  type AcceptExistingInvitationRequest,
   type AcceptInvitationRequest,
   InvitationInfoResponseSchema,
+  type Login2faRequest,
+  type LoginChallengeResponse,
   type LoginRequest,
   type MeResponse,
   MeResponseSchema,
+  type RecoveryCodesResponse,
   type SetMyAvatarRequest,
+  type TwoFactorSetupResponse,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { getActiveOrgId, setActiveOrgId } from '../../lib/activeOrg.ts';
+import { getSocket } from '../../ws/socket.ts';
 import { ApiError, get, post, put } from '../client.ts';
 
 export const meKey = ['me'] as const;
+
+/**
+ * Keeps this tab's organization consistent with what the server resolved: a tab without one (or with one the user left)
+ * takes the server's choice; a platform account has none.
+ */
+export function syncActiveOrg(me: MeResponse | null): void {
+  if (!me || me.account?.kind === 'super_admin') {
+    setActiveOrgId(null);
+    return;
+  }
+  const current = getActiveOrgId();
+  if (me.activeOrg && me.activeOrg.id !== current) setActiveOrgId(me.activeOrg.id);
+  else if (!me.activeOrg && current) setActiveOrgId(null);
+}
 
 /** `null` when not signed in (401). */
 export function useMe() {
@@ -17,7 +38,9 @@ export function useMe() {
     queryKey: meKey,
     queryFn: async (): Promise<MeResponse | null> => {
       try {
-        return await get('/auth/me', MeResponseSchema);
+        const me = await get<MeResponse>('/auth/me', MeResponseSchema);
+        syncActiveOrg(me);
+        return me;
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) return null;
         throw e;
@@ -28,11 +51,56 @@ export function useMe() {
   });
 }
 
+/** `POST /api/auth/login`: a session (`me`), or - two-factor accounts - a challenge to answer with a code. */
+export type LoginResult =
+  | { kind: 'me'; me: MeResponse }
+  | { kind: 'challenge'; challenge: LoginChallengeResponse };
+
+function startSession(qc: ReturnType<typeof useQueryClient>, me: MeResponse) {
+  // A new session starts clean: nothing cached for another account or organization survives.
+  qc.clear();
+  setActiveOrgId(null);
+  syncActiveOrg(me);
+  qc.setQueryData(meKey, me);
+}
+
 export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: LoginRequest) => post<MeResponse>('/auth/login', b, MeResponseSchema),
-    onSuccess: (me) => qc.setQueryData(meKey, me),
+    mutationFn: async (b: LoginRequest): Promise<LoginResult> => {
+      const r = await post<MeResponse | LoginChallengeResponse>('/auth/login', b);
+      if ('twoFactorRequired' in r) return { kind: 'challenge', challenge: r };
+      return { kind: 'me', me: r };
+    },
+    onSuccess: (r) => {
+      if (r.kind === 'me') startSession(qc, r.me);
+    },
+  });
+}
+
+/** The second step of a two-factor login: a 6-digit code or a recovery code. */
+export function useLogin2fa() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: Login2faRequest) => post<MeResponse>('/auth/login/2fa', b, MeResponseSchema),
+    onSuccess: (me) => startSession(qc, me),
+  });
+}
+
+/** Switches this tab to another organization: remembered on the server, kept per tab, caches and socket reset. */
+export function useSwitchOrg() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (orgId: string) => {
+      setActiveOrgId(orgId);
+      return post<MeResponse>('/orgs/active', { orgId }, MeResponseSchema);
+    },
+    onSuccess: (me) => {
+      qc.clear();
+      syncActiveOrg(me);
+      qc.setQueryData(meKey, me);
+      getSocket()?.restart();
+    },
   });
 }
 
@@ -42,6 +110,7 @@ export function useLogout() {
     mutationFn: () => post('/auth/logout'),
     onSuccess: () => {
       qc.clear();
+      setActiveOrgId(null);
       qc.setQueryData(meKey, null);
     },
   });
@@ -60,7 +129,76 @@ export function useAcceptInvitation(token: string) {
   return useMutation({
     mutationFn: (b: AcceptInvitationRequest) =>
       post<MeResponse>(`/invitations/${encodeURIComponent(token)}/accept`, b, MeResponseSchema),
-    onSuccess: (me) => qc.setQueryData(meKey, me),
+    onSuccess: (me) => startSession(qc, me),
+  });
+}
+
+/** Signed in with the invited email: join the organization (or create the invited one) without a new account. */
+export function useAcceptExistingInvitation(token: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: AcceptExistingInvitationRequest) =>
+      post<MeResponse>(`/invitations/${encodeURIComponent(token)}/accept-existing`, b, MeResponseSchema),
+    onSuccess: (me) => {
+      qc.clear();
+      // The organization just joined or created becomes this tab's.
+      setActiveOrgId(me.activeOrg?.id ?? null);
+      qc.setQueryData(meKey, me);
+      getSocket()?.restart();
+    },
+  });
+}
+
+// ---- two-factor login (owner decision 7)
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  required: boolean;
+  setupRequired: boolean;
+  recoveryCodesLeft: number;
+  requiredBy: Array<{ id: string; name: string }>;
+}
+
+export const twoFactorKey = ['two-factor'] as const;
+
+export function useTwoFactorStatus() {
+  return useQuery({ queryKey: twoFactorKey, queryFn: () => get<TwoFactorStatus>('/auth/2fa') });
+}
+
+export function useTwoFactorSetup() {
+  return useMutation({
+    mutationFn: (password: string) => post<TwoFactorSetupResponse>('/auth/2fa/setup', { password }),
+  });
+}
+
+export function useEnableTwoFactor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => post<RecoveryCodesResponse>('/auth/2fa/enable', { code }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: meKey });
+      void qc.invalidateQueries({ queryKey: twoFactorKey });
+    },
+  });
+}
+
+export function useDisableTwoFactor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { password: string; code: string }) => post('/auth/2fa/disable', b),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: meKey });
+      void qc.invalidateQueries({ queryKey: twoFactorKey });
+    },
+  });
+}
+
+export function useRegenerateRecoveryCodes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { password: string; code: string }) =>
+      post<RecoveryCodesResponse>('/auth/2fa/recovery-codes', b),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: twoFactorKey }),
   });
 }
 

@@ -10,7 +10,7 @@ import {
   SetWorkingBranchRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth/guards.ts';
+import { requireOrg, requireUser } from '../auth/guards.ts';
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import {
   addRepo,
@@ -37,8 +37,9 @@ export function projectRoutes(ctx: Ctx) {
     });
 
     app.post('/api/projects', { schema: { body: CreateProjectRequestSchema } }, async (req, reply) => {
-      const s = await requireUser(ctx, req);
-      const id = await createProject(ctx, s.user, req.body);
+      const a = await requireOrg(ctx, req);
+      const s = a.session;
+      const id = await createProject(ctx, s.user, { id: a.orgId, role: a.role }, req.body);
       reply.code(201);
       return getProjectDetail(ctx, s.user.id, id);
     });

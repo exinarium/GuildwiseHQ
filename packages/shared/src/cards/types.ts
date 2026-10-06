@@ -66,6 +66,7 @@ export const ClaimReleaseReason = z.enum([
   'manual',
   'workstation_unlinked',
   'member_removed',
+  'org_cancelled',
 ]);
 export type ClaimReleaseReason = z.infer<typeof ClaimReleaseReason>;
 

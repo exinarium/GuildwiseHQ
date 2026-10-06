@@ -456,7 +456,12 @@ export const phaseProjectors: Record<string, Projector> = {
     );
     // A floor report is queued once per local day: remember the day on the owner.
     if (p.kind === 'floor_report' && p.localDate)
-      await exec(tx, 'UPDATE users SET floor_report_day=$2 WHERE id=$1', [org, p.localDate]);
+      await exec(
+        tx,
+        `UPDATE users SET floor_report_day=$2
+          WHERE id = COALESCE((SELECT owner_user_id FROM organizations WHERE id = $1), $1)`,
+        [org, p.localDate],
+      );
   },
 
   BaTaskDispatched: async (tx, e) => {

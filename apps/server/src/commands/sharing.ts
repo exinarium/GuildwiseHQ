@@ -1,12 +1,14 @@
 import {
-  canManageAgent,
+  canManageAgentInOrg,
   canManageCard,
   type DecisionPolicyRequest,
+  isOrgManager,
   type ProjectInvitationDto,
   type RehomeAgentRequest,
   type RemovalPreview,
   streamId,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
@@ -14,36 +16,68 @@ import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { sandboxGate } from './agents.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
 
 // ------------------------------------------------------------------------------------- invitations
 
-/** Owner invites an existing user by email; the invitee must accept before they see anything (section 24 item 17). */
+/**
+ * An organization Owner or Admin gives someone access to a project (owner decision 4: only they add people):
+ * an active member of the organization is added at once (`ProjectMemberAdded`, no accept step); another existing
+ * account becomes a guest through an invitation they accept (`ProjectShared`, section 24 item 17). Everyone has an
+ * organization, so there is no "invite them to the app" here: an unknown email is told to join the organization first.
+ */
 export async function shareProject(
   ctx: Ctx,
   user: AuthSession['user'],
   projectId: string,
   email: string,
-): Promise<void> {
-  await withAppendTx(ctx.pool, async (tx) => {
+): Promise<{ via: 'member' | 'guest' }> {
+  return withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId);
-    if (p.my_role !== 'owner') throw forbidden('only the project owner can share it');
+    if (p.my_role !== 'owner')
+      throw forbidden('only the organization Owner and Admins can add people to a project');
     if (p.status !== 'active') throw conflict('project_archived', 'project is archived');
-    const invitee = await one(tx, `SELECT id, status FROM users WHERE lower(email) = lower($1)`, [
+    const invitee = await one(tx, `SELECT id, status, kind FROM users WHERE lower(email) = lower($1)`, [
       email.trim(),
     ]);
     if (!invitee || invitee.status !== 'active')
-      throw notFound('no active account with that email; invite them to the app first');
-    if (invitee.id === user.id) throw badRequest('invalid_invitee', 'you already own this project');
-    const existing = await one(tx, 'SELECT status FROM project_members WHERE project_id=$1 AND user_id=$2', [
-      projectId,
-      invitee.id,
-    ]);
+      throw notFound(
+        'no active account with that email. Invite them to the organization first, or ask them to sign up.',
+        'user_not_found',
+      );
+    if (invitee.kind === 'super_admin')
+      throw conflict('super_admin_cannot_join', 'platform accounts cannot join projects');
+    if (invitee.id === user.id)
+      throw badRequest('invalid_invitee', 'you already have access to this project');
+    const existing = await one(
+      tx,
+      'SELECT status, org_grant FROM project_members WHERE project_id=$1 AND user_id=$2',
+      [projectId, invitee.id],
+    );
     if (existing?.status === 'active') throw conflict('already_member', 'this user is already a member');
     if (existing?.status === 'invited')
       throw conflict('already_invited', 'this user already has a pending invitation');
+    const member = await orgRoleOf(tx, invitee.id, p.org_id);
+    if (member) {
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.project(projectId),
+            event: {
+              type: 'ProjectMemberAdded',
+              payload: { projectId, userId: invitee.id, addedBy: user.id },
+            },
+            actor: userActor(user.id),
+            scope: projectScope(p.org_id, projectId),
+          },
+        ],
+        { tx },
+      );
+      return { via: 'member' as const };
+    }
     await ctx.store.append(
       [
         {
@@ -55,15 +89,18 @@ export async function shareProject(
       ],
       { tx },
     );
+    return { via: 'guest' as const };
   });
 }
 
 export async function listProjectInvitations(ctx: Ctx, userId: string): Promise<ProjectInvitationDto[]> {
   const r = await rows(
     ctx.pool,
-    `SELECT pm.project_id, pm.invited_at, p.key, p.name, COALESCE(inv.display_name, owner.display_name) AS invited_by_name
+    `SELECT pm.project_id, pm.invited_at, p.key, p.name, o.name AS org_name,
+            COALESCE(inv.display_name, owner.display_name) AS invited_by_name
        FROM project_members pm JOIN projects p ON p.id = pm.project_id
-       JOIN users owner ON owner.id = p.org_id LEFT JOIN users inv ON inv.id = pm.invited_by
+       JOIN organizations o ON o.id = p.org_id
+       JOIN users owner ON owner.id = o.owner_user_id LEFT JOIN users inv ON inv.id = pm.invited_by
       WHERE pm.user_id = $1 AND pm.status = 'invited' AND p.status = 'active'
       ORDER BY pm.invited_at DESC`,
     [userId],
@@ -73,6 +110,7 @@ export async function listProjectInvitations(ctx: Ctx, userId: string): Promise<
     projectKey: x.key,
     projectName: x.name,
     invitedByName: x.invited_by_name,
+    orgName: x.org_name,
     invitedAt: iso(x.invited_at),
   }));
 }
@@ -195,14 +233,16 @@ export async function removeMemberIn(
   actorId: string,
   p: Row,
   memberId: string,
+  opts: { includeGrant?: boolean } = {},
 ): Promise<{ inheritedAgentIds: string[]; transferredCardIds: string[]; releasedCardIds: string[] }> {
   const projectId = p.id as string;
   const user = { id: actorId };
   {
+    // The organization's Owner and Admins hold `owner` rows through their grant: only leaving the organization removes those.
     const m = await one(
       tx,
-      `SELECT status FROM project_members WHERE project_id=$1 AND user_id=$2 AND role <> 'owner'`,
-      [projectId, memberId],
+      `SELECT status FROM project_members WHERE project_id=$1 AND user_id=$2 AND ($3::boolean OR role <> 'owner')`,
+      [projectId, memberId, opts.includeGrant === true],
     );
     if (!m || m.status === 'removed') throw notFound('member not found');
     const plan = await removalPlan(tx, projectId, memberId);
@@ -288,9 +328,11 @@ export async function rehomeAgent(
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     const a = await one(tx, 'SELECT * FROM agents WHERE id=$1', [agentId]);
-    if (!a || !(a.org_id === user.id || a.manager_user_id === user.id)) throw notFound('agent not found');
-    if (!canManageAgent({ userId: user.id, orgId: a.org_id, managerUserId: a.manager_user_id }))
-      throw forbidden('only the organization owner or the hiring manager can do this');
+    const role = a ? await orgRoleOf(tx, user.id, a.org_id) : null;
+    if (!a || !(isOrgManager({ orgRole: role }) || a.manager_user_id === user.id))
+      throw notFound('agent not found');
+    if (!canManageAgentInOrg({ userId: user.id, orgRole: role, managerUserId: a.manager_user_id }))
+      throw forbidden('only the organization Owner and Admins or the hiring manager can do this');
     if (a.status !== 'needs_rehome')
       throw conflict('not_homeless', 'only agents that need a new home can be re-homed');
     const ws = await one(
@@ -307,6 +349,13 @@ export async function rehomeAgent(
       req.runtime,
       req.acknowledgeUnsandboxed,
     );
+    // A workstation the organization does not use yet counts as one more (docs/design/organizations.md section 7.4).
+    const used = await one(
+      tx,
+      `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_devops LIMIT 1`,
+      [a.org_id, req.workstationId],
+    );
+    if (!used) await assertWithinLimit(tx, a.org_id, 'workstations');
     await ctx.store.append(
       [
         {

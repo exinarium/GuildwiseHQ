@@ -5,7 +5,7 @@ import {
   OutboundParamsSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth/guards.ts';
+import { requireUserWithFeature } from '../auth/guards.ts';
 import { createManagerDraft } from '../commands/drafts.ts';
 import { getOutboundDto, listOutbound, retryOutbound } from '../commands/outbox.ts';
 import type { Ctx } from '../context.ts';
@@ -21,7 +21,7 @@ export function outboundRoutes(ctx: Ctx) {
     const app = typed(fastify);
 
     app.get('/api/outbound', { schema: { querystring: OutboundListQuerySchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
+      const s = await requireUserWithFeature(ctx, req, 'outbound');
       return { drafts: await listOutbound(ctx.pool, s.user, req.query) };
     });
 
@@ -29,7 +29,7 @@ export function outboundRoutes(ctx: Ctx) {
       '/api/cards/:id/outbound',
       { schema: { params: CardParamsSchema, body: CreateOutboundDraftRequestSchema } },
       async (req, reply) => {
-        const s = await requireUser(ctx, req);
+        const s = await requireUserWithFeature(ctx, req, 'outbound');
         const { draftId } = await createManagerDraft(ctx, s.user, req.params.id, req.body);
         reply.code(201);
         return { draft: await getOutboundDto(ctx.pool, draftId) };
@@ -37,7 +37,7 @@ export function outboundRoutes(ctx: Ctx) {
     );
 
     app.post('/api/outbound/:id/retry', { schema: { params: OutboundParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
+      const s = await requireUserWithFeature(ctx, req, 'outbound');
       const { workstationId } = await retryOutbound(ctx, s.user, req.params.id);
       if (workstationId) await ctx.services.gateway.deliverPending(workstationId);
       return { draft: await getOutboundDto(ctx.pool, req.params.id) };

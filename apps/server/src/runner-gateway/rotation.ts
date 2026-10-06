@@ -1,5 +1,5 @@
 import { RUNNER_TOKEN_PREFIX, streamId } from '@aom/shared';
-import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { randomToken, sha256Hex } from '../crypto.ts';
 import { exec, one } from '../db/sql.ts';
@@ -45,7 +45,7 @@ export async function promoteRotatedToken(ctx: Ctx, token: string) {
             payload: { workstationId: pending.workstation_id, tokenHash: hash },
           },
           actor: SYSTEM_ACTOR,
-          scope: orgScope(pending.user_id),
+          scope: userScope(pending.user_id),
         },
       ],
       { tx },

@@ -34,6 +34,7 @@ export async function baTaskPass(
   const queued = await rows(
     ctx.pool,
     `SELECT t.* FROM ba_tasks t JOIN projects p ON p.id = t.project_id AND p.status = 'active'
+       JOIN organizations po ON po.id = p.org_id AND po.status IN ('trial','active')
       WHERE t.status = 'queued' ORDER BY t.created_at, t.id`,
   );
   const started: BaTaskDispatch[] = [];

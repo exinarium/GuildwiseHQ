@@ -1,12 +1,15 @@
-import type { OrgRole } from '@aom/shared';
+import type { OrgFeature, OrgRole } from '@aom/shared';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../context.ts';
 import { forbidden, HttpError, notFound, unauthorized } from '../errors.ts';
 import {
+  loadOrg,
   type OrgAccess,
   orgAccessFor,
+  orgRoleOf,
   type RequireOrgOptions,
   requestedOrgId,
+  requireFeature,
   resolveOrgId,
 } from './org-context.ts';
 import { type AuthSession, lookupSession, SESSION_COOKIE } from './sessions.ts';
@@ -76,6 +79,24 @@ export async function requireOrg(
   const orgId = await resolveOrgId(ctx, s, requestedOrgId(req));
   if (!orgId) throw new HttpError(403, 'no_organization', 'you do not belong to an organization');
   return orgAccessFor(ctx, s, orgId, opts);
+}
+
+/**
+ * A signed-in user on a route that belongs to a feature (interests, phases, research, outbound): 403 `feature_disabled`
+ * when the tab's organization has it switched off. A user without membership in the tab's organization (a guest working
+ * in someone else's project) is not blocked by it.
+ */
+export async function requireUserWithFeature(
+  ctx: Ctx,
+  req: FastifyRequest,
+  feature: OrgFeature,
+): Promise<AuthSession> {
+  const s = await requireUser(ctx, req);
+  const orgId = await resolveOrgId(ctx, s, requestedOrgId(req));
+  if (!orgId) return s;
+  const org = await loadOrg(ctx.pool, orgId);
+  if (org && (await orgRoleOf(ctx.pool, s.user.id, orgId))) requireFeature(org, feature);
+  return s;
 }
 
 /** `requireOrg` with a minimum role. */

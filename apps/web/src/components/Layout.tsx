@@ -3,6 +3,7 @@ import { Navigate, useLocation } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { useSetTimezone } from '../api/queries/reporting.ts';
 import { browserTimeZone } from '../lib/timezone.ts';
+import { SecuritySetup } from '../pages/SecuritySetup.tsx';
 import { getSocket, useSocketState } from '../ws/socket.ts';
 import { AppShell } from './shell/AppShell.tsx';
 import { PageSkeleton } from './ui.tsx';
@@ -12,7 +13,8 @@ export function RequireAuth() {
   const loc = useLocation();
   const socketState = useSocketState();
   useEffect(() => {
-    if (me.data) getSocket()?.start();
+    // No live socket while two-factor setup is pending (the server refuses it) or for a platform account's login page.
+    if (me.data && !me.data.twoFactor.setupRequired) getSocket()?.start();
     else getSocket()?.stop();
   }, [me.data]);
   // First login: take the manager's time zone from the browser (the daily BA report is posted on their clock).
@@ -33,5 +35,8 @@ export function RequireAuth() {
     const next = loc.pathname + loc.search;
     return <Navigate to={`/login${next === '/' ? '' : `?next=${encodeURIComponent(next)}`}`} replace />;
   }
-  return <AppShell isAdmin={me.data.isAdmin} name={me.data.user.displayName} live={socketState} />;
+  // An account that must have two-factor login sets it up first; a platform account never reaches the work shell.
+  if (me.data.twoFactor.setupRequired) return <SecuritySetup me={me.data} />;
+  if (me.data.account.kind === 'super_admin') return <Navigate to="/platform" replace />;
+  return <AppShell name={me.data.user.displayName} live={socketState} />;
 }

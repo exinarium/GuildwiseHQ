@@ -2,10 +2,14 @@ import { randomUUID } from 'node:crypto';
 import {
   type CardTemplate,
   type CreateInterestRequest,
+  canCreateProject,
+  canEditInterest,
   defaultWindowHours,
+  effectiveCreatorRank,
   feedMaxItems,
   type InterestBody,
   interestCardTemplate,
+  type OrgRole,
   type PatchInterestRequest,
   type ScanSpec,
   type ScheduleSyncPlan,
@@ -14,6 +18,7 @@ import {
   streamId,
   type TasteSeedLine,
 } from '@aom/shared';
+import { rankInOrg } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
 import { resolveWorkflow } from '../catalogue/loader.ts';
@@ -22,6 +27,7 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { assertWithinLimit } from '../orgs/limits.ts';
 import { projectScope, userActor } from './common.ts';
 import { assertCronAndZone, checkTemplate, nextFireAfter, scheduleUpdateEvent } from './schedules.ts';
 
@@ -173,7 +179,12 @@ function scheduleCreatedEvent(
   };
 }
 
-export async function createInterest(ctx: Ctx, user: User, req: CreateInterestRequest): Promise<string> {
+export async function createInterest(
+  ctx: Ctx,
+  user: User,
+  org: { id: string; role: OrgRole | null },
+  req: CreateInterestRequest,
+): Promise<string> {
   if (req.feedProjectId && req.newFeedProject)
     throw badRequest('conflicting_feed_project', 'choose an existing feed project or a new one, not both');
   if (!req.feedProjectId && !req.newFeedProject && !req.researchProjectId)
@@ -187,9 +198,15 @@ export async function createInterest(ctx: Ctx, user: User, req: CreateInterestRe
     let feed: Row | undefined;
     if (req.newFeedProject) {
       const np = req.newFeedProject;
-      if (!(await resolveWorkflow(tx, user.id, 'feed')))
+      // A new project is created: only the Owner and Admins do that (owner decision 4).
+      if (!canCreateProject({ orgRole: org.role }))
+        throw forbidden(
+          'only the organization Owner and Admins can create a project: choose an existing feed project',
+        );
+      await assertWithinLimit(tx, org.id, 'projects');
+      if (!(await resolveWorkflow(tx, org.id, 'feed')))
         throw badRequest('unknown_workflow', "workflow 'feed' does not exist");
-      if (await one(tx, 'SELECT 1 FROM projects WHERE org_id=$1 AND key=$2', [user.id, np.key]))
+      if (await one(tx, 'SELECT 1 FROM projects WHERE org_id=$1 AND key=$2', [org.id, np.key]))
         throw conflict('project_key_taken', `project key ${np.key} is already in use`);
       const projectId = randomUUID();
       const created: AppendInput = {
@@ -198,7 +215,8 @@ export async function createInterest(ctx: Ctx, user: User, req: CreateInterestRe
           type: 'ProjectCreated',
           payload: {
             projectId,
-            orgId: user.id,
+            orgId: org.id,
+            createdByUserId: user.id,
             key: np.key,
             name: np.name,
             domain: np.domain,
@@ -211,7 +229,7 @@ export async function createInterest(ctx: Ctx, user: User, req: CreateInterestRe
           },
         },
         actor: userActor(user.id),
-        scope: projectScope(user.id, projectId),
+        scope: projectScope(org.id, projectId),
       };
       // Its projector runs inside this transaction, so the project row exists for the steps below.
       await ctx.store.append([created], { tx });
@@ -243,6 +261,7 @@ export async function createInterest(ctx: Ctx, user: User, req: CreateInterestRe
     const body: InterestBody = {
       interestId,
       orgId,
+      creatorRank: ((await rankInOrg(tx, user.id, orgId)) || 1) as 1 | 2 | 3 | 4,
       name: req.name,
       description: req.description,
       feedProjectId: feed?.id ?? null,
@@ -272,6 +291,23 @@ export async function createInterest(ctx: Ctx, user: User, req: CreateInterestRe
   return interestId;
 }
 
+/**
+ * Edit rule of an interest (owner decision 13, docs/design/organizations.md section 4.3): the creator, or someone of
+ * at least the creator's rank in the interest's organization. The creator's current rank counts while they still have
+ * a relationship with the organization; the rank stored at creation is the fallback once they left.
+ */
+export async function assertCanEditInterest(tx: Queryable, userId: string, i: Row): Promise<void> {
+  const actorRank = await rankInOrg(tx, userId, i.org_id);
+  const current = i.created_by ? await rankInOrg(tx, i.created_by, i.org_id) : 0;
+  const creatorRank = effectiveCreatorRank(current, i.created_by_rank ?? undefined);
+  if (
+    !canEditInterest({ userId, rank: actorRank }, { userId: i.created_by ?? null, rank: creatorRank }, true)
+  )
+    throw forbidden(
+      'only its creator, or someone of a higher role in the organization, can change this interest',
+    );
+}
+
 async function lockInterest(tx: Tx, user: User, id: string): Promise<Row> {
   const i = await one(tx, 'SELECT * FROM interests WHERE id=$1 FOR UPDATE', [id]);
   if (!i) throw notFound('interest not found');
@@ -282,6 +318,7 @@ async function lockInterest(tx: Tx, user: User, id: string): Promise<Row> {
   if (!member) throw notFound('interest not found');
   if (!(await canManageInterest(tx, user.id, i)))
     throw forbidden('you must be a member of every project this interest links to');
+  await assertCanEditInterest(tx, user.id, i);
   return i;
 }
 
@@ -547,6 +584,7 @@ export async function adoptSchedules(ctx: Ctx, user: User, scheduleIds: string[]
         const body: InterestBody = {
           interestId: id,
           orgId: project.org_id,
+          creatorRank: ((await rankInOrg(tx, user.id, project.org_id)) || 1) as 1 | 2 | 3 | 4,
           name,
           description: typeof fields.description === 'string' ? fields.description : '',
           feedProjectId: project.id,
@@ -691,6 +729,19 @@ export async function setTasteSeed(
         throw badRequest('unknown_interest', 'a rule is tagged with an interest of another project');
     }
     const cur = await currentSeed(tx, projectId);
+    // The project's own rules follow the project; the rules of an interest follow the interest (its edit rule).
+    const key = (r: TasteSeedLine) => `${r.interestId ?? ''}|${r.text}`;
+    const before = new Set(cur.rules.map(key));
+    const after = new Set(rules.map(key));
+    const changed = new Set(
+      [...cur.rules, ...rules]
+        .filter((r) => r.interestId && before.has(key(r)) !== after.has(key(r)))
+        .map((r) => r.interestId as string),
+    );
+    for (const interestId of changed) {
+      const i = await one(tx, 'SELECT * FROM interests WHERE id=$1', [interestId]);
+      if (i) await assertCanEditInterest(tx, user.id, i);
+    }
     await appendTasteSeed(ctx, tx, user, project, dedupe(rules), cur.version + 1);
   });
 }

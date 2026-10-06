@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto';
 import {
   BA_ROLE_KEY,
   DESK_SUBKIND,
+  isOrgManager,
   normalizeRemoteUrl,
   RepoCreateParamsSchema,
   type RepoCreatePayload,
   RepoCreateResultSchema,
   streamId,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -71,6 +73,18 @@ async function connectedWorkstation(db: Queryable, userId: string): Promise<Row 
   );
 }
 
+/** A connected workstation of the organization's Owner or an Admin: the repository is created with that person's GitHub login. */
+async function managerWorkstation(db: Queryable, orgId: string): Promise<Row | undefined> {
+  return one(
+    db,
+    `SELECT w.id, w.name FROM workstations w JOIN org_members om ON om.user_id = w.user_id
+      WHERE om.org_id=$1 AND om.status='active' AND om.role IN ('owner','admin')
+        AND w.status='active' AND w.connected
+      ORDER BY w.last_seen_at DESC NULLS LAST, w.paired_at LIMIT 1`,
+    [orgId],
+  );
+}
+
 /** `aom repo create` from a chat with the BA or the DevOps engineer, or from a DevOps shift. */
 export async function repoCreateRpc(
   ctx: Ctx,
@@ -92,10 +106,13 @@ export async function repoCreateRpc(
     userId = ctx.services.chat.userOfChat(shift.id);
     threadId = ctx.services.chat.threadOfChat(shift.id) ?? null;
   } else if (shift.kind === 'devops' && agent.is_devops) {
-    const req = await one(ctx.pool, 'SELECT org_id, thread_id FROM devops_requests WHERE shift_id=$1', [
-      shift.id,
-    ]);
-    userId = req?.org_id;
+    const req = await one(
+      ctx.pool,
+      `SELECT r.org_id, r.thread_id, w.user_id FROM devops_requests r JOIN workstations w ON w.id = r.workstation_id
+        WHERE r.shift_id=$1`,
+      [shift.id],
+    );
+    userId = req?.user_id;
     threadId = req?.thread_id ?? null;
   } else
     return [
@@ -114,7 +131,7 @@ export async function repoCreateRpc(
   );
   if (!project)
     return [false, undefined, `unknown project '${p.data.project}' (use a project key you may work in)`];
-  if (!(await connectedWorkstation(ctx.pool, project.org_id)))
+  if (!(await managerWorkstation(ctx.pool, project.org_id)))
     return [
       false,
       undefined,
@@ -146,7 +163,7 @@ export async function repoCreateRpc(
 
   const requestId = randomUUID();
   const deskItemId = randomUUID();
-  const ws = await connectedWorkstation(ctx.pool, project.org_id);
+  const ws = await managerWorkstation(ctx.pool, project.org_id);
   const body = [
     `Repository: ${p.data.name}`,
     `Visibility: ${p.data.visibility}`,
@@ -248,9 +265,9 @@ export async function resolveRepoCreateIn(
     [item.id],
   );
   if (!req) throw notFound('repository request not found');
-  if (req.org_id !== user.id)
+  if (!isOrgManager({ orgRole: await orgRoleOf(tx, user.id, req.org_id) }))
     throw forbidden(
-      'only the project owner can approve this: the repository is created with their GitHub login',
+      'only the organization Owner and Admins can approve this: the repository is created with their GitHub login',
     );
   if (req.status !== 'pending') throw conflict('already_decided', `this request is already ${req.status}`);
   const scope = projectScope(req.org_id, req.project_id);
@@ -335,9 +352,9 @@ export async function retryRepoCreateIn(ctx: Ctx, tx: Tx, user: { id: string }, 
     [item.id],
   );
   if (!req) throw notFound('repository request not found');
-  if (req.org_id !== user.id)
+  if (!isOrgManager({ orgRole: await orgRoleOf(tx, user.id, req.org_id) }))
     throw forbidden(
-      'only the project owner can approve this: the repository is created with their GitHub login',
+      'only the organization Owner and Admins can approve this: the repository is created with their GitHub login',
     );
   if (req.status !== 'failed')
     throw conflict('not_failed', `this request is ${req.status}, only a failed request can be retried`);

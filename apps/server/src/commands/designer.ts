@@ -5,12 +5,15 @@ import {
   type CreateDepartmentRequest,
   DEFINITION_FORMAT,
   DESK_SUBKIND_DEFINITION,
+  DEVOPS_ROLE_KEY,
   type DefinitionIssue,
   type DepartmentDto,
   type DraftResponse,
   definitionVaultPath,
   type ExtendRoleRequest,
+  isOrgManager,
   type OrgCatalogueResponse,
+  type OrgRole,
   type RoleDefinition,
   RoleDefinitionSchema,
   type RoleDraftInput,
@@ -25,6 +28,7 @@ import {
   WorkflowDefinitionSchema,
   type WorkflowDraftInput,
 } from '@aom/shared';
+import { loadOrg, orgRoleOf, requireFeature } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
@@ -64,26 +68,38 @@ const issueOfWorkflow = (i: ValidationIssue): DefinitionIssue => ({
 // ------------------------------------------------------------------------------------------- context
 
 /**
- * The organization whose catalogue a request is about: the caller's own, or (with `projectId`) the one that owns the
- * project. Everyone in a project may read its owner's catalogue; only the owner may change it.
+ * The organization whose catalogue a request is about: the request's own (`requestOrg`), or (with `projectId`) the one
+ * that owns the project. Everyone in the organization or on the project may read its catalogue; only its Owner and
+ * Admins may change it (`isOwner` says whether the caller is one of them).
  */
 export async function catalogueOrg(
   db: Queryable,
   user: { id: string },
+  requestOrg: string | null,
   projectId: string | undefined,
   write: boolean,
-): Promise<{ orgId: string; isOwner: boolean }> {
-  if (!projectId) return { orgId: user.id, isOwner: true };
-  const role = await projectRole(db, user.id, projectId);
-  if (!role) throw notFound('project not found');
-  const p = await one<{ org_id: string }>(db, 'SELECT org_id FROM projects WHERE id=$1', [projectId]);
-  if (!p) throw notFound('project not found');
-  const isOwner = p.org_id === user.id;
+): Promise<{ orgId: string; isOwner: boolean; role: OrgRole | null }> {
+  let orgId = requestOrg;
+  if (projectId) {
+    const prole = await projectRole(db, user.id, projectId);
+    if (!prole) throw notFound('project not found');
+    const p = await one<{ org_id: string }>(db, 'SELECT org_id FROM projects WHERE id=$1', [projectId]);
+    if (!p) throw notFound('project not found');
+    orgId = p.org_id;
+  }
+  if (!orgId) throw forbidden('you do not belong to an organization');
+  const role = await orgRoleOf(db, user.id, orgId);
+  if (!projectId && !role) throw forbidden('you are not a member of that organization');
+  const isOwner = isOrgManager({ orgRole: role });
   if (write && !isOwner)
     throw forbidden(
-      'only the organization owner can change the role catalogue, workflows and standing orders',
+      'only the organization Owner and Admins can change the role catalogue, workflows and standing orders',
     );
-  return { orgId: p.org_id, isOwner };
+  if (write) {
+    const org = await loadOrg(db, orgId);
+    if (org) requireFeature(org, 'customRoles');
+  }
+  return { orgId, isOwner, role };
 }
 
 export async function departmentNames(db: Queryable, orgId: string): Promise<string[]> {
@@ -427,7 +443,13 @@ export async function submitDraft(
 }
 
 /** Drops a draft (or a rejected definition) that was never approved; approved versions are never removed. */
-export async function discardDraft(ctx: Ctx, orgId: string, kind: DefinitionKind, id: string): Promise<void> {
+export async function discardDraft(
+  ctx: Ctx,
+  userId: string,
+  orgId: string,
+  kind: DefinitionKind,
+  id: string,
+): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     const row = await loadVersion(tx, kind, orgId, id, true);
     if (row.status !== 'draft' && row.status !== 'rejected')
@@ -437,7 +459,7 @@ export async function discardDraft(ctx: Ctx, orgId: string, kind: DefinitionKind
         {
           streamId: kind === 'role' ? streamId.role(orgId, row.key) : streamId.workflow(orgId, row.key),
           event: { type: 'DefinitionDraftDiscarded', payload: { kind, versionId: id } },
-          actor: userActor(orgId),
+          actor: userActor(userId),
           scope: orgScope(orgId),
         },
       ],
@@ -461,7 +483,8 @@ export async function resolveDefinitionIn(
 ): Promise<void> {
   if (resolution === 'acknowledged')
     throw badRequest('wrong_resolution', 'a definition is approved or rejected');
-  if (item.org_id !== user.id) throw forbidden('only the organization owner can approve definitions');
+  if (!isOrgManager({ orgRole: await orgRoleOf(tx, user.id, item.org_id) }))
+    throw forbidden('only the organization Owner and Admins can approve definitions');
   const role = await one(tx, 'SELECT * FROM role_definitions WHERE desk_item_id=$1 FOR UPDATE', [item.id]);
   const wf = role
     ? undefined
@@ -508,7 +531,10 @@ export async function extendRole(
   roleKey: string,
   req: ExtendRoleRequest,
 ): Promise<{ roleKey: string; baseVersion: number }> {
-  if (orgId !== user.id) throw forbidden('only the organization owner can extend a role');
+  if (!isOrgManager({ orgRole: await orgRoleOf(ctx.pool, user.id, orgId) }))
+    throw forbidden('only the organization Owner and Admins can extend a role');
+  if (roleKey === DEVOPS_ROLE_KEY)
+    throw badRequest('not_extendable', 'the DevOps engineer cannot be extended');
   if (!req.instructions.trim() && req.skills.length === 0 && req.standingOrders.length === 0)
     throw badRequest('empty_extension', 'add instructions, skills or standing orders (or reset the role)');
   return withAppendTx(ctx.pool, async (tx) => {
@@ -520,7 +546,6 @@ export async function extendRole(
     );
     if (!latest)
       throw notFound('built-in role not found: custom roles are changed by drafting a new version');
-    if (roleKey === 'devops') throw badRequest('not_extendable', 'the DevOps engineer cannot be extended');
     await ctx.store.append(
       [
         {
@@ -556,7 +581,8 @@ export async function createDepartment(
   orgId: string,
   req: CreateDepartmentRequest,
 ): Promise<DepartmentDto> {
-  if (orgId !== user.id) throw forbidden('only the organization owner can create departments');
+  if (!isOrgManager({ orgRole: await orgRoleOf(ctx.pool, user.id, orgId) }))
+    throw forbidden('only the organization Owner and Admins can create departments');
   const name = req.name.trim();
   return withAppendTx(ctx.pool, async (tx) => {
     const taken = (await departmentNames(tx, orgId)).some((n) => n.toLowerCase() === name.toLowerCase());
@@ -582,9 +608,10 @@ export async function createDepartment(
 export async function orgCatalogue(
   ctx: Ctx,
   user: { id: string },
+  requestOrg: string | null,
   projectId?: string,
 ): Promise<OrgCatalogueResponse> {
-  const { orgId, isOwner } = await catalogueOrg(ctx.pool, user, projectId, false);
+  const { orgId, isOwner } = await catalogueOrg(ctx.pool, user, requestOrg, projectId, false);
   const visible = isOwner
     ? `status IN ('draft','pending_approval','active','superseded','rejected')`
     : `status IN ('active','superseded')`;
@@ -698,10 +725,11 @@ export async function listDepartments(db: Queryable, orgId: string): Promise<Dep
 export async function definitionFile(
   ctx: Ctx,
   user: { id: string },
+  requestOrg: string | null,
   id: string,
   projectId?: string,
 ): Promise<{ path: string; content: string; format: string }> {
-  const { orgId } = await catalogueOrg(ctx.pool, user, projectId, false);
+  const { orgId } = await catalogueOrg(ctx.pool, user, requestOrg, projectId, false);
   const role = await one(ctx.pool, 'SELECT * FROM role_definitions WHERE id=$1', [id]);
   const wf = role ? undefined : await one(ctx.pool, 'SELECT * FROM workflow_versions WHERE id=$1', [id]);
   const row = role ?? wf;

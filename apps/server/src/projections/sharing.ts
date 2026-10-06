@@ -79,11 +79,15 @@ export const sharingProjectors: Record<string, Projector> = {
       `SELECT p.org_id, o.owner_user_id FROM projects p LEFT JOIN organizations o ON o.id = p.org_id WHERE p.id=$1`,
       [p.projectId],
     );
-    await exec(tx, 'UPDATE project_members SET direct=false WHERE project_id=$1 AND user_id=$2', [
-      p.projectId,
-      p.userId,
-    ]);
-    await refreshProjectAccess(tx, p.projectId, p.userId, e.createdAt);
+    // The direct grant (or a pending share) ends; the row stays active only through the organization grant.
+    await exec(
+      tx,
+      `UPDATE project_members SET direct=false,
+              status = CASE WHEN org_grant THEN status ELSE 'removed' END,
+              removed_at = CASE WHEN org_grant THEN removed_at ELSE COALESCE(removed_at, $3) END
+        WHERE project_id=$1 AND user_id=$2`,
+      [p.projectId, p.userId, e.createdAt],
+    );
     if (!project) return;
     const inheritor = project.owner_user_id ?? project.org_id;
     // The owner inherits the agents; they need a new home (workstation + provider) before they work again.

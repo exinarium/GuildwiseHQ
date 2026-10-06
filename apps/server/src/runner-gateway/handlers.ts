@@ -8,7 +8,7 @@ import {
 } from '@aom/shared';
 import type { ChatTerminal } from '../chat/relay.ts';
 import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
-import { cardMessage, orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { cardMessage, SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { designRpc } from '../commands/design-rpc.ts';
 import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
 import { outboundDraftRpc } from '../commands/drafts.ts';
@@ -287,7 +287,7 @@ export class RunnerHandlers {
           payload: { workstationId: conn.workstationId, runtimes: now },
         },
         actor: SYSTEM_ACTOR,
-        scope: orgScope(conn.userId),
+        scope: userScope(conn.userId),
       },
     ]);
   }
@@ -322,7 +322,7 @@ export class RunnerHandlers {
           payload: { workstationId: conn.workstationId, runnerVersion: msg.runnerVersion },
         },
         actor: SYSTEM_ACTOR,
-        scope: orgScope(conn.userId),
+        scope: userScope(conn.userId),
       },
     ]);
     this.send(conn, 'welcome', {

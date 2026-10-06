@@ -102,9 +102,35 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['interests'],
         ['digest'],
       ];
+    case 'org':
+      // Organization events reach Members payload-stripped: refetch everything that depends on the organization.
+      return [
+        ['me'],
+        ['org'],
+        ['orgs'],
+        ['org-members'],
+        ['org-invitations'],
+        ['org-guests'],
+        ['agents'],
+        ['desk'],
+        ['projects'],
+        ['vaults'],
+        ['hr'],
+        ['roles'],
+        ['reporting'],
+        ['platform'],
+      ];
     case 'user':
     case 'invitation':
-      return [['admin'], ['me'], ['reporting']];
+      return [
+        ['admin'],
+        ['me'],
+        ['reporting'],
+        ['org-members'],
+        ['org-invitations'],
+        ['platform'],
+        ['two-factor'],
+      ];
     default:
       return [];
   }

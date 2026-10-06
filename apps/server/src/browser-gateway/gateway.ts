@@ -1,24 +1,27 @@
 import {
-  type AuthUser,
   type BrowserToServer,
   BrowserToServerSchema,
+  isOrgManager,
+  type OrgRole,
   type ProgressItem,
   RESYNC_THRESHOLD,
   type ServerToBrowser,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
+import { orgRoleOf, resolveOrgId } from '../auth/org-context.ts';
 import { checkWsOrigin } from '../auth/origin-check.ts';
 import { lookupSession, SESSION_COOKIE } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
-import { canSee, loadProjects, replayVisible, toVisibleEvent } from './visibility.ts';
+import { accessOf, loadProjects, replayVisible, type SocketViewer, toVisibleEvent } from './visibility.ts';
 
 interface BConn {
   socket: WebSocket;
-  user: AuthUser;
+  /** Who is looking and in which organization (the socket's `?org=`, else the session's default). */
+  viewer: SocketViewer;
   userId: string;
   sessionId: string;
   projects: Set<string>;
@@ -29,12 +32,20 @@ interface BConn {
   sentUpTo: bigint;
 }
 
-const PROJECT_EVENTS = new Set([
+/** Events after which a socket's project set or organization role may have changed. */
+const ACCESS_EVENTS = new Set([
   'ProjectCreated',
   'ProjectShared',
   'ProjectShareAccepted',
   'ProjectShareDeclined',
+  'ProjectMemberAdded',
   'ProjectMemberRemoved',
+  'ProjectDeleted',
+  'OrgMemberAdded',
+  'OrgMemberRoleChanged',
+  'OrgMemberRemoved',
+  'OrgOwnershipTransferred',
+  'OrgStatusChanged',
 ]);
 
 /** `/api/ws`: per-user event fan-out with replay, shift log watching, presence. */
@@ -46,7 +57,8 @@ export class BrowserGateway {
 
   register(app: FastifyInstance): void {
     app.get('/api/ws', { websocket: true }, (socket, req) => {
-      this.onConnection(socket, req.headers.origin, req.cookies[SESSION_COOKIE]);
+      const org = (req.query as { org?: string } | undefined)?.org;
+      this.onConnection(socket, req.headers.origin, req.cookies[SESSION_COOKIE], org);
     });
     this.unsubscribe = this.ctx.store.subscribe((e) => this.onEvent(e));
   }
@@ -55,11 +67,16 @@ export class BrowserGateway {
     if (c.socket.readyState === 1) c.socket.send(JSON.stringify(msg));
   }
 
-  private onConnection(socket: WebSocket, origin: string | undefined, sid: string | undefined): void {
+  private onConnection(
+    socket: WebSocket,
+    origin: string | undefined,
+    sid: string | undefined,
+    org: string | undefined,
+  ): void {
     const { ctx } = this;
     // Listeners are attached synchronously (the client may send `hello` right after the upgrade);
     // messages wait for authentication and are processed in order.
-    let chain: Promise<BConn | null> = this.authenticate(socket, origin, sid);
+    let chain: Promise<BConn | null> = this.authenticate(socket, origin, sid, org);
     socket.on('message', (data) => {
       chain = chain.then(async (conn) => {
         if (!conn) return null;
@@ -92,6 +109,7 @@ export class BrowserGateway {
     socket: WebSocket,
     origin: string | undefined,
     sid: string | undefined,
+    org: string | undefined,
   ): Promise<BConn | null> {
     const { ctx } = this;
     if (!checkWsOrigin(ctx.config, origin)) {
@@ -103,12 +121,34 @@ export class BrowserGateway {
       socket.close(4401, 'unauthenticated');
       return null;
     }
+    // Platform accounts see the `admin` audience only; two-factor setup pending: nothing.
+    if (session.twoFactor.setupRequired) {
+      socket.close(4403, 'two-factor setup required');
+      return null;
+    }
+    let orgId: string | null = null;
+    try {
+      orgId =
+        session.user.kind === 'super_admin'
+          ? null
+          : await resolveOrgId(ctx, session, org && /^[0-9a-f-]{36}$/i.test(org) ? org.toLowerCase() : null);
+    } catch {
+      socket.close(4403, 'org_forbidden');
+      return null;
+    }
+    const projects = await loadProjects(ctx.pool, session.user.id);
     const conn: BConn = {
       socket,
-      user: { id: session.user.id, role: session.user.role },
+      viewer: {
+        userId: session.user.id,
+        kind: session.user.kind,
+        orgId,
+        orgRole: orgId ? await orgRoleOf(ctx.pool, session.user.id, orgId) : null,
+        visibleProjectIds: projects,
+      },
       userId: session.user.id,
       sessionId: session.sessionId,
-      projects: await loadProjects(ctx.pool, session.user.id),
+      projects,
       watchers: new Set(),
       ready: false,
       buffer: [],
@@ -128,8 +168,7 @@ export class BrowserGateway {
         if (msg.lastSeq !== undefined) {
           const missed = await replayVisible(
             this.ctx.pool,
-            c.user,
-            c.projects,
+            c.viewer,
             BigInt(msg.lastSeq),
             RESYNC_THRESHOLD + 1,
           );
@@ -137,7 +176,8 @@ export class BrowserGateway {
           else
             for (const e of missed) {
               if (e.seq > maxSeq) break;
-              this.send(c, { type: 'event', event: toVisibleEvent(e) });
+              const level = accessOf(c.viewer, e);
+              if (level) this.send(c, { type: 'event', event: toVisibleEvent(e, level) });
             }
         }
         c.sentUpTo = upTo;
@@ -168,12 +208,19 @@ export class BrowserGateway {
       const card = await one(this.ctx.pool, 'SELECT project_id FROM cards WHERE id=$1', [s.card_id]);
       return !!card && !!(await projectRole(this.ctx.pool, c.userId, card.project_id));
     }
-    return s.org_id === c.userId;
+    // A chat, DevOps or BA shift: the organization's Owner and Admins, or the user whose workstation runs it.
+    const mine = await one(
+      this.ctx.pool,
+      'SELECT 1 FROM shifts s JOIN workstations w ON w.id = s.workstation_id WHERE s.id=$1 AND w.user_id=$2',
+      [shiftId, c.userId],
+    );
+    return !!mine || isOrgManager({ orgRole: await orgRoleOf(this.ctx.pool, c.userId, s.org_id) });
   }
 
   private deliver(c: BConn, e: StoredEvent): void {
-    if (!canSee(c.user, e, c.projects)) return;
-    this.send(c, { type: 'event', event: toVisibleEvent(e) });
+    const level = accessOf(c.viewer, e);
+    if (!level) return;
+    this.send(c, { type: 'event', event: toVisibleEvent(e, level) });
     c.sentUpTo = e.seq;
   }
 
@@ -182,15 +229,16 @@ export class BrowserGateway {
     const payload = e.event.payload as Record<string, any>;
     if (t === 'UserDeactivated') this.closeUser(payload.userId);
     for (const c of this.conns) {
-      if (PROJECT_EVENTS.has(t)) c.projects = await loadProjects(this.ctx.pool, c.userId);
-      if (t === 'UserRoleChanged' && payload.userId === c.userId)
-        c.user = { id: c.userId, role: payload.role };
+      if (ACCESS_EVENTS.has(t)) await this.refreshAccess(c, e);
       if (!c.ready) {
         c.buffer.push(e);
         continue;
       }
       if (e.seq > c.sentUpTo) this.deliver(c, e);
-      if ((t === 'WorkstationConnected' || t === 'WorkstationDisconnected') && e.scope.orgId === c.userId) {
+      if (
+        (t === 'WorkstationConnected' || t === 'WorkstationDisconnected') &&
+        (e.scope.userId === c.userId || (!e.scope.userId && e.scope.orgId === c.userId))
+      ) {
         this.send(c, {
           type: 'presence',
           workstationId: payload.workstationId,
@@ -198,6 +246,22 @@ export class BrowserGateway {
         });
       }
     }
+  }
+
+  /**
+   * After an event that can change what a socket may see (membership, role, status of its organization): recompute
+   * its projects and role, and tell the browser to resync when they changed (the client resets its caches).
+   */
+  private async refreshAccess(c: BConn, e: StoredEvent): Promise<void> {
+    const { ctx } = this;
+    const before = `${c.viewer.orgRole}|${[...(c.viewer.visibleProjectIds as Set<string>)].sort().join(',')}|${c.viewer.orgId}`;
+    c.projects = await loadProjects(ctx.pool, c.userId);
+    const orgId = c.viewer.orgId;
+    const role: OrgRole | null = orgId ? await orgRoleOf(ctx.pool, c.userId, orgId) : null;
+    c.viewer = { ...c.viewer, visibleProjectIds: c.projects, orgRole: role };
+    const after = `${role}|${[...c.projects].sort().join(',')}|${orgId}`;
+    const status = e.event.type === 'OrgStatusChanged' && e.scope.orgId === orgId;
+    if ((before !== after || status) && c.ready) this.send(c, { type: 'resync' });
   }
 
   /** Forwards runner progress to the sockets watching the shift. */

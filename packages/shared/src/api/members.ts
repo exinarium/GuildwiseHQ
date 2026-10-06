@@ -14,6 +14,8 @@ export const ProjectInvitationDtoSchema = z.object({
   projectKey: z.string(),
   projectName: z.string(),
   invitedByName: z.string(),
+  /** The organization that invited the user (guests see it in the inbox). */
+  orgName: z.string().optional(),
   invitedAt: IsoTime.nullable(),
 });
 export type ProjectInvitationDto = z.infer<typeof ProjectInvitationDtoSchema>;

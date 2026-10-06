@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { type CreateLedgerEntryRequest, streamId } from '@aom/shared';
+import { type CreateLedgerEntryRequest, isOrgManager, streamId } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
@@ -15,12 +16,13 @@ import { plannedVaultPath } from './decisions.ts';
 export async function addLedgerEntry(
   ctx: Ctx,
   user: AuthSession['user'],
+  requestOrg: string | null,
   req: CreateLedgerEntryRequest,
 ): Promise<string> {
   return withAppendTx(ctx.pool, async (tx) => {
     let projectId = req.projectId;
     let cardId = req.cardId;
-    let orgId = user.id;
+    let orgId = requestOrg;
     let myRole: string | null = null;
     if (cardId) {
       const { card } = await loadVisibleCard(tx, user.id, cardId);
@@ -34,9 +36,13 @@ export async function addLedgerEntry(
       myRole = project.my_role;
     }
     // Standing orders bind the project's agents (a card-scoped request still writes a project-wide order):
-    // the project owner decides, whether or not a cardId was supplied.
+    // the project owner (the organization's Owner and Admins) decides, whether or not a cardId was supplied.
     if (projectId && req.scope === 'standing_order' && myRole !== 'owner')
-      throw forbidden('only the project owner can add project standing orders');
+      throw forbidden('only the organization Owner and Admins can add project standing orders');
+    if (!orgId) throw forbidden('you do not belong to an organization');
+    // An organization-wide entry (no project) is the Owner's and Admins'.
+    if (!projectId && !isOrgManager({ orgRole: await orgRoleOf(tx, user.id, orgId) }))
+      throw forbidden('only the organization Owner and Admins can add organization-wide entries');
     const entryId = randomUUID();
     // Only standing orders are mirrored to the vault from here; decisions come from answered questions.
     const vaultPath =

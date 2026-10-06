@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
+  isOrgManager,
+  type OrgRole,
   type PatchVaultRequest,
   projectVaultFolder,
   type RegisterVaultRequest,
@@ -9,6 +11,7 @@ import {
   type VaultDto,
   type VaultWriteCommand,
 } from '@aom/shared';
+import { orgRoleOf, type Who } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
@@ -17,27 +20,31 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { assertRemoteUrl, orgScope, projectScope, userActor } from './common.ts';
+import { assertRemoteUrl, orgScope, projectScope, userActor, userScope } from './common.ts';
 
 const vaultScope = (v: Row) => (v.project_id ? projectScope(v.org_id, v.project_id) : orgScope(v.org_id));
 
 // ------------------------------------------------------------------------------------------ queries
 
-/** Vaults the user may see: their own work/personal vaults and the vaults of projects they are an active member of. */
-export async function listVaults(ctx: Ctx, userId: string): Promise<VaultDto[]> {
+/**
+ * Vaults the user may see: the organization-level vaults of the request organization (its Owner and Admins only: they
+ * sync to their workstations only, owner decision 12) and the vaults of projects they are an active member of.
+ */
+export async function listVaults(ctx: Ctx, who: Who): Promise<VaultDto[]> {
   const vs = await rows(
     ctx.pool,
-    `SELECT v.*, (v.project_id IS NULL AND v.org_id = $1) OR (v.project_id IS NOT NULL AND p.org_id = $1) AS can_edit
-       FROM vaults v LEFT JOIN projects p ON p.id = v.project_id
-      WHERE (v.project_id IS NULL AND v.org_id = $1)
-         OR (v.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active'))
+    `SELECT v.*, EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = v.org_id AND om.user_id = $1
+                          AND om.status = 'active' AND om.role IN ('owner','admin')) AS can_edit
+       FROM vaults v
+      WHERE (v.project_id IS NULL AND v.org_id = $2 AND $3::boolean)
+         OR v.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')
       ORDER BY (v.project_id IS NOT NULL), v.kind, v.created_at`,
-    [userId],
+    [who.userId, who.orgId, isOrgManager({ orgRole: who.role })],
   );
   const ws = await rows(
     ctx.pool,
     `SELECT id, name FROM workstations WHERE user_id=$1 AND status='active' ORDER BY paired_at`,
-    [userId],
+    [who.userId],
   );
   const status = await rows(
     ctx.pool,
@@ -75,11 +82,14 @@ export async function listVaults(ctx: Ctx, userId: string): Promise<VaultDto[]> 
 export async function registerVault(
   ctx: Ctx,
   user: AuthSession['user'],
+  org: { id: string; role: OrgRole | null },
   req: RegisterVaultRequest,
 ): Promise<string> {
   const vaultId = randomUUID();
   await withAppendTx(ctx.pool, async (tx) => {
-    let orgId = user.id;
+    let orgId = org.id;
+    if (req.kind !== 'project' && !isOrgManager({ orgRole: org.role }))
+      throw forbidden('only the organization Owner and Admins can register organization vaults');
     if (req.kind === 'project') {
       const p = await loadVisibleProject(tx, user.id, req.projectId as string);
       if (p.my_role !== 'owner') throw forbidden('only the project owner can register its vault');
@@ -92,7 +102,7 @@ export async function registerVault(
         req.kind,
       ])
     ) {
-      throw conflict('vault_exists', `you already registered a ${req.kind} vault; edit it instead`);
+      throw conflict('vault_exists', `the organization already has a ${req.kind} vault; edit it instead`);
     }
     assertRemoteUrl(ctx, req.remoteUrl.trim());
     const payload = {
@@ -130,18 +140,19 @@ async function editableVault(tx: Queryable, user: AuthSession['user'], vaultId: 
     [vaultId],
   );
   if (!v) throw notFound('vault not found');
+  const manager = isOrgManager({ orgRole: await orgRoleOf(tx, user.id, v.org_id) });
   const visible = v.project_id
     ? await one(
         tx,
         `SELECT role FROM project_members WHERE project_id=$1 AND user_id=$2 AND status='active'`,
         [v.project_id, user.id],
       )
-    : v.org_id === user.id
+    : manager
       ? { role: 'owner' }
       : undefined;
   if (!visible) throw notFound('vault not found');
-  if (v.project_id ? visible.role !== 'owner' : v.org_id !== user.id)
-    throw forbidden('only the owner can change this vault');
+  if (v.project_id ? visible.role !== 'owner' : !manager)
+    throw forbidden('only the organization Owner and Admins can change this vault');
   return v;
 }
 
@@ -235,12 +246,16 @@ export async function resolveVaultConflictIn(
 
 // ------------------------------------------------------------------- what a workstation should sync
 
-/** Vaults a workstation syncs: its user's own work/personal vaults and the vaults of their member projects. */
+/**
+ * Vaults a workstation syncs: the organization-level vaults of the organizations where its user is Owner or Admin
+ * (owner decision 12: Members' workstations do not get them) and the vaults of their member projects.
+ */
 export async function vaultConfigsFor(db: Queryable, userId: string): Promise<VaultConfig[]> {
   const vs = await rows(
     db,
     `SELECT v.* FROM vaults v
-      WHERE (v.project_id IS NULL AND v.org_id = $1)
+      WHERE (v.project_id IS NULL AND v.org_id IN (SELECT om.org_id FROM org_members om
+               WHERE om.user_id = $1 AND om.status = 'active' AND om.role IN ('owner','admin')))
          OR v.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')
       ORDER BY v.created_at, v.id`,
     [userId],
@@ -318,12 +333,19 @@ export async function refreshVaultConfig(ctx: Ctx, userIds: string[]): Promise<v
   }
 }
 
-/** Users whose workstations sync `vault`: the owner for org vaults, the active members for a project vault. */
+/** Users whose workstations sync `vault`: the Owner and Admins for org vaults, the active members for a project vault. */
 export async function vaultAudience(
   db: Queryable,
   vault: { org_id: string; project_id: string | null },
 ): Promise<string[]> {
-  if (!vault.project_id) return [vault.org_id];
+  if (!vault.project_id)
+    return (
+      await rows<{ user_id: string }>(
+        db,
+        `SELECT user_id FROM org_members WHERE org_id=$1 AND status='active' AND role IN ('owner','admin')`,
+        [vault.org_id],
+      )
+    ).map((r) => r.user_id);
   return (
     await rows<{ user_id: string }>(
       db,
@@ -351,7 +373,7 @@ export async function vaultForProject(
   if (!p) return null;
   const v =
     (await one(db, 'SELECT id, kind FROM vaults WHERE project_id=$1', [projectId])) ??
-    (p.org_id === workstationUserId
+    (isOrgManager({ orgRole: await orgRoleOf(db, workstationUserId, p.org_id) })
       ? await one(db, 'SELECT id, kind FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [
           p.org_id,
           p.domain,
@@ -445,7 +467,7 @@ export async function applyVaultConflict(
           payload: { vaultId: v.id, workstationId: ws.id, files: msg.files, deskItemId },
         },
         actor: { kind: 'runner', id: ws.id },
-        scope: orgScope(ws.userId),
+        scope: userScope(ws.userId),
       },
     ],
     { tx },

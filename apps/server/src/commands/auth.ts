@@ -3,18 +3,55 @@ import { dummyHash, hashPassword, verifyPassword } from '../auth/password.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
-import { badRequest, unauthorized } from '../errors.ts';
+import { badRequest, HttpError, unauthorized } from '../errors.ts';
 
-/** Verifies credentials; uniform failure (same error, comparable time) for unknown user, wrong password, deactivated. */
+/**
+ * Verifies credentials; uniform failure (same error, comparable time) for unknown user, wrong password, deactivated.
+ * Only after the password is right can the organization state show (section 8.2): a user whose every organization is
+ * suspended or cancelled, who owns none of them and has no usable guest project, is refused with 403 `org_suspended`.
+ */
 export async function verifyLogin(ctx: Ctx, email: string, password: string): Promise<string> {
   const u = await one(
     ctx.pool,
-    'SELECT id, password_hash, status FROM users WHERE lower(email) = lower($1)',
+    'SELECT id, password_hash, status, kind FROM users WHERE lower(email) = lower($1)',
     [email],
   );
   const ok = await verifyPassword(u?.password_hash ?? (await dummyHash()), password);
   if (!u || !ok || u.status !== 'active') throw unauthorized('invalid email or password');
+  if (u.kind !== 'super_admin') await assertMayLogin(ctx, u.id);
   return u.id as string;
+}
+
+async function assertMayLogin(ctx: Ctx, userId: string): Promise<void> {
+  const mine = await rows<{
+    id: string;
+    name: string;
+    status: string;
+    owner_user_id: string;
+    owner_name: string;
+  }>(
+    ctx.pool,
+    `SELECT o.id, o.name, o.status, o.owner_user_id, ou.display_name AS owner_name FROM org_members om
+       JOIN organizations o ON o.id = om.org_id JOIN users ou ON ou.id = o.owner_user_id
+      WHERE om.user_id=$1 AND om.status='active' ORDER BY om.joined_at`,
+    [userId],
+  );
+  if (mine.length === 0) return;
+  if (mine.some((o) => o.status === 'trial' || o.status === 'active')) return;
+  if (mine.some((o) => o.owner_user_id === userId)) return; // an Owner may sign in (read, settings, members)
+  const guest = await one(
+    ctx.pool,
+    `SELECT 1 FROM project_members pm JOIN projects p ON p.id = pm.project_id JOIN organizations o ON o.id = p.org_id
+      WHERE pm.user_id=$1 AND pm.status='active' AND o.status IN ('trial','active') LIMIT 1`,
+    [userId],
+  );
+  if (guest) return;
+  const first = mine[0] as (typeof mine)[number];
+  throw new HttpError(
+    403,
+    'org_suspended',
+    `Your organization ${first.name} is ${first.status}. Contact ${first.owner_name}.`,
+  );
 }
 
 export type { AuthSession };

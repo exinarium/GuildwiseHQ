@@ -2,7 +2,7 @@ import { LoginRequestSchema } from '@aom/shared';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
-import { useLogin, useMe } from '../api/queries/auth.ts';
+import { useLogin, useLogin2fa, useMe } from '../api/queries/auth.ts';
 import { AuthFrame } from '../components/auth/AuthFrame.tsx';
 import { PasswordInput } from '../components/auth/PasswordInput.tsx';
 import { Button, Callout, TextInput } from '../components/ui.tsx';
@@ -19,6 +19,7 @@ function failureText(err: unknown): string | null {
     if (err.status === 401 || err.status === 400)
       return 'That email and password do not match. Check them and try again.';
     if (err.status === 429) return 'Too many attempts. Wait a minute and try again.';
+    if (err.status === 403 && err.code === 'org_suspended') return err.message;
     if (err.status === 403) return 'This account is deactivated. Ask your admin.';
     if (err.status >= 500) return 'Cannot reach the server. Check your connection and try again.';
   }
@@ -29,6 +30,10 @@ export function Login() {
   usePageTitle('Sign in');
   const me = useMe();
   const login = useLogin();
+  const login2fa = useLogin2fa();
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [recovery, setRecovery] = useState(false);
+  const [code, setCode] = useState('');
   const nav = useNavigate();
   const loc = useLocation();
   const [params] = useSearchParams();
@@ -69,8 +74,93 @@ export function Login() {
       return;
     }
     setErrors({});
-    login.mutate(parsed.data, { onSuccess: () => nav(next, { replace: true }) });
+    login.mutate(parsed.data, {
+      onSuccess: (r) => {
+        if (r.kind === 'challenge') setChallenge(r.challenge.challenge);
+        else nav(next, { replace: true });
+      },
+    });
   };
+
+  if (challenge)
+    return (
+      <AuthFrame>
+        <div className="mb-7">
+          <h1 className="text-3xl font-semibold tracking-tight text-fg">Two-factor login</h1>
+          <p className="mt-1.5 text-base text-muted">
+            {recovery
+              ? 'Enter one of your recovery codes.'
+              : 'Enter the 6-digit code from your authenticator app.'}
+          </p>
+        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            login2fa.mutate(
+              { challenge, code: code.trim() },
+              { onSuccess: () => nav(next, { replace: true }) },
+            );
+          }}
+          noValidate
+          className="flex flex-col gap-4"
+          aria-label="Two-factor code"
+        >
+          <TextInput
+            label={recovery ? 'Recovery code' : 'Code'}
+            name="code"
+            autoComplete="one-time-code"
+            inputMode={recovery ? 'text' : 'numeric'}
+            autoCapitalize="none"
+            spellCheck={false}
+            maxLength={recovery ? 12 : 6}
+            autoFocus
+            value={code}
+            onChange={(e) => setCode(recovery ? e.target.value : e.target.value.replace(/\D/g, ''))}
+            data-testid="login-code"
+          />
+          {login2fa.isError && (
+            <Callout tone="danger" role="alert">
+              {login2fa.error instanceof ApiError && login2fa.error.status === 429
+                ? 'Too many attempts. Wait a minute and try again.'
+                : 'That code is not right, or the sign-in expired. Check the code or sign in again.'}
+            </Callout>
+          )}
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            loading={login2fa.isPending}
+            disabled={recovery ? code.trim().length < 10 : code.length !== 6}
+            className="w-full"
+          >
+            Verify
+          </Button>
+        </form>
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm">
+          <button
+            type="button"
+            className="text-brand-text underline-offset-2 hover:underline"
+            onClick={() => {
+              setRecovery(!recovery);
+              setCode('');
+            }}
+          >
+            {recovery ? 'Use the app instead' : 'Use a recovery code'}
+          </button>
+          <button
+            type="button"
+            className="text-muted underline-offset-2 hover:underline"
+            onClick={() => {
+              setChallenge(null);
+              setCode('');
+              setRecovery(false);
+            }}
+          >
+            Back to sign in
+          </button>
+        </div>
+      </AuthFrame>
+    );
 
   return (
     <AuthFrame>

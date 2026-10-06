@@ -165,30 +165,39 @@ describe('browser websocket', () => {
     late.close();
   });
 
-  it('redacts credential hashes and gives admins only the admin audience', async () => {
-    const admin = await w.t.userSession(uniqueEmail('admin'), 'admin');
-    const b = await Browser.open(admin.cookie);
+  it('redacts credential hashes and gives the super admin only the admin audience', async () => {
+    const root = await w.t.superAdminSession();
+    const b = await Browser.open(root.cookie);
     await b.hello();
     await ok(
-      w.t.req('POST', '/api/admin/invitations', {
-        cookie: admin.cookie,
-        body: { email: uniqueEmail('inv'), role: 'member' },
+      w.t.req('POST', '/api/platform/invitations', {
+        cookie: root.cookie,
+        body: { email: uniqueEmail('inv'), proposedOrgName: 'Hidden Inc' },
       }),
       201,
     );
-    await w.card({ title: 'Admin must not see this' });
-    await b.until(() => b.events().some((e) => e.type === 'UserInvited'));
-    const invited = b.events().find((e) => e.type === 'UserInvited');
+    await w.card({ title: 'The super admin must not see this' });
+    await b.until(() => b.events().some((e) => e.type === 'OrgInvitationCreated'));
+    const invited = b.events().find((e) => e.type === 'OrgInvitationCreated');
     expect(JSON.stringify(invited)).not.toContain('tokenHash');
-    expect(b.events().some((e) => e.type === 'CardCreated')).toBe(false);
-    expect(b.events().some((e) => e.type === 'ProjectCreated')).toBe(false);
-    // deactivating the admin's own account closes sockets of that user
+    for (const t of ['CardCreated', 'ProjectCreated', 'OrganizationCreated', 'ThreadMessagePosted'])
+      expect(
+        b.events().some((e) => e.type === t),
+        t,
+      ).toBe(false);
+    // deactivating an account closes the sockets of that user (its organization is suspended first)
     const victim = await w.t.userSession(uniqueEmail('victim'));
     const vb = await Browser.open(victim.cookie);
     await vb.hello();
     await ok(
-      w.t.req('PATCH', `/api/admin/users/${victim.id}`, {
-        cookie: admin.cookie,
+      w.t.req('POST', `/api/platform/orgs/${victim.id}/suspend`, {
+        cookie: root.cookie,
+        body: { reason: 'x' },
+      }),
+    );
+    await ok(
+      w.t.req('PATCH', `/api/platform/users/${victim.id}`, {
+        cookie: root.cookie,
         body: { status: 'deactivated' },
       }),
     );

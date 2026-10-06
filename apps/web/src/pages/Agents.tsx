@@ -82,7 +82,10 @@ export function Agents() {
     if (hash) document.getElementById(hash.slice(1))?.scrollIntoView?.({ block: 'center' });
   }, [hash, board.data]);
   /** The org owner may change and fire any agent; a member only the ones they hired themselves. */
-  const canManage = (a: AgentDto) => !!myId && (myId === a.orgId || myId === a.managerUserId);
+  // The organization's Owner and Admins manage any of its agents; everyone else the agents they hired.
+  const orgRole = (a: AgentDto) => me.data?.orgs?.find((o) => o.id === a.orgId)?.role;
+  const canManage = (a: AgentDto) =>
+    !!myId && (orgRole(a) === 'owner' || orgRole(a) === 'admin' || myId === a.managerUserId);
   const roleName = (k: string) => roles.data?.find((r) => r.definition.key === k)?.definition.name ?? k;
   const stationName = (id: string | null) => workstations.data?.find((w) => w.id === id)?.name ?? '';
   const active = board.data?.agents ?? [];

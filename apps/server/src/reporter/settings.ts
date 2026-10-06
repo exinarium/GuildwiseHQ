@@ -9,11 +9,15 @@ export interface OrgReporting extends ReportingPrefs {
   createdAt: Date | null;
 }
 
-/** The reporting preferences of an organization (its owner's user row); unset keys mean the defaults. */
+/**
+ * The reporting preferences of an organization: they live on its Owner's user row (the organization is that user for
+ * a migrated organization); unset keys mean the defaults. The time zone is the Owner's.
+ */
 export async function reportingOf(db: Queryable, orgId: string): Promise<OrgReporting> {
   const u = await one(
     db,
-    'SELECT timezone, reporting, floor_report_day, ba_chat_thread_id, created_at FROM users WHERE id=$1',
+    `SELECT timezone, reporting, floor_report_day, ba_chat_thread_id, created_at FROM users
+      WHERE id = COALESCE((SELECT owner_user_id FROM organizations WHERE id = $1), $1)`,
     [orgId],
   );
   const r = (u?.reporting ?? {}) as Partial<ReportingPrefs>;

@@ -7,7 +7,8 @@ import {
   RoleKeyParamsSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth/guards.ts';
+import { requireOrg } from '../auth/guards.ts';
+import { whoOf } from '../auth/org-context.ts';
 import type { Ctx } from '../context.ts';
 import {
   agentStats,
@@ -25,19 +26,18 @@ export function hrRoutes(ctx: Ctx) {
     const app = typed(fastify);
 
     app.get('/api/hr/board', { schema: { querystring: HrBoardQuerySchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
-      return hrBoard(ctx, s.user.id, req.query.projectId, req.query.department);
+      return hrBoard(ctx, whoOf(await requireOrg(ctx, req)), req.query.projectId, req.query.department);
     });
 
     app.get('/api/agents/:id/stats', { schema: { params: IdParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
-      return AgentStatsResponseSchema.parse(await agentStats(ctx, s.user.id, req.params.id));
+      const a = await requireOrg(ctx, req);
+      return AgentStatsResponseSchema.parse(await agentStats(ctx, whoOf(a), req.params.id));
     });
 
     app.get('/api/hr/recommendations', { schema: { querystring: HrBoardQuerySchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
+      const a = await requireOrg(ctx, req);
       return {
-        recommendations: (await listRecommendations(ctx, s.user.id, req.query.projectId)).map((l) => l.rec),
+        recommendations: (await listRecommendations(ctx, whoOf(a), req.query.projectId)).map((l) => l.rec),
       };
     });
 
@@ -45,24 +45,24 @@ export function hrRoutes(ctx: Ctx) {
       '/api/hr/recommendations/:id/apply',
       { schema: { params: RecommendationIdParamsSchema } },
       async (req) => {
-        const s = await requireUser(ctx, req);
-        return applyRecommendation(ctx, s.user, req.params.id);
+        const a = await requireOrg(ctx, req);
+        return applyRecommendation(ctx, a.session.user, whoOf(a), req.params.id);
       },
     );
 
     app.get('/api/hr/role-updates', async (req) => {
-      const s = await requireUser(ctx, req);
-      return { roleUpdates: await roleUpdates(ctx, s.user.id) };
+      const a = await requireOrg(ctx, req);
+      return { roleUpdates: await roleUpdates(ctx, whoOf(a)) };
     });
 
     app.post('/api/hr/roles/:key/reset', { schema: { params: RoleKeyParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
-      return resetRole(ctx, s.user, req.params.key);
+      const a = await requireOrg(ctx, req);
+      return resetRole(ctx, a.session.user, whoOf(a), req.params.key);
     });
 
     app.get('/api/metrics', { schema: { querystring: MetricsQuerySchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
-      return metrics(ctx, s.user.id, req.query);
+      const a = await requireOrg(ctx, req);
+      return metrics(ctx, whoOf(a), req.query);
     });
   };
 }

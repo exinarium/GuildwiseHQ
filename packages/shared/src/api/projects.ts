@@ -24,6 +24,8 @@ export type ProjectRepoDto = z.infer<typeof ProjectRepoDtoSchema>;
 export const ProjectDtoSchema = z.object({
   id: z.uuid(),
   orgId: z.uuid(),
+  /** The organization that owns the project (guests see it as a label). */
+  orgName: z.string().optional(),
   key: z.string(),
   name: z.string(),
   domain: ProjectDomain,

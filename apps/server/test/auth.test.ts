@@ -107,12 +107,25 @@ describe('auth', () => {
   });
 
   it('deactivated users get 401 and lose their sessions', async () => {
-    const admin = await t.userSession(uniqueEmail('admin'), 'admin');
+    const root = await t.superAdminSession();
     const email = uniqueEmail();
     const id = await t.createUser(email);
     const cookie = await t.login(email);
-    const r = await t.req('PATCH', `/api/admin/users/${id}`, {
-      cookie: admin.cookie,
+    // the Owner of a running organization is not deactivated before the organization is suspended
+    expect(
+      (
+        await t.req('PATCH', `/api/platform/users/${id}`, {
+          cookie: root.cookie,
+          body: { status: 'deactivated' },
+        })
+      ).status,
+    ).toBe(409);
+    await t.req('POST', `/api/platform/orgs/${id}/suspend`, {
+      cookie: root.cookie,
+      body: { reason: 'test' },
+    });
+    const r = await t.req('PATCH', `/api/platform/users/${id}`, {
+      cookie: root.cookie,
       body: { status: 'deactivated' },
     });
     expect(r.status).toBe(200);
@@ -121,8 +134,8 @@ describe('auth', () => {
     expect((await t.req('POST', '/api/auth/login', { body: { email, password: PASSWORD } })).status).toBe(
       401,
     );
-    // reactivation allows login again
-    await t.req('PATCH', `/api/admin/users/${id}`, { cookie: admin.cookie, body: { status: 'active' } });
+    // reactivation allows login again (the Owner of a suspended organization may sign in)
+    await t.req('PATCH', `/api/platform/users/${id}`, { cookie: root.cookie, body: { status: 'active' } });
     expect((await t.req('POST', '/api/auth/login', { body: { email, password: PASSWORD } })).status).toBe(
       200,
     );

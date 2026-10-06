@@ -1,6 +1,7 @@
 import { UpdateReportingRequestSchema, UpdateTimezoneRequestSchema } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth/guards.ts';
+import { requireOrg, requireUser } from '../auth/guards.ts';
+import { requestedOrgId } from '../auth/org-context.ts';
 import { getReporting, setTimezone, updateReporting } from '../commands/reporting.ts';
 import type { Ctx } from '../context.ts';
 import { meResponse } from './auth.ts';
@@ -12,19 +13,19 @@ export function reportingRoutes(ctx: Ctx) {
     const app = typed(fastify);
 
     app.get('/api/reporting', async (req) => {
-      const s = await requireUser(ctx, req);
-      return getReporting(ctx, s.user.id);
+      const a = await requireOrg(ctx, req);
+      return getReporting(ctx, { id: a.orgId, role: a.role });
     });
 
     app.put('/api/reporting', { schema: { body: UpdateReportingRequestSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
-      return updateReporting(ctx, s.user, req.body);
+      const a = await requireOrg(ctx, req);
+      return updateReporting(ctx, a.session.user, { id: a.orgId, role: a.role }, req.body);
     });
 
     app.put('/api/auth/timezone', { schema: { body: UpdateTimezoneRequestSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
       await setTimezone(ctx, s.user, req.body.timezone);
-      return meResponse(ctx, s.user.id);
+      return meResponse(ctx, s.user.id, requestedOrgId(req));
     });
   };
 }

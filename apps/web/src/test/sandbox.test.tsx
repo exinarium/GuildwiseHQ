@@ -136,7 +136,11 @@ beforeEach(() => {
     if (path === '/api/agents') return json({ agents: [] });
     if (path === '/api/roles') return json({ roles: [role] });
     if (path === '/api/auth/me' || path === '/api/me')
-      return json({ user: { id: USER, email: 'o@x.test', displayName: 'Olga' } });
+      return json({
+        user: { id: USER, email: 'o@x.test', displayName: 'Olga' },
+        account: { kind: 'user' },
+        orgs: [{ id: USER, name: 'Olga org', role: 'owner', status: 'active' }],
+      });
     if (path === '/api/agents/name-suggestions') return json({ names: [] });
     if (path === '/api/projects') return json({ projects: [] });
     return json({});

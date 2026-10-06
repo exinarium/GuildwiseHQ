@@ -199,7 +199,7 @@ describe('the BA designs with the manager', () => {
     const start = (await r.waitFor('chat.start', (f) => f.threadId === chat.threadId, 15_000, from)) as any;
     const res = await rpc(start.chatId, 'org.role.draft', { definition: roleInput('mine', [['x', '*']]) });
     expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/organization owner/);
+    expect(res.error).toMatch(/Owner and Admins/);
     mb.close();
   });
 });

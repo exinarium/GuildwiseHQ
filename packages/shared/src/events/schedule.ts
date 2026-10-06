@@ -42,6 +42,19 @@ export const scheduleEvents = [
     'ScheduleFired',
     z.object({ scheduleId: Id, cardId: Id, firedFor: IsoDate, nextFireAt: IsoDate.nullable() }),
   ),
+  /**
+   * A due fire that did not happen because the organization is not running (suspended or cancelled) or the feature is
+   * switched off: recorded, not retried; the next fire is the next one on the cron.
+   */
+  defineEvent(
+    'ScheduleSkipped',
+    z.object({
+      scheduleId: Id,
+      firedFor: IsoDate,
+      nextFireAt: IsoDate.nullable(),
+      reason: z.enum(['org_suspended', 'feature_disabled']),
+    }),
+  ),
   /** The manager ran a feed (or schedule) right now; same card path as `ScheduleFired`. */
   defineEvent(
     'FeedRunRequested',

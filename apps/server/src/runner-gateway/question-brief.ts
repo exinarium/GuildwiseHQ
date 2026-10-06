@@ -3,7 +3,7 @@ import type { EscalationStep, QuestionShift, ServerToRunnerOf } from '@aom/share
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { dedupMatches } from '../queries/ledger.ts';
-import { agentSpec, buildBrief } from './brief.ts';
+import { agentSpecFor, buildBrief } from './brief.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
 
@@ -70,7 +70,7 @@ export async function buildQuestionShiftStart(
     shiftId,
     claimId: randomUUID(),
     kind: 'question',
-    agent: agentSpec(agent),
+    agent: await agentSpecFor(ctx, agent),
     brief,
     worktree: null,
     prepare: { rebase: false },

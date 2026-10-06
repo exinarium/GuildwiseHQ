@@ -18,7 +18,7 @@ export function UserMenu({
   avatar,
   name,
   email,
-  isAdmin,
+  roleLabel,
   collapsed = false,
   onSignOut,
   onNavigate,
@@ -27,7 +27,7 @@ export function UserMenu({
   avatar: UserAvatarValue | null;
   name: string;
   email: string;
-  isAdmin: boolean;
+  roleLabel: string;
   collapsed?: boolean;
   onSignOut: () => void;
   onNavigate?: () => void;
@@ -47,7 +47,7 @@ export function UserMenu({
           <>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{name}</span>
-              <span className="block text-xs text-side-label">{isAdmin ? 'Administrator' : 'Manager'}</span>
+              <span className="block text-xs text-side-label">{roleLabel}</span>
             </span>
           </>
         )}

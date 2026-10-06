@@ -162,13 +162,33 @@ describe('authorization (any member of the linked projects may manage; others se
     const denied = await as(guest, 'PATCH', `/api/interests/${id}`, { description: 'mine' });
     expect(denied.status).toBe(403);
 
-    // a feed-only interest: a member of the feed project may manage it
-    const feedOnly = await fresh('Guest managed');
-    const patched = await as(guest, 'PATCH', `/api/interests/${feedOnly.id}`, {
-      description: 'changed by a member',
+    // a feed-only interest made by the Owner: a guest of its feed project sees it but cannot edit it (rank rule)
+    const feedOnly = await fresh('Owner made');
+    const listed = await ok<any>(as(guest, 'GET', '/api/interests'));
+    expect(listed.interests.find((x: any) => x.id === feedOnly.id)).toMatchObject({
+      canManage: false,
+      canRun: true,
     });
-    expect(patched.status).toBe(200);
-    expect(patched.body.description).toBe('changed by a member');
+    const refused = await as(guest, 'PATCH', `/api/interests/${feedOnly.id}`, { description: 'mine now' });
+    expect(refused.status).toBe(403);
+    expect((await as(guest, 'POST', `/api/interests/${feedOnly.id}/run`)).status).toBe(403);
+    expect((await as(guest, 'DELETE', `/api/interests/${feedOnly.id}`)).status).toBe(403);
+  });
+
+  it('creator rank: a guest edits their own interest, the Owner (higher rank) can edit it too', async () => {
+    const guest = await w.t.userSession(uniqueEmail('guest2'));
+    await ok(owner('POST', `/api/projects/${feedId}/members`, { email: guest.email }), 201);
+    await ok(as(guest, 'POST', `/api/projects/${feedId}/members/accept`));
+    const made = await ok<{ id: string }>(
+      as(guest, 'POST', '/api/interests', { name: 'Guest topic', feedProjectId: feedId }),
+      201,
+    );
+    const mine = await as(guest, 'PATCH', `/api/interests/${made.id}`, { description: 'by the guest' });
+    expect(mine.status).toBe(200);
+    expect(mine.body.canManage).toBe(true);
+    const byOwner = await owner('PATCH', `/api/interests/${made.id}`, { description: 'by the owner' });
+    expect(byOwner.status).toBe(200);
+    expect(byOwner.body.description).toBe('by the owner');
   });
 });
 

@@ -3,6 +3,7 @@ import { useMe } from '../api/queries/auth.ts';
 import { useReporting, useSetTimezone, useUpdateReporting } from '../api/queries/reporting.ts';
 import { UserAvatar } from '../components/Face.tsx';
 import { AvatarPicker } from '../components/profile/AvatarPicker.tsx';
+import { TwoFactorPanel } from '../components/security/TwoFactorPanel.tsx';
 import {
   Button,
   ErrorBox,
@@ -70,6 +71,8 @@ export function Settings() {
           />
         </Panel>
       )}
+
+      <TwoFactorPanel />
 
       <Panel>
         <h2 className="text-lg font-semibold text-fg">Your time zone</h2>

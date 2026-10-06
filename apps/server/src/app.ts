@@ -18,6 +18,7 @@ import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
 import { registerDecisionHook } from './commands/decisions.ts';
 import { registerDefinitionHook } from './commands/designer.ts';
+import { registerDevopsMembershipHook } from './commands/devops.ts';
 import { registerTasteHook } from './commands/taste.ts';
 import type { Config } from './config.ts';
 import type { Ctx } from './context.ts';
@@ -31,6 +32,7 @@ import { PgEventStore } from './eventstore/pg-event-store.ts';
 import { ConcurrencyError } from './eventstore/types.ts';
 import { registerHrHook } from './hr/hr.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
+import { createOrgStatusInterceptor } from './orgs/guard.ts';
 import { buildProjectors } from './projections/index.ts';
 import { Reporter } from './reporter/reporter.ts';
 import { createRoutingInterceptor } from './reporter/routing.ts';
@@ -52,6 +54,7 @@ import { ledgerRoutes } from './routes/ledger.ts';
 import { orgRoutes } from './routes/orgs.ts';
 import { outboundRoutes } from './routes/outbound.ts';
 import { phaseRoutes } from './routes/phases.ts';
+import { platformRoutes } from './routes/platform.ts';
 import { projectRoutes } from './routes/projects.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
@@ -172,6 +175,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     services: {} as Ctx['services'],
   };
   store.intercept(createRoutingInterceptor(ctx));
+  // Suspended and cancelled organizations are read-only for their users, whichever route a write came through.
+  store.intercept(createOrgStatusInterceptor(ctx));
   app.decorate('ctx', ctx);
   app.decorateRequest('auth', null);
 
@@ -254,6 +259,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(invitationRoutes(ctx));
   await app.register(adminRoutes(ctx));
   await app.register(orgRoutes(ctx));
+  await app.register(platformRoutes(ctx));
   await app.register(workstationRoutes(ctx));
   await app.register(projectRoutes(ctx));
   await app.register(cardRoutes(ctx));
@@ -309,6 +315,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
       // Time-dependent housekeeping (lease expiry, accept timeout) runs immediately instead of on the next tick.
       await ctx.services.reaper.run();
       await ctx.services.scheduler.run();
+      await ctx.services.scheduler.runLicensing();
       await ctx.services.reporter.run();
       ctx.services.dispatcher.trigger();
       return { now: clock.now().toISOString(), offsetMs: clock.offsetMs };
@@ -325,6 +332,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const unhookTaste = registerTasteHook(ctx);
   const unhookHr = registerHrHook(ctx);
   const unhookDefinitions = registerDefinitionHook(ctx);
+  const unhookDevops = registerDevopsMembershipHook(ctx);
   await notifier.start();
   if (opts.background) {
     dispatcher.start();
@@ -338,6 +346,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     unhookTaste();
     unhookHr();
     unhookDefinitions();
+    unhookDevops();
     await reporter.stop();
     await scheduler.stop();
     await dispatcher.stop();

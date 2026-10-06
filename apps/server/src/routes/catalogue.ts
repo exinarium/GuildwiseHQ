@@ -1,6 +1,7 @@
 import { OrgContextQuerySchema, RoleDefinitionSchema, WorkflowDefinitionSchema } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
+import { requestedOrgId, resolveOrgId } from '../auth/org-context.ts';
 import { catalogueOrg } from '../commands/designer.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
@@ -14,7 +15,13 @@ export function catalogueRoutes(ctx: Ctx) {
     // `?projectId=`: a shared project runs on its owner's catalogue (the Hire form lists the owner's roles).
     app.get('/api/roles', { schema: { querystring: OrgContextQuerySchema } }, async (req) => {
       const s = await requireUser(ctx, req);
-      const { orgId } = await catalogueOrg(ctx.pool, s.user, req.query.projectId, false);
+      const { orgId } = await catalogueOrg(
+        ctx.pool,
+        s.user,
+        await resolveOrgId(ctx, s, requestedOrgId(req)),
+        req.query.projectId,
+        false,
+      );
       const list = await rows(
         ctx.pool,
         `SELECT DISTINCT ON (r.org_id, r.key) r.org_id, r.status, r.definition, e.extensions
@@ -36,7 +43,13 @@ export function catalogueRoutes(ctx: Ctx) {
 
     app.get('/api/workflows', { schema: { querystring: OrgContextQuerySchema } }, async (req) => {
       const s = await requireUser(ctx, req);
-      const { orgId } = await catalogueOrg(ctx.pool, s.user, req.query.projectId, false);
+      const { orgId } = await catalogueOrg(
+        ctx.pool,
+        s.user,
+        await resolveOrgId(ctx, s, requestedOrgId(req)),
+        req.query.projectId,
+        false,
+      );
       const list = await rows(
         ctx.pool,
         `SELECT DISTINCT ON (org_id, key) id, org_id, status, definition FROM workflow_versions

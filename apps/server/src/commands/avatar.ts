@@ -2,17 +2,19 @@ import { randomUUID } from 'node:crypto';
 import {
   AVATAR_IMAGE_MAX_BYTES,
   AVATAR_IMAGE_MAX_SIDE,
+  isOrgManager,
   type RerollAgentAvatarRequest,
   randomAvatarSeed,
   type SetMyAvatarRequest,
   streamId,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, forbidden, notFound, unprocessable } from '../errors.ts';
-import { orgScope, projectScope, userActor } from './common.ts';
+import { orgScope, projectScope, userActor, userScope } from './common.ts';
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -64,7 +66,7 @@ export async function setMyAvatar(
             },
           },
           actor: userActor(user.id),
-          scope: orgScope(user.id),
+          scope: userScope(user.id),
         },
       ],
       { tx },
@@ -77,7 +79,7 @@ export async function setMyAvatar(
   ]).catch(() => undefined);
 }
 
-/** The image bytes the viewer may see: their own, an administrator's view of anyone, or a user they share a project with. */
+/** The image bytes the viewer may see: their own, or a user they share a project or an organization with. */
 export async function avatarImageFor(
   ctx: Ctx,
   viewer: AuthSession['user'],
@@ -87,10 +89,13 @@ export async function avatarImageFor(
     ctx.pool,
     `SELECT i.id, i.mime, i.data FROM users u JOIN avatar_images i ON i.id = u.avatar_image_id
       WHERE u.id = $1 AND u.avatar_kind = 'image'
-        AND ($1 = $2 OR $3 = 'admin' OR EXISTS (
+        AND ($1 = $2 OR EXISTS (
           SELECT 1 FROM project_members a JOIN project_members b ON b.project_id = a.project_id
+           WHERE a.user_id = $1 AND b.user_id = $2 AND a.status = 'active' AND b.status = 'active')
+          OR EXISTS (
+          SELECT 1 FROM org_members a JOIN org_members b ON b.org_id = a.org_id
            WHERE a.user_id = $1 AND b.user_id = $2 AND a.status = 'active' AND b.status = 'active'))`,
-    [userId, viewer.id, viewer.role],
+    [userId, viewer.id],
   );
   return row;
 }
@@ -105,8 +110,10 @@ export async function rerollAgentAvatar(
   await withAppendTx(ctx.pool, async (tx) => {
     const a = await one(tx, 'SELECT * FROM agents WHERE id=$1 FOR UPDATE', [agentId]);
     if (!a) throw notFound('agent not found');
-    if (user.id !== a.org_id && user.id !== a.manager_user_id)
-      throw forbidden('only the organization owner or the manager who hired this agent can change its face');
+    if (user.id !== a.manager_user_id && !isOrgManager({ orgRole: await orgRoleOf(tx, user.id, a.org_id) }))
+      throw forbidden(
+        'only the organization Owner and Admins or the manager who hired this agent can change its face',
+      );
     if (a.status === 'retired') throw unprocessable('agent_retired', 'a retired agent keeps its face');
     await ctx.store.append(
       [

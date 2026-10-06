@@ -15,7 +15,7 @@ import { buildReporterTask } from '../commands/reporter-tasks.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
-import { agentSpec } from './brief.ts';
+import { agentSpecFor } from './brief.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
 
@@ -155,7 +155,7 @@ export async function buildBaTaskShiftStart(
     shiftId,
     claimId: randomUUID(),
     kind: 'ba_task',
-    agent: agentSpec(agent),
+    agent: await agentSpecFor(ctx, agent),
     brief,
     worktree: null,
     prepare: { rebase: false },

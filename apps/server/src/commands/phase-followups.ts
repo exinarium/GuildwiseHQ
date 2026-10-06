@@ -5,6 +5,7 @@ import {
   type PhaseCardOutcome,
   streamId,
 } from '@aom/shared';
+import { orgOwnerId } from '../auth/org-context.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -266,8 +267,8 @@ export async function startFollowup(ctx: Ctx, tx: Tx, phase: Row, project: Row, 
     try {
       run = await regressionRunEvents(tx, project, {
         platform,
-        ownerUserId: project.org_id,
-        requestedBy: phase.approved_by ?? project.org_id,
+        ownerUserId: await orgOwnerId(tx, project.org_id),
+        requestedBy: phase.approved_by ?? (await orgOwnerId(tx, project.org_id)),
         actor: SYSTEM_ACTOR,
         scheduled: true,
         startedBy: `phase ${phase.ref} follow-up ${n}`,

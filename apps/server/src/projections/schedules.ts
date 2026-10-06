@@ -62,6 +62,15 @@ export const scheduleProjectors: Record<string, Projector> = {
       [p.scheduleId, e.createdAt, p.nextFireAt, p.cardId],
     );
   },
+  /** A due fire skipped (organization not running, feature off): the next fire moves on, nothing else changes. */
+  ScheduleSkipped: async (tx, e) => {
+    const p = (e.event as EventOf<'ScheduleSkipped'>).payload;
+    await exec(tx, 'UPDATE schedules SET next_fire_at=$2, updated_at=$3 WHERE id=$1', [
+      p.scheduleId,
+      p.nextFireAt,
+      e.createdAt,
+    ]);
+  },
   /** Backs off: the retry time replaces `next_fire_at`; the first failure of a streak remembers its desk notice. */
   ScheduleFireFailed: async (tx, e) => {
     const p = (e.event as EventOf<'ScheduleFireFailed'>).payload;

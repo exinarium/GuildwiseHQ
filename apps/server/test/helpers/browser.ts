@@ -17,11 +17,15 @@ export class Browser {
     baseUrl: string,
     cookie: string | null,
     origin: string | null = ORIGIN,
+    /** The socket's organization (`?org=`); null: the session's default. */
+    org: string | null = null,
   ): Promise<Browser> {
     const headers: Record<string, string> = {};
     if (cookie) headers.cookie = cookie;
     if (origin) headers.origin = origin;
-    const ws = new WebSocket(`${baseUrl.replace('http', 'ws')}/api/ws`, { headers });
+    const ws = new WebSocket(`${baseUrl.replace('http', 'ws')}/api/ws${org ? `?org=${org}` : ''}`, {
+      headers,
+    });
     const b = new Browser(ws);
     await new Promise<void>((res) => {
       ws.once('open', () => res());
@@ -35,6 +39,9 @@ export class Browser {
   }
   of(type: string) {
     return this.msgs.filter((m) => m.type === type);
+  }
+  events() {
+    return this.of('event').map((m) => m.event);
   }
   async until(fn: () => boolean, ms = 30_000) {
     await until(async () => fn(), ms, 'browser message');

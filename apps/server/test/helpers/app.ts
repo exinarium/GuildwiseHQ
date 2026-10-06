@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { NO_LIMITS, streamId } from '@aom/shared';
 import { type AomApp, createApp } from '../../src/app.ts';
 import { hashPassword } from '../../src/auth/password.ts';
+import { encryptSecret } from '../../src/auth/secrets.ts';
+import { generateTotpSecret, totpCode, totpStep } from '../../src/auth/totp.ts';
 import { registerBuiltins } from '../../src/catalogue/boot.ts';
 import { createClock } from '../../src/clock.ts';
 import { loadConfig } from '../../src/config.ts';
-import { resetDb } from './db.ts';
+import { q, resetDb } from './db.ts';
 
 export const ORIGIN = 'http://aom.test';
 export const PASSWORD = 'correct-horse-battery';
@@ -30,6 +32,12 @@ export interface TestApp {
   createUser(email: string, role?: 'admin' | 'member', displayName?: string): Promise<string>;
   /** A super admin account (the CLI's `superadmin:create`, straight through the event store). */
   createSuperAdmin(email: string, displayName?: string): Promise<string>;
+  /** Switches two-factor login on for a user straight through the stores (no QR dance); returns the TOTP secret. */
+  enableTwoFactor(userId: string): Promise<string>;
+  /** A valid TOTP code for the user's secret, never one the server has already accepted. */
+  totpCode(userId: string): Promise<string>;
+  /** A super admin (account, two-factor on) signed in, ready for the platform routes. */
+  superAdminSession(email?: string): Promise<{ id: string; email: string; cookie: string }>;
   /** A new organization owned by `ownerUserId` (its id is NOT a user id, unlike the per-user org of `createUser`). */
   createOrg(
     ownerUserId: string,
@@ -192,6 +200,7 @@ export async function createTestApp(
         scope,
       },
     ]);
+    await app.ctx.notifier.flush();
     return orgId;
   };
   const addOrgMember: TestApp['addOrgMember'] = async (orgId, userId, role = 'member', invitedBy) => {
@@ -206,9 +215,54 @@ export async function createTestApp(
         scope: { orgId, projectId: null, audience: 'org' },
       },
     ]);
+    // the DevOps engineer of the organization is hired by the membership hook, after commit
+    await app.ctx.notifier.flush();
+  };
+  const secrets = new Map<string, string>();
+  const lastStep = new Map<string, number>();
+  const enableTwoFactor: TestApp['enableTwoFactor'] = async (userId) => {
+    const secret = generateTotpSecret();
+    await q(
+      `INSERT INTO user_totp (user_id, secret_enc, confirmed_at, last_used_step, created_at) VALUES ($1,$2,now(),NULL,now())
+       ON CONFLICT (user_id) DO UPDATE SET secret_enc=EXCLUDED.secret_enc, confirmed_at=now(), last_used_step=NULL`,
+      [userId, await encryptSecret(app.ctx, secret)],
+    );
+    await app.ctx.store.append([
+      {
+        streamId: streamId.user(userId),
+        event: { type: 'TwoFactorEnabled', payload: { userId } },
+        actor: { kind: 'user', id: userId },
+        scope: { orgId: null, projectId: null, audience: 'user', userId },
+      },
+    ]);
+    secrets.set(userId, secret);
+    lastStep.delete(userId);
+    return secret;
+  };
+  const totpCodeOf: TestApp['totpCode'] = async (userId) => {
+    const secret = secrets.get(userId);
+    if (!secret) throw new Error('two-factor is not enabled for this user in the test');
+    // the server accepts a step once, within one step of its clock: take the next free one, else move its clock
+    let now = totpStep(clock.now());
+    const used = lastStep.get(userId) ?? -1;
+    if (used >= now + 1) {
+      clock.advance(31_000);
+      now = totpStep(clock.now());
+    }
+    const step = Math.max(now - 1, used + 1);
+    lastStep.set(userId, step);
+    return totpCode(secret, step);
   };
   const login: TestApp['login'] = async (email, password = PASSWORD) => {
     const r = await req('POST', '/api/auth/login', { body: { email, password } });
+    if (r.status === 200 && r.body?.twoFactorRequired) {
+      const u = (await q('SELECT id FROM users WHERE lower(email)=lower($1)', [email]))[0];
+      const code = await totpCodeOf(u?.id as string);
+      const r2 = await req('POST', '/api/auth/login/2fa', { body: { challenge: r.body.challenge, code } });
+      if (r2.status !== 200 || !r2.cookie)
+        throw new Error(`2fa login failed: ${r2.status} ${JSON.stringify(r2.body)}`);
+      return r2.cookie;
+    }
     if (r.status !== 200 || !r.cookie) throw new Error(`login failed: ${r.status} ${JSON.stringify(r.body)}`);
     return r.cookie;
   };
@@ -218,6 +272,13 @@ export async function createTestApp(
     req,
     createUser,
     createSuperAdmin,
+    enableTwoFactor,
+    totpCode: totpCodeOf,
+    async superAdminSession(email = uniqueEmail('root')) {
+      const id = await createSuperAdmin(email);
+      await enableTwoFactor(id);
+      return { id, email, cookie: await login(email) };
+    },
     createOrg,
     addOrgMember,
     login,

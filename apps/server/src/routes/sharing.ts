@@ -20,7 +20,7 @@ import {
 } from '../commands/sharing.ts';
 import type { Ctx } from '../context.ts';
 import { notFound } from '../errors.ts';
-import { listAgents } from '../queries/agents.ts';
+import { getAgentDto } from '../queries/agents.ts';
 import { getCardDetail } from '../queries/cards.ts';
 import { getProjectDetail } from '../queries/misc.ts';
 import { typed } from './util.ts';
@@ -83,7 +83,7 @@ export function sharingRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         await rehomeAgent(ctx, s.user, req.params.id, req.body);
-        const a = (await listAgents(ctx, s.user.id)).find((x) => x.id === req.params.id);
+        const a = await getAgentDto(ctx, s.user.id, req.params.id);
         if (!a) throw notFound('agent not found');
         return a;
       },

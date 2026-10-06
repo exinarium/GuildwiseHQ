@@ -4,7 +4,7 @@ import { notFound } from '../errors.ts';
 
 /**
  * Messages of a thread the user may read: their own chats, card threads of projects they are an active member of,
- * and org-level (devops, intake) threads of their own org. Returned oldest first; `before` pages backwards.
+ * DevOps threads of their own workstations and the intake threads of organizations they are Owner or Admin of. Returned oldest first; `before` pages backwards.
  */
 export async function threadMessages(
   db: Queryable,
@@ -18,7 +18,10 @@ export async function threadMessages(
       WHERE t.id = $1 AND t.deleted_at IS NULL AND (
         (t.kind = 'chat' AND (t.created_by = $2 OR t.project_id IN (SELECT project_id FROM project_members WHERE user_id=$2 AND status='active')))
         OR (t.kind IN ('card','phase') AND t.project_id IN (SELECT project_id FROM project_members WHERE user_id=$2 AND status='active'))
-        OR (t.kind IN ('devops','intake') AND t.org_id = $2))`,
+        OR (t.kind = 'devops' AND EXISTS (SELECT 1 FROM devops_requests r JOIN workstations w ON w.id = r.workstation_id
+              WHERE r.thread_id = t.id AND w.user_id = $2))
+        OR (t.kind = 'intake' AND EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = t.org_id AND om.user_id = $2
+              AND om.status = 'active' AND om.role IN ('owner','admin'))))`,
     [threadId, userId],
   );
   if (!t) throw notFound('thread not found');

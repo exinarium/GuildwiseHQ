@@ -34,10 +34,14 @@ export function toAgentDto(a: Row, active: Array<{ cardId: string; ref: string; 
   };
 }
 
-/** Agents visible to the user: their own org's agents plus project-scoped agents of projects they belong to. */
+/**
+ * Agents visible to the user: the agents of the request organization (when they are a member of it) plus
+ * project-scoped agents of projects they belong to (in any organization: a guest sees those of the shared project).
+ */
 export async function listAgents(
   ctx: Ctx,
   userId: string,
+  orgId: string | null,
   projectId?: string,
   department?: string,
 ): Promise<AgentDto[]> {
@@ -50,12 +54,14 @@ export async function listAgents(
        FROM agents a
        LEFT JOIN workstations ws ON ws.id = a.workstation_id
        LEFT JOIN LATERAL (SELECT e AS info FROM jsonb_array_elements(ws.runtimes) e WHERE e->>'id' = a.runtime LIMIT 1) rt ON true
-      WHERE (a.org_id = $1 OR a.project_id IN (SELECT project_id FROM project_members WHERE user_id=$1 AND status='active'))
+      WHERE ((a.org_id = $3::uuid AND EXISTS (SELECT 1 FROM org_members om
+                   WHERE om.org_id = a.org_id AND om.user_id = $1 AND om.status = 'active'))
+             OR a.project_id IN (SELECT project_id FROM project_members WHERE user_id=$1 AND status='active'))
         AND ($2::uuid IS NULL
              OR a.project_id = $2
              OR (a.project_id IS NULL AND a.org_id = (SELECT org_id FROM projects WHERE id = $2)))
       ORDER BY a.status = 'retired', a.hired_at, a.id`,
-    [userId, projectId ?? null],
+    [userId, projectId ?? null, orgId],
   );
   if (projectId) {
     // Hide other orgs' org-wide agents when filtering by a project the user cannot see.
@@ -81,4 +87,10 @@ export async function listAgents(
           .map((c) => ({ cardId: c.id, ref: c.ref, title: c.title })),
       ),
     );
+}
+
+/** One agent as the user sees it (object routes: the agent's own organization decides, not the tab's). */
+export async function getAgentDto(ctx: Ctx, userId: string, agentId: string): Promise<AgentDto | undefined> {
+  const o = await rows<{ org_id: string }>(ctx.pool, 'SELECT org_id FROM agents WHERE id=$1', [agentId]);
+  return (await listAgents(ctx, userId, o[0]?.org_id ?? null)).find((x) => x.id === agentId);
 }

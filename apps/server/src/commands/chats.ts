@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { type ChatDto, type CreateChatRequest, canDirectAgent, streamId } from '@aom/shared';
+import { type ChatDto, type CreateChatRequest, canDirectAgentInOrg, streamId } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard, projectRole, requireProjectMember } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
@@ -7,6 +8,19 @@ import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
+
+/** The user talking to the DevOps engineer that lives on their own workstation (workstation-targeted work is theirs). */
+export async function ownsDevopsMachine(
+  db: Queryable,
+  userId: string,
+  agent: { is_devops?: boolean; workstation_id?: string | null },
+): Promise<boolean> {
+  if (!agent.is_devops || !agent.workstation_id) return false;
+  return !!(await one(db, `SELECT 1 FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`, [
+    agent.workstation_id,
+    userId,
+  ]));
+}
 
 export function toChatDto(ctx: Ctx, r: Row, viewerId: string): ChatDto {
   return {
@@ -70,13 +84,12 @@ export async function createChat(
   return withAppendTx(ctx.pool, async (tx) => {
     const agent = await one(tx, `SELECT * FROM agents WHERE id=$1 AND status <> 'retired'`, [req.agentId]);
     if (!agent) throw notFound('agent not found');
-    const allowed = canDirectAgent({
-      userId: user.id,
-      orgId: agent.org_id,
-      managerUserId: agent.manager_user_id,
-      agentProjectId: agent.project_id,
-      projectRole: agent.project_id ? await projectRole(tx, user.id, agent.project_id) : null,
-    });
+    const allowed =
+      canDirectAgentInOrg({
+        orgRole: await orgRoleOf(tx, user.id, agent.org_id),
+        agentProjectId: agent.project_id,
+        projectMember: agent.project_id ? !!(await projectRole(tx, user.id, agent.project_id)) : false,
+      }) || (await ownsDevopsMachine(tx, user.id, agent));
     if (!allowed) throw notFound('agent not found');
 
     let projectId: string | undefined = req.projectId;

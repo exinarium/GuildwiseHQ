@@ -33,4 +33,5 @@ export type AcceptInvitationRequest = z.infer<typeof AcceptInvitationRequestSche
 export const AcceptExistingInvitationRequestSchema = z.object({
   orgName: z.string().trim().min(1).max(120).optional(),
 });
+export type AcceptExistingInvitationRequest = z.infer<typeof AcceptExistingInvitationRequestSchema>;
 export const InvitationTokenParamsSchema = z.object({ token: z.string().min(16) });

@@ -1,6 +1,13 @@
-import { canManageCard, IdParamsSchema, ShiftsQuerySchema, StopShiftRequestSchema } from '@aom/shared';
+import {
+  canManageCard,
+  IdParamsSchema,
+  isOrgManager,
+  ShiftsQuerySchema,
+  StopShiftRequestSchema,
+} from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
+import { orgRoleOf } from '../auth/org-context.ts';
 import { projectRole } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
@@ -8,8 +15,14 @@ import { conflict, forbidden, notFound } from '../errors.ts';
 import { SHIFT_SELECT, toShiftDto } from '../queries/cards.ts';
 import { typed } from './util.ts';
 
-/** Visible = the shift's card is in one of the user's projects, or (no card) it belongs to the user's org. */
-const VISIBLE = `(s.org_id = $1 OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.user_id = $1 AND pm.status='active' AND pm.project_id = c.project_id))`;
+/**
+ * Visible = the shift's card is in one of the user's projects, or (no card: a chat, DevOps or BA shift) the user is an
+ * Owner or Admin of its organization or it runs on one of their own workstations.
+ */
+const VISIBLE = `(EXISTS (SELECT 1 FROM project_members pm WHERE pm.user_id = $1 AND pm.status='active' AND pm.project_id = c.project_id)
+  OR (s.card_id IS NULL AND (EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = s.org_id AND om.user_id = $1
+        AND om.status = 'active' AND om.role IN ('owner','admin'))
+      OR EXISTS (SELECT 1 FROM workstations w WHERE w.id = s.workstation_id AND w.user_id = $1))))`;
 
 export function shiftRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
@@ -58,8 +71,14 @@ export function shiftRoutes(ctx: Ctx) {
           ) {
             throw forbidden('only the card owner or the project owner can stop a shift');
           }
-        } else if (row.org_id !== s.user.id)
-          throw forbidden('only the organization owner can stop this shift');
+        } else {
+          const own = await one(ctx.pool, 'SELECT 1 FROM workstations WHERE id=$1 AND user_id=$2', [
+            row.workstation_id,
+            s.user.id,
+          ]);
+          if (!own && !isOrgManager({ orgRole: await orgRoleOf(ctx.pool, s.user.id, row.org_id) }))
+            throw forbidden('only the organization Owner and Admins can stop this shift');
+        }
         const sent = ctx.services.gateway.stopShift(row.workstation_id, row.id, 'manager');
         return { ok: true, sent };
       },

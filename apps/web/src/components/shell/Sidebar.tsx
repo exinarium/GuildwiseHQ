@@ -95,6 +95,7 @@ export function SidebarBody({
   onSignOut,
   onNavigate,
   headerSlot,
+  orgSlot,
 }: {
   sections: NavSection[];
   footer: NavEntry[];
@@ -102,10 +103,12 @@ export function SidebarBody({
   counts: DeskCounts;
   project: ProjectDto | null;
   projects: ProjectDto[];
-  user: { id?: string; name: string; email: string; isAdmin: boolean; avatar?: UserAvatarValue | null };
+  user: { id?: string; name: string; email: string; roleLabel: string; avatar?: UserAvatarValue | null };
   onSignOut: () => void;
   onNavigate?: () => void;
   headerSlot?: React.ReactNode;
+  /** The organization switcher, above the project switcher. */
+  orgSlot?: React.ReactNode;
 }) {
   return (
     <div className="on-side flex h-full min-h-0 flex-col text-side-fg">
@@ -119,6 +122,7 @@ export function SidebarBody({
         {headerSlot}
       </div>
       <div className={cx('space-y-2 pb-2', collapsed ? 'px-3' : 'px-3')}>
+        {orgSlot && <div className="border-b border-side-line pb-2">{orgSlot}</div>}
         <ProjectSwitcher
           current={project}
           projects={projects}
@@ -179,7 +183,7 @@ export function SidebarBody({
               {...(user.id ? { userId: user.id } : {})}
               avatar={user.avatar ?? null}
               email={user.email}
-              isAdmin={user.isAdmin}
+              roleLabel={user.roleLabel}
               collapsed={collapsed}
               onSignOut={onSignOut}
               {...(onNavigate ? { onNavigate } : {})}

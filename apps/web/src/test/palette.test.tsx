@@ -58,7 +58,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-const nav = buildNav({ projectKey: 'TOY', isFeed: false, isAdmin: false });
+const nav = buildNav({ projectKey: 'TOY', isFeed: false, canManage: true });
 
 function Where() {
   const l = useLocation();

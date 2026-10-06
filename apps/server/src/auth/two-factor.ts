@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { streamId } from '@aom/shared';
 import type { Ctx } from '../context.ts';
-import { sha256Hex } from '../crypto.ts';
+import { randomToken, sha256Hex } from '../crypto.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict } from '../errors.ts';
@@ -230,3 +230,52 @@ export async function requiringOrgs(
 }
 
 export { totpStep };
+
+// --------------------------------------------------------------------------------------- the login challenge
+
+const CHALLENGE_TTL_MS = 5 * 60_000;
+export const MAX_CHALLENGE_ATTEMPTS = 5;
+
+/** A password-verified login waiting for its second factor: the token goes to the browser, a hash stays here. */
+export async function createLoginChallenge(
+  ctx: Ctx,
+  userId: string,
+  meta: { userAgent?: string | undefined; ip?: string | undefined } = {},
+): Promise<string> {
+  const token = randomToken(32);
+  const now = ctx.clock.now();
+  await exec(
+    ctx.pool,
+    `INSERT INTO login_challenges (id, user_id, created_at, expires_at, user_agent, ip) VALUES ($1,$2,$3,$4,$5,$6)`,
+    [
+      sha256Hex(token),
+      userId,
+      now,
+      new Date(now.getTime() + CHALLENGE_TTL_MS),
+      meta.userAgent ?? null,
+      meta.ip ?? null,
+    ],
+  );
+  await exec(ctx.pool, 'DELETE FROM login_challenges WHERE expires_at < $1', [
+    new Date(now.getTime() - 3600_000),
+  ]);
+  return token;
+}
+
+/**
+ * Answers a challenge: the user id when the code is right (the challenge is spent), null when it is wrong (the attempt
+ * counts; after five the challenge is dead and the user signs in again).
+ */
+export async function answerLoginChallenge(ctx: Ctx, token: string, code: string): Promise<string | null> {
+  const id = sha256Hex(token);
+  const c = await one<{ user_id: string; expires_at: Date; attempts: number }>(
+    ctx.pool,
+    'UPDATE login_challenges SET attempts = attempts + 1 WHERE id=$1 RETURNING user_id, expires_at, attempts',
+    [id],
+  );
+  if (!c || new Date(c.expires_at) <= ctx.clock.now() || c.attempts > MAX_CHALLENGE_ATTEMPTS) return null;
+  const ok = await verifySecondFactor(ctx, c.user_id, code);
+  if (!ok) return null;
+  await exec(ctx.pool, 'DELETE FROM login_challenges WHERE id=$1', [id]);
+  return c.user_id;
+}

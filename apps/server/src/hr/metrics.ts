@@ -1,4 +1,5 @@
 import { CODE_BOARD_COLUMNS, columnFor, getStage, type MetricsResponse } from '@aom/shared';
+import type { Who } from '../auth/org-context.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
@@ -15,19 +16,21 @@ const round = (n: number, d = 4) => Math.round(n * 10 ** d) / 10 ** d;
  */
 export async function metrics(
   ctx: Ctx,
-  userId: string,
+  who: Who,
   q: { projectId?: string | undefined; from?: string | undefined; to?: string | undefined },
 ): Promise<MetricsResponse> {
   const now = ctx.clock.now();
   const to = q.to ? new Date(q.to) : now;
   const from = q.from ? new Date(q.from) : new Date(to.getTime() - 30 * DAY_MS);
+  const userId = who.userId;
   if (q.projectId) await loadVisibleProject(ctx.pool, userId, q.projectId);
   const projectIds = (
     await rows<{ project_id: string }>(
       ctx.pool,
-      `SELECT project_id FROM project_members WHERE user_id=$1 AND status='active'
-         AND ($2::uuid IS NULL OR project_id = $2)`,
-      [userId, q.projectId ?? null],
+      `SELECT pm.project_id FROM project_members pm JOIN projects p ON p.id = pm.project_id
+        WHERE pm.user_id=$1 AND pm.status='active' AND ($2::uuid IS NULL OR pm.project_id = $2)
+          AND ($2::uuid IS NOT NULL OR p.org_id = $3)`,
+      [userId, q.projectId ?? null, who.orgId],
     )
   ).map((r) => r.project_id);
 

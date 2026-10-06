@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { FakeRunner } from './helpers/fake-runner.ts';
 import { addMember, connectMemberRunner, hireFor, type Member } from './helpers/members.ts';
@@ -16,14 +15,25 @@ afterAll(async () => {
 
 describe('deactivating a user cuts off runner and project access (review H3)', () => {
   it('unlinks their workstations, removes them from shared projects, and refuses their runner token', async () => {
-    const admin = await w.t.userSession(uniqueEmail('admin'), 'admin');
+    const root = await w.t.superAdminSession();
     const m: Member = await addMember(w, 'gone');
     const mr = await connectMemberRunner(w, m);
     const agent = await hireFor(w, m, 'Gus', 'builder', 'junior');
     await w.card({ title: 'Queued for the leaver' });
 
+    // the member owns an organization of their own: it is suspended first (the account of a running organization's
+    // Owner is not deactivated), then the login goes
     await ok(
-      w.t.req('PATCH', `/api/admin/users/${m.id}`, { cookie: admin.cookie, body: { status: 'deactivated' } }),
+      w.t.req('POST', `/api/platform/orgs/${m.id}/suspend`, {
+        cookie: root.cookie,
+        body: { reason: 'leaving' },
+      }),
+    );
+    await ok(
+      w.t.req('PATCH', `/api/platform/users/${m.id}`, {
+        cookie: root.cookie,
+        body: { status: 'deactivated' },
+      }),
     );
 
     expect((await q('SELECT status FROM workstations WHERE id=$1', [m.workstationId]))[0]!.status).toBe(

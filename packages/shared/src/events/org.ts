@@ -130,7 +130,7 @@ export const orgEvents = [
     z.object({
       orgId: Id,
       /** `null` puts the feature back to the plan default. */
-      features: z.record(OrgFeatureSchema, z.boolean().nullable()),
+      features: z.partialRecord(OrgFeatureSchema, z.boolean().nullable()),
       previous: Features.optional(),
       note: z.string().max(1000).optional(),
       meta: EventMetaSchema,

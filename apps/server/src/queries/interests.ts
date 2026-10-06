@@ -24,6 +24,20 @@ const NO_STATS: InterestStats = {
   failing: false,
 };
 
+/**
+ * The edit rule of an interest (docs/design/organizations.md section 4.3) in SQL: its creator, or someone whose rank in the
+ * interest's organization is at least the creator's current rank (the stored rank once the creator has no relationship
+ * with it any more). Owner 4, Admin 3, Member 2, Guest (project access only) 1.
+ */
+const RANK_OF = (user: string) => `(CASE
+    (SELECT om.role FROM org_members om WHERE om.org_id = i.org_id AND om.user_id = ${user} AND om.status = 'active')
+    WHEN 'owner' THEN 4 WHEN 'admin' THEN 3 WHEN 'member' THEN 2
+    ELSE (CASE WHEN EXISTS (SELECT 1 FROM project_members pm JOIN projects p ON p.id = pm.project_id
+                             WHERE pm.user_id = ${user} AND pm.status = 'active' AND p.org_id = i.org_id) THEN 1 END)
+  END)`;
+const EDIT_OK = `(i.created_by = $1 OR COALESCE(${RANK_OF('$1')}, 1) >= COALESCE(
+    CASE WHEN i.created_by IS NULL THEN NULL ELSE ${RANK_OF('i.created_by')} END, i.created_by_rank, 1))`;
+
 const SELECT = `
   SELECT i.*,
          fp.key AS feed_key, fp.name AS feed_name, fp.status AS feed_status,
@@ -32,6 +46,7 @@ const SELECT = `
          s.last_fired_at AS sched_last_fired,
          (fm.user_id IS NOT NULL OR i.feed_project_id IS NULL) AS feed_member,
          (rm.user_id IS NOT NULL OR i.research_project_id IS NULL) AS research_member,
+         ${EDIT_OK} AS edit_ok,
          (SELECT count(*) FROM taste_seeds ts, jsonb_array_elements(ts.rules) r
            WHERE ts.project_id = i.feed_project_id AND r->>'interestId' = i.id::text) AS taste_rules
     FROM interests i
@@ -139,7 +154,7 @@ function toDto(r: Row, stats: InterestStats | undefined): InterestDto {
     status: r.status,
     scheduleId: r.schedule_id,
     adoptedFrom: r.adopted_from,
-    canManage: member,
+    canManage: member && Boolean(r.edit_ok),
     canRun: Boolean(r.feed_project_id) && Boolean(r.feed_member),
     canResearch: Boolean(r.research_project_id) && Boolean(r.research_member),
     tasteRuleCount: Number(r.taste_rules ?? 0),

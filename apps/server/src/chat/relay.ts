@@ -2,19 +2,21 @@ import { randomUUID } from 'node:crypto';
 import {
   CHAT_ERROR,
   type ChatContext,
-  canDirectAgent,
+  canDirectAgentInOrg,
   type RunnerToServerOf,
   type ServerToBrowser,
   streamId,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import { projectRole } from '../authz/scope.ts';
+import { ownsDevopsMachine } from '../commands/chats.ts';
 import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../commands/common.ts';
 import { intakeContext } from '../commands/intake.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { agentSpec } from '../runner-gateway/brief.ts';
+import { agentSpecFor } from '../runner-gateway/brief.ts';
 
 const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
@@ -82,13 +84,12 @@ export class ChatRelay {
       ? await projectRole(ctx.pool, userId, row.thread_project_id)
       : null;
     const active = await one(ctx.pool, `SELECT 1 FROM users WHERE id=$1 AND status='active'`, [userId]);
-    const mayDirect = canDirectAgent({
-      userId,
-      orgId: row.org_id,
-      managerUserId: row.manager_user_id,
-      agentProjectId: row.project_id,
-      projectRole: rolePerm,
-    });
+    const mayDirect =
+      canDirectAgentInOrg({
+        orgRole: await orgRoleOf(ctx.pool, userId, row.org_id),
+        agentProjectId: row.project_id,
+        projectMember: rolePerm !== null && rolePerm !== undefined,
+      }) || (await ownsDevopsMachine(ctx.pool, userId, row));
     if (!active || !mayDirect || (row.thread_project_id && roleThread === null))
       return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);
     if (this.byThread.has(msg.threadId)) return this.fail(userId, msg.threadId, CHAT_ERROR.busy);
@@ -170,7 +171,7 @@ export class ChatRelay {
         {
           chatId,
           threadId: msg.threadId,
-          agent: agentSpec(row),
+          agent: await agentSpecFor(ctx, row),
           message: msg.body,
           ...(prior?.sid ? { resumeSessionId: prior.sid as string } : {}),
           context,

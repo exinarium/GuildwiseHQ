@@ -1,6 +1,7 @@
 import {
   BookOpen,
   BriefcaseBusiness,
+  Building2,
   ChartColumn,
   FolderKanban,
   Inbox,
@@ -10,7 +11,6 @@ import {
   Rss,
   Server,
   Settings,
-  ShieldCheck,
   Timer,
   Users,
   Vault,
@@ -26,7 +26,8 @@ export interface NavEntry {
   /** Route predicate for the active state (default: pathname starts with `to`). */
   match?: (pathname: string) => boolean;
   testId?: string;
-  adminOnly?: boolean;
+  /** Hidden for roles below Owner/Admin (the server enforces it regardless). */
+  managerOnly?: boolean;
 }
 export interface NavSection {
   label: string;
@@ -34,11 +35,21 @@ export interface NavSection {
 }
 
 /** The sidebar as data. Board points at the current project; Feed appears for feed projects (see `buildNav`). */
-export function buildNav(opts: { projectKey: string | null; isFeed: boolean; isAdmin: boolean }): {
+export function buildNav(opts: {
+  projectKey: string | null;
+  isFeed: boolean;
+  /** Owner or Admin of the active organization. */
+  canManage?: boolean;
+  /** Feature flags of the active organization (a switched-off feature leaves the nav; its data is kept). */
+  features?: Record<string, boolean>;
+  /** A platform account has no work nav at all. */
+  platform?: boolean;
+}): {
   sections: NavSection[];
   footer: NavEntry[];
 } {
-  const { projectKey, isFeed, isAdmin } = opts;
+  const { projectKey, isFeed, canManage = false, features = {} } = opts;
+  const on = (f: string) => features[f] !== false;
   const work: NavEntry[] = [
     {
       id: 'board',
@@ -56,12 +67,31 @@ export function buildNav(opts: { projectKey: string | null; isFeed: boolean; isA
       icon: Rss,
       match: (p) => p.endsWith('/feed'),
     });
+  work.push({ id: 'desk', label: 'Desk', to: '/desk', icon: Inbox });
+  if (on('integrations') && canManage)
+    work.push({ id: 'intake', label: 'Intake', to: '/intake', icon: BriefcaseBusiness });
   work.push(
-    { id: 'desk', label: 'Desk', to: '/desk', icon: Inbox },
-    { id: 'intake', label: 'Intake', to: '/intake', icon: BriefcaseBusiness },
     { id: 'schedules', label: 'Schedules', to: '/schedules', icon: Timer },
     { id: 'projects', label: 'Projects', to: '/projects', icon: FolderKanban },
   );
+  const knowledge: NavEntry[] = [];
+  if (on('interests'))
+    knowledge.push({
+      id: 'interests',
+      label: 'Interests',
+      to: '/interests',
+      icon: Lightbulb,
+      testId: 'nav-interests',
+    });
+  knowledge.push({ id: 'ledger', label: 'Ledger', to: '/ledger', icon: BookOpen, testId: 'nav-ledger' });
+  if (canManage)
+    knowledge.push({
+      id: 'vaults',
+      label: 'Vaults',
+      to: '/settings/vaults',
+      icon: Vault,
+      testId: 'nav-vaults',
+    });
   const sections: NavSection[] = [
     { label: 'Work', items: work },
     {
@@ -79,19 +109,18 @@ export function buildNav(opts: { projectKey: string | null; isFeed: boolean; isA
         { id: 'metrics', label: 'Metrics', to: '/metrics', icon: ChartColumn },
       ],
     },
-    {
-      label: 'Knowledge',
-      items: [
-        { id: 'interests', label: 'Interests', to: '/interests', icon: Lightbulb, testId: 'nav-interests' },
-        { id: 'ledger', label: 'Ledger', to: '/ledger', icon: BookOpen, testId: 'nav-ledger' },
-        { id: 'vaults', label: 'Vaults', to: '/settings/vaults', icon: Vault, testId: 'nav-vaults' },
-      ],
-    },
+    { label: 'Knowledge', items: knowledge },
   ];
   const footer: NavEntry[] = [
     { id: 'settings', label: 'Settings', to: '/settings', icon: Settings, match: (p) => p === '/settings' },
+    {
+      id: 'organization',
+      label: 'Organization',
+      to: '/settings/org',
+      icon: Building2,
+      testId: 'nav-organization',
+    },
   ];
-  if (isAdmin) footer.push({ id: 'admin', label: 'Admin', to: '/admin', icon: ShieldCheck, adminOnly: true });
   return { sections, footer };
 }
 

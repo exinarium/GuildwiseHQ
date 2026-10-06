@@ -3,12 +3,14 @@ import {
   type AnswerDeskItemRequest,
   type DeskActor,
   type DeskResolution,
+  isOrgManager,
   isPhaseDeskSubkind,
   type ResolveDeskItemRequest,
   streamId,
   UNMAPPED_TICKET_SUBKIND,
   WORKING_BRANCH_SUBKIND,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
@@ -48,7 +50,7 @@ async function lockItem(
   );
   if (!item) throw notFound('desk item not found');
   const role = item.project_id ? await projectRole(tx, user.id, item.project_id) : null;
-  return { item, mayAct: canAnswerItem(item, user.id, role) };
+  return { item, mayAct: canAnswerItem(item, user.id, role, await orgRoleOf(tx, user.id, item.org_id)) };
 }
 
 const truncate = (s: string, n: number) => {
@@ -83,8 +85,8 @@ export async function answerDeskItem(
     // Standing orders bind agents beyond this card: project-wide ones need the project owner, org-wide ones the
     // org owner (the item's org is the project owner's org; other managers are only guests in it).
     if (scope === 'standing_order') {
-      if (orgWide && item.org_id !== user.id)
-        throw forbidden('only the organization owner can add organization-wide standing orders');
+      if (orgWide && !isOrgManager({ orgRole: await orgRoleOf(tx, user.id, item.org_id) }))
+        throw forbidden('only the organization Owner and Admins can add organization-wide standing orders');
       if (!orgWide && item.project_id && (await projectRole(tx, user.id, item.project_id)) !== 'owner')
         throw forbidden('only the project owner can add project standing orders');
     }

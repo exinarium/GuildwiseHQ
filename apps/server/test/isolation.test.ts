@@ -128,7 +128,7 @@ describe('two-user isolation', () => {
     );
   });
 
-  it("admins get no visibility into other users' projects, cards or agents", async () => {
+  it("another organization's Owner gets no visibility into this user's projects, cards or agents", async () => {
     const admin = await w.t.userSession(uniqueEmail('adm'), 'admin');
     const card = (
       await ok<any>(w.t.req('GET', `/api/board?projectId=${w.projectId}`, { cookie: w.owner.cookie }))
@@ -136,15 +136,18 @@ describe('two-user isolation', () => {
     expect((await w.t.req('GET', `/api/cards/${card.id}`, { cookie: admin.cookie })).status).toBe(404);
     expect((await w.t.req('GET', `/api/projects/${w.projectId}`, { cookie: admin.cookie })).status).toBe(404);
     expect((await ok<any>(w.t.req('GET', '/api/agents', { cookie: admin.cookie }))).agents).toEqual([]);
-    // ...but can see and unlink all workstations through the admin view
-    const list = await ok<any>(w.t.req('GET', '/api/admin/workstations', { cookie: admin.cookie }));
-    expect(list.workstations.map((x: any) => x.id)).toContain(w.workstationId);
-    expect(list.workstations[0].ownerEmail).toBe(w.owner.email);
-    await ok(w.t.req('POST', `/api/admin/workstations/${w.workstationId}/unlink`, { cookie: admin.cookie }));
+    // an organization's Owner or Admin has no reach into someone else's workstations either: they are the user's own
     expect(
-      (await ok<any>(w.t.req('GET', '/api/workstations', { cookie: w.owner.cookie }))).workstations,
+      (await ok<any>(w.t.req('GET', '/api/workstations', { cookie: admin.cookie }))).workstations,
     ).toEqual([]);
-    expect((await w.t.req('GET', '/api/admin/workstations', { cookie: w.owner.cookie })).status).toBe(403);
+    expect(
+      (await w.t.req('POST', `/api/workstations/${w.workstationId}/unlink`, { cookie: admin.cookie })).status,
+    ).toBe(404);
+    expect(
+      (await ok<any>(w.t.req('GET', '/api/workstations', { cookie: w.owner.cookie }))).workstations.map(
+        (x: any) => x.id,
+      ),
+    ).toContain(w.workstationId);
   });
 
   it('catalogue endpoints list the built-in roles and workflows to any signed-in user', async () => {

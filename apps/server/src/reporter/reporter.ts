@@ -232,8 +232,9 @@ async function queueUrgentAlerts(ctx: Ctx): Promise<number> {
 async function queueFloorReports(ctx: Ctx, now: Date): Promise<number> {
   const orgs = await rows<{ id: string }>(
     ctx.pool,
-    `SELECT u.id FROM users u WHERE u.status='active'
-        AND EXISTS (SELECT 1 FROM projects p WHERE p.org_id = u.id AND p.status='active')`,
+    `SELECT o.id FROM organizations o JOIN users u ON u.id = o.owner_user_id AND u.status='active'
+      WHERE o.status IN ('trial','active')
+        AND EXISTS (SELECT 1 FROM projects p WHERE p.org_id = o.id AND p.status='active')`,
   );
   let n = 0;
   for (const o of orgs) {

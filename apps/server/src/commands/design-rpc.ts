@@ -1,9 +1,11 @@
 import {
   CreateDepartmentRequestSchema,
   type DefinitionIssue,
+  isOrgManager,
   RoleDraftInputSchema,
   WorkflowDraftInputSchema,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row } from '../db/sql.ts';
 import { HttpError } from '../errors.ts';
@@ -39,15 +41,19 @@ const errText = (err: unknown): string => {
 };
 
 /** The organization the BA designs for: the owner who is chatting with their own BA (nobody else changes it). */
-async function designerOf(ctx: Ctx, shift: Row): Promise<{ agentId: string; orgId: string } | string> {
+async function designerOf(
+  ctx: Ctx,
+  shift: Row,
+): Promise<{ agentId: string; orgId: string; userId: string } | string> {
   if (shift.kind !== 'chat')
     return 'organization design happens in a chat with the business analyst, not in a card shift';
   const agent = await one(ctx.pool, 'SELECT id, org_id, role_key FROM agents WHERE id=$1', [shift.agent_id]);
   if (!agent || agent.role_key !== BA_ROLE_KEY)
     return 'only the business analyst designs roles and workflows';
-  if (ctx.services.chat.userOfChat(shift.id) !== agent.org_id)
-    return 'only the organization owner can design its roles and workflows: ask the owner to chat with the BA';
-  return { agentId: agent.id, orgId: agent.org_id };
+  const chatUser = ctx.services.chat.userOfChat(shift.id);
+  if (!chatUser || !isOrgManager({ orgRole: await orgRoleOf(ctx.pool, chatUser, agent.org_id) }))
+    return 'only the organization Owner and Admins can design its roles and workflows: ask one of them to chat with the BA';
+  return { agentId: agent.id, orgId: agent.org_id, userId: chatUser };
 }
 
 async function findDraft(
@@ -97,7 +103,7 @@ export async function designRpc(
   try {
     switch (method) {
       case 'org.catalogue': {
-        const c = await orgCatalogue(ctx, { id: who.orgId });
+        const c = await orgCatalogue(ctx, { id: who.userId }, who.orgId);
         const lines = [
           'Roles:',
           ...c.roles.map(
@@ -171,7 +177,7 @@ export async function designRpc(
       case 'org.department': {
         const p = CreateDepartmentRequestSchema.safeParse({ name: params.name });
         if (!p.success) return [false, undefined, 'usage: aom org department --name "<name>"'];
-        const d = await createDepartment(ctx, { id: who.orgId } as never, who.orgId, p.data);
+        const d = await createDepartment(ctx, { id: who.userId } as never, who.orgId, p.data);
         return [true, { message: `Department '${d.name}' created.` }];
       }
       default:

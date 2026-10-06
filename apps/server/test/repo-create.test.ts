@@ -223,7 +223,7 @@ describe('approved repository setup', () => {
     // freshState() clears agents: hire the workstation's DevOps engineer the way pairing does, on the mock runtime.
     const ctx = w.t.app.ctx;
     const devopsId = await withAppendTx(ctx.pool, async (tx) => {
-      const hire = await devopsHireEvent(tx, w.owner.id, w.workstationId);
+      const hire = await devopsHireEvent(tx, w.owner.id, w.owner.id, w.workstationId);
       if (!hire) throw new Error('no devops role');
       (hire.event.payload as { runtime: string }).runtime = 'mock';
       await ctx.store.append([hire], { tx });

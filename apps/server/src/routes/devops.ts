@@ -7,7 +7,7 @@ import {
   UpdateHygieneRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth/guards.ts';
+import { requireOrg, requireUser } from '../auth/guards.ts';
 import { resetAgent } from '../commands/agents.ts';
 import {
   createDevOpsRequest,
@@ -19,7 +19,7 @@ import {
 import { runHygieneNow, setHygieneInterval } from '../commands/hygiene.ts';
 import type { Ctx } from '../context.ts';
 import { notFound } from '../errors.ts';
-import { listAgents } from '../queries/agents.ts';
+import { getAgentDto } from '../queries/agents.ts';
 import { workstationDtos } from '../queries/misc.ts';
 import { typed } from './util.ts';
 
@@ -33,8 +33,9 @@ export function devopsRoutes(ctx: Ctx) {
     });
 
     app.post('/api/devops/requests', { schema: { body: CreateDevOpsRequestSchema } }, async (req, reply) => {
-      const s = await requireUser(ctx, req);
-      const id = await createDevOpsRequest(ctx, s.user, req.body);
+      const a = await requireOrg(ctx, req);
+      const s = a.session;
+      const id = await createDevOpsRequest(ctx, s.user, { id: a.orgId }, req.body);
       ctx.services.dispatcher.trigger();
       reply.code(201);
       return getDevOpsRequest(ctx, s.user.id, id);
@@ -96,7 +97,7 @@ export function devopsRoutes(ctx: Ctx) {
     app.post('/api/agents/:id/reset', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
       await resetAgent(ctx, s.user, req.params.id);
-      const a = (await listAgents(ctx, s.user.id)).find((x) => x.id === req.params.id);
+      const a = await getAgentDto(ctx, s.user.id, req.params.id);
       if (!a) throw notFound('agent not found');
       return a;
     });

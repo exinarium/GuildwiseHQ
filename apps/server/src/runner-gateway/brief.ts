@@ -4,6 +4,7 @@ import {
   type AgentRuntimeSpec,
   DevOpsAccessSchema,
   devopsBriefOutcomes,
+  effectiveFeatures,
   getStage,
   type ServerToRunnerOf,
   type ShiftBrief,
@@ -32,6 +33,16 @@ export function agentSpec(a: Row): AgentRuntimeSpec {
     permissions: AgentPermissionsSchema.parse(a.permissions),
     isDevops: a.is_devops,
   };
+}
+
+/** The agent as its runner sees it, with `browser` off when the organization has the browser-tools feature switched off. */
+export async function agentSpecFor(ctx: Ctx, a: Row): Promise<AgentRuntimeSpec> {
+  const spec = agentSpec(a);
+  if (!spec.permissions.browser) return spec;
+  const org = await one(ctx.pool, 'SELECT plan, features FROM organizations WHERE id=$1', [a.org_id]);
+  if (org && !effectiveFeatures(org.plan, org.features).browserTools)
+    return { ...spec, permissions: { ...spec.permissions, browser: false } };
+  return spec;
 }
 
 /** Brief for one card shift: what the agent sees (docs/ARCHITECTURE.md section 11.2, ShiftBrief). */
@@ -188,7 +199,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     shiftId: claim.shiftId,
     claimId: claim.claimId,
     kind: 'card',
-    agent: agentSpec(agent),
+    agent: await agentSpecFor(ctx, agent),
     brief,
     worktree,
     prepare: { rebase: claim.rebase },
@@ -284,7 +295,7 @@ export async function buildDevopsShiftStart(
     shiftId,
     claimId: randomUUID(),
     kind: 'devops',
-    agent: agentSpec(agent),
+    agent: await agentSpecFor(ctx, agent),
     brief,
     worktree: null,
     prepare: { rebase: false },

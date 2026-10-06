@@ -26,7 +26,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { agentActor, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { agentActor, orgScope, projectScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { createDevOpsRequestIn, threadMessage } from './devops.ts';
 import { userBy } from './phase-events.ts';
 
@@ -204,7 +204,7 @@ export async function setHygieneInterval(
             payload: { workstationId, intervalHours, changedBy: user.id },
           },
           actor: userActor(user.id),
-          scope: orgScope(user.id),
+          scope: userScope(user.id),
         },
       ],
       { tx },
@@ -222,6 +222,8 @@ export async function fireDueHygiene(ctx: Ctx): Promise<string[]> {
     ctx.pool,
     `SELECT w.id FROM workstations w
       WHERE w.status = 'active' AND w.hygiene_interval_hours > 0 AND ${HAS_DEVOPS}
+        AND EXISTS (SELECT 1 FROM agents a JOIN organizations o ON o.id = a.org_id AND o.status IN ('trial','active')
+                     WHERE a.workstation_id = w.id AND a.is_devops AND a.status = 'active')
         AND COALESCE(w.hygiene_last_at, w.paired_at) + make_interval(hours => w.hygiene_interval_hours) <= $1
       ORDER BY w.id`,
     [now],
@@ -617,6 +619,22 @@ export async function applyWorktreeSweepResult(
   }
   const ws = await one(ctx.pool, 'SELECT user_id FROM workstations WHERE id=$1', [workstationId]);
   if (!ws) return;
+  // The findings belong to the organization of the request that asked for the sweep, else to the machine owner's own.
+  const asked = payload.requestId
+    ? await one<{ org_id: string }>(ctx.pool, 'SELECT org_id FROM devops_requests WHERE id=$1', [
+        payload.requestId,
+      ])
+    : undefined;
+  const orgId =
+    asked?.org_id ??
+    (
+      await one<{ org_id: string }>(
+        ctx.pool,
+        `SELECT org_id FROM org_members WHERE user_id=$1 AND status='active' ORDER BY joined_at LIMIT 1`,
+        [ws.user_id],
+      )
+    )?.org_id;
+  if (!orgId) return;
   await ctx.store.append([
     {
       streamId: streamId.workstation(workstationId),
@@ -631,7 +649,7 @@ export async function applyWorktreeSweepResult(
         },
       },
       actor: { kind: 'runner', id: workstationId },
-      scope: orgScope(ws.user_id),
+      scope: orgScope(orgId),
     },
   ]);
   await postSweepNote(ctx, workstationId, payload.requestId, r);

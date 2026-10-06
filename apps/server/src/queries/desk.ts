@@ -3,8 +3,10 @@ import {
   type DeskItemDto,
   type DeskListResponse,
   type DigestItemDto,
+  isOrgManager,
   isPhaseDeskSubkind,
   isProjectOwner,
+  type OrgRole,
   type ProjectRole,
 } from '@aom/shared';
 import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -25,12 +27,25 @@ SELECT d.*, c.ref AS card_ref, c.title AS card_title, c.stage AS card_stage, c.s
   LEFT JOIN users u ON u.id = d.answered_by
   LEFT JOIN agents aa ON aa.id = d.answered_by_agent_id`;
 
-/** Desk items the user may see: their project items (any active member) and their own org-level items. */
+/**
+ * Desk items the user may see (docs/design/organizations.md section 6): the items of projects they are an active
+ * member of, and the org-level items of organizations where they are Owner or Admin, plus the ones addressed to them.
+ */
 export const DESK_VISIBLE = `((d.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')
-   OR (d.project_id IS NULL AND d.org_id = $1)) AND d.triage <> 'pending')`;
+   OR (d.project_id IS NULL AND (d.addressee_user_id = $1
+        OR EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = d.org_id AND om.user_id = $1
+                     AND om.status = 'active' AND om.role IN ('owner','admin'))))) AND d.triage <> 'pending')`;
 
-/** May `userId` answer this item? (docs/ARCHITECTURE.md section 17.2) */
-export function canAnswerItem(r: Row, userId: string, role: ProjectRole): boolean {
+/**
+ * May `userId` answer this item? (docs/ARCHITECTURE.md section 17.2) `orgRole` is the user's role in the item's
+ * organization: org-level items are answered by its Owner and Admins, or only by their addressee when they have one.
+ */
+export function canAnswerItem(
+  r: Row,
+  userId: string,
+  role: ProjectRole,
+  orgRole: OrgRole | null = null,
+): boolean {
   // Ratings: any active member of the project (the digest belongs to the whole project).
   if (r.kind === 'rating') return role !== null;
   // Phases: any active member of the project may act (owner decision A1).
@@ -44,7 +59,8 @@ export function canAnswerItem(r: Row, userId: string, role: ProjectRole): boolea
     });
   }
   if (r.project_id) return isProjectOwner(role);
-  return r.org_id === userId;
+  if (r.addressee_user_id) return r.addressee_user_id === userId;
+  return isOrgManager({ orgRole });
 }
 
 export async function dedupEntriesFor(db: Queryable, ids: string[]) {
@@ -62,6 +78,7 @@ export function toDeskDto(
   userId: string,
   roles: Map<string, ProjectRole>,
   dedup: Map<string, { id: string; scope: any; title: string; body: string }>,
+  orgRoles: Map<string, OrgRole> = new Map(),
 ): DeskItemDto {
   const role = r.project_id ? (roles.get(r.project_id) ?? null) : null;
   return {
@@ -122,7 +139,7 @@ export function toDeskDto(
     supersededBy: r.superseded_by ?? null,
     chatThreadId: r.chat_thread_id ?? null,
     floor: r.subkind === 'floor_report' ? (r.data ?? null) : null,
-    canAnswer: r.status === 'open' && canAnswerItem(r, userId, role),
+    canAnswer: r.status === 'open' && canAnswerItem(r, userId, role, orgRoles.get(r.org_id) ?? null),
     createdAt: iso(r.created_at) as string,
   };
 }
@@ -133,6 +150,15 @@ const withDigest = (dto: DeskItemDto, digests: Map<string, DigestItemDto[]>): De
 /** Phase items carry the live data of their phase (members, follow-ups, reports). */
 async function withPhase(db: Queryable, dto: DeskItemDto, r: Row): Promise<DeskItemDto> {
   return isPhaseDeskSubkind(r.subkind) ? { ...dto, phase: await phaseDeskBlock(db, r) } : dto;
+}
+
+async function orgRolesOf(db: Queryable, userId: string): Promise<Map<string, OrgRole>> {
+  const list = await rows<{ org_id: string; role: OrgRole }>(
+    db,
+    `SELECT org_id, role FROM org_members WHERE user_id=$1 AND status='active'`,
+    [userId],
+  );
+  return new Map(list.map((r) => [r.org_id, r.role]));
 }
 
 async function rolesOf(db: Queryable, userId: string): Promise<Map<string, ProjectRole>> {
@@ -151,10 +177,13 @@ async function rolesOf(db: Queryable, userId: string): Promise<Map<string, Proje
 export async function listDesk(
   db: Queryable,
   userId: string,
+  orgId: string | null,
   opts: { projectId?: string | undefined; status: 'open' | 'closed' | 'all' },
 ): Promise<DeskListResponse> {
-  const params = [userId, opts.projectId ?? null];
-  const scope = `${DESK_VISIBLE} AND ($2::uuid IS NULL OR d.project_id = $2)`;
+  const params = [userId, opts.projectId ?? null, orgId];
+  // The tab's organization, plus the projects of organizations where the user is only a guest.
+  const scope = `${DESK_VISIBLE} AND ($2::uuid IS NULL OR d.project_id = $2)
+    AND (d.org_id = $3::uuid OR NOT EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = d.org_id AND om.user_id = $1 AND om.status = 'active'))`;
   const open =
     opts.status === 'closed'
       ? []
@@ -175,13 +204,14 @@ export async function listDesk(
   const all = [...open, ...closed];
   const dedup = await dedupEntriesFor(db, [...new Set(all.flatMap((r) => r.dedup_ledger_ids as string[]))]);
   const roles = await rolesOf(db, userId);
+  const orgRoles = await orgRolesOf(db, userId);
   const digests = await digestItemsForDesk(
     db,
     all.filter((r) => r.kind === 'rating').map((r) => r.id),
   );
   const items: DeskItemDto[] = [];
   for (const r of all)
-    items.push(await withPhase(db, withDigest(toDeskDto(r, userId, roles, dedup), digests), r));
+    items.push(await withPhase(db, withDigest(toDeskDto(r, userId, roles, dedup, orgRoles), digests), r));
   const openItems = items.filter((i) => i.status === 'open');
   return {
     items,
@@ -202,7 +232,11 @@ export async function getDeskDto(
   if (!r) return undefined;
   const dedup = await dedupEntriesFor(db, r.dedup_ledger_ids);
   const digests = await digestItemsForDesk(db, r.kind === 'rating' ? [r.id] : []);
-  return withPhase(db, withDigest(toDeskDto(r, userId, await rolesOf(db, userId), dedup), digests), r);
+  return withPhase(
+    db,
+    withDigest(toDeskDto(r, userId, await rolesOf(db, userId), dedup, await orgRolesOf(db, userId)), digests),
+    r,
+  );
 }
 
 /** Raw row (with card columns) for command-side authorization. */

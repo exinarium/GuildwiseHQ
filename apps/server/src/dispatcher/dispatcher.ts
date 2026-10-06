@@ -34,6 +34,8 @@ const TRIGGER_TYPES = new Set([
   'WorkstationConnected',
   'WorkstationRuntimesChanged',
   'ScheduleFired',
+  'OrgStatusChanged',
+  'OrgMemberAdded',
   'RebaseConflict',
   'CardMovedByManager',
   'CardFinalized',

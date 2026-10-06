@@ -1,10 +1,12 @@
-import type {
-  ProjectDetailResponse,
-  ProjectDto,
-  RoleCatalogueEntrySchema,
-  WorkstationDto,
+import {
+  isOrgOperational,
+  type ProjectDetailResponse,
+  type ProjectDto,
+  type RoleCatalogueEntrySchema,
+  type WorkstationDto,
 } from '@aom/shared';
 import type { z } from 'zod';
+import { orgSuspended } from '../auth/org-context.ts';
 import { hygieneDtos } from '../commands/hygiene.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
@@ -22,6 +24,7 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
   return {
     id: p.id,
     orgId: p.org_id,
+    orgName: p.org_name ?? '',
     key: p.key,
     name: p.name,
     domain: p.domain,
@@ -53,9 +56,13 @@ export async function listProjects(
   const r = (
     await rows(
       ctx.pool,
-      `SELECT p.*, pm.role AS my_role, ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL} FROM projects p JOIN project_members pm
+      `SELECT p.*, pm.role AS my_role, o.name AS org_name, ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL}
+         FROM projects p JOIN project_members pm
          ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
-        WHERE ($2 = 'all' OR p.status = $2) ORDER BY p.created_at`,
+         LEFT JOIN organizations o ON o.id = p.org_id
+        WHERE ($2 = 'all' OR p.status = $2)
+          AND (o.id IS NULL OR o.status IN ('trial','active') OR o.owner_user_id = $1)
+        ORDER BY p.created_at`,
       [userId, status],
     )
   ).filter((p) => !department || p.department === department);
@@ -69,11 +76,15 @@ export async function getProjectDetail(
 ): Promise<ProjectDetailResponse> {
   const p = await one(
     ctx.pool,
-    `SELECT p.*, pm.role AS my_role, ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL} FROM projects p JOIN project_members pm
-       ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active' WHERE p.id = $2`,
+    `SELECT p.*, pm.role AS my_role, o.name AS org_name, o.status AS org_status, o.owner_user_id AS org_owner,
+            ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL} FROM projects p JOIN project_members pm
+       ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
+       LEFT JOIN organizations o ON o.id = p.org_id WHERE p.id = $2`,
     [userId, projectId],
   );
   if (!p) throw notFound('project not found');
+  if (p.org_status && !isOrgOperational(p.org_status) && p.org_owner !== userId)
+    throw orgSuspended({ name: p.org_name ?? 'The organization', status: p.org_status });
   const repos = await rows(
     ctx.pool,
     'SELECT * FROM project_repos WHERE project_id=$1 AND removed_at IS NULL ORDER BY name',

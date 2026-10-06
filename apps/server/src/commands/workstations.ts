@@ -7,8 +7,8 @@ import { exec, one, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { cardMessage, orgScope, runnerActor, SYSTEM_ACTOR, userActor } from './common.ts';
-import { devopsHireEvent, threadMessage } from './devops.ts';
+import { cardMessage, orgScope, runnerActor, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
+import { devopsHireEvents as devopsHireEventsNew, threadMessage } from './devops.ts';
 
 const CODE_TTL_MS = 10 * 60_000;
 const MAX_ACTIVE_CODES = 3;
@@ -71,7 +71,8 @@ export async function pairRunner(
       throw new PairingError();
     await exec(tx, 'UPDATE pairing_codes SET used_at=$2 WHERE id=$1', [c.id, now]);
     // Every workstation gets its own DevOps engineer, hired in the same append (docs/ARCHITECTURE.md section 16.2).
-    const devopsHire = await devopsHireEvent(tx, c.user_id, workstationId);
+    // One DevOps engineer per organization the user belongs to (owner decision 15), hired in the same append.
+    const devopsHires = await devopsHireEventsNew(tx, c.user_id, workstationId);
     await ctx.store.append(
       [
         {
@@ -89,9 +90,9 @@ export async function pairRunner(
             },
           },
           actor: SYSTEM_ACTOR,
-          scope: orgScope(c.user_id),
+          scope: userScope(c.user_id),
         },
-        ...(devopsHire ? [devopsHire] : []),
+        ...devopsHires,
       ],
       { tx },
     );
@@ -109,7 +110,7 @@ export async function renameWorkstation(ctx: Ctx, user: AuthSession['user'], id:
           streamId: streamId.workstation(id),
           event: { type: 'WorkstationRenamed', payload: { workstationId: id, name } },
           actor: userActor(user.id),
-          scope: orgScope(user.id),
+          scope: userScope(user.id),
         },
       ],
       { tx },
@@ -149,7 +150,7 @@ export async function unlinkWorkstationIn(
         streamId: streamId.workstation(id),
         event: { type: 'WorkstationUnlinked', payload: { workstationId: id, by } },
         actor: userActor(user.id),
-        scope: orgScope(ws.user_id),
+        scope: userScope(ws.user_id),
       },
     ];
     const claimed = await rows(
@@ -180,7 +181,7 @@ export async function unlinkWorkstationIn(
     // End shifts that were still open on this workstation.
     const open = await rows(
       tx,
-      `SELECT id, agent_id, card_id, started_at FROM shifts WHERE workstation_id=$1 AND status <> 'ended'`,
+      `SELECT id, org_id, agent_id, card_id, started_at FROM shifts WHERE workstation_id=$1 AND status <> 'ended'`,
       [id],
     );
     for (const s of open) {
@@ -199,12 +200,12 @@ export async function unlinkWorkstationIn(
           },
         },
         actor: runnerActor(id),
-        scope: orgScope(ws.user_id),
+        scope: orgScope(s.org_id),
       });
     }
     // DevOps requests that were queued or in progress for this workstation can never run: fail them with the reason.
     const wsName = (await one<{ name: string }>(tx, 'SELECT name FROM workstations WHERE id=$1', [id]))?.name;
-    const why = `The workstation${wsName ? ` "${wsName}"` : ''} was unpaired${by === 'admin' ? ' by an administrator' : ''}, so this request cannot run. Pair the machine again and ask once more.`;
+    const why = `The workstation${wsName ? ` "${wsName}"` : ''} was unpaired${by === 'admin' ? ' by a platform administrator' : ''}, so this request cannot run. Pair the machine again and ask once more.`;
     const requests = await rows(
       tx,
       `SELECT id, thread_id, approval FROM devops_requests
@@ -220,9 +221,9 @@ export async function unlinkWorkstationIn(
             payload: { requestId: r.id, status: 'failed', summary: why },
           },
           actor: SYSTEM_ACTOR,
-          scope: orgScope(ws.user_id),
+          scope: orgScope(r.org_id),
         },
-        threadMessage(r.thread_id, ws.user_id, { kind: 'system' }, 'system', why),
+        threadMessage(r.thread_id, r.org_id, { kind: 'system' }, 'system', why),
       );
       const deskItemId = (r.approval as { deskItemId?: string } | null)?.deskItemId;
       if (deskItemId)
@@ -238,7 +239,7 @@ export async function unlinkWorkstationIn(
             },
           },
           actor: SYSTEM_ACTOR,
-          scope: orgScope(ws.user_id),
+          scope: orgScope(r.org_id),
         });
     }
     await ctx.store.append(events, { tx });

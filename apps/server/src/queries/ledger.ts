@@ -124,13 +124,21 @@ export const toLedgerDto = (r: Row, rank?: number): LedgerEntryDto => ({
   ...(rank !== undefined ? { rank } : {}),
 });
 
-/** What the user may see: org-wide entries of their own org plus entries of every project they are an active member of. */
-const VISIBLE = `((e.project_id IS NULL AND e.org_id = $1) OR e.project_id IN
+/**
+ * What the user may see: org-wide entries of the organizations they are a member of, plus entries of every project
+ * they are an active member of.
+ */
+const VISIBLE = `((e.project_id IS NULL AND EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = e.org_id
+        AND om.user_id = $1 AND om.status = 'active')) OR e.project_id IN
    (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active'))`;
+/** The tab's organization, plus the projects of organizations where the user is only a guest. */
+const IN_ORG = (p: string) => `(${p}::uuid IS NULL OR e.org_id = ${p}::uuid OR NOT EXISTS
+   (SELECT 1 FROM org_members om2 WHERE om2.org_id = e.org_id AND om2.user_id = $1 AND om2.status = 'active'))`;
 
 export async function listLedger(
   db: Queryable,
   userId: string,
+  orgId: string | null,
   o: { q?: string | undefined; projectId?: string | undefined; scope: LedgerScopeFilter },
 ): Promise<LedgerEntryDto[]> {
   const scope = o.scope;
@@ -154,10 +162,11 @@ export async function listLedger(
         ids.set(m.id, m.rank ?? 0);
     }
     if (ids.size === 0) return [];
-    const found = await rows(db, `${DTO_SELECT} WHERE e.id = ANY($2::uuid[]) AND ${VISIBLE}`, [
-      userId,
-      [...ids.keys()],
-    ]);
+    const found = await rows(
+      db,
+      `${DTO_SELECT} WHERE e.id = ANY($2::uuid[]) AND ${VISIBLE} AND ${IN_ORG('$3')}`,
+      [userId, [...ids.keys()], orgId],
+    );
     return found
       .map((r) => toLedgerDto(r, ids.get(r.id)))
       .sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0) || b.createdAt.localeCompare(a.createdAt));
@@ -167,9 +176,9 @@ export async function listLedger(
     `${DTO_SELECT}
       WHERE ${VISIBLE} AND e.superseded_by IS NULL
         AND ($2::uuid IS NULL OR e.project_id IS NULL OR e.project_id = $2)
-        AND ($3 = 'all' OR e.scope = $3)
+        AND ($3 = 'all' OR e.scope = $3) AND ${IN_ORG('$4')}
       ORDER BY e.created_at DESC, e.id LIMIT 200`,
-    [userId, o.projectId ?? null, scope],
+    [userId, o.projectId ?? null, scope, orgId],
   );
   return list.map((r) => toLedgerDto(r));
 }

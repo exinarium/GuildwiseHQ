@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import {
   type AgentStats,
   type ApplyRecommendationResponse,
-  canManageAgent,
+  canManageAgentInOrg,
   DEFAULT_AVATAR_STYLE,
   HR_DESK_SUBKIND,
   HR_WINDOW_DAYS,
   type HrBoardResponse,
+  isOrgManager,
+  type OrgRole,
   type Recommendation,
   type ResetRoleResponse,
   type RoleExtensions,
@@ -16,6 +18,7 @@ import {
   streamId,
   type WorkQuality,
 } from '@aom/shared';
+import { orgRoleOf, type Who } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadRole } from '../catalogue/loader.ts';
 import { agentScope, fireAgent, manageableAgent, suggestNames } from '../commands/agents.ts';
@@ -25,6 +28,7 @@ import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput, StoredEvent } from '../eventstore/types.ts';
+import { assertWithinLimit } from '../orgs/limits.ts';
 import { listAgents } from '../queries/agents.ts';
 import { computeRecommendations } from './recommendations.ts';
 import { computeTrack, type StatsAgent } from './track-record.ts';
@@ -39,12 +43,14 @@ const statsAgent = (a: { id: string; roleKey: string; hiredAt: string; status: s
 /** The HR board for `userId`: visible agents with stats against the role average, recommendations, role updates. */
 export async function hrBoard(
   ctx: Ctx,
-  userId: string,
+  who: Who,
   projectId?: string,
   department?: string,
 ): Promise<HrBoardResponse> {
   const now = ctx.clock.now();
-  const agents = (await listAgents(ctx, userId, projectId, department)).filter((a) => a.status !== 'retired');
+  const agents = (await listAgents(ctx, who.userId, who.orgId, projectId, department)).filter(
+    (a) => a.status !== 'retired',
+  );
   const track = await computeTrack(ctx.pool, agents.map(statsAgent), now);
   const names = new Map(
     (
@@ -74,17 +80,17 @@ export async function hrBoard(
         quality: t.quality,
       };
     }),
-    recommendations: (await listRecommendations(ctx, userId, projectId)).map((r) => r.rec),
-    roleUpdates: await roleUpdates(ctx, userId),
+    recommendations: (await listRecommendations(ctx, who, projectId)).map((r) => r.rec),
+    roleUpdates: await roleUpdates(ctx, who),
   };
 }
 
 export async function agentStats(
   ctx: Ctx,
-  userId: string,
+  who: Who,
   agentId: string,
 ): Promise<{ stats: AgentStats; quality: WorkQuality }> {
-  const all = (await listAgents(ctx, userId)).filter((a) => a.status !== 'retired');
+  const all = (await listAgents(ctx, who.userId, who.orgId)).filter((a) => a.status !== 'retired');
   const agent = all.find((a) => a.id === agentId);
   if (!agent) throw notFound('agent not found');
   const track = await computeTrack(ctx.pool, all.map(statsAgent), ctx.clock.now());
@@ -102,23 +108,30 @@ interface Listed {
  * agents, never the owner's org-wide ones), with `canApply` set for the owner and for the hiring manager of the agent.
  * Standing-order proposals are the owner's to apply.
  */
-export async function listRecommendations(ctx: Ctx, userId: string, projectId?: string): Promise<Listed[]> {
-  const visible = (await listAgents(ctx, userId, projectId)).filter((a) => a.status !== 'retired');
+export async function listRecommendations(ctx: Ctx, who: Who, projectId?: string): Promise<Listed[]> {
+  const visible = (await listAgents(ctx, who.userId, who.orgId, projectId)).filter(
+    (a) => a.status !== 'retired',
+  );
   const byId = new Map(visible.map((a) => [a.id, a]));
-  const orgIds = [...new Set([userId, ...visible.map((a) => a.orgId)])];
+  const orgIds = [...new Set([who.orgId, ...visible.map((a) => a.orgId)])];
+  const roles = new Map<string, OrgRole | null>();
+  for (const id of orgIds)
+    roles.set(id, id === who.orgId ? who.role : await orgRoleOf(ctx.pool, who.userId, id));
   const out: Listed[] = [];
   for (const orgId of orgIds) {
+    const role = roles.get(orgId) ?? null;
     for (const r of await computeRecommendations(ctx, orgId)) {
       const agent = r.agentId ? byId.get(r.agentId) : undefined;
       if (r.agentId && !agent) continue;
-      if (!r.agentId && orgId !== userId) continue;
+      if (!r.agentId && !(orgId === who.orgId && isOrgManager({ orgRole: role }))) continue;
       if (projectId && !agent && r.agentId === null) continue;
       const canApply =
         r.action.type === 'none'
           ? false
           : r.ownerOnly
-            ? userId === orgId
-            : !!agent && canManageAgent({ userId, orgId, managerUserId: agent.managerUserId });
+            ? isOrgManager({ orgRole: role })
+            : !!agent &&
+              canManageAgentInOrg({ userId: who.userId, orgRole: role, managerUserId: agent.managerUserId });
       const { ownerOnly: _ownerOnly, ...rest } = r;
       out.push({ rec: { ...rest, canApply }, orgId });
     }
@@ -130,14 +143,16 @@ export async function listRecommendations(ctx: Ctx, userId: string, projectId?: 
 export async function applyRecommendation(
   ctx: Ctx,
   user: AuthSession['user'],
+  who: Who,
   id: string,
 ): Promise<ApplyRecommendationResponse> {
-  const listed = (await listRecommendations(ctx, user.id)).find((l) => l.rec.id === id);
+  const listed = (await listRecommendations(ctx, who)).find((l) => l.rec.id === id);
   if (!listed) throw notFound('that recommendation no longer applies (it may already be applied)');
   const { rec, orgId } = listed;
   if (rec.action.type === 'none')
     throw badRequest('not_applicable', 'this recommendation is advice only; there is nothing to apply');
-  if (!rec.canApply) throw forbidden('only the organization owner or the hiring manager can apply this');
+  if (!rec.canApply)
+    throw forbidden('only the organization Owner and Admins or the hiring manager can apply this');
   const action = rec.action;
   const applied = (effect: string, deskItemId?: string): AppendInput => ({
     streamId: streamId.agent(rec.agentId ?? orgId),
@@ -229,6 +244,7 @@ export async function applyRecommendation(
         let name = action.juniorName;
         if (await one(tx, 'SELECT 1 FROM agents WHERE org_id=$1 AND lower(name)=lower($2)', [a.org_id, name]))
           name = (await suggestNames(ctx, a.org_id, undefined, 1))[0] ?? `${name} 2`;
+        await assertWithinLimit(tx, a.org_id, 'agents');
         const juniorId = randomUUID();
         const perms = a.permissions ?? {};
         const effect = `${a.name} now takes large cards (${action.seniorModel}); ${name} was hired for small ones (${action.juniorModel})`;
@@ -303,7 +319,7 @@ export async function applyRecommendation(
  * Built-in roles the owner extended whose default has moved on since: the owner sees them on the HR board and may reset
  * a role to the new default, which drops the extensions (shown here first).
  */
-export async function roleUpdates(ctx: Ctx, userId: string): Promise<RoleUpdate[]> {
+export async function roleUpdates(ctx: Ctx, who: Who): Promise<RoleUpdate[]> {
   const list = await rows(
     ctx.pool,
     // A built-in role has an update for this org when the owner's extensions were written against an older default,
@@ -323,14 +339,14 @@ export async function roleUpdates(ctx: Ctx, userId: string): Promise<RoleUpdate[
          OR EXISTS (SELECT 1 FROM agents a WHERE a.org_id = $1 AND a.role_key = k.role_key
                      AND a.status <> 'retired' AND a.role_version < r.version)
       ORDER BY k.role_key`,
-    [userId],
+    [who.orgId],
   );
   const out: RoleUpdate[] = [];
   for (const r of list) {
     const stale = await one<{ n: number }>(
       ctx.pool,
       'SELECT count(*)::int AS n FROM agents WHERE org_id=$1 AND role_key=$2 AND status <> $3 AND role_version < $4',
-      [userId, r.role_key, 'retired', r.latest],
+      [who.orgId, r.role_key, 'retired', r.latest],
     );
     out.push({
       roleKey: r.role_key,
@@ -348,17 +364,20 @@ export async function roleUpdates(ctx: Ctx, userId: string): Promise<RoleUpdate[
 }
 
 /**
- * Owner only: resets a built-in role to its current default. `RoleResetToDefault` records what was dropped; agents of
+ * Owner and Admins: resets a built-in role to its current default. `RoleResetToDefault` records what was dropped; agents of
  * the role move to the new version in the same append.
  */
 export async function resetRole(
   ctx: Ctx,
   user: AuthSession['user'],
+  who: Who,
   roleKey: string,
 ): Promise<ResetRoleResponse> {
+  if (!isOrgManager({ orgRole: who.role }))
+    throw forbidden('only the organization Owner and Admins can reset a role');
   return withAppendTx(ctx.pool, async (tx) => {
     const ext = await one(tx, 'SELECT * FROM role_extensions WHERE org_id=$1 AND role_key=$2 FOR UPDATE', [
-      user.id,
+      who.orgId,
       roleKey,
     ]);
     const latest = await one<{ version: number }>(
@@ -370,7 +389,7 @@ export async function resetRole(
     const stale = await rows(
       tx,
       `SELECT * FROM agents WHERE org_id=$1 AND role_key=$2 AND status <> 'retired' AND role_version < $3 ORDER BY hired_at`,
-      [user.id, roleKey, latest.version],
+      [who.orgId, roleKey, latest.version],
     );
     if (!ext && stale.length === 0) throw conflict('nothing_to_reset', 'this role already uses the default');
     const dropped: RoleExtensions = ext
@@ -378,13 +397,13 @@ export async function resetRole(
       : { instructions: '', skills: [], standingOrders: [] };
     const events: AppendInput[] = [
       {
-        streamId: streamId.role(user.id, roleKey),
+        streamId: streamId.role(who.orgId, roleKey),
         event: {
           type: 'RoleResetToDefault',
-          payload: { orgId: user.id, roleKey, toVersion: latest.version, droppedExtensions: dropped },
+          payload: { orgId: who.orgId, roleKey, toVersion: latest.version, droppedExtensions: dropped },
         },
         actor: userActor(user.id),
-        scope: orgScope(user.id),
+        scope: orgScope(who.orgId),
       },
       ...stale.map(
         (a): AppendInput => ({

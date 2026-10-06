@@ -59,6 +59,7 @@ async function mergeChecks(ctx: Ctx): Promise<void> {
        FROM cards c
        JOIN phases ph ON ph.id = c.phase_id AND ph.status = 'open'
        JOIN projects p ON p.id = c.project_id AND p.status = 'active'
+       JOIN organizations po ON po.id = p.org_id AND po.status IN ('trial','active')
        JOIN project_repos pr ON pr.id = c.repo_id
       WHERE c.phase_assignment = 'confirmed' AND c.status = 'done' AND c.finalize_result IS NOT NULL
         AND c.finalize_action IN ('pr','push_branch') AND c.merged_into_working_at IS NULL
@@ -97,6 +98,7 @@ async function completionStep(ctx: Ctx): Promise<void> {
   const open = await rows(
     ctx.pool,
     `SELECT ph.id FROM phases ph JOIN projects p ON p.id = ph.project_id AND p.status = 'active'
+       JOIN organizations po ON po.id = p.org_id AND po.status IN ('trial','active')
       WHERE ph.status = 'open' AND EXISTS (SELECT 1 FROM cards c WHERE c.phase_id = ph.id AND c.phase_assignment = 'confirmed')
       ORDER BY ph.created_at`,
   );
@@ -141,6 +143,7 @@ async function resultsStep(ctx: Ctx): Promise<void> {
     ctx.pool,
     `SELECT f.id, f.phase_id FROM phase_followups f JOIN phases ph ON ph.id = f.phase_id AND ph.status = 'running_followups'
        JOIN projects p ON p.id = ph.project_id AND p.status = 'active'
+       JOIN organizations po ON po.id = p.org_id AND po.status IN ('trial','active')
       WHERE f.status = 'running' AND f.delegate IN ('devops','tester') ORDER BY f.phase_id, f.position`,
   );
   for (const r of running) {
@@ -177,6 +180,7 @@ async function sequenceStep(ctx: Ctx): Promise<void> {
   const active = await rows(
     ctx.pool,
     `SELECT ph.id FROM phases ph JOIN projects p ON p.id = ph.project_id AND p.status = 'active'
+       JOIN organizations po ON po.id = p.org_id AND po.status IN ('trial','active')
       WHERE ph.status = 'running_followups' ORDER BY ph.approved_at`,
   );
   for (const { id } of active) {

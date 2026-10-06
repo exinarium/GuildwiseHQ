@@ -1,3 +1,4 @@
+import { ORG_ROLE_LABEL } from '@aom/shared';
 import * as RadixDialog from '@radix-ui/react-dialog';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { Inbox, Menu, MessageSquare, Plus, Search, X } from 'lucide-react';
@@ -16,6 +17,8 @@ import { ShortcutsDialog } from '../palette/ShortcutsDialog.tsx';
 import { cx } from '../ui/cx.ts';
 import { Breadcrumbs, crumbsFor } from './Breadcrumbs.tsx';
 import { buildNav } from './nav-config.ts';
+import { OrgBanner } from './OrgBanner.tsx';
+import { OrgSwitcher } from './OrgSwitcher.tsx';
 import { CollapseButton, SidebarBody } from './Sidebar.tsx';
 import { useCurrentProject } from './useCurrentProject.ts';
 
@@ -47,7 +50,7 @@ function LiveIndicator({ live, compact = false }: { live: string; compact?: bool
 }
 
 /** The signed-in application frame: dark sidebar (rail on tablets, drawer on phones), top bar, `main`. */
-export function AppShell({ isAdmin, name, live }: { isAdmin: boolean; name: string; live: string }) {
+export function AppShell({ name, live }: { name: string; live: string }) {
   const me = useMe();
   const logout = useLogout();
   const desk = useDesk();
@@ -65,17 +68,23 @@ export function AppShell({ isAdmin, name, live }: { isAdmin: boolean; name: stri
   const first = useRef(true);
 
   const counts = { open: desk.data?.counts.open ?? 0, blocking: desk.data?.counts.blocking ?? 0 };
+  const org = me.data?.activeOrg ?? null;
+  const canManage = org?.role === 'owner' || org?.role === 'admin';
   const { sections, footer } = buildNav({
     projectKey: project?.key ?? null,
     isFeed: project?.workflowKey === 'feed',
-    isAdmin,
+    canManage,
+    features: org?.features ?? {},
   });
+  const roleLabel = org ? ORG_ROLE_LABEL[org.role] : 'Member';
+  const orgSlot = me.data ? <OrgSwitcher me={me.data} collapsed={false} /> : null;
+  const orgSlotCollapsed = me.data ? <OrgSwitcher me={me.data} collapsed /> : null;
   const collapsed = isTabletUp && (!isDesktop || pref);
   const user = {
     id: me.data?.user.id,
     name,
     email: me.data?.user.email ?? '',
-    isAdmin,
+    roleLabel,
     avatar: me.data?.user.avatar ?? null,
   };
   const signOut = () => logout.mutate();
@@ -156,6 +165,7 @@ export function AppShell({ isAdmin, name, live }: { isAdmin: boolean; name: stri
               projects={projects}
               user={user}
               onSignOut={signOut}
+              orgSlot={collapsed ? orgSlotCollapsed : orgSlot}
               headerSlot={
                 isDesktop && !collapsed ? <CollapseButton collapsed={false} onToggle={toggle} /> : undefined
               }
@@ -249,13 +259,11 @@ export function AppShell({ isAdmin, name, live }: { isAdmin: boolean; name: stri
               </span>
             </header>
           )}
-          <main
-            id="main"
-            ref={main}
-            tabIndex={-1}
-            className="mx-auto w-full min-w-0 flex-1 px-4 py-5 outline-none sm:px-6 sm:py-6 lg:px-8"
-          >
-            <Outlet />
+          <main id="main" ref={main} tabIndex={-1} className="mx-auto w-full min-w-0 flex-1 outline-none">
+            {me.data && <OrgBanner me={me.data} project={project} />}
+            <div className="px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
+              <Outlet />
+            </div>
           </main>
         </div>
       </div>
@@ -279,6 +287,7 @@ export function AppShell({ isAdmin, name, live }: { isAdmin: boolean; name: stri
                 user={user}
                 onSignOut={signOut}
                 onNavigate={() => setDrawer(false)}
+                orgSlot={me.data ? <OrgSwitcher me={me.data} onNavigate={() => setDrawer(false)} /> : null}
                 headerSlot={
                   <RadixDialog.Close
                     aria-label="Close menu"

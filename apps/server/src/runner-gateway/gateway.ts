@@ -10,7 +10,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { confirmBranchOnEvent } from '../commands/branch-confirm.ts';
-import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { refreshVaultConfig, vaultAudience } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { sha256Hex } from '../crypto.ts';
@@ -106,7 +106,7 @@ export class RunnerGateway {
               streamId: streamId.workstation(c.workstationId),
               event: { type: 'WorkstationDisconnected', payload: { workstationId: c.workstationId } },
               actor: SYSTEM_ACTOR,
-              scope: orgScope(c.userId),
+              scope: userScope(c.userId),
             },
           ]);
         } catch (err) {

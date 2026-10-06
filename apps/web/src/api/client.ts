@@ -1,4 +1,5 @@
 import type { ZodType } from 'zod';
+import { getActiveOrgId } from '../lib/activeOrg.ts';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -21,6 +22,9 @@ export type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
  */
 export async function api<T>(method: Method, path: string, body?: unknown, schema?: ZodType<T>): Promise<T> {
   const init: RequestInit = { method, credentials: 'include', headers: { accept: 'application/json' } };
+  // This tab's organization (section 5): every request says which one it is for.
+  const org = getActiveOrgId();
+  if (org) (init.headers as Record<string, string>)['x-aom-org'] = org;
   if (method !== 'GET' && method !== 'DELETE') {
     (init.headers as Record<string, string>)['content-type'] = 'application/json';
     init.body = JSON.stringify(body ?? {});

@@ -7,6 +7,7 @@ import {
 } from '@aom/shared';
 import type { QueryClient } from '@tanstack/react-query';
 import { useSyncExternalStore } from 'react';
+import { getActiveOrgId } from '../lib/activeOrg.ts';
 import { invalidateForEvent } from './invalidate.ts';
 
 export type SocketState = 'connecting' | 'open' | 'closed';
@@ -63,6 +64,13 @@ export class LiveSocket {
       return;
     }
     this.open();
+  }
+
+  /** The tab switched organization: drop the connection and open a new one for it (no resume across organizations). */
+  restart(): void {
+    this.lastSeq = undefined;
+    this.stop();
+    this.start();
   }
 
   stop(): void {
@@ -200,7 +208,8 @@ export class LiveSocket {
 
 function defaultUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${proto}//${location.host}/api/ws`;
+  const org = getActiveOrgId();
+  return `${proto}//${location.host}/api/ws${org ? `?org=${encodeURIComponent(org)}` : ''}`;
 }
 
 let instance: LiveSocket | null = null;

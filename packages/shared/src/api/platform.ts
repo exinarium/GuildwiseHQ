@@ -81,7 +81,7 @@ export const PatchPlatformOrgRequestSchema = z
     trialEndsAt: z.iso.datetime().nullable(),
     licenseExpiresAt: z.iso.datetime().nullable(),
     graceDays: z.number().int().min(0).max(90),
-    features: z.record(OrgFeatureSchema, z.boolean().nullable()),
+    features: z.partialRecord(OrgFeatureSchema, z.boolean().nullable()),
     /** Mandatory for changes that affect the organization; shown in the audit log. */
     note: z.string().trim().min(1).max(1000),
   })
@@ -108,7 +108,7 @@ export const NewOrgInvitationRequestSchema = z.object({
   limits: OrgLimitsSchema.optional(),
   trialEndsAt: z.iso.datetime().optional(),
   licenseExpiresAt: z.iso.datetime().optional(),
-  features: z.record(OrgFeatureSchema, z.boolean().nullable()).optional(),
+  features: z.partialRecord(OrgFeatureSchema, z.boolean().nullable()).optional(),
 });
 export type NewOrgInvitationRequest = z.infer<typeof NewOrgInvitationRequestSchema>;
 

@@ -7,6 +7,7 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
+import { requestedOrgId, resolveOrgId } from '../auth/org-context.ts';
 import { answerDeskItem, dismissDeskItem, resolveDeskItem } from '../commands/desk.ts';
 import type { Ctx } from '../context.ts';
 import { notFound } from '../errors.ts';
@@ -25,7 +26,8 @@ export function deskRoutes(ctx: Ctx) {
 
     app.get('/api/desk', { schema: { querystring: DeskQuerySchema } }, async (req) => {
       const s = await requireUser(ctx, req);
-      return listDesk(ctx.pool, s.user.id, req.query);
+      const orgId = await resolveOrgId(ctx, s, requestedOrgId(req));
+      return listDesk(ctx.pool, s.user.id, orgId, req.query);
     });
 
     app.post(

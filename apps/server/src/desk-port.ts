@@ -8,8 +8,8 @@ import type { Tx } from './db/tx.ts';
 /**
  * M3 -> M2 seam. DevOps approvals (`kind 'approval'`, `subkind 'devops'`) and vault sync conflicts
  * (`kind 'escalation'`, `subkind 'vault_conflict'`) are desk items owned by the user whose workstation or vault they
- * concern (docs/ARCHITECTURE.md section 17.2): they are created in that user's own organization with no project or
- * card, so the project's other members neither see nor answer them. They are pinned (hard stops).
+ * concern (docs/ARCHITECTURE.md section 17.2): they are org-level items with no project or card, addressed to that user
+ * (`addresseeUserId`), so the project's other members neither see nor answer them. They are pinned (hard stops).
  *
  * The desk resolve path (`commands/desk.ts`) calls `resolveDevOpsApproval` / `resolveVaultConflict` for these kinds;
  * the M3 endpoints call `closeDeskItemIn` so the item never stays open after being resolved elsewhere.
@@ -21,7 +21,7 @@ export interface DeskItemRequest {
   body: string;
   pinned: boolean;
   blocking: boolean;
-  /** Organization (user) that owns and sees the item. */
+  /** The organization the item belongs to (its Owner and Admins see it; only `routeToUserId` can answer). */
   orgId: string;
   /** Kept for callers' context; desk items of this kind are never project- or card-scoped. */
   projectId?: string | null;
@@ -35,7 +35,7 @@ export interface DeskItemRequest {
 /** Appends `DeskItemCreated` in `tx` (an append transaction) and returns the new item id. */
 export async function raiseDeskItem(ctx: Ctx, tx: Tx, req: DeskItemRequest): Promise<{ deskItemId: string }> {
   const deskItemId = randomUUID();
-  const org = req.routeToUserId;
+  const org = req.orgId;
   await ctx.store.append(
     [
       {
@@ -53,6 +53,7 @@ export async function raiseDeskItem(ctx: Ctx, tx: Tx, req: DeskItemRequest): Pro
             pinned: req.pinned,
             affectedCardIds: [],
             askedBy: { kind: 'system' },
+            addresseeUserId: req.routeToUserId,
           },
         },
         actor: SYSTEM_ACTOR,

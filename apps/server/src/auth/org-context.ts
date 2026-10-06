@@ -5,6 +5,7 @@ import {
   type OrgFeature,
   type OrgRole,
   type OrgStatus,
+  type Rank,
   rankOf,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
@@ -33,6 +34,14 @@ export interface OrgAccess {
   role: OrgRole;
 }
 
+/** A user acting in one organization: what the org-scoped queries and commands take. */
+export interface Who {
+  userId: string;
+  orgId: string;
+  role: OrgRole;
+}
+export const whoOf = (a: OrgAccess): Who => ({ userId: a.session.user.id, orgId: a.orgId, role: a.role });
+
 export interface Membership {
   org_id: string;
   role: OrgRole;
@@ -59,6 +68,17 @@ export async function orgRoleOf(db: Queryable, userId: string, orgId: string): P
     [orgId, userId],
   );
   return r?.role ?? null;
+}
+
+/**
+ * The user who owns the organization: the Owner, whose user row also carries the organization's reporting settings.
+ * (Before the organizations exist, during a replay of legacy events, the organization is its user: `orgId`.)
+ */
+export async function orgOwnerId(db: Queryable, orgId: string): Promise<string> {
+  const r = await one<{ owner_user_id: string }>(db, 'SELECT owner_user_id FROM organizations WHERE id=$1', [
+    orgId,
+  ]);
+  return r?.owner_user_id ?? orgId;
 }
 
 export async function loadOrg(db: Queryable, orgId: string): Promise<OrgRow | null> {
@@ -94,6 +114,22 @@ export async function resolveOrgId(
     if (candidate && mine.some((m) => m.org_id === candidate)) return candidate;
   }
   return mine[0]?.org_id ?? null;
+}
+
+/**
+ * The user's rank in the organization (Owner 4, Admin 3, Member 2, Guest 1, none 0). A guest is not a member but has
+ * active access to at least one project of it (docs/design/organizations.md section 1).
+ */
+export async function rankInOrg(db: Queryable, userId: string, orgId: string): Promise<Rank> {
+  const role = await orgRoleOf(db, userId, orgId);
+  if (role) return rankOf(role, false);
+  const guest = await one(
+    db,
+    `SELECT 1 FROM project_members pm JOIN projects p ON p.id = pm.project_id
+      WHERE pm.user_id=$1 AND pm.status='active' AND p.org_id=$2 LIMIT 1`,
+    [userId, orgId],
+  );
+  return rankOf(null, !!guest);
 }
 
 /** Remembers the org as the default for this session and the user (operational, no event). */

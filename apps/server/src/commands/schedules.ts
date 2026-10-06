@@ -4,10 +4,12 @@ import {
   type CreateScheduleRequest,
   cardRef,
   DEFAULT_CARD_PRIORITY,
+  effectiveFeatures,
   emptyFields,
   FEED_FIELD_DEFAULTS,
   getStage,
   HR_DESK_SUBKIND,
+  isOrgOperational,
   type PatchScheduleRequest,
   parseCardFields,
   RegressionPlatform,
@@ -16,6 +18,7 @@ import {
   streamId,
 } from '@aom/shared';
 import { CronExpressionParser } from 'cron-parser';
+import { orgOwnerId } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import { resolveWorkflow } from '../catalogue/loader.ts';
@@ -305,7 +308,7 @@ async function scheduledCard(
           stage: specifyTarget(def).to,
           status: 'queued',
           fields: parsed.data,
-          ownerUserId: project.org_id,
+          ownerUserId: await orgOwnerId(tx, project.org_id),
           origin: 'schedule',
           scheduled: true,
           ...(scheduleId ? { scheduleId } : {}),
@@ -351,6 +354,39 @@ export async function fireDueSchedules(ctx: Ctx): Promise<Array<{ scheduleId: st
           // An archived project's schedules stop firing but keep their place.
           return null;
         }
+        // A suspended or cancelled organization starts nothing (docs/design/organizations.md section 7.2); a switched-off
+        // feature stops its own schedules. The fire is skipped and recorded, the cron moves on.
+        const org = await one(tx, 'SELECT status, plan, features FROM organizations WHERE id=$1', [
+          project.org_id,
+        ]);
+        const skip =
+          org && !isOrgOperational(org.status)
+            ? ('org_suspended' as const)
+            : org && s.interest_id && !effectiveFeatures(org.plan, org.features).interests
+              ? ('feature_disabled' as const)
+              : null;
+        if (skip) {
+          await ctx.store.append(
+            [
+              {
+                streamId: streamId.schedule(s.id),
+                event: {
+                  type: 'ScheduleSkipped',
+                  payload: {
+                    scheduleId: s.id,
+                    firedFor: firedFor.toISOString(),
+                    nextFireAt: next?.toISOString() ?? null,
+                    reason: skip,
+                  },
+                },
+                actor: SYSTEM_ACTOR,
+                scope: projectScope(project.org_id, project.id),
+              },
+            ],
+            { tx },
+          );
+          return null;
+        }
         const template = s.card_template as CardTemplate;
         if (s.kind === 'regression') {
           // M4's regression run: one scheduled regression card per platform, queued at Test for testers.
@@ -362,8 +398,8 @@ export async function fireDueSchedules(ctx: Ctx): Promise<Array<{ scheduleId: st
           const platform = RegressionPlatform.parse(template.fields.platform ?? 'web');
           const run = await regressionRunEvents(tx, project, {
             platform,
-            ownerUserId: (owner?.user_id ?? project.org_id) as string,
-            requestedBy: (owner?.user_id ?? project.org_id) as string,
+            ownerUserId: (owner?.user_id ?? (await orgOwnerId(tx, project.org_id))) as string,
+            requestedBy: (owner?.user_id ?? (await orgOwnerId(tx, project.org_id))) as string,
             actor: SYSTEM_ACTOR,
             scheduled: true,
             startedBy: `schedule "${s.name}"`,

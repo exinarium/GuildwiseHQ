@@ -4,6 +4,7 @@ import {
   DEFAULT_AVATAR_STYLE,
   DEVOPS_OUTCOME_APPROVAL,
   DEVOPS_OUTCOME_DONE,
+  DEVOPS_ROLE_KEY,
   type DevOpsAccess,
   DevOpsAccessSchema,
   type DevOpsRequestDetail,
@@ -26,7 +27,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { agentActor, orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { agentActor, orgScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { hygieneReportEvents } from './hygiene.ts';
 import type { ReportResult, WsRef } from './shifts.ts';
 
@@ -64,17 +65,28 @@ async function devopsName(db: Queryable, orgId: string): Promise<string> {
 }
 
 /**
- * `AgentHired{isDevops:true}` for a freshly paired workstation (docs/ARCHITECTURE.md section 16.2, section 24 item 16).
- * Appended in the same transaction as `WorkstationPaired`. The runtime is the role default; the first `hello`
- * re-points it to an available runtime when the default is missing on that workstation (`alignDevopsRuntime`).
+ * `AgentHired{isDevops:true}` for one organization on one workstation (docs/ARCHITECTURE.md section 16.2, section 24
+ * item 16): one DevOps engineer per organization and workstation, free (it does not count against the limits) and not
+ * extendable (owner decisions 15 and 15a). The runtime is the role default; the first `hello` re-points it to an
+ * available runtime when the default is missing on that workstation (`alignDevopsRuntime`). Null when the engineer
+ * already exists or the role is unavailable.
  */
 export async function devopsHireEvent(
   tx: Tx,
   userId: string,
+  orgId: string,
   workstationId: string,
 ): Promise<AppendInput | null> {
-  const role = await loadRole(tx, userId, 'devops');
+  const role = await loadRole(tx, orgId, DEVOPS_ROLE_KEY);
   if (!role) return null;
+  if (
+    await one(
+      tx,
+      `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND is_devops AND status='active'`,
+      [orgId, workstationId],
+    )
+  )
+    return null;
   const agentId = randomUUID();
   const dm = role.definition.defaultModel;
   return {
@@ -83,10 +95,10 @@ export async function devopsHireEvent(
       type: 'AgentHired',
       payload: {
         agentId,
-        orgId: userId,
+        orgId,
         hiredByUserId: userId,
         workstationId,
-        name: await devopsName(tx, userId),
+        name: await devopsName(tx, orgId),
         roleKey: role.key,
         roleVersion: role.version,
         seniority: 'senior',
@@ -102,8 +114,43 @@ export async function devopsHireEvent(
       },
     },
     actor: SYSTEM_ACTOR,
-    scope: orgScope(userId),
+    scope: orgScope(orgId),
   };
+}
+
+/** The DevOps engineers a user's active workstation needs: one for each organization they are an active member of. */
+export async function devopsHireEvents(
+  tx: Tx,
+  userId: string,
+  workstationId: string,
+): Promise<AppendInput[]> {
+  const orgs = await rows<{ org_id: string }>(
+    tx,
+    `SELECT om.org_id FROM org_members om JOIN organizations o ON o.id = om.org_id
+      WHERE om.user_id=$1 AND om.status='active' AND o.status IN ('trial','active') ORDER BY om.joined_at`,
+    [userId],
+  );
+  const out: AppendInput[] = [];
+  for (const o of orgs) {
+    const ev = await devopsHireEvent(tx, userId, o.org_id, workstationId);
+    if (ev) out.push(ev);
+  }
+  return out;
+}
+
+/** The user joined an organization (or started one): their active workstations get its DevOps engineer. */
+export async function hireDevopsForOrgIn(ctx: Ctx, tx: Tx, userId: string, orgId: string): Promise<void> {
+  const stations = await rows<{ id: string }>(
+    tx,
+    `SELECT id FROM workstations WHERE user_id=$1 AND status='active' ORDER BY paired_at`,
+    [userId],
+  );
+  const events: AppendInput[] = [];
+  for (const w of stations) {
+    const ev = await devopsHireEvent(tx, userId, orgId, w.id);
+    if (ev) events.push(ev);
+  }
+  if (events.length) await ctx.store.append(events, { tx });
 }
 
 /** After `hello`: a DevOps agent whose runtime the workstation lacks moves to an available runtime. */
@@ -112,31 +159,33 @@ export async function alignDevopsRuntime(
   workstationId: string,
   runtimes: Array<{ id: string; available: boolean }>,
 ): Promise<void> {
-  const a = await one(
+  const list = await rows(
     ctx.pool,
     `SELECT id, org_id, runtime FROM agents WHERE workstation_id=$1 AND is_devops AND status='active'`,
     [workstationId],
   );
-  if (!a) return;
   const available = runtimes.filter((r) => r.available);
-  if (available.length === 0 || available.some((r) => r.id === a.runtime)) return;
-  const next = available.find((r) => r.id !== 'mock') ?? available[0];
-  if (!next) return;
-  // The model names are runtime specific: the role default model applies to the claude-code runtime only.
-  await ctx.store.append([
-    {
-      streamId: streamId.agent(a.id),
-      event: {
-        type: 'AgentChanged',
-        payload: {
-          agentId: a.id,
-          changes: { runtime: next.id, ...(next.id === 'mock' ? { model: 'mock' } : {}) },
+  if (available.length === 0) return;
+  for (const a of list) {
+    if (available.some((r) => r.id === a.runtime)) continue;
+    const next = available.find((r) => r.id !== 'mock') ?? available[0];
+    if (!next) continue;
+    // The model names are runtime specific: the role default model applies to the claude-code runtime only.
+    await ctx.store.append([
+      {
+        streamId: streamId.agent(a.id),
+        event: {
+          type: 'AgentChanged',
+          payload: {
+            agentId: a.id,
+            changes: { runtime: next.id, ...(next.id === 'mock' ? { model: 'mock' } : {}) },
+          },
         },
+        actor: SYSTEM_ACTOR,
+        scope: orgScope(a.org_id),
       },
-      actor: SYSTEM_ACTOR,
-      scope: orgScope(a.org_id),
-    },
-  ]);
+    ]);
+  }
 }
 
 // ---------------------------------------------------------------------------------------- requests
@@ -174,6 +223,21 @@ export function threadMessage(
   };
 }
 
+/** The DevOps engineer of `orgId` on the workstation, else (a guest's machine) its oldest active engineer. */
+export async function devopsAgentOn(
+  db: Queryable,
+  workstationId: string,
+  orgId: string | null,
+): Promise<{ id: string; org_id: string } | undefined> {
+  return one<{ id: string; org_id: string }>(
+    db,
+    `SELECT a.id, a.org_id FROM agents a JOIN organizations o ON o.id = a.org_id
+      WHERE a.workstation_id=$1 AND a.is_devops AND a.status='active'
+      ORDER BY (a.org_id = $2::uuid) DESC NULLS LAST, (o.status IN ('trial','active')) DESC, a.hired_at, a.id LIMIT 1`,
+    [workstationId, orgId],
+  );
+}
+
 /** Creates the request, its thread and the first message. `tx` must be an append transaction. */
 export async function createDevOpsRequestIn(
   ctx: Ctx,
@@ -184,17 +248,15 @@ export async function createDevOpsRequestIn(
     requestedBy: DevOpsRequester;
     cardId?: string;
     hygiene?: HygieneSpec;
+    /** The organization the request is for: its DevOps engineer on this workstation works it (else the oldest one). */
+    orgId?: string | null;
   },
 ): Promise<{ requestId: string; threadId: string }> {
   const ws = await one(tx, `SELECT id, user_id FROM workstations WHERE id=$1 AND status='active'`, [
     input.workstationId,
   ]);
   if (!ws) throw notFound('workstation not found');
-  const agent = await one(
-    tx,
-    `SELECT id FROM agents WHERE workstation_id=$1 AND is_devops AND status='active'`,
-    [input.workstationId],
-  );
+  const agent = await devopsAgentOn(tx, input.workstationId, input.orgId ?? null);
   if (!agent) throw conflict('no_devops_agent', 'this workstation has no DevOps engineer');
   const requestId = randomUUID();
   const author: Parameters<typeof threadMessage>[2] =
@@ -226,9 +288,9 @@ export async function createDevOpsRequestIn(
             : input.requestedBy.kind === 'agent'
               ? agentActor(input.requestedBy.id as string)
               : SYSTEM_ACTOR,
-        scope: orgScope(ws.user_id),
+        scope: orgScope(agent.org_id),
       },
-      threadMessage(requestId, ws.user_id, author, 'comment', input.summary),
+      threadMessage(requestId, agent.org_id, author, 'comment', input.summary),
     ],
     { tx },
   );
@@ -238,6 +300,7 @@ export async function createDevOpsRequestIn(
 export async function createDevOpsRequest(
   ctx: Ctx,
   user: AuthSession['user'],
+  org: { id: string },
   req: CreateDevOpsRequest,
 ): Promise<string> {
   return withAppendTx(ctx.pool, async (tx) => {
@@ -245,8 +308,9 @@ export async function createDevOpsRequest(
       req.workstationId,
     ]);
     if (!ws || ws.user_id !== user.id) throw notFound('workstation not found');
-    if (req.cardId) await loadVisibleCard(tx, user.id, req.cardId);
+    const card = req.cardId ? (await loadVisibleCard(tx, user.id, req.cardId)).card : undefined;
     const { requestId } = await createDevOpsRequestIn(ctx, tx, {
+      orgId: card?.org_id ?? org.id,
       workstationId: req.workstationId,
       summary: req.summary,
       requestedBy: { kind: 'user', id: user.id, name: user.displayName },
@@ -295,7 +359,7 @@ function toRequestDto(r: Row): DevOpsRequestDto {
   };
 }
 
-/** Requests on the user's own workstations (newest first). */
+/** Requests on the user's own workstations (newest first): the machine's user answers for them. */
 export async function listDevOpsRequests(
   ctx: Ctx,
   userId: string,
@@ -303,7 +367,7 @@ export async function listDevOpsRequests(
 ): Promise<DevOpsRequestDto[]> {
   const r = await rows(
     ctx.pool,
-    `${REQUEST_SQL} WHERE r.org_id = $1 AND ($2::uuid IS NULL OR r.workstation_id = $2) AND ($3::text IS NULL OR r.status = $3)
+    `${REQUEST_SQL} WHERE w.user_id = $1 AND ($2::uuid IS NULL OR r.workstation_id = $2) AND ($3::text IS NULL OR r.status = $3)
       ORDER BY r.created_at DESC, r.id DESC LIMIT 200`,
     [userId, filter.workstationId ?? null, filter.status ?? null],
   );
@@ -311,7 +375,7 @@ export async function listDevOpsRequests(
 }
 
 export async function getDevOpsRequest(ctx: Ctx, userId: string, id: string): Promise<DevOpsRequestDetail> {
-  const r = await one(ctx.pool, `${REQUEST_SQL} WHERE r.id = $1 AND r.org_id = $2`, [id, userId]);
+  const r = await one(ctx.pool, `${REQUEST_SQL} WHERE r.id = $1 AND w.user_id = $2`, [id, userId]);
   if (!r) throw notFound('request not found');
   const messages = await rows(
     ctx.pool,
@@ -367,7 +431,7 @@ export async function patchDevOpsAccess(
           streamId: streamId.workstation(workstationId),
           event: { type: 'DevOpsAccessChanged', payload: { workstationId, access, changedBy: user.id } },
           actor: userActor(user.id),
-          scope: orgScope(user.id),
+          scope: userScope(user.id),
         },
       ],
       { tx },
@@ -405,10 +469,13 @@ export async function resolveDevOpsApprovalIn(
   resolution: 'approved' | 'rejected',
   note?: string,
 ): Promise<string> {
-  const r = await one(tx, 'SELECT * FROM devops_requests WHERE id=$1 AND org_id=$2 FOR UPDATE', [
-    requestId,
-    user.id,
-  ]);
+  // The machine's own user answers: approving runs commands on their workstation.
+  const r = await one(
+    tx,
+    `SELECT r.* FROM devops_requests r JOIN workstations w ON w.id = r.workstation_id
+      WHERE r.id=$1 AND w.user_id=$2 FOR UPDATE OF r`,
+    [requestId, user.id],
+  );
   if (!r) throw notFound('request not found');
   const ap = r.approval as { deskItemId: string; resolution: string | null } | null;
   if (r.status !== 'needs_approval' || !ap || ap.resolution)
@@ -422,11 +489,11 @@ export async function resolveDevOpsApprovalIn(
           payload: { requestId, deskItemId: ap.deskItemId, resolution, resolvedBy: user.id, note },
         },
         actor: userActor(user.id),
-        scope: orgScope(user.id),
+        scope: orgScope(r.org_id),
       },
       threadMessage(
         r.thread_id,
-        user.id,
+        r.org_id,
         { kind: 'user', userId: user.id },
         'answer',
         `${resolution === 'approved' ? 'Approved' : 'Rejected'}${note ? `: ${note}` : ''}`,
@@ -451,11 +518,11 @@ export async function applyDevopsReport(
   const req = await one(tx, 'SELECT * FROM devops_requests WHERE shift_id=$1 FOR UPDATE', [shift.id]);
   if (!req) return { accepted: false, error: 'this shift has no open DevOps request' };
   const report = msg.report;
-  const scope = orgScope(ws.userId);
+  const scope = orgScope(req.org_id);
   const agent = { kind: 'agent' as const, agentId: shift.agent_id as string };
 
   if (report.kind === 'comment') {
-    await ctx.store.append([threadMessage(req.thread_id, ws.userId, agent, 'comment', report.note)], { tx });
+    await ctx.store.append([threadMessage(req.thread_id, req.org_id, agent, 'comment', report.note)], { tx });
     return { accepted: true };
   }
   if (report.kind !== 'outcome') {
@@ -496,7 +563,7 @@ export async function applyDevopsReport(
           : []),
         threadMessage(
           req.thread_id,
-          ws.userId,
+          req.org_id,
           agent,
           'handoff',
           `${data.data.summary}${data.data.commands.length ? `\n\nCommands:\n${data.data.commands.map((c) => `- ${c}`).join('\n')}` : ''}`,
@@ -531,7 +598,7 @@ export async function applyDevopsReport(
       body: data.data.reason,
       pinned: true,
       blocking: true,
-      orgId: ws.userId,
+      orgId: req.org_id,
       projectId: project?.project_id ?? null,
       cardId: req.card_id,
       routeToUserId: ws.userId,
@@ -556,7 +623,7 @@ export async function applyDevopsReport(
         },
         threadMessage(
           req.thread_id,
-          ws.userId,
+          req.org_id,
           agent,
           'question',
           `Needs approval: ${data.data.action}\n\n${data.data.reason}`,
@@ -645,3 +712,20 @@ export async function endDevopsShift(
 /** The DevOps request a shift is working (if it still is). */
 export const runningRequestOfShift = (db: Queryable, shiftId: string) =>
   one(db, `SELECT * FROM devops_requests WHERE shift_id=$1 AND status='running'`, [shiftId]);
+
+/**
+ * Whoever becomes a member of an organization (an invitation, the CLI, a migration) gets that organization's DevOps
+ * engineer on each of their active workstations (owner decision 15). Idempotent: the accept flows hire synchronously,
+ * this covers every other path and a retry after a crash.
+ */
+export function registerDevopsMembershipHook(ctx: Ctx): () => void {
+  return ctx.store.subscribe(async (e) => {
+    try {
+      if (e.event.type !== 'OrgMemberAdded') return;
+      const p = e.event.payload;
+      await withAppendTx(ctx.pool, (tx) => hireDevopsForOrgIn(ctx, tx, p.userId, p.orgId));
+    } catch (err) {
+      ctx.log.warn({ err }, 'devops membership hook failed');
+    }
+  });
+}

@@ -27,11 +27,12 @@ export async function devopsPass(
   const onlineSince = new Date(ctx.clock.now().getTime() - ONLINE_WINDOW_MS);
   const queued = await rows(
     ctx.pool,
-    `SELECT r.id, r.workstation_id, r.devops_agent_id, a.runtime, w.runtimes
+    `SELECT r.id, r.org_id, r.workstation_id, r.devops_agent_id, a.runtime, w.runtimes
        FROM devops_requests r
        JOIN agents a ON a.id = r.devops_agent_id AND a.status = 'active'
        JOIN workstations w ON w.id = r.workstation_id AND w.status = 'active' AND w.connected AND w.last_seen_at > $1
        JOIN users wu ON wu.id = w.user_id AND wu.status = 'active'
+       JOIN organizations po ON po.id = r.org_id AND po.status IN ('trial','active')
       WHERE r.status = 'queued'
       ORDER BY r.created_at, r.id`,
     [onlineSince],
@@ -68,7 +69,7 @@ export async function devopsPass(
               },
             },
             actor: SYSTEM_ACTOR,
-            scope: orgScope(conn.userId),
+            scope: orgScope(r.org_id),
           },
         ],
         { tx },

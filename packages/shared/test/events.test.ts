@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  canAnswerCardDeskItem,
-  canManageCard,
-  canSeeEvent,
-  DomainEventSchema,
-  type EventType,
-} from '../src/index.ts';
+import { canAnswerCardDeskItem, canManageCard, DomainEventSchema, type EventType } from '../src/index.ts';
 import { U } from './fixtures.ts';
 
 describe('DomainEventSchema', () => {
@@ -72,22 +66,6 @@ describe('DomainEventSchema', () => {
 });
 
 describe('authz', () => {
-  const user = { id: U.a, role: 'member' as const };
-  it('event visibility', () => {
-    const projects = new Set([U.b]);
-    expect(canSeeEvent(user, { audience: 'org', orgId: U.a, projectId: null }, projects)).toBe(true);
-    expect(canSeeEvent(user, { audience: 'org', orgId: U.c, projectId: null }, projects)).toBe(false);
-    expect(canSeeEvent(user, { audience: 'project', orgId: U.c, projectId: U.b }, projects)).toBe(true);
-    expect(canSeeEvent(user, { audience: 'project', orgId: U.c, projectId: U.d }, projects)).toBe(false);
-    expect(canSeeEvent(user, { audience: 'admin', orgId: null, projectId: null }, projects)).toBe(false);
-    expect(
-      canSeeEvent({ ...user, role: 'admin' }, { audience: 'admin', orgId: null, projectId: null }, projects),
-    ).toBe(true);
-    expect(
-      canSeeEvent({ ...user, role: 'admin' }, { audience: 'project', orgId: U.c, projectId: U.d }, projects),
-    ).toBe(false);
-    expect(canSeeEvent(user, { audience: 'system', orgId: null, projectId: null }, projects)).toBe(false);
-  });
   it('card rights and decision policy', () => {
     const base = { userId: U.a, cardOwnerUserId: U.c };
     expect(canManageCard({ ...base, projectRole: 'owner' })).toBe(true);

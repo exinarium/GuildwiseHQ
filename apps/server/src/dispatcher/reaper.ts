@@ -1,7 +1,7 @@
 import { getStage, streamId } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import { endBaTaskShift } from '../commands/ba-tasks.ts';
-import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { endDevopsShift } from '../commands/devops.ts';
 import { endQuestionShift } from '../commands/escalation.ts';
 import { releaseClaimEvents } from '../commands/shifts.ts';
@@ -60,7 +60,7 @@ export class Reaper {
           streamId: streamId.workstation(w.id),
           event: { type: 'WorkstationDisconnected', payload: { workstationId: w.id } },
           actor: SYSTEM_ACTOR,
-          scope: orgScope(w.user_id),
+          scope: userScope(w.user_id),
         },
       ]);
     }

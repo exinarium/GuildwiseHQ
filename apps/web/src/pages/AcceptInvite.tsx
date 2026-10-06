@@ -2,11 +2,17 @@ import { AcceptInvitationRequestSchema } from '@aom/shared';
 import { KeyRound } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { useAcceptInvitation, useInvitation } from '../api/queries/auth.ts';
+import {
+  useAcceptExistingInvitation,
+  useAcceptInvitation,
+  useInvitation,
+  useLogout,
+  useMe,
+} from '../api/queries/auth.ts';
 import { BRAND } from '../brand.ts';
 import { AuthFrame } from '../components/auth/AuthFrame.tsx';
 import { PasswordInput } from '../components/auth/PasswordInput.tsx';
-import { Button, ButtonLink, ErrorBox, Skeleton, TextInput } from '../components/ui.tsx';
+import { Button, ButtonLink, Callout, EmptyState, ErrorBox, Skeleton, TextInput } from '../components/ui.tsx';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 
 /** Advisory only: the single enforced rule is the schema's 12 to 256 characters. */
@@ -37,18 +43,48 @@ function StrengthMeter({ password }: { password: string }) {
   );
 }
 
+const ROLE_PHRASE = { owner: 'its Owner', admin: 'an Admin', member: 'a Member' } as const;
+
+function InvalidInvitation() {
+  return (
+    <AuthFrame>
+      <EmptyState
+        bare
+        icon={KeyRound}
+        tone="warning"
+        title="This invitation is no longer valid"
+        description="It may have expired, been revoked or already been used. Ask whoever invited you for a new one."
+        action={
+          <ButtonLink to="/login" variant="secondary">
+            Go to sign in
+          </ButtonLink>
+        }
+      />
+    </AuthFrame>
+  );
+}
+
+/**
+ * `/invite/:token` (docs/design/organizations.md section 11.4): start an organization (super admin invitation), join
+ * one (member invitation) or the legacy account invitation. New accounts choose a name and password; an existing account
+ * signs in and confirms; a different signed-in account is asked to sign out first.
+ */
 export function AcceptInvite() {
   const { token = '' } = useParams();
   const info = useInvitation(token);
+  const me = useMe();
   const accept = useAcceptInvitation(token);
+  const acceptExisting = useAcceptExistingInvitation(token);
+  const logout = useLogout();
   const nav = useNavigate();
   const [displayName, setDisplayName] = useState('');
+  const [orgName, setOrgName] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   usePageTitle(info.isError ? 'Invitation unavailable' : 'Accept your invitation');
 
-  if (info.isPending)
+  if (info.isPending || me.isPending)
     return (
       <AuthFrame>
         <div role="status" aria-live="polite" className="space-y-4">
@@ -59,41 +95,126 @@ export function AcceptInvite() {
         </div>
       </AuthFrame>
     );
-  if (info.isError) {
+  if (info.isError || !info.data) return <InvalidInvitation />;
+  const inv = info.data;
+  const startsOrg = inv.kind !== 'org_member';
+  const name = startsOrg ? orgName || inv.proposedOrgName || '' : (inv.orgName ?? '');
+  const signedIn = me.data ?? null;
+  const sameAccount = !!signedIn && signedIn.user.email.toLowerCase() === inv.email.toLowerCase();
+  const heading = startsOrg ? 'Start your organization' : `Join ${inv.orgName}`;
+  const sub = startsOrg
+    ? `${inv.invitedBy ?? BRAND.name} set up ${inv.proposedOrgName ?? 'an organization'} for you.`
+    : `${inv.invitedBy ?? 'Someone'} invited you as ${ROLE_PHRASE[inv.role ?? 'member']}.`;
+
+  const orgField = startsOrg && (
+    <TextInput
+      id="invite-orgName"
+      label="Organization name"
+      value={orgName || inv.proposedOrgName || ''}
+      onChange={(e) => setOrgName(e.target.value)}
+      maxLength={120}
+      hint={inv.terms ?? undefined}
+    />
+  );
+
+  // 1) A different account is signed in.
+  if (signedIn && !sameAccount)
     return (
       <AuthFrame>
-        <div className="flex flex-col items-start gap-4">
-          <span className="flex size-14 items-center justify-center rounded-full bg-warning-soft text-warning-soft-fg">
-            <KeyRound aria-hidden="true" className="size-7" />
-          </span>
-          <h1 className="text-2xl font-semibold tracking-tight text-fg">
-            This invitation link does not work
-          </h1>
-          <p className="text-base text-muted">
-            It may have expired or already been used. Ask your admin to send a new one.
-          </p>
-          <ButtonLink to="/login" variant="secondary">
-            Go to sign in
-          </ButtonLink>
+        <div className="mb-6">
+          <h1 className="text-3xl font-semibold tracking-tight text-fg">{heading}</h1>
+          <p className="mt-1.5 text-base text-muted">{sub}</p>
+        </div>
+        <Callout tone="warning" role="status" title="This invitation is for another account">
+          It was sent to <strong>{inv.email}</strong>, but you are signed in as{' '}
+          <strong>{signedIn.user.email}</strong>.
+        </Callout>
+        <Button className="mt-5" variant="primary" loading={logout.isPending} onClick={() => logout.mutate()}>
+          Sign out and continue
+        </Button>
+      </AuthFrame>
+    );
+
+  // 2) The invited account is signed in: confirm.
+  if (signedIn && sameAccount)
+    return (
+      <AuthFrame>
+        <div className="mb-6">
+          <h1 className="text-3xl font-semibold tracking-tight text-fg">{heading}</h1>
+          <p className="mt-1.5 text-base text-muted">{sub}</p>
+        </div>
+        <div className="flex flex-col gap-4">
+          {orgField}
+          <ErrorBox error={acceptExisting.error} />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              size="lg"
+              loading={acceptExisting.isPending}
+              onClick={() =>
+                acceptExisting.mutate(startsOrg ? { orgName: name.trim() } : {}, {
+                  onSuccess: () => nav('/', { replace: true }),
+                })
+              }
+            >
+              {startsOrg ? `Create ${name || 'organization'}` : `Join ${inv.orgName}`}
+            </Button>
+            <ButtonLink to="/" variant="ghost" size="lg">
+              Not now
+            </ButtonLink>
+          </div>
         </div>
       </AuthFrame>
     );
-  }
 
+  // 3) The account exists but nobody is signed in: sign in to accept.
+  if (inv.accountExists)
+    return (
+      <AuthFrame>
+        <div className="mb-6">
+          <h1 className="text-3xl font-semibold tracking-tight text-fg">{heading}</h1>
+          <p className="mt-1.5 text-base text-muted">{sub}</p>
+        </div>
+        <Callout tone="info" role="status">
+          <strong>{inv.email}</strong> already has an account. Sign in to accept.
+        </Callout>
+        <ButtonLink
+          to={`/login?next=${encodeURIComponent(`/invite/${token}`)}`}
+          variant="primary"
+          size="lg"
+          className="mt-5 w-full"
+        >
+          Sign in to accept
+        </ButtonLink>
+      </AuthFrame>
+    );
+
+  // 4) A new account.
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const errs: Record<string, string> = {};
-    const parsed = AcceptInvitationRequestSchema.safeParse({ displayName: displayName.trim(), password });
+    const parsed = AcceptInvitationRequestSchema.safeParse({
+      displayName: displayName.trim(),
+      password,
+      ...(startsOrg && name.trim() ? { orgName: name.trim() } : {}),
+    });
     if (!parsed.success) {
       for (const i of parsed.error.issues) {
         if (i.path[0] === 'displayName') errs.displayName = 'Enter your name';
         if (i.path[0] === 'password') errs.password = 'Password must be 12 to 256 characters';
+        if (i.path[0] === 'orgName') errs.orgName = 'Enter a name for the organization';
       }
     }
     if (password !== confirm) errs.confirm = 'Passwords do not match';
     setErrors(errs);
     if (Object.keys(errs).length || !parsed.success) {
-      const first = errs.displayName ? 'displayName' : errs.password ? 'password' : 'confirm';
+      const first = errs.orgName
+        ? 'orgName'
+        : errs.displayName
+          ? 'displayName'
+          : errs.password
+            ? 'password'
+            : 'confirm';
       document.getElementById(`invite-${first}`)?.focus();
       return;
     }
@@ -103,10 +224,20 @@ export function AcceptInvite() {
   return (
     <AuthFrame>
       <div className="mb-7">
-        <h1 className="text-3xl font-semibold tracking-tight text-fg">You are invited</h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-fg">
+          {inv.kind === 'legacy' ? 'You are invited' : heading}
+        </h1>
         <p className="mt-1.5 text-base text-muted">
-          Create your {BRAND.name} account for{' '}
-          <strong className="font-semibold text-fg">{info.data.email}</strong>
+          {inv.kind === 'legacy' ? (
+            <>
+              Create your {BRAND.name} account for{' '}
+              <strong className="font-semibold text-fg">{inv.email}</strong>
+            </>
+          ) : (
+            <>
+              {sub} Create your account for <strong className="font-semibold text-fg">{inv.email}</strong>.
+            </>
+          )}
         </p>
       </div>
       <form onSubmit={submit} noValidate className="flex flex-col gap-4" aria-label="Accept invitation">
@@ -114,15 +245,26 @@ export function AcceptInvite() {
         <input
           type="text"
           autoComplete="username"
-          value={info.data.email}
+          value={inv.email}
           readOnly
           hidden
           aria-hidden="true"
           tabIndex={-1}
         />
+        {startsOrg && (
+          <TextInput
+            id="invite-orgName"
+            label="Organization name"
+            value={orgName || inv.proposedOrgName || ''}
+            onChange={(e) => setOrgName(e.target.value)}
+            maxLength={120}
+            error={errors.orgName}
+            hint={inv.terms ?? undefined}
+          />
+        )}
         <TextInput
           id="invite-displayName"
-          label="Display name"
+          label="Your name"
           autoComplete="name"
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
@@ -150,7 +292,11 @@ export function AcceptInvite() {
         />
         <ErrorBox error={accept.error} />
         <Button type="submit" variant="primary" size="lg" loading={accept.isPending} className="w-full">
-          Create account
+          {startsOrg
+            ? 'Create organization'
+            : inv.kind === 'legacy'
+              ? 'Create account'
+              : `Join ${inv.orgName}`}
         </Button>
       </form>
     </AuthFrame>

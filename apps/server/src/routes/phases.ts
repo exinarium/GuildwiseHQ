@@ -14,7 +14,7 @@ import {
   SetFollowupsRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth/guards.ts';
+import { requireUserWithFeature } from '../auth/guards.ts';
 import { requireProjectMember } from '../authz/scope.ts';
 import {
   addDeployTarget,
@@ -47,7 +47,7 @@ export function phaseRoutes(ctx: Ctx) {
     const app = typed(fastify);
 
     app.get('/api/projects/:id/phases', { schema: { params: IdParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
+      const s = await requireUserWithFeature(ctx, req, 'phases');
       return { phases: await listPhases(ctx, s.user.id, req.params.id) };
     });
 
@@ -55,7 +55,7 @@ export function phaseRoutes(ctx: Ctx) {
       '/api/projects/:id/phases',
       { schema: { params: IdParamsSchema, body: CreatePhaseRequestSchema } },
       async (req, reply) => {
-        const s = await requireUser(ctx, req);
+        const s = await requireUserWithFeature(ctx, req, 'phases');
         const id = await createPhase(ctx, s.user, req.params.id, req.body);
         ctx.services.dispatcher.trigger();
         reply.code(201);
@@ -64,7 +64,7 @@ export function phaseRoutes(ctx: Ctx) {
     );
 
     app.get('/api/phases/:id', { schema: { params: PhaseParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
+      const s = await requireUserWithFeature(ctx, req, 'phases');
       return getPhase(ctx, s.user.id, req.params.id);
     });
 
@@ -72,7 +72,7 @@ export function phaseRoutes(ctx: Ctx) {
       '/api/phases/by-number/:projectKey/:number',
       { schema: { params: PhaseByNumberParamsSchema } },
       async (req) => {
-        const s = await requireUser(ctx, req);
+        const s = await requireUserWithFeature(ctx, req, 'phases');
         return getPhaseByNumber(ctx, s.user.id, req.params.projectKey, req.params.number);
       },
     );
@@ -81,7 +81,7 @@ export function phaseRoutes(ctx: Ctx) {
       '/api/phases/:id',
       { schema: { params: PhaseParamsSchema, body: PatchPhaseRequestSchema } },
       async (req) => {
-        const s = await requireUser(ctx, req);
+        const s = await requireUserWithFeature(ctx, req, 'phases');
         await updatePhase(ctx, s.user, req.params.id, req.body);
         return getPhase(ctx, s.user.id, req.params.id);
       },
@@ -91,7 +91,7 @@ export function phaseRoutes(ctx: Ctx) {
       '/api/phases/:id/followups',
       { schema: { params: PhaseParamsSchema, body: SetFollowupsRequestSchema } },
       async (req) => {
-        const s = await requireUser(ctx, req);
+        const s = await requireUserWithFeature(ctx, req, 'phases');
         await setPhaseFollowups(ctx, s.user, req.params.id, req.body.followups);
         return getPhase(ctx, s.user.id, req.params.id);
       },
@@ -101,7 +101,7 @@ export function phaseRoutes(ctx: Ctx) {
       '/api/phases/:id/reopen',
       { schema: { params: PhaseParamsSchema, body: ReopenPhaseRequestSchema } },
       async (req) => {
-        const s = await requireUser(ctx, req);
+        const s = await requireUserWithFeature(ctx, req, 'phases');
         await reopenPhase(ctx, s.user, req.params.id, req.body.reason);
         return getPhase(ctx, s.user.id, req.params.id);
       },
@@ -111,7 +111,7 @@ export function phaseRoutes(ctx: Ctx) {
       '/api/cards/:id/phase',
       { schema: { params: CardParamsSchema, body: AssignCardPhaseRequestSchema } },
       async (req) => {
-        const s = await requireUser(ctx, req);
+        const s = await requireUserWithFeature(ctx, req, 'phases');
         await assignCardToPhase(ctx, s.user, req.params.id, req.body);
         return getCardDetail(ctx, s.user.id, req.params.id);
       },
@@ -121,14 +121,14 @@ export function phaseRoutes(ctx: Ctx) {
       '/api/cards/:id/confirm-merged',
       { schema: { params: CardParamsSchema, body: ConfirmMergedRequestSchema.default({}) } },
       async (req) => {
-        const s = await requireUser(ctx, req);
+        const s = await requireUserWithFeature(ctx, req, 'phases');
         await confirmCardMerged(ctx, s.user, req.params.id, req.body.note);
         return getCardDetail(ctx, s.user.id, req.params.id);
       },
     );
 
     app.get('/api/projects/:id/followup-defaults', { schema: { params: IdParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
+      const s = await requireUserWithFeature(ctx, req, 'phases');
       return { followups: await getFollowupDefaults(ctx, s.user, req.params.id) };
     });
 
@@ -136,21 +136,21 @@ export function phaseRoutes(ctx: Ctx) {
       '/api/projects/:id/followup-defaults',
       { schema: { params: IdParamsSchema, body: FollowupDefaultsResponseSchema } },
       async (req) => {
-        const s = await requireUser(ctx, req);
+        const s = await requireUserWithFeature(ctx, req, 'phases');
         await setFollowupDefaults(ctx, s.user, req.params.id, req.body.followups);
         return { followups: await getFollowupDefaults(ctx, s.user, req.params.id) };
       },
     );
 
     app.get('/api/projects/:id/deploy-targets', { schema: { params: IdParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
+      const s = await requireUserWithFeature(ctx, req, 'phases');
       await requireProjectMember(ctx.pool, s.user.id, req.params.id);
       return { targets: (await listDeployTargets(ctx.pool, req.params.id)).map(toTargetDto) };
     });
 
     // Any project member sees the workstations of every member (needed to name one in a remote deploy target).
     app.get('/api/projects/:id/workstations', { schema: { params: IdParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
+      const s = await requireUserWithFeature(ctx, req, 'phases');
       await requireProjectMember(ctx.pool, s.user.id, req.params.id);
       return { workstations: await listMemberWorkstations(ctx.pool, req.params.id, s.user.id) };
     });
@@ -159,7 +159,7 @@ export function phaseRoutes(ctx: Ctx) {
       '/api/projects/:id/deploy-targets',
       { schema: { params: IdParamsSchema, body: CreateDeployTargetRequestSchema } },
       async (req, reply) => {
-        const s = await requireUser(ctx, req);
+        const s = await requireUserWithFeature(ctx, req, 'phases');
         const id = await addDeployTarget(ctx, s.user, req.params.id, req.body);
         reply.code(201);
         const t = (await listDeployTargets(ctx.pool, req.params.id)).find((x) => x.id === id);
@@ -171,7 +171,7 @@ export function phaseRoutes(ctx: Ctx) {
       '/api/deploy-targets/:id',
       { schema: { params: IdParamsSchema, body: PatchDeployTargetRequestSchema } },
       async (req) => {
-        const s = await requireUser(ctx, req);
+        const s = await requireUserWithFeature(ctx, req, 'phases');
         await updateDeployTarget(ctx, s.user, req.params.id, req.body);
         const row = await one(ctx.pool, 'SELECT project_id FROM deploy_targets WHERE id=$1', [req.params.id]);
         const t = (await listDeployTargets(ctx.pool, row?.project_id)).find((x) => x.id === req.params.id);
@@ -180,7 +180,7 @@ export function phaseRoutes(ctx: Ctx) {
     );
 
     app.delete('/api/deploy-targets/:id', { schema: { params: IdParamsSchema } }, async (req, reply) => {
-      const s = await requireUser(ctx, req);
+      const s = await requireUserWithFeature(ctx, req, 'phases');
       await removeDeployTarget(ctx, s.user, req.params.id);
       reply.code(204);
     });
