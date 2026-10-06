@@ -51,7 +51,7 @@ export function DeployTargetsPanel({ projectId }: { projectId: string }) {
 
   return (
     <Panel data-testid="deploy-targets">
-      <h2 className="mb-1 text-sm font-semibold">Deploy targets</h2>
+      <h2 className="mb-2 text-lg font-semibold text-fg">Deploy targets</h2>
       <p className="mb-2 text-xs text-subtle">
         Where a phase can be deployed. No passwords or keys are stored here: SSH keys and Docker stay on the
         workstation of the DevOps engineer that deploys.
@@ -118,7 +118,12 @@ export function DeployTargetsPanel({ projectId }: { projectId: string }) {
           />
         </div>
         <ErrorBox error={add.error ?? remove.error} />
-        <Button type="submit" variant="primary" className="self-start sm:col-span-2" disabled={add.isPending}>
+        <Button
+          type="submit"
+          variant="primary"
+          className="justify-self-start sm:col-span-2"
+          disabled={add.isPending}
+        >
           Add deploy target
         </Button>
       </form>

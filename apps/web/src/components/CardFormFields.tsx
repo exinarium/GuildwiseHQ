@@ -38,7 +38,7 @@ export function CardFormFields({
         error={errors.title}
         maxLength={300}
       />
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
         {codeCard && (
           <>
             <Select
@@ -70,18 +70,20 @@ export function CardFormFields({
           </>
         )}
         <TextInput
-          label="Priority (1-9)"
+          label="Priority (1 = urgent … 9 = whenever)"
+          hint="Urgent cards are picked up first."
           inputMode="numeric"
           value={v.priority}
           onChange={(e) => onChange({ ...v, priority: e.target.value })}
           error={errors.priority}
         />
         {codeCard && (
-          <label className="flex items-center gap-2 self-end pb-2 text-sm">
+          <label className="flex min-h-9 items-center gap-2.5 self-end pb-1 text-base text-fg">
             <input
               type="checkbox"
               checked={v.docsNeeded}
               onChange={(e) => onChange({ ...v, docsNeeded: e.target.checked })}
+              className="size-5"
             />
             Docs needed
           </label>

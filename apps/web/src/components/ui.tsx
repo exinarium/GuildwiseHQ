@@ -15,6 +15,7 @@ export { EmptyState } from './ui/EmptyState.tsx';
 export { Menu, MenuItem, MenuSeparator } from './ui/Menu.tsx';
 export { ListSkeleton, PageSkeleton, Skeleton, SkeletonLine } from './ui/Skeleton.tsx';
 export { StatusDot } from './ui/StatusDot.tsx';
+export { type Step, Stepper } from './ui/Stepper.tsx';
 export { Tabs } from './ui/Tabs.tsx';
 export { ToastProvider, useToast } from './ui/Toast.tsx';
 export { cx };
@@ -380,7 +381,7 @@ export function PageHeader({
   usePageTitle(documentTitle ?? title);
   return (
     <div className="mb-5 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-      <div className="min-w-0 flex-1">
+      <div className="min-w-[min(100%,15rem)] flex-1">
         {back && (
           <Link
             to={back.to}
@@ -388,7 +389,7 @@ export function PageHeader({
             aria-label={back.label}
           >
             <ArrowLeft aria-hidden="true" className="size-3.5" />
-            <span>{back.label.replace(/^Back to /, '')}</span>
+            <span>{back.label}</span>
           </Link>
         )}
         {eyebrow}

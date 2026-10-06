@@ -1,3 +1,4 @@
+import { TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { SANDBOX_DOCS_URL } from '../lib/sandbox.ts';
 
@@ -24,7 +25,7 @@ export function SandboxWarning({
       data-testid={testId}
       className="flex gap-2 rounded-control border border-warning-fill bg-warning-soft px-3 py-2 text-sm text-warning-soft-fg"
     >
-      <span aria-hidden="true">&#9888;</span>
+      <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
       <p className="min-w-0">
         <strong>{lead}</strong> {children}
         {docs && (

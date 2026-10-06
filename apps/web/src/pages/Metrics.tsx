@@ -49,7 +49,7 @@ export function Metrics() {
       {d && (
         <div className="grid gap-3 md:grid-cols-2" data-testid="metrics">
           <Panel>
-            <h2 className="mb-2 text-sm font-semibold">Throughput</h2>
+            <h2 className="mb-3 text-lg font-semibold text-fg">Throughput</h2>
             <div className="mb-2 flex gap-6">
               <Stat label="Cards finalized" value={total(d.throughput)} testId="metric-throughput-total" />
               <Stat
@@ -64,7 +64,7 @@ export function Metrics() {
           </Panel>
 
           <Panel>
-            <h2 className="mb-2 text-sm font-semibold">Time blocked on you</h2>
+            <h2 className="mb-3 text-lg font-semibold text-fg">Time blocked on you</h2>
             <div className="flex gap-6" data-testid="metric-blocked">
               <Stat label="Total" value={duration(d.timeBlockedOnManager.totalMs)} />
               <Stat label="Cards held up" value={d.timeBlockedOnManager.cards} />
@@ -73,7 +73,7 @@ export function Metrics() {
           </Panel>
 
           <Panel>
-            <h2 className="mb-2 text-sm font-semibold">Bounce rate per builder</h2>
+            <h2 className="mb-3 text-lg font-semibold text-fg">Bounce rate per builder</h2>
             {d.bounceRate.length === 0 ? (
               <p className="text-sm text-subtle">No builder submitted a card in this range.</p>
             ) : (
@@ -113,7 +113,7 @@ export function Metrics() {
           </Panel>
 
           <Panel>
-            <h2 className="mb-2 text-sm font-semibold">Bugs escaped past test</h2>
+            <h2 className="mb-3 text-lg font-semibold text-fg">Bugs escaped past test</h2>
             <Stat label="Failed test runs" value={d.bugsEscaped.total} testId="metric-bugs-total" />
             <BarChart
               caption={`Failed test runs per day, ${d.bugsEscaped.byDay.length} days`}
@@ -123,7 +123,7 @@ export function Metrics() {
           </Panel>
 
           <Panel>
-            <h2 className="mb-2 text-sm font-semibold">Duration</h2>
+            <h2 className="mb-3 text-lg font-semibold text-fg">Duration</h2>
             <div className="mb-2 flex gap-6" data-testid="metric-duration">
               <Stat label="Cards finished" value={d.duration.cards} />
               <Stat label="Average per card" value={duration(d.duration.avgMsPerCard)} />
@@ -139,7 +139,7 @@ export function Metrics() {
           </Panel>
 
           <Panel>
-            <h2 className="mb-2 text-sm font-semibold">Queue depth per column</h2>
+            <h2 className="mb-3 text-lg font-semibold text-fg">Queue depth per column</h2>
             {d.queueDepth.length === 0 ? (
               <p className="text-sm text-subtle">No open cards.</p>
             ) : (

@@ -1,12 +1,24 @@
 import { type FormEvent, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { useParams } from 'react-router';
 import { useAddRepo, usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
 import { DeployTargetsPanel } from '../components/DeployTargetsPanel.tsx';
 import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
 import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
 import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
-import { Button, ErrorBox, PageHeader, Panel, Spinner, TextArea, TextInput } from '../components/ui.tsx';
+import {
+  Badge,
+  Button,
+  Callout,
+  ConfirmDialog,
+  ErrorBox,
+  PageHeader,
+  PageSkeleton,
+  Panel,
+  TextArea,
+  TextInput,
+  useToast,
+} from '../components/ui.tsx';
 import { WorkingBranchControl } from '../components/WorkingBranchControl.tsx';
 import { useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 
@@ -22,6 +34,8 @@ export function ProjectSettings() {
   const patch = usePatchProject(id);
   const addRepo = useAddRepo(id);
   const removeRepo = useRemoveRepo(id);
+  const toast = useToast();
+  const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
   const [name, setName] = useState('');
   const [branch, setBranch] = useState('');
   const [arch, setArch] = useState('');
@@ -41,19 +55,33 @@ export function ProjectSettings() {
     setE2e(project.e2eGlobs.join('\n'));
   }, [project]);
 
-  if (q.isPending) return <Spinner />;
-  if (q.isError) return <ErrorBox error={q.error} />;
+  if (q.isPending)
+    return (
+      <div className="mx-auto max-w-3xl">
+        <PageSkeleton label="Loading project settings" panels={3} />
+      </div>
+    );
+  if (q.isError)
+    return (
+      <div className="mx-auto max-w-3xl">
+        <PageHeader title="Project settings" />
+        <ErrorBox error={q.error} onRetry={() => q.refetch()} />
+      </div>
+    );
   const { repos, members } = q.data;
   const activeRepos = repos.filter((r) => !r.removedAt);
 
   const save = (e: FormEvent) => {
     e.preventDefault();
-    patch.mutate({
-      name: name.trim(),
-      workingBranch: branch.trim(),
-      ...(traits.usesRepos ? { architecturalGlobs: lines(arch) } : {}),
-      ...(traits.hasTestStage ? { e2eGlobs: lines(e2e) } : {}),
-    });
+    patch.mutate(
+      {
+        name: name.trim(),
+        workingBranch: branch.trim(),
+        ...(traits.usesRepos ? { architecturalGlobs: lines(arch) } : {}),
+        ...(traits.hasTestStage ? { e2eGlobs: lines(e2e) } : {}),
+      },
+      { onSuccess: () => toast.success('Settings saved') },
+    );
   };
   const add = (e: FormEvent) => {
     e.preventDefault();
@@ -70,6 +98,7 @@ export function ProjectSettings() {
       },
       {
         onSuccess: () => {
+          toast.success('Repository added');
           setRepoName('');
           setRepoUrl('');
           setRepoBranch('');
@@ -78,119 +107,187 @@ export function ProjectSettings() {
     );
   };
 
+  const sections = [
+    { id: 'general', label: 'Basics' },
+    ...(traits.usesRepos || activeRepos.length > 0 ? [{ id: 'repos', label: 'Repos' }] : []),
+    ...(project && traits.usesRepos
+      ? [
+          { id: 'phases', label: 'Phases and deploys' },
+          { id: 'merge', label: 'Merging' },
+        ]
+      : []),
+    { id: 'members', label: 'Team' },
+    { id: 'danger', label: 'Archive' },
+  ];
+
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+    <div className="mx-auto flex max-w-3xl flex-col gap-5">
       <PageHeader
-        title={`${project?.key} settings${project?.status === 'archived' ? ' (archived)' : ''}`}
-        actions={
-          <Link to={`/p/${project?.key}/board`} className="text-sm underline">
-            Back to board
-          </Link>
+        title={`${project?.name ?? ''} settings`}
+        back={{ to: `/p/${project?.key}/board`, label: 'Back to the board' }}
+        sub={
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-sm">{project?.key}</span>
+            {project?.status === 'archived' && <Badge tone="amber">Archived</Badge>}
+            {project?.myRole !== 'owner' && <Badge>shared with you</Badge>}
+          </span>
         }
       />
-      <Panel>
-        <h2 className="mb-2 text-sm font-semibold">General</h2>
-        <form onSubmit={save} className="flex flex-col gap-3" aria-label="Project settings">
-          <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <TextInput label="Working branch" value={branch} onChange={(e) => setBranch(e.target.value)} />
-          {traits.usesRepos && (
-            <TextArea
-              label="Architectural globs"
-              hint="One glob per line. Large diffs touching these are risk tier large."
-              value={arch}
-              onChange={(e) => setArch(e.target.value)}
-            />
-          )}
-          {traits.hasTestStage && (
-            <TextArea
-              label="E2E globs"
-              hint="One glob per line"
-              value={e2e}
-              onChange={(e) => setE2e(e.target.value)}
-            />
-          )}
-          <ErrorBox error={patch.error} />
-          <Button type="submit" variant="primary" className="self-start" disabled={patch.isPending}>
-            Save settings
-          </Button>
-          {patch.isSuccess && (
-            <p role="status" className="text-sm text-success">
-              Saved.
-            </p>
-          )}
-        </form>
-      </Panel>
-      {(traits.usesRepos || activeRepos.length > 0) && (
-        <Panel>
-          <h2 className="mb-2 text-sm font-semibold">Repositories</h2>
-          {!traits.usesRepos && (
-            <p className="mb-2 text-sm text-subtle">
-              This workflow needs no repository. Existing ones are listed so you can remove them.
-            </p>
-          )}
-          <ul className="mb-3 flex flex-col gap-1.5" data-testid="repos">
-            {activeRepos.map((r) => (
-              <li key={r.id} className="flex flex-col text-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span>
-                    <span className="font-medium">{r.name}</span>{' '}
-                    <span className="font-mono text-xs text-subtle break-all">{r.remoteUrl}</span>
-                  </span>
-                  <Button
-                    variant="ghost"
-                    aria-label={`Remove repository ${r.name}`}
-                    onClick={() => removeRepo.mutate(r.id)}
-                  >
-                    Remove
-                  </Button>
-                </div>
-                {traits.usesRepos && (
-                  <WorkingBranchControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
-                )}
-              </li>
-            ))}
-            {activeRepos.length === 0 && <li className="text-sm text-subtle">No repositories yet.</li>}
-          </ul>
-          {traits.usesRepos && (
-            <form onSubmit={add} noValidate aria-label="Add repository" className="grid gap-3 sm:grid-cols-3">
-              <TextInput
-                label="Repository name"
-                value={repoName}
-                onChange={(e) => setRepoName(e.target.value)}
-                error={repoErr.name}
+      <nav aria-label="Settings sections" className="scroll-fade-x -mt-2 flex gap-2 overflow-x-auto pb-1">
+        {sections.map((x) => (
+          <a
+            key={x.id}
+            href={`#${x.id}`}
+            className="inline-flex h-8 shrink-0 items-center rounded-full border border-control bg-surface px-3 text-sm font-medium text-muted hover:bg-sunken hover:text-fg"
+          >
+            {x.label}
+          </a>
+        ))}
+      </nav>
+      {!traits.usesRepos && (
+        <Callout tone="info">
+          This is a {project?.workflowKey} project: it needs no repository, and results go to its vault
+          folder.
+        </Callout>
+      )}
+      <div id="general" className="scroll-mt-20">
+        <Panel title="General">
+          <form onSubmit={save} className="flex flex-col gap-4" aria-label="Project settings">
+            <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} />
+            <TextInput label="Working branch" value={branch} onChange={(e) => setBranch(e.target.value)} />
+            {traits.usesRepos && (
+              <TextArea
+                label="Architectural globs"
+                hint="One glob per line. Large diffs touching these are risk tier large."
+                value={arch}
+                onChange={(e) => setArch(e.target.value)}
               />
-              <TextInput
-                label="Remote URL"
-                value={repoUrl}
-                onChange={(e) => setRepoUrl(e.target.value)}
-                error={repoErr.url}
+            )}
+            {traits.hasTestStage && (
+              <TextArea
+                label="E2E globs"
+                hint="One glob per line"
+                value={e2e}
+                onChange={(e) => setE2e(e.target.value)}
               />
-              <TextInput
-                label="Branch (optional)"
-                value={repoBranch}
-                onChange={(e) => setRepoBranch(e.target.value)}
-              />
-              <ErrorBox error={addRepo.error ?? removeRepo.error} />
-              <Button
-                type="submit"
-                variant="primary"
-                className="self-start sm:col-span-3"
-                disabled={addRepo.isPending}
-              >
-                Add repository
-              </Button>
-            </form>
-          )}
+            )}
+            <ErrorBox error={patch.error} />
+            <Button type="submit" variant="primary" className="self-start" loading={patch.isPending}>
+              Save settings
+            </Button>
+          </form>
         </Panel>
+      </div>
+      {(traits.usesRepos || activeRepos.length > 0) && (
+        <div id="repos" className="scroll-mt-20">
+          <Panel title="Repositories">
+            {!traits.usesRepos && (
+              <p className="mb-3 text-sm text-muted">
+                This workflow needs no repository. Existing ones are listed so you can remove them.
+              </p>
+            )}
+            <ul className="mb-4 flex flex-col divide-y divide-line" data-testid="repos">
+              {activeRepos.map((r) => (
+                <li key={r.id} className="flex flex-col py-3 text-sm first:pt-0">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="min-w-0">
+                      <span className="block text-base font-medium text-fg">{r.name}</span>
+                      <span className="block font-mono text-xs break-all text-subtle">{r.remoteUrl}</span>
+                    </span>
+                    <Button
+                      variant="danger-ghost"
+                      size="sm"
+                      aria-label={`Remove repository ${r.name}`}
+                      onClick={() => setRemoving({ id: r.id, name: r.name })}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                  {traits.usesRepos && (
+                    <WorkingBranchControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
+                  )}
+                </li>
+              ))}
+              {activeRepos.length === 0 && (
+                <li className="text-sm text-subtle">No repositories yet. Add the first one below.</li>
+              )}
+            </ul>
+            {traits.usesRepos && (
+              <form
+                onSubmit={add}
+                noValidate
+                aria-label="Add repository"
+                className="grid gap-4 border-t border-line pt-4 sm:grid-cols-3"
+              >
+                <TextInput
+                  label="Repository name"
+                  value={repoName}
+                  onChange={(e) => setRepoName(e.target.value)}
+                  error={repoErr.name}
+                />
+                <TextInput
+                  label="Remote URL"
+                  value={repoUrl}
+                  onChange={(e) => setRepoUrl(e.target.value)}
+                  error={repoErr.url}
+                />
+                <TextInput
+                  label="Branch (optional)"
+                  value={repoBranch}
+                  onChange={(e) => setRepoBranch(e.target.value)}
+                />
+                <div className="sm:col-span-3">
+                  <ErrorBox error={addRepo.error ?? removeRepo.error} />
+                </div>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  className="justify-self-start sm:col-span-3"
+                  loading={addRepo.isPending}
+                >
+                  Add repository
+                </Button>
+              </form>
+            )}
+          </Panel>
+        </div>
       )}
-      {project && traits.usesRepos && <PhasesPanel projectId={id} />}
-      {project && traits.usesRepos && <DeployTargetsPanel projectId={id} />}
-      {project && traits.usesRepos && <FollowupDefaultsPanel projectId={id} />}
       {project && traits.usesRepos && (
-        <MergePolicyPanel projectId={id} project={project} history={q.data.mergePolicyHistory ?? []} />
+        <div id="phases" className="flex scroll-mt-20 flex-col gap-5">
+          <PhasesPanel projectId={id} />
+          <DeployTargetsPanel projectId={id} />
+          <FollowupDefaultsPanel projectId={id} />
+        </div>
       )}
-      <MembersPanel projectId={id} members={members} isOwner={project?.myRole === 'owner'} />
-      {project && <ProjectDangerZone project={project} />}
+      {project && traits.usesRepos && (
+        <div id="merge" className="scroll-mt-20">
+          <MergePolicyPanel projectId={id} project={project} history={q.data.mergePolicyHistory ?? []} />
+        </div>
+      )}
+      <div id="members" className="scroll-mt-20">
+        <MembersPanel projectId={id} members={members} isOwner={project?.myRole === 'owner'} />
+      </div>
+      <div id="danger" className="scroll-mt-20">
+        {project && <ProjectDangerZone project={project} />}
+      </div>
+      <ConfirmDialog
+        open={!!removing}
+        onOpenChange={(o) => !o && setRemoving(null)}
+        title={`Remove ${removing?.name ?? 'repository'}?`}
+        description="Agents stop using this repository for the project. Existing branches and history stay on the remote."
+        confirmLabel="Remove repository"
+        pending={removeRepo.isPending}
+        onConfirm={() =>
+          removing &&
+          removeRepo.mutate(removing.id, {
+            onSuccess: () => {
+              toast.success(`${removing.name} removed`);
+              setRemoving(null);
+            },
+            onError: () => setRemoving(null),
+          })
+        }
+      />
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { FolderKanban } from 'lucide-react';
 import { type FormEvent, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
@@ -6,7 +7,18 @@ import { useMe } from '../api/queries/auth.ts';
 import { missingFromError, useCreateCard } from '../api/queries/cards.ts';
 import { useProject, useProjects } from '../api/queries/projects.ts';
 import { CardFormFields } from '../components/CardFormFields.tsx';
-import { Button, ErrorBox, PageHeader, Select, Spinner } from '../components/ui.tsx';
+import {
+  Button,
+  ButtonLink,
+  Callout,
+  EmptyState,
+  ErrorBox,
+  PageHeader,
+  PageSkeleton,
+  Panel,
+  Select,
+  useToast,
+} from '../components/ui.tsx';
 import { buildCardRequest, type CardFormValues, emptyForm, fieldLabel } from '../lib/cardForm.ts';
 import { getLastProjectKey } from '../lib/lastProject.ts';
 
@@ -29,17 +41,26 @@ export function CardNew() {
     [workflows.data, project?.workflowKey],
   );
 
-  if (projects.isPending || workflows.isPending) return <Spinner />;
+  if (projects.isPending || workflows.isPending)
+    return (
+      <div className="mx-auto max-w-2xl">
+        <PageSkeleton label="Loading the form" />
+      </div>
+    );
   if (!projects.data?.length) {
     return (
-      <div>
+      <div className="mx-auto max-w-2xl">
         <PageHeader title="New card" />
-        <p className="text-sm text-subtle">
-          Create a project first.{' '}
-          <Link to="/projects" className="underline">
-            Go to projects
-          </Link>
-        </p>
+        <EmptyState
+          icon={FolderKanban}
+          title="Create a project first"
+          description="Cards live on a project's board. Create a project, then come back."
+          action={
+            <ButtonLink to="/projects" variant="primary">
+              Go to projects
+            </ButtonLink>
+          }
+        />
       </div>
     );
   }
@@ -81,6 +102,7 @@ export function CardNewForm({
 }) {
   const nav = useNavigate();
   const create = useCreateCard();
+  const toast = useToast();
   const [v, setV] = useState<CardFormValues>(() => emptyForm(workflow.cardTypes[0] ?? ''));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [note, setNote] = useState<{ id: string; ref: string; missing: string[] } | null>(null);
@@ -107,6 +129,7 @@ export function CardNewForm({
             setNote({ id: res.card.id, ref: res.card.ref, missing: res.missing });
             return;
           }
+          toast.success(specify ? `${res.card.ref} specified` : `Saved as draft ${res.card.ref}`);
           nav(`/cards/${res.card.ref}`);
         },
         onError: (e) => {
@@ -129,69 +152,89 @@ export function CardNewForm({
   };
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <PageHeader title="New card" sub={`${projectKey} · ${workflow.name} workflow`} />
-      <form onSubmit={onSubmit} noValidate aria-label="New card" className="flex flex-col gap-3">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Select label="Project" value={projectKey} onChange={(e) => onProject(e.target.value)}>
-            {projectKeys.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </Select>
-          <Select
-            label="Card type"
-            value={v.cardType}
-            onChange={(e) => setV({ ...v, cardType: e.target.value })}
-            error={errors.cardType}
-          >
-            {workflow.cardTypes.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <CardFormFields
-          workflow={workflow}
-          values={v}
-          onChange={setV}
-          errors={errors}
-          repos={repos}
-          mockUi={mockUi}
-        />
+    <div className="mx-auto max-w-2xl">
+      <PageHeader
+        title="New card"
+        back={{ to: `/p/${projectKey}/board`, label: 'Back to the board' }}
+        sub={`${projectKey} · ${workflow.name} workflow`}
+      />
+      <form onSubmit={onSubmit} noValidate aria-label="New card" className="flex flex-col gap-4">
+        <Panel>
+          <div className="flex flex-col gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Select label="Project" value={projectKey} onChange={(e) => onProject(e.target.value)}>
+                {projectKeys.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                label="Card type"
+                value={v.cardType}
+                onChange={(e) => setV({ ...v, cardType: e.target.value })}
+                error={errors.cardType}
+              >
+                {workflow.cardTypes.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <CardFormFields
+              workflow={workflow}
+              values={v}
+              onChange={setV}
+              errors={errors}
+              repos={repos}
+              mockUi={mockUi}
+            />
+          </div>
+        </Panel>
         {errors._form && <ErrorBox error={new Error(errors._form)} />}
         {Object.keys(errors).some((k) => k !== '_form') && (
-          <p role="alert" className="text-sm font-medium text-danger">
+          <Callout tone="danger" role="alert">
             Fix the highlighted fields.
-          </p>
+          </Callout>
         )}
         {note && (
-          <p role="status" className="text-sm">
+          <Callout tone="warning" role="status">
             Saved as draft{' '}
-            <Link className="underline" to={`/cards/${note.ref}`}>
+            <Link className="font-medium underline" to={`/cards/${note.ref}`}>
               {note.ref}
             </Link>
             ; still missing {note.missing.map((m) => fieldLabel(workflow, m)).join(', ')}.
-          </p>
+          </Callout>
         )}
         {create.error && !errors._form && !missingFromError(create.error).length && (
           <ErrorBox error={create.error} />
         )}
-        <div className="flex flex-wrap gap-2">
-          <Button type="submit" variant="primary" disabled={create.isPending}>
-            Specify
-          </Button>
-          <Button disabled={create.isPending} onClick={() => submit(false)}>
-            Save draft
-          </Button>
-          <Link
-            to={`/p/${projectKey}/board`}
-            className="inline-flex min-h-8 items-center px-3 text-sm text-muted underline"
-          >
-            Cancel
-          </Link>
+        <div className="sticky bottom-0 z-10 -mx-4 border-t border-line bg-canvas/90 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur sm:mx-0 sm:rounded-card sm:border sm:px-4">
+          <p id="new-card-help" className="mb-2 text-xs text-subtle">
+            Specify sends the card to the Spec stage and checks every required field. Save draft keeps it
+            private until you are ready.
+          </p>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end [&>*]:max-sm:w-full">
+            <ButtonLink to={`/p/${projectKey}/board`} variant="ghost">
+              Cancel
+            </ButtonLink>
+            <Button
+              aria-describedby="new-card-help"
+              disabled={create.isPending}
+              onClick={() => submit(false)}
+            >
+              Save draft
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              aria-describedby="new-card-help"
+              loading={create.isPending}
+            >
+              Specify
+            </Button>
+          </div>
         </div>
       </form>
     </div>

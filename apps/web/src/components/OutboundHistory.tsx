@@ -42,7 +42,7 @@ export function OutboundHistory({
   return (
     <Panel>
       <div data-testid="outbound-history">
-        <h2 className="mb-2 text-sm font-semibold">
+        <h2 className="mb-3 text-lg font-semibold text-fg">
           Updates to {ticket ?? 'the ticket'} ({drafts.length})
         </h2>
         <p className="mb-2 text-xs text-subtle">

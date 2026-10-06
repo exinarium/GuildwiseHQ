@@ -5,6 +5,7 @@ export interface TabDef {
   id: string;
   label: string;
   badge?: ReactNode;
+  testId?: string;
 }
 
 export const tabId = (prefix: string, id: string) => `${prefix}-tab-${id}`;
@@ -64,6 +65,7 @@ export function Tabs({
             type="button"
             role="tab"
             id={tabId(prefix, t.id)}
+            {...(t.testId ? { 'data-testid': t.testId } : {})}
             aria-selected={active}
             aria-controls={panelId(prefix, t.id)}
             tabIndex={active ? 0 : -1}

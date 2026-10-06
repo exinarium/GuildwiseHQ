@@ -250,7 +250,7 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
       )}
       <ErrorBox error={submit.error ?? discard.error} />
       <section aria-label="Custom roles">
-        <h2 className="mb-2 text-sm font-semibold">Custom roles</h2>
+        <h2 className="mb-3 text-lg font-semibold text-fg">Custom roles</h2>
         {custom.length === 0 && <p className="text-sm text-subtle">No custom roles yet.</p>}
         <ul className="grid gap-3 md:grid-cols-2" data-testid="custom-roles">
           {custom.map((r) => {
@@ -323,7 +323,7 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
         </ul>
       </section>
       <section aria-label="Built-in roles">
-        <h2 className="mb-2 text-sm font-semibold">Built-in roles</h2>
+        <h2 className="mb-3 text-lg font-semibold text-fg">Built-in roles</h2>
         <p className="mb-2 text-xs text-subtle">
           They ship with the app and can never be removed. The owner can extend them with extra instructions,
           skills and standing orders; their core rules (test ownership, review gates) cannot be changed.
@@ -397,7 +397,9 @@ function RoleEditPanel({
   };
   return (
     <Panel>
-      <h2 className="mb-2 text-sm font-semibold">{edit.id ? 'Edit role draft' : 'New custom role'}</h2>
+      <h2 className="mb-3 text-lg font-semibold text-fg">
+        {edit.id ? 'Edit role draft' : 'New custom role'}
+      </h2>
       <RoleEditor
         value={edit.input}
         onChange={(input) => setEdit({ ...edit, input, issues: undefined })}
@@ -657,7 +659,7 @@ function WorkflowEditPanel({
   };
   return (
     <Panel>
-      <h2 className="mb-2 text-sm font-semibold">
+      <h2 className="mb-3 text-lg font-semibold text-fg">
         {edit.id ? 'Edit workflow draft' : 'New custom workflow'}
       </h2>
       <WorkflowEditor

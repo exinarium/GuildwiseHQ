@@ -19,7 +19,7 @@ export function PhasesPanel({ projectId }: { projectId: string }) {
   return (
     <Panel data-testid="phases-panel">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Phases</h2>
+        <h2 className="text-lg font-semibold text-fg">Phases</h2>
         <Button data-testid="new-phase" onClick={() => setOpen(true)}>
           New phase
         </Button>
@@ -138,7 +138,7 @@ export function FollowupDefaultsPanel({ projectId }: { projectId: string }) {
   const t = targets.data ?? [];
   return (
     <Panel data-testid="followup-defaults">
-      <h2 className="mb-1 text-sm font-semibold">Default follow-ups</h2>
+      <h2 className="mb-2 text-lg font-semibold text-fg">Default follow-ups</h2>
       <p className="mb-2 text-xs text-subtle">
         New phases start with these. Each phase can still change them until you approve.
       </p>

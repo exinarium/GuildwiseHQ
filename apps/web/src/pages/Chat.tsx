@@ -1,30 +1,37 @@
-import { Link, useParams } from 'react-router';
+import { MessageSquareOff } from 'lucide-react';
+import { useParams } from 'react-router';
 import { useChat } from '../api/queries/chats.ts';
 import { ChatPanel } from '../components/ChatPanel.tsx';
-import { ConnectionDot, PageHeader, Spinner } from '../components/ui.tsx';
+import { Avatar, ConnectionDot, EmptyState, PageHeader, PageSkeleton } from '../components/ui.tsx';
 
 /** A single conversation as a page (phone friendly). */
 export function Chat() {
   const { threadId = '' } = useParams();
   const chat = useChat(threadId);
-  if (chat.isPending) return <Spinner label="Loading chat" />;
+  if (chat.isPending) return <PageSkeleton label="Loading chat" panels={1} />;
   return (
-    <div className="mx-auto flex h-[calc(100dvh-6rem)] max-w-2xl flex-col">
+    <div className="mx-auto flex h-[calc(100dvh-8.5rem)] min-h-[26rem] max-w-2xl flex-col">
       <PageHeader
         title={chat.data ? `Chat with ${chat.data.agentName}` : 'Chat'}
+        back={{ to: '/desk', label: 'Back to the desk' }}
         sub={
-          <span className="flex items-center gap-2">
-            {chat.data && <ConnectionDot connected={chat.data.workstationOnline} />}
-            <Link to="/desk" className="underline">
-              Back to the desk
-            </Link>
-          </span>
+          chat.data && (
+            <span className="flex items-center gap-2">
+              <Avatar name={chat.data.agentName} size={20} />
+              <ConnectionDot connected={chat.data.workstationOnline} />
+            </span>
+          )
         }
       />
       {chat.data ? (
         <ChatPanel threadId={threadId} />
       ) : (
-        <p className="text-sm text-subtle">This conversation was not found.</p>
+        <EmptyState
+          icon={MessageSquareOff}
+          tone="neutral"
+          title="Conversation not found"
+          description="It may have been removed, or it belongs to another manager."
+        />
       )}
     </div>
   );

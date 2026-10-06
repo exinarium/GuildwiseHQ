@@ -134,7 +134,7 @@ export function WorkQualityPanel({ quality }: { quality: WorkQuality }) {
   const scored = q.reviewCount > 0;
   return (
     <div data-testid="work-quality" className="rounded-control bg-sunken p-2 text-sm">
-      <p className="mb-1 text-xs font-semibold tracking-wide text-subtle uppercase">Work quality</p>
+      <p className="mb-1 text-sm font-semibold text-muted">Work quality</p>
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
         <div
           data-testid="quality-score"

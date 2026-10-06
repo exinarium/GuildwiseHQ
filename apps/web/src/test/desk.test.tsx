@@ -183,7 +183,7 @@ describe('DeskItem', () => {
   it('has no urgent badge for a non-blocking, unpinned item', () => {
     renderItem(item({ pinned: false, urgent: false, blocking: false, affectedCount: 1 }));
     expect(screen.queryByTestId('urgent-badge')).toBeNull();
-    expect(screen.getByText('Non-blocking')).toBeInTheDocument();
+    expect(screen.queryByText('Blocking')).toBeNull();
     expect(screen.getByTestId('affected-count')).toHaveTextContent('Affects 1 card');
   });
 

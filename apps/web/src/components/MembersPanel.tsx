@@ -29,7 +29,7 @@ export function MembersPanel({
 
   return (
     <Panel>
-      <h2 className="mb-2 text-sm font-semibold">Members</h2>
+      <h2 className="mb-3 text-lg font-semibold text-fg">Members</h2>
       <p className="mb-2 text-xs text-subtle">
         Invited users join this project as additional managers once they accept: they see its board and desk
         and can hire agents for it onto their own workstations. Everything else of theirs stays private.

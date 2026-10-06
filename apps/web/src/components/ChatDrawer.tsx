@@ -76,9 +76,7 @@ export function ChatDrawer({
               </form>
               {(chats.data?.length ?? 0) > 0 && (
                 <div>
-                  <h3 className="mb-1 text-xs font-semibold tracking-wide text-subtle uppercase">
-                    Earlier conversations
-                  </h3>
+                  <h3 className="mb-1 text-sm font-semibold text-muted">Earlier conversations</h3>
                   <ul className="flex flex-col gap-1" data-testid="chat-list">
                     {chats.data?.map((c) => (
                       <li key={c.threadId}>

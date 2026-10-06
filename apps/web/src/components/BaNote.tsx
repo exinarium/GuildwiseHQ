@@ -8,12 +8,12 @@ export function BaNote({ item }: { item: DeskItemDto }) {
   return (
     <>
       {triage === 'passed' && (
-        <p className="mt-1 text-xs text-subtle" data-testid="triage-passed">
+        <p className="mt-2 text-xs text-subtle" data-testid="triage-passed">
           Your BA looked at this first and passed it on.
         </p>
       )}
       {triage === 'released' && (
-        <p className="mt-1 text-xs text-subtle" data-testid="triage-released">
+        <p className="mt-2 text-xs text-subtle" data-testid="triage-released">
           Your BA had not looked at this in time, so it reached you unchanged.
         </p>
       )}
@@ -21,15 +21,19 @@ export function BaNote({ item }: { item: DeskItemDto }) {
         <div
           role="note"
           data-testid="ba-note"
-          className="mt-2 rounded-control border border-brand/30 bg-brand-soft p-2 text-sm"
+          className="mt-3 rounded-control border border-brand/25 bg-brand-soft p-3 text-sm text-brand-soft-fg"
         >
-          <p className="text-xs font-medium text-brand-soft-fg">BA note</p>
+          <p className="text-xs font-semibold">BA note</p>
           <p className="mt-0.5 whitespace-pre-wrap">{item.baNote}</p>
         </div>
       )}
       {item.chatThreadId && (
         <p className="mt-2 text-xs">
-          <Link to={`/chat/${item.chatThreadId}`} className="underline" data-testid="ba-chat-link">
+          <Link
+            to={`/chat/${item.chatThreadId}`}
+            className="font-medium text-brand-text hover:underline"
+            data-testid="ba-chat-link"
+          >
             Discuss this with your BA
           </Link>
         </p>
@@ -40,7 +44,7 @@ export function BaNote({ item }: { item: DeskItemDto }) {
 
 const Section = ({ title, children, count }: { title: string; children: React.ReactNode; count: number }) => (
   <section className="mt-2">
-    <h3 className="text-xs font-semibold tracking-wide text-muted uppercase">
+    <h3 className="text-sm font-semibold text-fg">
       {title} <span className="font-normal normal-case">({count})</span>
     </h3>
     {count === 0 ? (

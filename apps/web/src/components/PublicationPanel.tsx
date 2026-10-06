@@ -8,7 +8,7 @@ export function PublicationPanel({ publication }: { publication: PublicationDto 
   return (
     <Panel>
       <div data-testid="publication">
-        <h2 className="mb-1 flex flex-wrap items-center gap-2 text-sm font-semibold">
+        <h2 className="mb-2 flex flex-wrap items-center gap-2 text-lg font-semibold text-fg">
           Published note <Badge tone="green">fact-checked</Badge>
         </h2>
         <p className="text-sm font-medium" data-testid="publication-title">

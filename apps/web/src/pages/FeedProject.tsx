@@ -58,7 +58,7 @@ export function FeedProject() {
       )}
 
       <Panel>
-        <h2 className="mb-1 text-sm font-semibold">Schedules</h2>
+        <h2 className="mb-2 text-lg font-semibold text-fg">Schedules</h2>
         {(schedules.data ?? []).length === 0 ? (
           <p className="text-sm text-subtle">
             No schedule.{' '}
@@ -80,7 +80,7 @@ export function FeedProject() {
       </Panel>
 
       <Panel>
-        <h2 className="mb-1 text-sm font-semibold">Running list</h2>
+        <h2 className="mb-2 text-lg font-semibold text-fg">Running list</h2>
         <p className="mb-2 text-xs text-subtle">
           {list.data?.path} · oldest first, entries are only ever appended
         </p>
@@ -118,7 +118,7 @@ export function FeedProject() {
       </Panel>
 
       <Panel>
-        <h2 className="mb-1 text-sm font-semibold">taste.md</h2>
+        <h2 className="mb-2 text-lg font-semibold text-fg">taste.md</h2>
         <p className="mb-2 text-xs text-subtle">
           {taste.data?.path} · explicit rules from your ratings; curators read this before filtering
         </p>

@@ -118,7 +118,7 @@ function PhaseView({ phase }: { phase: PhaseDetailDto }) {
 
       {phase.report && (
         <Panel data-testid="phase-report">
-          <h2 className="mb-1 text-sm font-semibold">Report</h2>
+          <h2 className="mb-2 text-lg font-semibold text-fg">Report</h2>
           <p className="text-sm whitespace-pre-wrap">{phase.report}</p>
           {phase.outstanding.length > 0 && (
             <>
@@ -134,13 +134,13 @@ function PhaseView({ phase }: { phase: PhaseDetailDto }) {
       )}
       {phase.resultsReport && (
         <Panel data-testid="phase-results">
-          <h2 className="mb-1 text-sm font-semibold">Follow-up results</h2>
+          <h2 className="mb-2 text-lg font-semibold text-fg">Follow-up results</h2>
           <p className="text-sm whitespace-pre-wrap">{phase.resultsReport}</p>
         </Panel>
       )}
       {phase.tasks.length > 0 && (
         <Panel>
-          <h2 className="mb-1 text-sm font-semibold">BA tasks</h2>
+          <h2 className="mb-2 text-lg font-semibold text-fg">BA tasks</h2>
           <ul className="text-sm" data-testid="ba-tasks">
             {phase.tasks.map((t) => (
               <li key={t.id}>
@@ -199,7 +199,7 @@ function Members({ phase }: { phase: PhaseDetailDto }) {
     );
   return (
     <Panel data-testid="phase-members">
-      <h2 className="mb-2 text-sm font-semibold">
+      <h2 className="mb-3 text-lg font-semibold text-fg">
         Cards ({phase.resolvedCount}/{phase.memberCount} done
         {phase.proposedCount ? `, ${phase.proposedCount} proposed` : ''})
       </h2>
@@ -330,7 +330,7 @@ function Followups({
   const list = draft ?? server;
   return (
     <Panel data-testid="phase-followups">
-      <h2 className="mb-1 text-sm font-semibold">Follow-ups</h2>
+      <h2 className="mb-2 text-lg font-semibold text-fg">Follow-ups</h2>
       {phase.canEditFollowups ? (
         <>
           <FollowupEditor value={list} onChange={setDraft} targets={targets} />
@@ -361,7 +361,7 @@ function Thread({ threadId }: { threadId: string }) {
   const messages = q.data?.messages ?? [];
   return (
     <Panel>
-      <h2 className="mb-2 text-sm font-semibold">Progress</h2>
+      <h2 className="mb-3 text-lg font-semibold text-fg">Progress</h2>
       <ul className="flex flex-col gap-1.5 text-sm" data-testid="phase-thread">
         {messages.map((m) => (
           <li key={m.id}>

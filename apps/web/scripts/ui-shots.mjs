@@ -82,13 +82,18 @@ const shot = async (p, file, full) => {
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(350);
   const vp = p.viewportSize();
-  const h = full ? await p.evaluate(() => document.documentElement.scrollHeight) : vp.height;
-  const max = vp.width < 600 ? 2000 : 1700; // keep the committed PNGs small and legible
-  await p.screenshot({
-    path: file,
-    ...(full ? { fullPage: true, clip: { x: 0, y: 0, width: vp.width, height: Math.min(h, max) } } : {}),
-    animations: 'disabled',
-  });
+  if (full) {
+    // Resize the viewport to the content (capped) so the sticky 100dvh sidebar fills the shot like it does in use.
+    const h = await p.evaluate(() => document.documentElement.scrollHeight);
+    const max = vp.width < 600 ? 2000 : 1700; // keep the committed PNGs small and legible
+    const target = Math.max(vp.height, Math.min(h, max));
+    if (target !== vp.height) {
+      await p.setViewportSize({ width: vp.width, height: target });
+      await p.waitForTimeout(250);
+    }
+    await p.screenshot({ path: file, animations: 'disabled' });
+    if (target !== vp.height) await p.setViewportSize(vp);
+  } else await p.screenshot({ path: file, animations: 'disabled' });
 };
 for (const sk of sizesWanted)
   for (const scheme of themes) {

@@ -315,6 +315,7 @@ test('AC2: vault sync pushes local edits, pulls remote edits and pauses on a con
     ['Work vault', 'vault-work', WORK],
     ['Personal vault', 'vault-personal', PERSONAL],
   ] as const) {
+    await page.getByRole('button', { name: 'Register a vault' }).click();
     const form = page.getByRole('form', { name: 'Register vault' });
     await form.getByLabel('Kind').selectOption({ label: kind });
     await form.getByLabel('Git URL').fill(v.origin);

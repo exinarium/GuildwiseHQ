@@ -27,7 +27,7 @@ export function MergePolicyPanel({
 
   return (
     <Panel>
-      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+      <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-fg">
         Large changes
         <Badge tone={on ? 'amber' : 'neutral'}>
           <span data-testid="merge-policy-state">{on ? 'Merge without approval' : 'Approval required'}</span>

@@ -27,12 +27,18 @@ function BoardSkeleton() {
     <div role="status" aria-live="polite">
       <span className="sr-only">Loading board...</span>
       <div aria-hidden="true" className="flex gap-3 overflow-hidden">
-        {[3, 2, 3, 2, 1].map((n, i) => (
+        {[
+          { id: 'a', n: 3 },
+          { id: 'b', n: 2 },
+          { id: 'c', n: 3 },
+          { id: 'd', n: 2 },
+          { id: 'e', n: 1 },
+        ].map(({ id, n }) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder
-          <div key={`c${i}`} className="w-[17rem] shrink-0 space-y-2 rounded-card bg-sunken p-2">
+          <div key={id} className="w-[17rem] shrink-0 space-y-2 rounded-card bg-sunken p-2">
             <Skeleton className="h-5 w-1/2" />
             {['a', 'b', 'c'].slice(0, n).map((j) => (
-              <Skeleton key={`${i}${j}`} className="h-20 rounded-card bg-surface" />
+              <Skeleton key={`${id}${j}`} className="h-20 rounded-card bg-surface" />
             ))}
           </div>
         ))}

@@ -30,7 +30,7 @@ export function Settings() {
       <ErrorBox error={reporting.error ?? setZone.error ?? update.error} />
 
       <Panel>
-        <h2 className="text-sm font-semibold">Your time zone</h2>
+        <h2 className="text-lg font-semibold text-fg">Your time zone</h2>
         <p className="mt-1 text-xs text-subtle">
           The daily floor report is posted at {prefs?.dailyAt} on your clock. We took it from your browser the
           first time you signed in. Until a zone is set, reports use UTC.
@@ -59,7 +59,7 @@ export function Settings() {
       </Panel>
 
       <Panel>
-        <h2 className="text-sm font-semibold">Your BA reports to you</h2>
+        <h2 className="text-lg font-semibold text-fg">Your BA reports to you</h2>
         <p className="mt-1 text-xs text-subtle">
           With routing on, what agents raise goes to your BA first. Urgent blocking questions and approvals
           still reach you at once (the BA adds context afterwards), and anything the BA has not looked at

@@ -170,7 +170,7 @@ export function Interests() {
 
       {(list.data?.tasteProjects ?? []).length > 0 && (
         <Panel data-testid="taste-projects">
-          <h2 className="mb-2 text-sm font-semibold">Project taste rules</h2>
+          <h2 className="mb-3 text-lg font-semibold text-fg">Project taste rules</h2>
           <ul className="flex flex-col gap-2">
             {list.data?.tasteProjects.map((t) => (
               <li
@@ -226,7 +226,7 @@ function InterestCard({
   return (
     <Panel>
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold">{i.name}</h2>
+        <h2 className="text-lg font-semibold text-fg">{i.name}</h2>
         <Badge tone={i.status === 'active' ? 'green' : 'amber'}>
           {i.status === 'active' ? 'Active' : 'Paused'}
         </Badge>

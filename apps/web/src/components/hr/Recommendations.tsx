@@ -32,7 +32,7 @@ export function RecommendationList({ recommendations }: { recommendations: Recom
   if (recommendations.length === 0) return null;
   return (
     <section aria-label="Recommendations" data-testid="recommendations" className="mb-4">
-      <h2 className="mb-2 text-sm font-semibold">Recommendations</h2>
+      <h2 className="mb-3 text-lg font-semibold text-fg">Recommendations</h2>
       <ul className="flex flex-col gap-2">
         {recommendations.map((r) => (
           <li key={r.id} data-testid={`rec-${r.kind}`} data-rec-id={r.id}>
@@ -116,7 +116,7 @@ export function RoleUpdates({ updates }: { updates: RoleUpdate[] }) {
   const ext = open?.extensions;
   return (
     <section aria-label="Role updates" data-testid="role-updates" className="mb-4">
-      <h2 className="mb-2 text-sm font-semibold">New defaults for built-in roles</h2>
+      <h2 className="mb-3 text-lg font-semibold text-fg">New defaults for built-in roles</h2>
       <ul className="flex flex-col gap-2">
         {updates.map((u) => (
           <li key={u.roleKey} data-testid={`role-update-${u.roleKey}`}>

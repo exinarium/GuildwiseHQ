@@ -2,7 +2,7 @@ import type { CreateLedgerEntryRequest } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { useAddLedgerEntry } from '../api/queries/ledger.ts';
 import { useProjects } from '../api/queries/projects.ts';
-import { Button, ErrorBox, Select, TextArea, TextInput } from './ui.tsx';
+import { Button, ErrorBox, Select, TextArea, TextInput, useToast } from './ui.tsx';
 
 type Kind = 'standing_order' | 'feature' | 'decision';
 
@@ -10,7 +10,14 @@ type Kind = 'standing_order' | 'feature' | 'decision';
  * Adds a requirement, decision or standing order straight to the ledger (no question needed). Standing orders may
  * apply to every project; requirements and decisions belong to a project.
  */
-export function LedgerForm({ defaultKind = 'standing_order' }: { defaultKind?: Kind }) {
+export function LedgerForm({
+  defaultKind = 'standing_order',
+  onDone,
+}: {
+  defaultKind?: Kind;
+  onDone?: () => void;
+}) {
+  const toast = useToast();
   const projects = useProjects();
   const add = useAddLedgerEntry();
   const [kind, setKind] = useState<Kind>(defaultKind);
@@ -36,12 +43,14 @@ export function LedgerForm({ defaultKind = 'standing_order' }: { defaultKind?: K
       onSuccess: () => {
         setTitle('');
         setBody('');
+        toast.success('Added to the ledger');
+        onDone?.();
       },
     });
   };
 
   return (
-    <form onSubmit={submit} aria-label="Add to ledger" className="flex flex-col gap-2" noValidate>
+    <form onSubmit={submit} aria-label="Add to ledger" className="flex flex-col gap-4" noValidate>
       <Select label="Kind" value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
         <option value="standing_order">Standing order (every agent loads it)</option>
         <option value="feature">Requirement</option>
@@ -62,12 +71,12 @@ export function LedgerForm({ defaultKind = 'standing_order' }: { defaultKind?: K
       <TextInput label="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
       <TextArea label="Text" value={body} onChange={(e) => setBody(e.target.value)} error={err} />
       <ErrorBox error={add.error} />
-      {add.isSuccess && !add.isPending && (
+      {add.isSuccess && !add.isPending && !onDone && (
         <p role="status" className="text-sm text-success">
           Added to the ledger.
         </p>
       )}
-      <Button type="submit" variant="primary" disabled={add.isPending} className="self-start">
+      <Button type="submit" variant="primary" loading={add.isPending} className="self-start">
         Add to ledger
       </Button>
     </form>

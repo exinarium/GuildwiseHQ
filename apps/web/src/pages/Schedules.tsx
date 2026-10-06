@@ -75,7 +75,7 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
   return (
     <Panel>
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold">{s.name}</h2>
+        <h2 className="text-lg font-semibold text-fg">{s.name}</h2>
         <Badge>{s.kind}</Badge>
         {projectKey && (
           <Link to={`/p/${projectKey}/feed`} className="text-xs underline">
@@ -216,7 +216,7 @@ function NewSchedule({ projects }: { projects: ProjectDto[] }) {
 
   return (
     <Panel>
-      <h2 className="mb-2 text-sm font-semibold">New feed schedule</h2>
+      <h2 className="mb-3 text-lg font-semibold text-fg">New feed schedule</h2>
       <p className="mb-2 text-xs text-subtle" data-testid="schedules-interests-hint">
         Feeds are easier to manage as{' '}
         <Link to="/interests" className="underline">

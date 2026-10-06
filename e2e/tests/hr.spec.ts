@@ -121,7 +121,7 @@ test('setup: a paired mock runner, project HRB on the toy repo, a senior reviewe
 
   // Hire the builder from the HR board: themed name generator, then the model typed in.
   await page.goto('/agents');
-  await expect(page.getByRole('heading', { name: 'HR board' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
   await page.getByRole('button', { name: 'Hire agent' }).first().click();
   const form = page.getByRole('form', { name: 'Hire agent' });
   await form.getByLabel('Role', { exact: true }).selectOption({ label: 'Builder' });

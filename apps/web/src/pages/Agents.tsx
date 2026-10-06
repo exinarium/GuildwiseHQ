@@ -1,4 +1,5 @@
 import { type AgentDto, type HrAgent, NAME_THEMES } from '@aom/shared';
+import { Users } from 'lucide-react';
 import { type FormEvent, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useAgents, useFire, useHire, useNameSuggestions, useRoles } from '../api/queries/agents.ts';
@@ -17,13 +18,17 @@ import {
   Avatar,
   Badge,
   Button,
+  ButtonLink,
   Dialog,
+  Disclosure,
+  EmptyState,
   ErrorBox,
+  ListSkeleton,
   PageHeader,
   Panel,
   Select,
-  Spinner,
   TextInput,
+  useToast,
 } from '../components/ui.tsx';
 import { getLastProjectKey } from '../lib/lastProject.ts';
 import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../lib/sandbox.ts';
@@ -71,20 +76,20 @@ export function Agents() {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
-        title="HR board"
-        sub={`Stats over the last ${board.data?.windowDays ?? 30} days, each against the average of the agents in the role.`}
+        title="Agents"
+        sub={`Performance over the last ${board.data?.windowDays ?? 30} days, each against the average of the agents in the role.`}
         actions={
           <>
-            <Link to="/metrics" className="text-sm underline" data-testid="metrics-link">
+            <ButtonLink to="/metrics" data-testid="metrics-link">
               Metrics
-            </Link>
+            </ButtonLink>
             <Button variant="primary" onClick={() => setHireOpen(true)}>
               Hire agent
             </Button>
           </>
         }
       />
-      <div className="mb-3 flex flex-wrap gap-3">
+      <div className="mb-4 flex flex-wrap gap-3">
         {(projects.data?.length ?? 0) > 1 && (
           <div className="w-full max-w-xs">
             <Select label="Project" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
@@ -114,15 +119,22 @@ export function Agents() {
           </div>
         )}
       </div>
-      {board.isPending && <Spinner />}
-      {board.isError && <ErrorBox error={board.error} />}
+      {board.isPending && <ListSkeleton label="Loading agents" />}
+      {board.isError && <ErrorBox error={board.error} onRetry={() => board.refetch()} />}
       <ErrorBox error={reset.error} />
       {board.data && <RoleUpdates updates={board.data.roleUpdates} />}
       {board.data && <RecommendationList recommendations={board.data.recommendations} />}
       {board.data && active.length === 0 && (
-        <Panel>
-          <p className="text-sm text-subtle">No agents hired yet.</p>
-        </Panel>
+        <EmptyState
+          icon={Users}
+          title="No agents yet"
+          description="Hire a builder and a reviewer to start moving cards."
+          action={
+            <Button variant="primary" onClick={() => setHireOpen(true)}>
+              Hire agent
+            </Button>
+          }
+        />
       )}
       <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="agents">
         {active.map((h) => (
@@ -152,16 +164,17 @@ export function Agents() {
         ))}
       </ul>
       {retired.length > 0 && (
-        <details className="mt-4 text-sm text-subtle">
-          <summary className="cursor-pointer">Retired ({retired.length})</summary>
-          <ul className="mt-1">
+        <Disclosure className="mt-6" summary={`Retired (${retired.length})`}>
+          <ul className="divide-y divide-line rounded-card border border-line bg-surface">
             {retired.map((a) => (
-              <li key={a.id}>
-                {a.name} · {roleName(a.roleKey)}
+              <li key={a.id} className="flex items-center gap-3 px-4 py-2.5 text-sm text-muted">
+                <Avatar name={a.name} size={22} />
+                <span className="font-medium text-fg">{a.name}</span>
+                <span>{roleName(a.roleKey)}</span>
               </li>
             ))}
           </ul>
-        </details>
+        </Disclosure>
       )}
       <HireDialog open={hireOpen} onOpenChange={setHireOpen} prefill={prefill} />
       <FireDialog agent={firing} onClose={() => setFiring(null)} />
@@ -200,12 +213,24 @@ function AgentCard({
   const a = hr.agent;
   const isBuilder = a.roleKey === 'builder';
   return (
-    <Panel className="flex h-full flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <Avatar name={a.name} size={36} />
+    <Panel className="flex h-full flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <span
+          className={`rounded-full p-0.5 ring-2 ring-offset-2 ring-offset-surface ${
+            a.status === 'needs_rehome'
+              ? 'ring-warning-fill'
+              : a.activeCards.length
+                ? 'ring-accent'
+                : hr.blockedOn.length
+                  ? 'ring-danger-fill'
+                  : 'ring-line'
+          }`}
+        >
+          <Avatar name={a.name} size={40} />
+        </span>
         <div className="min-w-0">
-          <p className="truncate font-medium">{a.name}</p>
-          <p className="text-xs text-subtle">
+          <p className="truncate text-lg leading-tight font-semibold text-fg">{a.name}</p>
+          <p className="text-sm text-muted">
             {roleName} · {a.seniority}
             {projectKey && ` · ${projectKey}`}
           </p>
@@ -224,7 +249,7 @@ function AgentCard({
           )}
         </span>
       </div>
-      <p className="text-xs text-subtle" data-testid="agent-model">
+      <p className="font-mono text-xs text-subtle" data-testid="agent-model">
         {a.runtime} · {a.model}
         {a.effort ? ` · ${a.effort}` : ''}
         {station && ` · ${station}`}
@@ -237,17 +262,25 @@ function AgentCard({
       <p className="text-xs text-subtle" data-testid="agent-hired-by">
         Hired by {hr.hiredByName}
       </p>
-      <p className="text-sm" data-testid="agent-current-card">
+      <p className="rounded-control bg-sunken px-3 py-2 text-sm text-muted" data-testid="agent-current-card">
         {a.activeCards.length === 0
           ? hr.blockedOn.length
             ? hr.blockedOn.map((c) => (
-                <Link key={c.cardId} to={`/cards/${c.cardId}`} className="underline">
+                <Link
+                  key={c.cardId}
+                  to={`/cards/${c.cardId}`}
+                  className="font-medium text-brand-text hover:underline"
+                >
                   {c.ref} {c.title} (blocked)
                 </Link>
               ))
             : 'No current card'
           : a.activeCards.map((c) => (
-              <Link key={c.cardId} to={`/cards/${c.cardId}`} className="underline">
+              <Link
+                key={c.cardId}
+                to={`/cards/${c.cardId}`}
+                className="font-medium text-brand-text hover:underline"
+              >
                 {c.ref} {c.title}
               </Link>
             ))}
@@ -258,25 +291,37 @@ function AgentCard({
         <div className="mt-auto flex items-center gap-2">
           <Badge tone="violet">DevOps engineer</Badge>
           {canManage && (
-            <Button variant="ghost" aria-label={`Reset ${a.name}`} disabled={resetting} onClick={onReset}>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`Reset ${a.name}`}
+              disabled={resetting}
+              onClick={onReset}
+            >
               Reset
             </Button>
           )}
         </div>
       ) : canManage ? (
-        <div className="mt-auto flex flex-wrap gap-2">
+        <div className="mt-auto flex flex-wrap items-center gap-1 border-t border-line pt-3">
           {a.status === 'needs_rehome' && (
-            <Button variant="primary" aria-label={`Re-home ${a.name}`} onClick={onRehome}>
+            <Button variant="primary" size="sm" aria-label={`Re-home ${a.name}`} onClick={onRehome}>
               Re-home
             </Button>
           )}
-          <Button variant="ghost" aria-label={`Change model of ${a.name}`} onClick={onModel}>
+          <Button variant="ghost" size="sm" aria-label={`Change model of ${a.name}`} onClick={onModel}>
             Change model
           </Button>
-          <Button variant="ghost" aria-label={`Change role of ${a.name}`} onClick={onRole}>
+          <Button variant="ghost" size="sm" aria-label={`Change role of ${a.name}`} onClick={onRole}>
             Change role
           </Button>
-          <Button variant="ghost" aria-label={`Fire ${a.name}`} onClick={onFire}>
+          <Button
+            variant="danger-ghost"
+            size="sm"
+            className="ml-auto"
+            aria-label={`Fire ${a.name}`}
+            onClick={onFire}
+          >
             Fire
           </Button>
         </div>
@@ -381,12 +426,13 @@ function RehomeDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () 
 
 function FireDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () => void }) {
   const fire = useFire();
+  const toast = useToast();
   return (
     <Dialog
       open={!!agent}
       onOpenChange={(o) => !o && onClose()}
       title={`Fire ${agent?.name ?? ''}?`}
-      description="The agent is retired and its sandbox wiped. Its name is never reused."
+      description="The agent is retired, its sandbox is wiped and its record is kept. Its name is never reused."
     >
       {agent && (
         <div className="flex flex-col gap-3">
@@ -412,7 +458,14 @@ function FireDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () =>
             <Button
               variant="danger"
               disabled={fire.isPending}
-              onClick={() => fire.mutate(agent.id, { onSuccess: onClose })}
+              onClick={() =>
+                fire.mutate(agent.id, {
+                  onSuccess: () => {
+                    toast.success(`${agent.name} was fired`);
+                    onClose();
+                  },
+                })
+              }
             >
               Confirm fire
             </Button>

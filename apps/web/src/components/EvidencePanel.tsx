@@ -18,7 +18,7 @@ export function EvidencePanel({
   return (
     <Panel>
       <div data-testid="evidence-panel">
-        <h2 className="mb-2 text-sm font-semibold">Test evidence ({testing.testRuns.length})</h2>
+        <h2 className="mb-3 text-lg font-semibold text-fg">Test evidence ({testing.testRuns.length})</h2>
         <ul className="flex flex-col gap-2">
           {testing.testRuns.map((r) => (
             <li

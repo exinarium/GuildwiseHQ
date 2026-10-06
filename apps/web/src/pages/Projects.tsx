@@ -1,5 +1,6 @@
 import type { ProjectDto } from '@aom/shared';
 import { CreateProjectRequestSchema, workflowUsesRepos } from '@aom/shared';
+import { Archive, Code2, FlaskConical, FolderKanban, Rss, Settings2 } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
 import { useWorkflows } from '../api/queries/agents.ts';
@@ -11,18 +12,66 @@ import {
 } from '../api/queries/projects.ts';
 import { DeleteProjectDialog } from '../components/DeleteProjectDialog.tsx';
 import { ProjectInvitations } from '../components/ProjectInvitations.tsx';
+import { projectTypeLabel } from '../components/shell/ProjectSwitcher.tsx';
+import { cx } from '../components/ui/cx.ts';
 import {
   Badge,
   Button,
   Dialog,
+  EmptyState,
   ErrorBox,
+  ListSkeleton,
   PageHeader,
-  Panel,
   Select,
-  Spinner,
+  Tabs,
   TextInput,
+  useToast,
 } from '../components/ui.tsx';
 import { departmentsOf, inDepartment } from '../lib/designer.ts';
+
+const TYPE_ICON = { code: Code2, research: FlaskConical, feed: Rss } as const;
+
+function ProjectCard({ p }: { p: ProjectDto }) {
+  const Icon = TYPE_ICON[p.workflowKey as keyof typeof TYPE_ICON] ?? FolderKanban;
+  return (
+    <li className="group relative rounded-card border border-line bg-surface p-4 transition-shadow hover:border-control hover:shadow-md">
+      <div className="flex items-start gap-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-control bg-brand-soft text-brand-soft-fg">
+          <Icon aria-hidden="true" className="size-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <Link
+            to={`/p/${p.key}/board`}
+            className="block truncate text-lg font-semibold text-fg after:absolute after:inset-0 after:rounded-card"
+          >
+            {p.name}
+          </Link>
+          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-subtle">
+            <span className="font-mono font-semibold text-muted">{p.key}</span>
+            <span aria-hidden="true">·</span>
+            {projectTypeLabel(p.workflowKey)}
+          </p>
+        </div>
+        <Link
+          className="relative z-10 -mt-1 -mr-1 inline-flex size-10 items-center justify-center rounded-control text-muted hover:bg-sunken hover:text-fg"
+          aria-label={`Settings for ${p.key}`}
+          title="Project settings"
+          to={`/projects/${p.id}/settings`}
+        >
+          <Settings2 aria-hidden="true" className="size-4" />
+        </Link>
+      </div>
+      <p className="mt-3 flex flex-wrap items-center gap-1.5">
+        <Badge>{p.workflowKey}</Badge>
+        {p.department && <Badge tone="violet">{p.department}</Badge>}
+        <Badge>{p.domain}</Badge>
+        <Badge tone={p.myRole === 'owner' ? 'blue' : 'neutral'}>
+          {p.myRole === 'owner' ? 'owner' : 'shared with you'}
+        </Badge>
+      </p>
+    </li>
+  );
+}
 
 export function Projects() {
   const projects = useProjects();
@@ -33,9 +82,10 @@ export function Projects() {
   const departments = departmentsOf(projects.data ?? []);
   const shown = inDepartment(projects.data ?? [], department);
   return (
-    <div className="mx-auto max-w-4xl">
+    <div className="mx-auto max-w-5xl">
       <PageHeader
         title="Projects"
+        sub="Each project owns a board, its agents and, for code, its repositories."
         actions={
           <Button variant="primary" onClick={() => setOpen(true)}>
             New project
@@ -43,76 +93,55 @@ export function Projects() {
         }
       />
       <ProjectInvitations />
-      {departments.length > 0 && (
-        <div className="mb-3 max-w-xs">
-          <Select label="Department" value={department} onChange={(e) => setDepartment(e.target.value)}>
-            <option value="">All departments</option>
-            {departments.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </Select>
-        </div>
-      )}
-      <div className="mb-3 flex gap-1" role="tablist" aria-label="Project filter">
-        <Button
-          role="tab"
-          aria-selected={!showArchived}
-          variant={showArchived ? 'ghost' : 'secondary'}
-          data-testid="filter-active"
-          onClick={() => setShowArchived(false)}
-        >
-          Active
-        </Button>
-        <Button
-          role="tab"
-          aria-selected={showArchived}
-          variant={showArchived ? 'secondary' : 'ghost'}
-          data-testid="filter-archived"
-          onClick={() => setShowArchived(true)}
-        >
-          Archived{archived.data && archived.data.length > 0 ? ` (${archived.data.length})` : ''}
-        </Button>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <Tabs
+          label="Project filter"
+          prefix="projects"
+          value={showArchived ? 'archived' : 'active'}
+          onChange={(v) => setShowArchived(v === 'archived')}
+          className="mb-4 flex-1"
+          tabs={[
+            { id: 'active', label: 'Active', testId: 'filter-active' },
+            {
+              id: 'archived',
+              label: `Archived${archived.data && archived.data.length > 0 ? ` (${archived.data.length})` : ''}`,
+              testId: 'filter-archived',
+            },
+          ]}
+        />
+        {departments.length > 0 && !showArchived && (
+          <div className="mb-4 w-52">
+            <Select label="Department" value={department} onChange={(e) => setDepartment(e.target.value)}>
+              <option value="">All departments</option>
+              {departments.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
       </div>
       {showArchived && <ArchivedProjects />}
-      {!showArchived && projects.isPending && <Spinner />}
-      {!showArchived && projects.isError && <ErrorBox error={projects.error} />}
-      {!showArchived && projects.data?.length === 0 && (
-        <Panel>
-          <p className="text-sm text-subtle">No projects yet. Create one to start a board.</p>
-        </Panel>
+      {!showArchived && projects.isPending && <ListSkeleton label="Loading projects" />}
+      {!showArchived && projects.isError && (
+        <ErrorBox error={projects.error} onRetry={() => projects.refetch()} />
       )}
-      <ul className="flex flex-col gap-2" hidden={showArchived}>
+      {!showArchived && projects.data?.length === 0 && (
+        <EmptyState
+          icon={FolderKanban}
+          title="No projects yet"
+          description="A project is where the work happens: a board, a team of agents and, for code, its repositories. Create your first one to start."
+          action={
+            <Button variant="primary" onClick={() => setOpen(true)}>
+              Create your first project
+            </Button>
+          }
+        />
+      )}
+      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" hidden={showArchived}>
         {shown.map((p) => (
-          <li key={p.id}>
-            <Panel className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="font-medium">
-                  <span className="mr-2 font-mono text-xs text-subtle">{p.key}</span>
-                  {p.name}
-                </p>
-                <p className="mt-0.5 flex gap-1.5 text-xs text-subtle">
-                  <Badge>{p.workflowKey}</Badge>
-                  {p.department && <Badge tone="violet">{p.department}</Badge>}
-                  <Badge>{p.domain}</Badge>
-                  <Badge tone="blue">{p.myRole}</Badge>
-                </p>
-              </div>
-              <div className="flex gap-2 text-sm">
-                <Link className="rounded-control px-2 py-1 underline" to={`/p/${p.key}/board`}>
-                  Board
-                </Link>
-                <Link
-                  className="rounded-control px-2 py-1 underline"
-                  aria-label={`Settings for ${p.key}`}
-                  to={`/projects/${p.id}/settings`}
-                >
-                  Settings
-                </Link>
-              </div>
-            </Panel>
-          </li>
+          <ProjectCard key={p.id} p={p} />
         ))}
       </ul>
       <NewProjectDialog open={open} onOpenChange={setOpen} />
@@ -124,55 +153,60 @@ export function Projects() {
 function ArchivedProjects() {
   const archived = useArchivedProjects();
   const restore = useRestoreProject();
+  const toast = useToast();
   const [deleting, setDeleting] = useState<ProjectDto | null>(null);
   return (
     <section aria-label="Archived projects" data-testid="archived-projects">
-      {archived.isPending && <Spinner />}
-      {archived.isError && <ErrorBox error={archived.error} />}
+      {archived.isPending && <ListSkeleton label="Loading archived projects" rows={2} />}
+      {archived.isError && <ErrorBox error={archived.error} onRetry={() => archived.refetch()} />}
       {archived.data?.length === 0 && (
-        <Panel>
-          <p className="text-sm text-subtle" data-testid="archived-empty">
-            No archived projects.
-          </p>
-        </Panel>
+        <EmptyState
+          data-testid="archived-empty"
+          icon={Archive}
+          tone="neutral"
+          title="No archived projects"
+          description="Archiving a project stops its work and hides it from pickers. You can restore it here."
+        />
       )}
       <ErrorBox error={restore.error} />
       <ul className="flex flex-col gap-2">
         {archived.data?.map((p) => (
-          <li key={p.id} data-testid={`archived-${p.key}`}>
-            <Panel className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="font-medium">
-                  <span className="mr-2 font-mono text-xs text-subtle">{p.key}</span>
-                  {p.name}
-                </p>
-                <p className="mt-0.5 flex gap-1.5 text-xs text-subtle">
-                  <Badge tone="amber">Archived</Badge>
-                  <Badge tone="blue">{p.myRole}</Badge>
-                </p>
-              </div>
-              <div className="flex gap-2 text-sm">
+          <li
+            key={p.id}
+            data-testid={`archived-${p.key}`}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface p-4"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-lg font-semibold text-fg">
+                <span className="mr-2 font-mono text-sm font-medium text-subtle">{p.key}</span>
+                {p.name}
+              </p>
+              <p className="mt-1 flex gap-1.5">
+                <Badge tone="amber">Archived</Badge>
+                <Badge tone="blue">{p.myRole}</Badge>
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="primary"
+                aria-label={`Restore ${p.key}`}
+                loading={restore.isPending}
+                data-testid={`restore-${p.key}`}
+                onClick={() => restore.mutate(p.id, { onSuccess: () => toast.success(`${p.name} restored`) })}
+              >
+                Restore
+              </Button>
+              {p.myRole === 'owner' && (
                 <Button
-                  variant="primary"
-                  aria-label={`Restore ${p.key}`}
-                  disabled={restore.isPending}
-                  data-testid={`restore-${p.key}`}
-                  onClick={() => restore.mutate(p.id)}
+                  variant="danger-ghost"
+                  aria-label={`Delete ${p.key} permanently`}
+                  data-testid={`delete-${p.key}`}
+                  onClick={() => setDeleting(p)}
                 >
-                  Restore
+                  Delete permanently
                 </Button>
-                {p.myRole === 'owner' && (
-                  <Button
-                    variant="danger"
-                    aria-label={`Delete ${p.key} permanently`}
-                    data-testid={`delete-${p.key}`}
-                    onClick={() => setDeleting(p)}
-                  >
-                    Delete permanently
-                  </Button>
-                )}
-              </div>
-            </Panel>
+              )}
+            </div>
           </li>
         ))}
       </ul>
@@ -189,16 +223,43 @@ function ArchivedProjects() {
   );
 }
 
+const WORKFLOW_BLURB: Record<string, { title: string; text: string; icon: typeof Code2 }> = {
+  code: {
+    title: 'Code',
+    text: 'Build features with agents. Spec to Finalize, uses repositories.',
+    icon: Code2,
+  },
+  research: {
+    title: 'Research',
+    text: 'Answer questions with cited sources. Results go to your vault.',
+    icon: FlaskConical,
+  },
+  feed: { title: 'Feed', text: 'Scheduled scans and digests you rate.', icon: Rss },
+};
+
 function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const create = useCreateProject();
+  const toast = useToast();
   const workflows = useWorkflows();
   const [key, setKey] = useState('');
   const [name, setName] = useState('');
+  const [keyTouched, setKeyTouched] = useState(false);
   const [workflowKey, setWorkflowKey] = useState('code');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const selected = workflows.data?.find((w) => w.definition.key === workflowKey)?.definition;
   const noRepo = selected ? !workflowUsesRepos(selected) : false;
   const keys = [...new Set(workflows.data?.map((w) => w.definition.key) ?? ['code'])];
+
+  const onName = (v: string) => {
+    setName(v);
+    if (!keyTouched)
+      setKey(
+        v
+          .replace(/[^A-Za-z0-9]/g, '')
+          .slice(0, 4)
+          .toUpperCase(),
+      );
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -216,8 +277,10 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
     setErrors({});
     create.mutate(parsed.data, {
       onSuccess: () => {
+        toast.success(`Project ${parsed.data.name} created`);
         setKey('');
         setName('');
+        setKeyTouched(false);
         onOpenChange(false);
       },
     });
@@ -230,32 +293,58 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
       title="New project"
       description="A project owns a board and agents. Code projects also own repositories."
     >
-      <form onSubmit={submit} noValidate className="flex flex-col gap-3">
+      <form onSubmit={submit} noValidate className="flex flex-col gap-4" aria-label="New project">
+        <TextInput label="Name" value={name} onChange={(e) => onName(e.target.value)} error={errors.name} />
         <TextInput
           label="Key"
           value={key}
-          onChange={(e) => setKey(e.target.value.toUpperCase())}
+          onChange={(e) => {
+            setKeyTouched(true);
+            setKey(e.target.value.toUpperCase());
+          }}
           error={errors.key}
           hint="Used in card refs, for example TOY-1"
           maxLength={10}
         />
-        <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} error={errors.name} />
-        <Select label="Workflow" value={workflowKey} onChange={(e) => setWorkflowKey(e.target.value)}>
-          {keys.map((k) => (
-            <option key={k} value={k}>
-              {k}
-            </option>
-          ))}
-        </Select>
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1.5 text-sm font-medium text-fg">Workflow</legend>
+          {keys.map((k) => {
+            const b = WORKFLOW_BLURB[k];
+            const Icon = b?.icon ?? FolderKanban;
+            return (
+              <label
+                key={k}
+                className={cx(
+                  'flex cursor-pointer items-start gap-3 rounded-card border p-3 transition-colors',
+                  workflowKey === k ? 'border-brand bg-brand-soft' : 'border-control hover:bg-sunken',
+                )}
+              >
+                <input
+                  type="radio"
+                  name="workflow"
+                  value={k}
+                  checked={workflowKey === k}
+                  onChange={() => setWorkflowKey(k)}
+                  className="mt-1 size-4"
+                />
+                <Icon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-muted" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-base font-medium text-fg">{b?.title ?? k}</span>
+                  <span className="block text-sm text-muted">{b?.text ?? `Custom workflow ${k}.`}</span>
+                </span>
+              </label>
+            );
+          })}
+        </fieldset>
         <p className="-mt-2 text-xs text-subtle" data-testid="workflow-hint">
           {noRepo
             ? "No repository needed; results go to the project's vault folder."
             : 'Add repositories in project settings.'}
         </p>
         <ErrorBox error={create.error} />
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end [&>button]:max-sm:w-full">
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" disabled={create.isPending}>
+          <Button type="submit" variant="primary" loading={create.isPending}>
             Create project
           </Button>
         </div>

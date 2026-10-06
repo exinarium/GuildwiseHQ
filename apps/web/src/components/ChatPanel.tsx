@@ -3,7 +3,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { useChat, useThreadMessages } from '../api/queries/chats.ts';
 import { newId } from '../lib/secure.ts';
 import { getSocket } from '../ws/socket.ts';
-import { Avatar, Button, ErrorBox, Spinner, TextArea } from './ui.tsx';
+import { Avatar, Button, Callout, ErrorBox, Spinner, TextArea } from './ui.tsx';
 
 const OFFLINE_TEXT =
   'This agent is offline: its workstation is not connected. Nothing is queued, so send your message again once it is back.';
@@ -103,13 +103,9 @@ export function ChatPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2" data-testid="chat-panel">
       {offline && (
-        <p
-          role="alert"
-          data-testid="chat-offline"
-          className="rounded-control border border-warning-fill/40 bg-warning-soft px-3 py-2 text-sm text-warning-soft-fg"
-        >
+        <Callout tone="warning" role="alert" data-testid="chat-offline">
           {name} is offline: its workstation is not connected. Messages are not queued.
-        </p>
+        </Callout>
       )}
       {chat?.projectId && (
         <p className="text-xs text-subtle" data-testid="chat-visibility">
@@ -120,10 +116,10 @@ export function ChatPanel({
         ref={log}
         role="log"
         aria-label="Conversation"
-        className="min-h-40 flex-1 overflow-y-auto rounded-control border border-line p-2"
+        className="min-h-40 flex-1 overflow-y-auto rounded-card border border-line bg-surface p-3"
       >
         {list.length === 0 && !showPending && streaming === null && (
-          <p className="text-sm text-subtle">Say hello to {name ?? 'the agent'}.</p>
+          <p className="py-6 text-center text-sm text-subtle">Say hello to {name ?? 'the agent'}.</p>
         )}
         <ul className="flex flex-col gap-2">
           {list.map((m) => (
@@ -131,12 +127,14 @@ export function ChatPanel({
               key={m.id}
               data-testid="chat-message"
               data-author-kind={m.authorKind}
-              className={`max-w-[92%] rounded-card px-3 py-2 text-sm ${
-                m.authorKind === 'user' ? 'self-end bg-brand text-white' : 'self-start bg-sunken '
+              className={`max-w-[88%] rounded-[14px] px-3.5 py-2 text-base ${
+                m.authorKind === 'user'
+                  ? 'self-end rounded-br-[4px] bg-brand text-brand-fg'
+                  : 'self-start rounded-bl-[4px] bg-sunken text-fg'
               }`}
             >
               {m.authorKind === 'agent' && (
-                <span className="mb-0.5 flex items-center gap-1 text-xs font-medium text-subtle">
+                <span className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted">
                   <Avatar name={m.authorName ?? 'agent'} size={16} />
                   {m.authorName}
                 </span>
@@ -148,7 +146,7 @@ export function ChatPanel({
             <li
               data-testid="chat-message"
               data-author-kind="user"
-              className="max-w-[92%] self-end rounded-card bg-brand px-3 py-2 text-sm text-white"
+              className="max-w-[88%] self-end rounded-[14px] rounded-br-[4px] bg-brand px-3.5 py-2 text-base text-brand-fg"
             >
               <p className="whitespace-pre-wrap">{pending.body}</p>
             </li>
@@ -157,17 +155,31 @@ export function ChatPanel({
             <li
               data-testid="chat-streaming"
               aria-live="polite"
-              className="max-w-[92%] self-start rounded-card bg-sunken px-3 py-2 text-sm"
+              className="max-w-[88%] self-start rounded-[14px] rounded-bl-[4px] bg-sunken px-3.5 py-2 text-base text-fg"
             >
-              <p className="whitespace-pre-wrap">{streaming || '…'}</p>
+              {streaming ? (
+                <p className="whitespace-pre-wrap">{streaming}</p>
+              ) : (
+                <p className="flex items-center gap-1 py-1" role="status">
+                  <span className="sr-only">{name ?? 'The agent'} is typing</span>
+                  {[0, 1, 2].map((d) => (
+                    <span
+                      key={d}
+                      aria-hidden="true"
+                      className="size-1.5 animate-pulse-soft rounded-full bg-subtle"
+                      style={{ animationDelay: `${d * 0.25}s` }}
+                    />
+                  ))}
+                </p>
+              )}
             </li>
           )}
         </ul>
       </div>
       {error && (
-        <p role="alert" data-testid="chat-error" className="text-sm font-medium text-danger">
+        <Callout tone="danger" role="alert" data-testid="chat-error">
           {chatErrorText(error)}
-        </p>
+        </Callout>
       )}
       <ErrorBox error={messages.error} />
       <form onSubmit={send} aria-label="Compose" className="flex flex-col gap-2">
@@ -177,15 +189,21 @@ export function ChatPanel({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(e);
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              send(e);
+            }
           }}
           disabled={busy}
         />
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Button type="submit" variant="primary" disabled={busy || !draft.trim()}>
             Send
           </Button>
           {busy && <Button onClick={() => getSocket()?.cancelChat(threadId)}>Stop</Button>}
+          <span className="ml-auto hidden text-xs text-subtle sm:block">
+            Enter to send, Shift+Enter for a new line
+          </span>
         </div>
       </form>
     </div>

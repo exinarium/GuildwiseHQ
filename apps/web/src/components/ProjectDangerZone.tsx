@@ -1,7 +1,7 @@
 import type { ProjectDto } from '@aom/shared';
 import { useState } from 'react';
 import { useArchiveProject, useProjectImpact, useRestoreProject } from '../api/queries/projects.ts';
-import { Badge, Button, Dialog, ErrorBox, Panel, Spinner } from './ui.tsx';
+import { Badge, Button, Dialog, ErrorBox, Panel, Spinner, useToast } from './ui.tsx';
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -14,11 +14,12 @@ export function ProjectDangerZone({ project }: { project: ProjectDto }) {
   const archive = useArchiveProject(project.id);
   const restore = useRestoreProject();
   const impact = useProjectImpact(project.id, confirming);
+  const toast = useToast();
   const archived = project.status === 'archived';
 
   return (
-    <Panel data-testid="danger-zone">
-      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-danger">
+    <Panel data-testid="danger-zone" className="border-danger-fill/40">
+      <h2 className="mb-2 flex items-center gap-2 text-lg font-semibold text-danger">
         Danger zone
         {archived && <Badge tone="amber">Archived</Badge>}
       </h2>
@@ -34,7 +35,9 @@ export function ProjectDangerZone({ project }: { project: ProjectDto }) {
             variant="primary"
             disabled={restore.isPending}
             data-testid="restore-project"
-            onClick={() => restore.mutate(project.id)}
+            onClick={() =>
+              restore.mutate(project.id, { onSuccess: () => toast.success(`${project.name} restored`) })
+            }
           >
             Restore project
           </Button>
@@ -63,7 +66,7 @@ export function ProjectDangerZone({ project }: { project: ProjectDto }) {
         description="This stops the project's work straight away."
       >
         <div data-testid="archive-dialog" className="flex flex-col gap-3">
-          {impact.isPending && <Spinner />}
+          {impact.isPending && <Spinner inline label="Checking what would stop" />}
           {impact.isError && <ErrorBox error={impact.error} />}
           {impact.data && (
             <ul className="list-disc pl-5 text-sm" data-testid="archive-impact">
@@ -91,7 +94,14 @@ export function ProjectDangerZone({ project }: { project: ProjectDto }) {
               variant="danger"
               disabled={archive.isPending || !impact.data}
               data-testid="archive-confirm"
-              onClick={() => archive.mutate(undefined, { onSuccess: () => setConfirming(false) })}
+              onClick={() =>
+                archive.mutate(undefined, {
+                  onSuccess: () => {
+                    setConfirming(false);
+                    toast.success(`${project.name} archived`);
+                  },
+                })
+              }
             >
               Archive project
             </Button>

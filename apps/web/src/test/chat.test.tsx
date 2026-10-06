@@ -79,7 +79,7 @@ describe('ChatPanel', () => {
     expect(sent).toEqual([
       { type: 'chat.send', threadId: THREAD, body: 'Hello Ada', clientMsgId: expect.any(String) },
     ]);
-    expect(screen.getByTestId('chat-streaming')).toHaveTextContent('…');
+    expect(screen.getByTestId('chat-streaming')).toHaveTextContent(/is typing/);
     expect(screen.getByLabelText('Message')).toBeDisabled();
 
     act(() => socket.handle({ type: 'chat.delta', threadId: THREAD, text: '[mock] Ada ' }));

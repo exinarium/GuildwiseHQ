@@ -35,7 +35,7 @@ export function CardPhase({
   const choices = (phases.data ?? []).filter((p) => p.status === 'open' || p.status === 'proposed');
   return (
     <div data-testid="card-phase" className="flex flex-col gap-1">
-      <div className="flex flex-wrap items-center gap-1.5 text-sm">
+      <div className={phase ? 'flex flex-wrap items-center gap-1.5 text-sm' : 'hidden'}>
         {phase ? (
           <>
             <Link to={phasePath(phase.ref)} className="font-mono underline" data-testid="card-phase-link">
@@ -50,9 +50,7 @@ export function CardPhase({
               </span>
             )}
           </>
-        ) : (
-          <span className="text-subtle">No phase</span>
-        )}
+        ) : null}
       </div>
       <Select
         label="Phase"
