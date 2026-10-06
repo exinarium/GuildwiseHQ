@@ -285,12 +285,11 @@ describe('deleting a project permanently', () => {
     expect(allCardIds.length).toBeGreaterThan(3);
     await ok(owner('POST', `/api/projects/${w.projectId}/delete`, { confirmKey: 'TOY' }));
 
-    // every table that has a project_id or card_id column holds nothing of this project (agents keep their
-    // historical scope; the scoped one is retired below)
+    // every table that has a project_id or card_id column holds nothing of this project (agents are checked below)
     const cols = await q<{ table_name: string; column_name: string }>(
       `SELECT table_name, column_name FROM information_schema.columns
         WHERE table_schema='public' AND column_name IN ('project_id','card_id','mapped_project_id','phase_id')
-          AND table_name NOT IN ('events', 'agents')`,
+          AND table_name NOT IN ('events')`,
     );
     expect(cols.length).toBeGreaterThan(10);
     for (const { table_name: t, column_name: c } of cols) {
@@ -313,8 +312,11 @@ describe('deleting a project permanently', () => {
     expect((await q('SELECT 1 FROM desk_items WHERE id=$1', [questionId])).length).toBe(0);
     expect((await q('SELECT 1 FROM schedules WHERE id=$1', [scheduleId])).length).toBe(0);
     expect((await q('SELECT 1 FROM workstation_repos WHERE project_repo_id=$1', [w.repoId])).length).toBe(0);
-    // the agent scoped to the project is retired, an org-wide one stays; the other project is untouched
-    expect((await q(`SELECT status FROM agents WHERE name='Scoped'`))[0]?.status).toBe('retired');
+    // agents belong to the org: the one scoped to the project stays active and becomes org-wide
+    expect((await q(`SELECT status, project_id FROM agents WHERE name='Scoped'`))[0]).toEqual({
+      status: 'active',
+      project_id: null,
+    });
     expect((await q(`SELECT status FROM agents WHERE name='Una'`))[0]?.status).toBe('active');
     expect((await q('SELECT status FROM projects WHERE id=$1', [keepProjectId]))[0]?.status).toBe('active');
     expect((await q('SELECT count(*)::int AS n FROM cards WHERE project_id=$1', [keepProjectId]))[0]?.n).toBe(

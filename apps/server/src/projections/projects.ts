@@ -128,6 +128,8 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
   );
   await exec(tx, 'DELETE FROM vaults WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM project_members WHERE project_id=$1', P);
+  // Agents belong to the organization: one scoped to this project stays and becomes org-wide.
+  await exec(tx, 'UPDATE agents SET project_id = NULL WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM projects WHERE id=$1', P);
 }
 

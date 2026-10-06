@@ -339,8 +339,8 @@ export async function restoreProject(ctx: Ctx, user: AuthSession['user'], projec
 
 /**
  * Deletes an archived project permanently (owner only; the caller types the project key). Appends `ProjectDeleted`;
- * its projector removes every row of the project. Agents scoped to the project are retired (with `agent.wipe`): their
- * scope no longer exists. The vault folder is never touched.
+ * its projector removes every row of the project. Agents belong to the organization: one that was scoped to the
+ * project is kept and becomes org-wide (owner decision, 2026-10-06). The vault folder is never touched.
  */
 export async function deleteProject(
   ctx: Ctx,
@@ -355,18 +355,6 @@ export async function deleteProject(
     if (confirmKey !== p.key) throw badRequest('key_mismatch', 'type the project key to confirm');
     const scope = projectScope(p.org_id, projectId);
     const events: AppendInput[] = [];
-    const agents = await rows(
-      tx,
-      `SELECT * FROM agents WHERE project_id=$1 AND status <> 'retired' AND NOT is_devops FOR UPDATE`,
-      [projectId],
-    );
-    for (const a of agents)
-      events.push({
-        streamId: streamId.agent(a.id),
-        event: { type: 'AgentRetired', payload: { agentId: a.id, by: user.id, releasedCardIds: [] } },
-        actor: userActor(user.id),
-        scope,
-      });
     events.push({
       streamId: streamId.project(projectId),
       event: {
@@ -377,7 +365,5 @@ export async function deleteProject(
       scope,
     });
     await ctx.store.append(events, { tx });
-    for (const a of agents)
-      if (a.workstation_id) await enqueueRunnerCommand(tx, a.workstation_id, 'agent.wipe', { agentId: a.id });
   });
 }
