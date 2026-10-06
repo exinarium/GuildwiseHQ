@@ -22,7 +22,7 @@ export function PhaseFilter({
         data-testid="phase-filter"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded-control border border-control bg-surface px-2 py-1 text-sm"
+        className="h-9 rounded-control border border-control bg-surface px-3 text-sm text-fg [@media(pointer:coarse)]:h-11"
       >
         <option value="">All phases</option>
         <option value="none">No phase</option>

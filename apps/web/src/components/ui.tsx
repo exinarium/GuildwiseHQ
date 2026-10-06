@@ -1,13 +1,6 @@
 import * as RadixDialog from '@radix-ui/react-dialog';
 import { AlertCircle, ArrowLeft, Loader2, X } from 'lucide-react';
-import {
-  type ButtonHTMLAttributes,
-  type InputHTMLAttributes,
-  type ReactNode,
-  type SelectHTMLAttributes,
-  type TextareaHTMLAttributes,
-  useId,
-} from 'react';
+import { type ComponentProps, type ReactNode, useId } from 'react';
 import { Link } from 'react-router';
 import { hueFor, initials } from '../lib/avatar.ts';
 import { useDelayedFlag } from '../lib/useDelayedFlag.ts';
@@ -55,7 +48,7 @@ export function Button({
   disabled,
   children,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: Size; loading?: boolean }) {
+}: ComponentProps<'button'> & { variant?: Variant; size?: Size; loading?: boolean }) {
   return (
     <button
       type={type}
@@ -149,7 +142,7 @@ export function TextInput({
   id,
   className,
   ...rest
-}: InputHTMLAttributes<HTMLInputElement> & { label: string; error?: string | undefined; hint?: string }) {
+}: ComponentProps<'input'> & { label: string; error?: string | undefined; hint?: string }) {
   const auto = useId();
   const fid = id ?? auto;
   return (
@@ -172,7 +165,7 @@ export function TextArea({
   id,
   className,
   ...rest
-}: TextareaHTMLAttributes<HTMLTextAreaElement> & {
+}: ComponentProps<'textarea'> & {
   label: string;
   error?: string | undefined;
   hint?: string;
@@ -201,7 +194,7 @@ export function Select({
   children,
   className,
   ...rest
-}: SelectHTMLAttributes<HTMLSelectElement> & { label: string; error?: string | undefined; hint?: string }) {
+}: ComponentProps<'select'> & { label: string; error?: string | undefined; hint?: string }) {
   const auto = useId();
   const fid = id ?? auto;
   return (

@@ -1,125 +1,193 @@
+import { Rss, Search, Settings2, SquareKanban } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useParams } from 'react-router';
 import { useBoard } from '../api/queries/board.ts';
 import { usePhases } from '../api/queries/phases.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useRunFeed } from '../api/queries/schedules.ts';
-import { BoardView } from '../components/BoardView.tsx';
+import { BoardView, NO_FILTER } from '../components/BoardView.tsx';
 import { PhaseFilter } from '../components/PhaseFilter.tsx';
 import { RegressionDialog } from '../components/RegressionDialog.tsx';
-import { Button, ErrorBox, PageHeader, Spinner } from '../components/ui.tsx';
-import { departmentsOf, inDepartment } from '../lib/designer.ts';
+import { projectTypeLabel } from '../components/shell/ProjectSwitcher.tsx';
+import {
+  Button,
+  ButtonLink,
+  EmptyState,
+  ErrorBox,
+  FilterChip,
+  PageHeader,
+  Skeleton,
+  useToast,
+} from '../components/ui.tsx';
 import { setLastProjectKey } from '../lib/lastProject.ts';
 import { useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 
+function BoardSkeleton() {
+  return (
+    <div role="status" aria-live="polite">
+      <span className="sr-only">Loading board...</span>
+      <div aria-hidden="true" className="flex gap-3 overflow-hidden">
+        {[3, 2, 3, 2, 1].map((n, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder
+          <div key={`c${i}`} className="w-[17rem] shrink-0 space-y-2 rounded-card bg-sunken p-2">
+            <Skeleton className="h-5 w-1/2" />
+            {['a', 'b', 'c'].slice(0, n).map((j) => (
+              <Skeleton key={`${i}${j}`} className="h-20 rounded-card bg-surface" />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function Board() {
   const { projectKey = '' } = useParams();
-  const nav = useNavigate();
   const projects = useProjects();
   const project = projects.data?.find((p) => p.key === projectKey);
   const [phaseId, setPhaseId] = useState('');
   const board = useBoard(project?.id, phaseId || undefined);
   const phases = usePhases(project?.id);
   const runFeed = useRunFeed();
-  const [department, setDepartment] = useState('');
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
+  const [filter, setFilter] = useState(NO_FILTER);
+  const toast = useToast();
 
   useEffect(() => {
     if (project) setLastProjectKey(project.key);
   }, [project]);
 
-  if (projects.isPending) return <Spinner />;
-  if (projects.isError) return <ErrorBox error={projects.error} />;
+  if (projects.isPending)
+    return (
+      <>
+        <PageHeader title="Board" />
+        <BoardSkeleton />
+      </>
+    );
+  if (projects.isError)
+    return (
+      <>
+        <PageHeader title="Board" />
+        <ErrorBox error={projects.error} onRetry={() => projects.refetch()} />
+      </>
+    );
   if (!project) {
     return (
-      <div>
+      <>
         <PageHeader title="Board" />
-        <p className="text-sm text-subtle">
-          Project {projectKey} not found.{' '}
-          <Link to="/projects" className="underline">
-            Browse projects
-          </Link>
-        </p>
-      </div>
+        <EmptyState
+          icon={SquareKanban}
+          tone="warning"
+          title="That project does not exist or you do not have access"
+          description={`Nothing is called ${projectKey}. Pick one of your projects instead.`}
+          action={
+            <ButtonLink to="/projects" variant="primary">
+              Browse projects
+            </ButtonLink>
+          }
+        />
+      </>
     );
   }
+
+  const cards = board.data?.columns.flatMap((c) => c.cards) ?? [];
+  const blocked = cards.filter((c) => c.blocked).length;
+  const open = board.data
+    ? board.data.columns.filter((c) => c.name !== 'Done').reduce((n, c) => n + c.cards.length, 0)
+    : null;
+  const setF = (patch: Partial<typeof filter>) => setFilter((f) => ({ ...f, ...patch }));
 
   return (
     <div>
       <PageHeader
-        title={`${project.name} board`}
-        sub={project.key}
+        title={project.name}
+        documentTitle={`${project.name} board`}
+        sub={
+          <span className="tnum">
+            {project.key} · {projectTypeLabel(project.workflowKey)}
+            {open !== null && ` · ${open} open`}
+            {blocked > 0 && ` · ${blocked} blocked`}
+          </span>
+        }
         actions={
           <>
-            <label className="sr-only" htmlFor="project-switch">
-              Project
-            </label>
-            {departmentsOf(projects.data ?? []).length > 0 && (
-              <>
-                <label className="sr-only" htmlFor="department-filter">
-                  Department
-                </label>
-                <select
-                  id="department-filter"
-                  value={department}
-                  onChange={(e) => setDepartment(e.target.value)}
-                  className="rounded-control border border-control bg-surface px-2 py-1 text-sm"
-                >
-                  <option value="">All departments</option>
-                  {departmentsOf(projects.data ?? []).map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
-            <select
-              id="project-switch"
-              value={project.key}
-              onChange={(e) => nav(`/p/${e.target.value}/board`)}
-              className="rounded-control border border-control bg-surface px-2 py-1 text-sm"
-            >
-              {inDepartment(projects.data ?? [], department)
-                .concat(
-                  project && !inDepartment(projects.data ?? [], department).includes(project)
-                    ? [project]
-                    : [],
-                )
-                .map((p) => (
-                  <option key={p.id} value={p.key}>
-                    {p.key}
-                  </option>
-                ))}
-            </select>
             <PhaseFilter phases={phases.data ?? []} value={phaseId} onChange={setPhaseId} />
             {traits.hasTestStage && <RegressionDialog projectId={project.id} />}
             {project.workflowKey === 'feed' && (
               <>
-                <Link
-                  to={`/p/${project.key}/feed`}
-                  className="inline-flex min-h-8 items-center rounded-control border border-control px-3 py-1 text-sm font-medium"
-                >
+                <ButtonLink to={`/p/${project.key}/feed`}>
+                  <Rss aria-hidden="true" className="size-4" />
                   Feed
-                </Link>
-                <Button disabled={runFeed.isPending} onClick={() => runFeed.mutate(project.id)}>
+                </ButtonLink>
+                <Button
+                  loading={runFeed.isPending}
+                  onClick={() =>
+                    runFeed.mutate(project.id, { onSuccess: () => toast.success('Feed scan started') })
+                  }
+                >
                   Run now
                 </Button>
               </>
             )}
-            <Link
-              to={`/cards/new?project=${project.key}`}
-              className="inline-flex min-h-8 items-center rounded-control bg-brand px-3 py-1 text-sm font-medium text-white hover:bg-brand-hover"
+            <ButtonLink
+              to={`/projects/${project.id}/settings`}
+              variant="ghost"
+              aria-label={`Settings for ${project.key}`}
+              title="Project settings"
             >
+              <Settings2 aria-hidden="true" className="size-4" />
+            </ButtonLink>
+            <ButtonLink to={`/cards/new?project=${project.key}`} variant="primary">
               New card
-            </Link>
+            </ButtonLink>
           </>
         }
       />
       <ErrorBox error={runFeed.error} />
-      {board.isPending && <Spinner label="Loading board" />}
-      {board.isError && <ErrorBox error={board.error} />}
-      {board.data && <BoardView board={board.data} />}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="relative w-full sm:w-72">
+          <Search
+            aria-hidden="true"
+            className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-subtle"
+          />
+          <input
+            type="search"
+            aria-label="Search cards"
+            placeholder="Search cards"
+            value={filter.text}
+            onChange={(e) => setF({ text: e.target.value })}
+            onKeyDown={(e) => e.key === 'Escape' && setF({ text: '' })}
+            className="h-9 w-full rounded-control border border-control bg-surface pr-3 pl-9 text-base text-fg placeholder:text-subtle focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:outline-none [@media(pointer:coarse)]:h-11"
+          />
+        </div>
+        <div className="flex gap-2 overflow-x-auto" role="group" aria-label="Filters">
+          <FilterChip pressed={filter.blocked} onClick={() => setF({ blocked: !filter.blocked })}>
+            Blocked
+          </FilterChip>
+          <FilterChip pressed={filter.rework} onClick={() => setF({ rework: !filter.rework })}>
+            Rework
+          </FilterChip>
+          <FilterChip pressed={filter.unassigned} onClick={() => setF({ unassigned: !filter.unassigned })}>
+            Unassigned
+          </FilterChip>
+        </div>
+      </div>
+      {board.isPending && <BoardSkeleton />}
+      {board.isError && <ErrorBox error={board.error} onRetry={() => board.refetch()} />}
+      {board.data && cards.length === 0 && !phaseId && (
+        <EmptyState
+          icon={SquareKanban}
+          title="No cards yet"
+          description="Create the first card, or bring work in from Jira or GitHub."
+          action={
+            <ButtonLink to={`/cards/new?project=${project.key}`} variant="primary">
+              New card
+            </ButtonLink>
+          }
+          secondaryAction={<ButtonLink to="/intake">Start an intake</ButtonLink>}
+        />
+      )}
+      {board.data && (cards.length > 0 || phaseId) && <BoardView board={board.data} filter={filter} />}
     </div>
   );
 }
