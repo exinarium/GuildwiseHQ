@@ -112,6 +112,8 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
           onValueChange={setQuery}
           placeholder="Search pages, cards, agents and desk items, or run an action"
           aria-label="Search the command palette"
+          // the global :focus-visible outline is unlayered CSS, which a utility class cannot beat; the palette frames the field itself
+          style={{ outline: 'none' }}
           className="h-12 w-full rounded-none border-0 bg-transparent text-base text-fg shadow-none placeholder:text-subtle focus:outline-none focus-visible:outline-none"
         />
       </div>

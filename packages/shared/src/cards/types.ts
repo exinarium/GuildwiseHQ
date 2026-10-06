@@ -96,3 +96,11 @@ export const ReviewData = z.object({
   criteriaMissed: z.array(z.string()).optional(),
 });
 export type ReviewData = z.infer<typeof ReviewData>;
+
+/**
+ * The priority of a card nobody prioritised (the API stays numeric, 1 = most urgent … 9). The labels in the UI are
+ * Urgent 1, High 3, Normal 5, Low 8; before 2026-10 the default was 2, which now reads as Urgent, so it moved to 5.
+ */
+export const DEFAULT_CARD_PRIORITY = 5;
+/** The old default: a `CardCreated` carrying it was never a conscious choice, so the projection reads it as the new default. */
+export const LEGACY_DEFAULT_CARD_PRIORITY = 2;

@@ -8,7 +8,7 @@ export const PRIORITY_LEVELS = [
 
 export type PriorityKey = (typeof PRIORITY_LEVELS)[number]['key'];
 
-export const DEFAULT_PRIORITY = 5;
+export { DEFAULT_CARD_PRIORITY as DEFAULT_PRIORITY } from '@aom/shared';
 
 /** The level nearest to a stored value (ties go to the more urgent level). */
 export function priorityLevel(n: number): (typeof PRIORITY_LEVELS)[number] {

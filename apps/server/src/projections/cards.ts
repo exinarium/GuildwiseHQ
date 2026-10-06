@@ -1,4 +1,9 @@
-import type { EventOf, EventType } from '@aom/shared';
+import {
+  DEFAULT_CARD_PRIORITY,
+  type EventOf,
+  type EventType,
+  LEGACY_DEFAULT_CARD_PRIORITY,
+} from '@aom/shared';
 import { exec, one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { Projector, StoredEvent } from '../eventstore/types.ts';
@@ -117,7 +122,7 @@ export const cardProjectors: Record<string, Projector> = {
         p.origin,
         p.scheduled,
         p.scheduleId ?? null,
-        p.priority,
+        p.priority === LEGACY_DEFAULT_CARD_PRIORITY ? DEFAULT_CARD_PRIORITY : p.priority,
         p.requiredCapabilities,
         p.worktreeCardId ?? null,
         p.status === 'queued' ? e.createdAt : null,

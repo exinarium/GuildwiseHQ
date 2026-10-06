@@ -29,7 +29,7 @@ describe('DomainEventSchema', () => {
     });
     expect(r.type === 'CardCreated' && r.payload).toMatchObject({
       scheduled: false,
-      priority: 2,
+      priority: 5,
       dependencies: [],
       docsNeeded: false,
     });

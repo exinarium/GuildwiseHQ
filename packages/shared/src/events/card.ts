@@ -5,6 +5,7 @@ import {
   CardType,
   ClaimReleaseReason,
   CompletionAction,
+  DEFAULT_CARD_PRIORITY,
   DecisionPolicy,
   DiffStats,
   ReworkReason,
@@ -55,7 +56,7 @@ export const cardEvents = [
       /** The interest this card belongs to (a scan of its schedule, or "Research this"). */
       interestId: Id.optional(),
       repoId: Id.optional(),
-      priority: z.number().int().min(1).max(9).default(2),
+      priority: z.number().int().min(1).max(9).default(DEFAULT_CARD_PRIORITY),
       docsNeeded: z.boolean().default(false),
       completionAction: CompletionAction.optional(),
       riskTier: RiskTier.optional(),

@@ -48,11 +48,11 @@ describe('editing a card', () => {
     const card = await draft({ title: 'Original', fields: fullFields({ constraints: 'keep it small' }) });
     const res = await patch(card.id, {
       title: 'Renamed',
-      priority: 5,
+      priority: 3,
       fields: { requirements: 'new reqs', constraints: null },
     });
     expect(res.status).toBe(200);
-    expect(res.body.card).toMatchObject({ title: 'Renamed', priority: 5 });
+    expect(res.body.card).toMatchObject({ title: 'Renamed', priority: 3 });
     expect(res.body.card.fields.requirements).toBe('new reqs');
     expect(res.body.card.fields).not.toHaveProperty('constraints');
     expect(res.body.activity).toHaveLength(1);

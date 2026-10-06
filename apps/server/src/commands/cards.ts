@@ -5,6 +5,7 @@ import {
   type CreateCardRequest,
   canManageCard,
   cardRef,
+  DEFAULT_CARD_PRIORITY,
   emptyFields,
   type FillableCard,
   getStage,
@@ -162,7 +163,7 @@ export async function createCardIn(
     completionAction: req.completionAction ?? null,
     docsNeeded: req.docsNeeded ?? false,
     riskTier: null,
-    priority: req.priority ?? 2,
+    priority: req.priority ?? DEFAULT_CARD_PRIORITY,
     fields: parsed.data,
   };
   const scope = projectScope(project.org_id, project.id);
@@ -187,7 +188,7 @@ export async function createCardIn(
           origin: acting.origin ?? 'manual',
           scheduled: false,
           repoId,
-          priority: req.priority ?? 2,
+          priority: req.priority ?? DEFAULT_CARD_PRIORITY,
           docsNeeded: req.docsNeeded ?? false,
           completionAction: req.completionAction,
           dependencies,

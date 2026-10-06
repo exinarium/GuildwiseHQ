@@ -1,5 +1,5 @@
 import { type AgentDto, type HrAgent, NAME_THEMES } from '@aom/shared';
-import { Users } from 'lucide-react';
+import { Dices, Users } from 'lucide-react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
 import {
@@ -249,13 +249,27 @@ function AgentCard({
                   : 'ring-line'
           }`}
         >
-          <AgentAvatar
-            agentId={a.id}
-            name={a.name}
-            size={40}
-            {...(a.avatarSeed ? { seed: a.avatarSeed } : {})}
-            {...(a.avatarStyle ? { style: a.avatarStyle } : {})}
-          />
+          <span className="group/face relative inline-flex">
+            <AgentAvatar
+              agentId={a.id}
+              name={a.name}
+              size={40}
+              {...(a.avatarSeed ? { seed: a.avatarSeed } : {})}
+              {...(a.avatarStyle ? { style: a.avatarStyle } : {})}
+            />
+            {canManage && (
+              <button
+                type="button"
+                aria-label={`Re-roll the face of ${a.name}`}
+                title="Re-roll face"
+                disabled={rerolling}
+                onClick={onReroll}
+                className="absolute -right-1.5 -bottom-1.5 inline-flex size-5 items-center justify-center rounded-full border border-line bg-surface text-muted opacity-70 shadow-sm transition-opacity group-hover/face:opacity-100 hover:text-fg focus-visible:opacity-100 disabled:opacity-40 [@media(pointer:coarse)]:opacity-100"
+              >
+                <Dices aria-hidden="true" className="size-3" />
+              </button>
+            )}
+          </span>
         </span>
         <div className="min-w-0">
           <p className="truncate text-lg leading-tight font-semibold text-fg">{a.name}</p>
@@ -323,17 +337,6 @@ function AgentCard({
             <Button
               variant="ghost"
               size="sm"
-              aria-label={`Re-roll the face of ${a.name}`}
-              disabled={rerolling}
-              onClick={onReroll}
-            >
-              Re-roll face
-            </Button>
-          )}
-          {canManage && (
-            <Button
-              variant="ghost"
-              size="sm"
               aria-label={`Reset ${a.name}`}
               disabled={resetting}
               onClick={onReset}
@@ -354,15 +357,6 @@ function AgentCard({
           </Button>
           <Button variant="ghost" size="sm" aria-label={`Change role of ${a.name}`} onClick={onRole}>
             Change role
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={`Re-roll the face of ${a.name}`}
-            disabled={rerolling}
-            onClick={onReroll}
-          >
-            Re-roll face
           </Button>
           <Button
             variant="danger-ghost"
