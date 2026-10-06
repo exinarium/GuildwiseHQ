@@ -836,3 +836,20 @@ Project guest invitations stay on the Projects page ("Shared with you: Accept / 
 `restructure.md` assumes "the org" exists: org-wide agents with project allow-lists, interests visible to "members" and creatable by "guests", per-project budgets, an org-level quiet cap and org-level schedules. Built on today's model, all of that would be written as `userId === orgId` and rewritten here a second time, and its data migration (`restructure-2026-10`, per org) would run against user ids before this migration re-points them. So: **this design's steps 1-9 land first** (the web steps 10-14 may run in parallel with restructure Part A). The restructure then takes the next free migration numbers and adds its data migration to the `data-migrations/index.ts` created here, ordered after `orgs-2026-10`.
 
 The restructure steps that change are listed in `restructure.md` under "Impact of organizations".
+
+---
+## Owner decisions (2026-10-06 evening). These override the defaults above.
+| # | Decision |
+|---|---|
+| 1 | Multi-org: **yes**, the active org is chosen per tab with an org switcher. |
+| 2/3 | Migration: every user with org data becomes the Owner of their own org. Nobody is merged; a later `orgs:merge` command does that. |
+| 4 | Only the Owner and Admins create projects. No setting changes this. |
+| 5/11 | Suspension: running shifts finish and nothing new starts. Only the Owner can log in, with read access plus org settings and members. |
+| 6 | The super admin can transfer ownership to an existing Admin, with a reason, audited. |
+| 7 | **Two-factor login (TOTP) for everyone in v1:** **required for the super admin**, optional for all users, and **enforceable per org** by the Owner. Include recovery codes. |
+| 8 | Plans: **one "Founding" plan with no limits for now**. The limit fields exist but are empty (unlimited) until pricing is decided. The trial and Team presets are not created yet. |
+| 9/10 | The platform audit log is kept forever. Guests do not count toward the member limit. |
+| 12 | Org-level vaults sync to Owner and Admin workstations only. |
+| 13 | Interest edit rank uses the creator's **current** role, falling back to the stored role if they have left the org. |
+| 14 | **Every user belongs to an organization.** A user either gets their own org (new-org invitation or migration) or is added as a member of an existing org. There are no org-less users (super admins excepted). **Guests can only be users who already hold an organization**: a guest invitation goes to an existing account that owns or belongs to an org. Inviting someone with no account goes through a member invitation (joins your org) or a new-org invitation from the super admin. The migration gives every existing user an org, including users without data (they become Owner of an empty org) or, if they only had shared access, an org of their own while their shared access becomes guest access. |
+| 15 | One DevOps engineer per org per workstation, not counted against limits. |
