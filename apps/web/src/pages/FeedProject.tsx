@@ -1,5 +1,6 @@
-import { Link, useParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import { useFeedList, useTaste } from '../api/queries/digest.ts';
+import { useInterest, useInterestDigestItems } from '../api/queries/interests.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useRunFeed, useSchedules } from '../api/queries/schedules.ts';
 import { DigestItemRow } from '../components/DigestRating.tsx';
@@ -13,6 +14,12 @@ export function FeedProject() {
   const projects = useProjects();
   const project = projects.data?.find((p) => p.key === projectKey);
   const list = useFeedList(project?.id);
+  // /p/KEY/feed?interest=<id> shows only the scans of one interest (the Digests link on the Interests page).
+  const [params, setParams] = useSearchParams();
+  const interestId = params.get('interest');
+  const interest = useInterest(interestId ?? undefined);
+  const filtered = useInterestDigestItems(project?.id, interestId);
+  const items = interestId ? filtered.data : list.data?.items;
   const taste = useTaste(project?.id);
   const schedules = useSchedules(project?.id);
   const run = useRunFeed();
@@ -78,13 +85,31 @@ export function FeedProject() {
           {list.data?.path} · oldest first, entries are only ever appended
         </p>
         {list.isPending && <Spinner />}
-        {list.data?.items.length === 0 && (
+        {interestId && (
+          <p className="mb-2 flex items-center gap-2 text-sm" data-testid="interest-filter-chip">
+            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800">
+              Interest: {interest.data?.interest.name ?? '...'}
+            </span>
+            <button
+              type="button"
+              className="text-xs underline"
+              onClick={() => {
+                const next = new URLSearchParams(params);
+                next.delete('interest');
+                setParams(next);
+              }}
+            >
+              Clear
+            </button>
+          </p>
+        )}
+        {items?.length === 0 && (
           <p className="text-sm text-zinc-500" data-testid="feed-empty">
             Nothing logged yet.
           </p>
         )}
         <ol className="flex flex-col gap-2" data-testid="feed-list">
-          {list.data?.items.map((i) => (
+          {items?.map((i) => (
             <li key={i.id}>
               <DigestItemRow item={i} canRate />
             </li>

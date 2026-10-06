@@ -7,6 +7,7 @@ import { useSetTimezone } from '../api/queries/reporting.ts';
 import { getLastProjectKey } from '../lib/lastProject.ts';
 import { browserTimeZone } from '../lib/timezone.ts';
 import { getSocket, useSocketState } from '../ws/socket.ts';
+import { INTERESTS_NAV } from './nav.ts';
 import { Avatar, Spinner } from './ui.tsx';
 
 const link = ({ isActive }: { isActive: boolean }) =>
@@ -90,6 +91,9 @@ function Shell({ isAdmin, name, live }: { isAdmin: boolean; name: string; live: 
             </NavLink>
             <NavLink to="/schedules" className={link}>
               Schedules
+            </NavLink>
+            <NavLink to={INTERESTS_NAV.to} data-testid={INTERESTS_NAV.testId} className={link}>
+              {INTERESTS_NAV.label}
             </NavLink>
             <NavLink to="/settings/vaults" className={link}>
               Vaults

@@ -101,3 +101,10 @@ export const HYGIENER = {
   name: 'E2E Hygiener',
   password: 'hygiener-password-12345',
 };
+
+/** Interests spec (docs/design/interests.md): own user, own runner (mock), a personal vault, feed and research projects. */
+export const INTERESTER = {
+  email: 'interester@e2e.test',
+  name: 'E2E Interester',
+  password: 'interester-password-12345',
+};

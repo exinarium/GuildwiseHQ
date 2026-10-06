@@ -34,6 +34,7 @@ export default defineConfig({
     { name: 'phases', testMatch: 'phases.spec.ts', dependencies: ['intake'] },
     { name: 'reporter', testMatch: 'reporter.spec.ts', dependencies: ['phases'] },
     { name: 'hygiene', testMatch: 'hygiene.spec.ts', dependencies: ['reporter'] },
+    { name: 'interests', testMatch: 'interests.spec.ts', dependencies: ['hygiene'] },
     // The screenshot run for docs/guide (never part of `pnpm e2e`): AOM_E2E_GUIDE=1 playwright test --project=guide
     ...(process.env.AOM_E2E_GUIDE === '1'
       ? [{ name: 'guide', testMatch: 'guide-screenshots.spec.ts', timeout: 600_000 }]

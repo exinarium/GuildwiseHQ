@@ -13,6 +13,7 @@ import { Chat } from './pages/Chat.tsx';
 import { Desk } from './pages/Desk.tsx';
 import { FeedProject } from './pages/FeedProject.tsx';
 import { IntakeNew, IntakeView } from './pages/Intake.tsx';
+import { Interests } from './pages/Interests.tsx';
 import { Ledger } from './pages/Ledger.tsx';
 import { Login } from './pages/Login.tsx';
 import { Metrics } from './pages/Metrics.tsx';
@@ -44,6 +45,7 @@ export const routes = [
       { path: '/p/:projectKey/feed', element: <FeedProject /> },
       { path: '/p/:projectKey/phases/:number', element: <Phase /> },
       { path: '/schedules', element: <Schedules /> },
+      { path: '/interests', element: <Interests /> },
       { path: '/cards/new', element: <CardNew /> },
       { path: '/cards/:ref', element: <CardDetail /> },
       { path: '/projects', element: <Projects /> },

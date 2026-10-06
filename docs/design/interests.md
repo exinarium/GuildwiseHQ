@@ -1,10 +1,10 @@
 # Design: the Interests page (one place to say "what I care about")
 
-Oct 5, 2026 · status: proposed (design only, nothing built) · companion to `docs/SPEC.md` ("Research and feeds"), `docs/ARCHITECTURE.md` (referenced as §n) and `docs/design/phases.md` (style)
+Oct 5, 2026 · status: built (Oct 6, 2026; see "Implementation status" at the end) · companion to `docs/SPEC.md` ("Research and feeds"), `docs/ARCHITECTURE.md` (referenced as §n) and `docs/design/phases.md` (style)
 
 Today a manager's interests are scattered: one feed schedule per topic (`/schedules`), ad-hoc research cards, and a `taste.md` that only grows from digest ratings. This design adds one global **Interests** page across all feed and research projects. An interest is the single statement of a topic; it owns the feed schedule that scans for it, prefills research cards about it, carries explicit taste rules, and shows what came of it (scans, items, ratings, notes).
 
-Note: other agents are editing code while this was written. Migration numbers `1300_` (transcripts, built) and `1300_`/`1400_` (phases design) are taken or reserved, so this feature uses `1500_`.
+Note: other agents are editing code while this was written. Migration numbers `1300_` (transcripts, built) and `1300_`/`1400_` (phases design) are taken or reserved, so this feature was designed with `1500_`. **Built as `apps/server/migrations/1306_interests.sql`** (the next free number after the hygiene migration `1305_`); wherever this document says `1500_`, read `1306_`.
 
 ---
 
@@ -512,3 +512,30 @@ The recommended defaults are accepted, with one exception that follows the owner
 
 - **Q1:** any member of the feed project may create, edit, pause and delete interests and their taste rules, not only the owner.
 - Q2–Q14 use the recommended defaults as written above.
+
+## Implementation status (built Oct 6, 2026)
+
+Built in the order of section 13, with the provisional decisions above (any member of the linked projects manages; Q2-Q14 as recommended). Migration **`1306_interests.sql`** instead of `1500_`.
+
+| Step | Status | Notes |
+| --- | --- | --- |
+| 1-4 Shared module, taste helpers, events, API and protocol | built | `interests/index.ts`, `feed/index.ts` (`renderTasteSeedSection`, `applyManagedSection`, `stripManagedSection`), `events/interest.ts`, `api/interests.ts`; `ShiftBrief.feed.tasteSeed`; feed `subCategory` field |
+| 5-6 Migration and projections | built | `interests`, `taste_seeds`, `schedules.interest_id`, `cards.interest_id`; `deleteProjectRows` also cleans interests and seeds |
+| 7 Schedule changes | built | linked schedules answer 409 `schedule_managed_by_interest`; `scheduleUpdateEvent` extracted; cards of a linked schedule carry `interest_id` |
+| 8 Commands, queries, routes | built | create (incl. `newFeedProject`), update with `syncSchedule`, delete (`keepSchedule`), adopt, run; stats in one query round |
+| 9 Research this (server) | built | `interestId` on `POST /api/cards`; `interestId` filters on digest items and publications |
+| 10 Taste seed (server) | built | `setTasteSeed`, `setInterestTaste`, resync; the hook writes a `section` vault write; brief carries the rules; `tasteFor` lists them first. Renaming or deleting an interest re-renders the section (extra `TasteSeedSet`) |
+| 11 Runner | built | `section` mode in `vaults/write.ts`, managed block stripped in `vaults/context.ts`, mock curator reads `tasteSeed` and `skip "<title>"` |
+| 12 Curator instructions | built | curator role version 4 |
+| 13-16 Web | built | Interests page, drawer, Research-this and Adopt dialogs, taste editors, Schedules lock and hint, `?interest=` filter on the feed page, live updates, `components/nav.ts` |
+| 17 E2E | built | `e2e/tests/interests.spec.ts` |
+| 18 Docs | built | USER-GUIDE (Interests), ARCHITECTURE, SPEC |
+
+**Deferred or different from the plan**
+
+- The "version skew" guard (skip the section write for a runner older than this feature, and say "update the runner" in the drawer) is not built: the runner version is a constant (`0.1.0`) that cannot tell old from new. An old runner rejects the write; only the `taste.md` mirror is late, the brief still carries the rules.
+- The drawer shows whether the project has a vault ("Mirrored to taste.md (rules version N)" or "no vault: brief only"); it does not know whether the runner has already written that version, because a completed `vault.write` is not an event. The resync endpoint exists (`POST /api/projects/:id/taste-seed/resync`) but has no button yet.
+- `Notes` opens an inline panel of recent scans and published notes on the card instead of a separate `#notes` route; `/interests?open=<id>` opens the edit panel.
+- The optional `ifUpdatedAt` precondition (409 `stale_interest`) is not built; concurrent edits are last-write-wins with the drawer refetching on open.
+- "Make explicit" on rating lines and approved rule proposals (open question 9) stays out of scope.
+- A research-only interest edited by a member who is in the research project only is allowed; a member of just one of two linked projects cannot edit (403) but can run (feed) or research (research).

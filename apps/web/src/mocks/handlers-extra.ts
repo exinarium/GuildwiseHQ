@@ -105,4 +105,17 @@ export const extraHandlers = [
   http.get(`${A}/projects/:id/feed`, empty({ path: 'feed/running-list.md', items: [] })),
   http.get(`${A}/projects/:id/taste`, empty({ path: 'feed/taste.md', content: '', lines: [] })),
   http.post(`${A}/digest-items/:id/rate`, unavailable),
+  // Interests (docs/design/interests.md): an empty page in the mock runtime
+  http.get(`${A}/interests`, empty({ interests: [], tasteProjects: [], adoptableCount: 0 })),
+  http.get(`${A}/interests/adoptable`, empty({ schedules: [] })),
+  http.get(`${A}/interests/:id`, notFound),
+  http.post(`${A}/interests`, unavailable),
+  http.post(`${A}/interests/adopt`, unavailable),
+  http.patch(`${A}/interests/:id`, unavailable),
+  http.delete(`${A}/interests/:id`, unavailable),
+  http.post(`${A}/interests/:id/run`, unavailable),
+  http.put(`${A}/interests/:id/taste`, unavailable),
+  http.get(`${A}/projects/:id/taste-seed`, empty({ projectId: '', version: 0, rules: [], hasVault: false })),
+  http.put(`${A}/projects/:id/taste-seed`, unavailable),
+  http.post(`${A}/projects/:id/taste-seed/resync`, unavailable),
 ];

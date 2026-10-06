@@ -287,6 +287,12 @@ Research and feed projects run on the same board and desk as code; what changes 
 - Verdicts are written to the project's `taste.md` as explicit rules and examples, never an opaque score, so the manager can read and correct them
 - Curators read `taste.md` before filtering and keep a seen-list by URL so nothing repeats
 - A curator may propose a new taste rule from a pattern of verdicts; it lands on the desk as an approval item
+- The manager can also write **explicit taste rules** (per feed project, optionally limited to one interest) on the Interests page. They are kept on the site, mirrored into `taste.md` as a managed block above the rating lines, and put in front of the curator in its brief; they come first and win when a rating line disagrees
+
+**Interests**
+
+- An **interest** is the single statement of a topic the manager cares about, across all feed and research projects: a name, a description, a feed project and/or a research project, a sub-category, preferred sites and a scan cadence (cron, time zone, window, maximum items, or manual only). It owns the one feed schedule that scans for it (that schedule is changed through the interest only), it prefills research cards ("Research this") and shows what came of it: scans, items, ratings and published notes
+- Any member of the projects an interest links to may create, edit, pause and delete it and set its taste rules; existing feed schedules can be adopted into interests, explicitly and never automatically
 
 ## External systems boundary
 

@@ -127,25 +127,37 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
         </div>
       </dl>
       <ErrorBox error={patch.error ?? run.error ?? del.error} />
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button variant="primary" disabled={run.isPending} onClick={() => run.mutate(s.id)}>
           Run now
         </Button>
-        <Button
-          disabled={patch.isPending}
-          onClick={() => patch.mutate({ id: s.id, body: { enabled: !s.enabled } })}
-        >
-          {s.enabled ? 'Pause' : 'Resume'}
-        </Button>
-        <Button
-          variant="danger"
-          disabled={del.isPending}
-          onClick={() => {
-            if (window.confirm(`Delete the schedule "${s.name}"?`)) del.mutate(s.id);
-          }}
-        >
-          Delete
-        </Button>
+        {s.interestId ? (
+          // Owned by an interest: it is edited, paused and deleted there (the server answers 409 otherwise).
+          <span className="text-sm" data-testid="schedule-managed">
+            Managed by interest{' '}
+            <Link to={`/interests?open=${s.interestId}`} className="font-medium underline">
+              {s.interestName ?? 'interest'}
+            </Link>
+          </span>
+        ) : (
+          <>
+            <Button
+              disabled={patch.isPending}
+              onClick={() => patch.mutate({ id: s.id, body: { enabled: !s.enabled } })}
+            >
+              {s.enabled ? 'Pause' : 'Resume'}
+            </Button>
+            <Button
+              variant="danger"
+              disabled={del.isPending}
+              onClick={() => {
+                if (window.confirm(`Delete the schedule "${s.name}"?`)) del.mutate(s.id);
+              }}
+            >
+              Delete
+            </Button>
+          </>
+        )}
       </div>
       {run.data && (
         <p className="mt-2 text-sm" data-testid="run-result">
@@ -205,6 +217,13 @@ function NewSchedule({ projects }: { projects: ProjectDto[] }) {
   return (
     <Panel>
       <h2 className="mb-2 text-sm font-semibold">New feed schedule</h2>
+      <p className="mb-2 text-xs text-zinc-500" data-testid="schedules-interests-hint">
+        Feeds are easier to manage as{' '}
+        <Link to="/interests" className="underline">
+          Interests
+        </Link>
+        : one place for the topic, its scan, your taste rules and its notes.
+      </p>
       {projects.length === 0 ? (
         <p className="text-sm text-zinc-500">
           You own no project with the Feed workflow.{' '}

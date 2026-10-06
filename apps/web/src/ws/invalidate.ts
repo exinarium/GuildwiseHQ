@@ -19,6 +19,9 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['intakes'],
         ['hr'],
         ['metrics'],
+        // scans and notes of an interest are cards (DigestPosted, ResearchPublished, CardCreated)
+        ['interests'],
+        ['interest'],
         // CardPhaseChanged and CardMergeVerified are on the card stream
         ['phases'],
         ['phase'],
@@ -37,7 +40,12 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
     case 'intake':
       return [['intakes'], ['desk'], ['card'], ['board']];
     case 'schedule':
-      return [['schedules'], ['board']];
+      // ScheduleLinked adopts a schedule into an interest (or unlinks it); ScheduleFired changes an interest's stats
+      return [['schedules'], ['board'], ['interests'], ['interest']];
+    case 'interest':
+      // Interest* events; the owner's schedule changes in the same append. An interest's events carry one project scope
+      // (feed project, else research), so a member of only the other project gets no live update (the REST list is right).
+      return [['interests'], ['interest'], ['schedules'], ['taste'], ['projects']];
     case 'thread':
       // Card threads show on the card; chat threads have their own message list and the chat list.
       return [
@@ -89,6 +97,10 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['deploy-targets'],
         ['followup-defaults'],
         ['phases'],
+        // TasteSeedSet is on the project stream
+        ['taste'],
+        ['interests'],
+        ['digest'],
       ];
     case 'user':
     case 'invitation':

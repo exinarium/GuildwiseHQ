@@ -504,6 +504,56 @@ The ledger is the shared memory of your org. It records:
 
 Results show matching entries with context. Agents can search the ledger during their shifts via `aom ledger search "<query>"`.
 
+## Interests
+
+The **Interests** page (top bar: Interests) is the one place that says what you care about, across all your feed and research projects. An interest is a topic with a name and a description. It owns the feed schedule that scans for it, it prefills research cards about it, it carries your explicit taste rules, and it shows what came of it: scans, items, your ratings and published notes.
+
+Anyone who is a member of the projects an interest links to can create, edit, pause and delete it, and set its taste rules (the same "any member" rule as phases). Someone who is a member of only one of its two projects can see it, run it and research it but not edit it.
+
+### Reading the page
+
+Each interest is a card with its name, whether it is active or paused, its feed and research project, and its sub-category. Below that:
+
+- **The scan**: when it runs ("Daily at 07:00 (Africa/Johannesburg)"), how many hours back it looks, how many items the digest holds, or "Manual only".
+- **The last scan** (a link to its card, with the number of items) and the next one.
+- **Ratings**: how many items you rated useful, irrelevant and boring, and how many are still unrated. On a phone this is the compact `U12 I3 B5 ?2`.
+- **Notes**: how many research notes were published for it and how many research cards are still open.
+- A red **Cannot run** badge, with the reason, when its schedule keeps failing (it retries with growing pauses, like any schedule).
+
+Buttons: **Run now** (scan once, straight away), **Research this**, **Digests** (the feed page filtered to this interest), **Notes** (recent scans and published notes), **Pause/Resume** and **Edit**. The filters above the list narrow it by project, status and search text.
+
+### Creating and editing an interest
+
+**+ New** (or **Edit**) opens a panel on the right (a full-screen sheet on a phone). Fields:
+
+- **Name**: a short label. It is also the feed topic and the title of the scan cards.
+- **Description**: markdown. The angle, what to include or leave out, the level. The scout and curator follow this first.
+- **Feed project**: the feed project that scans for it, or **+ New feed project** (a key, a name and a domain; it uses the Feed workflow and the default vault folder). Leave it empty for a research-only interest.
+- **Research project**: where "Research this" creates cards. Optional.
+- **Sub-category** and **Preferred sites**.
+- **Scan**: a preset or a custom cron expression, the time zone, the **window** in hours (empty: derived from the cadence, 1 hour for hourly, 24 for daily and weekdays, 168 for weekly), **max items** (the best N overall, whatever the kind) and **Manual only**.
+- **Taste rules for this interest**, and **Status** (Active or Paused).
+
+An interest always has exactly one feed schedule when it has a feed project. You change the schedule by changing the interest: the description, sites, window and max items rewrite the schedule's card template; a new cadence recomputes the next run; pausing (or Manual only) disables it and resuming gives it a fresh next run. Moving the interest to another feed project replaces its schedule; removing the feed project deletes it. Deleting an interest asks whether to **keep the schedule as a plain schedule**.
+
+On the **Schedules** page a schedule that belongs to an interest says "Managed by interest ..." with a link to it. Its Edit, Pause and Delete are gone (the server refuses them with a 409); **Run now** still works.
+
+### Adopting the schedules you already have
+
+If you have feed schedules that are not interests, a banner says so ("3 feed schedules are not interests yet") and the **Adopt** button lists them. **Adopt selected** makes one interest per schedule, named after its topic (a duplicate name gets " (2)"), and leaves the schedule as it is; the first time you edit the interest its template is normalized. Earlier scans of an adopted schedule count for the interest. A schedule that cannot be adopted (for instance its project is archived) shows the reason next to it; the others are adopted anyway.
+
+### Research this
+
+**Research this** opens a research card prefilled from the interest: the title ("Research: Rust async"), the question ("What should I know now about Rust async?"), the description as the scope, the sub-category and the sites. Edit anything, then **Create and queue** (the card goes to the researcher at once) or **Save as draft**. If the interest has no research project, choose one; tick "Remember this project for the interest" to keep it. The published note appears under the interest's **Notes**.
+
+### Taste rules
+
+Besides the rules that grow from your ratings, you can write **explicit taste rules**: a sentence each, such as "Skip beginner tutorials". The curators follow them first and they win when a rating line disagrees. A rule written as `skip "Exact title"` drops the item with exactly that title.
+
+- Rules are stored per feed project. A rule set in an interest's panel only reaches scans of that interest; a rule in **Project taste rules** (the panel at the bottom of the page, **Edit taste rules**) reaches every scan of the project.
+- They are written to the project's `taste.md` in your vault as a single block under the heading **Explicit rules**, above the rating lines (headed by comment markers that say it is managed by the site). **Edits you make inside that block in Obsidian are overwritten**; the rating lines below it stay yours to edit. If the project has no vault, or no workstation holds a clone, nothing is written and the panel says so; the curators still get the rules.
+- The `taste.md` preview on the feed page lists explicit rules first.
+
 ## Schedules and feeds
 
 ### Schedules
@@ -518,6 +568,8 @@ Scheduled work runs on a timer and jumps the queue.
 3. At the scheduled time, a card is created and claimed immediately (ahead of normal work)
 
 If all scouts are busy, an overflow shift starts; a second late schedule waits for the next free slot.
+
+Feeds are easier to manage as [Interests](#interests): one place for the topic, its scan, your taste rules and its notes. A schedule that belongs to an interest is changed there and is locked on this page.
 
 ### Feeds
 
