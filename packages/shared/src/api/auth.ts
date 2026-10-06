@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UserAvatarSchema } from '../avatars/index.ts';
 import { UserRole } from '../events/define.ts';
 import { IsoTime } from './common.ts';
 
@@ -15,6 +16,8 @@ export const UserDtoSchema = z.object({
   lastLoginAt: IsoTime.nullable(),
   /** IANA zone (`Europe/Amsterdam`): browser-detected on first login, editable. Null until set. */
   timezone: z.string().nullable().optional(),
+  /** The user's picture (null: initials). */
+  avatar: UserAvatarSchema.nullable().optional(),
 });
 export type UserDto = z.infer<typeof UserDtoSchema>;
 

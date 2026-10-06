@@ -8,6 +8,7 @@ import {
   type ProjectRole,
 } from '@aom/shared';
 import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
+import { userAvatarOf } from '../dto.ts';
 import { digestItemsForDesk } from './digests.ts';
 import { phaseDeskBlock } from './phases.ts';
 
@@ -15,6 +16,7 @@ const SELECT = `
 SELECT d.*, c.ref AS card_ref, c.title AS card_title, c.stage AS card_stage, c.status AS card_status,
        c.owner_user_id AS card_owner, c.decision_policy AS card_policy, p.key AS project_key, p.merge_large_without_approval AS project_merge_large_ok,
        a.name AS agent_name, u.display_name AS answered_by_name, aa.name AS answered_by_agent_name,
+       u.avatar_kind, u.avatar_seed, u.avatar_style, u.avatar_image_id,
        (SELECT i.id FROM intakes i WHERE i.mapping_desk_item_id = d.id) AS intake_id
   FROM desk_items d
   LEFT JOIN cards c ON c.id = d.card_id
@@ -103,6 +105,9 @@ export function toDeskDto(
     answerOption: r.answer_option,
     answeredAt: iso(r.answered_at),
     answeredByName: r.answered_by_name,
+    answeredByUserId: r.answered_by ?? null,
+    answeredByAvatar: r.answered_by ? userAvatarOf(r) : null,
+    answeredByAgentId: r.answered_by_agent_id ?? null,
     answeredByAgentName: r.answered_by_agent_name ?? null,
     escalationTrail: r.escalation_trail ?? [],
     hint:

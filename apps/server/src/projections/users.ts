@@ -15,6 +15,20 @@ const insertUser = (
   );
 
 export const userProjectors: Record<string, Projector> = {
+  UserAvatarSet: async (tx, e) => {
+    const p = (e.event as EventOf<'UserAvatarSet'>).payload;
+    await exec(
+      tx,
+      `UPDATE users SET avatar_kind=$2, avatar_seed=$3, avatar_style=$4, avatar_image_id=$5 WHERE id=$1`,
+      [
+        p.userId,
+        p.kind === 'none' ? null : p.kind,
+        p.kind === 'cartoon' ? (p.seed ?? null) : null,
+        p.kind === 'cartoon' ? (p.style ?? 'notionists') : null,
+        p.kind === 'image' ? (p.imageId ?? null) : null,
+      ],
+    );
+  },
   UserBootstrapped: async (tx, e) => {
     const p = (e.event as EventOf<'UserBootstrapped'>).payload;
     await insertUser(tx, p, e.createdAt);

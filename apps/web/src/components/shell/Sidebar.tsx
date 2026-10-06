@@ -1,4 +1,4 @@
-import type { ProjectDto } from '@aom/shared';
+import type { ProjectDto, UserAvatar as UserAvatarValue } from '@aom/shared';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { ChevronsLeft, ChevronsRight, LogOut, Plus } from 'lucide-react';
 import { Link, useLocation } from 'react-router';
@@ -102,7 +102,7 @@ export function SidebarBody({
   counts: DeskCounts;
   project: ProjectDto | null;
   projects: ProjectDto[];
-  user: { name: string; email: string; isAdmin: boolean };
+  user: { id?: string; name: string; email: string; isAdmin: boolean; avatar?: UserAvatarValue | null };
   onSignOut: () => void;
   onNavigate?: () => void;
   headerSlot?: React.ReactNode;
@@ -176,6 +176,8 @@ export function SidebarBody({
           <div className="min-w-0 flex-1">
             <UserMenu
               name={user.name}
+              {...(user.id ? { userId: user.id } : {})}
+              avatar={user.avatar ?? null}
               email={user.email}
               isAdmin={user.isAdmin}
               collapsed={collapsed}

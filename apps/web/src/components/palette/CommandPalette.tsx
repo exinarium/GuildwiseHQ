@@ -20,9 +20,9 @@ import { useAgents } from '../../api/queries/agents.ts';
 import { useDesk } from '../../api/queries/desk.ts';
 import { useCardSearch } from '../../api/queries/search.ts';
 import { useTheme } from '../../lib/useTheme.ts';
+import { AgentAvatar } from '../Face.tsx';
 import type { NavSection } from '../shell/nav-config.ts';
 import { cx } from '../ui/cx.ts';
-import { Avatar } from '../ui.tsx';
 
 export interface PaletteContext {
   sections: NavSection[];
@@ -219,7 +219,7 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
                 <Item
                   key={a.id}
                   value={`agent ${a.name} ${a.roleKey}`}
-                  leading={<Avatar name={a.name} size={20} />}
+                  leading={<AgentAvatar agentId={a.id} name={a.name} size={20} />}
                   hint={a.roleKey}
                   onSelect={go(`/agents#${a.id}`)}
                 >

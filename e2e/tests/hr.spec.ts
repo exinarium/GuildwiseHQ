@@ -137,9 +137,12 @@ test('setup: a paired mock runner, project HRB on the toy repo, a senior reviewe
   await expect(agentCard('Bea')).toBeVisible();
   beaId = (await q<{ id: string }>(`SELECT id FROM agents WHERE name='Bea' AND org_id=$1`, [ownerId]))[0]
     ?.id as string;
-  // The agent card: avatar, role, model, status, hiring manager and no hire cap
+  // The agent card: a generated face, role, model, status, hiring manager and no hire cap
   const card = agentCard('Bea');
-  await expect(card.getByTestId('avatar')).toBeVisible();
+  await expect(card.getByTestId('face')).toBeVisible();
+  const seedBefore = await card.getByTestId('face').getAttribute('data-seed');
+  await card.getByRole('button', { name: 'Re-roll the face of Bea' }).click();
+  await expect(card.getByTestId('face')).not.toHaveAttribute('data-seed', seedBefore ?? '');
   await expect(card.getByTestId('agent-model')).toContainText('mock · opus');
   await expect(card.getByTestId('agent-status')).toHaveText('idle');
   await expect(card.getByTestId('agent-hired-by')).toContainText(`Hired by ${HR.name}`);

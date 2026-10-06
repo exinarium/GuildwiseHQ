@@ -232,6 +232,21 @@ describe('HR board', () => {
   });
 });
 
+describe('agent faces on the HR board', () => {
+  it('shows each agent as a generated face and re-rolls it with one click', async () => {
+    const user = userEvent.setup();
+    wrap(<Agents />);
+    const una = await screen.findByTestId('agent-Una');
+    await user.click(await within(una).findByRole('button', { name: 'Re-roll the face of Una' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/agents/${ID(101)}/avatar/reroll`,
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
+  });
+});
+
 describe('hire form', () => {
   async function openHire() {
     const user = userEvent.setup();

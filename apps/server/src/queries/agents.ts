@@ -26,6 +26,8 @@ export function toAgentDto(a: Row, active: Array<{ cardId: string; ref: string; 
     retiredAt: iso(a.retired_at),
     department: a.department ?? null,
     lastShiftEndedAt: iso(a.last_shift_ended_at),
+    avatarSeed: a.avatar_seed ?? a.id,
+    avatarStyle: a.avatar_style ?? 'notionists',
     sandbox: a.sandbox ?? null,
     sandboxReason: a.sandbox_reason ?? null,
     activeCards: active,

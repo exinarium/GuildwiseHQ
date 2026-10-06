@@ -4,7 +4,9 @@ import {
   canHireAgent,
   canManageAgent,
   checkPermissions,
+  DEFAULT_AVATAR_STYLE,
   type HireAgentRequest,
+  randomAvatarSeed,
   streamId,
   type UnsandboxedAck,
 } from '@aom/shared';
@@ -276,6 +278,8 @@ export async function hireAgent(ctx: Ctx, user: AuthSession['user'], req: HireAg
               permissions: roleDef.definition.permissions,
               capacity: req.capacity,
               isDevops: false,
+              avatarSeed: randomAvatarSeed(),
+              avatarStyle: DEFAULT_AVATAR_STYLE,
               ...(unsandboxedAck ? { unsandboxedAck } : {}),
             },
           },

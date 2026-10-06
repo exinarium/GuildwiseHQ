@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useMe } from '../api/queries/auth.ts';
 import { useReporting, useSetTimezone, useUpdateReporting } from '../api/queries/reporting.ts';
+import { UserAvatar } from '../components/Face.tsx';
+import { AvatarPicker } from '../components/profile/AvatarPicker.tsx';
 import {
   Button,
   ErrorBox,
@@ -20,6 +22,7 @@ export function Settings() {
   const setZone = useSetTimezone();
   const update = useUpdateReporting();
   const toast = useToast();
+  const [picking, setPicking] = useState(false);
   const zone = reporting.data?.timezone ?? me.data?.user.timezone ?? null;
   const [dailyAt, setDailyAt] = useState('08:00');
   const [route, setRoute] = useState(true);
@@ -43,6 +46,30 @@ export function Settings() {
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
       <PageHeader title="Settings" sub="Your time zone and how your BA reports to you." />
       <ErrorBox error={reporting.error ?? setZone.error ?? update.error} />
+
+      {me.data?.user && (
+        <Panel>
+          <div className="flex flex-wrap items-center gap-4">
+            <UserAvatar user={me.data.user} size={64} />
+            <div className="min-w-0 flex-1">
+              <h2 className="text-lg font-semibold text-fg">Your picture</h2>
+              <p className="text-sm text-muted">
+                A cartoon face, a photo or an image of your own. It shows in the sidebar, the account menu and
+                on the answers you give at the desk.
+              </p>
+            </div>
+            <Button data-testid="change-picture" onClick={() => setPicking(true)}>
+              Change picture
+            </Button>
+          </div>
+          <AvatarPicker
+            open={picking}
+            onOpenChange={setPicking}
+            name={me.data.user.displayName}
+            current={me.data.user.avatar ?? null}
+          />
+        </Panel>
+      )}
 
       <Panel>
         <h2 className="text-lg font-semibold text-fg">Your time zone</h2>

@@ -1,9 +1,10 @@
+import type { UserAvatar as UserAvatarValue } from '@aom/shared';
 import * as DM from '@radix-ui/react-dropdown-menu';
 import { Laptop, LogOut, Moon, Sun } from 'lucide-react';
 import { Link } from 'react-router';
 import { type ThemeChoice, useTheme } from '../../lib/useTheme.ts';
+import { UserAvatar } from '../Face.tsx';
 import { cx } from '../ui/cx.ts';
-import { Avatar } from '../ui.tsx';
 
 const THEMES: Array<{ id: ThemeChoice; label: string; icon: typeof Sun }> = [
   { id: 'system', label: 'System', icon: Laptop },
@@ -13,6 +14,8 @@ const THEMES: Array<{ id: ThemeChoice; label: string; icon: typeof Sun }> = [
 
 /** Avatar + name; opens the account menu (theme, settings, sign out). */
 export function UserMenu({
+  userId,
+  avatar,
   name,
   email,
   isAdmin,
@@ -20,6 +23,8 @@ export function UserMenu({
   onSignOut,
   onNavigate,
 }: {
+  userId?: string;
+  avatar: UserAvatarValue | null;
   name: string;
   email: string;
   isAdmin: boolean;
@@ -37,7 +42,7 @@ export function UserMenu({
           collapsed ? 'h-10 justify-center' : 'min-h-11 px-2',
         )}
       >
-        <Avatar name={name} size={28} />
+        <UserAvatar user={{ id: userId, displayName: name, avatar }} size={28} />
         {!collapsed && (
           <>
             <span className="min-w-0 flex-1">

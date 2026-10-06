@@ -1,9 +1,16 @@
-import { ChangePasswordRequestSchema, LoginRequestSchema, type MeResponse } from '@aom/shared';
+import {
+  ChangePasswordRequestSchema,
+  IdParamsSchema,
+  LoginRequestSchema,
+  type MeResponse,
+  SetMyAvatarRequestSchema,
+} from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
 import { SlidingLimit } from '../auth/limits.ts';
 import { createSession, deleteSession, SESSION_COOKIE } from '../auth/sessions.ts';
 import { changePassword, verifyLogin } from '../commands/auth.ts';
+import { avatarImageFor, setMyAvatar } from '../commands/avatar.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { toUserDto } from '../dto.ts';
@@ -77,6 +84,26 @@ export function authRoutes(ctx: Ctx) {
       if (ctx.config.rateLimit) passwordPerAccount.hit(s.user.id);
       await changePassword(ctx, s, req.body.current, req.body.new);
       return { ok: true };
+    });
+
+    // The signed-in user's own picture: a generated face, an uploaded (cropped, 256 px) image, or none.
+    app.put('/api/me/avatar', { schema: { body: SetMyAvatarRequestSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await setMyAvatar(ctx, s.user, req.body);
+      return meResponse(ctx, s.user.id);
+    });
+
+    // An uploaded picture, for the people who may see that user (themselves, an administrator, project mates).
+    app.get('/api/users/:id/avatar', { schema: { params: IdParamsSchema } }, async (req, reply) => {
+      const s = await requireUser(ctx, req);
+      const img = await avatarImageFor(ctx, s.user, req.params.id);
+      if (!img) return reply.code(404).send({ error: { code: 'not_found', message: 'no picture' } });
+      return reply
+        .header('content-type', img.mime)
+        .header('cache-control', 'private, max-age=86400')
+        .header('etag', `"${img.id}"`)
+        .header('x-content-type-options', 'nosniff')
+        .send(img.data);
     });
 
     app.get('/api/auth/me', async (req) => {

@@ -4,10 +4,12 @@ import {
   IdParamsSchema,
   NameSuggestionsQuerySchema,
   PatchAgentRequestSchema,
+  RerollAgentAvatarRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
 import { fireAgent, hireAgent, patchAgent, suggestNames } from '../commands/agents.ts';
+import { rerollAgentAvatar } from '../commands/avatar.ts';
 import type { Ctx } from '../context.ts';
 import { notFound } from '../errors.ts';
 import { listAgents } from '../queries/agents.ts';
@@ -52,6 +54,17 @@ export function agentRoutes(ctx: Ctx) {
         const { acknowledgeUnsandboxed, ...changes } = req.body;
         await patchAgent(ctx, s.user, req.params.id, changes, acknowledgeUnsandboxed);
         return one(s.user.id, req.params.id);
+      },
+    );
+
+    // "Re-roll face": a new generated face for the agent (the org owner, or the manager who hired it).
+    app.post(
+      '/api/agents/:id/avatar/reroll',
+      { schema: { params: IdParamsSchema, body: RerollAgentAvatarRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await rerollAgentAvatar(ctx, s.user, req.params.id, req.body);
+        return { agent: await one(s.user.id, req.params.id) };
       },
     );
 

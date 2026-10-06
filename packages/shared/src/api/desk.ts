@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UserAvatarSchema } from '../avatars/index.ts';
 import { DecisionPolicy } from '../cards/types.ts';
 import { DeskItemKind, DeskItemStatus, DeskOptionSchema } from '../events/desk.ts';
 import { LedgerScope } from '../events/ledger.ts';
@@ -59,6 +60,11 @@ export const DeskItemDtoSchema = z.object({
   answerOption: z.string().nullable(),
   answeredAt: IsoTime.nullable(),
   answeredByName: z.string().nullable(),
+  /** The manager who answered and their picture (null: initials). */
+  answeredByUserId: z.uuid().nullable().optional(),
+  answeredByAvatar: UserAvatarSchema.nullable().optional(),
+  /** The agent that answered, for its face. */
+  answeredByAgentId: z.uuid().nullable().optional(),
   decisionPolicy: DecisionPolicy.nullable(),
   /** M7: who looked at the question on its way to the desk (senior peer, BA), and who answered it. */
   escalationTrail: z.array(EscalationStepSchema).optional(),

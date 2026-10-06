@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AvatarSeedSchema, AvatarStyleSchema } from '../avatars/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import { defineEvent, Id } from './define.ts';
 
@@ -42,6 +43,9 @@ export const agentEvents = [
       capacity: z.number().int().min(1).max(8),
       isDevops: z.boolean(),
       unsandboxedAck: UnsandboxedAckSchema.optional(),
+      /** The generated face; an agent hired before faces existed gets one seeded from its id. */
+      avatarSeed: AvatarSeedSchema.optional(),
+      avatarStyle: AvatarStyleSchema.optional(),
     }),
   ),
   defineEvent(
@@ -50,6 +54,11 @@ export const agentEvents = [
   ),
   defineEvent('AgentRetired', z.object({ agentId: Id, by: Id, releasedCardIds: z.array(Id) })),
   defineEvent('AgentReset', z.object({ agentId: Id })),
+  /** "Re-roll face": a new seed (and optionally another style) for the agent's generated face. */
+  defineEvent(
+    'AgentAvatarRerolled',
+    z.object({ agentId: Id, avatarSeed: AvatarSeedSchema, avatarStyle: AvatarStyleSchema, by: Id }),
+  ),
   defineEvent(
     'AgentRehomed',
     z.object({

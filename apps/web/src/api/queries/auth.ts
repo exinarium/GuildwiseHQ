@@ -4,9 +4,10 @@ import {
   type LoginRequest,
   type MeResponse,
   MeResponseSchema,
+  type SetMyAvatarRequest,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, get, post } from '../client.ts';
+import { ApiError, get, post, put } from '../client.ts';
 
 export const meKey = ['me'] as const;
 
@@ -60,5 +61,18 @@ export function useAcceptInvitation(token: string) {
     mutationFn: (b: AcceptInvitationRequest) =>
       post<MeResponse>(`/invitations/${encodeURIComponent(token)}/accept`, b, MeResponseSchema),
     onSuccess: (me) => qc.setQueryData(meKey, me),
+  });
+}
+
+/** Your own picture: a generated face, an uploaded or photographed image (a cropped PNG), or none. */
+export function useSetMyAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: SetMyAvatarRequest) => put<MeResponse>('/me/avatar', b, MeResponseSchema),
+    onSuccess: (me) => {
+      qc.setQueryData(meKey, me);
+      // desk answers and the admin list show it too
+      for (const key of ['desk', 'admin']) void qc.invalidateQueries({ queryKey: [key] });
+    },
   });
 }

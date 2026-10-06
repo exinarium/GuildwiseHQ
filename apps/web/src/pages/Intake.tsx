@@ -3,6 +3,7 @@ import { type FormEvent, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useCreateIntake, useIntake, useIntakes } from '../api/queries/intake.ts';
 import { ChatPanel } from '../components/ChatPanel.tsx';
+import { AgentAvatar } from '../components/Face.tsx';
 import {
   Avatar,
   Badge,
@@ -115,7 +116,7 @@ export function IntakeView() {
         sub={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-base">
             <span className="inline-flex items-center gap-1.5">
-              <Avatar name={i.baAgentName} size={20} />
+              <AgentAvatar agentId={i.baAgentId} name={i.baAgentName} size={20} />
               BA {i.baAgentName}
             </span>
             <ConnectionDot connected={i.workstationOnline} />

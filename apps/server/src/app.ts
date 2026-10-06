@@ -233,7 +233,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     reply.header('referrer-policy', 'no-referrer');
     reply.header('content-security-policy', csp);
     reply.header('cross-origin-opener-policy', 'same-origin');
-    reply.header('permissions-policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    reply.header('permissions-policy', 'camera=(self), microphone=(), geolocation=(), payment=()');
     // HSTS only where the public origin is https (a plain-http dev server must not pin browsers to https).
     if (config.secureCookies)
       reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');

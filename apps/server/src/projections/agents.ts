@@ -20,8 +20,9 @@ export const agentProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO agents (id, org_id, project_id, hired_by_user_id, manager_user_id, workstation_id, name, role_key,
-         role_version, seniority, runtime, model, effort, skills, permissions, capacity, is_devops, status, hired_at)
-       VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'active',$17)`,
+         role_version, seniority, runtime, model, effort, skills, permissions, capacity, is_devops, status, hired_at,
+         avatar_seed, avatar_style)
+       VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'active',$17,COALESCE($18::text, $20::text),$19)`,
       [
         p.agentId,
         p.orgId,
@@ -40,8 +41,19 @@ export const agentProjectors: Record<string, Projector> = {
         p.capacity,
         p.isDevops,
         e.createdAt,
+        p.avatarSeed ?? null,
+        p.avatarStyle ?? 'notionists',
+        p.agentId,
       ],
     );
+  },
+  AgentAvatarRerolled: async (tx, e) => {
+    const p = (e.event as EventOf<'AgentAvatarRerolled'>).payload;
+    await exec(tx, 'UPDATE agents SET avatar_seed=$2, avatar_style=$3 WHERE id=$1', [
+      p.agentId,
+      p.avatarSeed,
+      p.avatarStyle,
+    ]);
   },
   AgentChanged: async (tx, e) => {
     const p = (e.event as EventOf<'AgentChanged'>).payload;

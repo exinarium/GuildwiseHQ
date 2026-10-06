@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   type CreateDevOpsRequest,
+  DEFAULT_AVATAR_STYLE,
   DEVOPS_OUTCOME_APPROVAL,
   DEVOPS_OUTCOME_DONE,
   type DevOpsAccess,
@@ -13,6 +14,7 @@ import {
   type HygieneSpec,
   type PatchDevOpsAccessRequest,
   type RunnerToServerOf,
+  randomAvatarSeed,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -95,6 +97,8 @@ export async function devopsHireEvent(
         permissions: role.definition.permissions,
         capacity: 1,
         isDevops: true,
+        avatarSeed: randomAvatarSeed(),
+        avatarStyle: DEFAULT_AVATAR_STYLE,
       },
     },
     actor: SYSTEM_ACTOR,

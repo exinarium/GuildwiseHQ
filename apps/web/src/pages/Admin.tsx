@@ -9,6 +9,7 @@ import {
   useAdminUsers,
   useAdminWorkstations,
 } from '../api/queries/workstations.ts';
+import { UserAvatar } from '../components/Face.tsx';
 import {
   Avatar,
   Badge,
@@ -162,7 +163,7 @@ export function Admin() {
             return (
               <li key={u.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                 <span className="flex min-w-0 items-center gap-3">
-                  <Avatar name={u.displayName} size={32} />
+                  <UserAvatar user={u} size={32} />
                   <span className="min-w-0">
                     <span className="flex flex-wrap items-center gap-2 font-medium text-fg">
                       {u.displayName}

@@ -3,6 +3,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { useChat, useThreadMessages } from '../api/queries/chats.ts';
 import { newId } from '../lib/secure.ts';
 import { getSocket } from '../ws/socket.ts';
+import { AgentAvatar } from './Face.tsx';
 import { Avatar, Button, Callout, ErrorBox, Spinner, TextArea } from './ui.tsx';
 
 const OFFLINE_TEXT =
@@ -135,7 +136,7 @@ export function ChatPanel({
             >
               {m.authorKind === 'agent' && (
                 <span className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted">
-                  <Avatar name={m.authorName ?? 'agent'} size={16} />
+                  <AgentAvatar agentId={m.authorAgentId} name={m.authorName ?? 'agent'} size={16} />
                   {m.authorName}
                 </span>
               )}

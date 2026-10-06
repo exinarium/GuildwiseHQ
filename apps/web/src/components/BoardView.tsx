@@ -8,6 +8,7 @@ import { stageStyle } from '../lib/stages.ts';
 import { ageLabel } from '../lib/time.ts';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
 import { BackoffBadge } from './BackoffBadge.tsx';
+import { AgentAvatar } from './Face.tsx';
 import { cx } from './ui/cx.ts';
 import { Avatar, Badge, FilterChip } from './ui.tsx';
 import { WorkabilityWarning } from './WorkabilityWarning.tsx';
@@ -96,7 +97,7 @@ export function CardTile({
         >
           {card.assignee && (
             <span className="inline-flex items-center gap-1.5 text-xs text-muted" data-testid="tile-assignee">
-              <Avatar name={card.assignee.name} size={18} />
+              <AgentAvatar agentId={card.assignee.agentId} name={card.assignee.name} size={18} />
               {card.assignee.name}
             </span>
           )}

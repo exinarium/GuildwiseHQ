@@ -50,6 +50,15 @@ export function useHire() {
   });
 }
 
+/** "Re-roll face": a new generated face for the agent. */
+export function useRerollFace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => post(`/agents/${id}/avatar/reroll`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+  });
+}
+
 export function useFire() {
   const qc = useQueryClient();
   return useMutation({

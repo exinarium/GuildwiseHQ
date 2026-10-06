@@ -9,6 +9,7 @@ import { BRAND } from '../../brand.ts';
 import { useGlobalShortcuts } from '../../lib/shortcuts.ts';
 import { useIsDesktop, useIsTabletUp } from '../../lib/useMediaQuery.ts';
 import { getSocket, useSocketState } from '../../ws/socket.ts';
+import { AgentFacesSync } from '../AgentFacesSync.tsx';
 import { ChatDrawer } from '../ChatDrawer.tsx';
 import { CommandPalette } from '../palette/CommandPalette.tsx';
 import { ShortcutsDialog } from '../palette/ShortcutsDialog.tsx';
@@ -70,7 +71,13 @@ export function AppShell({ isAdmin, name, live }: { isAdmin: boolean; name: stri
     isAdmin,
   });
   const collapsed = isTabletUp && (!isDesktop || pref);
-  const user = { name, email: me.data?.user.email ?? '', isAdmin };
+  const user = {
+    id: me.data?.user.id,
+    name,
+    email: me.data?.user.email ?? '',
+    isAdmin,
+    avatar: me.data?.user.avatar ?? null,
+  };
   const signOut = () => logout.mutate();
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: route changes only
@@ -285,6 +292,7 @@ export function AppShell({ isAdmin, name, live }: { isAdmin: boolean; name: stri
           </RadixDialog.Portal>
         </RadixDialog.Root>
       )}
+      <AgentFacesSync />
       <CommandPalette
         open={palette}
         onOpenChange={setPalette}

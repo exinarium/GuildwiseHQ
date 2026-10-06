@@ -25,6 +25,7 @@ import { BackoffBadge } from '../components/BackoffBadge.tsx';
 import { EditCardDialog, RiskTierDialog } from '../components/CardEdit.tsx';
 import { CardPhase } from '../components/CardPhase.tsx';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
+import { AgentAvatar } from '../components/Face.tsx';
 import { FinalizePanel } from '../components/FinalizePanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
@@ -220,7 +221,7 @@ export function CardDetailView({
             </span>
             {card.claimedByAgentName ? (
               <span className="inline-flex items-center gap-1.5">
-                <Avatar name={card.claimedByAgentName} size={20} />
+                <AgentAvatar agentId={card.claimedByAgentId} name={card.claimedByAgentName} size={20} />
                 {card.claimedByAgentName}
               </span>
             ) : (
@@ -381,7 +382,7 @@ export function CardDetailView({
                   className="rounded-control border border-line p-3 text-base"
                 >
                   <div className="flex flex-wrap items-center gap-2 text-xs text-subtle">
-                    {h.agentName && <Avatar name={h.agentName} size={18} />}
+                    {h.agentName && <AgentAvatar agentId={h.agentId} name={h.agentName} size={18} />}
                     <span className="font-medium text-muted">{h.agentName ?? 'system'}</span>
                     <Badge tone={h.outcome === 'changes' || h.outcome === 'fail' ? 'red' : 'green'}>
                       {h.stage}: {h.outcome}
@@ -622,7 +623,12 @@ function ThreadPanel({
         {thread.map((m) => (
           <li key={m.id} className="text-sm">
             <div className="flex items-center gap-1.5 text-xs text-subtle">
-              {m.authorName && <Avatar name={m.authorName} size={16} />}
+              {m.authorName &&
+                (m.authorKind === 'agent' ? (
+                  <AgentAvatar agentId={m.authorAgentId} name={m.authorName} size={16} />
+                ) : (
+                  <Avatar name={m.authorName} size={16} />
+                ))}
               <span className="font-medium">{m.authorName ?? m.authorKind}</span>
               <Badge>{m.kind}</Badge>
               <span>{formatDateTime(m.createdAt)}</span>

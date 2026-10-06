@@ -10,6 +10,7 @@ import {
   useRestoreChat,
 } from '../api/queries/chats.ts';
 import { ChatPanel } from './ChatPanel.tsx';
+import { AgentAvatar } from './Face.tsx';
 import {
   Avatar,
   Button,
@@ -131,7 +132,7 @@ export function ChatDrawer({
                           onClick={() => setThreadId(c.threadId)}
                           className="flex min-w-0 flex-1 items-center gap-2 rounded-control border border-line px-2 py-1.5 text-left text-sm hover:bg-sunken"
                         >
-                          <Avatar name={c.agentName} size={20} />
+                          <AgentAvatar agentId={c.agentId} name={c.agentName} size={20} />
                           <span className="min-w-0 flex-1 truncate">
                             {c.agentName}
                             {c.cardRef && (
@@ -167,7 +168,7 @@ export function ChatDrawer({
                 {current && (
                   <>
                     <span className="flex min-w-0 items-center gap-1.5 font-medium">
-                      <Avatar name={current.agentName} size={20} />
+                      <AgentAvatar agentId={current.agentId} name={current.agentName} size={20} />
                       <span className="truncate">{current.agentName}</span>
                       <ConnectionDot connected={current.workstationOnline} />
                     </span>

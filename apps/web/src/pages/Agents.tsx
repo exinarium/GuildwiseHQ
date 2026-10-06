@@ -2,7 +2,14 @@ import { type AgentDto, type HrAgent, NAME_THEMES } from '@aom/shared';
 import { Users } from 'lucide-react';
 import { type FormEvent, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { useAgents, useFire, useHire, useNameSuggestions, useRoles } from '../api/queries/agents.ts';
+import {
+  useAgents,
+  useFire,
+  useHire,
+  useNameSuggestions,
+  useRerollFace,
+  useRoles,
+} from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
 import { useResetAgent } from '../api/queries/devops.ts';
 import { useHrBoard } from '../api/queries/hr.ts';
@@ -10,6 +17,7 @@ import { useRehomeAgent } from '../api/queries/members.ts';
 import { useDepartments } from '../api/queries/org.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
+import { AgentAvatar } from '../components/Face.tsx';
 import { AgentStats, WorkQualityPanel } from '../components/hr/AgentStats.tsx';
 import { ChangeModelDialog, ChangeRoleDialog } from '../components/hr/ChangeDialogs.tsx';
 import { RecommendationList, RoleUpdates } from '../components/hr/Recommendations.tsx';
@@ -65,6 +73,7 @@ export function Agents() {
   const me = useMe();
   const projects = useProjects();
   const reset = useResetAgent();
+  const reroll = useRerollFace();
   const myId = me.data?.user.id;
   /** The org owner may change and fire any agent; a member only the ones they hired themselves. */
   const canManage = (a: AgentDto) => !!myId && (myId === a.orgId || myId === a.managerUserId);
@@ -121,7 +130,7 @@ export function Agents() {
       </div>
       {board.isPending && <ListSkeleton label="Loading agents" />}
       {board.isError && <ErrorBox error={board.error} onRetry={() => board.refetch()} />}
-      <ErrorBox error={reset.error} />
+      <ErrorBox error={reset.error ?? reroll.error} />
       {board.data && <RoleUpdates updates={board.data.roleUpdates} />}
       {board.data && <RecommendationList recommendations={board.data.recommendations} />}
       {board.data && active.length === 0 && (
@@ -159,6 +168,8 @@ export function Agents() {
               onRole={() => setChangingRole(h.agent)}
               onReset={() => reset.mutate(h.agent.id)}
               resetting={reset.isPending}
+              onReroll={() => reroll.mutate(h.agent.id)}
+              rerolling={reroll.isPending}
             />
           </li>
         ))}
@@ -168,7 +179,7 @@ export function Agents() {
           <ul className="divide-y divide-line rounded-card border border-line bg-surface">
             {retired.map((a) => (
               <li key={a.id} className="flex items-center gap-3 px-4 py-2.5 text-sm text-muted">
-                <Avatar name={a.name} size={22} />
+                <AgentAvatar agentId={a.id} name={a.name} size={22} />
                 <span className="font-medium text-fg">{a.name}</span>
                 <span>{roleName(a.roleKey)}</span>
               </li>
@@ -197,6 +208,8 @@ function AgentCard({
   onRole,
   onReset,
   resetting,
+  onReroll,
+  rerolling,
 }: {
   hr: HrAgent;
   roleName: string;
@@ -209,6 +222,8 @@ function AgentCard({
   onRole: () => void;
   onReset: () => void;
   resetting: boolean;
+  onReroll: () => void;
+  rerolling: boolean;
 }) {
   const a = hr.agent;
   const isBuilder = a.roleKey === 'builder';
@@ -226,7 +241,13 @@ function AgentCard({
                   : 'ring-line'
           }`}
         >
-          <Avatar name={a.name} size={40} />
+          <AgentAvatar
+            agentId={a.id}
+            name={a.name}
+            size={40}
+            {...(a.avatarSeed ? { seed: a.avatarSeed } : {})}
+            {...(a.avatarStyle ? { style: a.avatarStyle } : {})}
+          />
         </span>
         <div className="min-w-0">
           <p className="truncate text-lg leading-tight font-semibold text-fg">{a.name}</p>
@@ -294,6 +315,17 @@ function AgentCard({
             <Button
               variant="ghost"
               size="sm"
+              aria-label={`Re-roll the face of ${a.name}`}
+              disabled={rerolling}
+              onClick={onReroll}
+            >
+              Re-roll face
+            </Button>
+          )}
+          {canManage && (
+            <Button
+              variant="ghost"
+              size="sm"
               aria-label={`Reset ${a.name}`}
               disabled={resetting}
               onClick={onReset}
@@ -314,6 +346,15 @@ function AgentCard({
           </Button>
           <Button variant="ghost" size="sm" aria-label={`Change role of ${a.name}`} onClick={onRole}>
             Change role
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`Re-roll the face of ${a.name}`}
+            disabled={rerolling}
+            onClick={onReroll}
+          >
+            Re-roll face
           </Button>
           <Button
             variant="danger-ghost"

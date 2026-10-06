@@ -2,6 +2,7 @@ import { MessageSquareOff } from 'lucide-react';
 import { useParams } from 'react-router';
 import { useChat } from '../api/queries/chats.ts';
 import { ChatPanel } from '../components/ChatPanel.tsx';
+import { AgentAvatar } from '../components/Face.tsx';
 import { Avatar, ConnectionDot, EmptyState, PageHeader, PageSkeleton } from '../components/ui.tsx';
 
 /** A single conversation as a page (phone friendly). */
@@ -17,7 +18,7 @@ export function Chat() {
         sub={
           chat.data && (
             <span className="flex items-center gap-2">
-              <Avatar name={chat.data.agentName} size={20} />
+              <AgentAvatar agentId={chat.data.agentId} name={chat.data.agentName} size={20} />
               <ConnectionDot connected={chat.data.workstationOnline} />
             </span>
           )

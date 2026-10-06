@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AvatarStyleSchema } from '../avatars/index.ts';
 import { AgentChangesSchema } from '../events/agent.ts';
 import { SandboxStateSchema } from '../protocol/runner.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
@@ -28,6 +29,9 @@ export const AgentDtoSchema = z.object({
   /** M10: the department of the agent's role. */
   department: z.string().nullable().optional(),
   lastShiftEndedAt: IsoTime.nullable(),
+  /** The generated face (seed and style); every agent has one. */
+  avatarSeed: z.string().optional(),
+  avatarStyle: AvatarStyleSchema.optional(),
   /** The OS-sandbox state its workstation reports for the agent's runtime (null/absent: not reported). */
   sandbox: SandboxStateSchema.nullable().optional(),
   sandboxReason: z.string().nullable().optional(),

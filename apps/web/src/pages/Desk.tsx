@@ -16,6 +16,7 @@ import { BaNote, FloorReport } from '../components/BaNote.tsx';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
 import { DigestRating } from '../components/DigestRating.tsx';
 import { EscalationTrail } from '../components/EscalationTrail.tsx';
+import { AgentAvatar, UserAvatar } from '../components/Face.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
 import { MappingForm } from '../components/MappingForm.tsx';
 import { OutboundApproval } from '../components/OutboundApproval.tsx';
@@ -262,11 +263,30 @@ export function Desk() {
               <li key={i.id} data-testid={`desk-closed-${i.id}`}>
                 <Panel padding="compact">
                   <p className="text-base font-medium text-fg">{i.title}</p>
-                  <p className="text-xs text-subtle">
-                    {i.status}
-                    {i.answeredByName ? ` by ${i.answeredByName}` : ''}
-                    {i.answeredByAgentName ? ` by ${i.answeredByAgentName} (without reaching the desk)` : ''}{' '}
-                    · {formatDateTime(i.answeredAt)}
+                  <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-subtle">
+                    <span>{i.status}</span>
+                    {i.answeredByName && (
+                      <span className="inline-flex items-center gap-1.5" data-testid="answered-by">
+                        by
+                        <UserAvatar
+                          user={{
+                            id: i.answeredByUserId,
+                            displayName: i.answeredByName,
+                            avatar: i.answeredByAvatar,
+                          }}
+                          size={18}
+                        />
+                        {i.answeredByName}
+                      </span>
+                    )}
+                    {i.answeredByAgentName && (
+                      <span className="inline-flex items-center gap-1.5" data-testid="answered-by">
+                        by
+                        <AgentAvatar agentId={i.answeredByAgentId} name={i.answeredByAgentName} size={18} />
+                        {i.answeredByAgentName} (without reaching the desk)
+                      </span>
+                    )}
+                    <span>· {formatDateTime(i.answeredAt)}</span>
                   </p>
                   {i.answer && <p className="mt-1 text-sm whitespace-pre-wrap text-muted">{i.answer}</p>}
                   <EscalationTrail item={i} />
@@ -318,7 +338,7 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         {item.askedBy.agentName && (
           <span className="inline-flex items-center gap-1.5 font-medium text-fg" data-testid="asked-by">
-            <Avatar name={item.askedBy.agentName} size={20} />
+            <AgentAvatar agentId={item.askedBy.agentId} name={item.askedBy.agentName} size={20} />
             {item.askedBy.agentName}
             {item.askedBy.role && <span className="font-normal text-subtle">({item.askedBy.role})</span>}
           </span>
