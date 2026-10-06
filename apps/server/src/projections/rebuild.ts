@@ -8,6 +8,10 @@ import { PROJECTION_TABLES } from './index.ts';
 const SAVED: Array<{ table: string; restoreWhere: string }> = [
   { table: 'auth_sessions', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'pairing_codes', restoreWhere: 'user_id IN (SELECT id FROM users)' },
+  // Two-factor secrets and recovery codes are operational (they never enter the event log).
+  { table: 'user_totp', restoreWhere: 'user_id IN (SELECT id FROM users)' },
+  { table: 'user_recovery_codes', restoreWhere: 'user_id IN (SELECT id FROM users)' },
+  { table: 'login_challenges', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'runner_commands', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
   { table: 'runner_token_rotations', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
   {
@@ -37,7 +41,10 @@ export async function rebuildProjections(
     await tx.query('SELECT pg_advisory_xact_lock(7311)'); // no appends while rebuilding
     for (const s of SAVED)
       await exec(tx, `CREATE TEMP TABLE _save_${s.table} ON COMMIT DROP AS SELECT * FROM ${s.table}`);
-    await exec(tx, 'CREATE TEMP TABLE _save_users ON COMMIT DROP AS SELECT id, last_login_at FROM users');
+    await exec(
+      tx,
+      'CREATE TEMP TABLE _save_users ON COMMIT DROP AS SELECT id, last_login_at, last_org_id FROM users',
+    );
     await exec(
       tx,
       'CREATE TEMP TABLE _save_ws ON COMMIT DROP AS SELECT id, connected, last_seen_at, runtimes, hostname, platform, runner_version FROM workstations',
@@ -70,7 +77,10 @@ export async function rebuildProjections(
     for (const s of SAVED) {
       await exec(tx, `INSERT INTO ${s.table} SELECT * FROM _save_${s.table} WHERE ${s.restoreWhere}`);
     }
-    await exec(tx, 'UPDATE users u SET last_login_at = s.last_login_at FROM _save_users s WHERE u.id = s.id');
+    await exec(
+      tx,
+      'UPDATE users u SET last_login_at = s.last_login_at, last_org_id = s.last_org_id FROM _save_users s WHERE u.id = s.id',
+    );
     await exec(
       tx,
       `UPDATE workstations w SET connected = s.connected, last_seen_at = s.last_seen_at, runtimes = s.runtimes,

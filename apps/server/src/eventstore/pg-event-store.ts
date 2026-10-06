@@ -12,7 +12,7 @@ import {
 } from './types.ts';
 
 const COLS = `seq, id, stream_id, stream_version, type, payload, actor_kind, actor_id, org_id, project_id,
-  audience, correlation_id, causation_id, created_at`;
+  audience, user_id, correlation_id, causation_id, created_at`;
 
 export function rowToEvent(r: Record<string, any>): StoredEvent {
   return {
@@ -22,7 +22,7 @@ export function rowToEvent(r: Record<string, any>): StoredEvent {
     streamVersion: r.stream_version,
     event: { type: r.type, payload: r.payload } as StoredEvent['event'],
     actor: { kind: r.actor_kind, id: r.actor_id },
-    scope: { orgId: r.org_id, projectId: r.project_id, audience: r.audience },
+    scope: { orgId: r.org_id, projectId: r.project_id, audience: r.audience, userId: r.user_id ?? null },
     correlationId: r.correlation_id ?? undefined,
     causationId: r.causation_id ?? undefined,
     createdAt: new Date(r.created_at),
@@ -46,7 +46,11 @@ export class PgEventStore implements EventStore {
   async append(inputs: AppendInput[], opts: { tx?: Tx } = {}): Promise<StoredEvent[]> {
     if (inputs.length === 0) return [];
     // Validate before touching the DB.
-    inputs.forEach((i) => void DomainEventSchema.parse(i.event));
+    inputs.forEach((i) => {
+      DomainEventSchema.parse(i.event);
+      if (i.scope.audience === 'user' && !i.scope.userId)
+        throw new Error(`event ${i.event.type}: audience 'user' needs scope.userId`);
+    });
     const run = async (tx: Tx): Promise<StoredEvent[]> => {
       // Re-entrant: commands that took the lock via withAppendTx already hold it.
       await tx.query('SELECT pg_advisory_xact_lock($1)', [APPEND_LOCK_ID]);
@@ -76,8 +80,8 @@ export class PgEventStore implements EventStore {
         const r = await rows(
           tx,
           `INSERT INTO events (stream_id, stream_version, type, payload, actor_kind, actor_id, org_id,
-             project_id, audience, correlation_id, causation_id, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING ${COLS}`,
+             project_id, audience, user_id, correlation_id, causation_id, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING ${COLS}`,
           [
             input.streamId,
             version,
@@ -88,6 +92,7 @@ export class PgEventStore implements EventStore {
             input.scope.orgId,
             input.scope.projectId,
             input.scope.audience,
+            input.scope.userId ?? null,
             input.correlationId ?? null,
             input.causationId ?? null,
             this.clock.now(),

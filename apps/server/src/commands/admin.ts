@@ -16,12 +16,14 @@ export async function patchUser(
   patch: { role?: 'admin' | 'member'; status?: 'active' | 'deactivated' },
 ) {
   await withAppendTx(ctx.pool, async (tx) => {
-    const u = await one(tx, 'SELECT id, role, status FROM users WHERE id=$1 FOR UPDATE', [userId]);
+    const u = await one(tx, 'SELECT id, legacy_role AS role, status FROM users WHERE id=$1 FOR UPDATE', [
+      userId,
+    ]);
     if (!u) throw notFound('user not found');
     const adminCount = async () =>
       Number(
-        (await one(tx, `SELECT count(*)::int AS n FROM users WHERE role='admin' AND status='active'`))?.n ??
-          0,
+        (await one(tx, `SELECT count(*)::int AS n FROM users WHERE legacy_role='admin' AND status='active'`))
+          ?.n ?? 0,
       );
     const events = [];
     const base = { actor: { kind: 'user', id: admin.user.id } as const, scope: ADMIN_SCOPE };

@@ -179,7 +179,7 @@ export function Admin() {
                   </label>
                   <select
                     id={`role-${u.id}`}
-                    value={u.role}
+                    value={(u as { role?: 'admin' | 'member' }).role ?? 'member'}
                     disabled={self}
                     onChange={(e) =>
                       m.patchUser.mutate(

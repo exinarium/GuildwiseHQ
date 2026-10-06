@@ -10,6 +10,7 @@
     "test": "vitest run --passWithNoTests",
     "db:migrate": "tsx src/db/migrate.ts",
     "admin:create": "tsx scripts/admin-create.ts",
+    "orgs:migrate": "tsx scripts/orgs-migrate.ts",
     "projections:rebuild": "tsx scripts/projections-rebuild.ts"
   },
   "dependencies": {

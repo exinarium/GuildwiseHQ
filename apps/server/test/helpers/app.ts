@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { streamId } from '@aom/shared';
+import { NO_LIMITS, streamId } from '@aom/shared';
 import { type AomApp, createApp } from '../../src/app.ts';
 import { hashPassword } from '../../src/auth/password.ts';
 import { registerBuiltins } from '../../src/catalogue/boot.ts';
@@ -94,6 +94,35 @@ export async function createTestApp(
               },
         actor: { kind: 'system', id: null },
         scope: { orgId: null, projectId: null, audience: 'admin' },
+      },
+      // Every user belongs to an organization (docs/design/organizations.md): the shape of the legacy migration,
+      // an organization whose id is the user id and whose Owner is that user.
+      {
+        streamId: streamId.org(userId),
+        event: {
+          type: 'OrganizationCreated',
+          payload: {
+            orgId: userId,
+            name: `${displayName}'s organization`,
+            ownerUserId: userId,
+            plan: 'founding',
+            status: 'active',
+            limits: NO_LIMITS,
+            features: {},
+            createdVia: 'cli',
+          },
+        },
+        actor: { kind: 'system', id: null },
+        scope: { orgId: userId, projectId: null, audience: 'org' },
+      },
+      {
+        streamId: streamId.org(userId),
+        event: {
+          type: 'OrgMemberAdded',
+          payload: { orgId: userId, userId, role: 'owner', via: 'bootstrap' },
+        },
+        actor: { kind: 'system', id: null },
+        scope: { orgId: userId, projectId: null, audience: 'org' },
       },
       // BA routing is on for new organizations; the existing suites assert the direct flows, so test users start
       // with it off (tests of the routing turn it on through PUT /api/reporting).

@@ -33,7 +33,7 @@ describe('admin users', () => {
     expect(demote.body.role).toBe('member');
 
     // only one admin left in the active set -> cannot demote or deactivate self
-    const onlyAdmins = (await q(`SELECT id FROM users WHERE role='admin' AND status='active'`)).map(
+    const onlyAdmins = (await q(`SELECT id FROM users WHERE legacy_role='admin' AND status='active'`)).map(
       (r) => r.id,
     );
     expect(onlyAdmins.length).toBeGreaterThanOrEqual(1);

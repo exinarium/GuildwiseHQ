@@ -32,7 +32,8 @@ const user = (timezone: string | null) => ({
   id: U(1),
   email: 'm@example.com',
   displayName: 'Mia',
-  role: 'member' as const,
+  kind: 'user' as const,
+  twoFactorEnabled: false,
   status: 'active' as const,
   createdAt: '2026-10-01T10:00:00.000Z',
   lastLoginAt: null,
@@ -40,7 +41,14 @@ const user = (timezone: string | null) => ({
 });
 const me = (timezone: string | null): MeResponse => ({
   user: user(timezone),
+  account: { kind: 'user' },
   isAdmin: false,
+  orgs: [],
+  activeOrg: null,
+  guestIn: [],
+  guestProjectIds: [],
+  pendingInvitations: 0,
+  twoFactor: { enabled: false, required: false, setupRequired: false },
   visibleProjectIds: [],
   features: { mockUi: false },
 });

@@ -62,6 +62,8 @@ export const deskEvents = [
       triage: z.object({ deadline: z.iso.datetime() }).optional(),
       /** Structured data the answer handler needs (the working-branch question: repo and reason). */
       data: z.record(z.string(), z.unknown()).optional(),
+      /** Org-level questions (the DevOps engineer's) addressed to one user. */
+      addresseeUserId: Id.optional(),
     }),
   ),
   defineEvent(
@@ -117,6 +119,8 @@ export const deskEvents = [
       data: z.record(z.string(), z.unknown()).optional(),
       /** Part B: the standing BA chat thread the report links to. */
       chatThreadId: Id.optional(),
+      /** Org-level items addressed to one user (DevOps, vault conflict, workstation bottleneck): only they and the org's Owner and Admins see it. */
+      addresseeUserId: Id.optional(),
     }),
   ),
   defineEvent(

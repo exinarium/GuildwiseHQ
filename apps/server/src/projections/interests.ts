@@ -15,8 +15,8 @@ async function upsert(
   await exec(
     tx,
     `INSERT INTO interests (id, org_id, name, description, feed_project_id, research_project_id, sub_category,
-       preferred_sites, scan, status, schedule_id, adopted_from, created_by, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)
+       preferred_sites, scan, status, schedule_id, adopted_from, created_by, created_at, updated_at, created_by_rank)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14,$15)
      ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description,
        feed_project_id=EXCLUDED.feed_project_id, research_project_id=EXCLUDED.research_project_id,
        sub_category=EXCLUDED.sub_category, preferred_sites=EXCLUDED.preferred_sites, scan=EXCLUDED.scan,
@@ -36,6 +36,7 @@ async function upsert(
       p.adoptedFrom ?? null,
       actorKind === 'user' ? actorId : null,
       at,
+      p.creatorRank ?? null,
     ],
   );
 }

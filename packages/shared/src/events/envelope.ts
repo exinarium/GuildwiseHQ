@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const ActorKind = z.enum(['user', 'agent', 'system', 'runner']);
-export const Audience = z.enum(['org', 'project', 'admin', 'system']);
+export const Audience = z.enum(['org', 'project', 'admin', 'user', 'system']);
 export type Audience = z.infer<typeof Audience>;
 
 export const ActorSchema = z.object({ kind: ActorKind, id: z.string().nullable() });
@@ -11,6 +11,8 @@ export const ScopeSchema = z.object({
   orgId: z.string().nullable(),
   projectId: z.string().nullable(),
   audience: Audience,
+  /** Required when `audience` is `user` (per-user events: workstations, addressed items). */
+  userId: z.string().nullable().optional(),
 });
 export type Scope = z.infer<typeof ScopeSchema>;
 

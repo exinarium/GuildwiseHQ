@@ -53,7 +53,14 @@ const NAMES = [
 const authed = () => db.signedIn;
 const meBody = () => ({
   user: ME,
-  isAdmin: ME.role === 'admin',
+  account: { kind: 'user' as const },
+  isAdmin: true,
+  orgs: [],
+  activeOrg: null,
+  guestIn: [],
+  guestProjectIds: [],
+  pendingInvitations: 0,
+  twoFactor: { enabled: false, required: false, setupRequired: false },
   visibleProjectIds: db.projects.map((p) => p.id),
   features: { mockUi: true },
 });

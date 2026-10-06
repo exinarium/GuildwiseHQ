@@ -25,7 +25,14 @@ export async function meResponse(ctx: Ctx, userId: string): Promise<MeResponse> 
   );
   return {
     user: toUserDto(u as Record<string, any>),
-    isAdmin: u?.role === 'admin',
+    account: { kind: u?.kind ?? 'user' },
+    isAdmin: u?.legacy_role === 'admin',
+    orgs: [],
+    activeOrg: null,
+    guestIn: [],
+    guestProjectIds: [],
+    pendingInvitations: 0,
+    twoFactor: { enabled: false, required: false, setupRequired: false },
     visibleProjectIds: projects.map((p) => p.project_id),
     features: { mockUi: ctx.config.mockUi },
   };

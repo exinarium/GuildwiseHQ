@@ -13,6 +13,7 @@ export const PROTOCOL_VERSION = 1 as const;
 /** Event stream id helpers (docs/ARCHITECTURE.md section 2). */
 export const streamId = {
   user: (id: string) => `user-${id}`,
+  org: (id: string) => `org-${id}`,
   invitation: (id: string) => `invitation-${id}`,
   workstation: (id: string) => `workstation-${id}`,
   project: (id: string) => `project-${id}`,

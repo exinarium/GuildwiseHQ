@@ -18,9 +18,15 @@ export function invitationRoutes(ctx: Ctx) {
     app.get('/api/invitations/:token', { schema: { params: InvitationTokenParamsSchema } }, async (req) => {
       const inv = await lookupInvitation(ctx, req.params.token);
       const out: InvitationInfoResponse = {
+        kind: 'legacy',
         email: inv.email,
-        role: inv.role,
+        role: null,
         expiresAt: iso(inv.expires_at) as string,
+        invitedBy: null,
+        orgName: null,
+        proposedOrgName: null,
+        accountExists: false,
+        terms: null,
       };
       return out;
     });

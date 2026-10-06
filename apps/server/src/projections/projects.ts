@@ -139,8 +139,8 @@ export const projectProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO projects (id, org_id, key, name, domain, workflow_key, priority_tier, branch_prefix,
-         working_branch, sub_categories, vault_folder, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+         working_branch, sub_categories, vault_folder, created_at, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [
         p.projectId,
         p.orgId,
@@ -154,14 +154,27 @@ export const projectProjectors: Record<string, Projector> = {
         p.subCategories,
         p.vaultFolder,
         e.createdAt,
+        p.createdByUserId ?? p.orgId,
       ],
     );
-    await exec(
-      tx,
-      `INSERT INTO project_members (project_id, user_id, role, status, joined_at)
-       VALUES ($1,$2,'owner','active',$3)`,
-      [p.projectId, p.orgId, e.createdAt],
-    );
+    if (p.createdByUserId) {
+      // Organizations: the creator is an Owner or Admin; every active Owner and Admin gets an organization grant.
+      await exec(
+        tx,
+        `INSERT INTO project_members (project_id, user_id, role, status, joined_at, direct, org_grant)
+         SELECT $1, om.user_id, 'owner', 'active', $3, false, true FROM org_members om
+          WHERE om.org_id = $2 AND om.status = 'active' AND om.role IN ('owner','admin')`,
+        [p.projectId, p.orgId, e.createdAt],
+      );
+    } else {
+      // Legacy event (before organizations): the user whose id is `orgId` created and owns it.
+      await exec(
+        tx,
+        `INSERT INTO project_members (project_id, user_id, role, status, joined_at)
+         VALUES ($1,$2,'owner','active',$3)`,
+        [p.projectId, p.orgId, e.createdAt],
+      );
+    }
   },
   ProjectUpdated: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectUpdated'>).payload;

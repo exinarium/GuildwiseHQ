@@ -30,6 +30,8 @@ export const projectEvents = [
     z.object({
       projectId: Id,
       orgId: Id,
+      /** Absent on events from before organizations (then the org's owner, `orgId`, created it). */
+      createdByUserId: Id.optional(),
       key: ProjectKeySchema,
       name: z.string().min(1),
       domain: ProjectDomain,

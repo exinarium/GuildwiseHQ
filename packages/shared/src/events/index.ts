@@ -11,6 +11,7 @@ import { hygieneEvents } from './hygiene.ts';
 import { intakeEvents } from './intake.ts';
 import { interestEvents } from './interest.ts';
 import { ledgerEvents } from './ledger.ts';
+import { orgEvents } from './org.ts';
 import { outboundEvents } from './outbound.ts';
 import { phaseEvents } from './phase.ts';
 import { projectEvents } from './project.ts';
@@ -28,6 +29,7 @@ import { workstationEvents } from './workstation.ts';
 // Registry: later milestones add one spread per domain file (desk, ledger, testing, ...) on the line below.
 export const DomainEventSchema = z.discriminatedUnion('type', [
   ...userEvents,
+  ...orgEvents,
   ...workstationEvents,
   ...projectEvents,
   ...cardEvents,
@@ -72,6 +74,7 @@ export * from './hygiene.ts';
 export * from './intake.ts';
 export * from './interest.ts';
 export * from './ledger.ts';
+export * from './org.ts';
 export * from './outbound.ts';
 export * from './phase.ts';
 export * from './project.ts';

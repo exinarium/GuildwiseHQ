@@ -41,6 +41,8 @@ export const InterestBodySchema = z.object({
   scheduleId: Id.nullable(),
   /** The schedule it was adopted from, if any. */
   adoptedFrom: Id.optional(),
+  /** The creator's rank (1 guest .. 4 owner) in the interest's organization when it was created (docs/design/organizations.md 4.3). */
+  creatorRank: z.number().int().min(1).max(4).optional(),
 });
 export type InterestBody = z.infer<typeof InterestBodySchema>;
 

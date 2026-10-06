@@ -4,14 +4,15 @@ import type { Projector } from '../eventstore/types.ts';
 
 const insertUser = (
   tx: Parameters<Projector>[0],
-  u: { userId: string; email: string; displayName: string; passwordHash: string; role: string },
+  u: { userId: string; email: string; displayName: string; passwordHash: string; role?: string },
   at: Date,
+  kind: 'user' | 'super_admin' = 'user',
 ) =>
   exec(
     tx,
-    `INSERT INTO users (id, email, display_name, password_hash, role, status, created_at)
-     VALUES ($1,$2,$3,$4,$5,'active',$6)`,
-    [u.userId, u.email, u.displayName, u.passwordHash, u.role, at],
+    `INSERT INTO users (id, email, display_name, password_hash, legacy_role, kind, status, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,'active',$7)`,
+    [u.userId, u.email, u.displayName, u.passwordHash, u.role ?? null, kind, at],
   );
 
 export const userProjectors: Record<string, Projector> = {
@@ -54,6 +55,54 @@ export const userProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'InvitationRevoked'>).payload;
     await exec(tx, `UPDATE invitations SET status='revoked' WHERE id=$1`, [p.invitationId]);
   },
+  /** An account created by accepting a new-organization or organization-member invitation. */
+  UserRegistered: async (tx, e) => {
+    const p = (e.event as EventOf<'UserRegistered'>).payload;
+    await insertUser(tx, p, e.createdAt);
+  },
+  SuperAdminCreated: async (tx, e) => {
+    const p = (e.event as EventOf<'SuperAdminCreated'>).payload;
+    await insertUser(tx, p, e.createdAt, 'super_admin');
+  },
+  OrgInvitationCreated: async (tx, e) => {
+    const p = (e.event as EventOf<'OrgInvitationCreated'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO invitations (id, email, role, token_hash, invited_by, status, expires_at, created_at, kind, org_id,
+         org_role, proposed_org_name, org_terms, project_ids)
+       VALUES ($1,$2,NULL,$3,$4,'pending',$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [
+        p.invitationId,
+        p.email,
+        p.tokenHash,
+        p.invitedBy,
+        p.expiresAt,
+        e.createdAt,
+        p.kind,
+        p.orgId ?? null,
+        p.orgRole,
+        p.proposedOrgName ?? null,
+        p.orgTerms ? JSON.stringify(p.orgTerms) : null,
+        p.projectIds,
+      ],
+    );
+  },
+  OrgInvitationAccepted: async (tx, e) => {
+    const p = (e.event as EventOf<'OrgInvitationAccepted'>).payload;
+    await exec(
+      tx,
+      `UPDATE invitations SET status='accepted', accepted_at=$2, accepted_user_id=$3 WHERE id=$1`,
+      [p.invitationId, e.createdAt, p.userId],
+    );
+  },
+  TwoFactorEnabled: async (tx, e) => {
+    const p = (e.event as EventOf<'TwoFactorEnabled'>).payload;
+    await exec(tx, 'UPDATE users SET two_factor_enabled=true WHERE id=$1', [p.userId]);
+  },
+  TwoFactorDisabled: async (tx, e) => {
+    const p = (e.event as EventOf<'TwoFactorDisabled'>).payload;
+    await exec(tx, 'UPDATE users SET two_factor_enabled=false WHERE id=$1', [p.userId]);
+  },
   InvitationAccepted: async (tx, e) => {
     const p = (e.event as EventOf<'InvitationAccepted'>).payload;
     await insertUser(tx, p, e.createdAt);
@@ -65,7 +114,7 @@ export const userProjectors: Record<string, Projector> = {
   },
   UserRoleChanged: async (tx, e) => {
     const p = (e.event as EventOf<'UserRoleChanged'>).payload;
-    await exec(tx, 'UPDATE users SET role=$2 WHERE id=$1', [p.userId, p.role]);
+    await exec(tx, 'UPDATE users SET legacy_role=$2 WHERE id=$1', [p.userId, p.role]);
   },
   UserDeactivated: async (tx, e) => {
     const p = (e.event as EventOf<'UserDeactivated'>).payload;

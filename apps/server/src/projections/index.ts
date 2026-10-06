@@ -10,8 +10,10 @@ import { hygieneProjectors } from './hygiene.ts';
 import { intakeProjectors } from './intake.ts';
 import { interestProjectors } from './interests.ts';
 import { ledgerProjectors } from './ledger.ts';
+import { orgProjectors } from './orgs.ts';
 import { outboundProjectors } from './outbound.ts';
 import { phaseProjectors } from './phases.ts';
+import { platformAuditProjectors } from './platform-audit.ts';
 import { projectProjectors } from './projects.ts';
 import { repoProjectors } from './repo.ts';
 import { reporterProjectors } from './reporter.ts';
@@ -32,6 +34,8 @@ import { workstationProjectors } from './workstations.ts';
  */
 const domains: Array<Record<string, Projector>> = [
   userProjectors,
+  orgProjectors,
+  platformAuditProjectors,
   catalogueProjectors,
   workstationProjectors,
   projectProjectors,
@@ -77,6 +81,9 @@ export function buildProjectors(): ProjectorMap {
  */
 export const PROJECTION_TABLES = [
   'users',
+  'organizations',
+  'org_members',
+  'platform_audit_log',
   'invitations',
   'workstations',
   'projects',

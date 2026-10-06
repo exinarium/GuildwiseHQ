@@ -52,7 +52,7 @@ export async function lookupSession(ctx: Ctx, token: string | undefined): Promis
   const id = sha256Hex(token);
   const r = await one(
     ctx.pool,
-    `SELECT s.id AS sid, s.last_seen_at, s.expires_at, u.id, u.email, u.display_name, u.role, u.status,
+    `SELECT s.id AS sid, s.last_seen_at, s.expires_at, u.id, u.email, u.display_name, u.legacy_role, u.status,
             u.created_at, u.last_login_at
        FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.id = $1`,
     [id],
@@ -76,7 +76,7 @@ export async function lookupSession(ctx: Ctx, token: string | undefined): Promis
       id: r.id,
       email: r.email,
       displayName: r.display_name,
-      role: r.role,
+      role: r.legacy_role ?? 'member',
       status: r.status,
       createdAt: new Date(r.created_at),
       lastLoginAt: r.last_login_at ? new Date(r.last_login_at) : null,
