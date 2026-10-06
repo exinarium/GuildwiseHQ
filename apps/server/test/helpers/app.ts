@@ -28,6 +28,16 @@ export interface TestApp {
   }>;
   /** Creates a user straight through the event store (fast) and returns its id. */
   createUser(email: string, role?: 'admin' | 'member', displayName?: string): Promise<string>;
+  /** A super admin account (the CLI's `superadmin:create`, straight through the event store). */
+  createSuperAdmin(email: string, displayName?: string): Promise<string>;
+  /** A new organization owned by `ownerUserId` (its id is NOT a user id, unlike the per-user org of `createUser`). */
+  createOrg(
+    ownerUserId: string,
+    name?: string,
+    over?: { status?: 'trial' | 'active' | 'suspended' | 'cancelled' },
+  ): Promise<string>;
+  /** Adds an existing user to an organization as a member or admin (as an accepted invitation would). */
+  addOrgMember(orgId: string, userId: string, role?: 'member' | 'admin', invitedBy?: string): Promise<void>;
   login(email: string, password?: string): Promise<string>;
   /** createUser + login. */
   userSession(
@@ -135,6 +145,68 @@ export async function createTestApp(
     ]);
     return userId;
   };
+  const createSuperAdmin: TestApp['createSuperAdmin'] = async (email, displayName = 'Root') => {
+    const userId = randomUUID();
+    await app.ctx.store.append([
+      {
+        streamId: streamId.user(userId),
+        event: {
+          type: 'SuperAdminCreated',
+          payload: { userId, email, displayName, passwordHash: await passwordHash() },
+        },
+        actor: { kind: 'system', id: null },
+        scope: { orgId: null, projectId: null, audience: 'admin' },
+      },
+    ]);
+    return userId;
+  };
+  const createOrg: TestApp['createOrg'] = async (ownerUserId, name = 'Second org', over = {}) => {
+    const orgId = randomUUID();
+    const scope = { orgId, projectId: null, audience: 'org' } as const;
+    await app.ctx.store.append([
+      {
+        streamId: streamId.org(orgId),
+        event: {
+          type: 'OrganizationCreated',
+          payload: {
+            orgId,
+            name,
+            ownerUserId,
+            plan: 'founding',
+            status: over.status ?? 'active',
+            limits: NO_LIMITS,
+            features: {},
+            createdVia: 'cli',
+          },
+        },
+        actor: { kind: 'system', id: null },
+        scope,
+      },
+      {
+        streamId: streamId.org(orgId),
+        event: {
+          type: 'OrgMemberAdded',
+          payload: { orgId, userId: ownerUserId, role: 'owner', via: 'bootstrap' },
+        },
+        actor: { kind: 'system', id: null },
+        scope,
+      },
+    ]);
+    return orgId;
+  };
+  const addOrgMember: TestApp['addOrgMember'] = async (orgId, userId, role = 'member', invitedBy) => {
+    await app.ctx.store.append([
+      {
+        streamId: streamId.org(orgId),
+        event: {
+          type: 'OrgMemberAdded',
+          payload: { orgId, userId, role, via: 'invitation', ...(invitedBy ? { invitedBy } : {}) },
+        },
+        actor: { kind: 'system', id: null },
+        scope: { orgId, projectId: null, audience: 'org' },
+      },
+    ]);
+  };
   const login: TestApp['login'] = async (email, password = PASSWORD) => {
     const r = await req('POST', '/api/auth/login', { body: { email, password } });
     if (r.status !== 200 || !r.cookie) throw new Error(`login failed: ${r.status} ${JSON.stringify(r.body)}`);
@@ -145,6 +217,9 @@ export async function createTestApp(
     clock,
     req,
     createUser,
+    createSuperAdmin,
+    createOrg,
+    addOrgMember,
     login,
     async userSession(email, role = 'member') {
       const id = await createUser(email, role);

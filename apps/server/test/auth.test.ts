@@ -32,7 +32,9 @@ describe('auth', () => {
     const me = await t.req('GET', '/api/auth/me', { cookie });
     expect(me.status).toBe(200);
     expect(me.body.user.email).toBe(email);
-    expect(me.body.isAdmin).toBe(false);
+    // every user is the Owner of an organization of their own, so the deprecated `isAdmin` alias is true
+    expect(me.body.isAdmin).toBe(true);
+    expect(me.body.activeOrg.role).toBe('owner');
     expect(me.body.visibleProjectIds).toEqual([]);
     expect((await t.req('GET', '/api/auth/me')).status).toBe(401);
   });

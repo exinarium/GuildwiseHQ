@@ -17,6 +17,7 @@ const EnvSchema = z.object({
   AOM_MAIL_FROM: z.string().default('Guildwise HQ <noreply@aom.local>'),
   AOM_MIGRATE_ON_BOOT: bool(true),
   AOM_DATA_MIGRATIONS: bool(true),
+  AOM_SECRET_KEY: z.string().min(16).optional(),
   AOM_SERVE_WEB: bool(false),
   AOM_WEB_DIST: z.string().optional(),
   AOM_RATE_LIMIT: bool(true),
@@ -39,6 +40,8 @@ export interface Config {
   migrateOnBoot: boolean;
   /** Run the boot data migrations (`orgs-2026-10`, ...) after the SQL migrations. */
   dataMigrations: boolean;
+  /** Encrypts the two-factor seeds at rest. Unset: a random key kept in the database (set it in production). */
+  secretKey: string | undefined;
   serveWeb: boolean;
   webDist: string | undefined;
   rateLimit: boolean;
@@ -70,6 +73,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     mailFrom: e.AOM_MAIL_FROM,
     migrateOnBoot: e.AOM_MIGRATE_ON_BOOT,
     dataMigrations: e.AOM_DATA_MIGRATIONS,
+    secretKey: e.AOM_SECRET_KEY,
     serveWeb: e.AOM_SERVE_WEB,
     webDist: e.AOM_WEB_DIST,
     rateLimit: e.AOM_RATE_LIMIT,
