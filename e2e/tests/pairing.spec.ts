@@ -33,6 +33,7 @@ test('AC2: pairing code, aom-runner pair + start, workstation Connected with the
   const card = page.getByTestId('workstation-E2E Desktop');
   await expect(card.getByTestId('connection-dot')).toHaveAttribute('data-connected', 'true');
   await expect(card.getByText('Connected')).toBeVisible();
+  await expandWorkstation(card);
   await expect(card.getByText('mock')).toBeVisible();
 
   // The server lists only repos that match a project repo (ARCHITECTURE: workstation_repos), so the toy repo

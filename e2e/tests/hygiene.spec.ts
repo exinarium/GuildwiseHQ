@@ -6,6 +6,7 @@ import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { pool, q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, E2E_DIR, HYGIENER, paths } from '../support/env.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
+import { expandWorkstation } from '../support/ui.ts';
 
 // DevOps repository hygiene and the working branch (docs/design/phases.md addendum): one user, one runner (mock runtime),
 // project HYG on its own repository `notes-app` whose working branch is NOT confirmed (like TEST01's). The mock DevOps
@@ -58,6 +59,7 @@ const questions = (status = 'open') =>
 async function runHygiene(): Promise<{ id: string; status: string }> {
   const before = (await requests()).length;
   await page.goto('/workstations');
+  await expandWorkstation(page.getByTestId('workstation-Hygiene Box'));
   await page.getByRole('button', { name: 'Run hygiene now' }).click();
   await expect(page.getByText(/Hygiene run requested|already queued or running/)).toBeVisible();
   const list = await waitFor(
@@ -135,6 +137,7 @@ test('AC1: while the working branch is unset, hygiene reports the uncommitted ch
   const localHead = git(CLONE, 'rev-parse', 'HEAD');
 
   await page.goto('/workstations');
+  await expandWorkstation(page.getByTestId('workstation-Hygiene Box'));
   const card = page.getByTestId('hygiene-Hygiene Box');
   await expect(card.getByLabel('Run')).toHaveValue('24'); // daily by default
   await expect(card.getByTestId('hygiene-status')).toContainText('Not run yet');
@@ -239,6 +242,7 @@ test('AC3: uncommitted changes on a branch that is not the working branch are re
   expect(sig[0]?.urgency).toBe('normal');
   expect(sig[0]?.subject.title).toContain('Uncommitted changes on another branch: notes-app');
   await page.goto('/workstations');
+  await expandWorkstation(page.getByTestId('workstation-Hygiene Box'));
   await expect(page.getByTestId('hygiene-status')).toContainText('1 open finding');
   await page.screenshot({ path: join(paths.vaults, 'hygiene-workstation.png'), fullPage: true });
 
@@ -351,6 +355,7 @@ test('AC6: a new phase asks the manager to keep the working branch or name anoth
 
 test('AC7: the cadence is set per workstation', async () => {
   await page.goto('/workstations');
+  await expandWorkstation(page.getByTestId('workstation-Hygiene Box'));
   await page.getByTestId('hygiene-Hygiene Box').getByLabel('Run').selectOption({ label: 'Every 6 hours' });
   await waitFor(
     'the cadence is stored',
