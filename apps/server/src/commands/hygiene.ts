@@ -6,6 +6,7 @@ import {
   type HygieneRepoSpec,
   type HygieneSpec,
   type HygieneTrigger,
+  PHASE_ASSIGNABLE_STATUSES,
   parseBranchName,
   renderHygieneRequest,
   streamId,
@@ -27,6 +28,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { agentActor, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { createDevOpsRequestIn, threadMessage } from './devops.ts';
+import { userBy } from './phase-events.ts';
 
 /** Phases whose own working branch the hygiene job uses: the phase is not over (nor discarded). */
 const ACTIVE_PHASE = `('open','reporting','awaiting_approval','running_followups','reporting_results')`;
@@ -315,7 +317,7 @@ export async function workingBranchQuestionEvents(
     ? `Keep ${current} as the working branch of ${where}${q.because ? ` for ${q.because}` : ''}, or use another branch?`
     : `Which branch is the working branch of ${where}?`;
   const doing = current
-    ? `Confirming the working branch of ${where}${q.because ? ` because of ${q.because}` : ''}. Hygiene commits and pushes unsaved work to this branch and agents merge their cards into it.`
+    ? `Confirming the working branch of ${where}${q.because ? ` because of ${q.because}` : ''}. Hygiene commits and pushes unsaved work to this branch and agents merge their cards into it.${q.reason === 'phase' ? ' A branch you name here applies to this phase only; the repository keeps its default and uses it again when the phase is done.' : ''}`
     : `Repository hygiene found no confirmed working branch for ${where}, so it did not commit or push anything. ${
         uncommitted.length
           ? `${uncommitted.length} file(s) have uncommitted changes (${uncommitted.slice(0, 8).join(', ')}${uncommitted.length > 8 ? ', ...' : ''}); they stay untouched until you answer.`
@@ -486,7 +488,7 @@ export async function workingBranchAnsweredEvents(
   user: AuthSession['user'],
   req: { answer: string; optionId?: string | undefined },
 ): Promise<{ events: AppendInput[]; hygieneForRepo: string | null }> {
-  const data = (item.data ?? {}) as { repoId?: string; reason?: WorkingBranchReason };
+  const data = (item.data ?? {}) as { repoId?: string; reason?: WorkingBranchReason; phaseId?: string };
   const repo = data.repoId
     ? await one(tx, 'SELECT * FROM project_repos WHERE id=$1 FOR UPDATE', [data.repoId])
     : undefined;
@@ -507,6 +509,30 @@ export async function workingBranchAnsweredEvents(
         ? 'there is no branch to keep: pick one or name one'
         : 'type the name of the branch (a valid git branch name)',
     );
+  // A branch named while re-confirming for a phase belongs to that phase: the repository keeps its default, which
+  // applies again once the phase is done. A repository with no default yet gets it set (hygiene needs one).
+  const phase =
+    data.reason === 'phase' && data.phaseId && repo.working_branch
+      ? await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [data.phaseId])
+      : undefined;
+  if (phase) {
+    const open = PHASE_ASSIGNABLE_STATUSES.includes(phase.status);
+    const events: AppendInput[] =
+      !open || branch === phase.working_branch || branch === repo.working_branch
+        ? []
+        : [
+            {
+              streamId: streamId.phase(phase.id),
+              event: {
+                type: 'PhaseUpdated',
+                payload: { phaseId: phase.id, changes: { workingBranch: branch }, by: userBy(user.id) },
+              },
+              actor: userActor(user.id),
+              scope: projectScope(project.org_id, project.id),
+            },
+          ];
+    return { events, hygieneForRepo: null };
+  }
   const events =
     branch === repo.working_branch
       ? []

@@ -5,10 +5,6 @@ import { withAppendTx } from '../db/tx.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { workingBranchQuestionEvents } from './hygiene.ts';
 
-/** A branch the manager named this recently is not asked about again for a new intake or phase. A repository with no confirmed
- * branch is skipped: the hygiene run asks about those (with the branches it found as options). */
-const RECENT_MS = 3600_000;
-
 async function askForProject(
   ctx: Ctx,
   projectId: string,
@@ -27,12 +23,9 @@ async function askForProject(
           AND EXISTS (SELECT 1 FROM workstation_repos wr WHERE wr.project_repo_id = r.id) ORDER BY r.name`,
       [projectId],
     );
-    const now = ctx.clock.now().getTime();
+    // No re-ask timer (owner decision, 2026-10-06): every new intake or phase asks again, for repositories that have a
+    // working branch (keep or change) and for those that have none yet (which one is it?).
     for (const repo of repos) {
-      // A repository without a confirmed branch is asked about by the hygiene run (with its branches as options).
-      if (!repo.working_branch) continue;
-      const setAt = repo.working_branch_set_at ? new Date(repo.working_branch_set_at).getTime() : 0;
-      if (now - setAt < RECENT_MS) continue;
       const events = await workingBranchQuestionEvents(ctx, tx, project, repo, {
         reason,
         because,
@@ -45,7 +38,8 @@ async function askForProject(
 
 /**
  * Re-confirm on change (owner decision 3): a new intake for a project, and a new phase created or activated, make the
- * DevOps engineer ask the manager whether the working branch stays or changes. A phase that names its own working branch
+ * DevOps engineer ask the manager whether the working branch stays or changes (or, with none yet, which it is). There is
+ * no timer: only these two events ask. A phase that names its own working branch
  * needs no question. Runs after the event committed (the gateway's event reactions); failures are logged, never raised.
  */
 export async function confirmBranchOnEvent(ctx: Ctx, e: StoredEvent): Promise<void> {

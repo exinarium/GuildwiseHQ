@@ -222,7 +222,7 @@ describe('the project settings change the working branch', () => {
 });
 
 describe('re-confirming when something changes', () => {
-  it('a repository with no confirmed branch is left to the hygiene run, not asked about for a new phase', async () => {
+  it('a new phase also asks about a repository with no working branch yet, and the answer sets the repository default', async () => {
     await q(`UPDATE project_repos SET working_branch=NULL WHERE id=$1`, [w.repoId]);
     await q(
       `DELETE FROM ledger_entries WHERE source_desk_item_id IN (SELECT id FROM desk_items WHERE subkind=$1)`,
@@ -234,8 +234,22 @@ describe('re-confirming when something changes', () => {
       201,
     );
     await flush();
-    await new Promise((res) => setTimeout(res, 200));
-    expect(await questions()).toHaveLength(0);
+    await until(
+      async () => (await questions()).length === 1,
+      5000,
+      'the question for the repo with no branch',
+    );
+    const [item] = await questions();
+    expect(item?.title).toContain('Which branch is the working branch of toy (TOY)?');
+    expect(item?.data).toMatchObject({ repoId: w.repoId, reason: 'phase' });
+    await ok(
+      owner('POST', `/api/desk/${item?.id}/answer`, {
+        answer: 'main',
+        optionId: 'branch:main',
+        ledger: { scope: 'decision' },
+      }),
+    );
+    expect((await repoRow()).working_branch).toBe('main');
   });
 
   it('a new phase asks to keep the current branch or name another; one that names its own branch asks nothing', async () => {
@@ -283,14 +297,50 @@ describe('re-confirming when something changes', () => {
     expect(await questions()).toHaveLength(0);
   });
 
-  it('a branch the manager just named is not asked about again straight away', async () => {
+  it('there is no re-ask timer: a branch named a moment ago is asked about again for a new phase', async () => {
     await q(`UPDATE project_repos SET working_branch='main', working_branch_set_at=now() WHERE id=$1`, [
       w.repoId,
     ]);
+    await q(
+      `DELETE FROM ledger_entries WHERE source_desk_item_id IN (SELECT id FROM desk_items WHERE subkind=$1)`,
+      [WORKING_BRANCH_SUBKIND],
+    );
+    await q(`DELETE FROM desk_items WHERE subkind=$1`, [WORKING_BRANCH_SUBKIND]);
     await ok(owner('POST', `/api/projects/${w.projectId}/phases`, { name: 'Recent', description: 'z' }), 201);
     await flush();
-    await new Promise((res) => setTimeout(res, 200));
-    expect(await questions()).toHaveLength(0);
+    await until(async () => (await questions()).length === 1, 5000, 'the question');
+    await q(`DELETE FROM desk_items WHERE subkind=$1`, [WORKING_BRANCH_SUBKIND]);
+  });
+
+  it('a branch named for a phase is saved on the phase; the repository default stays', async () => {
+    await q(`UPDATE project_repos SET working_branch='main', working_branch_set_at=now() WHERE id=$1`, [
+      w.repoId,
+    ]);
+    await q(
+      `DELETE FROM ledger_entries WHERE source_desk_item_id IN (SELECT id FROM desk_items WHERE subkind=$1)`,
+      [WORKING_BRANCH_SUBKIND],
+    );
+    await q(`DELETE FROM desk_items WHERE subkind=$1`, [WORKING_BRANCH_SUBKIND]);
+    const phase = await ok<any>(
+      owner('POST', `/api/projects/${w.projectId}/phases`, { name: 'Own branch later', description: 'q' }),
+      201,
+    );
+    await flush();
+    await until(async () => (await questions()).length === 1, 5000, 'the question');
+    const [item] = await questions();
+    expect(item?.data).toMatchObject({ reason: 'phase', phaseId: phase.id });
+    expect(item?.body ?? item?.doing ?? '').toBeDefined();
+    await ok(
+      owner('POST', `/api/desk/${item?.id}/answer`, {
+        answer: 'develop',
+        optionId: 'branch:develop',
+        ledger: { scope: 'decision' },
+      }),
+    );
+    expect((await repoRow()).working_branch).toBe('main');
+    expect((await q('SELECT working_branch FROM phases WHERE id=$1', [phase.id]))[0]?.working_branch).toBe(
+      'develop',
+    );
   });
 
   it('the active phase branch wins over the repository branch in the hygiene request', async () => {

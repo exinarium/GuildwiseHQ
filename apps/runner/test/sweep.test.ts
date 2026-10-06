@@ -127,17 +127,20 @@ describe('runner start-up sweep', () => {
     let live: string[] = [];
     const h = await startHarness({ worktreesLive: () => live }, { startupSweepMs: 20 }, repo);
     try {
-      // The first connection already swept an empty directory; now leave a dead and a live worktree and sweep again.
+      // Leave a dead and a live worktree and sweep. The start-up sweep (20 ms after connecting) may run first on a
+      // slow machine and remove the dead one itself, so the assertions do not depend on which sweep did it.
       const wt = join(h.dataDir, 'worktrees');
       const dead = cardWorktree(repo, wt, 'TOY-aaaaaaaa', 'TOY-1');
       const keep = cardWorktree(repo, wt, 'TOY-aaaaaaaa', 'TOY-2');
       live = [keep];
-      const r = await h.runner.sweepWorktrees();
-      expect(r.removed).toEqual([dead]);
+      await h.runner.sweepWorktrees();
+      expect(existsSync(dead)).toBe(false);
       expect(existsSync(keep)).toBe(true);
-      // The server sees exactly the candidates, as absolute paths.
-      const q = h.server.of('worktrees.query').at(-1);
-      expect(q?.paths.sort()).toEqual([dead, keep].sort());
+      // The server was asked about the candidates, as absolute paths (never about the live one's removal).
+      const asked = h.server.of('worktrees.query').flatMap((q) => q.paths);
+      expect(asked).toContain(dead);
+      expect(asked).toContain(keep);
+      expect(asked.every((p) => p.startsWith('/'))).toBe(true);
     } finally {
       await h.stop();
     }
