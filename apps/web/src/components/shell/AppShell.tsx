@@ -1,14 +1,17 @@
 import * as RadixDialog from '@radix-ui/react-dialog';
 import * as Tooltip from '@radix-ui/react-tooltip';
-import { Inbox, Menu, MessageSquare, Plus, X } from 'lucide-react';
+import { Inbox, Menu, MessageSquare, Plus, Search, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Link, Outlet, useLocation } from 'react-router';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import { useLogout, useMe } from '../../api/queries/auth.ts';
 import { useDesk } from '../../api/queries/desk.ts';
 import { BRAND } from '../../brand.ts';
+import { useGlobalShortcuts } from '../../lib/shortcuts.ts';
 import { useIsDesktop, useIsTabletUp } from '../../lib/useMediaQuery.ts';
 import { getSocket, useSocketState } from '../../ws/socket.ts';
 import { ChatDrawer } from '../ChatDrawer.tsx';
+import { CommandPalette } from '../palette/CommandPalette.tsx';
+import { ShortcutsDialog } from '../palette/ShortcutsDialog.tsx';
 import { cx } from '../ui/cx.ts';
 import { Breadcrumbs, crumbsFor } from './Breadcrumbs.tsx';
 import { buildNav } from './nav-config.ts';
@@ -54,6 +57,9 @@ export function AppShell({ isAdmin, name, live }: { isAdmin: boolean; name: stri
   const [pref, setPref] = useState(readCollapsed);
   const [drawer, setDrawer] = useState(false);
   const [chat, setChat] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const [help, setHelp] = useState(false);
+  const navigate = useNavigate();
   const main = useRef<HTMLElement>(null);
   const first = useRef(true);
 
@@ -92,6 +98,30 @@ export function AppShell({ isAdmin, name, live }: { isAdmin: boolean; name: stri
       /* storage blocked: the toggle still works for this page */
     }
   };
+
+  useGlobalShortcuts({
+    palette: () => setPalette((o) => !o),
+    help: () => setHelp(true),
+    newCard: () => navigate(project ? `/cards/new?project=${project.key}` : '/cards/new'),
+    search: () => {
+      const box = document.querySelector<HTMLInputElement>('main input[type="search"]');
+      if (box) {
+        box.focus();
+        box.select();
+      } else setPalette(true);
+    },
+    go: (page) =>
+      navigate(
+        {
+          board: project ? `/p/${project.key}/board` : '/projects',
+          desk: '/desk',
+          agents: '/agents',
+          projects: '/projects',
+          workstations: '/workstations',
+          interests: '/interests',
+        }[page],
+      ),
+  });
 
   const crumbs = crumbsFor(pathname, search, projects);
   const pageName = crumbs.at(-1)?.label ?? BRAND.name;
@@ -135,6 +165,19 @@ export function AppShell({ isAdmin, name, live }: { isAdmin: boolean; name: stri
               </div>
               <div className="flex shrink-0 items-center gap-4">
                 <LiveIndicator live={live} />
+                <button
+                  type="button"
+                  onClick={() => setPalette(true)}
+                  aria-label="Search and jump to (Ctrl K)"
+                  data-testid="palette-button"
+                  className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm text-muted hover:bg-sunken"
+                >
+                  <Search aria-hidden="true" className="size-4" />
+                  <span className="hidden xl:inline">Search</span>
+                  <kbd className="hidden rounded-[6px] border border-control bg-sunken px-1.5 font-mono text-xs text-subtle lg:inline">
+                    Ctrl K
+                  </kbd>
+                </button>
                 <button
                   type="button"
                   onClick={() => setChat(true)}
@@ -242,6 +285,19 @@ export function AppShell({ isAdmin, name, live }: { isAdmin: boolean; name: stri
           </RadixDialog.Portal>
         </RadixDialog.Root>
       )}
+      <CommandPalette
+        open={palette}
+        onOpenChange={setPalette}
+        ctx={{
+          sections,
+          footer,
+          projects,
+          projectKey: project?.key ?? null,
+          onChat: () => setChat(true),
+          onHelp: () => setHelp(true),
+        }}
+      />
+      <ShortcutsDialog open={help} onOpenChange={setHelp} />
       <ChatDrawer open={chat} onOpenChange={setChat} {...(project ? { projectId: project.id } : {})} />
     </Tooltip.Provider>
   );

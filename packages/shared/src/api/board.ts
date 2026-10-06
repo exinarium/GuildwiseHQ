@@ -64,3 +64,22 @@ export const BoardResponseSchema = z.object({
   columns: z.array(BoardColumnSchema),
 });
 export type BoardResponse = z.infer<typeof BoardResponseSchema>;
+
+/** `GET /api/search/cards?q=` : cards of the viewer's projects whose ref starts with, or whose title contains, `q` (the command palette). */
+export const CardSearchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(100),
+  limit: z.coerce.number().int().min(1).max(20).default(8),
+});
+export const CardSearchResponseSchema = z.object({
+  cards: z.array(
+    z.object({
+      id: z.uuid(),
+      ref: z.string(),
+      title: z.string(),
+      status: z.string(),
+      projectKey: z.string(),
+      projectName: z.string(),
+    }),
+  ),
+});
+export type CardSearchResponse = z.infer<typeof CardSearchResponseSchema>;

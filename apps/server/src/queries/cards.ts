@@ -3,6 +3,7 @@ import {
   boardColumns,
   type CardDetailResponse,
   type CardDto,
+  type CardSearchResponse,
   canCommentOnCard,
   canManageCard,
   columnFor,
@@ -14,7 +15,7 @@ import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
 import { memberRefusal } from '../commands/phases.ts';
 import type { Ctx } from '../context.ts';
-import { iso, one, type Row, rows } from '../db/sql.ts';
+import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 import { cardPhaseRef } from './phases.ts';
 import { publicationOfCard } from './research.ts';
@@ -303,5 +304,37 @@ export async function getBoard(
     projectId,
     workflowKey: wf.key,
     columns: [...byColumn.entries()].map(([name, cs]) => ({ name, cards: cs })),
+  };
+}
+
+/** Cards of the projects the user is an active member of, by ref prefix or title text (the command palette). */
+export async function searchCards(
+  db: Queryable,
+  userId: string,
+  q: string,
+  limit: number,
+): Promise<CardSearchResponse> {
+  const esc = q.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const like = `%${esc}%`;
+  const list = await rows(
+    db,
+    `SELECT c.id, c.ref, c.title, c.status, p.key AS project_key, p.name AS project_name
+       FROM cards c
+       JOIN projects p ON p.id = c.project_id AND p.status = 'active'
+       JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
+      WHERE c.status <> 'cancelled' AND (lower(c.ref) LIKE lower($3) || '%' OR c.title ILIKE $2)
+      ORDER BY (lower(c.ref) = lower($4)) DESC, (lower(c.ref) LIKE lower($3) || '%') DESC, c.updated_at DESC
+      LIMIT $5`,
+    [userId, like, esc, q, limit],
+  );
+  return {
+    cards: list.map((c) => ({
+      id: c.id,
+      ref: c.ref,
+      title: c.title,
+      status: c.status,
+      projectKey: c.project_key,
+      projectName: c.project_name,
+    })),
   };
 }

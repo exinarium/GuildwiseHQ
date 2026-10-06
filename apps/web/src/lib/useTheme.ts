@@ -21,8 +21,16 @@ function apply(choice: ThemeChoice): void {
 }
 
 /** The user's theme choice: persisted (guildwise-theme), applied to <html data-theme>, follows the OS for `system`. */
+const CHANGED = 'guildwise-theme-changed';
+
 export function useTheme(): [ThemeChoice, (c: ThemeChoice) => void] {
   const [choice, setChoice] = useState<ThemeChoice>(read);
+  // Another component (the command palette, the user menu) changed it: follow.
+  useEffect(() => {
+    const on = (e: Event) => setChoice((e as CustomEvent<ThemeChoice>).detail);
+    window.addEventListener(CHANGED, on);
+    return () => window.removeEventListener(CHANGED, on);
+  }, []);
   useEffect(() => {
     if (choice !== 'system' || !window.matchMedia) return;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -39,6 +47,7 @@ export function useTheme(): [ThemeChoice, (c: ThemeChoice) => void] {
     }
     apply(c);
     setChoice(c);
+    window.dispatchEvent(new CustomEvent<ThemeChoice>(CHANGED, { detail: c }));
   }, []);
   return [choice, set];
 }
