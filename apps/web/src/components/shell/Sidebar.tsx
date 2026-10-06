@@ -52,7 +52,7 @@ function Item({
       {...(entry.testId ? { 'data-testid': entry.testId } : {})}
       className={cx(
         'group relative flex items-center gap-3 rounded-control text-[14px] font-medium transition-colors duration-100',
-        collapsed ? 'size-10 justify-center' : 'min-h-9 px-3 py-1.5 [@media(pointer:coarse)]:min-h-12',
+        collapsed ? 'size-10 justify-center' : 'min-h-9 px-3 py-1.5 [@media(pointer:coarse)]:min-h-11',
         active
           ? 'bg-side-active text-side-strong'
           : 'text-side-fg hover:bg-side-hover hover:text-side-strong',
@@ -131,7 +131,7 @@ export function SidebarBody({
           aria-label="New card"
           className={cx(
             'flex items-center justify-center gap-2 rounded-control bg-accent font-semibold text-accent-fg hover:brightness-95',
-            collapsed ? 'size-10' : 'h-10 w-full text-sm [@media(pointer:coarse)]:h-12',
+            collapsed ? 'size-10' : 'h-10 w-full text-sm [@media(pointer:coarse)]:h-11',
           )}
         >
           <Plus aria-hidden="true" className="size-4" strokeWidth={2.5} />

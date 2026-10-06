@@ -1,7 +1,8 @@
 import { createBrowserRouter, Navigate } from 'react-router';
 import { useProjects } from './api/queries/projects.ts';
 import { RequireAuth } from './components/Layout.tsx';
-import { Spinner } from './components/ui.tsx';
+import { RouteError } from './components/RouteError.tsx';
+import { PageSkeleton } from './components/ui.tsx';
 import { getLastProjectKey } from './lib/lastProject.ts';
 import { AcceptInvite } from './pages/AcceptInvite.tsx';
 import { Admin } from './pages/Admin.tsx';
@@ -28,17 +29,18 @@ import { Workstations } from './pages/Workstations.tsx';
 
 function Home() {
   const projects = useProjects();
-  if (projects.isPending) return <Spinner />;
+  if (projects.isPending) return <PageSkeleton label="Loading" />;
   const last = getLastProjectKey();
   const key = projects.data?.find((p) => p.key === last)?.key ?? projects.data?.[0]?.key;
   return <Navigate to={key ? `/p/${key}/board` : '/projects'} replace />;
 }
 
 export const routes = [
-  { path: '/login', element: <Login /> },
-  { path: '/invite/:token', element: <AcceptInvite /> },
+  { path: '/login', element: <Login />, errorElement: <RouteError /> },
+  { path: '/invite/:token', element: <AcceptInvite />, errorElement: <RouteError /> },
   {
     element: <RequireAuth />,
+    errorElement: <RouteError />,
     children: [
       { path: '/', element: <Home /> },
       { path: '/p/:projectKey/board', element: <Board /> },

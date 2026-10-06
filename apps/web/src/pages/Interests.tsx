@@ -34,7 +34,7 @@ import { compactRatings, describeRatings, describeScan } from '../lib/interests.
 import { formatDateTime } from '../lib/time.ts';
 
 const linkBtn =
-  'inline-flex h-8 items-center justify-center rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken [@media(pointer:coarse)]:min-h-11';
+  'inline-flex h-9 items-center justify-center rounded-control border border-control bg-surface px-3.5 text-sm font-medium text-fg hover:bg-sunken [@media(pointer:coarse)]:min-h-11';
 
 /** Everything the manager cares about, across feed and research projects (docs/design/interests.md section 8.2). */
 export function Interests() {

@@ -1,4 +1,6 @@
-# Agent Org Manager — User Guide for Managers
+# Guildwise (formerly Agent Org Manager): User Guide for Managers
+
+Guildwise is your guild of AI agents: many hands, one master. This guide is for the master, the manager who sets the standard and answers the agents' questions.
 
 First login and setup, managing projects and agents, the board and decision desk, intake from external systems, and organization design.
 
@@ -14,7 +16,7 @@ First login and setup, managing projects and agents, the board and decision desk
 
 A workstation is a machine (Windows, macOS, Linux) where agents will run code and pull from git repositories.
 
-1. Open **Workstations** in the sidebar
+1. Open **Workstations** in the side menu (on a phone, open the menu with the button at the top left)
 2. Click **Pair workstation**
 3. Copy the code `XXXX-XXXX` (valid 10 minutes)
 4. On your machine, install the runner and pair it:
@@ -34,7 +36,7 @@ tar xzf aom-runner-*.tgz && cd aom-runner
 
 Run the runner under systemd (Linux and WSL2), launchd (macOS) so it reconnects automatically on reboot. See `docs/RUNNER.md` for service setup.
 
-**Sandbox warnings.** If a workstation's runner reports that agents run without an OS sandbox, the Workstations page, each affected agent card on the HR board and the Hire form show an amber warning that cannot be dismissed, and hiring onto it needs a confirmation. A workstation that cannot run agents at all shows why (for example "Native Windows: install the runner in WSL2"). The reason names the actual cause: the platform, the runtime's sandbox set to `off` in the runner config, a missing `bubblewrap` or `socat`, or (tests only) a forced state, and the advice below it fits that cause.
+**Sandbox warnings.** If a workstation's runner reports that agents run without an OS sandbox, the Workstations page, each affected agent card on the Agents page and the Hire form show an amber warning that cannot be dismissed, and hiring onto it needs a confirmation. A workstation that cannot run agents at all shows why (for example "Native Windows: install the runner in WSL2"). The reason names the actual cause: the platform, the runtime's sandbox set to `off` in the runner config, a missing `bubblewrap` or `socat`, or (tests only) a forced state, and the advice below it fits that cause.
 
 Each workstation also shows **Shifts running**, for example "2 of 4": how many agent shifts it runs now and the most it takes at once. That limit is the runner's `maxConcurrentShifts` setting (default 4; see `docs/RUNNER.md`). A shift offered beyond it is refused as busy and the card waits for the next free slot.
 
@@ -165,7 +167,7 @@ The Blocked column shows cards waiting on an answer from the decision desk.
 
 A queued card that no agent has claimed gets a warning icon on its board tile and next to its status on the card page when the dispatcher could not hand it out. Hover the icon or focus it with the keyboard to read the reason.
 
-- **Red, "Not workable"**: nobody hired could ever take the card's current stage, so waiting will not help. Typical reasons: no builder is hired; the Review stage needs a senior reviewer and only juniors exist; the only reviewer built the card (nobody reviews their own work); a large change needs two different senior reviewers but only one is hired ("needs a second senior reviewer other than Linus"). The tooltip has a **Hire** link that opens the HR board's Hire form with the missing role and seniority already chosen.
+- **Red, "Not workable"**: nobody hired could ever take the card's current stage, so waiting will not help. Typical reasons: no builder is hired; the Review stage needs a senior reviewer and only juniors exist; the only reviewer built the card (nobody reviews their own work); a large change needs two different senior reviewers but only one is hired ("needs a second senior reviewer other than Linus"). The tooltip has a **Hire** link that opens the Agents page's Hire form with the missing role and seniority already chosen.
 - **Amber, "Waiting"**: agents exist but cannot work right now: their workstation is offline ("Reviewer Linus is offline"), no workstation with an eligible agent holds the card's repository, or every eligible agent has been busy for more than ten minutes. It clears by itself when the machine is back, the repository is cloned or the agent is free.
 
 The icon follows hiring, firing, role changes and claims live, and offline workstations within about 30 seconds.
@@ -233,7 +235,7 @@ The BA can do the same from its shift with `aom risk <small|large> --reason "<wh
    - **Capacity**: max concurrent cards (default 1; larger for routine roles like DevOps)
 3. Click **Hire**
 
-First-run limits (removed after you see the HR board):
+First-run limits (removed after you see the Agents page):
 - 2 builders
 - 1 of each other role (reviewer, tester, writer, DevOps)
 
@@ -485,7 +487,7 @@ Open **The facts behind this report** for the same lists straight from the serve
 
 ### Settings: your time zone and the report time
 
-**Settings** (top bar) holds your **time zone**, which the app takes from your browser the first time you sign in (change it any time; until it is set, reports use UTC), the **routing** switch and the **time of the daily report** (default 08:00).
+**Settings** (bottom of the side menu) holds your **time zone**, which the app takes from your browser the first time you sign in (change it any time; until it is set, reports use UTC), the **routing** switch and the **time of the daily report** (default 08:00).
 
 ## Ledger and search
 
@@ -506,7 +508,7 @@ Results show matching entries with context. Agents can search the ledger during 
 
 ## Interests
 
-The **Interests** page (top bar: Interests) is the one place that says what you care about, across all your feed and research projects. An interest is a topic with a name and a description. It owns the feed schedule that scans for it, it prefills research cards about it, it carries your explicit taste rules, and it shows what came of it: scans, items, your ratings and published notes.
+The **Interests** page (side menu, Knowledge: Interests) is the one place that says what you care about, across all your feed and research projects. An interest is a topic with a name and a description. It owns the feed schedule that scans for it, it prefills research cards about it, it carries your explicit taste rules, and it shows what came of it: scans, items, your ratings and published notes.
 
 Anyone who is a member of the projects an interest links to can create, edit, pause and delete it, and set its taste rules (the same "any member" rule as phases). Someone who is a member of only one of its two projects can see it, run it and research it but not edit it.
 

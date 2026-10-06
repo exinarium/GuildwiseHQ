@@ -91,7 +91,7 @@ curl https://aom.example.com/api/health
       <tr><td><code>DATABASE_URL</code></td><td><code>postgres://aom:aom@127.0.0.1:5433/aom</code></td><td>Postgres connection string; in Docker use <code>postgres://aom:$POSTGRES_PASSWORD@postgres:5432/aom</code></td></tr>
       <tr><td><code>POSTGRES_PASSWORD</code></td><td>—</td><td>Database password (set this; used by postgres container and DATABASE_URL)</td></tr>
       <tr><td><code>AOM_SMTP_URL</code></td><td><code>smtp://127.0.0.1:1025</code></td><td>SMTP relay URL for invitation emails</td></tr>
-      <tr><td><code>AOM_MAIL_FROM</code></td><td><code>Agent Org Manager &lt;noreply@aom.local&gt;</code></td><td>From address in emails</td></tr>
+      <tr><td><code>AOM_MAIL_FROM</code></td><td><code>Guildwise &lt;noreply@aom.local&gt;</code></td><td>From address in emails</td></tr>
       <tr><td><code>AOM_MIGRATE_ON_BOOT</code></td><td><code>true</code></td><td>Apply migrations on server start</td></tr>
       <tr><td><code>AOM_SERVE_WEB</code></td><td><code>false</code></td><td>Serve built web app from server (enabled in <code>docker-compose.prod.yml</code>)</td></tr>
       <tr><td><code>AOM_HTTP_PORT</code>, <code>AOM_HTTPS_PORT</code></td><td><code>80</code>, <code>443</code></td><td>Host ports Caddy publishes (compose)</td></tr>

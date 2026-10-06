@@ -15,64 +15,10 @@ const out = args.find((a) => !a.startsWith('--')) ?? 'docs/design/ui/after';
 const only = flag('only', '')?.split(',').filter(Boolean);
 const sizesWanted = flag('sizes', 'd,m').split(',');
 const themes = flag('themes', 'light,dark').split(',');
-const base = process.env.BASE ?? 'http://127.0.0.1:5199';
-const email = process.env.EMAIL ?? 'pieter@demo.local';
-const password = process.env.PASSWORD ?? 'pieter-demo-pass-2026';
 mkdirSync(out, { recursive: true });
 
-const api = await request.newContext({
-  baseURL: base,
-  extraHTTPHeaders: { Origin: process.env.ORIGIN ?? 'http://localhost:4611' },
-});
-const login = await api.post('/api/auth/login', { data: { email, password } });
-if (!login.ok()) throw new Error(`login failed: ${login.status()}`);
-const storageState = await api.storageState();
-const j = async (p) => (await api.get(`/api${p}`)).json();
-
-const { projects } = await j('/projects');
-const web = projects.find((p) => p.key === 'WEB') ?? projects.find((p) => p.workflowKey === 'code');
-const feed = projects.find((p) => p.workflowKey === 'feed');
-const research = projects.find((p) => p.workflowKey === 'research');
-const board = await j(`/board?projectId=${web.id}`);
-const cards = board.columns.flatMap((c) => c.cards);
-const pick = (col) => board.columns.find((c) => c.name === col)?.cards[0];
-const detailCard = pick('Blocked') ?? pick('Review') ?? cards[0];
-const intakes = (await j('/intakes')).intakes ?? [];
-let phase = null;
-try {
-  const ph = (await j(`/projects/${web.id}/phases`)).phases ?? [];
-  phase = ph[0] ?? null;
-} catch {}
-
-const routes = {
-  projects: '/projects',
-  board: `/p/${web.key}/board`,
-  desk: '/desk',
-  'card-new': `/cards/new?project=${web.key}`,
-  'card-detail': `/cards/${detailCard.ref}`,
-  agents: '/agents',
-  workstations: '/workstations',
-  ledger: '/ledger',
-  vaults: '/settings/vaults',
-  org: '/org',
-  'org-workflows': '/org?tab=workflows',
-  schedules: '/schedules',
-  metrics: '/metrics',
-  admin: '/admin',
-  intake: '/intake',
-  settings: '/settings',
-  interests: '/interests',
-  'project-settings': `/projects/${web.id}/settings`,
-  ...(feed ? { feed: `/p/${feed.key}/feed`, 'board-feed': `/p/${feed.key}/board` } : {}),
-  ...(research
-    ? {
-        'board-research': `/p/${research.key}/board`,
-        'project-settings-research': `/projects/${research.id}/settings`,
-      }
-    : {}),
-  ...(intakes[0] ? { 'intake-view': `/intake/${intakes[0].id}` } : {}),
-  ...(phase ? { phase: `/p/${web.key}/phases/${phase.number}` } : {}),
-};
+const { api, storageState, routes } = await connect();
+const webKey = routes.board.split('/')[2];
 const sizes = { d: { width: 1440, height: 900 }, m: { width: 390, height: 844 } };
 const tall = new Set(['board']); // viewport only for the board (it scrolls inside)
 
@@ -144,7 +90,7 @@ for (const sk of sizesWanted)
       }
     }
     if (mobile && want('drawer')) {
-      await p.goto(`${base}/p/${web.key}/board`);
+      await p.goto(`${base}/p/${webKey}/board`);
       await p.getByRole('button', { name: 'Open menu' }).click();
       await p.waitForTimeout(400);
       await shot(p, `${out}/drawer-m-${scheme}.png`, false);

@@ -129,7 +129,7 @@ Set these in `.env` before starting the server. All have defaults suitable for d
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `AOM_SMTP_URL` | `smtp://127.0.0.1:1025` | SMTP relay URL (e.g., `smtp://user:pass@smtp.example.com:587`) |
-| `AOM_MAIL_FROM` | `Agent Org Manager <noreply@aom.local>` | From address in emails |
+| `AOM_MAIL_FROM` | `Guildwise <noreply@aom.local>` | From address in emails |
 
 ### Features
 

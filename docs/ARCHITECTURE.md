@@ -1693,7 +1693,7 @@ Server env (`apps/server/src/config.ts`, zod-validated):
 | `AOM_PORT` / `AOM_HOST` | `4600` / `127.0.0.1` | `0.0.0.0` in container |
 | `AOM_PUBLIC_ORIGIN` | `http://localhost:5173` | used for links, Origin check, cookie Secure flag (https) |
 | `AOM_SMTP_URL` | `smtp://127.0.0.1:1025` | Mailpit in dev |
-| `AOM_MAIL_FROM` | `Agent Org Manager <noreply@aom.local>` | |
+| `AOM_MAIL_FROM` | `Guildwise <noreply@aom.local>` | |
 | `AOM_MIGRATE_ON_BOOT` | `true` | |
 | `AOM_FIRST_RUN_HIRE_CAP` | `true` | until M9 |
 | `AOM_SERVE_WEB` | `false` (dev), `true` (prod) | serve `apps/web/dist` |
