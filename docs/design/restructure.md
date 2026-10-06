@@ -798,3 +798,38 @@ Server tests (vitest, `aom_test`):
 31. **E2E.** Rewrite `interests.spec.ts`, delete `feeds.spec.ts`, add `interests-migration.spec.ts`, update `guide-screenshots.spec.ts`. Full suite green.
 32. **Cleanup.** Drop `taste_seeds` from `PROJECTION_TABLES` (keep the table, `TasteSeedSet` projector a no-op). Remove `ScheduleLinked` writers (keep the event for replay).
 33. **Docs.** `SPEC.md`, `ARCHITECTURE.md`, `USER-GUIDE.md`, `DEPLOY.md` (backup before upgrade); mark `interests.md` as superseded in part, and this document as built.
+
+---
+## Owner decisions (2026-10-06 evening). These override the defaults above.
+
+### New requirements
+- **Agents: org-wide but assignable.** Agents belong to the org, and the manager **assigns them to projects and controls where each one may and may not work**. Use a per-agent allow-list of projects; the default for a new hire is decided at hire time, with an "any project" option. The dispatcher only offers a card to an agent allowed on that project, combined with the workstation-membership rule (D-agents). Focus projects stay as a soft preference inside the allow-list.
+- **Interest run and delivery schedule, so the manager is not flooded.** Each interest has:
+  - a **run schedule**: when scans happen (cron or simple presets, timezone-aware);
+  - a **delivery schedule**: when results reach the manager. New items are batched into a digest delivered at chosen times (for example weekdays 07:00), and nothing is pushed between deliveries.
+  - an org-level **quiet cap** on how many digest items may arrive per day across all interests.
+
+  Runs can happen ahead of delivery; delivery is what lands on the desk and in the floor report.
+- **Roadmap after the restructure:**
+  - (1) **Per-project budgets and cost tracking:** token and cost use recorded per shift, rolled up per agent, card, project and phase. A monthly budget per project, a warning at 80% to the BA and the desk, and an automatic pause of the project's dispatching at 100% until the manager raises the budget or overrides. Spend is shown on the project, the HR board and the floor report.
+  - (2) **A visual org chart page:** roles, seniority, reporting and escalation lines, and agents with their faces.
+
+### Answers to the 16 open questions
+| # | Decision |
+|---|---|
+| 1 | Hidden backing project per interest: **yes**. |
+| 2 | Any active member of the interest's project sees and edits it. |
+| 3 | **Guests may create any interest**, private to them unless shared. |
+| 4 | **No preference window:** any qualified, allowed agent takes an interest run immediately (the assigned agent is a soft preference only). |
+| 5 | An interest's vault domain is fixed after its first run. |
+| 6 | **Move the existing feed folders to `interests/<slug>/` during the migration.** Add a runner `vault.move` (git mv, commit, push) used by the migration, idempotent and safe if it is interrupted. |
+| 7 | **Create a new GitHub repo from the convert dialog**, still via the owner's approval (reuse the `aom repo create` flow). |
+| 8 | Repo check and floor report are shown as read-only system rows on Schedules. |
+| 9 | **Add event triggers** to schedules: internal events such as phase completed, card finalized, interest run done, project converted, plus GitHub/Jira labelled-issue events via polling. |
+| 10 | No lending of a guest's agents. |
+| 11 | **Optional per-project concurrency cap**, off by default (fits per-project budgets). |
+| 12 | **Any → any project conversions** (research, code and custom workflows), with the same keep/cancel handling for open cards that the new workflow can't place. |
+| 13 | **The floor report gets an Interests highlights section** (top items per interest since the last report), respecting the delivery schedule and quiet cap. |
+| 14 | Interest research is **off, on demand only** ("Research this" on an interest or an item). |
+| 15 | A converted project gets a **Research tab** keeping its research notes front and centre. |
+| 16 | V1 integrations: **GitHub/Jira issue polling into intake, outgoing webhooks** (POST JSON to a URL; Slack, Teams, n8n and Zapier compatible; signed), and **email digests** at a set time. |
