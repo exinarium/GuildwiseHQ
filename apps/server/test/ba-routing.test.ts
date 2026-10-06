@@ -274,7 +274,7 @@ describe('non-urgent items are held for the BA', () => {
 });
 
 describe('urgent items go straight to the manager; the BA annotates afterwards', () => {
-  it('pinned alerts, approvals and blocking questions are never held', async () => {
+  it('pinned alerts, approvals and escalations are never held; only an escalation gets a BA note', async () => {
     await clean();
     const pinned = await alert('Second tester shortage', { pinned: true });
     const approval = await alert('Approve the thing', { kind: 'approval', subkind: 'definition' });
@@ -282,21 +282,43 @@ describe('urgent items go straight to the manager; the BA annotates afterwards',
     expect((await row(approval)).triage).toBe('none');
     expect((await deskIds()).sort()).toEqual([pinned, approval].sort());
     expect(await tasks('desk_triage')).toHaveLength(0);
-    // one note task for the burst
+    // plain approvals and pinned alerts get no note (owner decision, 2026-10-06)
+    expect(await tasks('urgent_note')).toHaveLength(0);
+
+    const escalation = await alert('Stage Review is stuck', { kind: 'escalation', subkind: 'stuck' });
+    expect((await row(escalation)).triage).toBe('none');
     const notes = await tasks('urgent_note');
     expect(notes).toHaveLength(1);
-    expect([...notes[0]!.desk_item_ids].sort()).toEqual([pinned, approval].sort());
+    expect([...notes[0]!.desk_item_ids]).toEqual([escalation]);
 
     const from = r.received.length;
     await dispatcher().run();
     const start = await baShift(from, 'urgent_note');
     expect(start.baTask.reporter.items.every((i: any) => i.held === false)).toBe(true);
     const res = await baReport(start.shiftId, 'notes_done', {
-      notes: [{ itemId: pinned, note: 'Second bottleneck this week; hire a tester.', related: [approval] }],
+      notes: [
+        { itemId: escalation, note: 'Second bottleneck this week; hire a tester.', related: [approval] },
+      ],
     });
     expect(res.accepted).toBe(true);
-    expect((await deskItem(pinned)).baNote).toContain('hire a tester');
+    expect((await deskItem(escalation)).baNote).toContain('hire a tester');
     expect((await deskItem(approval)).baNote).toBeNull();
+  });
+
+  it('a repeated approval (the third similar one in 24 h) gets a BA note, the first two do not', async () => {
+    await clean();
+    const ask = (n: number) =>
+      alert(`DevOps needs approval: install docker engine (${n})`, {
+        kind: 'approval',
+        subkind: 'devops_access',
+      });
+    await ask(1);
+    await ask(2);
+    expect(await tasks('urgent_note')).toHaveLength(0);
+    const third = await ask(3);
+    const notes = await tasks('urgent_note');
+    expect(notes).toHaveLength(1);
+    expect([...notes[0]!.desk_item_ids]).toEqual([third]);
   });
 
   it('the loop breaker alert is urgent: on the desk at once, analysed through the loop signal rather than a note task', async () => {
@@ -308,7 +330,7 @@ describe('urgent items go straight to the manager; the BA annotates afterwards',
     expect(await tasks('urgent_note')).toHaveLength(0);
   });
 
-  it('a blocking question skips the peer and the BA hop and is on the desk at once', async () => {
+  it('a blocking question walks the chain: senior peer, then the BA, then the manager, and the BA notes the escalation', async () => {
     await clean();
     const from = r.received.length;
     const card = await w.card({ title: 'Needs an answer' });
@@ -323,13 +345,68 @@ describe('urgent items go straight to the manager; the BA annotates afterwards',
       blocking: true,
     })) as any;
     expect(res.accepted).toBe(true);
-    expect(res.message).toContain("manager's desk");
-    const it = (await q('SELECT * FROM desk_items WHERE card_id=$1', [card.id]))[0]!;
-    expect(it).toMatchObject({ routed_to: 'manager', blocking: true, triage: 'none' });
-    expect(await deskIds()).toContain(it.id);
-    // the BA is asked for a note
-    expect((await tasks('urgent_note')).at(-1)!.desk_item_ids).toContain(it.id);
+    expect(res.message).toContain('Sam');
+    const sam = (await q(`SELECT id FROM agents WHERE name='Sam'`))[0]!;
+    const ben = (await q(`SELECT id FROM agents WHERE name='Ben'`))[0]!;
+    const it = () => q('SELECT * FROM desk_items WHERE card_id=$1', [card.id]).then((x) => x[0]!);
+    expect(await it()).toMatchObject({ routed_to: 'agent', routed_agent_id: sam.id, blocking: true });
+    expect(await deskIds()).not.toContain((await it()).id);
+    expect(await tasks('urgent_note')).toHaveLength(0);
     r.ended(start.shiftId, 'reported');
+    await r.barrier();
+
+    // step 1, the senior peer, cannot answer and passes it on: it is the BA's turn (not the manager's)
+    const questionShift = async (name: string, mark: number) => {
+      await dispatcher().run();
+      const qs = (await r.waitFor(
+        'shift.start',
+        (f: any) => f.kind === 'question' && f.agent.name === name,
+        5000,
+        mark,
+      )) as any;
+      await hh.startShift(r, qs);
+      return qs;
+    };
+    let mark = r.received.length;
+    const samShift = await questionShift('Sam', mark);
+    const out = (await hh.report(r, samShift.shiftId, {
+      kind: 'escalate',
+      itemId: (await it()).id,
+      note: 'not mine to decide',
+    })) as any;
+    expect(out.accepted).toBe(true);
+    r.ended(samShift.shiftId, 'reported');
+    await r.barrier();
+    expect(await it()).toMatchObject({ routed_to: 'agent', routed_agent_id: ben.id });
+    expect(await tasks('urgent_note')).toHaveLength(0);
+
+    // step 2, the BA's runs keep failing: after two the question goes to the manager and only now the BA adds a note
+    for (let i = 0; i < 2; i++) {
+      mark = r.received.length;
+      const bs = await questionShift('Ben', mark);
+      r.ended(bs.shiftId, 'no_report');
+      await until(
+        async () => (await q('SELECT 1 FROM shifts WHERE id=$1 AND status=$2', [bs.shiftId, 'ended']))[0],
+        3000,
+        'ended',
+      );
+    }
+    const noteFrom = r.received.length;
+    await online();
+    await dispatcher().run();
+    expect(await it()).toMatchObject({ routed_to: 'manager', blocking: true });
+    expect(await deskIds()).toContain((await it()).id);
+    expect((await tasks('urgent_note')).at(-1)!.desk_item_ids).toContain((await it()).id);
+    const note = await baShift(noteFrom, 'urgent_note');
+    const done = await baReport(note.shiftId, 'notes_done', {
+      notes: [{ itemId: (await it()).id, note: 'Nobody up the chain could answer; the ledger has nothing.' }],
+    });
+    expect(done.accepted).toBe(true);
+    r.ended(note.shiftId, 'reported');
+    // the other tests expect Bea to be the next builder in line
+    await r.barrier();
+    await q('UPDATE agents SET last_shift_ended_at = NULL');
+    await online();
   });
 
   it('a non-blocking question starts at the BA instead of the senior peer', async () => {
@@ -399,7 +476,7 @@ describe('rebuild', () => {
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);
     expect(await snap()).toEqual(before);
     expect(before.desk.join()).toContain('"triage": "pending"');
-    expect(before.tasks).toHaveLength(2);
+    expect(before.tasks).toHaveLength(1);
     expect(PROJECTION_TABLES).toContain('ba_signals');
   });
 });

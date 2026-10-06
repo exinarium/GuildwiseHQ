@@ -65,7 +65,7 @@ describe('the working-branch question goes through the BA routing', () => {
     w.t.clock.setOffset(0);
   });
 
-  it('a question that holds back a commit is blocking and reaches the manager at once, with a BA note task', async () => {
+  it('a question that holds back a commit is blocking and reaches the manager at once, with no BA note', async () => {
     await q(`DELETE FROM ba_tasks`);
     await q(`DELETE FROM desk_items WHERE subkind=$1`, [WORKING_BRANCH_SUBKIND]);
     await q(`UPDATE project_repos SET working_branch=NULL WHERE id=$1`, [w.repoId]);
@@ -106,7 +106,7 @@ describe('the working-branch question goes through the BA routing', () => {
     expect(item).toMatchObject({ triage: 'none', blocking: true, pinned: true });
     expect(await deskIds()).toContain(item?.id);
     const tasks = await q(`SELECT kind FROM ba_tasks WHERE $1 = ANY(desk_item_ids)`, [item?.id]);
-    expect(tasks.map((t) => t.kind)).toEqual(['urgent_note']);
+    expect(tasks).toEqual([]);
   });
 });
 

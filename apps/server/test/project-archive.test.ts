@@ -127,7 +127,9 @@ describe('archiving a project', () => {
       },
     ]);
     const impact = await ok<any>(asMember('GET', `/api/projects/${w.projectId}/impact`));
-    expect(impact).toMatchObject({ activeShifts: 1, schedules: 1, openDeskItems: 1 });
+    expect(impact).toMatchObject({ activeShifts: 1, schedules: 1 });
+    // the question, plus the working-branch re-confirmation the new phase asked for
+    expect(impact.openDeskItems).toBeGreaterThanOrEqual(1);
     expect(impact.openCards).toBeGreaterThanOrEqual(2);
   });
 

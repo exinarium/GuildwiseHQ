@@ -69,9 +69,11 @@ export async function raiseQuestion(
   const options: DeskOption[] = report.options.map((label, i) => ({ id: optionId(i), label }));
   const deskItemId = randomUUID();
   const affected = report.blocking ? await affectedCards(tx, card) : [card.id];
-  // Part B: with BA routing on, a blocking question is urgent and goes straight to the manager (the BA annotates it
-  // afterwards); a non-blocking one starts at the BA, which answers it, merges it or passes it on. Off: peer, BA, desk.
-  const viaBa = (await reportingOf(tx, card.org_id)).routeViaBa;
+  // Part B: with BA routing on, a non-blocking question starts at the BA, which answers it, merges it or passes it on.
+  // A blocking one walks the whole chain (senior peer, then the BA from the ledger, then the manager) with a short
+  // time limit at each step (`QUESTION_STALL_MS`), exactly as with routing off; only approvals and pinned items go
+  // straight to the manager (owner decision, 2026-10-06).
+  const viaBa = (await reportingOf(tx, card.org_id)).routeViaBa && !report.blocking;
   const route = await nextRoute(ctx, tx, {
     orgId: card.org_id,
     projectId: card.project_id,
@@ -80,7 +82,7 @@ export async function raiseQuestion(
     askerRole: agent.role_key,
     from: 'raise',
     tried: [],
-    ...(viaBa ? { via: report.blocking ? ('desk' as const) : ('ba' as const) } : {}),
+    ...(viaBa ? { via: 'ba' as const } : {}),
   });
   const scope = projectScope(card.org_id, card.project_id);
   // Going to the BA or the desk while the same question is already open: attach to it instead of a second item.
