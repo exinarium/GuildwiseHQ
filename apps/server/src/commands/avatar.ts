@@ -129,7 +129,7 @@ export async function rerollAgentAvatar(
             },
           },
           actor: userActor(user.id),
-          scope: a.project_id ? projectScope(a.org_id, a.project_id) : orgScope(a.org_id),
+          scope: orgScope(a.org_id),
         },
       ],
       { tx },

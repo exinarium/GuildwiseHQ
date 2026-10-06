@@ -50,7 +50,7 @@ export async function ensureReportThread(
     (await one(
       db,
       `SELECT id FROM agents WHERE org_id=$1 AND role_key='ba' AND status='active' AND NOT is_devops
-        ORDER BY (project_id IS NULL) DESC, hired_at, id LIMIT 1`,
+        ORDER BY (allowed_project_ids IS NULL) DESC, hired_at, id LIMIT 1`,
       [orgId],
     ));
   if (!ba) return { threadId: null, events: [] };

@@ -142,21 +142,22 @@ describe('agents and claims across managers', () => {
     expect(a).toMatchObject({
       name: 'Mia',
       orgId: w.owner.id,
-      projectId: w.projectId,
+      hiredForProjectId: w.projectId,
+      allowedProjectIds: [w.projectId],
       workstationId: m.workstationId,
       hiredByUserId: m.id,
       managerUserId: m.id,
     });
-    // both managers see the agent in the project; the owner's org-wide agents are not listed for the member
+    // both managers see the agent in the project; the owner's any-project agent is listed for the member too
     const orgWide = await w.hire('Olga', 'builder', 'junior');
     const mine = (await as(m.cookie).get(`/api/agents`)).body.agents.map((x: any) => x.name);
     expect(mine).toContain('Mia');
-    expect(mine).not.toContain('Olga');
+    expect(mine).toContain('Olga');
     const theirs = (await as(w.owner.cookie).get(`/api/agents?projectId=${w.projectId}`)).body.agents.map(
       (x: any) => x.name,
     );
     expect(theirs).toContain('Mia');
-    expect(orgWide.projectId).toBeNull();
+    expect(orgWide.allowedProjectIds).toBeNull();
     // the owner's role catalogue applies: DevOps cannot be hired
     const devops = await as(m.cookie).post('/api/agents', {
       name: 'Dee',

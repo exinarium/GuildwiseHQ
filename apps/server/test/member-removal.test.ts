@@ -243,7 +243,8 @@ describe('removing a manager from a shared project', () => {
       workstationId: w.workstationId,
       hiredByUserId: m.id,
       managerUserId: w.owner.id,
-      projectId: w.projectId,
+      hiredForProjectId: w.projectId,
+      allowedProjectIds: [w.projectId],
     });
     expect((await owners.post(`/api/agents/${mia.id}/rehome`, body)).status).toBe(409);
     const ev = await q(`SELECT type FROM events WHERE stream_id=$1 ORDER BY seq`, [`agent-${mia.id}`]);

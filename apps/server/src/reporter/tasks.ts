@@ -24,7 +24,9 @@ export async function baAvailable(
     `SELECT a.runtime, ws.runtimes FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
       WHERE a.org_id = $1 AND a.role_key = 'ba' AND a.status = 'active' AND NOT a.is_devops
         AND ws.status = 'active' AND ws.connected AND ws.last_seen_at > $2
-        AND ($3::uuid IS NULL OR a.project_id IS NULL OR a.project_id = $3)`,
+        AND ($3::uuid IS NULL OR ((a.allowed_project_ids IS NULL OR $3::uuid = ANY (a.allowed_project_ids))
+             AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = $3::uuid AND pm.user_id = ws.user_id
+                          AND pm.status = 'active')))`,
     [orgId, since, projectId],
   );
   return list.some((a) =>

@@ -89,6 +89,14 @@ export const sharingProjectors: Record<string, Projector> = {
       [p.projectId, p.userId, e.createdAt],
     );
     if (!project) return;
+    // The project leaves the focus of the member's agents once they can no longer work it.
+    await exec(
+      tx,
+      `UPDATE agents SET focus_project_ids = array_remove(focus_project_ids, $1::uuid)
+        WHERE $1::uuid = ANY(focus_project_ids) AND (manager_user_id=$2 OR hired_by_user_id=$2)
+          AND NOT EXISTS (SELECT 1 FROM project_members WHERE project_id=$1 AND user_id=$2 AND status='active')`,
+      [p.projectId, p.userId],
+    );
     const inheritor = project.owner_user_id ?? project.org_id;
     // The owner inherits the agents; they need a new home (workstation + provider) before they work again.
     await exec(

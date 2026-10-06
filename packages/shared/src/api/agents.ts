@@ -8,7 +8,12 @@ import { IsoTime } from './common.ts';
 export const AgentDtoSchema = z.object({
   id: z.uuid(),
   orgId: z.uuid(),
-  projectId: z.uuid().nullable(),
+  /** The project the agent was hired for: history only, it does not limit where the agent works. */
+  hiredForProjectId: z.uuid().nullable(),
+  /** Projects the agent may work on; null means any project of the organization. */
+  allowedProjectIds: z.array(z.uuid()).nullable(),
+  /** Projects the agent prefers (a soft preference inside the allow-list). */
+  focusProjectIds: z.array(z.uuid()).default([]),
   hiredByUserId: z.uuid(),
   managerUserId: z.uuid(),
   workstationId: z.uuid().nullable(),
@@ -51,7 +56,18 @@ export const HireAgentRequestSchema = z.object({
   roleKey: z.string().min(1),
   seniority: Seniority,
   workstationId: z.uuid(),
+  /**
+   * Alias kept for older clients: the agent is hired for this project and allowed on it only (unless
+   * `allowedProjectIds` says otherwise).
+   */
   projectId: z.uuid().optional(),
+  /**
+   * Where the agent may work: a list of projects, or null for any project of the organization (Owner and Admins
+   * only). Omitted: any project, or `[projectId]` when the alias is given.
+   */
+  allowedProjectIds: z.array(z.uuid()).max(500).nullable().optional(),
+  /** Projects to prefer, inside the allow-list. */
+  focusProjectIds: z.array(z.uuid()).max(10).optional(),
   runtime: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   effort: z.string().optional(),
@@ -66,6 +82,15 @@ export const PatchAgentRequestSchema = AgentChangesSchema.extend({
   acknowledgeUnsandboxed: z.boolean().optional(),
 });
 export type PatchAgentRequest = z.infer<typeof PatchAgentRequestSchema>;
+
+/** `PUT /api/agents/:id/allowed-projects`: a project list, or null for any project. */
+export const SetAllowedProjectsRequestSchema = z.object({
+  projectIds: z.array(z.uuid()).max(500).nullable(),
+});
+export type SetAllowedProjectsRequest = z.infer<typeof SetAllowedProjectsRequestSchema>;
+/** `PUT /api/agents/:id/focus-projects`. */
+export const SetFocusProjectsRequestSchema = z.object({ projectIds: z.array(z.uuid()).max(10) });
+export type SetFocusProjectsRequest = z.infer<typeof SetFocusProjectsRequestSchema>;
 
 /** `POST /api/agents/:id/rehome` (M3). */
 export const RehomeAgentRequestSchema = z.object({

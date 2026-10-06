@@ -42,6 +42,7 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     mergeLargeChanged: p.merge_large_changed_at
       ? { byName: p.merge_large_changed_by_name ?? 'unknown', at: iso(p.merge_large_changed_at) as string }
       : null,
+    maxConcurrentShifts: p.max_concurrent_shifts ?? null,
     createdAt: iso(p.created_at) as string,
     myRole,
   };

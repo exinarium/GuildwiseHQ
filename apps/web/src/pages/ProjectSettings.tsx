@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { useAddRepo, usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
+import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { DeployTargetsPanel } from '../components/DeployTargetsPanel.tsx';
 import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
@@ -262,6 +263,11 @@ export function ProjectSettings() {
       {project && traits.usesRepos && (
         <div id="merge" className="scroll-mt-20">
           <MergePolicyPanel projectId={id} project={project} history={q.data.mergePolicyHistory ?? []} />
+        </div>
+      )}
+      {project && (
+        <div id="concurrency" className="scroll-mt-20">
+          <ConcurrencyCapPanel projectId={id} project={project} />
         </div>
       )}
       <div id="members" className="scroll-mt-20">

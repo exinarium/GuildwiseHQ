@@ -312,11 +312,13 @@ describe('deleting a project permanently', () => {
     expect((await q('SELECT 1 FROM desk_items WHERE id=$1', [questionId])).length).toBe(0);
     expect((await q('SELECT 1 FROM schedules WHERE id=$1', [scheduleId])).length).toBe(0);
     expect((await q('SELECT 1 FROM workstation_repos WHERE project_repo_id=$1', [w.repoId])).length).toBe(0);
-    // agents belong to the org: the one scoped to the project stays active and becomes org-wide
-    expect((await q(`SELECT status, project_id FROM agents WHERE name='Scoped'`))[0]).toEqual({
-      status: 'active',
-      project_id: null,
-    });
+    // agents belong to the org: the one allowed on this project only stays active and may now work any project;
+    // the id of the project it was hired for stays as history
+    expect(
+      (
+        await q(`SELECT status, allowed_project_ids, hired_for_project_id FROM agents WHERE name='Scoped'`)
+      )[0],
+    ).toEqual({ status: 'active', allowed_project_ids: null, hired_for_project_id: w.projectId });
     expect((await q(`SELECT status FROM agents WHERE name='Una'`))[0]?.status).toBe('active');
     expect((await q('SELECT status FROM projects WHERE id=$1', [keepProjectId]))[0]?.status).toBe('active');
     expect((await q('SELECT count(*)::int AS n FROM cards WHERE project_id=$1', [keepProjectId]))[0]?.n).toBe(

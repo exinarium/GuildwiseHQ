@@ -273,7 +273,9 @@ export async function applyRecommendation(
                 payload: {
                   agentId: juniorId,
                   orgId: a.org_id,
-                  ...(a.project_id ? { projectId: a.project_id } : {}),
+                  ...(a.hired_for_project_id ? { projectId: a.hired_for_project_id } : {}),
+                  allowedProjectIds: a.allowed_project_ids ?? null,
+                  focusProjectIds: a.focus_project_ids ?? [],
                   hiredByUserId: user.id,
                   workstationId: a.workstation_id,
                   name,

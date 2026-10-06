@@ -21,7 +21,7 @@ const nameList = (names: string[]): string =>
 const AGENT_REFS = {
   id: 'a.id',
   orgId: 'a.org_id',
-  projectId: 'a.project_id',
+  allowedProjects: 'a.allowed_project_ids',
   roleKey: 'a.role_key',
   senior: `(a.seniority = 'senior')`,
   workstationId: 'ws.id',
@@ -44,8 +44,8 @@ SELECT c.id AS card_id, a.id AS agent_id, a.name, a.capacity,
   FROM cards c
   JOIN projects p ON p.id = c.project_id
   JOIN workflow_stages st ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
-  JOIN agents a ON a.status = 'active' AND NOT a.is_devops AND ${E.scope} AND ${E.role}
-  JOIN workstations ws ON ws.id = a.workstation_id
+  JOIN agents a ON a.status = 'active' AND NOT a.is_devops AND ${E.role}
+  JOIN workstations ws ON ws.id = a.workstation_id AND ${E.scope}
   JOIN users wu ON wu.id = ws.user_id
  WHERE c.id = ANY($1)
  ORDER BY a.hired_at, a.id`;

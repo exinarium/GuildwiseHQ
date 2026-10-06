@@ -8,6 +8,7 @@ import {
   DEFAULT_AVATAR_STYLE,
   DEVOPS_ROLE_KEY,
   type HireAgentRequest,
+  isOrgManager,
   randomAvatarSeed,
   streamId,
   type UnsandboxedAck,
@@ -233,20 +234,31 @@ export async function hireAgent(
     if (!ws) throw notFound('workstation not found');
     let orgId = org.id;
     let role: Awaited<ReturnType<typeof projectRole>> = null;
-    if (req.projectId) {
-      const p = await one(tx, 'SELECT org_id, status FROM projects WHERE id=$1', [req.projectId]);
-      role = await projectRole(tx, user.id, req.projectId);
+    // The agent belongs to the organization of the project it is hired for, or of the first project it is allowed on
+    // (a guest hires into the organization that shared the project with them).
+    const anchor = req.projectId ?? req.allowedProjectIds?.[0];
+    if (anchor) {
+      const p = await one(tx, 'SELECT org_id, status FROM projects WHERE id=$1', [anchor]);
+      role = await projectRole(tx, user.id, anchor);
       if (!p || !role) throw notFound('project not found');
       if (p.status === 'archived')
         throw conflict('project_archived', 'this project is archived; unarchive it to hire');
       orgId = p.org_id;
     }
     const orgRole = await orgRoleOf(tx, user.id, orgId);
+    // Where the agent may work: an explicit list (or null: any project), else the alias project, else any project.
+    const allowed: string[] | null =
+      req.allowedProjectIds !== undefined ? req.allowedProjectIds : req.projectId ? [req.projectId] : null;
+    const allowedList = allowed === null ? null : [...new Set(allowed)];
+    if (allowedList) await assertProjectsOfOrg(tx, orgId, allowedList);
+    const focus = [...new Set(req.focusProjectIds ?? [])];
+    assertFocusInside(focus, allowedList);
+    if (focus.length) await assertProjectsOfOrg(tx, orgId, focus);
     if (
       !canHireAgentInOrg({
         orgRole,
-        projectScoped: !!req.projectId,
-        projectMember: role !== null && role !== undefined,
+        projectScoped: allowedList !== null && allowedList.length > 0,
+        projectMember: allowedList !== null && (await memberOfAll(tx, user.id, allowedList)),
       })
     ) {
       throw forbidden('you cannot hire agents here');
@@ -293,7 +305,9 @@ export async function hireAgent(
             payload: {
               agentId,
               orgId,
-              projectId: req.projectId,
+              ...(req.projectId ? { projectId: req.projectId } : {}),
+              allowedProjectIds: allowedList,
+              ...(focus.length ? { focusProjectIds: focus } : {}),
               hiredByUserId: user.id,
               workstationId: req.workstationId,
               name: req.name,
@@ -313,7 +327,7 @@ export async function hireAgent(
             },
           },
           actor: userActor(user.id),
-          scope: req.projectId ? projectScope(orgId, req.projectId) : orgScope(orgId),
+          scope: orgScope(orgId),
         },
       ],
       { tx },
@@ -333,8 +347,9 @@ export async function manageableAgent(tx: Tx, user: AuthSession['user'], agentId
         a.manager_user_id = $2
         OR EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = a.org_id AND om.user_id = $2 AND om.status = 'active'
                     AND om.role IN ('owner','admin'))
-        OR (a.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_members pm
-              WHERE pm.project_id = a.project_id AND pm.user_id = $2 AND pm.status='active')))`,
+        OR (NOT a.is_devops AND EXISTS (SELECT 1 FROM project_members pm JOIN projects pp ON pp.id = pm.project_id
+              WHERE pp.org_id = a.org_id AND pm.user_id = $2 AND pm.status='active'
+                AND (a.allowed_project_ids IS NULL OR pm.project_id = ANY (a.allowed_project_ids)))))`,
     [agentId, user.id],
   );
   if (!a) throw notFound('agent not found');
@@ -345,8 +360,8 @@ export async function manageableAgent(tx: Tx, user: AuthSession['user'], agentId
   return a;
 }
 
-export const agentScope = (a: Row) =>
-  a.project_id ? projectScope(a.org_id, a.project_id) : orgScope(a.org_id);
+/** Agents belong to the organization: their events are organization events. */
+export const agentScope = (a: Row) => orgScope(a.org_id);
 
 export async function patchAgent(
   ctx: Ctx,
@@ -402,6 +417,110 @@ export async function patchAgent(
             type: 'AgentChanged',
             payload: { agentId, changes: next, ...(unsandboxedAck ? { unsandboxedAck } : {}) },
           },
+          actor: userActor(user.id),
+          scope: agentScope(a),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
+/** 400 unless every project exists in the organization (a deleted or foreign project cannot be allowed). */
+async function assertProjectsOfOrg(tx: Tx, orgId: string, projectIds: string[]): Promise<void> {
+  if (projectIds.length === 0) return;
+  const found = await rows<{ id: string }>(
+    tx,
+    `SELECT id FROM projects WHERE org_id=$1 AND id = ANY($2::uuid[]) `,
+    [orgId, projectIds],
+  );
+  if (found.length !== new Set(projectIds).size)
+    throw badRequest('invalid_project', 'every project must be one of this organization');
+}
+
+/** Is the user an active member of every one of the projects? (An empty list is not.) */
+async function memberOfAll(tx: Tx, userId: string, projectIds: string[]): Promise<boolean> {
+  if (projectIds.length === 0) return false;
+  const r = await one<{ n: string }>(
+    tx,
+    `SELECT count(DISTINCT project_id)::text AS n FROM project_members
+      WHERE user_id=$1 AND status='active' AND project_id = ANY($2::uuid[])`,
+    [userId, projectIds],
+  );
+  return Number(r?.n ?? 0) === new Set(projectIds).size;
+}
+
+/** The focus is a preference inside the allow-list: 400 `focus_not_allowed` for a project outside it. */
+function assertFocusInside(focus: string[], allowed: string[] | null): void {
+  if (allowed === null) return;
+  const bad = focus.filter((f) => !allowed.includes(f));
+  if (bad.length)
+    throw badRequest('focus_not_allowed', 'focus projects must be projects the agent is allowed to work on');
+}
+
+/**
+ * The manager sets where an agent may work (docs/design/restructure.md section 4): a list of projects, an empty list
+ * (the agent works nowhere, "benched") or null for any project of the organization. The Owner and Admins may set
+ * anything; a Member or Guest manager only a list of projects they are on. Focus projects outside the new list drop
+ * out. The DevOps engineer is not subject to allow-lists (it works DevOps requests and hygiene only).
+ */
+export async function setAgentAllowedProjects(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  agentId: string,
+  projectIds: string[] | null,
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const a = await manageableAgent(tx, user, agentId);
+    if (a.status === 'retired') throw conflict('agent_retired', 'agent is retired');
+    if (a.is_devops)
+      throw badRequest(
+        'devops_fixed',
+        'the DevOps engineer works DevOps requests only: allow-lists do not apply',
+      );
+    const list = projectIds === null ? null : [...new Set(projectIds)];
+    if (list) await assertProjectsOfOrg(tx, a.org_id, list);
+    const orgRole = await orgRoleOf(tx, user.id, a.org_id);
+    const manager = isOrgManager({ orgRole });
+    if (!manager && (list === null || (list.length > 0 && !(await memberOfAll(tx, user.id, list)))))
+      throw forbidden('you can only allow an agent on projects you are on');
+    const same = JSON.stringify(a.allowed_project_ids ?? null) === JSON.stringify(list);
+    if (same) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.agent(agentId),
+          event: { type: 'AgentAllowedSet', payload: { agentId, projectIds: list, by: user.id } },
+          actor: userActor(user.id),
+          scope: agentScope(a),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
+/** The manager sets the agent's focus projects: a soft preference, only among projects the agent may work. */
+export async function setAgentFocusProjects(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  agentId: string,
+  projectIds: string[],
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const a = await manageableAgent(tx, user, agentId);
+    if (a.status === 'retired') throw conflict('agent_retired', 'agent is retired');
+    if (a.is_devops)
+      throw badRequest('devops_fixed', 'the DevOps engineer works DevOps requests only: it has no focus');
+    const list = [...new Set(projectIds)];
+    await assertProjectsOfOrg(tx, a.org_id, list);
+    assertFocusInside(list, a.allowed_project_ids ?? null);
+    if (JSON.stringify(a.focus_project_ids ?? []) === JSON.stringify(list)) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.agent(agentId),
+          event: { type: 'AgentFocusSet', payload: { agentId, projectIds: list, by: user.id } },
           actor: userActor(user.id),
           scope: agentScope(a),
         },

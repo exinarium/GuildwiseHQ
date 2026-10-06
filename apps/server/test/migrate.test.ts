@@ -99,3 +99,54 @@ describe('migrate', () => {
     expect(b.rowCount).toBe(0);
   });
 });
+
+describe('1313_agent_allow_list', () => {
+  it('gives project-scoped agents an allow-list of their old project, org-wide agents "any", and is safe to run again', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aom-mig-'));
+    await cp(defaultMigrationsDir(), dir, { recursive: true });
+    await rm(join(dir, '1313_agent_allow_list.sql'));
+    await migrate(TEST_DB_URL, { schema: SCHEMA, dir });
+    await client.query(`SET search_path TO ${SCHEMA}`);
+    await client.query(`SET session_replication_role = replica`);
+    const P = '00000000-0000-4000-8000-0000000000a1';
+    const U = '00000000-0000-4000-8000-0000000000b1';
+    await client.query(
+      `INSERT INTO projects (id, org_id, key, name, domain, workflow_key, created_at)
+       VALUES ($1, $2, 'OLD', 'Old', 'work', 'code', now())`,
+      [P, U],
+    );
+    const agent = (id: string, name: string, project: string | null) =>
+      client.query(
+        `INSERT INTO agents (id, org_id, project_id, hired_by_user_id, manager_user_id, name, role_key, role_version,
+           seniority, runtime, model, status, hired_at, avatar_seed)
+         VALUES ($1, $2, $3, $2, $2, $4, 'builder', 1, 'junior', 'mock', 'mock', 'active', now(), $4 || '-seed')`,
+        [id, U, project, name],
+      );
+    await agent('00000000-0000-4000-8000-0000000000c1', 'Scoped', P);
+    await agent('00000000-0000-4000-8000-0000000000c2', 'Wide', null);
+    await client.query(`SET session_replication_role = DEFAULT`);
+
+    const applied = await migrate(TEST_DB_URL, { schema: SCHEMA });
+    expect(applied).toEqual(['1313_agent_allow_list.sql']);
+    const read = async () =>
+      (
+        await client.query(
+          `SELECT name, hired_for_project_id, allowed_project_ids, focus_project_ids FROM agents ORDER BY name`,
+        )
+      ).rows;
+    expect(await read()).toEqual([
+      { name: 'Scoped', hired_for_project_id: P, allowed_project_ids: [P], focus_project_ids: [] },
+      { name: 'Wide', hired_for_project_id: null, allowed_project_ids: null, focus_project_ids: [] },
+    ]);
+    expect((await client.query(`SELECT max_concurrent_shifts FROM projects`)).rows).toEqual([
+      { max_concurrent_shifts: null },
+    ]);
+
+    // A manager changed an allow-list afterwards; running the file again must not reset it.
+    await client.query(`UPDATE agents SET allowed_project_ids = NULL WHERE name = 'Scoped'`);
+    const sql = await readFile(join(defaultMigrationsDir(), '1313_agent_allow_list.sql'), 'utf8');
+    await client.query(sql);
+    await client.query(sql);
+    expect((await read())[0]).toMatchObject({ name: 'Scoped', allowed_project_ids: null });
+  });
+});

@@ -121,6 +121,33 @@ export async function setMergePolicy(
   });
 }
 
+/**
+ * Sets (or clears, with null) the cap on shifts running at once on the project, whatever the number of agents. Any
+ * project member may change it (docs/design/restructure.md decision 11). Off by default.
+ */
+export async function setConcurrencyCap(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  cap: number | null,
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    if ((p.max_concurrent_shifts ?? null) === cap) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: { type: 'ProjectConcurrencyCapSet', payload: { projectId, cap, by: user.id } },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
 export async function addRepo(
   ctx: Ctx,
   user: AuthSession['user'],

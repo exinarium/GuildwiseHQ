@@ -120,7 +120,9 @@ export async function testerBottleneckCheck(ctx: Ctx): Promise<void> {
               a.capacity
          FROM agents a LEFT JOIN workstations ws ON ws.id = a.workstation_id
         WHERE a.status='active' AND a.role_key='tester' AND NOT a.is_devops
-          AND (a.project_id = $1 OR (a.project_id IS NULL AND a.org_id = $2))`,
+          AND a.org_id = $2 AND (a.allowed_project_ids IS NULL OR $1::uuid = ANY (a.allowed_project_ids))
+          AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = $1::uuid AND pm.user_id = ws.user_id
+                       AND pm.status = 'active')`,
       [projectId, first.org_id, onlineSince],
     );
     // Spec: "all testers are busy". A project that never hired a tester has no tester pool to be a bottleneck of.

@@ -5,10 +5,19 @@ import {
   NameSuggestionsQuerySchema,
   PatchAgentRequestSchema,
   RerollAgentAvatarRequestSchema,
+  SetAllowedProjectsRequestSchema,
+  SetFocusProjectsRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireOrg, requireUser } from '../auth/guards.ts';
-import { fireAgent, hireAgent, patchAgent, suggestNames } from '../commands/agents.ts';
+import {
+  fireAgent,
+  hireAgent,
+  patchAgent,
+  setAgentAllowedProjects,
+  setAgentFocusProjects,
+  suggestNames,
+} from '../commands/agents.ts';
 import { rerollAgentAvatar } from '../commands/avatar.ts';
 import type { Ctx } from '../context.ts';
 import { notFound } from '../errors.ts';
@@ -56,6 +65,28 @@ export function agentRoutes(ctx: Ctx) {
         const { acknowledgeUnsandboxed, ...changes } = req.body;
         await patchAgent(ctx, s.user, req.params.id, changes, acknowledgeUnsandboxed);
         return one(s.user.id, req.params.id);
+      },
+    );
+
+    // Where the agent may work: a project list, or null for any project of the organization.
+    app.put(
+      '/api/agents/:id/allowed-projects',
+      { schema: { params: IdParamsSchema, body: SetAllowedProjectsRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setAgentAllowedProjects(ctx, s.user, req.params.id, req.body.projectIds);
+        return { agent: await one(s.user.id, req.params.id) };
+      },
+    );
+
+    // The agent's focus projects (a soft preference inside its allow-list).
+    app.put(
+      '/api/agents/:id/focus-projects',
+      { schema: { params: IdParamsSchema, body: SetFocusProjectsRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setAgentFocusProjects(ctx, s.user, req.params.id, req.body.projectIds);
+        return { agent: await one(s.user.id, req.params.id) };
       },
     );
 

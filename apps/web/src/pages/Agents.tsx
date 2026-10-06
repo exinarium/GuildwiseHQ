@@ -1,4 +1,4 @@
-import { type AgentDto, type HrAgent, NAME_THEMES } from '@aom/shared';
+import { type AgentDto, type HrAgent, NAME_THEMES, type ProjectDto } from '@aom/shared';
 import { Dices, Users } from 'lucide-react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
@@ -17,6 +17,12 @@ import { useRehomeAgent } from '../api/queries/members.ts';
 import { useDepartments } from '../api/queries/org.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
+import {
+  type Access,
+  AllowedProjectsDialog,
+  ProjectAccessEditor,
+  WorksOn,
+} from '../components/agents/ProjectAccess.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
 import { AgentStats, WorkQualityPanel } from '../components/hr/AgentStats.tsx';
 import { ChangeModelDialog, ChangeRoleDialog } from '../components/hr/ChangeDialogs.tsx';
@@ -70,6 +76,7 @@ export function Agents() {
   const [rehoming, setRehoming] = useState<AgentDto | null>(null);
   const [changingModel, setChangingModel] = useState<AgentDto | null>(null);
   const [changingRole, setChangingRole] = useState<AgentDto | null>(null);
+  const [allowing, setAllowing] = useState<AgentDto | null>(null);
   const me = useMe();
   const projects = useProjects();
   const reset = useResetAgent();
@@ -167,12 +174,9 @@ export function Agents() {
               hr={h}
               roleName={roleName(h.agent.roleKey)}
               station={stationName(h.agent.workstationId)}
-              projectKey={
-                h.agent.projectId
-                  ? (projects.data?.find((p) => p.id === h.agent.projectId)?.key ?? 'shared project')
-                  : null
-              }
+              projects={projects.data ?? []}
               canManage={canManage(h.agent)}
+              onProjects={() => setAllowing(h.agent)}
               onFire={() => setFiring(h.agent)}
               onRehome={() => setRehoming(h.agent)}
               onModel={() => setChangingModel(h.agent)}
@@ -201,6 +205,12 @@ export function Agents() {
       <HireDialog open={hireOpen} onOpenChange={setHireOpen} prefill={prefill} />
       <FireDialog agent={firing} onClose={() => setFiring(null)} />
       <RehomeDialog agent={rehoming} onClose={() => setRehoming(null)} />
+      <AllowedProjectsDialog
+        agent={allowing}
+        projects={projects.data ?? []}
+        canAny={!!allowing && ['owner', 'admin'].includes(orgRole(allowing) ?? '')}
+        onClose={() => setAllowing(null)}
+      />
       <ChangeModelDialog agent={changingModel} onClose={() => setChangingModel(null)} />
       <ChangeRoleDialog agent={changingRole} roles={roles.data ?? []} onClose={() => setChangingRole(null)} />
     </div>
@@ -211,8 +221,9 @@ function AgentCard({
   hr,
   roleName,
   station,
-  projectKey,
+  projects,
   canManage,
+  onProjects,
   onFire,
   onRehome,
   onModel,
@@ -225,8 +236,9 @@ function AgentCard({
   hr: HrAgent;
   roleName: string;
   station: string;
-  projectKey: string | null;
+  projects: ProjectDto[];
   canManage: boolean;
+  onProjects: () => void;
   onFire: () => void;
   onRehome: () => void;
   onModel: () => void;
@@ -278,7 +290,6 @@ function AgentCard({
           <p className="truncate text-lg leading-tight font-semibold text-fg">{a.name}</p>
           <p className="text-sm text-muted">
             {roleName} · {a.seniority}
-            {projectKey && ` · ${projectKey}`}
           </p>
         </div>
         <span className="ml-auto" data-testid="agent-status">
@@ -305,6 +316,7 @@ function AgentCard({
           {agentWarning(station || 'its workstation', a.sandboxReason)}
         </SandboxWarning>
       )}
+      <WorksOn agent={a} projects={projects} />
       <p className="text-xs text-subtle" data-testid="agent-hired-by">
         Hired by {hr.hiredByName}
       </p>
@@ -355,6 +367,9 @@ function AgentCard({
               Re-home
             </Button>
           )}
+          <Button variant="ghost" size="sm" aria-label={`Allowed projects of ${a.name}`} onClick={onProjects}>
+            Projects
+          </Button>
           <Button variant="ghost" size="sm" aria-label={`Change model of ${a.name}`} onClick={onModel}>
             Change model
           </Button>
@@ -540,14 +555,23 @@ function HireDialog({
   const [roleKey, setRoleKey] = useState(prefill?.roleKey ?? '');
   const [seniority, setSeniority] = useState(prefill ? prefill.seniority || 'junior' : '');
   const [workstationId, setWorkstationId] = useState('');
-  const [projectId, setProjectId] = useState(prefill?.projectId ?? '');
+  const me = useMe();
+  const activeOrg = me.data?.activeOrg ?? null;
+  const canAny = activeOrg?.role === 'owner' || activeOrg?.role === 'admin';
+  /** What the manager picked in "Where may this agent work?"; untouched, the default below applies. */
+  const [access, setAccess] = useState<Access | null>(null);
+  // The default for a new hire: the project the form was opened for, else the one worked on last. "Any project" is a
+  // deliberate choice of the organization's Owner and Admins.
+  const defaultProject =
+    (prefill?.projectId && projects.data?.find((p) => p.id === prefill.projectId)?.id) ||
+    projects.data?.find((p) => p.key === getLastProjectKey())?.id ||
+    projects.data?.find((p) => p.orgId === activeOrg?.id)?.id ||
+    projects.data?.[0]?.id ||
+    '';
+  // With no project to pick yet (a new organization) the agent may work any project it gets later.
+  const effectiveAccess: Access = access ?? { allowed: defaultProject ? [defaultProject] : null, focus: [] };
   // A shared project runs on its owner's catalogue: the Hire form lists that organization's roles (custom ones too).
-  const roles = useRoles(
-    projectId ||
-      projects.data?.find((p) => p.key === getLastProjectKey())?.id ||
-      projects.data?.[0]?.id ||
-      undefined,
-  );
+  const roles = useRoles(effectiveAccess.allowed?.[0] || defaultProject || undefined);
   const [runtime, setRuntime] = useState('');
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState('');
@@ -569,11 +593,6 @@ function HireDialog({
       ? seniority
       : (role?.seniorityLevels[0] ?? '');
   const effectiveStation = workstationId || activeStations[0]?.id || '';
-  const effectiveProject =
-    projectId ||
-    projects.data?.find((p) => p.key === getLastProjectKey())?.id ||
-    projects.data?.[0]?.id ||
-    '';
   const station = activeStations.find((w) => w.id === effectiveStation);
   const runtimeOptions = [
     ...new Set(
@@ -596,6 +615,8 @@ function HireDialog({
     if (unsandboxed && !ackUnsandboxed)
       errs.sandbox = 'Confirm that you accept hiring onto an unsandboxed workstation';
     if (!name.trim()) errs.name = 'A name is required';
+    if (effectiveAccess.allowed !== null && effectiveAccess.allowed.length === 0)
+      errs.access = 'Pick at least one project, or allow any project';
     if (!effectiveStation) errs.workstation = 'Pair a workstation first';
     setErrors(errs);
     if (Object.keys(errs).length || !role) return;
@@ -605,7 +626,8 @@ function HireDialog({
         roleKey: role.key,
         seniority: effectiveSeniority as 'junior' | 'senior',
         workstationId: effectiveStation,
-        ...(effectiveProject ? { projectId: effectiveProject } : {}),
+        allowedProjectIds: effectiveAccess.allowed,
+        ...(effectiveAccess.focus.length ? { focusProjectIds: effectiveAccess.focus } : {}),
         ...(runtime ? { runtime } : {}),
         ...(model.trim() ? { model: model.trim() } : {}),
         ...(effort ? { effort } : {}),
@@ -619,6 +641,7 @@ function HireDialog({
       {
         onSuccess: () => {
           setName('');
+          setAccess(null);
           setNonce((n) => n + 1);
           onOpenChange(false);
         },
@@ -668,13 +691,6 @@ function HireDialog({
               </option>
             ))}
           </Select>
-          <Select label="Project" value={effectiveProject} onChange={(e) => setProjectId(e.target.value)}>
-            {(projects.data ?? []).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.key}
-              </option>
-            ))}
-          </Select>
           <Select
             label="Runtime"
             value={runtime || role?.defaultModel.runtime || ''}
@@ -702,6 +718,20 @@ function HireDialog({
               </option>
             ))}
           </Select>
+        </div>
+        <div>
+          <ProjectAccessEditor
+            value={effectiveAccess}
+            onChange={setAccess}
+            projects={projects.data ?? []}
+            canAny={canAny}
+            idPrefix="hire"
+          />
+          {errors.access && (
+            <p role="alert" className="mt-1 text-sm font-medium text-danger">
+              {errors.access}
+            </p>
+          )}
         </div>
         <TextInput
           label="Skills"

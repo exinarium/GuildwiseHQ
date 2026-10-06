@@ -10,6 +10,18 @@ import { conflict, notFound } from '../errors.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
 
 /** The user talking to the DevOps engineer that lives on their own workstation (workstation-targeted work is theirs). */
+/** Is the agent allowed on a project of its organization that the user is on? (Members and Guests direct such agents.) */
+export async function sharesAllowedProject(db: Queryable, userId: string, agent: Row): Promise<boolean> {
+  return !!(await one(
+    db,
+    `SELECT 1 FROM project_members pm JOIN projects pp ON pp.id = pm.project_id
+      WHERE pp.org_id = $2 AND pm.user_id = $1 AND pm.status = 'active'
+        AND ($3::uuid[] IS NULL OR pm.project_id = ANY ($3::uuid[]))
+      LIMIT 1`,
+    [userId, agent.org_id, agent.allowed_project_ids ?? null],
+  ));
+}
+
 export async function ownsDevopsMachine(
   db: Queryable,
   userId: string,
@@ -87,8 +99,7 @@ export async function createChat(
     const allowed =
       canDirectAgentInOrg({
         orgRole: await orgRoleOf(tx, user.id, agent.org_id),
-        agentProjectId: agent.project_id,
-        projectMember: agent.project_id ? !!(await projectRole(tx, user.id, agent.project_id)) : false,
+        sharesAllowedProject: await sharesAllowedProject(tx, user.id, agent),
       }) || (await ownsDevopsMachine(tx, user.id, agent));
     if (!allowed) throw notFound('agent not found');
 

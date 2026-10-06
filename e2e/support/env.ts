@@ -130,3 +130,10 @@ export const POLISHER = {
   name: 'E2E Polisher',
   password: 'polisher-password-12345',
 };
+
+/** Agent projects spec (docs/design/restructure.md Part A): own user and a paired (offline) workstation; allow-lists, focus and the cap. */
+export const ALLOWER = {
+  email: 'allower@e2e.test',
+  name: 'E2E Allower',
+  password: 'allower-password-12345',
+};

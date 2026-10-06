@@ -79,7 +79,10 @@ export const canTransferOwnership = isOrgOwner;
 export const canViewOrgPlan = isOrgManager;
 export const canSetOrgSecurity = isOrgOwner;
 
-/** Hire: O/A any agent; Members and Guests onto their own workstation, within a project they are on. */
+/**
+ * Hire: O/A any agent with any allow-list; Members and Guests onto their own workstation, with an allow-list
+ * (`projectScoped`: a non-empty project list) made only of projects they are on (`projectMember`).
+ */
 export function canHireAgentInOrg(c: {
   orgRole: OrgRole | null;
   projectScoped: boolean;
@@ -96,13 +99,12 @@ export const canManageAgentInOrg = (c: {
 }): boolean => c.orgRole === 'owner' || c.orgRole === 'admin' || c.userId === c.managerUserId;
 /** Widening an agent's permissions is for the Owner and Admins only. */
 export const canWidenPermissions = isOrgManager;
-/** Direct / chat with an agent: O/A any; others only an agent scoped to a project they are on. */
-export const canDirectAgentInOrg = (c: {
-  orgRole: OrgRole | null;
-  agentProjectId: string | null;
-  projectMember: boolean;
-}): boolean =>
-  c.orgRole === 'owner' || c.orgRole === 'admin' || (c.agentProjectId !== null && c.projectMember);
+/**
+ * Direct / chat with an agent: O/A any; others only an agent that is allowed on a project they are on
+ * (`sharesAllowedProject`).
+ */
+export const canDirectAgentInOrg = (c: { orgRole: OrgRole | null; sharesAllowedProject: boolean }): boolean =>
+  c.orgRole === 'owner' || c.orgRole === 'admin' || c.sharesAllowedProject;
 /** Custom roles, workflows, departments and standing orders of the organization. */
 export const canDesignInOrg = isOrgManager;
 /** Org-level vaults, org reporting settings, org-level desk items. */
@@ -178,3 +180,7 @@ export function eventAccess(
       return false;
   }
 }
+
+/** Does the agent's allow-list (null: any project) let it work on the project? */
+export const agentAllowsProject = (allowedProjectIds: readonly string[] | null, projectId: string): boolean =>
+  allowedProjectIds === null || allowedProjectIds.includes(projectId);

@@ -51,27 +51,27 @@ describe('HR recommendations in a shared project', () => {
     expect(byAgent(recs)).toEqual({ Olga: true, Pam: true, Mia: true });
   });
 
-  it('a member sees the project agents (not the owner org-wide ones) and can apply only for their own hire', async () => {
-    expect(byAgent(await recommendations(w, c1))).toEqual({ Pam: false, Mia: true });
-    expect(byAgent(await recommendations(w, c2))).toEqual({ Pam: false, Mia: false });
+  it("a member sees the agents allowed on the project (the owner's any-project agent too) and can apply only for their own hire", async () => {
+    expect(byAgent(await recommendations(w, c1))).toEqual({ Olga: false, Pam: false, Mia: true });
+    expect(byAgent(await recommendations(w, c2))).toEqual({ Olga: false, Pam: false, Mia: false });
     const b = await board(w, c1);
     expect(
       b.agents
         .filter((a: any) => !a.agent.isDevops)
         .map((a: any) => a.agent.name)
         .sort(),
-    ).toEqual(['Mia', 'Pam']);
+    ).toEqual(['Mia', 'Olga', 'Pam']);
     const mine = b.agents.find((a: any) => a.agent.name === 'Mia');
     expect(mine.agent.managerUserId).toBe(m1.id);
-    expect(b.recommendations.map((r: any) => r.agentName).sort()).toEqual(['Mia', 'Pam']);
+    expect(b.recommendations.map((r: any) => r.agentName).sort()).toEqual(['Mia', 'Olga', 'Pam']);
   });
 
-  it("applying someone else's recommendation is refused, and so is one for an agent they cannot see", async () => {
+  it("applying someone else's recommendation is refused, and so is one for an agent they do not manage", async () => {
     const id = (agentName: string, recs: any[]) => recs.find((r) => r.agentName === agentName).id as string;
     const ownerRecs = await recommendations(w, owner);
     expect((await as(c1).post(`/api/hr/recommendations/${id('Pam', ownerRecs)}/apply`)).status).toBe(403);
     expect((await as(c2).post(`/api/hr/recommendations/${id('Mia', ownerRecs)}/apply`)).status).toBe(403);
-    expect((await as(c1).post(`/api/hr/recommendations/${id('Olga', ownerRecs)}/apply`)).status).toBe(404);
+    expect((await as(c1).post(`/api/hr/recommendations/${id('Olga', ownerRecs)}/apply`)).status).toBe(403);
     expect((await q('SELECT status FROM agents WHERE id=$1', [olga.id]))[0]!.status).toBe('active');
   });
 

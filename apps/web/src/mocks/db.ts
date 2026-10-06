@@ -374,7 +374,9 @@ export function seed() {
   const mkAgent = (name: string, roleKey: string, seniority: 'junior' | 'senior'): AgentDto => ({
     id: uuid(),
     orgId: ORG_ID,
-    projectId,
+    hiredForProjectId: projectId,
+    allowedProjectIds: [projectId],
+    focusProjectIds: [],
     hiredByUserId: ME.id,
     managerUserId: ME.id,
     workstationId: wsId,

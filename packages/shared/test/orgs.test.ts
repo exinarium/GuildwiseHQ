@@ -79,8 +79,8 @@ describe('org predicates', () => {
     expect(canManageAgentInOrg({ userId: U.a, orgRole: 'member', managerUserId: U.a })).toBe(true);
     expect(canManageAgentInOrg({ userId: U.a, orgRole: 'member', managerUserId: U.b })).toBe(false);
     expect(canManageAgentInOrg({ userId: U.a, orgRole: 'admin', managerUserId: U.b })).toBe(true);
-    expect(canDirectAgentInOrg({ orgRole: 'member', agentProjectId: null, projectMember: true })).toBe(false);
-    expect(canDirectAgentInOrg({ orgRole: 'member', agentProjectId: U.c, projectMember: true })).toBe(true);
+    expect(canDirectAgentInOrg({ orgRole: 'member', sharesAllowedProject: false })).toBe(false);
+    expect(canDirectAgentInOrg({ orgRole: 'member', sharesAllowedProject: true })).toBe(true);
   });
   it('interest edit: the creator or an equal or higher rank, and only when the interest can be viewed', () => {
     expect(canEditInterest({ userId: U.a, rank: 2 }, { userId: U.b, rank: 3 }, true)).toBe(false);

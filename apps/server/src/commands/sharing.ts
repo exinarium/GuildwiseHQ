@@ -153,19 +153,47 @@ export async function answerShare(
 
 // ------------------------------------------------------------------------------- member removal
 
-async function removalPlan(tx: Queryable, projectId: string, memberId: string) {
-  const agents = await rows(
-    tx,
-    `SELECT a.id, a.name, a.role_key, a.workstation_id, w.name AS workstation_name
-       FROM agents a LEFT JOIN workstations w ON w.id = a.workstation_id
-      WHERE a.project_id=$1 AND a.hired_by_user_id=$2 AND a.status IN ('active','needs_rehome') AND NOT a.is_devops
-      ORDER BY a.hired_at`,
-    [projectId, memberId],
-  );
+/**
+ * What removing `memberId` from the project touches (docs/design/restructure.md section 4.4). Agents are
+ * organization-wide, so the member's agents are re-homed only when this was their last access in the organization
+ * (no other active project, and no organization-wide grant); otherwise they keep working elsewhere and only stop
+ * qualifying for this project. Their claims on this project are released in both cases.
+ */
+async function removalPlan(tx: Queryable, projectId: string, memberId: string, includeGrant = false) {
+  const project = await one<{ org_id: string }>(tx, 'SELECT org_id FROM projects WHERE id=$1', [projectId]);
+  // The member keeps this project through the organization grant (an org Member): nothing moves.
+  const keeps =
+    !includeGrant &&
+    (await one(
+      tx,
+      `SELECT 1 FROM project_members WHERE project_id=$1 AND user_id=$2 AND status='active' AND org_grant`,
+      [projectId, memberId],
+    ));
+  const held =
+    project && !keeps
+      ? await rows(
+          tx,
+          `SELECT a.id, a.name, a.role_key, a.workstation_id, w.name AS workstation_name
+             FROM agents a LEFT JOIN workstations w ON w.id = a.workstation_id
+            WHERE a.org_id=$1 AND (a.manager_user_id=$2 OR w.user_id=$2) AND a.status IN ('active','needs_rehome')
+              AND NOT a.is_devops
+            ORDER BY a.hired_at`,
+          [project.org_id, memberId],
+        )
+      : [];
+  const lastAccess =
+    !!project &&
+    !(await one(
+      tx,
+      `SELECT 1 FROM project_members pm JOIN projects pp ON pp.id = pm.project_id
+        WHERE pp.org_id=$1 AND pm.user_id=$2 AND pm.status='active' AND (pm.project_id <> $3 OR pm.org_grant)`,
+      [project.org_id, memberId, projectId],
+    ));
+  const agents = lastAccess ? held : [];
   const claimed = await rows(
     tx,
     `SELECT c.* FROM cards c WHERE c.project_id=$1 AND c.claim_id IS NOT NULL AND c.claimed_by_agent_id = ANY($2::uuid[])`,
-    [projectId, agents.map((a) => a.id)],
+    [projectId, held.map((a) => a.id)],
   );
   const owned = await rows(
     tx,
@@ -245,7 +273,7 @@ export async function removeMemberIn(
       [projectId, memberId, opts.includeGrant === true],
     );
     if (!m || m.status === 'removed') throw notFound('member not found');
-    const plan = await removalPlan(tx, projectId, memberId);
+    const plan = await removalPlan(tx, projectId, memberId, opts.includeGrant === true);
     const events: AppendInput[] = [];
     for (const c of plan.claimed) {
       const lastHandoff = await one<{ id: string }>(
@@ -371,7 +399,7 @@ export async function rehomeAgent(
             },
           },
           actor: userActor(user.id),
-          scope: a.project_id ? projectScope(a.org_id, a.project_id) : orgScope(a.org_id),
+          scope: orgScope(a.org_id),
         },
       ],
       { tx },

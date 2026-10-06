@@ -386,7 +386,10 @@ export const handlers = [
     const agent: AgentDto = {
       id: uuid(),
       orgId: ORG_ID,
-      projectId: b.projectId ?? null,
+      hiredForProjectId: b.projectId ?? null,
+      allowedProjectIds:
+        b.allowedProjectIds !== undefined ? b.allowedProjectIds : b.projectId ? [b.projectId] : null,
+      focusProjectIds: b.focusProjectIds ?? [],
       hiredByUserId: ME.id,
       managerUserId: ME.id,
       workstationId: b.workstationId,
@@ -408,9 +411,24 @@ export const handlers = [
       activeCards: [],
     };
     db.agents.push(agent);
-    emit('AgentHired', `agent-${agent.id}`, agent.projectId);
+    emit('AgentHired', `agent-${agent.id}`, agent.hiredForProjectId);
     for (const c of db.cards.filter((x) => x.stage === 'build' && x.status === 'queued')) simulateBuilder(c);
     return HttpResponse.json({ agent }, { status: 201 });
+  }),
+  http.put(`${A}/agents/:id/allowed-projects`, async ({ params, request }) => {
+    const a = db.agents.find((x) => x.id === params.id);
+    const b = (await request.json()) as { projectIds: string[] | null };
+    if (!a) return err(404, 'not_found', 'Agent not found');
+    a.allowedProjectIds = b.projectIds;
+    if (b.projectIds) a.focusProjectIds = a.focusProjectIds.filter((f) => b.projectIds?.includes(f));
+    return HttpResponse.json({ agent: a });
+  }),
+  http.put(`${A}/agents/:id/focus-projects`, async ({ params, request }) => {
+    const a = db.agents.find((x) => x.id === params.id);
+    const b = (await request.json()) as { projectIds: string[] };
+    if (!a) return err(404, 'not_found', 'Agent not found');
+    a.focusProjectIds = b.projectIds;
+    return HttpResponse.json({ agent: a });
   }),
   http.post(`${A}/agents/:id/fire`, ({ params }) => {
     const a = db.agents.find((x) => x.id === params.id);
@@ -419,7 +437,7 @@ export const handlers = [
       transition(c, c.stage, 'queued', 'agent retired');
     a.status = 'retired';
     a.retiredAt = iso();
-    emit('AgentRetired', `agent-${a.id}`, a.projectId);
+    emit('AgentRetired', `agent-${a.id}`, a.hiredForProjectId);
     return HttpResponse.json({ agent: a });
   }),
   http.get(`${A}/roles`, () =>

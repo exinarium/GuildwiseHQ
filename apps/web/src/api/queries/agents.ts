@@ -6,7 +6,7 @@ import {
   WorkflowsResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { get, post, qs } from '../client.ts';
+import { get, post, put, qs } from '../client.ts';
 
 export function useAgents(projectId?: string, department?: string) {
   return useQuery({
@@ -67,6 +67,32 @@ export function useFire() {
       qc.invalidateQueries({ queryKey: ['agents'] });
       qc.invalidateQueries({ queryKey: ['board'] });
       qc.invalidateQueries({ queryKey: ['card'] });
+    },
+  });
+}
+
+/** "Allowed projects": a project list, or null for any project of the organization. */
+export function useSetAllowedProjects() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, projectIds }: { id: string; projectIds: string[] | null }) =>
+      put(`/agents/${id}/allowed-projects`, { projectIds }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['agents'] });
+      void qc.invalidateQueries({ queryKey: ['hr'] });
+    },
+  });
+}
+
+/** Focus projects: the projects the agent prefers inside its allow-list. */
+export function useSetFocusProjects() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, projectIds }: { id: string; projectIds: string[] }) =>
+      put(`/agents/${id}/focus-projects`, { projectIds }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['agents'] });
+      void qc.invalidateQueries({ queryKey: ['hr'] });
     },
   });
 }

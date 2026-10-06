@@ -198,7 +198,7 @@ async function memberPlan(db: Queryable, orgId: string, userId: string) {
   );
   const agents = await rows(
     db,
-    `SELECT a.id, a.name, a.role_key, a.project_id, a.workstation_id FROM agents a
+    `SELECT a.id, a.name, a.role_key, a.workstation_id FROM agents a
       WHERE a.org_id=$1 AND a.manager_user_id=$2 AND a.status IN ('active','needs_rehome') AND NOT a.is_devops
       ORDER BY a.hired_at`,
     [orgId, userId],
@@ -236,7 +236,7 @@ export async function removeOrgMemberIn(
   }
   // Org-wide agents: their claims go back to the queue; the projector hands the agents to the Owner (`needs_rehome`).
   const events: AppendInput[] = [];
-  const orgWide = plan.agents.filter((x) => !x.project_id);
+  const orgWide = plan.agents;
   const stillClaimed = await rows(
     tx,
     `SELECT c.* FROM cards c WHERE c.org_id=$1 AND c.claim_id IS NOT NULL AND c.claimed_by_agent_id = ANY($2::uuid[])`,

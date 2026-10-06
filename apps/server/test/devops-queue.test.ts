@@ -60,7 +60,8 @@ describe('DevOps engineer per workstation', () => {
       seniority: 'senior',
       status: 'active',
       workstationId: w.workstationId,
-      projectId: null,
+      hiredForProjectId: null,
+      allowedProjectIds: null,
       capacity: 1,
     });
     expect(agents[0].name).toBe('Atlas');

@@ -50,7 +50,9 @@ const agent = (n: number, name: string, workstationId: string, sandbox: string |
   agent: {
     id: ID(100 + n),
     orgId: USER,
-    projectId: null,
+    hiredForProjectId: null,
+    allowedProjectIds: null,
+    focusProjectIds: [],
     hiredByUserId: USER,
     managerUserId: USER,
     workstationId,
@@ -112,8 +114,10 @@ const role = {
 
 const fetchMock = vi.fn();
 let hired: unknown;
+let projectsList: unknown[] = [];
 beforeEach(() => {
   hired = undefined;
+  projectsList = [];
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     const path = url.split('?')[0];
@@ -137,12 +141,38 @@ beforeEach(() => {
     if (path === '/api/roles') return json({ roles: [role] });
     if (path === '/api/auth/me' || path === '/api/me')
       return json({
-        user: { id: USER, email: 'o@x.test', displayName: 'Olga' },
+        user: {
+          id: USER,
+          email: 'o@x.test',
+          displayName: 'Olga',
+          kind: 'user',
+          twoFactorEnabled: false,
+          status: 'active',
+          createdAt: '2026-10-01T10:00:00.000Z',
+          lastLoginAt: null,
+        },
         account: { kind: 'user' },
+        isAdmin: true,
         orgs: [{ id: USER, name: 'Olga org', role: 'owner', status: 'active' }],
+        activeOrg: {
+          id: USER,
+          name: 'Olga org',
+          role: 'owner',
+          status: 'active',
+          plan: 'founding',
+          planName: 'Founding',
+          features: {},
+          banners: [],
+        },
+        guestIn: [],
+        guestProjectIds: [],
+        visibleProjectIds: [],
+        pendingInvitations: 0,
+        twoFactor: { enabled: false, required: false, setupRequired: false },
+        features: { mockUi: false },
       });
     if (path === '/api/agents/name-suggestions') return json({ names: [] });
-    if (path === '/api/projects') return json({ projects: [] });
+    if (path === '/api/projects') return json({ projects: projectsList });
     return json({});
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -287,6 +317,74 @@ describe('hire form', () => {
     await user.type(within(form).getByLabelText('Name'), 'Fern');
     await user.click(within(form).getByRole('button', { name: 'Hire' }));
     await waitFor(() => expect(hired).toMatchObject({ name: 'Fern', workstationId: WS_OK }));
+  });
+});
+
+describe('hire form: where the new agent may work', () => {
+  const project = (id: string, key: string) => ({
+    id,
+    orgId: USER,
+    orgName: 'Olga org',
+    key,
+    name: `${key} project`,
+    domain: 'work',
+    workflowKey: 'code',
+    priorityTier: 2,
+    branchPrefix: 'aom/',
+    workingBranch: 'main',
+    subCategories: [],
+    vaultFolder: null,
+    architecturalGlobs: [],
+    e2eGlobs: [],
+    status: 'active',
+    createdAt: '2026-10-01T10:00:00.000Z',
+    myRole: 'owner',
+  });
+  const P1 = '0192f3a0-0000-7000-8000-000000000001';
+  const P2 = '0192f3a0-0000-7000-8000-000000000002';
+
+  async function open() {
+    projectsList = [project(P1, 'TOY'), project(P2, 'WEB')];
+    const user = userEvent.setup();
+    wrap(<Agents />);
+    await user.click(await screen.findByRole('button', { name: 'Hire agent' }));
+    const form = await screen.findByRole('form', { name: 'Hire agent' });
+    await within(form).findByRole('option', { name: /Win desk/ });
+    await within(form).findByTestId('hire-editor');
+    await user.selectOptions(within(form).getByLabelText('Workstation'), WS_OK);
+    return { user, form };
+  }
+
+  it('defaults to the first project (not "any"), and sends the allow-list and focus', async () => {
+    const { user, form } = await open();
+    expect(within(form).getByRole('checkbox', { name: 'Allow TOY' })).toBeChecked();
+    expect(within(form).getByRole('checkbox', { name: 'Allow WEB' })).not.toBeChecked();
+    await user.click(within(form).getByRole('checkbox', { name: 'Allow WEB' }));
+    await user.click(within(form).getByRole('button', { name: 'Prefer WEB' }));
+    await user.type(within(form).getByLabelText('Name'), 'Wren');
+    await user.click(within(form).getByRole('button', { name: 'Hire' }));
+    await waitFor(() =>
+      expect(hired).toMatchObject({ name: 'Wren', allowedProjectIds: [P1, P2], focusProjectIds: [P2] }),
+    );
+  });
+
+  it('the Owner can allow any project; the hire carries null', async () => {
+    const { user, form } = await open();
+    await user.click(within(form).getByRole('button', { name: 'Any project' }));
+    await user.type(within(form).getByLabelText('Name'), 'Quill');
+    await user.click(within(form).getByRole('button', { name: 'Hire' }));
+    await waitFor(() => expect(hired).toMatchObject({ name: 'Quill', allowedProjectIds: null }));
+  });
+
+  it('refuses an empty list before calling the server', async () => {
+    const { user, form } = await open();
+    await user.click(within(form).getByRole('checkbox', { name: 'Allow TOY' }));
+    await user.type(within(form).getByLabelText('Name'), 'Nobody');
+    await user.click(within(form).getByRole('button', { name: 'Hire' }));
+    expect(
+      await within(form).findByText('Pick at least one project, or allow any project'),
+    ).toBeInTheDocument();
+    expect(hired).toBeUndefined();
   });
 });
 

@@ -30,7 +30,8 @@ describe('hiring', () => {
       status: 'active',
       capacity: 1,
       workstationId: w.workstationId,
-      projectId: null,
+      hiredForProjectId: null,
+      allowedProjectIds: null,
       isDevops: false,
       runtime: 'mock',
     });

@@ -7,7 +7,10 @@ export const ONLINE_WINDOW_MS = 45_000;
 export interface AgentView {
   id: string;
   orgId: string;
-  projectId: string | null;
+  /** Where the agent may work: a project list, or null for any project of its organization. */
+  allowedProjectIds: string[] | null;
+  /** Projects it prefers inside that list (soft: ordering only). */
+  focusProjectIds: string[];
   roleKey: string;
   senior: boolean;
   workstationId: string;
@@ -19,7 +22,8 @@ export function agentView(a: Row, capabilities: string[]): AgentView {
   return {
     id: a.id,
     orgId: a.org_id,
-    projectId: a.project_id,
+    allowedProjectIds: a.allowed_project_ids ?? null,
+    focusProjectIds: a.focus_project_ids ?? [],
     roleKey: a.role_key,
     senior: a.seniority === 'senior',
     workstationId: a.workstation_id,
@@ -37,7 +41,8 @@ export function agentView(a: Row, capabilities: string[]): AgentView {
 export interface AgentRefs {
   id: string;
   orgId: string;
-  projectId: string;
+  /** The agent's allow-list as a uuid[] expression (NULL: any project). */
+  allowedProjects: string;
   roleKey: string;
   senior: string;
   workstationId: string;
@@ -49,7 +54,7 @@ export interface AgentRefs {
 export const PARAM_AGENT: AgentRefs = {
   id: '$1',
   orgId: '$2',
-  projectId: '$3',
+  allowedProjects: '$3',
   roleKey: '$4',
   senior: '$5',
   workstationId: '$6',
@@ -71,7 +76,13 @@ export function eligibility(A: AgentRefs) {
                           AND om.org_id = v.org_id AND om.status = 'active' AND om.role IN ('owner','admin')
                           WHERE w.id = ${A.workstationId})))`;
   return {
-    scope: `c.org_id = ${A.orgId} AND (${A.projectId}::uuid IS NULL OR c.project_id = ${A.projectId})`,
+    // The agent's organization, then where its manager allowed it, then who may see the project: the user who owns the
+    // agent's workstation must be an active member of the card's project (the Owner and Admins hold a row in every
+    // project of their organization; a guest holds one only in the projects shared with them).
+    scope: `c.org_id = ${A.orgId}
+      AND (${A.allowedProjects}::uuid[] IS NULL OR c.project_id = ANY (${A.allowedProjects}::uuid[]))
+      AND EXISTS (SELECT 1 FROM workstations aw JOIN project_members apm ON apm.user_id = aw.user_id
+                   WHERE aw.id = ${A.workstationId} AND apm.project_id = c.project_id AND apm.status = 'active')`,
     role: `st.kind = 'agent' AND st.claim_role = ${A.roleKey}`,
     senior: `(NOT st.senior_only OR ${A.senior})`,
     notExcluded: `NOT (${A.id} = ANY (c.excluded_agent_ids))`,
@@ -110,6 +121,8 @@ WHERE c.status = 'queued'
   AND ${E.repo}
   AND ${E.vault}
   AND ${E.worktree}
+  AND (p.max_concurrent_shifts IS NULL OR (SELECT count(*) FROM cards pc
+        WHERE pc.project_id = c.project_id AND pc.claim_id IS NOT NULL) < p.max_concurrent_shifts)
   AND (c.retry_after IS NULL OR c.retry_after <= $9::timestamptz)
   AND NOT EXISTS (
         SELECT 1 FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id
@@ -124,6 +137,7 @@ ORDER BY
     WHEN c.is_rework_or_bug THEN 1
     ELSE 2
   END,
+  (c.project_id = ANY ($10::uuid[])) DESC,
   p.priority_tier ASC,
   c.priority ASC,
   c.queued_at ASC,
@@ -133,13 +147,14 @@ LIMIT 5`;
 const params = (a: AgentView, now: Date) => [
   a.id,
   a.orgId,
-  a.projectId,
+  a.allowedProjectIds,
   a.roleKey,
   a.senior,
   a.workstationId,
   a.capabilities,
   a.riskTiers,
   now,
+  a.focusProjectIds,
 ];
 
 /** Claimable cards for `agent` in priority order (limit 5). A card in loop-breaker back-off is skipped until it expires. */
@@ -158,6 +173,6 @@ export async function isCandidate(
   cardId: string,
   now: Date = new Date(),
 ): Promise<boolean> {
-  const r = await one(db, CANDIDATES_SQL('AND c.id = $10'), [...params(agent, now), cardId]);
+  const r = await one(db, CANDIDATES_SQL('AND c.id = $11'), [...params(agent, now), cardId]);
   return !!r;
 }

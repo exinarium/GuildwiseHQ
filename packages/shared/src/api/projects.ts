@@ -44,11 +44,17 @@ export const ProjectDtoSchema = z.object({
   mergeLargeWithoutApproval: z.boolean().optional(),
   /** Who last changed the setting and when (null: never). */
   mergeLargeChanged: z.object({ byName: z.string(), at: IsoTime }).nullable().optional(),
+  /** Optional cap on shifts running at once on this project; null: no cap (the default). */
+  maxConcurrentShifts: z.number().int().nullable().optional(),
   createdAt: IsoTime,
   /** The requesting user's relation to the project. */
   myRole: z.enum(['owner', 'manager']),
 });
 export type ProjectDto = z.infer<typeof ProjectDtoSchema>;
+
+/** `PUT /api/projects/:id/concurrency-cap`: a number of shifts, or null to remove the cap. */
+export const SetConcurrencyCapRequestSchema = z.object({ cap: z.number().int().min(1).max(50).nullable() });
+export type SetConcurrencyCapRequest = z.infer<typeof SetConcurrencyCapRequestSchema>;
 
 export const ProjectMemberDtoSchema = z.object({
   userId: z.uuid(),

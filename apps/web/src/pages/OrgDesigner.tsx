@@ -726,7 +726,9 @@ function DesignTab({ cat }: { cat: OrgCatalogueResponse }) {
   const agents = useAgents();
   const create = useCreateChat();
   const [threadId, setThreadId] = useState<string | null>(null);
-  const bas = (agents.data ?? []).filter((a) => a.roleKey === 'ba' && a.status === 'active' && !a.projectId);
+  const bas = (agents.data ?? []).filter(
+    (a) => a.roleKey === 'ba' && a.status === 'active' && a.allowedProjectIds === null,
+  );
   const [agentId, setAgentId] = useState('');
   const chosen = agentId || bas[0]?.id || '';
   if (!cat.canEdit)

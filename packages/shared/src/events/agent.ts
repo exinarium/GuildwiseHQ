@@ -22,13 +22,24 @@ export type AgentChanges = z.infer<typeof AgentChangesSchema>;
 export const UnsandboxedAckSchema = z.object({ by: Id, at: z.iso.datetime() });
 export type UnsandboxedAck = z.infer<typeof UnsandboxedAckSchema>;
 
+/** An agent can prefer at most this many projects. */
+export const MAX_FOCUS_PROJECTS = 10;
+
 export const agentEvents = [
   defineEvent(
     'AgentHired',
     z.object({
       agentId: Id,
       orgId: Id,
+      /** The project the agent was hired for, kept as history only: it never limits where the agent works. */
       projectId: Id.optional(),
+      /**
+       * Where the agent may work: a list of projects, or null for any project of the organization. Hires from before
+       * allow-lists have no field: they get `[projectId]` when they were project-scoped, otherwise any project.
+       */
+      allowedProjectIds: z.array(Id).max(500).nullable().optional(),
+      /** Projects the agent prefers inside its allow-list (soft preference for the dispatcher's ordering). */
+      focusProjectIds: z.array(Id).max(MAX_FOCUS_PROJECTS).optional(),
       hiredByUserId: Id,
       workstationId: Id,
       name: z.string().min(1),
@@ -51,6 +62,16 @@ export const agentEvents = [
   defineEvent(
     'AgentChanged',
     z.object({ agentId: Id, changes: AgentChangesSchema, unsandboxedAck: UnsandboxedAckSchema.optional() }),
+  ),
+  /** The manager set where the agent may work: a project list, or null for any project of the organization. */
+  defineEvent(
+    'AgentAllowedSet',
+    z.object({ agentId: Id, projectIds: z.array(Id).max(500).nullable(), by: Id }),
+  ),
+  /** The manager set the projects the agent prefers (a soft preference inside the allow-list). */
+  defineEvent(
+    'AgentFocusSet',
+    z.object({ agentId: Id, projectIds: z.array(Id).max(MAX_FOCUS_PROJECTS), by: Id }),
   ),
   defineEvent('AgentRetired', z.object({ agentId: Id, by: Id, releasedCardIds: z.array(Id) })),
   defineEvent('AgentReset', z.object({ agentId: Id })),

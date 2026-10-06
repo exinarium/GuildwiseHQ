@@ -81,6 +81,14 @@ export const projectEvents = [
     z.object({ projectId: Id, mergeLargeWithoutApproval: z.boolean(), changedBy: Id }),
   ),
   /**
+   * A project member set (or cleared, with null) the cap on shifts that may run at once on this project, whatever the
+   * number of agents. Off by default (restructure.md decision 11).
+   */
+  defineEvent(
+    'ProjectConcurrencyCapSet',
+    z.object({ projectId: Id, cap: z.number().int().min(1).max(50).nullable(), by: Id }),
+  ),
+  /**
    * A member archived the project: it disappears from boards, pickers, the dispatcher, schedules, intake mapping and the
    * desk; history, cards and the vault folder are kept. The same append closes the open cards (`CardCancelled` with
    * cause `project_archived`), disables the schedules and dismisses the open desk items.

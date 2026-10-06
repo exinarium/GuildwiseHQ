@@ -113,6 +113,18 @@ export function useSetMergePolicy(id: string) {
   });
 }
 
+/** The optional cap on shifts running at once on a project (null removes it). */
+export function useSetConcurrencyCap(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (cap: number | null) => put(`/projects/${id}/concurrency-cap`, { cap }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
 export function useAddRepo(projectId: string) {
   const qc = useQueryClient();
   return useMutation({

@@ -9,7 +9,7 @@ import {
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import { projectRole } from '../authz/scope.ts';
-import { ownsDevopsMachine } from '../commands/chats.ts';
+import { ownsDevopsMachine, sharesAllowedProject } from '../commands/chats.ts';
 import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../commands/common.ts';
 import { intakeContext } from '../commands/intake.ts';
 import type { Ctx } from '../context.ts';
@@ -79,7 +79,6 @@ export class ChatRelay {
     if (!row) return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);
     // Rights are re-checked on every send: the thread outlives a removed membership, a re-homed agent or a
     // deactivated account (being its creator is not enough).
-    const rolePerm = row.project_id ? await projectRole(ctx.pool, userId, row.project_id) : null;
     const roleThread = row.thread_project_id
       ? await projectRole(ctx.pool, userId, row.thread_project_id)
       : null;
@@ -87,8 +86,7 @@ export class ChatRelay {
     const mayDirect =
       canDirectAgentInOrg({
         orgRole: await orgRoleOf(ctx.pool, userId, row.org_id),
-        agentProjectId: row.project_id,
-        projectMember: rolePerm !== null && rolePerm !== undefined,
+        sharesAllowedProject: await sharesAllowedProject(ctx.pool, userId, row),
       }) || (await ownsDevopsMachine(ctx.pool, userId, row));
     if (!active || !mayDirect || (row.thread_project_id && roleThread === null))
       return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);

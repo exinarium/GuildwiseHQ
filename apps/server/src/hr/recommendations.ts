@@ -378,15 +378,19 @@ export async function computeRecommendations(
     const util = Math.min(1, r.shiftMs / r.availableMs);
     if (sinceMs >= HR_RULES.idleMinDays * 86_400_000 && util < HR_RULES.lowUtilisation) {
       const sameRole = agentRows.filter((o) => o.role_key === a.role_key && o.id !== a.id);
-      const covers = (o: Row) => !a.project_id || o.project_id === null || o.project_id === a.project_id;
+      // Another agent covers this one when it may work every project this one may.
+      const covers = (o: Row) =>
+        a.allowed_project_ids === null ||
+        o.allowed_project_ids === null ||
+        (a.allowed_project_ids as string[]).every((x) => (o.allowed_project_ids as string[]).includes(x));
       if (sameRole.some(covers)) {
         const queued = await one<{ n: number }>(
           ctx.pool,
           `SELECT count(*)::int AS n FROM cards c
              JOIN workflow_stages st ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
             WHERE c.org_id=$1 AND c.status='queued' AND c.claim_id IS NULL AND st.kind='agent' AND st.claim_role=$2
-              AND ($3::uuid IS NULL OR c.project_id = $3)`,
-          [orgId, a.role_key, a.project_id],
+              AND ($3::uuid[] IS NULL OR c.project_id = ANY ($3::uuid[]))`,
+          [orgId, a.role_key, a.allowed_project_ids ?? null],
         );
         if (Number(queued?.n ?? 0) === 0) {
           push(

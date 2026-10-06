@@ -6,6 +6,7 @@ import {
   PatchProjectRequestSchema,
   ProjectsQuerySchema,
   RepoParamsSchema,
+  SetConcurrencyCapRequestSchema,
   SetMergePolicyRequestSchema,
   SetWorkingBranchRequestSchema,
 } from '@aom/shared';
@@ -20,6 +21,7 @@ import {
   projectImpact,
   removeRepo,
   restoreProject,
+  setConcurrencyCap,
   setMergePolicy,
   updateProject,
 } from '../commands/projects.ts';
@@ -92,6 +94,16 @@ export function projectRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         await setMergePolicy(ctx, s.user, req.params.id, req.body.mergeLargeWithoutApproval);
+        return getProjectDetail(ctx, s.user.id, req.params.id);
+      },
+    );
+
+    app.put(
+      '/api/projects/:id/concurrency-cap',
+      { schema: { params: IdParamsSchema, body: SetConcurrencyCapRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setConcurrencyCap(ctx, s.user, req.params.id, req.body.cap);
         return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );

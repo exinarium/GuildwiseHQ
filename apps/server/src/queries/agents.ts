@@ -6,7 +6,9 @@ export function toAgentDto(a: Row, active: Array<{ cardId: string; ref: string; 
   return {
     id: a.id,
     orgId: a.org_id,
-    projectId: a.project_id,
+    hiredForProjectId: a.hired_for_project_id ?? null,
+    allowedProjectIds: a.allowed_project_ids ?? null,
+    focusProjectIds: a.focus_project_ids ?? [],
     hiredByUserId: a.hired_by_user_id,
     managerUserId: a.manager_user_id,
     workstationId: a.workstation_id,
@@ -34,9 +36,15 @@ export function toAgentDto(a: Row, active: Array<{ cardId: string; ref: string; 
   };
 }
 
+/** Does the agent's workstation user hold an active membership of project `proj` (a SQL expression)? */
+const WS_USER_ON = (proj: string) => `EXISTS (SELECT 1 FROM project_members wpm WHERE wpm.project_id = ${proj}
+        AND wpm.status = 'active' AND wpm.user_id = ws.user_id)`;
+
 /**
- * Agents visible to the user: the agents of the request organization (when they are a member of it) plus
- * project-scoped agents of projects they belong to (in any organization: a guest sees those of the shared project).
+ * Agents visible to the user (docs/design/restructure.md section 4.4): the agents of the request organization (when
+ * they are a member of it), plus the agents of any organization that are allowed on a project the user is on and
+ * whose workstation owner is on it too (a guest sees the agents that may work the shared project).
+ * With `projectId`: only the agents eligible for that project.
  */
 export async function listAgents(
   ctx: Ctx,
@@ -56,15 +64,19 @@ export async function listAgents(
        LEFT JOIN LATERAL (SELECT e AS info FROM jsonb_array_elements(ws.runtimes) e WHERE e->>'id' = a.runtime LIMIT 1) rt ON true
       WHERE ((a.org_id = $3::uuid AND EXISTS (SELECT 1 FROM org_members om
                    WHERE om.org_id = a.org_id AND om.user_id = $1 AND om.status = 'active'))
-             OR a.project_id IN (SELECT project_id FROM project_members WHERE user_id=$1 AND status='active'))
+             OR (NOT a.is_devops AND EXISTS (SELECT 1 FROM project_members pm JOIN projects pp ON pp.id = pm.project_id
+                         WHERE pp.org_id = a.org_id AND pm.user_id = $1 AND pm.status = 'active'
+                           AND (a.allowed_project_ids IS NULL OR pm.project_id = ANY (a.allowed_project_ids))
+                           AND ${WS_USER_ON('pm.project_id')})))
         AND ($2::uuid IS NULL
-             OR a.project_id = $2
-             OR (a.project_id IS NULL AND a.org_id = (SELECT org_id FROM projects WHERE id = $2)))
+             OR (a.org_id = (SELECT org_id FROM projects WHERE id = $2)
+                 AND (a.allowed_project_ids IS NULL OR $2::uuid = ANY (a.allowed_project_ids))
+                 AND ${WS_USER_ON('$2::uuid')}))
       ORDER BY a.status = 'retired', a.hired_at, a.id`,
     [userId, projectId ?? null, orgId],
   );
   if (projectId) {
-    // Hide other orgs' org-wide agents when filtering by a project the user cannot see.
+    // Agents of a project the user cannot see are not listed.
     const visible = await rows(
       ctx.pool,
       `SELECT 1 FROM project_members WHERE project_id=$1 AND user_id=$2 AND status='active'`,
