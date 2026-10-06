@@ -112,42 +112,6 @@ export const handlers = [
     return HttpResponse.json(meBody());
   }),
 
-  // admin
-  http.get(`${A}/admin/users`, () => HttpResponse.json({ users: db.users })),
-  http.patch(`${A}/admin/users/:id`, async ({ params, request }) => {
-    const u = db.users.find((x) => x.id === params.id);
-    if (!u) return err(404, 'not_found', 'User not found');
-    Object.assign(u, await request.json());
-    return HttpResponse.json({ user: u });
-  }),
-  http.get(`${A}/admin/invitations`, () => HttpResponse.json({ invitations: db.invitations })),
-  http.post(`${A}/admin/invitations`, async ({ request }) => {
-    const b = await body(request, CreateInvitationRequestSchema);
-    if (!b) return err(400, 'validation', 'Invalid request');
-    const inv = {
-      id: uuid(),
-      email: b.email,
-      role: b.role,
-      status: 'pending' as const,
-      invitedBy: ME.id,
-      expiresAt: new Date(Date.now() + 6e8).toISOString(),
-      createdAt: iso(),
-      acceptedAt: null,
-    };
-    db.invitations.unshift(inv);
-    return HttpResponse.json({ invitation: inv }, { status: 201 });
-  }),
-  http.post(`${A}/admin/invitations/:id/resend`, () => HttpResponse.json({ ok: true })),
-  http.post(`${A}/admin/invitations/:id/revoke`, ({ params }) => {
-    const i = db.invitations.find((x) => x.id === params.id);
-    if (i) i.status = 'revoked';
-    return HttpResponse.json({ ok: true });
-  }),
-  http.get(`${A}/admin/workstations`, () =>
-    HttpResponse.json({ workstations: db.workstations.map((w) => ({ ...w, ownerEmail: ME.email })) }),
-  ),
-  http.post(`${A}/admin/workstations/:id/unlink`, ({ params }) => unlink(String(params.id))),
-
   // workstations
   http.get(`${A}/workstations`, () => HttpResponse.json({ workstations: db.workstations })),
   http.post(`${A}/workstations/pairing-codes`, () =>

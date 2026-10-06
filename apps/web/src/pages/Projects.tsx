@@ -4,6 +4,7 @@ import { Archive, Code2, FlaskConical, FolderKanban, Rss, Settings } from 'lucid
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
 import { useWorkflows } from '../api/queries/agents.ts';
+import { useMe } from '../api/queries/auth.ts';
 import {
   useArchivedProjects,
   useCreateProject,
@@ -32,7 +33,8 @@ import { departmentsOf, inDepartment } from '../lib/designer.ts';
 
 const TYPE_ICON = { code: Code2, research: FlaskConical, feed: Rss } as const;
 
-function ProjectCard({ p }: { p: ProjectDto }) {
+function ProjectCard({ p, activeOrgId }: { p: ProjectDto; activeOrgId: string | null }) {
+  const guest = !!activeOrgId && p.orgId !== activeOrgId;
   const Icon = TYPE_ICON[p.workflowKey as keyof typeof TYPE_ICON] ?? FolderKanban;
   return (
     <li className="group relative rounded-card border border-line bg-surface p-4 transition-shadow hover:border-control hover:shadow-md">
@@ -66,15 +68,23 @@ function ProjectCard({ p }: { p: ProjectDto }) {
         <Badge>{p.workflowKey}</Badge>
         {p.department && <Badge tone="violet">{p.department}</Badge>}
         <Badge>{p.domain}</Badge>
-        <Badge tone={p.myRole === 'owner' ? 'blue' : 'neutral'}>
-          {p.myRole === 'owner' ? 'owner' : 'shared with you'}
-        </Badge>
+        {guest ? (
+          <Badge tone="amber" title="You are a guest of this project's organization">
+            Guest{p.orgName ? ` · ${p.orgName}` : ''}
+          </Badge>
+        ) : (
+          <Badge tone={p.myRole === 'owner' ? 'blue' : 'neutral'}>
+            {p.myRole === 'owner' ? 'owner' : 'shared with you'}
+          </Badge>
+        )}
       </p>
     </li>
   );
 }
 
 export function Projects() {
+  const me = useMe();
+  const canCreate = me.data?.activeOrg?.role === 'owner' || me.data?.activeOrg?.role === 'admin';
   const projects = useProjects();
   const archived = useArchivedProjects();
   const [showArchived, setShowArchived] = useState(false);
@@ -88,9 +98,11 @@ export function Projects() {
         title="Projects"
         sub="Each project owns a board, its agents and, for code, its repositories."
         actions={
-          <Button variant="primary" onClick={() => setOpen(true)}>
-            New project
-          </Button>
+          canCreate && (
+            <Button variant="primary" onClick={() => setOpen(true)}>
+              New project
+            </Button>
+          )
         }
       />
       <ProjectInvitations />
@@ -147,7 +159,7 @@ export function Projects() {
         )}
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" hidden={showArchived}>
           {shown.map((p) => (
-            <ProjectCard key={p.id} p={p} />
+            <ProjectCard key={p.id} p={p} activeOrgId={me.data?.activeOrg?.id ?? null} />
           ))}
         </ul>
       </div>

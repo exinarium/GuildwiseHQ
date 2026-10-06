@@ -56,7 +56,7 @@ export function crumbsFor(pathname: string, search: string, projects: ProjectDto
     ['/chat/:threadId', () => [{ label: 'Desk', to: '/desk' }, { label: 'Chat' }]],
     ['/desk', () => [{ label: 'Desk' }]],
     ['/schedules', () => [{ label: 'Work' }, { label: 'Schedules' }]],
-    ['/admin', () => [{ label: 'Admin' }]],
+    ['/settings/org', () => [{ label: 'Settings', to: '/settings' }, { label: 'Organization' }]],
   ];
   for (const [pattern, build] of table) {
     const m = matchPath(pattern, pathname);

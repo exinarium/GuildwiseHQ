@@ -119,7 +119,7 @@ export function WorkstationCard({
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 }) {
-  const unpair = useUnlinkWorkstation(admin);
+  const unpair = useUnlinkWorkstation();
   const toast = useToast();
   const [confirm, setConfirm] = useState(false);
   const [own, setOwn] = useState(false);

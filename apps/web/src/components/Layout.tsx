@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Navigate, useLocation } from 'react-router';
+import { Navigate, Outlet, useLocation } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { useSetTimezone } from '../api/queries/reporting.ts';
 import { browserTimeZone } from '../lib/timezone.ts';
@@ -8,7 +8,8 @@ import { getSocket, useSocketState } from '../ws/socket.ts';
 import { AppShell } from './shell/AppShell.tsx';
 import { PageSkeleton } from './ui.tsx';
 
-export function RequireAuth() {
+/** The signed-in frame. `platform` is the platform administrator's area; everyone else gets the work shell. */
+export function RequireAuth({ platform = false }: { platform?: boolean } = {}) {
   const me = useMe();
   const loc = useLocation();
   const socketState = useSocketState();
@@ -37,6 +38,8 @@ export function RequireAuth() {
   }
   // An account that must have two-factor login sets it up first; a platform account never reaches the work shell.
   if (me.data.twoFactor.setupRequired) return <SecuritySetup me={me.data} />;
-  if (me.data.account.kind === 'super_admin') return <Navigate to="/platform" replace />;
+  const isPlatform = me.data.account.kind === 'super_admin';
+  if (platform) return isPlatform ? <Outlet /> : <Navigate to="/" replace />;
+  if (isPlatform) return <Navigate to="/platform" replace />;
   return <AppShell name={me.data.user.displayName} live={socketState} />;
 }

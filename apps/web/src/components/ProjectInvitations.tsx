@@ -24,6 +24,12 @@ export function ProjectInvitations() {
               <strong>
                 {i.projectKey} {i.projectName}
               </strong>
+              {i.orgName && (
+                <>
+                  {' '}
+                  as a guest of <strong>{i.orgName}</strong>
+                </>
+              )}
               {i.invitedAt && <span className="text-xs text-subtle"> · {formatDateTime(i.invitedAt)}</span>}
             </span>
             <Button

@@ -1,11 +1,11 @@
 import { createBrowserRouter, Navigate } from 'react-router';
 import { useProjects } from './api/queries/projects.ts';
 import { RequireAuth } from './components/Layout.tsx';
+import { PlatformShell } from './components/platform/PlatformShell.tsx';
 import { RouteError } from './components/RouteError.tsx';
 import { PageSkeleton } from './components/ui.tsx';
 import { getLastProjectKey } from './lib/lastProject.ts';
 import { AcceptInvite } from './pages/AcceptInvite.tsx';
-import { Admin } from './pages/Admin.tsx';
 import { Agents } from './pages/Agents.tsx';
 import { Board } from './pages/Board.tsx';
 import { CardDetail } from './pages/CardDetail.tsx';
@@ -19,9 +19,15 @@ import { Ledger } from './pages/Ledger.tsx';
 import { Login } from './pages/Login.tsx';
 import { Metrics } from './pages/Metrics.tsx';
 import { OrgDesigner } from './pages/OrgDesigner.tsx';
+import { OrgSettings } from './pages/OrgSettings.tsx';
 import { Phase } from './pages/Phase.tsx';
 import { ProjectSettings } from './pages/ProjectSettings.tsx';
 import { Projects } from './pages/Projects.tsx';
+import { PlatformAudit } from './pages/platform/PlatformAudit.tsx';
+import { PlatformInvitations } from './pages/platform/PlatformInvitations.tsx';
+import { PlatformOrgDetail } from './pages/platform/PlatformOrgDetail.tsx';
+import { PlatformOrgs } from './pages/platform/PlatformOrgs.tsx';
+import { PlatformUsers } from './pages/platform/PlatformUsers.tsx';
 import { Schedules } from './pages/Schedules.tsx';
 import { Settings } from './pages/Settings.tsx';
 import { Vaults } from './pages/Vaults.tsx';
@@ -59,12 +65,29 @@ export const routes = [
       { path: '/workstations', element: <Workstations /> },
       { path: '/settings', element: <Settings /> },
       { path: '/settings/vaults', element: <Vaults /> },
-      { path: '/admin', element: <Admin /> },
+      { path: '/settings/org', element: <OrgSettings /> },
+      { path: '/admin', element: <Navigate to="/settings/org" replace /> },
       { path: '/desk', element: <Desk /> },
       { path: '/ledger', element: <Ledger /> },
       { path: '/chat/:threadId', element: <Chat /> },
       { path: '/intake', element: <IntakeNew /> },
       { path: '/intake/:id', element: <IntakeView /> },
+    ],
+  },
+  {
+    element: <RequireAuth platform />,
+    errorElement: <RouteError />,
+    children: [
+      {
+        element: <PlatformShell />,
+        children: [
+          { path: '/platform', element: <PlatformOrgs /> },
+          { path: '/platform/orgs/:id', element: <PlatformOrgDetail /> },
+          { path: '/platform/invitations', element: <PlatformInvitations /> },
+          { path: '/platform/users', element: <PlatformUsers /> },
+          { path: '/platform/audit', element: <PlatformAudit /> },
+        ],
+      },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },
