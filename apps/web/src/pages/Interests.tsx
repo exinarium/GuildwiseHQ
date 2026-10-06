@@ -180,7 +180,11 @@ export function Interests() {
               >
                 <span>
                   {t.key}: {t.ruleCount} explicit {t.ruleCount === 1 ? 'rule' : 'rules'}
-                  {t.hasVault ? ` · written to taste.md v${t.version}` : ' · no vault, brief only'}
+                  {!t.hasVault
+                    ? ' · no vault, brief only'
+                    : t.version > 0
+                      ? ` · written to taste.md v${t.version}`
+                      : ' · nothing written to taste.md yet'}
                 </span>
                 <Button className="min-h-11 sm:min-h-8" onClick={() => setTasteProject(t.projectId)}>
                   Edit taste rules
