@@ -6,6 +6,7 @@ import {
   useInterest,
   useInterests,
   usePatchInterest,
+  useResyncTasteSeed,
   useRunInterest,
   useSaveTasteSeed,
   useTasteSeed,
@@ -420,6 +421,8 @@ function InterestNotes({ id }: { id: string }) {
 function ProjectTasteDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const seed = useTasteSeed(projectId);
   const save = useSaveTasteSeed();
+  const resync = useResyncTasteSeed();
+  const toast = useToast();
   const list = useInterests();
   const [rules, setRules] = useState<string[] | null>(null);
   useEffect(() => {
@@ -453,8 +456,19 @@ function ProjectTasteDialog({ projectId, onClose }: { projectId: string; onClose
             </ul>
           </div>
         )}
-        <ErrorBox error={save.error} />
-        <div className="flex justify-end gap-2">
+        <ErrorBox error={save.error ?? resync.error} />
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            className="mr-auto"
+            data-testid="project-taste-resync"
+            loading={resync.isPending}
+            title="Write the saved rules to taste.md in the vault again"
+            onClick={() =>
+              resync.mutate(projectId, { onSuccess: () => toast.success('Rules sent to taste.md again') })
+            }
+          >
+            Resync taste.md
+          </Button>
           <Button onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"

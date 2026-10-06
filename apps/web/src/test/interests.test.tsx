@@ -218,6 +218,20 @@ describe('Interests page', () => {
     );
   });
 
+  it('resyncs taste.md from the project taste rules dialog', async () => {
+    const calls: Call[] = [];
+    stubApi([interest()], calls);
+    wrap(<Interests />);
+    const row = await screen.findByTestId('taste-project-NEWS');
+    await userEvent.setup().click(within(row).getByRole('button'));
+    await userEvent.setup().click(await screen.findByTestId('project-taste-resync'));
+    await waitFor(() =>
+      expect(calls).toContainEqual(
+        expect.objectContaining({ method: 'POST', url: `/api/projects/${NEWS.id}/taste-seed/resync` }),
+      ),
+    );
+  });
+
   it('runs an interest now and links Digests to the filtered feed', async () => {
     const calls: Call[] = [];
     stubApi([interest()], calls);
