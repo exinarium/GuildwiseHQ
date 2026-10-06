@@ -43,6 +43,8 @@ async function createCard(title: string, mock: Record<string, string[]>) {
   expect(res.status(), await res.text()).toBe(201);
   return (await res.json()).card as { id: string; ref: string };
 }
+/** The reporter's organization. Other specs leave their own organizations in the database, and when the clock jumps to the next day each of them gets its own floor report (a fallback one when it has no BA), so queries about reports are scoped to this one. */
+const ORG = `(SELECT id FROM users WHERE lower(email)=lower($1))`;
 const user = async () =>
   (
     await q<{ timezone: string | null; reporting: Record<string, unknown> }>(
@@ -134,8 +136,11 @@ test('AC2: an approval reaches the desk at once; the BA adds context afterwards'
   const item = await waitFor(
     'the DevOps approval is on the desk',
     () =>
+      // This user's own approval: the devops spec leaves an answered "install docker" approval of its own in the database.
       q<{ id: string; triage: string; status: string; pinned: boolean }>(
-        `SELECT id, triage, status, pinned FROM desk_items WHERE subkind='devops'`,
+        `SELECT d.id, d.triage, d.status, d.pinned FROM desk_items d JOIN users u ON u.id = d.org_id
+          WHERE d.subkind='devops' AND lower(u.email)=lower($1)`,
+        [REPORTER.email],
       ),
     (r) => r.length === 1,
     60_000,
@@ -161,7 +166,11 @@ test('AC3: a card whose shifts keep failing: the loop breaker holds it back and 
   });
   const alert = await waitFor(
     'the loop breaker alert',
-    () => q<{ id: string; title: string }>(`SELECT id, title FROM desk_items WHERE subkind='loop_backoff'`),
+    () =>
+      q<{ id: string; title: string }>(
+        `SELECT id, title FROM desk_items WHERE subkind='loop_backoff' AND org_id=${ORG}`,
+        [REPORTER.email],
+      ),
     (r) => r.length === 1,
     120_000,
   );
@@ -174,7 +183,8 @@ test('AC3: a card whose shifts keep failing: the loop breaker holds it back and 
     'an urgent loop signal',
     () =>
       q<{ kind: string; urgency: string; status: string }>(
-        `SELECT kind, urgency, status FROM ba_signals WHERE kind='loop'`,
+        `SELECT kind, urgency, status FROM ba_signals WHERE kind='loop' AND org_id=${ORG}`,
+        [REPORTER.email],
       ),
     (r) => r.length === 1 && r[0]?.status === 'reported',
     60_000,
@@ -187,7 +197,10 @@ test('AC3: a card whose shifts keep failing: the loop breaker holds it back and 
   await expect(art.getByTestId('triage-passed')).toHaveCount(0);
   await page.screenshot({ path: join(paths.vaults, 'reporter-loop.png'), fullPage: true });
   // the alert is the only item: the BA's analysis is a note on it, not a second one
-  expect((await q(`SELECT 1 FROM desk_items WHERE subkind='ba_report'`)).length).toBe(0);
+  expect(
+    (await q(`SELECT 1 FROM desk_items WHERE subkind='ba_report' AND org_id=${ORG}`, [REPORTER.email]))
+      .length,
+  ).toBe(0);
   // stop the loop for the rest of the spec
   const stop = await api.post(`/api/cards/${looping.id}/cancel`, { data: { reason: 'e2e: stop the loop' } });
   expect(stop.ok(), await stop.text()).toBeTruthy();
@@ -195,7 +208,9 @@ test('AC3: a card whose shifts keep failing: the loop breaker holds it back and 
 
 test('AC4: the daily floor report is a desk item at 08:00 on the manager clock, with a link to the standing BA chat', async () => {
   // Nothing is due yet: the organization was created after today\'s 08:00 or the day is not over.
-  expect((await q(`SELECT 1 FROM ba_tasks WHERE kind='floor_report'`)).length).toBe(0);
+  expect(
+    (await q(`SELECT 1 FROM ba_tasks WHERE kind='floor_report' AND org_id=${ORG}`, [REPORTER.email])).length,
+  ).toBe(0);
   // Tomorrow at 09:00 in Johannesburg (UTC+2, no daylight saving): 07:00 UTC of the next local date. The DevOps approval
   // is still open, so there is news.
   const clock = (advanceMs: number) =>
@@ -214,14 +229,16 @@ test('AC4: the daily floor report is a desk item at 08:00 on the manager clock, 
     'the floor report task',
     () =>
       q<{ status: string; local_date: string }>(
-        `SELECT status, local_date FROM ba_tasks WHERE kind='floor_report'`,
+        `SELECT status, local_date FROM ba_tasks WHERE kind='floor_report' AND org_id=${ORG}`,
+        [REPORTER.email],
       ),
     (r) => r.length >= 1 && r.every((t) => t.status === 'done'),
     120_000,
   );
   expect(tasks).toHaveLength(1);
   const items = await q<{ id: string; title: string; chat_thread_id: string | null; asked_by_role: string }>(
-    `SELECT id, title, chat_thread_id, asked_by_role FROM desk_items WHERE subkind='floor_report'`,
+    `SELECT id, title, chat_thread_id, asked_by_role FROM desk_items WHERE subkind='floor_report' AND org_id=${ORG}`,
+    [REPORTER.email],
   );
   expect(items).toHaveLength(1);
   expect(items[0]?.title).toBe(`Floor report ${tasks[0]?.local_date}`);
@@ -251,11 +268,16 @@ test('AC4: the daily floor report is a desk item at 08:00 on the manager clock, 
   await art.getByTestId('ba-chat-link').click();
   await expect(page).toHaveURL(new RegExp(`/chat/${items[0]?.chat_thread_id}`));
   await expect(page.getByRole('heading', { name: 'Chat with Ben' })).toBeVisible();
-  expect((await q(`SELECT 1 FROM threads WHERE title='BA reports'`)).length).toBe(1);
+  expect(
+    (await q(`SELECT 1 FROM threads WHERE title='BA reports' AND org_id=${ORG}`, [REPORTER.email])).length,
+  ).toBe(1);
 
   // only one report per local day, however many sweeps ran
   await new Promise((r) => setTimeout(r, 8_000));
-  expect((await q(`SELECT 1 FROM desk_items WHERE subkind='floor_report'`)).length).toBe(1);
+  expect(
+    (await q(`SELECT 1 FROM desk_items WHERE subkind='floor_report' AND org_id=${ORG}`, [REPORTER.email]))
+      .length,
+  ).toBe(1);
 
   await page.goto('/desk');
   await page

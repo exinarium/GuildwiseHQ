@@ -68,6 +68,11 @@ test.beforeAll(async ({ browser }) => {
   const admin = await apiAs(ADMIN.email, ADMIN.password);
   await inviteAndAccept(admin, INTAKER);
   api = await apiAs(INTAKER.email, INTAKER.password);
+  // BA routing is on for new organizations (questions start at the BA, and a blocking one reaches the desk at once with
+  // the BA's note). This spec asserts the escalation chain itself (peer, BA, desk), so the intaker turns routing off;
+  // reporter.spec.ts covers the routed flow with its own user.
+  const routing = await api.put('/api/reporting', { data: { routeViaBa: false } });
+  expect(routing.ok(), await routing.text()).toBeTruthy();
   page = await (await browser.newContext({ storageState: await api.storageState() })).newPage();
 });
 

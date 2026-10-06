@@ -49,8 +49,9 @@ const questions = (status = 'open') =>
     options: Array<{ id: string; label: string }>;
     data: any;
   }>(
-    `SELECT id, title, blocking, pinned, options, data FROM desk_items WHERE subkind='working_branch' AND status=$1 ORDER BY created_at`,
-    [status],
+    // this spec's project only: the phases spec leaves its own working-branch questions in the database
+    `SELECT id, title, blocking, pinned, options, data FROM desk_items WHERE subkind='working_branch' AND status=$1 AND project_id=$2 ORDER BY created_at`,
+    [status, projectId],
   );
 
 /** Clicks "Run hygiene now" and waits until the new request is done. */
@@ -175,7 +176,8 @@ test('AC2: answering sets the branch on the repository with a ledger entry; hygi
   await waitFor('the branch is stored', repoRow, (r) => r?.working_branch === 'main', 30_000);
   expect((await questions('open')).length).toBe(0);
   const ledger = await q<{ body: string; scope: string }>(
-    `SELECT body, scope FROM ledger_entries WHERE source_desk_item_id IN (SELECT id FROM desk_items WHERE subkind='working_branch')`,
+    `SELECT body, scope FROM ledger_entries WHERE source_desk_item_id IN (SELECT id FROM desk_items WHERE subkind='working_branch' AND project_id=$1)`,
+    [projectId],
   );
   expect(ledger).toHaveLength(1);
   expect(ledger[0]?.body).toContain('main');
@@ -228,7 +230,8 @@ test('AC3: uncommitted changes on a branch that is not the working branch are re
     'the reporter signal',
     () =>
       q<{ urgency: string; subject: { title: string } }>(
-        `SELECT urgency, subject FROM ba_signals WHERE kind='repo_hygiene' AND status <> 'resolved'`,
+        `SELECT urgency, subject FROM ba_signals WHERE kind='repo_hygiene' AND status <> 'resolved' AND project_id=$1`,
+        [projectId],
       ),
     (r) => r.length === 1,
     60_000,
@@ -245,12 +248,15 @@ test('AC3: uncommitted changes on a branch that is not the working branch are re
   await runHygiene();
   await waitFor(
     'findings resolved',
-    () => q(`SELECT 1 FROM hygiene_findings WHERE status='open'`),
+    () => q(`SELECT 1 FROM hygiene_findings WHERE status='open' AND project_id=$1`, [projectId]),
     (r) => r.length === 0,
   );
   await waitFor(
     'signal resolved',
-    () => q(`SELECT 1 FROM ba_signals WHERE kind='repo_hygiene' AND status <> 'resolved'`),
+    () =>
+      q(`SELECT 1 FROM ba_signals WHERE kind='repo_hygiene' AND status <> 'resolved' AND project_id=$1`, [
+        projectId,
+      ]),
     (r) => r.length === 0,
     60_000,
   );
