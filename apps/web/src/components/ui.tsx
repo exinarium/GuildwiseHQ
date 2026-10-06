@@ -8,7 +8,7 @@ import { usePageTitle } from '../lib/usePageTitle.ts';
 import { cx } from './ui/cx.ts';
 
 export { Callout } from './ui/Callout.tsx';
-export { FilterChip, Segmented } from './ui/Chips.tsx';
+export { FilterChip, PriorityPicker, Segmented } from './ui/Chips.tsx';
 export { ConfirmDialog } from './ui/ConfirmDialog.tsx';
 export { Disclosure } from './ui/Disclosure.tsx';
 export { EmptyState } from './ui/EmptyState.tsx';

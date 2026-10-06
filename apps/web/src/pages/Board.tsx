@@ -16,6 +16,7 @@ import {
   ErrorBox,
   FilterChip,
   PageHeader,
+  PriorityPicker,
   Skeleton,
   useToast,
 } from '../components/ui.tsx';
@@ -177,6 +178,13 @@ export function Board() {
             Unassigned
           </FilterChip>
         </div>
+        <PriorityPicker
+          allowAny
+          inline
+          label="Priority"
+          value={filter.priority}
+          onChange={(n) => setF({ priority: n })}
+        />
       </div>
       {board.isPending && <BoardSkeleton />}
       {board.isError && <ErrorBox error={board.error} onRetry={() => board.refetch()} />}

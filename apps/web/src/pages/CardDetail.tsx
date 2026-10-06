@@ -51,6 +51,7 @@ import {
 } from '../components/ui.tsx';
 import { WorkabilityWarning } from '../components/WorkabilityWarning.tsx';
 import { fieldLabel } from '../lib/cardForm.ts';
+import { priorityLabel } from '../lib/priority.ts';
 import { stageStyle } from '../lib/stages.ts';
 import { formatDateTime } from '../lib/time.ts';
 
@@ -425,7 +426,7 @@ export function CardDetailView({
                 </>
               )}
               {card.branchName && <Meta k="Branch" v={card.branchName} mono />}
-              <Meta k="Priority" v={`${card.priority} (1 = urgent)`} />
+              <Meta k="Priority" v={priorityLabel(card.priority)} />
               {(data.phase || permissions.canSetPhase) && (
                 <div className="sm:col-span-2 lg:col-span-1">
                   <dt className="sr-only">Phase</dt>

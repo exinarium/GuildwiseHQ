@@ -14,6 +14,7 @@ import {
   type Stage,
   type WorkflowDefinition,
 } from '@aom/shared';
+import { DEFAULT_PRIORITY } from './priority.ts';
 
 /** Raw form state: everything is a string except the boolean, so inputs stay controlled. */
 export interface CardFormValues {
@@ -32,7 +33,7 @@ export const emptyForm = (cardType = ''): CardFormValues => ({
   repoId: '',
   completionAction: '',
   docsNeeded: false,
-  priority: '',
+  priority: String(DEFAULT_PRIORITY),
   fields: {},
 });
 

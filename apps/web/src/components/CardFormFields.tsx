@@ -1,7 +1,8 @@
 import { CompletionAction, ResearchDepth } from '@aom/shared';
 import type { CardFormValues } from '../lib/cardForm.ts';
 import { formFieldList } from '../lib/cardForm.ts';
-import { Select, TextArea, TextInput } from './ui.tsx';
+import { DEFAULT_PRIORITY } from '../lib/priority.ts';
+import { PriorityPicker, Select, TextArea, TextInput } from './ui.tsx';
 
 type Workflow = Parameters<typeof formFieldList>[0];
 
@@ -69,13 +70,10 @@ export function CardFormFields({
             </Select>
           </>
         )}
-        <TextInput
-          label="Priority (1 = urgent … 9 = whenever)"
+        <PriorityPicker
+          value={v.priority.trim() ? Number(v.priority) : DEFAULT_PRIORITY}
+          onChange={(n) => onChange({ ...v, priority: String(n ?? DEFAULT_PRIORITY) })}
           hint="Urgent cards are picked up first."
-          inputMode="numeric"
-          value={v.priority}
-          onChange={(e) => onChange({ ...v, priority: e.target.value })}
-          error={errors.priority}
         />
         {codeCard && (
           <label className="flex min-h-9 items-center gap-2.5 self-end pb-1 text-base text-fg">

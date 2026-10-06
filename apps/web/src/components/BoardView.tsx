@@ -2,6 +2,7 @@ import type { BoardCard, BoardResponse } from '@aom/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { BRAND } from '../brand.ts';
+import { DEFAULT_PRIORITY, priorityLabel, priorityLevel } from '../lib/priority.ts';
 import { stageStyle } from '../lib/stages.ts';
 import { ageLabel } from '../lib/time.ts';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
@@ -24,8 +25,16 @@ export interface BoardFilter {
   blocked: boolean;
   rework: boolean;
   unassigned: boolean;
+  /** Show only cards at this level (nearest label); null = any. */
+  priority: number | null;
 }
-export const NO_FILTER: BoardFilter = { text: '', blocked: false, rework: false, unassigned: false };
+export const NO_FILTER: BoardFilter = {
+  text: '',
+  blocked: false,
+  rework: false,
+  unassigned: false,
+  priority: null,
+};
 
 export const matchesFilter = (c: BoardCard, f: BoardFilter): boolean => {
   const q = f.text.trim().toLowerCase();
@@ -33,8 +42,12 @@ export const matchesFilter = (c: BoardCard, f: BoardFilter): boolean => {
   if (f.blocked && !c.blocked) return false;
   if (f.rework && c.reworkRound <= 0) return false;
   if (f.unassigned && c.assignee) return false;
+  if (f.priority !== null && priorityLevel(c.priority).value !== f.priority) return false;
   return true;
 };
+
+const priorityTone = (p: number) =>
+  priorityLevel(p).key === 'urgent' ? 'danger' : priorityLevel(p).key === 'high' ? 'warning' : 'neutral';
 
 const riskTone = (r: string) => (r === 'medium' ? 'info' : r === 'large' ? 'warning' : 'danger');
 
@@ -86,9 +99,9 @@ export function CardTile({
               {card.assignee.name}
             </span>
           )}
-          {card.priority === 1 && (
-            <Badge tone="danger" title="Priority 1 (urgent)">
-              P1
+          {card.priority !== DEFAULT_PRIORITY && (
+            <Badge tone={priorityTone(card.priority)} title={`Priority: ${priorityLabel(card.priority)}`}>
+              {priorityLabel(card.priority)}
             </Badge>
           )}
           {!quietRisk && card.riskTier && (
