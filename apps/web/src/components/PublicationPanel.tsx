@@ -14,20 +14,18 @@ export function PublicationPanel({ publication }: { publication: PublicationDto 
         <p className="text-sm font-medium" data-testid="publication-title">
           {publication.title}
         </p>
-        <p className="mt-0.5 break-all font-mono text-xs text-zinc-500" data-testid="publication-path">
+        <p className="mt-0.5 break-all font-mono text-xs text-subtle" data-testid="publication-path">
           {publication.vaultPath}
         </p>
         {publication.excerpt && (
           <blockquote
-            className="mt-2 border-l-2 border-zinc-300 pl-3 text-sm whitespace-pre-wrap text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
+            className="mt-2 border-l-2 border-control pl-3 text-sm whitespace-pre-wrap text-muted"
             data-testid="publication-preview"
           >
             {publication.excerpt}
           </blockquote>
         )}
-        <h3 className="mt-3 text-xs font-semibold text-zinc-600 dark:text-zinc-400">
-          Citations ({publication.citations.length})
-        </h3>
+        <h3 className="mt-3 text-xs font-semibold text-muted">Citations ({publication.citations.length})</h3>
         <ol className="mt-1 list-decimal pl-5 text-sm" data-testid="publication-citations">
           {publication.citations.map((c) => (
             <li key={c.url}>

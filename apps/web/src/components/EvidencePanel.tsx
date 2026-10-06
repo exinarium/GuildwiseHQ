@@ -25,9 +25,9 @@ export function EvidencePanel({
               key={r.id}
               data-testid="test-run"
               data-result={r.result}
-              className="rounded-md border border-zinc-200 p-2 text-sm dark:border-zinc-800"
+              className="rounded-control border border-line p-2 text-sm"
             >
-              <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-subtle">
                 <Badge>{r.kind.replace('_', ' ')}</Badge>
                 {r.platform && <Badge tone="blue">{r.platform}</Badge>}
                 <Badge tone={r.result === 'passed' ? 'green' : 'red'}>{r.result}</Badge>
@@ -42,7 +42,7 @@ export function EvidencePanel({
                 </ul>
               )}
               {r.evidence.outputExcerpt && (
-                <pre className="mt-1 max-h-48 overflow-auto rounded bg-zinc-100 p-2 font-mono text-xs dark:bg-zinc-800">
+                <pre className="mt-1 max-h-48 overflow-auto rounded bg-sunken p-2 font-mono text-xs">
                   {r.evidence.outputExcerpt}
                 </pre>
               )}
@@ -50,8 +50,8 @@ export function EvidencePanel({
           ))}
         </ul>
         {notes.length > 0 && (
-          <div className="mt-2 border-t border-zinc-200 pt-2 dark:border-zinc-800" data-testid="test-notes">
-            <h3 className="text-xs font-medium text-zinc-500">Test handoff notes</h3>
+          <div className="mt-2 border-t border-line pt-2" data-testid="test-notes">
+            <h3 className="text-xs font-medium text-subtle">Test handoff notes</h3>
             {notes.map((h) => (
               <p key={h.id} className="mt-1 text-sm whitespace-pre-wrap">
                 {h.note}
@@ -87,7 +87,7 @@ export function TestingLinks({ testing, status }: { testing: Testing; status: st
         <p
           role="status"
           data-testid="parked-notice"
-          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
+          className="rounded-control border border-warning-fill/40 bg-warning-soft px-3 py-2 text-warning-soft-fg"
         >
           Tester is parked waiting on DevOps: {parkedOn.problem.replaceAll('_', ' ')}
         </p>

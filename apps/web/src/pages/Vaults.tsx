@@ -38,7 +38,7 @@ export function Vaults() {
       </ul>
       {vaults.length === 0 && q.data && (
         <Panel>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-subtle">
             No vault registered yet. Agents work without one, but decisions and standing orders are only
             written to a vault.
           </p>
@@ -78,7 +78,7 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-semibold">
           {vault.projectId ? vault.name : KIND_LABEL[vault.kind]}
-          {projectKey && <span className="ml-1 font-normal text-zinc-500">({projectKey})</span>}
+          {projectKey && <span className="ml-1 font-normal text-subtle">({projectKey})</span>}
         </h2>
         <Badge>{vault.kind}</Badge>
         {!vault.canEdit && <Badge tone="blue">shared with you</Badge>}
@@ -110,7 +110,7 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
       <ErrorBox error={patch.error ?? resolve.error} />
       <ul className="mt-3 flex flex-col gap-1.5 text-sm" data-testid="vault-workstations">
         {vault.workstations.length === 0 && (
-          <li className="text-zinc-500">Pair a workstation to sync this vault.</li>
+          <li className="text-subtle">Pair a workstation to sync this vault.</li>
         )}
         {vault.workstations.map((w) => (
           <li
@@ -131,16 +131,14 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
             ) : (
               <Badge>waiting for first sync</Badge>
             )}
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-subtle">
               {w.lastPullAt ? `pulled ${formatDateTime(w.lastPullAt)}` : 'never pulled'}
               {w.lastPushAt ? ` · pushed ${formatDateTime(w.lastPushAt)}` : ''}
             </span>
-            {w.lastError && !w.paused && (
-              <span className="text-xs text-amber-700 dark:text-amber-400">{w.lastError}</span>
-            )}
+            {w.lastError && !w.paused && <span className="text-xs text-warning">{w.lastError}</span>}
             {w.paused && (
               <>
-                <span className="text-xs text-zinc-500">
+                <span className="text-xs text-subtle">
                   Conflicting files: {w.conflictFiles.join(', ') || 'unknown'}. Resolve them in the clone
                   {w.localPath ? ` (${w.localPath})` : ''}, then resume.
                 </span>

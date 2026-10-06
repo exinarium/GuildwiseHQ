@@ -54,7 +54,7 @@ describe('workability warning', () => {
     const warn = screen.getByTestId('workability-warning');
     expect(warn).toHaveAttribute('data-level', 'blocked');
     const button = screen.getByRole('button', { name: blocked.reason as string });
-    expect(button.className).toContain('text-red');
+    expect(button.className).toContain('text-danger');
     // the reason is the tooltip the button points at (shown on hover and on keyboard focus)
     expect(screen.getByRole('tooltip')).toHaveTextContent('needs a second senior reviewer other than Linus');
     expect(button).toHaveAttribute('aria-describedby', screen.getByRole('tooltip').id);
@@ -67,7 +67,7 @@ describe('workability warning', () => {
     renderTile(waiting);
     expect(screen.getByTestId('workability-warning')).toHaveAttribute('data-level', 'waiting');
     expect(screen.getByRole('button', { name: 'Waiting: Reviewer Linus is offline.' }).className).toContain(
-      'text-amber',
+      'text-warning',
     );
     expect(screen.queryByTestId('workability-hire')).toBeNull();
   });

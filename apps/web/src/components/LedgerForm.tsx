@@ -63,7 +63,7 @@ export function LedgerForm({ defaultKind = 'standing_order' }: { defaultKind?: K
       <TextArea label="Text" value={body} onChange={(e) => setBody(e.target.value)} error={err} />
       <ErrorBox error={add.error} />
       {add.isSuccess && !add.isPending && (
-        <p role="status" className="text-sm text-emerald-700 dark:text-emerald-400">
+        <p role="status" className="text-sm text-success">
           Added to the ledger.
         </p>
       )}

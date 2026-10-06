@@ -75,10 +75,10 @@ export function Metrics() {
           <Panel>
             <h2 className="mb-2 text-sm font-semibold">Bounce rate per builder</h2>
             {d.bounceRate.length === 0 ? (
-              <p className="text-sm text-zinc-500">No builder submitted a card in this range.</p>
+              <p className="text-sm text-subtle">No builder submitted a card in this range.</p>
             ) : (
               <table className="w-full text-sm" data-testid="metric-bounce">
-                <thead className="text-left text-xs text-zinc-500">
+                <thead className="text-left text-xs text-subtle">
                   <tr>
                     <th scope="col">Builder</th>
                     <th scope="col" className="text-right">
@@ -141,7 +141,7 @@ export function Metrics() {
           <Panel>
             <h2 className="mb-2 text-sm font-semibold">Queue depth per column</h2>
             {d.queueDepth.length === 0 ? (
-              <p className="text-sm text-zinc-500">No open cards.</p>
+              <p className="text-sm text-subtle">No open cards.</p>
             ) : (
               <div data-testid="metric-queue">
                 <HBars

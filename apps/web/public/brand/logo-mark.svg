@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Guildwise">
+  <title>Guildwise</title>
+  <rect width="64" height="64" rx="15" fill="#0D1220"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="14.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.12"/>
+  <!-- three skilled agents (arc segments) and the master bar converge on one lime node: a G -->
+  <path d="M44.61 22.15A16 16 0 0 0 22.15 19.39 M19.74 21.72A16 16 0 0 0 20.89 43.51 M23.52 45.57A16 16 0 0 0 47.04 37.47" fill="none" stroke="#FFFFFF" stroke-width="6.5"/><path d="M32 32H51.25" stroke="#FFFFFF" stroke-width="6.5"/><circle cx="32" cy="32" r="5.6" fill="#D4F24A"/>
+</svg>

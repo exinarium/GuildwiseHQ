@@ -78,7 +78,7 @@ export function Admin() {
                 >
                   {i.status}
                 </Badge>
-                <span className="ml-2 text-xs text-zinc-500">expires {formatDateTime(i.expiresAt)}</span>
+                <span className="ml-2 text-xs text-subtle">expires {formatDateTime(i.expiresAt)}</span>
               </span>
               {i.status === 'pending' && (
                 <span className="flex gap-1">
@@ -113,7 +113,7 @@ export function Admin() {
             return (
               <li key={u.id} className="flex flex-wrap items-center justify-between gap-2">
                 <span>
-                  {u.displayName} <span className="text-zinc-500">({u.email})</span>{' '}
+                  {u.displayName} <span className="text-subtle">({u.email})</span>{' '}
                   {u.status === 'deactivated' && <Badge tone="red">deactivated</Badge>}
                 </span>
                 <span className="flex items-center gap-2">
@@ -127,7 +127,7 @@ export function Admin() {
                     onChange={(e) =>
                       m.patchUser.mutate({ id: u.id, body: { role: e.target.value as 'admin' | 'member' } })
                     }
-                    className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                    className="rounded-control border border-control bg-surface px-2 py-1 text-sm"
                   >
                     {UserRole.options.map((r) => (
                       <option key={r} value={r}>

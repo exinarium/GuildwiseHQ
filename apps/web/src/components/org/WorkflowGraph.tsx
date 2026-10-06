@@ -43,7 +43,7 @@ export function WorkflowGraph({
         width={g.width + 8}
         height={g.height + 8}
         viewBox={`-4 -4 ${g.width + 8} ${g.height + 8}`}
-        className="text-zinc-700 dark:text-zinc-300"
+        className="text-muted"
       >
         <defs>
           <marker

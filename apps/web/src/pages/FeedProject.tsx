@@ -25,7 +25,7 @@ export function FeedProject() {
   const run = useRunFeed();
 
   if (projects.isPending) return <Spinner />;
-  if (!project) return <p className="text-sm text-zinc-500">Project {projectKey} not found.</p>;
+  if (!project) return <p className="text-sm text-subtle">Project {projectKey} not found.</p>;
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-3">
@@ -36,7 +36,7 @@ export function FeedProject() {
           <>
             <Link
               to={`/p/${project.key}/board`}
-              className="inline-flex min-h-8 items-center rounded-md border border-zinc-300 px-3 py-1 text-sm font-medium dark:border-zinc-700"
+              className="inline-flex min-h-8 items-center rounded-control border border-control px-3 py-1 text-sm font-medium"
             >
               Board
             </Link>
@@ -60,7 +60,7 @@ export function FeedProject() {
       <Panel>
         <h2 className="mb-1 text-sm font-semibold">Schedules</h2>
         {(schedules.data ?? []).length === 0 ? (
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-subtle">
             No schedule.{' '}
             <Link to="/schedules" className="underline">
               Add one
@@ -81,13 +81,13 @@ export function FeedProject() {
 
       <Panel>
         <h2 className="mb-1 text-sm font-semibold">Running list</h2>
-        <p className="mb-2 text-xs text-zinc-500">
+        <p className="mb-2 text-xs text-subtle">
           {list.data?.path} · oldest first, entries are only ever appended
         </p>
         {list.isPending && <Spinner />}
         {interestId && (
           <p className="mb-2 flex items-center gap-2 text-sm" data-testid="interest-filter-chip">
-            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800">
+            <span className="rounded-full bg-sunken px-2 py-0.5 text-xs">
               Interest: {interest.data?.interest.name ?? '...'}
             </span>
             <button
@@ -104,7 +104,7 @@ export function FeedProject() {
           </p>
         )}
         {items?.length === 0 && (
-          <p className="text-sm text-zinc-500" data-testid="feed-empty">
+          <p className="text-sm text-subtle" data-testid="feed-empty">
             Nothing logged yet.
           </p>
         )}
@@ -119,18 +119,18 @@ export function FeedProject() {
 
       <Panel>
         <h2 className="mb-1 text-sm font-semibold">taste.md</h2>
-        <p className="mb-2 text-xs text-zinc-500">
+        <p className="mb-2 text-xs text-subtle">
           {taste.data?.path} · explicit rules from your ratings; curators read this before filtering
         </p>
         {taste.data?.content ? (
           <pre
-            className="overflow-x-auto rounded-md bg-zinc-50 p-2 text-xs whitespace-pre-wrap dark:bg-zinc-950"
+            className="overflow-x-auto rounded-control bg-sunken p-2 text-xs whitespace-pre-wrap"
             data-testid="taste-preview"
           >
             {taste.data.content}
           </pre>
         ) : (
-          <p className="text-sm text-zinc-500" data-testid="taste-empty">
+          <p className="text-sm text-subtle" data-testid="taste-empty">
             No ratings yet.
           </p>
         )}

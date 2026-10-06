@@ -97,9 +97,7 @@ export function RoleEditor({
         }
       />
       <fieldset className="flex flex-wrap items-center gap-3 text-sm" disabled={readOnly}>
-        <legend className="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
-          Seniority levels
-        </legend>
+        <legend className="mb-1 text-xs font-medium text-muted">Seniority levels</legend>
         {(['junior', 'senior'] as const).map((s) => (
           <label key={s} className="inline-flex items-center gap-1">
             <input
@@ -140,7 +138,7 @@ export function RoleEditor({
         />
       </div>
       <fieldset className="flex flex-wrap items-center gap-3 text-sm" disabled={readOnly}>
-        <legend className="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">Tools</legend>
+        <legend className="mb-1 text-xs font-medium text-muted">Tools</legend>
         {TOOLS.map((t) => (
           <label key={t} className="inline-flex items-center gap-1">
             <input
@@ -206,7 +204,7 @@ export function RoleEditor({
         data-errors={shown.filter((i) => i.severity === 'error').length}
       >
         {shown.length === 0 ? (
-          <p className="text-sm text-emerald-700 dark:text-emerald-400" data-testid="validation-ok">
+          <p className="text-sm text-success" data-testid="validation-ok">
             No issues.
           </p>
         ) : (
@@ -216,7 +214,7 @@ export function RoleEditor({
                 key={`${i.code}-${i.message}`}
                 data-testid="issue"
                 data-code={i.code}
-                className="text-red-700 dark:text-red-400"
+                className="text-danger"
               >
                 <Badge tone={i.severity === 'error' ? 'red' : 'amber'}>{i.severity}</Badge> {i.message}
               </li>

@@ -43,11 +43,11 @@ export function WorkingBranchQuestion({ item }: { item: DeskItemDto }) {
       data-testid="working-branch-question"
     >
       <fieldset className="flex flex-col gap-1.5">
-        <legend className="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">Working branch</legend>
+        <legend className="mb-1 text-xs font-medium text-muted">Working branch</legend>
         {item.options.map((o) => (
           <label
             key={o.id}
-            className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-200 p-2 text-sm dark:border-zinc-700"
+            className="flex cursor-pointer items-start gap-2 rounded-control border border-line p-2 text-sm"
           >
             <input
               type="radio"
@@ -59,7 +59,7 @@ export function WorkingBranchQuestion({ item }: { item: DeskItemDto }) {
             />
             <span className="flex-1">
               {o.label}
-              {o.description && <span className="block text-xs text-zinc-500">{o.description}</span>}
+              {o.description && <span className="block text-xs text-subtle">{o.description}</span>}
             </span>
             {item.recommendation === o.id && <Badge tone="green">Recommended</Badge>}
           </label>
@@ -74,7 +74,7 @@ export function WorkingBranchQuestion({ item }: { item: DeskItemDto }) {
         />
       )}
       {err && (
-        <p role="alert" className="text-sm text-red-700 dark:text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {err}
         </p>
       )}

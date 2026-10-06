@@ -24,7 +24,7 @@ export function Chat() {
       {chat.data ? (
         <ChatPanel threadId={threadId} />
       ) : (
-        <p className="text-sm text-zinc-500">This conversation was not found.</p>
+        <p className="text-sm text-subtle">This conversation was not found.</p>
       )}
     </div>
   );

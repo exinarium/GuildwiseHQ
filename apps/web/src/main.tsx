@@ -2,8 +2,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router';
+import '@fontsource-variable/geist/wght.css';
+import '@fontsource-variable/geist-mono/wght.css';
 import './index.css';
 import { ApiError } from './api/client.ts';
+import { ToastProvider } from './components/ui.tsx';
 import { createRouter } from './router.tsx';
 import { initSocket } from './ws/socket.ts';
 
@@ -26,7 +29,9 @@ async function boot() {
   createRoot(document.getElementById('root') as HTMLElement).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <RouterProvider router={createRouter()} />
+        <ToastProvider>
+          <RouterProvider router={createRouter()} />
+        </ToastProvider>
       </QueryClientProvider>
     </StrictMode>,
   );

@@ -22,7 +22,7 @@ export function PhaseDeskItem({ item }: { item: DeskItemDto }) {
   const [draft, setDraft] = useState<FollowupSpec[] | null>(null);
   const [reopenOpen, setReopenOpen] = useState(false);
   const [reason, setReason] = useState('');
-  if (!phase) return <p className="mt-2 text-sm text-zinc-500">This phase is gone.</p>;
+  if (!phase) return <p className="mt-2 text-sm text-subtle">This phase is gone.</p>;
   const t = targets.data ?? [];
   const specs = phase.followups.map(specOf);
   const n = phase.followups.length;
@@ -48,7 +48,7 @@ export function PhaseDeskItem({ item }: { item: DeskItemDto }) {
                   {m.ref}
                 </Link>{' '}
                 {m.title}
-                <span className="text-xs text-zinc-500">
+                <span className="text-xs text-subtle">
                   {' '}
                   · {m.outcome ? OUTCOME_LABEL[m.outcome] : m.status}
                   {m.resultRef?.mergeCommit ? ` ${m.resultRef.mergeCommit.slice(0, 10)}` : ''}

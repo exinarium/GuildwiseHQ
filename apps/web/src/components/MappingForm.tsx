@@ -37,7 +37,7 @@ export function MappingForm({ item }: { item: DeskItemDto }) {
         });
       }}
     >
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="text-sm text-muted">
         This is a ticket the BA could not map. Choosing a project maps it and tells the BA to carry on
         {item.intakeId && (
           <>
@@ -52,14 +52,14 @@ export function MappingForm({ item }: { item: DeskItemDto }) {
         .
       </p>
       {item.options.length === 0 ? (
-        <p className="text-sm text-zinc-500">There is no project to map to yet: create one first.</p>
+        <p className="text-sm text-subtle">There is no project to map to yet: create one first.</p>
       ) : (
         <fieldset className="flex flex-col gap-1.5">
-          <legend className="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">Project</legend>
+          <legend className="mb-1 text-xs font-medium text-muted">Project</legend>
           {item.options.map((o) => (
             <label
               key={o.id}
-              className="flex cursor-pointer items-center gap-2 rounded-md border border-zinc-200 p-2 text-sm dark:border-zinc-700"
+              className="flex cursor-pointer items-center gap-2 rounded-control border border-line p-2 text-sm"
             >
               <input
                 type="radio"
@@ -74,7 +74,7 @@ export function MappingForm({ item }: { item: DeskItemDto }) {
         </fieldset>
       )}
       {err && (
-        <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm font-medium text-danger">
           {err}
         </p>
       )}

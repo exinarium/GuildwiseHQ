@@ -80,7 +80,7 @@ export function FollowupEditor({
   return (
     <div className="flex flex-col gap-2" data-testid="followup-editor">
       {value.length === 0 && (
-        <p className="text-sm text-zinc-500" data-testid="followups-empty">
+        <p className="text-sm text-subtle" data-testid="followups-empty">
           No follow-ups: nothing runs after this phase.
         </p>
       )}
@@ -92,10 +92,10 @@ export function FollowupEditor({
               // biome-ignore lint/suspicious/noArrayIndexKey: the list is positional
               key={i}
               data-testid={`followup-${i + 1}`}
-              className="rounded-md border border-zinc-200 p-2 dark:border-zinc-700"
+              className="rounded-control border border-line p-2"
             >
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="font-mono text-xs text-zinc-500">{i + 1}.</span>
+                <span className="font-mono text-xs text-subtle">{i + 1}.</span>
                 <span className="font-medium">{KIND_LABEL[f.kind]}</span>
                 {d && (
                   <span data-testid={`followup-status-${i + 1}`}>
@@ -148,7 +148,7 @@ export function FollowupEditor({
                     </p>
                   )}
                   {f.kind === 'custom' && <p className="whitespace-pre-wrap">{f.instruction}</p>}
-                  {f.note && <p className="text-xs text-zinc-500">Note: {f.note}</p>}
+                  {f.note && <p className="text-xs text-subtle">Note: {f.note}</p>}
                   {d && <FollowupResult d={d} />}
                 </div>
               ) : (
@@ -244,7 +244,7 @@ export function FollowupEditor({
           {problems.length > 0 && (
             <ul
               role="alert"
-              className="list-disc pl-5 text-xs font-medium text-red-600 dark:text-red-400"
+              className="list-disc pl-5 text-xs font-medium text-danger"
               data-testid="followup-problems"
             >
               {problems.map((p) => (
@@ -252,7 +252,7 @@ export function FollowupEditor({
               ))}
             </ul>
           )}
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-subtle">
             They run in this order, one at a time, after you approve them. A failed one stops the ones after
             it.
           </p>

@@ -80,7 +80,7 @@ export function Projects() {
       {!showArchived && projects.isError && <ErrorBox error={projects.error} />}
       {!showArchived && projects.data?.length === 0 && (
         <Panel>
-          <p className="text-sm text-zinc-500">No projects yet. Create one to start a board.</p>
+          <p className="text-sm text-subtle">No projects yet. Create one to start a board.</p>
         </Panel>
       )}
       <ul className="flex flex-col gap-2" hidden={showArchived}>
@@ -89,10 +89,10 @@ export function Projects() {
             <Panel className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="font-medium">
-                  <span className="mr-2 font-mono text-xs text-zinc-500">{p.key}</span>
+                  <span className="mr-2 font-mono text-xs text-subtle">{p.key}</span>
                   {p.name}
                 </p>
-                <p className="mt-0.5 flex gap-1.5 text-xs text-zinc-500">
+                <p className="mt-0.5 flex gap-1.5 text-xs text-subtle">
                   <Badge>{p.workflowKey}</Badge>
                   {p.department && <Badge tone="violet">{p.department}</Badge>}
                   <Badge>{p.domain}</Badge>
@@ -100,11 +100,11 @@ export function Projects() {
                 </p>
               </div>
               <div className="flex gap-2 text-sm">
-                <Link className="rounded-md px-2 py-1 underline" to={`/p/${p.key}/board`}>
+                <Link className="rounded-control px-2 py-1 underline" to={`/p/${p.key}/board`}>
                   Board
                 </Link>
                 <Link
-                  className="rounded-md px-2 py-1 underline"
+                  className="rounded-control px-2 py-1 underline"
                   aria-label={`Settings for ${p.key}`}
                   to={`/projects/${p.id}/settings`}
                 >
@@ -131,7 +131,7 @@ function ArchivedProjects() {
       {archived.isError && <ErrorBox error={archived.error} />}
       {archived.data?.length === 0 && (
         <Panel>
-          <p className="text-sm text-zinc-500" data-testid="archived-empty">
+          <p className="text-sm text-subtle" data-testid="archived-empty">
             No archived projects.
           </p>
         </Panel>
@@ -143,10 +143,10 @@ function ArchivedProjects() {
             <Panel className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="font-medium">
-                  <span className="mr-2 font-mono text-xs text-zinc-500">{p.key}</span>
+                  <span className="mr-2 font-mono text-xs text-subtle">{p.key}</span>
                   {p.name}
                 </p>
-                <p className="mt-0.5 flex gap-1.5 text-xs text-zinc-500">
+                <p className="mt-0.5 flex gap-1.5 text-xs text-subtle">
                   <Badge tone="amber">Archived</Badge>
                   <Badge tone="blue">{p.myRole}</Badge>
                 </p>
@@ -247,7 +247,7 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
             </option>
           ))}
         </Select>
-        <p className="-mt-2 text-xs text-zinc-500" data-testid="workflow-hint">
+        <p className="-mt-2 text-xs text-subtle" data-testid="workflow-hint">
           {noRepo
             ? "No repository needed; results go to the project's vault folder."
             : 'Add repositories in project settings.'}

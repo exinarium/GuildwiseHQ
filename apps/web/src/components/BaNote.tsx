@@ -8,12 +8,12 @@ export function BaNote({ item }: { item: DeskItemDto }) {
   return (
     <>
       {triage === 'passed' && (
-        <p className="mt-1 text-xs text-zinc-500" data-testid="triage-passed">
+        <p className="mt-1 text-xs text-subtle" data-testid="triage-passed">
           Your BA looked at this first and passed it on.
         </p>
       )}
       {triage === 'released' && (
-        <p className="mt-1 text-xs text-zinc-500" data-testid="triage-released">
+        <p className="mt-1 text-xs text-subtle" data-testid="triage-released">
           Your BA had not looked at this in time, so it reached you unchanged.
         </p>
       )}
@@ -21,9 +21,9 @@ export function BaNote({ item }: { item: DeskItemDto }) {
         <div
           role="note"
           data-testid="ba-note"
-          className="mt-2 rounded-md border border-indigo-200 bg-indigo-50 p-2 text-sm dark:border-indigo-900 dark:bg-indigo-950/40"
+          className="mt-2 rounded-control border border-brand/30 bg-brand-soft p-2 text-sm"
         >
-          <p className="text-xs font-medium text-indigo-800 dark:text-indigo-200">BA note</p>
+          <p className="text-xs font-medium text-brand-soft-fg">BA note</p>
           <p className="mt-0.5 whitespace-pre-wrap">{item.baNote}</p>
         </div>
       )}
@@ -40,11 +40,11 @@ export function BaNote({ item }: { item: DeskItemDto }) {
 
 const Section = ({ title, children, count }: { title: string; children: React.ReactNode; count: number }) => (
   <section className="mt-2">
-    <h3 className="text-xs font-semibold tracking-wide text-zinc-600 uppercase dark:text-zinc-400">
+    <h3 className="text-xs font-semibold tracking-wide text-muted uppercase">
       {title} <span className="font-normal normal-case">({count})</span>
     </h3>
     {count === 0 ? (
-      <p className="text-sm text-zinc-500">None.</p>
+      <p className="text-sm text-subtle">None.</p>
     ) : (
       <ul className="list-disc pl-5 text-sm">{children}</ul>
     )}
@@ -59,7 +59,7 @@ export function FloorReport({ digest }: { digest: FloorDigest }) {
     ['rework', 'finalize_failures', 'repo_hygiene'].includes(s.kind),
   );
   return (
-    <div data-testid="floor-report" className="mt-2 border-t border-zinc-200 pt-1 dark:border-zinc-800">
+    <div data-testid="floor-report" className="mt-2 border-t border-line pt-1">
       <Section title="Phases waiting or open" count={digest.phases.length}>
         {digest.phases.map((p) => (
           <li key={p.ref}>

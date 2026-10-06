@@ -45,19 +45,19 @@ export function OutboundHistory({
         <h2 className="mb-2 text-sm font-semibold">
           Updates to {ticket ?? 'the ticket'} ({drafts.length})
         </h2>
-        <p className="mb-2 text-xs text-zinc-500">
+        <p className="mb-2 text-xs text-subtle">
           Nothing is posted to a company system without the card owner's approval.
         </p>
-        {drafts.length === 0 && <p className="text-sm text-zinc-500">No updates drafted yet.</p>}
+        {drafts.length === 0 && <p className="text-sm text-subtle">No updates drafted yet.</p>}
         <ul className="flex flex-col gap-2">
           {drafts.map((d) => (
             <li
               key={d.id}
-              className="rounded-md border border-zinc-200 p-2 text-sm dark:border-zinc-800"
+              className="rounded-control border border-line p-2 text-sm"
               data-testid={`outbound-${d.id}`}
               data-status={d.status}
             >
-              <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-subtle">
                 <Badge tone={tone(d.status)}>{STATUS_LABEL[d.status] ?? d.status}</Badge>
                 <span>
                   {KIND_LABEL[d.kind]} for {systemLabel(d.externalSystem)} {d.externalKey}
@@ -71,7 +71,7 @@ export function OutboundHistory({
               {d.edited && d.finalBody ? (
                 <div className="mt-1.5">
                   <DiffView before={d.body} after={d.finalBody} testId={`outbound-diff-${d.id}`} />
-                  <p className="mt-1 text-xs text-zinc-500">Posted as edited.</p>
+                  <p className="mt-1 text-xs text-subtle">Posted as edited.</p>
                 </div>
               ) : (
                 <p className="mt-1.5 whitespace-pre-wrap" data-testid={`outbound-body-${d.id}`}>
@@ -91,13 +91,10 @@ export function OutboundHistory({
                 </p>
               )}
               {d.status === 'rejected' && d.rejectReason && (
-                <p className="mt-1 text-xs text-zinc-500">Rejected: {d.rejectReason}</p>
+                <p className="mt-1 text-xs text-subtle">Rejected: {d.rejectReason}</p>
               )}
               {d.status === 'blocked' && (
-                <p
-                  className="mt-1 text-xs text-red-700 dark:text-red-300"
-                  data-testid={`outbound-blocked-${d.id}`}
-                >
+                <p className="mt-1 text-xs text-danger" data-testid={`outbound-blocked-${d.id}`}>
                   Blocked before it reached the desk: it mentioned {d.blockedMatches.join(', ')}.
                 </p>
               )}
@@ -109,7 +106,7 @@ export function OutboundHistory({
                 </p>
               )}
               {d.status === 'failed' && (
-                <div className="mt-1 text-xs text-red-700 dark:text-red-300">
+                <div className="mt-1 text-xs text-danger">
                   <p data-testid={`outbound-error-${d.id}`}>Could not post: {d.error}</p>
                   {isOwner && (
                     <Button
@@ -145,7 +142,7 @@ function DraftForm({ cardId }: { cardId: string }) {
   return (
     <form
       onSubmit={submit}
-      className="mt-3 flex flex-col gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-800"
+      className="mt-3 flex flex-col gap-2 border-t border-line pt-3"
       aria-label="Write an update"
     >
       <TextArea

@@ -121,7 +121,7 @@ export function Agents() {
       {board.data && <RecommendationList recommendations={board.data.recommendations} />}
       {board.data && active.length === 0 && (
         <Panel>
-          <p className="text-sm text-zinc-500">No agents hired yet.</p>
+          <p className="text-sm text-subtle">No agents hired yet.</p>
         </Panel>
       )}
       <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="agents">
@@ -152,7 +152,7 @@ export function Agents() {
         ))}
       </ul>
       {retired.length > 0 && (
-        <details className="mt-4 text-sm text-zinc-500">
+        <details className="mt-4 text-sm text-subtle">
           <summary className="cursor-pointer">Retired ({retired.length})</summary>
           <ul className="mt-1">
             {retired.map((a) => (
@@ -205,7 +205,7 @@ function AgentCard({
         <Avatar name={a.name} size={36} />
         <div className="min-w-0">
           <p className="truncate font-medium">{a.name}</p>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-subtle">
             {roleName} · {a.seniority}
             {projectKey && ` · ${projectKey}`}
           </p>
@@ -224,7 +224,7 @@ function AgentCard({
           )}
         </span>
       </div>
-      <p className="text-xs text-zinc-500" data-testid="agent-model">
+      <p className="text-xs text-subtle" data-testid="agent-model">
         {a.runtime} · {a.model}
         {a.effort ? ` · ${a.effort}` : ''}
         {station && ` · ${station}`}
@@ -234,7 +234,7 @@ function AgentCard({
           {agentWarning(station || 'its workstation', a.sandboxReason)}
         </SandboxWarning>
       )}
-      <p className="text-xs text-zinc-500" data-testid="agent-hired-by">
+      <p className="text-xs text-subtle" data-testid="agent-hired-by">
         Hired by {hr.hiredByName}
       </p>
       <p className="text-sm" data-testid="agent-current-card">
@@ -281,7 +281,7 @@ function AgentCard({
           </Button>
         </div>
       ) : (
-        <p className="mt-auto text-xs text-zinc-500" data-testid="agent-readonly">
+        <p className="mt-auto text-xs text-subtle" data-testid="agent-readonly">
           Hired by another manager (read only)
         </p>
       )}
@@ -402,7 +402,7 @@ function FireDialog({ agent, onClose }: { agent: AgentDto | null; onClose: () =>
               </ul>
             </div>
           ) : (
-            <p className="text-sm text-zinc-500" data-testid="fire-releases">
+            <p className="text-sm text-subtle" data-testid="fire-releases">
               This agent holds no cards. Nothing will be released.
             </p>
           )}
@@ -624,7 +624,7 @@ function HireDialog({
               data-testid="name-theme"
               value={theme}
               onChange={(e) => setTheme(e.target.value)}
-              className="rounded border border-zinc-300 bg-white px-1 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+              className="rounded border border-control bg-surface px-1 py-0.5 text-xs"
             >
               {NAME_THEMES.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -632,13 +632,13 @@ function HireDialog({
                 </option>
               ))}
             </select>
-            <span className="text-xs text-zinc-500">Suggestions:</span>
+            <span className="text-xs text-subtle">Suggestions:</span>
             {suggestions.data?.map((n) => (
               <button
                 type="button"
                 key={n}
                 onClick={() => setName(n)}
-                className="rounded-full border border-zinc-300 px-2 py-0.5 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                className="rounded-full border border-control px-2 py-0.5 text-xs hover:bg-sunken"
               >
                 {n}
               </button>
@@ -664,7 +664,7 @@ function HireDialog({
               <span>I understand this agent runs without an OS sandbox on {station.name}</span>
             </label>
             {errors.sandbox && (
-              <p id="hire-sandbox-error" role="alert" className="text-sm text-red-700 dark:text-red-400">
+              <p id="hire-sandbox-error" role="alert" className="text-sm text-danger">
                 {errors.sandbox}
               </p>
             )}

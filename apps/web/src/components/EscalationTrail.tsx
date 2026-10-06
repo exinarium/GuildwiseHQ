@@ -6,7 +6,7 @@ export function EscalationTrail({ item }: { item: Pick<DeskItemDto, 'escalationT
   const steps = item.escalationTrail ?? [];
   if (steps.length < 2) return null;
   return (
-    <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-400" data-testid="escalation-trail">
+    <div className="mt-2 text-xs text-muted" data-testid="escalation-trail">
       <p className="font-medium">Escalation trail</p>
       <ol className="mt-1 flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
         {steps.map((s, i) => (
@@ -19,7 +19,7 @@ export function EscalationTrail({ item }: { item: Pick<DeskItemDto, 'escalationT
             {i > 0 && <span aria-hidden="true">→</span>}
             <span title={s.note}>
               {trailLabel(s)}
-              {s.note ? <span className="text-zinc-500">: {s.note}</span> : null}
+              {s.note ? <span className="text-subtle">: {s.note}</span> : null}
             </span>
           </li>
         ))}

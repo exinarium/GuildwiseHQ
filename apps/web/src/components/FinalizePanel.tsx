@@ -35,7 +35,7 @@ export function FinalizePanel({
       <div data-testid="finalize-panel" data-state={state}>
         <h2 className="mb-2 text-sm font-semibold">Finalize</h2>
         {finalize.available && canAct && (
-          <p className="mb-2 text-xs text-zinc-500" data-testid="finalize-override-note">
+          <p className="mb-2 text-xs text-subtle" data-testid="finalize-override-note">
             A BA, if you have one, finalizes cards waiting here by itself; this is your override.
           </p>
         )}
@@ -54,7 +54,7 @@ export function FinalizePanel({
               ))}
             </Select>
             {needsApproval && (
-              <p data-testid="finalize-approval-note" className="text-sm text-amber-800 dark:text-amber-300">
+              <p data-testid="finalize-approval-note" className="text-sm text-warning-soft-fg">
                 Large change: merging needs your approval on the desk first.{' '}
                 <Link to="/desk" className="underline">
                   Open the desk
@@ -88,11 +88,7 @@ export function FinalizePanel({
           </p>
         )}
         {state === 'failed' && (
-          <p
-            data-testid="finalize-state"
-            role="alert"
-            className="mt-2 text-sm text-red-600 dark:text-red-400"
-          >
+          <p data-testid="finalize-state" role="alert" className="mt-2 text-sm text-danger">
             Finalize failed{finalize.lastError ? `: ${finalize.lastError}` : '.'} Fix the cause and press
             Finalize again.
           </p>

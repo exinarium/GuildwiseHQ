@@ -57,7 +57,7 @@ export function Ledger() {
         <ErrorBox error={entries.error} />
         {entries.data?.length === 0 && (
           <Panel>
-            <p className="text-sm text-zinc-500" data-testid="ledger-empty">
+            <p className="text-sm text-subtle" data-testid="ledger-empty">
               {q.trim() ? 'No entries match.' : 'The ledger is empty. Answers on the desk are recorded here.'}
             </p>
           </Panel>
@@ -66,7 +66,7 @@ export function Ledger() {
           {entries.data?.map((e) => (
             <li key={e.id} data-testid="ledger-entry" data-scope={e.scope}>
               <Panel>
-                <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-subtle">
                   <Badge
                     tone={e.scope === 'standing_order' ? 'amber' : e.scope === 'decision' ? 'blue' : 'violet'}
                   >

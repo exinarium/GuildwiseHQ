@@ -47,7 +47,7 @@ export function WorkingBranchControl({
   return (
     <div className="mt-1 flex flex-col gap-1" data-testid={`working-branch-${repo.name}`}>
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-zinc-600 dark:text-zinc-400">Working branch</span>
+        <span className="text-muted">Working branch</span>
         {repo.workingBranch ? (
           <Badge tone="green">{repo.workingBranch}</Badge>
         ) : (

@@ -138,7 +138,7 @@ export function WorkflowEditor({
         </Select>
       </div>
       <fieldset className="flex flex-wrap items-center gap-3 text-sm" disabled={readOnly}>
-        <legend className="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">Card types</legend>
+        <legend className="mb-1 text-xs font-medium text-muted">Card types</legend>
         {CARD_TYPES.map((t) => (
           <label key={t} className="inline-flex items-center gap-1">
             <input
@@ -249,7 +249,7 @@ export function WorkflowEditor({
         <h3 className="text-sm font-semibold">Stages</h3>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[40rem] text-left text-sm" data-testid="stage-table">
-            <thead className="text-xs text-zinc-500">
+            <thead className="text-xs text-subtle">
               <tr>
                 <th className="py-1 pr-2">Stage</th>
                 <th className="pr-2">Kind</th>
@@ -266,12 +266,12 @@ export function WorkflowEditor({
                   key={`${i}-${s.id}`}
                   data-testid={`stage-${s.id}`}
                   data-invalid={flagged.has(s.id) ? 'true' : undefined}
-                  className={`align-top ${flagged.has(s.id) ? 'bg-red-50 dark:bg-red-950/30' : ''}`}
+                  className={`align-top ${flagged.has(s.id) ? 'bg-danger-soft ' : ''}`}
                 >
                   <td className="py-1 pr-2">
                     <input
                       aria-label={`Stage ${i + 1} label`}
-                      className="w-32 rounded border border-zinc-300 px-1.5 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+                      className="w-32 rounded border border-control px-1.5 py-1"
                       value={s.label}
                       disabled={readOnly}
                       onChange={(e) => setStage(i, { label: e.target.value, column: e.target.value })}
@@ -280,12 +280,12 @@ export function WorkflowEditor({
                         if (id && id !== s.id && !stageIds.includes(id)) renameStage(i, id);
                       }}
                     />
-                    <div className="mt-0.5 font-mono text-[11px] text-zinc-500">{s.id}</div>
+                    <div className="mt-0.5 font-mono text-xs text-subtle">{s.id}</div>
                   </td>
                   <td className="pr-2">
                     <select
                       aria-label={`Stage ${s.id} kind`}
-                      className="rounded border border-zinc-300 px-1 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+                      className="rounded border border-control px-1 py-1"
                       value={s.kind}
                       disabled={readOnly}
                       onChange={(e) =>
@@ -306,7 +306,7 @@ export function WorkflowEditor({
                       <>
                         <select
                           aria-label={`Stage ${s.id} role`}
-                          className="rounded border border-zinc-300 px-1 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+                          className="rounded border border-control px-1 py-1"
                           value={s.claimRole ?? ''}
                           disabled={readOnly}
                           onChange={(e) => setStage(i, { claimRole: e.target.value || null })}
@@ -329,7 +329,7 @@ export function WorkflowEditor({
                         </label>
                       </>
                     ) : (
-                      <span className="text-zinc-500">{s.kind === 'manual' ? 'the BA or you' : '-'}</span>
+                      <span className="text-subtle">{s.kind === 'manual' ? 'the BA or you' : '-'}</span>
                     )}
                   </td>
                   <td className="pr-2">
@@ -345,7 +345,7 @@ export function WorkflowEditor({
                   <td className="pr-2">
                     <input
                       aria-label={`Stage ${s.id} done criteria`}
-                      className="w-44 rounded border border-zinc-300 px-1.5 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+                      className="w-44 rounded border border-control px-1.5 py-1"
                       value={s.doneCriteria}
                       disabled={readOnly || s.kind === 'terminal'}
                       onChange={(e) => setStage(i, { doneCriteria: e.target.value })}
@@ -398,23 +398,23 @@ export function WorkflowEditor({
           .map(({ s, i }) => (
             <div
               key={`${i}-${s.id}`}
-              className="rounded-md border border-zinc-200 p-2 dark:border-zinc-800"
+              className="rounded-control border border-line p-2"
               data-testid={`outcomes-${s.id}`}
             >
-              <p className="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">{s.label}</p>
+              <p className="mb-1 text-xs font-medium text-muted">{s.label}</p>
               {s.outcomes.map((o, k) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: outcome ids are being edited
                 <div key={`${k}-${o.id}`} className="mb-1 flex flex-wrap items-center gap-2 text-sm">
                   <input
                     aria-label={`${s.id} outcome ${k + 1} id`}
-                    className="w-28 rounded border border-zinc-300 px-1.5 py-1 font-mono dark:border-zinc-700 dark:bg-zinc-900"
+                    className="w-28 rounded border border-control px-1.5 py-1 font-mono"
                     value={o.id}
                     disabled={readOnly}
                     onChange={(e) => setOutcome(i, k, { id: e.target.value, label: e.target.value })}
                   />
                   <select
                     aria-label={`${s.id}.${o.id} kind`}
-                    className="rounded border border-zinc-300 px-1 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+                    className="rounded border border-control px-1 py-1"
                     value={o.kind}
                     disabled={readOnly}
                     onChange={(e) => setOutcome(i, k, { kind: e.target.value as Outcome['kind'] })}
@@ -425,7 +425,7 @@ export function WorkflowEditor({
                   <span aria-hidden="true">goes to</span>
                   <select
                     aria-label={`${s.id}.${o.id} goes to`}
-                    className="rounded border border-zinc-300 px-1 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+                    className="rounded border border-control px-1 py-1"
                     value={o.to}
                     disabled={readOnly}
                     onChange={(e) => setOutcome(i, k, { to: e.target.value })}
@@ -484,7 +484,7 @@ export function WorkflowEditor({
       <section aria-label="Validation" data-testid="validation" data-errors={errorCount(shown)}>
         <h3 className="text-sm font-semibold">Validation</h3>
         {errorCount(shown) === 0 && (
-          <p className="text-sm text-emerald-700 dark:text-emerald-400" data-testid="validation-ok">
+          <p className="text-sm text-success" data-testid="validation-ok">
             No errors: every stage can be claimed and reached, and every failure route ends.
           </p>
         )}
@@ -508,9 +508,7 @@ function Issue({ issue }: { issue: DefinitionIssue }) {
     <li
       data-testid="issue"
       data-code={issue.code}
-      className={
-        issue.severity === 'error' ? 'text-red-700 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'
-      }
+      className={issue.severity === 'error' ? 'text-danger ' : 'text-warning '}
     >
       <Badge tone={issue.severity === 'error' ? 'red' : 'amber'}>{issue.severity}</Badge>{' '}
       {issue.stageId && <span className="font-mono text-xs">[{issue.stageId}] </span>}

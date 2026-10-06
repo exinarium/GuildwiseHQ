@@ -38,7 +38,7 @@ export function Workstations() {
       {q.isError && <ErrorBox error={q.error} />}
       {q.data?.length === 0 && (
         <Panel>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-subtle">
             No workstations paired. Pair one to run agents on your machine.
           </p>
         </Panel>
@@ -70,7 +70,7 @@ export function WorkstationCard({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="font-medium">{w.name}</p>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-subtle">
               {[w.platform, w.hostname, w.runnerVersion && `runner ${w.runnerVersion}`]
                 .filter(Boolean)
                 .join(' · ')}
@@ -99,9 +99,9 @@ export function WorkstationCard({
         ))}
         <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
           <div>
-            <p className="text-xs font-medium text-zinc-500">Runtimes</p>
+            <p className="text-xs font-medium text-subtle">Runtimes</p>
             <p className="flex flex-wrap gap-1">
-              {w.runtimes.length === 0 && <span className="text-zinc-500">None reported</span>}
+              {w.runtimes.length === 0 && <span className="text-subtle">None reported</span>}
               {w.runtimes.map((r) => (
                 <Badge key={r.id} tone={r.available ? 'green' : 'neutral'}>
                   {r.id} {r.version}
@@ -110,7 +110,7 @@ export function WorkstationCard({
             </p>
           </div>
           <div>
-            <p className="text-xs font-medium text-zinc-500">Shifts running</p>
+            <p className="text-xs font-medium text-subtle">Shifts running</p>
             <p
               data-testid="workstation-shifts"
               title="Set maxConcurrentShifts in the runner config.json (default 4)"
@@ -123,9 +123,9 @@ export function WorkstationCard({
             </p>
           </div>
           <div>
-            <p className="text-xs font-medium text-zinc-500">Repositories</p>
+            <p className="text-xs font-medium text-subtle">Repositories</p>
             <ul data-testid="workstation-repos">
-              {w.repos.length === 0 && <li className="text-zinc-500">None reported</li>}
+              {w.repos.length === 0 && <li className="text-subtle">None reported</li>}
               {w.repos.map((r) => (
                 <li key={r.projectRepoId} className="font-mono text-xs break-all">
                   {r.localPath}
@@ -134,9 +134,7 @@ export function WorkstationCard({
             </ul>
           </div>
         </div>
-        {w.lastSeenAt && (
-          <p className="mt-1 text-xs text-zinc-500">Last seen {formatDateTime(w.lastSeenAt)}</p>
-        )}
+        {w.lastSeenAt && <p className="mt-1 text-xs text-subtle">Last seen {formatDateTime(w.lastSeenAt)}</p>}
         {!admin && <DevOpsPanel w={w} />}
         <ErrorBox error={unlink.error} />
       </Panel>
@@ -199,17 +197,17 @@ function PairDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
           <p className="text-center font-mono text-2xl tracking-widest" data-testid="pairing-code">
             {code}
           </p>
-          <p className="text-xs text-zinc-500">Expires {formatDateTime(gen.data?.expiresAt)}. Shown once.</p>
+          <p className="text-xs text-subtle">Expires {formatDateTime(gen.data?.expiresAt)}. Shown once.</p>
           <pre
             data-testid="pair-command"
-            className="overflow-x-auto rounded-md bg-zinc-950 p-2 font-mono text-xs text-zinc-100"
+            className="overflow-x-auto rounded-control bg-side p-2 font-mono text-xs text-side-strong"
           >
             {cmd}
           </pre>
           <Button onClick={copy} className="self-start">
             {copied ? 'Copied' : 'Copy command'}
           </Button>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-subtle">
             Then run <code>aom-runner start</code>. This page updates when it connects.
           </p>
         </div>

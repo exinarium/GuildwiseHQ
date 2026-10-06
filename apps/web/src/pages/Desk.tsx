@@ -84,7 +84,7 @@ export function Desk() {
       )}
       {items.length === 0 && (
         <Panel>
-          <p className="text-sm text-zinc-500" data-testid="desk-empty">
+          <p className="text-sm text-subtle" data-testid="desk-empty">
             Nothing is waiting on you.
           </p>
         </Panel>
@@ -99,7 +99,7 @@ export function Desk() {
 
       {(closed.data?.items.length ?? 0) > 0 && (
         <details className="mt-6" data-testid="desk-closed">
-          <summary className="cursor-pointer text-sm font-medium text-zinc-600 dark:text-zinc-400">
+          <summary className="cursor-pointer text-sm font-medium text-muted">
             Answered and closed ({closed.data?.items.length})
           </summary>
           <ul className="mt-2 flex flex-col gap-2">
@@ -107,7 +107,7 @@ export function Desk() {
               <li key={i.id} data-testid={`desk-closed-${i.id}`}>
                 <Panel>
                   <p className="text-sm font-medium">{i.title}</p>
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-subtle">
                     {i.status}
                     {i.answeredByName ? ` by ${i.answeredByName}` : ''}
                     {i.answeredByAgentName ? ` by ${i.answeredByAgentName} (without reaching the desk)` : ''}{' '}
@@ -136,13 +136,11 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
       data-blocking={item.blocking}
       data-pinned={item.pinned}
       aria-label={item.title}
-      className={`rounded-lg border bg-white p-3 dark:bg-zinc-900 ${
-        item.urgent
-          ? 'border-red-300 ring-1 ring-red-200 dark:border-red-900 dark:ring-red-950'
-          : 'border-zinc-200 dark:border-zinc-800'
+      className={`rounded-card border bg-surface p-3  ${
+        item.urgent ? 'border-danger-fill/40 ring-1 ring-danger-fill/30  ' : 'border-line '
       }`}
     >
-      <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-subtle">
         {item.urgent && (
           <Badge tone="red" title="Pinned: needs you first">
             <span data-testid="urgent-badge">Urgent</span>
@@ -163,7 +161,7 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
           <span className="inline-flex items-center gap-1.5 font-medium" data-testid="asked-by">
             <Avatar name={item.askedBy.agentName} size={20} />
             {item.askedBy.agentName}
-            {item.askedBy.role && <span className="font-normal text-zinc-500">({item.askedBy.role})</span>}
+            {item.askedBy.role && <span className="font-normal text-subtle">({item.askedBy.role})</span>}
           </span>
         )}
         {item.card && (
@@ -173,7 +171,7 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
         )}
       </div>
       {item.doing && (
-        <p className="mt-1 text-xs text-zinc-500" data-testid="item-doing">
+        <p className="mt-1 text-xs text-subtle" data-testid="item-doing">
           Was doing: {item.doing}
         </p>
       )}
@@ -181,7 +179,7 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
       {item.body && item.kind !== 'rating' && <p className="mt-1 text-sm whitespace-pre-wrap">{item.body}</p>}
       {item.floor && (
         <details className="mt-2" data-testid="floor-facts">
-          <summary className="cursor-pointer text-xs font-medium text-zinc-600 dark:text-zinc-400">
+          <summary className="cursor-pointer text-xs font-medium text-muted">
             The facts behind this report
           </summary>
           <FloorReport digest={item.floor} />
@@ -192,7 +190,7 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
         <p
           role="note"
           data-testid="desk-hint"
-          className="mt-1 rounded-md bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+          className="mt-1 rounded-control bg-warning-soft p-2 text-sm text-warning-soft-fg"
         >
           {item.hint}
         </p>
@@ -210,10 +208,7 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
       )}
 
       {item.dedupEntries.length > 0 && (
-        <div
-          className="mt-2 rounded-md bg-amber-50 p-2 text-xs dark:bg-amber-950/40"
-          data-testid="dedup-entries"
-        >
+        <div className="mt-2 rounded-control bg-warning-soft p-2 text-xs" data-testid="dedup-entries">
           <p className="font-medium">The ledger already has similar entries:</p>
           <ul className="mt-1 list-disc pl-4">
             {item.dedupEntries.map((e) => (
@@ -229,12 +224,12 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
       <EscalationTrail item={item} />
 
       {item.status !== 'open' ? (
-        <p className="mt-2 text-sm text-zinc-500">
+        <p className="mt-2 text-sm text-subtle">
           {item.status}
           {item.answer ? `: ${item.answer}` : ''}
         </p>
       ) : !item.canAnswer ? (
-        <p className="mt-2 text-sm text-zinc-500" data-testid="read-only">
+        <p className="mt-2 text-sm text-subtle" data-testid="read-only">
           Read only:{' '}
           {item.card ? 'only the card owner can answer this.' : 'only the project owner can answer.'}
         </p>
@@ -278,11 +273,11 @@ function AnswerForm({ item }: { item: DeskItemDto }) {
     <form onSubmit={submit} aria-label="Answer" className="mt-3 flex flex-col gap-3" noValidate>
       {item.options.length > 0 && (
         <fieldset className="flex flex-col gap-1.5">
-          <legend className="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">Options</legend>
+          <legend className="mb-1 text-xs font-medium text-muted">Options</legend>
           {item.options.map((o) => (
             <label
               key={o.id}
-              className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-200 p-2 text-sm dark:border-zinc-700"
+              className="flex cursor-pointer items-start gap-2 rounded-control border border-line p-2 text-sm"
             >
               <input
                 type="radio"
@@ -294,7 +289,7 @@ function AnswerForm({ item }: { item: DeskItemDto }) {
               />
               <span className="flex-1">
                 {o.label}
-                {o.description && <span className="block text-xs text-zinc-500">{o.description}</span>}
+                {o.description && <span className="block text-xs text-subtle">{o.description}</span>}
               </span>
               {item.recommendation === o.id && (
                 <Badge tone="green" title="The asker's recommended default">

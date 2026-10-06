@@ -63,17 +63,14 @@ export function RecommendationList({ recommendations }: { recommendations: Recom
                   </Badge>
                 )}
               </div>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">{r.summary}</p>
+              <p className="text-sm text-muted">{r.summary}</p>
               {r.action.type === 'standing_order' && (
-                <p
-                  className="rounded bg-zinc-50 px-2 py-1 text-xs italic dark:bg-zinc-800/60"
-                  data-testid="rec-proposal"
-                >
+                <p className="rounded bg-sunken px-2 py-1 text-xs italic" data-testid="rec-proposal">
                   Proposed standing order: {r.action.text}
                 </p>
               )}
               <details>
-                <summary className="cursor-pointer text-xs text-zinc-500">Evidence</summary>
+                <summary className="cursor-pointer text-xs text-subtle">Evidence</summary>
                 <ul className="mt-1 list-disc pl-5 text-xs" data-testid="rec-evidence">
                   {r.evidence.metrics.map((m) => (
                     <li key={m.label}>
@@ -93,7 +90,7 @@ export function RecommendationList({ recommendations }: { recommendations: Recom
                 </ul>
               </details>
               {done[r.id] && (
-                <p className="text-sm text-emerald-700 dark:text-emerald-400" data-testid="rec-applied">
+                <p className="text-sm text-success" data-testid="rec-applied">
                   {done[r.id]?.effect}.{' '}
                   {done[r.id]?.deskItemId && (
                     <Link to="/desk" className="underline">
@@ -150,7 +147,7 @@ export function RoleUpdates({ updates }: { updates: RoleUpdate[] }) {
           <div className="flex flex-col gap-3">
             <div
               data-testid="reset-diff"
-              className="rounded-md border border-red-200 bg-red-50 p-2 text-sm dark:border-red-900 dark:bg-red-950/40"
+              className="rounded-control border border-danger-fill/30 bg-danger-soft p-2 text-sm"
             >
               <p className="mb-1 font-medium">Will be removed</p>
               <ul className="list-disc pl-5">
@@ -165,7 +162,7 @@ export function RoleUpdates({ updates }: { updates: RoleUpdate[] }) {
                   <li>Nothing: you have no extensions on this role.</li>
                 )}
               </ul>
-              <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
+              <p className="mt-2 text-xs text-muted">
                 The role's core rules do not change. Its agents move to version {open.latestVersion}.
               </p>
             </div>

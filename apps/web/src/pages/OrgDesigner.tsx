@@ -115,7 +115,7 @@ export function OrgDesigner() {
         <p
           role="note"
           data-testid="read-only-note"
-          className="mb-3 rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200"
+          className="mb-3 rounded-control border border-info-fill/40 bg-info-soft px-3 py-2 text-sm text-info-soft-fg"
         >
           You are an additional manager here: this is the owner's catalogue. Their roles, workflows and
           standing orders apply to the shared project's cards, and only the owner can change them.
@@ -124,7 +124,7 @@ export function OrgDesigner() {
       <div
         role="tablist"
         aria-label="Organization sections"
-        className="mb-3 flex flex-wrap gap-1 border-b border-zinc-200 dark:border-zinc-800"
+        className="mb-3 flex flex-wrap gap-1 border-b border-line"
       >
         {TABS.map(([id, label]) => (
           <button
@@ -133,7 +133,7 @@ export function OrgDesigner() {
             type="button"
             aria-selected={tab === id}
             onClick={() => setParam('tab', id === 'roles' ? '' : id)}
-            className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${tab === id ? 'border-indigo-600 font-semibold' : 'border-transparent text-zinc-600 dark:text-zinc-400'}`}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${tab === id ? 'border-brand font-semibold' : 'border-transparent text-muted '}`}
           >
             {label}
           </button>
@@ -200,14 +200,14 @@ function VersionRow({
         {STATUS_LABEL[status] ?? status}
       </Badge>
       {draftedByAgent && <Badge tone="violet">Drafted by the BA</Badge>}
-      {extra && <span className="text-xs text-zinc-500">{extra}</span>}
+      {extra && <span className="text-xs text-subtle">{extra}</span>}
       {status === 'pending_approval' && deskItemId && (
         <Link to="/desk" className="text-xs underline">
           Open the desk
         </Link>
       )}
       {vaultPath && (
-        <span className="text-xs text-zinc-500" title="Stored in your vault">
+        <span className="text-xs text-subtle" title="Stored in your vault">
           {vaultPath}
         </span>
       )}
@@ -251,7 +251,7 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
       <ErrorBox error={submit.error ?? discard.error} />
       <section aria-label="Custom roles">
         <h2 className="mb-2 text-sm font-semibold">Custom roles</h2>
-        {custom.length === 0 && <p className="text-sm text-zinc-500">No custom roles yet.</p>}
+        {custom.length === 0 && <p className="text-sm text-subtle">No custom roles yet.</p>}
         <ul className="grid gap-3 md:grid-cols-2" data-testid="custom-roles">
           {custom.map((r) => {
             const latest = r.versions[0]?.definition;
@@ -260,10 +260,10 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
                 <Panel>
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-semibold">{latest?.name}</h3>
-                    <span className="font-mono text-xs text-zinc-500">{r.key}</span>
+                    <span className="font-mono text-xs text-subtle">{r.key}</span>
                     {latest?.department && <Badge>{latest.department}</Badge>}
                   </div>
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">{latest?.purpose}</p>
+                  <p className="text-sm text-muted">{latest?.purpose}</p>
                   <ul className="mt-2 flex flex-col gap-1">
                     {r.versions.map((v) => (
                       <VersionRow
@@ -311,7 +311,7 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
                     ))}
                   </ul>
                   {latest && (
-                    <p className="mt-2 text-xs text-zinc-500">
+                    <p className="mt-2 text-xs text-subtle">
                       May claim:{' '}
                       {latest.claimableStages.map((c) => `${c.workflowKey}.${c.stageId}`).join(', ')}
                     </p>
@@ -324,7 +324,7 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
       </section>
       <section aria-label="Built-in roles">
         <h2 className="mb-2 text-sm font-semibold">Built-in roles</h2>
-        <p className="mb-2 text-xs text-zinc-500">
+        <p className="mb-2 text-xs text-subtle">
           They ship with the app and can never be removed. The owner can extend them with extra instructions,
           skills and standing orders; their core rules (test ownership, review gates) cannot be changed.
         </p>
@@ -338,9 +338,9 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
                     <h3 className="font-semibold">{d?.name}</h3>
                     <Badge tone="blue">Built in</Badge>
                     {d?.department && <Badge>{d.department}</Badge>}
-                    <span className="text-xs text-zinc-500">v{d?.version}</span>
+                    <span className="text-xs text-subtle">v{d?.version}</span>
                   </div>
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">{d?.purpose}</p>
+                  <p className="text-sm text-muted">{d?.purpose}</p>
                   {r.extensions && (
                     <p className="mt-1 text-xs" data-testid={`extended-${r.key}`}>
                       <Badge tone="violet">Extended</Badge>{' '}
@@ -458,7 +458,7 @@ function ExtendDialog({
       description="Your additions are added to the role's instructions for every agent in this role, in every project of your organization."
     >
       <form onSubmit={submit} className="flex flex-col gap-3" aria-label={`Extend ${role.key}`}>
-        <div className="rounded-md bg-zinc-50 p-2 text-xs dark:bg-zinc-800" data-testid="core-rules">
+        <div className="rounded-control bg-sunken p-2 text-xs" data-testid="core-rules">
           <p className="font-medium">Core rules (cannot be changed)</p>
           <ul className="list-disc pl-4">
             {(def?.coreRules ?? []).map((r) => (
@@ -534,7 +534,7 @@ function WorkflowsTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId
               <Panel>
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="font-semibold">{latest?.name}</h3>
-                  <span className="font-mono text-xs text-zinc-500">{w.key}</span>
+                  <span className="font-mono text-xs text-subtle">{w.key}</span>
                   {w.builtIn ? <Badge tone="blue">Built in</Badge> : <Badge tone="violet">Custom</Badge>}
                   {latest?.department && <Badge>{latest.department}</Badge>}
                 </div>
@@ -602,7 +602,7 @@ function WorkflowsTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId
                   .map((v) => (
                     <div key={v.id} className="mt-2" data-testid={`view-${w.key}-v${v.version}`}>
                       <WorkflowGraph def={v.definition} />
-                      <ol className="mt-2 list-decimal pl-5 text-xs text-zinc-600 dark:text-zinc-400">
+                      <ol className="mt-2 list-decimal pl-5 text-xs text-muted">
                         {v.definition.stages.map((s) => (
                           <li key={s.id}>
                             <span className="font-medium">{s.label}</span>
@@ -693,7 +693,7 @@ function DepartmentsTab({ cat, projectId }: { cat: OrgCatalogueResponse; project
   };
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="text-sm text-muted">
         A department groups the roles and workflows of one function, so the HR board and the boards can be
         filtered by it.
       </p>
@@ -716,8 +716,8 @@ function DepartmentsTab({ cat, projectId }: { cat: OrgCatalogueResponse; project
                 <h3 className="font-semibold">{d.name}</h3>
                 {d.builtIn && <Badge tone="blue">Built in</Badge>}
               </div>
-              <p className="mt-1 text-xs text-zinc-500">Roles: {d.roleKeys.join(', ') || 'none'}</p>
-              <p className="text-xs text-zinc-500">Workflows: {d.workflowKeys.join(', ') || 'none'}</p>
+              <p className="mt-1 text-xs text-subtle">Roles: {d.roleKeys.join(', ') || 'none'}</p>
+              <p className="text-xs text-subtle">Workflows: {d.workflowKeys.join(', ') || 'none'}</p>
             </Panel>
           </li>
         ))}
@@ -736,15 +736,15 @@ function DesignTab({ cat }: { cat: OrgCatalogueResponse }) {
   const [agentId, setAgentId] = useState('');
   const chosen = agentId || bas[0]?.id || '';
   if (!cat.canEdit)
-    return <p className="text-sm text-zinc-500">Only the organization owner designs with the BA.</p>;
+    return <p className="text-sm text-subtle">Only the organization owner designs with the BA.</p>;
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="text-sm text-muted">
         Describe the role or workflow you need. The BA drafts it, asks what is unclear, validates it and puts
         it on your desk; it is available only after you approve it.
       </p>
       {bas.length === 0 ? (
-        <p className="text-sm text-zinc-500" data-testid="no-ba">
+        <p className="text-sm text-subtle" data-testid="no-ba">
           Hire a business analyst on the{' '}
           <Link to="/agents?hire=ba" className="underline">
             HR board

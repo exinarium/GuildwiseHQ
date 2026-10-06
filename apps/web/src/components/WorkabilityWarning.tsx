@@ -43,8 +43,8 @@ export function WorkabilityWarning({
         type="button"
         aria-label={reason}
         aria-describedby={tipId}
-        className={`rounded p-0.5 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500 ${
-          blocked ? 'text-red-600 dark:text-red-400' : 'text-amber-500 dark:text-amber-400'
+        className={`rounded p-0.5 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring ${
+          blocked ? 'text-danger ' : 'text-warning '
         }`}
       >
         <svg viewBox="0 0 20 20" width="18" height="18" fill="currentColor" aria-hidden="true">
@@ -59,14 +59,14 @@ export function WorkabilityWarning({
         role="tooltip"
         id={tipId}
         data-testid="workability-reason"
-        className="invisible absolute top-full right-0 z-20 mt-1 w-64 rounded-md border border-zinc-200 bg-white p-2 text-left text-xs font-normal text-zinc-800 shadow-lg group-focus-within:visible group-hover:visible dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+        className="invisible absolute top-full right-0 z-20 mt-1 w-64 rounded-control border border-line bg-surface p-2 text-left text-xs font-normal text-fg shadow-lg group-focus-within:visible group-hover:visible"
       >
         {reason}
         {hireUrl && (
           <Link
             to={hireUrl}
             data-testid="workability-hire"
-            className="mt-1.5 block font-medium text-indigo-700 underline dark:text-indigo-300"
+            className="mt-1.5 block font-medium text-brand-text underline"
           >
             {hireLabel}
           </Link>

@@ -57,12 +57,9 @@ export function DevOpsPanel({ w }: { w: WorkstationDto }) {
     );
 
   return (
-    <section
-      className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800"
-      data-testid={`devops-panel-${w.name}`}
-    >
+    <section className="mt-3 border-t border-line pt-3" data-testid={`devops-panel-${w.name}`}>
       <h3 className="text-sm font-semibold">DevOps engineer</h3>
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-subtle">
         Sets up and maintains this machine. Anything outside the access below waits for your approval.
       </p>
       <fieldset className="mt-2 grid gap-1 text-sm sm:grid-cols-3" aria-label={`DevOps access on ${w.name}`}>
@@ -105,7 +102,7 @@ export function DevOpsPanel({ w }: { w: WorkstationDto }) {
         data-testid="devops-requests"
         aria-label={`DevOps requests on ${w.name}`}
       >
-        {requests.data?.length === 0 && <li className="text-sm text-zinc-500">No requests yet.</li>}
+        {requests.data?.length === 0 && <li className="text-sm text-subtle">No requests yet.</li>}
         {requests.data?.map((r) => (
           <RequestRow key={r.id} r={r} />
         ))}
@@ -121,12 +118,9 @@ function HygieneSettings({ w }: { w: WorkstationDto }) {
   const h = w.hygiene;
   const hours = h?.intervalHours ?? 24;
   return (
-    <div
-      className="mt-3 rounded-md border border-zinc-200 p-2 dark:border-zinc-800"
-      data-testid={`hygiene-${w.name}`}
-    >
+    <div className="mt-3 rounded-control border border-line p-2" data-testid={`hygiene-${w.name}`}>
       <h4 className="text-sm font-semibold">Repository hygiene</h4>
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-subtle">
         The DevOps engineer fetches and pulls this machine's project repositories, commits unsaved work to the
         working branch you confirmed, pushes, and removes merged agent branches and stale worktrees. A
         repository with no confirmed working branch is never committed to: you are asked which branch it is.
@@ -150,14 +144,14 @@ function HygieneSettings({ w }: { w: WorkstationDto }) {
           Run hygiene now
         </Button>
       </div>
-      <p className="mt-2 text-xs text-zinc-500" data-testid="hygiene-status">
+      <p className="mt-2 text-xs text-subtle" data-testid="hygiene-status">
         {h?.lastRunAt ? `Last run ${formatDateTime(h.lastRunAt)}` : 'Not run yet'}
         {h?.lastStatus ? ` (${h.lastStatus.replace('_', ' ')})` : ''}
         {h?.nextRunAt ? `; next ${formatDateTime(h.nextRunAt)}` : '; the schedule is off'}
         {h && h.openFindings > 0 ? `; ${h.openFindings} open finding${h.openFindings === 1 ? '' : 's'}` : ''}.
       </p>
       {run.isSuccess && (
-        <p role="status" className="text-sm text-emerald-600">
+        <p role="status" className="text-sm text-success">
           {run.data.alreadyRunning ? 'A hygiene run is already queued or running.' : 'Hygiene run requested.'}
         </p>
       )}
@@ -204,7 +198,7 @@ function RequestRow({ r }: { r: DevOpsRequestDto }) {
   const [open, setOpen] = useState(r.status === 'needs_approval');
   return (
     <li
-      className="rounded-md border border-zinc-200 p-2 dark:border-zinc-800"
+      className="rounded-control border border-line p-2"
       data-testid={`devops-request-${r.summary.slice(0, 40)}`}
       data-status={r.status}
     >
@@ -216,7 +210,7 @@ function RequestRow({ r }: { r: DevOpsRequestDto }) {
       >
         <Badge tone={TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge>
         <span className="min-w-0 flex-1 truncate font-medium">{r.summary}</span>
-        <span className="text-xs text-zinc-500">
+        <span className="text-xs text-subtle">
           {r.requestedBy.name ?? r.requestedBy.kind}
           {r.cardRef ? ` · ${r.cardRef}` : ''} · {formatDateTime(r.createdAt)}
         </span>
@@ -230,7 +224,7 @@ function RequestThread({ id }: { id: string }) {
   const q = useDevOpsRequest(id);
   const resolve = useResolveDevOpsApproval();
   const [note, setNote] = useState('');
-  if (!q.data) return <p className="mt-2 text-sm text-zinc-500">Loading thread…</p>;
+  if (!q.data) return <p className="mt-2 text-sm text-subtle">Loading thread…</p>;
   const { request, messages, changes } = q.data;
   const awaiting = request.status === 'needs_approval' && request.approval && !request.approval.resolution;
   return (
@@ -239,7 +233,7 @@ function RequestThread({ id }: { id: string }) {
         {messages.map((m) => (
           <li key={m.id}>
             <span className="font-medium">{m.authorName}</span>{' '}
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-subtle">
               {m.kind} · {formatDateTime(m.createdAt)}
             </span>
             <p className="whitespace-pre-wrap">{m.body}</p>
@@ -248,7 +242,7 @@ function RequestThread({ id }: { id: string }) {
       </ol>
       {changes.length > 0 && (
         <div data-testid="devops-changes">
-          <p className="text-xs font-medium text-zinc-500">Environment changes</p>
+          <p className="text-xs font-medium text-subtle">Environment changes</p>
           <ul className="list-disc pl-5">
             {changes.map((c) => (
               <li key={c.id}>
@@ -260,11 +254,11 @@ function RequestThread({ id }: { id: string }) {
         </div>
       )}
       {awaiting && request.approval && (
-        <div className="rounded-md bg-amber-50 p-2 dark:bg-amber-950/40" data-testid="devops-approval">
+        <div className="rounded-control bg-warning-soft p-2" data-testid="devops-approval">
           <p className="font-medium">Approval needed: {request.approval.action}</p>
           <p>{request.approval.reason}</p>
           {request.approval.commands.length > 0 && (
-            <pre className="mt-1 overflow-x-auto rounded bg-zinc-950 p-2 text-xs text-zinc-100">
+            <pre className="mt-1 overflow-x-auto rounded bg-side p-2 text-xs text-side-strong">
               {request.approval.commands.join('\n')}
             </pre>
           )}
@@ -289,7 +283,7 @@ function RequestThread({ id }: { id: string }) {
         </div>
       )}
       {request.status === 'failed' && request.resultSummary && (
-        <p className="text-red-700 dark:text-red-400">{request.resultSummary}</p>
+        <p className="text-danger">{request.resultSummary}</p>
       )}
     </div>
   );

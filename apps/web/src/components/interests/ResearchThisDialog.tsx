@@ -146,7 +146,7 @@ export function ResearchThisDialog({ interest, onClose }: { interest: InterestDt
             onChange={(e) => setSites(e.target.value)}
           />
           {err && (
-            <p role="alert" className="text-xs font-medium text-red-600">
+            <p role="alert" className="text-xs font-medium text-danger">
               {err}
             </p>
           )}

@@ -27,7 +27,7 @@ export function AdoptSchedulesDialog({ open, onClose }: { open: boolean; onClose
       <div className="flex flex-col gap-3" data-testid="adopt-dialog">
         {list.isPending && <Spinner />}
         <ErrorBox error={list.error ?? adopt.error} />
-        {list.data?.length === 0 && <p className="text-sm text-zinc-500">Nothing left to adopt.</p>}
+        {list.data?.length === 0 && <p className="text-sm text-subtle">Nothing left to adopt.</p>}
         <ul className="flex flex-col gap-2">
           {list.data?.map((s) => {
             const r = results.get(s.id);
@@ -48,13 +48,13 @@ export function AdoptSchedulesDialog({ open, onClose }: { open: boolean; onClose
                 />
                 <label htmlFor={`adopt-${s.id}`} className="min-w-0 flex-1">
                   <span className="font-medium">{s.name}</span>{' '}
-                  <span className="text-zinc-500">
+                  <span className="text-subtle">
                     {s.projectKey} · {describeCron(s.cron)} ({s.timezone}){s.topic ? ` · ${s.topic}` : ''}
                     {s.enabled ? '' : ' · paused'}
                   </span>
                   {r && (
                     <span
-                      className={r.error ? 'block text-red-600' : 'block text-emerald-700'}
+                      className={r.error ? 'block text-danger' : 'block text-success'}
                       data-testid="adopt-result"
                     >
                       {r.error ? r.error : 'Adopted'}

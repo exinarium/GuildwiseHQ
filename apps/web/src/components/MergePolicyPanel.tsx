@@ -33,14 +33,14 @@ export function MergePolicyPanel({
           <span data-testid="merge-policy-state">{on ? 'Merge without approval' : 'Approval required'}</span>
         </Badge>
       </h2>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">
+      <p className="text-sm text-muted">
         Merge large changes without my approval. By default a large change (two reviewers approved it) waits
         for your approval on the desk before it is merged into the working branch.
       </p>
       <p
         role="note"
         data-testid="merge-policy-warning"
-        className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+        className="mt-2 rounded-control border border-warning-fill/40 bg-warning-soft p-2 text-sm text-warning-soft-fg"
       >
         Warning: when this is on, large changes are merged into the working branch as soon as they are
         finalized, without asking anyone. Only the review, the tests and the full suite that runs afterwards
@@ -48,7 +48,7 @@ export function MergePolicyPanel({
         touched; you can still approve them there.
       </p>
       {changed && (
-        <p className="mt-2 text-xs text-zinc-500" data-testid="merge-policy-changed">
+        <p className="mt-2 text-xs text-subtle" data-testid="merge-policy-changed">
           {on ? 'Turned on' : 'Turned off'} by {changed.byName} on {when(changed.at)}.
         </p>
       )}
@@ -99,13 +99,13 @@ export function MergePolicyPanel({
           <ErrorBox error={set.error} />
         </div>
       ) : (
-        <p className="mt-3 text-sm text-zinc-500" data-testid="merge-policy-readonly">
+        <p className="mt-3 text-sm text-subtle" data-testid="merge-policy-readonly">
           Only the project owner can change this setting.
         </p>
       )}
       {history.length > 0 && (
         <details className="mt-3 text-sm">
-          <summary className="cursor-pointer text-zinc-600 dark:text-zinc-400">History</summary>
+          <summary className="cursor-pointer text-muted">History</summary>
           <ul className="mt-1 flex flex-col gap-0.5" data-testid="merge-policy-history">
             {history.map((h) => (
               <li key={`${h.at}-${h.enabled}`}>

@@ -22,7 +22,7 @@ export function SandboxWarning({
     <div
       role={role}
       data-testid={testId}
-      className="flex gap-2 rounded-md border border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-600 dark:bg-amber-950 dark:text-amber-100"
+      className="flex gap-2 rounded-control border border-warning-fill bg-warning-soft px-3 py-2 text-sm text-warning-soft-fg"
     >
       <span aria-hidden="true">&#9888;</span>
       <p className="min-w-0">
@@ -50,7 +50,7 @@ export function SandboxWarning({
 export function SandboxUnavailable({ runtime, reason }: { runtime: string; reason?: string }) {
   return (
     <p
-      className="rounded-md border border-zinc-400 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+      className="rounded-control border border-control bg-sunken px-3 py-2 text-sm text-fg"
       data-testid="sandbox-unavailable"
     >
       <strong>{runtime} is unavailable:</strong> {reason ?? 'the OS sandbox cannot start'}.{' '}

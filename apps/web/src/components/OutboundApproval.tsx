@@ -9,22 +9,16 @@ export function DiffView({ before, after, testId }: { before: string; after: str
   // A diff is positional and never reordered: the position is its stable key.
   const parts = diffWords(before, after).map((p, position) => ({ ...p, key: `${position}-${p.kind}` }));
   return (
-    <p
-      className="rounded-md bg-zinc-50 p-2 text-sm whitespace-pre-wrap dark:bg-zinc-800/60"
-      data-testid={testId}
-    >
+    <p className="rounded-control bg-sunken p-2 text-sm whitespace-pre-wrap" data-testid={testId}>
       {parts.map((p) =>
         p.kind === 'same' ? (
           <span key={p.key}>{p.text}</span>
         ) : p.kind === 'added' ? (
-          <ins
-            key={p.key}
-            className="bg-green-100 text-green-900 no-underline dark:bg-green-950 dark:text-green-200"
-          >
+          <ins key={p.key} className="bg-success-soft text-success-soft-fg no-underline">
             {p.text}
           </ins>
         ) : (
-          <del key={p.key} className="bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-200">
+          <del key={p.key} className="bg-danger-soft text-danger-soft-fg">
             {p.text}
           </del>
         ),
@@ -55,11 +49,11 @@ export function OutboundApproval({ item }: { item: DeskItemDto }) {
       />
       {edited && text.trim() && (
         <div data-testid="outbound-diff">
-          <p className="mb-1 text-xs font-medium text-zinc-500">Your changes</p>
+          <p className="mb-1 text-xs font-medium text-subtle">Your changes</p>
           <DiffView before={item.body} after={text} testId="outbound-diff-view" />
         </div>
       )}
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-subtle">
         Nothing is posted until you approve. Your own workstation posts it with your own access; agent names
         and the team's inner workings are refused.
       </p>

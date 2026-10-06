@@ -9,7 +9,7 @@ export function ProjectInvitations() {
   const list = q.data ?? [];
   if (list.length === 0) return null;
   return (
-    <Panel className="mb-3 border-indigo-300 dark:border-indigo-800">
+    <Panel className="mb-3 border-brand/50">
       <h2 className="mb-2 text-sm font-semibold">Project invitations</h2>
       <ul className="flex flex-col gap-2" data-testid="project-invitations">
         {list.map((i) => (
@@ -23,7 +23,7 @@ export function ProjectInvitations() {
               <strong>
                 {i.projectKey} {i.projectName}
               </strong>
-              {i.invitedAt && <span className="text-xs text-zinc-500"> · {formatDateTime(i.invitedAt)}</span>}
+              {i.invitedAt && <span className="text-xs text-subtle"> · {formatDateTime(i.invitedAt)}</span>}
             </span>
             <Button
               variant="primary"

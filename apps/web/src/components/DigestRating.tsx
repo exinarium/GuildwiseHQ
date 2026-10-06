@@ -29,11 +29,11 @@ export function DigestItemRow({ item, canRate }: { item: DigestItemDto; canRate:
   const rated = item.verdict !== null && !editing;
   return (
     <div
-      className="rounded-md border border-zinc-200 p-2 dark:border-zinc-700"
+      className="rounded-control border border-line p-2"
       data-testid={`digest-item-${item.id}`}
       data-verdict={item.verdict ?? ''}
     >
-      <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-subtle">
         <Badge tone="blue">{item.kind}</Badge>
         <span>{item.source}</span>
         {item.publishedAt && <span>· {item.publishedAt.slice(0, 10)}</span>}
@@ -53,7 +53,7 @@ export function DigestItemRow({ item, canRate }: { item: DigestItemDto; canRate:
           {item.title}
         </span>
       )}
-      <p className="mt-0.5 text-sm text-zinc-700 dark:text-zinc-300">{item.summary}</p>
+      <p className="mt-0.5 text-sm text-muted">{item.summary}</p>
       {hasTranscript(item.kind) && (
         <TranscriptExpander
           projectId={item.projectId}
@@ -64,7 +64,7 @@ export function DigestItemRow({ item, canRate }: { item: DigestItemDto; canRate:
       {rated && item.verdict ? (
         <p className="mt-2 flex flex-wrap items-center gap-2 text-sm" data-testid="verdict">
           <Badge tone={verdictTone(item.verdict)}>{VERDICTS.find((v) => v.id === item.verdict)?.label}</Badge>
-          {item.verdictReason && <span className="text-zinc-500">{item.verdictReason}</span>}
+          {item.verdictReason && <span className="text-subtle">{item.verdictReason}</span>}
           {canRate && (
             <Button variant="ghost" onClick={() => setEditing(true)}>
               Change
@@ -73,14 +73,14 @@ export function DigestItemRow({ item, canRate }: { item: DigestItemDto; canRate:
         </p>
       ) : canRate ? (
         <div className="mt-2 flex flex-col gap-2">
-          <label className="text-xs text-zinc-500">
+          <label className="text-xs text-subtle">
             <span className="sr-only">Reason for {item.title}</span>
             <input
               type="text"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Why? (optional)"
-              className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              className="w-full rounded-control border border-control bg-surface px-2 py-1 text-sm"
             />
           </label>
           <fieldset className="flex flex-wrap gap-2">

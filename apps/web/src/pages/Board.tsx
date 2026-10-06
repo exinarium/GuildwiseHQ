@@ -34,7 +34,7 @@ export function Board() {
     return (
       <div>
         <PageHeader title="Board" />
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-subtle">
           Project {projectKey} not found.{' '}
           <Link to="/projects" className="underline">
             Browse projects
@@ -63,7 +63,7 @@ export function Board() {
                   id="department-filter"
                   value={department}
                   onChange={(e) => setDepartment(e.target.value)}
-                  className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  className="rounded-control border border-control bg-surface px-2 py-1 text-sm"
                 >
                   <option value="">All departments</option>
                   {departmentsOf(projects.data ?? []).map((d) => (
@@ -78,7 +78,7 @@ export function Board() {
               id="project-switch"
               value={project.key}
               onChange={(e) => nav(`/p/${e.target.value}/board`)}
-              className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              className="rounded-control border border-control bg-surface px-2 py-1 text-sm"
             >
               {inDepartment(projects.data ?? [], department)
                 .concat(
@@ -98,7 +98,7 @@ export function Board() {
               <>
                 <Link
                   to={`/p/${project.key}/feed`}
-                  className="inline-flex min-h-8 items-center rounded-md border border-zinc-300 px-3 py-1 text-sm font-medium dark:border-zinc-700"
+                  className="inline-flex min-h-8 items-center rounded-control border border-control px-3 py-1 text-sm font-medium"
                 >
                   Feed
                 </Link>
@@ -109,7 +109,7 @@ export function Board() {
             )}
             <Link
               to={`/cards/new?project=${project.key}`}
-              className="inline-flex min-h-8 items-center rounded-md bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-500"
+              className="inline-flex min-h-8 items-center rounded-control bg-brand px-3 py-1 text-sm font-medium text-white hover:bg-brand-hover"
             >
               New card
             </Link>

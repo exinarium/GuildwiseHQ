@@ -58,16 +58,12 @@ export function EditCardDialog({
           mockUi={mockUi}
         />
         {Object.keys(errors).length > 0 && (
-          <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm font-medium text-danger">
             Fix the highlighted fields.
           </p>
         )}
         {patch.error && (
-          <p
-            role="alert"
-            data-testid="edit-refused"
-            className="text-sm font-medium text-red-600 dark:text-red-400"
-          >
+          <p role="alert" data-testid="edit-refused" className="text-sm font-medium text-danger">
             {refusalText(patch.error)}
           </p>
         )}

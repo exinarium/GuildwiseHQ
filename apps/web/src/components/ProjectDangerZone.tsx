@@ -18,13 +18,13 @@ export function ProjectDangerZone({ project }: { project: ProjectDto }) {
 
   return (
     <Panel data-testid="danger-zone">
-      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-red-700 dark:text-red-400">
+      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-danger">
         Danger zone
         {archived && <Badge tone="amber">Archived</Badge>}
       </h2>
       {archived ? (
         <>
-          <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="archived-note">
+          <p className="text-sm text-muted" data-testid="archived-note">
             This project is archived. It is hidden from boards, pickers and the dispatcher; its cards, history
             and vault folder are kept. Restore it to work on it again (cards that were closed stay closed and
             schedules stay off).
@@ -42,7 +42,7 @@ export function ProjectDangerZone({ project }: { project: ProjectDto }) {
         </>
       ) : (
         <>
-          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+          <p className="text-sm text-muted">
             Archive this project to take it out of use. Running shifts stop, open cards close, schedules stop
             and open desk items are dismissed. Nothing is deleted; you can restore it later.
           </p>
@@ -80,7 +80,7 @@ export function ProjectDangerZone({ project }: { project: ProjectDto }) {
               </li>
             </ul>
           )}
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-subtle">
             Agents hired for this project are not fired; they just stop getting its work. The vault folder is
             never touched.
           </p>

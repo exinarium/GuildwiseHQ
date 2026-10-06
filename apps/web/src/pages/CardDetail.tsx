@@ -212,7 +212,7 @@ export function CardDetailView({
         }
       />
       {missing.length > 0 && (
-        <p role="alert" className="mb-3 text-sm font-medium text-red-600 dark:text-red-400">
+        <p role="alert" className="mb-3 text-sm font-medium text-danger">
           Cannot specify yet. Missing:{' '}
           {missing.map((m) => (workflow ? fieldLabel(workflow, m) : m)).join(', ')}
         </p>
@@ -226,7 +226,7 @@ export function CardDetailView({
         <div
           role="status"
           data-testid="card-blockers"
-          className="mb-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
+          className="mb-3 rounded-control border border-danger-fill/40 bg-danger-soft px-3 py-2 text-sm text-danger-soft-fg"
         >
           Blocked by{' '}
           {blockers.map((b, i) => (
@@ -249,7 +249,7 @@ export function CardDetailView({
             <Panel>
               <h2 className="mb-2 text-sm font-semibold">
                 Live shift{currentShift.agentName ? ` · ${currentShift.agentName}` : ''}
-                <span className="ml-2 font-normal text-zinc-500">{currentShift.stage}</span>
+                <span className="ml-2 font-normal text-subtle">{currentShift.stage}</span>
               </h2>
               <ShiftLog key={currentShift.id} shift={currentShift} />
             </Panel>
@@ -261,7 +261,7 @@ export function CardDetailView({
               <Meta k="Stage" v={card.stage} />
               {(!workflow || workflowUsesRepos(workflow)) && (
                 <div>
-                  <dt className="text-xs font-medium text-zinc-500">Risk tier</dt>
+                  <dt className="text-xs font-medium text-subtle">Risk tier</dt>
                   <dd className="flex flex-wrap items-center gap-1.5" data-testid="risk-tier">
                     <span>{card.riskTier ?? 'not set'}</span>
                     {card.riskTierOverridden && <Badge tone="violet">override</Badge>}
@@ -301,13 +301,13 @@ export function CardDetailView({
                 </div>
               )}
               <div>
-                <dt className="text-xs font-medium text-zinc-500">Who answers its questions</dt>
+                <dt className="text-xs font-medium text-subtle">Who answers its questions</dt>
                 <dd>
                   {permissions.canMove ? (
                     <select
                       aria-label="Decision policy"
                       data-testid="decision-policy"
-                      className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                      className="rounded-control border border-control bg-surface px-2 py-1 text-sm"
                       value={card.decisionPolicy}
                       disabled={policy.isPending}
                       onChange={(e) =>
@@ -328,10 +328,10 @@ export function CardDetailView({
               </div>
             </dl>
             {keys.length > 0 && (
-              <dl className="mt-3 flex flex-col gap-3 border-t border-zinc-200 pt-3 text-sm dark:border-zinc-800">
+              <dl className="mt-3 flex flex-col gap-3 border-t border-line pt-3 text-sm">
                 {keys.map((k) => (
                   <div key={k}>
-                    <dt className="text-xs font-medium text-zinc-500">{catalogue[k]?.label ?? k}</dt>
+                    <dt className="text-xs font-medium text-subtle">{catalogue[k]?.label ?? k}</dt>
                     <dd className="mt-0.5">{renderValue(card.fields[k])}</dd>
                   </div>
                 ))}
@@ -356,7 +356,7 @@ export function CardDetailView({
           />
           <Panel>
             <h2 className="mb-2 text-sm font-semibold">Handoffs ({handoffs.length})</h2>
-            {handoffs.length === 0 && <p className="text-sm text-zinc-500">No handoffs yet.</p>}
+            {handoffs.length === 0 && <p className="text-sm text-subtle">No handoffs yet.</p>}
             <ol className="flex flex-col gap-2" data-testid="handoffs">
               {handoffs.map((h) => (
                 <li
@@ -364,9 +364,9 @@ export function CardDetailView({
                   data-testid="handoff"
                   data-stage={h.stage}
                   data-outcome={h.outcome}
-                  className="rounded-md border border-zinc-200 p-2 text-sm dark:border-zinc-800"
+                  className="rounded-control border border-line p-2 text-sm"
                 >
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-subtle">
                     {h.agentName && <Avatar name={h.agentName} size={18} />}
                     <span>{h.agentName ?? 'system'}</span>
                     <Badge tone={h.outcome === 'changes' || h.outcome === 'fail' ? 'red' : 'green'}>
@@ -392,9 +392,9 @@ export function CardDetailView({
                     <span>
                       <span className="font-medium">{t.fromStage ?? 'new'}</span> →{' '}
                       <span className="font-medium">{t.toStage}</span>{' '}
-                      <span className="text-xs text-zinc-500">({t.toStatus})</span>
+                      <span className="text-xs text-subtle">({t.toStatus})</span>
                     </span>
-                    <span className="text-xs text-zinc-500">
+                    <span className="text-xs text-subtle">
                       {t.reason} · {formatDateTime(t.at)}
                     </span>
                   </li>
@@ -407,7 +407,7 @@ export function CardDetailView({
                   >
                     <span>{t.summary}</span>
                     {t.reason && <span className="text-xs">Reason: {t.reason}</span>}
-                    <span className="text-xs text-zinc-500">
+                    <span className="text-xs text-subtle">
                       {t.actorName ? `${t.actorName} · ` : ''}
                       {formatDateTime(t.at)}
                     </span>
@@ -449,7 +449,7 @@ export function CardDetailView({
 function Meta({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   return (
     <div>
-      <dt className="text-xs font-medium text-zinc-500">{k}</dt>
+      <dt className="text-xs font-medium text-subtle">{k}</dt>
       <dd className={mono ? 'font-mono text-xs break-all' : ''}>{v}</dd>
     </div>
   );
@@ -469,7 +469,7 @@ function HandoffData({ data }: { data: Record<string, unknown> }) {
         </Badge>
       ))}
       {missed.map((m) => (
-        <span key={m} className="text-zinc-500">
+        <span key={m} className="text-subtle">
           Missed: {m}
         </span>
       ))}
@@ -497,10 +497,10 @@ function ThreadPanel({
     <Panel>
       <h2 className="mb-2 text-sm font-semibold">Thread</h2>
       <ul className="flex flex-col gap-2" data-testid="thread">
-        {thread.length === 0 && <li className="text-sm text-zinc-500">No messages yet.</li>}
+        {thread.length === 0 && <li className="text-sm text-subtle">No messages yet.</li>}
         {thread.map((m) => (
           <li key={m.id} className="text-sm">
-            <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+            <div className="flex items-center gap-1.5 text-xs text-subtle">
               {m.authorName && <Avatar name={m.authorName} size={16} />}
               <span className="font-medium">{m.authorName ?? m.authorKind}</span>
               <Badge>{m.kind}</Badge>

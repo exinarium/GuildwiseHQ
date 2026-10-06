@@ -32,14 +32,14 @@ export function PhasesPanel({ projectId }: { projectId: string }) {
             </Link>
             <span className="font-medium">{p.name}</span>
             <Badge tone={phaseTone(p.status)}>{PHASE_STATUS_LABEL[p.status]}</Badge>
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-subtle">
               {p.resolvedCount}/{p.memberCount} cards done
               {p.proposedCount > 0 ? `, ${p.proposedCount} proposed` : ''}
             </span>
           </li>
         ))}
         {phases.data?.length === 0 && (
-          <li className="text-sm text-zinc-500">
+          <li className="text-sm text-subtle">
             No phases yet. A phase groups cards you want to ship and check together, then deploys and tests
             them.
           </li>
@@ -108,13 +108,11 @@ function NewPhaseDialog({
           onChange={(e) => setDescription(e.target.value)}
         />
         <div>
-          <h3 className="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
-            Follow-ups after the phase
-          </h3>
+          <h3 className="mb-1 text-xs font-medium text-muted">Follow-ups after the phase</h3>
           <FollowupEditor value={list} onChange={setFollowups} targets={t} />
         </div>
         {err && name.trim() && (
-          <p role="alert" className="text-xs font-medium text-red-600">
+          <p role="alert" className="text-xs font-medium text-danger">
             {err}
           </p>
         )}
@@ -141,7 +139,7 @@ export function FollowupDefaultsPanel({ projectId }: { projectId: string }) {
   return (
     <Panel data-testid="followup-defaults">
       <h2 className="mb-1 text-sm font-semibold">Default follow-ups</h2>
-      <p className="mb-2 text-xs text-zinc-500">
+      <p className="mb-2 text-xs text-subtle">
         New phases start with these. Each phase can still change them until you approve.
       </p>
       <FollowupEditor value={list} onChange={setDraft} targets={t} />
@@ -156,7 +154,7 @@ export function FollowupDefaultsPanel({ projectId }: { projectId: string }) {
           Save defaults
         </Button>
         {save.isSuccess && draft === null && (
-          <span role="status" className="text-sm text-emerald-600">
+          <span role="status" className="text-sm text-success">
             Saved.
           </span>
         )}

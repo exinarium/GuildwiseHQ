@@ -34,7 +34,7 @@ export function CardNew() {
     return (
       <div>
         <PageHeader title="New card" />
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-subtle">
           Create a project first.{' '}
           <Link to="/projects" className="underline">
             Go to projects
@@ -163,7 +163,7 @@ export function CardNewForm({
         />
         {errors._form && <ErrorBox error={new Error(errors._form)} />}
         {Object.keys(errors).some((k) => k !== '_form') && (
-          <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm font-medium text-danger">
             Fix the highlighted fields.
           </p>
         )}
@@ -188,7 +188,7 @@ export function CardNewForm({
           </Button>
           <Link
             to={`/p/${projectKey}/board`}
-            className="inline-flex min-h-8 items-center px-3 text-sm text-zinc-600 underline dark:text-zinc-400"
+            className="inline-flex min-h-8 items-center px-3 text-sm text-muted underline"
           >
             Cancel
           </Link>

@@ -22,14 +22,14 @@ export function TasteRulesEditor({
   };
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
-      {rules.length === 0 && <p className="text-xs text-zinc-500">No explicit rules yet.</p>}
+      {rules.length === 0 && <p className="text-xs text-subtle">No explicit rules yet.</p>}
       <ul className="flex flex-col gap-1">
         {rules.map((r, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: rules are edited in place, so their position is their identity
           <li key={i} className="flex items-center gap-2" data-testid="taste-rule">
             <input
               aria-label={`Rule ${i + 1}`}
-              className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900"
+              className="min-w-0 flex-1 rounded-control border border-control bg-surface px-2 py-1 text-sm disabled:opacity-60"
               value={r}
               disabled={disabled}
               onChange={(e) => onChange(rules.map((x, j) => (j === i ? e.target.value : x)))}

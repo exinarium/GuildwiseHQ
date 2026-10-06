@@ -43,7 +43,7 @@ export function ListInput<T = string>({
   if (bare) {
     return (
       <input
-        className="w-32 rounded border border-zinc-300 px-1.5 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+        className="w-32 rounded border border-control px-1.5 py-1"
         {...rest}
         value={raw}
         onChange={(e) => handle(e.target.value)}

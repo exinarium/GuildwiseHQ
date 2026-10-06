@@ -29,7 +29,7 @@ import { compactRatings, describeRatings, describeScan } from '../lib/interests.
 import { formatDateTime } from '../lib/time.ts';
 
 const linkBtn =
-  'inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-3 py-1 text-sm font-medium text-zinc-800 hover:bg-zinc-50 sm:min-h-8 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800';
+  'inline-flex min-h-11 items-center justify-center rounded-control border border-control bg-surface px-3 py-1 text-sm font-medium text-fg hover:bg-sunken sm:min-h-8    ';
 
 /** Everything the manager cares about, across feed and research projects (docs/design/interests.md section 8.2). */
 export function Interests() {
@@ -135,7 +135,7 @@ export function Interests() {
 
       {adoptable > 0 && !bannerHidden && (
         <div
-          className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
+          className="flex flex-wrap items-center gap-2 rounded-control border border-warning-fill/40 bg-warning-soft px-3 py-2 text-sm text-warning-soft-fg"
           data-testid="adopt-banner"
         >
           <span className="min-w-0 flex-1">
@@ -162,7 +162,7 @@ export function Interests() {
       </ul>
       {list.data && shown.length === 0 && (
         <Panel>
-          <p className="text-sm text-zinc-500" data-testid="interests-empty">
+          <p className="text-sm text-subtle" data-testid="interests-empty">
             No interests yet. Add one with + New, or adopt the feed schedules you already have.
           </p>
         </Panel>
@@ -236,24 +236,22 @@ function InterestCard({
             Cannot run ({i.schedule?.failCount} {i.schedule?.failCount === 1 ? 'try' : 'tries'})
           </Badge>
         )}
-        <span className="ml-auto text-xs text-zinc-500" data-testid="interest-projects">
+        <span className="ml-auto text-xs text-subtle" data-testid="interest-projects">
           {i.feedProject && <span title="feed project">{i.feedProject.key} (feed)</span>}
           {i.feedProject && i.researchProject && ' · '}
           {i.researchProject && <span title="research project">{i.researchProject.key} (research)</span>}
           {i.subCategory && ` · ${i.subCategory}`}
         </span>
       </div>
-      {i.description && (
-        <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">{i.description}</p>
-      )}
+      {i.description && <p className="mt-1 line-clamp-2 text-sm text-muted">{i.description}</p>}
       {s.failing && i.schedule?.lastError && (
-        <p className="mt-1 text-xs text-red-700 dark:text-red-400">{i.schedule.lastError}</p>
+        <p className="mt-1 text-xs text-danger">{i.schedule.lastError}</p>
       )}
       <dl className="mt-2 grid gap-x-6 gap-y-1 text-sm">
         {i.feedProject && (
           <>
             <div data-testid="interest-cadence">{describeScan(i.scan)}</div>
-            <div className="text-zinc-600 dark:text-zinc-400" data-testid="interest-last-scan">
+            <div className="text-muted" data-testid="interest-last-scan">
               {s.lastScanAt ? (
                 <>
                   Last scan {formatDateTime(s.lastScanAt)}
@@ -276,7 +274,7 @@ function InterestCard({
             <div data-testid="interest-ratings">
               <span className="hidden sm:inline">Ratings {describeRatings(s.ratings)}</span>
               <span className="sm:hidden">{compactRatings(s.ratings)}</span>
-              <span className="text-zinc-500">
+              <span className="text-subtle">
                 {' '}
                 · scans 30d {s.scans30d} · items {s.items.total}
               </span>
@@ -363,12 +361,12 @@ function InterestNotes({ id }: { id: string }) {
   if (d.isPending) return <Spinner />;
   return (
     <div
-      className="mt-3 grid gap-3 border-t border-zinc-200 pt-3 text-sm sm:grid-cols-2 dark:border-zinc-800"
+      className="mt-3 grid gap-3 border-t border-line pt-3 text-sm sm:grid-cols-2"
       data-testid="interest-notes-panel"
     >
       <div>
-        <h3 className="mb-1 text-xs font-semibold text-zinc-500">Recent scans</h3>
-        {d.data?.scans.length === 0 && <p className="text-zinc-500">None yet.</p>}
+        <h3 className="mb-1 text-xs font-semibold text-subtle">Recent scans</h3>
+        {d.data?.scans.length === 0 && <p className="text-subtle">None yet.</p>}
         <ul>
           {d.data?.scans.map((s) => (
             <li key={s.cardId}>
@@ -381,8 +379,8 @@ function InterestNotes({ id }: { id: string }) {
         </ul>
       </div>
       <div>
-        <h3 className="mb-1 text-xs font-semibold text-zinc-500">Notes</h3>
-        {d.data?.publications.length === 0 && <p className="text-zinc-500">None yet.</p>}
+        <h3 className="mb-1 text-xs font-semibold text-subtle">Notes</h3>
+        {d.data?.publications.length === 0 && <p className="text-subtle">None yet.</p>}
         <ul data-testid="interest-publications">
           {d.data?.publications.map((p) => (
             <li key={p.id}>
@@ -424,7 +422,7 @@ function ProjectTasteDialog({ projectId, onClose }: { projectId: string; onClose
           <TasteRulesEditor rules={rules} onChange={setRules} testId="project-taste-rules" />
         )}
         {tagged.length > 0 && (
-          <div className="text-xs text-zinc-500">
+          <div className="text-xs text-subtle">
             <p className="font-medium">Rules of single interests (edit them on the interest)</p>
             <ul className="list-disc pl-4">
               {tagged.map((r) => (

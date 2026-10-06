@@ -137,9 +137,9 @@ export function InterestDrawer({ interest, onClose }: { interest: InterestDto | 
           <RadixDialog.Overlay className="fixed inset-0 z-40 bg-black/50" />
           <RadixDialog.Content
             data-testid="interest-drawer"
-            className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-white shadow-xl sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[480px] sm:border-l sm:border-zinc-200 dark:bg-zinc-900 dark:sm:border-zinc-700"
+            className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-surface shadow-xl sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[480px] sm:border-l sm:border-line"
           >
-            <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <div className="flex items-center justify-between border-b border-line px-4 py-3">
               <div className="min-w-0">
                 <RadixDialog.Title className="truncate text-base font-semibold">
                   {interest ? `Edit interest: ${interest.name}` : 'New interest'}
@@ -157,7 +157,7 @@ export function InterestDrawer({ interest, onClose }: { interest: InterestDto | 
 
             <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
               {readOnly && (
-                <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                <p className="rounded-control bg-warning-soft px-3 py-2 text-xs text-warning-soft-fg">
                   You are not a member of every project this interest links to, so you cannot edit it.
                 </p>
               )}
@@ -205,8 +205,8 @@ export function InterestDrawer({ interest, onClose }: { interest: InterestDto | 
                 {!interest && <option value="__new">+ New feed project</option>}
               </Select>
               {v.newFeed && (
-                <fieldset className="grid gap-2 rounded-md border border-zinc-200 p-2 sm:grid-cols-3 dark:border-zinc-800">
-                  <legend className="px-1 text-xs text-zinc-500">New feed project</legend>
+                <fieldset className="grid gap-2 rounded-control border border-line p-2 sm:grid-cols-3">
+                  <legend className="px-1 text-xs text-subtle">New feed project</legend>
                   <TextInput
                     label="Key"
                     value={v.newFeedKey}
@@ -228,7 +228,7 @@ export function InterestDrawer({ interest, onClose }: { interest: InterestDto | 
                     <option value="work">work</option>
                   </Select>
                   {errors.newFeed && (
-                    <p role="alert" className="text-xs font-medium text-red-600 sm:col-span-3">
+                    <p role="alert" className="text-xs font-medium text-danger sm:col-span-3">
                       {errors.newFeed}
                     </p>
                   )}
@@ -270,8 +270,8 @@ export function InterestDrawer({ interest, onClose }: { interest: InterestDto | 
               />
 
               {hasFeed && (
-                <fieldset className="flex flex-col gap-2 rounded-md border border-zinc-200 p-2 dark:border-zinc-800">
-                  <legend className="px-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">Scan</legend>
+                <fieldset className="flex flex-col gap-2 rounded-control border border-line p-2">
+                  <legend className="px-1 text-xs font-medium text-muted">Scan</legend>
                   <Select
                     label="When"
                     value={v.preset}
@@ -335,24 +335,24 @@ export function InterestDrawer({ interest, onClose }: { interest: InterestDto | 
                     />
                     Manual only (use Run now)
                   </label>
-                  <p className="text-xs text-zinc-500" data-testid="interest-next-run">
+                  <p className="text-xs text-subtle" data-testid="interest-next-run">
                     Next run: {nextRun}
                   </p>
                 </fieldset>
               )}
 
               {hasFeed && (
-                <fieldset className="flex flex-col gap-2 rounded-md border border-zinc-200 p-2 dark:border-zinc-800">
-                  <legend className="px-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                <fieldset className="flex flex-col gap-2 rounded-control border border-line p-2">
+                  <legend className="px-1 text-xs font-medium text-muted">
                     Taste rules for this interest
                   </legend>
                   {interest && rules === null ? (
-                    <p className="text-xs text-zinc-500">Loading rules...</p>
+                    <p className="text-xs text-subtle">Loading rules...</p>
                   ) : (
                     <TasteRulesEditor rules={rules ?? []} onChange={setRules} disabled={readOnly} />
                   )}
                   {interest && detail.data && (
-                    <p className="text-xs text-zinc-500" data-testid="taste-mirror-status">
+                    <p className="text-xs text-subtle" data-testid="taste-mirror-status">
                       {detail.data.taste.hasVault
                         ? `Mirrored to taste.md (rules version ${detail.data.taste.version}).`
                         : 'This project has no vault: the rules reach the curators through their brief only.'}
@@ -362,7 +362,7 @@ export function InterestDrawer({ interest, onClose }: { interest: InterestDto | 
               )}
 
               <fieldset className="flex items-center gap-4 text-sm">
-                <legend className="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">Status</legend>
+                <legend className="mb-1 text-xs font-medium text-muted">Status</legend>
                 {(['active', 'paused'] as const).map((s) => (
                   <label key={s} className="flex items-center gap-1.5">
                     <input
@@ -380,7 +380,7 @@ export function InterestDrawer({ interest, onClose }: { interest: InterestDto | 
               <ErrorBox error={error} />
             </div>
 
-            <div className="sticky bottom-0 flex items-center justify-between gap-2 border-t border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="sticky bottom-0 flex items-center justify-between gap-2 border-t border-line bg-surface px-4 py-3">
               <div>
                 {interest && !readOnly && (
                   <Button

@@ -31,15 +31,15 @@ export function ShiftLog({ shift }: { shift: ShiftDto }) {
       aria-label="Live shift log"
       aria-live="polite"
       data-testid="shift-log"
-      className="max-h-64 overflow-y-auto rounded-md bg-zinc-950 p-2 font-mono text-xs leading-relaxed text-zinc-200"
+      className="max-h-64 overflow-y-auto rounded-control bg-side p-2 font-mono text-xs leading-relaxed text-side-fg"
     >
-      {items.length === 0 && <p className="text-zinc-500">Waiting for output...</p>}
+      {items.length === 0 && <p className="text-side-label">Waiting for output...</p>}
       {items.map((i) => (
         <p
           key={`${i.at}|${i.text}`}
-          className={i.kind === 'tool' ? 'text-sky-300' : i.kind === 'status' ? 'text-amber-300' : ''}
+          className={i.kind === 'tool' ? 'text-[#8fc7ff]' : i.kind === 'status' ? 'text-[#f2b544]' : ''}
         >
-          <span className="text-zinc-500">{new Date(i.at).toLocaleTimeString()} </span>
+          <span className="text-side-label">{new Date(i.at).toLocaleTimeString()} </span>
           {i.text}
         </p>
       ))}

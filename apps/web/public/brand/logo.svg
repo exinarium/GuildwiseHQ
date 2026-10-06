@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 221 48" width="221" height="48" role="img" aria-label="Guildwise">
+  <title>Guildwise</title>
+  <g transform="translate(0.5 2.5) scale(0.6719)">
+    <rect width="64" height="64" rx="15" fill="#0D1220"/>
+    <rect x="0.5" y="0.5" width="63" height="63" rx="14.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.14"/>
+    <path d="M44.61 22.15A16 16 0 0 0 22.15 19.39 M19.74 21.72A16 16 0 0 0 20.89 43.51 M23.52 45.57A16 16 0 0 0 47.04 37.47" fill="none" stroke="#FFFFFF" stroke-width="6.5"/><path d="M32 32H51.25" stroke="#FFFFFF" stroke-width="6.5"/><circle cx="32" cy="32" r="5.6" fill="#D4F24A"/>
+  </g>
+  <g fill="none" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" stroke="currentColor">
+    <path d="M15 24Q15 14 8 14Q1 14 1 24Q1 34 8 34Q15 34 15 24M15 14V37Q15 42 8 42Q3 42 1.5 39" transform="translate(56.0 0)"/>
+    <path d="M0 14V27Q0 34 7.5 34Q15 34 15 27M15 14V34" transform="translate(79.5 0)"/>
+    <path d="M0 14V34" transform="translate(103.0 0)"/>
+    <circle cx="103.0" cy="7.4" r="2.3" fill="currentColor" stroke="none"/>
+    <path d="M0 8V34" transform="translate(111.5 0)"/>
+    <path d="M15 24Q15 14 8 14Q1 14 1 24Q1 34 8 34Q15 34 15 24M15 8V34" transform="translate(120.0 0)"/>
+    <path d="M0 14L5 34L10 17L15 34L20 14" transform="translate(143.5 0)"/>
+    <path d="M0 14V34" transform="translate(172.0 0)"/>
+    <circle cx="172.0" cy="7.4" r="2.3" fill="currentColor" stroke="none"/>
+    <path d="M13 18Q13 14 7.5 14Q1.5 14 1.5 18.5Q1.5 22 7.5 24Q14 26 14 29.5Q14 34 7.5 34Q1.5 34 1 30" transform="translate(180.5 0)"/>
+    <path d="M1 24H15Q15 14 8 14Q1 14 1 24Q1 34 8 34Q13 34 15 30" transform="translate(203.0 0)"/>
+  </g>
+</svg>

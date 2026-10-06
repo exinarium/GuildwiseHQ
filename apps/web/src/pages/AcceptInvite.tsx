@@ -19,13 +19,10 @@ export function AcceptInvite() {
     return (
       <div className="mx-auto max-w-sm p-4">
         <h1 className="text-lg font-semibold">Invitation unavailable</h1>
-        <p className="mt-2 text-sm text-zinc-500">
+        <p className="mt-2 text-sm text-subtle">
           This invitation link is invalid, expired, or already used. Ask your admin for a new one.
         </p>
-        <Link
-          to="/login"
-          className="mt-3 inline-block text-sm text-indigo-600 underline dark:text-indigo-400"
-        >
+        <Link to="/login" className="mt-3 inline-block text-sm text-brand-text underline">
           Go to sign in
         </Link>
       </div>
@@ -52,7 +49,7 @@ export function AcceptInvite() {
     <div className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-4 p-4">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Accept invitation</h1>
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-subtle">
           Creating an account for <strong>{info.data.email}</strong>
         </p>
       </div>

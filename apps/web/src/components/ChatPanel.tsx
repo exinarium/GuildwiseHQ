@@ -106,13 +106,13 @@ export function ChatPanel({
         <p
           role="alert"
           data-testid="chat-offline"
-          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+          className="rounded-control border border-warning-fill/40 bg-warning-soft px-3 py-2 text-sm text-warning-soft-fg"
         >
           {name} is offline: its workstation is not connected. Messages are not queued.
         </p>
       )}
       {chat?.projectId && (
-        <p className="text-xs text-zinc-500" data-testid="chat-visibility">
+        <p className="text-xs text-subtle" data-testid="chat-visibility">
           This conversation is visible to this project's managers.
         </p>
       )}
@@ -120,10 +120,10 @@ export function ChatPanel({
         ref={log}
         role="log"
         aria-label="Conversation"
-        className="min-h-40 flex-1 overflow-y-auto rounded-md border border-zinc-200 p-2 dark:border-zinc-800"
+        className="min-h-40 flex-1 overflow-y-auto rounded-control border border-line p-2"
       >
         {list.length === 0 && !showPending && streaming === null && (
-          <p className="text-sm text-zinc-500">Say hello to {name ?? 'the agent'}.</p>
+          <p className="text-sm text-subtle">Say hello to {name ?? 'the agent'}.</p>
         )}
         <ul className="flex flex-col gap-2">
           {list.map((m) => (
@@ -131,14 +131,12 @@ export function ChatPanel({
               key={m.id}
               data-testid="chat-message"
               data-author-kind={m.authorKind}
-              className={`max-w-[92%] rounded-lg px-3 py-2 text-sm ${
-                m.authorKind === 'user'
-                  ? 'self-end bg-indigo-600 text-white'
-                  : 'self-start bg-zinc-100 dark:bg-zinc-800'
+              className={`max-w-[92%] rounded-card px-3 py-2 text-sm ${
+                m.authorKind === 'user' ? 'self-end bg-brand text-white' : 'self-start bg-sunken '
               }`}
             >
               {m.authorKind === 'agent' && (
-                <span className="mb-0.5 flex items-center gap-1 text-xs font-medium text-zinc-500">
+                <span className="mb-0.5 flex items-center gap-1 text-xs font-medium text-subtle">
                   <Avatar name={m.authorName ?? 'agent'} size={16} />
                   {m.authorName}
                 </span>
@@ -150,7 +148,7 @@ export function ChatPanel({
             <li
               data-testid="chat-message"
               data-author-kind="user"
-              className="max-w-[92%] self-end rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white"
+              className="max-w-[92%] self-end rounded-card bg-brand px-3 py-2 text-sm text-white"
             >
               <p className="whitespace-pre-wrap">{pending.body}</p>
             </li>
@@ -159,7 +157,7 @@ export function ChatPanel({
             <li
               data-testid="chat-streaming"
               aria-live="polite"
-              className="max-w-[92%] self-start rounded-lg bg-zinc-100 px-3 py-2 text-sm dark:bg-zinc-800"
+              className="max-w-[92%] self-start rounded-card bg-sunken px-3 py-2 text-sm"
             >
               <p className="whitespace-pre-wrap">{streaming || '…'}</p>
             </li>
@@ -167,11 +165,7 @@ export function ChatPanel({
         </ul>
       </div>
       {error && (
-        <p
-          role="alert"
-          data-testid="chat-error"
-          className="text-sm font-medium text-red-600 dark:text-red-400"
-        >
+        <p role="alert" data-testid="chat-error" className="text-sm font-medium text-danger">
           {chatErrorText(error)}
         </p>
       )}

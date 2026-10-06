@@ -32,7 +32,7 @@ export function ChatDrawer({
         <RadixDialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
         <RadixDialog.Content
           aria-label="Chat"
-          className="fixed inset-y-0 right-0 z-50 flex w-full flex-col gap-3 border-l border-zinc-200 bg-white p-4 shadow-xl sm:w-[28rem] dark:border-zinc-700 dark:bg-zinc-900"
+          className="fixed inset-y-0 right-0 z-50 flex w-full flex-col gap-3 border-l border-line bg-surface p-4 shadow-xl sm:w-[28rem]"
         >
           <div className="flex items-center justify-between">
             <RadixDialog.Title className="text-base font-semibold">Chat</RadixDialog.Title>
@@ -76,7 +76,7 @@ export function ChatDrawer({
               </form>
               {(chats.data?.length ?? 0) > 0 && (
                 <div>
-                  <h3 className="mb-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase">
+                  <h3 className="mb-1 text-xs font-semibold tracking-wide text-subtle uppercase">
                     Earlier conversations
                   </h3>
                   <ul className="flex flex-col gap-1" data-testid="chat-list">
@@ -85,7 +85,7 @@ export function ChatDrawer({
                         <button
                           type="button"
                           onClick={() => setThreadId(c.threadId)}
-                          className="flex w-full items-center gap-2 rounded-md border border-zinc-200 px-2 py-1.5 text-left text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800"
+                          className="flex w-full items-center gap-2 rounded-control border border-line px-2 py-1.5 text-left text-sm hover:bg-sunken"
                         >
                           <Avatar name={c.agentName} size={20} />
                           <span className="flex-1 truncate">{c.agentName}</span>

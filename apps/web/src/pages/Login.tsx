@@ -50,7 +50,7 @@ export function Login() {
     <div className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-4 p-4">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Sign in</h1>
-        <p className="text-sm text-zinc-500">Agent Org Manager</p>
+        <p className="text-sm text-subtle">Agent Org Manager</p>
       </div>
       <form onSubmit={submit} noValidate className="flex flex-col gap-3" aria-label="Sign in">
         <TextInput
@@ -72,7 +72,7 @@ export function Login() {
           error={errors.password}
         />
         {failure && (
-          <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm font-medium text-danger">
             {failure}
           </p>
         )}

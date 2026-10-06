@@ -51,7 +51,7 @@ export function CardPhase({
             )}
           </>
         ) : (
-          <span className="text-zinc-500">No phase</span>
+          <span className="text-subtle">No phase</span>
         )}
       </div>
       <Select
@@ -71,7 +71,7 @@ export function CardPhase({
         ))}
       </Select>
       {reason && (
-        <p className="text-xs text-zinc-500" data-testid="card-phase-reason">
+        <p className="text-xs text-subtle" data-testid="card-phase-reason">
           {reason}
         </p>
       )}

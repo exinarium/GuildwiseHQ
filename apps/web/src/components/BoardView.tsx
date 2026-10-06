@@ -19,9 +19,9 @@ export function CardTile({ card, now, projectId }: { card: BoardCard; now?: numb
         to={`/cards/${card.id}`}
         data-testid={`card-tile-${card.ref}`}
         aria-label={`${card.ref} ${card.title}`}
-        className="block rounded-md border border-zinc-200 bg-white p-2 text-sm shadow-sm hover:border-indigo-500 dark:border-zinc-800 dark:bg-zinc-900"
+        className="block rounded-control border border-line bg-surface p-2 text-sm shadow-sm hover:border-brand"
       >
-        <div className="flex items-center justify-between gap-2 text-xs text-zinc-500">
+        <div className="flex items-center justify-between gap-2 text-xs text-subtle">
           <span className="font-mono font-medium">{card.ref}</span>
           <span title={`Updated ${card.updatedAt}`}>{ageLabel(card.updatedAt, now)}</span>
         </div>
@@ -35,7 +35,7 @@ export function CardTile({ card, now, projectId }: { card: BoardCard; now?: numb
               {card.assignee.name}
             </span>
           ) : (
-            <span className="text-xs text-zinc-400">Unassigned</span>
+            <span className="text-xs text-subtle">Unassigned</span>
           )}
           {card.riskTier && (
             <Badge tone={card.riskTier === 'large' ? 'amber' : 'neutral'} title="Risk tier">
@@ -102,13 +102,11 @@ export function BoardView({ board, now }: { board: BoardResponse; now?: number }
           key={col.name}
           aria-label={col.name}
           data-testid={`column-${col.name}`}
-          className="flex w-64 shrink-0 flex-col rounded-lg bg-zinc-100/70 p-2 dark:bg-zinc-900/60"
+          className="flex w-64 shrink-0 flex-col rounded-card bg-sunken/70 p-2"
         >
-          <h2 className="mb-2 flex items-center justify-between px-1 text-xs font-semibold tracking-wide text-zinc-600 uppercase dark:text-zinc-400">
+          <h2 className="mb-2 flex items-center justify-between px-1 text-xs font-semibold tracking-wide text-muted uppercase">
             {col.name}
-            <span className="rounded bg-zinc-200 px-1.5 text-[11px] dark:bg-zinc-800">
-              {col.cards.length}
-            </span>
+            <span className="rounded bg-sunken px-1.5 text-xs">{col.cards.length}</span>
           </h2>
           <ul className="flex flex-col gap-2">
             {col.cards.map((c) => (

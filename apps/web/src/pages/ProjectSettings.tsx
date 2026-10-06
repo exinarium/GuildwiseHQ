@@ -114,7 +114,7 @@ export function ProjectSettings() {
             Save settings
           </Button>
           {patch.isSuccess && (
-            <p role="status" className="text-sm text-emerald-600">
+            <p role="status" className="text-sm text-success">
               Saved.
             </p>
           )}
@@ -124,7 +124,7 @@ export function ProjectSettings() {
         <Panel>
           <h2 className="mb-2 text-sm font-semibold">Repositories</h2>
           {!traits.usesRepos && (
-            <p className="mb-2 text-sm text-zinc-500">
+            <p className="mb-2 text-sm text-subtle">
               This workflow needs no repository. Existing ones are listed so you can remove them.
             </p>
           )}
@@ -134,7 +134,7 @@ export function ProjectSettings() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span>
                     <span className="font-medium">{r.name}</span>{' '}
-                    <span className="font-mono text-xs text-zinc-500 break-all">{r.remoteUrl}</span>
+                    <span className="font-mono text-xs text-subtle break-all">{r.remoteUrl}</span>
                   </span>
                   <Button
                     variant="ghost"
@@ -149,7 +149,7 @@ export function ProjectSettings() {
                 )}
               </li>
             ))}
-            {activeRepos.length === 0 && <li className="text-sm text-zinc-500">No repositories yet.</li>}
+            {activeRepos.length === 0 && <li className="text-sm text-subtle">No repositories yet.</li>}
           </ul>
           {traits.usesRepos && (
             <form onSubmit={add} noValidate aria-label="Add repository" className="grid gap-3 sm:grid-cols-3">

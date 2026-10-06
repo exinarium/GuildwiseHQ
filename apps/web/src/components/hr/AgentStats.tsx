@@ -89,7 +89,7 @@ export function AgentStats({ stats, roleName }: { stats: AgentStatsDto; roleName
       data-testid="agent-stats"
       aria-label={`Stats over ${stats.windowDays} days against the ${roleName} average`}
     >
-      <div className="mb-1 flex items-center justify-between text-xs text-zinc-500">
+      <div className="mb-1 flex items-center justify-between text-xs text-subtle">
         <span>
           {stats.windowDays}-day window, against the {roleName} average
         </span>
@@ -103,12 +103,12 @@ export function AgentStats({ stats, roleName }: { stats: AgentStatsDto; roleName
           const dir = versusTeam(r.stat, r.lowerIsBetter);
           return (
             <div key={r.key} data-testid={`stat-${r.key}`} title={r.meaning}>
-              <dt className="text-xs text-zinc-500">{r.label}</dt>
+              <dt className="text-xs text-subtle">{r.label}</dt>
               <dd className="m-0">
                 <span className="text-sm font-semibold tabular-nums" data-testid="stat-value">
                   {r.fmt(r.stat.value)}
                 </span>
-                <span className="ml-1 text-xs text-zinc-500" data-testid="stat-team">
+                <span className="ml-1 text-xs text-subtle" data-testid="stat-team">
                   team {r.fmt(r.stat.team)}
                 </span>
                 {r.max !== null && (
@@ -133,24 +133,24 @@ export function WorkQualityPanel({ quality }: { quality: WorkQuality }) {
   const q = quality;
   const scored = q.reviewCount > 0;
   return (
-    <div data-testid="work-quality" className="rounded-md bg-zinc-50 p-2 text-sm dark:bg-zinc-800/60">
-      <p className="mb-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase">Work quality</p>
+    <div data-testid="work-quality" className="rounded-control bg-sunken p-2 text-sm">
+      <p className="mb-1 text-xs font-semibold tracking-wide text-subtle uppercase">Work quality</p>
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
         <div
           data-testid="quality-score"
           title="Reviewer score 1 to 5 against the spec and conventions, rolling average"
         >
-          <dt className="text-xs text-zinc-500">Reviewer score</dt>
+          <dt className="text-xs text-subtle">Reviewer score</dt>
           <dd className="m-0 font-semibold tabular-nums">
             {scored ? `${q.reviewScoreAvg?.toFixed(1)} of 5` : '–'}
-            {scored && <span className="ml-1 text-xs font-normal text-zinc-500">({q.reviewCount})</span>}
+            {scored && <span className="ml-1 text-xs font-normal text-subtle">({q.reviewCount})</span>}
           </dd>
         </div>
         <div data-testid="quality-rounds" title="One bounce is normal, three on the same card is a pattern">
-          <dt className="text-xs text-zinc-500">Rework rounds per card</dt>
+          <dt className="text-xs text-subtle">Rework rounds per card</dt>
           <dd className="m-0 font-semibold tabular-nums">
             {num(q.reworkRoundsPerCard.avg)}
-            <span className="ml-1 text-xs font-normal text-zinc-500">
+            <span className="ml-1 text-xs font-normal text-subtle">
               max {q.reworkRoundsPerCard.max}
               {q.reworkRoundsPerCard.cardsWithThreeOrMore > 0 &&
                 `, ${q.reworkRoundsPerCard.cardsWithThreeOrMore} with 3+`}
@@ -158,11 +158,11 @@ export function WorkQualityPanel({ quality }: { quality: WorkQuality }) {
           </dd>
         </div>
         <div data-testid="quality-bugs" title="Test failures and later regressions traced back to its cards">
-          <dt className="text-xs text-zinc-500">Bugs escaped</dt>
+          <dt className="text-xs text-subtle">Bugs escaped</dt>
           <dd className="m-0 font-semibold tabular-nums">{q.bugsEscaped}</dd>
         </div>
         <div data-testid="quality-criteria" title="Acceptance criteria the reviewer found unmet at handoff">
-          <dt className="text-xs text-zinc-500">Criteria missed</dt>
+          <dt className="text-xs text-subtle">Criteria missed</dt>
           <dd className="m-0 font-semibold tabular-nums">{q.criteriaMissed}</dd>
         </div>
         <div
@@ -170,7 +170,7 @@ export function WorkQualityPanel({ quality }: { quality: WorkQuality }) {
           className="col-span-2"
           title="Whether the builder wrote or updated tests with the code"
         >
-          <dt className="text-xs text-zinc-500">Test coverage of its changes</dt>
+          <dt className="text-xs text-subtle">Test coverage of its changes</dt>
           <dd className="m-0 font-semibold tabular-nums">
             {q.testCoverage.cardsMeasured > 0
               ? `${pct(q.testCoverage.rate)} (${q.testCoverage.cardsWithTests} of ${q.testCoverage.cardsMeasured} cards)`
@@ -179,9 +179,9 @@ export function WorkQualityPanel({ quality }: { quality: WorkQuality }) {
         </div>
       </dl>
       <div className="mt-2" data-testid="quality-reasons">
-        <p className="text-xs text-zinc-500">Rework by reason</p>
+        <p className="text-xs text-subtle">Rework by reason</p>
         {q.reworkByReason.length === 0 ? (
-          <p className="text-xs text-zinc-500">No review bounces.</p>
+          <p className="text-xs text-subtle">No review bounces.</p>
         ) : (
           <ul className="mt-0.5 flex flex-col gap-0.5">
             {q.reworkByReason.map((r) => (
@@ -193,7 +193,7 @@ export function WorkQualityPanel({ quality }: { quality: WorkQuality }) {
                 <span>
                   {REWORK_REASON_LABEL[r.reason]}
                   {!countsAgainstBuilder(r.reason) && (
-                    <span className="ml-1 text-zinc-500">(not counted against the builder)</span>
+                    <span className="ml-1 text-subtle">(not counted against the builder)</span>
                   )}
                 </span>
                 <span className="tabular-nums">{r.count}</span>

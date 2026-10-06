@@ -203,13 +203,13 @@ function Members({ phase }: { phase: PhaseDetailDto }) {
         Cards ({phase.resolvedCount}/{phase.memberCount} done
         {phase.proposedCount ? `, ${phase.proposedCount} proposed` : ''})
       </h2>
-      <p className="mb-2 text-xs text-zinc-500">
+      <p className="mb-2 text-xs text-subtle">
         The phase is complete when every card is finalized and its work is in the working branch, closed or
         cancelled.
       </p>
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-xs text-zinc-500">
+          <tr className="text-left text-xs text-subtle">
             <th className="py-1 pr-2">Card</th>
             <th className="py-1 pr-2">State</th>
             <th className="py-1 pr-2">Result</th>
@@ -218,11 +218,7 @@ function Members({ phase }: { phase: PhaseDetailDto }) {
         </thead>
         <tbody>
           {phase.members.map((m) => (
-            <tr
-              key={m.cardId}
-              data-testid={`member-${m.ref}`}
-              className="border-t border-zinc-100 dark:border-zinc-800"
-            >
+            <tr key={m.cardId} data-testid={`member-${m.ref}`} className="border-t border-line">
               <td className="py-1 pr-2">
                 <Link to={`/cards/${m.cardId}`} className="underline">
                   {m.ref}
@@ -238,7 +234,7 @@ function Members({ phase }: { phase: PhaseDetailDto }) {
               </td>
               <td className="py-1 pr-2">
                 {m.status}
-                <span className="text-xs text-zinc-500"> · {m.stage}</span>
+                <span className="text-xs text-subtle"> · {m.stage}</span>
               </td>
               <td className="py-1 pr-2 text-xs">
                 {m.outcome ? OUTCOME_LABEL[m.outcome] : '-'}
@@ -286,7 +282,7 @@ function Members({ phase }: { phase: PhaseDetailDto }) {
           ))}
           {phase.members.length === 0 && (
             <tr>
-              <td colSpan={4} className="py-2 text-sm text-zinc-500">
+              <td colSpan={4} className="py-2 text-sm text-subtle">
                 No cards yet.
               </td>
             </tr>
@@ -349,7 +345,7 @@ function Followups({
               Save follow-ups
             </Button>
             {phase.status === 'awaiting_approval' && (
-              <span className="text-xs text-zinc-500">Approve them on the desk once you are happy.</span>
+              <span className="text-xs text-subtle">Approve them on the desk once you are happy.</span>
             )}
           </div>
         </>
@@ -369,13 +365,13 @@ function Thread({ threadId }: { threadId: string }) {
       <ul className="flex flex-col gap-1.5 text-sm" data-testid="phase-thread">
         {messages.map((m) => (
           <li key={m.id}>
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-subtle">
               {formatDateTime(m.createdAt)} · {m.authorName ?? m.authorKind}:{' '}
             </span>
             <span className="whitespace-pre-wrap">{m.body}</span>
           </li>
         ))}
-        {messages.length === 0 && <li className="text-zinc-500">Nothing yet.</li>}
+        {messages.length === 0 && <li className="text-subtle">Nothing yet.</li>}
       </ul>
     </Panel>
   );

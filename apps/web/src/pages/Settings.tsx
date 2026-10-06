@@ -31,7 +31,7 @@ export function Settings() {
 
       <Panel>
         <h2 className="text-sm font-semibold">Your time zone</h2>
-        <p className="mt-1 text-xs text-zinc-500">
+        <p className="mt-1 text-xs text-subtle">
           The daily floor report is posted at {prefs?.dailyAt} on your clock. We took it from your browser the
           first time you signed in. Until a zone is set, reports use UTC.
         </p>
@@ -60,7 +60,7 @@ export function Settings() {
 
       <Panel>
         <h2 className="text-sm font-semibold">Your BA reports to you</h2>
-        <p className="mt-1 text-xs text-zinc-500">
+        <p className="mt-1 text-xs text-subtle">
           With routing on, what agents raise goes to your BA first. Urgent blocking questions and approvals
           still reach you at once (the BA adds context afterwards), and anything the BA has not looked at
           within ten minutes reaches you unchanged.
@@ -79,7 +79,7 @@ export function Settings() {
           />
           <span>
             Route agent-raised items through the BA first
-            <span className="block text-xs text-zinc-500">
+            <span className="block text-xs text-subtle">
               Off: everything lands on your desk as it is raised.
             </span>
           </span>
@@ -107,7 +107,7 @@ export function Settings() {
             Save time
           </Button>
         </form>
-        <p className="mt-2 text-xs text-zinc-500">
+        <p className="mt-2 text-xs text-subtle">
           Urgent notices are never held for this time; they reach you at any hour.
         </p>
       </Panel>

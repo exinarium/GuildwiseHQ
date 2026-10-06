@@ -30,7 +30,7 @@ export function MembersPanel({
   return (
     <Panel>
       <h2 className="mb-2 text-sm font-semibold">Members</h2>
-      <p className="mb-2 text-xs text-zinc-500">
+      <p className="mb-2 text-xs text-subtle">
         Invited users join this project as additional managers once they accept: they see its board and desk
         and can hire agents for it onto their own workstations. Everything else of theirs stays private.
       </p>
@@ -43,7 +43,7 @@ export function MembersPanel({
             className="flex flex-wrap items-center gap-2"
           >
             <span>
-              {m.displayName} <span className="text-zinc-500">({m.email})</span>
+              {m.displayName} <span className="text-subtle">({m.email})</span>
             </span>
             <Badge>{m.role}</Badge>
             {m.status === 'invited' && <Badge tone="amber">pending</Badge>}
@@ -113,13 +113,13 @@ function RemoveDialog({
           <section>
             <p className="font-medium">Agents you inherit ({p.agents.length})</p>
             {p.agents.length === 0 ? (
-              <p className="text-zinc-500">None.</p>
+              <p className="text-subtle">None.</p>
             ) : (
               <ul className="list-disc pl-5">
                 {p.agents.map((a) => (
                   <li key={a.id}>
                     {a.name}{' '}
-                    <span className="text-zinc-500">
+                    <span className="text-subtle">
                       ({a.roleKey}
                       {a.workstationName ? ` on ${a.workstationName}` : ''})
                     </span>
@@ -132,7 +132,7 @@ function RemoveDialog({
           <section>
             <p className="font-medium">Cards released to the queue ({p.releasedCards.length})</p>
             {p.releasedCards.length === 0 ? (
-              <p className="text-zinc-500">None. Released cards keep their last handoff.</p>
+              <p className="text-subtle">None. Released cards keep their last handoff.</p>
             ) : (
               <ul className="list-disc pl-5">
                 {p.releasedCards.map((c) => (
@@ -146,12 +146,12 @@ function RemoveDialog({
           <section>
             <p className="font-medium">Cards that become yours ({p.transferredCards.length})</p>
             {p.transferredCards.length === 0 ? (
-              <p className="text-zinc-500">None.</p>
+              <p className="text-subtle">None.</p>
             ) : (
               <ul className="list-disc pl-5">
                 {p.transferredCards.map((c) => (
                   <li key={c.ref}>
-                    {c.ref} {c.title} <span className="text-zinc-500">({c.status})</span>
+                    {c.ref} {c.title} <span className="text-subtle">({c.status})</span>
                   </li>
                 ))}
               </ul>

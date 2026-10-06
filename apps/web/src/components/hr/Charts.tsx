@@ -27,7 +27,7 @@ export function Sparkline({
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
-      className="text-indigo-600 dark:text-indigo-400"
+      className="text-brand-text"
     >
       <title>{label}</title>
       {values.map((v, i) => {
@@ -64,21 +64,13 @@ export function CompareBar({
 }) {
   const w = (n: number) => `${Math.max(0, Math.min(100, (n / max) * 100))}%`;
   return (
-    <div
-      role="img"
-      aria-label={label}
-      title={label}
-      className="relative h-1.5 w-full rounded-full bg-zinc-200 dark:bg-zinc-700"
-    >
+    <div role="img" aria-label={label} title={label} className="relative h-1.5 w-full rounded-full bg-sunken">
       {value !== null && (
-        <div
-          className="absolute inset-y-0 left-0 rounded-full bg-indigo-600 dark:bg-indigo-400"
-          style={{ width: w(value) }}
-        />
+        <div className="absolute inset-y-0 left-0 rounded-full bg-brand" style={{ width: w(value) }} />
       )}
       {team !== null && (
         <div
-          className="absolute -top-0.5 h-2.5 w-0.5 bg-zinc-800 dark:bg-zinc-100"
+          className="absolute -top-0.5 h-2.5 w-0.5 bg-sunken"
           style={{ left: w(team) }}
           data-testid="team-tick"
         />
@@ -113,7 +105,7 @@ export function BarChart({
         aria-label={`${caption}: ${data.map((d) => `${d.label} ${format ? format(d.value) : d.value}`).join(', ')}`}
         viewBox={`0 0 100 ${height}`}
         preserveAspectRatio="none"
-        className="w-full text-indigo-600 dark:text-indigo-400"
+        className="w-full text-brand-text"
         style={{ height }}
       >
         <title>{caption}</title>
@@ -160,10 +152,10 @@ export function HBars({
     <ul aria-label={caption} className="flex flex-col gap-1.5">
       {data.map((d) => (
         <li key={d.label} className="grid grid-cols-[7rem_1fr_3.5rem] items-center gap-2 text-sm">
-          <span className="truncate text-zinc-600 dark:text-zinc-400">{d.label}</span>
-          <span className="h-2 rounded-full bg-zinc-200 dark:bg-zinc-700" aria-hidden="true">
+          <span className="truncate text-muted">{d.label}</span>
+          <span className="h-2 rounded-full bg-sunken" aria-hidden="true">
             <span
-              className="block h-2 rounded-full bg-indigo-600 dark:bg-indigo-400"
+              className="block h-2 rounded-full bg-brand"
               style={{ width: `${(d.value / max) * 100}%` }}
             />
           </span>
@@ -187,9 +179,9 @@ export function Stat({
 }) {
   return (
     <div data-testid={testId}>
-      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="text-xs text-subtle">{label}</p>
       <p className="text-xl font-semibold tabular-nums">{value}</p>
-      {sub && <p className="text-xs text-zinc-500">{sub}</p>}
+      {sub && <p className="text-xs text-subtle">{sub}</p>}
     </div>
   );
 }

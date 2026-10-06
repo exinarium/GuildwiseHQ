@@ -52,7 +52,7 @@ export function DeployTargetsPanel({ projectId }: { projectId: string }) {
   return (
     <Panel data-testid="deploy-targets">
       <h2 className="mb-1 text-sm font-semibold">Deploy targets</h2>
-      <p className="mb-2 text-xs text-zinc-500">
+      <p className="mb-2 text-xs text-subtle">
         Where a phase can be deployed. No passwords or keys are stored here: SSH keys and Docker stay on the
         workstation of the DevOps engineer that deploys.
       </p>
@@ -64,8 +64,8 @@ export function DeployTargetsPanel({ projectId }: { projectId: string }) {
               <Badge>
                 {t.kind === 'local_docker' ? 'local Docker (every member workstation)' : `ssh ${t.host}`}
               </Badge>{' '}
-              {t.workstationName && <span className="text-xs text-zinc-500">via {t.workstationName}</span>}{' '}
-              {t.appUrl && <span className="font-mono text-xs text-zinc-500">{t.appUrl}</span>}
+              {t.workstationName && <span className="text-xs text-subtle">via {t.workstationName}</span>}{' '}
+              {t.appUrl && <span className="font-mono text-xs text-subtle">{t.appUrl}</span>}
             </span>
             <Button
               variant="ghost"
@@ -76,7 +76,7 @@ export function DeployTargetsPanel({ projectId }: { projectId: string }) {
             </Button>
           </li>
         ))}
-        {targets.data?.length === 0 && <li className="text-sm text-zinc-500">No deploy targets yet.</li>}
+        {targets.data?.length === 0 && <li className="text-sm text-subtle">No deploy targets yet.</li>}
       </ul>
       <form onSubmit={submit} noValidate aria-label="Add deploy target" className="grid gap-3 sm:grid-cols-2">
         <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} error={err.name} />

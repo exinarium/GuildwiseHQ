@@ -55,7 +55,7 @@ export function Schedules() {
       </ul>
       {schedules.data?.length === 0 && (
         <Panel>
-          <p className="text-sm text-zinc-500" data-testid="schedules-empty">
+          <p className="text-sm text-subtle" data-testid="schedules-empty">
             No schedules yet. Create a project with the Feed workflow, then schedule its scan below.
           </p>
         </Panel>
@@ -90,39 +90,39 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
         )}
       </div>
       {(s.failCount ?? 0) > 0 && s.lastError && (
-        <p className="mt-1 text-xs text-red-700 dark:text-red-400" data-testid="schedule-error">
+        <p className="mt-1 text-xs text-danger" data-testid="schedule-error">
           {s.lastError} Retrying with growing pauses.
         </p>
       )}
       <dl className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
         <div>
-          <dt className="text-xs text-zinc-500">When</dt>
+          <dt className="text-xs text-subtle">When</dt>
           <dd data-testid="schedule-when">
-            {describeCron(s.cron)} <span className="text-zinc-500">({s.timezone})</span>
+            {describeCron(s.cron)} <span className="text-subtle">({s.timezone})</span>
           </dd>
         </div>
         <div>
-          <dt className="text-xs text-zinc-500">Next run</dt>
+          <dt className="text-xs text-subtle">Next run</dt>
           <dd data-testid="schedule-next">{s.nextFireAt ? formatDateTime(s.nextFireAt) : 'not scheduled'}</dd>
         </div>
         <div>
-          <dt className="text-xs text-zinc-500">Topic</dt>
+          <dt className="text-xs text-subtle">Topic</dt>
           <dd>{topic ?? s.cardTemplate.title}</dd>
         </div>
         <div>
-          <dt className="text-xs text-zinc-500">Max items</dt>
+          <dt className="text-xs text-subtle">Max items</dt>
           <dd data-testid="schedule-max-items">{feedMaxItems(fields)}</dd>
         </div>
         {description && (
           <div className="sm:col-span-2">
-            <dt className="text-xs text-zinc-500">Description</dt>
+            <dt className="text-xs text-subtle">Description</dt>
             <dd className="whitespace-pre-wrap" data-testid="schedule-description">
               {description}
             </dd>
           </div>
         )}
         <div>
-          <dt className="text-xs text-zinc-500">Last run</dt>
+          <dt className="text-xs text-subtle">Last run</dt>
           <dd data-testid="schedule-last">{s.lastFiredAt ? formatDateTime(s.lastFiredAt) : 'never'}</dd>
         </div>
       </dl>
@@ -217,7 +217,7 @@ function NewSchedule({ projects }: { projects: ProjectDto[] }) {
   return (
     <Panel>
       <h2 className="mb-2 text-sm font-semibold">New feed schedule</h2>
-      <p className="mb-2 text-xs text-zinc-500" data-testid="schedules-interests-hint">
+      <p className="mb-2 text-xs text-subtle" data-testid="schedules-interests-hint">
         Feeds are easier to manage as{' '}
         <Link to="/interests" className="underline">
           Interests
@@ -225,7 +225,7 @@ function NewSchedule({ projects }: { projects: ProjectDto[] }) {
         : one place for the topic, its scan, your taste rules and its notes.
       </p>
       {projects.length === 0 ? (
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-subtle">
           You own no project with the Feed workflow.{' '}
           <Link to="/projects" className="underline">
             Create one
@@ -293,7 +293,7 @@ function NewSchedule({ projects }: { projects: ProjectDto[] }) {
           />
           <div className="flex flex-col gap-2 sm:col-span-2">
             {err && (
-              <p role="alert" className="text-xs font-medium text-red-600">
+              <p role="alert" className="text-xs font-medium text-danger">
                 {err}
               </p>
             )}
