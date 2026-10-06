@@ -534,7 +534,7 @@ Built in the order of section 13, with the provisional decisions above (any memb
 **Deferred or different from the plan**
 
 - The "version skew" guard (skip the section write for a runner older than this feature, and say "update the runner" in the drawer) is not built: the runner version is a constant (`0.1.0`) that cannot tell old from new. An old runner rejects the write; only the `taste.md` mirror is late, the brief still carries the rules.
-- The drawer shows whether the project has a vault ("Mirrored to taste.md (rules version N)" or "no vault: brief only"); it does not know whether the runner has already written that version, because a completed `vault.write` is not an event. The resync endpoint exists (`POST /api/projects/:id/taste-seed/resync`) but has no button yet.
+- The drawer shows whether the project has a vault ("Mirrored to taste.md (rules version N)" or "no vault: brief only"); it does not know whether the runner has already written that version, because a completed `vault.write` is not an event. The resync endpoint (`POST /api/projects/:id/taste-seed/resync`) now has a "Resync taste.md" button in the project taste rules dialog.
 - `Notes` opens an inline panel of recent scans and published notes on the card instead of a separate `#notes` route; `/interests?open=<id>` opens the edit panel.
 - The optional `ifUpdatedAt` precondition (409 `stale_interest`) is not built; concurrent edits are last-write-wins with the drawer refetching on open.
 - "Make explicit" on rating lines and approved rule proposals (open question 9) stays out of scope.

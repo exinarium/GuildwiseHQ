@@ -131,7 +131,7 @@ test('AC1: the time zone comes from the browser at first login; routing is on by
   await page.screenshot({ path: join(paths.vaults, 'reporter-settings.png'), fullPage: true });
 });
 
-test('AC2: an approval reaches the desk at once; the BA adds context afterwards', async () => {
+test('AC2: an approval reaches the desk at once, and a plain approval gets no BA note', async () => {
   await createCard('Needs docker', { build: ['devops_install'] });
   const item = await waitFor(
     'the DevOps approval is on the desk',
@@ -150,14 +150,14 @@ test('AC2: an approval reaches the desk at once; the BA adds context afterwards'
   await page.goto('/desk');
   const art = page.getByRole('article', { name: 'DevOps needs approval: install docker' });
   await expect(art).toBeVisible();
-  // the mock BA's note arrives later (an urgent_note task)
-  await expect(art.getByTestId('ba-note')).toContainText('mock note: the BA saw', { timeout: 60_000 });
-  await page.screenshot({ path: join(paths.vaults, 'reporter-urgent-note.png'), fullPage: true });
+  // The BA only adds a note where it adds value (loops, repeated approvals, escalations): a plain approval gets none,
+  // so no urgent_note task is queued for it (owner decision, 2026-10-06).
+  await page.waitForTimeout(4_000);
+  await expect(art.getByTestId('ba-note')).toHaveCount(0);
   expect(
-    (await q(`SELECT status FROM ba_tasks WHERE kind='urgent_note' ORDER BY created_at`)).map(
-      (t: any) => t.status,
-    ),
-  ).toContain('done');
+    (await q(`SELECT 1 FROM ba_tasks WHERE kind='urgent_note' AND org_id=${ORG}`, [REPORTER.email])).length,
+  ).toBe(0);
+  await page.screenshot({ path: join(paths.vaults, 'reporter-urgent-note.png'), fullPage: true });
 });
 
 test('AC3: a card whose shifts keep failing: the loop breaker holds it back and the BA analyses the loop on its alert', async () => {

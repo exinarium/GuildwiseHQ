@@ -1,7 +1,7 @@
 import { type AgentDto, type HrAgent, NAME_THEMES } from '@aom/shared';
 import { Users } from 'lucide-react';
-import { type FormEvent, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router';
 import {
   useAgents,
   useFire,
@@ -75,6 +75,12 @@ export function Agents() {
   const reset = useResetAgent();
   const reroll = useRerollFace();
   const myId = me.data?.user.id;
+  const { hash } = useLocation();
+  // The command palette links to /agents#<id>: bring that agent into view once the board has loaded.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run when the board or the hash changes
+  useEffect(() => {
+    if (hash) document.getElementById(hash.slice(1))?.scrollIntoView?.({ block: 'center' });
+  }, [hash, board.data]);
   /** The org owner may change and fire any agent; a member only the ones they hired themselves. */
   const canManage = (a: AgentDto) => !!myId && (myId === a.orgId || myId === a.managerUserId);
   const roleName = (k: string) => roles.data?.find((r) => r.definition.key === k)?.definition.name ?? k;
@@ -149,6 +155,8 @@ export function Agents() {
         {active.map((h) => (
           <li
             key={h.agent.id}
+            id={h.agent.id}
+            className="scroll-mt-20 target:[&>*]:ring-2 target:[&>*]:ring-ring/60"
             data-testid={`agent-${h.agent.name}`}
             data-editable={canManage(h.agent) ? 'true' : 'false'}
           >

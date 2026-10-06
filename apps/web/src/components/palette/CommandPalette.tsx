@@ -40,7 +40,6 @@ function Item({
   hint,
   children,
   onSelect,
-  forceMount,
   leading,
 }: {
   value: string;
@@ -49,14 +48,12 @@ function Item({
   hint?: ReactNode;
   children: ReactNode;
   onSelect: () => void;
-  forceMount?: boolean;
   leading?: ReactNode;
 }) {
   return (
     <Command.Item
       value={value}
       {...(keywords ? { keywords } : {})}
-      {...(forceMount ? { forceMount: true } : {})}
       onSelect={onSelect}
       className="flex min-h-10 cursor-pointer items-center gap-3 rounded-control px-3 text-sm text-fg select-none data-[selected=true]:bg-brand-soft data-[selected=true]:text-brand-soft-fg [@media(pointer:coarse)]:min-h-12"
     >
@@ -115,7 +112,7 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
           onValueChange={setQuery}
           placeholder="Search pages, cards, agents and desk items, or run an action"
           aria-label="Search the command palette"
-          className="h-12 w-full bg-transparent text-base text-fg placeholder:text-subtle focus:outline-none"
+          className="h-12 w-full rounded-none border-0 bg-transparent text-base text-fg shadow-none placeholder:text-subtle focus:outline-none focus-visible:outline-none"
         />
       </div>
       <Command.List className="min-h-0 flex-1 overflow-y-auto p-2">
@@ -198,7 +195,6 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
             {cards.data?.map((c) => (
               <Item
                 key={c.id}
-                forceMount
                 value={`card ${c.ref} ${c.title}`}
                 icon={FileText}
                 hint={`${c.projectKey} · ${c.status}`}

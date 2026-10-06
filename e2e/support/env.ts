@@ -108,3 +108,10 @@ export const INTERESTER = {
   name: 'E2E Interester',
   password: 'interester-password-12345',
 };
+
+/** Polish spec: own user and runner (mock) for the command palette, shortcuts, priority, pictures, chats and Unpair. */
+export const POLISHER = {
+  email: 'polisher@e2e.test',
+  name: 'E2E Polisher',
+  password: 'polisher-password-12345',
+};

@@ -75,10 +75,7 @@ test('AC1: chat with an agent streams tokens to the browser and saves the conver
 
 test('AC1b: the saved conversation reappears after a reload and continues in the same session', async () => {
   const drawer = await openChat();
-  await drawer
-    .getByTestId('chat-list')
-    .getByRole('button', { name: new RegExp(reviewerName) })
-    .click();
+  await drawer.getByTestId(`chat-row-${reviewerName}`).getByRole('button').first().click();
   await expect(drawer.getByTestId('chat-message')).toHaveCount(2);
   await drawer.getByLabel('Message').fill('and again');
   await drawer.getByRole('button', { name: 'Send' }).click();
@@ -97,10 +94,7 @@ test('AC2: with the workstation offline the chat says so and nothing is queued',
   );
   const before = (await q<any>(`SELECT count(*)::int AS n FROM thread_messages`))[0].n;
   const drawer = await openChat();
-  await drawer
-    .getByTestId('chat-list')
-    .getByRole('button', { name: new RegExp(reviewerName) })
-    .click();
+  await drawer.getByTestId(`chat-row-${reviewerName}`).getByRole('button').first().click();
   await expect(drawer.getByTestId('chat-offline')).toContainText('offline');
   await drawer.getByLabel('Message').fill('are you there?');
   await drawer.getByRole('button', { name: 'Send' }).click();

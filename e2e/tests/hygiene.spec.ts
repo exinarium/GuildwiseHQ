@@ -334,14 +334,23 @@ test('AC6: a new phase asks the manager to keep the working branch or name anoth
   await expect(art.getByRole('alert')).toContainText('Type the name of the branch');
   await art.getByRole('textbox', { name: 'Branch name' }).fill('release/2026');
   await art.getByRole('button', { name: 'Set working branch' }).click();
-  await waitFor('the new branch is stored', repoRow, (r) => r?.working_branch === 'release/2026', 30_000);
+  // A branch named while re-confirming for a phase is saved on that phase; the repository keeps its default.
+  const phaseBranch = () =>
+    q<{ working_branch: string | null }>(`SELECT working_branch FROM phases WHERE name='Autosave'`);
+  await waitFor(
+    'the phase branch is stored',
+    phaseBranch,
+    (r) => r[0]?.working_branch === 'release/2026',
+    30_000,
+  );
+  expect((await repoRow())?.working_branch).toBe('main');
   expect(
     (
-      await q<{ payload: any }>(
-        `SELECT payload FROM events WHERE type='ProjectRepoWorkingBranchSet' ORDER BY seq DESC LIMIT 1`,
+      await q(
+        `SELECT 1 FROM events WHERE type='ProjectRepoWorkingBranchSet' AND payload->>'workingBranch'='release/2026'`,
       )
-    )[0]?.payload,
-  ).toMatchObject({ workingBranch: 'release/2026', previousBranch: 'main', reason: 'phase' });
+    ).length,
+  ).toBe(0);
   // that branch does not exist anywhere: hygiene says so instead of guessing
   await runHygiene();
   const f = await waitFor(
@@ -351,6 +360,7 @@ test('AC6: a new phase asks the manager to keep the working branch or name anoth
   );
   expect(f[0]?.kind).toBe('branch_missing');
   await q(`UPDATE project_repos SET working_branch='main' WHERE id=$1`, [repoId]);
+  await q(`UPDATE phases SET working_branch=NULL WHERE name='Autosave'`);
 });
 
 test('AC7: the cadence is set per workstation', async () => {

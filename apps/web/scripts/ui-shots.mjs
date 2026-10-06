@@ -88,6 +88,73 @@ for (const sk of sizesWanted)
         console.error(`FAILED ${name} ${sk} ${scheme}: ${e.message}`);
       }
     }
+    if (!mobile && want('extras')) {
+      // Interactions of the polish round: the command palette, the shortcuts dialog, the picture picker, the chat
+      // list with its Archived filter, an expanded workstation with the Unpair dialog and the taste rules dialog.
+      const step = async (name, fn) => {
+        try {
+          await fn();
+          await shot(p, `${out}/${name}-${sk}-${scheme}.png`, false);
+        } catch (e) {
+          console.error(`FAILED ${name} ${sk} ${scheme}: ${e.message}`);
+        }
+      };
+      await p.goto(base + routes.board);
+      await p.waitForLoadState('networkidle').catch(() => undefined);
+      await step('palette', async () => {
+        await p.keyboard.press('Control+k');
+        await p.getByTestId('command-palette').waitFor();
+        await p.getByRole('combobox').fill('a');
+        await p.waitForTimeout(500);
+      });
+      await p.keyboard.press('Escape');
+      await step('shortcuts', async () => {
+        await p.keyboard.press('?');
+        await p.getByTestId('shortcuts-dialog').waitFor();
+      });
+      await p.keyboard.press('Escape');
+      await p.goto(base + routes.settings);
+      await step('avatar-picker', async () => {
+        await p.getByTestId('change-picture').click();
+        await p.getByTestId('avatar-choice').first().waitFor();
+        await p.getByTestId('avatar-choice').nth(1).click();
+        await p.waitForTimeout(400);
+      });
+      await p.keyboard.press('Escape');
+      await step('avatar-camera', async () => {
+        await p.getByTestId('change-picture').click();
+        await p.getByRole('tab', { name: 'Take a photo' }).click();
+        await p.waitForTimeout(300);
+      });
+      await p.keyboard.press('Escape');
+      await p.goto(base + routes.workstations);
+      await step('workstation-open', async () => {
+        const t = p.getByTestId('workstation-toggle').first();
+        if ((await t.getAttribute('aria-expanded')) !== 'true') await t.click();
+        await p.waitForTimeout(300);
+      });
+      await step('workstation-unpair', async () => {
+        await p
+          .getByRole('button', { name: /^Unpair / })
+          .first()
+          .click();
+        await p.getByRole('dialog').waitFor();
+      });
+      await p.keyboard.press('Escape');
+      await p.goto(base + routes.desk);
+      await step('chats', async () => {
+        await p.getByRole('button', { name: 'Chat with an agent' }).click();
+        await p.getByRole('dialog', { name: 'Chat' }).waitFor();
+        await p.waitForTimeout(500);
+      });
+      await p.keyboard.press('Escape');
+      await p.goto(base + routes.interests);
+      await step('taste-rules', async () => {
+        await p.getByRole('button', { name: 'Edit taste rules' }).first().click();
+        await p.getByTestId('project-taste-dialog').waitFor();
+      });
+      await p.keyboard.press('Escape');
+    }
     if (mobile && want('drawer')) {
       await p.goto(`${base}/p/${webKey}/board`);
       await p.getByRole('button', { name: 'Open menu' }).click();
