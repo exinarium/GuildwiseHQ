@@ -22,6 +22,10 @@ export const ChatDtoSchema = z.object({
   workstationOnline: z.boolean(),
   createdAt: IsoTime,
   lastMessageAt: IsoTime.nullable(),
+  /** Closed by the viewer: hidden from the default list, shown under Archived. */
+  archived: z.boolean().optional(),
+  /** The viewer created it, so may delete it (unless it is linked to a card). */
+  mine: z.boolean().optional(),
 });
 export type ChatDto = z.infer<typeof ChatDtoSchema>;
 

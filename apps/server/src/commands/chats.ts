@@ -3,12 +3,12 @@ import { type ChatDto, type CreateChatRequest, canDirectAgent, streamId } from '
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard, projectRole, requireProjectMember } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
-import { iso, one, type Row, rows } from '../db/sql.ts';
+import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { notFound } from '../errors.ts';
+import { conflict, notFound } from '../errors.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
 
-export function toChatDto(ctx: Ctx, r: Row): ChatDto {
+export function toChatDto(ctx: Ctx, r: Row, viewerId: string): ChatDto {
   return {
     threadId: r.id,
     title: r.title,
@@ -22,12 +22,16 @@ export function toChatDto(ctx: Ctx, r: Row): ChatDto {
       r.agent_status === 'active' && !!r.workstation_id && ctx.services.runners.isOnline(r.workstation_id),
     createdAt: iso(r.created_at) as string,
     lastMessageAt: iso(r.last_message_at),
+    archived: !!r.archived,
+    mine: r.created_by === viewerId,
   };
 }
 
+/** `$1` is the viewing user: `archived` is whether they closed the chat. */
 const CHAT_SELECT = `
 SELECT t.*, a.name AS agent_name, a.role_key AS agent_role, a.status AS agent_status, a.workstation_id,
        c.ref AS card_ref,
+       EXISTS (SELECT 1 FROM chat_archives x WHERE x.thread_id = t.id AND x.user_id = $1) AS archived,
        (SELECT max(m.created_at) FROM thread_messages m WHERE m.thread_id = t.id) AS last_message_at
   FROM threads t JOIN agents a ON a.id = t.agent_id LEFT JOIN cards c ON c.id = t.card_id`;
 
@@ -35,23 +39,23 @@ SELECT t.*, a.name AS agent_name, a.role_key AS agent_role, a.status AS agent_st
 export async function listChats(ctx: Ctx, userId: string): Promise<ChatDto[]> {
   const list = await rows(
     ctx.pool,
-    `${CHAT_SELECT} WHERE t.kind = 'chat' AND (t.created_by = $1 OR t.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')) AND a.status <> 'retired'
+    `${CHAT_SELECT} WHERE t.kind = 'chat' AND t.deleted_at IS NULL AND (t.created_by = $1 OR t.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')) AND a.status <> 'retired'
       ORDER BY COALESCE((SELECT max(m.created_at) FROM thread_messages m WHERE m.thread_id = t.id), t.created_at) DESC, t.id`,
     [userId],
   );
-  return list.map((r) => toChatDto(ctx, r));
+  return list.map((r) => toChatDto(ctx, r, userId));
 }
 
 export async function getChat(ctx: Ctx, userId: string, threadId: string): Promise<ChatDto> {
   const r = (
     await rows(
       ctx.pool,
-      `${CHAT_SELECT} WHERE t.id = $1 AND t.kind = 'chat' AND (t.created_by = $2 OR t.project_id IN (SELECT project_id FROM project_members WHERE user_id = $2 AND status = 'active'))`,
-      [threadId, userId],
+      `${CHAT_SELECT} WHERE t.id = $2 AND t.kind = 'chat' AND t.deleted_at IS NULL AND (t.created_by = $1 OR t.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active'))`,
+      [userId, threadId],
     )
   )[0];
   if (!r) throw notFound('chat not found');
-  return toChatDto(ctx, r);
+  return toChatDto(ctx, r, userId);
 }
 
 /**
@@ -107,5 +111,73 @@ export async function createChat(
       { tx },
     );
     return threadId;
+  });
+}
+
+async function getChatRow(db: Queryable, userId: string, threadId: string): Promise<Row | undefined> {
+  return (
+    await rows(
+      db,
+      `${CHAT_SELECT} WHERE t.id = $2 AND t.kind = 'chat' AND t.deleted_at IS NULL AND (t.created_by = $1 OR t.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active'))`,
+      [userId, threadId],
+    )
+  )[0];
+}
+
+const chatScope = (r: Row) => (r.project_id ? projectScope(r.org_id, r.project_id) : orgScope(r.org_id));
+
+/** Close (archive) or restore a chat for the user: it leaves, or returns to, their list. Anyone who can see the chat may. */
+export async function setChatArchived(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  threadId: string,
+  archived: boolean,
+): Promise<ChatDto> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const r = await getChatRow(tx, user.id, threadId);
+    if (!r) throw notFound('chat not found');
+    if (!!r.archived === archived) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.thread(threadId),
+          event: {
+            type: archived ? 'ChatArchived' : 'ChatRestored',
+            payload: { threadId, userId: user.id },
+          },
+          actor: userActor(user.id),
+          scope: chatScope(r),
+        },
+      ],
+      { tx },
+    );
+  });
+  return getChat(ctx, user.id, threadId);
+}
+
+/**
+ * Delete a chat for good (its messages are removed). Only the person who started it may. A chat linked to a card is
+ * refused (409 `chat_in_card_history`): its messages are part of that card's history, so the answer there is Close.
+ */
+export async function deleteChat(ctx: Ctx, user: AuthSession['user'], threadId: string): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const r = await getChatRow(tx, user.id, threadId);
+    if (!r || r.created_by !== user.id) throw notFound('chat not found');
+    if (r.card_id)
+      throw conflict(
+        'chat_in_card_history',
+        `this chat is linked to ${r.card_ref ?? 'a card'} and stays in its history: close it instead`,
+      );
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.thread(threadId),
+          event: { type: 'ChatDeleted', payload: { threadId, deletedBy: user.id } },
+          actor: userActor(user.id),
+          scope: chatScope(r),
+        },
+      ],
+      { tx },
+    );
   });
 }

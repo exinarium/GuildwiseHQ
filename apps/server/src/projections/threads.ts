@@ -16,10 +16,11 @@ export const threadProjectors: Record<string, Projector> = {
   },
   ThreadMessagePosted: async (tx, e) => {
     const p = (e.event as EventOf<'ThreadMessagePosted'>).payload;
+    // A message for a deleted chat (a reply that was still on its way) is dropped.
     await exec(
       tx,
       `INSERT INTO thread_messages (id, thread_id, author_kind, author_user_id, author_agent_id, kind, body, data, event_seq, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+       SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10 WHERE NOT EXISTS (SELECT 1 FROM threads WHERE id=$2 AND deleted_at IS NOT NULL)`,
       [
         p.messageId,
         p.threadId,

@@ -71,7 +71,7 @@ export class ChatRelay {
       `SELECT a.*, t.kind AS thread_kind, t.project_id AS thread_project_id, t.card_id AS thread_card_id, p.key AS project_key, c.ref AS card_ref, c.worktree_path AS card_worktree_path
          FROM threads t JOIN agents a ON a.id = t.agent_id
          LEFT JOIN projects p ON p.id = t.project_id LEFT JOIN cards c ON c.id = t.card_id
-        WHERE t.id = $1 AND t.kind IN ('chat','intake') AND t.created_by = $2`,
+        WHERE t.id = $1 AND t.kind IN ('chat','intake') AND t.created_by = $2 AND t.deleted_at IS NULL`,
       [msg.threadId, userId],
     );
     if (!row) return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);

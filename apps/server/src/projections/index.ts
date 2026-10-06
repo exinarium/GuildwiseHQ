@@ -95,6 +95,7 @@ export const PROJECTION_TABLES = [
   'card_activity',
   'shifts',
   'threads',
+  'chat_archives',
   'thread_messages',
   'desk_items',
   'card_blockers',

@@ -21,4 +21,24 @@ export const chatProjectors: Record<string, Projector> = {
       ],
     );
   },
+  ChatArchived: async (tx, e) => {
+    const p = (e.event as EventOf<'ChatArchived'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO chat_archives (thread_id, user_id, archived_at) VALUES ($1,$2,$3)
+       ON CONFLICT (thread_id, user_id) DO NOTHING`,
+      [p.threadId, p.userId, e.createdAt],
+    );
+  },
+  ChatRestored: async (tx, e) => {
+    const p = (e.event as EventOf<'ChatRestored'>).payload;
+    await exec(tx, 'DELETE FROM chat_archives WHERE thread_id=$1 AND user_id=$2', [p.threadId, p.userId]);
+  },
+  ChatDeleted: async (tx, e) => {
+    const p = (e.event as EventOf<'ChatDeleted'>).payload;
+    // Messages go; the thread row stays as a tombstone so a late message event cannot break the projections.
+    await exec(tx, 'DELETE FROM thread_messages WHERE thread_id=$1', [p.threadId]);
+    await exec(tx, 'DELETE FROM chat_archives WHERE thread_id=$1', [p.threadId]);
+    await exec(tx, 'UPDATE threads SET deleted_at=$2 WHERE id=$1', [p.threadId, e.createdAt]);
+  },
 };

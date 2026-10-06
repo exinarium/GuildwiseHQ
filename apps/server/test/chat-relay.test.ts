@@ -343,3 +343,71 @@ describe('chat rights are re-checked on every send (review M6)', () => {
     await hangUp(r);
   });
 });
+
+describe('closing and deleting chats', () => {
+  const chats = async (cookie = w.owner.cookie) =>
+    (await ok<any>(w.t.req('GET', '/api/chats', { cookie }))).chats as any[];
+  const post = (url: string, cookie = w.owner.cookie) => w.t.req('POST', url, { cookie });
+
+  it('Close hides the chat for the user who closed it, Restore brings it back, and it survives a rebuild', async () => {
+    await freshState();
+    const agent = await w.hire('Cleo', 'builder', 'junior', { projectId: w.projectId });
+    const m = await addMember(w, 'watcher');
+    const chat = await newChat(agent.id, { projectId: w.projectId });
+    expect((await chats()).map((c) => [c.threadId, c.archived, c.mine])).toEqual([
+      [chat.threadId, false, true],
+    ]);
+
+    const closed = await ok<any>(post(`/api/chats/${chat.threadId}/close`));
+    expect(closed.chat.archived).toBe(true);
+    // per user: the project member who also sees the chat has not closed it
+    expect((await chats(m.cookie)).map((c) => [c.threadId, c.archived, c.mine])).toEqual([
+      [chat.threadId, false, false],
+    ]);
+    expect((await chats()).find((c) => c.threadId === chat.threadId).archived).toBe(true);
+    // closing again changes nothing
+    await ok(post(`/api/chats/${chat.threadId}/close`));
+
+    const { rebuildProjections } = await import('../src/projections/rebuild.ts');
+    await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);
+    expect((await chats()).find((c) => c.threadId === chat.threadId).archived).toBe(true);
+
+    const restored = await ok<any>(post(`/api/chats/${chat.threadId}/restore`));
+    expect(restored.chat.archived).toBe(false);
+  });
+
+  it('Delete is permanent, for the creator only, and removes the messages', async () => {
+    await freshState();
+    const agent = await w.hire('Dora', 'builder', 'junior', { projectId: w.projectId });
+    const m = await addMember(w, 'nosy');
+    const chat = await newChat(agent.id, { projectId: w.projectId });
+    // a project member sees it but may not delete it
+    expect((await w.t.req('DELETE', `/api/chats/${chat.threadId}`, { cookie: m.cookie })).status).toBe(404);
+    expect((await w.t.req('DELETE', `/api/chats/${chat.threadId}`, { cookie: w.owner.cookie })).status).toBe(
+      204,
+    );
+    expect(await chats()).toEqual([]);
+    expect((await w.t.req('GET', `/api/chats/${chat.threadId}`, { cookie: w.owner.cookie })).status).toBe(
+      404,
+    );
+    expect(
+      (await w.t.req('GET', `/api/threads/${chat.threadId}/messages`, { cookie: w.owner.cookie })).status,
+    ).toBe(404);
+    expect((await q('SELECT 1 FROM thread_messages WHERE thread_id=$1', [chat.threadId])).length).toBe(0);
+    expect((await w.t.req('DELETE', `/api/chats/${chat.threadId}`, { cookie: w.owner.cookie })).status).toBe(
+      404,
+    );
+  });
+
+  it('a chat linked to a card cannot be deleted (it is card history), only closed', async () => {
+    await freshState();
+    const agent = await w.hire('Eli', 'builder', 'junior');
+    const card = await w.card({ title: 'Linked' });
+    const chat = await newChat(agent.id, { cardId: card.id });
+    const res = await w.t.req('DELETE', `/api/chats/${chat.threadId}`, { cookie: w.owner.cookie });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('chat_in_card_history');
+    expect((await chats()).map((c) => c.threadId)).toEqual([chat.threadId]);
+    expect((await ok<any>(post(`/api/chats/${chat.threadId}/close`))).chat.archived).toBe(true);
+  });
+});

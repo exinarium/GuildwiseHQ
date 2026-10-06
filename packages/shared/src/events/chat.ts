@@ -14,4 +14,10 @@ export const chatEvents = [
       createdBy: Id,
     }),
   ),
+  /** Close: the user hides the chat from their list (per user; the conversation is kept). */
+  defineEvent('ChatArchived', z.object({ threadId: Id, userId: Id })),
+  /** Restore a closed chat to the user's list. */
+  defineEvent('ChatRestored', z.object({ threadId: Id, userId: Id })),
+  /** Delete: permanent. Only the creator, and not for a chat linked to a card (its messages are card history). */
+  defineEvent('ChatDeleted', z.object({ threadId: Id, deletedBy: Id })),
 ] as const;
