@@ -17,6 +17,7 @@ let api: APIRequestContext;
 let guestApi: APIRequestContext;
 let workstationId: string;
 let ownerId: string;
+let orgId: string;
 let projectId: string;
 let guestWs: string;
 
@@ -150,6 +151,12 @@ test.beforeAll(async ({ browser }) => {
   guestPage = await (await browser.newContext({ storageState: await guestApi.storageState() })).newPage();
   ownerId = (await q<{ id: string }>('SELECT id FROM users WHERE email=$1', [DESIGNER.email]))[0]
     ?.id as string;
+  orgId = (
+    await q<{ id: string }>(
+      'SELECT o.id FROM organizations o JOIN users u ON u.id = o.owner_user_id WHERE u.email=$1',
+      [DESIGNER.email],
+    )
+  )[0]?.id as string;
 });
 
 test('setup: a paired mock runner, project ORG on the toy repo, and a BA', async () => {
@@ -398,9 +405,8 @@ test('a custom workflow with custom roles runs a card end to end; a failure rout
 
 test('changing a workflow creates v2; a card in flight finishes on v1, new cards start on v2', async () => {
   // No responder is on shift: the card waits in Resolve, in flight on v1, while the workflow changes.
-  const rhea = (
-    await q<{ id: string }>(`SELECT id FROM agents WHERE name='Rhea' AND org_id=$1`, [ownerId])
-  )[0]?.id;
+  const rhea = (await q<{ id: string }>(`SELECT id FROM agents WHERE name='Rhea' AND org_id=$1`, [orgId]))[0]
+    ?.id;
   expect((await api.post(`/api/agents/${rhea}/fire`, { data: {} })).status()).toBe(200);
   const inFlight = await createTicket('Refund request');
   await stageWait(inFlight, 'resolve', 'queued', 120_000);
@@ -515,7 +521,7 @@ test("an additional manager uses the owner's workflows and roles but cannot chan
   const proj = (await (await guestApi.get('/api/projects')).json()).projects.find(
     (p: any) => p.key === 'SUP',
   );
-  expect(proj.orgId).toBe(ownerId);
+  expect(proj.orgId).toBe(orgId);
   // The Organization page shows the owner's catalogue, read only.
   await guestPage.goto(`/org?project=${projectId}`);
   await expect(guestPage.getByTestId('read-only-note')).toContainText('only the owner can change them');
@@ -573,7 +579,7 @@ test("an additional manager uses the owner's workflows and roles but cannot chan
   expect(
     (
       await q(`SELECT 1 FROM role_extensions WHERE org_id=$1 AND extensions->>'instructions'='sneaky'`, [
-        ownerId,
+        orgId,
       ])
     ).length,
   ).toBe(0);

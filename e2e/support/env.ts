@@ -13,6 +13,21 @@ export const SMTP_URL = process.env.AOM_E2E_SMTP_URL ?? 'smtp://127.0.0.1:1025';
 
 export const ADMIN = { email: 'admin@e2e.test', name: 'E2E Admin', password: 'admin-password-12345' };
 export const MEMBER = { email: 'member@e2e.test', name: 'E2E Member', password: 'member-password-12345' };
+/** The platform administrator (created by the global setup; sets up two-factor login at first sign-in). */
+export const SUPER = {
+  email: 'platform@e2e.test',
+  name: 'E2E Platform',
+  password: 'platform-password-12345',
+};
+/** Owner of an organization started from a platform invitation. */
+export const NEWORG = {
+  email: 'neworg@e2e.test',
+  name: 'E2E NewOrg',
+  password: 'neworg-password-12345',
+  org: 'Newco',
+};
+/** A Member invited to the admin's organization by the Owner (org-members spec). */
+export const ORGMEM = { email: 'orgmem@e2e.test', name: 'E2E OrgMem', password: 'orgmem-password-12345' };
 export const OTHER = { email: 'other@e2e.test', name: 'E2E Other', password: 'other-password-12345' };
 
 /** M3 specs: one user for the DevOps/vault flows, an owner and a guest for project sharing. */

@@ -44,7 +44,7 @@ async function createCard(title: string, mock: Record<string, string[]>) {
   return (await res.json()).card as { id: string; ref: string };
 }
 /** The reporter's organization. Other specs leave their own organizations in the database, and when the clock jumps to the next day each of them gets its own floor report (a fallback one when it has no BA), so queries about reports are scoped to this one. */
-const ORG = `(SELECT id FROM users WHERE lower(email)=lower($1))`;
+const ORG = `(SELECT o.id FROM organizations o JOIN users u ON u.id = o.owner_user_id WHERE lower(u.email)=lower($1))`;
 const user = async () =>
   (
     await q<{ timezone: string | null; reporting: Record<string, unknown> }>(
@@ -138,7 +138,7 @@ test('AC2: an approval reaches the desk at once, and a plain approval gets no BA
     () =>
       // This user's own approval: the devops spec leaves an answered "install docker" approval of its own in the database.
       q<{ id: string; triage: string; status: string; pinned: boolean }>(
-        `SELECT d.id, d.triage, d.status, d.pinned FROM desk_items d JOIN users u ON u.id = d.org_id
+        `SELECT d.id, d.triage, d.status, d.pinned FROM desk_items d JOIN organizations o ON o.id = d.org_id JOIN users u ON u.id = o.owner_user_id
           WHERE d.subkind='devops' AND lower(u.email)=lower($1)`,
         [REPORTER.email],
       ),

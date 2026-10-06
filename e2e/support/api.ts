@@ -1,6 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { type APIRequestContext, expect, request } from '@playwright/test';
-import { BASE_URL, E2E_DIR } from './env.ts';
-import { waitForMail } from './mail.ts';
+import { BASE_URL, DATABASE_URL, E2E_DIR, ROOT, SMTP_URL } from './env.ts';
 
 export const storagePath = (who: string) => `${E2E_DIR}/${who}.storage.json`;
 
@@ -12,20 +12,34 @@ export async function apiAs(email: string, password: string): Promise<APIRequest
   return ctx;
 }
 
-/** Admin invites `email`, the invitation link is read from Mailpit and accepted over the API. */
+/**
+ * Creates `user` as the Owner of an organization of their own (the server's `admin:create` command), the way an
+ * account started from a new-organization invitation ends up. The specs that need two independent people (an owner and
+ * a guest, or a second tenant) use this; the org-members and platform specs cover the invitation flows themselves.
+ */
 export async function inviteAndAccept(
-  admin: APIRequestContext,
+  _admin: APIRequestContext,
   user: { email: string; name: string; password: string },
 ): Promise<void> {
-  const inv = await admin.post('/api/admin/invitations', { data: { email: user.email, role: 'member' } });
-  expect(inv.ok(), await inv.text()).toBeTruthy();
-  const mail = await waitForMail(user.email);
-  const token = /\/invite\/([A-Za-z0-9_-]+)/.exec(mail.text)?.[1];
-  expect(token).toBeTruthy();
-  const anon = await request.newContext({ baseURL: BASE_URL, extraHTTPHeaders: { Origin: BASE_URL } });
-  const acc = await anon.post(`/api/invitations/${token}/accept`, {
-    data: { displayName: user.name, password: user.password },
-  });
-  expect(acc.ok(), await acc.text()).toBeTruthy();
-  await anon.dispose();
+  execFileSync(
+    'pnpm',
+    [
+      '--filter',
+      '@aom/server',
+      'admin:create',
+      '--email',
+      user.email,
+      '--name',
+      user.name,
+      '--password',
+      user.password,
+      '--org',
+      `${user.name}'s organization`,
+    ],
+    {
+      cwd: ROOT,
+      env: { ...process.env, DATABASE_URL, AOM_PUBLIC_ORIGIN: BASE_URL, AOM_SMTP_URL: SMTP_URL },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    },
+  );
 }

@@ -19,6 +19,7 @@ let workstationId: string;
 let projectId: string;
 let repoId: string;
 let ownerId: string;
+let orgId: string;
 let beaId: string;
 
 const SPEC = {
@@ -73,6 +74,12 @@ test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext({ storageState: await api.storageState() })).newPage();
   guestPage = await (await browser.newContext({ storageState: await guestApi.storageState() })).newPage();
   ownerId = (await q<{ id: string }>('SELECT id FROM users WHERE email=$1', [HR.email]))[0]?.id as string;
+  orgId = (
+    await q<{ id: string }>(
+      'SELECT o.id FROM organizations o JOIN users u ON u.id = o.owner_user_id WHERE u.email=$1',
+      [HR.email],
+    )
+  )[0]?.id as string;
 });
 
 test('setup: a paired mock runner, project HRB on the toy repo, a senior reviewer and a builder hired from the form', async () => {
@@ -135,7 +142,7 @@ test('setup: a paired mock runner, project HRB on the toy repo, a senior reviewe
   await form.getByLabel('Name', { exact: true }).fill('Bea');
   await form.getByRole('button', { name: 'Hire', exact: true }).click();
   await expect(agentCard('Bea')).toBeVisible();
-  beaId = (await q<{ id: string }>(`SELECT id FROM agents WHERE name='Bea' AND org_id=$1`, [ownerId]))[0]
+  beaId = (await q<{ id: string }>(`SELECT id FROM agents WHERE name='Bea' AND org_id=$1`, [orgId]))[0]
     ?.id as string;
   // The agent card: a generated face, role, model, status, hiring manager and no hire cap
   const card = agentCard('Bea');
@@ -349,7 +356,7 @@ test('applying the standing-order recommendation puts an approval on the desk; a
   });
   const applied = await q<{ payload: any }>(
     `SELECT payload FROM events WHERE type='RecommendationApplied' AND payload->>'orgId'=$1`,
-    [ownerId],
+    [orgId],
   );
   expect(applied.map((e) => e.payload.kind).sort()).toEqual(['model_down', 'rework_reason']);
 });
@@ -380,7 +387,7 @@ test('built-in role defaults: the owner sees the new default version, resets aft
     `INSERT INTO role_extensions (org_id, role_key, base_version, extensions, updated_at)
      VALUES ($1, 'tester', 1, $2, now())`,
     [
-      ownerId,
+      orgId,
       JSON.stringify({
         instructions: 'Always run lint first.',
         skills: ['lint'],
@@ -411,7 +418,7 @@ test('built-in role defaults: the owner sees the new default version, resets aft
     toVersion: 4,
     droppedExtensions: { skills: ['lint'] },
   });
-  expect(await q(`SELECT 1 FROM role_extensions WHERE org_id=$1`, [ownerId])).toHaveLength(0);
+  expect(await q(`SELECT 1 FROM role_extensions WHERE org_id=$1`, [orgId])).toHaveLength(0);
 });
 
 test('fire: Bea can be let go from the HR card', async () => {

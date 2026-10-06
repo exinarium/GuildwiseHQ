@@ -150,7 +150,7 @@ test("AC6c: the member hires a project-scoped agent onto their own workstation f
   expect(gia).toMatchObject({ projectId, workstationId: guestWs, hiredByUserId: expect.any(String) });
   // she belongs to the owner's organization (the owner's catalogue and name space apply)
   const me = await json(await owner.get('/api/auth/me'));
-  expect(gia.orgId).toBe(me.user.id);
+  expect(gia.orgId).toBe(me.activeOrg.id);
   const rey = await guest.post('/api/agents', {
     data: {
       name: 'Rey',

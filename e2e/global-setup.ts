@@ -8,11 +8,14 @@ import {
   DATABASE_URL,
   DB_NAME,
   E2E_DIR,
+  NEWORG,
+  ORGMEM,
   PG_ADMIN_URL,
   PORT,
   paths,
   ROOT,
   SMTP_URL,
+  SUPER,
 } from './support/env.ts';
 import { deleteMailFor } from './support/mail.ts';
 import { killAllRunners } from './support/runner.ts';
@@ -84,6 +87,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       'reporter@e2e.test',
       'hygiener@e2e.test',
       'interester@e2e.test',
+      SUPER.email,
+      NEWORG.email,
+      ORGMEM.email,
     ].map(deleteMailFor),
   );
 
@@ -125,6 +131,22 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       cwd: ROOT,
       env,
     },
+  );
+
+  sh(
+    'pnpm',
+    [
+      '--filter',
+      '@aom/server',
+      'superadmin:create',
+      '--email',
+      SUPER.email,
+      '--name',
+      SUPER.name,
+      '--password',
+      SUPER.password,
+    ],
+    { cwd: ROOT, env },
   );
 
   const log = openSync(paths.serverLog, 'a');

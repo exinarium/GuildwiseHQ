@@ -6,7 +6,10 @@ import { deleteMailFor, waitForMail } from '../support/mail.ts';
 test.describe.configure({ mode: 'serial' });
 
 // AC1: admin invites a member; the member accepts via the Mailpit link and logs in.
-test('AC1: admin invites a member who accepts via the mailed link and logs in', async ({ page, browser }) => {
+test('AC1: the owner invites an admin who accepts via the mailed link and logs in', async ({
+  page,
+  browser,
+}) => {
   await deleteMailFor(MEMBER.email);
 
   await page.goto('/');
@@ -19,9 +22,14 @@ test('AC1: admin invites a member who accepts via the mailed link and logs in', 
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
 
-  await page.getByRole('link', { name: 'Admin' }).click();
-  await page.getByRole('form', { name: 'Invite user' }).getByLabel('Email').fill(MEMBER.email);
-  await page.getByRole('button', { name: 'Send invitation' }).click();
+  await page.getByRole('link', { name: 'Organization', exact: true }).click();
+  await page.getByRole('tab', { name: 'Members' }).click();
+  await page.getByTestId('invite-member').click();
+  await page.getByRole('dialog').getByLabel('Email').fill(MEMBER.email);
+  // the main e2e user creates projects, which only Admins and the Owner may do
+  await page.getByRole('dialog').getByRole('radio', { name: /Admin/ }).check();
+  await page.getByRole('dialog').getByRole('button', { name: 'Send invitation' }).click();
+  await page.getByRole('tab', { name: 'Invitations' }).click();
   await expect(page.getByText(MEMBER.email).first()).toBeVisible();
 
   const mail = await waitForMail(MEMBER.email);
@@ -31,7 +39,7 @@ test('AC1: admin invites a member who accepts via the mailed link and logs in', 
   const memberCtx = await browser.newContext();
   const mp = await memberCtx.newPage();
   await mp.goto(link as string);
-  await mp.getByLabel('Display name').fill(MEMBER.name);
+  await mp.getByLabel('Your name').fill(MEMBER.name);
   await mp.getByLabel('Password', { exact: true }).fill(MEMBER.password);
   await mp.getByLabel('Confirm password').fill(MEMBER.password);
   await mp.getByRole('button', { name: /accept|create|continue|join/i }).click();
@@ -44,7 +52,7 @@ test('AC1: admin invites a member who accepts via the mailed link and logs in', 
   await mp.getByLabel('Password').fill(MEMBER.password);
   await mp.getByRole('button', { name: 'Sign in' }).click();
   await expect(mp.getByRole('navigation', { name: 'Main' })).toBeVisible();
-  await expect(mp.getByRole('link', { name: 'Admin' })).toHaveCount(0);
+  await expect(mp.getByTestId('org-role')).toContainText('Admin');
   await memberCtx.storageState({ path: storagePath('member') });
   await memberCtx.close();
 });

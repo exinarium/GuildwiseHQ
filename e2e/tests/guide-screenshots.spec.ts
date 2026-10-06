@@ -163,16 +163,16 @@ step('users, invitations, the admin', async () => {
   await inviteAndAccept(admin, PIETER);
   await inviteAndAccept(admin, MAYA);
   for (const email of ['sam@demo.local', 'lee@demo.local']) {
-    const r = await admin.post('/api/admin/invitations', { data: { email, role: 'member' } });
+    const r = await admin.post('/api/org/invitations', { data: { email, role: 'member' } });
     expect(r.ok(), await r.text()).toBeTruthy();
   }
   const mail = await waitForMail('sam@demo.local');
   S.ids.samToken = /\/invite\/([A-Za-z0-9_-]+)/.exec(mail.text)?.[1] ?? '';
   expect(S.ids.samToken).toBeTruthy();
-  const invs = (await (await admin.get('/api/admin/invitations')).json()) as any;
+  const invs = (await (await admin.get('/api/org/invitations')).json()) as any;
   const list: any[] = invs.invitations ?? invs;
   const lee = list.find((i) => i.email === 'lee@demo.local');
-  expect((await admin.post(`/api/admin/invitations/${lee.id}/revoke`, { data: {} })).ok()).toBeTruthy();
+  expect((await admin.post(`/api/org/invitations/${lee.id}/revoke`, { data: {} })).ok()).toBeTruthy();
 });
 
 step('fakes: gh, a Jira ticket, the vaults', async () => {
@@ -1477,15 +1477,15 @@ cap('sign-in, invitations, admin', async () => {
   await snap(a, 'login-error', { maxH: 520, cx: { x: 420, width: 440 } });
   await open(a, `/invite/${S.ids.samToken}`);
   await snap(a, 'invite-accept', { maxH: 520, cx: { x: 420, width: 440 } });
-  await a.getByLabel('Display name').fill('Sam Demo');
+  await a.getByLabel('Your name').fill('Sam Demo');
   await a.getByLabel('Password', { exact: true }).fill('short');
   await a.getByLabel('Confirm password').fill('different');
-  await a.getByRole('button', { name: 'Create account' }).click();
+  await a.getByRole('button', { name: /join/i }).click();
   await snap(a, 'invite-errors', { maxH: 520, cx: { x: 420, width: 440 } });
   await open(a, '/invite/not-a-real-token');
   await snap(a, 'invite-invalid', { maxH: 300, cx: { x: 420, width: 440 } });
   await ctx.close();
-  await open(aPage, '/admin');
+  await open(aPage, '/settings/org?tab=members');
   await snap(aPage, 'admin', { maxH: 1500, noHeader: true, cx: { x: 190, width: 900 } });
 });
 
