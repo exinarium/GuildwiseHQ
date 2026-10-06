@@ -266,6 +266,26 @@ describe('two-factor policy of an organization', () => {
   });
 });
 
+describe('a DevOps request belongs to the organization of the engineer that works it', () => {
+  it('a request on a workstation whose user is not the organization id is stored under the organization', async () => {
+    const { owner, org, as } = await acme();
+    expect(owner.id).not.toBe(org);
+    const created = await ok<any>(
+      as(owner, 'POST', '/api/devops/requests', {
+        workstationId: owner.workstationId,
+        summary: 'start the app',
+      }),
+      201,
+    );
+    const rows = await q('SELECT org_id FROM devops_requests WHERE id=$1', [created.request.id]);
+    expect(rows[0]!.org_id).toBe(org);
+    const thread = await q(`SELECT org_id FROM threads WHERE id=$1`, [
+      created.request.threadId ?? created.request.id,
+    ]);
+    expect(thread[0]!.org_id).toBe(org);
+  });
+});
+
 describe('the DevOps engineer per organization and workstation', () => {
   it('joining an organization hires its engineer on the member’s workstations; pairing hires one per organization', async () => {
     const u = await t.userSession(uniqueEmail('multi'));

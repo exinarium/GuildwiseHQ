@@ -11,7 +11,7 @@ import { usePageTitle } from '../lib/usePageTitle.ts';
  * Shown instead of the app when the account must have two-factor login and has not set it up yet (a super admin at
  * their first sign-in, or a member of an organization that requires it). Nothing else is reachable until it is on.
  */
-export function SecuritySetup({ me }: { me: MeResponse }) {
+export function SecuritySetup({ me, onDone }: { me: MeResponse; onDone?: () => void }) {
   usePageTitle('Set up two-factor login');
   const status = useTwoFactorStatus();
   const logout = useLogout();
@@ -31,7 +31,12 @@ export function SecuritySetup({ me }: { me: MeResponse }) {
       <Callout tone="info" className="mb-5" role="status">
         {why}
       </Callout>
-      <TwoFactorSetup onFinished={() => void qc.invalidateQueries({ queryKey: meKey })} />
+      <TwoFactorSetup
+        onFinished={() => {
+          void qc.invalidateQueries({ queryKey: meKey });
+          onDone?.();
+        }}
+      />
       <div className="mt-8 border-t border-line pt-4">
         <Button variant="ghost" onClick={() => logout.mutate()}>
           <LogOut aria-hidden="true" className="size-4" />

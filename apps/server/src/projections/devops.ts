@@ -5,9 +5,11 @@ import type { Projector } from '../eventstore/types.ts';
 export const devopsProjectors: Record<string, Projector> = {
   DevOpsRequested: async (tx, e) => {
     const p = (e.event as EventOf<'DevOpsRequested'>).payload;
-    const ws = await one<{ user_id: string }>(tx, 'SELECT user_id FROM workstations WHERE id=$1', [
-      p.workstationId,
+    // The request belongs to the organization of the DevOps engineer that works it (not the workstation's user).
+    const agent = await one<{ org_id: string }>(tx, 'SELECT org_id FROM agents WHERE id=$1', [
+      p.devopsAgentId,
     ]);
+    const orgId = agent?.org_id ?? e.scope.orgId;
     const card = p.cardId
       ? await one<{ project_id: string }>(tx, 'SELECT project_id FROM cards WHERE id=$1', [p.cardId])
       : undefined;
@@ -18,7 +20,7 @@ export const devopsProjectors: Record<string, Projector> = {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$12::jsonb,'queued',$11,$11)`,
       [
         p.requestId,
-        ws?.user_id,
+        orgId,
         p.workstationId,
         p.devopsAgentId,
         p.threadId,
@@ -42,7 +44,7 @@ export const devopsProjectors: Record<string, Projector> = {
        VALUES ($1,$2,$3,$4,'devops',$5,$6,$7,$8)`,
       [
         p.threadId,
-        ws?.user_id,
+        orgId,
         card?.project_id ?? null,
         p.cardId ?? null,
         p.devopsAgentId,

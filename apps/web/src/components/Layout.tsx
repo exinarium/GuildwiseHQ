@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { useSetTimezone } from '../api/queries/reporting.ts';
@@ -13,11 +13,17 @@ export function RequireAuth({ platform = false }: { platform?: boolean } = {}) {
   const me = useMe();
   const loc = useLocation();
   const socketState = useSocketState();
+  // Setting two-factor login up turns `setupRequired` off before the recovery codes were saved: stay on the setup page until it says it is done.
+  const [holdSetup, setHoldSetup] = useState(false);
+  const setupRequired = !!me.data?.twoFactor.setupRequired;
+  useEffect(() => {
+    if (setupRequired) setHoldSetup(true);
+  }, [setupRequired]);
   useEffect(() => {
     // No live socket while two-factor setup is pending (the server refuses it) or for a platform account's login page.
-    if (me.data && !me.data.twoFactor.setupRequired) getSocket()?.start();
+    if (me.data && !me.data.twoFactor.setupRequired && !holdSetup) getSocket()?.start();
     else getSocket()?.stop();
-  }, [me.data]);
+  }, [me.data, holdSetup]);
   // First login: take the manager's time zone from the browser (the daily BA report is posted on their clock).
   const setZone = useSetTimezone();
   const needsZone = !!me.data && !me.data.user.timezone;
@@ -37,7 +43,8 @@ export function RequireAuth({ platform = false }: { platform?: boolean } = {}) {
     return <Navigate to={`/login${next === '/' ? '' : `?next=${encodeURIComponent(next)}`}`} replace />;
   }
   // An account that must have two-factor login sets it up first; a platform account never reaches the work shell.
-  if (me.data.twoFactor.setupRequired) return <SecuritySetup me={me.data} />;
+  if (me.data.twoFactor.setupRequired || holdSetup)
+    return <SecuritySetup me={me.data} onDone={() => setHoldSetup(false)} />;
   const isPlatform = me.data.account.kind === 'super_admin';
   if (platform) return isPlatform ? <Outlet /> : <Navigate to="/" replace />;
   if (isPlatform) return <Navigate to="/platform" replace />;
