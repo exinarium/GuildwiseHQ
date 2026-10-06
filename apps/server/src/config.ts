@@ -17,7 +17,7 @@ const EnvSchema = z.object({
   AOM_MAIL_FROM: z.string().default('Guildwise HQ <noreply@aom.local>'),
   AOM_MIGRATE_ON_BOOT: bool(true),
   AOM_DATA_MIGRATIONS: bool(true),
-  AOM_SECRET_KEY: z.string().min(16).optional(),
+  AOM_SECRET_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(16).optional()),
   AOM_SERVE_WEB: bool(false),
   AOM_WEB_DIST: z.string().optional(),
   AOM_RATE_LIMIT: bool(true),

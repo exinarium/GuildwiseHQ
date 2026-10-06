@@ -8,9 +8,11 @@ First login and setup, managing projects and agents, the board and decision desk
 
 ### First login
 
-1. Check your email for an invitation link from the admin
-2. Click the link to set your password (12+ characters)
+1. Check your email for an invitation link. It comes either from the platform administrator ("start your organization": you become its Owner) or from the Owner or an Admin of an organization ("join Acme": you become a Member or Admin)
+2. Click the link, choose your name and a password (12+ characters). If you already have an account, sign in instead and confirm
 3. You are now logged in and can access the dashboard
+
+Every account belongs to an organization. There are no accounts without one, except the platform administrator.
 
 ### Pairing your first workstation
 
@@ -73,11 +75,55 @@ aom-runner.cmd pair --server ... --code ...  # pairs once
 
 With `default`, each agent gets a symlink to your `~/.claude/.credentials.json`.
 
+## Organizations, roles and security
+
+An **organization** owns projects, agents, the catalogue, the desk, the ledger and the vaults. Everyone works inside an organization, in one of these roles:
+
+| Role | Can do |
+| --- | --- |
+| **Owner** | Everything an Admin can, plus: invite Admins, change roles, require two-factor login, hand ownership to an Admin. There is exactly one Owner |
+| **Admin** | Create projects, add and remove people, manage vaults, hire and fire any agent, see the plan and limits |
+| **Member** | Work in the projects they were added to: hire agents on their own workstations, move cards, answer the desk |
+| **Guest** | Not a member. Has access to one or more projects of the organization (see below). Guests see nothing at organization level |
+
+Only the Owner and Admins create projects and add people. There is no setting that changes this.
+
+### Switching organizations
+
+You can belong to several organizations. The **organization switcher** at the top of the sidebar shows the one this browser tab works in, and a different tab can work in a different one. Projects of an organization where you are only a guest carry a "Guest" label with the organization's name.
+
+### Members, invitations and guests
+
+Open **Settings > Organization** (Owner and Admins; Members see a read-only member list).
+
+- **Members** lists everyone with their role. The Owner changes roles and removes people; Admins remove Members. When someone is removed, their agents are re-homed to you and claimed cards are released. Anyone except the Owner can leave. The Owner must hand over ownership first.
+- **Invitations** shows pending and past invitations (resend, revoke). Invite a person as a Member (with the projects they start on) or, as Owner, as an Admin. They receive an email with a link.
+- **Guests** lists the people from other organizations who have access to your projects.
+- **Plan & limits** shows the plan, status, licence date, usage and feature switches. The Founding plan has no limits yet; the limit fields are empty (unlimited) until pricing is decided. To change the plan, ask your platform administrator.
+
+**Guests.** Sharing a project (**Projects > Settings > Members**) invites an existing person who already belongs to an organization. If they have no account, invite them as a Member of your organization instead, or ask the platform administrator for a separate organization for them. A guest accepts in the **Project invitations** inbox on the Projects page, which names the inviting organization.
+
+### Two-factor login
+
+Anyone can switch on two-factor login (a six-digit code from an authenticator app) under **Settings > Security**: enter your password, scan the QR code, type the first code. You get ten **recovery codes**, shown once. Keep them somewhere safe: each works once if you lose your phone. At sign-in, after your password you are asked for the code (or a recovery code).
+
+- The platform administrator must use it (it is set up at first sign-in).
+- The Owner can **require it for the organization** (Organization > General). Members who have not set it up are held at the setup screen until they do. The Owner needs it on their own account first.
+- If a member loses their phone and recovery codes, the Owner (or the platform administrator) resets their two-factor login on the Members tab.
+
+### Suspension and licences
+
+A platform administrator can suspend an organization (unpaid, trial over, a licence date passed). Running shifts finish and nothing new starts; scheduled fires are skipped and recorded. A banner explains it. Only the Owner can still sign in, with read access plus organization settings and members. Reactivating the organization resumes everything where it stopped.
+
+### The platform area (platform administrators only)
+
+The platform administrator signs in at the same address and sees only the **Platform** area: organizations (status, Owner, plan, usage, limits, features), invitations to start a new organization, accounts (deactivate, reset two-factor) and the audit log. They never see an organization's cards, desk or vaults. Every platform action is recorded in the audit log, which is kept forever. The administrator can suspend, reactivate or cancel an organization and, with a written reason, move ownership to one of its Admins (for example when the Owner left the company).
+
 ## Projects
 
 ### Creating a project
 
-1. Go to **Projects**
+1. Go to **Projects** (as Owner or Admin; Members do not see the button)
 2. Click **Create project**
 3. Enter a name and key (e.g., `WEB`, `DOCS`), type (Code/Research/Feed), and domain (Work/Personal)
 4. For a Code project, add repositories (by URL or by linking to one already scanned on a workstation). Research and Feed projects need no repository
@@ -99,7 +145,7 @@ Research and Feed projects need no repository and have no testing or regression 
 Vaults are git repositories that sync to your workstations automatically. Each workstation syncs every 5 minutes (configurable) and commits/pushes changes.
 
 - **Personal vault**: knowledge base for your org, visible only to you
-- **Work vault**: shared among your team (if you share a project, members see your work vault)
+- **Work vault**: shared among the organization's Owner and Admins (it syncs to their workstations only; Members and guests never receive it)
 - **Project vaults**: one per project, shared with all members who see that project
 
 To configure:
@@ -111,15 +157,15 @@ To configure:
 
 ### Sharing a project
 
-Only the project owner can share. To invite another manager:
+Only the Owner and Admins of the organization can add people to a project. To invite someone from another organization as a guest:
 
 1. Go to **Projects** > **Settings** > **Members**
-2. Enter their email and click **Invite**
-3. They accept in their Invitations inbox and gain access to this project only
+2. Enter their email and click **Invite**. The person must already have an account that belongs to an organization
+3. They accept in their Project invitations inbox and gain access to this project only
 4. They can hire agents onto their own workstations, see the board, and answer desk items
 5. Only the owner (and the hiring manager) can change each agent; only the owner can hire/change/fire shared project agents
 
-When you remove a member, their agents are re-homed to your workstation and account automatically; claimed cards are released. Deactivating a user (administrator) does the same for every project they were a manager of, unlinks all of their workstations (their runners are disconnected and cannot reconnect), and parks their own agents until the account is reactivated and re-paired.
+When you remove a member, their agents are re-homed to your workstation and account automatically; claimed cards are released. Deactivating a user (platform administrator) does the same for every project they were a manager of, unlinks all of their workstations (their runners are disconnected and cannot reconnect), and parks their own agents until the account is reactivated and re-paired.
 
 Only the project owner can add standing orders (also from a card or when answering a question); a guest manager can answer questions with decisions and requirements. Organization-wide standing orders can only come from the organization owner. An agent's permissions can be narrowed by its hiring manager but never widened beyond its role (a reviewer never commits); widening other limits (web, extra tools, risk tiers) is for the organization owner.
 
@@ -244,6 +290,8 @@ Name suggestions skip retired agents and names already in use.
 ### The DevOps engineer
 
 You get one DevOps agent per workstation automatically. It cannot be fired, only **reset** (which wipes its sandbox like a firing, but keeps it assigned). It is not driven by cards; agents and you ask it directly via the `aom devops` command in a shift or the **Ask DevOps** button on the Workstations page.
+
+The DevOps engineer is free (it does not count against the agent limit) and one exists per organization per workstation. Because it is free it cannot be extended: no extra instructions, skills, tools, standing orders or custom permissions, it cannot be cloned into a custom role or given workflow stages. Only its model and effort can change.
 
 DevOps is always available and outside the queue. It handles:
 - Cloning and setting up projects

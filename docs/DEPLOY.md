@@ -64,14 +64,28 @@ This:
 - Applies migrations on boot (via `AOM_MIGRATE_ON_BOOT=true`)
 - Logs to docker compose (use `docker compose logs -f` to watch)
 
-### 3. Create the first admin account
+### 3. Create the platform account and the first organization
+
+The **platform account** (super admin) manages organizations, invitations, accounts and the audit log. It belongs to no organization and cannot see anyone's work. It must use two-factor login, which it sets up at its first sign-in (keep the recovery codes).
+
+```bash
+docker compose -f docker-compose.prod.yml exec app node dist/superadmin-create.mjs \
+  --email platform@example.com \
+  --name "Platform" \
+  --password 'your-strong-password'
+```
+
+Then either sign in as the platform account and invite someone to start an organization (**Platform > Invitations**), or create the first user and organization directly. Use a different email from the platform account:
 
 ```bash
 docker compose -f docker-compose.prod.yml exec app node dist/admin-create.mjs \
   --email you@example.com \
   --name "You" \
-  --password 'your-strong-password'
+  --password 'your-strong-password' \
+  --org "Your organization"
 ```
+
+A lost platform password is reset with `node dist/superadmin-reset-password.mjs --email ... [--reset-two-factor]` (the flag also clears its two-factor login so it is set up again).
 
 ### 4. Test the deployment
 
@@ -102,6 +116,14 @@ docker compose -f docker-compose.prod.yml up -d --build
 
 Migrations run on boot. Downtime is minimal (seconds).
 
+### Upgrading from before organizations (October 2026)
+
+1. **Back up the database** first (see Backups).
+2. Optional preview, which reads and prints the plan and writes nothing: `docker compose -f docker-compose.prod.yml exec app node dist/orgs-migrate.mjs --dry-run`.
+3. Deploy. On boot the schema migrations `1310_organizations`, `1311_org_fks` and `1312_two_factor` run, then the data migration `orgs-2026-10` gives **every existing user an organization** (same id as the user, so no existing row or event changes) and makes them its Owner. Users who only had shared access get an organization of their own and keep their shared projects as guest access. The migration is idempotent: running it again (or `orgs-migrate.mjs`) finds nothing to do.
+4. Create the platform account (step 3 above) with a new email.
+5. The old `/api/admin/*` endpoints answer 410 and point to their replacements.
+
 ## Environment variables (server)
 
 Set these in `.env` before starting the server. All have defaults suitable for development or HTTPS deployment.
@@ -116,6 +138,7 @@ Set these in `.env` before starting the server. All have defaults suitable for d
 | `AOM_DOMAIN` | — | Public domain (used by Caddy for Let's Encrypt certs; omit for internal IP/CA) |
 | `AOM_HTTP_PORT` | `80` | Caddy HTTP port (for ACME challenges) |
 | `AOM_HTTPS_PORT` | `443` | Caddy HTTPS port |
+| `AOM_SECRET_KEY` | generated on first use | Key that encrypts two-factor (TOTP) seeds at rest. **Set it in production** (any long random string) so a database dump alone cannot read the seeds; without it a random key is kept in the database. Changing it later invalidates enrolled authenticator apps, so keep it with your backups |
 
 ### Database
 
@@ -242,7 +265,7 @@ Workstations connect outbound over WebSocket (no inbound ports needed). Code, cr
 
 ## Isolation and multi-tenancy
 
-Each user is sandboxed: they see only their own org, projects, cards, and shared projects (invited). The server enforces org-scoped queries and authorization checks in every route. Tests verify cross-user isolation.
+Each organization is sandboxed: members see only their organization's projects, cards and desk (the projects they were added to), and guests see only the projects they were invited to. The server enforces org-scoped queries and authorization checks in every route, and the platform account sees organization metadata only. Tests verify cross-organization isolation.
 
 v1 runs a single server instance. Runner connections are identified by token (not session); a second runner with the same token closes the first (preventing duplicate shifts).
 

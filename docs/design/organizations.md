@@ -1,6 +1,6 @@
 # Design: organizations, org roles, super admin and licensing
 
-Oct 6, 2026 · status: design (not built) · companion to `docs/SPEC.md`, `docs/ARCHITECTURE.md` (referenced as §n), `docs/design/restructure.md` (built **after** this, see §17) and the Guildwise HQ design system (`docs/design/ui/*`)
+Oct 6, 2026 · status: built (October 2026, see Implementation status at the end) · companion to `docs/SPEC.md`, `docs/ARCHITECTURE.md` (referenced as §n), `docs/design/restructure.md` (built **after** this, see §17) and the Guildwise HQ design system (`docs/design/ui/*`)
 
 Today every user *is* an organization: each `org_id` column holds a user id (`projects`, `agents`, `cards`, `desk_items`, `ledger_entries`, `vaults`, `devops_requests`, `shifts`, `threads`, `schedules`, `intakes`, `outbound`, `catalogue` overrides, `departments`, `phases`, `ba_signals`, `hygiene_findings`, `interests`, `repo_requests`, and `events.org_id`). The FK target is `users(id)` (the `agent_stats` tables have no FK). `users.role` ('admin' | 'member') is an app-wide administrator role (`auth/guards.ts requireAdmin`, `/api/admin/*`, `pages/Admin.tsx`, the `admin:create` CLI). Sharing a project (`project_members`, role `manager`) is the only way two users work together. "Org owner" is written in code as `userId === orgId` (`packages/shared/src/authz/index.ts`, `hr/hr.ts`, `commands/{designer,vaults,sharing}.ts`, `queries/desk.ts`, `browser-gateway/gateway.ts`), and about 100 SQL predicates `org_id = $n` and 16 `orgScope(user.id)` call sites pass the user id as the org.
 
@@ -854,3 +854,18 @@ The restructure steps that change are listed in `restructure.md` under "Impact o
 | 14 | **Every user belongs to an organization.** A user either gets their own org (new-org invitation or migration) or is added as a member of an existing org. There are no org-less users (super admins excepted). **Guests can only be users who already hold an organization**: a guest invitation goes to an existing account that owns or belongs to an org. Inviting someone with no account goes through a member invitation (joins your org) or a new-org invitation from the super admin. The migration gives every existing user an org, including users without data (they become Owner of an empty org) or, if they only had shared access, an org of their own while their shared access becomes guest access. |
 | 15 | One DevOps engineer per org per workstation, not counted against limits. |
 | 15a | **The DevOps engineer cannot be extended.** It is free, so it must not become a general-purpose agent. Its built-in role takes no owner extensions: no extra instructions, skills, MCP tools, standing orders or custom permissions. It cannot be cloned into a custom role, cannot be given claimable workflow stages, and only works DevOps requests and hygiene. The server enforces this (reject the extension, clone and stage-assignment commands for role key `devops`), and the UI hides those controls. The model and effort can be changed. Any agent that is not the built-in DevOps engineer counts toward the agent limit. |
+
+---
+
+## Implementation status (built, 6 Oct 2026)
+
+All 15 steps of section 16 are built, with every owner decision above applied. Where the build differs from the text above:
+
+- **Migrations** are `1310_organizations.sql`, `1311_org_fks.sql` and `1312_two_factor.sql` (the numbers 1307/1308 were taken by other work). The data migration is `orgs-2026-10` (`apps/server/src/data-migrations/orgs.ts`), idempotent, covered by `orgs-migration.test.ts` against a realistic legacy fixture (admin with a project, repository, agents and vaults; a user with shared access only; a user with no data).
+- **Plans**: only `founding` (no limits). The limit fields exist and are null. No trial or Team presets (decision 8).
+- **Two-factor** (decision 7) is built: TOTP, ten recovery codes, required for super admins, optional for users, enforceable per organization. Seeds are encrypted with `AOM_SECRET_KEY`.
+- **15a** is enforced by the server (`devops_fixed`, no custom role under `devops`, no stage claims) and the controls are hidden in the web app.
+- **Org-level vaults** sync to Owner and Admin workstations only (decision 12). The interest rank rule uses the creator's current rank with the stored rank as fallback (decision 13).
+- **Guest schedule rule**: schedules are managed by the project's Owner or Admins (project owner role) and a schedule acts only inside its own project; guests and Members cannot create schedules, which is stricter than the matrix row and open for the owner to relax (see questions in the hand-over).
+- **Web**: platform area (`/platform`, `PlatformShell`), `/settings/org`, org switcher and banners, the three accept-invite flows, 2FA setup and login step. `pages/Admin.tsx` is removed; `/admin` redirects to `/settings/org`.
+- **CLI**: `superadmin:create`, `superadmin:reset-password`, `admin:create` (now creates a user plus the organization they own), `orgs:migrate [--dry-run]`.

@@ -196,7 +196,7 @@ Migrations are plain SQL files `apps/server/migrations/NNNN_name.sql`, applied i
 - for each file not applied: run it in its own transaction and insert the row; for applied files, compare sha256 checksum and abort with an error if a file changed;
 - runs on server boot (`AOM_MIGRATE_ON_BOOT=true`, default) and via `pnpm db:migrate`; tests run it against `aom_test` once in vitest `globalSetup`.
 
-Migration number ranges are reserved per milestone so parallel builders never collide: M1 `0001–0099`, M2 `0200–0299`, M3 `0300–0399`, M4 `0400–0499`, M5 `0500–0599`, M6 `0600–0699`, M7 `0700–0799`, M8 `0800–0899`, M9 `0900–0999`, M10 `1000–1099`.
+Migration number ranges are reserved per milestone so parallel builders never collide: M1 `0001–0099`, M2 `0200–0299`, M3 `0300–0399`, M4 `0400–0499`, M5 `0500–0599`, M6 `0600–0699`, M7 `0700–0799`, M8 `0800–0899`, M9 `0900–0999`, M10 `1000–1099`. Organizations added `1310_organizations.sql` (tables, `users.kind`, invitation kinds, `org_id` on the projections that lacked it), `1311_org_fks.sql` (the `org_id` foreign keys re-pointed from `users` to `organizations`, `DEFERRABLE INITIALLY DEFERRED` and validated by the data migration) and `1312_two_factor.sql` (`user_totp`, recovery codes, login challenges, `organizations.require_two_factor`). Data migrations (`apps/server/src/data-migrations/`, recorded in `data_migrations`) run on boot after the schema: `orgs-2026-10` appends `OrganizationCreated` + `OrgMemberAdded(owner)` for every user (org id = user id) and is idempotent; `pnpm --filter @aom/server orgs:migrate [--dry-run]` runs or previews it.
 
 ### 4.1 Core DDL (M1)
 
@@ -1543,6 +1543,8 @@ M8 as built: the BA drafts with `aom outbound draft` in its Finalize shift (`out
 
 ## 17. Multi-user scoping and authorization
 
+> **Organizations (October 2026).** The text below was written when every user was an organization (`userId === orgId`). That is gone: `org_id` is an `organizations.id`, the request's organization comes from `X-AOM-Org` (WebSocket: `org` query parameter) or `auth_sessions.active_org_id`, and "org owner" means the organization's Owner or an Admin (`org_members.role`). Section 25 is the current model; where this section says "owner", read "Owner or Admin of the project's organization", and "any user" creating a project is Owner or Admin only.
+
 ### 17.1 Visibility predicates (`apps/server/src/authz/scope.ts`, mirrored as pure functions in `packages/shared/src/authz/`)
 
 ```sql
@@ -1560,9 +1562,10 @@ Admins get the administration view only; being admin grants no visibility into o
 
 | Action | Allowed for |
 | --- | --- |
-| Admin: invite / resend / revoke, change role, deactivate/reactivate user, list users, unlink any workstation | admins |
+| Organization members and invitations (`/api/org/*`): invite, resend, revoke, change role, remove | Owner and Admins (Admins only for Members; Owner alone for Admins and roles) |
+| Platform (`/api/platform/*`): organizations, new-organization invitations, accounts, audit log | super admin only |
 | Pair / rename / unlink own workstation; set DevOps access | the workstation's user |
-| Create project | any user (in own org) |
+| Create project | the organization's Owner and Admins |
 | Update project, add/remove repos, share/remove members, register project vault | project owner |
 | Archive and restore a project | any active project member |
 | Delete an archived project permanently | project owner (type-the-key confirmation) |
@@ -1747,3 +1750,27 @@ Root scripts: `pnpm test` (all vitest), `pnpm e2e`, `pnpm typecheck` (`tsc --noE
 ### 24.x Not built (accepted by the owner, 4 Oct 2026)
 
 - Couchbase bucket or scope per worktree, and a one-at-a-time queue for heavy builds (e.g. MAUI) per workstation (spec, "Worktrees, testing, review and integration"). Deferred as a later enhancement; until then keep Couchbase-backed or MAUI projects to one tester and one builder per workstation.
+
+---
+
+## 25. Organizations, roles, platform and licensing (built; design: `docs/design/organizations.md`)
+
+**Model.** `organizations(id, name, owner_user_id, plan, status, status_reason, limits, feature overrides, trial_ends_at, license_expires_at, grace_days, require_two_factor, billing refs)`; `org_members(org_id, user_id, role owner|admin|member)` with a partial unique index for exactly one Owner. `users.kind` is `user` or `super_admin` (no memberships possible). A **guest** is derived: an active `project_members` row in an organization the user is not a member of. Org Owners and Admins get projector-maintained `project_members` rows (`org_grant`), so every existing visibility join stays correct. Migrated organizations keep the old user id as their id, so no event or `org_id` column was rewritten.
+
+**Events** (`events/org.ts`, `events/user.ts`): `OrganizationCreated`, `OrganizationRenamed`, `OrgMemberAdded`, `OrgMemberRoleChanged`, `OrgMemberRemoved`, `OrgOwnershipTransferred`, `OrgPlanChanged`, `OrgLimitsSet`, `OrgDatesSet`, `OrgFeaturesSet`, `OrgStatusChanged`, `OrgTwoFactorPolicySet`, `PlatformOrgViewed`; `SuperAdminCreated`, `SuperAdminSignedIn`, `TwoFactorEnabled`, `TwoFactorDisabled`, `TwoFactorRecoveryCodeUsed`, `TwoFactorRecoveryCodesRegenerated`. Audiences gain `user` (workstation and addressed-desk events). `platform_audit_log` is a projection of every super admin and system licensing event, rebuilt with the rest and **never pruned**.
+
+**Request context** (`auth/org-context.ts`, `auth/guards.ts`, `orgs/guard.ts`). `requireOrg` resolves the active organization, checks membership and status, and returns the role; `requireSuperAdmin` guards `/api/platform/*` and keeps super admins off app routes; `requireFeature` checks the plan's switches; object routes derive the organization from the object. `POST /api/orgs/active` stores the remembered default. A write caused by a user in a suspended or cancelled organization is refused with `org_suspended` for everyone but its Owner (who keeps read access plus organization settings and members).
+
+**Authorization** is the pure predicate set in `packages/shared/src/authz/` over ranks Owner 4, Admin 3, Member 2, Guest 1 (the interest edit rule compares the actor's rank with the creator's *current* rank, the stored rank when the creator left). Event visibility (`browser-gateway/visibility.ts`, `queries`/`EVENT_VISIBILITY_SQL`): Owners and Admins get `org` events in full, Members get them payload-stripped, guests get project events only.
+
+**Two-factor login** (`auth/totp.ts`, `auth/two-factor.ts`, `routes/auth.ts`). RFC 6238 TOTP (SHA-1, 6 digits, 30 s, +-1 step, a step is accepted once); seeds are AES-256-GCM encrypted at rest with `AOM_SECRET_KEY` (`auth/secrets.ts`) and live in operational tables (`user_totp`, `user_recovery_codes`, `login_challenges`), the events only record enabling, disabling and code use; ten single-use recovery codes are stored hashed. Login returns `{twoFactorRequired, challenge}` until `POST /api/auth/login/2fa` answers it. `MeResponse.twoFactor = {enabled, required, setupRequired}`: required for super admins and for members of an organization with `require_two_factor`; while `setupRequired` the session can reach only the 2FA setup routes. Owner (`POST /api/org/members/:id/reset-two-factor`) and super admin (`/api/platform/users/:id/reset-two-factor`) reset it.
+
+**Licensing** (`orgs/licensing.ts`, `orgs/limits.ts`, `packages/shared/src/orgs/plans.ts`). One plan, `founding`, with all features and `NO_LIMITS`; limits (`maxMembers`, `maxWorkstations`, `maxAgents`, `maxProjects`) are nullable per organization and enforced inside the creating transaction (invitations count as seats, guests and DevOps engineers never count). `licensingTick` (scheduler) ends trials, warns once per threshold and suspends after the grace days (system actor, audited). The dispatcher, scheduler, reporter and hygiene skip non-operational organizations; running shifts finish.
+
+**DevOps engineer** (`commands/devops.ts`, `commands/agents.ts`): one per (organization, workstation) for each organization the workstation's user belongs to. Owner decision 15a: `PATCH` of extensions, a custom role under key `devops`, workflow-stage claims and standing orders for it are rejected (`devops_fixed`); model and effort remain editable.
+
+**Routes.** `/api/orgs`, `/api/orgs/active`, `/api/org`, `/api/org/{members,invitations,guests,transfer-ownership}`, `/api/auth/2fa/*`, `/api/auth/login/2fa`, `/api/platform/{orgs,invitations,users,audit}`; `/api/admin/*` answers 410. Invitations carry a kind: `new_org` (super admin), `org_member`, or `legacy` (accepted for old links); guest sharing stays `POST /api/projects/:id/members`.
+
+**CLI** (`apps/server/scripts`, bundled as `dist/*.mjs` in the image): `superadmin:create --email --name [--password]`, `superadmin:reset-password --email [--password] [--reset-two-factor]`, `admin:create --email --name [--password] [--org] [--plan]` (a user plus the organization they own), `orgs:migrate [--dry-run]`.
+
+**Web.** The API client sends `X-AOM-Org` from `sessionStorage` (per tab); `OrgSwitcher` and `OrgBanner` in the shell; `/settings/org` (General, Members, Invitations, Guests, Plan & limits); `/settings` security panel and the forced `SecuritySetup` page; the Login 2FA step; `/invite/:token` for the three invitation kinds; `/platform/*` (`PlatformShell`: organizations, detail, invitations, accounts, audit log), which only super admins reach.
