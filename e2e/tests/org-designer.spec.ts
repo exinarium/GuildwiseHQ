@@ -298,7 +298,7 @@ test('validation: a workflow with an unreachable stage cannot be submitted, and 
   expect(submit.status()).toBe(422);
   expect(JSON.stringify(await submit.json())).toContain('unreachable_stage');
   expect(await q(`SELECT 1 FROM desk_items WHERE title LIKE '%Bad flow%'`)).toHaveLength(0);
-  await page.getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'Discard bad-flow v1' }).click();
   await expect(page.getByTestId('workflow-bad-flow')).toHaveCount(0);
 });
@@ -309,9 +309,9 @@ test("a project's type is its workflow: created from the Projects page, filtered
   const dlg = page.getByRole('dialog');
   await dlg.getByLabel('Key').fill('SUP');
   await dlg.getByLabel('Name', { exact: true }).fill('Support desk');
-  await dlg.getByLabel('Workflow').selectOption('support');
+  await dlg.getByRole('radio', { name: /^support/ }).check();
   await dlg.getByRole('button', { name: 'Create project' }).click();
-  await expect(page.getByText('Support desk')).toBeVisible();
+  await expect(page.getByRole('main').getByText('Support desk')).toBeVisible();
   projectId = (await q<{ id: string }>(`SELECT id FROM projects WHERE key='SUP'`))[0]?.id as string;
   const add = await api.post(`/api/projects/${projectId}/repos`, {
     data: { name: 'toy', remoteUrl: paths.origin, workingBranch: 'main' },
@@ -328,10 +328,10 @@ test("a project's type is its workflow: created from the Projects page, filtered
   ).toEqual(['SUP']);
 
   await page.goto('/projects');
-  await expect(page.getByText('Support desk')).toBeVisible();
+  await expect(page.getByRole('main').getByText('Support desk')).toBeVisible();
   await page.getByLabel('Department').selectOption('support');
-  await expect(page.getByText('Support desk')).toBeVisible();
-  await expect(page.getByText('Org project')).toHaveCount(0);
+  await expect(page.getByRole('main').getByText('Support desk')).toBeVisible();
+  await expect(page.getByRole('main').getByText('Org project')).toHaveCount(0);
 });
 
 test('hire: the custom roles are on the HR board Hire form, grouped by department', async () => {

@@ -258,7 +258,11 @@ function RequestThread({ id }: { id: string }) {
           <p className="font-medium">Approval needed: {request.approval.action}</p>
           <p>{request.approval.reason}</p>
           {request.approval.commands.length > 0 && (
-            <pre className="mt-1 overflow-x-auto rounded bg-side p-2 text-xs text-side-strong">
+            <pre
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be keyboard reachable
+              tabIndex={0}
+              className="mt-1 overflow-x-auto rounded bg-side p-2 text-xs text-side-strong"
+            >
               {request.approval.commands.join('\n')}
             </pre>
           )}

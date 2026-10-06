@@ -186,8 +186,8 @@ export function AppShell({ isAdmin, name, live }: { isAdmin: boolean; name: stri
                     data-testid="desk-badge"
                     title={`${counts.blocking} blocking, ${counts.open} open`}
                     className={cx(
-                      'tnum absolute top-1 right-0.5 inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-[11px] font-semibold',
-                      counts.blocking > 0 ? 'bg-danger-fill text-white' : 'bg-accent text-accent-fg',
+                      'tnum absolute top-1 right-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-xs font-semibold',
+                      counts.blocking > 0 ? 'bg-danger-solid text-white' : 'bg-accent text-accent-fg',
                     )}
                   >
                     {counts.open}

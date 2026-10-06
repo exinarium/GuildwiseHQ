@@ -128,7 +128,7 @@ export function Agents() {
         <EmptyState
           icon={Users}
           title="No agents yet"
-          description="Hire a builder and a reviewer to start moving cards."
+          description="No agents hired yet. Hire a builder and a reviewer to start moving cards."
           action={
             <Button variant="primary" onClick={() => setHireOpen(true)}>
               Hire agent

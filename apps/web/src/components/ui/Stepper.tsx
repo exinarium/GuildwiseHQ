@@ -23,6 +23,8 @@ export function Stepper({
   );
   return (
     <ol
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be keyboard reachable
+      tabIndex={0}
       aria-label={label}
       className="scroll-fade-x -mx-4 flex items-center overflow-x-auto px-4 py-1 sm:mx-0 sm:px-0"
     >

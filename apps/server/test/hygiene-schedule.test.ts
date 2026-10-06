@@ -198,9 +198,13 @@ describe('what hygiene cannot resolve becomes a reporter signal', () => {
       5000,
       'dirty worktree finding',
     );
-    const note = await q(
-      `SELECT body FROM thread_messages WHERE body LIKE 'Worktree sweep:%' ORDER BY created_at DESC LIMIT 1`,
-    );
+    // the thread note is written right after the finding: wait for it instead of racing it
+    const noteQuery = () =>
+      q(
+        `SELECT body FROM thread_messages WHERE body LIKE 'Worktree sweep:%' ORDER BY created_at DESC LIMIT 1`,
+      );
+    await until(async () => (await noteQuery())[0], 5000, 'worktree sweep note');
+    const note = await noteQuery();
     expect(note[0]?.body).toContain('2 stale worktrees removed');
     expect(note[0]?.body).toContain('TOY-9');
     await reporter().run();

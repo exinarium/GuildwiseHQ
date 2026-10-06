@@ -238,6 +238,8 @@ function PairDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
           <p className="text-sm text-muted">Expires {formatDateTime(gen.data?.expiresAt)}. Shown once.</p>
           <pre
             data-testid="pair-command"
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be keyboard reachable
+            tabIndex={0}
             className="overflow-x-auto rounded-control bg-side p-2 font-mono text-xs text-side-strong"
           >
             {cmd}

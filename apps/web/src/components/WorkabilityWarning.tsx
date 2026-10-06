@@ -43,7 +43,7 @@ export function WorkabilityWarning({
         type="button"
         aria-label={reason}
         aria-describedby={tipId}
-        className={`rounded p-0.5 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring ${
+        className={`rounded p-1 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring ${
           blocked ? 'text-danger ' : 'text-warning '
         }`}
       >

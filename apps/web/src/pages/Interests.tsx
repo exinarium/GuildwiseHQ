@@ -261,7 +261,7 @@ function InterestCard({
       {s.failing && i.schedule?.lastError && (
         <p className="mt-1 text-xs text-danger">{i.schedule.lastError}</p>
       )}
-      <dl className="mt-2 grid gap-x-6 gap-y-1 text-sm">
+      <div className="mt-2 grid gap-x-6 gap-y-1 text-sm">
         {i.feedProject && (
           <>
             <div data-testid="interest-cadence">{describeScan(i.scan)}</div>
@@ -300,7 +300,7 @@ function InterestCard({
             Notes {s.research.published} · open {s.research.open}
           </div>
         )}
-      </dl>
+      </div>
       <ErrorBox error={run.error ?? patch.error} />
       {run.data && (
         <p className="mt-2 text-sm" data-testid="interest-run-result">

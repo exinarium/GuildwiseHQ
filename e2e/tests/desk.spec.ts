@@ -179,7 +179,7 @@ test('AC3: a standing order added on the desk is in the instructions of the next
   await form.getByLabel('Title').fill('E2E: never push to main');
   await form.getByLabel('Text').fill('Agents never push to the main branch.');
   await form.getByRole('button', { name: 'Add to ledger' }).click();
-  await expect(form.getByText('Added to the ledger.')).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Added to the ledger' }).first()).toBeVisible();
 
   const a = await createCard('Standing order A');
   const b = await createCard('Standing order B');

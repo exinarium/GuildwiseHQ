@@ -2,12 +2,11 @@
 //   node apps/web/scripts/ui-shots.mjs [outDir] [--only=board,desk] [--sizes=d,m] [--themes=light,dark]
 // Needs a server with a populated demo world (see e2e/tests/guide-screenshots.spec.ts: AOM_E2E_GUIDE=1 AOM_GUIDE_KEEP=1
 // AOM_E2E_DB=aom_e2e_b AOM_E2E_PORT=4611 AOM_E2E_DIR=/tmp/aom-e2e-b playwright test --project=guide --grep seed:)
-// serving apps/web/dist. Env: BASE (default http://localhost:4611), EMAIL, PASSWORD.
+// reached through the Vite dev server (AOM_API_TARGET=http://localhost:4611 AOM_WEB_PORT=5199 pnpm --filter @aom/web exec vite).
+// Env: BASE (default http://127.0.0.1:5199), ORIGIN (the API's public origin), EMAIL, PASSWORD.
 import { mkdirSync } from 'node:fs';
-import {
-  chromium,
-  request,
-} from '/path/to/guildwise/e2e/node_modules/@playwright/test/index.mjs';
+import { chromium } from '/path/to/guildwise/e2e/node_modules/@playwright/test/index.mjs';
+import { base, connect, email } from './ui-routes.mjs';
 
 const args = process.argv.slice(2);
 const flag = (n, d) => args.find((a) => a.startsWith(`--${n}=`))?.split('=')[1] ?? d;

@@ -114,7 +114,7 @@ test('adopt: the banner lists the plain schedule; adopting makes it an interest 
   await expect(dialog.getByTestId('adopt-row-Old scan')).toBeVisible();
   await dialog.getByTestId('adopt-submit').click();
   await expect(dialog.getByTestId('adopt-result')).toHaveText('Adopted');
-  await dialog.getByRole('button', { name: 'Close' }).click();
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
 
   const card = page.getByTestId('interest-Reloading');
   await expect(card).toBeVisible();
@@ -278,7 +278,7 @@ test('research this: the dialog is prefilled; the mock researcher and checker pu
   await dialog.getByTestId('research-submit').click();
   const ref = (await page.getByTestId('research-card-link').textContent())?.trim() as string;
   expect(ref).toMatch(/^RES-\d+$/);
-  await page.getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
 
   const res = await waitFor(
     `${ref} done`,

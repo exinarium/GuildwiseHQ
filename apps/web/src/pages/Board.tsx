@@ -1,4 +1,4 @@
-import { Rss, Search, Settings2, SquareKanban } from 'lucide-react';
+import { Rss, Search, Settings, SquareKanban } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { useBoard } from '../api/queries/board.ts';
@@ -141,7 +141,7 @@ export function Board() {
               aria-label={`Settings for ${project.key}`}
               title="Project settings"
             >
-              <Settings2 aria-hidden="true" className="size-4" />
+              <Settings aria-hidden="true" className="size-4" />
             </ButtonLink>
             <ButtonLink to={`/cards/new?project=${project.key}`} variant="primary">
               New card
@@ -182,6 +182,7 @@ export function Board() {
       {board.isError && <ErrorBox error={board.error} onRetry={() => board.refetch()} />}
       {board.data && cards.length === 0 && !phaseId && (
         <EmptyState
+          data-testid="board"
           icon={SquareKanban}
           title="No cards yet"
           description="Create the first card, or bring work in from Jira or GitHub."

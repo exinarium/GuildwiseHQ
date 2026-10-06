@@ -7,7 +7,7 @@ export const email = process.env.EMAIL ?? 'pieter@demo.local';
 export const password = process.env.PASSWORD ?? 'pieter-demo-pass-2026';
 
 export async function connect() {
-  const api = await request.newContext({ baseURL: apiOrigin, extraHTTPHeaders: { Origin: apiOrigin } });
+  const api = await request.newContext({ baseURL: base, extraHTTPHeaders: { Origin: apiOrigin } });
   const login = await api.post('/api/auth/login', { data: { email, password } });
   if (!login.ok()) throw new Error(`login failed: ${login.status()}`);
   const storageState = await api.storageState();

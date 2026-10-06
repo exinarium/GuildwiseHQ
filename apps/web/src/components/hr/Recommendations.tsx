@@ -29,17 +29,25 @@ const APPLY_LABEL: Record<Recommendation['action']['type'], string> = {
 export function RecommendationList({ recommendations }: { recommendations: Recommendation[] }) {
   const apply = useApplyRecommendation();
   const [done, setDone] = useState<Record<string, { effect: string; deskItemId: string | null }>>({});
-  if (recommendations.length === 0) return null;
+  // An applied recommendation disappears from the server's list at once: keep showing it with its outcome.
+  const [applied, setApplied] = useState<Record<string, Recommendation>>({});
+  const shown = [
+    ...recommendations,
+    ...Object.values(applied).filter((a) => !recommendations.some((r) => r.id === a.id)),
+  ];
+  if (shown.length === 0) return null;
   return (
     <section aria-label="Recommendations" data-testid="recommendations" className="mb-4">
       <h2 className="mb-3 text-lg font-semibold text-fg">Recommendations</h2>
       <ul className="flex flex-col gap-2">
-        {recommendations.map((r) => (
+        {shown.map((r) => (
           <li key={r.id} data-testid={`rec-${r.kind}`} data-rec-id={r.id}>
             <Panel className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone="violet">{KIND_LABEL[r.kind]}</Badge>
-                <p className="min-w-0 flex-1 text-sm font-medium">{r.title}</p>
+                <p className="min-w-0 basis-full text-base font-medium text-fg sm:basis-0 sm:flex-1">
+                  {r.title}
+                </p>
                 {done[r.id] ? (
                   <Badge tone="green">Applied</Badge>
                 ) : r.action.type === 'none' ? (
@@ -51,7 +59,19 @@ export function RecommendationList({ recommendations }: { recommendations: Recom
                     disabled={apply.isPending}
                     onClick={() =>
                       apply.mutate(r.id, {
-                        onSuccess: (res) => setDone((d) => ({ ...d, [r.id]: res })),
+                        onSuccess: (res) => {
+                          setDone((d) => ({ ...d, [r.id]: res }));
+                          setApplied((a) => ({ ...a, [r.id]: r }));
+                          // keep the outcome on screen for a moment, then let the server's list win
+                          setTimeout(
+                            () =>
+                              setApplied((a) => {
+                                const { [r.id]: _gone, ...rest } = a;
+                                return rest;
+                              }),
+                            3000,
+                          );
+                        },
                       })
                     }
                   >
@@ -65,13 +85,18 @@ export function RecommendationList({ recommendations }: { recommendations: Recom
               </div>
               <p className="text-sm text-muted">{r.summary}</p>
               {r.action.type === 'standing_order' && (
-                <p className="rounded bg-sunken px-2 py-1 text-xs italic" data-testid="rec-proposal">
+                <p
+                  className="rounded-control bg-sunken px-3 py-2 text-sm text-muted italic"
+                  data-testid="rec-proposal"
+                >
                   Proposed standing order: {r.action.text}
                 </p>
               )}
               <details>
-                <summary className="cursor-pointer text-xs text-subtle">Evidence</summary>
-                <ul className="mt-1 list-disc pl-5 text-xs" data-testid="rec-evidence">
+                <summary className="cursor-pointer text-sm font-medium text-muted hover:text-fg">
+                  Evidence
+                </summary>
+                <ul className="mt-2 list-disc pl-5 text-sm text-muted" data-testid="rec-evidence">
                   {r.evidence.metrics.map((m) => (
                     <li key={m.label}>
                       {m.label}: <span className="font-medium">{m.value}</span>
@@ -121,7 +146,7 @@ export function RoleUpdates({ updates }: { updates: RoleUpdate[] }) {
         {updates.map((u) => (
           <li key={u.roleKey} data-testid={`role-update-${u.roleKey}`}>
             <Panel className="flex flex-wrap items-center gap-2">
-              <p className="min-w-0 flex-1 text-sm">
+              <p className="min-w-0 flex-1 text-base text-fg">
                 <span className="font-medium">{u.roleName}</span> has a new default (version {u.latestVersion}
                 )
                 {u.extensionBaseVersion !== null

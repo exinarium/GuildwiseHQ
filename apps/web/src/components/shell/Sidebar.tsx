@@ -22,8 +22,8 @@ function DeskPill({ counts, collapsed }: { counts: DeskCounts; collapsed: boolea
       title={`${counts.blocking} blocking, ${counts.open} open`}
       className={cx(
         'tnum inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold',
-        blocking ? 'bg-danger-fill text-white' : 'bg-accent text-accent-fg',
-        collapsed && 'absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px]',
+        blocking ? 'bg-danger-solid text-white' : 'bg-accent text-accent-fg',
+        collapsed && 'absolute -top-1.5 -right-1.5 h-[18px] min-w-[18px] px-1 text-xs',
       )}
     >
       {counts.open}

@@ -1,6 +1,6 @@
 import type { ProjectDto } from '@aom/shared';
 import { CreateProjectRequestSchema, workflowUsesRepos } from '@aom/shared';
-import { Archive, Code2, FlaskConical, FolderKanban, Rss, Settings2 } from 'lucide-react';
+import { Archive, Code2, FlaskConical, FolderKanban, Rss, Settings } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
 import { useWorkflows } from '../api/queries/agents.ts';
@@ -14,6 +14,7 @@ import { DeleteProjectDialog } from '../components/DeleteProjectDialog.tsx';
 import { ProjectInvitations } from '../components/ProjectInvitations.tsx';
 import { projectTypeLabel } from '../components/shell/ProjectSwitcher.tsx';
 import { cx } from '../components/ui/cx.ts';
+import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import {
   Badge,
   Button,
@@ -58,7 +59,7 @@ function ProjectCard({ p }: { p: ProjectDto }) {
           title="Project settings"
           to={`/projects/${p.id}/settings`}
         >
-          <Settings2 aria-hidden="true" className="size-4" />
+          <Settings aria-hidden="true" className="size-4" />
         </Link>
       </div>
       <p className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -99,7 +100,7 @@ export function Projects() {
           prefix="projects"
           value={showArchived ? 'archived' : 'active'}
           onChange={(v) => setShowArchived(v === 'archived')}
-          className="mb-4 flex-1"
+          className="mb-4 basis-full sm:flex-1 sm:basis-0"
           tabs={[
             { id: 'active', label: 'Active', testId: 'filter-active' },
             {
@@ -122,28 +123,34 @@ export function Projects() {
           </div>
         )}
       </div>
-      {showArchived && <ArchivedProjects />}
-      {!showArchived && projects.isPending && <ListSkeleton label="Loading projects" />}
-      {!showArchived && projects.isError && (
-        <ErrorBox error={projects.error} onRetry={() => projects.refetch()} />
-      )}
-      {!showArchived && projects.data?.length === 0 && (
-        <EmptyState
-          icon={FolderKanban}
-          title="No projects yet"
-          description="A project is where the work happens: a board, a team of agents and, for code, its repositories. Create your first one to start."
-          action={
-            <Button variant="primary" onClick={() => setOpen(true)}>
-              Create your first project
-            </Button>
-          }
-        />
-      )}
-      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" hidden={showArchived}>
-        {shown.map((p) => (
-          <ProjectCard key={p.id} p={p} />
-        ))}
-      </ul>
+      <div
+        role="tabpanel"
+        id={panelId('projects', showArchived ? 'archived' : 'active')}
+        aria-labelledby={tabId('projects', showArchived ? 'archived' : 'active')}
+      >
+        {showArchived && <ArchivedProjects />}
+        {!showArchived && projects.isPending && <ListSkeleton label="Loading projects" />}
+        {!showArchived && projects.isError && (
+          <ErrorBox error={projects.error} onRetry={() => projects.refetch()} />
+        )}
+        {!showArchived && projects.data?.length === 0 && (
+          <EmptyState
+            icon={FolderKanban}
+            title="No projects yet"
+            description="A project is where the work happens: a board, a team of agents and, for code, its repositories. Create your first one to start."
+            action={
+              <Button variant="primary" onClick={() => setOpen(true)}>
+                Create your first project
+              </Button>
+            }
+          />
+        )}
+        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" hidden={showArchived}>
+          {shown.map((p) => (
+            <ProjectCard key={p.id} p={p} />
+          ))}
+        </ul>
+      </div>
       <NewProjectDialog open={open} onOpenChange={setOpen} />
     </div>
   );

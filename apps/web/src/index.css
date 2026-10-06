@@ -36,6 +36,7 @@
   --danger-fill: #c0262f;
   --danger-soft: #fbe5e7;
   --danger-soft-fg: #9e1c25;
+  --danger-solid: #c0262f;
   --info: #0a64b4;
   --info-fill: #0a64b4;
   --info-soft: #e1effb;
@@ -154,6 +155,7 @@
   --color-warning-soft-fg: var(--warning-soft-fg);
   --color-danger: var(--danger);
   --color-danger-fill: var(--danger-fill);
+  --color-danger-solid: var(--danger-solid);
   --color-danger-soft: var(--danger-soft);
   --color-danger-soft-fg: var(--danger-soft-fg);
   --color-info: var(--info);
@@ -332,6 +334,9 @@ select:not([multiple]):not([size]) {
 input[type="checkbox"],
 input[type="radio"] {
   accent-color: var(--brand);
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
 }
 
 /* Login art: the lit nodes pulse (off under prefers-reduced-motion via the global rule above). */

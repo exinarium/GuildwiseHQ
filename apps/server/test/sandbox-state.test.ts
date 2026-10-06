@@ -138,6 +138,17 @@ describe('live refresh', () => {
   it('a runtimes.report that changes the state emits an event the browsers invalidate on; an identical one does not', async () => {
     r.send('runtimes.report', { runtimes: runtime('enforced', 'x') });
     await until(async () => (await workstation()).runtimes[0].sandbox === 'enforced', 3000, 'enforced');
+    // the event follows the row update: wait for it, or the count below would include it by accident
+    await until(
+      async () =>
+        (
+          await q(
+            `SELECT payload FROM events WHERE type='WorkstationRuntimesChanged' ORDER BY seq DESC LIMIT 1`,
+          )
+        )[0]?.payload.runtimes[0]?.sandbox === 'enforced',
+      3000,
+      'the event for enforced',
+    );
     const n = await changed();
     r.send('runtimes.report', { runtimes: runtime('enforced', 'reworded reason') });
     r.send('runtimes.report', { runtimes: runtime('unavailable', 'y') });

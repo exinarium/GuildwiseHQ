@@ -111,7 +111,7 @@ test('AC6a: the owner invites an existing user by email; nothing is visible unti
   await expect(invitation).toContainText('invited you to manage');
   await guestPage.screenshot({ path: join(paths.vaults, 'sharing-invitation.png') });
   await invitation.getByRole('button', { name: 'Accept invitation to SHR' }).click();
-  await expect(guestPage.getByText('Shared project')).toBeVisible();
+  await expect(guestPage.getByRole('main').getByText('Shared project')).toBeVisible();
   await expect(guestPage.getByTestId('invitation-SHR')).toHaveCount(0);
   await guestPage.goto('/p/SHR/board');
   await expect(guestPage.getByTestId('board')).toBeVisible();
@@ -129,8 +129,8 @@ test('AC6b: the member keeps their own projects private from the owner', async (
   await ownerPage.goto('/projects');
   await expect(ownerPage.getByText('Guest private')).toHaveCount(0);
   await guestPage.goto('/projects');
-  await expect(guestPage.getByText('Guest private')).toBeVisible();
-  await expect(guestPage.getByText('Shared project')).toBeVisible();
+  await expect(guestPage.getByRole('main').getByText('Guest private')).toBeVisible();
+  await expect(guestPage.getByRole('main').getByText('Shared project')).toBeVisible();
 });
 
 test("AC6c: the member hires a project-scoped agent onto their own workstation from the owner's catalogue", async () => {

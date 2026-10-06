@@ -8,8 +8,13 @@ export function AdoptSchedulesDialog({ open, onClose }: { open: boolean; onClose
   const list = useAdoptable(open);
   const adopt = useAdopt();
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // The rows shown: frozen once adopting is done, so the result lines survive the list refetch.
+  const [rows, setRows] = useState<NonNullable<typeof list.data>>([]);
   useEffect(() => {
-    if (list.data && !adopt.data) setPicked(new Set(list.data.map((s) => s.id)));
+    if (list.data && !adopt.data) {
+      setPicked(new Set(list.data.map((s) => s.id)));
+      setRows(list.data);
+    }
   }, [list.data, adopt.data]);
   const results = new Map((adopt.data?.results ?? []).map((r) => [r.scheduleId, r]));
   return (
@@ -25,11 +30,13 @@ export function AdoptSchedulesDialog({ open, onClose }: { open: boolean; onClose
       description="Each schedule becomes an interest; its template is left as it is until you edit the interest."
     >
       <div className="flex flex-col gap-3" data-testid="adopt-dialog">
-        {list.isPending && <Spinner />}
+        {list.isPending && <Spinner inline label="Loading schedules" />}
         <ErrorBox error={list.error ?? adopt.error} />
-        {list.data?.length === 0 && <p className="text-sm text-subtle">Nothing left to adopt.</p>}
+        {list.data?.length === 0 && !adopt.data && (
+          <p className="text-sm text-muted">Nothing left to adopt.</p>
+        )}
         <ul className="flex flex-col gap-2">
-          {list.data?.map((s) => {
+          {rows.map((s) => {
             const r = results.get(s.id);
             return (
               <li key={s.id} className="flex items-start gap-2 text-sm" data-testid={`adopt-row-${s.name}`}>
@@ -47,8 +54,8 @@ export function AdoptSchedulesDialog({ open, onClose }: { open: boolean; onClose
                   }}
                 />
                 <label htmlFor={`adopt-${s.id}`} className="min-w-0 flex-1">
-                  <span className="font-medium">{s.name}</span>{' '}
-                  <span className="text-subtle">
+                  <span className="font-medium text-fg">{s.name}</span>{' '}
+                  <span className="text-muted">
                     {s.projectKey} · {describeCron(s.cron)} ({s.timezone}){s.topic ? ` · ${s.topic}` : ''}
                     {s.enabled ? '' : ' · paused'}
                   </span>
@@ -65,7 +72,7 @@ export function AdoptSchedulesDialog({ open, onClose }: { open: boolean; onClose
             );
           })}
         </ul>
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end [&>button]:max-sm:w-full">
           <Button onClick={onClose}>{adopt.data ? 'Close' : 'Cancel'}</Button>
           {!adopt.data && (
             <Button
