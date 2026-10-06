@@ -2,11 +2,11 @@ import { type APIRequestContext, expect, type Page, test } from '@playwright/tes
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { waitFor } from '../support/db.ts';
 import { ADMIN, ALLOWER, BASE_URL, paths } from '../support/env.ts';
-import { pairRunner } from '../support/runner.ts';
+import { pairRunner, startRunner } from '../support/runner.ts';
 
 // Part A of the restructure: agents belong to the organization; the manager decides per agent where it may work
 // (an allow-list or any project), which projects it prefers, and a project may cap the shifts running at once.
-// One user and a paired workstation that never connects: hiring and editing need no runner.
+// One user and one mock runner (the Hire form lists the runtimes a connected workstation reports).
 test.describe.configure({ mode: 'serial' });
 
 const HOME = paths.runnerHome('allower');
@@ -23,10 +23,11 @@ test.beforeAll(async ({ browser }) => {
   const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json())
     .code as string;
   pairRunner(BASE_URL, code, 'Allower Box', HOME);
+  startRunner({}, HOME);
   await waitFor(
-    'workstation paired',
+    'workstation connected',
     async () => (await (await api.get('/api/workstations')).json()).workstations[0],
-    (w) => !!w,
+    (w) => w?.connected === true,
     30_000,
   );
   for (const [key, name] of [

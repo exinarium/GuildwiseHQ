@@ -127,7 +127,7 @@ agent-org-manager/
 - **Streams.** `user-<uuid>`, `invitation-<uuid>`, `workstation-<uuid>`, `project-<uuid>`, `card-<uuid>`, `agent-<uuid>`, `thread-<uuid>`, `desk-<uuid>`, `ledger-<uuid>`, `schedule-<uuid>`, `workflow-<orgId|builtin>-<key>`, `role-<orgId|builtin>-<key>`, `shift-<uuid>`, `vault-<uuid>`. Optimistic concurrency per stream via `stream_version`.
 - **Card ref.** `<PROJECT_KEY>-<n>` (e.g. `WEB-12`), `n` from `projects.next_card_number`, allocated inside the `CardCreated` transaction.
 - **Card owner.** The user who created or imported the card (`cards.owner_user_id`). Defaults decision rights and outbound updates (spec: "the card's owner, who imported the ticket").
-- **Agent scope.** `agents.org_id` (the org it works for), `agents.project_id` (NULL = all projects of the org; set = that project only; agents hired by additional managers are always project-scoped), `agents.workstation_id` (where it runs), `agents.hired_by_user_id` (HR rights), `agents.manager_user_id` (current HR manager; changes to the owner when a member is removed).
+- **Agent scope.** Agents belong to the organization (`agents.org_id`), not to a project (docs/design/restructure.md, Part A). `agents.allowed_project_ids` is the per-agent allow-list set by the manager (NULL = any project of the org; a list = those projects only; an empty list = benched), `agents.focus_project_ids` the soft preference inside it (at most 10), and `agents.hired_for_project_id` (the former `project_id`) only keeps the project the agent was hired for as history. An agent may work a card only when the card's project is on its allow-list **and** the user who owns the agent's workstation is an active member of that project (`project_members`: the Owner and Admins hold a row in every project of their org, a guest only in the shared ones). The DevOps engineer is outside allow-lists (it works DevOps requests and hygiene only). `agents.workstation_id` (where it runs), `agents.hired_by_user_id` (HR rights), `agents.manager_user_id` (current HR manager; changes to the owner when a member is removed).
 
 ---
 
@@ -176,7 +176,7 @@ Decision: projections update synchronously in the append transaction. A command'
 - Projectors must be deterministic functions of the event and prior projection state: they use `e.createdAt`, never `now()`, and never call external services.
 - `pnpm --filter @aom/server projections:rebuild` truncates every projection table (list in `projections/index.ts`) and replays all events in `seq` order in batches of 1000 within one transaction. Operational columns (lease expiry, `connected`, `last_seen_at`) are reset to safe values (leases recomputed as `claimed_at + 1h`).
 
-**Deleted projects and rebuild.** The event log is append-only and a project's events (its `project-`, `card-`, `thread-`, `shift-`... streams) are never purged. `ProjectDeleted` is a tombstone: its projector runs `deleteProjectRows()`, which deletes every row of the project in foreign-key order (cards and what hangs off them: transitions, handoffs, activity, dependencies, blockers, test runs, intake links, agent stats and review log, digest items, research publications, outbound drafts, shifts; threads and messages; desk items and project/card ledger entries; schedules, `feed_seen`, `transcripts`, repo requests, project repos and their `workstation_repos`, the project vault registration, members, the project row) and detaches rows that merely point at its cards (a parent/worktree reference from another project, a DevOps request's `card_id`, an intake's `mapped_project_id`). A rebuild replays the events in `seq` order, so the project's rows are recreated by its earlier events and removed again when the tombstone is reached: the end state equals the live state, and nothing is resurrected. Chosen over purging the streams because purging needs an exception to the append-only trigger (§3.5), leaves holes in `seq`/`stream_version` that subscribers and the optimistic-concurrency check do not expect, and loses the audit trail; the cost is that the deleted project's payloads (card titles, messages) remain in the `events` table, which is the accepted trade-off of an event-sourced audit log (the database *rows* the application reads are gone). Retired agents keep their `agents.project_id` as historical scope, so that foreign key was dropped (migration 1302); agents scoped to the deleted project are retired by the same append and wiped (`agent.wipe`). The vault folder is never touched. Covered by `apps/server/test/project-archive.test.ts` (including a rebuild after the delete).
+**Deleted projects and rebuild.** The event log is append-only and a project's events (its `project-`, `card-`, `thread-`, `shift-`... streams) are never purged. `ProjectDeleted` is a tombstone: its projector runs `deleteProjectRows()`, which deletes every row of the project in foreign-key order (cards and what hangs off them: transitions, handoffs, activity, dependencies, blockers, test runs, intake links, agent stats and review log, digest items, research publications, outbound drafts, shifts; threads and messages; desk items and project/card ledger entries; schedules, `feed_seen`, `transcripts`, repo requests, project repos and their `workstation_repos`, the project vault registration, members, the project row) and detaches rows that merely point at its cards (a parent/worktree reference from another project, a DevOps request's `card_id`, an intake's `mapped_project_id`). A rebuild replays the events in `seq` order, so the project's rows are recreated by its earlier events and removed again when the tombstone is reached: the end state equals the live state, and nothing is resurrected. Chosen over purging the streams because purging needs an exception to the append-only trigger (§3.5), leaves holes in `seq`/`stream_version` that subscribers and the optimistic-concurrency check do not expect, and loses the audit trail; the cost is that the deleted project's payloads (card titles, messages) remain in the `events` table, which is the accepted trade-off of an event-sourced audit log (the database *rows* the application reads are gone). Agents belong to the organization and are kept: `agents.hired_for_project_id` keeps the id as history (it has no foreign key), the project leaves every allow-list and focus (an agent allowed on that project only may then work any project), and nothing is retired or wiped. The vault folder is never touched. Covered by `apps/server/test/project-archive.test.ts` (including a rebuild after the delete).
 
 ### 3.4 Subscriptions
 
@@ -397,7 +397,8 @@ CREATE TABLE role_extensions (                     -- owner's additions to a bui
 CREATE TABLE agents (
   id                  uuid PRIMARY KEY,
   org_id              uuid NOT NULL REFERENCES users(id),
-  project_id          uuid REFERENCES projects(id),   -- NULL = org-wide
+  project_id          uuid REFERENCES projects(id),   -- NULL = org-wide (1313: renamed hired_for_project_id, history only,
+                                                       --   no FK; allowed_project_ids uuid[] NULL = any, focus_project_ids uuid[] added)
   hired_by_user_id    uuid NOT NULL REFERENCES users(id),
   manager_user_id     uuid NOT NULL REFERENCES users(id),
   workstation_id      uuid REFERENCES workstations(id), -- NULL while needs_rehome
@@ -1091,16 +1092,23 @@ An agent claims at most one card per pass. Agents with capacity > 1 (and agents 
 ### 9.3 Candidate query (`dispatcher/candidates.ts`)
 
 ```sql
--- $1 agent_id, $2 org_id, $3 project_scope (uuid|null), $4 role_key, $5 is_senior,
--- $6 workstation_id, $7 runtime capabilities text[], $8 agent risk tiers text[], $9 now (the server clock)
+-- $1 agent_id, $2 org_id, $3 allowed projects (uuid[]|null = any), $4 role_key, $5 is_senior,
+-- $6 workstation_id, $7 runtime capabilities text[], $8 agent risk tiers text[], $9 now (the server clock),
+-- $10 the agent's focus projects (uuid[])
 SELECT c.id, c.stage
 FROM cards c
 JOIN projects p          ON p.id = c.project_id AND p.status = 'active'
 JOIN workflow_stages st  ON st.workflow_version_id = c.workflow_version_id AND st.stage_id = c.stage
 WHERE c.status = 'queued'
   AND c.claim_id IS NULL
-  AND c.org_id = $2                                             -- only the owner org's cards
-  AND ($3::uuid IS NULL OR c.project_id = $3)                   -- project-scoped agents
+  AND c.org_id = $2                                             -- only the agent's organization
+  AND ($3::uuid[] IS NULL OR c.project_id = ANY ($3))           -- the manager's allow-list for this agent
+  AND EXISTS (SELECT 1 FROM workstations aw JOIN project_members apm ON apm.user_id = aw.user_id
+               WHERE aw.id = $6 AND apm.project_id = c.project_id AND apm.status = 'active')
+                                                                -- the workstation owner is on the project
+  AND (p.max_concurrent_shifts IS NULL OR                       -- optional per-project cap (off by default)
+       (SELECT count(*) FROM cards pc WHERE pc.project_id = c.project_id AND pc.claim_id IS NOT NULL)
+         < p.max_concurrent_shifts)
   AND st.kind = 'agent'
   AND st.claim_role = $4                                        -- role/stage matching from workflow data
   AND (NOT st.senior_only OR $5)
@@ -1126,11 +1134,14 @@ ORDER BY
     WHEN c.is_rework_or_bug THEN 1
     ELSE 2
   END,
-  p.priority_tier ASC,                                          -- 4. project tier
-  c.priority ASC,                                               -- 5. card priority
-  c.queued_at ASC                                               -- 6. FIFO
+  (c.project_id = ANY ($10)) DESC,                              -- 4. the agent's focus projects (soft preference)
+  p.priority_tier ASC,                                          -- 5. project tier
+  c.priority ASC,                                               -- 6. card priority
+  c.queued_at ASC                                               -- 7. FIFO
 LIMIT 5;
 ```
+
+Allow-list, membership and cap are one place: `eligibility().scope` (shared with `queries/workability.ts`, so "could anyone ever take this card" cannot drift from "can this agent take it now") and the `max_concurrent_shifts` line in the candidate SQL. The cap is hard: it also binds the overflow path (`isCandidate`). The BA-task, tester-bottleneck, question-escalation and reporter paths use the same rule on the agent's allow-list and its workstation owner's membership.
 
 Notes: the "builder priority" CASE is harmless for other roles (they rarely see rework flags; reviewers of rework cards simply sort them first, which is desired). "Idle agents pull personal cards" falls out of the ordering: personal cards are taken only when no work card is eligible. "A new work card waits for the current shift" falls out of claims never being preempted. M3 adds for cards without a repo (research/feed): `EXISTS (SELECT 1 FROM workstation_vaults wv JOIN vaults v ... WHERE v.kind = p.domain OR v.project_id = p.id)`.
 
@@ -1581,16 +1592,18 @@ Admins get the administration view only; being admin grants no visibility into o
 | Create and edit phases, assign cards, edit follow-ups, project default follow-ups, deploy targets, confirm a BA proposal, approve / reject the follow-ups, reopen a phase, confirm a merge | any active project member (owner decision A1); every route uses `loadVisibleProject` / `loadVisibleCard`, other users get 404. A remote deploy target's workstation must be an active workstation of a project member |
 | Reporting preferences, time zone | the signed-in user for their own organization (each user owns their organization); the BA's `aom report` verbs: the BA of the reporter task only (`applyReporterReport`), which can annotate any item of the org, and dismiss or merge only held non-urgent alerts |
 | The BA's `aom phase` verbs | the BA of the conversation (propose, assign, submit: its intake chat) or of the task (`ba_task` shift: only that phase) |
-| Hire agent org-wide | the org owner, onto own workstation |
-| Hire agent for a shared project | any active member, onto own workstation, from the owner's role catalogue; `project_id` is set; refused on archived projects |
+| Hire an agent with any allow-list (including "any project") | the org Owner and Admins, onto own workstation |
+| Hire an agent as a Member or guest | onto own workstation, from the org's role catalogue, with an allow-list of projects they are on (never "any project"; 403 otherwise); an agent hired for a guest project belongs to the org that owns the project; refused on archived projects |
+| Set an agent's allowed projects or focus (`PUT /api/agents/:id/allowed-projects`, `/focus-projects`) | whoever may change the agent (Owner/Admins, or the hiring manager); a Member or guest manager only names projects they are on; the focus must lie inside the allow-list (400 `focus_not_allowed`); every project must belong to the agent's org (400 `invalid_project`); the DevOps engineer is refused (400 `devops_fixed`) |
+| Set a project's concurrency cap (`PUT /api/projects/:id/concurrency-cap`) | any active project member |
 | Add a standing order (`POST /api/ledger`, or `ledger.scope=standing_order` when answering a desk item) | project owner for project-wide orders (also when a `cardId` is given: the order is still project-wide); the organization owner for organization-wide orders (a guest manager's answer may carry decisions and requirements, never standing orders) |
 | Change an agent's `permissions` | anyone who may change the agent, but only to narrow the role definition; widening non-core limits (web/MCP tools, risk tiers, repos) needs the org owner; the role's hard limits (`edit`/`shell` tools it lacks, `mayCommit`, its denied shell patterns, its writable globs) are never widened (`checkPermissions`, `permissions_exceed_role`); changing the role resets permissions to the new role's |
 | Change / fire / rehome agent | org owner (any agent of the org) or `manager_user_id` (own hires) |
-| Direct / chat with an agent | org owner for org-wide agents; any active member of the agent's project for project-scoped agents; any member may chat with org-wide agents in the context of the shared project (thread linked to the project). Re-checked on every `chat.send` (a removed member or deactivated account cannot keep using an old thread); project chats are labelled "visible to this project's managers" in the UI |
+| Direct / chat with an agent | org Owner and Admins for any agent; anyone else for an agent that is allowed on a project they are on (`sharesAllowedProject`, thread linked to that project). Re-checked on every `chat.send` (a removed member or deactivated account cannot keep using an old thread); project chats are labelled "visible to this project's managers" in the UI |
 | Extend / reset built-in roles, create custom roles/workflows/departments | org owner |
 | Rate digest items, approve outbound for a card | card owner (outbound) / project members (ratings) |
 
-Member removal (`DELETE /api/projects/:id/members/:userId`, owner only): one append with `ProjectMemberRemoved` (agents → `manager_user_id = owner`, `status needs_rehome`, `workstation_id NULL`), `ClaimReleased(member_removed)` for every card those agents held, and `CardUpdated{ownerUserId: owner}` for cards the member owned (their desk items follow the card). The owner re-homes each agent with `POST /api/agents/:id/rehome {workstationId, runtime, model}` → `AgentRehomed`.
+Member removal (`DELETE /api/projects/:id/members/:userId`, owner only): one append with `ClaimReleased(member_removed)` for every card on this project held by the member's agents, then `ProjectMemberRemoved`. The member's agents are re-homed (`manager_user_id = owner`, `status needs_rehome`, `workstation_id NULL`) **only when this was their last access in the organization** (no other active project of the org and no organization-wide grant); otherwise they keep working elsewhere and merely stop qualifying for this project, which also leaves their focus. An org Member keeps their agents until `OrgMemberRemoved`. Cards the member owned move to the owner, and `CardUpdated{ownerUserId: owner}` for cards the member owned (their desk items follow the card). The owner re-homes each agent with `POST /api/agents/:id/rehome {workstationId, runtime, model}` → `AgentRehomed`.
 
 Enforcement: every route calls a guard from `apps/server/src/auth/guards.ts` (`requireUser`, `requireAdmin`, `requireProjectMember(projectId)`, `requireProjectOwner`, `requireCardDecisionRight(cardId)`, `requireAgentHr(agentId)`). Every list query joins the visibility predicate; there is no unscoped list endpoint outside `/api/admin/*`. Integration tests include a two-user isolation suite.
 

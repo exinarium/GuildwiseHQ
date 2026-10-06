@@ -162,10 +162,10 @@ Only the Owner and Admins of the organization can add people to a project. To in
 1. Go to **Projects** > **Settings** > **Members**
 2. Enter their email and click **Invite**. The person must already have an account that belongs to an organization
 3. They accept in their Project invitations inbox and gain access to this project only
-4. They can hire agents onto their own workstations, see the board, and answer desk items
-5. Only the owner (and the hiring manager) can change each agent; only the owner can hire/change/fire shared project agents
+4. They can hire agents onto their own workstations (allowed on the shared project only), see the board, and answer desk items
+5. Only the organization's Owner and Admins (and the hiring manager) can change each agent. A guest's agent works only on the projects shared with them, whatever its allowed projects say
 
-When you remove a member, their agents are re-homed to your workstation and account automatically; claimed cards are released. Deactivating a user (platform administrator) does the same for every project they were a manager of, unlinks all of their workstations (their runners are disconnected and cannot reconnect), and parks their own agents until the account is reactivated and re-paired.
+When you remove a member from a project, the cards their agents held on it are released. Their agents move to your workstation and account (they need re-homing) only if that was the member's last project in your organization; otherwise they keep working the member's other projects. Deactivating a user (platform administrator) does the same for every project they were a manager of, unlinks all of their workstations (their runners are disconnected and cannot reconnect), and parks their own agents until the account is reactivated and re-paired.
 
 Only the project owner can add standing orders (also from a card or when answering a question); a guest manager can answer questions with decisions and requirements. Organization-wide standing orders can only come from the organization owner. An agent's permissions can be narrowed by its hiring manager but never widened beyond its role (a reviewer never commits); widening other limits (web, extra tools, risk tiers) is for the organization owner.
 
@@ -182,7 +182,7 @@ Agents hired for the project are not fired; they simply stop getting its work. C
 
 **Restore**: **Projects** > **Archived** > **Restore** (or **Settings** > **Danger zone** > **Restore project**). The project is back on the boards and pickers and takes work again. Cards that the archive closed stay closed and schedules stay off; create new cards and switch schedules back on as needed.
 
-**Delete permanently**: only the project owner, and only for an archived project. **Projects** > **Archived** > **Delete permanently**, then type the project key to confirm. The project's cards, threads and messages, schedules, desk items, repositories, members, digests, transcripts and research notes are removed from the database and cannot be recovered. The audit log keeps a record that the project was deleted, and the vault folder is never touched. Agents that were hired for that project only are let go. The project key becomes free for a new project.
+**Delete permanently**: only the project owner, and only for an archived project. **Projects** > **Archived** > **Delete permanently**, then type the project key to confirm. The project's cards, threads and messages, schedules, desk items, repositories, members, digests, transcripts and research notes are removed from the database and cannot be recovered. The audit log keeps a record that the project was deleted, and the vault folder is never touched. Agents are never let go with a project: they belong to the organization, the project simply leaves their allowed projects (an agent that was allowed on that project only may then work any project of the organization until you narrow it again). The project key becomes free for a new project.
 
 ### Decision policy
 
@@ -275,6 +275,7 @@ The BA can do the same from its shift with `aom risk <small|large> --reason "<wh
    - **Role**: builder, reviewer, tester, technical writer, or custom roles you have designed
    - **Seniority**: junior or senior (affects permissions and queue priority)
    - **Workstation**: where they run (must have the project's repos)
+   - **Where may this agent work?**: **Any project** (Owners and Admins) or **Selected projects**, ticked one by one. The form starts with the project you worked on last. Star the projects the agent should prefer. See "Where an agent works" below
    - **Model**: Claude Opus 4, Sonnet 4.5, etc., and effort level
    - **Name**: autocomplete suggests unused names; type to override
    - **Skills**: special knowledge (e.g., "Playwright", "database migrations")
@@ -287,11 +288,22 @@ First-run limits (removed after you see the Agents page):
 
 Name suggestions skip retired agents and names already in use.
 
+### Where an agent works
+
+Agents belong to your organization, not to one project. For each agent you decide where it may work:
+
+- **Allowed projects**: **Any project** of the organization, or only the projects you tick. The agent is only offered cards of those projects. Click **Projects** on the agent's card on the **Agents** page to change it at any time; the card shows a "Works on" line with the projects (a star marks the preferred ones) or "any project". An empty list benches the agent. Owners and Admins can allow any project; a Member or guest manager can only pick projects they are on.
+- **Preferred projects (focus)**: the star next to a project. It is a soft preference inside the allowed projects: when a card of a starred project and a card of another project are both waiting, the agent takes the starred one first (before the project's priority tier). Up to 10 projects. Removing a project from the allowed list also removes it from the preferred ones.
+- **Whose projects**: the agent also needs the person who owns its workstation to be on the project. Owners and Admins are on every project of the organization; a guest is only on the projects shared with them, so a guest's agent never works the owner's other projects, whatever its allowed projects say.
+- **Hiring**: the Hire form sets the default allow-list of the new agent. Without a choice it starts with the project you worked on last (not "any project").
+- **Projects that go away**: deleting a project keeps its agents. Removing a person from their last project hands their agents back to you (they need re-homing).
+- **Limit simultaneous shifts**: **Projects** > **Settings** > **Simultaneous shifts** sets an optional cap on how many shifts may run at once on that project, whatever the number of agents allowed on it. It is off by default. At the cap, the project's other cards wait in the queue. Any project member can change it.
+
 ### The DevOps engineer
 
 You get one DevOps agent per workstation automatically. It cannot be fired, only **reset** (which wipes its sandbox like a firing, but keeps it assigned). It is not driven by cards; agents and you ask it directly via the `aom devops` command in a shift or the **Ask DevOps** button on the Workstations page.
 
-The DevOps engineer is free (it does not count against the agent limit) and one exists per organization per workstation. Because it is free it cannot be extended: no extra instructions, skills, tools, standing orders or custom permissions, it cannot be cloned into a custom role or given workflow stages. Only its model and effort can change.
+The DevOps engineer is free (it does not count against the agent limit) and one exists per organization per workstation. Allowed projects do not apply to it: it works DevOps requests and repository checks only, and has no Projects button. Because it is free it cannot be extended: no extra instructions, skills, tools, standing orders or custom permissions, it cannot be cloned into a custom role or given workflow stages. Only its model and effort can change.
 
 DevOps is always available and outside the queue. It handles:
 - Cloning and setting up projects

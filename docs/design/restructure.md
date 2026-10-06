@@ -1,6 +1,6 @@
 # Design: org-level interests, generic schedules, org agents and research-to-project
 
-Oct 6, 2026 · status: design (not built) · companion to `docs/SPEC.md`, `docs/ARCHITECTURE.md` (referenced as §n), `docs/design/interests.md` (built, superseded in part by this) and `docs/design/phases.md`
+Oct 6, 2026 · status: design; **Part A (org-level agents) built, 7 Oct 2026** (see Implementation status at the end), Parts B to D not built · companion to `docs/SPEC.md`, `docs/ARCHITECTURE.md` (referenced as §n), `docs/design/interests.md` (built, superseded in part by this) and `docs/design/phases.md`
 
 This design implements the owner's "Model restructure" decisions in `docs/design/open-questions.md`:
 
@@ -865,3 +865,26 @@ Steps that change:
 | 28 | `restructure-2026-10` runs per organization (ids are unchanged); its desk report is an org-level item visible to Owner/Admins |
 | 30 | Interests page: edit controls follow `canEditInterest`; schedule controls follow the schedule rule; feature flag hides the page |
 | Roadmap | Per-project budgets: set and overridden by Owner/Admin. Org quiet cap: Owner/Admin. Org chart: visible to org members |
+
+
+---
+
+## Implementation status
+
+### Part A: agents belong to the org (built, 7 Oct 2026)
+
+Built to the owner decisions and the organizations overrides above. Where the build differs from the plan in section 13:
+
+- **Migration** is `1313_agent_allow_list.sql` (not `1310_org_agents.sql`: 1310 to 1312 are the organization migrations). It renames `agents.project_id` to `hired_for_project_id` (history only, no foreign key), adds `allowed_project_ids uuid[]` (NULL = any project) and `focus_project_ids uuid[] NOT NULL DEFAULT '{}'`, and `projects.max_concurrent_shifts integer NULL`. Existing agents get `[hired_for_project_id]` when they were project-scoped and NULL (any) otherwise. The backfill runs only in the step that adds the column, so running the file again never overwrites an allow-list a manager set later. Covered by `migrate.test.ts`.
+- **Allow-list, not a focus default.** The owner's per-agent allow-list replaced the design's "work any project the workstation owner is on": `AgentHired` carries `allowedProjectIds` (list or null) and `focusProjectIds`; `AgentAllowedSet` and `AgentFocusSet` change them. An `AgentHired` written before this (only `projectId`) replays as `[projectId]`, or "any" without a project, so a rebuild equals the migrated data (`org-agents.test.ts`). `projectId` stays accepted on the hire request as an alias (allowed `[projectId]`, hired-for `projectId`).
+- **Eligibility** (`dispatcher/candidates.ts eligibility().scope`, shared with `queries/workability.ts`): the card's org, then the agent's allow-list, then an active `project_members` row of the agent's workstation owner on the card's project. The Owner and Admins hold such a row in every project of their org (organizations.md), a guest only in shared projects, so "member or Owner/Admin of the project's org with access to the project" is one check. Suspended organizations are still excluded by the candidate join. The same rule is applied by the BA-task pass, the tester-bottleneck check, question escalation and the reporter's BA lookup.
+- **Focus ordering**: the agent's focus projects sort before the project tier (`$10`). **Dropped from this build** (not asked for in the owner decisions): `projects.preferred_skills` / `ProjectSkillsSet` and the skills-overlap ordering term (step 6 of the old plan).
+- **Concurrency cap** (decision 11): `projects.max_concurrent_shifts`, event `ProjectConcurrencyCapSet`, `PUT /api/projects/:id/concurrency-cap {cap: 1..50 | null}`, any project member. It is a hard cap in the candidate query, so it also binds the late-scheduled overflow path. A card waiting because of the cap shows no special reason on the board (it is just queued).
+- **Who may set what**: `PUT /api/agents/:id/allowed-projects` and `/focus-projects` need the right to change the agent (Owner/Admin or the hiring manager). Members and guests may only name projects they are on and never "any project". The focus must lie inside the allow-list (400 `focus_not_allowed`); narrowing the allow-list drops projects from the focus. The DevOps engineer is refused (400 `devops_fixed`): allow-lists do not apply to it.
+- **Hiring**: a guest hires into the org that owns the first allowed project (the request org otherwise). Agent events are org events (`orgScope`); live updates for guests rely on polling (R5).
+- **Visibility**: a user sees the agents of their active org (as a member) plus, in any org, the non-DevOps agents allowed on a project that both they and the agent's workstation owner are on. This means a guest also sees the owner's "any project" agents when the owner is on the shared project, which is what section 4.4 specifies; the old behaviour hid them. The tests were updated.
+- **Project delete** keeps the agents: the project leaves every allow-list and focus (an agent that was allowed on it only becomes "any", as a project-scoped agent became org-wide before) and `hired_for_project_id` keeps the id.
+- **Member removal** (`commands/sharing.ts removalPlan`, `projections/sharing.ts`): claims on the project are released for the member's agents; the agents are re-homed (`needs_rehome`) only when it was the member's last access in the org (no other active project, no org grant). An org Member keeps their agents until `OrgMemberRemoved`. The project leaves the focus of the member's agents.
+- **Web**: `components/agents/ProjectAccess.tsx` (the allow-list and focus editor, the "Works on" chips, the **Projects** dialog on each agent card), the Hire form replaces its Project select with the editor (default: the project worked on last; "Any project" for Owners and Admins), and `components/ConcurrencyCapPanel.tsx` in project settings. There is no separate agent detail page: the agent card is the detail.
+- **Tests**: `apps/server/test/org-agents.test.ts` (eligibility matrix of allow-list, membership and guest workstation; focus ordering; cap; permissions; member removal; rebuild with legacy events), `migrate.test.ts` (1313), `packages/shared/test/agent-allow-list.test.ts`, `apps/web/src/test/agent-projects.test.tsx` and the Hire form tests in `sandbox.test.tsx`, and the e2e spec `agent-projects.spec.ts`.
+- **Not built (still open for the later parts)**: the organization selector in the Hire dialog (a guest picks the shared project instead), the reason text "waiting: project at its limit" in workability, and the DTO `eligibleProjects` count.

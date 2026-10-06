@@ -4,6 +4,7 @@ import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, DESIGNER, DESIGNGUEST, paths } from '../support/env.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
+import { allowOnlyProject } from '../support/ui.ts';
 
 // M10: the organization designer (docs/PLAN.md M10 AC). The manager describes a support pipeline to the BA in a chat;
 // the BA drafts a role pair and a workflow, the server validates, the desk approves, and a custom workflow with custom
@@ -349,7 +350,7 @@ test('hire: the custom roles are on the HR board Hire form, grouped by departmen
   await expect(roleSelect.locator('option', { hasText: 'Triager' })).toHaveCount(1);
   await roleSelect.selectOption({ label: 'Triager' });
   await expect(form.getByText('Department: support')).toBeVisible();
-  await form.getByLabel('Project').selectOption('SUP');
+  await allowOnlyProject(form, 'SUP');
   await form.getByLabel('Runtime').selectOption('mock');
   await form.getByLabel('Name', { exact: true }).fill('Tara');
   await form.getByRole('button', { name: 'Hire', exact: true }).click();

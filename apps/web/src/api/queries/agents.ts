@@ -46,7 +46,11 @@ export function useHire() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (b: HireAgentRequest) => post('/agents', b),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+    // Agents are organization events: a guest hiring into another organization gets no live event, so refetch here.
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['agents'] });
+      void qc.invalidateQueries({ queryKey: ['hr'] });
+    },
   });
 }
 
@@ -55,7 +59,10 @@ export function useRerollFace() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => post(`/agents/${id}/avatar/reroll`, {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['agents'] });
+      void qc.invalidateQueries({ queryKey: ['hr'] });
+    },
   });
 }
 
@@ -65,6 +72,7 @@ export function useFire() {
     mutationFn: (id: string) => post(`/agents/${id}/fire`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agents'] });
+      qc.invalidateQueries({ queryKey: ['hr'] });
       qc.invalidateQueries({ queryKey: ['board'] });
       qc.invalidateQueries({ queryKey: ['card'] });
     },

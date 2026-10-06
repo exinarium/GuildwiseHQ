@@ -6,6 +6,7 @@ import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, GUEST, paths, SHARER } from '../support/env.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
+import { allowOnlyProject } from '../support/ui.ts';
 
 // Two users, two browser contexts, two runners (docs/PLAN.md M3: sharing and member removal).
 test.describe.configure({ mode: 'serial' });
@@ -138,7 +139,7 @@ test("AC6c: the member hires a project-scoped agent onto their own workstation f
   await guestPage.getByRole('button', { name: 'Hire agent' }).first().click();
   const form = guestPage.getByRole('form', { name: 'Hire agent' });
   await form.getByLabel('Role', { exact: true }).selectOption({ label: 'Builder' });
-  await form.getByLabel('Project').selectOption({ label: 'SHR' });
+  await allowOnlyProject(form, 'SHR');
   await form.getByLabel('Workstation').selectOption({ index: 0 });
   await form.getByLabel('Runtime').selectOption('mock');
   await form.getByLabel('Name', { exact: true }).fill('Gia');
@@ -147,7 +148,11 @@ test("AC6c: the member hires a project-scoped agent onto their own workstation f
   const agents = (await json(await guest.get('/api/agents'))).agents;
   const gia = agents.find((a: { name: string }) => a.name === 'Gia');
   giaId = gia.id;
-  expect(gia).toMatchObject({ projectId, workstationId: guestWs, hiredByUserId: expect.any(String) });
+  expect(gia).toMatchObject({
+    allowedProjectIds: [projectId],
+    workstationId: guestWs,
+    hiredByUserId: expect.any(String),
+  });
   // she belongs to the owner's organization (the owner's catalogue and name space apply)
   const me = await json(await owner.get('/api/auth/me'));
   expect(gia.orgId).toBe(me.activeOrg.id);
