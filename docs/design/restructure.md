@@ -833,3 +833,35 @@ Server tests (vitest, `aom_test`):
 | 14 | Interest research is **off, on demand only** ("Research this" on an interest or an item). |
 | 15 | A converted project gets a **Research tab** keeping its research notes front and centre. |
 | 16 | V1 integrations: **GitHub/Jira issue polling into intake, outgoing webhooks** (POST JSON to a URL; Slack, Teams, n8n and Zapier compatible; signed), and **email digests** at a set time. |
+
+---
+
+## Impact of organizations (`docs/design/organizations.md`, 2026-10-06)
+
+Organizations, org roles (Owner > Admin > Member, plus Guests) and licensing are built **before** this restructure (organizations.md §17). Everywhere above, "the org owner" means **the org's Owner or an Admin**, "org member" means an active `org_members` row, and "guest" means a user with access to a shared project of an org they are not a member of. `userId === orgId` no longer exists. Take migration numbers after the organizations ones, and add `restructure-2026-10` to the `data-migrations/index.ts` that organizations creates, after `orgs-2026-10`.
+
+Owner decisions that override this document:
+
+- **Only the Owner and Admins create projects and add people** (org members and guests). This affects conversion (§8.2: Owner/Admin) and interest sharing (§5.1 "Share an interest": Owner/Admin of the interest's org).
+- **Interests use the role hierarchy** (replaces D12 and §5.1 "any active member may edit"): you may edit, delete, pause, archive, run or change the taste rules of an interest only if its creator's rank is at or below yours (Owner > Admin > Member > Guest), or you created it. Viewing is unchanged (members of the backing project). `interests.created_by_rank` is stored at creation; the creator's **current** rank in the org counts, the stored rank is the fallback when the creator has left (organizations.md §4.3).
+- **Schedules:** project-bound actions may be created and edited by any active member of that project, including Guests on shared projects. Org-level actions (BA tasks not bound to a project, hygiene, integrations not bound to a project) are Owner/Admin only. Workstation-targeted actions (DevOps, integration polling on a runner) additionally need the workstation's user (replaces D12's schedule clause).
+
+Steps that change:
+
+| Step | Change |
+| --- | --- |
+| 1 | `canHireAgent({actor, orgId})`: Owner/Admin with any allow-list; Members and Guests onto their own workstation with an allow-list inside the projects they are on. `canManageAgent`: Owner/Admin or the hiring manager. `canDirectAgent`: Owner/Admin, or a project member for agents allowed on that project. All take the `Actor` of organizations.md §4.1 |
+| 2 | `1310_org_agents.sql` becomes the next number after the organizations migrations; its FKs reference `organizations` |
+| 3 | Eligibility: the agent's manager must still be an active org member or an active guest of the card's project; agents of suspended orgs are never candidates (organizations.md §7.6) |
+| 4 | "Other readers": replace the remaining `userId === orgId` checks with org roles |
+| 5 | §4.4 `ProjectMemberRemoved`: "no other active membership in the org" means another active project of that org for a guest; an org Member keeps their agents until `OrgMemberRemoved` (organizations.md §8.3) |
+| 6 | Hire dialog: org select lists orgs where the user is a member or a guest; the allow-list picker is limited by role; hire is refused at `max_agents` / `max_workstations` (409 `limit_reached`) |
+| 10 | Schedule create/patch authorization per the decision above; scheduled fires of suspended orgs are skipped |
+| 16 | `convertProject`: Owner/Admin only; `max_projects` re-checked when a research project becomes a counted project |
+| 20, 21 | `InterestCreated` gains `creatorRank`; `interests.created_by_rank`. Backing projects are excluded from `max_projects` |
+| 22 | `VISIBLE_PROJECT_KIND` composes with the `project_members` org grants; no other visibility change |
+| 23 | Interest commands use `canEditInterest` (rank rule); `POST /api/interests/:id/members` is Owner/Admin |
+| 24 | `fireDueInterests` skips suspended orgs and orgs with the `interests` feature off |
+| 28 | `restructure-2026-10` runs per organization (ids are unchanged); its desk report is an org-level item visible to Owner/Admins |
+| 30 | Interests page: edit controls follow `canEditInterest`; schedule controls follow the schedule rule; feature flag hides the page |
+| Roadmap | Per-project budgets: set and overridden by Owner/Admin. Org quiet cap: Owner/Admin. Org chart: visible to org members |
