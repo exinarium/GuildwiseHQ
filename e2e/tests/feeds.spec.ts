@@ -436,8 +436,8 @@ test('AC6: the Schedules page creates a schedule from a preset with a time zone 
   await form.getByRole('button', { name: 'Create schedule' }).click();
   await expect(page.getByText(/cron expression must have 5 fields/i)).toBeVisible();
   // tidy up: pause, then delete
-  page.once('dialog', (d) => void d.accept());
   await row.getByRole('button', { name: 'Delete' }).click();
+  await page.getByRole('button', { name: 'Delete schedule' }).click();
   await expect(row).toHaveCount(0);
 });
 

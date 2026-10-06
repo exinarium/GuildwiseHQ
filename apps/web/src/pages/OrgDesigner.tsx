@@ -25,15 +25,18 @@ import { ChatPanel } from '../components/ChatPanel.tsx';
 import { RoleEditor } from '../components/org/RoleEditor.tsx';
 import { WorkflowEditor } from '../components/org/WorkflowEditor.tsx';
 import { WorkflowGraph } from '../components/org/WorkflowGraph.tsx';
+import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import {
   Badge,
   Button,
+  Callout,
   Dialog,
   ErrorBox,
+  ListSkeleton,
   PageHeader,
   Panel,
   Select,
-  Spinner,
+  Tabs,
   TextArea,
   TextInput,
 } from '../components/ui.tsx';
@@ -112,41 +115,30 @@ export function OrgDesigner() {
         </div>
       )}
       {cat.data && !cat.data.canEdit && (
-        <p
-          role="note"
-          data-testid="read-only-note"
-          className="mb-3 rounded-control border border-info-fill/40 bg-info-soft px-3 py-2 text-sm text-info-soft-fg"
-        >
+        <Callout tone="info" role="note" data-testid="read-only-note" className="mb-4">
           You are an additional manager here: this is the owner's catalogue. Their roles, workflows and
           standing orders apply to the shared project's cards, and only the owner can change them.
-        </p>
+        </Callout>
       )}
-      <div
-        role="tablist"
-        aria-label="Organization sections"
-        className="mb-3 flex flex-wrap gap-1 border-b border-line"
-      >
-        {TABS.map(([id, label]) => (
-          <button
-            key={id}
-            role="tab"
-            type="button"
-            aria-selected={tab === id}
-            onClick={() => setParam('tab', id === 'roles' ? '' : id)}
-            className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${tab === id ? 'border-brand font-semibold' : 'border-transparent text-muted '}`}
-          >
-            {label}
-          </button>
-        ))}
+      <Tabs
+        label="Organization sections"
+        prefix="org"
+        value={tab}
+        onChange={(id) => setParam('tab', id === 'roles' ? '' : id)}
+        tabs={TABS.map(([id, label]) => ({ id, label }))}
+      />
+      {cat.isPending && <ListSkeleton label="Loading the organization" rows={3} />}
+      {cat.isError && <ErrorBox error={cat.error} onRetry={() => cat.refetch()} />}
+      <div role="tabpanel" id={panelId('org', tab)} aria-labelledby={tabId('org', tab)}>
+        {cat.data && tab === 'roles' && <RolesTab cat={cat.data} projectId={ctxProject || undefined} />}
+        {cat.data && tab === 'workflows' && (
+          <WorkflowsTab cat={cat.data} projectId={ctxProject || undefined} />
+        )}
+        {cat.data && tab === 'departments' && (
+          <DepartmentsTab cat={cat.data} projectId={ctxProject || undefined} />
+        )}
+        {cat.data && tab === 'design' && <DesignTab cat={cat.data} />}
       </div>
-      {cat.isPending && <Spinner />}
-      {cat.isError && <ErrorBox error={cat.error} />}
-      {cat.data && tab === 'roles' && <RolesTab cat={cat.data} projectId={ctxProject || undefined} />}
-      {cat.data && tab === 'workflows' && <WorkflowsTab cat={cat.data} projectId={ctxProject || undefined} />}
-      {cat.data && tab === 'departments' && (
-        <DepartmentsTab cat={cat.data} projectId={ctxProject || undefined} />
-      )}
-      {cat.data && tab === 'design' && <DesignTab cat={cat.data} />}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import type { InterestDto } from '@aom/shared';
+import { Lightbulb } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import {
@@ -17,19 +18,23 @@ import { TasteRulesEditor } from '../components/interests/TasteRulesEditor.tsx';
 import {
   Badge,
   Button,
+  Callout,
   Dialog,
+  EmptyState,
   ErrorBox,
+  ListSkeleton,
   PageHeader,
   Panel,
   Select,
   Spinner,
   TextInput,
+  useToast,
 } from '../components/ui.tsx';
 import { compactRatings, describeRatings, describeScan } from '../lib/interests.ts';
 import { formatDateTime } from '../lib/time.ts';
 
 const linkBtn =
-  'inline-flex min-h-11 items-center justify-center rounded-control border border-control bg-surface px-3 py-1 text-sm font-medium text-fg hover:bg-sunken sm:min-h-8    ';
+  'inline-flex h-8 items-center justify-center rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken [@media(pointer:coarse)]:min-h-11';
 
 /** Everything the manager cares about, across feed and research projects (docs/design/interests.md section 8.2). */
 export function Interests() {
@@ -134,25 +139,27 @@ export function Interests() {
       </div>
 
       {adoptable > 0 && !bannerHidden && (
-        <div
-          className="flex flex-wrap items-center gap-2 rounded-control border border-warning-fill/40 bg-warning-soft px-3 py-2 text-sm text-warning-soft-fg"
+        <Callout
+          tone="warning"
           data-testid="adopt-banner"
+          actions={
+            <>
+              <Button size="sm" onClick={() => setAdopting(true)}>
+                Review and adopt
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setBannerHidden(true)}>
+                Dismiss
+              </Button>
+            </>
+          }
         >
-          <span className="min-w-0 flex-1">
-            {adoptable} feed {adoptable === 1 ? 'schedule is not an interest' : 'schedules are not interests'}{' '}
-            yet.
-          </span>
-          <Button className="min-h-11 sm:min-h-8" onClick={() => setAdopting(true)}>
-            Review and adopt
-          </Button>
-          <Button variant="ghost" className="min-h-11 sm:min-h-8" onClick={() => setBannerHidden(true)}>
-            Dismiss
-          </Button>
-        </div>
+          {adoptable} feed {adoptable === 1 ? 'schedule is not an interest' : 'schedules are not interests'}{' '}
+          yet.
+        </Callout>
       )}
 
-      {list.isPending && <Spinner label="Loading interests" />}
-      <ErrorBox error={list.error} />
+      {list.isPending && <ListSkeleton label="Loading interests" rows={3} />}
+      <ErrorBox error={list.error} onRetry={() => list.refetch()} />
       <ul className="flex flex-col gap-3" aria-label="Interests" data-testid="interests">
         {shown.map((i) => (
           <li key={i.id} data-testid={`interest-${i.name}`}>
@@ -161,11 +168,17 @@ export function Interests() {
         ))}
       </ul>
       {list.data && shown.length === 0 && (
-        <Panel>
-          <p className="text-sm text-subtle" data-testid="interests-empty">
-            No interests yet. Add one with + New, or adopt the feed schedules you already have.
-          </p>
-        </Panel>
+        <EmptyState
+          data-testid="interests-empty"
+          icon={Lightbulb}
+          title="No interests yet"
+          description="An interest is something you care about: a topic scanned on a schedule, rated by you, with its own taste rules. Add one, or adopt the feed schedules you already have."
+          action={
+            <Button variant="primary" onClick={() => setEditing('new')}>
+              + New
+            </Button>
+          }
+        />
       )}
 
       {(list.data?.tasteProjects ?? []).length > 0 && (
@@ -186,7 +199,7 @@ export function Interests() {
                       ? ` · written to taste.md v${t.version}`
                       : ' · nothing written to taste.md yet'}
                 </span>
-                <Button className="min-h-11 sm:min-h-8" onClick={() => setTasteProject(t.projectId)}>
+                <Button size="sm" onClick={() => setTasteProject(t.projectId)}>
                   Edit taste rules
                 </Button>
               </li>
@@ -220,6 +233,7 @@ function InterestCard({
 }) {
   const run = useRunInterest();
   const patch = usePatchInterest();
+  const toast = useToast();
   const [showNotes, setShowNotes] = useState(false);
   const s = i.stats;
   const archived = !!(i.feedProject?.archived || i.researchProject?.archived);
@@ -304,7 +318,7 @@ function InterestCard({
             className="min-h-11 sm:min-h-8"
             disabled={run.isPending || archived}
             data-testid="interest-run"
-            onClick={() => run.mutate(i.id)}
+            onClick={() => run.mutate(i.id, { onSuccess: (r) => toast.success(`Scan started: ${r.ref}`) })}
           >
             Run now
           </Button>
@@ -339,7 +353,13 @@ function InterestCard({
               disabled={patch.isPending}
               data-testid="interest-toggle"
               onClick={() =>
-                patch.mutate({ id: i.id, body: { status: i.status === 'active' ? 'paused' : 'active' } })
+                patch.mutate(
+                  { id: i.id, body: { status: i.status === 'active' ? 'paused' : 'active' } },
+                  {
+                    onSuccess: () =>
+                      toast.success(i.status === 'active' ? `${i.name} paused` : `${i.name} resumed`),
+                  },
+                )
               }
             >
               {i.status === 'active' ? 'Pause' : 'Resume'}

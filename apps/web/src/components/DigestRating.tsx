@@ -29,7 +29,7 @@ export function DigestItemRow({ item, canRate }: { item: DigestItemDto; canRate:
   const rated = item.verdict !== null && !editing;
   return (
     <div
-      className="rounded-control border border-line p-2"
+      className="rounded-card border border-line bg-surface p-3"
       data-testid={`digest-item-${item.id}`}
       data-verdict={item.verdict ?? ''}
     >
@@ -44,16 +44,16 @@ export function DigestItemRow({ item, canRate }: { item: DigestItemDto; canRate:
           href={safeHref(item.url)}
           target="_blank"
           rel="noreferrer noopener"
-          className="mt-1 block text-sm font-medium underline"
+          className="mt-1.5 block text-base font-medium text-brand-text hover:underline"
         >
           {item.title}
         </a>
       ) : (
-        <span className="mt-1 block text-sm font-medium" data-testid="unsafe-link">
+        <span className="mt-1.5 block text-base font-medium text-fg" data-testid="unsafe-link">
           {item.title}
         </span>
       )}
-      <p className="mt-0.5 text-sm text-muted">{item.summary}</p>
+      <p className="mt-1 text-sm text-muted">{item.summary}</p>
       {hasTranscript(item.kind) && (
         <TranscriptExpander
           projectId={item.projectId}
@@ -66,7 +66,7 @@ export function DigestItemRow({ item, canRate }: { item: DigestItemDto; canRate:
           <Badge tone={verdictTone(item.verdict)}>{VERDICTS.find((v) => v.id === item.verdict)?.label}</Badge>
           {item.verdictReason && <span className="text-subtle">{item.verdictReason}</span>}
           {canRate && (
-            <Button variant="ghost" onClick={() => setEditing(true)}>
+            <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
               Change
             </Button>
           )}
@@ -80,7 +80,7 @@ export function DigestItemRow({ item, canRate }: { item: DigestItemDto; canRate:
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Why? (optional)"
-              className="w-full rounded-control border border-control bg-surface px-2 py-1 text-sm"
+              className="h-9 w-full rounded-control border border-control bg-surface px-3 text-sm text-fg placeholder:text-subtle"
             />
           </label>
           <fieldset className="flex flex-wrap gap-2">
@@ -88,6 +88,7 @@ export function DigestItemRow({ item, canRate }: { item: DigestItemDto; canRate:
             {VERDICTS.map((v) => (
               <Button
                 key={v.id}
+                size="sm"
                 title={v.hint}
                 disabled={rate.isPending}
                 onClick={() =>

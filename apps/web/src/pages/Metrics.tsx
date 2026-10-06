@@ -2,7 +2,15 @@ import { useState } from 'react';
 import { useMetrics } from '../api/queries/hr.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { BarChart, HBars, Stat } from '../components/hr/Charts.tsx';
-import { ErrorBox, PageHeader, Panel, Select, Spinner } from '../components/ui.tsx';
+import {
+  EmptyState,
+  ErrorBox,
+  FilterChip,
+  PageHeader,
+  PageSkeleton,
+  Panel,
+  Select,
+} from '../components/ui.tsx';
 import { duration, pct } from '../lib/hr.ts';
 
 const RANGES = [7, 14, 30, 90] as const;
@@ -16,12 +24,12 @@ export function Metrics() {
   const d = m.data;
   const total = (xs: Array<{ count: number }>) => xs.reduce((s, x) => s + x.count, 0);
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-3">
+    <div className="mx-auto flex max-w-5xl flex-col gap-4">
       <PageHeader
         title="Metrics"
         sub="What the team delivered, where it waited on you, and where quality slipped."
       />
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap items-end gap-3">
         {(projects.data?.length ?? 0) > 1 && (
           <div className="w-56">
             <Select label="Project" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
@@ -34,23 +42,21 @@ export function Metrics() {
             </Select>
           </div>
         )}
-        <div className="w-40">
-          <Select label="Range" value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
-            {RANGES.map((r) => (
-              <option key={r} value={r}>
-                Last {r} days
-              </option>
-            ))}
-          </Select>
+        <div role="group" aria-label="Range" className="flex items-end gap-2 pb-0.5">
+          {RANGES.map((r) => (
+            <FilterChip key={r} pressed={days === r} onClick={() => setDays(r)}>
+              {r} days
+            </FilterChip>
+          ))}
         </div>
       </div>
-      {m.isPending && <Spinner />}
-      <ErrorBox error={m.error} />
+      {m.isPending && <PageSkeleton label="Loading metrics" panels={2} />}
+      <ErrorBox error={m.error} onRetry={() => m.refetch()} />
       {d && (
-        <div className="grid gap-3 md:grid-cols-2" data-testid="metrics">
+        <div className="grid gap-4 md:grid-cols-2" data-testid="metrics">
           <Panel>
             <h2 className="mb-3 text-lg font-semibold text-fg">Throughput</h2>
-            <div className="mb-2 flex gap-6">
+            <div className="mb-4 flex gap-8">
               <Stat label="Cards finalized" value={total(d.throughput)} testId="metric-throughput-total" />
               <Stat
                 label="Per day"
@@ -65,7 +71,7 @@ export function Metrics() {
 
           <Panel>
             <h2 className="mb-3 text-lg font-semibold text-fg">Time blocked on you</h2>
-            <div className="flex gap-6" data-testid="metric-blocked">
+            <div className="flex flex-wrap gap-x-8 gap-y-3" data-testid="metric-blocked">
               <Stat label="Total" value={duration(d.timeBlockedOnManager.totalMs)} />
               <Stat label="Cards held up" value={d.timeBlockedOnManager.cards} />
               <Stat label="Average per card" value={duration(d.timeBlockedOnManager.avgMsPerCard)} />
@@ -75,10 +81,10 @@ export function Metrics() {
           <Panel>
             <h2 className="mb-3 text-lg font-semibold text-fg">Bounce rate per builder</h2>
             {d.bounceRate.length === 0 ? (
-              <p className="text-sm text-subtle">No builder submitted a card in this range.</p>
+              <p className="text-sm text-muted">No builder submitted a card in this range.</p>
             ) : (
-              <table className="w-full text-sm" data-testid="metric-bounce">
-                <thead className="text-left text-xs text-subtle">
+              <table className="w-full text-sm text-fg" data-testid="metric-bounce">
+                <thead className="bg-sunken text-left text-xs font-semibold text-muted [&_th]:px-2 [&_th]:py-2">
                   <tr>
                     <th scope="col">Builder</th>
                     <th scope="col" className="text-right">
@@ -97,7 +103,11 @@ export function Metrics() {
                 </thead>
                 <tbody>
                   {d.bounceRate.map((b) => (
-                    <tr key={b.agentId} data-testid={`bounce-${b.name}`}>
+                    <tr
+                      key={b.agentId}
+                      data-testid={`bounce-${b.name}`}
+                      className="border-b border-line [&_td]:px-2 [&_td]:py-2.5 [&_th]:px-2 [&_th]:py-2.5"
+                    >
                       <th scope="row" className="text-left font-medium">
                         {b.name}
                       </th>
@@ -124,7 +134,7 @@ export function Metrics() {
 
           <Panel>
             <h2 className="mb-3 text-lg font-semibold text-fg">Duration</h2>
-            <div className="mb-2 flex gap-6" data-testid="metric-duration">
+            <div className="mb-4 flex flex-wrap gap-x-8 gap-y-3" data-testid="metric-duration">
               <Stat label="Cards finished" value={d.duration.cards} />
               <Stat label="Average per card" value={duration(d.duration.avgMsPerCard)} />
               <Stat label="Median per card" value={duration(d.duration.medianMsPerCard)} />

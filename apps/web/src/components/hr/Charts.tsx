@@ -70,7 +70,7 @@ export function CompareBar({
       )}
       {team !== null && (
         <div
-          className="absolute -top-0.5 h-2.5 w-0.5 bg-sunken"
+          className="absolute -top-0.5 h-2.5 w-0.5 rounded bg-fg"
           style={{ left: w(team) }}
           data-testid="team-tick"
         />
@@ -159,7 +159,7 @@ export function HBars({
               style={{ width: `${(d.value / max) * 100}%` }}
             />
           </span>
-          <span className="text-right tabular-nums">{format ? format(d.value) : d.value}</span>
+          <span className="text-right text-fg tabular-nums">{format ? format(d.value) : d.value}</span>
         </li>
       ))}
     </ul>
@@ -179,8 +179,8 @@ export function Stat({
 }) {
   return (
     <div data-testid={testId}>
-      <p className="text-xs text-subtle">{label}</p>
-      <p className="text-xl font-semibold tabular-nums">{value}</p>
+      <p className="text-xs font-medium text-muted">{label}</p>
+      <p className="text-2xl font-semibold tabular-nums text-fg">{value}</p>
       {sub && <p className="text-xs text-subtle">{sub}</p>}
     </div>
   );

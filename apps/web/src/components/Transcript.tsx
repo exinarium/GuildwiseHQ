@@ -31,7 +31,7 @@ export function TranscriptExpander({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="text-xs font-medium underline"
+        className="rounded text-sm font-medium text-brand-text hover:underline"
       >
         {open ? `Hide ${label.toLowerCase()}` : label}
       </button>
@@ -42,7 +42,7 @@ export function TranscriptExpander({
 
 function TranscriptText({ projectId, url }: { projectId: string; url: string }) {
   const t = useTranscript(projectId, url, true);
-  if (t.isPending) return <Spinner label="Loading transcript" />;
+  if (t.isPending) return <Spinner inline label="Loading transcript" />;
   if (t.error) {
     const missing = t.error instanceof ApiError && t.error.status === 404;
     return (
@@ -60,7 +60,7 @@ function TranscriptText({ projectId, url }: { projectId: string; url: string }) 
         {t.data.path ? ` · ${t.data.path}` : ''}
       </p>
       <pre
-        className="mt-1 max-h-96 overflow-y-auto rounded-control bg-sunken p-2 text-xs whitespace-pre-wrap"
+        className="mt-1 max-h-96 overflow-y-auto rounded-control bg-sunken p-3 font-mono text-xs whitespace-pre-wrap text-fg"
         data-testid="transcript-text"
       >
         {t.data.text}

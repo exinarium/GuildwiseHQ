@@ -17,14 +17,16 @@ import { FollowupEditor, followupProblems } from '../components/FollowupEditor.t
 import {
   Badge,
   Button,
+  ButtonLink,
   Dialog,
   ErrorBox,
   PageHeader,
+  PageSkeleton,
   Panel,
   Select,
-  Spinner,
   TextArea,
   TextInput,
+  useToast,
 } from '../components/ui.tsx';
 import { OUTCOME_LABEL, PHASE_STATUS_LABEL, phaseTone, specOf } from '../lib/phases.ts';
 import { formatDateTime } from '../lib/time.ts';
@@ -33,8 +35,19 @@ import { formatDateTime } from '../lib/time.ts';
 export function Phase() {
   const { projectKey = '', number = '' } = useParams();
   const q = usePhaseByNumber(projectKey, Number(number));
-  if (q.isPending) return <Spinner label="Loading the phase" />;
-  if (q.isError) return <ErrorBox error={q.error} />;
+  if (q.isPending)
+    return (
+      <div className="mx-auto max-w-4xl">
+        <PageSkeleton label="Loading the phase" panels={3} />
+      </div>
+    );
+  if (q.isError)
+    return (
+      <div className="mx-auto max-w-4xl">
+        <PageHeader title="Phase" />
+        <ErrorBox error={q.error} onRetry={() => q.refetch()} />
+      </div>
+    );
   return <PhaseView phase={q.data} />;
 }
 
@@ -44,6 +57,7 @@ function PhaseView({ phase }: { phase: PhaseDetailDto }) {
   const targets = useDeployTargets(phase.projectId);
   const patch = usePatchPhase(phase.id);
   const reopen = useReopenPhase(phase.id);
+  const toast = useToast();
   const [reopenOpen, setReopenOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [name, setName] = useState(phase.name);
@@ -57,9 +71,10 @@ function PhaseView({ phase }: { phase: PhaseDetailDto }) {
   );
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-3" data-testid="phase-page">
+    <div className="mx-auto flex max-w-4xl flex-col gap-4" data-testid="phase-page">
       <PageHeader
         title={`${phase.ref} ${phase.name}`}
+        back={{ to: `/p/${project?.key ?? phase.ref.split('-')[0]}/board`, label: 'Back to the board' }}
         sub={
           <span className="flex flex-wrap items-center gap-1.5">
             <span data-testid="phase-status">
@@ -80,11 +95,7 @@ function PhaseView({ phase }: { phase: PhaseDetailDto }) {
                 Reopen phase
               </Button>
             )}
-            {project && (
-              <Link to={`/projects/${project.id}/settings`} className="text-sm underline">
-                Project settings
-              </Link>
-            )}
+            {project && <ButtonLink to={`/projects/${project.id}/settings`}>Project settings</ButtonLink>}
           </>
         }
       />
@@ -96,7 +107,10 @@ function PhaseView({ phase }: { phase: PhaseDetailDto }) {
             aria-label="Phase details"
             onSubmit={(e) => {
               e.preventDefault();
-              patch.mutate({ name: name.trim(), description });
+              patch.mutate(
+                { name: name.trim(), description },
+                { onSuccess: () => toast.success('Phase saved') },
+              );
             }}
           >
             <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -119,10 +133,10 @@ function PhaseView({ phase }: { phase: PhaseDetailDto }) {
       {phase.report && (
         <Panel data-testid="phase-report">
           <h2 className="mb-2 text-lg font-semibold text-fg">Report</h2>
-          <p className="text-sm whitespace-pre-wrap">{phase.report}</p>
+          <p className="text-base whitespace-pre-wrap text-fg">{phase.report}</p>
           {phase.outstanding.length > 0 && (
             <>
-              <h3 className="mt-2 text-xs font-semibold">Outstanding</h3>
+              <h3 className="mt-3 text-sm font-semibold text-fg">Outstanding</h3>
               <ul className="list-disc pl-5 text-sm">
                 {phase.outstanding.map((o) => (
                   <li key={o.text}>{o.text}</li>
@@ -135,7 +149,7 @@ function PhaseView({ phase }: { phase: PhaseDetailDto }) {
       {phase.resultsReport && (
         <Panel data-testid="phase-results">
           <h2 className="mb-2 text-lg font-semibold text-fg">Follow-up results</h2>
-          <p className="text-sm whitespace-pre-wrap">{phase.resultsReport}</p>
+          <p className="text-base whitespace-pre-wrap text-fg">{phase.resultsReport}</p>
         </Panel>
       )}
       {phase.tasks.length > 0 && (
@@ -168,7 +182,14 @@ function PhaseView({ phase }: { phase: PhaseDetailDto }) {
               variant="primary"
               data-testid="reopen-confirm"
               disabled={!reason.trim() || reopen.isPending}
-              onClick={() => reopen.mutate(reason.trim(), { onSuccess: () => setReopenOpen(false) })}
+              onClick={() =>
+                reopen.mutate(reason.trim(), {
+                  onSuccess: () => {
+                    setReopenOpen(false);
+                    toast.success('Phase reopened');
+                  },
+                })
+              }
             >
               Reopen
             </Button>

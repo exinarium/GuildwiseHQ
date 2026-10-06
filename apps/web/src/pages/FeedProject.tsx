@@ -1,10 +1,21 @@
+import { Rss } from 'lucide-react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useFeedList, useTaste } from '../api/queries/digest.ts';
 import { useInterest, useInterestDigestItems } from '../api/queries/interests.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useRunFeed, useSchedules } from '../api/queries/schedules.ts';
 import { DigestItemRow } from '../components/DigestRating.tsx';
-import { Button, ErrorBox, PageHeader, Panel, Spinner } from '../components/ui.tsx';
+import {
+  Button,
+  ButtonLink,
+  EmptyState,
+  ErrorBox,
+  ListSkeleton,
+  PageHeader,
+  PageSkeleton,
+  Panel,
+  useToast,
+} from '../components/ui.tsx';
 import { describeCron } from '../lib/feeds.ts';
 import { formatDateTime } from '../lib/time.ts';
 
@@ -23,24 +34,41 @@ export function FeedProject() {
   const taste = useTaste(project?.id);
   const schedules = useSchedules(project?.id);
   const run = useRunFeed();
+  const toast = useToast();
 
-  if (projects.isPending) return <Spinner />;
-  if (!project) return <p className="text-sm text-subtle">Project {projectKey} not found.</p>;
+  if (projects.isPending) return <PageSkeleton label="Loading the feed" />;
+  if (!project)
+    return (
+      <EmptyState
+        icon={Rss}
+        tone="warning"
+        title="That feed does not exist"
+        description={`Nothing is called ${projectKey}, or you do not have access to it.`}
+        action={
+          <ButtonLink to="/projects" variant="primary">
+            Browse projects
+          </ButtonLink>
+        }
+      />
+    );
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-3">
+    <div className="mx-auto flex max-w-4xl flex-col gap-5">
       <PageHeader
         title={`${project.name} feed`}
         sub={project.key}
         actions={
           <>
-            <Link
-              to={`/p/${project.key}/board`}
-              className="inline-flex min-h-8 items-center rounded-control border border-control px-3 py-1 text-sm font-medium"
+            <ButtonLink to={`/p/${project.key}/board`}>Board</ButtonLink>
+            <Button
+              variant="primary"
+              loading={run.isPending}
+              onClick={() =>
+                run.mutate(project.id, {
+                  onSuccess: (r) => toast.success(`Emitted ${r.ref}. The next scout picks it up.`),
+                })
+              }
             >
-              Board
-            </Link>
-            <Button variant="primary" disabled={run.isPending} onClick={() => run.mutate(project.id)}>
               Run now
             </Button>
           </>
@@ -48,9 +76,9 @@ export function FeedProject() {
       />
       <ErrorBox error={run.error} />
       {run.data && (
-        <p className="text-sm" data-testid="run-result">
+        <p className="text-sm text-fg" data-testid="run-result">
           Emitted{' '}
-          <Link to={`/cards/${run.data.ref}`} className="underline">
+          <Link to={`/cards/${run.data.ref}`} className="text-brand-text underline">
             {run.data.ref}
           </Link>
           ; the next free scout picks it up first.
@@ -60,17 +88,17 @@ export function FeedProject() {
       <Panel>
         <h2 className="mb-2 text-lg font-semibold text-fg">Schedules</h2>
         {(schedules.data ?? []).length === 0 ? (
-          <p className="text-sm text-subtle">
+          <p className="text-sm text-muted">
             No schedule.{' '}
-            <Link to="/schedules" className="underline">
+            <Link to="/schedules" className="text-brand-text underline">
               Add one
             </Link>
             .
           </p>
         ) : (
-          <ul className="text-sm">
+          <ul className="divide-y divide-line text-sm text-fg">
             {schedules.data?.map((s) => (
-              <li key={s.id}>
+              <li key={s.id} className="py-2 first:pt-0 last:pb-0">
                 {s.name}: {describeCron(s.cron)} ({s.timezone}), next{' '}
                 {s.nextFireAt ? formatDateTime(s.nextFireAt) : 'not scheduled'}
               </li>
@@ -81,10 +109,10 @@ export function FeedProject() {
 
       <Panel>
         <h2 className="mb-2 text-lg font-semibold text-fg">Running list</h2>
-        <p className="mb-2 text-xs text-subtle">
+        <p className="mb-3 font-mono text-xs text-subtle">
           {list.data?.path} · oldest first, entries are only ever appended
         </p>
-        {list.isPending && <Spinner />}
+        {list.isPending && <ListSkeleton label="Loading the running list" rows={3} />}
         {interestId && (
           <p className="mb-2 flex items-center gap-2 text-sm" data-testid="interest-filter-chip">
             <span className="rounded-full bg-sunken px-2 py-0.5 text-xs">
@@ -104,9 +132,13 @@ export function FeedProject() {
           </p>
         )}
         {items?.length === 0 && (
-          <p className="text-sm text-subtle" data-testid="feed-empty">
-            Nothing logged yet.
-          </p>
+          <EmptyState
+            bare
+            data-testid="feed-empty"
+            icon={Rss}
+            title="Nothing logged yet"
+            description="Run the scan now, or wait for the next schedule. Each digest lands here for you to rate."
+          />
         )}
         <ol className="flex flex-col gap-2" data-testid="feed-list">
           {items?.map((i) => (
@@ -119,19 +151,19 @@ export function FeedProject() {
 
       <Panel>
         <h2 className="mb-2 text-lg font-semibold text-fg">taste.md</h2>
-        <p className="mb-2 text-xs text-subtle">
+        <p className="mb-3 font-mono text-xs text-subtle">
           {taste.data?.path} · explicit rules from your ratings; curators read this before filtering
         </p>
         {taste.data?.content ? (
           <pre
-            className="overflow-x-auto rounded-control bg-sunken p-2 text-xs whitespace-pre-wrap"
+            className="overflow-x-auto rounded-control bg-sunken p-3 font-mono text-xs whitespace-pre-wrap text-fg"
             data-testid="taste-preview"
           >
             {taste.data.content}
           </pre>
         ) : (
-          <p className="text-sm text-subtle" data-testid="taste-empty">
-            No ratings yet.
+          <p className="text-sm text-muted" data-testid="taste-empty">
+            No ratings yet. Rate a few items above and the rules appear here.
           </p>
         )}
       </Panel>

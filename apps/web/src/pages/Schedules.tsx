@@ -6,6 +6,7 @@ import {
   SCHEDULE_PRESETS,
   type ScheduleDto,
 } from '@aom/shared';
+import { CalendarClock } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
 import { useProjects } from '../api/queries/projects.ts';
@@ -19,13 +20,18 @@ import {
 import {
   Badge,
   Button,
+  ButtonLink,
+  Callout,
+  ConfirmDialog,
+  EmptyState,
   ErrorBox,
+  ListSkeleton,
   PageHeader,
   Panel,
   Select,
-  Spinner,
   TextArea,
   TextInput,
+  useToast,
 } from '../components/ui.tsx';
 import { buildFeedTemplate, defaultTimezone, describeCron } from '../lib/feeds.ts';
 import { formatDateTime } from '../lib/time.ts';
@@ -44,8 +50,8 @@ export function Schedules() {
         title="Schedules"
         sub="Each run emits a card that takes the next free agent ahead of normal work; if none is free, one extra shift starts."
       />
-      {schedules.isPending && <Spinner label="Loading schedules" />}
-      <ErrorBox error={schedules.error} />
+      {schedules.isPending && <ListSkeleton label="Loading schedules" rows={2} />}
+      <ErrorBox error={schedules.error} onRetry={() => schedules.refetch()} />
       <ul className="flex flex-col gap-3" aria-label="Schedules" data-testid="schedules">
         {(schedules.data ?? []).map((s) => (
           <li key={s.id} data-testid={`schedule-${s.name}`}>
@@ -54,11 +60,19 @@ export function Schedules() {
         ))}
       </ul>
       {schedules.data?.length === 0 && (
-        <Panel>
-          <p className="text-sm text-subtle" data-testid="schedules-empty">
-            No schedules yet. Create a project with the Feed workflow, then schedule its scan below.
-          </p>
-        </Panel>
+        <EmptyState
+          data-testid="schedules-empty"
+          icon={CalendarClock}
+          title="No schedules yet"
+          description="A schedule runs a feed scan on a cadence. Create a project with the Feed workflow, then schedule its scan below."
+          action={
+            feedProjects.length === 0 ? (
+              <ButtonLink to="/projects" variant="primary">
+                Create a feed project
+              </ButtonLink>
+            ) : undefined
+          }
+        />
       )}
       <NewSchedule projects={feedProjects} />
     </div>
@@ -69,6 +83,8 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
   const patch = usePatchSchedule();
   const run = useRunSchedule();
   const del = useDeleteSchedule();
+  const toast = useToast();
+  const [confirming, setConfirming] = useState(false);
   const fields = s.cardTemplate.fields as Record<string, unknown>;
   const topic = typeof fields.topic === 'string' ? fields.topic : undefined;
   const description = typeof fields.description === 'string' ? fields.description.trim() : '';
@@ -90,11 +106,11 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
         )}
       </div>
       {(s.failCount ?? 0) > 0 && s.lastError && (
-        <p className="mt-1 text-xs text-danger" data-testid="schedule-error">
+        <p className="mt-1 text-sm text-danger" data-testid="schedule-error">
           {s.lastError} Retrying with growing pauses.
         </p>
       )}
-      <dl className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+      <dl className="mt-3 grid gap-x-6 gap-y-3 text-sm text-fg sm:grid-cols-2">
         <div>
           <dt className="text-xs text-subtle">When</dt>
           <dd data-testid="schedule-when">
@@ -128,7 +144,11 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
       </dl>
       <ErrorBox error={patch.error ?? run.error ?? del.error} />
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button variant="primary" disabled={run.isPending} onClick={() => run.mutate(s.id)}>
+        <Button
+          variant="primary"
+          loading={run.isPending}
+          onClick={() => run.mutate(s.id, { onSuccess: (r) => toast.success(`Emitted ${r.ref}`) })}
+        >
           Run now
         </Button>
         {s.interestId ? (
@@ -143,24 +163,40 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
           <>
             <Button
               disabled={patch.isPending}
-              onClick={() => patch.mutate({ id: s.id, body: { enabled: !s.enabled } })}
+              onClick={() =>
+                patch.mutate(
+                  { id: s.id, body: { enabled: !s.enabled } },
+                  { onSuccess: () => toast.success(s.enabled ? 'Schedule paused' : 'Schedule resumed') },
+                )
+              }
             >
               {s.enabled ? 'Pause' : 'Resume'}
             </Button>
-            <Button
-              variant="danger"
-              disabled={del.isPending}
-              onClick={() => {
-                if (window.confirm(`Delete the schedule "${s.name}"?`)) del.mutate(s.id);
-              }}
-            >
+            <Button variant="danger-ghost" className="ml-auto" onClick={() => setConfirming(true)}>
               Delete
             </Button>
+            <ConfirmDialog
+              open={confirming}
+              onOpenChange={setConfirming}
+              title={`Delete the schedule "${s.name}"?`}
+              description="It stops running. Cards it already emitted are kept."
+              confirmLabel="Delete schedule"
+              pending={del.isPending}
+              onConfirm={() =>
+                del.mutate(s.id, {
+                  onSuccess: () => {
+                    setConfirming(false);
+                    toast.success('Schedule deleted');
+                  },
+                  onError: () => setConfirming(false),
+                })
+              }
+            />
           </>
         )}
       </div>
       {run.data && (
-        <p className="mt-2 text-sm" data-testid="run-result">
+        <p className="mt-2 text-sm text-fg" data-testid="run-result">
           Emitted {run.data.ref}.
         </p>
       )}
@@ -170,6 +206,7 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
 
 function NewSchedule({ projects }: { projects: ProjectDto[] }) {
   const create = useCreateSchedule();
+  const toast = useToast();
   const [projectId, setProjectId] = useState('');
   const [name, setName] = useState('');
   const [preset, setPreset] = useState<string>(SCHEDULE_PRESETS[0].id);
@@ -205,6 +242,7 @@ function NewSchedule({ projects }: { projects: ProjectDto[] }) {
       },
       {
         onSuccess: () => {
+          toast.success('Schedule created');
           setName('');
           setTopic('');
           setDescription('');
@@ -217,23 +255,23 @@ function NewSchedule({ projects }: { projects: ProjectDto[] }) {
   return (
     <Panel>
       <h2 className="mb-3 text-lg font-semibold text-fg">New feed schedule</h2>
-      <p className="mb-2 text-xs text-subtle" data-testid="schedules-interests-hint">
+      <p className="mb-4 text-sm text-muted" data-testid="schedules-interests-hint">
         Feeds are easier to manage as{' '}
-        <Link to="/interests" className="underline">
+        <Link to="/interests" className="text-brand-text underline">
           Interests
         </Link>
         : one place for the topic, its scan, your taste rules and its notes.
       </p>
       {projects.length === 0 ? (
-        <p className="text-sm text-subtle">
+        <p className="text-sm text-muted">
           You own no project with the Feed workflow.{' '}
-          <Link to="/projects" className="underline">
+          <Link to="/projects" className="text-brand-text underline">
             Create one
           </Link>{' '}
           and choose the Feed workflow.
         </p>
       ) : (
-        <form onSubmit={submit} aria-label="New schedule" className="grid gap-3 sm:grid-cols-2" noValidate>
+        <form onSubmit={submit} aria-label="New schedule" className="grid gap-4 sm:grid-cols-2" noValidate>
           <Select label="Project" value={chosen?.id ?? ''} onChange={(e) => setProjectId(e.target.value)}>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
@@ -293,13 +331,13 @@ function NewSchedule({ projects }: { projects: ProjectDto[] }) {
           />
           <div className="flex flex-col gap-2 sm:col-span-2">
             {err && (
-              <p role="alert" className="text-xs font-medium text-danger">
+              <Callout tone="danger" role="alert">
                 {err}
-              </p>
+              </Callout>
             )}
             <ErrorBox error={create.error} />
             <div>
-              <Button type="submit" variant="primary" disabled={create.isPending}>
+              <Button type="submit" variant="primary" loading={create.isPending}>
                 Create schedule
               </Button>
             </div>
