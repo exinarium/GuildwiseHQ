@@ -97,6 +97,20 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
   await exec(tx, 'DELETE FROM ba_signals WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM hygiene_findings WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM deploy_targets WHERE project_id=$1', P);
+  // Interests: those that only lived in this project go; one that also has another project loses just this link.
+  await exec(
+    tx,
+    `DELETE FROM interests WHERE COALESCE(feed_project_id, research_project_id) = $1
+        AND COALESCE(research_project_id, feed_project_id) = $1`,
+    P,
+  );
+  await exec(
+    tx,
+    'UPDATE interests SET feed_project_id = NULL, scan = NULL, schedule_id = NULL WHERE feed_project_id=$1',
+    P,
+  );
+  await exec(tx, 'UPDATE interests SET research_project_id = NULL WHERE research_project_id=$1', P);
+  await exec(tx, 'DELETE FROM taste_seeds WHERE project_id=$1', P);
   // Project-level rows.
   for (const t of ['feed_seen', 'transcripts', 'repo_requests', 'schedules']) {
     await exec(tx, `DELETE FROM ${t} WHERE project_id=$1`, P);

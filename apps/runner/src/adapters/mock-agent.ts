@@ -41,7 +41,7 @@ interface Brief {
     recommendation?: string;
     ledgerMatches: Array<{ title: string; body: string }>;
   };
-  feed?: { candidates: FeedItem[]; seenUrls: string[]; taste?: string };
+  feed?: { candidates: FeedItem[]; seenUrls: string[]; taste?: string; tasteSeed?: string[] };
   standingOrders?: Array<{ title: string }>;
   ledger?: Array<{ title: string; body: string }>;
   card: {
@@ -264,7 +264,17 @@ async function feedWork(brief: Brief, action: Action): Promise<{ code: number; o
   const tasteLines = (taste ?? '').split('\n').filter((l) => l.startsWith('- '));
   emit({ kind: 'progress', text: `mock taste: ${taste ? `${tasteLines.length} rule line(s)` : 'none'}` });
   for (const l of tasteLines) emit({ kind: 'progress', text: `mock taste rule: ${l.slice(0, 400)}` });
-  const skip = skipTitles(taste);
+  // Explicit rules the manager set on the Interests page (docs/design/interests.md): `skip "<title>"` drops a candidate.
+  const seed = brief.feed?.tasteSeed ?? [];
+  emit({ kind: 'progress', text: `mock taste seed: ${seed.length} rule(s)` });
+  for (const r of seed) emit({ kind: 'progress', text: `mock taste seed rule: ${r.slice(0, 400)}` });
+  if (taste?.includes('aom:section'))
+    emit({ kind: 'progress', text: 'mock taste: managed section NOT stripped' });
+  else emit({ kind: 'progress', text: 'mock taste: managed section stripped' });
+  const skip = [
+    ...skipTitles(taste),
+    ...seed.flatMap((r) => [...r.matchAll(/skip "([^"]+)"/gi)].map((m) => m[1] as string)),
+  ];
   // One top-N across kinds (a legacy per-kind maximum counts as the sum of its values).
   const max =
     fields.maxItems ??

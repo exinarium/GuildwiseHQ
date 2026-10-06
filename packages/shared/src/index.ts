@@ -10,6 +10,7 @@ export * from './hr/index.ts';
 export * from './hygiene/index.ts';
 export * from './ids.ts';
 export * from './intake/index.ts';
+export * from './interests/index.ts';
 export * from './phases/index.ts';
 export * from './prompt/index.ts';
 export * from './protocol/index.ts';

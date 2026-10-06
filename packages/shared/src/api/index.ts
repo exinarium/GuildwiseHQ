@@ -12,6 +12,7 @@ export * from './devops.ts';
 export * from './digest.ts';
 export * from './hr.ts';
 export * from './intake.ts';
+export * from './interests.ts';
 export * from './invitations.ts';
 export * from './ledger.ts';
 export * from './members.ts';

@@ -1,7 +1,13 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isSafeVaultFolder, type ShiftBrief, type ShiftVault, TASTE_FILE } from '@aom/shared';
+import {
+  isSafeVaultFolder,
+  type ShiftBrief,
+  type ShiftVault,
+  stripManagedSection,
+  TASTE_FILE,
+} from '@aom/shared';
 import { confine } from '../fs-safe.ts';
 
 export interface VaultShiftContext {
@@ -46,7 +52,9 @@ export async function readVaultContext(
   const project = await read(join(root, ...vault.folder.split('/'), 'standing-orders.md'), root);
   if (project) orders.push({ title: 'Project standing orders (vault)', body: project });
   const projectDoc = await read(join(root, ...vault.folder.split('/'), 'PROJECT.md'), root);
-  const taste = await read(join(root, ...vault.folder.split('/'), TASTE_FILE), root);
+  // The site-managed rules reach curators through the brief (`feed.tasteSeed`); the file copy would show them twice.
+  const rawTaste = await read(join(root, ...vault.folder.split('/'), TASTE_FILE), root);
+  const taste = rawTaste ? stripManagedSection(rawTaste) || undefined : undefined;
   return {
     addDir: root,
     standingOrders: orders,

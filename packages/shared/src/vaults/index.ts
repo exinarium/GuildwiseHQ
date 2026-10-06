@@ -27,18 +27,28 @@ export const VaultConfigureCommandSchema = z.object({
 export type VaultConfigureCommand = z.infer<typeof VaultConfigureCommandSchema>;
 
 /** `vault.write` (docs/ARCHITECTURE.md section 16.4). Idempotent: identical content is success. */
-export const VaultWriteCommandSchema = z.object({
-  vaultId: VaultIdSchema,
-  /** Vault-relative, forward slashes, no `..`. */
-  path: z.string().min(1),
-  mode: z.enum(['create', 'append', 'replace']),
-  content: z.string(),
-  commitMessage: z.string().min(1),
-  /** `append` only: written first when the file does not exist yet (e.g. a title for `taste.md`). */
-  header: z.string().optional(),
-  /** Push right after committing (default); otherwise the next sync pushes. */
-  push: z.boolean().default(true),
-});
+export const VaultWriteCommandSchema = z
+  .object({
+    vaultId: VaultIdSchema,
+    /** Vault-relative, forward slashes, no `..`. */
+    path: z.string().min(1),
+    /** `section`: a site-managed block between markers (see `applyManagedSection`), replaced when `section.version` is newer. */
+    mode: z.enum(['create', 'append', 'replace', 'section']),
+    content: z.string(),
+    commitMessage: z.string().min(1),
+    /** `append` and `section`: written first when the file does not exist yet (e.g. a title for `taste.md`). */
+    header: z.string().optional(),
+    /** `section` only: which managed block, and its version (a write with an older or equal version is a no-op). */
+    section: z
+      .object({ id: z.string().regex(/^[a-z-]+$/), version: z.number().int().nonnegative() })
+      .optional(),
+    /** Push right after committing (default); otherwise the next sync pushes. */
+    push: z.boolean().default(true),
+  })
+  .refine((c) => c.mode !== 'section' || c.section !== undefined, {
+    message: 'section mode needs a section id and version',
+    path: ['section'],
+  });
 export type VaultWriteCommand = z.infer<typeof VaultWriteCommandSchema>;
 
 /** Rejects absolute paths, `..` segments and anything inside `.git`. */

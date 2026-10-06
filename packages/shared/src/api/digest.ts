@@ -27,6 +27,8 @@ export type DigestItemDto = z.infer<typeof DigestItemDtoSchema>;
 
 export const DigestItemsQuerySchema = z.object({
   projectId: z.uuid().optional(),
+  /** Only the items of the scans of this interest. */
+  interestId: z.uuid().optional(),
   /** `unrated` (default) or every item of the project's running list. */
   status: z.enum(['unrated', 'all']).default('all'),
 });
@@ -46,8 +48,10 @@ export type RateDigestItemRequest = z.infer<typeof RateDigestItemRequestSchema>;
 export const TasteResponseSchema = z.object({
   path: z.string(),
   content: z.string(),
-  /** One readable line per rating or approved rule, oldest first. */
+  /** One readable line per rating or approved rule, oldest first; explicit (site-managed) rules come first. */
   lines: z.array(z.string()),
+  /** How many of `lines` are explicit rules set on the Interests page. */
+  seedCount: z.number().int().nonnegative().optional(),
 });
 export type TasteResponse = z.infer<typeof TasteResponseSchema>;
 

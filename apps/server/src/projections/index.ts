@@ -8,6 +8,7 @@ import { devopsProjectors } from './devops.ts';
 import { feedProjectors } from './feeds.ts';
 import { hygieneProjectors } from './hygiene.ts';
 import { intakeProjectors } from './intake.ts';
+import { interestProjectors } from './interests.ts';
 import { ledgerProjectors } from './ledger.ts';
 import { outboundProjectors } from './outbound.ts';
 import { phaseProjectors } from './phases.ts';
@@ -55,6 +56,7 @@ const domains: Array<Record<string, Projector>> = [
   repoProjectors,
   phaseProjectors,
   reporterProjectors,
+  interestProjectors,
 ];
 
 export function buildProjectors(): ProjectorMap {
@@ -119,4 +121,6 @@ export const PROJECTION_TABLES = [
   'ba_tasks',
   'ba_signals',
   'hygiene_findings',
+  'interests',
+  'taste_seeds',
 ];

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DigestItemSchema, FeedVerdictSchema } from '../feed/index.ts';
+import { TasteSeedRuleSchema } from '../interests/index.ts';
 import { defineEvent, Id } from './define.ts';
 
 /** Feed events (docs/ARCHITECTURE.md section 5.2, M5). */
@@ -41,6 +42,15 @@ export const feedEvents = [
       deskItemId: Id,
       rule: z.string().min(1).max(500),
       evidenceItemIds: z.array(Id).default([]),
+    }),
+  ),
+  /** The manager set the explicit taste rules of a feed project (docs/design/interests.md section 6). `version` bumps on every set. */
+  defineEvent(
+    'TasteSeedSet',
+    z.object({
+      projectId: Id,
+      version: z.number().int().positive(),
+      rules: z.array(TasteSeedRuleSchema).max(100),
     }),
   ),
 ] as const;

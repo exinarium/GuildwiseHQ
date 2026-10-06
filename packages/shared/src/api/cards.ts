@@ -170,6 +170,8 @@ export const CreateCardRequestSchema = z.object({
   dependencies: z.array(z.uuid()).optional(),
   /** Specify immediately; if required fields are missing the card stays draft and the response lists them. */
   specify: z.boolean().optional(),
+  /** "Research this": the interest the card belongs to (its research or feed project must be `projectId`). */
+  interestId: z.uuid().optional(),
 });
 export type CreateCardRequest = z.infer<typeof CreateCardRequestSchema>;
 

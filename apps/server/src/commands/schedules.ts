@@ -72,9 +72,11 @@ const toDto = (r: Row): ScheduleDto => ({
   failCount: r.fail_count ?? 0,
   lastError: r.last_error ?? null,
   createdAt: iso(r.created_at) as string,
+  interestId: r.interest_id ?? null,
+  interestName: r.interest_name ?? null,
 });
 
-const SELECT = `SELECT s.*, p.key AS project_key, p.name AS project_name FROM schedules s JOIN projects p ON p.id = s.project_id`;
+const SELECT = `SELECT s.*, p.key AS project_key, p.name AS project_name, i.name AS interest_name FROM schedules s JOIN projects p ON p.id = s.project_id LEFT JOIN interests i ON i.id = s.interest_id`;
 const VISIBLE = `s.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1 AND status = 'active')`;
 
 export async function listSchedules(
@@ -97,7 +99,7 @@ export async function getScheduleDto(db: Queryable, userId: string, id: string):
 }
 
 /** Validates a template against the project's workflow field set (a bad feed template must fail now, not at 07:00). */
-async function checkTemplate(tx: Queryable, project: Row, kind: string, template: CardTemplate) {
+export async function checkTemplate(tx: Queryable, project: Row, kind: string, template: CardTemplate) {
   const wf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
   if (!wf) throw badRequest('unknown_workflow', `workflow '${project.workflow_key}' is not available`);
   if (kind === 'feed' && wf.definition.fieldSet !== 'feed')
@@ -168,6 +170,12 @@ async function lockOwned(tx: Tx, user: AuthSession['user'], id: string): Promise
   if (!s) throw notFound('schedule not found');
   const project = await loadVisibleProject(tx, user.id, s.project_id);
   if (project.my_role !== 'owner') throw forbidden('only the project owner can manage schedules');
+  if (s.interest_id)
+    throw conflict(
+      'schedule_managed_by_interest',
+      'this schedule belongs to an interest; change it on the Interests page',
+      { interestId: s.interest_id },
+    );
   return { s, project };
 }
 
@@ -190,33 +198,40 @@ export async function patchSchedule(
     if (patch.cardTemplate) await checkTemplate(tx, project, s.kind, next.cardTemplate);
     // A changed cron/zone, or re-enabling, recomputes the next fire; otherwise the pending fire is kept.
     const reschedule =
-      patch.cron !== undefined || patch.timezone !== undefined || (patch.enabled && !s.enabled);
-    const nextFireAt = !next.enabled
-      ? null
-      : reschedule || !s.next_fire_at
-        ? (nextFireAfter(next.cron, next.timezone, ctx.clock.now())?.toISOString() ?? null)
-        : (iso(s.next_fire_at) as string);
+      patch.cron !== undefined || patch.timezone !== undefined || Boolean(patch.enabled && !s.enabled);
     await ctx.store.append(
-      [
-        {
-          streamId: streamId.schedule(id),
-          event: {
-            type: 'ScheduleUpdated',
-            payload: {
-              scheduleId: id,
-              projectId: s.project_id,
-              kind: s.kind,
-              ...next,
-              nextFireAt,
-            },
-          },
-          actor: userActor(user.id),
-          scope: projectScope(project.org_id, project.id),
-        },
-      ],
+      [scheduleUpdateEvent(s, project, next, reschedule, ctx.clock.now(), userActor(user.id))],
       { tx },
     );
   });
+}
+
+/**
+ * The `ScheduleUpdated` for `next` (a full snapshot). Next-fire rules: disabled has none; a changed cron or time zone,
+ * or re-enabling (`reschedule`), recomputes it; otherwise the pending fire is kept. Shared with the interest sync.
+ */
+export function scheduleUpdateEvent(
+  s: Row,
+  project: Row,
+  next: { name: string; cron: string; timezone: string; cardTemplate: CardTemplate; enabled: boolean },
+  reschedule: boolean,
+  now: Date,
+  actor: AppendInput['actor'],
+): AppendInput {
+  const nextFireAt = !next.enabled
+    ? null
+    : reschedule || !s.next_fire_at
+      ? (nextFireAfter(next.cron, next.timezone, now)?.toISOString() ?? null)
+      : (iso(s.next_fire_at) as string);
+  return {
+    streamId: streamId.schedule(s.id),
+    event: {
+      type: 'ScheduleUpdated',
+      payload: { scheduleId: s.id, projectId: s.project_id, kind: s.kind, ...next, nextFireAt },
+    },
+    actor,
+    scope: projectScope(project.org_id, project.id),
+  };
 }
 
 export async function deleteSchedule(ctx: Ctx, user: AuthSession['user'], id: string): Promise<void> {
@@ -251,6 +266,7 @@ async function scheduledCard(
   template: CardTemplate,
   scheduleId: string | undefined,
   title: string,
+  interestId?: string | null,
 ): Promise<{ cardId: string; ref: string; event: AppendInput }> {
   const wf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
   if (!wf) throw badRequest('unknown_workflow', `workflow '${project.workflow_key}' is not available`);
@@ -292,6 +308,7 @@ async function scheduledCard(
           origin: 'schedule',
           scheduled: true,
           ...(scheduleId ? { scheduleId } : {}),
+          ...(interestId ? { interestId } : {}),
           priority: template.priority ?? 2,
           docsNeeded: false,
           dependencies: [],
@@ -379,6 +396,7 @@ export async function fireDueSchedules(ctx: Ctx): Promise<Array<{ scheduleId: st
           template,
           s.id,
           `${template.title} (${dayIn(firedFor, s.timezone)})`,
+          s.interest_id,
         );
         await ctx.store.append(
           [
@@ -553,6 +571,7 @@ export async function runFeedNow(
       template,
       schedule?.id,
       `${template.title} (run now ${dayIn(now, timezone)} ${now.toISOString().slice(11, 16)}Z)`,
+      schedule?.interest_id,
     );
     await ctx.store.append(
       [

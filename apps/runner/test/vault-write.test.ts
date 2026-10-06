@@ -1,6 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type VaultWriteCommand, VaultWriteCommandSchema } from '@aom/shared';
+import {
+  renderTasteSeedSection,
+  TASTE_HEADER,
+  type VaultWriteCommand,
+  VaultWriteCommandSchema,
+} from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { runnerPaths } from '../src/paths.ts';
 import { VaultManager } from '../src/vaults/manager.ts';
@@ -207,5 +212,54 @@ describe('vault writes refuse symlinks (review low)', () => {
       writeVaultFile(v.mine, cmd({ path: 'note.md', mode: 'replace', content: 'x' }), IDENTITY),
     ).rejects.toThrow(/symlink/);
     expect(readFileSync(target, 'utf8')).toBe('precious');
+  });
+});
+
+describe('vault.write section mode (docs/design/interests.md section 6)', () => {
+  const TASTE = 'projects/toy/taste.md';
+  const section = (version: number, rule: string) =>
+    cmd({
+      path: TASTE,
+      mode: 'section',
+      header: TASTE_HEADER,
+      content: renderTasteSeedSection([{ text: rule, interestId: null }]),
+      section: { id: 'seed', version },
+      commitMessage: `aom: taste rules v${version}`,
+    });
+
+  it('creates the file with the header, inserts above rating lines, replaces a newer version and ignores stale or identical writes', async () => {
+    const v = await clone();
+    expect(await writeVaultFile(v.mine, section(1, 'First rule'), IDENTITY)).toEqual({
+      written: true,
+      committed: true,
+    });
+    const file = join(v.mine, TASTE);
+    expect(readFileSync(file, 'utf8')).toContain('- Rule: First rule');
+    // a rating line appended later stays below the managed block
+    writeFileSync(file, `${readFileSync(file, 'utf8')}- Prefer articles like "x" (rated useful).\n`);
+    sh(v.mine, 'git', ['commit', '-am', 'rating']);
+    const head = sh(v.mine, 'git', ['rev-parse', 'HEAD']);
+    // same version: nothing changes, no commit
+    expect(await writeVaultFile(v.mine, section(1, 'First rule'), IDENTITY)).toEqual({
+      written: false,
+      committed: false,
+    });
+    // an older version is a no-op too
+    expect(await writeVaultFile(v.mine, section(0, 'Old'), IDENTITY)).toEqual({
+      written: false,
+      committed: false,
+    });
+    expect(sh(v.mine, 'git', ['rev-parse', 'HEAD'])).toBe(head);
+    // a newer one replaces the block, never duplicates it
+    expect(await writeVaultFile(v.mine, section(2, 'Second rule'), IDENTITY)).toEqual({
+      written: true,
+      committed: true,
+    });
+    const text = readFileSync(file, 'utf8');
+    expect(text.match(/aom:section seed v=/g)).toHaveLength(1);
+    expect(text).toContain('Second rule');
+    expect(text).not.toContain('First rule');
+    expect(text.indexOf('aom:section seed end')).toBeLessThan(text.indexOf('- Prefer articles'));
+    expect(sh(v.mine, 'git', ['status', '--porcelain'])).toBe('');
   });
 });

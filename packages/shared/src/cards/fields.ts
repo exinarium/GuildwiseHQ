@@ -116,6 +116,7 @@ export const CODE_FIELDS: Record<string, FieldMeta> = {
 // -------------------------------------------------------------- research set
 
 export const ResearchDepth = z.enum(['quick', 'standard', 'deep']);
+export type ResearchDepth = z.infer<typeof ResearchDepth>;
 /**
  * Mock adapter only: the claims a scripted researcher "finds" (each with the page that supports it). A claim with
  * `supported: false` is one the mock checker cannot verify against its page: the fact check fails and the card goes
@@ -174,6 +175,8 @@ const FeedFieldsBase = z.object({
   description: z.string().optional(),
   windowHours: z.number().int().positive().optional(),
   preferredSites: z.array(z.string()).optional(),
+  /** Optional sub-category of the topic (e.g. `rust/async`); shown to the agents, never changes where files go. */
+  subCategory: z.string().optional(),
   /** The digest holds the best N items overall, whatever their kind. */
   maxItems: z.number().int().positive().max(100).optional(),
   /** Legacy (read only): per-kind maxima, converted to `maxItems` on read. */
@@ -214,6 +217,7 @@ export const FEED_FIELDS: Record<string, FieldMeta> = {
   description: { label: 'Description', kind: 'markdown' },
   windowHours: { label: 'Window (hours)', kind: 'number' },
   preferredSites: { label: 'Preferred sites', kind: 'url-list' },
+  subCategory: { label: 'Sub-category', kind: 'text' },
   maxItems: { label: 'Max items', kind: 'number' },
   mock: { label: 'Mock script', kind: 'json' },
   mockFeed: { label: 'Mock feed items', kind: 'json' },

@@ -18,6 +18,7 @@ function feedContext(brief: ShiftBrief): string {
     lines.push(
       `- Description (what the manager actually wants; this is the primary statement of intent, follow it over the topic label):\n\n${text(f.description)}\n`,
     );
+  if (text(f.subCategory)) lines.push(`- Sub-category: ${text(f.subCategory)}`);
   lines.push(`- Window: the last ${typeof f.windowHours === 'number' ? f.windowHours : 24} hours`);
   const sites = list(f.preferredSites);
   lines.push(
@@ -45,6 +46,10 @@ function feedContext(brief: ShiftBrief): string {
               }`,
           )
           .join('\n')}`,
+      );
+    if (feed.tasteSeed?.length)
+      lines.push(
+        `\n### Explicit taste rules (set by the manager; follow these first)\n${feed.tasteSeed.map((r) => `- ${r}`).join('\n')}`,
       );
     lines.push(`\n### Taste (taste.md)\n${feed.taste?.trim() ? feed.taste.trim() : 'No taste rules yet.'}`);
   }

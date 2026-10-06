@@ -39,6 +39,20 @@ export async function seenUrls(db: Queryable, projectId: string, limit = 300): P
   ).map((r) => r.url_normalized);
 }
 
+/**
+ * The manager's explicit taste rules for a feed card (docs/design/interests.md section 6): the project-wide ones plus
+ * those tagged with the card's interest, in the order they were set.
+ */
+export async function tasteSeedFor(
+  db: Queryable,
+  projectId: string,
+  interestId: string | null | undefined,
+): Promise<string[]> {
+  const r = await one(db, 'SELECT rules FROM taste_seeds WHERE project_id=$1', [projectId]);
+  const rules = (r?.rules as Array<{ text: string; interestId: string | null }> | undefined) ?? [];
+  return rules.filter((x) => !x.interestId || x.interestId === interestId).map((x) => x.text);
+}
+
 export type DigestResult =
   | { ok: true; events: AppendInput[]; summary: string }
   | { ok: false; error: string };

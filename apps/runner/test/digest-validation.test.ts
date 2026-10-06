@@ -148,7 +148,7 @@ describe('the runner rejects feed items that were never opened (no fabrication)'
     h = await startHarness({}, { adapters: new Map([['mock', adapter]]) });
     const msg = makeFeedShiftStart({
       stage: 'curate',
-      feed: { candidates: [feedItem(1), feedItem(2)], seenUrls: [] },
+      feed: { candidates: [feedItem(1), feedItem(2)], seenUrls: [], tasteSeed: [] },
     });
     await runFeedShift(msg);
     expect(seen.stray.status).toBe(422);
@@ -221,7 +221,7 @@ describe('mock adapter: scripted feed runs through the real aom CLI', () => {
         maxItems: 2,
         mockFeed: { items: [], proposeRule: 'Prefer videos with chronograph data' },
       },
-      feed: { candidates, seenUrls: [] },
+      feed: { candidates, seenUrls: [], tasteSeed: [] },
       vault: { vaultId, kind: 'personal', folder: 'projects/news' },
     });
     const ended = await runFeedShift(msg);
@@ -245,7 +245,10 @@ describe('mock adapter: scripted feed runs through the real aom CLI', () => {
 
   it('a curator with nothing left posts an empty digest', async () => {
     h = await startHarness();
-    const msg = makeFeedShiftStart({ stage: 'curate', feed: { candidates: [], seenUrls: [] } });
+    const msg = makeFeedShiftStart({
+      stage: 'curate',
+      feed: { candidates: [], seenUrls: [], tasteSeed: [] },
+    });
     const ended = await runFeedShift(msg);
     expect(ended.outcome).toBe('reported');
     expect(reports(msg.shiftId as string)[0]?.report).toMatchObject({

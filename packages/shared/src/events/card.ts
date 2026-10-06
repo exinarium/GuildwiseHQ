@@ -52,6 +52,8 @@ export const cardEvents = [
       worktreeCardId: Id.optional(),
       scheduled: z.boolean().default(false),
       scheduleId: Id.optional(),
+      /** The interest this card belongs to (a scan of its schedule, or "Research this"). */
+      interestId: Id.optional(),
       repoId: Id.optional(),
       priority: z.number().int().min(1).max(9).default(2),
       docsNeeded: z.boolean().default(false),

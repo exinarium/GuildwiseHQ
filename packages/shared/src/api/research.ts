@@ -18,6 +18,9 @@ export const PublicationDtoSchema = z.object({
 });
 export type PublicationDto = z.infer<typeof PublicationDtoSchema>;
 
-export const PublicationsQuerySchema = z.object({ projectId: z.uuid().optional() });
+export const PublicationsQuerySchema = z.object({
+  projectId: z.uuid().optional(),
+  interestId: z.uuid().optional(),
+});
 /** `GET /api/research/publications`: newest first. */
 export const PublicationsResponseSchema = z.object({ publications: z.array(PublicationDtoSchema) });

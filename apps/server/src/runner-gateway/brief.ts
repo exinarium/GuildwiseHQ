@@ -10,7 +10,7 @@ import {
   type WorktreeSpec,
 } from '@aom/shared';
 import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
-import { scoutCandidates, seenUrls } from '../commands/feeds.ts';
+import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
@@ -157,6 +157,7 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
           feed: {
             candidates: stage.id === 'curate' ? ((await scoutCandidates(ctx.pool, card.id)) ?? []) : [],
             seenUrls: await seenUrls(ctx.pool, card.project_id),
+            tasteSeed: await tasteSeedFor(ctx.pool, card.project_id, card.interest_id),
           },
         }
       : {}),

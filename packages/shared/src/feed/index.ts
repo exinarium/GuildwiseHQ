@@ -204,3 +204,85 @@ export function tasteSkipTitles(taste: string): string[] {
   for (const m of taste.matchAll(/^- Skip \S+ like "([^"]+)"/gm)) out.push(m[1] as string);
   return out;
 }
+
+// ------------------------------------------------------------------ explicit taste rules (docs/design/interests.md)
+
+/** One explicit rule of a feed project, as the site stores it (`taste_seeds.rules`). `interestId` limits it to that interest's cards. */
+export interface TasteSeedLine {
+  text: string;
+  interestId: string | null;
+}
+
+export const TASTE_SEED_SECTION_ID = 'seed';
+const sectionBegin = (id: string, version: number): string =>
+  `<!-- aom:section ${id} v=${version} begin. Managed on the site (Interests page); edits here are overwritten. -->`;
+const sectionEnd = (id: string): string => `<!-- aom:section ${id} end -->`;
+
+const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim();
+
+/** The body of the managed `seed` section: project-wide rules first, then one group per interest. */
+export function renderTasteSeedSection(
+  rules: readonly TasteSeedLine[],
+  interestNames: Readonly<Record<string, string>> = {},
+): string {
+  const lines: string[] = ['## Explicit rules', ''];
+  const general = rules.filter((r) => !r.interestId || !interestNames[r.interestId]);
+  if (rules.length === 0) lines.push('_No explicit rules yet._', '');
+  for (const r of general) lines.push(`- Rule: ${oneLine(r.text)}`);
+  if (general.length) lines.push('');
+  const groups = new Map<string, string[]>();
+  for (const r of rules) {
+    if (!r.interestId || !interestNames[r.interestId]) continue;
+    groups.set(r.interestId, [...(groups.get(r.interestId) ?? []), r.text]);
+  }
+  for (const [id, texts] of groups) {
+    lines.push(`### ${oneLine(interestNames[id] as string)} (interest)`, '');
+    for (const t of texts) lines.push(`- Rule: ${oneLine(t)}`);
+    lines.push('');
+  }
+  return `${lines.join('\n').trimEnd()}\n`;
+}
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const blockRe = (id: string): RegExp =>
+  new RegExp(
+    `<!-- aom:section ${escapeRe(id)} v=(\\d+) begin[^\\n]*?-->[\\s\\S]*?<!-- aom:section ${escapeRe(id)} end -->[ \\t]*(?:\\r?\\n)?`,
+  );
+
+/**
+ * Puts a site-managed block into a markdown file: a missing file becomes `header + block`; a block that is already
+ * there with `v >= version` is left alone (a stale or duplicate write); an older block is replaced between its markers;
+ * without a block it goes right after the header paragraph (before the first `- ` line), else at the end.
+ */
+export function applyManagedSection(
+  current: string | null,
+  header: string,
+  id: string,
+  version: number,
+  content: string,
+): { text: string; changed: boolean } {
+  const block = `${sectionBegin(id, version)}\n${content.trim()}\n${sectionEnd(id)}\n`;
+  if (current === null || current.trim() === '') return { text: `${header}${block}`, changed: true };
+  const m = blockRe(id).exec(current);
+  if (m) {
+    if (Number(m[1]) >= version) return { text: current, changed: false };
+    return {
+      text: `${current.slice(0, m.index)}${block}${current.slice(m.index + m[0].length)}`,
+      changed: true,
+    };
+  }
+  const firstRule = /^- /m.exec(current);
+  if (firstRule) {
+    const before = current.slice(0, firstRule.index).replace(/\s*$/, '\n\n');
+    return { text: `${before}${block}\n${current.slice(firstRule.index)}`, changed: true };
+  }
+  return { text: `${current.replace(/\s*$/, '\n\n')}${block}`, changed: true };
+}
+
+/** `taste.md` without the managed block, so the rules never appear twice in a curator's brief. */
+export function stripManagedSection(text: string, id: string = TASTE_SEED_SECTION_ID): string {
+  return text
+    .replace(blockRe(id), '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}

@@ -94,8 +94,8 @@ export const cardProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO cards (id, org_id, project_id, number, ref, title, card_type, workflow_version_id, stage, status, fields,
          owner_user_id, risk_tier, docs_needed, completion_action, repo_id, parent_card_id, origin, scheduled,
-         schedule_id, priority, required_capabilities, worktree_card_id, queued_at, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$25)`,
+         schedule_id, priority, required_capabilities, worktree_card_id, queued_at, created_at, updated_at, interest_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$25,$26)`,
       [
         p.cardId,
         proj?.org_id,
@@ -122,6 +122,7 @@ export const cardProjectors: Record<string, Projector> = {
         p.worktreeCardId ?? null,
         p.status === 'queued' ? e.createdAt : null,
         e.createdAt,
+        p.interestId ?? null,
       ],
     );
     for (const dep of p.dependencies) {

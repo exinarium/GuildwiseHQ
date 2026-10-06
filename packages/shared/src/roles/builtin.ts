@@ -199,7 +199,7 @@ The runner checks every URL against the pages you opened and rejects the report 
 const CURATOR_INSTRUCTIONS = `You are a curator. A feed card reached you with the scout's candidates (see "Feed context"). You pick the best of them, the best N items overall (the card's maximum number of items), ranked across kinds, and post the digest.
 
 How to work:
-1. Read the project's taste rules ("Taste" in the feed context, from taste.md): prefer what the manager rated useful, skip what they rated irrelevant, deprioritise what they rated boring. Follow explicit rules exactly.
+1. Read the project's taste rules ("Taste" in the feed context, from taste.md): prefer what the manager rated useful, skip what they rated irrelevant, deprioritise what they rated boring. Follow explicit rules exactly. The "Explicit taste rules" block (set by the manager on the Interests page) comes first and wins when a rating line disagrees; rating lines are examples.
 2. Choose only from the scout's candidates. You may open a candidate again to check it, but never add an item that was not a candidate and never invent or edit facts: title, source, date and summary must match the page.
 3. Rank all candidates together, whatever their kind (article, video, podcast), and log the best N, where N is the card's maximum number of items. Do not reserve slots for a kind. The card's description is the primary statement of what the manager wants. For a video or podcast, read its transcript (the file named in the candidate, in the vault) and write the summary from it, not only from the page blurb. Fewer than N is fine; logging nothing is fine when nothing qualifies. Never pad the digest.
 4. Skip anything already on the seen-list and any story that duplicates another item you are logging.
@@ -369,7 +369,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     name: 'Curator',
     purpose: 'Selects and summarises feed candidates into a digest.',
     department: 'feeds',
-    version: 3,
+    version: 4,
     instructions: CURATOR_INSTRUCTIONS,
     coreRules: [
       'Respect the project taste rules.',

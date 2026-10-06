@@ -1,7 +1,7 @@
 import { existsSync, lstatSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { isSafeVaultPath, type VaultWriteCommand } from '@aom/shared';
+import { applyManagedSection, isSafeVaultPath, type VaultWriteCommand } from '@aom/shared';
 import { git, gitOk } from '../git/git.ts';
 import { identityEnv, type VaultIdentity } from './sync.ts';
 
@@ -47,6 +47,20 @@ export async function writeVaultFile(
       if (exists && current === cmd.content) return { written: false, committed: false };
       next = cmd.content;
       break;
+    case 'section': {
+      // A site-managed block between markers; a stale or identical version changes nothing (idempotent).
+      if (!cmd.section) throw new VaultWriteError('section mode needs a section id and version');
+      const r = applyManagedSection(
+        exists ? current : null,
+        cmd.header ?? '',
+        cmd.section.id,
+        cmd.section.version,
+        cmd.content,
+      );
+      if (!r.changed) return { written: false, committed: false };
+      next = r.text;
+      break;
+    }
   }
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, next);

@@ -177,6 +177,8 @@ export const ShiftBriefSchema = z.object({
       candidates: z.array(FeedItemInputSchema).default([]),
       seenUrls: z.array(z.string()).default([]),
       taste: z.string().optional(),
+      /** Explicit taste rules the manager set on the Interests page (project-wide plus this card's interest). */
+      tasteSeed: z.array(z.string()).default([]),
     })
     .optional(),
 });

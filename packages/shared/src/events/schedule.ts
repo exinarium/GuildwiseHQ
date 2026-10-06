@@ -31,8 +31,11 @@ const ScheduleBody = z.object({
 
 /** Scheduler events (docs/ARCHITECTURE.md section 5.2 and 10, M5). */
 export const scheduleEvents = [
-  defineEvent('ScheduleCreated', ScheduleBody),
+  /** `interestId`: the interest that owns this schedule (docs/design/interests.md). */
+  defineEvent('ScheduleCreated', ScheduleBody.extend({ interestId: Id.optional() })),
   defineEvent('ScheduleUpdated', ScheduleBody),
+  /** Adopts a schedule into an interest, or (null) unlinks it. Linking back-fills `cards.interest_id` of its earlier cards. */
+  defineEvent('ScheduleLinked', z.object({ scheduleId: Id, interestId: Id.nullable() })),
   defineEvent('ScheduleDeleted', z.object({ scheduleId: Id })),
   /** Always appended together with the `CardCreated{scheduled:true, origin:'schedule'}` it causes. */
   defineEvent(

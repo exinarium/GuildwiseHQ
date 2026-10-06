@@ -25,6 +25,7 @@ export const streamId = {
   outbound: (id: string) => `outbound-${id}`,
   repo: (id: string) => `repo-${id}`,
   schedule: (id: string) => `schedule-${id}`,
+  interest: (id: string) => `interest-${id}`,
   phase: (id: string) => `phase-${id}`,
   baTask: (id: string) => `ba-task-${id}`,
   baSignal: (id: string) => `ba-signal-${id}`,
