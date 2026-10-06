@@ -1,4 +1,5 @@
 import type { BoardCard, BoardResponse } from '@aom/shared';
+import { ChevronsLeft } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { BRAND } from '../brand.ts';
@@ -178,6 +179,15 @@ export function BoardView({
   const wide = useMediaQuery('(min-width: 768px)', true);
   const [hideEmpty, setHideEmpty] = useState(readHide);
   const [picked, setPicked] = useState<string | null>(null);
+  // Empty columns folded into a pill can be opened one by one (until the page is left).
+  const [opened, setOpened] = useState<Set<string>>(new Set());
+  const setOpen = (name: string, open: boolean) =>
+    setOpened((cur) => {
+      const next = new Set(cur);
+      if (open) next.add(name);
+      else next.delete(name);
+      return next;
+    });
   const cols = board.columns.map((c) => ({ ...c, cards: c.cards.filter((x) => matchesFilter(x, filter)) }));
   const total = cols.reduce((n, c) => n + c.cards.length, 0);
 
@@ -285,8 +295,25 @@ export function BoardView({
         {cols.map((col) => {
           const s = stageStyle(col.name);
           const Icon = s.icon;
-          const folded = wide && hideEmpty && col.cards.length === 0;
+          const folded = wide && hideEmpty && col.cards.length === 0 && !opened.has(col.name);
           const hidden = !wide && col.name !== current;
+          if (folded)
+            return (
+              <button
+                key={col.name}
+                type="button"
+                data-testid={`column-${col.name}`}
+                data-folded="true"
+                aria-label={`${col.name}, no cards. Show the column`}
+                aria-expanded={false}
+                title={`${col.name}: no cards (click to show)`}
+                onClick={() => setOpen(col.name, true)}
+                className="group flex h-fit shrink-0 snap-start flex-col items-center gap-1.5 self-start rounded-full border border-line bg-sunken px-2.5 py-3 text-muted transition-colors hover:bg-surface hover:text-fg focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+              >
+                <Icon aria-hidden="true" className="size-4" style={{ color: s.color }} />
+                <span className="tnum text-xs font-medium">{col.cards.length}</span>
+              </button>
+            );
           return (
             <section
               key={col.name}
@@ -295,44 +322,47 @@ export function BoardView({
               hidden={hidden}
               className={cx(
                 'relative flex shrink-0 snap-start flex-col overflow-hidden rounded-card bg-sunken',
-                wide ? (folded ? 'w-14' : 'w-[17rem] flex-1 basis-[17rem]') : 'w-full',
+                wide ? 'w-[17rem] flex-1 basis-[17rem]' : 'w-full',
               )}
             >
               <span aria-hidden="true" className="h-[3px] shrink-0" style={{ background: s.color }} />
-              <div className={cx('p-2', folded && 'flex flex-1 flex-col items-center gap-3 py-3')}>
-                <div className={cx('mb-2 flex items-center gap-2 px-1', folded && 'mb-0 flex-col')}>
+              <div className="p-2">
+                <div className="mb-2 flex items-center gap-2 px-1">
                   <Icon aria-hidden="true" className="size-4 shrink-0" style={{ color: s.color }} />
-                  <h2
-                    className={cx(
-                      'text-sm font-semibold text-fg',
-                      !folded && 'flex flex-1 items-center justify-between',
-                      folded && '[writing-mode:vertical-rl]',
-                    )}
-                  >
+                  <h2 className="flex flex-1 items-center justify-between text-sm font-semibold text-fg">
                     {col.name}
                     <span className="tnum ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-surface px-1.5 text-xs font-medium text-muted">
                       {col.cards.length}
                     </span>
                   </h2>
+                  {wide && hideEmpty && col.cards.length === 0 && (
+                    <button
+                      type="button"
+                      aria-label={`Fold ${col.name} again`}
+                      title="Fold this empty column"
+                      onClick={() => setOpen(col.name, false)}
+                      className="rounded-control p-1 text-subtle hover:bg-surface hover:text-fg focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+                    >
+                      <ChevronsLeft aria-hidden="true" className="size-4" />
+                    </button>
+                  )}
                 </div>
-                {!folded && (
-                  <ul className="flex flex-col gap-2">
-                    {col.cards.map((c) => (
-                      <CardTile
-                        key={c.id}
-                        card={c}
-                        projectId={board.projectId}
-                        flash={flash.has(c.id)}
-                        {...(now !== undefined ? { now } : {})}
-                      />
-                    ))}
-                    {col.cards.length === 0 && (
-                      <li className="rounded-control border border-dashed border-control/60 px-3 py-4 text-center text-sm text-subtle">
-                        No cards
-                      </li>
-                    )}
-                  </ul>
-                )}
+                <ul className="flex flex-col gap-2">
+                  {col.cards.map((c) => (
+                    <CardTile
+                      key={c.id}
+                      card={c}
+                      projectId={board.projectId}
+                      flash={flash.has(c.id)}
+                      {...(now !== undefined ? { now } : {})}
+                    />
+                  ))}
+                  {col.cards.length === 0 && (
+                    <li className="rounded-control border border-dashed border-control/60 px-3 py-4 text-center text-sm text-subtle">
+                      No cards
+                    </li>
+                  )}
+                </ul>
               </div>
             </section>
           );

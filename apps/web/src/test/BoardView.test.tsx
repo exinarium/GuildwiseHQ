@@ -7,8 +7,9 @@ import {
   getStage,
 } from '@aom/shared';
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BoardView } from '../components/BoardView.tsx';
 
 type Seed = Pick<BoardCard, 'stage' | 'status' | 'reworkRound' | 'title'> & Partial<BoardCard>;
@@ -42,6 +43,8 @@ function boardFrom(seeds: Seed[]): BoardResponse {
   return { projectId: '0192f3a0-0000-7000-8000-000000000001', workflowKey: 'code', columns };
 }
 
+afterEach(() => localStorage.removeItem('guildwise-board-hide-empty'));
+
 const inColumn = (name: string) => within(screen.getByRole('region', { name }));
 
 describe('Board columns follow columnFor', () => {
@@ -71,6 +74,8 @@ describe('Board columns follow columnFor', () => {
     );
 
   it('renders the columns in server order', () => {
+    // every column (empty ones too) is a full column when folding is off
+    localStorage.setItem('guildwise-board-hide-empty', 'no');
     renderBoard();
     const names = within(screen.getByTestId('board'))
       .getAllByRole('heading', { level: 2 })
@@ -108,5 +113,29 @@ describe('Board columns follow columnFor', () => {
   it('shows the column count', () => {
     renderBoard();
     expect(inColumn('Spec').getByText('1')).toBeInTheDocument();
+  });
+});
+
+describe('folded empty columns', () => {
+  beforeEach(() => localStorage.removeItem('guildwise-board-hide-empty'));
+
+  const board = boardFrom([{ title: 'Only one', stage: 'build', status: 'queued', reworkRound: 0 }]);
+
+  it('shows an empty column as a pill with its count, a tooltip and an accessible name, with no rotated text', async () => {
+    render(
+      <MemoryRouter>
+        <BoardView board={board} />
+      </MemoryRouter>,
+    );
+    const pill = screen.getByRole('button', { name: /^Spec, no cards/ });
+    expect(pill).toHaveAttribute('title', 'Spec: no cards (click to show)');
+    expect(pill).toHaveTextContent('0');
+    expect(pill.innerHTML).not.toMatch(/vertical/);
+    expect(screen.queryByRole('region', { name: 'Spec' })).not.toBeInTheDocument();
+
+    await userEvent.setup().click(pill);
+    expect(screen.getByRole('region', { name: 'Spec' })).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Fold Spec again' }));
+    expect(screen.getByRole('button', { name: /^Spec, no cards/ })).toBeInTheDocument();
   });
 });
