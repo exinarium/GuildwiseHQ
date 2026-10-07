@@ -131,6 +131,18 @@ export const POLISHER = {
   password: 'polisher-password-12345',
 };
 
+/** Schedules spec (docs/design/restructure.md Part B): an owner with a runner, and a guest on one shared project. */
+export const SCHEDULER = {
+  email: 'scheduler@e2e.test',
+  name: 'E2E Scheduler',
+  password: 'scheduler-password-12345',
+};
+export const SCHEDGUEST = {
+  email: 'schedguest@e2e.test',
+  name: 'E2E SchedGuest',
+  password: 'schedguest-password-12345',
+};
+
 /** Agent projects spec (docs/design/restructure.md Part A): own user and a paired (offline) workstation; allow-lists, focus and the cap. */
 export const ALLOWER = {
   email: 'allower@e2e.test',

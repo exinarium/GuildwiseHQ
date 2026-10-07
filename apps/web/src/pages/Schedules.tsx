@@ -1,5 +1,6 @@
 import {
   type CreateScheduleResponse,
+  feedMaxItems,
   isWebhookAction,
   type ScheduleDto,
   type SystemScheduleDto,
@@ -212,6 +213,8 @@ function ScheduleRow({
   const managed = !!s.interestId;
   const editable = s.canEdit !== false && !managed;
   const Chevron = history ? ChevronDown : ChevronRight;
+  // A feed schedule (older installations, until feeds are interests) shows what it asks the scout for.
+  const feed = s.kind === 'feed' ? ((s.cardTemplate?.fields ?? {}) as Record<string, unknown>) : null;
 
   return (
     <Panel>
@@ -266,6 +269,22 @@ function ScheduleRow({
             <dt className="text-xs text-subtle">Runs as</dt>
             <dd>{s.ownerName}</dd>
           </div>
+        )}
+        {feed && (
+          <>
+            <div>
+              <dt className="text-xs text-subtle">Max items</dt>
+              <dd data-testid="schedule-max-items">{feedMaxItems(feed)}</dd>
+            </div>
+            {typeof feed.description === 'string' && feed.description.trim() && (
+              <div className="sm:col-span-2">
+                <dt className="text-xs text-subtle">Description</dt>
+                <dd className="whitespace-pre-wrap" data-testid="schedule-description">
+                  {feed.description.trim()}
+                </dd>
+              </div>
+            )}
+          </>
         )}
       </dl>
       <ErrorBox error={patch.error ?? run.error ?? del.error ?? test.error ?? rotate.error} />

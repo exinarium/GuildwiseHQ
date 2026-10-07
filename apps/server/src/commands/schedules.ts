@@ -267,11 +267,13 @@ interface Normalized {
   enabled: boolean;
   trigger: ScheduleTrigger;
   action: ScheduleAction;
+  /** A feed schedule (only where `AOM_LEGACY_FEED_SCHEDULES` allows new ones): kind `feed`, run by the feed path. */
+  legacyFeed?: boolean;
 }
 
 /** The new `{trigger, action}` request, or the old `{projectId, kind, cron, timezone, cardTemplate}` one, as one shape. */
-function normalizeCreate(req: CreateScheduleRequest): Normalized {
-  if (req.kind === 'feed')
+function normalizeCreate(req: CreateScheduleRequest, legacyFeeds: boolean): Normalized {
+  if (req.kind === 'feed' && !legacyFeeds)
     throw badRequest(
       'use_interests',
       'feeds are interests now: create the feed on the Interests page (it brings its own schedule)',
@@ -291,7 +293,13 @@ function normalizeCreate(req: CreateScheduleRequest): Normalized {
       ? undefined
       : { kind: 'cron', cron: req.cron ?? '0 7 * * *', timezone: req.timezone ?? 'UTC' });
   if (!trigger) throw badRequest('trigger_required', 'a schedule needs a trigger (when it runs)');
-  return { name: req.name, enabled: req.enabled, trigger, action };
+  return {
+    name: req.name,
+    enabled: req.enabled,
+    trigger,
+    action,
+    ...(req.kind === 'feed' ? { legacyFeed: true } : {}),
+  };
 }
 
 /**
@@ -372,7 +380,9 @@ async function validate(
     case 'create_card':
     case 'regression_run': {
       const wf = await resolveWorkflow(tx, (project as Row).org_id, (project as Row).workflow_key);
-      const legacyFeed = existingKind === 'feed';
+      if (wf?.definition.fieldSet === 'feed' && ctx.config.legacyFeedSchedules && !existingKind)
+        n.legacyFeed = true;
+      const legacyFeed = existingKind === 'feed' || n.legacyFeed === true;
       if (wf?.definition.fieldSet === 'feed' && !legacyFeed)
         throw badRequest('use_interests', 'a feed is an interest now: create it on the Interests page');
       await checkTemplate(
@@ -460,7 +470,7 @@ function bodyOf(
     scheduleId: id,
     projectId: actionProjectId(n.action),
     name: n.name,
-    kind: actionKind(n.action),
+    kind: n.legacyFeed ? ('feed' as const) : actionKind(n.action),
     cron: t.kind === 'cron' || t.kind === 'issue_labelled' ? t.cron : null,
     timezone: t.kind === 'cron' || t.kind === 'issue_labelled' ? t.timezone : null,
     ...(template ? { cardTemplate: template } : {}),
@@ -480,7 +490,7 @@ export async function createSchedule(
   org: OrgCtx | null,
   req: CreateScheduleRequest,
 ): Promise<{ id: string; webhookSecret?: string }> {
-  const n = normalizeCreate(req);
+  const n = normalizeCreate(req, ctx.config.legacyFeedSchedules);
   return withAppendTx(ctx.pool, async (tx) => {
     const { orgId, project } = await authorize(ctx, tx, user, org, n);
     const isManager = isOrgManager({ orgRole: await orgRoleOf(tx, user.id, orgId) });
@@ -578,6 +588,7 @@ export async function patchSchedule(
       enabled: patch.enabled ?? s.enabled,
       trigger,
       action,
+      ...(s.kind === 'feed' ? { legacyFeed: true } : {}),
     };
     const actionChanged = JSON.stringify(action) !== JSON.stringify(cur);
     const triggerChanged = JSON.stringify(trigger) !== JSON.stringify(curTrigger);

@@ -407,16 +407,23 @@ test('AC5: nothing qualified logs nothing and says so on the card', async () => 
   await page.screenshot({ path: `${paths.vaults}/feeds-nothing.png` });
 });
 
-test('AC6: the Schedules page creates a schedule from a preset with a time zone and shows when it runs next', async () => {
+test('AC6: the Schedules wizard creates a schedule from a preset with a time zone and shows when it runs next', async () => {
   await page.goto('/schedules');
-  const form = page.getByRole('form', { name: 'New schedule' });
-  await form.getByLabel('Name').fill('UI created');
-  await form.getByLabel('Runs').selectOption({ label: 'Daily at 07:00' });
-  await form.getByLabel('Time zone').fill('Africa/Johannesburg');
-  await form.getByLabel('Topic').fill('hunting optics');
-  await form.getByLabel('Description').fill('Only long-range optics with owner reviews.');
-  await form.getByLabel(/Max items/).fill('7');
-  await form.getByRole('button', { name: 'Create schedule' }).click();
+  await page.getByTestId('new-schedule').click();
+  const wiz = page.getByTestId('schedule-wizard');
+  await wiz.getByLabel('Runs').selectOption({ label: 'Daily at 07:00' });
+  await wiz.getByLabel('Time zone').fill('Africa/Johannesburg');
+  await page.getByTestId('wizard-next').click();
+  await wiz.getByTestId('tile-create_card').click();
+  await page.getByTestId('wizard-next').click();
+  await wiz.getByLabel('Name', { exact: true }).first().fill('UI created');
+  await wiz.getByLabel('Project').selectOption({ label: 'NEWS Firearm news' });
+  const template = wiz.getByTestId('card-template');
+  await template.getByLabel('Title').fill('UI created');
+  await template.getByLabel('Topic').fill('hunting optics');
+  await template.getByLabel('Description').fill('Only long-range optics with owner reviews.');
+  await template.getByLabel(/Max items/).fill('7');
+  await page.getByTestId('wizard-save').click();
   const row = page.getByTestId('schedule-UI created');
   await expect(row.getByTestId('schedule-when')).toContainText('Daily at 07:00 (Africa/Johannesburg)');
   const created = await q<any>(`SELECT * FROM schedules WHERE name='UI created'`);
@@ -428,14 +435,15 @@ test('AC6: the Schedules page creates a schedule from a preset with a time zone 
   // 07:00 in Johannesburg (UTC+2)
   expect(new Date(created[0].next_fire_at).getUTCHours()).toBe(5);
   await page.screenshot({ path: `${paths.vaults}/feeds-schedules.png` });
-  // a bad cron is refused by the server with a readable error
-  await form.getByLabel('Name').fill('Bad cron');
-  await form.getByLabel('Runs').selectOption({ label: 'Custom cron expression' });
-  await form.getByLabel('Cron expression').fill('every day');
-  await form.getByLabel('Topic').fill('x');
-  await form.getByRole('button', { name: 'Create schedule' }).click();
-  await expect(page.getByText(/cron expression must have 5 fields/i)).toBeVisible();
-  // tidy up: pause, then delete
+  // a bad cron is caught in the wizard before anything is sent
+  await page.getByTestId('new-schedule').click();
+  const again = page.getByTestId('schedule-wizard');
+  await again.getByLabel('Runs').selectOption({ label: 'Custom cron expression' });
+  await again.getByLabel('Cron expression').fill('every day');
+  await page.getByTestId('wizard-next').click();
+  await expect(again.getByText(/Five fields/)).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  // tidy up: delete
   await row.getByRole('button', { name: 'Delete' }).click();
   await page.getByRole('button', { name: 'Delete schedule' }).click();
   await expect(row).toHaveCount(0);

@@ -87,6 +87,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       'reporter@e2e.test',
       'hygiener@e2e.test',
       'interester@e2e.test',
+      'scheduler@e2e.test',
       SUPER.email,
       NEWORG.email,
       ORGMEM.email,
@@ -112,6 +113,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_REPORTER_SECONDS: '3',
     // repository hygiene runs only when a spec asks ("Run hygiene now"): the specs move the clock by days
     AOM_HYGIENE_SCHEDULE: 'false',
+    // schedules: the webhook receivers of the specs listen on this machine
+    AOM_WEBHOOK_ALLOW_PRIVATE: 'true',
+    // feeds are interests now and the API refuses new feed schedules; the specs of the old feed flow still make them
+    AOM_LEGACY_FEED_SCHEDULES: 'true',
     LOG_LEVEL: 'info',
   };
   sh(

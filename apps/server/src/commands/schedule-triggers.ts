@@ -108,7 +108,7 @@ async function contextOf(db: Queryable, e: Row): Promise<EventContext | null> {
     interestId,
     ref,
     projectKey: proj?.key ?? null,
-    label: `${scheduleEventLabel(name).replace(/^An? /, '')}: ${what}`.slice(0, 280),
+    label: `${what.charAt(0).toUpperCase()}${what.slice(1)}`.slice(0, 280),
     details,
   };
 }

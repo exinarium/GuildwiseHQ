@@ -27,6 +27,7 @@ const EnvSchema = z.object({
   AOM_REPORTER_SECONDS: z.coerce.number().int().min(1).max(3600).default(60),
   AOM_HYGIENE_SCHEDULE: bool(true),
   AOM_WEBHOOK_ALLOW_PRIVATE: bool(false),
+  AOM_LEGACY_FEED_SCHEDULES: bool(false),
   AOM_MAX_SHIFTS_PER_WORKSTATION: z.coerce.number().int().min(1).max(256).default(16),
   LOG_LEVEL: z.string().default('info'),
 });
@@ -59,6 +60,8 @@ export interface Config {
   maxShiftsPerWorkstation: number;
   /** Let outgoing webhooks reach loopback and private-network addresses (local tests; off in production). */
   webhookAllowPrivate: boolean;
+  /** Still accept new feed schedules (the e2e stack only: they stand for the ones an old installation holds until feeds are interests). */
+  legacyFeedSchedules: boolean;
   logLevel: string;
   /** Cookie `Secure` flag: true when the public origin is https. */
   secureCookies: boolean;
@@ -87,6 +90,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     hygieneSchedule: e.AOM_HYGIENE_SCHEDULE,
     maxShiftsPerWorkstation: e.AOM_MAX_SHIFTS_PER_WORKSTATION,
     webhookAllowPrivate: e.AOM_WEBHOOK_ALLOW_PRIVATE,
+    legacyFeedSchedules: e.AOM_LEGACY_FEED_SCHEDULES,
     logLevel: e.LOG_LEVEL,
     secureCookies: publicOrigin.startsWith('https://'),
   };

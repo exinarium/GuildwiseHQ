@@ -182,7 +182,7 @@ Agents hired for the project are not fired; they simply stop getting its work. C
 
 **Restore**: **Projects** > **Archived** > **Restore** (or **Settings** > **Danger zone** > **Restore project**). The project is back on the boards and pickers and takes work again. Cards that the archive closed stay closed and schedules stay off; create new cards and switch schedules back on as needed.
 
-**Delete permanently**: only the project owner, and only for an archived project. **Projects** > **Archived** > **Delete permanently**, then type the project key to confirm. The project's cards, threads and messages, schedules, desk items, repositories, members, digests, transcripts and research notes are removed from the database and cannot be recovered. The audit log keeps a record that the project was deleted, and the vault folder is never touched. Agents are never let go with a project: they belong to the organization, the project simply leaves their allowed projects (an agent that was allowed on that project only may then work any project of the organization until you narrow it again). The project key becomes free for a new project.
+**Delete permanently**: only the project owner, and only for an archived project. **Projects** > **Archived** > **Delete permanently**, then type the project key to confirm. The project's cards, threads and messages, schedules, desk items, repositories, members, digests, transcripts and research notes are removed from the database and cannot be recovered. The audit log keeps a record that the project was deleted, and the vault folder is never touched. Agents are never let go with a project: they belong to the organization, the project simply leaves their allowed projects. An agent that was allowed on that project only is **benched**: its allowed list is empty, so it takes no work until you give it projects again (the agent's **Projects** dialog). One notice on the desk names the benched agents so you can reassign them. The project key becomes free for a new project.
 
 ### Decision policy
 
@@ -620,18 +620,34 @@ Besides the rules that grow from your ratings, you can write **explicit taste ru
 
 ### Schedules
 
-Scheduled work runs on a timer and jumps the queue.
+A schedule is **a trigger and one action**. The **Schedules** page (side menu, Work) lists them grouped by project, with the ones for the whole organization first. **New schedule** opens a three-step wizard: **When**, **What**, **Details**.
 
-1. Go to **Schedules** (or create a project with type Feed)
-2. Add a schedule:
-   - **Cron expression**: e.g., "every day at 7:00 AM"
-   - **Project**: the scout/curator will run this
-   - **Card title**: description of what to do
-3. At the scheduled time, a card is created and claimed immediately (ahead of normal work)
+**When (the trigger)**
 
-If all scouts are busy, an overflow shift starts; a second late schedule waits for the next free slot.
+| Trigger | What it does |
+| --- | --- |
+| **On a schedule** | A cron time with a preset ("Weekdays at 07:00", "Mondays at 07:00", "Every hour", ...) or your own five-field cron expression, in a time zone you choose. Missed fires (the server was down) happen once, not many times. |
+| **When something happens** | A phase is completed, a card is finalized, an interest run is done or a project is converted, optionally only in one project. The server watches for these itself: no agent polls, and the same event never runs a schedule twice. |
+| **When an issue is labelled** | A GitHub or Jira issue gets a label. One of your workstations polls on the cadence you pick, with its own `gh` login or Jira token; the credentials never leave it. Each new issue runs the action once. |
+| **Only when I run it** | No automatic trigger: use **Run now**. |
 
-Feeds are easier to manage as [Interests](#interests): one place for the topic, its scan, your taste rules and its notes. A schedule that belongs to an interest is changed there and is locked on this page.
+**What (the action)**
+
+- **Create a card** from a template. A title without `{date}` or `{week}` gets the date appended; `{ref}`, `{project}` and `{issue.title}` work when an event or an issue ran it. The card is queued ahead of normal work.
+- **Run a regression**: one regression card per platform, queued at Test.
+- **Ask DevOps**: a request to the DevOps engineer of one of your workstations, or a repository hygiene run.
+- **Ask the BA**: free-text instructions. The BA reads (ledger, desk, vault, repositories; it changes nothing) and posts one report on your desk, with the BA chat open if you chose that. If no BA is available the desk gets a notice with your instructions instead.
+- **Poll GitHub or Jira issues**: new issues of a repository (or a JQL filter) go into **intake** with the BA, one conversation each. An issue is taken once.
+- **Send a webhook**: POST JSON to a URL. Formats: generic (n8n, Zapier, your own code), Slack incoming webhook and Microsoft Teams (both get a formatted `text`). You may append the floor report or a project summary. Each request is signed: the header `X-AOM-Signature` is `sha256=` plus the HMAC-SHA256 of `<X-AOM-Timestamp>.<body>` with the schedule's secret, which is shown **once** when you create it (**New secret** replaces it). A failed delivery (a 5xx, 429 or a network error) is retried after 1 minute, 5 minutes, 30 minutes and 2 hours, five tries in all; another 4xx answer is final. Addresses on this machine or a private network are refused unless the deployment allows them.
+- **E-mail a digest**: the floor report (the whole organization) or a project summary, sent at the time you set from the site's mail account. A failing mail server is retried like a webhook. Interest digests will join once interests move to the organization.
+
+**History.** **History** on a schedule shows every run: when, what triggered it, what it did, a link to the card or the intakes it made, and the reason when it failed. For a webhook or an e-mail the **Deliveries** view is the delivery log with every try, its HTTP status and its duration. **Send test** (webhooks and e-mails) sends one signed test delivery now; it is logged but never retried and is not counted as a run of the schedule.
+
+**System rows.** Under **Run by the system** two jobs are listed read-only: the repository hygiene of each of your workstations and the BA floor report. They show when they run and last ran, with a **Configure** link to where you change them.
+
+**Who may do what.** A schedule tied to a project can be created, changed and run by any member of that project, guests on a shared project included. A schedule that acts for the whole organization (a BA task or an integration without a project, repository hygiene, the floor report digest) is for the Owner and Admins only; others see a note and must choose a project. A schedule that runs on a workstation (DevOps, issue polling) needs the workstation's user to create or change it, and it runs as the person who created it. A member may e-mail a digest to their own address only. If its owner loses access to the project, the schedule stops and a notice appears on the desk. A suspended organization skips its schedules and records it.
+
+**Feeds.** New feed schedules are not created here any more: feeds are [Interests](#interests). Feed schedules that already exist keep running and stay listed (those that belong to an interest are changed on the Interests page).
 
 ### Feeds
 
