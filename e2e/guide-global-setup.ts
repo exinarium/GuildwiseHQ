@@ -14,6 +14,7 @@ import {
   ROOT,
   SMTP_URL,
 } from './support/env.ts';
+import { SUPER_DEMO } from './support/guide.ts';
 import { deleteMailFor } from './support/mail.ts';
 import { killAllRunners } from './support/runner.ts';
 
@@ -85,9 +86,18 @@ export default async function globalSetup(): Promise<(() => Promise<void>) | und
   await recreateDb();
   makeToyRepo();
   await Promise.all(
-    ['pieter@demo.local', 'maya@demo.local', 'sam@demo.local', 'lee@demo.local', 'jo@demo.local'].map(
-      deleteMailFor,
-    ),
+    [
+      'pieter@demo.local',
+      'maya@demo.local',
+      'sam@demo.local',
+      'lee@demo.local',
+      'jo@demo.local',
+      'noor@demo.local',
+      'ari@demo.local',
+      'platform@demo.local',
+      'northwind@demo.local',
+      'support@example.com',
+    ].map(deleteMailFor),
   );
 
   const env = {
@@ -118,6 +128,22 @@ export default async function globalSetup(): Promise<(() => Promise<void>) | und
       ADMIN.name,
       '--password',
       ADMIN.password,
+    ],
+    { cwd: ROOT, env },
+  );
+
+  sh(
+    'pnpm',
+    [
+      '--filter',
+      '@aom/server',
+      'superadmin:create',
+      '--email',
+      SUPER_DEMO.email,
+      '--name',
+      SUPER_DEMO.name,
+      '--password',
+      SUPER_DEMO.password,
     ],
     { cwd: ROOT, env },
   );

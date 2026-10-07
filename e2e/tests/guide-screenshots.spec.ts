@@ -11,7 +11,19 @@ import {
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { pool, q, waitFor } from '../support/db.ts';
 import { ADMIN, BASE_URL, paths } from '../support/env.ts';
-import { ADMIN_DEMO, loadState, MAYA, PIETER, saveState, snap, snapColumn } from '../support/guide.ts';
+import {
+  ADMIN_DEMO,
+  ARI,
+  loadState,
+  MAYA,
+  NOOR,
+  PIETER,
+  SUPER_DEMO,
+  SUPPORT_INBOX,
+  saveState,
+  snap,
+  snapColumn,
+} from '../support/guide.ts';
 import { waitForMail } from '../support/mail.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
 import { expandWorkstation } from '../support/ui.ts';
@@ -114,6 +126,7 @@ async function makeCard(
         context: c.context,
         requirements: c.requirements,
         acceptanceCriteria: c.criteria,
+        mockUsage: { inputTokens: 300_000, outputTokens: 20_000 },
         affectedAreas: c.areas ?? 'src/',
         constraints: 'Keep the public API unchanged. No new runtime dependencies.',
         testPlan: c.testPlan ?? 'Run the unit tests and walk through the screen in the browser.',
@@ -153,27 +166,58 @@ async function reword(
 // ---------------------------------------------------------------------------------------------------------------
 // seed
 
-step('users, invitations, the admin', async () => {
+step('users and the admin', async () => {
+  // The demo organization is Pieter's. The e2e admin account (and its empty organization) is renamed so nothing says e2e.
   await q(`UPDATE users SET email=$1, display_name=$2 WHERE email=$3`, [
     ADMIN_DEMO.email,
     ADMIN_DEMO.name,
     ADMIN.email,
   ]);
+  await q(`UPDATE organizations SET name='Admin Demo''s organization' WHERE name ILIKE '%e2e%'`);
   const admin = await apiAs(ADMIN_DEMO.email, ADMIN.password);
   await inviteAndAccept(admin, PIETER);
   await inviteAndAccept(admin, MAYA);
-  for (const email of ['sam@demo.local', 'lee@demo.local']) {
-    const r = await admin.post('/api/org/invitations', { data: { email, role: 'member' } });
-    expect(r.ok(), await r.text()).toBeTruthy();
-  }
-  const mail = await waitForMail('sam@demo.local');
-  S.ids.samToken = /\/invite\/([A-Za-z0-9_-]+)/.exec(mail.text)?.[1] ?? '';
-  expect(S.ids.samToken).toBeTruthy();
-  const invs = (await (await admin.get('/api/org/invitations')).json()) as any;
-  const list: any[] = invs.invitations ?? invs;
-  const lee = list.find((i) => i.email === 'lee@demo.local');
-  expect((await admin.post(`/api/org/invitations/${lee.id}/revoke`, { data: {} })).ok()).toBeTruthy();
 });
+
+step(
+  'people: Pieter invites an Admin and a Member, a third invitation waits, a fourth is revoked',
+  async () => {
+    const p = await pieter();
+    const accept = async (email: string, person: { name: string; password: string }) => {
+      const mail = await waitForMail(email);
+      const token = /\/invite\/([A-Za-z0-9_-]+)/.exec(mail.text)?.[1] ?? '';
+      expect(token).toBeTruthy();
+      const ctx = await (await import('@playwright/test')).request.newContext({
+        baseURL: BASE_URL,
+        extraHTTPHeaders: { Origin: BASE_URL },
+      });
+      const r = await ctx.post(`/api/invitations/${token}/accept`, {
+        data: { displayName: person.name, password: person.password },
+      });
+      expect(r.ok(), await r.text()).toBeTruthy();
+      await ctx.dispose();
+    };
+    for (const [who, role] of [
+      [ARI, 'admin'],
+      [NOOR, 'member'],
+    ] as const) {
+      const r = await p.post('/api/org/invitations', { data: { email: who.email, role } });
+      expect(r.ok(), await r.text()).toBeTruthy();
+      await accept(who.email, who);
+    }
+    for (const email of ['sam@demo.local', 'lee@demo.local']) {
+      const r = await p.post('/api/org/invitations', { data: { email, role: 'member' } });
+      expect(r.ok(), await r.text()).toBeTruthy();
+    }
+    const mail = await waitForMail('sam@demo.local');
+    S.ids.samToken = /\/invite\/([A-Za-z0-9_-]+)/.exec(mail.text)?.[1] ?? '';
+    expect(S.ids.samToken).toBeTruthy();
+    const invs = (await (await p.get('/api/org/invitations')).json()) as any;
+    const list: any[] = invs.invitations ?? invs;
+    const lee = list.find((i) => i.email === 'lee@demo.local');
+    expect((await p.post(`/api/org/invitations/${lee.id}/revoke`, { data: {} })).ok()).toBeTruthy();
+  },
+);
 
 step('fakes: gh, a Jira ticket, the vaults', async () => {
   mkdirSync(paths.vaults, { recursive: true });
@@ -344,6 +388,91 @@ step('history: four clean cards, a docs card', async () => {
   await inStage(d.ref, 'docs', 'queued');
 });
 
+step('a phase of two cards that is finished and waits for approval', async () => {
+  const p = await pieter();
+  const web = S.ids['project:WEB'] as string;
+  const target = await p.post(`/api/projects/${web}/deploy-targets`, {
+    data: {
+      name: 'local',
+      kind: 'local_docker',
+      appUrl: 'http://localhost:3000',
+      notes: 'docker compose up -d in the web repository',
+    },
+  });
+  expect(target.status(), await target.text()).toBeLessThan(300);
+  const targets = (await (await p.get(`/api/projects/${web}/deploy-targets`)).json()) as any;
+  const targetId = (targets.targets as any[]).find((t) => t.name === 'local').id as string;
+  const defaults = await p.put(`/api/projects/${web}/followup-defaults`, {
+    data: {
+      followups: [
+        { kind: 'deploy', targetId },
+        { kind: 'regression', platform: 'web', targetId },
+      ],
+    },
+  });
+  expect(defaults.ok(), await defaults.text()).toBeTruthy();
+  const ph = await p.post(`/api/projects/${web}/phases`, {
+    data: {
+      name: 'Phase 1: checkout polish',
+      description: 'Small improvements to the checkout that ship together.',
+      followups: [
+        { kind: 'deploy', targetId },
+        { kind: 'regression', platform: 'web', targetId },
+      ],
+    },
+  });
+  expect(ph.status(), await ph.text()).toBe(201);
+  const phase = (await ph.json()) as { id: string; ref: string };
+  S.ids['phase:ref'] = phase.ref;
+  for (const c of [
+    spec(
+      'Show the order total in words on the receipt',
+      'Some customers ask for the total written out for their accounting.',
+      'Print the total in words under the number on the receipt.',
+      ['The total is printed in words'],
+    ),
+    spec(
+      'Remember the last used payment method',
+      'Returning customers pick the same payment method every time.',
+      'Preselect the payment method of the last order.',
+      ['The last used method is preselected'],
+    ),
+  ]) {
+    const card = await makeCard(p, 'WEB', c, { action: 'merge' });
+    const put = await p.put(`/api/cards/${card.id}/phase`, { data: { phaseId: phase.id } });
+    expect(put.status(), await put.text()).toBe(200);
+    await done(card.ref);
+  }
+  await waitFor(
+    'the phase waits for approval',
+    () => q<any>(`SELECT status FROM phases WHERE id=$1`, [phase.id]),
+    (r) => r[0]?.status === 'awaiting_approval',
+    240_000,
+  );
+});
+
+step('a card whose shifts keep failing: the loop breaker backs it off', async () => {
+  const p = await pieter();
+  const c = await makeCard(
+    p,
+    'WEB',
+    spec(
+      'Sync the product feed with the warehouse system',
+      'Stock levels in the shop drift from the warehouse system during the day.',
+      'Pull the warehouse stock feed every 15 minutes and update the product stock levels.',
+      ['Stock levels match the warehouse feed', 'A failed pull is retried on the next run'],
+    ),
+    { mock: { build: Array.from({ length: 24 }, () => 'no_report') } },
+  );
+  S.ids['card:backoff'] = c.ref;
+  await waitFor(
+    'the loop breaker alert',
+    () => q<any>(`SELECT id FROM desk_items WHERE subkind='loop_backoff' AND card_id=$1`, [c.id]),
+    (r) => r.length > 0,
+    240_000,
+  );
+});
+
 CARDS.hang_build = spec(
   'Add rate limiting to the public API',
   'A client script hammered the API last week and slowed the shop down for everybody.',
@@ -504,6 +633,58 @@ step('ledger: standing orders and requirements', async () => {
   });
 });
 
+step('a repository whose working branch is not confirmed: hygiene asks on the desk', async (browser) => {
+  const p = await pieter();
+  const origin = join(paths.vaults, 'notes-origin.git');
+  const clone = join(paths.repoRoot, 'notes-app');
+  rmSync(origin, { recursive: true, force: true });
+  rmSync(clone, { recursive: true, force: true });
+  mkdirSync(paths.vaults, { recursive: true });
+  git(paths.vaults, 'init', '--bare', '-b', 'main', origin);
+  git(paths.repoRoot, 'clone', origin, 'notes-app');
+  git(clone, 'checkout', '-b', 'main');
+  writeFileSync(join(clone, 'README.md'), '# Team notes\n');
+  git(clone, 'add', '.');
+  git(clone, 'commit', '-m', 'Initial commit');
+  git(clone, 'push', '-u', 'origin', 'main');
+  git(clone, 'branch', 'develop');
+  git(clone, 'push', 'origin', 'develop');
+  const proj = await p.post('/api/projects', {
+    data: { key: 'NOTES', name: 'Team notes', workflowKey: 'code', domain: 'work' },
+  });
+  expect(proj.status(), await proj.text()).toBe(201);
+  const notes = (await proj.json()).project.id as string;
+  S.ids['project:NOTES'] = notes;
+  const add = await p.post(`/api/projects/${notes}/repos`, {
+    data: { name: 'notes-app', remoteUrl: origin },
+  });
+  expect(add.status(), await add.text()).toBe(201);
+  await waitFor(
+    'the workstation holds notes-app',
+    async () => (await (await p.get('/api/workstations')).json()).workstations[0].repos.length,
+    (n) => n >= 2,
+    30_000,
+  );
+  writeFileSync(join(clone, 'todo.md'), 'meeting notes that were never saved\n');
+  writeFileSync(join(clone, 'README.md'), '# Team notes\n\nedited by hand\n');
+  const ctx = await browser.newContext({
+    storageState: await p.storageState(),
+    viewport: { width: 1280, height: 1000 },
+  });
+  const page = await ctx.newPage();
+  await page.goto('/workstations');
+  await expandWorkstation(page.getByTestId("workstation-Pieter's desktop (WSL2)"));
+  await page.getByRole('button', { name: 'Run hygiene now' }).click();
+  await waitFor(
+    'the working-branch question',
+    () =>
+      q<any>(`SELECT id FROM desk_items WHERE title LIKE 'Which branch is the working branch of notes-app%'`),
+    (r) => r.length > 0,
+    90_000,
+  );
+  await ctx.close();
+});
+
 step('workstation B (unsandboxed), Maya, Gus, sharing', async () => {
   const p = await pieter();
   const m = await maya();
@@ -557,6 +738,9 @@ step('workstation B (unsandboxed), Maya, Gus, sharing', async () => {
       await p.post(`/api/projects/${S.ids['project:SHOOT']}/members`, { data: { email: MAYA.email } })
     ).status(),
   ).toBe(201);
+  // Noor is a Member of the organization and works on WEB only
+  const addNoor = await p.post(`/api/projects/${web}/members`, { data: { email: NOOR.email } });
+  expect(addNoor.status(), await addNoor.text()).toBeLessThan(300);
   // Maya's own workstation (paired over the API, not running) and her builder Gus
   const mcode = (await (await m.post('/api/workstations/pairing-codes', { data: {} })).json()).code as string;
   const paired = await (await import('@playwright/test')).request.newContext({
@@ -1042,12 +1226,17 @@ step('organization: custom roles, workflow, departments, extensions', async () =
     },
   });
   expect(ext.ok(), await ext.text()).toBeTruthy();
-  const ownerId = (await q<any>(`SELECT id FROM users WHERE email=$1`, [PIETER.email]))[0].id;
+  const orgId = (
+    await q<any>(
+      `SELECT m.org_id FROM org_members m JOIN users u ON u.id=m.user_id WHERE u.email=$1 AND m.status='active'`,
+      [PIETER.email],
+    )
+  )[0].org_id;
   await q(
     `INSERT INTO role_extensions (org_id, role_key, base_version, extensions, updated_at) VALUES ($1,'tester',1,$2,now())
      ON CONFLICT (org_id, role_key) DO UPDATE SET base_version=1, extensions=$2`,
     [
-      ownerId,
+      orgId,
       JSON.stringify({
         instructions: 'Always run the linter first.',
         skills: ['lint'],
@@ -1066,7 +1255,7 @@ step(
       viewport: { width: 1280, height: 800 },
     });
     const page = await ctx.newPage();
-    const chat = async (agent: string, message: string, shotName: string) => {
+    const chat = async (agent: string, message: string, shotName?: string) => {
       await page.goto('/desk');
       await page.getByRole('button', { name: 'Chat', exact: true }).click();
       const drawer = page.getByRole('dialog', { name: 'Chat' });
@@ -1084,11 +1273,11 @@ step(
       await drawer.getByRole('button', { name: 'Send' }).click();
       await expect(drawer.getByTestId('chat-message').last()).toContainText('heard', { timeout: 60_000 });
       await expect(drawer.getByTestId('chat-streaming')).toHaveCount(0);
-      await snap(page, shotName, { sel: drawer });
+      if (shotName) await snap(page, shotName, { sel: drawer });
     };
     await chat('Olga', 'Can you check whether the SUP-231 ticket has a screenshot attached?', 'chat-ba');
-    await chat('Olga', 'Thanks. Please draft a card for the password reset form on phones.', 'chat-ba-2');
-    await chat('Linus', 'Which review comments came up most often this week?', 'chat-reviewer');
+    await chat('Olga', 'Thanks. Please draft a card for the password reset form on phones.');
+    await chat('Linus', 'Which review comments came up most often this week?');
     // the start screen with earlier conversations
     await page.goto('/desk');
     await page.getByRole('button', { name: 'Chat', exact: true }).click();
@@ -1398,6 +1587,239 @@ step('polish: realistic wording for the questions the mock agents raised', async
   );
 });
 
+step('schedules and integrations', async () => {
+  const p = await pieter();
+  const web = S.ids['project:WEB'] as string;
+  for (const old of ((await (await p.get('/api/schedules')).json()) as any).schedules as any[]) {
+    await p.delete(`/api/schedules/${old.id}`);
+  }
+  const post = async (data: Record<string, unknown>) => {
+    const r = await p.post('/api/schedules', { data });
+    expect(r.status(), await r.text()).toBe(201);
+  };
+  await post({
+    name: 'Weekly dependency check',
+    trigger: { kind: 'cron', cron: '0 7 * * 1', timezone: 'Africa/Johannesburg' },
+    action: {
+      kind: 'create_card',
+      projectId: web,
+      template: {
+        title: 'Weekly dependency check {date}',
+        cardType: 'feature',
+        fields: {
+          context: 'Outdated packages are a security risk.',
+          requirements: 'List the packages with a newer version and upgrade the safe ones.',
+          acceptanceCriteria: ['A list of upgrades is in the handoff', 'The tests still pass'],
+          affectedAreas: 'package.json',
+          constraints: 'Patch and minor upgrades only.',
+          testPlan: 'Run the unit tests.',
+        },
+      },
+    },
+  });
+  await post({
+    name: 'Tell the team when a phase is done',
+    trigger: { kind: 'event', event: 'phase_completed', projectId: web },
+    action: {
+      kind: 'integration',
+      integration: 'webhook',
+      operation: 'post',
+      url: 'https://hooks.example.com/services/T000/B000/demo',
+      format: 'slack',
+      message: 'A phase of the web shop is done: {ref}',
+      digest: null,
+    },
+  });
+  await post({
+    name: 'Floor report by e-mail',
+    trigger: { kind: 'cron', cron: '0 17 * * 5', timezone: 'Africa/Johannesburg' },
+    action: {
+      kind: 'integration',
+      integration: 'email',
+      operation: 'digest',
+      to: [PIETER.email],
+      subject: 'Floor report of the week',
+      digest: 'floor_report',
+    },
+  });
+  await post({
+    name: 'New issues labelled aom',
+    trigger: {
+      kind: 'issue_labelled',
+      provider: 'github',
+      workstationId: S.ids.wsA,
+      query: 'example/web',
+      label: 'aom',
+      cron: '*/15 * * * *',
+      timezone: 'Africa/Johannesburg',
+    },
+    action: {
+      kind: 'create_card',
+      projectId: web,
+      template: {
+        title: '{issue.title}',
+        cardType: 'feature',
+        fields: { context: 'Reported on GitHub: {issue.title}' },
+      },
+    },
+  });
+  await post({
+    name: 'Friday review',
+    trigger: { kind: 'manual' },
+    action: {
+      kind: 'ba_task',
+      projectId: null,
+      prompt: 'Summarize what is open on {date} and what needs my attention.',
+      deliver: 'desk_notice',
+    },
+  });
+});
+
+step('the budget of the web shop', async () => {
+  const p = await pieter();
+  const web = S.ids['project:WEB'] as string;
+  const spend = Number(
+    (
+      await q<any>(`SELECT COALESCE(sum(cost_usd_micros),0) AS s FROM shift_costs WHERE project_id=$1`, [web])
+    )[0].s,
+  );
+  S.ids.spendWeb = String(spend / 1e6);
+  const monthly = Math.max(5, Math.ceil(spend / 1e6 / 0.62));
+  S.ids.budgetWeb = String(monthly);
+  const r = await p.put(`/api/projects/${web}/budget`, { data: { monthly } });
+  expect(r.ok(), await r.text()).toBeTruthy();
+});
+
+step('platform: the administrator, other organizations, support requests', async (browser) => {
+  const { freshTotp } = await import('../support/totp.ts');
+  const pw = await import('@playwright/test');
+  // a second customer organization (its owner is never used again) that the platform suspends
+  const hana = { email: 'hana@demo.local', name: 'Hana Harbor', password: 'hana-demo-pass-2026' };
+  if (!(await q<any>(`SELECT 1 FROM users WHERE email=$1`, [hana.email])).length)
+    await inviteAndAccept(await pieter(), hana);
+  await q(
+    `UPDATE organizations SET name='Harbor Cafe' WHERE owner_user_id=(SELECT id FROM users WHERE email=$1)`,
+    [hana.email],
+  );
+
+  const staffCtx = await browser.newContext();
+  const staff = await staffCtx.newPage();
+  await staff.goto('/login');
+  await staff.getByLabel('Email').fill(SUPER_DEMO.email);
+  await staff.getByLabel('Password').fill(SUPER_DEMO.password);
+  await staff.getByRole('button', { name: 'Sign in' }).click();
+  await staff.getByLabel('Your password').fill(SUPER_DEMO.password);
+  await staff.getByRole('button', { name: 'Continue' }).click();
+  const secret = (await staff.locator('code').first().innerText()).trim();
+  S.ids.superSecret = secret;
+  await staff.getByTestId('totp-code').fill(await freshTotp(secret));
+  await staff.getByRole('button', { name: 'Turn on two-factor login' }).click();
+  await staff.getByLabel('I saved my recovery codes somewhere safe').check();
+  await staff.getByRole('button', { name: 'Done' }).click();
+  await expect(staff).toHaveURL(/\/platform/);
+  const sapi = staffCtx.request;
+  const hdr = { Origin: BASE_URL };
+  expect(
+    (
+      await sapi.patch('/api/platform/settings', { data: { supportEmail: SUPPORT_INBOX }, headers: hdr })
+    ).ok(),
+  ).toBeTruthy();
+  const inv = await sapi.post('/api/platform/invitations', {
+    data: {
+      email: 'northwind@demo.local',
+      proposedOrgName: 'Northwind Traders',
+      plan: 'founding',
+      status: 'active',
+    },
+    headers: hdr,
+  });
+  expect(inv.ok(), await inv.text()).toBeTruthy();
+  const orgs = (await (await sapi.get('/api/platform/orgs')).json()) as any;
+  const harbor = (orgs.orgs ?? orgs.organizations ?? orgs).find((o: any) => o.name === 'Harbor Cafe');
+  const sus = await sapi.post(`/api/platform/orgs/${harbor.id}/suspend`, {
+    data: { reason: 'Invoice 2026-091 is unpaid', note: 'Reminder sent on 1 October' },
+    headers: hdr,
+  });
+  expect(sus.ok(), await sus.text()).toBeTruthy();
+
+  // support requests: Maya (signed in) and a visitor; the platform answers Maya's
+  const m = await maya();
+  const t1 = await m.post('/api/support/tickets', {
+    data: {
+      kind: 'question',
+      subject: 'How do I move a card back to Build?',
+      message: 'A reviewer sent my card back twice. Can I move it to Build myself, or only the owner?',
+      context: { page: '/cards/WEB-12', appVersion: '1.0.0', browser: 'Chrome 140', viewport: '1280x800' },
+    },
+  });
+  expect(t1.status(), await t1.text()).toBe(201);
+  const ref1 = ((await t1.json()) as any).ref ?? ((await t1.json()) as any).ticket?.ref;
+  const anon = await pw.request.newContext({ baseURL: BASE_URL, extraHTTPHeaders: { Origin: BASE_URL } });
+  const t2 = await anon.post('/api/support/tickets', {
+    data: {
+      kind: 'feature',
+      subject: 'Dark mode for the landing page',
+      message: 'The sign-in page is bright at night. Could it follow the system theme?',
+      name: 'Vera Visitor',
+      email: 'vera@example.com',
+    },
+  });
+  expect(t2.status(), await t2.text()).toBe(201);
+  await anon.dispose();
+  const list = (await (await sapi.get('/api/platform/support/tickets')).json()) as any;
+  const mine = (list.tickets as any[]).find((t) => t.subject.startsWith('How do I move'));
+  expect(mine, JSON.stringify(ref1)).toBeTruthy();
+  S.ids.ticketMaya = mine.id;
+  const rep = await sapi.post(`/api/platform/support/tickets/${mine.id}/replies`, {
+    data: {
+      body: 'Hi Maya. Only the card owner, an Owner or an Admin can move a card. Ask Pieter to move it, or open the card and use Release if the card is yours and unclaimed.',
+    },
+    headers: hdr,
+  });
+  expect(rep.ok(), await rep.text()).toBeTruthy();
+  await staffCtx.close();
+});
+
+step(
+  'the daily floor report of the next morning (the test clock moves; keep this step last)',
+  async (browser) => {
+    const p = await pieter();
+    const ZONE = 'Africa/Johannesburg';
+    const ctx = await browser.newContext({ storageState: await p.storageState(), timezoneId: ZONE });
+    const page = await ctx.newPage();
+    await page.goto('/settings');
+    await waitFor(
+      'the browser time zone is stored',
+      async () => q<any>(`SELECT timezone FROM users WHERE email=$1`, [PIETER.email]),
+      (r) => r[0]?.timezone === ZONE,
+      30_000,
+    );
+    await ctx.close();
+    const orgId = (
+      await q<any>(
+        `SELECT m.org_id FROM org_members m JOIN users u ON u.id=m.user_id WHERE u.email=$1 AND m.status='active'`,
+        [PIETER.email],
+      )
+    )[0].org_id as string;
+    const clock = (advanceMs: number) =>
+      fetch(`${BASE_URL}/api/test/clock`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE_URL },
+        body: JSON.stringify({ advanceMs }),
+      });
+    const now = new Date(((await (await clock(0)).json()) as { now: string }).now);
+    const local = new Date(now.getTime() + 2 * 3_600_000);
+    const target = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + 1, 7, 0, 0);
+    expect((await clock(target - now.getTime())).ok).toBe(true);
+    await waitFor(
+      'the floor report',
+      () => q<any>(`SELECT id FROM desk_items WHERE subkind='floor_report' AND org_id=$1`, [orgId]),
+      (r) => r.length > 0,
+      180_000,
+    );
+  },
+);
+
 test('seed: finished', async () => {
   expect(Object.keys(S.done).length).toBeGreaterThan(5);
 });
@@ -1405,302 +1827,161 @@ test('seed: finished', async () => {
 // ---------------------------------------------------------------------------------------------------------------
 // capture: every screen of the guide. Nothing here changes the demo world, except where a comment says so.
 
-let pPage: Page;
-let mPage: Page;
-let aPage: Page;
-let phone: Page;
 const ctxs: Record<string, BrowserContext> = {};
+let pPage: Page; // Pieter, the Owner
+let mPage: Page; // Maya, a Guest of Pieter's organization
+let nPage: Page; // Noor, a Member
+let phone: Page;
 async function pageFor(
   browser: Browser,
   key: string,
-  user: { email: string; password: string } | null,
+  user: { email: string; password: string },
   viewport = { width: 1280, height: 800 },
 ): Promise<Page> {
   if (!ctxs[key]) {
-    const storageState = user ? await (await api(user)).storageState() : undefined;
-    ctxs[key] = await browser.newContext({ viewport, ...(storageState ? { storageState } : {}) });
+    const storageState = await (await api(user)).storageState();
+    ctxs[key] = await browser.newContext({ viewport, storageState });
   }
   return ctxs[key]!.newPage();
 }
 
 function cap(name: string, fn: () => Promise<void>): void {
   test(`capture: ${name}`, async ({ browser }) => {
-    test.setTimeout(180_000);
-    const mk = async () => {
-      pPage = await pageFor(browser, 'p', PIETER);
-      mPage = await pageFor(browser, 'm', MAYA);
-      aPage = await pageFor(browser, 'a', { email: ADMIN_DEMO.email, password: ADMIN.password });
-      phone = await pageFor(browser, 'ph', PIETER, { width: 390, height: 844 });
-    };
-    await mk();
+    test.setTimeout(240_000);
+    pPage = await pageFor(browser, 'p', PIETER);
+    mPage = await pageFor(browser, 'm', MAYA);
+    nPage = await pageFor(browser, 'n', NOOR);
+    phone = await pageFor(browser, 'ph', PIETER, { width: 390, height: 844 });
     try {
       await fn();
     } finally {
-      for (const pg of [pPage, mPage, aPage, phone]) await pg.close();
+      for (const pg of [pPage, mPage, nPage, phone]) await pg.close();
     }
   });
 }
 
-const refId = async (ref: string) => (await card(ref)).id as string;
 const open = async (page: Page, path: string) => {
   await page.goto(path);
   await page.waitForLoadState('networkidle').catch(() => undefined);
+  // a card, a desk or a board that is still loading shows skeletons for a moment
+  await expect(page.locator('[aria-busy="true"]'))
+    .toHaveCount(0, { timeout: 15_000 })
+    .catch(() => undefined);
 };
-const idOfAgent = async (name: string) =>
-  (await q<any>(`SELECT id FROM agents WHERE name=$1`, [name]))[0].id as string;
+/** The section (panel) of a page that has this heading. */
+const section = (page: Page, heading: RegExp | string) =>
+  page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: heading }) })
+    .last();
+const NARROW = { x: 0, width: 760 };
 
-cap('sign-in, invitations, admin', async () => {
-  const anon = await ctxs.anon?.newPage();
-  void anon;
+cap('sign-in, invitations, two-factor code', async () => {
   const ctx = await pPage
     .context()
     .browser()!
-    .newContext({ viewport: { width: 1280, height: 520 } });
+    .newContext({ viewport: { width: 1280, height: 720 } });
   const a = await ctx.newPage();
   await open(a, '/login');
-  await snap(a, 'login', { maxH: 520, cx: { x: 420, width: 440 } });
+  await snap(a, 'login', { maxH: 720 });
   await a.getByLabel('Email').fill('pieter@demo.local');
   await a.getByLabel('Password').fill('not-the-password');
   await a.getByRole('button', { name: 'Sign in' }).click();
-  await expect(a.getByText('Incorrect email or password')).toBeVisible();
-  await snap(a, 'login-error', { maxH: 520, cx: { x: 420, width: 440 } });
+  await expect(a.getByRole('alert').first()).toBeVisible();
+  await snap(a, 'login-error', { maxH: 720 });
   await open(a, `/invite/${S.ids.samToken}`);
-  await snap(a, 'invite-accept', { maxH: 520, cx: { x: 420, width: 440 } });
-  await a.getByLabel('Your name').fill('Sam Demo');
-  await a.getByLabel('Password', { exact: true }).fill('short');
-  await a.getByLabel('Confirm password').fill('different');
-  await a.getByRole('button', { name: /join/i }).click();
-  await snap(a, 'invite-errors', { maxH: 520, cx: { x: 420, width: 440 } });
+  await snap(a, 'invite-accept', { maxH: 720 });
   await open(a, '/invite/not-a-real-token');
-  await snap(a, 'invite-invalid', { maxH: 300, cx: { x: 420, width: 440 } });
+  await snap(a, 'invite-invalid', { maxH: 720 });
+  // the platform administrator has two-factor login: the code step after the password
+  await open(a, '/login');
+  await a.getByLabel('Email').fill(SUPER_DEMO.email);
+  await a.getByLabel('Password').fill(SUPER_DEMO.password);
+  await a.getByRole('button', { name: 'Sign in' }).click();
+  await expect(a.getByTestId('login-code')).toBeVisible();
+  await snap(a, 'login-2fa', { maxH: 720 });
+  // the landing page that visitors see
+  await open(a, '/');
+  await snap(a, 'landing', { maxH: 900 });
   await ctx.close();
-  await open(aPage, '/settings/org?tab=members');
-  await snap(aPage, 'admin', { maxH: 1500, noHeader: true, cx: { x: 190, width: 900 } });
 });
 
-cap('the board', async () => {
+cap('the shell: board, palette, help, tour', async () => {
   await open(pPage, '/p/WEB/board');
-  const board = pPage.getByTestId('board');
-  await snap(pPage, 'board-left', { maxH: 820 });
-  await board.evaluate((el) => {
-    el.scrollLeft = 1050;
-  });
-  await snap(pPage, 'board-mid', { maxH: 820 });
-  await board.evaluate((el) => {
-    el.scrollLeft = el.scrollWidth;
-  });
-  await snap(pPage, 'board-right', { maxH: 820 });
-  // the hero of the cover: a wide window
   await pPage.setViewportSize({ width: 1700, height: 900 });
-  await board.evaluate((el) => {
-    el.scrollLeft = 0;
-  });
-  await snap(pPage, 'board-hero', { maxH: 640 });
+  await snap(pPage, 'board-hero', { maxH: 900 });
   await pPage.setViewportSize({ width: 1280, height: 800 });
-  for (const [id, col] of [
-    ['spec', 'Spec'],
-    ['todo', 'To do'],
-    ['rework', 'Rework'],
-    ['inprogress', 'In progress'],
-    ['blocked', 'Blocked'],
-    ['review', 'Review'],
-    ['test', 'Test'],
-    ['waiting', 'Test (waiting on bug)'],
-    ['docs', 'Docs'],
-    ['finalize', 'Finalize'],
-    ['done', 'Done'],
-  ] as const) {
-    await snapColumn(pPage, `col-${id}`, pPage.getByTestId(`column-${col}`));
-  }
-  await open(pPage, '/interests');
-  await snap(pPage, 'interests', { maxH: 900, noHeader: true, cx: { x: 190, width: 900 } });
-  await open(pPage, '/p/SHOOT/board');
-  await snap(pPage, 'board-research', { maxH: 700 });
   await open(pPage, '/p/WEB/board');
-  await pPage.getByTestId('regression-open').click();
-  await snap(pPage, 'dlg-regression', { sel: pPage.getByRole('dialog') });
+  await snap(pPage, 'board-left', { maxH: 800 });
+  await open(pPage, '/desk');
+  await pPage.keyboard.press('Control+k');
+  await expect(pPage.getByTestId('command-palette')).toBeVisible();
+  await pPage.keyboard.type('contact');
+  await snap(pPage, 'palette', { sel: pPage.getByTestId('command-palette') });
+  await pPage.keyboard.press('Escape');
+  await open(pPage, '/help');
+  await snap(pPage, 'help-centre', { maxH: 900, content: true });
+  await open(pPage, '/help/install-troubleshooting');
+  await snap(pPage, 'help-install', { maxH: 900, content: true });
+  // the tour starts from Help ("Replay the tour")
+  await open(pPage, '/help');
+  await pPage.getByTestId('help-replay-tour').click();
+  await expect(pPage.getByTestId('tour')).toBeVisible();
+  await snap(pPage, 'tour-1', { maxH: 800 });
   await pPage.keyboard.press('Escape');
 });
 
-cap('new card', async () => {
+cap('cards', async () => {
   await open(pPage, '/cards/new?project=WEB');
-  await snap(pPage, 'card-new', { maxH: 1500, noHeader: true, cx: { x: 230, width: 820 } });
-  await pPage.getByRole('button', { name: 'Specify' }).click();
-  await snap(pPage, 'card-new-errors', { maxH: 1900, noHeader: true, cx: { x: 230, width: 820 } });
-  await open(pPage, '/cards/new?project=SHOOT');
-  await snap(pPage, 'card-new-research', { maxH: 1300, noHeader: true, cx: { x: 230, width: 820 } });
-  {
-    // creates one more draft card (once)
-    await open(pPage, '/cards/new?project=WEB');
-    const form = pPage.getByRole('form', { name: 'New card' });
-    await form.getByLabel('Title').fill('Show stock level on the product page');
-    await form.getByLabel('Context').fill('Customers ask whether an item is in stock before they order.');
-    await form.getByRole('button', { name: 'Specify' }).click();
-    await expect(
-      pPage.getByText('still missing').or(pPage.getByText('Fix the highlighted fields')),
-    ).toBeVisible();
-    await snap(pPage, 'card-new-missing', { maxH: 1900, noHeader: true, cx: { x: 230, width: 820 } });
-  }
-});
-
-cap('card detail', async () => {
-  const detail = async (name: string, ref: string, o: Parameters<typeof snap>[2] = { maxH: 1700 }) => {
-    await open(pPage, `/cards/${ref}`);
-    await snap(pPage, name, o);
-  };
-  await detail('card-detail', S.ids['card:bounced0'] as string, { maxH: 1100 });
-  await detail('card-handoffs', S.ids['card:bounced0'] as string, { maxH: 2000, top: 0 });
-  await detail('card-live', 'WEB-10', { maxH: 900 });
-  await detail('card-blocked', S.ids['card:guest'] as string, { maxH: 900 });
-  await detail('card-waiting', S.ids['card:tb'] as string, { maxH: 1100 });
-  await detail('card-bug', S.ids['card:bug'] as string, { maxH: 900 });
-  await detail('card-large', S.ids['card:large'] as string, { maxH: 1100 });
-  await detail('card-conflict', S.ids['card:conflict'] as string, { maxH: 1400 });
-  await detail('card-evidence', 'WEB-1', { maxH: 1700 });
-  await detail('card-outbound-edited', S.ids.card12 as string, { maxH: 1700 });
-  await detail('card-outbound-failed', S.ids.card40 as string, { maxH: 1700 });
-  await detail('card-published', S.ids.research1 as string, { maxH: 1500 });
-  await detail('card-research-rework', S.ids.research2 as string, { maxH: 1500 });
-  await detail('card-draft', 'WEB-43', { maxH: 900 });
-  // Edit card dialog (a draft) and the risk tier dialog (a queued card)
-  await pPage.setViewportSize({ width: 1280, height: 1500 });
-  await open(pPage, '/cards/WEB-43');
-  await pPage.getByTestId('edit-card').click();
-  await snap(pPage, 'dlg-edit-card', { sel: pPage.getByRole('dialog') });
-  await pPage.keyboard.press('Escape');
-  await pPage.setViewportSize({ width: 1280, height: 800 });
-  await open(pPage, `/cards/${S.ids['card:rq']}`);
+  await snap(pPage, 'card-new', { maxH: 1400, content: true });
+  const form = pPage.getByRole('form', { name: 'New card' });
+  await form.getByLabel('Title').fill('Show stock level on the product page');
+  await form.getByLabel('Context').fill('Customers ask whether an item is in stock before they order.');
+  await form.getByRole('button', { name: 'Specify' }).click();
+  await expect(pPage.getByText(/still missing|Fix the highlighted/).first()).toBeVisible();
+  await snap(pPage, 'card-new-missing', { maxH: 1500, content: true });
+  await open(pPage, `/cards/${S.ids['card:bounced0']}`);
+  await snap(pPage, 'card-detail', { maxH: 1300, content: true });
+  await open(pPage, `/cards/${S.ids['card:hang_build']}`);
+  await snap(pPage, 'card-live', { maxH: 1000, content: true });
+  await open(pPage, `/cards/${S.ids['card:backoff']}`);
+  await snap(pPage, 'card-backoff', { maxH: 700, content: true });
+  await open(pPage, `/cards/${S.ids.research1}`);
+  await snap(pPage, 'card-published', { maxH: 1300, content: true });
+  await open(pPage, `/cards/${S.ids['card:backoff']}`);
   await pPage.getByTestId('set-risk').click();
   await snap(pPage, 'dlg-risk', { sel: pPage.getByRole('dialog') });
   await pPage.keyboard.press('Escape');
-  await detail('card-feed-run', S.ids['ref:feed2'] as string, { maxH: 1100 });
-  const panel = async (name: string, ref: string, heading: RegExp) => {
-    await open(pPage, `/cards/${ref}`);
-    const el = pPage
-      .locator('section')
-      .filter({ has: pPage.getByRole('heading', { name: heading }) })
-      .last();
-    await snap(pPage, name, { sel: el });
-  };
-  await panel('panel-details', S.ids['card:bounced0'] as string, /^Details$/);
-  await panel('panel-handoffs', S.ids['card:bounced0'] as string, /^Handoffs/);
-  await panel('panel-thread', S.ids['card:bounced0'] as string, /^Thread$/);
-  await panel('panel-timeline', S.ids['card:bounced0'] as string, /^Timeline$/);
-  await panel('panel-risk', S.ids['card:rq'] as string, /^Details$/);
-  await panel('panel-timeline-edit', S.ids['card:rq'] as string, /^Timeline$/);
-  await panel('panel-live', 'WEB-10', /^Live shift/);
-  await panel('panel-finalize', S.ids['card:large'] as string, /^Finalize$/);
-  await panel('panel-evidence', 'WEB-1', /^Test evidence/);
-  await panel('panel-outbound', S.ids.card12 as string, /^Updates to/);
-  await panel('panel-outbound-failed', S.ids.card40 as string, /^Updates to/);
-  await panel('panel-published', S.ids.research1 as string, /^Published note/);
-  await open(pPage, `/cards/${S.ids['card:tc']}`);
-  await pPage.getByRole('button', { name: 'Move' }).click();
-  await snap(pPage, 'dlg-move', { sel: pPage.getByRole('dialog') });
-  await pPage.keyboard.press('Escape');
-  await pPage.getByRole('button', { name: 'Cancel card' }).click();
-  await snap(pPage, 'dlg-cancel', { sel: pPage.getByRole('dialog') });
-  await pPage.keyboard.press('Escape');
-  await open(mPage, `/cards/${S.ids['card:maya']}`);
-  await snap(mPage, 'card-maya', { maxH: 1100 });
 });
 
-cap('the decision desk', async () => {
+cap('the desk and the ledger', async () => {
   await open(pPage, '/desk');
-  await snap(pPage, 'desk', { maxH: 1500, cx: { x: 190, width: 900 } });
-  const item = (title: string | RegExp) => pPage.getByRole('article', { name: title });
+  await snap(pPage, 'desk', { maxH: 1500, content: true });
+  const item = (title: string | RegExp) => pPage.getByRole('article', { name: title }).first();
   const shots: Array<[string, string | RegExp]> = [
     ['desk-question', /How long may we keep the personal data/],
     ['desk-outbound', /Approve resolution for Jira SUP-231/],
-    ['desk-failed', /Could not post the update/],
-    ['desk-digest', /Rate the AI news feed digest/],
-    ['desk-taste', /Add a taste rule/],
-    ['desk-devops', /DevOps needs approval/],
     ['desk-large-merge', /Approve merge of/],
-    ['desk-definition', /Approve role "Release manager"/],
-    ['desk-alert', /waiting for a tester/],
+    ['desk-branch', /Which branch is the working branch of notes-app/],
+    ['desk-phase-done', /is done: approve/],
+    ['desk-floor-report', /^Floor report /],
   ];
   for (const [name, title] of shots) {
-    const el = item(title).first();
-    if (await el.count()) await snap(pPage, name, { sel: el });
-    else console.log(`missing desk item for ${name}`);
+    const el = item(title);
+    await expect(el, name).toBeVisible();
+    await snap(pPage, name, { sel: el });
   }
-  await pPage.getByRole('button', { name: 'Add to ledger' }).first().click();
-  await snap(pPage, 'desk-ledger-form', { maxH: 700, noHeader: true, cx: { x: 190, width: 900 } });
-  await pPage.getByRole('button', { name: 'Add to ledger' }).first().click();
-  const closed = pPage.getByTestId('desk-closed');
-  if (await closed.count()) {
-    await closed.getByText(/Answered and closed/).click();
-    await snap(pPage, 'desk-closed', { sel: closed });
-  }
-  // an outbound draft being edited: the diff of the manager's own words
-  const ob = item(/Approve resolution for GitHub example\/web#31/).first();
-  if (await ob.count()) {
-    const box = ob.getByLabel(/Update \(edit it/);
-    const text = await box.inputValue();
-    await box.fill(`${text} The cut-off is 3 pm on weekdays.`);
-    await snap(pPage, 'desk-outbound-edit', { sel: ob });
-    await box.fill(text);
-  }
-  // the unmapped ticket
-  const un = item(/Which project does OPS-77 belong to/).first();
-  if (await un.count()) await snap(pPage, 'desk-unmapped', { sel: un });
-  // the second manager sees the same desk, with the questions of cards she does not own read-only
-  await open(mPage, '/desk');
-  await snap(mPage, 'desk-maya', { maxH: 1400, cx: { x: 190, width: 900 } });
-});
-
-cap('ledger', async () => {
   await open(pPage, '/ledger');
-  await snap(pPage, 'ledger', { noHeader: true, maxH: 1100, cx: { x: 130, width: 1020 } });
-  await pPage.getByLabel('Search', { exact: true }).fill('session');
-  await snap(pPage, 'ledger-search', { noHeader: true, maxH: 600, cx: { x: 130, width: 1020 } });
+  await snap(pPage, 'ledger', { maxH: 1100, content: true });
 });
 
-cap('chat (offline) and chat on a phone', async () => {
-  const gus = await idOfAgent('Gus');
-  void gus;
-  await open(pPage, '/desk');
-  await pPage.getByRole('button', { name: 'Chat', exact: true }).click();
-  const drawer = pPage.getByRole('dialog', { name: 'Chat' });
-  const opt = (await drawer.getByLabel('Agent').locator('option').allInnerTexts()).find((t) =>
-    t.startsWith('Gus'),
-  );
-  if (opt) {
-    await drawer.getByLabel('Agent').selectOption({ label: opt });
-    await drawer.getByRole('button', { name: 'Start chat' }).click();
-    await expect(drawer.getByTestId('chat-offline')).toBeVisible();
-    await drawer.getByLabel('Message').fill('Are you there?');
-    await drawer.getByRole('button', { name: 'Send' }).click();
-    await expect(drawer.getByTestId('chat-error')).toBeVisible();
-    await snap(pPage, 'chat-offline', { sel: drawer });
-  }
-  const thread = (await q<any>(`SELECT id FROM threads WHERE kind='chat' ORDER BY created_at LIMIT 1`))[0];
-  await open(phone, `/chat/${thread.id}`);
-  await snap(phone, 'm-chat', { maxH: 844 });
-});
-
-cap('HR board', async () => {
+cap('agents', async () => {
   await pPage.setViewportSize({ width: 1280, height: 1300 });
   await open(pPage, '/agents');
-  await snap(pPage, 'hr', { maxH: 1700 });
-  await snap(pPage, 'hr-ada', { sel: pPage.getByTestId('agent-Ada') });
-  await snap(pPage, 'hr-grace', { sel: pPage.getByTestId('agent-Grace') });
-  await snap(pPage, 'hr-sal', { sel: pPage.getByTestId('agent-Sal') });
-  const devops = pPage
-    .getByTestId('agents')
-    .getByRole('listitem')
-    .filter({ hasText: 'DevOps engineer' })
-    .first();
-  await snap(pPage, 'hr-devops', { sel: devops });
+  await snap(pPage, 'hr', { maxH: 1300, content: true });
   const recs = pPage.getByTestId('recommendations');
   for (const d of await recs.locator('details').all()) await d.locator('summary').click();
   await snap(pPage, 'hr-recs', { sel: recs });
-  await snap(pPage, 'hr-role-update', { sel: pPage.getByTestId('role-updates') });
-  await pPage.getByTestId('reset-tester').click();
-  await snap(pPage, 'dlg-reset-role', { sel: pPage.getByRole('dialog') });
-  await pPage.keyboard.press('Escape');
-  // hire form, name generator, the unsandboxed warning
   await pPage.getByRole('button', { name: 'Hire agent' }).first().click();
   const form = pPage.getByRole('form', { name: 'Hire agent' });
   await form.getByLabel('Role', { exact: true }).selectOption({ label: 'Builder' });
@@ -1715,130 +1996,221 @@ cap('HR board', async () => {
   await expect(form.getByText('Confirm that you accept')).toBeVisible();
   await snap(pPage, 'dlg-hire-unsandboxed', { sel: pPage.getByRole('dialog') });
   await pPage.keyboard.press('Escape');
-  await pPage.getByRole('button', { name: 'Fire Grace' }).click();
-  await snap(pPage, 'dlg-fire', { sel: pPage.getByRole('dialog') });
+  await pPage.getByRole('button', { name: 'Allowed projects of Ada' }).click();
+  await snap(pPage, 'dlg-allowlist', { sel: pPage.getByRole('dialog') });
   await pPage.keyboard.press('Escape');
-  await pPage.getByRole('button', { name: 'Change model of Ada' }).click();
-  await snap(pPage, 'dlg-model', { sel: pPage.getByRole('dialog') });
-  await pPage.keyboard.press('Escape');
-  await pPage.getByRole('button', { name: 'Change role of Ada' }).click();
-  await snap(pPage, 'dlg-role', { sel: pPage.getByRole('dialog') });
-  await pPage.keyboard.press('Escape');
-  await open(pPage, '/agents?hire=tester');
-  await snap(pPage, 'dlg-hire-tester', { sel: pPage.getByRole('dialog') });
-  // the second manager sees the owner's agents read-only
-  await open(mPage, '/agents');
-  await snap(mPage, 'hr-maya', { maxH: 1500 });
 });
 
-cap('metrics', async () => {
-  await open(pPage, '/metrics');
-  await snap(pPage, 'metrics', { noHeader: true, maxH: 1400, cx: { x: 130, width: 1020 } });
-});
-
-cap('intake', async () => {
-  await open(pPage, '/intake');
-  await snap(pPage, 'intake-new', { maxH: 600, noHeader: true, cx: { x: 290, width: 700 } });
-  await pPage.getByLabel('Ticket or need').fill('SUP-231');
-  await snap(pPage, 'intake-typed', { maxH: 330, noHeader: true, cx: { x: 290, width: 700 } });
-  await open(pPage, `/intake/${S.ids.intakeJira}`);
-  await snap(pPage, 'intake-view', { maxH: 800, noHeader: true, cx: { x: 130, width: 1020 } });
-  await open(pPage, `/intake/${S.ids.intakeUnmapped}`);
-  await snap(pPage, 'intake-unmapped', { maxH: 800, noHeader: true, cx: { x: 130, width: 1020 } });
-  await open(pPage, `/intake/${S.ids.intakeGh12}`);
-  await snap(pPage, 'intake-gh', { maxH: 800, noHeader: true, cx: { x: 130, width: 1020 } });
-});
-
-cap('feeds, schedules, research', async () => {
-  const interestUrl = `/interests/${S.ids['interest:NEWS']}`;
-  await open(pPage, `${interestUrl}?tab=digest`);
-  await snap(pPage, 'feed', { maxH: 1700, noHeader: true, cx: { x: 190, width: 900 } });
-  await open(pPage, `${interestUrl}?tab=runs`);
-  await snap(pPage, 'interest-runs', { maxH: 1400, noHeader: true, cx: { x: 190, width: 900 } });
-  await open(pPage, `${interestUrl}?tab=settings`);
-  await snap(pPage, 'interest-settings', { maxH: 1900, noHeader: true, cx: { x: 190, width: 900 } });
-  await open(pPage, `${interestUrl}?tab=taste`);
-  await snap(pPage, 'interest-taste', { maxH: 1100, noHeader: true, cx: { x: 190, width: 900 } });
-  await open(pPage, '/schedules');
-  await snap(pPage, 'schedules', { maxH: 1500, noHeader: true, cx: { x: 190, width: 900 } });
-  await open(pPage, `/p/SHOOT/board`);
-});
-
-cap('projects, sharing, vaults', async () => {
+cap('projects, settings, phases, conversion', async () => {
   await open(pPage, '/projects');
-  await snap(pPage, 'projects', { maxH: 520, noHeader: true, cx: { x: 190, width: 900 } });
   await pPage.getByRole('button', { name: 'New project' }).click();
   await snap(pPage, 'dlg-new-project', { sel: pPage.getByRole('dialog') });
   await pPage.keyboard.press('Escape');
+  await pPage.setViewportSize({ width: 1280, height: 1000 });
   await open(pPage, `/projects/${S.ids['project:WEB']}/settings`);
-  await snap(pPage, 'project-settings', { maxH: 1800, noHeader: true, cx: { x: 250, width: 780 } });
-  const maya = pPage.getByTestId('members').getByRole('listitem').filter({ hasText: 'Maya' });
-  await maya.getByRole('button').first().click();
-  await expect(pPage.getByTestId('removal-preview')).toBeVisible();
-  await snap(pPage, 'dlg-remove-member', { sel: pPage.getByRole('dialog') });
-  await pPage.keyboard.press('Escape');
-  await open(mPage, '/projects');
-  await snap(mPage, 'projects-maya', { maxH: 520, noHeader: true, cx: { x: 190, width: 900 } });
-  await open(mPage, `/projects/${S.ids['project:WEB']}/settings`);
-  await snap(mPage, 'project-settings-maya', { maxH: 1500, noHeader: true, cx: { x: 250, width: 780 } });
+  await snap(pPage, 'project-settings', { maxH: 1000, content: true });
+  await snap(pPage, 'budget-panel', { sel: section(pPage, /Monthly budget/) });
   await open(pPage, '/settings/vaults');
-  await snap(pPage, 'vaults', { maxH: 1500, noHeader: true, cx: { x: 190, width: 900 } });
+  await snap(pPage, 'vaults', { maxH: 1300, content: true });
+  await open(pPage, `/p/WEB/phases/${String(S.ids['phase:ref']).replace(/^.*-P/, '')}`);
+  await snap(pPage, 'phase', { maxH: 1300, content: true });
+  await open(pPage, '/p/SHOOT/research');
+  await snap(pPage, 'research-tab', { maxH: 1200, content: true });
+  await open(pPage, '/p/SHOOT/board');
+  await pPage
+    .getByRole('button', { name: /Convert to project/ })
+    .first()
+    .click();
+  await snap(pPage, 'dlg-convert', { sel: pPage.getByRole('dialog') });
+  await pPage.keyboard.press('Escape');
+  await open(pPage, `/projects/${S.ids['project:WEB']}/settings`);
+  await pPage.getByRole('button', { name: 'Archive project' }).click();
+  await snap(pPage, 'dlg-archive', { sel: pPage.getByRole('dialog') });
+  await pPage.keyboard.press('Escape');
 });
 
-cap('workstations and the DevOps engineer', async () => {
+cap('budgets: a project over its budget (restored at the end)', async () => {
+  const web = S.ids['project:WEB'] as string;
+  const p = await pieter();
+  const spend = Number(S.ids.spendWeb);
+  const monthly = Number(S.ids.budgetWeb);
+  try {
+    expect(
+      (await p.put(`/api/projects/${web}/budget`, { data: { monthly: Math.max(0.01, spend * 0.9) } })).ok(),
+    ).toBeTruthy();
+    await open(pPage, '/p/WEB/board');
+    await expect(pPage.getByTestId('budget-banner')).toBeVisible({ timeout: 30_000 });
+    await snap(pPage, 'budget-banner', { maxH: 420, content: true });
+  } finally {
+    expect((await p.put(`/api/projects/${web}/budget`, { data: { monthly } })).ok()).toBeTruthy();
+  }
+  await open(pPage, '/costs');
+  await snap(pPage, 'costs', { maxH: 1500, content: true });
+});
+
+cap('workstations and the installer', async () => {
+  await pPage.setViewportSize({ width: 1280, height: 1200 });
   await open(pPage, '/workstations');
-  for (const card of await pPage
-    .locator('[data-testid^="workstation-"]:has([data-testid="workstation-toggle"])')
-    .all())
-    await expandWorkstation(card);
-  await snap(pPage, 'workstations', { maxH: 1900, noHeader: true, cx: { x: 190, width: 900 } });
-  await snap(pPage, 'ws-sandbox', { sel: pPage.getByTestId('workstation-Build mini-PC') });
-  const dv = pPage.getByTestId("workstation-Pieter's desktop (WSL2)").locator('section').first();
-  await snap(pPage, 'ws-devops', { sel: dv });
-  await pPage.getByRole('button', { name: 'Pair workstation' }).click();
-  await pPage.getByRole('button', { name: 'Generate pairing code' }).click();
-  await expect(pPage.getByTestId('pairing-code')).toBeVisible();
-  await snap(pPage, 'dlg-pair', { sel: pPage.getByRole('dialog') });
+  await expandWorkstation(pPage.getByTestId("workstation-Pieter's desktop (WSL2)"));
+  await snap(pPage, 'ws-hygiene', { sel: pPage.getByTestId("hygiene-Pieter's desktop (WSL2)") });
+  await open(mPage, '/workstations');
+  const laptop = mPage.getByTestId("workstation-Maya's laptop");
+  await expect(laptop).toBeVisible();
+  await expandWorkstation(laptop);
+  await snap(mPage, 'ws-offline', { sel: laptop });
+  // the wizard (the script is never run: the progress is reported the way the script does it)
+  await open(pPage, '/workstations');
+  await pPage.setViewportSize({ width: 1280, height: 1800 });
+  await pPage.getByTestId('add-workstation-button').click();
+  const wiz = pPage.getByRole('dialog');
+  await expect(wiz.getByTestId('install-command')).toBeVisible();
+  await snap(pPage, 'installer-choose', { sel: wiz, crop: { top: 0, height: 330 } });
+  const command = (await pPage.getByTestId('install-command').innerText()).trim();
+  const token = /\/install\/([^/]+)\//.exec(command)?.[1] as string;
+  await snap(pPage, 'installer-command', { sel: wiz, crop: { top: 330, height: 640 } });
+  const report = (body: Record<string, string>) =>
+    fetch(`${BASE_URL}/install/${token}/progress`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  await report({ step: 'installer', status: 'start', detail: 'linux' });
+  await report({ step: 'Paired', status: 'ok', detail: 'Office PC' });
+  for (const [step, status, detail] of [
+    ['doctor:node', 'ok', 'v22.23.2'],
+    ['doctor:git', 'ok', 'git version 2.47.1'],
+    ['doctor:claude', 'ok', 'signed in'],
+    ['doctor:docker', 'warn', 'not found (optional)'],
+  ] as const)
+    await report({ step, status, detail });
+  await expect(pPage.getByTestId('doctor-node')).toBeVisible({ timeout: 20_000 });
+  await snap(pPage, 'installer-progress', { sel: wiz, crop: { top: 940, height: 520 } });
   await pPage.keyboard.press('Escape');
 });
 
 cap('organization', async () => {
-  await open(pPage, '/org');
-  await snap(pPage, 'org-roles', { maxH: 1800 });
-  await pPage.getByRole('button', { name: 'Extend reviewer' }).click();
-  await snap(pPage, 'dlg-extend', { sel: pPage.getByRole('dialog') });
+  await pPage.setViewportSize({ width: 1280, height: 1100 });
+  await open(pPage, '/settings/org');
+  await snap(pPage, 'org-general', { maxH: 1000, content: true });
+  await open(pPage, '/settings/org?tab=members');
+  await snap(pPage, 'org-members', { maxH: 900, content: true });
+  await open(pPage, '/settings/org?tab=invitations');
+  await snap(pPage, 'org-invitations', { maxH: 800, content: true });
+  await pPage
+    .getByTestId('invite-member')
+    .click()
+    .catch(() => undefined);
+  await open(pPage, '/settings/org?tab=members');
+  await pPage.getByTestId('invite-member').click();
+  await snap(pPage, 'dlg-invite', { sel: pPage.getByRole('dialog') });
   await pPage.keyboard.press('Escape');
+  await open(pPage, '/settings/org?tab=guests');
+  await snap(pPage, 'org-guests', { maxH: 700, content: true });
+  await open(pPage, '/settings/org?tab=plan');
+  await snap(pPage, 'org-plan', { maxH: 900, content: true });
+  await open(pPage, '/org-chart');
+  await snap(pPage, 'org-chart', { maxH: 1100, content: true });
+  await open(pPage, '/org');
+  await snap(pPage, 'org-roles', { maxH: 1300, content: true });
   await open(pPage, '/org?tab=workflows');
   await pPage.getByRole('button', { name: 'View support v1' }).click();
-  await snap(pPage, 'org-workflows', { maxH: 1800 });
-  await pPage.getByRole('button', { name: 'New custom workflow' }).click();
-  const editor = pPage.getByTestId('workflow-editor');
-  await editor.getByLabel('Key', { exact: true }).fill('bad-flow');
-  await editor.getByLabel('Name', { exact: true }).fill('Bad flow');
-  await editor.getByRole('button', { name: 'Add stage' }).click();
-  await snap(pPage, 'org-workflow-editor', { maxH: 1800 });
-  await open(pPage, '/org?tab=departments');
-  await snap(pPage, 'org-departments', { maxH: 800 });
-  await open(mPage, `/org?project=${S.ids['project:WEB']}`);
-  await snap(mPage, 'org-maya', { maxH: 900 });
-  await open(pPage, '/org?tab=roles');
-  await pPage.getByRole('button', { name: 'New custom role' }).click();
-  await snap(pPage, 'org-role-editor', { maxH: 1800 });
+  await snap(pPage, 'org-workflows', { maxH: 1500, content: true });
+  await open(pPage, '/settings');
+  await snap(pPage, 'settings', { maxH: 1300, content: true });
+  await pPage.getByRole('button', { name: 'Set up', exact: true }).click();
+  await snap(pPage, 'security-2fa', { sel: pPage.getByRole('dialog') });
+});
+
+cap('schedules, interests, intake', async () => {
+  await pPage.setViewportSize({ width: 1280, height: 1200 });
+  await open(pPage, '/schedules');
+  await snap(pPage, 'schedules', { maxH: 1400, content: true });
+  await pPage.getByRole('button', { name: 'New schedule' }).first().click();
+  await snap(pPage, 'schedule-wizard', { sel: pPage.getByRole('dialog') });
+  await pPage.keyboard.press('Escape');
+  await open(pPage, '/interests');
+  await snap(pPage, 'interests', { maxH: 1100, content: true });
+  const interestUrl = `/interests/${S.ids['interest:NEWS']}`;
+  await open(pPage, `${interestUrl}?tab=digest`);
+  await snap(pPage, 'feed', { maxH: 1500, content: true });
+  await open(pPage, `${interestUrl}?tab=settings`);
+  await snap(pPage, 'interest-settings', { maxH: 1000, content: true });
+  await open(pPage, `${interestUrl}?tab=taste`);
+  await snap(pPage, 'interest-taste', { maxH: 1000, content: true });
+  await open(pPage, `/intake/${S.ids.intakeJira}`);
+  await snap(pPage, 'intake-view', { maxH: 900, content: true });
+});
+
+cap('a Member and a Guest', async () => {
+  await open(nPage, '/projects');
+  await snap(nPage, 'member-projects', { maxH: 700, content: true });
+  await open(nPage, '/settings/org?tab=members');
+  await snap(nPage, 'member-org', { maxH: 800, content: true });
+  await open(mPage, '/projects');
+  await expect(mPage.getByTestId('project-invitations')).toBeVisible();
+  await snap(mPage, 'guest-invitation', { sel: mPage.getByTestId('project-invitations') });
+  await open(mPage, '/p/WEB/board');
+  await snap(mPage, 'guest-project', { maxH: 800 });
+});
+
+cap('contact us and my requests', async () => {
+  await open(mPage, '/desk');
+  await mPage.getByTestId('user-menu').click();
+  await mPage.getByTestId('menu-contact').click();
+  const dlg = mPage.getByRole('dialog', { name: 'Contact us' });
+  await expect(dlg.getByTestId('contact-screenshot')).toBeVisible({ timeout: 30_000 });
+  await dlg.getByTestId('contact-kind').selectOption('question');
+  await dlg.getByTestId('contact-subject').fill('Can a guest see the budget?');
+  await dlg.getByTestId('contact-message').fill('A project of mine was paused and I could not see why.');
+  await snap(mPage, 'contact-us', { sel: dlg });
+  await mPage.keyboard.press('Escape');
+  await open(mPage, '/help/requests');
+  await snap(mPage, 'my-requests', { maxH: 700, content: true });
+});
+
+cap('the platform area', async () => {
+  const { freshTotp } = await import('../support/totp.ts');
+  const ctx = await pPage
+    .context()
+    .browser()!
+    .newContext({ viewport: { width: 1280, height: 900 } });
+  const s = await ctx.newPage();
+  await s.goto('/login');
+  await s.getByLabel('Email').fill(SUPER_DEMO.email);
+  await s.getByLabel('Password').fill(SUPER_DEMO.password);
+  await s.getByRole('button', { name: 'Sign in' }).click();
+  await s.getByTestId('login-code').fill(await freshTotp(S.ids.superSecret as string));
+  await s.getByRole('button', { name: 'Verify' }).click();
+  await expect(s).toHaveURL(/\/platform/);
+  await open(s, '/platform');
+  await snap(s, 'platform-orgs', { maxH: 800, content: true });
+  await s
+    .getByRole('link', { name: /Harbor Cafe/ })
+    .first()
+    .click();
+  await s.waitForLoadState('networkidle');
+  await snap(s, 'platform-org-detail', { maxH: 1100, content: true });
+  await open(s, '/platform/invitations');
+  await snap(s, 'platform-invitations', { maxH: 900, content: true });
+  await open(s, '/platform/users');
+  await snap(s, 'platform-users', { maxH: 900, content: true });
+  await open(s, '/platform/support');
+  await snap(s, 'platform-support', { maxH: 900, content: true });
+  await s.getByTestId('support-inbox').getByRole('link').first().click();
+  await s.waitForLoadState('networkidle');
+  await snap(s, 'platform-ticket', { maxH: 1200, content: true });
+  await open(s, '/platform/audit');
+  await snap(s, 'platform-audit', { maxH: 900, content: true });
+  await ctx.close();
 });
 
 cap('on a phone', async () => {
-  const shots: Array<[string, string]> = [
+  for (const [name, path] of [
     ['m-board', '/p/WEB/board'],
     ['m-desk', '/desk'],
     ['m-card', `/cards/${S.ids['card:guest']}`],
-    ['m-hr', '/agents'],
-    ['m-new-card', '/cards/new?project=WEB'],
-    ['m-workstations', '/workstations'],
-    ['m-ledger', '/ledger'],
-    ['m-metrics', '/metrics'],
-  ];
-  for (const [name, path] of shots) {
+  ] as const) {
     await open(phone, path);
-    await snap(phone, name, { maxH: 1000 });
+    await snap(phone, name, { maxH: 900 });
   }
 });
