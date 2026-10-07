@@ -29,8 +29,8 @@ export const costProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, card_id, phase_id, kind, model,
-         tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, cost_usd_micros, reported_usd_micros, ended_at, cost_stamped)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        ON CONFLICT (shift_id) DO NOTHING`,
       [
         p.shiftId,
@@ -48,6 +48,7 @@ export const costProjectors: Record<string, Projector> = {
         cost,
         p.usage.costUsd === undefined ? null : Math.round(p.usage.costUsd * 1_000_000),
         e.createdAt,
+        p.costMicros !== undefined,
       ],
     );
   },

@@ -122,10 +122,10 @@ describe('usage capture and pricing', () => {
     expect(Number(row?.cost_usd_micros)).toBe(12_500_000);
     expect(row).toMatchObject({ model: 'claude-opus-4-5', kind: 'card', card_id: a.card.id });
     expect(row?.project_id).toBe(w.projectId);
-    // Without a reported model the agent's configured one prices it: Sonnet 1M x $3 + 1M cache read x $0.30
+    // Without a reported model the agent's configured one prices it: Sonnet 1M x $2 + 1M cache read x $0.20
     const b = await shiftWith({ inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 1_000_000 });
     const rb = (await q('SELECT * FROM shift_costs WHERE shift_id=$1', [b.shiftId]))[0];
-    expect(Number(rb?.cost_usd_micros)).toBe(3_300_000);
+    expect(Number(rb?.cost_usd_micros)).toBe(2_200_000);
     expect(rb?.model).toBe('claude-sonnet-4-5');
     // The shift row itself keeps the tokens (the existing projection)
     const s = (await q('SELECT tokens_input, tokens_cache_read FROM shifts WHERE id=$1', [b.shiftId]))[0];
@@ -136,7 +136,7 @@ describe('usage capture and pricing', () => {
     const c = await shiftWith({ inputTokens: 1000, outputTokens: 1000, costUsd: 0.0123 });
     const row = (await q('SELECT * FROM shift_costs WHERE shift_id=$1', [c.shiftId]))[0];
     expect(Number(row?.reported_usd_micros)).toBe(12_300);
-    expect(Number(row?.cost_usd_micros)).toBe(1000 * 3 + 1000 * 15);
+    expect(Number(row?.cost_usd_micros)).toBe(1000 * 2 + 1000 * 10);
   });
 
   it('counts chats: to the card project when card-linked, else to the org overhead bucket', async () => {
@@ -194,9 +194,9 @@ describe('usage capture and pricing', () => {
     )[0];
     expect(a).toMatchObject({ project_id: w.projectId, kind: 'chat' });
     expect(b?.project_id).toBeNull();
-    expect(Number(b?.cost_usd_micros)).toBe(3_000_000);
+    expect(Number(b?.cost_usd_micros)).toBe(2_000_000);
     const rep = await ok<any>(owner('GET', '/api/costs'));
-    expect(rep.overhead.costMicros).toBeGreaterThanOrEqual(3_000_000);
+    expect(rep.overhead.costMicros).toBeGreaterThanOrEqual(2_000_000);
   });
 });
 
@@ -232,14 +232,14 @@ describe('roll-ups', () => {
     // the card joins the phase afterwards: the roll-up follows the card
     await ok(owner('PUT', `/api/cards/${y.card.id}/phase`, { phaseId: phase.id }));
     const p = await ok<any>(owner('GET', `/api/phases/${phase.id}`));
-    expect(p.spend.totalMicros).toBe(3_000_000);
+    expect(p.spend.totalMicros).toBe(2_000_000);
     // a BA task cost
     await q(
       `INSERT INTO shift_costs (shift_id, org_id, agent_id, project_id, phase_id, kind, model, cost_usd_micros, ended_at)
        VALUES ($1,$2,(SELECT id FROM agents WHERE name='Ben'),$3,$4,'ba_task','sonnet',500000,now())`,
       [randomUUID(), await orgId(), w.projectId, phase.id],
     );
-    expect((await ok<any>(owner('GET', `/api/phases/${phase.id}`))).spend.totalMicros).toBe(3_500_000);
+    expect((await ok<any>(owner('GET', `/api/phases/${phase.id}`))).spend.totalMicros).toBe(2_500_000);
     // an interest
     const i = await createFeedInterest(w, { name: 'Costs interest' });
     await addSpend(i.projectId, 2_000_000);
@@ -643,11 +643,21 @@ describe('the migration backfill prices history like the projector', () => {
     const { join } = await import('node:path');
     const { defaultMigrationsDir } = await import('../src/db/migrate.ts');
     const { costUsdMicros } = await import('@aom/shared');
-    const sql = await readFile(join(defaultMigrationsDir(), '1317_costs_budgets.sql'), 'utf8');
-    const backfill = sql.slice(sql.indexOf('INSERT INTO shift_costs'));
+    const sql1317 = await readFile(join(defaultMigrationsDir(), '1317_costs_budgets.sql'), 'utf8');
+    const sql1318 = await readFile(join(defaultMigrationsDir(), '1318_reprice_shift_costs.sql'), 'utf8');
+    // 1317 inserts the missing rows (at the prices of its day); 1318 reprices every table-priced row.
+    const insertRows = sql1317.slice(sql1317.indexOf('INSERT INTO shift_costs'));
+    const backfill = `${insertRows}\n${sql1318.slice(sql1318.indexOf('UPDATE shift_costs'))}`;
     const base = await shiftWith({ inputTokens: 1, outputTokens: 1 });
     const shift = (await q('SELECT * FROM shifts WHERE id=$1', [base.shiftId]))[0] as Record<string, any>;
-    const cases = ['claude-opus-4-5', 'CLAUDE-SONNET-4-5', 'claude-haiku-4-5', 'mock', 'gpt-x'];
+    const cases = [
+      'claude-fable-5-1',
+      'claude-opus-4-5',
+      'CLAUDE-SONNET-4-5',
+      'claude-haiku-4-5',
+      'mock',
+      'gpt-x',
+    ];
     const tokens = [
       { i: 123_457, o: 98_765, cr: 5, cw: 7 },
       { i: 5, o: 3, cr: 5, cw: 5 },

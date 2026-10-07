@@ -15,6 +15,13 @@ describe('price table', () => {
   it('matches a model family by substring and prices unknown models like Sonnet', () => {
     expect(priceFor('claude-opus-4-5').label).toBe('Opus');
     expect(priceFor('SONNET').label).toBe('Sonnet');
+    expect(priceFor('claude-fable-5-1').label).toBe('Fable');
+    expect(priceFor('claude-fable-5-1')).toMatchObject({
+      input: 10,
+      output: 50,
+      cacheRead: 1,
+      cacheWrite: 12.5,
+    });
     expect(priceFor('claude-haiku-4-5-20251001').label).toBe('Haiku');
     expect(priceFor('mock-model').input).toBe(priceFor('sonnet').input);
     expect(modelFamily('gpt-x')).toBe('Other (priced as Sonnet)');
@@ -22,8 +29,9 @@ describe('price table', () => {
   });
 
   it('prices tokens exactly in micro-USD (list price per million tokens x tokens)', () => {
-    // Sonnet: 3 + 15 per million, cache read 0.30, cache write 3.75.
-    expect(costUsdMicros('sonnet', { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(18_000_000);
+    // Sonnet: 2 + 10 per million, cache read 0.20, cache write 2.50.
+    expect(costUsdMicros('sonnet', { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(12_000_000);
+    expect(costUsdMicros('fable', { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(60_000_000);
     expect(
       costUsdMicros('sonnet', {
         inputTokens: 0,
@@ -31,7 +39,7 @@ describe('price table', () => {
         cacheReadTokens: 1_000_000,
         cacheWriteTokens: 1_000_000,
       }),
-    ).toBe(4_050_000);
+    ).toBe(2_700_000);
     expect(costUsdMicros('opus', { inputTokens: 1000, outputTokens: 200 })).toBe(5000 + 5000);
     // 5 tokens of cache read at 0.1 = 0.5 micro: rounds half up, exactly.
     expect(costUsdMicros('haiku', { inputTokens: 0, outputTokens: 0, cacheReadTokens: 5 })).toBe(1);

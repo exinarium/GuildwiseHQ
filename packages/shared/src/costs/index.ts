@@ -18,18 +18,21 @@ export interface ModelPrice {
 }
 
 /**
- * DEFAULT price table: Anthropic's published list prices in USD per million tokens (cache writes at the 5-minute
- * rate, cache reads at 10% of the input price). These are DEFAULTS, not billing data: the real invoice depends on the
- * plan, discounts and batch/priority tiers. The table is deliberately plain data in shared config so the super admin
- * can edit it later (a platform setting that stamps `costMicros` on new `ShiftEnded` events; history keeps the price it
- * was recorded at). Order matters: the first match wins; the last entry is the fallback for an unknown model.
+ * DEFAULT price table: Anthropic's list prices in USD per million tokens as of September 2026 (cache writes at the
+ * 5-minute rate, 1.25x the input price; cache reads at 10% of the input price). These are DEFAULTS, not billing data:
+ * verify them against anthropic.com/pricing, because the real invoice depends on the plan, discounts and
+ * batch/priority tiers. The table is deliberately plain data in shared config so the super admin can edit it later (a
+ * platform setting that stamps `costMicros` on new `ShiftEnded` events; history keeps the price it was recorded at).
+ * Models are mapped by family (fable, opus, sonnet, haiku). Order matters: the first match wins; the last entry is the
+ * fallback for an unknown model. The SQL in migration 1318 mirrors this table.
  */
 export const DEFAULT_MODEL_PRICES: readonly ModelPrice[] = [
+  { match: 'fable', label: 'Fable', input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
   { match: 'opus', label: 'Opus', input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  { match: 'sonnet', label: 'Sonnet', input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  { match: 'sonnet', label: 'Sonnet', input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   { match: 'haiku', label: 'Haiku', input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   // Unknown models (the mock runtime, other providers) are priced like Sonnet so spend is never silently zero.
-  { match: '', label: 'Other (priced as Sonnet)', input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  { match: '', label: 'Other (priced as Sonnet)', input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
 ];
 
 export interface TokenCounts {
