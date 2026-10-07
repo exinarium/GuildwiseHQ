@@ -117,6 +117,13 @@ export function CardTile({
             </Badge>
           )}
           <BackoffBadge backoff={card.backoff} />
+          {card.workflowKey && (
+            <span data-testid="workflow-chip">
+              <Badge tone="violet" title={`Runs on the ${card.workflowKey} workflow`}>
+                {card.workflowKey === 'research' ? 'Research' : card.workflowKey}
+              </Badge>
+            </span>
+          )}
           {card.phase && (
             <span data-testid="phase-chip">
               <Badge tone={card.phase.assignment === 'proposed' ? 'amber' : 'blue'} title="Phase">

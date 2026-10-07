@@ -50,6 +50,7 @@ export function phasePath(ref: string): string {
 export const OUTCOME_LABEL = {
   finalized: 'finalized',
   closed_manually: 'closed by hand',
+  published: 'note published',
   cancelled: 'cancelled',
   waiting_merge: 'waiting to be merged',
 } as const;

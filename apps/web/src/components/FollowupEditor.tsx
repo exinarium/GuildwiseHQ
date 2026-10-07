@@ -47,7 +47,10 @@ export function FollowupEditor({
   targets,
   readOnly = false,
   details,
+  unavailable = {},
 }: {
+  /** Kinds the project cannot run (no repository, no test stage), with the reason: greyed out (`useFollowupAvailability`). */
+  unavailable?: { deploy?: string | undefined; regression?: string | undefined };
   value: Spec[];
   onChange?: (next: Spec[]) => void;
   targets: DeployTargetDto[];
@@ -227,12 +230,18 @@ export function FollowupEditor({
       {!readOnly && (
         <>
           <div className="flex flex-wrap gap-2">
-            <Button data-testid="add-deploy" disabled={value.length >= 10} onClick={() => add('deploy')}>
+            <Button
+              data-testid="add-deploy"
+              disabled={value.length >= 10 || !!unavailable.deploy}
+              title={unavailable.deploy}
+              onClick={() => add('deploy')}
+            >
               Add deploy
             </Button>
             <Button
               data-testid="add-regression"
-              disabled={value.length >= 10}
+              disabled={value.length >= 10 || !!unavailable.regression}
+              title={unavailable.regression}
               onClick={() => add('regression')}
             >
               Add regression run
@@ -241,6 +250,11 @@ export function FollowupEditor({
               Add custom
             </Button>
           </div>
+          {(unavailable.deploy || unavailable.regression) && (
+            <p className="text-xs text-subtle" data-testid="followup-unavailable">
+              {unavailable.deploy ?? unavailable.regression}
+            </p>
+          )}
           {problems.length > 0 && (
             <ul
               role="alert"

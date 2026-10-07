@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  BookOpenText,
   BriefcaseBusiness,
   Building2,
   ChartColumn,
@@ -38,6 +39,8 @@ export interface NavSection {
 export function buildNav(opts: {
   projectKey: string | null;
   isFeed: boolean;
+  /** The current project has published research notes or started as research: it gets a Research entry. */
+  hasResearch?: boolean;
   /** Owner or Admin of the active organization. */
   canManage?: boolean;
   /** Feature flags of the active organization (a switched-off feature leaves the nav; its data is kept). */
@@ -48,7 +51,7 @@ export function buildNav(opts: {
   sections: NavSection[];
   footer: NavEntry[];
 } {
-  const { projectKey, isFeed, canManage = false, features = {} } = opts;
+  const { projectKey, isFeed, hasResearch = false, canManage = false, features = {} } = opts;
   const on = (f: string) => features[f] !== false;
   const work: NavEntry[] = [
     {
@@ -66,6 +69,15 @@ export function buildNav(opts: {
       to: `/p/${projectKey}/feed`,
       icon: Rss,
       match: (p) => p.endsWith('/feed'),
+    });
+  if (hasResearch && projectKey)
+    work.push({
+      id: 'research',
+      label: 'Research',
+      to: `/p/${projectKey}/research`,
+      icon: BookOpenText,
+      testId: 'nav-research',
+      match: (p) => p.endsWith('/research'),
     });
   work.push({ id: 'desk', label: 'Desk', to: '/desk', icon: Inbox });
   if (on('integrations') && canManage)

@@ -4,6 +4,7 @@ import { Link } from 'react-router';
 import { useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
 import { useDeployTargets, useReopenPhase, useSetPhaseFollowups } from '../api/queries/phases.ts';
 import { OUTCOME_LABEL, phasePath, specOf } from '../lib/phases.ts';
+import { useFollowupAvailability } from '../lib/projectWorkflow.ts';
 import { FollowupEditor, followupProblems } from './FollowupEditor.tsx';
 import { Button, Dialog, ErrorBox, TextArea } from './ui.tsx';
 
@@ -16,6 +17,7 @@ export function PhaseDeskItem({ item }: { item: DeskItemDto }) {
   const resolve = useResolveDeskItem();
   const dismiss = useDismissDeskItem();
   const targets = useDeployTargets(item.projectId ?? undefined);
+  const unavailable = useFollowupAvailability(item.projectId ?? undefined);
   const save = useSetPhaseFollowups(phase?.phaseId ?? '');
   const reopen = useReopenPhase(phase?.phaseId ?? '');
   const [editOpen, setEditOpen] = useState(false);
@@ -158,7 +160,7 @@ export function PhaseDeskItem({ item }: { item: DeskItemDto }) {
         description="They are saved before you approve."
       >
         <div className="flex flex-col gap-3" data-testid="edit-followups-dialog">
-          <FollowupEditor value={draft ?? specs} onChange={setDraft} targets={t} />
+          <FollowupEditor unavailable={unavailable} value={draft ?? specs} onChange={setDraft} targets={t} />
           <ErrorBox error={save.error} />
           <div className="flex justify-end gap-2">
             <Button onClick={() => setEditOpen(false)}>Cancel</Button>

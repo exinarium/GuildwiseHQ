@@ -28,6 +28,7 @@ import { PlatformInvitations } from './pages/platform/PlatformInvitations.tsx';
 import { PlatformOrgDetail } from './pages/platform/PlatformOrgDetail.tsx';
 import { PlatformOrgs } from './pages/platform/PlatformOrgs.tsx';
 import { PlatformUsers } from './pages/platform/PlatformUsers.tsx';
+import { ResearchTab } from './pages/ResearchTab.tsx';
 import { Schedules } from './pages/Schedules.tsx';
 import { Settings } from './pages/Settings.tsx';
 import { Vaults } from './pages/Vaults.tsx';
@@ -51,6 +52,7 @@ export const routes = [
       { path: '/', element: <Home /> },
       { path: '/p/:projectKey/board', element: <Board /> },
       { path: '/p/:projectKey/feed', element: <FeedProject /> },
+      { path: '/p/:projectKey/research', element: <ResearchTab /> },
       { path: '/p/:projectKey/phases/:number', element: <Phase /> },
       { path: '/schedules', element: <Schedules /> },
       { path: '/interests', element: <Interests /> },

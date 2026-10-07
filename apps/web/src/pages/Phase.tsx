@@ -29,6 +29,7 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { OUTCOME_LABEL, PHASE_STATUS_LABEL, phaseTone, specOf } from '../lib/phases.ts';
+import { useFollowupAvailability } from '../lib/projectWorkflow.ts';
 import { formatDateTime } from '../lib/time.ts';
 
 /** One phase: its cards, follow-ups (editable until approved), the BA's reports and the thread of progress notes. */
@@ -346,6 +347,7 @@ function Followups({
   targets: import('@aom/shared').DeployTargetDto[];
 }) {
   const save = useSetPhaseFollowups(phase.id);
+  const unavailable = useFollowupAvailability(phase.projectId);
   const server = phase.followupDetails.map(specOf);
   const [draft, setDraft] = useState<FollowupSpec[] | null>(null);
   const list = draft ?? server;
@@ -354,7 +356,7 @@ function Followups({
       <h2 className="mb-2 text-lg font-semibold text-fg">Follow-ups</h2>
       {phase.canEditFollowups ? (
         <>
-          <FollowupEditor value={list} onChange={setDraft} targets={targets} />
+          <FollowupEditor unavailable={unavailable} value={list} onChange={setDraft} targets={targets} />
           <ErrorBox error={save.error} />
           <div className="mt-2 flex items-center gap-2">
             <Button

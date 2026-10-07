@@ -9,6 +9,7 @@ import {
   useSetFollowupDefaults,
 } from '../api/queries/phases.ts';
 import { PHASE_STATUS_LABEL, phasePath, phaseTone, withoutIds } from '../lib/phases.ts';
+import { useFollowupAvailability } from '../lib/projectWorkflow.ts';
 import { FollowupEditor, followupProblems } from './FollowupEditor.tsx';
 import { Badge, Button, Dialog, ErrorBox, Panel, TextArea, TextInput } from './ui.tsx';
 
@@ -61,6 +62,7 @@ function NewPhaseDialog({
 }) {
   const defaults = useFollowupDefaults(projectId);
   const targets = useDeployTargets(projectId);
+  const unavailable = useFollowupAvailability(projectId);
   const create = useCreatePhase(projectId);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -109,7 +111,7 @@ function NewPhaseDialog({
         />
         <div>
           <h3 className="mb-1 text-xs font-medium text-muted">Follow-ups after the phase</h3>
-          <FollowupEditor value={list} onChange={setFollowups} targets={t} />
+          <FollowupEditor unavailable={unavailable} value={list} onChange={setFollowups} targets={t} />
         </div>
         {err && name.trim() && (
           <p role="alert" className="text-xs font-medium text-danger">
@@ -132,6 +134,7 @@ function NewPhaseDialog({
 export function FollowupDefaultsPanel({ projectId }: { projectId: string }) {
   const defaults = useFollowupDefaults(projectId);
   const targets = useDeployTargets(projectId);
+  const unavailable = useFollowupAvailability(projectId);
   const save = useSetFollowupDefaults(projectId);
   const [draft, setDraft] = useState<FollowupSpec[] | null>(null);
   const list = draft ?? defaults.data ?? [];
@@ -142,7 +145,7 @@ export function FollowupDefaultsPanel({ projectId }: { projectId: string }) {
       <p className="mb-2 text-xs text-subtle">
         New phases start with these. Each phase can still change them until you approve.
       </p>
-      <FollowupEditor value={list} onChange={setDraft} targets={t} />
+      <FollowupEditor unavailable={unavailable} value={list} onChange={setDraft} targets={t} />
       <ErrorBox error={save.error} />
       <div className="mt-2 flex items-center gap-2">
         <Button

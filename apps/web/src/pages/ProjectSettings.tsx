@@ -1,7 +1,9 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'react-router';
+import { useMe } from '../api/queries/auth.ts';
 import { useAddRepo, usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
 import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
+import { ConvertPanel } from '../components/ConvertPanel.tsx';
 import { DeployTargetsPanel } from '../components/DeployTargetsPanel.tsx';
 import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
@@ -47,6 +49,9 @@ export function ProjectSettings() {
   const [repoErr, setRepoErr] = useState<Record<string, string>>({});
   const project = q.data?.project;
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
+  const me = useMe();
+  const orgRole = me.data?.activeOrg?.role;
+  const canConvert = orgRole === 'owner' || orgRole === 'admin';
 
   useEffect(() => {
     if (!project) return;
@@ -110,6 +115,7 @@ export function ProjectSettings() {
 
   const sections = [
     { id: 'general', label: 'Basics' },
+    { id: 'stage', label: 'Stage' },
     ...(traits.usesRepos || activeRepos.length > 0 ? [{ id: 'repos', label: 'Repos' }] : []),
     ...(project && traits.usesRepos
       ? [
@@ -148,7 +154,7 @@ export function ProjectSettings() {
       {!traits.usesRepos && (
         <Callout tone="info">
           This is a {project?.workflowKey} project: it needs no repository, and results go to its vault
-          folder.
+          folder. Convert it to a delivery project to add repositories.
         </Callout>
       )}
       <div id="general" className="scroll-mt-20">
@@ -179,6 +185,11 @@ export function ProjectSettings() {
           </form>
         </Panel>
       </div>
+      {project && (
+        <div id="stage" className="scroll-mt-20">
+          <ConvertPanel project={project} repos={repos} canConvert={canConvert} />
+        </div>
+      )}
       {(traits.usesRepos || activeRepos.length > 0) && (
         <div id="repos" className="scroll-mt-20">
           <Panel title="Repositories">

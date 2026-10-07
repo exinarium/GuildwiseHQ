@@ -1,11 +1,13 @@
-import { Rss, Search, Settings, SquareKanban } from 'lucide-react';
+import { ArrowRightLeft, Rss, Search, Settings, SquareKanban } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
+import { useMe } from '../api/queries/auth.ts';
 import { useBoard } from '../api/queries/board.ts';
 import { usePhases } from '../api/queries/phases.ts';
-import { useProjects } from '../api/queries/projects.ts';
+import { useProject, useProjects } from '../api/queries/projects.ts';
 import { useRunFeed } from '../api/queries/schedules.ts';
 import { BoardView, NO_FILTER } from '../components/BoardView.tsx';
+import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { PhaseFilter } from '../components/PhaseFilter.tsx';
 import { RegressionDialog } from '../components/RegressionDialog.tsx';
 import { projectTypeLabel } from '../components/shell/ProjectSwitcher.tsx';
@@ -58,6 +60,10 @@ export function Board() {
   const runFeed = useRunFeed();
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
   const [filter, setFilter] = useState(NO_FILTER);
+  const [converting, setConverting] = useState(false);
+  const detail = useProject(project?.workflowKey === 'research' ? project.id : undefined);
+  const orgRole = useMe().data?.activeOrg?.role;
+  const canConvert = orgRole === 'owner' || orgRole === 'admin';
   const toast = useToast();
 
   useEffect(() => {
@@ -120,6 +126,12 @@ export function Board() {
           <>
             <PhaseFilter phases={phases.data ?? []} value={phaseId} onChange={setPhaseId} />
             {traits.hasTestStage && <RegressionDialog projectId={project.id} />}
+            {project.workflowKey === 'research' && canConvert && detail.data && (
+              <Button data-testid="convert-board-open" onClick={() => setConverting(true)}>
+                <ArrowRightLeft aria-hidden="true" className="size-4" />
+                Convert to project
+              </Button>
+            )}
             {project.workflowKey === 'feed' && (
               <>
                 <ButtonLink to={`/p/${project.key}/feed`}>
@@ -150,6 +162,14 @@ export function Board() {
           </>
         }
       />
+      {detail.data && (
+        <ConvertProjectDialog
+          project={detail.data.project}
+          repos={detail.data.repos}
+          open={converting}
+          onOpenChange={setConverting}
+        />
+      )}
       <ErrorBox error={runFeed.error} />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="relative w-full sm:w-72">

@@ -65,6 +65,12 @@ export function CardNew() {
     );
   }
   if (!project || !workflow) return <ErrorBox error={new Error('Project or workflow not found')} />;
+  // A research card may be created in any project: its own workflow runs it (restructure.md section 8.1).
+  const research = workflow.cardTypes.includes('research' as never)
+    ? undefined
+    : workflows.data
+        ?.filter((w) => w.definition.key === 'research')
+        .sort((a, b) => b.definition.version - a.definition.version)[0]?.definition;
 
   return (
     <CardNewForm
@@ -74,6 +80,7 @@ export function CardNew() {
       projectKeys={projects.data.map((p) => p.key)}
       onProject={setChosen}
       workflow={workflow}
+      extraWorkflows={research ? [research] : []}
       repos={(detail.data?.repos ?? []).filter((r) => !r.removedAt)}
       mockUi={mockUi}
     />
@@ -87,7 +94,8 @@ export function CardNewForm({
   projectKey,
   projectKeys,
   onProject,
-  workflow,
+  workflow: projectWorkflow,
+  extraWorkflows = [],
   repos,
   mockUi = false,
 }: {
@@ -96,6 +104,8 @@ export function CardNewForm({
   projectKeys: string[];
   onProject: (key: string) => void;
   workflow: Workflow;
+  /** Workflows that run card types the project's own does not (research), offered in the type select. */
+  extraWorkflows?: Workflow[];
   repos: Array<{ id: string; name: string }>;
   /** Show the mock-runtime fields (server `AOM_MOCK_UI`); off for real users. */
   mockUi?: boolean;
@@ -103,7 +113,14 @@ export function CardNewForm({
   const nav = useNavigate();
   const create = useCreateCard();
   const toast = useToast();
-  const [v, setV] = useState<CardFormValues>(() => emptyForm(workflow.cardTypes[0] ?? ''));
+  const [v, setV] = useState<CardFormValues>(() => emptyForm(projectWorkflow.cardTypes[0] ?? ''));
+  // The workflow of the chosen type decides the fields (a research card in a code project asks for the question).
+  const workflow =
+    [projectWorkflow, ...extraWorkflows].find((w) => w.cardTypes.includes(v.cardType as never)) ??
+    projectWorkflow;
+  const cardTypes = [
+    ...new Set([...projectWorkflow.cardTypes, ...extraWorkflows.flatMap((w) => w.cardTypes)]),
+  ];
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [note, setNote] = useState<{ id: string; ref: string; missing: string[] } | null>(null);
   const submit = (specify: boolean) => {
@@ -156,7 +173,7 @@ export function CardNewForm({
       <PageHeader
         title="New card"
         back={{ to: `/p/${projectKey}/board`, label: 'Back to the board' }}
-        sub={`${projectKey} · ${workflow.name} workflow`}
+        sub={`${projectKey} · ${projectWorkflow.name} workflow${workflow !== projectWorkflow ? `, this card runs on ${workflow.name}` : ''}`}
       />
       <form onSubmit={onSubmit} noValidate aria-label="New card" className="flex flex-col gap-4">
         <Panel>
@@ -175,7 +192,7 @@ export function CardNewForm({
                 onChange={(e) => setV({ ...v, cardType: e.target.value })}
                 error={errors.cardType}
               >
-                {workflow.cardTypes.map((t) => (
+                {cardTypes.map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>

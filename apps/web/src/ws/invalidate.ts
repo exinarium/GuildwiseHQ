@@ -25,6 +25,9 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         // CardPhaseChanged and CardMergeVerified are on the card stream
         ['phases'],
         ['phase'],
+        // ResearchPublished: the Research tab and the project's note count
+        ['publications'],
+        ['projects'],
       ];
     case 'phase':
     case 'ba':
@@ -84,8 +87,12 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
       return [['roles'], ['workflows'], ['org'], ['hr'], ['agents'], ['projects'], ['board'], ['card']];
     case 'workstation':
       return [['workstations'], ['admin', 'workstations'], ['agents'], ['hr'], ['board'], ['card']];
+    case 'repo':
+      // Repository requests (a conversion that waits for its repository): the project and the desk item change.
+      return [['project'], ['projects'], ['desk'], ['board']];
     case 'project':
       return [
+        ['publications'],
         ['projects'],
         ['project'],
         ['board'],

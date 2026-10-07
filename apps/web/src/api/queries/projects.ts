@@ -1,5 +1,9 @@
 import {
   type AddRepoRequest,
+  type ConvertPreview,
+  ConvertPreviewSchema,
+  type ConvertProjectRequest,
+  type ConvertResult,
   type CreateProjectRequest,
   type PatchProjectRequest,
   type ProjectDetailResponse,
@@ -8,6 +12,8 @@ import {
   type ProjectImpact,
   ProjectImpactSchema,
   ProjectsResponseSchema,
+  type PublicationDto,
+  PublicationsResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, patch, post, put } from '../client.ts';
@@ -151,5 +157,51 @@ export function useSetWorkingBranch(projectId: string) {
       qc.invalidateQueries({ queryKey: ['project', projectId] });
       qc.invalidateQueries({ queryKey: ['desk'] });
     },
+  });
+}
+
+/** What converting to `toWorkflowKey` would do (the open cards that need a decision, the repositories needed). */
+export function useConvertPreview(projectId: string, toWorkflowKey: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['project', projectId, 'convert-preview', toWorkflowKey],
+    enabled: enabled && !!toWorkflowKey,
+    queryFn: () =>
+      get<ConvertPreview>(
+        `/projects/${projectId}/convert-preview?toWorkflowKey=${encodeURIComponent(toWorkflowKey ?? '')}`,
+        ConvertPreviewSchema,
+      ),
+  });
+}
+
+/** Converts the project (Owner and Admins). The board, desk and project queries all change with it. */
+export function useConvertProject(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: ConvertProjectRequest) => post<ConvertResult>(`/projects/${projectId}/convert`, b),
+    onSuccess: () => {
+      for (const k of ['projects', 'project', 'board', 'desk', 'card', 'phases', 'workflows'])
+        qc.invalidateQueries({ queryKey: [k] });
+    },
+  });
+}
+
+/** Cancels a conversion that waits for its new repositories. */
+export function useCancelConversion(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => del(`/projects/${projectId}/convert`),
+    onSuccess: () => {
+      for (const k of ['projects', 'project', 'desk']) qc.invalidateQueries({ queryKey: [k] });
+    },
+  });
+}
+
+/** The published research notes of a project, newest first (the Research tab). */
+export function useProjectPublications(projectId: string | undefined) {
+  return useQuery({
+    queryKey: ['publications', projectId],
+    enabled: !!projectId,
+    queryFn: async (): Promise<PublicationDto[]> =>
+      (await get(`/research/publications?projectId=${projectId}`, PublicationsResponseSchema)).publications,
   });
 }
