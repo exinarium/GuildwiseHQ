@@ -34,7 +34,7 @@ test.beforeAll(async ({ browser }) => {
     ['ALA', 'Alpha'],
     ['ALB', 'Beta'],
   ] as const) {
-    const p = await api.post('/api/projects', { data: { key, name, workflowKey: 'code', domain: 'work' } });
+    const p = await api.post('/api/projects', { data: { key, name, workflowKey: 'code' } });
     expect(p.status(), await p.text()).toBe(201);
     const id = (await p.json()).project.id as string;
     if (key === 'ALA') alpha = id;

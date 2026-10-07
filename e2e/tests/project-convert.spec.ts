@@ -104,7 +104,7 @@ exit 0
 
   vault = makeVault('convert', { 'projects/rld/PROJECT.md': '# Reload\n\nOur reloading notes.\n' });
   const v = await api.post('/api/vaults', {
-    data: { kind: 'work', remoteUrl: vault.origin, syncIntervalSec: 2 },
+    data: { kind: 'org', remoteUrl: vault.origin, syncIntervalSec: 2 },
   });
   expect(v.status(), await v.text()).toBe(201);
   await waitFor(

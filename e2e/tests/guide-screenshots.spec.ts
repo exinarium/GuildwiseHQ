@@ -245,10 +245,7 @@ esac
   S.ids.fakeGh = fakeGh;
   const owner = (n: string) =>
     makeVault(n, { 'README.md': `# ${n} vault\n\nMarkdown notes of Pieter Demo.\n` });
-  makeVault('personal', {
-    'projects/shoot/PROJECT.md': '# Shooting research\n\nResearch notes about shooting and reloading.\n',
-  });
-  owner('work');
+  owner('org');
   owner('project');
 });
 
@@ -269,11 +266,11 @@ step('workstation A, projects, agents', async () => {
   );
   S.ids.wsA = ws[0].id;
 
-  for (const [key, name, workflowKey, domain, extra] of [
-    ['WEB', 'Web shop', 'code', 'work', {}],
-    ['SHOOT', 'Shooting research', 'research', 'personal', { subCategories: ['hunting', 'reloading'] }],
+  for (const [key, name, workflowKey, extra] of [
+    ['WEB', 'Web shop', 'code', {}],
+    ['SHOOT', 'Shooting research', 'research', { subCategories: ['hunting', 'reloading'] }],
   ] as const) {
-    const r = await p.post('/api/projects', { data: { key, name, workflowKey, domain, ...extra } });
+    const r = await p.post('/api/projects', { data: { key, name, workflowKey, ...extra } });
     expect(r.status(), await r.text()).toBe(201);
     S.ids[`project:${key}`] = (await r.json()).project.id;
   }
@@ -289,8 +286,7 @@ step('workstation A, projects, agents', async () => {
     30_000,
   );
   for (const [kind, name, projectId] of [
-    ['personal', 'personal', undefined],
-    ['work', 'work', undefined],
+    ['org', 'org', undefined],
     ['project', 'project', S.ids['project:WEB']],
   ] as const) {
     const origin = join(paths.vaults, name, 'origin.git');
@@ -650,7 +646,7 @@ step('a repository whose working branch is not confirmed: hygiene asks on the de
   git(clone, 'branch', 'develop');
   git(clone, 'push', 'origin', 'develop');
   const proj = await p.post('/api/projects', {
-    data: { key: 'NOTES', name: 'Team notes', workflowKey: 'code', domain: 'work' },
+    data: { key: 'NOTES', name: 'Team notes', workflowKey: 'code' },
   });
   expect(proj.status(), await proj.text()).toBe(201);
   const notes = (await proj.json()).project.id as string;
@@ -980,7 +976,6 @@ step('research and the feed', async () => {
     data: {
       name: 'AI news feed',
       description: 'Practical agent engineering and coding assistants. No hype, no press releases.',
-      domain: 'personal',
       subCategory: 'ai/agents',
       preferredSites: ['https://news.example.com'],
       scan: { cron: '0 7 * * *', timezone: 'Africa/Johannesburg', maxItems: 10 },
@@ -2003,6 +1998,7 @@ cap('agents', async () => {
 
 cap('projects, settings, phases, conversion', async () => {
   await open(pPage, '/projects');
+  await snap(pPage, 'projects-ranked', { maxH: 900, content: true });
   await pPage.getByRole('button', { name: 'New project' }).click();
   await snap(pPage, 'dlg-new-project', { sel: pPage.getByRole('dialog') });
   await pPage.keyboard.press('Escape');

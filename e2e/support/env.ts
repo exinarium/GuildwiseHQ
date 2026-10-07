@@ -38,6 +38,10 @@ export const GUEST = { email: 'guest@e2e.test', name: 'E2E Guest', password: 'gu
 /** Interests migration spec: an owner whose database holds a feed project, as before org-level interests. */
 export const MIGRANT = { email: 'migrant@e2e.test', name: 'E2E Migrant', password: 'migrant-password-12345' };
 
+/** Ranking spec: an Owner whose organization has projects to order, a personal vault to merge, and a Member who may only look. */
+export const RANKER = { email: 'ranker@e2e.test', name: 'E2E Ranker', password: 'ranker-password-12345' };
+export const RANKMEM = { email: 'rankmem@e2e.test', name: 'E2E RankMem', password: 'rankmem-password-12345' };
+
 /** M6 research spec. */
 export const SCHOLAR = { email: 'scholar@e2e.test', name: 'E2E Scholar', password: 'scholar-password-12345' };
 

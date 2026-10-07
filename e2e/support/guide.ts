@@ -50,7 +50,7 @@ export async function maskDemo(page: Page): Promise<void> {
     const map: Array<[RegExp, string]> = [
       [new RegExp(`${dir}/origin/toy\\.git`, 'g'), 'https://git.example.com/demo/web.git'],
       [
-        new RegExp(`${dir}/vaults/(work|personal|project)/origin\\.git`, 'g'),
+        new RegExp(`${dir}/vaults/(org|project)/origin\\.git`, 'g'),
         'git@git.example.com:pieter/$1-vault.git',
       ],
       [new RegExp(`${dir}/guide-[a-z]+/vaults/[^\\s)]*`, 'g'), '/home/demo/.aom-runner/vaults/vault'],

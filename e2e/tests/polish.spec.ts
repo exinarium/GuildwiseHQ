@@ -38,7 +38,7 @@ test('setup: a paired runner, project POL, an agent and two cards', async () => 
   );
   workstationId = (await (await api.get('/api/workstations')).json()).workstations[0].id;
   const p = await api.post('/api/projects', {
-    data: { key: 'POL', name: 'Polish', workflowKey: 'code', domain: 'work' },
+    data: { key: 'POL', name: 'Polish', workflowKey: 'code' },
   });
   expect(p.status(), await p.text()).toBe(201);
   projectId = (await p.json()).project.id;

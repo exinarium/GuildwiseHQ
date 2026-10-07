@@ -107,7 +107,7 @@ const vaultLines = (path: string) =>
 const sections = (text: string) => (text.match(/aom:section seed v=/g) ?? []).length;
 const taste = () => (originHas(vault, `${FOLDER}/taste.md`) ? originFile(vault, `${FOLDER}/taste.md`) : '');
 
-test('setup: a paired workstation with a personal vault, and a scout, curator, researcher and checker', async () => {
+test('setup: a paired workstation with the organization vault, and a scout, curator, researcher and checker', async () => {
   const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json())
     .code as string;
   pairRunner(BASE_URL, code, 'Interest Box', HOME);
@@ -121,7 +121,7 @@ test('setup: a paired workstation with a personal vault, and a scout, curator, r
   workstationId = (await (await api.get('/api/workstations')).json()).workstations[0].id;
   vault = makeVault('interests', { 'README.md': '# Notes\n' });
   const v = await api.post('/api/vaults', {
-    data: { kind: 'personal', remoteUrl: vault.origin, syncIntervalSec: 2 },
+    data: { kind: 'org', remoteUrl: vault.origin, syncIntervalSec: 2 },
   });
   expect(v.status(), await v.text()).toBe(201);
   await waitFor(
@@ -163,7 +163,7 @@ test('create: the dialog makes an interest; its hidden project and vault folder 
   const i = await interestByName('Firearm news');
   interestId = i.id;
   projectId = i.project_id;
-  expect(i).toMatchObject({ slug: 'firearm-news', domain: 'personal', status: 'active' });
+  expect(i).toMatchObject({ slug: 'firearm-news', status: 'active' });
   expect(i.scan).toMatchObject({ manual: true, maxItems: 3 });
   expect((await q<any>('SELECT kind, vault_dir FROM projects WHERE id=$1', [projectId]))[0]).toMatchObject({
     kind: 'interest',

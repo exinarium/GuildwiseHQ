@@ -298,37 +298,32 @@ test('reset wipes the DevOps sandbox and keeps the engineer', async () => {
 
 // ------------------------------------------------------------------------------------------- vaults
 
-let WORK: VaultFixture;
-let PERSONAL: VaultFixture;
+let WORK: VaultFixture; // the organization vault
+let PERSONAL: VaultFixture; // the vault of the HOB project
 test.beforeAll(() => {
-  WORK = makeVault('work', {
+  WORK = makeVault('org', {
     'standing-orders.md': 'WORK-ORDER keep answers short\n',
     'projects/dvo/PROJECT.md': 'WORK-MARK project doc for DVO\n',
   });
-  PERSONAL = makeVault('personal', {
+  PERSONAL = makeVault('hob', {
     'projects/hob/PROJECT.md': 'PERSONAL-MARK secret hobby notes\n',
   });
 });
 const workClone = () =>
-  q<{ id: string }>(`SELECT id FROM vaults WHERE kind='work'`).then((r) =>
+  q<{ id: string }>(`SELECT id FROM vaults WHERE kind='org'`).then((r) =>
     join(HOME, 'vaults', r[0]?.id ?? 'none'),
   );
 
 test('AC2: vault sync pushes local edits, pulls remote edits and pauses on a conflict until resolved', async () => {
   await page.goto('/settings/vaults');
-  for (const [kind, testId, v] of [
-    ['Work vault', 'vault-work', WORK],
-    ['Personal vault', 'vault-personal', PERSONAL],
-  ] as const) {
-    await page.getByRole('button', { name: 'Register a vault' }).click();
-    const form = page.getByRole('form', { name: 'Register vault' });
-    await form.getByLabel('Kind').selectOption({ label: kind });
-    await form.getByLabel('Git URL').fill(v.origin);
-    await form.getByLabel('Sync interval (seconds)').fill('2');
-    await form.getByRole('button', { name: 'Register vault' }).click();
-    await expect(page.getByTestId(testId)).toBeVisible(); // the form resets once registered
-  }
-  const work = page.getByTestId('vault-work');
+  await page.getByRole('button', { name: 'Register a vault' }).click();
+  const form = page.getByRole('form', { name: 'Register vault' });
+  await form.getByLabel('Kind').selectOption({ label: 'Organization vault (for the whole organization)' });
+  await form.getByLabel('Git URL').fill(WORK.origin);
+  await form.getByLabel('Sync interval (seconds)').fill('2');
+  await form.getByRole('button', { name: 'Register vault' }).click();
+  await expect(page.getByTestId('vault-org')).toBeVisible();
+  const work = page.getByTestId('vault-org');
   await expect(work).toBeVisible();
   await expect(work.getByTestId('vault-ws-Dev Box')).toContainText('synced', { timeout: 30_000 });
   const dir = await workClone();
@@ -412,7 +407,7 @@ test('AC2: vault sync pushes local edits, pulls remote edits and pauses on a con
   );
 });
 
-test('AC3: answering a question on the desk writes projects/<name>/decisions/<date>-<slug>.md into the domain vault, committed and pushed', async () => {
+test('AC3: answering a question on the desk writes projects/<name>/decisions/<date>-<slug>.md into the organization vault, committed and pushed', async () => {
   // The real M2 path: a builder asks, the manager answers on the desk, the QuestionAnswered hook writes the file.
   const ref = await createCard('Needs a decision for the vault', { build: ['question', 'ok'] });
   await page.goto('/desk');
@@ -450,8 +445,6 @@ test('AC3: answering a question on the desk writes projects/<name>/decisions/<da
   expect(originLog(WORK).some((l) => l.includes(`aom: decision ${ref} Mock question for ${ref}?`))).toBe(
     true,
   );
-  // the personal vault never got it
-  expect(originHas(PERSONAL, path)).toBe(false);
   // the unblocked card carries on
   await waitFor(
     'unblocked card reaches review',
@@ -496,12 +489,16 @@ test('AC3b: standing orders added to the ledger are appended to the vault standi
   expect(paths.map((p) => p.vault_path)).toEqual(['projects/dvo/standing-orders.md', 'standing-orders.md']);
 });
 
-test('AC4: a work-domain card shift sees only the work vault; a personal card only the personal vault', async () => {
-  const personal = await api.post('/api/projects', {
-    data: { key: 'HOB', name: 'Hobby', domain: 'personal', vaultFolder: 'projects/hob' },
+test("AC4: a card shift sees only the vault of its project: the organization vault, or the project's own vault", async () => {
+  const hobby = await api.post('/api/projects', {
+    data: { key: 'HOB', name: 'Hobby', vaultFolder: 'projects/hob' },
   });
-  expect(personal.status()).toBe(201);
-  const hobId = (await personal.json()).project.id;
+  expect(hobby.status()).toBe(201);
+  const hobId = (await hobby.json()).project.id;
+  const hobVault = await api.post('/api/vaults', {
+    data: { kind: 'project', projectId: hobId, remoteUrl: PERSONAL.origin, syncIntervalSec: 2 },
+  });
+  expect(hobVault.status(), await hobVault.text()).toBe(201);
   const add = await api.post(`/api/projects/${hobId}/repos`, {
     data: { name: 'toy', remoteUrl: paths.origin, workingBranch: 'main' },
   });
@@ -541,7 +538,7 @@ test('AC4: a work-domain card shift sees only the work vault; a personal card on
     expect(r.status(), await r.text()).toBe(201);
     return (await r.json()).card.ref as string;
   };
-  // Dana is scoped to DVO (work); Hal to HOB (personal). Each regenerates its own instructions file per shift.
+  // Dana is scoped to DVO (organization vault); Hal to HOB (its own project vault). Each regenerates its own instructions file per shift.
   const hal = await api.post('/api/agents', {
     data: {
       name: 'Hal',

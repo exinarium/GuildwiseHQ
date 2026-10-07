@@ -95,7 +95,7 @@ async function createResearchCard(title: string, fields: Record<string, unknown>
   return (await res.json()).card.ref as string;
 }
 
-test('setup: a paired workstation with a personal vault, a research project, a researcher and a checker', async () => {
+test('setup: a paired workstation with the organization vault, a research project, a researcher and a checker', async () => {
   const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json())
     .code as string;
   pairRunner(BASE_URL, code, 'Research Box', HOME);
@@ -110,7 +110,7 @@ test('setup: a paired workstation with a personal vault, a research project, a r
 
   vault = makeVault('research', { 'projects/shoot/PROJECT.md': '# Shooting research\n' });
   const v = await api.post('/api/vaults', {
-    data: { kind: 'personal', remoteUrl: vault.origin, syncIntervalSec: 2 },
+    data: { kind: 'org', remoteUrl: vault.origin, syncIntervalSec: 2 },
   });
   expect(v.status(), await v.text()).toBe(201);
   await waitFor(
@@ -125,7 +125,6 @@ test('setup: a paired workstation with a personal vault, a research project, a r
       key: 'SHOOT',
       name: 'Shooting',
       workflowKey: 'research',
-      domain: 'personal',
       subCategories: ['hunting', 'reloading'],
     },
   });

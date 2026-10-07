@@ -45,7 +45,7 @@ test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext({ storageState: await api.storageState() })).newPage();
 });
 
-test('setup: a runner with the personal vault that still has projects/news/, then the legacy feed project', async () => {
+test('setup: a runner with the organization vault that still has projects/news/, then the legacy feed project', async () => {
   const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json())
     .code as string;
   pairRunner(BASE_URL, code, 'Migration Box', HOME);
@@ -64,7 +64,7 @@ test('setup: a runner with the personal vault that still has projects/news/, the
     'projects/news/transcripts/2026-10-01-legacy-1.md': 'Transcript text 1\n',
   });
   const v = await api.post('/api/vaults', {
-    data: { kind: 'personal', remoteUrl: vault.origin, syncIntervalSec: 2 },
+    data: { kind: 'org', remoteUrl: vault.origin, syncIntervalSec: 2 },
   });
   expect(v.status(), await v.text()).toBe(201);
   await waitFor(
