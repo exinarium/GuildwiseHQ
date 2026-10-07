@@ -125,10 +125,10 @@ describe('runner start-up sweep', () => {
   it('asks the server which worktrees are live after connecting and removes the dead ones', async () => {
     const repo = makeRepo();
     let live: string[] = [];
-    const h = await startHarness({ worktreesLive: () => live }, { startupSweepMs: 20 }, repo);
+    // The timed start-up sweep is off (-1) so only the explicit sweep below runs, after `live` is set: no race.
+    // The timer itself is covered by 'sweeps by itself shortly after the first connection'.
+    const h = await startHarness({ worktreesLive: () => live }, { startupSweepMs: -1 }, repo);
     try {
-      // Leave a dead and a live worktree and sweep. The start-up sweep (20 ms after connecting) may run first on a
-      // slow machine and remove the dead one itself, so the assertions do not depend on which sweep did it.
       const wt = join(h.dataDir, 'worktrees');
       const dead = cardWorktree(repo, wt, 'TOY-aaaaaaaa', 'TOY-1');
       const keep = cardWorktree(repo, wt, 'TOY-aaaaaaaa', 'TOY-2');
