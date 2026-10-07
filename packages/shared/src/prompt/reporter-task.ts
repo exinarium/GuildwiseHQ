@@ -9,6 +9,7 @@ const TITLE: Record<ReporterTaskKind, string> = {
   urgent_note: 'Urgent items on the desk: add context',
   floor_alert: 'Urgent signals: report them to the manager',
   floor_report: 'Daily floor report',
+  scheduled_brief: 'Scheduled task from the manager',
 };
 
 const JOB: Record<ReporterTaskKind, string[]> = {
@@ -35,6 +36,10 @@ const JOB: Record<ReporterTaskKind, string[]> = {
     '5. DevOps requests that are open',
     '6. What you resolved yourself without bothering the manager',
     "Lead with what needs the manager's decision. Be brief: a manager reads this at 08:00. Do not invent facts; link nothing you were not given.",
+  ],
+  scheduled_brief: [
+    'The manager set up a schedule that asks you for a report. Do what the instructions below ask, using only what you can read (the ledger, the desk, the vault, the repositories read-only) and what the facts say. Do not change anything.',
+    'Answer with one report in markdown: lead with the answer, then the evidence. Say plainly what you could not find out. Do not invent facts.',
   ],
 };
 
@@ -96,6 +101,13 @@ export function renderReporterPrompt(task: BaTaskShift): string {
       out.push('## Other open items you may merge into');
       out.push(r.openItems.map((i) => `- ${i.id}: ${i.title}`).join('\n') || 'None.');
     }
+  }
+  if (kind === 'scheduled_brief' && r.brief) {
+    out.push(
+      `Schedule: ${r.brief.scheduleName}${r.brief.projectKey ? ` (project ${r.brief.projectKey})` : ''}.`,
+    );
+    out.push('## Instructions');
+    out.push(r.brief.instructions);
   }
   if (kind === 'floor_alert') {
     out.push('## Signals');

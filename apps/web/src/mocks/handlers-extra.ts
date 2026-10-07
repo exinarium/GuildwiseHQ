@@ -97,7 +97,7 @@ export const extraHandlers = [
   http.post(`${A}/cards/:key/finalize`, unavailable),
   http.post(`${A}/projects/:id/regression`, empty({ cards: [] })),
   // M5 schedules and feeds, M6 research
-  http.get(`${A}/schedules`, empty({ schedules: [] })),
+  http.get(`${A}/schedules`, empty({ schedules: [], system: [] })),
   http.post(`${A}/schedules`, unavailable),
   http.patch(`${A}/schedules/:id`, unavailable),
   http.delete(`${A}/schedules/:id`, unavailable),

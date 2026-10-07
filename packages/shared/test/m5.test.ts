@@ -234,13 +234,13 @@ describe('M5 contract', () => {
     );
   });
 
-  it('schedule requests default to a daily 07:00 feed and ship presets', () => {
+  it('schedule requests accept the legacy shape and ship presets', () => {
     const r = CreateScheduleRequestSchema.parse({
       projectId: U.b,
       name: 'Daily',
       cardTemplate: { title: 'Run' },
     });
-    expect(r).toMatchObject({ kind: 'feed', cron: '0 7 * * *', timezone: 'UTC', enabled: true });
+    expect(r).toMatchObject({ projectId: U.b, enabled: true });
     expect(SCHEDULE_PRESETS.map((p) => p.id)).toContain('daily-0700');
   });
 

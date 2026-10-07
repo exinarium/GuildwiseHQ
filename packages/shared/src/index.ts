@@ -21,6 +21,7 @@ export * from './reporter/index.ts';
 export * from './research/index.ts';
 export * from './roles/index.ts';
 export * from './safe.ts';
+export * from './schedules/index.ts';
 export * from './testing/index.ts';
 export * from './vaults/index.ts';
 export * from './workflows/index.ts';

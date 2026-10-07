@@ -1,0 +1,833 @@
+import {
+  type CardTemplate,
+  type CreateScheduleResponse,
+  SCHEDULE_EVENT_TRIGGERS,
+  SCHEDULE_PRESETS,
+  type ScheduleDto,
+  WEBHOOK_FORMATS,
+} from '@aom/shared';
+import {
+  CalendarClock,
+  ClipboardList,
+  FilePlus2,
+  FlaskConical,
+  Hand,
+  Inbox,
+  type LucideIcon,
+  Mail,
+  Radio,
+  Tag,
+  Webhook,
+  Wrench,
+} from 'lucide-react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { useWorkflows } from '../../api/queries/agents.ts';
+import { useMe } from '../../api/queries/auth.ts';
+import { useProjects } from '../../api/queries/projects.ts';
+import { useCreateSchedule, usePatchSchedule } from '../../api/queries/schedules.ts';
+import { useWorkstations } from '../../api/queries/workstations.ts';
+import {
+  ACTION_TILES,
+  type ActionTile,
+  buildScheduleRequest,
+  CUSTOM_PRESET,
+  emptyWizard,
+  formFromTemplate,
+  isEventName,
+  stateFromSchedule,
+  TRIGGER_TILES,
+  type TriggerKind,
+  WEBHOOK_FORMAT_LABEL,
+  type WizardState,
+  wizardIsOrgLevel,
+} from '../../lib/schedules.ts';
+import { CardFormFields } from '../CardFormFields.tsx';
+import { cx } from '../ui/cx.ts';
+import { Button, Callout, Dialog, ErrorBox, Select, Stepper, TextArea, TextInput, useToast } from '../ui.tsx';
+
+const TRIGGER_ICON: Record<TriggerKind, LucideIcon> = {
+  cron: CalendarClock,
+  event: Radio,
+  issue_labelled: Tag,
+  manual: Hand,
+};
+const ACTION_ICON: Record<ActionTile, LucideIcon> = {
+  create_card: FilePlus2,
+  regression_run: FlaskConical,
+  devops_request: Wrench,
+  ba_task: ClipboardList,
+  github: Inbox,
+  jira: Inbox,
+  webhook: Webhook,
+  email: Mail,
+};
+const STEPS = [
+  { id: 'trigger', label: 'When', color: 'var(--stage-progress)' },
+  { id: 'action', label: 'What', color: 'var(--stage-spec)' },
+  { id: 'details', label: 'Details', color: 'var(--stage-done)' },
+];
+
+function TileGrid<T extends string>({
+  label,
+  value,
+  onChange,
+  tiles,
+  icons,
+  disabled,
+}: {
+  label: string;
+  value: T;
+  onChange: (v: T) => void;
+  tiles: Array<{ id: T; label: string; description: string }>;
+  icons: Record<string, LucideIcon>;
+  disabled?: (id: T) => string | null;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="grid gap-2 sm:grid-cols-2">
+      {tiles.map((t) => {
+        const Icon = icons[t.id] as LucideIcon;
+        const why = disabled?.(t.id) ?? null;
+        const selected = value === t.id;
+        return (
+          // biome-ignore lint/a11y/useSemanticElements: a tile-styled radio
+          <button
+            key={t.id}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={!!why}
+            data-testid={`tile-${t.id}`}
+            onClick={() => onChange(t.id)}
+            className={cx(
+              'flex items-start gap-3 rounded-panel border p-3 text-left transition-colors',
+              selected ? 'border-brand bg-brand-soft' : 'border-line bg-surface hover:border-control',
+              why && 'cursor-not-allowed opacity-60 hover:border-line',
+            )}
+          >
+            <span
+              aria-hidden="true"
+              className={cx(
+                'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-control',
+                selected ? 'bg-brand text-brand-fg' : 'bg-sunken text-muted',
+              )}
+            >
+              <Icon className="size-4" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-base font-semibold text-fg">{t.label}</span>
+              <span className="block text-sm text-muted">{why ?? t.description}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function ScheduleWizard({
+  open,
+  onOpenChange,
+  editing,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  editing?: ScheduleDto | undefined;
+  /** A new webhook schedule's signing secret, shown once by the caller. */
+  onCreated?: (created: CreateScheduleResponse) => void;
+}) {
+  // Remount per open so each use starts from its own state (a new schedule, or the one being edited).
+  return open ? (
+    <WizardDialog
+      key={editing?.id ?? 'new'}
+      onOpenChange={onOpenChange}
+      editing={editing}
+      onCreated={onCreated}
+    />
+  ) : null;
+}
+
+function WizardDialog({
+  onOpenChange,
+  editing,
+  onCreated,
+}: {
+  onOpenChange: (open: boolean) => void;
+  editing: ScheduleDto | undefined;
+  onCreated: ((c: CreateScheduleResponse) => void) | undefined;
+}) {
+  const me = useMe().data;
+  const projects = useProjects();
+  const workstations = useWorkstations();
+  const create = useCreateSchedule();
+  const patch = usePatchSchedule();
+  const toast = useToast();
+  const [step, setStep] = useState(editing ? 2 : 0);
+  const [s, setS] = useState<WizardState>(() => (editing ? stateFromSchedule(editing) : emptyWizard()));
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const isManager = me?.activeOrg?.role === 'owner' || me?.activeOrg?.role === 'admin';
+  const myWorkstations = (workstations.data ?? []).filter((w) => w.status === 'active');
+  const myProjects = (projects.data ?? []).filter((p) => p.status === 'active');
+  const set = (patchState: Partial<WizardState>) => setS((cur) => ({ ...cur, ...patchState }));
+
+  const projectForCard = myProjects.find((p) => p.id === s.projectId);
+  const workflows = useWorkflows(s.tile === 'create_card' ? projectForCard?.id : undefined);
+  const workflow = useMemo(
+    () =>
+      workflows.data
+        ?.filter((w) => w.definition.key === projectForCard?.workflowKey)
+        .sort((a, b) => b.definition.version - a.definition.version)[0]?.definition,
+    [workflows.data, projectForCard?.workflowKey],
+  );
+
+  // Editing a card schedule: its field values need the workflow to be shown as text, so they load when it arrives.
+  const hydrated = useRef(false);
+  useEffect(() => {
+    if (!editing || hydrated.current || !workflow || editing.action.kind !== 'create_card') return;
+    hydrated.current = true;
+    setS((cur) => ({
+      ...cur,
+      card: formFromTemplate((editing.action as { template: CardTemplate }).template, workflow),
+    }));
+  }, [editing, workflow]);
+
+  // A new card template starts with the workflow's first card type.
+  useEffect(() => {
+    if (workflow && !s.card.cardType && workflow.cardTypes[0])
+      setS((cur) => ({ ...cur, card: { ...cur.card, cardType: workflow.cardTypes[0] as string } }));
+  }, [workflow, s.card.cardType]);
+
+  /** The trigger step's own fields, checked before moving on. */
+  const triggerOk = (): boolean => {
+    const r = buildScheduleRequest({ ...s, name: s.name || 'x' }, { workflow, mockUi: false });
+    const mine = ['cron', 'timezone', 'labelQuery', 'label', 'workstationId'];
+    const e = Object.fromEntries(Object.entries(r.errors).filter(([k]) => mine.includes(k)));
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const submit = () => {
+    const r = buildScheduleRequest(s, {
+      workflow,
+      mockUi: me?.features?.mockUi ?? false,
+      myEmail: me?.user.email,
+    });
+    setErrors(r.errors);
+    if (!r.body) {
+      // Take the user to the step that holds the first error.
+      const first = Object.keys(r.errors)[0] ?? '';
+      if (['cron', 'timezone', 'labelQuery', 'label'].includes(first)) setStep(0);
+      return;
+    }
+    if (editing) {
+      patch.mutate(
+        {
+          id: editing.id,
+          body: {
+            name: r.body.name,
+            enabled: r.body.enabled,
+            trigger: r.body.trigger,
+            action: r.body.action,
+          },
+        },
+        {
+          onSuccess: () => {
+            toast.success('Schedule saved');
+            onOpenChange(false);
+          },
+        },
+      );
+    } else {
+      create.mutate(r.body, {
+        onSuccess: (created) => {
+          toast.success('Schedule created');
+          onCreated?.(created);
+          onOpenChange(false);
+        },
+      });
+    }
+  };
+
+  const orgLevel = wizardIsOrgLevel(s);
+  const blockedOrgLevel = orgLevel && !isManager;
+  const tileDisabled = (id: ActionTile): string | null => {
+    const t = ACTION_TILES.find((x) => x.id === id);
+    if (t?.notWith?.includes(s.triggerKind)) return 'Not available with this trigger.';
+    return null;
+  };
+
+  const header = (
+    <div className="mb-4">
+      <Stepper steps={STEPS} currentId={STEPS[step]?.id ?? 'trigger'} label="Schedule steps" />
+    </div>
+  );
+
+  const footer = (
+    <>
+      {step > 0 && !editing && (
+        <Button onClick={() => setStep(step - 1)} className="sm:mr-auto">
+          Back
+        </Button>
+      )}
+      <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+      {step < 2 ? (
+        <Button
+          variant="primary"
+          data-testid="wizard-next"
+          onClick={() => {
+            if (step === 0 && !triggerOk()) return;
+            setErrors({});
+            setStep(step + 1);
+          }}
+        >
+          Next
+        </Button>
+      ) : (
+        <Button
+          variant="primary"
+          data-testid="wizard-save"
+          loading={create.isPending || patch.isPending}
+          disabled={blockedOrgLevel}
+          onClick={submit}
+        >
+          {editing ? 'Save changes' : 'Create schedule'}
+        </Button>
+      )}
+    </>
+  );
+
+  return (
+    <Dialog
+      open
+      onOpenChange={onOpenChange}
+      size="xl"
+      title={editing ? `Edit "${editing.name}"` : 'New schedule'}
+      description="Choose when it runs, what it does, then fill in the details."
+      footer={footer}
+    >
+      <div data-testid="schedule-wizard">
+        {header}
+        {step === 0 && (
+          <div className="flex flex-col gap-4">
+            <TileGrid
+              label="Trigger"
+              value={s.triggerKind}
+              onChange={(v) => {
+                const t = ACTION_TILES.find((x) => x.id === s.tile);
+                set({ triggerKind: v, ...(t?.notWith?.includes(v) ? { tile: 'create_card' as const } : {}) });
+              }}
+              tiles={TRIGGER_TILES}
+              icons={TRIGGER_ICON}
+            />
+            <TriggerFields
+              s={s}
+              set={set}
+              errors={errors}
+              workstations={myWorkstations}
+              projects={myProjects}
+            />
+          </div>
+        )}
+        {step === 1 && (
+          <TileGrid
+            label="Action"
+            value={s.tile}
+            onChange={(v) => set({ tile: v })}
+            tiles={ACTION_TILES}
+            icons={ACTION_ICON}
+            disabled={tileDisabled}
+          />
+        )}
+        {step === 2 && (
+          <div className="flex flex-col gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextInput
+                label="Name"
+                value={s.name}
+                onChange={(e) => set({ name: e.target.value })}
+                error={errors.name}
+                maxLength={120}
+                autoFocus
+              />
+              <label className="flex min-h-9 items-center gap-2.5 self-end pb-1 text-base text-fg">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-[var(--brand)]"
+                  checked={s.enabled}
+                  onChange={(e) => set({ enabled: e.target.checked })}
+                />
+                Enabled
+              </label>
+            </div>
+            <ActionFields
+              s={s}
+              set={set}
+              errors={errors}
+              workstations={myWorkstations}
+              projects={myProjects}
+              workflow={workflow}
+              editing={!!editing}
+              isManager={isManager}
+              mockUi={me?.features?.mockUi ?? false}
+            />
+            {blockedOrgLevel && (
+              <Callout tone="warning" data-testid="org-level-note">
+                This schedule acts for the whole organization, so only the Owner and Admins can save it.
+                Choose a project to tie it to one, or ask an Admin.
+              </Callout>
+            )}
+            <ErrorBox error={create.error ?? patch.error} />
+          </div>
+        )}
+      </div>
+    </Dialog>
+  );
+}
+
+function TriggerFields({
+  s,
+  set,
+  errors,
+  workstations,
+  projects,
+}: {
+  s: WizardState;
+  set: (p: Partial<WizardState>) => void;
+  errors: Record<string, string>;
+  workstations: Array<{ id: string; name: string }>;
+  projects: Array<{ id: string; key: string; name: string }>;
+}) {
+  if (s.triggerKind === 'manual')
+    return <p className="text-sm text-muted">It never runs by itself. Use "Run now" on its card.</p>;
+  const cronFields = (
+    <>
+      <Select
+        label={s.triggerKind === 'issue_labelled' ? 'Check for issues' : 'Runs'}
+        value={s.preset}
+        onChange={(e) => {
+          const p = SCHEDULE_PRESETS.find((x) => x.id === e.target.value);
+          set({ preset: e.target.value, ...(p ? { cron: p.cron } : {}) });
+        }}
+      >
+        {SCHEDULE_PRESETS.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.label}
+          </option>
+        ))}
+        <option value={CUSTOM_PRESET}>Custom cron expression</option>
+      </Select>
+      <TextInput
+        label="Time zone"
+        hint="IANA name, e.g. Africa/Johannesburg"
+        value={s.timezone}
+        onChange={(e) => set({ timezone: e.target.value })}
+        error={errors.timezone}
+      />
+      {s.preset === CUSTOM_PRESET && (
+        <TextInput
+          label="Cron expression"
+          hint="minute hour day month weekday"
+          value={s.cron}
+          onChange={(e) => set({ cron: e.target.value })}
+          error={errors.cron}
+        />
+      )}
+    </>
+  );
+  if (s.triggerKind === 'cron') return <div className="grid gap-4 sm:grid-cols-2">{cronFields}</div>;
+  if (s.triggerKind === 'event')
+    return (
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Select
+          label="Event"
+          value={s.event}
+          onChange={(e) => isEventName(e.target.value) && set({ event: e.target.value })}
+          hint={SCHEDULE_EVENT_TRIGGERS.find((x) => x.id === s.event)?.hint}
+        >
+          {SCHEDULE_EVENT_TRIGGERS.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.label}
+            </option>
+          ))}
+        </Select>
+        <Select
+          label="Only in project"
+          value={s.eventProjectId}
+          onChange={(e) => set({ eventProjectId: e.target.value })}
+          hint="Leave empty for every project you can see."
+        >
+          <option value="">Any project</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.key} {p.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+    );
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <Select
+        label="System"
+        value={s.provider}
+        onChange={(e) => set({ provider: e.target.value as 'github' | 'jira' })}
+      >
+        <option value="github">GitHub</option>
+        <option value="jira">Jira</option>
+      </Select>
+      <Select
+        label="Polling workstation"
+        value={s.workstationId}
+        onChange={(e) => set({ workstationId: e.target.value })}
+        error={errors.workstationId}
+        hint="Its credentials (gh login, Jira token) are used; they never leave it."
+      >
+        <option value="">Choose a workstation</option>
+        {workstations.map((w) => (
+          <option key={w.id} value={w.id}>
+            {w.name}
+          </option>
+        ))}
+      </Select>
+      <TextInput
+        label={s.provider === 'github' ? 'Repository' : 'JQL filter'}
+        hint={s.provider === 'github' ? 'owner/repo' : 'e.g. project = WEB AND statusCategory != Done'}
+        value={s.labelQuery}
+        onChange={(e) => set({ labelQuery: e.target.value })}
+        error={errors.labelQuery}
+      />
+      <TextInput
+        label="Label"
+        value={s.label}
+        onChange={(e) => set({ label: e.target.value })}
+        error={errors.label}
+      />
+      {cronFields}
+    </div>
+  );
+}
+
+function ProjectSelect({
+  s,
+  set,
+  projects,
+  errors,
+  optional,
+  isManager,
+}: {
+  s: WizardState;
+  set: (p: Partial<WizardState>) => void;
+  projects: Array<{ id: string; key: string; name: string }>;
+  errors: Record<string, string>;
+  optional?: string;
+  isManager: boolean;
+}) {
+  return (
+    <Select
+      label={optional ? 'Project (optional)' : 'Project'}
+      value={s.projectId}
+      onChange={(e) => set({ projectId: e.target.value })}
+      error={errors.projectId}
+      hint={
+        optional
+          ? isManager
+            ? optional
+            : 'Choose a project: only the Owner and Admins can make a schedule for the whole organization.'
+          : undefined
+      }
+    >
+      <option value="">{optional ? 'Whole organization' : 'Choose a project'}</option>
+      {projects.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.key} {p.name}
+        </option>
+      ))}
+    </Select>
+  );
+}
+
+function ActionFields({
+  s,
+  set,
+  errors,
+  workstations,
+  projects,
+  workflow,
+  editing,
+  isManager,
+  mockUi,
+}: {
+  s: WizardState;
+  set: (p: Partial<WizardState>) => void;
+  errors: Record<string, string>;
+  workstations: Array<{ id: string; name: string }>;
+  projects: Array<{ id: string; key: string; name: string }>;
+  workflow: Parameters<typeof CardFormFields>[0]['workflow'] | undefined;
+  editing: boolean;
+  isManager: boolean;
+  mockUi: boolean;
+}): ReactNode {
+  const lockedProject = editing && (s.tile === 'create_card' || s.tile === 'regression_run');
+  const ws = (
+    <Select
+      label="Workstation"
+      value={s.workstationId}
+      onChange={(e) => set({ workstationId: e.target.value })}
+      error={errors.workstationId}
+      hint="One of yours: the action runs as you, on your machine."
+    >
+      <option value="">Choose a workstation</option>
+      {workstations.map((w) => (
+        <option key={w.id} value={w.id}>
+          {w.name}
+        </option>
+      ))}
+    </Select>
+  );
+  switch (s.tile) {
+    case 'create_card':
+      return (
+        <>
+          <div className={lockedProject ? 'pointer-events-none opacity-70' : undefined}>
+            <ProjectSelect s={s} set={set} projects={projects} errors={errors} isManager={isManager} />
+          </div>
+          {!s.projectId && <p className="text-sm text-muted">Choose a project to fill in the card.</p>}
+          {s.projectId && !workflow && (
+            <p className="text-sm text-muted">Loading the project's card form...</p>
+          )}
+          {workflow && (
+            <div className="flex flex-col gap-4" data-testid="card-template">
+              {workflow.cardTypes.length > 1 && (
+                <Select
+                  label="Card type"
+                  value={s.card.cardType}
+                  onChange={(e) => set({ card: { ...s.card, cardType: e.target.value } })}
+                  error={errors['card.cardType']}
+                >
+                  {workflow.cardTypes.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </Select>
+              )}
+              <CardFormFields
+                workflow={workflow}
+                values={s.card}
+                onChange={(card) => set({ card })}
+                errors={Object.fromEntries(
+                  Object.entries(errors)
+                    .filter(([k]) => k.startsWith('card.'))
+                    .map(([k, v]) => [k.slice(5), v]),
+                )}
+                repos={[]}
+                mockUi={mockUi}
+                template
+              />
+              <p className="text-xs text-subtle">
+                Use {'{date}'} or {'{week}'} in the title; without them the date is added.
+              </p>
+            </div>
+          )}
+        </>
+      );
+    case 'regression_run':
+      return (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <ProjectSelect s={s} set={set} projects={projects} errors={errors} isManager={isManager} />
+          <Select
+            label="Platform"
+            value={s.platform}
+            onChange={(e) => set({ platform: e.target.value as WizardState['platform'] })}
+          >
+            <option value="web">Web</option>
+            <option value="mobile">Mobile</option>
+            <option value="both">Both</option>
+          </Select>
+        </div>
+      );
+    case 'devops_request':
+      return (
+        <div className="flex flex-col gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {ws}
+            <label className="flex min-h-9 items-center gap-2.5 self-end pb-1 text-base text-fg">
+              <input
+                type="checkbox"
+                className="size-4 accent-[var(--brand)]"
+                checked={s.hygiene}
+                onChange={(e) => set({ hygiene: e.target.checked })}
+              />
+              Repository hygiene run (organization-wide)
+            </label>
+          </div>
+          {!s.hygiene && (
+            <TextArea
+              label="Request"
+              rows={4}
+              value={s.devopsText}
+              onChange={(e) => set({ devopsText: e.target.value })}
+              error={errors.devopsText}
+              maxLength={2000}
+            />
+          )}
+          <ProjectSelect
+            s={s}
+            set={set}
+            projects={projects}
+            errors={errors}
+            optional="Whole organization (Owner and Admins only)"
+            isManager={isManager}
+          />
+        </div>
+      );
+    case 'ba_task':
+      return (
+        <div className="flex flex-col gap-4">
+          <TextArea
+            label="Instructions for the BA"
+            hint="The BA only reads: the ledger, the desk, the vault and the repositories. Use {date} and {week} if you like."
+            rows={5}
+            value={s.prompt}
+            onChange={(e) => set({ prompt: e.target.value })}
+            error={errors.prompt}
+            maxLength={2000}
+          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <ProjectSelect
+              s={s}
+              set={set}
+              projects={projects}
+              errors={errors}
+              optional="Whole organization (Owner and Admins only)"
+              isManager={isManager}
+            />
+            <Select
+              label="Deliver the report"
+              value={s.deliver}
+              onChange={(e) => set({ deliver: e.target.value as WizardState['deliver'] })}
+            >
+              <option value="desk_notice">As a notice on the desk</option>
+              <option value="chat">On the desk, with the BA chat open for questions</option>
+            </Select>
+          </div>
+        </div>
+      );
+    case 'github':
+    case 'jira':
+      return (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {ws}
+          <TextInput
+            label={s.tile === 'github' ? 'Repository' : 'JQL filter'}
+            hint={s.tile === 'github' ? 'owner/repo' : 'e.g. project = WEB AND statusCategory != Done'}
+            value={s.query}
+            onChange={(e) => set({ query: e.target.value })}
+            error={errors.query}
+          />
+          <ProjectSelect
+            s={s}
+            set={set}
+            projects={projects}
+            errors={errors}
+            optional="Whole organization (Owner and Admins only)"
+            isManager={isManager}
+          />
+          <p className="text-sm text-muted sm:col-span-2">
+            Each new issue becomes an intake conversation with the BA. An issue is taken once.
+          </p>
+        </div>
+      );
+    case 'webhook':
+      return (
+        <div className="flex flex-col gap-4">
+          <TextInput
+            label="URL"
+            hint="https://hooks.slack.com/..., a Teams workflow URL, an n8n or Zapier catch hook"
+            value={s.url}
+            onChange={(e) => set({ url: e.target.value })}
+            error={errors.url}
+            inputMode="url"
+          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Select
+              label="Format"
+              value={s.format}
+              onChange={(e) => set({ format: e.target.value as WizardState['format'] })}
+            >
+              {WEBHOOK_FORMATS.map((f) => (
+                <option key={f} value={f}>
+                  {WEBHOOK_FORMAT_LABEL[f]}
+                </option>
+              ))}
+            </Select>
+            <Select
+              label="Add a digest"
+              value={s.digest}
+              onChange={(e) => set({ digest: e.target.value as WizardState['digest'] })}
+            >
+              <option value="">No digest</option>
+              <option value="floor_report">Floor report (organization)</option>
+              <option value="project_summary">Project summary</option>
+            </Select>
+          </div>
+          <TextArea
+            label="Message"
+            hint="Placeholders: {event}, {ref}, {project}, {date}, {issue}. Empty: a one-line summary of the run."
+            rows={3}
+            value={s.message}
+            onChange={(e) => set({ message: e.target.value })}
+            maxLength={2000}
+          />
+          <ProjectSelect
+            s={s}
+            set={set}
+            projects={projects}
+            errors={errors}
+            optional="Whole organization (Owner and Admins only)"
+            isManager={isManager}
+          />
+          <p className="text-sm text-muted">
+            Every request is signed: <code>X-AOM-Signature</code> is <code>sha256=</code> and the HMAC of{' '}
+            <code>timestamp.body</code> with the schedule's secret, which is shown once after you create it. A
+            failed delivery is retried up to five times.
+          </p>
+        </div>
+      );
+    case 'email':
+      return (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Select
+            label="Digest"
+            value={s.emailDigest}
+            onChange={(e) => set({ emailDigest: e.target.value as WizardState['emailDigest'] })}
+          >
+            <option value="floor_report">Floor report (organization)</option>
+            <option value="project_summary">Project summary</option>
+          </Select>
+          {s.emailDigest === 'project_summary' && (
+            <ProjectSelect s={s} set={set} projects={projects} errors={errors} isManager={isManager} />
+          )}
+          <TextInput
+            label="To"
+            hint={isManager ? 'One or more addresses, separated by commas.' : 'Your own address only.'}
+            value={s.to}
+            onChange={(e) => set({ to: e.target.value })}
+            error={errors.to}
+            placeholder="me@example.com"
+          />
+          <TextInput
+            label="Subject"
+            hint="Empty: the digest's own subject."
+            value={s.subject}
+            onChange={(e) => set({ subject: e.target.value })}
+            maxLength={200}
+          />
+          <p className="text-sm text-muted sm:col-span-2">
+            Sent from the server's mail account. Interest digests join here once interests move to the
+            organization.
+          </p>
+        </div>
+      );
+  }
+}

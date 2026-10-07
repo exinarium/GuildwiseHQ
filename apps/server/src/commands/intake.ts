@@ -144,6 +144,20 @@ export async function startIntake(
 ): Promise<IntakeDto> {
   if (!isOrgManager({ orgRole: org.role }))
     throw forbidden('only the organization Owner and Admins can start an intake');
+  return startIntakeIn(ctx, user, org.id, req);
+}
+
+/**
+ * The intake itself, without the role check: a schedule that polls GitHub or Jira for new issues (its creator was
+ * authorized when the schedule was made) starts one per issue.
+ */
+export async function startIntakeIn(
+  ctx: Ctx,
+  user: Pick<AuthSession['user'], 'id'>,
+  orgId: string,
+  req: CreateIntakeRequest,
+): Promise<IntakeDto> {
+  const org = { id: orgId };
   const ref = parseExternalRef(req.externalKey ?? req.note);
   const externalKey = req.externalKey ?? ref?.key;
   const externalSystem = req.externalSystem ?? ref?.system;

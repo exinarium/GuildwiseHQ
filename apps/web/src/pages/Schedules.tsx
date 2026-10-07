@@ -1,26 +1,38 @@
 import {
-  DEFAULT_SCHEDULE_CRON,
-  FEED_DEFAULT_MAX_ITEMS,
-  feedMaxItems,
-  type ProjectDto,
-  SCHEDULE_PRESETS,
+  type CreateScheduleResponse,
+  isWebhookAction,
   type ScheduleDto,
+  type SystemScheduleDto,
 } from '@aom/shared';
-import { CalendarClock } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
-import { Link } from 'react-router';
-import { useProjects } from '../api/queries/projects.ts';
 import {
-  useCreateSchedule,
+  CalendarClock,
+  ChevronDown,
+  ChevronRight,
+  History,
+  KeyRound,
+  Lock,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  Send,
+  Trash2,
+} from 'lucide-react';
+import { useState } from 'react';
+import { Link } from 'react-router';
+import {
   useDeleteSchedule,
   usePatchSchedule,
+  useRotateSecret,
   useRunSchedule,
-  useSchedules,
+  useScheduleList,
+  useTestSchedule,
 } from '../api/queries/schedules.ts';
+import { RunHistory } from '../components/schedules/RunHistory.tsx';
+import { ScheduleWizard } from '../components/schedules/ScheduleWizard.tsx';
 import {
   Badge,
   Button,
-  ButtonLink,
   Callout,
   ConfirmDialog,
   EmptyState,
@@ -28,77 +40,191 @@ import {
   ListSkeleton,
   PageHeader,
   Panel,
-  Select,
-  TextArea,
-  TextInput,
   useToast,
 } from '../components/ui.tsx';
-import { buildFeedTemplate, defaultTimezone, describeCron } from '../lib/feeds.ts';
+import { actionLabel, describeAction, describeTrigger } from '../lib/schedules.ts';
 import { formatDateTime } from '../lib/time.ts';
 
-const CUSTOM = 'custom';
-
-/** Recurring tasks: cron with a time zone ("Daily at 07:00"), run now, pause. Schedules always fire on time. */
+/**
+ * Schedules: a trigger (a time, an event, a labelled issue or nothing) and one action (a card, a regression, a DevOps
+ * request, a BA task, an integration). Runs, history and the webhook delivery log are on each schedule; the jobs the
+ * system runs by itself are listed read-only at the end.
+ */
 export function Schedules() {
-  const schedules = useSchedules();
-  const projects = useProjects();
-  const feedProjects = (projects.data ?? []).filter((p) => p.workflowKey === 'feed' && p.myRole === 'owner');
+  const list = useScheduleList();
+  const [wizard, setWizard] = useState<{ open: boolean; editing?: ScheduleDto }>({ open: false });
+  const [secret, setSecret] = useState<{ name: string; value: string } | null>(null);
+  const schedules = list.data?.schedules ?? [];
+  const system = list.data?.system ?? [];
+
+  const groups = new Map<string, ScheduleDto[]>();
+  for (const s of schedules) {
+    const key = s.projectKey ? `${s.projectKey} ${s.projectName ?? ''}`.trim() : 'Whole organization';
+    groups.set(key, [...(groups.get(key) ?? []), s]);
+  }
+  const ordered = [...groups.entries()].sort(([a], [b]) =>
+    a === 'Whole organization' ? -1 : b === 'Whole organization' ? 1 : a.localeCompare(b),
+  );
+  const onCreated = (c: CreateScheduleResponse) => {
+    if (c.webhookSecret) setSecret({ name: c.name, value: c.webhookSecret });
+  };
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-3">
+    <div className="mx-auto flex max-w-4xl flex-col gap-4">
       <PageHeader
         title="Schedules"
-        sub="Each run emits a card that takes the next free agent ahead of normal work; if none is free, one extra shift starts."
+        sub="Run something on a time, when an event happens, or when an issue gets a label. No agent ever polls: the server does."
+        actions={
+          <Button variant="primary" data-testid="new-schedule" onClick={() => setWizard({ open: true })}>
+            <Plus aria-hidden="true" className="size-4" />
+            New schedule
+          </Button>
+        }
       />
-      {schedules.isPending && <ListSkeleton label="Loading schedules" rows={2} />}
-      <ErrorBox error={schedules.error} onRetry={() => schedules.refetch()} />
-      <ul className="flex flex-col gap-3" aria-label="Schedules" data-testid="schedules">
-        {(schedules.data ?? []).map((s) => (
-          <li key={s.id} data-testid={`schedule-${s.name}`}>
-            <ScheduleRow schedule={s} projectKey={projects.data?.find((p) => p.id === s.projectId)?.key} />
-          </li>
-        ))}
-      </ul>
-      {schedules.data?.length === 0 && (
+      {secret && <SecretNotice name={secret.name} value={secret.value} onClose={() => setSecret(null)} />}
+      {list.isPending && <ListSkeleton label="Loading schedules" rows={2} />}
+      <ErrorBox error={list.error} onRetry={() => list.refetch()} />
+      {ordered.map(([group, items]) => (
+        <section key={group} aria-label={group} className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold tracking-wide text-subtle uppercase">{group}</h2>
+          <ul className="flex flex-col gap-3" aria-label={`Schedules of ${group}`} data-testid="schedules">
+            {items.map((s) => (
+              <li key={s.id} data-testid={`schedule-${s.name}`}>
+                <ScheduleRow
+                  schedule={s}
+                  onEdit={() => setWizard({ open: true, editing: s })}
+                  onSecret={setSecret}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+      {list.data && schedules.length === 0 && (
         <EmptyState
           data-testid="schedules-empty"
           icon={CalendarClock}
           title="No schedules yet"
-          description="A schedule runs a feed scan on a cadence. Create a project with the Feed workflow, then schedule its scan below."
+          description="A schedule runs something for you: a weekly regression, a card when a phase is completed, a Slack message when a card is finalized, a morning e-mail digest, or new GitHub issues taken into intake."
           action={
-            feedProjects.length === 0 ? (
-              <ButtonLink to="/projects" variant="primary">
-                Create a feed project
-              </ButtonLink>
-            ) : undefined
+            <Button variant="primary" onClick={() => setWizard({ open: true })}>
+              Create the first schedule
+            </Button>
           }
         />
       )}
-      <NewSchedule projects={feedProjects} />
+      {system.length > 0 && (
+        <section aria-label="Run by the system" className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold tracking-wide text-subtle uppercase">Run by the system</h2>
+          <ul className="flex flex-col gap-3" aria-label="System jobs" data-testid="system-schedules">
+            {system.map((s) => (
+              <li key={s.id}>
+                <SystemRow row={s} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <ScheduleWizard
+        open={wizard.open}
+        onOpenChange={(open) => setWizard((cur) => ({ ...cur, open }))}
+        editing={wizard.editing}
+        onCreated={onCreated}
+      />
     </div>
   );
 }
 
-function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; projectKey: string | undefined }) {
+function SecretNotice({ name, value, onClose }: { name: string; value: string; onClose: () => void }) {
+  return (
+    <Callout tone="info" data-testid="webhook-secret">
+      <p className="font-medium">Signing secret of "{name}"</p>
+      <p className="mt-1 text-sm">
+        Copy it now: it is shown only this once. Your receiver checks the <code>X-AOM-Signature</code> header
+        against it.
+      </p>
+      <p
+        className="mt-2 rounded-control bg-sunken px-2 py-1.5 font-mono text-sm break-all text-fg"
+        data-testid="secret-value"
+      >
+        {value}
+      </p>
+      <div className="mt-2 flex gap-2">
+        <Button onClick={() => void navigator.clipboard?.writeText(value)}>Copy</Button>
+        <Button onClick={onClose}>I have saved it</Button>
+      </div>
+    </Callout>
+  );
+}
+
+function SystemRow({ row }: { row: SystemScheduleDto }) {
+  return (
+    <Panel data-testid={`system-${row.kind}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Lock aria-hidden="true" className="size-4 text-subtle" />
+        <h3 className="text-lg font-semibold text-fg">{row.name}</h3>
+        <Badge>System</Badge>
+        <Link to={row.configureAt} className="ml-auto text-sm text-brand-text underline">
+          Configure
+        </Link>
+      </div>
+      <p className="mt-1 text-sm text-muted">{row.description}</p>
+      <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm text-fg sm:grid-cols-3">
+        <div>
+          <dt className="text-xs text-subtle">When</dt>
+          <dd>{row.when}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-subtle">Next run</dt>
+          <dd>{row.nextRunAt ? formatDateTime(row.nextRunAt) : 'not scheduled'}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-subtle">Last run</dt>
+          <dd>{row.lastRunAt ? formatDateTime(row.lastRunAt) : 'never'}</dd>
+        </div>
+      </dl>
+    </Panel>
+  );
+}
+
+const STATUS_TONE = { ok: 'success', failed: 'danger', pending: 'warning' } as const;
+const STATUS_LABEL = { ok: 'Last run done', failed: 'Last run failed', pending: 'Last run waiting' } as const;
+
+function ScheduleRow({
+  schedule: s,
+  onEdit,
+  onSecret,
+}: {
+  schedule: ScheduleDto;
+  onEdit: () => void;
+  onSecret: (v: { name: string; value: string }) => void;
+}) {
   const patch = usePatchSchedule();
   const run = useRunSchedule();
   const del = useDeleteSchedule();
+  const test = useTestSchedule();
+  const rotate = useRotateSecret();
   const toast = useToast();
   const [confirming, setConfirming] = useState(false);
-  const fields = s.cardTemplate.fields as Record<string, unknown>;
-  const topic = typeof fields.topic === 'string' ? fields.topic : undefined;
-  const description = typeof fields.description === 'string' ? fields.description.trim() : '';
+  const [history, setHistory] = useState(false);
+  const webhook = isWebhookAction(s.action);
+  const testable = webhook || (s.action.kind === 'integration' && s.action.integration === 'email');
+  const managed = !!s.interestId;
+  const editable = s.canEdit !== false && !managed;
+  const Chevron = history ? ChevronDown : ChevronRight;
+
   return (
     <Panel>
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-semibold text-fg">{s.name}</h2>
-        <Badge>{s.kind}</Badge>
-        {projectKey && (
-          <Link to={`/p/${projectKey}/feed`} className="text-xs underline">
-            {projectKey}
-          </Link>
-        )}
+        <h3 className="text-lg font-semibold text-fg [overflow-wrap:anywhere]">{s.name}</h3>
+        <Badge tone="brand">{actionLabel(s.action)}</Badge>
         <Badge tone={s.enabled ? 'green' : 'amber'}>{s.enabled ? 'Enabled' : 'Paused'}</Badge>
+        {s.orgLevel && (
+          <Badge title="Acts for the whole organization: only Owners and Admins change it">
+            Organization
+          </Badge>
+        )}
+        {s.lastStatus && <Badge tone={STATUS_TONE[s.lastStatus]}>{STATUS_LABEL[s.lastStatus]}</Badge>}
         {(s.failCount ?? 0) > 0 && (
           <Badge tone="red" title={s.lastError ?? undefined}>
             Cannot run ({s.failCount} failed {s.failCount === 1 ? 'try' : 'tries'})
@@ -110,48 +236,81 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
           {s.lastError} Retrying with growing pauses.
         </p>
       )}
+      <p className="mt-1 text-sm text-muted [overflow-wrap:anywhere]" data-testid="schedule-action">
+        {describeAction(s.action)}
+      </p>
       <dl className="mt-3 grid gap-x-6 gap-y-3 text-sm text-fg sm:grid-cols-2">
         <div>
           <dt className="text-xs text-subtle">When</dt>
-          <dd data-testid="schedule-when">
-            {describeCron(s.cron)} <span className="text-subtle">({s.timezone})</span>
-          </dd>
+          <dd data-testid="schedule-when">{describeTrigger(s.trigger)}</dd>
         </div>
         <div>
           <dt className="text-xs text-subtle">Next run</dt>
-          <dd data-testid="schedule-next">{s.nextFireAt ? formatDateTime(s.nextFireAt) : 'not scheduled'}</dd>
+          <dd data-testid="schedule-next">
+            {s.nextFireAt
+              ? formatDateTime(s.nextFireAt)
+              : s.trigger.kind === 'event'
+                ? 'on the event'
+                : 'not scheduled'}
+          </dd>
         </div>
-        <div>
-          <dt className="text-xs text-subtle">Topic</dt>
-          <dd>{topic ?? s.cardTemplate.title}</dd>
-        </div>
-        <div>
-          <dt className="text-xs text-subtle">Max items</dt>
-          <dd data-testid="schedule-max-items">{feedMaxItems(fields)}</dd>
-        </div>
-        {description && (
-          <div className="sm:col-span-2">
-            <dt className="text-xs text-subtle">Description</dt>
-            <dd className="whitespace-pre-wrap" data-testid="schedule-description">
-              {description}
-            </dd>
-          </div>
-        )}
         <div>
           <dt className="text-xs text-subtle">Last run</dt>
-          <dd data-testid="schedule-last">{s.lastFiredAt ? formatDateTime(s.lastFiredAt) : 'never'}</dd>
+          <dd data-testid="schedule-last">
+            {s.lastFiredAt ? formatDateTime(s.lastFiredAt) : 'never'}
+            {s.lastSummary ? <span className="text-muted"> - {s.lastSummary}</span> : null}
+          </dd>
         </div>
+        {s.ownerName && (
+          <div>
+            <dt className="text-xs text-subtle">Runs as</dt>
+            <dd>{s.ownerName}</dd>
+          </div>
+        )}
       </dl>
-      <ErrorBox error={patch.error ?? run.error ?? del.error} />
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button
-          variant="primary"
-          loading={run.isPending}
-          onClick={() => run.mutate(s.id, { onSuccess: (r) => toast.success(`Emitted ${r.ref}`) })}
+      <ErrorBox error={patch.error ?? run.error ?? del.error ?? test.error ?? rotate.error} />
+      {test.data && test.variables === s.id && (
+        <p
+          className={`mt-2 text-sm ${test.data.ok ? 'text-success' : 'text-danger'}`}
+          role="status"
+          data-testid="test-result"
         >
-          Run now
+          {test.data.ok
+            ? `Test delivered${test.data.httpStatus ? ` (HTTP ${test.data.httpStatus})` : ''}.`
+            : `Test failed${test.data.httpStatus ? ` (HTTP ${test.data.httpStatus})` : ''}: ${test.data.error ?? 'unknown error'}`}
+        </p>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {(editable || managed) && (
+          <Button
+            variant="primary"
+            loading={run.isPending && run.variables === s.id}
+            onClick={() =>
+              run.mutate(s.id, {
+                onSuccess: (r) => toast.success(r.ref ? `Emitted ${r.ref}` : (r.summary ?? 'Started')),
+              })
+            }
+          >
+            <Play aria-hidden="true" className="size-4" />
+            Run now
+          </Button>
+        )}
+        {testable && editable && (
+          <Button
+            loading={test.isPending && test.variables === s.id}
+            onClick={() => test.mutate(s.id)}
+            data-testid="test-delivery"
+          >
+            <Send aria-hidden="true" className="size-4" />
+            Send test
+          </Button>
+        )}
+        <Button onClick={() => setHistory(!history)} aria-expanded={history} data-testid="toggle-history">
+          <History aria-hidden="true" className="size-4" />
+          History
+          <Chevron aria-hidden="true" className="size-4" />
         </Button>
-        {s.interestId ? (
+        {managed ? (
           // Owned by an interest: it is edited, paused and deleted there (the server answers 409 otherwise).
           <span className="text-sm" data-testid="schedule-managed">
             Managed by interest{' '}
@@ -159,8 +318,12 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
               {s.interestName ?? 'interest'}
             </Link>
           </span>
-        ) : (
+        ) : editable ? (
           <>
+            <Button onClick={onEdit}>
+              <Pencil aria-hidden="true" className="size-4" />
+              Edit
+            </Button>
             <Button
               disabled={patch.isPending}
               onClick={() =>
@@ -170,16 +333,35 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
                 )
               }
             >
+              {s.enabled ? (
+                <Pause aria-hidden="true" className="size-4" />
+              ) : (
+                <Play aria-hidden="true" className="size-4" />
+              )}
               {s.enabled ? 'Pause' : 'Resume'}
             </Button>
+            {webhook && (
+              <Button
+                loading={rotate.isPending && rotate.variables === s.id}
+                onClick={() =>
+                  rotate.mutate(s.id, {
+                    onSuccess: (r) => onSecret({ name: s.name, value: r.webhookSecret }),
+                  })
+                }
+              >
+                <KeyRound aria-hidden="true" className="size-4" />
+                New secret
+              </Button>
+            )}
             <Button variant="danger-ghost" className="ml-auto" onClick={() => setConfirming(true)}>
+              <Trash2 aria-hidden="true" className="size-4" />
               Delete
             </Button>
             <ConfirmDialog
               open={confirming}
               onOpenChange={setConfirming}
               title={`Delete the schedule "${s.name}"?`}
-              description="It stops running. Cards it already emitted are kept."
+              description="It stops running and its history goes with it. Cards it already emitted are kept."
               confirmLabel="Delete schedule"
               pending={del.isPending}
               onConfirm={() =>
@@ -193,157 +375,18 @@ function ScheduleRow({ schedule: s, projectKey }: { schedule: ScheduleDto; proje
               }
             />
           </>
+        ) : (
+          <span className="text-sm text-subtle" data-testid="schedule-readonly">
+            Only the Owner and Admins change this one.
+          </span>
         )}
       </div>
-      {run.data && (
+      {run.data && run.variables === s.id && (
         <p className="mt-2 text-sm text-fg" data-testid="run-result">
-          Emitted {run.data.ref}.
+          {run.data.ref ? `Emitted ${run.data.ref}.` : (run.data.summary ?? 'Started.')}
         </p>
       )}
-    </Panel>
-  );
-}
-
-function NewSchedule({ projects }: { projects: ProjectDto[] }) {
-  const create = useCreateSchedule();
-  const toast = useToast();
-  const [projectId, setProjectId] = useState('');
-  const [name, setName] = useState('');
-  const [preset, setPreset] = useState<string>(SCHEDULE_PRESETS[0].id);
-  const [cron, setCron] = useState<string>(DEFAULT_SCHEDULE_CRON);
-  const [timezone, setTimezone] = useState(defaultTimezone());
-  const [topic, setTopic] = useState('');
-  const [sites, setSites] = useState('');
-  const [description, setDescription] = useState('');
-  const [maxItems, setMaxItems] = useState(String(FEED_DEFAULT_MAX_ITEMS));
-  const [err, setErr] = useState('');
-  const chosen = projects.find((p) => p.id === projectId) ?? projects[0];
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!chosen) return setErr('Create a feed project first');
-    if (!name.trim() || !topic.trim()) return setErr('A name and a topic are required');
-    const expression =
-      preset === CUSTOM ? cron.trim() : (SCHEDULE_PRESETS.find((p) => p.id === preset)?.cron ?? cron);
-    setErr('');
-    create.mutate(
-      {
-        projectId: chosen.id,
-        name: name.trim(),
-        cron: expression,
-        timezone: timezone.trim() || 'UTC',
-        cardTemplate: buildFeedTemplate({
-          title: `${name.trim()}`,
-          topic,
-          description,
-          sites,
-          maxItems,
-        }),
-      },
-      {
-        onSuccess: () => {
-          toast.success('Schedule created');
-          setName('');
-          setTopic('');
-          setDescription('');
-          setSites('');
-        },
-      },
-    );
-  };
-
-  return (
-    <Panel>
-      <h2 className="mb-3 text-lg font-semibold text-fg">New feed schedule</h2>
-      <p className="mb-4 text-sm text-muted" data-testid="schedules-interests-hint">
-        Feeds are easier to manage as{' '}
-        <Link to="/interests" className="text-brand-text underline">
-          Interests
-        </Link>
-        : one place for the topic, its scan, your taste rules and its notes.
-      </p>
-      {projects.length === 0 ? (
-        <p className="text-sm text-muted">
-          You own no project with the Feed workflow.{' '}
-          <Link to="/projects" className="text-brand-text underline">
-            Create one
-          </Link>{' '}
-          and choose the Feed workflow.
-        </p>
-      ) : (
-        <form onSubmit={submit} aria-label="New schedule" className="grid gap-4 sm:grid-cols-2" noValidate>
-          <Select label="Project" value={chosen?.id ?? ''} onChange={(e) => setProjectId(e.target.value)}>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.key} {p.name}
-              </option>
-            ))}
-          </Select>
-          <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <Select label="Runs" value={preset} onChange={(e) => setPreset(e.target.value)}>
-            {SCHEDULE_PRESETS.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-            <option value={CUSTOM}>Custom cron expression</option>
-          </Select>
-          <TextInput
-            label="Time zone"
-            hint="IANA name, e.g. Africa/Johannesburg"
-            value={timezone}
-            onChange={(e) => setTimezone(e.target.value)}
-          />
-          {preset === CUSTOM && (
-            <TextInput
-              label="Cron expression"
-              hint="minute hour day month weekday"
-              value={cron}
-              onChange={(e) => setCron(e.target.value)}
-            />
-          )}
-          <TextInput
-            label="Topic"
-            hint="A short label"
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-          />
-          <TextInput
-            label="Max items"
-            hint="The best N items overall, whatever their kind (articles, videos, podcasts)"
-            inputMode="numeric"
-            value={maxItems}
-            onChange={(e) => setMaxItems(e.target.value)}
-          />
-          <div className="sm:col-span-2">
-            <TextArea
-              label="Description"
-              hint="Markdown. What you want in detail: the angle, what to include or leave out, the level. Optional, but the agents follow it over the topic."
-              rows={5}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
-          <TextArea
-            label="Preferred sites (searched first, one per line)"
-            value={sites}
-            onChange={(e) => setSites(e.target.value)}
-          />
-          <div className="flex flex-col gap-2 sm:col-span-2">
-            {err && (
-              <Callout tone="danger" role="alert">
-                {err}
-              </Callout>
-            )}
-            <ErrorBox error={create.error} />
-            <div>
-              <Button type="submit" variant="primary" loading={create.isPending}>
-                Create schedule
-              </Button>
-            </div>
-          </div>
-        </form>
-      )}
+      {history && <RunHistory schedule={s} />}
     </Panel>
   );
 }

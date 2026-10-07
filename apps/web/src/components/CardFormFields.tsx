@@ -17,6 +17,7 @@ export function CardFormFields({
   errors,
   repos,
   mockUi,
+  template = false,
 }: {
   workflow: Workflow;
   values: CardFormValues;
@@ -24,11 +25,13 @@ export function CardFormFields({
   errors: Record<string, string>;
   repos: Array<{ id: string; name: string }>;
   mockUi: boolean;
+  /** A template for a scheduled card: no repository, completion action or docs flag (they belong to a real card). */
+  template?: boolean;
 }) {
   const v = values;
   const list = formFieldList(workflow, mockUi);
   // Repository and completion action belong to code work; research and feed cards live in the vault.
-  const codeCard = workflow.fieldSet !== 'research' && workflow.fieldSet !== 'feed';
+  const codeCard = !template && workflow.fieldSet !== 'research' && workflow.fieldSet !== 'feed';
   const setField = (k: string, val: string) => onChange({ ...v, fields: { ...v.fields, [k]: val } });
   return (
     <>

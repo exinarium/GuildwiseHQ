@@ -407,6 +407,12 @@ describe('Schedules page with interests', () => {
     kind: 'feed',
     cron: '0 7 * * *',
     timezone: 'UTC',
+    trigger: { kind: 'cron', cron: '0 7 * * *', timezone: 'UTC' },
+    action: {
+      kind: 'create_card',
+      projectId: NEWS.id,
+      template: { title: 'Rust async', fields: { topic: 'Rust async' } },
+    },
     cardTemplate: { title: 'Rust async', fields: { topic: 'Rust async' } },
     enabled: true,
     nextFireAt: '2026-10-06T07:00:00.000Z',
@@ -444,8 +450,5 @@ describe('Schedules page with interests', () => {
     );
     const plain = screen.getByTestId('schedule-Plain');
     expect(within(plain).getByRole('button', { name: 'Pause' })).toBeInTheDocument();
-    expect(screen.getByTestId('schedules-interests-hint')).toHaveTextContent(
-      'Feeds are easier to manage as Interests',
-    );
   });
 });

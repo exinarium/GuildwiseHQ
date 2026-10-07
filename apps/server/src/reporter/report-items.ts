@@ -203,3 +203,48 @@ export async function floorReportEvents(
     ...open.map((s) => signalEvent(orgId, null, s.id, deskItemId)),
   ];
 }
+
+/**
+ * The answer to a schedule's `ba_task`: one `alert/ba_report` item (org-level, or on the project the schedule is tied
+ * to) carrying the BA's report. `deliver: 'chat'` also links the standing "BA reports" chat so the manager can ask
+ * follow-up questions.
+ */
+export async function scheduledBriefEvents(
+  db: Queryable,
+  task: Row,
+  input: { report: string; by: DeskActor; baAgentId?: string | undefined; fallback?: boolean },
+): Promise<AppendInput[]> {
+  const orgId = task.org_id as string;
+  const projectId = task.org_level ? null : ((task.project_id as string | null) ?? null);
+  const thread =
+    task.deliver === 'chat'
+      ? await ensureReportThread(db, orgId, input.baAgentId)
+      : { threadId: null, events: [] };
+  const deskItemId = randomUUID();
+  return [
+    ...thread.events,
+    {
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemCreated',
+        payload: {
+          deskItemId,
+          kind: 'alert',
+          subkind: REPORT_DESK_SUBKIND.baReport,
+          title: `${task.schedule_name ?? 'Scheduled task'}: BA report`,
+          body: input.report,
+          options: [],
+          blocking: false,
+          pinned: false,
+          affectedCardIds: [],
+          ...(projectId ? { projectId } : {}),
+          askedBy: input.by,
+          ...(thread.threadId ? { chatThreadId: thread.threadId } : {}),
+          data: { scheduleId: task.schedule_id ?? null, kind: 'scheduled_brief' },
+        },
+      },
+      actor: actorOf(input.by),
+      scope: scopeOf(orgId, projectId),
+    },
+  ];
+}

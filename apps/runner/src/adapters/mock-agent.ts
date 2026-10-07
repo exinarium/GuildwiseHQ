@@ -539,10 +539,12 @@ interface BaTaskBrief extends Brief {
       | 'desk_triage'
       | 'urgent_note'
       | 'floor_alert'
-      | 'floor_report';
+      | 'floor_report'
+      | 'scheduled_brief';
     followupId?: string;
     phase?: { ref: string; name: string; description: string; workingBranch: string };
     reporter?: {
+      brief?: { scheduleName: string; instructions: string; deliver: string; projectKey?: string | null };
       items: Array<{ id: string; title: string; held: boolean }>;
       openItems: Array<{ id: string; title: string }>;
       signals: Array<{
@@ -628,6 +630,16 @@ async function reporterTaskMain(
       ...(s.subject.deskItemId ? { annotateItemId: s.subject.deskItemId } : {}),
     }));
     res = aom(['report', 'signals', '--file', tmpJson('reports.json', { reports })]);
+  } else if (t.kind === 'scheduled_brief') {
+    const b = r.brief;
+    const md = [
+      `# ${b?.scheduleName ?? 'Scheduled task'} (mock BA)`,
+      '',
+      `Instructions: ${b?.instructions ?? ''}`,
+      '',
+      'The mock BA read the instructions and has nothing to add.',
+    ].join('\n');
+    res = aom(['report', 'brief', '--summary-file', tmpText('brief.md', md)]);
   } else {
     const d = r.digest;
     const list = (xs: string[]) => (xs.length ? xs.map((x) => `- ${x}`) : ['- none']);

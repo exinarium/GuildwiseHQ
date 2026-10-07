@@ -50,7 +50,7 @@ export async function baTaskPass(
                AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = $2::uuid AND pm.user_id = ws.user_id
                             AND pm.status = 'active')))
         ORDER BY (a.id = $3::uuid) DESC, a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
-      [t.org_id, t.project_id, t.preferred_agent_id, t.kind === 'floor_report'],
+      [t.org_id, t.project_id, t.preferred_agent_id, t.kind === 'floor_report' || t.org_level === true],
     );
     const stalled = now.getTime() - new Date(t.updated_at).getTime() > BA_TASK_STALL_MS;
     if (bas.length === 0 || t.attempts >= BA_TASK_MAX_ATTEMPTS || stalled) {

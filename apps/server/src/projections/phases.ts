@@ -438,8 +438,8 @@ export const phaseProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO ba_tasks (id, org_id, project_id, phase_id, followup_id, kind, status, preferred_agent_id,
-         signal_ids, desk_item_ids, local_date, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9,$10,$11,$11)`,
+         signal_ids, desk_item_ids, local_date, instructions, deliver, schedule_id, schedule_name, org_level, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16)`,
       [
         p.taskId,
         org,
@@ -451,6 +451,11 @@ export const phaseProjectors: Record<string, Projector> = {
         p.signalIds ?? [],
         p.deskItemIds ?? [],
         p.localDate ?? null,
+        p.instructions ?? null,
+        p.deliver ?? null,
+        p.scheduleId ?? null,
+        p.scheduleName ?? null,
+        p.orgLevel ?? false,
         e.createdAt,
       ],
     );

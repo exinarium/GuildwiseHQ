@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { streamId } from '@aom/shared';
+import { nextFireAfter } from '../../src/commands/schedules.ts';
 import { q } from './db.ts';
 import type { FakeRunner } from './fake-runner.ts';
 import { shiftHelpers } from './shifts.ts';
@@ -36,18 +39,55 @@ export async function createFeedProject(w: World, over: Record<string, unknown> 
   return r.project.id as string;
 }
 
-export const feedSchedule = (w: World, projectId: string, over: Record<string, unknown> = {}) =>
-  w.t.req('POST', '/api/schedules', {
-    cookie: w.owner.cookie,
-    body: {
-      projectId,
-      name: 'Daily news',
-      cron: '0 7 * * *',
-      timezone: 'UTC',
-      cardTemplate: { title: 'News run', fields: { topic: 'reloading' } },
-      ...over,
+/**
+ * A feed schedule as it was created before feeds became interests: a legacy `ScheduleCreated` (no trigger, no action,
+ * `kind: 'feed'`). The API refuses new feed schedules (they are interests now), so tests that need one inject the old
+ * event, exactly what an existing installation holds. Returns what `POST /api/schedules` used to.
+ */
+export async function feedSchedule(
+  w: World,
+  projectId: string,
+  over: Record<string, unknown> = {},
+): Promise<{ status: number; body: any }> {
+  const ctx = w.t.app.ctx;
+  const b = {
+    name: 'Daily news',
+    cron: '0 7 * * *',
+    timezone: 'UTC',
+    cardTemplate: { title: 'News run', fields: { topic: 'reloading' } },
+    enabled: true,
+    ...over,
+  } as { name: string; cron: string; timezone: string; cardTemplate: unknown; enabled: boolean };
+  const proj = (await q('SELECT org_id FROM projects WHERE id=$1', [projectId]))[0];
+  const id = randomUUID();
+  await ctx.store.append([
+    {
+      streamId: streamId.schedule(id),
+      event: {
+        type: 'ScheduleCreated',
+        payload: {
+          scheduleId: id,
+          projectId,
+          name: b.name,
+          kind: 'feed',
+          cron: b.cron,
+          timezone: b.timezone,
+          cardTemplate: b.cardTemplate as never,
+          enabled: b.enabled,
+          nextFireAt: b.enabled
+            ? (nextFireAfter(b.cron, b.timezone, ctx.clock.now())?.toISOString() ?? null)
+            : null,
+        },
+      },
+      actor: { kind: 'user', id: w.owner.id } as never,
+      scope: { orgId: proj?.org_id, projectId, audience: 'project' } as never,
     },
-  });
+  ]);
+  await ctx.notifier.flush();
+  const list = (await w.t.req('GET', `/api/schedules?projectId=${projectId}`, { cookie: w.owner.cookie }))
+    .body.schedules as any[];
+  return { status: 201, body: list.find((x) => x.id === id) };
+}
 
 /** Drives scout and curator shifts of one feed card through a fake runner. */
 export function feedRunner(w: World, r: FakeRunner) {

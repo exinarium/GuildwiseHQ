@@ -198,6 +198,39 @@ export const ChatContextSchema = z.object({
 });
 export type ChatContext = z.infer<typeof ChatContextSchema>;
 
+/**
+ * `integration.run`: poll GitHub or Jira on the owner's workstation (the credentials never leave it). The answer is the
+ * issues that match; the server takes the new ones into intake (docs/ARCHITECTURE.md section 10.4).
+ */
+export const IntegrationRunPayloadSchema = z.object({
+  scheduleId: z.uuid(),
+  /** The run waiting for the answer (an `issues_poll` action); absent for a labelled-issue trigger. */
+  runId: z.uuid().optional(),
+  integration: z.enum(['github', 'jira']),
+  /** GitHub: `owner/repo`. Jira: a JQL filter. */
+  query: z.string().min(1).max(500),
+  /** Only issues with this label (a labelled-issue trigger). */
+  label: z.string().max(100).optional(),
+  limit: z.number().int().min(1).max(100).default(30),
+});
+export type IntegrationRunPayload = z.infer<typeof IntegrationRunPayloadSchema>;
+
+export const PolledIssueSchema = z.object({
+  key: z.string().min(1).max(300),
+  title: z.string().max(500),
+  url: z.string().max(2000).optional(),
+  body: z.string().max(20000).default(''),
+  labels: z.array(z.string()).default([]),
+});
+export type PolledIssue = z.infer<typeof PolledIssueSchema>;
+
+export const IntegrationRunResultSchema = z.object({
+  ok: z.boolean(),
+  error: z.string().max(2000).optional(),
+  issues: z.array(PolledIssueSchema).default([]),
+});
+export type IntegrationRunResult = z.infer<typeof IntegrationRunResultSchema>;
+
 export const RunnerCommandNameSchema = z.enum([
   'agent.wipe',
   'worktree.remove',
@@ -209,6 +242,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.create',
   'branch.check_merged',
   'worktrees.sweep',
+  'integration.run',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -238,6 +272,7 @@ export const CommandPayloadSchemas = {
   'repo.create': RepoCreatePayloadSchema,
   'branch.check_merged': BranchCheckMergedPayloadSchema,
   'worktrees.sweep': WorktreesSweepPayloadSchema,
+  'integration.run': IntegrationRunPayloadSchema,
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([

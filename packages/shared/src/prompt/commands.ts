@@ -45,6 +45,8 @@ export function commandForOutcome(outcome: BriefOutcome): string {
       return 'aom report signals --file <reports.json>   # { "reports": [ { "signalId", "summary" (markdown), "annotateItemId"? } ] }';
     case 'floor_report':
       return 'aom report floor --summary-file <report.md>';
+    case 'scheduled_brief':
+      return 'aom report brief --summary-file <report.md>';
     case 'phase_results':
       return 'aom phase results --summary-file <report.md>';
     default:

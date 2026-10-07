@@ -20,6 +20,7 @@ import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '..
 import { applyBranchCheckResult } from '../commands/phases.ts';
 import { applyRepoCreateResult, repoCreateRpc } from '../commands/repo-create.ts';
 import { riskTierRpc } from '../commands/risk.ts';
+import { applyIntegrationResult } from '../commands/schedule-triggers.ts';
 import {
   applyShiftEnded,
   applyShiftRejected,
@@ -223,6 +224,11 @@ export class RunnerHandlers {
           // Terminal: the sweep ran (or was skipped); what it found is recorded, never retried blindly.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
           await applyWorktreeSweepResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
+        } else if (cmd?.type === 'integration.run') {
+          // Terminal: the poll's answer is applied once (a failed poll shows in the schedule's history, the next
+          // cron fire asks again); never retried blindly.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyIntegrationResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
         } else if (cmd?.type === 'repo.create') {
           // Terminal like outbound.post: created and added to the project, or a failure on the desk (no blind retry).
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

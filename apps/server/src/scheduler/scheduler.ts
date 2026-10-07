@@ -1,4 +1,6 @@
 import { fireDueHygiene } from '../commands/hygiene.ts';
+import { deliverDue } from '../commands/schedule-delivery.ts';
+import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
 import type { Ctx } from '../context.ts';
 import { licensingTick } from '../orgs/licensing.ts';
@@ -16,6 +18,8 @@ export class Scheduler {
   private licensingTimer: NodeJS.Timeout | null = null;
   private chain: Promise<unknown> = Promise.resolve();
   private stopped = false;
+  private kicked: NodeJS.Timeout | null = null;
+  private unsubscribe: (() => void) | null = null;
 
   constructor(private readonly ctx: Ctx) {}
 
@@ -27,6 +31,7 @@ export class Scheduler {
     this.timer.unref();
     this.licensingTimer = setInterval(() => void this.runLicensing().catch(() => {}), LICENSING_MS);
     this.licensingTimer.unref();
+    this.unsubscribe = this.ctx.store.subscribe(() => this.kickTriggers());
     void this.runLicensing().catch((err) => this.ctx.log.error({ err }, 'licensing tick failed'));
     void this.run().catch((err) => this.ctx.log.error({ err }, 'scheduler failed'));
     if (this.ctx.config.hygieneSchedule)
@@ -50,17 +55,40 @@ export class Scheduler {
   }
 
   /** One pass, serialized in-process. Returns the cards it created. */
-  run(): Promise<Array<{ scheduleId: string; cardId: string }>> {
+  run(): Promise<Array<{ scheduleId: string; cardId?: string }>> {
     if (this.stopped) return Promise.resolve([]);
-    const next = this.chain.then(() => fireDueSchedules(this.ctx));
+    const next = this.chain.then(async () => {
+      const fired = await fireDueSchedules(this.ctx);
+      await this.triggers();
+      return fired;
+    });
     this.chain = next.catch(() => {});
     return next;
+  }
+
+  /** Event triggers and the deliveries (webhooks, e-mail) that are due; a failure of one never stops the other. */
+  private async triggers(): Promise<void> {
+    await sweepEventTriggers(this.ctx).catch((err) => this.ctx.log.error({ err }, 'event triggers failed'));
+    await deliverDue(this.ctx).catch((err) => this.ctx.log.error({ err }, 'schedule deliveries failed'));
+  }
+
+  /** The notifier saw new events: look at them soon (a sweep is cheap and idempotent). */
+  private kickTriggers(): void {
+    if (this.stopped || this.kicked) return;
+    this.kicked = setTimeout(() => {
+      this.kicked = null;
+      const next = this.chain.then(() => this.triggers());
+      this.chain = next.catch(() => {});
+    }, 750);
+    this.kicked.unref();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     if (this.licensingTimer) clearInterval(this.licensingTimer);
+    if (this.kicked) clearTimeout(this.kicked);
+    this.unsubscribe?.();
     await this.chain.catch(() => {});
   }
 }

@@ -150,3 +150,70 @@ describe('1313_agent_allow_list', () => {
     expect((await read())[0]).toMatchObject({ name: 'Scoped', allowed_project_ids: null });
   });
 });
+
+describe('1314_generic_schedules', () => {
+  it('reads old schedules as create_card or regression_run on a cron trigger, and is safe to run again', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aom-mig-'));
+    await cp(defaultMigrationsDir(), dir, { recursive: true });
+    await rm(join(dir, '1314_generic_schedules.sql'));
+    await migrate(TEST_DB_URL, { schema: SCHEMA, dir });
+    await client.query(`SET search_path TO ${SCHEMA}`);
+    await client.query(`SET session_replication_role = replica`);
+    const P = '00000000-0000-4000-8000-0000000000a2';
+    const U = '00000000-0000-4000-8000-0000000000b2';
+    await client.query(
+      `INSERT INTO projects (id, org_id, key, name, domain, workflow_key, created_at)
+       VALUES ($1, $2, 'OLD2', 'Old', 'work', 'code', now())`,
+      [P, U],
+    );
+    const schedule = (id: string, kind: string) =>
+      client.query(
+        `INSERT INTO schedules (id, org_id, project_id, name, kind, cron, timezone, card_template, enabled, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, '0 7 * * *', 'UTC', '{"title":"Run","fields":{}}'::jsonb, true, now(), now())`,
+        [id, U, P, `S-${kind}`, kind],
+      );
+    await schedule('00000000-0000-4000-8000-0000000000d1', 'feed');
+    await schedule('00000000-0000-4000-8000-0000000000d2', 'regression');
+    await client.query(`SET session_replication_role = DEFAULT`);
+
+    const applied = await migrate(TEST_DB_URL, { schema: SCHEMA });
+    expect(applied).toEqual(['1314_generic_schedules.sql']);
+    const read = async () =>
+      (
+        await client.query(
+          `SELECT kind, project_id, action->>'kind' AS action_kind, trigger FROM schedules ORDER BY kind`,
+        )
+      ).rows;
+    expect(await read()).toEqual([
+      {
+        kind: 'feed',
+        project_id: P,
+        action_kind: 'create_card',
+        trigger: { kind: 'cron', cron: '0 7 * * *', timezone: 'UTC' },
+      },
+      {
+        kind: 'regression',
+        project_id: P,
+        action_kind: 'regression_run',
+        trigger: { kind: 'cron', cron: '0 7 * * *', timezone: 'UTC' },
+      },
+    ]);
+    // the new tables and columns exist; an org-level schedule (no project, no cron) is allowed
+    await client.query(`SET session_replication_role = replica`);
+    await client.query(
+      `INSERT INTO schedules (id, org_id, project_id, name, kind, enabled, trigger, action, created_at, updated_at)
+       VALUES ('00000000-0000-4000-8000-0000000000d3', $1, NULL, 'Org', 'ba_task', true, '{"kind":"manual"}', '{"kind":"ba_task"}', now(), now())`,
+      [U],
+    );
+    await client.query(`SET session_replication_role = DEFAULT`);
+    for (const t of ['schedule_runs', 'schedule_attempts', 'schedule_issues', 'schedule_trigger_cursor'])
+      expect((await client.query(`SELECT count(*)::int AS n FROM ${t}`)).rows[0]).toEqual({ n: 0 });
+
+    // A trigger changed afterwards must survive the file running again.
+    await client.query(`UPDATE schedules SET trigger = '{"kind":"manual"}' WHERE kind = 'feed'`);
+    const sql = await readFile(join(defaultMigrationsDir(), '1314_generic_schedules.sql'), 'utf8');
+    await client.query(sql);
+    await client.query(sql);
+    expect((await read()).find((r) => r.kind === 'feed')).toMatchObject({ trigger: { kind: 'manual' } });
+  });
+});

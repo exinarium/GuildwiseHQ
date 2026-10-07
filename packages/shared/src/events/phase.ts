@@ -234,6 +234,13 @@ export const phaseEvents = [
       signalIds: z.array(Id).optional(),
       deskItemIds: z.array(Id).optional(),
       localDate: z.string().optional(),
+      /** `scheduled_brief` (a schedule's BA task): what to do, where the answer goes, and which schedule asked. */
+      instructions: z.string().max(2000).optional(),
+      deliver: z.enum(['desk_notice', 'chat']).optional(),
+      scheduleId: Id.optional(),
+      scheduleName: z.string().max(120).optional(),
+      /** The task is for the whole organization (any BA may take it); its project is only the carrier it is filed under. */
+      orgLevel: z.boolean().optional(),
     }),
   ),
   /** A `ba_task` shift was dispatched to the runner (creates the shift row). */

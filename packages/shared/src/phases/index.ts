@@ -3,7 +3,7 @@ import { MockScriptSchema } from '../cards/fields.ts';
 import { CompletionAction } from '../cards/types.ts';
 import { RegressionPlatform } from '../events/testing.ts';
 import type { ReporterTaskKind } from '../reporter/index.ts';
-import { ReporterTaskSchema, reporterBriefOutcomes } from '../reporter/index.ts';
+import { isReporterTaskKind, ReporterTaskSchema, reporterBriefOutcomes } from '../reporter/index.ts';
 
 /**
  * Named phases with post-phase follow-ups (docs/design/phases.md, Part A): the contract shared by the server, the
@@ -300,6 +300,7 @@ export const BaTaskKind = z.enum([
   'urgent_note',
   'floor_alert',
   'floor_report',
+  'scheduled_brief',
 ]);
 export type BaTaskKind = z.infer<typeof BaTaskKind>;
 export const BaTaskStatus = z.enum(['queued', 'running', 'done', 'failed', 'fallback', 'cancelled']);
@@ -531,8 +532,7 @@ export type BranchCheckMergedResult = z.infer<typeof BranchCheckMergedResultSche
 
 /** Outcomes placed in the synthetic brief of a `ba_task` shift (the runner validates reports against them). */
 export function baTaskBriefOutcomes(kind: BaTaskKind) {
-  if (kind === 'desk_triage' || kind === 'urgent_note' || kind === 'floor_alert' || kind === 'floor_report')
-    return reporterBriefOutcomes(kind as ReporterTaskKind);
+  if (isReporterTaskKind(kind)) return reporterBriefOutcomes(kind as ReporterTaskKind);
   const o = (id: string, label: string, data: string) => ({ id, label, kind: 'success' as const, data });
   switch (kind) {
     case 'phase_report':

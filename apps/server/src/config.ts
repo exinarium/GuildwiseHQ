@@ -26,6 +26,7 @@ const EnvSchema = z.object({
   AOM_MOCK_UI: bool(false),
   AOM_REPORTER_SECONDS: z.coerce.number().int().min(1).max(3600).default(60),
   AOM_HYGIENE_SCHEDULE: bool(true),
+  AOM_WEBHOOK_ALLOW_PRIVATE: bool(false),
   AOM_MAX_SHIFTS_PER_WORKSTATION: z.coerce.number().int().min(1).max(256).default(16),
   LOG_LEVEL: z.string().default('info'),
 });
@@ -56,6 +57,8 @@ export interface Config {
   /** Run the workstations' scheduled repository hygiene (each workstation's own cadence). "Run hygiene now" always works. */
   hygieneSchedule: boolean;
   maxShiftsPerWorkstation: number;
+  /** Let outgoing webhooks reach loopback and private-network addresses (local tests; off in production). */
+  webhookAllowPrivate: boolean;
   logLevel: string;
   /** Cookie `Secure` flag: true when the public origin is https. */
   secureCookies: boolean;
@@ -83,6 +86,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     reporterSeconds: e.AOM_REPORTER_SECONDS,
     hygieneSchedule: e.AOM_HYGIENE_SCHEDULE,
     maxShiftsPerWorkstation: e.AOM_MAX_SHIFTS_PER_WORKSTATION,
+    webhookAllowPrivate: e.AOM_WEBHOOK_ALLOW_PRIVATE,
     logLevel: e.LOG_LEVEL,
     secureCookies: publicOrigin.startsWith('https://'),
   };

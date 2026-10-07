@@ -244,7 +244,14 @@ export const floorDigestIsEmpty = (d: FloorDigest): boolean =>
 
 // ------------------------------------------------------------------------------------ BA reporter tasks
 
-export const ReporterTaskKind = z.enum(['desk_triage', 'urgent_note', 'floor_alert', 'floor_report']);
+export const ReporterTaskKind = z.enum([
+  'desk_triage',
+  'urgent_note',
+  'floor_alert',
+  'floor_report',
+  /** A schedule's `ba_task` action: free-text instructions from the manager, answered with one report. */
+  'scheduled_brief',
+]);
 export type ReporterTaskKind = z.infer<typeof ReporterTaskKind>;
 export const isReporterTaskKind = (k: string): k is ReporterTaskKind => ReporterTaskKind.safeParse(k).success;
 
@@ -253,6 +260,7 @@ export const REPORTER_OUTCOME = {
   notes: 'notes_done',
   signals: 'signal_report',
   floor: 'floor_report',
+  brief: 'scheduled_brief',
 } as const;
 
 /** `desk_triage`: what to do with each held item. Items without a decision reach the manager unchanged. */
@@ -300,6 +308,7 @@ export const SignalReportsDataSchema = z.object({
 export type SignalReportsData = z.infer<typeof SignalReportsDataSchema>;
 
 export const FloorReportDataSchema = z.object({ report: z.string().min(1).max(40000) });
+export const ScheduledBriefDataSchema = z.object({ report: z.string().min(1).max(40000) });
 
 export const ReporterItemBriefSchema = z.object({
   id: z.uuid(),
@@ -326,6 +335,15 @@ export const ReporterTaskSchema = z.object({
   openItems: z.array(z.object({ id: z.uuid(), title: z.string() })).default([]),
   /** How long the BA has before the held items reach the manager unchanged. */
   triageWindowMinutes: z.number().int().positive(),
+  /** `scheduled_brief`: what the manager's schedule asks for. */
+  brief: z
+    .object({
+      scheduleName: z.string(),
+      instructions: z.string(),
+      deliver: z.enum(['desk_notice', 'chat']),
+      projectKey: z.string().nullable().optional(),
+    })
+    .optional(),
 });
 export type ReporterTask = z.infer<typeof ReporterTaskSchema>;
 
@@ -340,6 +358,8 @@ export function reporterBriefOutcomes(kind: ReporterTaskKind) {
       return [o(REPORTER_OUTCOME.signals, 'Report each urgent signal to the manager', 'signalReport')];
     case 'floor_report':
       return [o(REPORTER_OUTCOME.floor, 'Write the daily floor report', 'floorReport')];
+    case 'scheduled_brief':
+      return [o(REPORTER_OUTCOME.brief, 'Report on the scheduled task', 'scheduledBrief')];
   }
 }
 

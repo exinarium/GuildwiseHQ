@@ -99,7 +99,7 @@ export function FeedProject() {
           <ul className="divide-y divide-line text-sm text-fg">
             {schedules.data?.map((s) => (
               <li key={s.id} className="py-2 first:pt-0 last:pb-0">
-                {s.name}: {describeCron(s.cron)} ({s.timezone}), next{' '}
+                {s.name}: {describeCron(s.cron ?? '')} ({s.timezone}), next{' '}
                 {s.nextFireAt ? formatDateTime(s.nextFireAt) : 'not scheduled'}
               </li>
             ))}

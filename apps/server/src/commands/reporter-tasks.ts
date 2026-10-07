@@ -10,6 +10,7 @@ import {
   type RunnerToServerOf,
   renderFloorReportFallback,
   renderSignalFallback,
+  ScheduledBriefDataSchema,
   SignalReportsDataSchema,
   streamId,
   TriageDataSchema,
@@ -19,7 +20,13 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { buildFloorDigest, toSignalBrief } from '../reporter/digest.ts';
-import { agentBy, floorReportEvents, signalReportEvents, systemBy } from '../reporter/report-items.ts';
+import {
+  agentBy,
+  floorReportEvents,
+  scheduledBriefEvents,
+  signalReportEvents,
+  systemBy,
+} from '../reporter/report-items.ts';
 import { reportingOf } from '../reporter/settings.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR } from './common.ts';
 import { actorOf } from './phase-events.ts';
@@ -112,6 +119,17 @@ export async function buildReporterTask(ctx: Ctx, db: Queryable, task: Row): Pro
     ]);
     base.signals = sig.map(toSignalBrief);
   }
+  if (kind === 'scheduled_brief') {
+    const p = task.project_id
+      ? await one(db, 'SELECT key FROM projects WHERE id=$1', [task.project_id])
+      : undefined;
+    base.brief = {
+      scheduleName: task.schedule_name ?? 'Scheduled task',
+      instructions: task.instructions ?? '',
+      deliver: task.deliver === 'chat' ? 'chat' : 'desk_notice',
+      projectKey: p?.key ?? null,
+    };
+  }
   if (kind === 'floor_report') {
     const prefs = await reportingOf(db, task.org_id);
     const localDate = task.local_date ?? localParts(ctx.clock.now(), prefs.timezone).date;
@@ -146,6 +164,7 @@ export async function applyReporterReport(
     urgent_note: REPORTER_OUTCOME.notes,
     floor_alert: REPORTER_OUTCOME.signals,
     floor_report: REPORTER_OUTCOME.floor,
+    scheduled_brief: REPORTER_OUTCOME.brief,
   }[kind];
   if (report.outcomeId !== expected)
     return bad(`outcome '${report.outcomeId}' is not available (allowed: ${expected})`);
@@ -263,6 +282,23 @@ export async function applyReporterReport(
     return { accepted: true };
   }
 
+  if (kind === 'scheduled_brief') {
+    const data = ScheduledBriefDataSchema.safeParse(report.data);
+    if (!data.success) return bad(`invalid report data: ${data.error.message}`);
+    await ctx.store.append(
+      [
+        ...(await scheduledBriefEvents(tx, task, {
+          report: data.data.report,
+          by,
+          baAgentId: shift.agent_id,
+        })),
+        taskCompleted(task, 'done'),
+      ],
+      { tx },
+    );
+    return { accepted: true };
+  }
+
   const data = FloorReportDataSchema.safeParse(report.data);
   if (!data.success) return bad(`invalid report data: ${data.error.message}`);
   const prefs = await reportingOf(tx, task.org_id);
@@ -309,6 +345,14 @@ export async function runReporterFallback(ctx: Ctx, tx: Tx, task: Row): Promise<
           by: systemBy,
         })),
       );
+  } else if (kind === 'scheduled_brief') {
+    events.push(
+      ...(await scheduledBriefEvents(tx, task, {
+        report: `No BA was available, so this task was not carried out.\n\nWhat the schedule asked for:\n\n${task.instructions ?? ''}`,
+        by: systemBy,
+        fallback: true,
+      })),
+    );
   } else if (kind === 'floor_report') {
     const prefs = await reportingOf(tx, task.org_id);
     const digest = await buildFloorDigest(

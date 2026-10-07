@@ -29,19 +29,28 @@ const cards = () => q('SELECT * FROM cards WHERE project_id=$1 ORDER BY number',
 
 describe('schedules', () => {
   it('validates the cron expression and the time zone', async () => {
-    const bad = await feedSchedule(w, feedId, { cron: 'every day' });
+    const make = (over: Record<string, unknown> = {}) =>
+      owner('POST', '/api/schedules', {
+        projectId: w.projectId,
+        name: 'Check',
+        kind: 'card',
+        cron: '0 7 * * *',
+        timezone: 'UTC',
+        cardTemplate: { title: 'Run', fields: {} },
+        ...over,
+      });
+    const bad = await make({ cron: 'every day' });
     expect(bad.status).toBe(400);
     expect(bad.body.error.code).toBe('invalid_cron');
-    expect((await feedSchedule(w, feedId, { cron: '0 7 * * * *' })).status).toBe(400);
-    const tz = await feedSchedule(w, feedId, { timezone: 'Mars/Olympus' });
+    expect((await make({ cron: '0 7 * * * *' })).status).toBe(400);
+    const tz = await make({ timezone: 'Mars/Olympus' });
     expect(tz.status).toBe(400);
     expect(tz.body.error.code).toBe('invalid_timezone');
-    // a feed schedule needs a feed project; the template must fit the feed field set
-    expect((await feedSchedule(w, w.projectId)).status).toBe(400);
-    expect(
-      (await feedSchedule(w, feedId, { cardTemplate: { title: 'x', fields: { windowHours: 'many' } } }))
-        .status,
-    ).toBe(400);
+    // new feed schedules are refused (feeds are interests), whether asked for or implied by a feed project
+    const feed = await make({ kind: 'feed' });
+    expect(feed.status).toBe(400);
+    expect(feed.body.error.code).toBe('use_interests');
+    expect((await make({ projectId: feedId })).body.error.code).toBe('use_interests');
   });
 
   it('computes the next fire in the schedule time zone and only the owner manages schedules', async () => {

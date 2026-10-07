@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { hostname, platform } from 'node:os';
+import { join } from 'node:path';
 import {
   CommandPayloadSchemas,
   type IpcRpcResponse,
@@ -25,6 +26,7 @@ import { checkBranchMerged } from './git/merged.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { sweepWorktrees } from './git/sweep.ts';
 import { removeWorktree } from './git/worktrees.ts';
+import { IntegrationPoller } from './integrations/poll.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
@@ -72,6 +74,7 @@ export class Runner {
   readonly vaults: VaultManager;
   /** M8: posts approved drafts to Jira and the code host with this workstation's credentials. */
   readonly outbound: OutboundExecutor;
+  private readonly poller: IntegrationPoller;
   readonly repoCreator: RepoCreator;
   private readonly log: Logger;
   private readonly adapters: Map<string, RuntimeAdapter>;
@@ -155,6 +158,11 @@ export class Runner {
       dir: this.paths.outbound,
       repoRoots: () => this.opts.config.repoRoots,
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
+    });
+    this.poller = new IntegrationPoller({
+      ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
+      jira: opts.config.jira,
+      ...(opts.config.runtimes.mock?.enabled ? { mockFile: join(this.paths.root, 'mock-issues.json') } : {}),
     });
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
@@ -452,6 +460,9 @@ export class Runner {
             ? await checkBranchMerged({ repoPath: repo.localPath, payload: p })
             : { merged: false, reason: `no local clone for ${p.remoteUrlNormalized}` },
         );
+      } else if (command === 'integration.run') {
+        // A failed poll is an answer (ok:true, result.ok:false): the server shows it in the schedule's history.
+        done(true, await this.poller.run(CommandPayloadSchemas['integration.run'].parse(payload)));
       } else if (command === 'repo.create') {
         // Failures are answered as `ok:true, result.ok:false`: the server puts them on the desk.
         done(true, await this.repoCreator.run(CommandPayloadSchemas['repo.create'].parse(payload)));

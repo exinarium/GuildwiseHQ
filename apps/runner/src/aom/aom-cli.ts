@@ -226,7 +226,8 @@ async function cardDraft(ctx: AomContext, p: Parsed, sub: 'create' | 'update' | 
 const REPORT_USAGE = `usage: aom report triage --file <decisions.json>      # { "decisions": [ { "itemId", "action": "pass|dismiss|merge", "note"?, "into"? } ] }
        aom report notes --file <notes.json>          # { "notes": [ { "itemId", "note", "related"? } ] }
        aom report signals --file <reports.json>     # { "reports": [ { "signalId", "summary", "annotateItemId"? } ] }
-       aom report floor --summary-file <report.md>`;
+       aom report floor --summary-file <report.md>
+       aom report brief --summary-file <report.md>`;
 
 /** `aom report ...`: the BA's reporter tasks (held items, urgent notes, urgent signals, the daily floor report). */
 async function reportVerb(ctx: AomContext, p: Parsed): Promise<number> {
@@ -247,6 +248,13 @@ async function reportVerb(ctx: AomContext, p: Parsed): Promise<number> {
       return report(
         ctx,
         outcome('floor_report', 'Daily floor report', {
+          report: textFlag(ctx, p, 'summary', true) as string,
+        }),
+      );
+    case 'brief':
+      return report(
+        ctx,
+        outcome('scheduled_brief', 'Scheduled task report', {
           report: textFlag(ctx, p, 'summary', true) as string,
         }),
       );
