@@ -78,6 +78,10 @@ async function pinTestClock(): Promise<void> {
       body: JSON.stringify({ advanceMs }),
     });
   const now = new Date(((await (await post(0)).json()) as { now: string }).now);
+  // Already in the safe part of the day (08:30 to 22:00 UTC)? Stay put. Jumping a day ahead from here would carry the
+  // organizations created a moment ago across the next 08:00, and each would get a floor report mid-suite.
+  const hour = now.getUTCHours() + now.getUTCMinutes() / 60;
+  if (hour >= 8.5 && hour < 22) return;
   const target = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 10, 0, 0);
   const next = target > now.getTime() ? target : target + 86_400_000;
   const r = await post(next - now.getTime());

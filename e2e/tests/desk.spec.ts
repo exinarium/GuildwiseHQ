@@ -255,23 +255,29 @@ test('AC5: the desk is sorted pinned, blocking, affected-card count, then age; u
   await page.goto('/desk');
   const list = page.getByTestId('desk-list');
   await expect(deskItem(`Mock question for ${x.ref}?`)).toBeVisible();
-  const titles = await list.getByRole('heading', { level: 2 }).allInnerTexts();
+  // A floor report can land on the desk whenever the wall clock is past 08:00 on the jumped test clock: it is a heads-up, not
+  // urgent, and sorts after everything that is. These checks are about the urgent items.
+  const urgent = list.getByRole('article').filter({ has: page.getByTestId('urgent-badge') });
+  const titles = await urgent.getByRole('heading', { level: 2 }).allInnerTexts();
   const idx = (ref: string) => titles.indexOf(`Mock question for ${ref}?`);
   expect(idx(x.ref), titles.join(' | ')).toBeGreaterThanOrEqual(0);
   expect(idx(x.ref)).toBeLessThan(idx(p.ref)); // bigger blast radius first
   await expect(deskItem(`Mock question for ${x.ref}?`).getByTestId('affected-count')).toContainText(
     'Affects 2 cards',
   );
-  // Every open item here is blocking and pinned: all carry the badge, and all are ahead of anything non-blocking.
-  const badges = await list.getByTestId('urgent-badge').count();
-  expect(badges).toBe(await list.getByRole('article').count());
+  // Every blocking item carries the badge, and all of them are ahead of anything non-blocking.
+  const urgentCount = await urgent.count();
+  const articles = list.getByRole('article');
+  for (let i = 0; i < urgentCount; i++)
+    await expect(articles.nth(i).getByTestId('urgent-badge')).toBeVisible();
   // Same order as the API.
   const apiItems = (await (await api.get('/api/desk')).json()).items as Array<{
     title: string;
     urgent: boolean;
   }>;
-  expect(apiItems.map((i) => i.title)).toEqual(titles);
-  expect(apiItems.every((i) => i.urgent)).toBe(true);
+  const apiUrgent = apiItems.filter((i) => i.urgent);
+  expect(apiUrgent.map((i) => i.title)).toEqual(titles);
+  expect(apiItems.slice(0, apiUrgent.length)).toEqual(apiUrgent);
   await page.screenshot({ path: '/tmp/aom-e2e-desk-sorted.png', fullPage: true });
 });
 
@@ -326,7 +332,10 @@ test('AC6: owner_only - a member sees the item read-only and cannot answer; no n
 });
 
 test('cleanup: answer what is left so the next spec starts from an idle fleet', async () => {
-  const items = (await (await api.get('/api/desk')).json()).items as Array<{ id: string }>;
+  // Questions only: a floor report (a heads-up) may be on the desk too, and it takes no answer.
+  const items = (
+    (await (await api.get('/api/desk')).json()).items as Array<{ id: string; kind: string }>
+  ).filter((i) => i.kind === 'question');
   for (const i of items) {
     const res = await api.post(`/api/desk/${i.id}/answer`, { data: { answer: 'yes' } });
     expect(res.ok(), await res.text()).toBeTruthy();

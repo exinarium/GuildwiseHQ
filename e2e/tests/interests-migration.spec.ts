@@ -84,7 +84,9 @@ test('setup: a runner with the personal vault that still has projects/news/, the
 test('dry run: the plan is printed and nothing is written', async () => {
   // Only what the migration could write: the server keeps appending signal and connection events in the background
   // (clock-driven detectors, runners coming and going), so the table as a whole is never still.
-  const MIGRATION_EVENTS = `SELECT count(*)::int AS n FROM events WHERE org_id = $1 AND type = ANY($2::text[])`;
+  // A floor report (or an alert) the BA raises on its own clock is not the migration's doing.
+  const MIGRATION_EVENTS = `SELECT count(*)::int AS n FROM events WHERE org_id = $1 AND type = ANY($2::text[])
+    AND coalesce(payload->>'subkind', '') NOT IN ('floor_report', 'alert')`;
   const types = [
     'DeskItemCreated',
     'InterestArchived',
