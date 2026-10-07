@@ -16,6 +16,7 @@ import { checkContentType, checkOrigin } from './auth/origin-check.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
 import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
+import { registerBudgetHook } from './commands/budgets.ts';
 import { registerDecisionHook } from './commands/decisions.ts';
 import { registerDefinitionHook } from './commands/designer.ts';
 import { registerDevopsMembershipHook } from './commands/devops.ts';
@@ -42,6 +43,7 @@ import { authRoutes } from './routes/auth.ts';
 import { cardRoutes } from './routes/cards.ts';
 import { catalogueRoutes } from './routes/catalogue.ts';
 import { chatRoutes } from './routes/chats.ts';
+import { costRoutes } from './routes/costs.ts';
 import { designerRoutes } from './routes/designer.ts';
 import { deskRoutes } from './routes/desk.ts';
 import { devopsRoutes } from './routes/devops.ts';
@@ -284,6 +286,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(outboundRoutes(ctx));
   await app.register(phaseRoutes(ctx));
   await app.register(reportingRoutes(ctx));
+  await app.register(costRoutes(ctx));
 
   // Gateways: runner WS (/api/runner/ws) and browser WS (/api/ws).
   const runners = new RunnerRegistry();
@@ -330,6 +333,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
 
   const unhookDecisions = registerDecisionHook(ctx);
   const unhookTaste = registerTasteHook(ctx);
+  const unhookBudgets = registerBudgetHook(ctx);
   const unhookHr = registerHrHook(ctx);
   const unhookDefinitions = registerDefinitionHook(ctx);
   const unhookDevops = registerDevopsMembershipHook(ctx);
@@ -344,6 +348,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   app.addHook('onClose', async () => {
     unhookDecisions();
     unhookTaste();
+    unhookBudgets();
     unhookHr();
     unhookDefinitions();
     unhookDevops();

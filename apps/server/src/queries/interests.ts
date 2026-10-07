@@ -16,6 +16,7 @@ import {
   type ScanSpec,
 } from '@aom/shared';
 import type { z } from 'zod';
+import { budgetDto, monthSpendByProject, orgCostCtx, spendBriefs } from '../costs/index.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 
 type Query = z.infer<typeof InterestsQuerySchema>;
@@ -54,6 +55,7 @@ const EDIT_OK = `(i.created_by = $1 OR COALESCE(${RANK_OF('$1')}, 1) >= COALESCE
 
 const SELECT = `
   SELECT i.*, bp.key AS project_key, bp.status AS project_status, bp.vault_dir AS project_vault_dir,
+         bp.budget_micros, bp.budget_override_month,
          cu.display_name AS creator_name,
          ${EDIT_OK} AS edit_ok,
          EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = i.org_id AND om.user_id = $1
@@ -244,7 +246,28 @@ export async function listInterests(
   const agents = await agentRefs(db, r, now);
   const out: InterestDto[] = [];
   for (const x of r) out.push(await toDto(db, x, stats.get(x.id), agents));
+  await withCosts(db, out, r, now);
   return out;
+}
+
+/** Spend and budget of each interest's backing project (cost tracking); Owner and Admins may edit the budget. */
+async function withCosts(db: Queryable, dtos: InterestDto[], raw: Row[], now: Date): Promise<void> {
+  for (const orgId of new Set(dtos.map((d) => d.orgId))) {
+    const c = await orgCostCtx(db, orgId);
+    const mine = raw.filter((x) => x.org_id === orgId);
+    const projectIds = mine.map((x) => x.project_id as string);
+    const month = await monthSpendByProject(db, c, now, projectIds);
+    const briefs = await spendBriefs(db, c, now, 'project', projectIds);
+    for (const x of mine) {
+      const dto = dtos.find((d) => d.id === x.id);
+      if (!dto) continue;
+      dto.budget = budgetDto(x, month.get(x.project_id) ?? 0, c, now, {
+        canEdit: Boolean(x.can_share),
+        showAmounts: true,
+      });
+      dto.spend = briefs.get(x.project_id);
+    }
+  }
 }
 
 export async function getInterestDto(
@@ -256,7 +279,9 @@ export async function getInterestDto(
   const r = await one(db, `${SELECT} WHERE i.id = $2`, [userId, id]);
   if (!r) return null;
   const stats = await statsFor(db, [id], now);
-  return toDto(db, r, stats.get(id), await agentRefs(db, [r], now));
+  const dto = await toDto(db, r, stats.get(id), await agentRefs(db, [r], now));
+  await withCosts(db, [dto], [r], now);
+  return dto;
 }
 
 /** Detail: the interest, its notes, its taste and who can see it. */

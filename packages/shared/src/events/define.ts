@@ -13,6 +13,10 @@ export const Usage = z.object({
   outputTokens: z.number().int().nonnegative(),
   cacheReadTokens: z.number().int().nonnegative().default(0),
   cacheWriteTokens: z.number().int().nonnegative().default(0),
+  /** The model that did the work when the runtime says (Claude Code `modelUsage`); else the agent's configured one. */
+  model: z.string().max(120).optional(),
+  /** What the runtime itself reported as cost in USD (Claude Code `total_cost_usd`); informational. */
+  costUsd: z.number().nonnegative().optional(),
 });
 export type Usage = z.infer<typeof Usage>;
 

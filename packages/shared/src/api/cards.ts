@@ -12,6 +12,7 @@ import {
 import { CardChangesSchema } from '../events/card.ts';
 import { WorkabilitySchema } from './board.ts';
 import { IsoTime } from './common.ts';
+import { SpendBriefSchema } from './costs.ts';
 import { PublicationDtoSchema } from './research.ts';
 import { ShiftDtoSchema } from './shifts.ts';
 import { CardTestingSchema } from './testing.ts';
@@ -143,6 +144,8 @@ export const CardDetailResponseSchema = z.object({
   testing: CardTestingSchema.optional(),
   /** M6: the published research note of a research card. */
   publication: PublicationDtoSchema.nullable().optional(),
+  /** Cost tracking: what the card's shifts cost so far (organization members only). */
+  spend: SpendBriefSchema.optional(),
   /** The phase this card belongs to, if any. */
   phase: z
     .object({

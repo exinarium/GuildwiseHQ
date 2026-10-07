@@ -13,6 +13,7 @@ import {
   ScanSpecSchema,
 } from '../interests/index.ts';
 import { IsoTime } from './common.ts';
+import { BudgetDtoSchema, SpendBriefSchema } from './costs.ts';
 
 /** Interests API (docs/design/restructure.md section 7). */
 
@@ -88,6 +89,9 @@ export const InterestDtoSchema = z.object({
   tasteRuleCount: z.number().int().nonnegative(),
   tasteVersion: z.number().int().nonnegative(),
   stats: InterestStatsSchema,
+  /** The backing project's monthly budget and this month's spend (Owner and Admin set it). */
+  budget: BudgetDtoSchema.optional(),
+  spend: SpendBriefSchema.optional(),
   createdAt: IsoTime,
   updatedAt: IsoTime,
 });

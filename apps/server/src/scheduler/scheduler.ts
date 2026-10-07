@@ -1,3 +1,4 @@
+import { evaluateAllBudgets } from '../commands/budgets.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
@@ -60,6 +61,8 @@ export class Scheduler {
     if (this.stopped) return Promise.resolve([]);
     const next = this.chain.then(async () => {
       const fired = await fireDueSchedules(this.ctx);
+      // Budgets: a new month re-arms the thresholds, and a pause of last month's closes its desk item.
+      await evaluateAllBudgets(this.ctx).catch((err) => this.ctx.log.error({ err }, 'budget check failed'));
       await this.interests();
       await this.triggers();
       return fired;

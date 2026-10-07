@@ -1,4 +1,4 @@
-import { type DeskItemDto, type FloorDigest, SIGNAL_LABEL } from '@aom/shared';
+import { type DeskItemDto, type FloorDigest, formatMoney, SIGNAL_LABEL } from '@aom/shared';
 import { Link } from 'react-router';
 import { Badge } from './ui.tsx';
 
@@ -60,7 +60,7 @@ export function FloorReport({ digest }: { digest: FloorDigest }) {
   const stuck = digest.signals.filter((s) => ['blocked', 'unclaimed', 'loop'].includes(s.kind));
   const approvals = digest.signals.filter((s) => s.kind === 'repeated_approval');
   const failed = digest.signals.filter((s) =>
-    ['rework', 'finalize_failures', 'repo_hygiene'].includes(s.kind),
+    ['rework', 'finalize_failures', 'repo_hygiene', 'budget'].includes(s.kind),
   );
   return (
     <div data-testid="floor-report" className="mt-2 border-t border-line pt-1">
@@ -105,6 +105,25 @@ export function FloorReport({ digest }: { digest: FloorDigest }) {
         {digest.failures.map((f) => (
           <li key={f.ref}>
             {f.ref} {f.title}: {f.failedShifts} failed shifts
+          </li>
+        ))}
+      </Section>
+      <Section
+        title="Spend"
+        count={Math.max(digest.spend.projects.length, digest.spend.monthMicros > 0 ? 1 : 0)}
+      >
+        <li data-testid="floor-spend-total" className="list-none -ml-5 mb-1 text-muted">
+          This month {formatMoney(digest.spend.monthMicros, digest.spend.currency)}; since the last report{' '}
+          {formatMoney(digest.spend.sinceMicros, digest.spend.currency)}
+          {digest.spend.overheadMonthMicros > 0 &&
+            `; org overhead ${formatMoney(digest.spend.overheadMonthMicros, digest.spend.currency)}`}
+        </li>
+        {digest.spend.projects.map((p) => (
+          <li key={p.key}>
+            {p.key} {p.name}: {formatMoney(p.monthMicros, digest.spend.currency)}
+            {p.budgetMicros !== null && ` of ${formatMoney(p.budgetMicros, digest.spend.currency)}`}
+            {p.state === 'paused' && ' (paused)'}
+            {p.state === 'warning' && ` (${Math.round(p.percent ?? 0)}%)`}
           </li>
         ))}
       </Section>

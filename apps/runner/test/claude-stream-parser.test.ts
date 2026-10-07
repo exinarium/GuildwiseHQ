@@ -26,14 +26,22 @@ describe('claude stream parser', () => {
     ]);
     expect(events.at(-2)).toEqual({
       kind: 'usage',
-      usage: { inputTokens: 1520, outputTokens: 910, cacheReadTokens: 42000, cacheWriteTokens: 8000 },
+      usage: {
+        inputTokens: 1520,
+        outputTokens: 910,
+        cacheReadTokens: 42000,
+        cacheWriteTokens: 8000,
+        model: 'claude-sonnet-4-5',
+        costUsd: expect.any(Number),
+      },
     });
     expect(events.at(-1)).toEqual({ kind: 'final', text: 'Done. Handed off with aom handoff.' });
-    expect(parser.usage()).toEqual({
+    expect(parser.usage()).toMatchObject({
       inputTokens: 1520,
       outputTokens: 910,
       cacheReadTokens: 42000,
       cacheWriteTokens: 8000,
+      model: 'claude-sonnet-4-5',
     });
     expect(parser.resultError).toBeUndefined();
   });
@@ -62,11 +70,78 @@ describe('claude stream parser', () => {
     const { events, parser } = parse('max-turns.jsonl');
     expect(parser.resultError).toBe('error_max_turns');
     expect(events.some((e) => e.kind === 'final')).toBe(false);
-    expect(parser.usage()).toEqual({
+    expect(parser.usage()).toMatchObject({
       inputTokens: 900,
       outputTokens: 400,
       cacheReadTokens: 2000,
       cacheWriteTokens: 100,
+      costUsd: 0.5,
+    });
+  });
+
+  it('a session that never reaches the result line still reports what its messages used', () => {
+    const p = new ClaudeStreamParser();
+    const line = (o: unknown) => p.parseLine(JSON.stringify(o));
+    line({ type: 'system', subtype: 'init', session_id: 's1', model: 'claude-opus-4-5' });
+    line({
+      type: 'assistant',
+      message: {
+        id: 'm1',
+        model: 'claude-opus-4-5',
+        content: [],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+    });
+    // The same message id repeated (streamed partials) counts once, with its latest numbers.
+    line({
+      type: 'assistant',
+      message: {
+        id: 'm1',
+        model: 'claude-opus-4-5',
+        content: [],
+        usage: {
+          input_tokens: 10,
+          output_tokens: 50,
+          cache_read_input_tokens: 1000,
+          cache_creation_input_tokens: 20,
+        },
+      },
+    });
+    line({
+      type: 'assistant',
+      message: { id: 'm2', content: [], usage: { input_tokens: 4, output_tokens: 6 } },
+    });
+    expect(p.usage()).toEqual({
+      inputTokens: 14,
+      outputTokens: 56,
+      cacheReadTokens: 1000,
+      cacheWriteTokens: 20,
+      model: 'claude-opus-4-5',
+    });
+  });
+
+  it('takes the model and the cost from the result: the model with the most tokens wins', () => {
+    const p = new ClaudeStreamParser();
+    p.parseLine(
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        result: 'ok',
+        usage: { input_tokens: 100, output_tokens: 50 },
+        total_cost_usd: 0.0123,
+        modelUsage: {
+          'claude-haiku-4-5': { inputTokens: 10, outputTokens: 5 },
+          'claude-sonnet-4-5': { inputTokens: 90, outputTokens: 45 },
+        },
+      }),
+    );
+    expect(p.usage()).toEqual({
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      model: 'claude-sonnet-4-5',
+      costUsd: 0.0123,
     });
   });
 

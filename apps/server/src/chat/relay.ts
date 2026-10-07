@@ -150,6 +150,7 @@ export class ChatRelay {
               runtime: row.runtime,
               model: row.model,
               overflow: false,
+              ...(row.thread_project_id ? { projectId: row.thread_project_id } : {}),
             },
           },
           actor: runnerActor(row.workstation_id),

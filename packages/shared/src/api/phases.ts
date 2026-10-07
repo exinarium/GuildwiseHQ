@@ -15,6 +15,7 @@ import {
 } from '../phases/index.ts';
 import { HttpUrlSchema } from '../safe.ts';
 import { IsoTime } from './common.ts';
+import { SpendBriefSchema } from './costs.ts';
 
 // ------------------------------------------------------------------------------------- deploy targets
 
@@ -106,6 +107,8 @@ export const PhaseSummaryDtoSchema = z.object({
   resolvedCount: z.number().int(),
   proposedCount: z.number().int(),
   followups: z.array(PhaseFollowupSummarySchema),
+  /** Cost tracking: what the phase's cards and BA tasks cost (organization members only). */
+  spend: SpendBriefSchema.optional(),
   createdAt: IsoTime,
   completedAt: IsoTime.nullable(),
 });

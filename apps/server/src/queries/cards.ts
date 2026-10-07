@@ -11,10 +11,12 @@ import {
   type ShiftDto,
   type WorkflowDefinition,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
 import { memberRefusal } from '../commands/phases.ts';
 import type { Ctx } from '../context.ts';
+import { orgCostCtx, spendBriefs } from '../costs/index.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 import { cardPhaseRef } from './phases.ts';
@@ -239,6 +241,15 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     ).map((b) => ({ deskItemId: b.id, title: b.title })),
     publication: await publicationOfCard(ctx.pool, card.id),
     phase: await cardPhaseRef(ctx.pool, card),
+    ...((await orgRoleOf(ctx.pool, userId, card.org_id))
+      ? {
+          spend: (
+            await spendBriefs(ctx.pool, await orgCostCtx(ctx.pool, card.org_id), ctx.clock.now(), 'card', [
+              card.id,
+            ])
+          ).get(card.id),
+        }
+      : {}),
   };
 }
 

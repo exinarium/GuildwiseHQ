@@ -313,7 +313,7 @@ describe('ba_task shifts on the mock runtime', () => {
       });
     }, 60_000);
 
-    it('floor_report: the seven sections from the digest', async () => {
+    it('floor_report: the eight sections from the digest (spend included)', async () => {
       h = await startHarness();
       const msg = reporterShift(h, 'floor_report', {
         digest: {
@@ -345,12 +345,31 @@ describe('ba_task shifts on the mock runtime', () => {
             ],
             failing: [],
           },
+          spend: {
+            currency: 'USD',
+            sinceMicros: 1_000_000,
+            monthMicros: 12_340_000,
+            overheadMonthMicros: 0,
+            projects: [
+              {
+                key: 'TOY',
+                name: 'Toy',
+                monthMicros: 12_340_000,
+                budgetMicros: 20_000_000,
+                percent: 61,
+                state: 'ok',
+              },
+            ],
+          },
         },
       });
       await run(h, msg);
       const rep = reports(h, msg.shiftId)[0]?.report as any;
       const text = rep.data.report as string;
-      expect((text.match(/^## /gm) ?? []).length).toBe(7);
+      expect((text.match(/^## /gm) ?? []).length).toBe(8);
+      expect(text).toContain('## Spend');
+      expect(text).toContain('This month USD 12.34');
+      expect(text).toContain('- TOY: 12.34 of 20.00 (ok)');
       expect(text).toContain('## Interests highlights');
       expect(text).toContain('Interests: 2 active of 2, 2 items delivered, 1 unrated');
       expect(text).toContain('Tokio 2.0 (article)');

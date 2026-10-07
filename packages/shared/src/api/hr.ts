@@ -4,6 +4,7 @@ import { RecommendationKind } from '../events/hr.ts';
 import { RoleExtensionsSchema } from '../roles/schema.ts';
 import { AgentDtoSchema } from './agents.ts';
 import { IsoTime } from './common.ts';
+import { SpendBriefSchema } from './costs.ts';
 
 /** A rate or count of one agent next to the average of the agents in its role. `null`: not enough data. */
 export const StatValueSchema = z.object({
@@ -57,6 +58,8 @@ export type WorkQuality = z.infer<typeof WorkQualitySchema>;
 
 export const HrAgentSchema = z.object({
   agent: AgentDtoSchema,
+  /** This month's and the all-time spend of the agent (cost tracking); absent for a guest. */
+  spend: SpendBriefSchema.optional(),
   hiredByName: z.string(),
   /** Cards this agent left Blocked on a question for the manager (the agent's status is "blocked" while it has any). */
   blockedOn: z.array(z.object({ cardId: z.uuid(), ref: z.string(), title: z.string() })).default([]),

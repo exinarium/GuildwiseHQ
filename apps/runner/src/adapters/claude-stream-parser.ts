@@ -22,6 +22,17 @@ export function summarizeToolInput(name: string, input: unknown): string {
   return s.slice(0, 200);
 }
 
+/** The model with the most output tokens in a result's `modelUsage` map (`{ <model>: { outputTokens, ... } }`). */
+function dominantModel(modelUsage: unknown): string | undefined {
+  if (!isObj(modelUsage)) return undefined;
+  let best: [string, number] | undefined;
+  for (const [model, u] of Object.entries(modelUsage)) {
+    const n = isObj(u) ? num(u.outputTokens) + num(u.inputTokens) : 0;
+    if (!best || n > best[1]) best = [model, n];
+  }
+  return best?.[0];
+}
+
 export function usageFromClaude(u: unknown): Usage {
   const o = isObj(u) ? u : {};
   return {
@@ -38,12 +49,30 @@ export function usageFromClaude(u: unknown): Usage {
  * Unknown or malformed lines are ignored. The `result` usage is the session total.
  */
 export class ClaudeStreamParser {
-  private total: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  /** The session total from the `result` line (authoritative once it arrives). */
+  private total: Usage | undefined;
+  /** What each assistant message reported, by message id: the running total of a session that never reaches `result`. */
+  private readonly perMessage = new Map<string, Usage>();
+  private lastModel: string | undefined;
   private errorSubtype: string | undefined;
   sessionId: string | undefined;
 
+  /**
+   * Token use of the session so far: the `result` line's total when the session finished, else the sum of the
+   * assistant messages seen (a shift that was stopped, timed out or crashed still reports what it spent). `model` is
+   * the model that did most of the work (`result.modelUsage`) or the last one seen; `costUsd` is what Claude Code
+   * itself reported (`total_cost_usd`).
+   */
   usage(): Usage {
-    return { ...this.total };
+    if (this.total) return { ...this.total };
+    const sum: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    for (const u of this.perMessage.values()) {
+      sum.inputTokens += u.inputTokens;
+      sum.outputTokens += u.outputTokens;
+      sum.cacheReadTokens += u.cacheReadTokens;
+      sum.cacheWriteTokens += u.cacheWriteTokens;
+    }
+    return this.lastModel ? { ...sum, model: this.lastModel } : sum;
   }
 
   /** Set when the `result` line reported an error (e.g. `error_max_turns`). */
@@ -65,6 +94,7 @@ export class ClaudeStreamParser {
 
     if (msg.type === 'system' && msg.subtype === 'init' && typeof msg.session_id === 'string') {
       this.sessionId = msg.session_id;
+      if (typeof msg.model === 'string' && msg.model) this.lastModel = msg.model;
       events.push({ kind: 'session', runtimeSessionId: msg.session_id });
     } else if (msg.type === 'stream_event' && isObj(msg.event)) {
       // `--include-partial-messages`: token deltas of the reply being written.
@@ -73,7 +103,13 @@ export class ClaudeStreamParser {
       if (d?.type === 'text_delta' && typeof d.text === 'string' && d.text) {
         events.push({ kind: 'delta', text: d.text });
       }
-    } else if (msg.type === 'assistant' && isObj(msg.message) && Array.isArray(msg.message.content)) {
+    } else if (msg.type === 'assistant' && isObj(msg.message)) {
+      if (typeof msg.message.model === 'string' && msg.message.model && !msg.message.model.startsWith('<'))
+        this.lastModel = msg.message.model;
+      if (isObj(msg.message.usage) && typeof msg.message.id === 'string')
+        this.perMessage.set(msg.message.id, usageFromClaude(msg.message.usage));
+    }
+    if (msg.type === 'assistant' && isObj(msg.message) && Array.isArray(msg.message.content)) {
       for (const block of msg.message.content) {
         if (!isObj(block)) continue;
         if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
@@ -87,7 +123,16 @@ export class ClaudeStreamParser {
         }
       }
     } else if (msg.type === 'result') {
-      this.total = usageFromClaude(msg.usage);
+      const model = dominantModel(msg.modelUsage) ?? this.lastModel;
+      this.total = {
+        ...usageFromClaude(msg.usage),
+        ...(model ? { model } : {}),
+        ...(typeof msg.total_cost_usd === 'number' &&
+        Number.isFinite(msg.total_cost_usd) &&
+        msg.total_cost_usd >= 0
+          ? { costUsd: msg.total_cost_usd }
+          : {}),
+      };
       events.push({ kind: 'usage', usage: this.usage() });
       const failed = msg.is_error === true || (typeof msg.subtype === 'string' && msg.subtype !== 'success');
       if (failed) this.errorSubtype = typeof msg.subtype === 'string' ? msg.subtype : 'error';

@@ -24,6 +24,7 @@ import { loadRole } from '../catalogue/loader.ts';
 import { agentScope, fireAgent, manageableAgent, suggestNames } from '../commands/agents.ts';
 import { orgScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
+import { orgCostCtx, spendBriefs } from '../costs/index.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
@@ -66,12 +67,20 @@ export async function hrBoard(
     `SELECT id, ref, title, last_agent_id FROM cards WHERE status='blocked' AND last_agent_id = ANY($1::uuid[]) ORDER BY number`,
     [agents.map((a) => a.id)],
   );
+  const spend = await spendBriefs(
+    ctx.pool,
+    await orgCostCtx(ctx.pool, who.orgId),
+    now,
+    'agent',
+    agents.map((a) => a.id),
+  );
   return {
     windowDays: HR_WINDOW_DAYS,
     agents: agents.map((agent) => {
       const t = track.get(agent.id) as NonNullable<ReturnType<typeof track.get>>;
       return {
         agent,
+        spend: spend.get(agent.id),
         hiredByName: names.get(agent.hiredByUserId) ?? 'unknown',
         blockedOn: blocked
           .filter((c) => c.last_agent_id === agent.id)

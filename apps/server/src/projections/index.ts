@@ -3,6 +3,7 @@ import { agentProjectors } from './agents.ts';
 import { cardProjectors } from './cards.ts';
 import { catalogueProjectors } from './catalogue.ts';
 import { chatProjectors } from './chats.ts';
+import { costProjectors } from './costs.ts';
 import { deskProjectors } from './desk.ts';
 import { devopsProjectors } from './devops.ts';
 import { feedProjectors } from './feeds.ts';
@@ -43,6 +44,7 @@ const domains: Array<Record<string, Projector>> = [
   agentProjectors,
   cardProjectors,
   shiftProjectors,
+  costProjectors,
   threadProjectors,
   deskProjectors,
   ledgerProjectors,
@@ -103,6 +105,7 @@ export const PROJECTION_TABLES = [
   'card_transitions',
   'card_activity',
   'shifts',
+  'shift_costs',
   'threads',
   'chat_archives',
   'thread_messages',

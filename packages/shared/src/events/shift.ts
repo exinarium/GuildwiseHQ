@@ -31,6 +31,8 @@ export const shiftEvents = [
       runtime: z.string(),
       model: z.string(),
       overflow: z.boolean().default(false),
+      /** Chats about a project without a card: the shift's project (card shifts resolve it through the card). */
+      projectId: Id.optional(),
       runtimeSessionId: z.string().optional(),
       /** Additive: set from the runner's `shift.started`; the server learns the worktree path here. */
       worktree: z
@@ -54,6 +56,8 @@ export const shiftEvents = [
       reportOutcome: z.string().optional(),
       durationMs: z.number().int().nonnegative(),
       usage: Usage,
+      /** USD micro-units stamped by the server when it prices the shift; absent: the default table prices it. */
+      costMicros: z.number().int().nonnegative().optional(),
       exitCode: z.number().int().nullable().optional(),
       guardViolations: z.array(GuardViolation).default([]),
     }),

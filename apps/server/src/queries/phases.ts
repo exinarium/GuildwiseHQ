@@ -9,9 +9,11 @@ import {
   type PhaseMemberDto,
   type PhaseSummaryDto,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import { loadVisibleProject, requireProjectMember } from '../authz/scope.ts';
 import { followupRows, memberRows, memberState, targetNames } from '../commands/phase-events.ts';
 import type { Ctx } from '../context.ts';
+import { orgCostCtx, spendBriefs } from '../costs/index.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 
@@ -19,9 +21,19 @@ const SUMMARY_SELECT = `SELECT p.*, u.display_name AS created_by_user_name, a.na
   FROM phases p JOIN projects pr ON pr.id = p.project_id
   LEFT JOIN users u ON u.id = p.created_by_user_id LEFT JOIN agents a ON a.id = p.created_by_agent_id`;
 
-async function summaries(db: Queryable, list: Row[]): Promise<PhaseSummaryDto[]> {
+async function summaries(
+  db: Queryable,
+  list: Row[],
+  clock: Date,
+  userId: string,
+): Promise<PhaseSummaryDto[]> {
   if (list.length === 0) return [];
   const ids = list.map((p) => p.id);
+  const orgId = list[0]?.org_id as string;
+  // Spend is for the organization's own members; a guest on a shared project sees the phase without it.
+  const spend = (await orgRoleOf(db, userId, orgId))
+    ? await spendBriefs(db, await orgCostCtx(db, orgId), clock, 'phase', ids)
+    : new Map();
   const members = await rows(
     db,
     `SELECT phase_id, id, status, phase_assignment, finalize_result, finalize_action, merged_into_working_at
@@ -76,6 +88,7 @@ async function summaries(db: Queryable, list: Row[]): Promise<PhaseSummaryDto[]>
         })),
       createdAt: iso(p.created_at) as string,
       completedAt: iso(p.completed_at),
+      ...(spend.has(p.id) ? { spend: spend.get(p.id) } : {}),
     };
   });
 }
@@ -85,6 +98,8 @@ export async function listPhases(ctx: Ctx, userId: string, projectId: string): P
   return summaries(
     ctx.pool,
     await rows(ctx.pool, `${SUMMARY_SELECT} WHERE p.project_id=$1 ORDER BY p.number DESC`, [projectId]),
+    ctx.clock.now(),
+    userId,
   );
 }
 
@@ -161,8 +176,14 @@ async function followupDtos(db: Queryable, phaseId: string): Promise<PhaseFollow
   return out;
 }
 
-async function detail(db: Queryable, p: Row, projectActive: boolean): Promise<PhaseDetailDto> {
-  const [summary] = await summaries(db, [p]);
+async function detail(
+  db: Queryable,
+  p: Row,
+  projectActive: boolean,
+  clock: Date,
+  userId: string,
+): Promise<PhaseDetailDto> {
+  const [summary] = await summaries(db, [p], clock, userId);
   const members = (await memberRows(db, p.id)).map(memberDto);
   const tasks = await rows(
     db,
@@ -201,7 +222,7 @@ export async function getPhase(ctx: Ctx, userId: string, phaseId: string): Promi
   const p = await one(ctx.pool, `${SUMMARY_SELECT} WHERE p.id=$1`, [phaseId]);
   if (!p) throw notFound('phase not found');
   const project = await loadVisibleProject(ctx.pool, userId, p.project_id);
-  return detail(ctx.pool, p, project.status === 'active');
+  return detail(ctx.pool, p, project.status === 'active', ctx.clock.now(), userId);
 }
 
 /** `/p/:projectKey/phases/:number`: the key is resolved among the projects the user is a member of. */
@@ -219,7 +240,7 @@ export async function getPhaseByNumber(
   );
   if (!p) throw notFound('phase not found');
   const project = await loadVisibleProject(ctx.pool, userId, p.project_id);
-  return detail(ctx.pool, p, project.status === 'active');
+  return detail(ctx.pool, p, project.status === 'active', ctx.clock.now(), userId);
 }
 
 /** The live data a phase desk item renders from. */

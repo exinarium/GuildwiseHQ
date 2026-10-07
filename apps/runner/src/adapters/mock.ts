@@ -180,6 +180,7 @@ export class MockAdapter implements RuntimeAdapter {
             outputTokens: u.outputTokens ?? 0,
             cacheReadTokens: u.cacheReadTokens ?? 0,
             cacheWriteTokens: u.cacheWriteTokens ?? 0,
+            ...(u.model ? { model: u.model } : {}),
           };
           return [{ kind: 'usage', usage }];
         }

@@ -66,7 +66,7 @@ describe('reporter contract', () => {
     expect(reporterBriefOutcomes('floor_report')[0]?.id).toBe('floor_report');
   });
 
-  it('the template report has the seven sections the manager expects', () => {
+  it('the template report has the eight sections the manager expects (spend included)', () => {
     const d: FloorDigest = {
       generatedAt: '2026-11-10T06:00:00.000Z',
       localDate: '2026-11-10',
@@ -92,10 +92,29 @@ describe('reporter contract', () => {
         ],
         failing: [{ interest: 'AI weekly', failCount: 3, error: 'no curator online' }],
       },
+      spend: {
+        currency: 'USD',
+        sinceMicros: 1_500_000,
+        monthMicros: 42_000_000,
+        overheadMonthMicros: 2_000_000,
+        projects: [
+          {
+            key: 'TOY',
+            name: 'Toy',
+            monthMicros: 40_000_000,
+            budgetMicros: 50_000_000,
+            percent: 80,
+            state: 'warning',
+          },
+        ],
+      },
     };
     const text = renderFloorReportFallback(d);
     expect(text).toContain('TOY-P1 Autosave: open, held open by late bugs TOY-9');
-    expect((text.match(/^## /gm) ?? []).length).toBe(7);
+    expect((text.match(/^## /gm) ?? []).length).toBe(8);
+    expect(text).toContain('## Spend');
+    expect(text).toContain('- TOY Toy: $40.00 of $50.00 (80%)');
+    expect(text).toContain('this month $42.00 (org overhead $2.00)');
     expect(text).toContain('## Interests highlights');
     expect(text).toContain(
       'Interests: 1 active of 2, 3 runs since the last report, 2 items delivered, 2 unrated',

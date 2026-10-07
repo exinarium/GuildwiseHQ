@@ -1,5 +1,7 @@
 import {
+  budgetStatus,
   DESK_SUBKIND,
+  formatMoney,
   HYGIENE_PROBLEM_LABEL,
   type HygieneProblemKind,
   REPORTER,
@@ -9,6 +11,7 @@ import {
   topicWords,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
+import { monthOf, monthSpendByProject, orgCostCtx } from '../costs/index.ts';
 import { iso, type Queryable, type Row, rows } from '../db/sql.ts';
 import { cardWorkability } from '../queries/workability.ts';
 
@@ -265,6 +268,53 @@ export async function detectHygiene(db: Queryable): Promise<Detected[]> {
   }));
 }
 
+/**
+ * Budgets (cost tracking): a project at 80% of its monthly budget is a normal-urgency signal (the daily report carries
+ * it); at 100% and not overridden it is urgent (its dispatching is paused). The signal resolves by itself when the
+ * budget is raised, overridden or the month turns. The fingerprint carries the month, so each month raises it afresh.
+ */
+export async function detectBudgets(db: Queryable, now: Date): Promise<Detected[]> {
+  const projects = await rows(
+    db,
+    `SELECT id, org_id, key, name, budget_micros, budget_override_month FROM projects
+      WHERE budget_micros IS NOT NULL AND status = 'active' ORDER BY created_at, id`,
+  );
+  const out: Detected[] = [];
+  const ctxs = new Map<string, Awaited<ReturnType<typeof orgCostCtx>>>();
+  const spends = new Map<string, Map<string, number>>();
+  for (const p of projects) {
+    let c = ctxs.get(p.org_id);
+    if (!c) {
+      c = await orgCostCtx(db, p.org_id);
+      ctxs.set(p.org_id, c);
+      spends.set(p.org_id, await monthSpendByProject(db, c, now));
+    }
+    const m = monthOf(c, now);
+    const spend = spends.get(p.org_id)?.get(p.id) ?? 0;
+    const budget = Number(p.budget_micros);
+    const st = budgetStatus(budget, spend, p.budget_override_month === m.key);
+    if (st.state !== 'warning' && st.state !== 'paused') continue;
+    const paused = st.state === 'paused';
+    out.push({
+      orgId: p.org_id,
+      projectId: p.id,
+      kind: 'budget' as const,
+      fingerprint: `budget:${p.id}:${m.key}:${paused ? 'paused' : 'warning'}`,
+      urgency: paused ? ('urgent' as const) : ('normal' as const),
+      count: 1,
+      subject: {
+        title: paused
+          ? `${p.key} is paused: its monthly budget is used up`
+          : `${p.key} has used ${Math.floor(st.percent ?? 0)}% of its monthly budget`,
+        detail: `${formatMoney(spend, c.currency)} of ${formatMoney(budget, c.currency)} this month${paused ? '; running shifts finish, nothing new starts until the budget is raised or overridden' : ''}`,
+        projectKey: p.key,
+      },
+      evidence: { month: m.key, spendMicros: spend, budgetMicros: budget, currency: c.currency },
+    });
+  }
+  return out;
+}
+
 /** Every detector, run once. */
 export async function detectAll(ctx: Ctx, now: Date): Promise<Detected[]> {
   return [
@@ -274,5 +324,6 @@ export async function detectAll(ctx: Ctx, now: Date): Promise<Detected[]> {
     ...(await detectUnclaimed(ctx, now)),
     ...(await detectFailures(ctx.pool)),
     ...(await detectHygiene(ctx.pool)),
+    ...(await detectBudgets(ctx.pool, now)),
   ];
 }

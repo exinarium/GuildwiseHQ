@@ -213,6 +213,22 @@ const digest: FloorDigest = {
   resolvedByBa: [{ id: U(31), title: 'Noise', how: 'dismissed', note: 'duplicate' }],
   failures: [{ ref: 'TOY-2', title: 'Looping builder', failedShifts: 4 }],
   interests: { count: 0, active: 0, runs: 0, delivered: 0, unrated: 0, highlights: [], failing: [] },
+  spend: {
+    currency: 'USD',
+    sinceMicros: 2_000_000,
+    monthMicros: 41_000_000,
+    overheadMonthMicros: 1_000_000,
+    projects: [
+      {
+        key: 'TOY',
+        name: 'Toy',
+        monthMicros: 40_000_000,
+        budgetMicros: 50_000_000,
+        percent: 80,
+        state: 'warning',
+      },
+    ],
+  },
 };
 
 const base: DeskItemDto = {
@@ -257,6 +273,7 @@ describe('the floor report on the desk', () => {
       /Stuck, blocked and backing-off cards/,
       /Repeated approvals/,
       /Failures/,
+      /Spend/,
       /DevOps requests that are open/,
       /Resolved by the BA without bothering you/,
     ])

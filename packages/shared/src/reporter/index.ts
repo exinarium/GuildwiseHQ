@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { formatMoney } from '../costs/index.ts';
 import { LOOP_BREAKER } from '../testing/index.ts';
 
 /**
@@ -164,6 +165,8 @@ export const SignalKind = z.enum([
   'finalize_failures',
   /** Repository hygiene could not resolve something (conflict, dirty tree on another branch, auth failure, ...). */
   'repo_hygiene',
+  /** A project used 80% or more of its monthly budget (urgent once it is used up and paused). */
+  'budget',
 ]);
 export type SignalKind = z.infer<typeof SignalKind>;
 export const SignalUrgency = z.enum(['urgent', 'normal']);
@@ -179,6 +182,7 @@ export const SIGNAL_LABEL: Record<SignalKind, string> = {
   rework: 'Repeated rework',
   finalize_failures: 'Repeated finalize failures',
   repo_hygiene: 'Repository hygiene',
+  budget: 'Budget',
 };
 
 /** What a signal is about; free-form evidence the BA and the template read. */
@@ -272,6 +276,28 @@ export const FloorDigestSchema = z.object({
       ),
     })
     .default({ count: 0, active: 0, runs: 0, delivered: 0, unrated: 0, highlights: [], failing: [] }),
+  /**
+   * Spend (cost tracking): since the last report and this month, the projects that cost the most and the ones near or
+   * over their budget. Money is in micro-units of the organization's currency.
+   */
+  spend: z
+    .object({
+      currency: z.string(),
+      sinceMicros: z.number().int().nonnegative(),
+      monthMicros: z.number().int().nonnegative(),
+      overheadMonthMicros: z.number().int().nonnegative(),
+      projects: z.array(
+        z.object({
+          key: z.string(),
+          name: z.string(),
+          monthMicros: z.number().int().nonnegative(),
+          budgetMicros: z.number().int().nullable(),
+          percent: z.number().nullable(),
+          state: z.enum(['none', 'ok', 'warning', 'paused', 'overridden']),
+        }),
+      ),
+    })
+    .default({ currency: 'USD', sinceMicros: 0, monthMicros: 0, overheadMonthMicros: 0, projects: [] }),
 });
 export type FloorDigest = z.infer<typeof FloorDigestSchema>;
 
@@ -283,7 +309,8 @@ export const floorDigestIsEmpty = (d: FloorDigest): boolean =>
   d.resolvedByBa.length === 0 &&
   d.failures.length === 0 &&
   d.interests.highlights.length === 0 &&
-  d.interests.failing.length === 0;
+  d.interests.failing.length === 0 &&
+  d.spend.monthMicros === 0;
 
 // ------------------------------------------------------------------------------------ BA reporter tasks
 
@@ -421,6 +448,23 @@ export function renderInterestHighlights(i: FloorDigest['interests']): string[] 
   return lines;
 }
 
+/** The spend section of a floor report: totals, then each project with its budget when it has one. */
+export function renderSpendLines(sp: FloorDigest['spend']): string[] {
+  const money = (v: number) => formatMoney(v, sp.currency);
+  const lines = [
+    `Since the last report ${money(sp.sinceMicros)}; this month ${money(sp.monthMicros)}${sp.overheadMonthMicros > 0 ? ` (org overhead ${money(sp.overheadMonthMicros)})` : ''}`,
+  ];
+  for (const p of sp.projects)
+    lines.push(
+      `- ${p.key} ${p.name}: ${money(p.monthMicros)}${
+        p.budgetMicros === null
+          ? ''
+          : ` of ${money(p.budgetMicros)} (${Math.round(p.percent ?? 0)}%${p.state === 'paused' ? ', paused' : p.state === 'overridden' ? ', overridden' : ''})`
+      }`,
+    );
+  return lines;
+}
+
 const list = (xs: string[]): string => (xs.length ? xs.map((x) => `- ${x}`).join('\n') : '- none');
 
 /** The daily floor report the server posts when no BA is available (and the base the BA starts from). */
@@ -464,6 +508,8 @@ export function renderFloorReportFallback(d: FloorDigest): string {
       ),
     ]),
   );
+  out.push('', '## Spend');
+  out.push(...renderSpendLines(d.spend));
   out.push('', '## Interests highlights');
   out.push(...renderInterestHighlights(d.interests));
   out.push('', '## DevOps requests that are open');

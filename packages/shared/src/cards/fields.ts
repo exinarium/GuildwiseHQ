@@ -57,12 +57,31 @@ export type MockAction = z.infer<typeof MockActionSchema>;
 /** `{ "<stage>": ["<action>", ...] }` consumed by round index. Example: `{ review: ['changes', 'ok'] }`. */
 export const MockScriptSchema = z.record(z.string(), z.array(MockActionSchema));
 export type MockScript = z.infer<typeof MockScriptSchema>;
+/**
+ * Mock runtime: the synthetic token use a card's shifts report (cost tracking and budget tests). Default 1000 input and
+ * 200 output tokens per shift; `model` lets a test price the shift as another model.
+ */
+export const MockUsageSchema = z.object({
+  inputTokens: z.number().int().min(0).max(1_000_000_000),
+  outputTokens: z.number().int().min(0).max(1_000_000_000),
+  cacheReadTokens: z.number().int().min(0).max(1_000_000_000).optional(),
+  cacheWriteTokens: z.number().int().min(0).max(1_000_000_000).optional(),
+  model: z.string().max(120).optional(),
+});
+export type MockUsage = z.infer<typeof MockUsageSchema>;
 
 /**
  * Fields that only script the mock runtime. They are shown, and accepted by the API, only when the server runs with
  * `AOM_MOCK_UI=true` (dev and e2e).
  */
-export const MOCK_FIELD_KEYS = ['mock', 'mockEnv', 'mockOutbound', 'mockResearch', 'mockFeed'] as const;
+export const MOCK_FIELD_KEYS = [
+  'mock',
+  'mockEnv',
+  'mockOutbound',
+  'mockResearch',
+  'mockFeed',
+  'mockUsage',
+] as const;
 export const isMockField = (key: string): boolean => (MOCK_FIELD_KEYS as readonly string[]).includes(key);
 
 // ------------------------------------------------------------------ code set
@@ -78,6 +97,8 @@ export const CodeFieldsSchema = z.object({
   testPlan: z.string().optional(),
   externalRef: z.string().optional(),
   mock: MockScriptSchema.optional(),
+  /** Mock runtime: the usage each shift of this card reports. */
+  mockUsage: MockUsageSchema.optional(),
   /** M4 regression and full-suite cards: the platform under test. */
   platform: z.enum(['web', 'mobile']).optional(),
   /** M4 suite cards: the branch the suite runs on (the pushed card branch for `pr` / `push_branch`; default: the working branch). */
@@ -105,6 +126,7 @@ export const CODE_FIELDS: Record<string, FieldMeta> = {
   testPlan: { label: 'Test plan', kind: 'markdown' },
   externalRef: { label: 'External reference', kind: 'text' },
   mock: { label: 'Mock script', kind: 'json' },
+  mockUsage: { label: 'Mock token usage', kind: 'json' },
   platform: { label: 'Platform', kind: 'enum' },
   suiteBranch: { label: 'Suite branch', kind: 'text' },
   targetUrl: { label: 'Target URL', kind: 'text' },

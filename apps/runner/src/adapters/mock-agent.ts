@@ -562,6 +562,12 @@ interface BaTaskBrief extends Brief {
         devopsOpen: Array<{ summary: string; status: string }>;
         resolvedByBa: Array<{ title: string; how: string }>;
         failures: Array<{ ref: string; failedShifts: number }>;
+        spend?: {
+          currency: string;
+          sinceMicros: number;
+          monthMicros: number;
+          projects: Array<{ key: string; monthMicros: number; budgetMicros: number | null; state: string }>;
+        };
         interests?: {
           count: number;
           active: number;
@@ -683,7 +689,7 @@ async function reporterTaskMain(
       '## Failures',
       ...list([
         ...(d?.signals ?? [])
-          .filter((s) => ['rework', 'finalize_failures', 'repo_hygiene'].includes(s.kind))
+          .filter((s) => ['rework', 'finalize_failures', 'repo_hygiene', 'budget'].includes(s.kind))
           .map((s) => s.subject.title),
         ...(d?.failures ?? []).map((f) => `${f.ref}: ${f.failedShifts} failed shifts`),
         ...(d?.interests?.failing ?? []).map(
@@ -696,6 +702,17 @@ async function reporterTaskMain(
       '',
       '## Resolved without bothering you',
       ...list((d?.resolvedByBa ?? []).map((x) => `${x.title} (${x.how})`)),
+      '',
+      '## Spend',
+      ...(d?.spend
+        ? [
+            `This month ${d.spend.currency} ${(d.spend.monthMicros / 1_000_000).toFixed(2)}; since the last report ${(d.spend.sinceMicros / 1_000_000).toFixed(2)}`,
+            ...d.spend.projects.map(
+              (p) =>
+                `- ${p.key}: ${(p.monthMicros / 1_000_000).toFixed(2)}${p.budgetMicros ? ` of ${(p.budgetMicros / 1_000_000).toFixed(2)} (${p.state})` : ''}`,
+            ),
+          ]
+        : ['- none']),
       '',
       '## Interests highlights',
       ...(d?.interests
@@ -1174,7 +1191,14 @@ async function main(): Promise<number> {
     emit({ kind: 'progress', text: `mock ${brief.card.ref} ${stage}: step ${i}/3 (${action})` });
     await sleep(stepMs);
   }
-  emit({ kind: 'usage', usage: { inputTokens: 1000, outputTokens: 200 } });
+  const scripted = brief.card.fields.mockUsage as Record<string, unknown> | undefined;
+  emit({
+    kind: 'usage',
+    usage:
+      scripted && typeof scripted === 'object'
+        ? (scripted as { inputTokens: number; outputTokens: number })
+        : { inputTokens: 1000, outputTokens: 200 },
+  });
 
   if (action === 'crash') {
     process.stderr.write('mock crash\n');

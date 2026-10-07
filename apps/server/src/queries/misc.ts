@@ -1,4 +1,5 @@
 import {
+  type BudgetDto,
   isOrgOperational,
   type ProjectDetailResponse,
   type ProjectDto,
@@ -6,10 +7,11 @@ import {
   type WorkstationDto,
 } from '@aom/shared';
 import type { z } from 'zod';
-import { orgSuspended } from '../auth/org-context.ts';
+import { orgRoleOf, orgSuspended } from '../auth/org-context.ts';
 import { pendingConversionOf } from '../commands/convert.ts';
 import { hygieneDtos } from '../commands/hygiene.ts';
 import type { Ctx } from '../context.ts';
+import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts } from '../costs/index.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { conflict, notFound } from '../errors.ts';
 
@@ -74,7 +76,36 @@ export async function listProjects(
       [userId, status],
     )
   ).filter((p) => !department || p.department === department);
-  return r.map((p) => toProjectDto(p, p.my_role));
+  const budgets = await budgetsFor(ctx, userId, r);
+  return r.map((p) => ({ ...toProjectDto(p, p.my_role), budget: budgets.get(p.id) as BudgetDto }));
+}
+
+/** The budget block (state, amounts for org members, the reset time) of each project row, one query per organization. */
+export async function budgetsFor(ctx: Ctx, userId: string, projects: Row[]): Promise<Map<string, BudgetDto>> {
+  const out = new Map<string, BudgetDto>();
+  const now = ctx.clock.now();
+  for (const orgId of new Set(projects.map((p) => p.org_id as string))) {
+    const role = await orgRoleOf(ctx.pool, userId, orgId);
+    const c = await orgCostCtx(ctx.pool, orgId);
+    const mine = projects.filter((p) => p.org_id === orgId);
+    const spend = mine.some((p) => p.budget_micros !== null && p.budget_micros !== undefined)
+      ? await monthSpendByProject(
+          ctx.pool,
+          c,
+          now,
+          mine.map((p) => p.id),
+        )
+      : new Map<string, number>();
+    for (const p of mine)
+      out.set(
+        p.id,
+        budgetDto(p, spend.get(p.id) ?? 0, c, now, {
+          canEdit: canEditBudget(role),
+          showAmounts: seesAmounts(role),
+        }),
+      );
+  }
+  return out;
 }
 
 export async function getProjectDetail(
@@ -120,7 +151,11 @@ export async function getProjectDetail(
     [projectId],
   );
   return {
-    project: { ...toProjectDto(p, p.my_role), pendingConversion: await pendingConversionOf(ctx.pool, p) },
+    project: {
+      ...toProjectDto(p, p.my_role),
+      pendingConversion: await pendingConversionOf(ctx.pool, p),
+      budget: (await budgetsFor(ctx, userId, [p])).get(p.id) as BudgetDto,
+    },
     repos: repos.map((r) => ({
       id: r.id,
       projectId: r.project_id,

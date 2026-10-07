@@ -4,6 +4,7 @@ import { ProjectKeySchema } from '../ids.ts';
 import { RepoDescriptionSchema, RepoNameSchema, RepoVisibilitySchema } from '../repo/index.ts';
 import { BranchPrefixSchema, GitRefSchema, RemoteUrlSchema, VaultFolderSchema } from '../safe.ts';
 import { IsoTime } from './common.ts';
+import { BudgetDtoSchema } from './costs.ts';
 
 export const ProjectRepoDtoSchema = z.object({
   id: z.uuid(),
@@ -47,6 +48,8 @@ export const ProjectDtoSchema = z.object({
   mergeLargeChanged: z.object({ byName: z.string(), at: IsoTime }).nullable().optional(),
   /** Optional cap on shifts running at once on this project; null: no cap (the default). */
   maxConcurrentShifts: z.number().int().nullable().optional(),
+  /** The monthly budget and this month's spend (amounts hidden from guests); absent in lists that do not compute it. */
+  budget: BudgetDtoSchema.optional(),
   createdAt: IsoTime,
   /** The workflow the project was created with (`research` for research-first projects). */
   startedAs: z.string().nullable().optional(),

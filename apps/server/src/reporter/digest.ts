@@ -1,4 +1,5 @@
 import type { FloorDigest, SignalBrief } from '@aom/shared';
+import { spendDigest } from '../costs/index.ts';
 import { iso, type Queryable, rows } from '../db/sql.ts';
 
 export const toSignalBrief = (r: Record<string, any>): SignalBrief => ({
@@ -109,6 +110,7 @@ export async function buildFloorDigest(
   );
 
   const interests = await interestsDigest(db, orgId, sinceOrEpoch);
+  const spend = await spendDigest(db, orgId, now, sinceOrEpoch);
 
   return {
     generatedAt: now.toISOString(),
@@ -136,6 +138,7 @@ export async function buildFloorDigest(
     })),
     failures: failures.map((f) => ({ ref: f.ref, title: f.title, failedShifts: f.n })),
     interests,
+    spend,
   };
 }
 

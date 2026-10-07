@@ -1,3 +1,4 @@
+import { budgetPausedSql } from '../costs/index.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 
 /** A runner that has not been heard from for this long counts as offline. */
@@ -127,6 +128,8 @@ WHERE c.status = 'queued'
   AND (p.max_concurrent_shifts IS NULL OR (SELECT count(*) FROM cards pc
         WHERE pc.project_id = c.project_id AND pc.claim_id IS NOT NULL) < p.max_concurrent_shifts)
   AND (c.retry_after IS NULL OR c.retry_after <= $9::timestamptz)
+  -- A project over its monthly budget starts nothing new (running shifts finish): costs/index.ts budgetPausedSql.
+  AND NOT ${budgetPausedSql('p', '$9')}
   AND NOT EXISTS (
         SELECT 1 FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id
          WHERE d.card_id = c.id AND c.stage = 'build' AND c.rework_round = 0
