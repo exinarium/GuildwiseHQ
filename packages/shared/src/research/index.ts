@@ -158,3 +158,48 @@ export function noteExcerpt(md: string, max = 600): string {
     .replace(/^#\s+.*\n+/, '');
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
+
+// ---------------------------------------------------------------- the research index in PROJECT.md
+
+/** The managed block of `PROJECT.md` a conversion writes: every later shift reads the project's research through it. */
+export const RESEARCH_INDEX_SECTION_ID = 'research-index';
+export const PROJECT_FILE = 'PROJECT.md';
+export const PROJECT_FILE_HEADER = '# Project\n';
+
+export interface ResearchIndexNote {
+  title: string;
+  /** Vault-relative path of the note. */
+  vaultPath: string;
+  cardRef: string;
+  citations: number;
+  publishedAt: string;
+}
+
+const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim();
+
+/**
+ * The body of the `research-index` section of `PROJECT.md`: one line per published note (oldest first), linking the note
+ * by its path relative to the project folder when it lives there. Pure; the same input yields the same text, so a
+ * repeated write is a no-op.
+ */
+export function renderResearchIndex(
+  notes: readonly ResearchIndexNote[],
+  opts: { folder: string; startedAs?: string; convertedTo?: string } = { folder: '' },
+): string {
+  const lines = ['## Research', ''];
+  lines.push(
+    opts.convertedTo
+      ? `This project started as research and was converted to the ${opts.convertedTo} workflow. The notes below were published before the conversion; read them before you start.`
+      : 'The notes below were published by this project. Read them before you start.',
+    '',
+  );
+  if (notes.length === 0) lines.push('_No notes were published yet._', '');
+  const prefix = opts.folder ? `${opts.folder}/` : '';
+  for (const n of [...notes].sort((a, b) => a.publishedAt.localeCompare(b.publishedAt))) {
+    const rel = prefix && n.vaultPath.startsWith(prefix) ? n.vaultPath.slice(prefix.length) : n.vaultPath;
+    lines.push(
+      `- [${oneLine(n.title).replace(/[[\]]/g, '')}](${rel.replace(/ /g, '%20')}) (${n.cardRef}, ${n.citations} citation${n.citations === 1 ? '' : 's'}, ${n.publishedAt.slice(0, 10)})`,
+    );
+  }
+  return `${lines.join('\n').trimEnd()}\n`;
+}

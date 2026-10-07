@@ -129,7 +129,7 @@ export type DeployTargetKind = z.infer<typeof DeployTargetKind>;
 
 // ---------------------------------------------------------------------------------------- card outcomes
 
-export const PhaseCardOutcomeKind = z.enum(['finalized', 'closed_manually', 'cancelled']);
+export const PhaseCardOutcomeKind = z.enum(['finalized', 'closed_manually', 'cancelled', 'published']);
 export type PhaseCardOutcomeKind = z.infer<typeof PhaseCardOutcomeKind>;
 
 export const PhaseCardOutcome = z.object({
@@ -186,6 +186,8 @@ export interface PhaseMemberState {
   action?: string | null;
   /** The card's work is in the working branch (a `merge` finalize, or a verified `pr` / `push_branch` branch). */
   merged: boolean;
+  /** A research card whose note was published (`ResearchPublished`): its work product is the note, not a merge. */
+  published?: boolean;
 }
 
 /**
@@ -193,10 +195,11 @@ export interface PhaseMemberState {
  * not merged into the working branch yet: owner decision A2, `waiting_merge`).
  */
 export function memberOutcome(
-  c: Pick<PhaseMemberState, 'status' | 'finalized' | 'action' | 'merged'>,
+  c: Pick<PhaseMemberState, 'status' | 'finalized' | 'action' | 'merged'> & { published?: boolean },
 ): PhaseCardOutcomeKind | 'waiting_merge' | null {
   if (c.status === 'cancelled') return 'cancelled';
   if (c.status !== 'done') return null;
+  if (c.published) return 'published';
   if (!c.finalized) return 'closed_manually';
   if (c.action === 'merge' || c.merged) return 'finalized';
   return 'waiting_merge';
@@ -397,6 +400,7 @@ export interface FallbackFollowup {
 const cardLine = (c: PhaseCardOutcome): string => {
   if (c.outcome === 'cancelled')
     return `- ${c.ref} ${c.title}: cancelled${c.reason ? ` (${c.reason})` : ''}${c.unmergedBranch ? `; branch ${c.unmergedBranch} kept, not merged` : ''}`;
+  if (c.outcome === 'published') return `- ${c.ref} ${c.title}: research note published`;
   if (c.outcome === 'closed_manually')
     return `- ${c.ref} ${c.title}: closed by hand, no completion action ran${c.unmergedBranch ? `; branch ${c.unmergedBranch} kept` : ''}`;
   const how =

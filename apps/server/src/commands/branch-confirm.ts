@@ -11,18 +11,27 @@ async function askForProject(
   reason: WorkingBranchReason,
   because: string,
   phaseId?: string,
+  /** Only these repositories, and whether or not a workstation holds a clone yet (a conversion's new repositories). */
+  repoIds?: string[],
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     const project = await one(tx, `SELECT * FROM projects WHERE id=$1 AND status='active'`, [projectId]);
     if (!project) return;
     // Only repositories some workstation holds a clone of: that is where hygiene commits and pushes.
-    const repos = await rows(
-      tx,
-      `SELECT r.* FROM project_repos r
-        WHERE r.project_id=$1 AND r.removed_at IS NULL
-          AND EXISTS (SELECT 1 FROM workstation_repos wr WHERE wr.project_repo_id = r.id) ORDER BY r.name`,
-      [projectId],
-    );
+    const repos = repoIds
+      ? await rows(
+          tx,
+          `SELECT r.* FROM project_repos r
+            WHERE r.project_id=$1 AND r.removed_at IS NULL AND r.id = ANY($2::uuid[]) ORDER BY r.name`,
+          [projectId, repoIds],
+        )
+      : await rows(
+          tx,
+          `SELECT r.* FROM project_repos r
+            WHERE r.project_id=$1 AND r.removed_at IS NULL
+              AND EXISTS (SELECT 1 FROM workstation_repos wr WHERE wr.project_repo_id = r.id) ORDER BY r.name`,
+          [projectId],
+        );
     // No re-ask timer (owner decision, 2026-10-06): every new intake or phase asks again, for repositories that have a
     // working branch (keep or change) and for those that have none yet (which one is it?).
     for (const repo of repos) {
@@ -37,7 +46,8 @@ async function askForProject(
 }
 
 /**
- * Re-confirm on change (owner decision 3): a new intake for a project, and a new phase created or activated, make the
+ * Re-confirm on change (owner decision 3): a new intake for a project, a conversion that added repositories, and a new
+ * phase created or activated, make the
  * DevOps engineer ask the manager whether the working branch stays or changes (or, with none yet, which it is). There is
  * no timer: only these two events ask. A phase that names its own working branch
  * needs no question. Runs after the event committed (the gateway's event reactions); failures are logged, never raised.
@@ -49,6 +59,20 @@ export async function confirmBranchOnEvent(ctx: Ctx, e: StoredEvent): Promise<vo
         const p = (e.event as EventOf<'TicketMapped'>).payload;
         if (p.unmapped || !p.projectId || p.cardId) return;
         await askForProject(ctx, p.projectId, 'intake', 'a new intake');
+        return;
+      }
+      case 'ProjectConverted': {
+        // Each repository the conversion added: no clone exists yet, so the question is asked without one.
+        const p = (e.event as EventOf<'ProjectConverted'>).payload;
+        if (p.repoIds.length === 0) return;
+        await askForProject(
+          ctx,
+          p.projectId,
+          'conversion',
+          'the conversion to a delivery project',
+          undefined,
+          p.repoIds,
+        );
         return;
       }
       case 'PhaseCreated': {

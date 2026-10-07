@@ -24,6 +24,10 @@ export const ProjectChangesSchema = z
   .partial();
 export type ProjectChanges = z.infer<typeof ProjectChangesSchema>;
 
+/** What happens to an open card the new workflow cannot place: it finishes where it is, or it is cancelled. */
+export const ConvertCardDecision = z.enum(['keep', 'cancel']);
+export type ConvertCardDecision = z.infer<typeof ConvertCardDecision>;
+
 export const projectEvents = [
   defineEvent(
     'ProjectCreated',
@@ -56,6 +60,48 @@ export const projectEvents = [
     }),
   ),
   defineEvent('ProjectRepoRemoved', z.object({ projectId: Id, repoId: Id })),
+  /**
+   * The Owner or an Admin converted the project to another workflow (docs/design/restructure.md section 8, any to any).
+   * One append with the repositories it adds (`ProjectRepoAdded`) and, for each open card the new workflow cannot place,
+   * the decision: kept (it finishes on its own workflow and shows in extra board columns) or cancelled
+   * (`CardCancelled`, reason "Project converted"). `repoIds` are the repositories added now, for the working-branch
+   * question. Cards, notes, history and the vault folder are untouched.
+   */
+  defineEvent(
+    'ProjectConverted',
+    z.object({
+      projectId: Id,
+      fromWorkflowKey: z.string().min(1),
+      toWorkflowKey: z.string().min(1),
+      cardDecisions: z.array(z.object({ cardId: Id, decision: ConvertCardDecision })).default([]),
+      cancelledCardIds: z.array(Id).default([]),
+      repoIds: z.array(Id).default([]),
+      note: z.string().max(500).optional(),
+      by: Id,
+    }),
+  ),
+  /**
+   * A conversion that needs a repository none of the entries can supply yet: the Owner asked for new repositories, which
+   * wait for the owner's approval and the runner. The project stays as it is until they exist, then `ProjectConverted`
+   * follows.
+   */
+  defineEvent(
+    'ProjectConversionRequested',
+    z.object({
+      projectId: Id,
+      conversionId: Id,
+      toWorkflowKey: z.string().min(1),
+      cardDecisions: z.array(z.object({ cardId: Id, decision: ConvertCardDecision })).default([]),
+      repoRequestIds: z.array(Id).min(1),
+      note: z.string().max(500).optional(),
+      by: Id,
+    }),
+  ),
+  /** The waiting conversion was cancelled (by the Owner, or because every repository request was declined). */
+  defineEvent(
+    'ProjectConversionCancelled',
+    z.object({ projectId: Id, conversionId: Id, by: Id.optional(), reason: z.string().optional() }),
+  ),
   /**
    * The manager confirmed (or changed) the repository's working branch: the answer to the DevOps engineer's question on
    * the desk, or a change in the project settings. Hygiene commits and pushes only to a confirmed branch.

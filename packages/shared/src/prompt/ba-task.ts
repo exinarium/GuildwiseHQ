@@ -81,9 +81,11 @@ export function renderBaTaskPrompt(task: BaTaskShift): string {
             const how =
               c.outcome === 'finalized'
                 ? `finalized (${c.action ?? 'merge'})${c.resultRef?.mergeCommit ? ` ${c.resultRef.mergeCommit.slice(0, 10)}` : ''}${c.resultRef?.prUrl ? ` ${c.resultRef.prUrl}` : ''}${c.resultRef?.pushedBranch ? ` branch ${c.resultRef.pushedBranch}` : ''}`
-                : c.outcome === 'closed_manually'
-                  ? 'closed by hand (no completion action ran)'
-                  : `cancelled${c.reason ? `: ${c.reason}` : ''}`;
+                : c.outcome === 'published'
+                  ? 'research note published'
+                  : c.outcome === 'closed_manually'
+                    ? 'closed by hand (no completion action ran)'
+                    : `cancelled${c.reason ? `: ${c.reason}` : ''}`;
             const suite = c.suite
               ? `\n   full E2E suite ${c.suite.ref}: ${c.suite.result ?? c.suite.status}${c.suite.bugRefs.length ? `, bugs ${c.suite.bugRefs.join(', ')}` : ''}`
               : '';

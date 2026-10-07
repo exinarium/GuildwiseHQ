@@ -121,3 +121,13 @@ export function workflowHasTestStage(def: Pick<WorkflowDefinition, 'stages'>): b
 export function workflowUsesRepos(def: Pick<WorkflowDefinition, 'stages'>): boolean {
   return def.stages.some((s) => s.worktree !== 'none');
 }
+
+/**
+ * Card types that may be created in any project whatever its workflow, with the workflow that runs them
+ * (docs/design/restructure.md section 8.1). The project's own workflow wins when it lists the type.
+ */
+export const CROSS_PROJECT_CARD_TYPES: Readonly<Record<string, string>> = { research: 'research' };
+
+/** The workflow key a project is in while it only researches (repositories are refused until it is converted). */
+export const RESEARCH_STAGE_WORKFLOW = 'research';
+export const isResearchStage = (workflowKey: string): boolean => workflowKey === RESEARCH_STAGE_WORKFLOW;

@@ -120,7 +120,7 @@ export const PhaseMemberDtoSchema = z.object({
   stage: z.string(),
   status: z.string(),
   assignment: PhaseAssignment,
-  outcome: z.enum(['finalized', 'closed_manually', 'cancelled', 'waiting_merge']).nullable(),
+  outcome: z.enum(['finalized', 'closed_manually', 'cancelled', 'waiting_merge', 'published']).nullable(),
   action: CompletionAction.nullable(),
   resultRef: z
     .object({ mergeCommit: z.string(), prUrl: z.string(), pushedBranch: z.string() })

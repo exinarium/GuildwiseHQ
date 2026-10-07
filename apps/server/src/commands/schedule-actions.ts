@@ -32,7 +32,7 @@ import { badRequest, conflict } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { carrierProject } from '../reporter/tasks.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { specifyTarget } from './cards.ts';
+import { resolveCardWorkflow, specifyTarget } from './cards.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { createDevOpsRequestIn } from './devops.ts';
 import { requestHygiene } from './hygiene.ts';
@@ -59,11 +59,17 @@ export async function scheduledCard(
   title: string,
   interestId?: string | null,
 ): Promise<{ cardId: string; ref: string; event: AppendInput }> {
-  const wf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
-  if (!wf) throw badRequest('unknown_workflow', `workflow '${project.workflow_key}' is not available`);
-  const def = wf.definition;
-  const cardType = template.cardType ?? def.cardTypes[0];
+  const projectWf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
+  if (!projectWf) throw badRequest('unknown_workflow', `workflow '${project.workflow_key}' is not available`);
+  const cardType = template.cardType ?? projectWf.definition.cardTypes[0];
   if (!cardType) throw badRequest('invalid_card_type', 'the workflow has no card types');
+  const wf = await resolveCardWorkflow(tx, project, cardType);
+  if (!wf)
+    throw badRequest(
+      'invalid_card_type',
+      `card type '${cardType}' is not allowed in workflow '${projectWf.definition.key}'`,
+    );
+  const def = wf.definition;
   const defaults = def.fieldSet === 'feed' ? { ...FEED_FIELD_DEFAULTS } : {};
   const parsed = parseCardFields(def.fieldSet, {
     ...emptyFields(def.fieldSet),

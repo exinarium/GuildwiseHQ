@@ -39,6 +39,7 @@ import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { resolveCardWorkflow } from './cards.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import {
   dayIn,
@@ -250,13 +251,14 @@ export async function checkTemplate(tx: Queryable, project: Row, kind: string, t
     return;
   }
   const cardType = template.cardType ?? wf.definition.cardTypes[0];
-  if (!cardType || !wf.definition.cardTypes.includes(cardType))
+  const cardWf = cardType ? await resolveCardWorkflow(tx, project, cardType) : null;
+  if (!cardType || !cardWf)
     throw badRequest(
       'invalid_card_type',
       `card type '${cardType}' is not allowed in workflow '${wf.definition.key}'`,
     );
-  const parsed = parseCardFields(wf.definition.fieldSet, {
-    ...emptyFields(wf.definition.fieldSet),
+  const parsed = parseCardFields(cardWf.definition.fieldSet, {
+    ...emptyFields(cardWf.definition.fieldSet),
     ...template.fields,
   });
   if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);

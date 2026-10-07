@@ -3,6 +3,7 @@ import {
   BA_ROLE_KEY,
   DESK_SUBKIND,
   isOrgManager,
+  isResearchStage,
   normalizeRemoteUrl,
   RepoCreateParamsSchema,
   type RepoCreatePayload,
@@ -17,6 +18,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { agentActor, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { settleConversionIn } from './convert.ts';
 import { addRepoIn } from './projects.ts';
 
 /**
@@ -124,13 +126,19 @@ export async function repoCreateRpc(
 
   const project = await one(
     ctx.pool,
-    `SELECT p.id, p.key, p.name, p.org_id FROM projects p
+    `SELECT p.id, p.key, p.name, p.org_id, p.workflow_key FROM projects p
        JOIN project_members m ON m.project_id = p.id AND m.user_id = $1 AND m.status = 'active'
       WHERE p.key = $2 AND p.status = 'active'`,
     [userId, p.data.project.toUpperCase()],
   );
   if (!project)
     return [false, undefined, `unknown project '${p.data.project}' (use a project key you may work in)`];
+  if (isResearchStage(project.workflow_key))
+    return [
+      false,
+      undefined,
+      `project ${project.key} is still in the research stage: repositories come with the conversion to a delivery project. Ask the manager to convert it.`,
+    ];
   if (!(await managerWorkstation(ctx.pool, project.org_id)))
     return [
       false,
@@ -244,6 +252,86 @@ export async function repoCreateRpc(
 }
 
 /**
+ * A new repository asked for from the project's convert dialog (restructure.md decision 7): the same request, desk
+ * approval and runner flow as `aom repo create`, asked by the manager instead of an agent. Returns the events and ids;
+ * the caller appends them in its own transaction. 409 when a live request for the same name exists.
+ */
+export async function repoCreateRequestEvents(
+  tx: Tx,
+  user: { id: string; displayName?: string },
+  project: Row,
+  spec: { name: string; visibility: 'private' | 'public'; description?: string },
+  context: string,
+): Promise<{ events: AppendInput[]; requestId: string; deskItemId: string }> {
+  const live = await one(
+    tx,
+    `SELECT 1 FROM repo_requests WHERE project_id=$1 AND lower(name)=lower($2) AND status = ANY($3)`,
+    [project.id, spec.name, LIVE],
+  );
+  if (live)
+    throw conflict('repo_request_exists', `a request for ${spec.name} already exists for this project`);
+  const requestId = randomUUID();
+  const deskItemId = randomUUID();
+  const ws = await managerWorkstation(tx, project.org_id);
+  const body = [
+    `Repository: ${spec.name}`,
+    `Visibility: ${spec.visibility}`,
+    `Project: ${project.key} (${project.name})`,
+    ...(spec.description ? [`Description: ${spec.description}`] : []),
+    `Requested by: ${user.displayName ?? 'a manager'}, ${context}`,
+    `Runs on: ${ws?.name ?? 'your connected workstation'} (your workstation)`,
+    '',
+    `Approving creates this repository on GitHub with your own GitHub login on that workstation (gh), pushes a first commit (README.md) to main, clones it next to your other repositories and adds it to project ${project.key}. Nothing is created until you approve.`,
+  ].join('\n');
+  const scope = projectScope(project.org_id, project.id);
+  const actor = userActor(user.id);
+  return {
+    requestId,
+    deskItemId,
+    events: [
+      {
+        streamId: streamId.desk(deskItemId),
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId,
+            kind: 'approval',
+            subkind: DESK_SUBKIND.repoCreate,
+            title: `Create repository ${spec.name}`,
+            body,
+            options: [],
+            blocking: false,
+            pinned: false,
+            projectId: project.id,
+            affectedCardIds: [],
+            askedBy: { kind: 'user', userId: user.id },
+          },
+        },
+        actor,
+        scope,
+      },
+      {
+        streamId: streamId.repo(requestId),
+        event: {
+          type: 'RepoCreateRequested',
+          payload: {
+            requestId,
+            projectId: project.id,
+            name: spec.name,
+            visibility: spec.visibility,
+            ...(spec.description ? { description: spec.description } : {}),
+            requestedByUserId: user.id,
+            deskItemId,
+          },
+        },
+        actor,
+        scope,
+      },
+    ],
+  };
+}
+
+/**
  * Desk resolution of a repository request (inside the desk resolve transaction). Only the project owner decides: the
  * runner uses their GitHub login. Approving needs one of their workstations to be connected. Returns the workstation
  * to deliver the queued command to, or null (rejected).
@@ -292,6 +380,8 @@ export async function resolveRepoCreateIn(
       ],
       { tx },
     );
+    // A conversion waiting for this repository learns that it will not come.
+    await settleConversionIn(ctx, tx, req.project_id);
     return null;
   }
   const ws = await connectedWorkstation(tx, user.id);
@@ -431,7 +521,11 @@ export async function applyRepoCreateResult(
               remoteUrl: r.remoteUrl,
               workingBranch: 'main',
             },
-            agentActor(req.requested_by_agent_id),
+            req.requested_by_agent_id
+              ? agentActor(req.requested_by_agent_id)
+              : req.requested_by_user_id
+                ? userActor(req.requested_by_user_id)
+                : SYSTEM_ACTOR,
           ));
         await ctx.store.append(
           [
@@ -459,6 +553,8 @@ export async function applyRepoCreateResult(
           ],
           { tx },
         );
+        // A conversion waiting for this repository can complete now.
+        await settleConversionIn(ctx, tx, req.project_id);
         return;
       } catch (err) {
         failure = `the repository was created but could not be added to the project: ${err instanceof Error ? err.message : String(err)}`;

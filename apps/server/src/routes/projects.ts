@@ -1,5 +1,7 @@
 import {
   AddRepoRequestSchema,
+  ConvertPreviewQuerySchema,
+  ConvertProjectRequestSchema,
   CreateProjectRequestSchema,
   DeleteProjectRequestSchema,
   IdParamsSchema,
@@ -12,6 +14,7 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireOrg, requireUser } from '../auth/guards.ts';
+import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import {
   addRepo,
@@ -60,6 +63,34 @@ export function projectRoutes(ctx: Ctx) {
         return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );
+
+    /** What converting to a workflow would do: the open cards that need a decision, the repositories needed. */
+    app.get(
+      '/api/projects/:id/convert-preview',
+      { schema: { params: IdParamsSchema, querystring: ConvertPreviewQuerySchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return convertPreview(ctx, s.user, req.params.id, req.query.toWorkflowKey);
+      },
+    );
+
+    /** Converts the project to another workflow (Owner and Admins); see `commands/convert.ts`. */
+    app.post(
+      '/api/projects/:id/convert',
+      { schema: { params: IdParamsSchema, body: ConvertProjectRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        const result = await convertProject(ctx, s.user, req.params.id, req.body);
+        return { ...result, ...(await getProjectDetail(ctx, s.user.id, req.params.id)) };
+      },
+    );
+
+    /** Cancels a conversion that waits for its new repositories. */
+    app.delete('/api/projects/:id/convert', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await cancelConversion(ctx, s.user, req.params.id);
+      return getProjectDetail(ctx, s.user.id, req.params.id);
+    });
 
     app.get('/api/projects/:id/impact', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);

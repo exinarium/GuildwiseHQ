@@ -414,6 +414,49 @@ describe('event triggers', () => {
   });
 });
 
+describe('the project_converted trigger', () => {
+  it('a converted project runs its schedule once, with the project and the workflows in the text', async () => {
+    const proj = await ok<any>(
+      owner('POST', '/api/projects', { key: 'RSCH', name: 'Reload research', workflowKey: 'research' }),
+      201,
+    );
+    const rid = proj.project.id as string;
+    const s = await ok<any>(
+      create({
+        name: 'Converted hook',
+        trigger: { kind: 'event', event: 'project_converted' },
+        action: {
+          kind: 'integration',
+          integration: 'webhook',
+          url: hookUrl,
+          format: 'slack',
+          message: 'Converted {project}: {event}',
+          projectId: rid,
+        },
+      }),
+      201,
+    );
+    await scheduler().run(); // the cursor moves to the end of the log: older events never run it
+    expect(await runsOf(s.id)).toHaveLength(0);
+    const before = received.length;
+    await ok(
+      owner('POST', `/api/projects/${rid}/convert`, {
+        toWorkflowKey: 'code',
+        repos: [{ name: 'reload', remoteUrl: 'https://github.com/acme/reload.git' }],
+      }),
+    );
+    await scheduler().run();
+    await until(async () => received.length > before, 5000, 'webhook delivered');
+    const last = JSON.parse(received.at(-1)?.body ?? '{}');
+    expect(last.text).toBe('Converted RSCH: a project is converted');
+    await scheduler().run();
+    const runs = await runsOf(s.id);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ trigger: 'event', status: 'ok' });
+    expect(runs[0]?.label).toBe('Project converted');
+  });
+});
+
 const sign = (secret: string, ts: string, body: string) =>
   `sha256=${createHmac('sha256', secret).update(`${ts}.${body}`).digest('hex')}`;
 

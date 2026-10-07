@@ -8,6 +8,7 @@ import {
   type HygieneTrigger,
   PHASE_ASSIGNABLE_STATUSES,
   parseBranchName,
+  RESEARCH_STAGE_WORKFLOW,
   renderHygieneRequest,
   streamId,
   summarizeSweep,
@@ -70,7 +71,7 @@ export async function hygieneSpecFor(
             p.id AS project_id, p.key AS project_key, p.name AS project_name, p.branch_prefix
        FROM workstation_repos wr
        JOIN project_repos r ON r.id = wr.project_repo_id AND r.removed_at IS NULL
-       JOIN projects p ON p.id = r.project_id AND p.status = 'active'
+       JOIN projects p ON p.id = r.project_id AND p.status = 'active' AND p.workflow_key <> '${RESEARCH_STAGE_WORKFLOW}'
       WHERE wr.workstation_id = $1 ORDER BY p.key, r.name, r.id LIMIT ${MAX_REQUEST_REPOS}`,
     [workstationId],
   );

@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { ProjectChangesSchema, ProjectDomain } from '../events/project.ts';
+import { ConvertCardDecision, ProjectChangesSchema, ProjectDomain } from '../events/project.ts';
 import { ProjectKeySchema } from '../ids.ts';
+import { RepoDescriptionSchema, RepoNameSchema, RepoVisibilitySchema } from '../repo/index.ts';
 import { BranchPrefixSchema, GitRefSchema, RemoteUrlSchema, VaultFolderSchema } from '../safe.ts';
 import { IsoTime } from './common.ts';
 
@@ -47,6 +48,16 @@ export const ProjectDtoSchema = z.object({
   /** Optional cap on shifts running at once on this project; null: no cap (the default). */
   maxConcurrentShifts: z.number().int().nullable().optional(),
   createdAt: IsoTime,
+  /** The workflow the project was created with (`research` for research-first projects). */
+  startedAs: z.string().nullable().optional(),
+  convertedAt: IsoTime.nullable().optional(),
+  /** Published research notes of the project (the Research tab shows when there are some, or it started as research). */
+  publishedNotes: z.number().int().optional(),
+  /** A conversion that waits for its new repositories. */
+  pendingConversion: z
+    .lazy(() => PendingConversionSchema)
+    .nullable()
+    .optional(),
   /** The requesting user's relation to the project. */
   myRole: z.enum(['owner', 'manager']),
 });
@@ -119,3 +130,93 @@ export const AddRepoRequestSchema = z.object({
 });
 export type AddRepoRequest = z.infer<typeof AddRepoRequestSchema>;
 export const RepoParamsSchema = z.object({ id: z.uuid(), repoId: z.uuid() });
+
+// ------------------------------------------------------------------------------------- conversion
+
+/** A repository the conversion adds: an existing remote, or a new one the owner approves and the runner creates. */
+export const ConvertRepoSchema = z.union([
+  z.object({
+    name: z.string().min(1).max(120),
+    remoteUrl: RemoteUrlSchema,
+    workingBranch: GitRefSchema.optional(),
+  }),
+  z.object({
+    create: z.object({
+      /** `owner/repo` as `aom repo create` takes it. */
+      name: RepoNameSchema,
+      visibility: RepoVisibilitySchema.default('private'),
+      description: RepoDescriptionSchema.optional(),
+    }),
+  }),
+]);
+export type ConvertRepo = z.infer<typeof ConvertRepoSchema>;
+
+/**
+ * `POST /api/projects/:id/convert` (Owner and Admins). `cardDecisions` names the decision for single cards; every other
+ * open card the new workflow cannot place gets `defaultDecision` (keep: it finishes on its own workflow).
+ */
+export const ConvertProjectRequestSchema = z.object({
+  toWorkflowKey: z.string().min(1),
+  repos: z.array(ConvertRepoSchema).max(10).default([]),
+  defaultDecision: ConvertCardDecision.default('keep'),
+  cardDecisions: z.record(z.uuid(), ConvertCardDecision).default({}),
+  note: z.string().max(500).optional(),
+});
+export type ConvertProjectRequest = z.infer<typeof ConvertProjectRequestSchema>;
+
+export const ConvertPreviewQuerySchema = z.object({ toWorkflowKey: z.string().min(1) });
+
+/** An open card the target workflow cannot place, with what happens to it by default. */
+export const ConvertCardDtoSchema = z.object({
+  id: z.uuid(),
+  ref: z.string(),
+  title: z.string(),
+  cardType: z.string(),
+  workflowKey: z.string(),
+  stage: z.string(),
+  status: z.string(),
+  claimed: z.boolean(),
+});
+export type ConvertCardDto = z.infer<typeof ConvertCardDtoSchema>;
+
+/** `GET /api/projects/:id/convert-preview?toWorkflowKey=`: what the dialog shows before the Owner confirms. */
+export const ConvertPreviewSchema = z.object({
+  fromWorkflowKey: z.string(),
+  toWorkflowKey: z.string(),
+  toWorkflowName: z.string(),
+  /** The target workflow needs repositories (at least one must be added or requested). */
+  usesRepos: z.boolean(),
+  activeRepos: z.number().int(),
+  publishedNotes: z.number().int(),
+  /** Open cards of other workflows than the target: each is kept or cancelled. */
+  foreignCards: z.array(ConvertCardDtoSchema),
+  placedCards: z.number().int(),
+  /** The next step usually taken from the current workflow (research: code), for the dialog's guidance. */
+  suggested: z.string().nullable(),
+});
+export type ConvertPreview = z.infer<typeof ConvertPreviewSchema>;
+
+/** A conversion waiting for its repositories (shown on the project). */
+export const PendingConversionSchema = z.object({
+  conversionId: z.uuid(),
+  toWorkflowKey: z.string(),
+  requests: z.array(
+    z.object({
+      id: z.uuid(),
+      name: z.string(),
+      status: z.enum(['pending', 'approved', 'rejected', 'created', 'failed']),
+      deskItemId: z.uuid(),
+      error: z.string().nullable(),
+    }),
+  ),
+});
+export type PendingConversion = z.infer<typeof PendingConversionSchema>;
+
+export const ConvertResultSchema = z.object({
+  /** `converted`: done now. `waiting`: the repositories are requested; it completes when they exist. */
+  status: z.enum(['converted', 'waiting']),
+  cancelledCards: z.number().int(),
+  keptCards: z.number().int(),
+  repoRequests: z.array(z.object({ requestId: z.uuid(), name: z.string(), deskItemId: z.uuid() })),
+});
+export type ConvertResult = z.infer<typeof ConvertResultSchema>;

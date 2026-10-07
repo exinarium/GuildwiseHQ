@@ -1,6 +1,6 @@
 import {
   type BoardResponse,
-  boardColumns,
+  boardColumnsWith,
   type CardDetailResponse,
   type CardDto,
   type CardSearchResponse,
@@ -251,7 +251,6 @@ export async function getBoard(
   const project = await loadVisibleProject(ctx.pool, userId, projectId);
   const wf = await resolveWorkflow(ctx.pool, project.org_id, project.workflow_key);
   if (!wf) throw notFound('workflow not found');
-  const columns = boardColumns(wf.definition as WorkflowDefinition);
   const cards = await rows(
     ctx.pool,
     `SELECT c.*, a.name AS agent_name, wo.id AS waiting_on_id, wo.ref AS waiting_on_ref, ph.ref AS phase_ref
@@ -264,6 +263,22 @@ export async function getBoard(
       ORDER BY c.priority, c.queued_at NULLS LAST, c.number`,
     [projectId, phaseId ?? null],
   );
+  // Open cards that run on other workflows than the project's (research cards in a code project, cards kept through a
+  // conversion) add their columns before the terminal one; they show only while such cards exist.
+  const others: WorkflowDefinition[] = [];
+  const keyOf = new Map<string, string>();
+  for (const c of cards) {
+    if (keyOf.has(c.workflow_version_id)) continue;
+    const w = await loadWorkflowById(ctx.pool, c.workflow_version_id);
+    keyOf.set(c.workflow_version_id, w?.key ?? '');
+    if (
+      w &&
+      w.key !== wf.key &&
+      cards.some((o) => o.workflow_version_id === c.workflow_version_id && o.status !== 'done')
+    )
+      others.push(w.definition);
+  }
+  const columns = boardColumnsWith(wf.definition as WorkflowDefinition, others);
   const workability = await cardWorkability(ctx, cards);
   const byColumn = new Map<string, BoardResponse['columns'][number]['cards']>(columns.map((c) => [c, []]));
   for (const c of cards) {
@@ -274,6 +289,9 @@ export async function getBoard(
       ref: c.ref,
       title: c.title,
       cardType: c.card_type,
+      ...(keyOf.get(c.workflow_version_id) && keyOf.get(c.workflow_version_id) !== wf.key
+        ? { workflowKey: keyOf.get(c.workflow_version_id) as string }
+        : {}),
       stage: c.stage,
       status: c.status,
       assignee: c.claimed_by_agent_id ? { agentId: c.claimed_by_agent_id, name: c.agent_name } : null,

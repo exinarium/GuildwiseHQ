@@ -104,7 +104,8 @@ export const hasOpenFollowups = (list: Row[]): boolean => list.some((f) => !isFo
 // -------------------------------------------------------------------------------- card outcomes
 
 const MEMBER_SELECT = `SELECT c.id, c.ref, c.title, c.stage, c.status, c.card_type, c.phase_assignment, c.finalize_action,
-       c.finalize_result, c.merged_into_working_at, c.branch_name, c.finalized_at, c.repo_id, c.home_workstation_id
+       c.finalize_result, c.merged_into_working_at, c.branch_name, c.finalized_at, c.repo_id, c.home_workstation_id,
+       EXISTS (SELECT 1 FROM research_publications rp WHERE rp.card_id = c.id) AS published
   FROM cards c WHERE c.phase_id = $1 ORDER BY c.number`;
 
 export const memberRows = (db: Queryable, phaseId: string): Promise<Row[]> =>
@@ -117,6 +118,7 @@ export const memberState = (c: Row) => ({
   finalized: c.finalize_result !== null && c.finalize_result !== undefined,
   action: c.finalize_action as string | null,
   merged: !!c.merged_into_working_at,
+  published: !!c.published,
 });
 
 /** The cancel reason of a card (from its event stream). */
@@ -147,6 +149,8 @@ export async function cardOutcomes(db: Queryable, phaseId: string): Promise<Phas
         ...(c.finalize_action ? { action: c.finalize_action } : {}),
         ...(c.finalize_result ? { resultRef: c.finalize_result } : {}),
       });
+    else if (kind === 'published')
+      out.push({ cardId: c.id, ref: c.ref, title: c.title, outcome: 'published' });
     else if (kind === 'closed_manually')
       out.push({ cardId: c.id, ref: c.ref, title: c.title, outcome: 'closed_manually', ...unmerged });
     else {

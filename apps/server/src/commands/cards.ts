@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   type CardChanges,
   type CardOrigin,
+  CROSS_PROJECT_CARD_TYPES,
   type CreateCardRequest,
   canManageCard,
   cardRef,
@@ -16,18 +17,38 @@ import {
   type Stage,
   streamId,
   type WorkflowDefinition,
+  workflowUsesRepos,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
-import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
+import { loadWorkflowById, resolveWorkflow, type WorkflowVersionRow } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
-import { one, type Row, rows } from '../db/sql.ts';
+import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { cardMessage, projectScope, userActor } from './common.ts';
 import { openLoopAlerts } from './loop-breaker.ts';
+
+/**
+ * The workflow that runs a card of this type in this project (docs/design/restructure.md section 8.1): the project's own
+ * when it lists the type, otherwise the one named in `CROSS_PROJECT_CARD_TYPES` (a research card in a code project),
+ * otherwise none. The card carries that workflow version from then on, so the board shows its columns next to the
+ * project's own.
+ */
+export async function resolveCardWorkflow(
+  db: Queryable,
+  project: Row,
+  cardType: string,
+): Promise<WorkflowVersionRow | null> {
+  const own = await resolveWorkflow(db, project.org_id, project.workflow_key);
+  if (own?.definition.cardTypes.includes(cardType as never)) return own;
+  const other = CROSS_PROJECT_CARD_TYPES[cardType];
+  if (!other || other === project.workflow_key) return null;
+  const wf = await resolveWorkflow(db, project.org_id, other);
+  return wf?.definition.cardTypes.includes(cardType as never) ? wf : null;
+}
 
 /** The stage a `CardSpecified` moves the card into, and the outcome's resolved stage. */
 export function specifyTarget(def: WorkflowDefinition): { from: string; to: string; stage: Stage } {
@@ -111,15 +132,16 @@ export async function createCardIn(
   const actor = acting.actor ?? userActor(user.id);
   const project = await loadVisibleProject(tx, user.id, req.projectId);
   if (project.status !== 'active') throw conflict('project_archived', 'project is archived');
-  const wf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
-  if (!wf) throw badRequest('unknown_workflow', `workflow '${project.workflow_key}' is not available`);
-  const def = wf.definition;
-  if (!def.cardTypes.includes(req.cardType)) {
+  const projectWf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
+  if (!projectWf) throw badRequest('unknown_workflow', `workflow '${project.workflow_key}' is not available`);
+  const wf = await resolveCardWorkflow(tx, project, req.cardType);
+  if (!wf) {
     throw badRequest(
       'invalid_card_type',
-      `card type '${req.cardType}' is not allowed in workflow '${def.key}'`,
+      `card type '${req.cardType}' is not allowed in workflow '${projectWf.definition.key}'`,
     );
   }
+  const def = wf.definition;
   assertNoMockFields(ctx, req.fields);
   if (req.interestId) {
     // "Research this": the interest must be visible and its research (or feed) project must be the card's project.
@@ -138,7 +160,9 @@ export async function createCardIn(
   if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
 
   let repoId = req.repoId;
-  if (repoId) await assertRepoInProject(tx, project.id, repoId);
+  // A card whose workflow works in the vault (research in a code project) never takes a repository.
+  if (!workflowUsesRepos(def)) repoId = undefined;
+  else if (repoId) await assertRepoInProject(tx, project.id, repoId);
   else {
     const repos = await rows<{ id: string }>(
       tx,
@@ -504,67 +528,91 @@ export async function releaseBackoff(ctx: Ctx, user: AuthSession['user'], idOrRe
   });
 }
 
+/**
+ * Cancels one open card inside the caller's transaction: releases its claim, appends `CardCancelled` (and, for a bug
+ * child, puts a waiting parent back in the Test queue unless it is cancelled too), and queues the removal of its
+ * worktree (the branch is kept). Returns the workstation to deliver the queued command to.
+ */
+export async function cancelCardIn(
+  ctx: Ctx,
+  tx: Tx,
+  user: { id: string; displayName: string },
+  card: Row,
+  reason: string,
+  opts: { cause?: 'project_archived' | 'project_converted'; alsoCancelling?: ReadonlySet<string> } = {},
+): Promise<string | undefined> {
+  // A cancelled bug child will never pass review: the parent waiting on it goes back to the Test queue
+  // (unless another bug child of the same parent is still open).
+  const resume: AppendInput[] = [];
+  if (
+    card.parent_card_id &&
+    card.origin === 'test_failure' &&
+    !opts.alsoCancelling?.has(card.parent_card_id)
+  ) {
+    const parent = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [card.parent_card_id]);
+    const open = await one(
+      tx,
+      `SELECT 1 FROM cards WHERE parent_card_id=$1 AND origin='test_failure' AND id<>$2
+          AND status NOT IN ('done','cancelled') LIMIT 1`,
+      [card.parent_card_id, card.id],
+    );
+    if (parent && parent.status === 'waiting' && !open) {
+      resume.push(
+        {
+          streamId: streamId.card(parent.id),
+          event: {
+            type: 'ChildCardResolved',
+            payload: { cardId: parent.id, childCardId: card.id, toStage: 'test' },
+          },
+          actor: userActor(user.id),
+          scope: projectScope(parent.org_id, parent.project_id),
+        },
+        cardMessage(
+          parent,
+          { kind: 'system' },
+          'system',
+          `${card.ref} (${card.title}) was cancelled: ${parent.ref} is back in the Test queue.`,
+        ),
+      );
+    }
+  }
+  await ctx.store.append(
+    [
+      ...releaseEvents(card, user.id, 'manual'),
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'CardCancelled',
+          payload: { cardId: card.id, reason, ...(opts.cause ? { cause: opts.cause } : {}) },
+        },
+        actor: userActor(user.id),
+        scope: projectScope(card.org_id, card.project_id),
+      },
+      cardMessage(card, { kind: 'system' }, 'system', `Cancelled by ${user.displayName}: ${reason}`),
+      ...resume,
+    ],
+    { tx },
+  );
+  // A card that ends without a merge gives its worktree back (the branch is kept and listed in the phase report).
+  if (card.worktree_path && card.home_workstation_id && !card.worktree_card_id) {
+    await enqueueRunnerCommand(tx, card.home_workstation_id, 'worktree.remove', {
+      repoId: card.repo_id ?? undefined,
+      path: card.worktree_path,
+      branchName: card.branch_name ?? undefined,
+      deleteBranch: false,
+    });
+    return card.home_workstation_id as string;
+  }
+  return undefined;
+}
+
 export async function cancelCard(ctx: Ctx, user: AuthSession['user'], idOrRef: string, reason: string) {
   let workstation: string | undefined;
   const id = await withAppendTx(ctx.pool, async (tx) => {
     const card = await loadManageable(tx, user, idOrRef);
     if (['done', 'cancelled'].includes(card.status))
       throw conflict('card_closed', `card is already ${card.status}`);
-    // A cancelled bug child will never pass review: the parent waiting on it goes back to the Test queue
-    // (unless another bug child of the same parent is still open).
-    const resume: AppendInput[] = [];
-    if (card.parent_card_id && card.origin === 'test_failure') {
-      const parent = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [card.parent_card_id]);
-      const open = await one(
-        tx,
-        `SELECT 1 FROM cards WHERE parent_card_id=$1 AND origin='test_failure' AND id<>$2
-            AND status NOT IN ('done','cancelled') LIMIT 1`,
-        [card.parent_card_id, card.id],
-      );
-      if (parent && parent.status === 'waiting' && !open) {
-        resume.push(
-          {
-            streamId: streamId.card(parent.id),
-            event: {
-              type: 'ChildCardResolved',
-              payload: { cardId: parent.id, childCardId: card.id, toStage: 'test' },
-            },
-            actor: userActor(user.id),
-            scope: projectScope(parent.org_id, parent.project_id),
-          },
-          cardMessage(
-            parent,
-            { kind: 'system' },
-            'system',
-            `${card.ref} (${card.title}) was cancelled: ${parent.ref} is back in the Test queue.`,
-          ),
-        );
-      }
-    }
-    await ctx.store.append(
-      [
-        ...releaseEvents(card, user.id, 'manual'),
-        {
-          streamId: streamId.card(card.id),
-          event: { type: 'CardCancelled', payload: { cardId: card.id, reason } },
-          actor: userActor(user.id),
-          scope: projectScope(card.org_id, card.project_id),
-        },
-        cardMessage(card, { kind: 'system' }, 'system', `Cancelled by ${user.displayName}: ${reason}`),
-        ...resume,
-      ],
-      { tx },
-    );
-    // A card that ends without a merge gives its worktree back (the branch is kept and listed in the phase report).
-    if (card.worktree_path && card.home_workstation_id && !card.worktree_card_id) {
-      await enqueueRunnerCommand(tx, card.home_workstation_id, 'worktree.remove', {
-        repoId: card.repo_id ?? undefined,
-        path: card.worktree_path,
-        branchName: card.branch_name ?? undefined,
-        deleteBranch: false,
-      });
-      workstation = card.home_workstation_id;
-    }
+    workstation = await cancelCardIn(ctx, tx, user, card, reason);
     return card.id as string;
   });
   if (workstation) await ctx.services.gateway.deliverPending(workstation);

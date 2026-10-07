@@ -181,7 +181,7 @@ export const WORKING_BRANCH_KEEP_OPTION = 'keep';
 export const branchOptionId = (branch: string): string => `branch:${branch}`;
 
 /** `repo.working_branch` is changed by this event's command; why the question was asked. */
-export const WorkingBranchReason = z.enum(['unconfirmed', 'phase', 'intake', 'manual']);
+export const WorkingBranchReason = z.enum(['unconfirmed', 'phase', 'intake', 'manual', 'conversion']);
 export type WorkingBranchReason = z.infer<typeof WorkingBranchReason>;
 
 /** A working branch name the manager typed or picked: a safe git ref. */

@@ -3,6 +3,7 @@ import {
   type AddRepoRequest,
   type CreateProjectRequest,
   canCreateProject,
+  isResearchStage,
   normalizeRemoteUrl,
   type OrgRole,
   type PatchProjectRequest,
@@ -21,6 +22,7 @@ import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { releaseEvents } from './cards.ts';
 import { assertRemoteUrl, cardMessage, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { cancelConversionEvents } from './convert.ts';
 import { cancelPhasesEvents } from './phases.ts';
 
 /** Only the organization's Owner and Admins create projects (owner decision 4). */
@@ -73,6 +75,11 @@ export async function updateProject(
 ) {
   await withAppendTx(ctx.pool, async (tx) => {
     const p = await ownedProject(tx, user.id, projectId);
+    if (changes.workflowKey && changes.workflowKey !== p.workflow_key)
+      throw badRequest(
+        'use_convert',
+        'change a project to another workflow with "Convert project" (it handles the open cards and the repositories)',
+      );
     if (changes.workflowKey && !(await resolveWorkflow(tx, p.org_id, changes.workflowKey))) {
       throw badRequest('unknown_workflow', `workflow '${changes.workflowKey}' does not exist`);
     }
@@ -160,18 +167,26 @@ export async function addRepo(
     throw badRequest('invalid_remote_url', 'remote URL must include a host and a path');
   return withAppendTx(ctx.pool, async (tx) => {
     const p = await ownedProject(tx, user.id, projectId);
+    if (isResearchStage(p.workflow_key))
+      throw conflict(
+        'research_stage_no_repos',
+        'This project is still in the research stage: convert it to a delivery project first, then add repositories.',
+      );
     return addRepoIn(ctx, tx, p, input, userActor(user.id));
   });
 }
 
-/** Adds a repository to a project (the owner in settings, or an approved repository setup): one `ProjectRepoAdded`. */
-export async function addRepoIn(
+/**
+ * The `ProjectRepoAdded` for a repository, after the checks every way of adding one shares (a safe URL, not already
+ * on the project). A removed repository with the same remote comes back under its old id.
+ */
+export async function repoAddedEvent(
   ctx: Ctx,
   tx: Tx,
   project: Row,
   input: AddRepoRequest,
   actor: Parameters<typeof ctx.store.append>[0][number]['actor'],
-): Promise<string> {
+): Promise<{ repoId: string; event: AppendInput }> {
   assertRemoteUrl(ctx, input.remoteUrl);
   const normalized = normalizeRemoteUrl(input.remoteUrl);
   if (!normalized.includes('/'))
@@ -183,29 +198,39 @@ export async function addRepoIn(
   );
   if (existing && !existing.removed_at)
     throw conflict('repo_exists', 'this repository is already added to the project');
-  const repoId = existing?.id ?? randomUUID();
-  await ctx.store.append(
-    [
-      {
-        streamId: streamId.project(project.id),
-        event: {
-          type: 'ProjectRepoAdded',
-          payload: {
-            projectId: project.id,
-            repoId,
-            name: input.name,
-            remoteUrl: input.remoteUrl,
-            remoteUrlNormalized: normalized,
-            workingBranch: input.workingBranch,
-          },
+  const repoId = (existing?.id ?? randomUUID()) as string;
+  return {
+    repoId,
+    event: {
+      streamId: streamId.project(project.id),
+      event: {
+        type: 'ProjectRepoAdded',
+        payload: {
+          projectId: project.id,
+          repoId,
+          name: input.name,
+          remoteUrl: input.remoteUrl,
+          remoteUrlNormalized: normalized,
+          workingBranch: input.workingBranch,
         },
-        actor,
-        scope: projectScope(project.org_id, project.id),
       },
-    ],
-    { tx },
-  );
-  return repoId as string;
+      actor,
+      scope: projectScope(project.org_id, project.id),
+    },
+  };
+}
+
+/** Adds a repository to a project (the owner in settings, or an approved repository setup): one `ProjectRepoAdded`. */
+export async function addRepoIn(
+  ctx: Ctx,
+  tx: Tx,
+  project: Row,
+  input: AddRepoRequest,
+  actor: Parameters<typeof ctx.store.append>[0][number]['actor'],
+): Promise<string> {
+  const { repoId, event } = await repoAddedEvent(ctx, tx, project, input, actor);
+  await ctx.store.append([event], { tx });
+  return repoId;
 }
 
 export async function removeRepo(ctx: Ctx, user: AuthSession['user'], projectId: string, repoId: string) {
@@ -352,6 +377,8 @@ export async function archiveProject(ctx: Ctx, user: AuthSession['user'], projec
         scope,
       });
     }
+    // A conversion that waits for its repositories ends with the project.
+    events.push(...(await cancelConversionEvents(tx, p, user.id, 'The project was archived.', false)));
     // Phases: pending follow-ups and BA tasks are cancelled (a running DevOps request is left to finish).
     events.push(...(await cancelPhasesEvents(tx, projectId, 'Project archived')));
     await ctx.store.append(events, { tx });

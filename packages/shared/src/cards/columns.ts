@@ -55,6 +55,29 @@ export function columnFor(card: ColumnCard, stage: Pick<Stage, 'id' | 'column'>)
   return stage.column;
 }
 
+/**
+ * The board of a project whose open cards run on other workflows than the project's own (research cards in a code
+ * project, cards kept through a conversion): the project's columns, then the columns of those workflows, inserted before
+ * the terminal column and de-duplicated by label. They appear only while such cards exist.
+ */
+export function boardColumnsWith(
+  def: Pick<WorkflowDefinition, 'stages'>,
+  others: ReadonlyArray<Pick<WorkflowDefinition, 'stages'>>,
+): string[] {
+  const own = boardColumns(def);
+  const last = own[own.length - 1];
+  const terminal = def.stages.some((s) => s.kind === 'terminal' && s.column === last) ? last : undefined;
+  const head = terminal ? own.slice(0, -1) : [...own];
+  for (const o of others) {
+    for (const c of boardColumns(o)) {
+      if (own.includes(c) || head.includes(c)) continue;
+      // The other workflow's terminal column is the same "Done" in practice; any other terminal label stays last.
+      head.push(c);
+    }
+  }
+  return terminal ? [...head, terminal] : head;
+}
+
 /** Ordered, de-duplicated board columns for a workflow. For `code` this is CODE_BOARD_COLUMNS plus the waiting column after Test. */
 export function boardColumns(def: Pick<WorkflowDefinition, 'stages'>): string[] {
   const out: string[] = [];

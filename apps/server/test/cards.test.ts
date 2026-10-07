@@ -50,7 +50,8 @@ describe('card creation', () => {
   });
 
   it('validates fields per field set and card type', async () => {
-    const badType = await post({ projectId: w.projectId, title: 't', cardType: 'research' });
+    // a research card is allowed in any project; a feed card is not allowed in a code project
+    const badType = await post({ projectId: w.projectId, title: 't', cardType: 'feed' });
     expect(badType.status).toBe(400);
     expect(badType.body.error.code).toBe('invalid_card_type');
     const badField = await post({

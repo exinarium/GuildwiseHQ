@@ -217,3 +217,77 @@ describe('1314_generic_schedules', () => {
     expect((await read()).find((r) => r.kind === 'feed')).toMatchObject({ trigger: { kind: 'manual' } });
   });
 });
+
+describe('1315_project_stage', () => {
+  it('reads what a project started as from its creation event, keeps research projects in the research stage, and is safe to run again', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aom-mig-'));
+    await cp(defaultMigrationsDir(), dir, { recursive: true });
+    await rm(join(dir, '1315_project_stage.sql'));
+    await migrate(TEST_DB_URL, { schema: SCHEMA, dir });
+    await client.query(`SET search_path TO ${SCHEMA}`);
+    await client.query(`SET session_replication_role = replica`);
+    const U = '00000000-0000-4000-8000-0000000000b3';
+    const mk = (id: string, key: string, workflow: string) =>
+      client.query(
+        `INSERT INTO projects (id, org_id, key, name, domain, workflow_key, created_at)
+         VALUES ($1, $2, $3, $3, 'work', $4, now())`,
+        [id, U, key, workflow],
+      );
+    const RES = '00000000-0000-4000-8000-0000000000a3';
+    const CHANGED = '00000000-0000-4000-8000-0000000000a4';
+    const BARE = '00000000-0000-4000-8000-0000000000a5';
+    await mk(RES, 'RESX', 'research');
+    // created as research, its workflow changed later by the old settings form: it started as research
+    await mk(CHANGED, 'CHGD', 'code');
+    await mk(BARE, 'BARE', 'code'); // no creation event: falls back to the current workflow
+    await client.query(
+      `INSERT INTO events (stream_id, stream_version, type, payload, actor_kind, org_id, project_id, audience, created_at)
+       VALUES ($1, 1, 'ProjectCreated', $2, 'system', $3, $4, 'project', now())`,
+      [`project-${CHANGED}`, JSON.stringify({ projectId: CHANGED, workflowKey: 'research' }), U, CHANGED],
+    );
+    await client.query(`SET session_replication_role = DEFAULT`);
+
+    const applied = await migrate(TEST_DB_URL, { schema: SCHEMA });
+    expect(applied).toEqual(['1315_project_stage.sql']);
+    const read = async () =>
+      (
+        await client.query(
+          `SELECT key, workflow_key, started_as, converted_at, pending_conversion FROM projects ORDER BY key`,
+        )
+      ).rows;
+    expect(await read()).toEqual([
+      { key: 'BARE', workflow_key: 'code', started_as: 'code', converted_at: null, pending_conversion: null },
+      {
+        key: 'CHGD',
+        workflow_key: 'code',
+        started_as: 'research',
+        converted_at: null,
+        pending_conversion: null,
+      },
+      {
+        key: 'RESX',
+        workflow_key: 'research',
+        started_as: 'research',
+        converted_at: null,
+        pending_conversion: null,
+      },
+    ]);
+    // repository requests may come from a manager now
+    await client.query(`SET session_replication_role = replica`);
+    await client.query(
+      `INSERT INTO repo_requests (id, org_id, project_id, name, visibility, requested_by_agent_id, requested_by_user_id, desk_item_id, status, created_at, updated_at)
+       VALUES ('00000000-0000-4000-8000-0000000000e1', $1, $2, 'acme/x', 'private', NULL, $1, $2, 'pending', now(), now())`,
+      [U, RES],
+    );
+    await client.query(`SET session_replication_role = DEFAULT`);
+
+    // Running the file again keeps a value set afterwards (a conversion changes workflow_key, never started_as).
+    await client.query(
+      `UPDATE projects SET started_as = 'custom', workflow_key = 'support' WHERE key = 'BARE'`,
+    );
+    const sql = await readFile(join(defaultMigrationsDir(), '1315_project_stage.sql'), 'utf8');
+    await client.query(sql);
+    await client.query(sql);
+    expect((await read()).find((r) => r.key === 'BARE')).toMatchObject({ started_as: 'custom' });
+  });
+});

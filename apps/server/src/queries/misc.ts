@@ -7,6 +7,7 @@ import {
 } from '@aom/shared';
 import type { z } from 'zod';
 import { orgSuspended } from '../auth/org-context.ts';
+import { pendingConversionOf } from '../commands/convert.ts';
 import { hygieneDtos } from '../commands/hygiene.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
@@ -19,6 +20,9 @@ export const PROJECT_DEPARTMENT_SQL = `(SELECT w.department FROM workflow_versio
 
 /** Display name of whoever last changed the large-merge setting. */
 const MERGE_CHANGED_BY_SQL = `(SELECT u.display_name FROM users u WHERE u.id = p.merge_large_changed_by) AS merge_large_changed_by_name`;
+
+/** Published research notes of the project (the Research tab shows when there are some). */
+const PUBLISHED_NOTES_SQL = `(SELECT count(*)::int FROM research_publications rp WHERE rp.project_id = p.id) AS published_notes`;
 
 export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
   return {
@@ -44,6 +48,9 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
       : null,
     maxConcurrentShifts: p.max_concurrent_shifts ?? null,
     createdAt: iso(p.created_at) as string,
+    startedAs: p.started_as ?? p.workflow_key,
+    convertedAt: iso(p.converted_at),
+    publishedNotes: p.published_notes ?? 0,
     myRole,
   };
 }
@@ -57,7 +64,7 @@ export async function listProjects(
   const r = (
     await rows(
       ctx.pool,
-      `SELECT p.*, pm.role AS my_role, o.name AS org_name, ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL}
+      `SELECT p.*, pm.role AS my_role, o.name AS org_name, ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PUBLISHED_NOTES_SQL}
          FROM projects p JOIN project_members pm
          ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
          LEFT JOIN organizations o ON o.id = p.org_id
@@ -78,7 +85,7 @@ export async function getProjectDetail(
   const p = await one(
     ctx.pool,
     `SELECT p.*, pm.role AS my_role, o.name AS org_name, o.status AS org_status, o.owner_user_id AS org_owner,
-            ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL} FROM projects p JOIN project_members pm
+            ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PUBLISHED_NOTES_SQL} FROM projects p JOIN project_members pm
        ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
        LEFT JOIN organizations o ON o.id = p.org_id WHERE p.id = $2`,
     [userId, projectId],
@@ -111,7 +118,7 @@ export async function getProjectDetail(
     [projectId],
   );
   return {
-    project: toProjectDto(p, p.my_role),
+    project: { ...toProjectDto(p, p.my_role), pendingConversion: await pendingConversionOf(ctx.pool, p) },
     repos: repos.map((r) => ({
       id: r.id,
       projectId: r.project_id,

@@ -16,9 +16,11 @@ import {
   parsePhaseRef,
   phaseRef,
   streamId,
+  workflowHasTestStage,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
+import { resolveWorkflow } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -60,9 +62,17 @@ export async function normalizeFollowups(
 ): Promise<FollowupSpecWithId[]> {
   const seen = new Set<string>();
   const out: FollowupSpecWithId[] = [];
+  const can = await followupCapabilities(db, projectId);
   for (const f of list) {
     const id = f.id && !seen.has(f.id) ? f.id : randomUUID();
     seen.add(id);
+    if ((f.kind === 'deploy' && !can.deploy) || (f.kind === 'regression' && !can.regression))
+      throw badRequest(
+        'followup_needs_repos',
+        f.kind === 'deploy'
+          ? 'a deploy follow-up needs a repository: this project has none (convert it to a delivery project first)'
+          : 'a regression follow-up needs a repository and a workflow with a test stage: this project has neither',
+      );
     if (f.kind === 'deploy' || (f.kind === 'regression' && f.targetId))
       await liveTarget(db, projectId, f.targetId as string);
     if (f.kind === 'regression' && f.mock && !ctx.config.mockUi)
@@ -73,6 +83,27 @@ export async function normalizeFollowups(
     out.push({ ...f, id } as FollowupSpecWithId);
   }
   return out;
+}
+
+/**
+ * Which follow-ups the project can run at all: a deploy needs a repository, a regression run a repository and a workflow
+ * with a test stage (a research-stage project has neither, docs/design/restructure.md section 9).
+ */
+export async function followupCapabilities(
+  db: Queryable,
+  projectId: string,
+): Promise<{ deploy: boolean; regression: boolean }> {
+  const p = await one(db, 'SELECT org_id, workflow_key FROM projects WHERE id=$1', [projectId]);
+  if (!p) return { deploy: false, regression: false };
+  const repos = Number(
+    (
+      await one(db, 'SELECT count(*) AS n FROM project_repos WHERE project_id=$1 AND removed_at IS NULL', [
+        projectId,
+      ])
+    )?.n ?? 0,
+  );
+  const wf = await resolveWorkflow(db, p.org_id, p.workflow_key);
+  return { deploy: repos > 0, regression: repos > 0 && !!wf && workflowHasTestStage(wf.definition) };
 }
 
 /** Stored default follow-ups of a project as specs (ids minted per use). */
@@ -118,7 +149,12 @@ export async function createPhase(
       throw badRequest('invalid_branch', 'not a valid git branch name');
     let followups: FollowupSpecWithId[];
     try {
-      followups = await normalizeFollowups(ctx, tx, projectId, req.followups ?? defaultFollowups(project));
+      const can = await followupCapabilities(tx, projectId);
+      // Stale defaults the project cannot run (no repository, no test stage) are left out rather than blocking the phase.
+      const defaults = defaultFollowups(project).filter((f) =>
+        f.kind === 'deploy' ? can.deploy : f.kind === 'regression' ? can.regression : true,
+      );
+      followups = await normalizeFollowups(ctx, tx, projectId, req.followups ?? defaults);
     } catch (err) {
       if (!req.followups)
         throw conflict('defaults_invalid', 'the project default follow-ups need fixing first');

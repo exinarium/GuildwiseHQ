@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { confirmBranchOnEvent } from '../commands/branch-confirm.ts';
 import { SYSTEM_ACTOR, userScope } from '../commands/common.ts';
+import { writeResearchIndex } from '../commands/convert.ts';
 import { refreshVaultConfig, vaultAudience } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { sha256Hex } from '../crypto.ts';
@@ -185,6 +186,12 @@ export class RunnerGateway {
       case 'PhaseCreated':
       case 'PhaseConfirmed':
         await confirmBranchOnEvent(ctx, e);
+        return;
+      case 'ProjectConverted':
+        await confirmBranchOnEvent(ctx, e);
+        await writeResearchIndex(ctx, e).catch((err) =>
+          ctx.log.warn({ err }, 'could not write the research index to PROJECT.md'),
+        );
         return;
       case 'WorkstationUnlinked': {
         const p = (e.event as EventOf<'WorkstationUnlinked'>).payload;

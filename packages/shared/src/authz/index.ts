@@ -68,6 +68,8 @@ export const actorRank = (a: Pick<OrgActor, 'orgRole' | 'isGuest'>): Rank => ran
 
 /** Only the Owner and Admins create projects (owner decision 4) and add people (members and guests). */
 export const canCreateProject = isOrgManager;
+/** Converting a project (restructure.md section 8): the organization's Owner and Admins. */
+export const canConvertProject = isOrgManager;
 export const canAddPeople = isOrgManager;
 export const canRenameOrg = isOrgManager;
 export const canInviteOrgMember = (a: Pick<OrgActor, 'orgRole'>, role: 'admin' | 'member'): boolean =>

@@ -235,7 +235,11 @@ export const cardEvents = [
   /** `cause: 'project_archived'` marks a card closed because its project was archived (not cancelled by hand). */
   defineEvent(
     'CardCancelled',
-    z.object({ cardId: Id, reason: z.string(), cause: z.enum(['project_archived']).optional() }),
+    z.object({
+      cardId: Id,
+      reason: z.string(),
+      cause: z.enum(['project_archived', 'project_converted']).optional(),
+    }),
   ),
   defineEvent(
     'ThreadMessagePosted',

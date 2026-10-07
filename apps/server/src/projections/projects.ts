@@ -148,8 +148,8 @@ export const projectProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO projects (id, org_id, key, name, domain, workflow_key, priority_tier, branch_prefix,
-         working_branch, sub_categories, vault_folder, created_at, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+         working_branch, sub_categories, vault_folder, created_at, created_by, started_as)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$6)`,
       [
         p.projectId,
         p.orgId,
@@ -196,6 +196,36 @@ export const projectProjectors: Record<string, Projector> = {
       sets.push(`${col} = $${params.length}`);
     }
     if (sets.length) await exec(tx, `UPDATE projects SET ${sets.join(', ')} WHERE id=$1`, params);
+  },
+  ProjectConverted: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectConverted'>).payload;
+    await exec(
+      tx,
+      `UPDATE projects SET workflow_key=$2, converted_at=$3, converted_by=$4, pending_conversion=NULL WHERE id=$1`,
+      [p.projectId, p.toWorkflowKey, e.createdAt, p.by],
+    );
+  },
+  ProjectConversionRequested: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectConversionRequested'>).payload;
+    await exec(tx, 'UPDATE projects SET pending_conversion=$2 WHERE id=$1', [
+      p.projectId,
+      JSON.stringify({
+        conversionId: p.conversionId,
+        toWorkflowKey: p.toWorkflowKey,
+        cardDecisions: p.cardDecisions,
+        repoRequestIds: p.repoRequestIds,
+        ...(p.note ? { note: p.note } : {}),
+        by: p.by,
+      }),
+    ]);
+  },
+  ProjectConversionCancelled: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectConversionCancelled'>).payload;
+    await exec(
+      tx,
+      `UPDATE projects SET pending_conversion=NULL WHERE id=$1 AND pending_conversion->>'conversionId' = $2`,
+      [p.projectId, p.conversionId],
+    );
   },
   ProjectMergePolicyChanged: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectMergePolicyChanged'>).payload;

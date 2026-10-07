@@ -16,7 +16,9 @@ export const repoEvents = [
       name: z.string().min(3).max(200),
       visibility: Visibility,
       description: z.string().max(350).optional(),
-      requestedByAgentId: Id,
+      /** Absent when the manager asked from the project's convert dialog (`requestedByUserId`). */
+      requestedByAgentId: Id.optional(),
+      requestedByUserId: Id.optional(),
       /** The chat or DevOps thread that gets the result. */
       threadId: Id.optional(),
       deskItemId: Id,

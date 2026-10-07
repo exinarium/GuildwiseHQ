@@ -21,6 +21,8 @@ export const BoardCardSchema = z.object({
   ref: z.string(),
   title: z.string(),
   cardType: CardType,
+  /** Set when the card runs on another workflow than the project's (a research card in a code project). */
+  workflowKey: z.string().optional(),
   stage: z.string(),
   status: CardStatus,
   assignee: z.object({ agentId: z.uuid(), name: z.string() }).nullable(),
