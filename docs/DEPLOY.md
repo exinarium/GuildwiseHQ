@@ -148,6 +148,7 @@ Set these in `.env` before starting the server. All have defaults suitable for d
 | `AOM_DOMAIN` | — | Public domain (used by Caddy for Let's Encrypt certs; omit for internal IP/CA) |
 | `AOM_HTTP_PORT` | `80` | Caddy HTTP port (for ACME challenges) |
 | `AOM_HTTPS_PORT` | `443` | Caddy HTTPS port |
+| `AOM_RUNNER_RELEASE_DIR` | `/app/release` in the image | Directory with `aom-runner-<version>.tgz` served to the workstation installers (`/api/runner/release`); the image builds it with `scripts/package-runner.sh` |
 | `AOM_SECRET_KEY` | generated on first use | Key that encrypts two-factor (TOTP) seeds at rest. **Set it in production** (any long random string) so a database dump alone cannot read the seeds; without it a random key is kept in the database. Changing it later invalidates enrolled authenticator apps, so keep it with your backups |
 
 ### Database

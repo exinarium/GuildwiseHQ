@@ -10,6 +10,44 @@ The runner is a Node.js CLI that runs on your workstation, connects to the serve
 - **Git 2.40 or later** (for worktree support)
 - **Docker** (optional; needed for testers to run containers)
 
+### Guided install (recommended)
+
+The app generates an installer for each workstation: **Workstations, Add a workstation** (see "Add a workstation" in `docs/USER-GUIDE.md`). It gives you either a one-line command or a script to download:
+
+```sh
+curl -fsSL 'https://aom.example.com/install/<short-lived-token>/install.sh' | bash        # Linux, macOS (install-mac.sh), WSL2
+irm 'https://aom.example.com/install/<short-lived-token>/install.ps1' | iex               # Windows (PowerShell)
+```
+
+The link works for 30 minutes. The script embeds the server URL, a fresh **single-use pairing code** made for that wizard session (only its hash is stored) and the checksum of the runner release; it embeds no long-lived secret. Each time a link is opened a new code is minted and the previous one stops working, and starting the wizard again retires the older unused codes.
+
+**What the Linux installer does** (also run inside Ubuntu by the Windows script), each step shown and reported to the wizard page:
+
+1. checks the system (64-bit, not root, apt, dnf or pacman);
+2. installs git, curl, tar, `bubblewrap` and `socat` with the package manager (sudo); git older than 2.40 (Ubuntu 22.04, Debian 12) is replaced by the git-core PPA build or, on Debian, a pinned and checksummed git compiled into `~/.local`;
+3. uses Node 22 if present, otherwise installs it with nvm;
+4. installs Claude Code (`npm install -g @anthropic-ai/claude-code`);
+5. optionally installs yt-dlp (asks, default yes) and Docker (asks, default no);
+6. downloads `aom-runner-<version>.tgz` from the app, verifies its sha256 against the value embedded in the script and unpacks it to `~/.local/share/guildwise/runner/<version>` (`current` points at the active version; `~/.local/bin/aom-runner` and `aom` link to it);
+7. pairs (`aom-runner pair`), unless the machine is already paired;
+8. asks which folders hold your code (suggests `~/src`) and runs `aom-runner repos add` for each;
+9. walks you through the `claude` sign-in: subscription (browser login, usage counts against your plan) or API key (stored in `config.json`, mode 0600), or later;
+10. installs the systemd **user service** `aom-runner` (unit in `~/.config/systemd/user`, `PATH` set to the Node and Claude directories), enables lingering (`loginctl enable-linger`) so it survives logout and starts at boot, waits for the runner to connect and runs `aom-runner doctor`, streaming each line to the wizard.
+
+Without a running systemd (a container, or WSL without `systemd=true`) the unit file is still written, the runner is started in the background with `~/.local/share/guildwise/runner/start-runner.sh` and the summary says so.
+
+**macOS:** the same flow with Homebrew (installed if missing, after asking), `node@22` and `git`, no `bubblewrap` or `socat` (Seatbelt is built in), and a **launchd** agent `com.guildwisehq.runner` in `~/Library/LaunchAgents` (starts at login, restarts if it stops; log in `~/.aom-runner/logs/runner.log`).
+
+**Windows:** the PowerShell script elevates itself, enables WSL2 and installs Ubuntu if needed (when Windows has to restart it registers a `RunOnce` entry and continues after you sign in; a copy of the script and the Linux installer are kept in `%LOCALAPPDATA%\GuildwiseHQ`), creates the Ubuntu user if the distribution has only root, sets `systemd=true` in `/etc/wsl.conf`, sets `vmIdleTimeout=-1` in `%USERPROFILE%\.wslconfig`, registers the **"WSL Boot"** scheduled task (at logon: `wsl.exe -d Ubuntu --exec sleep infinity`), turns lingering on for the Ubuntu user and runs the Linux installer inside Ubuntu.
+
+All installers are **idempotent**: running the command again upgrades the runner, repairs the service and keeps the pairing (`GUILDWISE_REPAIR=1` pairs again). They finish with a success or failure summary that links to the install help (`/help#install-troubleshooting`) and Contact us (`/contact`).
+
+Environment variables the Linux and macOS scripts understand (unattended installs and tests): `GUILDWISE_YES=1` (take every default, never ask), `GUILDWISE_NAME` (workstation name), `GUILDWISE_REPO_DIRS` (space-separated folders), `GUILDWISE_WITH_YTDLP`, `GUILDWISE_WITH_DOCKER`, `GUILDWISE_WITH_HOMEBREW` (1 or 0), `GUILDWISE_MOCK=1` (enable the mock runtime), `GUILDWISE_SKIP_CLAUDE=1` (skip the sign-in), `GUILDWISE_SKIP_CLAUDE_INSTALL=1`, `GUILDWISE_ALLOW_ROOT=1`.
+
+**Server side.** The app serves the release it finds in `AOM_RUNNER_RELEASE_DIR` (the Docker image builds one into `/app/release`; otherwise `release/` next to the working directory or the repository, as made by `pnpm package:runner`): `GET /api/runner/release` (version, sha256, size, URL), `GET /api/runner/release/aom-runner-<version>.tgz` and `.tgz.sha256`. The newest version wins. Without a release the wizard says so and the installers stop with a clear message.
+
+**Testing the installers.** `scripts/lint-installers.sh` renders them and runs `bash -n`, shellcheck (local, else the `koalaman/shellcheck` image) and, when `pwsh` is installed, the PowerShell parser and PSScriptAnalyzer. `scripts/test-installer-docker.sh` runs the Linux installer for real in throwaway containers (ubuntu:24.04, debian:12) against a running server, with the mock runtime and no Claude sign-in, and then runs it a second time to prove the upgrade path. Never run an installer on your own machine to test it.
+
 ### Getting the runner
 
 Build it from source:

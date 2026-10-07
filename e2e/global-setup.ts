@@ -108,10 +108,18 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       'hygiener@e2e.test',
       'interester@e2e.test',
       'scheduler@e2e.test',
+      'installer@e2e.test',
       SUPER.email,
       NEWORG.email,
       ORGMEM.email,
     ].map(deleteMailFor),
+  );
+
+  const releaseDir = join(E2E_DIR, 'release');
+  mkdirSync(releaseDir, { recursive: true });
+  writeFileSync(
+    join(releaseDir, 'aom-runner-0.1.0.tgz'),
+    'not a real tarball: the e2e suite never installs it\n',
   );
 
   const env = {
@@ -135,6 +143,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_HYGIENE_SCHEDULE: 'false',
     // schedules: the webhook receivers of the specs listen on this machine
     AOM_WEBHOOK_ALLOW_PRIVATE: 'true',
+    // the "Add a workstation" wizard serves a runner release: a stand-in file is enough, no spec downloads it
+    AOM_RUNNER_RELEASE_DIR: releaseDir,
     LOG_LEVEL: 'info',
   };
   sh(

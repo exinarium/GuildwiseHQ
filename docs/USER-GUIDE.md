@@ -14,14 +14,25 @@ First login and setup, managing projects and agents, the board and decision desk
 
 Every account belongs to an organization. There are no accounts without one, except the platform administrator.
 
-### Pairing your first workstation
+### Add a workstation
 
-A workstation is a machine (Windows, macOS, Linux) where agents will run code and pull from git repositories.
+A workstation is a computer of yours (Windows, macOS or Linux) where your agents run code and work on your git repositories. The guided setup installs everything for you; you do not need to know anything about servers.
 
-1. Open **Workstations** in the side menu (on a phone, open the menu with the button at the top left)
-2. Click **Pair workstation**
-3. Copy the code `XXXX-XXXX` (valid 10 minutes)
-4. On your machine, install the runner and pair it:
+1. Open **Workstations** in the side menu (on a phone, open the menu with the button at the top left) and click **Add a workstation** (on an empty list the same button is in the middle of the page).
+2. **Pick the computer.** The page guesses from your browser (Windows, Linux or macOS); change it if the machine that will run the agents is a different one. Windows runs the agents inside WSL2, Microsoft's built-in Linux: the installer turns it on for you. Optionally type a name for the workstation.
+3. **Read the steps** (with pictures) for your system and **copy the command** with the copy button, or use **Download the script** if you would like to read it first. The command contains a link that works for 30 minutes and a one-time pairing code; it never contains a password or any other long-lived secret. If the 30 minutes pass, choose your system again to get a new one.
+4. **Run it on that computer**: open a terminal (Windows: PowerShell), paste the command and press Enter. Say yes when it asks permission. Windows may ask to restart once; the installer carries on by itself when you sign in again.
+5. **Watch this page.** It shows the installer starting, the computer pairing ("Paired as ..."), then the health checks one by one (Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories, the server), and finally **Ready**. The installer log under the progress shows each step.
+
+The installer asks only what it must: your password once to install system tools, whether you want the optional extras (yt-dlp for video transcripts; Docker, only if your testers run containers), the folders that hold your code (it suggests `~/src`), and how Claude should sign in. It explains the two ways in plain words: a **Claude subscription** (Pro, Max, Team or Enterprise; you sign in with your Claude account in a browser and the agents' work counts against your plan) or an **API key** (you pay for exactly what the agents use). If you choose later, run `claude` on that computer any time; the health check "claude" shows the state.
+
+You can run the same command again at any time: it upgrades the runner, repairs a broken install and keeps your existing pairing. If something goes wrong the installer says what happened, links to the install help and to **Contact us** (see "Contact us and My requests"), and the wizard shows the same links.
+
+**Pair with a code** (for people who already have the runner, or for a machine the installer cannot reach) is still there: the secondary button on the Workstations page generates a one-time code (valid 10 minutes) for `aom-runner pair`, as described in `docs/RUNNER.md`.
+
+#### Installing by hand
+
+Only needed when the guided setup is not an option. Open **Workstations**, click **Pair workstation**, copy the code `XXXX-XXXX` (valid 10 minutes), then install the runner and pair it:
 
 **On Linux/macOS:**
 ```sh

@@ -168,3 +168,10 @@ export const BUDGETEER = {
   name: 'E2E Budgeteer',
   password: 'budgeteer-password-12345',
 };
+
+/** "Add a workstation" wizard spec. */
+export const INSTALLER = {
+  email: 'installer@e2e.test',
+  name: 'E2E Installer',
+  password: 'installer-password-12345',
+};
