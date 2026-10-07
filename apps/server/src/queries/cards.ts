@@ -336,7 +336,11 @@ export async function getBoard(
   };
 }
 
-/** Cards of the projects the user is an active member of, by ref prefix or title text (the command palette). */
+/**
+ * Cards of the projects the user is an active member of, by ref prefix or title text (the command palette). The
+ * hidden projects behind interests (`kind = 'interest'`) are never listed: their cards are scan runs, reached through
+ * the interest itself.
+ */
 export async function searchCards(
   db: Queryable,
   userId: string,
@@ -349,7 +353,7 @@ export async function searchCards(
     db,
     `SELECT c.id, c.ref, c.title, c.status, p.key AS project_key, p.name AS project_name
        FROM cards c
-       JOIN projects p ON p.id = c.project_id AND p.status = 'active'
+       JOIN projects p ON p.id = c.project_id AND p.status = 'active' AND p.kind <> 'interest'
        JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
       WHERE c.status <> 'cancelled' AND (lower(c.ref) LIKE lower($3) || '%' OR c.title ILIKE $2)
       ORDER BY (lower(c.ref) = lower($4)) DESC, (lower(c.ref) LIKE lower($3) || '%') DESC, c.updated_at DESC

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { closeAdminPool } from './helpers/db.ts';
+import { closeAdminPool, q } from './helpers/db.ts';
 import { createWorld, fullFields, ok, type World } from './helpers/world.ts';
 
 let w: World;
@@ -26,8 +26,8 @@ afterAll(async () => {
   await closeAdminPool();
 });
 
-const search = (q: string, cookie = w.owner.cookie) =>
-  w.t.req('GET', `/api/search/cards?q=${encodeURIComponent(q)}`, { cookie });
+const search = (text: string, cookie = w.owner.cookie) =>
+  w.t.req('GET', `/api/search/cards?q=${encodeURIComponent(text)}`, { cookie });
 
 describe('GET /api/search/cards (command palette)', () => {
   it('finds a card by title text or by ref', async () => {
@@ -41,6 +41,16 @@ describe('GET /api/search/cards (command palette)', () => {
   it('treats % and _ literally and rejects an empty query', async () => {
     expect((await ok<any>(search('%'))).cards).toEqual([]);
     expect((await search('  ')).status).toBe(400);
+  });
+
+  it("never lists the cards of an interest's hidden project", async () => {
+    await q(`UPDATE projects SET kind='interest' WHERE id=$1`, [w.projectId]);
+    try {
+      expect((await ok<any>(search('autosave'))).cards).toEqual([]);
+    } finally {
+      await q(`UPDATE projects SET kind='project' WHERE id=$1`, [w.projectId]);
+    }
+    expect((await ok<any>(search('autosave'))).cards).toHaveLength(1);
   });
 
   it('never returns cards of projects the user is not a member of', async () => {
