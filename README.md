@@ -25,7 +25,7 @@ A self-hosted site for running an organization of AI coding agents. A manager cr
 ### Manager tools
 - **Decision desk**: every question and approval reaches the manager with context
 - **Ledger**: answers recorded once, shared with future agents
-- **Vaults**: git-backed knowledge repositories per user (work/personal) and per project
+- **Vaults**: git-backed knowledge repositories: one organization vault and an optional vault per project
 - **Standing orders**: recurring instructions for teams of agents
 - **Chat with agents**: real-time conversations with builders on the board (Claude-powered)
 - **Intake from Jira/GitHub**: BA maps tickets to projects and drafts cards with specs and test plans
@@ -41,7 +41,7 @@ A self-hosted site for running an organization of AI coding agents. A manager cr
 
 ### Intelligence
 - Scheduling: scheduled tasks fire on time, agents pull side projects when idle
-- Dispatcher: smart ordering (scheduled > work > personal; own rework > other work; dependencies block)
+- Dispatcher: smart ordering (scheduled work first, then own rework, then the organization's project ranking, then card priority and age; dependencies block)
 - Risk assessment: auto-computed from diff size, overridable to "large" (needs two reviewer approvals)
 - Double review on large cards and full-suite failures
 - Bottleneck detection: desk alert when testers are busy and E2E work waits

@@ -147,7 +147,8 @@ Read this chapter once. Everything else builds on these words.
 | **Standing order** | A rule every agent reads at the start of every shift, such as "write a unit test for every change". |
 | **BA** | The business analyst agent. It drafts cards from your requests and tickets, answers what it can from the ledger, and writes your daily floor report. |
 | **DevOps engineer** | A free agent that looks after one workstation: installs tools, keeps your repositories tidy, starts and stops things. |
-| **Vault** | A folder of notes (a git repository) that is synced to your workstations, such as your personal knowledge base. |
+| **Vault** | A folder of notes (a git repository) that is synced to your workstations: your organization's knowledge base, or one project's own notes. |
+| **Priority order** | The order of your projects on the Projects page, most important first. Agents serve the project higher up first. |
 | **Schedule** | A trigger plus one action, for example "every Monday at 07:00, create a card". |
 | **Interest** | A topic you follow, such as "AI news". Agents look for new items on a schedule and deliver them to your desk. |
 | **Phase** | A named slice of a project ("Phase 2: autosave") that you ship and check together, followed by steps such as deploy and regression run. |
@@ -368,7 +369,15 @@ On **Organization, Members** you see everybody with their role.
 
 ### 4.3 Projects
 
-**Create a project** as in chapter 3.6. Everything about a project lives in its **Settings** (the gear on the Projects page).
+**Create a project** as in chapter 3.6. A new project goes to the bottom of your priority order (see below). Everything about a project lives in its **Settings** (the gear on the Projects page).
+
+**Put your projects in order.** The **Projects** page lists your organization's projects, most important first. When an agent looks for its next card, it takes work in this order: scheduled work first (schedules, interest scans and an on-demand **Research this**), then cards that came back to it for rework, then the **project order** (the card of the project higher up first), and then the card's own priority, how long it has waited and its dependencies. An agent's **focus** projects (4.4) are a gentle preference ahead of the order. A shift that has started is never interrupted: a more important card waits for it to end.
+
+Owners and Admins change the order by **dragging** a project by its grip (the dotted handle on the left), or with the **Move up** and **Move down** buttons on each row. With the grip selected, the up and down arrow keys move it as well, and Home and End send it to the top or the bottom. The order saves by itself. Members and Guests see the order but cannot change it. Archived projects are not ranked, and the hidden projects behind interests never appear: interests run on their own schedule and are not ranked.
+
+![The Projects page in priority order](guide/assets/projects-ranked.jpg)
+
+> **Good to know:** There is no work/personal split any more. "Personal" simply means your own organization: keep personal projects in it, or in an organization of your own that you switch to. If your organization had a personal vault and personal projects from before, they were merged for you: the projects sit below your work projects in the order they had, and the personal vault's files are under `personal/` in the organization vault. The desk note you received says what happened.
 
 ![Project settings](guide/assets/project-settings.jpg)
 
@@ -388,7 +397,7 @@ What you will find there:
 
 > **Watch out:** removing a person from their last project hands their agents back to you (they need a new home on one of your workstations). Cards those agents held go back into the queue.
 
-**Vaults.** A vault is a git repository of notes that syncs to your workstations. There are three kinds: a *personal* vault (yours only), a *work* vault (shared among Owners and Admins) and a *project* vault (shared with the project's members). Register them under **Vaults** in the sidebar. The address must not contain a password or token. Use an SSH key or a credential helper on the workstation instead.
+**Vaults.** A vault is a git repository of notes that syncs to your workstations. There are two kinds: the **organization vault** (your organization's knowledge, including your interests under `interests/`, shared among Owners and Admins) and a **project vault** (shared with the project's members; a project without one reads the organization vault). Register them under **Vaults** in the sidebar. The address must not contain a password or token. Use an SSH key or a credential helper on the workstation instead.
 
 ![Vaults](guide/assets/vaults.jpg)
 
@@ -707,7 +716,7 @@ A **Member** works inside the projects an Owner or Admin has added them to. You 
 
 | You can | You cannot |
 | --- | --- |
-| See the board, desk items and cards of **your** projects | See other projects, or create a project |
+| See the board, desk items and cards of **your** projects | See other projects, create a project or change the priority order |
 | Create and edit cards, and comment | Add or remove people, or change project settings |
 | Move, release or cancel **your own** cards | Manage cards of other people (ask an Owner or Admin) |
 | Answer questions on your own cards | Answer project-level decisions (Owners and Admins do) |
@@ -1018,7 +1027,7 @@ Press **?** (when not typing in a field) for the list of shortcuts. **Ctrl+K** o
 | Answer questions and approve things | **Desk** |
 | Hand the BA a ticket | **Intake** (Owners and Admins) |
 | Set up recurring jobs and integrations | **Schedules** |
-| Create or change a project | **Projects** |
+| Create or change a project, or put the projects in priority order | **Projects** |
 | Follow a topic | **Interests** (Knowledge) |
 | Look up a past decision | **Ledger** (Knowledge) |
 | Register a notes vault | **Vaults** (Owners and Admins) |

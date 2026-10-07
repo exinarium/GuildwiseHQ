@@ -4,7 +4,7 @@ Oct 2, 2026 · @Pieter
 
 ## Overview and goals
 
-Agent Org Manager runs a team of named AI agents as an organization across code, research and feed projects, work and personal alike: work arrives as cards, agents pull it asynchronously, and the human acts as engineering manager rather than implementer. The unit of work is the card, not the session; sessions are short shifts that start, do one job, write a handoff and exit.
+Agent Org Manager runs a team of named AI agents as an organization across code and research projects and interests, for work and for yourself alike (your own organization is where your personal work lives): work arrives as cards, agents pull it asynchronously, and the human acts as engineering manager rather than implementer. The unit of work is the card, not the session; sessions are short shifts that start, do one job, write a handoff and exit.
 
 Goals:
 
@@ -78,13 +78,13 @@ Every card belongs to a project, and the project's type decides its pipeline and
 | Research | Question → research → fact-check → publish to vault | Researcher, checker | Shooting (reloading, hunting, sport shooting), education |
 | Feed | Scheduled scan → filter → digest | Scout, curator | Firearm articles, AI and shooting videos |
 
-A project has a domain (work or personal), a priority tier, its repos or topics, sub-categories, and a folder in the matching knowledge vault. Intake maps each incoming ticket to a project; an unmapped ticket becomes a desk question.
+A project has a **rank** in its organization (the Owner and Admins order the projects by drag and drop on the Projects page, or with the move up and move down buttons; a new project goes to the bottom), its repos or topics, sub-categories, and a folder in the knowledge vault of its organization or in its own project vault. There is no work/personal split: "personal" simply means your own organization. Intake maps each incoming ticket to a project; an unmapped ticket becomes a desk question.
 
 **Scheduling rules**
 
 1. Scheduled tasks always fire on time, whatever the project type or queue state. They emit a card that takes the next free agent of the right role ahead of normal work; if none is free, the runner starts one extra shift at a time rather than letting the schedule slip; a second late schedule waits for the next free agent.
-2. Work cards outrank personal cards in every queue.
-3. Idle agents pull personal code and research cards; a new work card waits only for the current shift to end, never preempts it mid-shift.
+2. Cards are taken in this order: scheduled cards first (the runs of interests and an on-demand "Research this" count as scheduled), then an agent's own rework, then the **project rank** (the project higher on the Projects page first; a focus project of the agent is a soft preference ahead of the rank), then the card's own priority, its age and its dependencies. Interests are not ranked: their scans run on their own schedule, and their budgets and the quiet cap bound how much they take.
+3. A card that becomes more important waits only for the current shift to end; a claim is never preempted mid-shift.
 
 ## Expanding the organization
 
@@ -125,7 +125,7 @@ The app is a hosted website; code, credentials and agent sessions stay on each u
 - **Workstations**: each user links one or more workstations, for example a Windows machine, by installing the runner and pairing it with a one-time code from their settings. A workstation belongs to the user and may serve every organization the user belongs to. The runner connects outbound over WebSocket, so no inbound ports are opened, and reports which repos, vaults and agent runtimes it holds. Users can rename or unlink their workstations.
 - **Agents** are hired onto a workstation and run there under that user's own account with the agent provider they choose: Claude is the baseline, but a user may drive their agents with OpenAI, Grok or another provider. The dispatcher gives an agent only its organization's cards, for projects whose repo is on that workstation. There is one built-in **DevOps engineer** per organization per workstation; it is free and therefore **cannot be extended** (no extra instructions, skills, tools, standing orders or custom permissions, no custom role, no workflow stages): only its model and effort change.
 - **Projects** can span several repositories. The Owner or an Admin shares a project by inviting a guest; the invitee must already belong to an organization, and accepting makes them a guest engineering manager of that project only. Members of the organization are added to projects directly. A project's cards appear on every manager's board, and any agent in the project can claim any card and run it on its own workstation. Each card has a decision policy: by default only the card's owner answers its desk items and decisions, which still show on every manager's desk; the owner can open a card so any manager may answer. Outbound updates stay with the card's owner, who imported the ticket and posts with their own access.
-- **Vaults** are git repositories that the DevOps engineer clones onto each workstation. A personal vault is visible only to its owner; organization-level vaults sync to the Owner's and Admins' workstations only; a project's vault is shared with the members and guests of that project.
+- **Vaults** are git repositories that the DevOps engineer clones onto each workstation. There are no personal vaults: the **organization vault** (organization knowledge) syncs to the Owner's and Admins' workstations only, and a **project vault** is shared with the members and guests of that project.
 - **Offline workstations**: if a runner disconnects mid-shift, its cards wait one hour, then return to their owner's queue with the last handoff attached.
 - **What the site holds**: users, organizations, and each organization's cards, events, threads, handoffs and desk items, scoped to that organization (and, for Members and guests, to their projects). It never holds repo credentials, agent provider credentials or vault content.
 
@@ -189,7 +189,7 @@ Rules: an agent must search the ledger before raising a question, and the BA ded
 
 Knowledge lives in git repos of markdown, separate from the event store: the store holds state, the vault holds what agents and the manager know. Vaults are Obsidian-compatible so the manager can browse and edit them directly. Each vault is a git repository. The DevOps engineer clones it onto every workstation that needs it, pulls updates on a regular interval, and commits and pushes local changes on a regular interval. A sync conflict it cannot resolve goes to the desk.
 
-There are two vaults, work and personal, and an agent on a card can read only the vault of that card's domain. Work knowledge never reaches personal projects or the reverse.
+There is one **organization vault** (the organization's knowledge, on the Owner's and Admins' workstations only) and, optionally, a **project vault** per project (shared with the project's members and guests). An agent on a card can read only the vault of that card's project (its project vault, or the organization vault when the project has none and the shift runs on an Owner's or Admin's workstation). Interests live in the organization vault under `interests/<slug>/`. Knowledge never crosses organizations.
 
 Layout per vault:
 
@@ -298,7 +298,7 @@ Research projects and interests (the feeds) run on the same board and desk as co
 
 **Interests**
 
-- An **interest** is an organization-level statement of a topic: a name, a description, a vault (work or personal, fixed once it has run), a sub-category, preferred sites, the kinds it wants (article, video, podcast), a **maximum total number of items** per run across the kinds, an active/paused tick, and its taste rules. Each interest is backed by a **hidden project** (`kind interest`) that carries its feed and research cards, its seen-list, transcripts and vault folder `interests/<slug>/`; the project never appears in project lists, pickers, the board switcher, the Research tab or the metrics
+- An **interest** is an organization-level statement of a topic: a name, a description, a sub-category, preferred sites, the kinds it wants (article, video, podcast), a **maximum total number of items** per run across the kinds, an active/paused tick, and its taste rules. Each interest is backed by a **hidden project** (`kind interest`) that carries its feed and research cards, its seen-list, transcripts and vault folder `interests/<slug>/`; the project never appears in project lists, pickers, the board switcher, the Research tab or the metrics
 - **Run schedule and delivery schedule are separate.** The run schedule (cron or presets, time-zone aware, or manual only) says when scans happen. The **delivery schedule** says when results reach the manager: new items are held and delivered as one digest at the chosen times (for example weekdays 07:00), with nothing pushed in between, or as soon as a run finishes. An organization-level **quiet cap** limits the digest items that reach the desk per day (the last 24 hours) across all interests; items over it stay held for the next delivery. Delivery is what lands on the desk and in the floor report (an **Interests highlights** section, a count line, and the failing interests under Failures) and what the interests e-mail digest lists
 - The manager may assign a preferred scout, curator, researcher and fact checker. It is a **soft preference only**: there is no claim window, and any qualified, allowed agent takes a run at once; an agent restricted to some projects still works an interest it is assigned to
 - A **run log** records every scan and research run: its trigger, status, how many items it found, published and dropped, and its card, with the ratings, transcripts and shift logs joined when read
@@ -476,7 +476,7 @@ A page under Organization that draws the organization as a tree: the manager (Ow
 Build the smallest loop that removes terminal juggling first, then let the team build the rest of itself.
 
 1. **Core loop**: Postgres event store, login and invitations, runner pairing for one workstation, card schema, projects, dispatcher with exclusive claims, builders and a reviewer running headless in worktrees, a bare board; first runs capped at two builders and one of each other role
-2. **Decision desk, ledger, vaults and DevOps**: questions, answers, standing orders, dedup check, work and personal vaults, DevOps engineer with vault sync
+2. **Decision desk, ledger, vaults and DevOps**: questions, answers, standing orders, dedup check, the organization and project vaults, DevOps engineer with vault sync
 3. **Tester and bug loop**: unit test rules, Playwright feature E2E, bug cards, rebase step, post-finalize full suite, regression runs, bottleneck alert
 4. **Scheduler and feeds**: recurring tasks, scout and curator, digests, ratings and `taste.md`
 5. **Research projects**: researcher and checker, publishing to the vault
