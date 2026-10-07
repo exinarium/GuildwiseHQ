@@ -12,15 +12,15 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Blocked filter',
-        text: 'Show only cards waiting on an answer you gave at the desk. Useful when you have decisions pending.',
+        text: 'Show only blocked cards: the ones waiting for your answer at the desk. Useful when you have decisions pending.',
       },
       {
         name: 'Rework filter',
-        text: 'Show only cards sent back for fixes after review or test. Use this to track failed submissions.',
+        text: 'Show only cards that review has sent back for fixes at least once.',
       },
       {
         name: 'Unassigned filter',
-        text: 'Show only cards no agent has claimed yet. Use this to find work ready for pickup.',
+        text: 'Show only cards no agent is working on right now.',
       },
       {
         name: 'Priority picker',
@@ -31,59 +31,104 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Show cards in a specific phase. Phases break work into milestones; leave empty to see all phases.',
       },
       {
-        name: 'Regression dialog',
-        text: 'A one-click approval to promote a card from test to release. Shown only on projects with a test stage.',
+        name: 'Run regression',
+        text: 'Queue a regression run for the testers on Web, Mobile or Both platforms. Shown only on projects with a test stage.',
       },
       {
         name: 'Convert to project',
-        text: 'Turn a research interest into a full code project with repositories and agents. Only available for eligible research projects.',
+        text: 'Convert a research project to a Code project (or another workflow) once its questions are answered. Shown on research projects to the Owner and Admins.',
       },
       {
         name: 'Settings',
-        text: 'Open project settings to change its name, working branch, repositories, budget and more.',
+        text: 'The gear opens the project settings: name, working branch, repositories, phases, merging, budget, team and archiving.',
       },
       {
         name: 'New card',
-        text: 'Create a new card to bring in work, describe a task or propose an idea.',
+        text: 'Create a new card to describe a piece of work.',
       },
     ],
     article: 'board-and-cards#reading-the-board',
-    tips: ['Press n to create a card', 'Press b to go to the board'],
+    tips: ['Press n to create a card', 'Press g then b to go to the board'],
   },
   '/p/:projectKey/research': {
     title: 'Research',
     intro:
-      'Research is in-progress scanning and discovery for an interest. See the scan results and refined set.',
+      'The research cards of this project and the notes they published. A note is published once its claims are checked against their sources.',
     controls: [
       {
-        name: 'Research content',
-        text: 'Results from the scan, organized to show progress and findings.',
+        name: 'New research card',
+        text: 'Create a research card with a question, scope and depth.',
+      },
+      {
+        name: 'In progress',
+        text: 'Research cards that are still open, with the board column each one is in.',
+      },
+      {
+        name: 'Published notes',
+        text: 'The finished research notes, each linked to the card that produced it.',
       },
     ],
-    article: 'projects#creating-a-project',
+    article: 'projects#project-types',
   },
   '/p/:projectKey/phases/:number': {
     title: 'Phase',
-    intro: 'A phase groups related work together. See all cards in this phase, their status and progress.',
+    intro: 'A phase groups cards you want to ship together. See its cards, follow-ups, report and progress.',
     controls: [
       {
         name: 'Phase details',
-        text: 'Cards and progress specific to this milestone or delivery phase.',
+        text: 'Change the name and description until the phase is final, then click Save.',
+      },
+      {
+        name: 'Cards',
+        text: 'The cards in the phase with their state and result. Add a card with Add a card, take one out with Remove, or click Mark merged when the automatic check cannot see a merge.',
+      },
+      {
+        name: 'Follow-ups',
+        text: 'What runs after you approve the phase (deploys, regression runs, custom items) and how far each has got.',
+      },
+      {
+        name: 'Reopen phase',
+        text: 'Make the phase wait for its cards again. A reason is required.',
+      },
+      {
+        name: 'Report and thread',
+        text: 'The BA report, the follow-up results and the conversation about this phase.',
       },
     ],
     article: 'phases#phase-done',
   },
   '/schedules': {
     title: 'Schedules',
-    intro: 'Automate workflows with triggers and actions. When an event happens, the action runs.',
+    intro:
+      'Automate work with a trigger and an action: at a time, when something happens, or when an issue gets a label.',
     controls: [
       {
-        name: 'Schedule list',
-        text: 'All your triggers and actions that run on a schedule or when events occur.',
+        name: 'New schedule',
+        text: 'Open the three-step wizard: When (the trigger), What (the action) and Details.',
       },
       {
-        name: 'Add schedule',
-        text: 'Create a new trigger-action pair to automate work in your projects.',
+        name: 'Schedule list',
+        text: 'Your schedules grouped by project, with the whole organization first. Each shows its trigger, next run and last run.',
+      },
+      {
+        name: 'Run now',
+        text: 'Run a schedule once, straight away.',
+      },
+      {
+        name: 'Send test',
+        text: 'For webhooks: send a test delivery now. It is logged but never retried.',
+      },
+      {
+        name: 'History',
+        text: 'Every run with what triggered it, what it did and why it failed, plus the delivery log for webhooks and e-mails.',
+      },
+      {
+        name: 'Edit, Pause or Resume, Delete',
+        text: 'Change a schedule, switch it off and on, or remove it. Schedules for the whole organization are changed by the Owner and Admins only.',
+      },
+      {
+        name: 'New secret',
+        text: 'For webhooks: replace the signing secret. The new one is shown once.',
       },
     ],
     article: 'schedules-and-integrations#triggers',
@@ -123,7 +168,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'Overview tab',
-        text: 'Summary of the interest: what it scans, its status, last scan time and recent stats.',
+        text: 'The run and delivery schedules, the last run, what waits for delivery, the notes research published and who can see the interest.',
       },
       {
         name: 'Run log tab',
@@ -131,15 +176,15 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Digest tab',
-        text: 'Items waiting to be delivered, and a record of what was already sent and how you rated it.',
+        text: 'The items found and delivered, where you rate them.',
       },
       {
         name: 'Settings tab',
-        text: 'Change the scan schedule, delivery times, and vault where results are stored.',
+        text: 'Change what to collect, the run and delivery schedules, preferred agents and the budget. The vault is fixed once the interest has run.',
       },
       {
         name: 'Taste tab',
-        text: 'Rules to filter or prioritize results. Agents learn from your ratings and suggest new rules here.',
+        text: 'Your explicit taste rules, and what the interest has learned from your ratings.',
       },
       {
         name: 'Run scan',
@@ -147,22 +192,22 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Research this',
-        text: 'Open a focused research interface for this interest, or research a different interest on the same topic.',
+        text: "Ask a question at Quick, Standard or Deep depth. A researcher and fact checker publish a note in the interest's vault folder.",
       },
       {
         name: 'Deliver now',
-        text: 'Send held-back items to the vault now. Use this when you are ready to accept more results.',
+        text: 'Shown as Deliver N now when items are waiting: put them on your desk ahead of the schedule, within the daily quiet cap.',
       },
       {
-        name: 'Archive',
-        text: 'Stop scanning and hide the interest. Archived interests can be restored.',
+        name: 'More actions',
+        text: 'Archive stops scanning and hides the interest (Restore brings it back). An archived interest can also be deleted permanently.',
       },
     ],
     article: 'interests#run-and-delivery',
   },
   '/cards/new': {
     title: 'New card',
-    intro: 'Create a new card to describe work, propose an idea or onboard a ticket from outside.',
+    intro: 'Create a new card to describe a piece of work for the agents.',
     controls: [
       {
         name: 'Project',
@@ -170,23 +215,31 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Card type',
-        text: 'Select the type of work: feature, bug, chore or other types defined in your roles.',
+        text: 'The kind of work (feature, bug, support, refactor, docs and so on, depending on the workflow).',
       },
       {
-        name: 'Title and description',
-        text: 'The card title and any details about what needs to be done.',
+        name: 'Title',
+        text: 'A short name for the work.',
+      },
+      {
+        name: 'Repository and Completion action',
+        text: 'For code work: which repository, and how to ship it (pr, push_branch or merge).',
       },
       {
         name: 'Priority',
-        text: 'Urgent, high, normal or low. Agents use this to order their work.',
+        text: 'Urgent, high, normal or low. Urgent cards are picked up first.',
       },
       {
-        name: 'Custom fields',
-        text: 'Extra fields specific to your workflow, such as time estimate or component.',
+        name: 'Docs needed',
+        text: 'Tick it if a technical writer should document the change.',
       },
       {
-        name: 'External ref (optional)',
-        text: 'A link to a ticket in Jira, GitHub or another system, so agents can track the source.',
+        name: 'Workflow fields',
+        text: 'Context, requirements, acceptance criteria, affected areas, constraints and the test plan (for research cards: question, scope and depth).',
+      },
+      {
+        name: 'Save draft and Specify',
+        text: 'Save draft keeps the card private until you are ready. Specify checks every required field and sends it on.',
       },
     ],
     article: 'board-and-cards#creating-a-card',
@@ -198,11 +251,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'Status badge',
-        text: 'Draft, queued, in progress, blocked, waiting, done or cancelled. Only you can move the card between stages.',
+        text: "Draft, queued, claimed, blocked, waiting, done or cancelled. Only the project owner or the card's creator can move the card between stages.",
       },
       {
         name: 'Card type badge',
-        text: 'Feature, bug, chore or other types defined in your workflow.',
+        text: 'Feature, bug, support, refactor, docs or another type defined in the workflow.',
       },
       {
         name: 'Rework badge',
@@ -214,15 +267,15 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Workflow stepper',
-        text: 'The stages the card passes through. Click to see where the card is in its workflow.',
+        text: 'The stages the card passes through, with the current one highlighted.',
       },
       {
         name: 'Specify button',
-        text: 'Mark the card as ready to work. Available when the card is a draft with all required fields filled.',
+        text: 'Send a draft on to be worked. It lists any required field that is still missing.',
       },
       {
         name: 'Edit button',
-        text: 'Change the card title, description, priority or custom fields.',
+        text: 'Change the title, priority, completion action and the other fields. Only while the card is a draft or queued and not yet claimed.',
       },
       {
         name: 'Move button',
@@ -234,11 +287,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'More actions menu',
-        text: 'Release (let another agent claim it), Re-home (reset workstation and branch), or Cancel the card.',
+        text: 'Release (let another agent claim it), Re-home (forget its workstation and worktree) or Cancel card (a reason is required).',
       },
       {
         name: 'What to build panel',
-        text: 'Specification fields from the workflow: task, component, time estimate and other custom fields.',
+        text: "The card's specification: context, requirements, acceptance criteria, affected areas, constraints and test plan.",
       },
       {
         name: 'Thread',
@@ -254,19 +307,15 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Details panel',
-        text: 'Stage, risk tier, completion action, priority, phase and decision policy all in one place.',
+        text: 'Stage, risk tier, completion action, docs needed, branch, priority, phase and who answers its questions, in one place.',
       },
       {
         name: 'Risk tier',
-        text: 'How much code risk a change carries (small, medium, large). Set it or let the system calculate it.',
+        text: 'Small or large, worked out from the diff. Click Change to override it with a reason; it sets how many reviewers are needed and whether a merge waits for you.',
       },
       {
         name: 'Who answers its questions',
         text: 'Choose whether only the card owner or any project manager can answer questions from agents.',
-      },
-      {
-        name: 'Decision policy',
-        text: 'Control whether only the card owner or any project manager can answer blocking questions.',
       },
     ],
     article: 'board-and-cards#editing-a-card',
@@ -278,7 +327,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'New project',
-        text: 'Create a code delivery, research or feed project. Available to owners and admins.',
+        text: 'Create a project with a name, a key and a workflow (Code, Research or a custom one). Available to the Owner and Admins.',
       },
       {
         name: 'Active tab',
@@ -286,7 +335,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Archived tab',
-        text: 'Projects that have finished or been paused. You can restore any of them.',
+        text: 'Archived projects. Restore one, or delete it permanently.',
       },
       {
         name: 'Department filter',
@@ -294,7 +343,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Project card',
-        text: 'Shows the project name, key, type, department, domain and your role. Click to open its board.',
+        text: 'Shows the project name, key, workflow, department, domain and whether you own it or it is shared with you. Click to open its board.',
       },
       {
         name: 'Settings link',
@@ -302,43 +351,44 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
     article: 'projects#creating-a-project',
-    tips: ['Press p to go to projects'],
+    tips: ['Press g then p to go to projects'],
   },
   '/projects/:id/settings': {
     title: 'Project settings',
-    intro: 'Configure a project: its name, repositories, budget, team, workflow stages and archive status.',
+    intro:
+      'Configure a project: its name, repositories, phases, merging, budget, team and archiving. The buttons at the top jump to each section.',
     controls: [
       {
-        name: 'Basics tab',
+        name: 'Basics',
         text: 'Project name, working branch, architectural globs (for repos) and E2E test globs.',
       },
       {
-        name: 'Stage tab',
-        text: 'The workflow stages cards pass through. Configure stage names and properties.',
+        name: 'Stage',
+        text: 'Which workflow the project runs on, and Convert project (Owner and Admins) to move it to another one.',
       },
       {
-        name: 'Repos tab',
-        text: 'Add or remove repositories. Only for code delivery projects.',
+        name: 'Repos',
+        text: "Add or remove repositories and set or change each one's working branch. Only for projects whose workflow uses repositories.",
       },
       {
-        name: 'Phases and deploys tab',
-        text: 'Break work into phases, set follow-up defaults and configure deploy targets. For code projects.',
+        name: 'Phases and deploys',
+        text: 'Create phases, set the default follow-ups and add deploy targets. For code projects.',
       },
       {
-        name: 'Merging tab',
-        text: 'Set merge policies for pull requests and configure approval workflows.',
+        name: 'Merging',
+        text: 'Let large changes merge without your approval (project owner only, off by default).',
       },
       {
-        name: 'Budget tab',
-        text: 'Set a monthly budget for agent usage costs. The desk will pause work if overspent.',
+        name: 'Budget',
+        text: 'Set a monthly budget for what the agents cost. At 80% you are warned; at 100% new work pauses until you raise it or override it.',
       },
       {
-        name: 'Team tab',
-        text: 'Invite or remove members, and set roles. Owners manage everything; members manage cards.',
+        name: 'Team',
+        text: 'Share the project with someone from another organization by email. They join as additional managers once they accept.',
       },
       {
-        name: 'Archive tab',
-        text: 'Archive or permanently delete the project. Archiving is reversible; deletion is not.',
+        name: 'Archive',
+        text: 'Archive the project (reversible). Permanent deletion is on the Projects page, under Archived.',
       },
       {
         name: 'Save settings',
@@ -358,7 +408,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Hire agent',
-        text: 'Create a new agent for a role. Set seniority, model and which projects it works on.',
+        text: 'Hire an agent: role, seniority, workstation, runtime, model and effort, which projects it may work on, skills and a name.',
       },
       {
         name: 'Project filter',
@@ -370,43 +420,47 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Role updates',
-        text: 'A list of role version changes proposed by the BA. One-click to apply changes to agents in that role.',
+        text: 'Shown when an app update gives a built-in role a new default. Reset to default drops the extensions you added to that role.',
       },
       {
         name: 'Recommendations',
-        text: 'Suggestions for agent changes: hire, fire, promote or retrain. With evidence and one-click apply.',
+        text: 'Rule-based suggestions such as a model change, splitting a role or firing an idle agent, with the evidence. Some can be applied with one click.',
       },
       {
         name: 'Agent card',
-        text: 'Name, avatar, role, model, status, hiring manager and performance stats. Click to see details.',
+        text: 'Name, role and seniority, status (idle, on shift, blocked or needs rehome), model, current card, who hired it, cost and performance stats.',
       },
       {
         name: 'Work quality panel',
-        text: 'Detailed quality metrics for builder agents: score, bounce rate and test failure rate.',
+        text: 'For builders: reviewer score, rework rounds per card, bugs escaped, criteria missed and test coverage of their changes.',
+      },
+      {
+        name: 'Projects',
+        text: 'Change where the agent may work: any project (Owner and Admins) or selected ones, with a star to prefer some. An empty list benches the agent.',
       },
       {
         name: 'Change model',
-        text: 'Switch the agent to a different AI model.',
+        text: 'Switch the agent to a different model or effort.',
       },
       {
         name: 'Change role',
-        text: 'Promote or retrain the agent to a different role.',
+        text: 'Move the agent to a different role.',
       },
       {
-        name: 'Fire agent',
-        text: 'Remove the agent. Active claims are released and work goes back in the queue.',
+        name: 'Fire',
+        text: 'Retire the agent. Its cards go back to the queue and its sandbox is wiped.',
       },
       {
-        name: 'Rehome agent',
-        text: 'Move the agent to a different workstation or reset it to use any available workstation.',
+        name: 'Re-home',
+        text: 'Shown when an agent needs a new home (for example its manager was removed): pick one of your own workstations.',
       },
       {
-        name: 'Reset agent',
-        text: 'Clear the agent cache and restart. Use this if the agent is stuck or behaving oddly.',
+        name: 'Reset (DevOps engineer)',
+        text: "Wipe a DevOps engineer's sandbox. It stays assigned to its workstation.",
       },
       {
-        name: 'Reroll face',
-        text: 'Give the agent a new avatar from the pool of generated faces.',
+        name: 'Re-roll face',
+        text: 'Give the agent a new generated face.',
       },
       {
         name: 'Retired section',
@@ -414,7 +468,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
     article: 'agents#hiring',
-    tips: ['Press a to go to agents', 'You can link to a specific agent with #<agent-id>'],
+    tips: ['Press g then a to go to agents', 'You can link to a specific agent with #<agent-id>'],
   },
   '/hr': {
     title: 'Agents',
@@ -427,7 +481,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Hire agent',
-        text: 'Create a new agent for a role. Set seniority, model and which projects it works on.',
+        text: 'Hire an agent: role, seniority, workstation, runtime, model and effort, which projects it may work on, skills and a name.',
       },
       {
         name: 'Project filter',
@@ -439,43 +493,47 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Role updates',
-        text: 'A list of role version changes proposed by the BA. One-click to apply changes to agents in that role.',
+        text: 'Shown when an app update gives a built-in role a new default. Reset to default drops the extensions you added to that role.',
       },
       {
         name: 'Recommendations',
-        text: 'Suggestions for agent changes: hire, fire, promote or retrain. With evidence and one-click apply.',
+        text: 'Rule-based suggestions such as a model change, splitting a role or firing an idle agent, with the evidence. Some can be applied with one click.',
       },
       {
         name: 'Agent card',
-        text: 'Name, avatar, role, model, status, hiring manager and performance stats. Click to see details.',
+        text: 'Name, role and seniority, status (idle, on shift, blocked or needs rehome), model, current card, who hired it, cost and performance stats.',
       },
       {
         name: 'Work quality panel',
-        text: 'Detailed quality metrics for builder agents: score, bounce rate and test failure rate.',
+        text: 'For builders: reviewer score, rework rounds per card, bugs escaped, criteria missed and test coverage of their changes.',
+      },
+      {
+        name: 'Projects',
+        text: 'Change where the agent may work: any project (Owner and Admins) or selected ones, with a star to prefer some. An empty list benches the agent.',
       },
       {
         name: 'Change model',
-        text: 'Switch the agent to a different AI model.',
+        text: 'Switch the agent to a different model or effort.',
       },
       {
         name: 'Change role',
-        text: 'Promote or retrain the agent to a different role.',
+        text: 'Move the agent to a different role.',
       },
       {
-        name: 'Fire agent',
-        text: 'Remove the agent. Active claims are released and work goes back in the queue.',
+        name: 'Fire',
+        text: 'Retire the agent. Its cards go back to the queue and its sandbox is wiped.',
       },
       {
-        name: 'Rehome agent',
-        text: 'Move the agent to a different workstation or reset it to use any available workstation.',
+        name: 'Re-home',
+        text: 'Shown when an agent needs a new home (for example its manager was removed): pick one of your own workstations.',
       },
       {
-        name: 'Reset agent',
-        text: 'Clear the agent cache and restart. Use this if the agent is stuck or behaving oddly.',
+        name: 'Reset (DevOps engineer)',
+        text: "Wipe a DevOps engineer's sandbox. It stays assigned to its workstation.",
       },
       {
-        name: 'Reroll face',
-        text: 'Give the agent a new avatar from the pool of generated faces.',
+        name: 'Re-roll face',
+        text: 'Give the agent a new generated face.',
       },
       {
         name: 'Retired section',
@@ -483,12 +541,12 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
     article: 'agents#hiring',
-    tips: ['Press a to go to agents', 'You can link to a specific agent with #<agent-id>'],
+    tips: ['Press g then a to go to agents', 'You can link to a specific agent with #<agent-id>'],
   },
   '/metrics': {
     title: 'Metrics',
     intro:
-      'Dashboard of team performance: cards finalized, time blocked on you, bounce rate, quality and throughput.',
+      'What the team delivered, where it waited on you and where quality slipped: throughput, time blocked, bounce rate, escaped bugs, duration and queue depth.',
     controls: [
       {
         name: 'Project filter',
@@ -500,63 +558,63 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Throughput',
-        text: 'How many cards your team completed and average per day. The foundation of team velocity.',
+        text: 'Cards finalized in the range, in total and per day.',
       },
       {
         name: 'Time blocked on you',
         text: 'Total time cards waited on desk answers, average per card and how many cards were held up.',
       },
       {
-        name: 'Bounce rate',
-        text: 'For each builder, the rate of cards sent back for review or test fixes. Lower is better.',
+        name: 'Bounce rate per builder',
+        text: 'For each builder, how often their cards were sent back for rework. Lower is better.',
       },
       {
-        name: 'Quality metrics',
-        text: 'Test failure rate, bug density and rework rounds. Trends reveal quality issues early.',
+        name: 'Bugs escaped past test',
+        text: 'How many test runs failed, by day.',
       },
       {
-        name: 'Queue depth',
-        text: 'How many cards are waiting to be claimed. A queue means agents are at capacity.',
+        name: 'Duration',
+        text: 'How many cards finished, with the average and median time per card.',
       },
       {
-        name: 'Velocity chart',
-        text: 'Cards completed per day, showing consistency and capacity trends.',
+        name: 'Queue depth per column',
+        text: 'How many cards sit in each board column right now. A long queue means agents are at capacity.',
       },
     ],
-    article: 'ba-reporter#floor-report',
+    article: 'agents#hr-board',
   },
   '/org': {
     title: 'Organization',
     intro:
-      'Design your organization: define roles and their capabilities, create custom workflows, set up departments and chat with the BA.',
+      'Design your organization: define roles, create custom workflows, set up departments and draft them with the BA. Definitions are approved on the desk before they can be used. The Owner and Admins can change them.',
     controls: [
       {
         name: 'Organization selector',
-        text: 'If you manage a shared project, switch between your organization and the owner organization (read-only).',
+        text: 'If you work on a shared project, switch between your own organization and the catalogue of the organization that owns it (read-only).',
       },
       {
         name: 'Roles tab',
-        text: 'All roles available to agents: their seniority levels, responsibilities and capabilities.',
+        text: 'Custom roles (New custom role) and the built-in roles, which you can Extend with extra instructions, skills and standing orders.',
       },
       {
         name: 'Workflows tab',
-        text: 'Custom workflows that agents follow. Each stage can define what agents do and what the BA checks.',
+        text: 'Built-in and custom workflows (New custom workflow). Each stage names the role that claims it and where the card goes next.',
       },
       {
         name: 'Departments tab',
-        text: 'Groups of agents and projects. Use departments to organize large teams.',
+        text: 'Departments group roles and workflows by function, so the Agents and Projects pages can be filtered by department.',
       },
       {
         name: 'Design with the BA tab',
-        text: 'Chat with the BA about your organization, roles and workflows. The BA suggests improvements.',
+        text: 'Pick a business analyst and describe the role or workflow you need. The BA drafts it, validates it and puts it on your desk.',
       },
       {
         name: 'Role editor',
-        text: 'Define a new role or edit an existing one. Set seniority levels and what they are responsible for.',
+        text: 'Define a role: purpose, instructions, core rules, seniority levels, default model, tools and the workflow stages it may claim. Save draft, or Save and submit for approval.',
       },
       {
         name: 'Workflow editor',
-        text: 'Design a custom workflow with stages and transitions. See validation errors and a preview graph.',
+        text: 'Design a workflow with its stages and where cards go on success and failure. Validation errors and a preview graph show as you edit.',
       },
       {
         name: 'Workflow graph',
@@ -564,7 +622,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Status badges',
-        text: 'Active (in use), Draft (being edited), Waiting for approval (ready to use), Rejected or Superseded.',
+        text: 'Active (in use), Draft (being edited), Waiting for your approval (approve it on the desk), Rejected, or Replaced by a newer version.',
       },
     ],
     article: 'org-chart-and-design#custom-roles',
@@ -579,11 +637,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'List view',
-        text: 'A flat list of all agents with their role, workstation and status.',
+        text: 'A list of all agents grouped by department, with their role, workstation and status.',
       },
       {
         name: 'View toggle',
-        text: 'Switch between chart and list. Charts work best on wide screens.',
+        text: 'The View switch: Chart or List. The chart works best on wide screens; phones show the list.',
       },
       {
         name: 'Project filter',
@@ -591,37 +649,38 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Agent details',
-        text: 'Click any agent to see their full profile, workstation, department and performance.',
+        text: 'Click any agent to see its projects, focus, who it reports to and escalates to, workstation, spend and recent work.',
       },
       {
-        name: 'Workstation indicator',
-        text: 'A dot showing workstation health. Green means connected, yellow or red means issues.',
+        name: 'Agent status',
+        text: 'Each tile says in words what the agent is doing: working, blocked, idle or offline.',
       },
       {
-        name: 'Department label',
-        text: 'Which department the agent belongs to. Helps organize large teams.',
+        name: 'DevOps engineers',
+        text: 'Shown apart from the chart, one per workstation, reporting to your desk rather than to the BA.',
       },
     ],
     article: 'org-chart-and-design#org-chart',
   },
   '/costs': {
     title: 'Costs',
-    intro: 'Track what your agents cost: spending by project, agent and model. Set budgets and export data.',
+    intro:
+      'Track what your agents cost: spending by project, agent, model and day. Budgets are set in the project settings.',
     controls: [
       {
-        name: 'Month preset',
+        name: 'This month',
         text: 'Show costs for the current month.',
       },
       {
-        name: 'Last 30 days preset',
-        text: 'Show costs for any 30-day rolling window.',
+        name: 'Last 30 days',
+        text: 'Show costs for the last 30 days.',
       },
       {
-        name: 'Last month preset',
+        name: 'Last month',
         text: 'Show costs for the previous calendar month.',
       },
       {
-        name: 'Custom range',
+        name: 'From and To',
         text: 'Pick start and end dates to see costs for any period.',
       },
       {
@@ -629,12 +688,12 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Show costs for a specific project or all projects combined.',
       },
       {
-        name: 'Currency settings',
-        text: 'Set your currency code and exchange rate against USD for cost display.',
+        name: 'Currency and prices',
+        text: 'Set your currency code and the rate against USD, and see the list prices used.',
       },
       {
         name: 'Total spend',
-        text: 'Sum of all costs for agents, models and API calls in the selected period.',
+        text: 'Estimated cost of all shifts in the period, worked out from tokens at list prices. Not an invoice.',
       },
       {
         name: 'Breakdown by project',
@@ -649,7 +708,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Spending over time, showing trends and spike days.',
       },
       {
-        name: 'Export to CSV',
+        name: 'Export CSV',
         text: 'Download costs data for analysis in a spreadsheet or accounting system.',
       },
     ],
@@ -670,27 +729,23 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Workstation card',
-        text: 'Name, status, connected runtimes (Python, Node, etc) and health checks. Click to expand details.',
+        text: 'Name, system and runner version, whether it is connected, and an Unpair button. Click the name to expand: runtimes, shifts running, repositories and the DevOps engineer panel.',
       },
       {
         name: 'Connection dot',
-        text: 'Green means the workstation is connected and ready. Yellow or red means connection issues.',
+        text: 'Says Connected or Offline. Offline means the runner has stopped or lost its connection.',
       },
       {
         name: 'Runtime warnings',
-        text: 'Alerts if a runtime is unsandboxed or unavailable. Some runtimes need Guildwise tools to run safely.',
+        text: 'Alerts if a runtime runs agents without an OS sandbox, or cannot run them at all (for example native Windows).',
       },
       {
-        name: 'Expand for details',
-        text: 'See agent runs, health checks, logs and options to unlink or refresh the workstation.',
+        name: 'DevOps engineer panel',
+        text: 'What the DevOps engineer may do on its own (install, Docker, sudo, extra paths), Repository hygiene (how often, and Run hygiene now), Ask DevOps, and its requests.',
       },
       {
-        name: 'Health checks',
-        text: 'Tests to confirm the workstation is ready. Red checks need fixing before work can run.',
-      },
-      {
-        name: 'Unlink workstation',
-        text: 'Disconnect a workstation. Active agent shifts are ended and work is re-queued.',
+        name: 'Unpair',
+        text: 'Disconnect a workstation for good. Its runner token is revoked, cards claimed there go back to the queue and its agents wait to be re-homed.',
       },
     ],
     article: 'workstations-and-installer#add-a-workstation',
@@ -706,15 +761,15 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Change picture',
-        text: 'Upload a new image or pick from generated cartoon faces.',
+        text: 'Pick a generated cartoon face, take a photo or upload your own image.',
       },
       {
         name: 'Two-factor security',
-        text: 'Enable or disable two-factor authentication. Protects your account from unauthorized access.',
+        text: 'Set up two-factor login with an authenticator app, get new recovery codes or turn it off (not possible when your organization requires it).',
       },
       {
         name: 'Your time zone',
-        text: 'Set your time zone so the daily floor report is posted at the right time on your clock.',
+        text: "Set your time zone. The daily floor report follows the Owner's time zone.",
       },
       {
         name: 'Use this browser zone',
@@ -722,40 +777,38 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Route via BA',
-        text: 'If on, agent-raised questions go to your BA first for context. Urgent items and approvals still reach you immediately.',
+        text: 'If on, items agents raise go to your BA first. Urgent blocking questions and approvals still reach you at once. Owner and Admins can change it; it applies to the whole organization.',
       },
       {
-        name: 'Daily report time',
-        text: 'Choose what hour the BA delivers its floor report to you each day.',
+        name: 'Daily floor report at',
+        text: 'The time of day the BA posts its floor report (default 08:00). Click Save time.',
       },
     ],
     article: 'getting-started#the-tour',
-    tips: ['Your settings are personal to your account, not shared with other team members'],
+    tips: [
+      'Your picture, time zone and two-factor login are personal to your account. Routing through the BA and the report time apply to the whole organization.',
+    ],
   },
   '/settings/vaults': {
     title: 'Vaults',
     intro:
-      'Storage folders for interests, research and other results. Each vault maps to a folder on your disk.',
+      'Git repositories of markdown notes that your agents read and your DevOps engineers keep in sync on your workstations. The app stores only the URLs and the sync status.',
     controls: [
       {
-        name: 'Vault list',
-        text: 'All configured vaults showing path, domain and which interests use each.',
+        name: 'Register a vault',
+        text: 'Add a Work or Personal vault, or a project vault, by its git URL and sync interval. Agents never see credentials: the workstation uses its own git access.',
       },
       {
-        name: 'Search vaults',
-        text: 'Find a vault by path or name.',
+        name: 'Vault card',
+        text: "The vault's kind, git URL and sync interval, and for each workstation whether it is synced, waiting or in error, with the last pull and push.",
       },
       {
-        name: 'Add vault',
-        text: 'Create a new vault by pointing to a folder on your disk or a cloud storage mount.',
+        name: 'Edit',
+        text: "Change the vault's git URL or sync interval.",
       },
       {
-        name: 'Edit vault',
-        text: 'Change vault settings: path, label or permissions.',
-      },
-      {
-        name: 'Delete vault',
-        text: 'Remove a vault. Interests using it must be reassigned to another vault.',
+        name: 'Sync paused: conflict',
+        text: 'A change conflicts with a remote one. Fix the listed files in the clone on your workstation, then click I resolved it, resume.',
       },
     ],
     article: 'ledger-and-vaults#vaults',
@@ -766,27 +819,27 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'General tab',
-        text: 'Organization name, domain and two-factor requirement. Owners and admins can edit.',
+        text: 'The organization name, its Owner, Transfer ownership and the Require two-factor login switch (Owner only). Other members can Leave organization here.',
       },
       {
         name: 'Members tab',
-        text: 'Everyone in the organization, their role and their projects. Members and guests see read-only view.',
+        text: 'Everyone in the organization with their role, projects and 2FA state. Owner and Admins can Invite member, change projects or remove people; only the Owner changes roles or resets two-factor login.',
       },
       {
         name: 'Invitations tab',
-        text: 'Pending member invites. Copy links to invite people, or resend invites. Owners and admins only.',
+        text: 'Pending and past invitations. Resend or Revoke one. Owner and Admins only.',
       },
       {
         name: 'Guests tab',
-        text: 'Guest members with access to specific projects only. Manage guest status and permissions. Owners and admins only.',
+        text: 'People from other organizations who have access to your projects, and which ones. Owner and Admins only.',
       },
       {
         name: 'Plan & limits tab',
-        text: 'Current subscription plan, member count, agent limit and usage. Owners and admins only.',
+        text: 'Your plan and status, usage against the limits (members, projects, agents, workstations) and the features switched on. Owner and Admins only.',
       },
       {
         name: 'Your role',
-        text: 'Owner (complete control), Admin (manage everything except billing) or Member (manage your cards).',
+        text: 'Shown under the page title: Owner, Admin or Member. Admins cannot invite Admins, change roles or change the security settings.',
       },
     ],
     article: 'organizations-and-roles#roles',
@@ -810,7 +863,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Approvals filter',
-        text: 'Show only approvals: code merges, feature releases or configuration changes.',
+        text: 'Show only approvals: large merges, DevOps requests, outbound updates, repository creation and the like.',
       },
       {
         name: 'Notices filter',
@@ -826,15 +879,15 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Add to ledger',
-        text: 'Quickly add a standing order, decision or requirement that agents should know.',
+        text: 'Add a standing order, requirement or decision straight to the ledger, without a question.',
       },
       {
         name: 'Intake',
-        text: 'Start an intake to organize new work coming from outside, or invite suggestions from agents.',
+        text: 'Start an intake: bring a Jira or GitHub ticket, or a described need, in through the BA.',
       },
       {
         name: 'Chat',
-        text: 'Ask the BA for context or discuss strategy without sending a formal question.',
+        text: 'Open a chat with the BA, DevOps or any agent you may direct.',
       },
       {
         name: 'Desk item',
@@ -854,7 +907,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Affects count',
-        text: 'How many cards are blocked by this item. Click to jump to the desk item.',
+        text: 'How many cards are waiting on this item.',
       },
       {
         name: 'Options',
@@ -866,7 +919,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Add to ledger dropdown',
-        text: 'Choose whether your answer becomes a standing order, decision or requirement in the ledger.',
+        text: 'Choose how your answer is saved in the ledger: Decision (the default), Requirement, or a Standing order for this project or every project.',
       },
       {
         name: 'Answer button',
@@ -890,7 +943,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
     article: 'desk#answering',
-    tips: ['Press d to go to the desk', 'Items are grouped by priority to show what needs you most'],
+    tips: ['Press g then d to go to the desk', 'Items are grouped by priority to show what needs you most'],
   },
   '/help': {
     title: 'Help',
@@ -926,7 +979,8 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   },
   '/help/contact': {
     title: 'Contact us',
-    intro: 'Write to the support team. Your message, browser details and current page context are included.',
+    intro:
+      'Write to the support team. Your name, email and organization go with the message, and you can see the page context first.',
     controls: [
       {
         name: 'Subject',
@@ -934,19 +988,23 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Category',
-        text: 'Choose the type of issue: a bug, a feature request, billing or general help.',
+        text: 'Choose what it is about: Bug report, Question, Feature request or Billing.',
       },
       {
         name: 'Message',
         text: 'Full details about what you experienced and what you expected.',
       },
       {
-        name: 'Capture page context',
-        text: 'Include the current page, its state and your browser details. Helps support understand your situation.',
+        name: 'Screenshot (optional)',
+        text: 'A screenshot of the page you were on is captured first; remove it or upload another PNG, JPEG or WebP image up to 2.5 MB.',
+      },
+      {
+        name: 'What we send with your request',
+        text: 'Opens the page, app version, browser, screen size, time zone and recent errors that go along. You can leave the errors out.',
       },
       {
         name: 'Send',
-        text: 'Submit your message. A confirmation will appear under My requests.',
+        text: 'Send your message. It then shows under My requests, and the answer arrives by email.',
       },
     ],
     article: 'writing-to-us#contact-us',
@@ -961,7 +1019,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'New reply badge',
-        text: 'Shown if the support team has answered since you last read the request.',
+        text: "Shown on a request where the support team's reply is the last message and the request is not closed.",
       },
       {
         name: 'Click to read',
@@ -1044,7 +1102,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   '/chat/:threadId': {
     title: 'Chat',
     intro:
-      'A conversation with the BA. Discuss strategy, ask for context or brainstorm without a formal desk item.',
+      'A conversation with one agent (the BA, DevOps or another agent you may direct). Ask, suggest or discuss without a formal desk item.',
     controls: [
       {
         name: 'Message thread',
@@ -1052,7 +1110,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Send message',
-        text: 'Type and send a message. The BA will respond.',
+        text: 'Type and send a message. The agent replies while its workstation is connected.',
       },
     ],
     article: 'chat-with-agents',
@@ -1060,49 +1118,50 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   '/intake': {
     title: 'New intake',
     intro:
-      'Organize new work from outside or invite agent suggestions. Intake turns raw input into structured cards.',
+      'Bring work in from Jira or GitHub, or describe a need. Your BA reads it, asks what it cannot decide and drafts the cards.',
     controls: [
       {
-        name: 'Intake form',
-        text: 'Describe work you want done: a feature, bug, research topic or anything else.',
+        name: 'Ticket or need',
+        text: 'A Jira key (ABC-123), a GitHub issue (acme/web#12 or its URL), or a plain description. The page shows what it detected.',
       },
       {
-        name: 'Project',
-        text: 'Which project this work belongs to.',
+        name: 'Start intake',
+        text: 'Open a conversation with your BA about it.',
       },
       {
-        name: 'Intake items',
-        text: 'List of items you are adding. Each becomes a separate card.',
-      },
-      {
-        name: 'Submit intake',
-        text: 'Turn the intake into cards. Cards start in draft status.',
+        name: 'Earlier intakes',
+        text: 'Your previous intakes. Click one to pick the conversation up again.',
       },
     ],
     article: 'intake-and-outbox#intake',
   },
   '/intake/:id': {
     title: 'Intake view',
-    intro: 'Review an intake: its items, status and the cards created from it.',
+    intro: 'One intake: your conversation with the BA and the cards it has drafted from it.',
     controls: [
       {
-        name: 'Intake details',
-        text: 'The intake source, items and created cards.',
+        name: 'Conversation',
+        text: "Answer the BA's questions about scope and project here.",
       },
       {
-        name: 'View cards',
-        text: 'Jump to any card created from this intake.',
+        name: 'Cards created',
+        text: 'The cards drafted from this intake. Click one to review it and Specify it.',
+      },
+      {
+        name: 'Pick the project',
+        text: 'Shown when the BA could not map the ticket to a project: it takes you to the desk question.',
       },
     ],
     article: 'intake-and-outbox#intake',
   },
   '/platform': {
     title: 'Organizations',
-    intro: 'Platform admin view of all organizations. See metadata, status, plan and member count.',
+    intro:
+      'Platform admin view of all organizations: Owner, members, status, plan and when they were last active.',
     controls: [
       {
         name: 'Search',
-        text: 'Find an organization by name or owner email.',
+        text: 'Find an organization by name or Owner email.',
       },
       {
         name: 'Status filter',
@@ -1110,195 +1169,183 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Sort by',
-        text: 'Sort by name, creation date, last active or member count.',
+        text: 'Sort by name, created, last active or members.',
       },
       {
         name: 'Organization table',
-        text: 'List of all organizations with owner, members, status and plan.',
-      },
-      {
-        name: 'Click org name',
-        text: 'View details of an organization and manage its status.',
-      },
-      {
-        name: 'Two-factor badge',
-        text: 'Shown if this organization requires two-factor authentication for all members.',
+        text: 'Every organization with its Owner, member count, status, plan and last activity. Click one to open it.',
       },
     ],
     article: 'organizations-and-roles#suspension',
   },
   '/platform/orgs/:id': {
     title: 'Organization detail',
-    intro: 'View and manage one organization: members, subscription, two-factor requirement and status.',
+    intro: 'View and manage one organization: its Owner, plan, limits, features and status.',
     controls: [
       {
-        name: 'Organization info',
-        text: 'Name, owner, plan and subscription status.',
+        name: 'Suspend, Reactivate and Cancel',
+        text: "Change the organization's status. Each asks for a reason and is recorded in the audit log.",
       },
       {
-        name: 'Members',
-        text: 'List of all members, their roles and status.',
+        name: 'Overview',
+        text: 'Owner, member count, shifts in the last 30 days, when it was created and last active, and whether two-factor login is required.',
       },
       {
-        name: 'Subscription management',
-        text: 'Current plan, billing cycle and any overages or limits.',
+        name: 'Transfer ownership',
+        text: "Move ownership to one of the organization's Admins, with a mandatory reason.",
       },
       {
-        name: 'Two-factor requirement',
-        text: 'Toggle to require or allow two-factor authentication.',
+        name: 'Plan, limits and features',
+        text: 'Set the limits (leave empty for unlimited), the licence expiry and which features are on, with a reason for the change.',
       },
       {
-        name: 'Suspension',
-        text: 'Suspend or unsuspend the organization. Suspended orgs cannot access Guildwise HQ.',
+        name: 'Recent activity',
+        text: 'The latest audit entries for this organization.',
       },
     ],
     article: 'organizations-and-roles#suspension',
   },
   '/platform/invitations': {
     title: 'Invitations',
-    intro: 'Invite new organizations to the platform or manage pending invitations.',
+    intro: 'Invite the Owner of a new organization and manage the invitations that are still open.',
     controls: [
       {
-        name: 'Pending invitations',
-        text: 'Orgs invited but not yet activated.',
+        name: 'Invite a new organization',
+        text: "Enter the Owner's email and an organization name to send the invitation.",
       },
       {
-        name: 'Invite org',
-        text: 'Send an invitation email to a new organization owner.',
+        name: 'All invitations',
+        text: 'Every invitation with its status (pending, accepted or revoked) and when it expires.',
       },
       {
-        name: 'Resend invitation',
-        text: 'Send the invitation again if the owner did not receive it.',
+        name: 'Resend',
+        text: 'Send a pending invitation again.',
       },
       {
-        name: 'Cancel invitation',
-        text: 'Revoke an invitation before the org signs up.',
+        name: 'Revoke',
+        text: 'Cancel a pending invitation before it is accepted.',
       },
     ],
-    article: 'organizations-and-roles#members-and-invitations',
+    article: 'organizations-and-roles#platform-area',
   },
   '/platform/users': {
-    title: 'Users',
-    intro: 'Platform admin view of all user accounts: active, suspended or invited.',
+    title: 'Accounts',
+    intro: 'Everyone with an account. An Owner is deactivated only after ownership has moved.',
     controls: [
       {
-        name: 'User search',
-        text: 'Find a user by name or email.',
+        name: 'Search',
+        text: 'Find an account by name or email.',
       },
       {
-        name: 'User status',
-        text: 'Active (can sign in), suspended (locked out) or invited (awaiting signup).',
+        name: 'Account row',
+        text: 'Name, email, number of organizations, last sign-in, and badges for platform admin, deactivated and 2FA on.',
       },
       {
-        name: 'Manage user',
-        text: 'Suspend, unsuspend or delete a user account.',
+        name: 'Reset 2FA',
+        text: "Clear a person's two-factor login so they set it up again (recorded in the audit log).",
       },
       {
-        name: 'Reset password',
-        text: 'Send a password reset email to a user.',
+        name: 'Deactivate and Reactivate',
+        text: 'Lock an account out, or let it sign in again.',
       },
     ],
-    article: 'organizations-and-roles#members-and-invitations',
+    article: 'organizations-and-roles#platform-area',
   },
   '/platform/support': {
     title: 'Support',
-    intro: 'List of all support tickets from users and organizations. Search and filter by status or kind.',
+    intro: 'Every Contact us request from every organization and from visitors.',
     controls: [
       {
-        name: 'Ticket search',
-        text: 'Find a support ticket by subject, reference or organization.',
+        name: 'Support address',
+        text: 'The mailbox that also receives every new request and follow-up.',
       },
       {
-        name: 'Status filter',
-        text: 'Show open, answered or closed tickets.',
+        name: 'Status chips',
+        text: 'Filter by All, Open, Answered or Closed, with counts.',
       },
       {
-        name: 'Kind filter',
-        text: 'Filter by issue type: bug, feature request, billing or general.',
+        name: 'Search',
+        text: 'Find a request by reference, subject, name, email or organization.',
       },
       {
-        name: 'Ticket list',
-        text: 'All tickets with subject, sender, status and creation date.',
+        name: 'Type filter',
+        text: 'Filter by Bug report, Question, Feature request or Billing.',
       },
       {
-        name: 'Click ticket',
-        text: 'View the full ticket and add replies.',
+        name: 'Request list',
+        text: 'Each request with who wrote, their organization, type, status and last message. Click one to open it.',
       },
     ],
-    article: 'writing-to-us#contact-us',
+    article: 'writing-to-us#my-requests',
   },
   '/platform/support/:id': {
     title: 'Support ticket',
-    intro: 'One support ticket with full conversation. Add replies and manage ticket status.',
+    intro: 'One request with the whole conversation, the page it came from and what the app sent along.',
     controls: [
       {
-        name: 'Ticket header',
-        text: 'Subject, sender organization and current status.',
+        name: 'Request details',
+        text: 'Who wrote it, their organization, when it was sent, the page, version, browser, recent browser errors and the screenshot.',
       },
       {
-        name: 'Conversation thread',
-        text: 'User message and all support replies in time order.',
+        name: 'Conversation',
+        text: "The person's message and every reply in time order.",
       },
       {
-        name: 'Add reply',
-        text: 'Type and send a response to the user.',
+        name: 'Reply',
+        text: 'Write the answer. It is emailed to the person and shows under their My requests.',
       },
       {
-        name: 'Change status',
-        text: 'Mark as answered, closed or reopen if needed.',
+        name: 'Send reply and Send and close',
+        text: 'Send the reply and mark the request answered, or send it and close the request.',
       },
       {
-        name: 'Assign ticket',
-        text: 'Assign to a support team member.',
+        name: 'Mark open, answered or closed',
+        text: 'Change the status without writing a reply.',
       },
     ],
-    article: 'writing-to-us#contact-us',
+    article: 'writing-to-us#my-requests',
   },
   '/platform/audit': {
     title: 'Audit log',
-    intro: 'A record of system events: signups, suspensions, feature changes and administrative actions.',
+    intro: 'Every platform administrator action and every licensing action by the system. Kept forever.',
     controls: [
       {
-        name: 'Event log',
-        text: 'Chronological list of all platform events with timestamp, actor and description.',
+        name: 'Filter by action',
+        text: 'Type an action name, for example OrgSuspended, to show only those entries.',
       },
       {
-        name: 'Filter by event type',
-        text: 'Show signups, suspensions, role changes or other event categories.',
+        name: 'Entries',
+        text: 'Each entry with its summary, the time, who did it, the action, the organization and the address it came from.',
       },
       {
-        name: 'Search events',
-        text: 'Find events by organization name or user email.',
-      },
-      {
-        name: 'Export log',
-        text: 'Download the audit log for compliance or analysis.',
+        name: 'Older entries',
+        text: 'Load the next page of older entries.',
       },
     ],
-    article: 'troubleshooting',
+    article: 'organizations-and-roles#platform-area',
   },
   '/platform/help': {
     title: 'Help',
     intro:
-      'Platform admin documentation with articles on managing organizations, users, subscriptions and support.',
+      'The same articles and glossary as in the app, plus the tour. Contact us is only for organization members.',
     controls: [
       {
-        name: 'Admin articles',
-        text: 'Guides for platform administrators: managing organizations, invitations, billing and support.',
+        name: 'Articles',
+        text: 'The help articles. Search them, or open one.',
       },
       {
         name: 'Glossary',
-        text: 'Definitions specific to platform administration.',
+        text: 'Definitions of the terms used in the app.',
       },
       {
         name: 'Tour replay',
-        text: 'Watch the admin tour again.',
+        text: 'Watch the platform administrator tour again.',
       },
       {
         name: 'This panel',
-        text: 'Help text for every page you visit. Click ? to see it again.',
+        text: 'Help text for every page you visit. Click the ? button in the top bar to see it again.',
       },
     ],
-    article: 'install-troubleshooting',
+    article: 'organizations-and-roles#platform-area',
   },
 };

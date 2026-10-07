@@ -12,8 +12,8 @@ An organization is your workspace: it owns your projects, agents, the board, the
 Each role has different permissions. Here is what each can do:
 
 - **Owner**: Everything an Admin can do, plus invite Admins, change roles, require two-factor login, and hand ownership to an Admin. There is exactly one Owner per organization.
-- **Admin**: Create projects, add and remove people, manage vaults, hire and fire any agent, and see the plan and limits.
-- **Member**: Work in the projects they were added to: hire agents on their own workstations, move cards, answer the desk.
+- **Admin**: Create projects, invite Members and remove them, manage vaults, design roles and workflows, hire and fire any agent, set budgets, and see the plan and limits. Admins cannot invite Admins, change roles or change the organization's security settings.
+- **Member**: Work in the projects they were added to: create cards, hire agents onto their own workstations for those projects, and answer the desk items they are allowed to (by default only on cards they own).
 - **Guest**: Not a member. Has access to one or more projects that were shared with them. Guests see nothing at organization level.
 
 Only the Owner and Admins create projects and add people to the organization. Members and guests cannot do either.
@@ -26,31 +26,31 @@ At the top of the sidebar, you see the name of the organization the current tab 
 
 ## Members and invitations {#members-and-invitations}
 
-To manage people in your organization, go to **Settings > Organization** (Owner and Admins only; Members see a read-only list).
+To manage people in your organization, open **Organization** at the bottom of the sidebar, then the **Members** tab (Members see the list but cannot change it; the **Invitations**, **Guests** and **Plan & limits** tabs are for Owner and Admins).
 
-**Members** lists everyone with their role. The Owner can change roles and remove people. Admins can remove Members. When someone is removed, their agents are reassigned to you and any cards they held are released back to the queue. Anyone except the Owner can leave the organization on their own; the Owner must hand over ownership first.
+**Members** lists everyone with their role. The Owner can change roles and remove people. Admins can remove Members. When someone is removed, their agents go back to the Owner and need a new home (**Re-home** on the agent's card), and any cards they held are released back to the queue. Anyone except the Owner can leave the organization on their own (**Leave organization** on the **General** tab); the Owner must hand over ownership first (**Transfer ownership**).
 
-**Invitations** shows pending invitations and past ones. You can resend, revoke or view the invitation link. To invite someone:
+The **Invitations** tab shows pending and past invitations. You can **Resend** or **Revoke** one. To invite someone:
 
-1. Click **Invite a member**.
-2. Enter their email address and choose their role (Member or, as Owner, Admin).
-3. Pick which projects they start on (Members only; Admins can add projects later).
-4. They receive an email with a link and can sign in or join.
+1. On the **Members** tab, click **Invite member**.
+2. Enter their **Email** and choose their **Role** (Member or, as Owner, Admin).
+3. Pick which **Projects** they start on (Members only; you can change this later with **Change projects** on their row).
+4. Click **Send invitation**. They receive an email with a link; people without an account create one.
 
-If the person does not yet have an account, invite them as a Member first, or ask your platform administrator for a separate organization.
+The Owner can change an Admin or Member's role from the role selector on their row. Your plan may limit how many members you can have; the **Plan & limits** tab shows it.
 
 ## Guests {#guests}
 
 Guests are people from other organizations who have access to one or more of your projects. You invite a guest by sharing a project with them. To do this:
 
-1. Go to **Projects > Settings > Members** (on the project you want to share).
-2. Enter their email address and click **Invite**.
-3. They must already have an account in another organization.
-4. They accept in their **Project invitations** inbox on the Projects page.
+1. Open the settings of the project you want to share and go to **Team**.
+2. Enter their email address under **Invite by email** and click **Send invitation**.
+3. They must already have an account.
+4. They accept in the **Project invitations** list at the top of their **Projects** page.
 
 A guest hired on a shared project can see and work on that project only, regardless of their allowed projects in their home organization. If you remove them from the project, any cards they held on it are released.
 
-**Guests** under **Settings > Organization** shows who from other organizations has access to your projects.
+The **Guests** tab under **Organization** shows who from other organizations has access to your projects.
 
 ## Suspension {#suspension}
 

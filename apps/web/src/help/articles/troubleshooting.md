@@ -7,20 +7,20 @@ order: 23
 
 Here are solutions to common day-to-day problems in Guildwise HQ.
 
-## A workstation shows "Disconnected" {#workstation-disconnected}
+## A workstation shows "Offline" {#workstation-disconnected}
 
-The runner process stopped or the connection timed out. To check the state:
+The runner process stopped or the connection timed out. On that computer, check the state:
 
 ```
 aom-runner status               # shows process state and connection
-aom-runner doctor               # checks node, git, claude, server connectivity
+aom-runner doctor               # checks node, git, claude, docker, server connectivity
 ```
 
-To restart it: `aom-runner start` or check logs in `~/.aom-runner/logs/runner.log`.
+The guided installer runs the runner as a service. Restart it with `systemctl --user restart aom-runner` (Linux, and WSL2 on Windows) or by logging out and in again (macOS, where it starts at login). If you run the runner by hand, `aom-runner start` runs it in the foreground. The log is in `~/.aom-runner/logs/runner.log`.
 
 ## An agent finished but I do not see a handoff {#no-handoff}
 
-The shift may have timed out (server killed it after 1 hour offline) or the runner crashed. Check:
+The shift may have run past its time limit (an hour by default; the server stops it) or the runner crashed. Check:
 
 - **Board**: the card should be back in its queue with the last handoff attached.
 - **Workstations**: is the runner connected?
@@ -30,18 +30,17 @@ The shift may have timed out (server killed it after 1 hour offline) or the runn
 
 When rotating the runner's token to refresh the connection:
 
-1. Stop the runner: `aom-runner stop` or press Ctrl+C.
+1. Stop the runner: `systemctl --user stop aom-runner` (or press Ctrl+C if you run it in a terminal).
 2. Rotate the token: `aom-runner rotate-token`.
-3. Restart: `aom-runner start`.
+3. Start it again: `systemctl --user start aom-runner` (or `aom-runner start`).
 
 ## Vault sync is paused with a conflict {#vault-conflict}
 
-Vault sync stops if a local change conflicts with a remote change. Go to **Projects > Settings > Vaults**, find the vault, and resolve manually:
+Vault sync stops if a local change conflicts with a remote change. Open **Vaults** in the sidebar, find the vault (it shows **Sync paused: conflict** and the conflicting files), and resolve it:
 
-1. Click **Resolve**.
-2. Fix the conflicting file(s) on your workstation (in Obsidian, VS Code, or your text editor).
-3. Commit and push the fix.
-4. Sync restarts automatically.
+1. Fix the conflicting file(s) in the clone on your workstation (in Obsidian, VS Code, or your text editor) and commit.
+2. Click **I resolved it, resume**.
+3. Sync restarts.
 
 This usually happens when you and an agent edit the same file at the same time. Merge the changes.
 
@@ -49,12 +48,12 @@ This usually happens when you and an agent edit the same file at the same time. 
 
 The repository must be listed under the workstation, and the agent must have the role and workstation assigned. Check:
 
-- **Workstations**: go to the workstation page and see if the repository is listed under it.
-- **Agents**: go to the agent's card and check its assigned workstation and role.
+- **Workstations**: open the workstation on the Workstations page and see if the repository is listed under **Repositories**.
+- **Agents**: go to the agent's card and check its workstation, role, seniority and allowed projects (**Projects**).
 
-If you just added a repository, agents see it after they reconnect (next heartbeat).
+The warning icon on the card says which of these it is (see Board and cards). If you just added a repository folder to the runner, it is re-scanned when the runner connects and every 10 minutes.
 
-## Out of scope when I expected to run {#out-of-scope}
+## An agent says the work is out of scope {#out-of-scope}
 
 The agent reported work outside the scope of its role. Check:
 

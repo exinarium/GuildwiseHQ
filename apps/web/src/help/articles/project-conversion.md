@@ -11,9 +11,9 @@ When a research project has answered its questions and is ready to build, you co
 
 Only the organization's Owner and Admins can convert. To convert a project:
 
-1. Go to **Projects > Settings > Stage** (or the **Convert to project** button on the board of a research project).
-2. Click **Convert project**.
-3. The dialog has four short steps.
+1. Open the project's settings (the gear on its board) and go to **Stage**, or click **Convert to project** on the board of a research project.
+2. Click **Convert project** (**Convert to project** on a research project).
+3. The dialog has up to four short steps (the repositories step only appears when the target workflow works in repositories).
 
 ## What is kept {#what-is-kept}
 

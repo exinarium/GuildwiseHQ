@@ -5,53 +5,57 @@ keywords: [board, card, stage, workflow, risk, backing off, search]
 order: 5
 ---
 
-The board is your view of all work in a project. Cards move left to right through stages as agents work on them. Each card shows the title, who is working on it, how old it is, and how risky it is.
+The board is your view of all work in a project. Cards move left to right through stages as agents work on them. Each card shows the title, who is working on it, how recently it changed, and flags such as large risk or rework.
 
 ## Reading the board {#reading-the-board}
 
-The board shows one column per stage. Each card tile shows:
+The board shows one column per stage (for a Code project: Spec, To do, Rework, In progress, Blocked, Review, Test, Docs, Finalize and Done). Empty columns fold into a small strip; click one to open it. At the top you can search cards, filter by **Blocked**, **Rework** or **Unassigned**, and filter by priority. Each card tile shows:
 
-- **Card reference** (e.g., `TOY-1`): a unique label for the card.
-- **Title and type** (feature, bug, support, refactor, docs).
+- **Card reference** (e.g., `TOY-1`): a unique label for the card, and how long ago it last changed.
+- **Title**.
 - **Assignee**: the agent working on it, if anyone.
-- **Age**: how long the card has been in the current stage.
-- **Risk tier** (small or large): how much review and testing it needs.
-- **Waiting badge**: if the card is waiting on something (a bug, your approval, a decision).
-- **Rework count**: how many times the card was sent back to review.
+- **Priority**: only when it is not the default.
+- **Risk tier**: shown only when it is **large** (a small risk tier is the quiet default).
+- **Rework** badge with the round number: how many times review sent the card back.
+- **Backing off** badge when the card is being held back after failed shifts (see below).
+- **Badges** for the workflow it runs on (for example Research), its phase, **Blocked**, or a waiting reason such as **waiting on bug**, **Awaiting your approval**, **Finalizing** or **waiting on DevOps**.
 
-A **Blocked** column appears when cards are waiting for your answer from the desk.
+The card type (feature, bug, support, refactor, docs, regression) shows on the card's own page.
+
+A **Blocked** column holds cards that are waiting for your answer from the desk.
 
 ## Why a card does not move {#why-a-card-does-not-move}
 
 If a queued card has a warning icon, no agent can pick it up right now. Hover the icon to see why:
 
-- **Red, "Not workable"**: no hired agent could ever take this stage. For example, you hired no builders, or the Review stage needs a senior reviewer and you only hired juniors. The tooltip has a **Hire** link to open the Hire form with the missing role and seniority pre-filled.
-- **Amber, "Waiting"**: agents exist but cannot work right now. Their workstation is offline, the card's repository is not cloned on any of their machines, or they have been busy for too long. This clears by itself when the workstation comes back, the repository is cloned, or the agent is free.
+- **Red, "Not workable"**: no hired agent could ever take this stage. For example, you hired no builders, the Review stage needs a senior reviewer and you only hired juniors, or the only reviewer built the card itself (a reviewer never reviews their own work, and a large change needs two different reviewers). The tooltip has a **Hire** link to open the Hire form with the missing role and seniority pre-filled.
+- **Amber, "Waiting"**: agents exist but cannot work right now. Their workstation is offline, the card's repository is not cloned on any of their machines, or they have all been busy with other work for more than ten minutes. This clears by itself when the workstation comes back, the repository is cloned, or the agent is free.
 
 ## Creating a card {#creating-a-card}
 
 To create a card:
 
-1. Click **Create card** on the board or in a project, or press **n** anywhere.
+1. Click **New card** on the board, or press **n** anywhere.
 2. Fill in the form:
-   - **Title and type**: what the work is (e.g., "Fix login timeout, bug").
+   - **Project** and **Card type** (feature, bug, support, refactor, docs).
+   - **Title**: what the work is (e.g., "Fix login timeout").
+   - **Repository** and **Completion action**: how to ship it (`pr`, `push_branch` or `merge`).
+   - **Priority**, and **Docs needed** (whether a technical writer should document it).
    - **Context**: why this exists, the current behaviour.
    - **Requirements**: what must be done.
-   - **Acceptance criteria**: what done looks like.
+   - **Acceptance criteria**: what done looks like, one per line.
    - **Affected areas**: which files or systems.
    - **Constraints**: limits and linked decisions.
-   - **Test plan**: E2E test scenarios (for Code projects).
-   - **Completion action**: how to ship it (PR, push branch, merge to main).
-   - **Docs needed**: whether a technical writer should document it.
-3. Save as a draft, or click **Specify** to move it to the queue (requires all fields).
+   - **Test plan**: the E2E test scenarios.
+3. Click **Save draft**, or click **Specify** to send it on (this requires every field a build needs; the form tells you what is missing).
 
-Drafts can stay until you are ready to queue them.
+Drafts can stay until you are ready to specify them. A draft saved with missing fields can be finished later on its card page, where **Specify** is also offered.
 
 ## Editing a card {#editing-a-card}
 
 You can edit a card while it is a draft or queued and unclaimed:
 
-1. Click the card on the board or find it on the project page.
+1. Click the card on the board.
 2. Click **Edit**.
 3. Change what you need: title, requirements, completion action, priority, docs needed, or workflow fields.
 4. Click **Save**.
@@ -64,15 +68,15 @@ To move a card to a different stage (for example to fix a stuck card):
 
 1. Click the card.
 2. Click **Move**.
-3. Choose the stage.
+3. Choose the **Target stage**, give a **Reason** (required) and click **Move card**.
 
-You can also release the card back to the queue so another agent can claim it, or cancel it entirely.
+The **More actions** menu (the three dots) also has **Release** (put the card back in the queue so another agent can claim it), **Re-home** (forget its workstation and worktree) and **Cancel card** (a reason is required). Only the project owner (Owner and Admins) or the card's creator sees these actions.
 
 ## Backing off {#backing-off}
 
-When three shifts on the same card end with no report within ten minutes (the agent crashed or timed out), the card shows an amber **backing off** badge. Guildwise HQ waits 1 minute before offering it again. If it fails again, the next wait is longer, up to 1 hour.
+When three shifts on the same card end with no report within ten minutes (the agent crashed or timed out), the card shows an amber badge such as "backing off until 14:32 (3 failures)", and a "keeps failing" item lands on your desk. Guildwise HQ waits 1 minute before offering it again; every further failure doubles the wait, up to 1 hour.
 
-A report (any shift result) resets the wait. If the card fails again, the wait is longer. To fix it:
+Any report from an agent ends the back-off. To fix it:
 
 1. Find what the agent cannot do: maybe a tool is denied, or a required capability is missing.
 2. Fix it.
@@ -82,13 +86,13 @@ Moving the card to another stage also clears the back-off.
 
 ## Risk tier {#risk-tier}
 
-Risk is auto-computed from the size of changes (small: <= 100 lines changed; large: > 100 lines). It sets how many reviewers must approve and whether the full test suite runs after merging.
+Risk is computed when the builder hands off. A card is **large** when 200 or more lines changed, when the change touches the project's architectural paths (set in **Project settings > Basics** as architectural globs), or when it is a refactor; otherwise it is small. Small cards need one reviewer's approval, large cards two, and a large change that is merged into the working branch waits for your approval on the desk (unless you turned that off in the project's merging settings).
 
 You can override it:
 
 1. Click the card.
-2. Next to the risk tier, click **Change**.
-3. Pick small, large, or go back to the computed tier.
-4. Give a reason.
+2. In **Details**, next to the risk tier, click **Change**.
+3. Pick small, large, or (once overridden) back to the one computed from the diff.
+4. Give a reason and click **Set risk tier**.
 
-The override shows as a badge and the reason is recorded in the timeline. Once overridden, the diff no longer changes it.
+The override shows as a badge on the card and the reason is recorded. Once overridden, the diff no longer changes it.

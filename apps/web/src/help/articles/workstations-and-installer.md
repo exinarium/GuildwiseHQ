@@ -22,9 +22,9 @@ The runner on each workstation:
 
 1. Go to **Workstations** (sidebar: Organization) and click **Add a workstation** (or the button in the middle if the list is empty).
 2. **Pick the system**: Windows, Linux or macOS. The page guesses from your browser; change it if needed. Optionally type a name for the workstation.
-3. **Read the steps and copy the command**: the command contains a link (works 30 minutes) and a pairing code (one time only). It never contains a password. If 30 minutes pass, choose your system again for a new one.
+3. **Read the steps and click Copy command**: the command contains a link (works 30 minutes) and a pairing code (one time only). It never contains a password. You can also read the whole script first with **Download the script**. If 30 minutes pass, choose your system again for a new one.
 4. **Run the command on that computer**: open a terminal (Windows: PowerShell), paste and press Enter. Say yes when it asks permission. Windows may ask to restart; the installer carries on by itself when you sign in again.
-5. **Watch this page**: it shows the installer starting, pairing ("Paired as..."), then health checks one by one, and finally **Ready**. The installer log shows each step. If it stops, the last line marked [x] says what to fix.
+5. **Watch this page**: it shows the installer starting, pairing ("Paired as..."), then **Health checks** one by one, and finally **Ready**. The **Installer log** shows each step. If it stops, the last line marked [x] in the terminal (shown as [fail] in the log) says what to fix.
 
 The installer asks only what it must: your password once (to install system tools), whether you want optional extras (yt-dlp for video transcripts; Docker, only if testers run containers), the folders that hold your code (it suggests `~/src`), and how Claude should sign in.
 
@@ -41,20 +41,18 @@ Choose whichever your organization provided. You can choose later and run `claud
 
 Only needed when the guided setup is not an option:
 
-1. Go to **Workstations** and click **Pair workstation**.
-2. Copy the code `XXXX-XXXX` (valid 10 minutes).
+1. Go to **Workstations** and click **Pair workstation** (or **Pair it with a code instead** in the Add a workstation window).
+2. Click **Generate pairing code** and copy the command it shows. The code (`XXXX-XXXX`) is valid for 10 minutes.
 3. On the computer, download or build the runner.
-4. Pair it, add your repository folders, and start it as a service.
+4. Run the pair command, add your repository folders (`aom-runner repos add`), and start the runner as a service.
 
 See the installer's help links for your system's commands. On Windows, install the runner inside WSL2 (Ubuntu): that is the only way to get a sandbox.
 
 ## Health checks {#health-checks}
 
-After the installer finishes, go to **Workstations** and click on the workstation. It shows health checks: Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories, and server connectivity.
+While the installer runs, this page lists the health checks as they finish: Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories and server connectivity. Each shows **ok**, **warn** or **fail**. A **fail** means something is missing or broken and the line says what. A **warn** (Docker, yt-dlp) is optional.
 
-A **red X** means something is missing or broken. Click it to see what and what to fix. Amber warnings (Docker, yt-dlp) are optional.
-
-If you need to run checks again, click **Run doctor** on the workstation card.
+Afterwards, a workstation's card on the **Workstations** page shows whether it is **Connected** or **Offline**, its runtimes (with a sandbox warning if one cannot sandbox agents), how many shifts are running, and its repositories. To run the checks again, run `aom-runner doctor` on that computer.
 
 ## Windows {#windows}
 
@@ -64,6 +62,6 @@ If you need to run checks again, click **Run doctor** on the workstation card.
 
 For vault SSH keys on Windows, ensure git can find them (OpenSSH or PuTTY with Pageant).
 
-## Unpairing {#health-checks}
+## Unpairing {#unpairing}
 
-If a workstation goes away (you sold the computer, decommissioned a server), go to **Workstations** and click its menu to **Unpair**. The runner stops connecting and any agents assigned to it show offline.
+If a workstation goes away (you sold the computer, decommissioned a server), go to **Workstations** and click **Unpair** on its card, then confirm. Its runner token stops working and the runner shuts down, cards claimed there go back to the queue, and its agents wait until you re-home them. To use the machine again, pair it with a new code.

@@ -12,12 +12,12 @@ A **schedule** is a trigger (when something happens) and one action (what to do)
 To create a schedule:
 
 1. Go to **Schedules** and click **New schedule**.
-2. Pick a trigger (the **When** step).
-3. Pick an action (the **What** step).
+2. Pick a trigger (the **When** step) and click **Next**.
+3. Pick an action (the **What** step) and click **Next**.
 4. Set details (the **Details** step).
-5. Click **Create**.
+5. Click **Create schedule**.
 
-Schedules run on your workstation or on the server, never in your browser. You see the history of every run, with logs when something fails.
+Schedules run on your workstation or on the server, never in your browser. Each schedule can be run now, paused or resumed, edited and deleted. You see the history of every run, with logs when something fails. Schedules that act for the whole organization (no project) can only be changed by the Owner and Admins.
 
 ## Triggers {#triggers}
 
@@ -33,10 +33,10 @@ A trigger is when the schedule fires:
 An action is what happens:
 
 - **Create a card** from a template (title, type, fields). Queued ahead of normal work.
-- **Run a regression**: one regression card per platform (web, mobile, or both).
+- **Run a regression**: one regression card per platform (web, mobile, or both), queued at Test.
 - **Ask DevOps**: a request to a workstation's DevOps engineer, or a repository hygiene run.
 - **Ask the BA**: free-text instructions for the BA (read-only; it reads ledger, desk, vault, repositories).
-- **Poll GitHub or Jira issues**: new issues go into intake with the BA, one conversation each.
+- **Poll GitHub issues** or **Poll Jira issues**: new issues go into intake with the BA, one conversation each.
 - **Send a webhook**: POST JSON to a URL. Supports generic JSON, Slack incoming webhooks, Microsoft Teams. Signed and retried on failure.
 - **E-mail a digest**: the floor report (whole organization) or a project summary, sent at the time you set.
 
@@ -58,7 +58,7 @@ Schedules can integrate with GitHub, Jira, Slack, Microsoft Teams, n8n, Zapier a
 
 **GitHub and Jira polling**: polls for new issues and brings them into intake.
 
-**Webhooks**: send signed JSON to any URL. Every request includes a signature header (`X-AOM-Signature: sha256=<hmac-sha256 of timestamp and body>`). Failed deliveries (5xx, 429, network error) are retried at 1 minute, 5 minutes, 30 minutes and 2 hours. Other 4xx errors are final.
+**Webhooks**: send signed JSON to any URL. Every request includes a signature header (`X-AOM-Signature: sha256=<hmac-sha256 of "timestamp.body">`, with the timestamp in `X-AOM-Timestamp`). Failed deliveries (5xx, 429, 408, network error) are retried after 1 minute, 5 minutes, 30 minutes and 2 hours, five tries in all. Other 4xx errors are final.
 
 When creating a webhook, the schedule shows its secret once: the key for the signature. Click **New secret** to replace it.
 

@@ -32,7 +32,7 @@ export const GLOSSARY: GlossaryEntry[] = [
     term: 'Budget',
     aka: ['spending limit', 'cap'],
     definition:
-      'A monthly spending limit for the organization or a project. When it is reached, new work pauses until you raise it or override it.',
+      'A monthly spending limit for a project or an interest. When it is reached, new work pauses until you raise it or override it.',
     article: 'budgets-and-costs#monthly-budgets',
   },
   {
@@ -73,7 +73,7 @@ export const GLOSSARY: GlossaryEntry[] = [
     term: 'Follow-up',
     aka: ['followup', 'phase follow-up'],
     definition:
-      'Work that starts by itself when a phase is finished, such as a release check or a regression run. You approve it on the desk first.',
+      'Work that starts by itself when a phase is finished, such as a deploy or a regression run. You approve it on the desk first.',
     article: 'phases#followups',
   },
   {
@@ -132,7 +132,7 @@ export const GLOSSARY: GlossaryEntry[] = [
   {
     term: 'Risk tier',
     definition:
-      'How careful an agent must be with a card: higher tiers need more review or your approval before anything leaves your machine.',
+      'How big and risky a change is: small or large. A large change needs two reviewers and, when merged, your approval on the desk.',
     article: 'board-and-cards#risk-tier',
   },
   {
@@ -146,7 +146,7 @@ export const GLOSSARY: GlossaryEntry[] = [
     term: 'Schedule',
     aka: ['trigger', 'automation'],
     definition:
-      'Work that starts by itself: at a time of day, when a webhook arrives, or when an issue gets a label. It has a trigger and an action.',
+      'Work that starts by itself: at a time of day, when something happens (such as a phase finishing), or when an issue gets a label. It has a trigger and an action.',
     article: 'schedules-and-integrations#schedules',
   },
   {

@@ -11,10 +11,9 @@ order: 22
 
 Open **Contact us** from:
 
-- The user menu (top right).
+- The user menu (click your name at the bottom of the sidebar).
+- The **Contact us** tab on the Help page.
 - The command palette (press Ctrl K and type "contact").
-- The Help page.
-- The installer's failure screens (if something goes wrong).
 - The sign-in page footer (if you cannot sign in yet).
 
 To send a message:
@@ -33,8 +32,8 @@ Open **What we send with your request** to see exactly what goes along:
 
 - The page you were on.
 - The app version.
-- Your browser and screen details.
-- The last few errors from your browser (untick the box to leave them out).
+- Your browser, screen size and time zone.
+- The last few errors from your browser, up to ten (untick the box to leave them out).
 
 Your name, email and organization are added automatically.
 
@@ -46,7 +45,7 @@ We answer by email, and the answer also appears under **Help > My requests**.
 - **Answered**: we have replied; you can write again if you want.
 - **Closed**: we are done.
 
-When we reply to an answered or closed request, it reopens automatically. Requests with a new answer show a "New reply" badge.
+If you write again on an answered or closed request, it reopens. Requests where our reply is the last message show a "New reply" badge, and the My requests tab shows how many are new.
 
 You can reply in the app or just read our answer there.
 
@@ -54,7 +53,7 @@ You can reply in the app or just read our answer there.
 
 If you cannot sign in:
 
-1. Go to **Contact us** on the sign-in page.
+1. Click **Contact us** at the bottom of the sign-in page.
 2. Give your name and email.
 3. Write your message.
 

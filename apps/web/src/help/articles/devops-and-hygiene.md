@@ -9,7 +9,7 @@ Every workstation has a **DevOps engineer** agent: one per machine, free and alw
 
 ## The DevOps engineer {#devops-engineer}
 
-You get one DevOps engineer per workstation automatically. It cannot be fired, only reset (which clears its sandbox but keeps it assigned). It is always available and outside the queue.
+You get one DevOps engineer per workstation automatically. It cannot be fired, only reset (which clears its sandbox but keeps it assigned). It does not take cards from the queue.
 
 The DevOps engineer handles:
 - Cloning and setting up projects.
@@ -18,20 +18,20 @@ The DevOps engineer handles:
 - Pulling and pushing vault changes.
 - Repository hygiene (see below).
 
-You can ask it directly: go to **Workstations** and click **Ask DevOps**, or in a chat with an agent type a request.
+You can ask it directly: open the workstation on the **Workstations** page, type what you need in **Ask DevOps** and click **Send request**. You can also start a chat with it (see Chat with agents). In the same panel you decide what it may do on its own: install packages and tools, use Docker, use elevated privileges (sudo) and write to extra paths. Anything outside that waits for your approval on the desk.
 
-Because it is free and works everywhere, you cannot extend it with extra instructions, skills or custom permissions. Only its model can change.
+Because it is free, you cannot extend it with extra instructions, skills or custom permissions. Only its model, effort and runtime can change.
 
 ## Repository hygiene {#hygiene}
 
-Once a day per workstation (you can change the schedule or turn it off under **Workstations**, then **Repository hygiene**), the DevOps engineer tidies the repositories on that machine. For each repository it:
+Once a day per workstation by default, the DevOps engineer tidies the repositories on that machine. On the **Workstations** page, open the workstation and find **Repository hygiene**: **Run** sets how often (off, every hour, every 6 hours, every 12 hours, daily or weekly) and **Run hygiene now** starts a run at once. For each repository it:
 
 - Fetches and pulls the latest changes.
 - Commits any uncommitted changes to the working branch.
 - Pushes commits that have not been pushed yet.
 - Removes branches and worktrees (temporary checkouts) of finished cards.
 
-Everything it does is logged on the Workstations page.
+The panel shows the last and next run and any open findings.
 
 If hygiene finds a conflict, uncommitted changes on the wrong branch, an authentication failure, or a missing clone, it does not force anything. These show as failures in your BA's daily report until a later run finds the repository clean.
 
@@ -41,11 +41,11 @@ The **working branch** is the main branch where agents commit their finished wor
 
 When a repository has no confirmed working branch (project settings show **not confirmed**), the DevOps engineer does not commit, pull or push in it. Instead, it asks you on the desk: **Which branch is the working branch of `<repository>`?**
 
-The question is pinned and blocking (it stops the desk from clearing). Answer it by picking a branch from the options or typing its name. Your answer is stored and written to the ledger so nobody asks again.
+When the repository has uncommitted changes waiting, the question is pinned and blocking; otherwise it is an ordinary question. Answer it by picking a branch from the options or typing its name. Your answer is stored for the repository.
 
-When something changes (a new intake starts, a new phase is created), the DevOps engineer asks again so you can keep or change it.
+When something changes (for example a new phase is created), the DevOps engineer asks again ("Keep `<branch>` as the working branch...?") so you can keep or change it.
 
-You can also set or change the working branch any time in project settings, in the repository row.
+You can also set or change it any time in **Project settings**, under **Repos**: use **Set** or **Change** on the repository row.
 
 ## Creating a new repository {#new-repository}
 
@@ -53,7 +53,7 @@ Agents cannot create GitHub repositories themselves: their sandbox has no GitHub
 
 1. The BA or DevOps engineer asks with `aom repo create`.
 2. The request appears on your desk as **Create repository `<owner/repo>`**.
-3. You review it and click **Create repository**.
+3. You review it and click **Create repository** (or **Reject**).
 
 On approval, your runner creates the repository using your GitHub login, pushes an initial commit to `main`, clones it on the workstation, and tells the server. The project gains the repository with `main` as the working branch. Agents are then told so they can continue.
 
