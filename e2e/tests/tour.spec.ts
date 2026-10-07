@@ -173,6 +173,7 @@ test('the Help centre: entries in the sidebar, the user menu and Ctrl+K, search,
   await page.getByTestId('help-search').fill('qqzzxx');
   await expect(page.getByText(/Nothing found/)).toBeVisible();
   await page.getByTestId('help-search').fill('');
+  await page.getByRole('link', { name: 'All articles' }).click();
   await page.getByTestId('help-glossary-link').click();
   await expect(page.getByTestId('help-glossary')).toContainText('Allow-list');
   await expect(page.getByTestId('help-glossary')).toContainText('Workstation');

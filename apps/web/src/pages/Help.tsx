@@ -7,7 +7,7 @@ import { ContactForm, prefillFor } from '../components/support/ContactForm.tsx';
 import { MyRequest } from '../components/support/MyRequest.tsx';
 import { StatusBadge } from '../components/support/StatusBadge.tsx';
 import { useTour } from '../components/tour/TourContext.tsx';
-import { Tabs } from '../components/ui/Tabs.tsx';
+import { panelId, Tabs, tabId } from '../components/ui/Tabs.tsx';
 import { Badge, Button, EmptyState, ErrorBox, ListSkeleton, PageHeader, Panel } from '../components/ui.tsx';
 import { ARTICLES, articleBySlug, glossaryId, helpBase, helpPath, searchHelp } from '../help/articles.ts';
 import { GLOSSARY } from '../help/glossary.ts';
@@ -52,9 +52,11 @@ export function Help() {
         ]}
         className="mb-5"
       />
-      {tab === 'help' && <HelpCentre />}
-      {tab === 'contact' && <ContactTab />}
-      {tab === 'requests' && <RequestsTab />}
+      <div role="tabpanel" id={panelId('help', tab)} aria-labelledby={tabId('help', tab)}>
+        {tab === 'help' && <HelpCentre />}
+        {tab === 'contact' && <ContactTab />}
+        {tab === 'requests' && <RequestsTab />}
+      </div>
     </div>
   );
 }
@@ -74,6 +76,7 @@ function TourCard() {
   const tour = useTour();
   if (!tour.available) return null;
   const canResume =
+    !tour.active &&
     (tour.status === 'dismissed' || tour.status === 'in_progress') &&
     tour.step > 0 &&
     tour.step < tour.total - 1;
@@ -118,7 +121,7 @@ function SearchBox({ value, onChange }: { value: string; onChange: (v: string) =
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-label="Search the help articles"
-        placeholder="Search the help: try “budget”, “allow-list” or “two-factor”"
+        placeholder="Search the help, for example “budget”"
         data-testid="help-search"
         className="h-11 w-full rounded-control border border-control bg-surface pr-3 pl-10 text-base text-fg placeholder:text-subtle"
       />

@@ -343,13 +343,13 @@ export function TourProvider({
               <div
                 aria-hidden="true"
                 data-testid="tour-spotlight"
-                className="pointer-events-none fixed z-80 rounded-[12px] ring-2 ring-accent transition-[left,top,width,height] duration-200 ease-out motion-reduce:transition-none"
+                className="pointer-events-none fixed z-80 rounded-[12px] transition-[left,top,width,height] duration-200 ease-out motion-reduce:transition-none"
                 style={{
                   left: box.left - PAD,
                   top: box.top - PAD,
                   width: box.width + PAD * 2,
                   height: box.height + PAD * 2,
-                  boxShadow: '0 0 0 100vmax var(--overlay)',
+                  boxShadow: '0 0 0 3px var(--accent), 0 0 0 100vmax var(--overlay)',
                 }}
               />
             )}

@@ -52,7 +52,7 @@ Some stages need seniors (e.g., Review needs a senior reviewer). If you hire onl
 
 ## Runtime and model {#runtime-and-model}
 
-Every agent uses Claude (Claude Opus 4, Claude Sonnet 4.5, or another version). The model affects cost and capability.
+Every agent runs on a Claude model that you choose when you hire it. The model affects cost and capability.
 
 When hiring, pick the model and effort level. You can change both later on the agent's card on the Agents page.
 
