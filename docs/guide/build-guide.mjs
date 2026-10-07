@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Builds Agent-Org-Manager-User-Guide.pdf from guide.html with Playwright Chromium.
+// Builds Guildwise-HQ-User-Guide.pdf from guide.html with Playwright Chromium.
 // Uses the Playwright and pdf-parse packages of the e2e workspace package (pnpm install; pnpm --filter @aom/e2e exec playwright install chromium).
 // Usage: node docs/guide/build-guide.mjs [--out <file.pdf>]
 //
@@ -18,10 +18,10 @@ const { chromium } = e2eRequire('@playwright/test');
 const pdfParse = e2eRequire('pdf-parse/lib/pdf-parse.js');
 
 const outArg = process.argv.indexOf('--out');
-const OUT = outArg > 0 ? path.resolve(process.argv[outArg + 1]) : path.join(here, 'Agent-Org-Manager-User-Guide.pdf');
+const OUT = outArg > 0 ? path.resolve(process.argv[outArg + 1]) : path.join(here, 'Guildwise-HQ-User-Guide.pdf');
 
-const footer = `<div style="width:100%;font-family:'Adwaita Sans','Liberation Sans',Arial,sans-serif;font-size:7.5pt;color:#6b7280;padding:0 15mm;display:flex;justify-content:space-between;">
-  <span>Agent Org Manager &middot; User guide &amp; handover 1.0 &middot; 4 October 2026</span>
+const footer = `<div style="width:100%;font-family:'Geist','Liberation Sans',Arial,sans-serif;font-size:7.5pt;color:#6b7280;padding:0 15mm;display:flex;justify-content:space-between;">
+  <span>Guildwise HQ &middot; User Guide &middot; 7 October 2026</span>
   <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`;
 
 const render = (page) => page.pdf({
@@ -29,7 +29,7 @@ const render = (page) => page.pdf({
   headerTemplate: '<span></span>', footerTemplate: footer,
   margin: { top: '16mm', bottom: '18mm', left: '15mm', right: '15mm' },
   preferCSSPageSize: true,
-  scale: 0.74, // the guide has many wide screenshots and tables: 86 percent keeps the text readable and the page count reasonable
+  scale: 0.9,
 });
 
 const pageTexts = async (buf) => {
@@ -50,7 +50,8 @@ try {
   const page = await browser.newPage();
   await page.goto(pathToFileURL(path.join(here, 'guide.html')).href, { waitUntil: 'load' });
   await page.evaluate(() => document.fonts.ready);
-  const ids = await page.$$eval('#toc a[data-id]', (as) => as.map((a) => a.dataset.id));
+  const entries = await page.$$eval('#toc a[data-id]', (as) => as.map((a) => ({ id: a.dataset.id, text: a.querySelector('.t').textContent })));
+  const ids = entries.map((e) => e.id);
 
   let pdf;
   let previous = '';
@@ -58,8 +59,13 @@ try {
     pdf = await render(page);
     const texts = await pageTexts(pdf);
     const numbers = {};
-    for (const id of ids) {
-      const idx = texts.findIndex((t) => t.includes(`TOCMARK_${id.replace(/-/g, 'x')}_`));
+    const squash = (t) => t.replace(/\s+/g, '');
+    let from = 0;
+    for (const { id, text } of entries) {
+      // chapters carry an invisible marker; sections are found by their heading text, searching forward
+      let idx = id.includes('-') ? -1 : texts.findIndex((t) => t.includes(`TOCMARK_${id}_`));
+      if (idx < 0) idx = texts.findIndex((t, n) => n >= from && squash(t).includes(squash(text)));
+      if (idx >= 0) from = idx;
       numbers[id] = idx >= 0 ? String(idx + 1) : '?';
     }
     const key = JSON.stringify(numbers);

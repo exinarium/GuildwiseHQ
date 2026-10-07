@@ -15,41 +15,44 @@ const OUT = path.join(here, 'assets');
 const TOOLS = process.env.GUIDE_TOOLS || '/tmp/guide-tools';
 const sharp = createRequire(path.join(TOOLS, 'package.json'))('sharp');
 
-// Tall pictures are cut into an upper and a lower half (name.jpg, name-b.jpg, 30 px overlap) so the text stays legible on A4;
-// a few are cut to their top part (CROP_TOP: name -> height in px).
-export const SPLIT = ['card-new', 'card-new-errors', 'card-new-missing', 'card-conflict', 'card-evidence', 'card-outbound-edited', 'card-outbound-failed', 'card-published', 'card-research-rework', 'desk', 'desk-maya', 'feed', 'workstations', 'project-settings', 'project-settings-maya', 'org-workflow-editor', 'org-role-editor', 'dlg-edit-card', 'admin', 'hr', 'hr-maya'];
-const CROP_TOP = { 'chat-ba': 520, 'chat-ba-2': 520, 'chat-reviewer': 420, 'chat-start': 380 };
+// Tall pictures are limited by the guide's CSS (max-height), so nothing is cut here. Phone shots keep their size.
 fs.mkdirSync(OUT, { recursive: true });
 let total = 0;
 let count = 0;
 const produced = new Set();
+
+// Page shots are taken at a fixed height: cut the empty band at the bottom (uniform background), keep 28 px of air.
+async function trimBottom(buf) {
+  const { data, info } = await sharp(buf).raw().toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  const px = (x, y) => y * width * channels + x * channels;
+  const bg = [data[px(width - 1, height - 1)], data[px(width - 1, height - 1) + 1], data[px(width - 1, height - 1) + 2]];
+  let last = height - 1;
+  rows: for (; last > 0; last--) {
+    for (let x = 0; x < width; x += 2) {
+      const o = px(x, last);
+      if (Math.abs(data[o] - bg[0]) + Math.abs(data[o + 1] - bg[1]) + Math.abs(data[o + 2] - bg[2]) > 12) break rows;
+    }
+  }
+  const keep = Math.min(height, last + 28);
+  if (height - keep < 60) return buf;
+  return sharp(buf).extract({ left: 0, top: 0, width, height: keep }).png().toBuffer();
+}
 for (const f of fs.readdirSync(RAW).filter((x) => x.endsWith('.png')).sort()) {
   const name = f.replace(/\.png$/, '');
   const meta = await sharp(path.join(RAW, f)).metadata();
   let img = sharp(path.join(RAW, f)).flatten({ background: '#ffffff' });
-  // the centred sign-in style pages are mostly white: cut the empty margins and keep a little air
-  if (/^(login|login-error|invite-accept|invite-errors|invite-invalid)$/.test(name)) {
-    img = sharp(await img.trim({ threshold: 8 }).png().toBuffer()).extend({ top: 24, bottom: 24, left: 24, right: 24, background: '#ffffff' });
-  }
   if ((meta.width ?? 0) > 1600) img = img.resize({ width: 1600 });
-  const flat = await img.png().toBuffer();
-  const fm = await sharp(flat).metadata();
+  let flat = await img.png().toBuffer();
+  flat = await trimBottom(flat);
   const write = async (buf, out) => {
-    const info = await sharp(buf).jpeg({ quality: 82, mozjpeg: true }).toFile(path.join(OUT, `${out}.jpg`));
+    const info = await sharp(buf).jpeg({ quality: 80, mozjpeg: true }).toFile(path.join(OUT, `${out}.jpg`));
     produced.add(`${out}.jpg`);
     total += info.size;
     count++;
     console.log(out.padEnd(30), `${info.width}x${info.height}`.padStart(10), `${Math.round(info.size / 1024)}K`.padStart(6));
   };
-  if (CROP_TOP[name] && fm.height > CROP_TOP[name]) {
-    await write(await sharp(flat).extract({ left: 0, top: 0, width: fm.width, height: CROP_TOP[name] }).png().toBuffer(), name);
-  } else if (SPLIT.includes(name) && fm.height > 700) {
-    const half = Math.ceil(fm.height / 2);
-    await write(await sharp(flat).extract({ left: 0, top: 0, width: fm.width, height: half + 15 }).png().toBuffer(), name);
-    await write(await sharp(flat).extract({ left: 0, top: half - 15, width: fm.width, height: fm.height - half + 15 }).png().toBuffer(), `${name}-b`);
-  } else {
-    await write(flat, name);
-  }
+  await write(flat, name);
 }
 console.log(`total ${(total / 1024 / 1024).toFixed(2)} MB, ${count} figures`);
-for (const f of fs.readdirSync(OUT)) if (!produced.has(f)) { fs.rmSync(path.join(OUT, f)); console.log('removed stale', f); }
+for (const f of fs.readdirSync(OUT)) if (f !== 'fonts' && !f.endsWith('.svg') && !produced.has(f)) { fs.rmSync(path.join(OUT, f)); console.log('removed stale', f); }

@@ -1,917 +1,1041 @@
-# Guildwise HQ: User Guide for Managers
+# Guildwise HQ: User Guide
 
-Guildwise HQ is your guild of AI agents: many hands, one master. This guide is for the master, the manager who sets the standard and answers the agents' questions.
+*Many hands. One master.*
 
-First login and setup, managing projects and agents, the board and decision desk, intake from external systems, and organization design.
+Guildwise HQ is a place where you run a team of AI agents the way you would run a small company. You write down what you want. The agents do the work. They stop and ask you whenever a decision is really yours to make.
 
-## Getting started
+This guide is for people who have never worked with AI agents before. You do not need to be a programmer to read it. Where a technical word is unavoidable, it is explained the first time it appears and again in the glossary in chapter 2.
 
-### First login
+**How to use this guide**
 
-1. Check your email for an invitation link. It comes either from the platform administrator ("start your organization": you become its Owner) or from the Owner or an Admin of an organization ("join Acme": you become a Member or Admin)
-2. Click the link, choose your name and a password (12+ characters). If you already have an account, sign in instead and confirm
-3. You are now logged in and can access the dashboard
+- New here? Read chapters 1 to 3. They take about half an hour, and chapter 3 gets you from an invitation to your first working card in about 15 minutes.
+- Then read the chapter for your role: chapter 4 for Owners and Admins, chapter 5 for Members, chapter 6 for Guests, chapter 7 for the platform administrator (the person who runs the Guildwise HQ service itself).
+- Chapter 8 shows four everyday workflows from start to finish. Chapter 9 helps when something goes wrong. Chapters 10 and 11 cover Contact us and frequently asked questions.
+- Inside the app, the **Help** page has short articles on every topic. This guide points to them like this: *In the app: Help, "Budgets and costs"*. The same articles open from the small **?** hints next to many headings.
 
-Every account belongs to an organization. There are no accounts without one, except the platform administrator.
+<!-- toc -->
+**Contents**
 
-### Add a workstation
+- [1. What Guildwise HQ is](#1-what-guildwise-hq-is)
+  - [1.1 The idea in one minute](#11-the-idea-in-one-minute)
+  - [1.2 What you do and what the agents do](#12-what-you-do-and-what-the-agents-do)
+  - [1.3 Where the agents run](#13-where-the-agents-run)
+- [2. Key ideas](#2-key-ideas)
+  - [2.1 The words you will meet](#21-the-words-you-will-meet)
+  - [2.2 How a card travels](#22-how-a-card-travels)
+  - [2.3 Who is allowed to do what](#23-who-is-allowed-to-do-what)
+- [3. Getting started in 15 minutes](#3-getting-started-in-15-minutes)
+  - [3.1 Accept the invitation and sign in (2 minutes)](#31-accept-the-invitation-and-sign-in-2-minutes)
+  - [3.2 Turn on two-factor login (3 minutes)](#32-turn-on-two-factor-login-3-minutes)
+  - [3.3 Take the tour (1 minute)](#33-take-the-tour-1-minute)
+  - [3.4 Add a workstation (5 minutes)](#34-add-a-workstation-5-minutes)
+  - [3.5 Hire your first agents (2 minutes)](#35-hire-your-first-agents-2-minutes)
+  - [3.6 Create your first project (1 minute)](#36-create-your-first-project-1-minute)
+  - [3.7 Create your first card (2 minutes)](#37-create-your-first-card-2-minutes)
+  - [3.8 Watch it happen](#38-watch-it-happen)
+- [4. For Owners and Admins](#4-for-owners-and-admins)
+  - [4.1 Your organization](#41-your-organization)
+  - [4.2 Members, invitations and guests](#42-members-invitations-and-guests)
+  - [4.3 Projects](#43-projects)
+  - [4.4 Agents, hiring and allow-lists](#44-agents-hiring-and-allow-lists)
+  - [4.5 The desk, the ledger and standing orders](#45-the-desk-the-ledger-and-standing-orders)
+  - [4.6 Budgets and costs](#46-budgets-and-costs)
+  - [4.7 The org chart, roles and workflows](#47-the-org-chart-roles-and-workflows)
+  - [4.8 Schedules and integrations](#48-schedules-and-integrations)
+  - [4.9 Interests](#49-interests)
+  - [4.10 Phases and follow-ups](#410-phases-and-follow-ups)
+  - [4.11 Your BA reports to you](#411-your-ba-reports-to-you)
+  - [4.12 Testing, finalizing and risk](#412-testing-finalizing-and-risk)
+  - [4.13 Conversion, the Research tab and research cards](#413-conversion-the-research-tab-and-research-cards)
+  - [4.14 Archive and delete](#414-archive-and-delete)
+  - [4.15 Security and two-factor login](#415-security-and-two-factor-login)
+  - [4.16 Plan and limits](#416-plan-and-limits)
+  - [4.17 Chatting with agents](#417-chatting-with-agents)
+- [5. For Members](#5-for-members)
+  - [5.1 What you can do](#51-what-you-can-do)
+  - [5.2 Your first day](#52-your-first-day)
+  - [5.3 Good habits](#53-good-habits)
+- [6. For Guests](#6-for-guests)
+  - [6.1 Accepting the invitation](#61-accepting-the-invitation)
+  - [6.2 What you can do as a Guest](#62-what-you-can-do-as-a-guest)
+  - [6.3 What you cannot do](#63-what-you-cannot-do)
+- [7. For the platform administrator](#7-for-the-platform-administrator)
+  - [7.1 First sign-in and two-factor login](#71-first-sign-in-and-two-factor-login)
+  - [7.2 Organizations](#72-organizations)
+  - [7.3 Invitations: starting a new organization](#73-invitations-starting-a-new-organization)
+  - [7.4 Accounts](#74-accounts)
+  - [7.5 The Support inbox](#75-the-support-inbox)
+  - [7.6 The audit log](#76-the-audit-log)
+- [8. Everyday workflows](#8-everyday-workflows)
+  - [8.1 A feature, from intake to deploy](#81-a-feature-from-intake-to-deploy)
+  - [8.2 From research to a project](#82-from-research-to-a-project)
+  - [8.3 Setting up interests without being flooded](#83-setting-up-interests-without-being-flooded)
+  - [8.4 Controlling spend](#84-controlling-spend)
+- [9. Troubleshooting](#9-troubleshooting)
+  - [9.1 The installer](#91-the-installer)
+  - [9.2 The runner is offline](#92-the-runner-is-offline)
+  - [9.3 A card is backing off](#93-a-card-is-backing-off)
+  - [9.4 A budget pause](#94-a-budget-pause)
+  - [9.5 A missing working branch](#95-a-missing-working-branch)
+  - [9.6 Two-factor recovery](#96-two-factor-recovery)
+  - [9.7 Other things you may see](#97-other-things-you-may-see)
+- [10. Contact us](#10-contact-us)
+- [11. Frequently asked questions](#11-frequently-asked-questions)
+- [Appendix A. Where to find things](#appendix-a-where-to-find-things)
+- [Appendix B. More documentation](#appendix-b-more-documentation)
 
-A workstation is a computer of yours (Windows, macOS or Linux) where your agents run code and work on your git repositories. The guided setup installs everything for you; you do not need to know anything about servers.
+<!-- /toc -->
 
-1. Open **Workstations** in the side menu (on a phone, open the menu with the button at the top left) and click **Add a workstation** (on an empty list the same button is in the middle of the page).
-2. **Pick the computer.** The page guesses from your browser (Windows, Linux or macOS); change it if the machine that will run the agents is a different one. Windows runs the agents inside WSL2, Microsoft's built-in Linux: the installer turns it on for you. Optionally type a name for the workstation.
-3. **Read the steps** (with pictures) for your system and **copy the command** with the copy button, or use **Download the script** if you would like to read it first. The command contains a link that works for 30 minutes and a one-time pairing code; it never contains a password or any other long-lived secret. If the 30 minutes pass, choose your system again to get a new one.
-4. **Run it on that computer**: open a terminal (Windows: PowerShell), paste the command and press Enter. Say yes when it asks permission. Windows may ask to restart once; the installer carries on by itself when you sign in again.
-5. **Watch this page.** It shows the installer starting, the computer pairing ("Paired as ..."), then the health checks one by one (Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories, the server), and finally **Ready**. The installer log under the progress shows each step.
 
-The installer asks only what it must: your password once to install system tools, whether you want the optional extras (yt-dlp for video transcripts; Docker, only if your testers run containers), the folders that hold your code (it suggests `~/src`), and how Claude should sign in. It explains the two ways in plain words: a **Claude subscription** (Pro, Max, Team or Enterprise; you sign in with your Claude account in a browser and the agents' work counts against your plan) or an **API key** (you pay for exactly what the agents use). If you choose later, run `claude` on that computer any time; the health check "claude" shows the state.
 
-You can run the same command again at any time: it upgrades the runner, repairs a broken install and keeps your existing pairing. If something goes wrong the installer says what happened, links to the install help and to **Contact us** (see "Contact us and My requests"), and the wizard shows the same links.
 
-**Pair with a code** (for people who already have the runner, or for a machine the installer cannot reach) is still there: the secondary button on the Workstations page generates a one-time code (valid 10 minutes) for `aom-runner pair`, as described in `docs/RUNNER.md`.
 
-#### Installing by hand
 
-Only needed when the guided setup is not an option. Open **Workstations**, click **Pair workstation**, copy the code `XXXX-XXXX` (valid 10 minutes), then install the runner and pair it:
 
-**On Linux/macOS:**
-```sh
-pnpm package:runner    # or download aom-runner-X.tgz from your system
-tar xzf aom-runner-*.tgz && cd aom-runner
-./aom-runner pair --server https://aom.example.com --code XXXX-XXXX --name "Desktop"
-./aom-runner repos add ~/src ~/work    # folders scanned (depth 3) for git repos
-./aom-runner start                     # keep running; run under systemd (see below)
-```
 
-**On macOS:** the same commands as Linux. Agents run inside the built-in Seatbelt sandbox; nothing extra to install.
+## 1. What Guildwise HQ is
 
-**On Windows:** run the runner inside WSL2 (the default and recommended setup). Windows cannot sandbox agents natively, but inside WSL2 the runner gets the same sandbox as on Linux. In short: `wsl --install -d Ubuntu`, then in Ubuntu install Node 22 (nvm), git, gh, `bubblewrap` and `socat`, Claude Code, clone repos under `~/src` (not `/mnt/c`), and run the Linux commands above. The full step-by-step guide is in `docs/RUNNER.md`, section "Windows: run the runner inside WSL2". Running natively on Windows is possible only as an explicit, unsandboxed opt-in (see "Windows workstation notes" below).
+### 1.1 The idea in one minute
 
-Run the runner under systemd (Linux and WSL2), launchd (macOS) so it reconnects automatically on reboot. See `docs/RUNNER.md` for service setup.
+Imagine you hire a small team: someone who builds, someone who checks the work, someone who tests it, and an assistant who keeps notes and reports to you. Each of them can work on several things, but they cannot read your mind. When they are unsure, they ask. When something is risky, they wait for your go-ahead.
 
-**Sandbox warnings.** If a workstation's runner reports that agents run without an OS sandbox, the Workstations page, each affected agent card on the Agents page and the Hire form show an amber warning that cannot be dismissed, and hiring onto it needs a confirmation. A workstation that cannot run agents at all shows why (for example "Native Windows: install the runner in WSL2"). The reason names the actual cause: the platform, the runtime's sandbox set to `off` in the runner config, a missing `bubblewrap` or `socat`, or (tests only) a forced state, and the advice below it fits that cause.
+Guildwise HQ is that team, made of AI agents. It gives you:
 
-Each workstation also shows **Shifts running**, for example "2 of 4": how many agent shifts it runs now and the most it takes at once. That limit is the runner's `maxConcurrentShifts` setting (default 4; see `docs/RUNNER.md`). A shift offered beyond it is refused as busy and the card waits for the next free slot.
+- a **board** that shows every piece of work and where it stands, from left to right;
+- a **desk**, which is your inbox of decisions: questions, approvals and go-aheads that only you can give;
+- **agents** with names, faces and roles, who do the actual work on one of your own computers;
+- a **memory** (the ledger) that remembers every decision, so nobody asks you the same thing twice;
+- **reports and limits**: a daily summary from your business analyst, monthly spending budgets, and loop protection, so the team cannot run away with your money or your patience.
 
-The Workstations page will show your repos once you create a project with one of them.
+![The board of a project, with cards moving from left to right](guide/assets/board-hero.jpg)
 
-### Claude Code credentials (optional)
+### 1.2 What you do and what the agents do
 
-Agents run Claude Code by default. Set credentials in the runner config (mode 0600, never leaves your machine):
-
-**OAuth token (preferred):**
-```
-aom-runner.cmd pair --server ... --code ...  # pairs once
-# Edit ~/.aom-runner/config.json (Windows: %LOCALAPPDATA%\aom-runner\config.json):
-{
-  "runtimes": {
-    "claude-code": {
-      "bin": "claude",
-      "authMode": "oauth",
-      "oauthToken": "...from `claude setup-token`..."
-    }
-  }
-}
-```
-
-**API key** (Data Center/self-hosted Claude):
-```json
-{ "runtimes": { "claude-code": { "authMode": "api_key", "apiKey": "..." } } }
-```
-
-**Local login** (default):
-```json
-{ "runtimes": { "claude-code": { "authMode": "default" } } }
-```
-
-With `default`, each agent gets a symlink to your `~/.claude/.credentials.json`.
-
-## Help, Contact us and My requests
-
-**Help** (in the sidebar and the user menu) has three tabs: the **Help centre** (plain-language answers, starting with "Installing a workstation: if something goes wrong"), **Contact us** and **My requests**.
-
-**Contact us** is in the user menu, in the command palette (press Ctrl K and type "contact"), on the Help page, on the installer's failure screens and, for people who are not signed in, in the footer of the sign-in page (visitors give their name and email; there is a limit of a few requests an hour). Choose what it is about (bug report, question, feature request or billing), write a subject and a message, and optionally attach a screenshot. When you open it from the menu or the palette, the page you were looking at is captured first and attached (look at it, remove it, or upload a different image: PNG, JPEG or WebP up to 2.5 MB). Open **What we send with your request** to see exactly what goes along: the page you were on, the app version, your browser and screen, and the last few errors from your browser (untick the box to leave the errors out). Your name, email and organization are added so that support can answer and look at your account.
-
-We answer by email, and the answer also appears under **Help, My requests**, where you can reply (a reply to an answered or closed request reopens it). A request is **Open** until we answer, **Answered** until you write again, and **Closed** when we are done. Requests with a new answer show a "New reply" badge.
-
-## Organizations, roles and security
-
-An **organization** owns projects, agents, the catalogue, the desk, the ledger and the vaults. Everyone works inside an organization, in one of these roles:
-
-| Role | Can do |
+| You | The agents |
 | --- | --- |
-| **Owner** | Everything an Admin can, plus: invite Admins, change roles, require two-factor login, hand ownership to an Admin. There is exactly one Owner |
-| **Admin** | Create projects, add and remove people, manage vaults, hire and fire any agent, see the plan and limits |
-| **Member** | Work in the projects they were added to: hire agents on their own workstations, move cards, answer the desk |
-| **Guest** | Not a member. Has access to one or more projects of the organization (see below). Guests see nothing at organization level |
+| Say what you want, in plain words, as a card | Turn it into a proper specification, build it, review it, test it |
+| Answer questions on the desk | Ask when they cannot decide, and carry on once you answer |
+| Approve risky steps (merging big changes, posting to a ticket, spending beyond a budget) | Wait for your approval and never go around it |
+| Choose the team, the budgets and the rules | Follow them, and report if something does not fit |
 
-Only the Owner and Admins create projects and add people. There is no setting that changes this.
+### 1.3 Where the agents run
 
-### Switching organizations
+The agents do their work on a computer of yours, called a **workstation**: your own PC, a Mac, or a Linux machine. Your code, your passwords and your files stay on that computer. The Guildwise HQ website only holds the board, the desk and the records. A small helper program called the **runner** (installed in the next chapters with a guided installer) connects the workstation to the website.
 
-You can belong to several organizations. The **organization switcher** at the top of the sidebar shows the one this browser tab works in, and a different tab can work in a different one. Projects of an organization where you are only a guest carry a "Guest" label with the organization's name.
+> **Good to know:** the AI itself is Claude. You sign in to Claude once on your workstation, either with your own Claude subscription or with an API key. The agents' work is billed by Claude to you (a subscription uses your plan, an API key is pay-as-you-go). Guildwise HQ estimates and limits that spend for you (see chapter 4.6).
 
-### Members, invitations and guests
+## 2. Key ideas
 
-Open **Settings > Organization** (Owner and Admins; Members see a read-only member list).
+Read this chapter once. Everything else builds on these words.
 
-- **Members** lists everyone with their role. The Owner changes roles and removes people; Admins remove Members. When someone is removed, their agents are re-homed to you and claimed cards are released. Anyone except the Owner can leave. The Owner must hand over ownership first.
-- **Invitations** shows pending and past invitations (resend, revoke). Invite a person as a Member (with the projects they start on) or, as Owner, as an Admin. They receive an email with a link.
-- **Guests** lists the people from other organizations who have access to your projects.
-- **Plan & limits** shows the plan, status, licence date, usage and feature switches. The Founding plan has no limits yet; the limit fields are empty (unlimited) until pricing is decided. To change the plan, ask your platform administrator.
+### 2.1 The words you will meet
 
-**Guests.** Sharing a project (**Projects > Settings > Members**) invites an existing person who already belongs to an organization. If they have no account, invite them as a Member of your organization instead, or ask the platform administrator for a separate organization for them. A guest accepts in the **Project invitations** inbox on the Projects page, which names the inviting organization.
+| Word | What it means |
+| --- | --- |
+| **Organization** | Your company's space in Guildwise HQ. It holds the people, projects, agents, workstations and records. You can belong to more than one. |
+| **Owner, Admin, Member, Guest** | The four roles a person can have. The Owner runs the organization, Admins help manage it, Members work in the projects they are added to, Guests are visitors from another organization who can work in one shared project. |
+| **Project** | A body of work with its own board, for example "Web shop". A *code* project builds software. A *research* project looks things up and writes notes. |
+| **Card** | One piece of work with its requirements and acceptance criteria ("what done looks like"). A card moves across the board until it is done. |
+| **Board** | The columns of a project. Each column is a stage of the work. |
+| **Agent** | One AI team member: a **role** (such as builder or reviewer), a **seniority** (junior or senior), a face, a name and a track record. |
+| **Allow-list** | The projects an agent may work on. An agent only ever gets cards from projects on its list. |
+| **Workstation** | A computer of yours where agents run. |
+| **Runner** | The small program on a workstation that does the agents' work and talks to the website. |
+| **Shift** | One stretch of work by one agent on one card. You will see the word in logs and reports. |
+| **Desk** | Your inbox of decisions. |
+| **Ledger** | The shared memory: decisions, standing orders and requirements, searchable. |
+| **Standing order** | A rule every agent reads at the start of every shift, such as "write a unit test for every change". |
+| **BA** | The business analyst agent. It drafts cards from your requests and tickets, answers what it can from the ledger, and writes your daily floor report. |
+| **DevOps engineer** | A free agent that looks after one workstation: installs tools, keeps your repositories tidy, starts and stops things. |
+| **Vault** | A folder of notes (a git repository) that is synced to your workstations, such as your personal knowledge base. |
+| **Schedule** | A trigger plus one action, for example "every Monday at 07:00, create a card". |
+| **Interest** | A topic you follow, such as "AI news". Agents look for new items on a schedule and deliver them to your desk. |
+| **Phase** | A named slice of a project ("Phase 2: autosave") that you ship and check together, followed by steps such as deploy and regression run. |
+| **Budget** | A monthly spending limit on a project (or an interest). |
 
-### Two-factor login
+The in-app glossary is at **Help, Glossary**.
 
-Anyone can switch on two-factor login (a six-digit code from an authenticator app) under **Settings > Security**: enter your password, scan the QR code, type the first code. You get ten **recovery codes**, shown once. Keep them somewhere safe: each works once if you lose your phone. At sign-in, after your password you are asked for the code (or a recovery code).
+### 2.2 How a card travels
 
-- The platform administrator must use it (it is set up at first sign-in).
-- The Owner can **require it for the organization** (Organization > General). Members who have not set it up are held at the setup screen until they do. The Owner needs it on their own account first.
-- If a member loses their phone and recovery codes, the Owner (or the platform administrator) resets their two-factor login on the Members tab.
+A card in a code project goes through the same stages every time. You do not have to push it along. The agents do.
 
-### Suspension and licences
+1. **Spec**: the card is written down: context, requirements, acceptance criteria. You (or the BA) write it. Until it is specified it is a draft.
+2. **To do and Build**: a builder takes the card and works on a branch of your repository.
+3. **Review**: a reviewer reads the change and either approves or sends it back (rework).
+4. **Test**: a tester runs the tests in the test plan. A failure creates a bug card, and the original waits for the fix.
+5. **Finalize**: the BA completes the card in the way you chose: open a pull request, push the branch, or merge.
+6. **Done**.
 
-A platform administrator can suspend an organization (unpaid, trial over, a licence date passed). Running shifts finish and nothing new starts; scheduled fires are skipped and recorded. A banner explains it. Only the Owner can still sign in, with read access plus organization settings and members. Reactivating the organization resumes everything where it stopped.
+If anyone gets stuck or needs a decision, the card turns to **Blocked** and a question appears on your desk.
 
-### The platform area (platform administrators only)
+![The same card in different columns, from To do to Done](guide/assets/board-left.jpg)
 
-The platform administrator signs in at the same address and sees only the **Platform** area: organizations (status, Owner, plan, usage, limits, features), invitations to start a new organization, accounts (deactivate, reset two-factor) and the audit log. They never see an organization's cards, desk or vaults. **Support** is their inbox for Contact us requests from every organization and from visitors: filter by status (open, answered, closed), type or organization, search by reference, name, email or subject, open a request to see who wrote (and which organization), the page, version, browser, recent errors and the screenshot, then reply (the reply is emailed to the person and appears in their My requests) or reply and close. At the top, set the **support address**: every new request and follow-up is also emailed there (with the writer's address as Reply-To), so the team can work from its own mailbox as well. Every platform action is recorded in the audit log, which is kept forever. The administrator can suspend, reactivate or cancel an organization and, with a written reason, move ownership to one of its Admins (for example when the Owner left the company).
+> **In the app:** Help, "Board and cards" (`/help/board-and-cards`) and "Testing and finalization" (`/help/testing-and-finalization`).
 
-## Projects
+### 2.3 Who is allowed to do what
 
-### Creating a project
+In short: **Owners and Admins manage**, **Members work** in the projects they were added to, **Guests work** in the one project that was shared with them, and the **platform administrator** only runs the service and never sees your work. Chapter 4 to 7 have the details for each role.
 
-1. Go to **Projects** (as Owner or Admin; Members do not see the button)
-2. Click **Create project**
-3. Enter a name and key (e.g., `WEB`, `DOCS`), type (Code or Research, or a custom workflow of your organization), and domain (Work/Personal). Following a topic? Create an [interest](#interests) instead
-4. For a Code project, add repositories (by URL or by linking to one already scanned on a workstation). A Research project needs no repository
-5. For work domain projects, set up vaults (work/personal folders in your knowledge system)
-6. Click **Create**
+> **In the app:** Help, "Organizations and roles" (`/help/organizations-and-roles`).
 
-### Project types and workflows
+## 3. Getting started in 15 minutes
 
-Research projects need no repository and have no testing or regression controls: their project settings show no Repositories section, E2E or architectural globs, or large-merge setting, and their boards have no Regression button. Results go to the project's vault folder. (A research project that already has repositories still lists them so you can remove them.) A project in the research stage takes no repositories at all until you convert it (see below), and repository hygiene ignores it.
+By the end of this chapter you have: a working login with two-factor protection, a workstation connected, a small team hired, a project and your first card moving across the board.
 
-| Type | Stages | Typical roles | When to use |
-| --- | --- | --- | --- |
-| **Code** | Spec → Build → Review → Test → Finalize | BA/architect, builder, reviewer, tester, technical writer | Feature work, bug fixes, refactors, documentation |
-| **Research** | Question → Research → Fact-check → Publish | Researcher, checker | Deep dives, investigations, knowledge base articles |
+> **Before you start:** you need an invitation email, a computer to use as a workstation (it can be the one you are on now), and a Claude account. A Claude subscription (Pro, Max, Team or Enterprise) is the easiest. An API key works too.
 
-### Research is a stage: research cards in any project, and converting a project
+### 3.1 Accept the invitation and sign in (2 minutes)
 
-**Research cards in any project.** A research card can be created in every project, not only in research projects: pick the card type **research** on the New card form (it then asks for the question, scope and depth, and no repository). The card runs on the research workflow (question, research, fact check, publish) whatever the project's own workflow is. On the board its cards carry a **Research** chip, and the board shows the research columns (Research, Fact check) next to the project's own, only while such cards are open. Schedules can create research cards too, and a research card can join a phase: it counts as resolved once its note is published.
+1. Open the invitation email. It comes from either the **platform administrator** ("start your organization": you become its Owner) or from the **Owner or an Admin** of an existing organization ("join Acme": you become a Member or Admin). Invitations work for 7 days.
+2. Click the link. Type your name and choose a password of at least 12 characters, then confirm it.
+3. You land inside the app. If you already had an account, sign in instead and confirm.
 
-**Converting a project.** A project that started as research (the usual way to explore a topic before building) converts to a delivery project when the questions are answered. Only the organization's **Owner and Admins** can convert, in **Project settings > Stage > Convert project** (or the **Convert to project** button on the board of a research project). The dialog has four short steps:
+![Accepting an invitation](guide/assets/invite-accept.jpg)
 
-1. **Workflow.** Pick the target: Code (the usual next step from research), or any custom workflow of your organization. Any workflow can convert to any other, including back to research. The feed workflow is not a target.
-2. **Repositories.** A workflow that works in repositories needs at least one. Add an existing repository (name and remote URL, optionally a branch), or **request a new GitHub repository**: the request lands on your desk as **Create repository `<owner/repo>`**, exactly like the BA's `aom repo create`, and your own runner creates it with your GitHub login when you approve. If the new repository is the only one, the project stays as it is until it exists, then converts by itself; the Stage panel shows the waiting request and a **Cancel the conversion** button (declining the request cancels it too). When another repository is given, the project converts at once and the new one is added when created.
-3. **Open cards.** The cards that run on another workflow than the target (for example the open research cards when you convert to Code) are listed. Choose for all of them, or one by one, **Keep** (the card finishes on its own workflow and shows in extra board columns) or **Cancel** (it is closed with the reason "Project converted"; a running shift stops). Draft cards stay drafts if kept.
-4. **Hand-over.** The published research notes are listed in `PROJECT.md` of the project's vault folder (a managed `research-index` section; your own text in the file is kept), so every agent that works the project reads them. An optional note is stored with the conversion.
+If the link says the invitation is no longer valid, it has expired, was used already, or was withdrawn. Ask the person who invited you to send a new one.
 
-Cards, notes, history and the vault folder are untouched, and the project remembers that it **started as research** (shown on the Stage panel). For each repository the conversion added, the DevOps engineer asks you which branch is the working branch (**Keep `<branch>` as the working branch ...**, or which one it is), like for a new intake or phase. Converting triggers a `project_converted` schedule if you have one (Schedules > event trigger). Deploy and regression follow-ups of a phase need a repository (and, for regression, a workflow with a test stage): they are greyed out until the project has them.
+![An invitation link that no longer works](guide/assets/invite-invalid.jpg)
 
-### The Research tab
+Visitors who are not signed in see the landing page, with a **Sign in** button.
 
-A project that has published research notes, or that started as research, has a **Research** entry in the sidebar (and in the command palette) while you are in it. It keeps the research front and centre after the conversion: the research cards in progress, then every published note with its path in the vault, a preview, its citations as links and the transcripts of video or podcast sources. The notes themselves stay in the vault; the tab is the index.
+![The landing page](guide/assets/landing.jpg)
 
-### Vaults and shared knowledge
+To sign in later, go to the sign-in page, type your email and password, and press **Sign in**.
 
-Vaults are git repositories that sync to your workstations automatically. Each workstation syncs every 5 minutes (configurable) and commits/pushes changes.
+![The sign-in page](guide/assets/login.jpg)
 
-- **Personal vault**: knowledge base for your org, visible only to you
-- **Work vault**: shared among the organization's Owner and Admins (it syncs to their workstations only; Members and guests never receive it)
-- **Project vaults**: one per project, shared with all members who see that project
+A wrong email or password always gives the same message, so nobody can use the page to find out who has an account.
 
-To configure:
-1. Go to **Projects** > **Settings** > **Vaults**
-2. Add URLs (SSH or HTTPS) for personal and work vaults. URLs must not contain a password or token (`https://user:token@host/...` is refused): use SSH keys or a credential helper on the workstation
-3. Set sync interval (default 300 seconds)
+![A wrong password](guide/assets/login-error.jpg)
 
-**On Windows**, if vault URLs use SSH keys, ensure git can find them (OpenSSH or PuTTY; WSL2 recommended).
+### 3.2 Turn on two-factor login (3 minutes)
 
-### Sharing a project
+Two-factor login means that after your password you also type a six-digit code from an app on your phone. Even if somebody learns your password, they cannot get in. It is strongly recommended for everybody, and your Owner may require it.
 
-Only the Owner and Admins of the organization can add people to a project. To invite someone from another organization as a guest:
+1. Open your avatar menu at the bottom of the sidebar and choose **Your settings**.
+2. On that page, in the **Two-factor login** panel, choose **Turn on two-factor login**. Type your password, scan the QR code with an authenticator app (any one will do, for example Google Authenticator, Microsoft Authenticator or 1Password) and type the first six-digit code.
+3. You are shown **ten recovery codes, once**. Save them in a password manager or print them. Each code works one time, if you lose your phone.
 
-1. Go to **Projects** > **Settings** > **Members**
-2. Enter their email and click **Invite**. The person must already have an account that belongs to an organization
-3. They accept in their Project invitations inbox and gain access to this project only
-4. They can hire agents onto their own workstations (allowed on the shared project only), see the board, and answer desk items
-5. Only the organization's Owner and Admins (and the hiring manager) can change each agent. A guest's agent works only on the projects shared with them, whatever its allowed projects say
+![Setting up two-factor login](guide/assets/security-2fa.jpg)
 
-When you remove a member from a project, the cards their agents held on it are released. Their agents move to your workstation and account (they need re-homing) only if that was the member's last project in your organization; otherwise they keep working the member's other projects. Deactivating a user (platform administrator) does the same for every project they were a manager of, unlinks all of their workstations (their runners are disconnected and cannot reconnect), and parks their own agents until the account is reactivated and re-paired.
+> **Watch out:** the recovery codes are the only way back in if you lose your phone, apart from asking your Owner to reset your two-factor login. Save them now.
 
-Only the project owner can add standing orders (also from a card or when answering a question); a guest manager can answer questions with decisions and requirements. Organization-wide standing orders can only come from the organization owner. An agent's permissions can be narrowed by its hiring manager but never widened beyond its role (a reviewer never commits); widening other limits (web, extra tools, risk tiers) is for the organization owner.
+> **In the app:** Help, "Two-factor login" (`/help/two-factor`).
 
-### Archiving, restoring and deleting a project
+### 3.3 Take the tour (1 minute)
 
-**Archive** a project you no longer use: **Projects** > **Settings** > **Danger zone** > **Archive project**. The dialog lists what will stop before you confirm (active shifts, open cards, schedules, open desk items). On confirm:
+The first time you sign in, a short guided tour highlights the main areas and tells you what each is for. The tour is different for each role. You can skip it and replay it any time from **Help**.
 
-- running shifts are cancelled and their worktrees removed (the branches are kept);
-- open cards are closed as *archived* (they show as cancelled with the reason "Project archived", so you can tell them from cards you cancelled yourself);
-- schedules are switched off and open desk items for the project are dismissed;
-- the project disappears from boards, project pickers, the Schedules and Desk pages, and from intake mapping, and the dispatcher stops giving its work to agents.
+![The first step of the tour](guide/assets/tour-1.jpg)
 
-Agents hired for the project are not fired; they simply stop getting its work. Cards, history and the vault folder are kept. Any member of the project (owner or manager) can archive and restore it, and members of a shared project see it as archived.
+Three things worth knowing from the start:
 
-**Restore**: **Projects** > **Archived** > **Restore** (or **Settings** > **Danger zone** > **Restore project**). The project is back on the boards and pickers and takes work again. Cards that the archive closed stay closed and schedules stay off; create new cards and switch schedules back on as needed.
+- **Search and jump anywhere:** press **Ctrl+K** (on a Mac **Cmd+K**) to open the command palette. Type a project, card, page or action ("contact", "new card") and press Enter.
+- **The ? hints:** small question-mark buttons next to headings open the matching help article in a side panel, without leaving your page.
+- **On a phone:** the whole app works on a phone. Open the menu with the button at the top left.
 
-**Delete permanently**: only the project owner, and only for an archived project. **Projects** > **Archived** > **Delete permanently**, then type the project key to confirm. The project's cards, threads and messages, schedules, desk items, repositories, members, digests, transcripts and research notes are removed from the database and cannot be recovered. The audit log keeps a record that the project was deleted, and the vault folder is never touched. Agents are never let go with a project: they belong to the organization, the project simply leaves their allowed projects. An agent that was allowed on that project only is **benched**: its allowed list is empty, so it takes no work until you give it projects again (the agent's **Projects** dialog). One notice on the desk names the benched agents so you can reassign them. The project key becomes free for a new project.
+![The command palette](guide/assets/palette.jpg)
 
-### Decision policy
+### 3.4 Add a workstation (5 minutes)
 
-By default, only the card's owner (who created it) can answer questions and approve decisions on it. To let any manager answer:
+A workstation is the computer where your agents will work. The guided installer sets everything up for you.
 
-1. Go to **Projects** > **Settings** > **Decision policy**
-2. Toggle **Allow any manager to answer decisions**
+1. Open **Workstations** in the sidebar and click **Add a workstation**.
+2. **Pick the computer.** The page guesses from your browser (Windows, Linux or macOS). Change it if the machine that will run the agents is a different one. Windows runs the agents inside WSL2, Microsoft's built-in Linux, and the installer turns it on for you. You may also type a name for it ("Office PC").
+3. **Copy the command** with the copy button, or choose **Download the script** if you would like to read it first. The command contains a link that is valid for 30 minutes and a one-time pairing code. It never contains a password.
+4. **Run it on that computer.** Open a terminal (on Windows, PowerShell), paste the command and press Enter. Say yes when it asks for permission. Windows may ask to restart once. The installer carries on by itself when you sign in again.
+5. **Watch the page.** It shows the installer starting, the computer pairing, and then health checks one by one (Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories, the server), ending with **Ready**.
 
-## The board
+![The installer wizard, step 1: choose the computer](guide/assets/installer-choose.jpg)
 
-### Reading the board
+![The installer wizard, step 3: the command to run](guide/assets/installer-command.jpg)
 
-The board shows all cards in a workflow, from left to right by stage. Each card tile shows:
+![The installer wizard while it works: pairing and health checks](guide/assets/installer-progress.jpg)
 
-- **Card ref** (e.g., `TOY-1`). Refs are unique only within one organization: if two of your projects (your own and a shared one) both have a `TOY-1`, the ref link asks which one you mean, and the board always links by card id
-- **Title and type** (feature, bug, support, refactor, docs)
-- **Assignee** (the agent working on it, if claimed)
-- **Age** (time in current stage)
-- **Risk tier** (small/large; auto-computed from diff, overridable)
-- **Waiting badge** (a card waiting on a bug it spawned says "waiting on bug" in the Test (waiting on bug) column; a large merge waiting for your approval stays in the Finalize column and says "Awaiting your approval")
-- **Warning icon** (a card in the queue that nobody may be able to take; see below)
-- **Rework round** (number of times bounced from review)
-- **Blocked badge** (if waiting on a decision)
+The installer asks only what it must: your password once to install system tools, whether you want the optional extras (yt-dlp for transcripts of videos and podcasts; Docker only if your tests run containers), the folder that holds your code (it suggests `~/src`), and how Claude should sign in. It explains the two ways in plain words. Choose **Claude subscription** if you have one: you sign in with your Claude account in a browser. Choose **API key** if you would rather pay for exactly what the agents use.
 
-The Blocked column shows cards waiting on an answer from the decision desk.
+> **Good to know:** you can run the same command again at any time. It upgrades the runner, repairs a broken installation and keeps your existing pairing.
 
-#### The warning icon: why a card does not move
+If something goes wrong, the installer says what happened and links to the install help and to **Contact us**. Chapter 9.1 covers the usual problems.
 
-A queued card that no agent has claimed gets a warning icon on its board tile and next to its status on the card page when the dispatcher could not hand it out. Hover the icon or focus it with the keyboard to read the reason.
+> **In the app:** Help, "Workstations and the installer" (`/help/workstations-and-installer`) and "Installing a workstation: if something goes wrong" (`/help/install-troubleshooting`).
 
-- **Red, "Not workable"**: nobody hired could ever take the card's current stage, so waiting will not help. Typical reasons: no builder is hired; the Review stage needs a senior reviewer and only juniors exist; the only reviewer built the card (nobody reviews their own work); a large change needs two different senior reviewers but only one is hired ("needs a second senior reviewer other than Linus"). The tooltip has a **Hire** link that opens the Agents page's Hire form with the missing role and seniority already chosen.
-- **Amber, "Waiting"**: agents exist but cannot work right now: their workstation is offline ("Reviewer Linus is offline"), no workstation with an eligible agent holds the card's repository, or every eligible agent has been busy for more than ten minutes. It clears by itself when the machine is back, the repository is cloned or the agent is free.
+### 3.5 Hire your first agents (2 minutes)
 
-The icon follows hiring, firing, role changes and claims live, and offline workstations within about 30 seconds.
+You need at least a builder, a reviewer and a tester to get a card from idea to done. The BA is also strongly recommended.
 
-### Creating and specifying a card
+1. Open **Agents** and click **Hire agent**.
+2. Choose a **Role**: *Builder* writes the change, *Reviewer* checks it, *Tester* runs the tests, *BA* writes cards and reports, *Writer* documents. Choose **Seniority**: seniors take larger and riskier work and may review large changes. Pick the **Workstation** where the agent runs.
+3. Choose where the agent may work: **Any project**, or **Selected projects** (the allow-list). For now keep the project you will create next, or any project.
+4. Choose the **Model** (a bigger model is smarter and costs more; a smaller one is fast and cheap). A good start is a stronger model for builders and BAs and a lighter one for reviewers and testers. Give the agent a **Name**. The name generator suggests unused names; pick a theme or type your own.
+5. Click **Hire**. Repeat for each role.
 
-1. Click **Create card** or go to the project and click **New card**
-2. Fill in the form:
-   - **Title and type**: the work (e.g., "Fix login timeout – bug")
-   - **Context**: why this exists, current behaviour
-   - **Requirements**: what must be done
-   - **Acceptance criteria**: what "done" looks like
-   - **Affected areas**: which files/modules/systems
-   - **Constraints**: limits and linked past decisions
-   - **Test plan**: E2E test scenarios
-   - **Completion action**: how to merge/publish (PR, branch push, merge to main)
-   - **Docs needed**: whether a technical writer should document it
-3. Save as draft or click **Specify** to move it to To do (requires all fields)
+![Hiring an agent](guide/assets/dlg-hire.jpg)
 
-Cards can stay as drafts until you are ready. The BA can also draft cards via intake.
+> **Tip:** two builders and one each of reviewer, tester and BA is a comfortable first team. Large changes need two different senior reviewers, so hire a second senior reviewer when you get to bigger work. Review and Finalize need seniors.
 
-The form shows only fields that matter to real work. The mock-runtime fields (**Mock script**, **Mock test environment**, **Mock outbound draft**, **Mock research claims**, **Mock feed items**) exist for development and the test suite: they appear, and the API accepts them, only when the server runs with `AOM_MOCK_UI=true`. Without it the API refuses them with a 422 (`mock_fields_disabled`) and the card page does not show them.
+Each workstation also gets a free **DevOps engineer** automatically. You never hire or fire it.
 
-### Editing a card
+> **In the app:** Help, "Agents" (`/help/agents`).
 
-The card owner and the project owner can change a card with **Edit** on its page while it is a draft (Spec) or queued and unclaimed: title, repository, completion action, priority, docs needed and the workflow's fields, with the same checks as the New card form (a queued card must keep the fields its stage needs). Empty a field to remove it. A card an agent holds (claimed) cannot be edited: the page offers no Edit and the server answers that the card is being worked on; release the claim first. Every edit appears in the card's **Timeline** ("Edited title, requirements", who, when).
+### 3.6 Create your first project (1 minute)
 
-### Moving and releasing cards
+1. Open **Projects** and click **New project** (Owners and Admins only).
+2. Give it a **Name** and a short **Key** (for example `WEB`; card references look like `WEB-1`). Choose the **Workflow**: **Code** for software, **Research** for investigations, or a custom workflow your organization designed. Click **Create project**.
+3. For a code project, open the project's **Settings** (the gear on the Projects page) and, under **Repositories**, add your repository: a name, the git address of your code and the **working branch**, the branch that finished work goes into (usually `main`). A research project needs no repository.
 
-Clicking a card shows its detail view. Actions:
+![The new project dialog](guide/assets/dlg-new-project.jpg)
 
-- **Move**: reassign to a different stage (manager only; used to fix stuck cards)
-- **Release**: return to the queue (if an agent dropped it mid-shift or you need to reassign)
-- **Release back-off**: appears only on a card showing the badge below
-- **Cancel**: mark as cancelled (keeps the history, does not queue it again)
+> **In the app:** Help, "Projects" (`/help/projects`).
 
-#### "Backing off until 14:32 (3 failures)"
+### 3.7 Create your first card (2 minutes)
 
-When three shifts on the same card end without a report within 10 minutes (the agent crashed, timed out, or was stopped by a denied tool and ended with nothing), the dispatcher stops handing the card out and shows this amber badge on the board and on the card page. The wait starts at 1 minute and doubles with every further failure, up to 1 hour. A shift that reports resets it. You also get one alert on the desk per episode, and the card thread holds a single note instead of one per failure.
+1. Open the project's board and click **New card**.
+2. Fill in the form. Be concrete, as if you were briefing a new colleague:
+   - **Title:** what it is ("Show the last login time on the profile page").
+   - **Context:** why it matters.
+   - **Requirements:** what must be done.
+   - **Acceptance criteria:** how you will know it is done, one line each.
+   - **Affected areas, Constraints, Test plan:** what to touch and not to touch, and how to check it.
+   - **Completion action:** what happens at the end: open a pull request, push the branch, or merge.
+3. Click **Specify**. The card moves to **To do** and the agents pick it up. If a required field is missing, the form tells you which. Use **Save draft** if you want to finish later.
 
-The usual cause is something the agent cannot do (a tool that is denied, a missing capability). Fix that, then click **Release back-off** on the card page to retry at once. If the card fails again, the next wait is longer than before. Moving the card to another stage also clears the back-off.
+![The New card form](guide/assets/card-new.jpg)
 
-### Risk tier
+![The form tells you which fields are still missing](guide/assets/card-new-missing.jpg)
 
-Auto-computed from the diff size of similar PRs:
-- **Small** (≤100 lines changed): one reviewer approval, one tester
-- **Large** (>100 lines): two distinct senior reviewers, full test suite run after finalize
+> **Tip:** you do not have to write it all yourself. Open a chat with the BA ("Chat" button on the desk), say what you want in your own words, and the BA drafts and specifies the cards for you.
 
-Override on the card detail if the auto-computed tier does not match the risk (e.g., a 50-line change to a critical system deserves large-tier review). The card owner and the project owner click **Change** next to the risk tier, pick small or large (or go back to the computed tier) and give a reason; the override shows as an "override" badge, the reason and who set it appear in the Timeline, and from then on the diff no longer changes it. It works like the computed tier: it sets how many reviewers must approve and whether a merge at Finalize waits for your approval. It can be changed while the card is open, except while a merge is pending.
+### 3.8 Watch it happen
 
-The BA can do the same from its shift with `aom risk <small|large> --reason "<why>"`; the override is recorded with the BA as the actor.
+Within a minute the card moves to **Build**. A builder works on it, then a reviewer, then a tester. Open the card to follow along: the **Live shift** panel shows what the agent is doing right now, **Handoffs** shows the notes agents leave for each other, and **Timeline** records every step.
 
-## Hiring and firing agents
+![A card in the middle of a shift](guide/assets/card-live.jpg)
 
-### Hiring an agent
+When an agent needs a decision, the card turns **Blocked** and the question appears on your **Desk**. Answer it and work continues. When the card is done, you will find the change on the branch (or pull request) you chose.
 
-1. Go to **Agents** or click **Hire** on the Board
-2. Fill in:
-   - **Role**: builder, reviewer, tester, technical writer, or custom roles you have designed
-   - **Seniority**: junior or senior (affects permissions and queue priority)
-   - **Workstation**: where they run (must have the project's repos)
-   - **Where may this agent work?**: **Any project** (Owners and Admins) or **Selected projects**, ticked one by one. The form starts with the project you worked on last. Star the projects the agent should prefer. See "Where an agent works" below
-   - **Model**: Claude Opus 4, Sonnet 4.5, etc., and effort level
-   - **Name**: autocomplete suggests unused names; type to override
-   - **Skills**: special knowledge (e.g., "Playwright", "database migrations")
-   - **Capacity**: max concurrent cards (default 1; larger for routine roles like DevOps)
-3. Click **Hire**
+![A question waiting on the desk](guide/assets/desk-question.jpg)
 
-First-run limits (removed after you see the Agents page):
-- 2 builders
-- 1 of each other role (reviewer, tester, writer, DevOps)
+You now have a working team. The rest of this guide is for when you want more: more control, more automation, or more safety.
 
-Name suggestions skip retired agents and names already in use.
+## 4. For Owners and Admins
 
-### Where an agent works
+The **Owner** runs the organization: there is exactly one, and the Owner can hand the role to someone else. **Admins** are appointed by the Owner and help manage. This chapter covers everything the two roles do. Where something is only for the Owner, it says so.
 
-Agents belong to your organization, not to one project. For each agent you decide where it may work:
+| | Owner | Admin |
+| --- | --- | --- |
+| Create projects, add people to projects, change project settings | yes | yes |
+| See every project of the organization | yes | yes |
+| Invite Members | yes | yes |
+| Invite, promote or demote Admins; change roles | yes | no |
+| Remove Members | yes | yes |
+| Remove Admins | yes | no |
+| Hire, change and fire any agent, widen an agent's permissions | yes | yes |
+| Set budgets, see Costs | yes | yes |
+| Design roles, workflows and departments | yes | yes |
+| Org-wide schedules, interests quiet cap, BA settings | yes | yes |
+| See plan and limits | yes | yes |
+| Require two-factor login for everybody | yes | no |
+| Hand over ownership | yes | no |
 
-- **Allowed projects**: **Any project** of the organization, or only the projects you tick. The agent is only offered cards of those projects. Click **Projects** on the agent's card on the **Agents** page to change it at any time; the card shows a "Works on" line with the projects (a star marks the preferred ones) or "any project". An empty list benches the agent. Owners and Admins can allow any project; a Member or guest manager can only pick projects they are on.
-- **Preferred projects (focus)**: the star next to a project. It is a soft preference inside the allowed projects: when a card of a starred project and a card of another project are both waiting, the agent takes the starred one first (before the project's priority tier). Up to 10 projects. Removing a project from the allowed list also removes it from the preferred ones.
-- **Whose projects**: the agent also needs the person who owns its workstation to be on the project. Owners and Admins are on every project of the organization; a guest is only on the projects shared with them, so a guest's agent never works the owner's other projects, whatever its allowed projects say.
-- **Hiring**: the Hire form sets the default allow-list of the new agent. Without a choice it starts with the project you worked on last (not "any project").
-- **Projects that go away**: deleting a project keeps its agents. Removing a person from their last project hands their agents back to you (they need re-homing).
-- **Limit simultaneous shifts**: **Projects** > **Settings** > **Simultaneous shifts** sets an optional cap on how many shifts may run at once on that project, whatever the number of agents allowed on it. It is off by default. At the cap, the project's other cards wait in the queue. Any project member can change it.
+### 4.1 Your organization
 
-### The DevOps engineer
+Open **Organization** at the bottom of the sidebar. The **General** tab shows the organization's name (rename it here) and the security switch for two-factor login (4.15).
 
-You get one DevOps agent per workstation automatically. It cannot be fired, only **reset** (which wipes its sandbox like a firing, but keeps it assigned). It is not driven by cards; agents and you ask it directly via the `aom devops` command in a shift or the **Ask DevOps** button on the Workstations page.
+![Organization settings: General](guide/assets/org-general.jpg)
 
-The DevOps engineer is free (it does not count against the agent limit) and one exists per organization per workstation. Allowed projects do not apply to it: it works DevOps requests and repository checks only, and has no Projects button. Because it is free it cannot be extended: no extra instructions, skills, tools, standing orders or custom permissions, it cannot be cloned into a custom role or given workflow stages. Only its model and effort can change.
+If you belong to several organizations, the **organization switcher** at the top of the sidebar shows which one this browser tab works in. A different tab can work in a different organization. Projects of an organization where you are only a guest carry a "Guest" label.
 
-DevOps is always available and outside the queue. It handles:
-- Cloning and setting up projects
-- Installing tools and dependencies
-- Starting containers and databases
-- Pulling/pushing vault changes
-- Granting access to internal systems (with your approval on the desk)
+### 4.2 Members, invitations and guests
+
+On **Organization, Members** you see everybody with their role.
+
+![The Members tab](guide/assets/org-members.jpg)
+
+**To invite someone:** click **Invite member**, type their email, choose the role (**Member**, or **Admin** if you are the Owner) and, if you like, the projects they should start on, then **Send invitation**. They receive an email with a link that works for 7 days. On the **Invitations** tab you can see pending and past invitations, resend one or revoke one.
+
+![Inviting a member](guide/assets/dlg-invite.jpg)
+
+![The Invitations tab](guide/assets/org-invitations.jpg)
+
+**To change a role or remove a person:** use the role selector and the remove button in the Members list. When somebody is removed, their agents are handed to you and any cards those agents held go back into the queue. Anyone except the Owner can leave an organization. The Owner must hand over ownership first (**General, Transfer ownership**, which asks for your password).
+
+**Guests** are people from other organizations who work in a project you shared. The **Guests** tab lists them and the projects they can reach (see 4.3, sharing a project).
+
+![The Guests tab](guide/assets/org-guests.jpg)
+
+> **In the app:** Help, "Organizations and roles" (`/help/organizations-and-roles`).
+
+### 4.3 Projects
+
+**Create a project** as in chapter 3.6. Everything about a project lives in its **Settings** (the gear on the Projects page).
+
+![Project settings](guide/assets/project-settings.jpg)
+
+What you will find there:
+
+- **Repos:** the code the agents work on, and its **working branch**, the branch finished work lands on. Research projects need none.
+- **Team:** who works in the project (see below).
+- **Merging:** the setting **Merge large changes without my approval** (off by default). Read chapter 4.12 before turning it on.
+- **Simultaneous shifts:** an optional cap on how many shifts may run at once in this project.
+- **Budget** (4.6), **Phases and deploys** (4.10), **Stage** (4.13) and **Archive** (4.14).
+
+**Who answers a card's questions.** By default only the card's creator answers them. On the card page you can let any project member answer (**Who answers its questions**).
+
+**Project types.** A **code** project follows Spec, Build, Review, Test and Finalize. A **research** project follows Question, Research, Fact check and Publish and writes its results as notes into the project's vault folder. Your organization can also design its own workflows (4.7).
+
+**Adding people to a project.** Only Owners and Admins add people. Add an organization member under **Team** in the project settings. They get access at once. To share with somebody from another organization (a guest), type the email of an existing account and click **Invite**. They accept in the **Project invitations** inbox on their Projects page, and they only ever see this project. There are no guests without an organization. Someone with no account must be invited as a Member of your organization instead.
+
+> **Watch out:** removing a person from their last project hands their agents back to you (they need a new home on one of your workstations). Cards those agents held go back into the queue.
+
+**Vaults.** A vault is a git repository of notes that syncs to your workstations. There are three kinds: a *personal* vault (yours only), a *work* vault (shared among Owners and Admins) and a *project* vault (shared with the project's members). Register them under **Vaults** in the sidebar. The address must not contain a password or token. Use an SSH key or a credential helper on the workstation instead.
+
+![Vaults](guide/assets/vaults.jpg)
+
+> **In the app:** Help, "Projects" (`/help/projects`) and "Ledger and vaults" (`/help/ledger-and-vaults`).
+
+### 4.4 Agents, hiring and allow-lists
+
+Agents belong to the organization, not to a single project. For each agent you decide where it may work: its **allow-list**. The agent is only offered cards from those projects.
+
+![The Agents page](guide/assets/hr.jpg)
+
+**Hiring** works as described in 3.5. Hiring has a few more options:
+
+- **Where may this agent work?** **Any project** (Owners and Admins only) or **Selected projects**, ticked one by one. An empty list **benches** the agent: it takes no work until you give it projects again. A star next to a project means *preferred*: when two cards are waiting, the agent takes the starred project's card first.
+- **Seniority** decides who may review large changes and who handles harder work.
+- **Effort and Model:** how hard the agent thinks. Higher costs more.
+- **Skills:** extra know-how, such as "Playwright" or "database migrations".
+
+**Changing an agent.** On the agent's card use **Projects** (the allow-list), **Change model**, **Change role**, and **Fire**. Firing releases the cards the agent holds back to the queue with the last handoff, deletes the agent's private sandbox, and retires the name. The agent's history stays in the records. A fired name is never reused.
+
+![Changing an agent's allowed projects](guide/assets/dlg-allowlist.jpg)
+
+**Each agent card also shows** what the agent costs this month and in total, how many cards it finished, its bounce rate (how often review sent its work back) and its current work.
+
+**Recommendations.** The Agents page suggests changes based on how the team performs: a different model, hiring another reviewer, or a standing order. You can apply them in one click, or ignore them.
+
+![Recommendations on the Agents page](guide/assets/hr-recs.jpg)
+
+**Safety.** Agents run inside a sandbox on the workstation, so they cannot read your whole disk. Some computers cannot offer a sandbox (for example plain Windows). The app then shows an amber warning on the workstation, on each affected agent and in the Hire form, and hiring onto that machine needs an explicit confirmation. Prefer a workstation with a sandbox (Linux, macOS, or Windows with WSL2).
+
+![The unsandboxed warning when hiring](guide/assets/dlg-hire-unsandboxed.jpg)
+
+**The DevOps engineer.** Each workstation has one, free of charge. It installs tools, starts containers, pulls and pushes vault changes and keeps repositories tidy (next section). You can only reset it, never fire it, and only change its model and effort.
+
+> **In the app:** Help, "Agents" (`/help/agents`).
 
 #### Repository hygiene and the working branch
 
-Once a day per workstation (you can change that, or switch it off, under **Workstations**, **Repository hygiene**, and start one with **Run hygiene now**) the DevOps engineer tidies the project repositories on that machine. For each repository it fetches and pulls, **commits any uncommitted changes to the working branch** and pushes them, pushes commits that were not pushed yet, and removes branches and worktrees of cards that are finished and merged. The same pass cleans up leftover card worktrees (the runner also does that when it starts). Everything it did is logged in the request on the Workstations page.
+Once a day per workstation the DevOps engineer tidies the project repositories on that machine: it fetches and pulls, **commits any uncommitted changes to the working branch** and pushes them, and removes branches and worktrees of cards that are finished and merged. Change the time or switch it off in the workstation's **Repository hygiene** panel on the Workstations page, or start it with **Run hygiene now**.
 
-**The working branch is something you confirm, it is never guessed.** While a repository has no confirmed working branch (the project settings show *not confirmed*), the DevOps engineer does not commit, pull or push in it. It only reports the uncommitted changes and asks you on the desk, **Which branch is the working branch of `<repository>`?**, with the repository's branches as options and *Another branch* (type its name). The question is pinned and blocking when changes are waiting for the answer. Your answer is stored on the repository, written to the ledger so nobody asks again, and the DevOps engineer commits and pushes right away. You can also set or change it any time in the project settings, in the repository row (**Change**). The project owner decides.
+![Repository hygiene on the Workstations page](guide/assets/ws-hygiene.jpg)
 
-When something changes, you are asked again: when a new intake starts for the project, and when a new phase is created or activated, the DevOps engineer asks **Keep `<branch>` as the working branch ... or use another branch?** (a normal item: your BA may look at it first). A phase can have its own working branch; hygiene then uses the active phase's branch.
+**The working branch is something you confirm. It is never guessed.** While a repository has no confirmed working branch, the DevOps engineer does not commit, pull or push in it. It only reports the changes and asks you on the desk: *Which branch is the working branch of this repository?* Your answer is stored on the repository and in the ledger, and the DevOps engineer carries on at once. You can also set it any time in the project settings, in the repository row (**Change**). You are asked again when a new intake or phase starts ("keep `main` as the working branch?").
 
-What hygiene cannot resolve it does not force: a conflict while pulling, uncommitted changes on a branch that is not the working branch, an authentication failure, a missing clone, a leftover worktree with uncommitted changes (never deleted). These show up as a failure in your BA's daily report until a later run finds the repository in order.
+![The desk asks which branch is the working branch](guide/assets/desk-branch.jpg)
 
-#### Creating a new repository
+What hygiene cannot resolve, it does not force: a conflict while pulling, changes on the wrong branch, a failed login, a missing clone, or a leftover worktree with uncommitted work. These appear under Failures in your BA's daily report until a later run finds the repository in order.
 
-Agents cannot create GitHub repositories themselves: their sandbox has no GitHub login and cannot push. When a project needs a new repository, the BA (in any chat or intake) or the DevOps engineer asks for it with `aom repo create`. The request appears on your desk as **Create repository `<owner/repo>`**, showing the repository name, its visibility (private or public), the project, which of your workstations will run it, and that it uses your own GitHub login (`gh`) on that workstation. Nothing is created until you click **Create repository**.
+> **In the app:** Help, "DevOps and repository hygiene" (`/help/devops-and-hygiene`).
 
-On approval your own runner creates the repository with `gh`, pushes a first commit (a `README.md` named after the project) to `main`, clones it under the first repository root of your workstation (for example `~/src/<repo>`) and reports the URL. The server adds it to the project (working branch `main`), exactly as if you had added it in the project settings, and the agent's conversation is told the result so it can go on to create cards on it. You can also ask for one from the project's **Convert project** dialog (see above). Only the organization's Owner and Admins can approve, and your workstation must be connected (and `gh` installed and logged in); an existing GitHub repository of that name is never touched unless it is empty and yours. Any failure comes back to the desk as an alert (**Repository not created**), and nothing is added to the project. Once you have fixed the cause (for example `gh auth login`, or starting your runner), click **Retry** on the alert: the same request runs again on your connected workstation (it reuses an empty repository of yours that was already created and its own earlier clone) and the agent's conversation is told. **Dismiss** closes the alert and leaves the request failed; the agent can then ask again. Only the project owner can retry. Asking twice for the same repository never creates a second one.
+### 4.5 The desk, the ledger and standing orders
 
-### Firing an agent
+The **Desk** is where every question and approval reaches you. Cards do not move past a question until you answer.
 
-1. Go to **Agents** and click the agent's row
-2. Click **Fire** (with confirmation)
+![The Desk](guide/assets/desk.jpg)
 
-What happens:
-- Cards the agent holds are released to the queue with the last handoff attached
-- The agent's private sandbox is deleted (transcripts, memory, caches)
-- The agent is marked retired: hidden from hiring, never gets new work
-- The official record stays intact (events, card history, handoffs)
+Each desk item says **what kind it is** (Question, DevOps approval, Merge approval, Outbound update, Digest to rate, Alert, Floor report, and so on), **who asked and what they were doing**, the **question** with options and a **recommendation**, and **how many cards are waiting**. To answer, click an option or type your own answer, optionally add it to the ledger, and click **Answer**.
 
-To hire the same role again, create a new agent. Retired names are never reused, so history stays unambiguous.
+![A question with options and a recommendation](guide/assets/desk-question.jpg)
 
-## Decision desk
+When you answer you can also record it in the **ledger** as a **requirement** (a permanent rule), a **standing order** (an instruction every agent reads at the start of every shift) or a **decision** (a one-time choice kept for history). That is how the team learns: the next agent who is about to ask the same thing finds your answer first, and the desk shows "similar decision in the ledger".
 
-The decision desk is where every question and approval reaches you. Cards do not move forward until you answer.
+The **Ledger** page lists everything and is searchable. Organization-wide standing orders can only come from the Owner and Admins. A project owner adds project-wide ones.
 
-### Desk items
+![The ledger](guide/assets/ledger.jpg)
 
-A desk item shows:
+> **In the app:** Help, "The Decision desk" (`/help/desk`) and "Ledger and vaults" (`/help/ledger-and-vaults`).
 
-- **What kind it is**, as a label: Question, DevOps approval, Merge approval, Outbound update, Digest to rate, Escalation, Vault conflict, Tester bottleneck and so on (the same label in the list and in the item)
-- **Who asked**: agent name and role
-- **What they're doing**: card, stage, workflow context
-- **The question**: options and recommendation
-- **Blocking**: how many cards are waiting on this answer
-- **Urgency**: age, count of affected cards, and whether it blocks progress
+### 4.6 Budgets and costs
 
-### Answering a question
+Every shift records what it used (input, output and cache tokens and the model). The server turns that into money at the **list prices** of the models, in US dollars, and shows it in your organization's currency. These are estimates of what the work costs, not an invoice. Chats count too: to the project when the chat is about a card or project, otherwise to **Org overhead**.
 
-1. Click the desk item
-2. Choose an option or type an answer
-3. Click **Answer** (the recommendation is pre-selected)
+**Where spend shows:**
 
-The answer is recorded in the ledger (shared with future agents), the card is unblocked, and the asking agent's next shift includes the answer.
+- the **Costs** page (Owners and Admins): spend by project, agent, model and day for any date range, with an **Export CSV** button;
+- the **project settings** and the **board header** ("$9.00 of $10.00 this month");
+- each **agent card**, each **card** and each **phase**;
+- the **BA's floor report**.
 
-### Standing orders
+![The Costs page](guide/assets/costs.jpg)
 
-Standing orders are recurring instructions that appear in every agent's next shift. Use them for:
-- Team policies ("all PRs must have unit tests")
-- Context ("we are migrating from X to Y")
-- Decisions that affect multiple cards ("use the new auth system")
+**Monthly budgets.** In the project settings, **Monthly budget** sets a limit for the project. (An interest has its own budget on its Settings tab, 4.9.) The month runs from the 1st to the end of the month in your time zone.
 
-To add a standing order:
+![The Monthly budget panel](guide/assets/budget-panel.jpg)
 
-1. Go to **Ledger**
-2. Click **Add standing order**
-3. Enter the text and scope (whole org, specific project, specific role)
+- **At 80%** you get one notice on the desk and a line in the daily report. Work carries on.
+- **At 100%** the project is **paused**. Running shifts finish, but nothing new starts. Cards wait in the queue. A banner on the board says so, and a desk item offers **Raise budget** (the pause lifts as soon as the new amount is above the spend) or **Override for this month** (work resumes until the 1st).
+- **On the 1st** the month starts again from zero.
 
-Standing orders land in the agent's shift prompt automatically.
+![The board banner when a project is over budget](guide/assets/budget-banner.jpg)
 
-### Adding to the ledger
+Setting a budget below what was already spent pauses the project at once. Members can see the progress but not change it. Guests see only that a project is paused.
 
-When answering a desk question, you can also add it to the ledger as:
-- **Requirement** (a permanent rule)
-- **Standing order** (a team-wide instruction)
-- **Decision** (a one-time choice, recorded for history)
+**Currency.** Under **Costs, Currency and prices** type a three-letter currency code and how many units make one US dollar (for example `EUR` and `0.92`). Changing the rate changes how history is shown, not what was recorded.
 
-## Intake from Jira and GitHub
+> **In the app:** Help, "Budgets and costs" (`/help/budgets-and-costs`).
 
-The BA handles intake: reading tickets from Jira or GitHub, mapping them to projects, and drafting cards with full specs.
+### 4.7 The org chart, roles and workflows
 
-### Intake workflow
+**Org chart** (sidebar, Organization) shows who works for you and who answers whom, as a tree: you at the top, then the BAs, then each department with its seniors above its juniors. The lines are the **escalation path**: a question goes to a senior of the same role, then to the BA, then to your desk. Each tile shows the agent's face, name, role, what it is doing and its workstation. Click an agent for its card. **List** shows the same as grouped lists (the default on a phone).
 
-(You can also ask the BA to create cards in any chat, not only in an intake; see "Chat with agents".)
+![The org chart](guide/assets/org-chart.jpg)
 
-1. Click **Intake** on the desk (or go to Projects > Intake)
-2. Paste a Jira key or GitHub issue URL
-3. Chat with the BA (Claude-powered):
-   - It reads the ticket via MCP skill (Jira) or GitHub API
-   - You answer questions about the scope and project
-   - It drafts a card with context, requirements, acceptance criteria, test plan and completion action
-4. Review the card and click **Specify** when it is ready
+**Roles & workflows** (sidebar, Organization) lets you extend the team beyond the built-in roles.
 
-Cards drafted via intake start in the To do queue and follow the normal workflow.
+- **Roles.** Built-in roles (builder, reviewer, tester, writer and others) cannot be removed, but you can extend them with extra instructions, skills and standing orders (**Extend**). You can also design **custom roles**: a name and purpose, instructions, permissions, skills, a default model and which workflow stages the role may claim.
+- **Workflows.** A workflow is a set of stages with a role for each and a route for success and failure. Design your own, for example a support-triage flow. The BA checks that every stage can be reached and every failure ends somewhere.
+- **Departments** group roles by function so you can filter the board and the Agents page.
+- **Design chat.** Click **Start a design chat** and the BA interviews you and drafts the role or workflow.
 
-### Unmapped tickets
+Everything you design is **submitted to the desk for your approval** before it can be used.
 
-If a ticket does not match a project (e.g., a support request for an untracked system):
-1. The BA asks on the desk
-2. You can map it to an existing project or decide it is out of scope
-3. If out of scope, it lands as a desk notice for your records
+![The design chat: the BA asks what it needs to know](guide/assets/org-design-chat.jpg)
 
-### Jira and GitHub credentials
+![Roles in the organization designer](guide/assets/org-roles.jpg)
 
-- **Jira**: set up in runner config via MCP (stays on your machine)
-- **GitHub**: uses your machine's `gh` login (configured via `gh auth login`)
+![Designing a workflow](guide/assets/org-workflows.jpg)
 
-Neither credential leaves the runner.
+> **In the app:** Help, "Organization chart and design" (`/help/org-chart-and-design`).
 
-## Outbox and posting updates
+### 4.8 Schedules and integrations
 
-Outbox items are draft updates to be posted back to tickets (Jira, GitHub).
+A **schedule** is *a trigger and one action*. Open **Schedules** in the sidebar and click **New schedule**. A three-step wizard asks **When**, **What** and **Details**.
 
-### Outbox workflow
+![The schedules page](guide/assets/schedules.jpg)
 
-1. An agent or the BA drafts an outbox update via the shift (e.g., `aom outbound draft --kind comment --body "...fix..."`)
-2. The update lands on the desk as an **Outbox approval** card
-3. You review it:
-   - **Approve**: posts immediately
-   - **Edit**: make changes and approve (only the manager's edits are posted)
-   - **Reject**: discards it
-4. The post is made with your account and credentials
-
-### Guardrails
-
-Outbox items are scrubbed before posting:
-- No agent names (replaced with role descriptions)
-- No internal process details (review scores, rework reasons, testing step counts)
-
-If a draft violates these rules, it is rejected by the runner; the author can revise and resubmit.
-
-## Testing and finalization
-
-### Test stage
-
-Once a reviewer approves, the card moves to Test. A tester:
-- Runs E2E tests from the test plan
-- If tests pass: card moves to Finalize (or Docs if docs-needed)
-- If tests fail: a bug card is created on the same branch, linked to the original card
-
-The original card waits ("waiting on bug") until the bug passes review and the tester re-runs the full suite.
-
-Testers run browsers (Playwright/Chromium). For that, a tester's sandbox allows Unix sockets, while Docker, WSL interop, the desktop session bus, keyrings and ssh-agent sockets stay hidden from it. A custom role that needs a browser opts in with the **runs browsers** option in the role editor (granting it to a single agent beyond its role is for the organization owner). Playwright's `test-results/`, `playwright-report/` and `blob-report/` folders are treated as scratch output: they are discarded after the shift and never committed. Details and the trade-off: docs/RUNNER.md, "Browser roles (testers) and Unix sockets".
-
-Reviewers, business analysts and other roles that cannot edit or commit work in a read-only worktree: their shell cannot write to it. A reviewer who needs a build or tests runs them in a copy under its scratch directory. Anything that still changes the worktree is rolled back after the shift and recorded as a guard violation.
-
-### Finalization
-
-A large merge waits for your approval on the desk; until you answer, its card stays in the Finalize column with an "Awaiting your approval" badge.
-
-**Owner override: merge large changes without waiting for you.** In **Project settings**, the **Large changes** panel has the setting **Merge large changes without my approval** (off by default). Only the project owner can change it; additional managers see its state read-only. Turning it on asks for a confirmation, because from then on a large change is merged into the working branch as soon as it is finalized: only the two reviews, the tests and the full suite that runs after the merge stand in between. The card's timeline then says "Large change merged without manager approval (project setting)". Every change of the setting is recorded with who made it and when (shown in the panel and its history). Turning it on does not touch approvals already waiting on the desk: they stay, show a hint that the project setting now allows merging without your approval, and **Approve merge** still works with one click. Turn it off again and large merges wait for you as before.
-
-On the Finalize stage, the BA chooses the completion action:
-
-| Action | What happens |
-| --- | --- |
-| **PR** | Push branch to origin, create a PR (if `gh` is available) or ask the desk |
-| **Push branch** | Push to origin without PR |
-| **Merge to main** | Merge the working branch (small cards only) or ask the desk for approval |
-
-The branch is then removed and the card moves to Done. If docs are needed, a tech writer card is spawned.
-
-### Full suite and regression
-
-After finalize, a full suite card is spawned for testers to run the entire E2E suite once. If it fails, a bug card is created and desk notice is posted.
-
-**Regression runs**: on the Projects page, click **Run regression** to test the entire suite on all platforms (web, mobile).
-
-## Phases and follow-ups
-
-A **phase** is a named slice of a project's work ("Phase 2: autosave"): the cards you want to ship and check together. When all of them are done and merged, the BA tells you, and you decide what happens next: deploy, run the regression suite, do something custom. Nothing runs until you approve. Every active member of a project can do everything described here.
-
-### Setting up (project settings)
-
-- **Deploy targets**: where a phase can be deployed. A **local Docker stack** is deployed on *every workstation of every project member* (one DevOps request each, and the deploy only counts as successful when all succeed). A **remote host** names the workstation whose DevOps engineer deploys over SSH, the SSH host alias (from that user's `~/.ssh/config`) and, optionally, the app URL. The notes ("how to deploy": the compose file, the script, the environment) are what the DevOps engineer reads. No passwords or keys are stored in the site: SSH keys and Docker stay on the workstation, and anything destructive still goes through the DevOps approval on your desk.
-- **Default follow-ups**: the list every new phase starts with, for example *Deploy to local*, then *Regression run (web) against local*.
-- Deploy and regression follow-ups need a repository on the project (and regression a workflow with a test stage). In a project without one, for example a project still in the research stage, those buttons are greyed out and the server refuses them (`followup_needs_repos`); stale defaults of that kind are left out of new phases.
-
-### Creating a phase and putting cards in it
-
-Create a phase from **Project settings > Phases > New phase**, or let the BA propose one in an intake chat ("this is phase 2"): it proposes the phase, the cards and the follow-ups, and you confirm them on the desk (**Phase proposal**). Put a card in a phase from the phase page (**Add a card**) or the card page (**Phase** select). A card belongs to at most one phase; suite and regression cards and bug fixes that ride on another card's branch cannot be members. The board has a phase filter and a chip on each card; a "proposed" mark means the BA suggested it and you have not confirmed it yet. A bug card filed after finalize (for example by the full E2E suite) joins the phase it came from automatically, and the phase waits for it.
-
-### When is a phase done?
-
-When every card is **finalized and its work is in the project's working branch**, closed by hand, or cancelled. A research card counts as soon as its note is **published** (the report says "research note published"). A card finalized with *merge* counts at once. A card finalized with *PR* or *push branch* counts once the runner finds its branch merged into the working branch (it checks with git every few minutes; no GitHub status is needed) and then deletes the branch. If the check cannot see it (a squash merge, a branch that was deleted), click **Mark merged** on the phase page. A card that ends without a merge (cancelled, closed by hand) gives its worktree back; its branch is kept and listed in the report. Full E2E suites that run after a merge never delay the phase: the report lists them as passed, failed or still running.
-
-### The "phase done" desk item
-
-The BA writes a report (what was delivered with the merge commits, what was cancelled, what is outstanding) and the desk shows **Phase done: approve N follow-ups?**. You can **Edit follow-ups** (add, remove, reorder, change targets) before you decide, **Approve all**, **Reject** (nothing runs), or **Reopen the phase** (it waits for its cards again; possible until you approve). With no follow-ups the item is just an acknowledgement. If no BA is available (none hired, or none online for 15 minutes) the server writes a template report ("Your BA was not available; this summary was generated.") so you are never left waiting.
-
-### What runs after you approve
-
-The follow-ups are frozen. The BA writes the instructions for each delegate, then the server runs them **in order, one at a time**: a deploy becomes DevOps request(s) with the target's details; a regression run becomes a regression card pinned to the workstation that was just deployed, testing the target URL (the tester gets it in the card and as `AOM_TARGET_URL`); a custom item goes to DevOps, a tester or the BA. **If any follow-up fails, the ones after it are skipped.** At the end a **Phase results** notice lists each result with its evidence (pinned when something failed). The phase page shows live status, the DevOps requests, the regression cards and the progress thread. Archiving a project cancels its phases and their pending follow-ups.
-
-## Your BA reports to you
-
-Your BA is your eyes and ears on the floor and your one consolidated voice. It reports in three ways, and it never slows an agent down.
-
-### What goes through the BA
-
-With **routing** on (it is on for every new organization; **Settings > Your BA reports to you**), what agents and the system raise goes to your BA first:
-
-- **Urgent items reach your desk at once, unchanged**: blocking questions, approvals (DevOps, merges, outbound updates, new repositories, roles and workflows), pinned alerts and a card that keeps failing. The BA adds a **BA note** under the item a little later: how often it was asked, what the ledger says, what it recommends.
-- **Everything else** (for example a "bug reported" or "posting failed" alert) is held for the BA for up to **10 minutes**. The BA passes it on (often with a note), folds duplicates into one item, or dismisses noise it can show is already covered. You see the result: "Your BA looked at this first and passed it on", and what the BA resolved itself is listed in the daily report.
-- **A non-blocking question** reaches your BA before any colleague. It answers from the ledger when it can, otherwise it escalates with the context you need.
-- **The BA never blocks anyone.** An item it has not looked at within ten minutes reaches you unchanged ("Your BA had not looked at this in time"), and with no BA online nothing is held at all. The BA can only dismiss or merge non-urgent alerts, never a question or an approval.
-
-Turn routing off in Settings to see everything as it is raised, exactly as before.
-
-### Signals the server watches for
-
-The server checks the floor every minute, without using any tokens (the BA only works when something fires):
-
-| Signal | Threshold | How you hear about it |
-| --- | --- | --- |
-| A card keeps failing (shift loop) | 3 failed shifts on one card in 10 minutes | At once: the loop alert gets the BA's analysis as a note |
-| The same approval asked again and again | The same DevOps or approval action 3 times in 24 hours (at once if it was rejected before) | In the daily report (at once when it was rejected before) |
-| Blocked too long | A blocked card waits more than 4 hours | Daily report |
-| Nobody can take it | A queued card nobody is able to take for more than 30 minutes | Daily report |
-| Repeated failures | A card in rework round 3, or a failed finalize twice | Daily report |
-| Repository hygiene problem | The DevOps engineer could not resolve something in a repository (conflict, changes on the wrong branch, authentication, missing clone) or found a leftover worktree with uncommitted changes | Daily report, under Failures |
-| Budget | A project has used 80% of its monthly budget (normal), or 100% and is paused (urgent). See [Costs and budgets](#costs-and-budgets) | At 80% in the daily report and on the desk; at 100% at once |
-
-A signal appears once however long it lasts, and clears by itself when the cause is gone (a notice the BA posted is then acknowledged for you).
-
-### The daily floor report
-
-At **08:00 on your clock** the BA posts one **Floor report** on your desk (only on days with something to say; urgent notices never wait for it, at any hour). It lists:
-
-1. phases waiting or open, and the ones held open by late bug cards;
-2. stuck, blocked and backing-off cards;
-3. repeated approvals;
-4. failures, including interests that cannot run;
-5. DevOps requests that are open;
-6. what the BA resolved itself without bothering you;
-7. **Spend**: what the agents cost since the last report and this month, the projects that cost the most, and every project near or over its budget (see [Costs and budgets](#costs-and-budgets));
-8. **Interests highlights**: a count line (how many interests, how many runs since the last report, how many items were delivered and how many are unrated) and the top items of each interest since the last report. Only what a delivery already put on your desk is counted, so the report respects each interest's delivery schedule and the daily quiet cap.
-
-Open **The facts behind this report** for the same lists straight from the server, with links. Every report links to your standing **BA reports** chat (one per organization): ask "why?" there. The desk item stays the record; the chat holds the discussion. With no BA available (none hired, or none online for 15 minutes) the server posts the same report from a template, and passes items on unchanged.
-
-### Settings: your time zone and the report time
-
-**Settings** (bottom of the side menu) holds your **time zone**, which the app takes from your browser the first time you sign in (change it any time; until it is set, reports use UTC), the **routing** switch and the **time of the daily report** (default 08:00).
-
-## Ledger and search
-
-The ledger is the shared memory of your org. It records:
-
-- **Decisions**: choices made on desk items (who decided what, when)
-- **Standing orders**: recurring instructions
-- **Questions**: blocking questions and their answers
-- **Features**: documented changes (from finishing cards)
-
-### Searching the ledger
-
-1. Go to **Ledger**
-2. Type a query (e.g., "authentication", "login timeout")
-3. Optionally filter by scope (all, features, decisions, standing orders)
-
-Results show matching entries with context. Agents can search the ledger during their shifts via `aom ledger search "<query>"`.
-
-## Interests
-
-The **Interests** page (side menu, Knowledge: Interests) is the one place that says what you follow. An interest is a topic with a name and a description. It scans on its own **run schedule**, puts what it found on your desk on its own **delivery schedule**, prefills research about it, carries its own taste rules, and keeps a **run log** of everything it did. Interests belong to the organization. The project behind each interest is hidden: you never see it in project lists, pickers, the board switcher, the Research tab or the metrics, and the card refs of its runs use its short key (for example `RUSTAS-41`).
-
-### Who may see and change an interest
-
-- **Seeing**: anyone who is an active member of the project behind it. An Owner or Admin of the organization sees every interest. An interest that a Member or a guest creates is private to them (and to the Owner and Admins) until an Owner or Admin shares it (**Overview**, then **Share with**).
-- **Changing** (edit, pause, run, research, archive, delete, taste rules): its creator, or someone whose role in the organization is the same or higher (Owner, then Admin, then Member, then Guest). The role the creator has now counts; if they left the organization, the role they had when they created it counts. Everyone else can read it.
-- **Creating**: any member, and guests too (a guest creates in the organization of a project that was shared with them, for example by choosing that organization in the switcher first).
-
-### The list
-
-Each interest is a card with a **tick** (Active or Paused: pausing stops its runs and deliveries), its name and vault folder (`interests/rust-async`), and below that:
-
-- **The run schedule**: when it scans ("Daily at 07:00 (Africa/Johannesburg)"), the most items a run may publish, or "Manual only", and when it runs next.
-- **The delivery schedule**: when results reach you ("Weekdays at 07:00", or "As soon as a run finishes"), and the next delivery. A badge says how many items are **waiting for delivery**.
-- **The last run**: when, how it ended, how many items it found and published, with a link to its card.
-- **Ratings**: useful, irrelevant, boring and unrated (on a phone the compact `U12 I3 B5 ?2`).
-- A red **Cannot run** badge, with the reason, when it keeps failing (it retries with growing pauses and opens a notice on your desk after the third try).
-
-Buttons: **Run scan**, **Research this**, **Run log**, **Digest** and **Open**. The filters above the list narrow it by status and text; **Show archived** lists the archived ones.
-
-### The interest page
-
-**Open** shows one interest with five tabs.
-
-- **Overview**: the schedules, the last run, what waits for delivery, the notes research published, and who can see the interest.
-- **Run log**: every scan and research run, newest first. A row says when, what started it (the schedule, you, or a migration), how it ended, how many items it **found** and **published** (and how many it dropped as duplicates or because the maximum was reached), the ratings of its items, the card and how long it took. Open a row to see its items with their transcript status, the notes a research run published, and the agents that worked on it (with a link to the card for their shift logs). A research run shows its note. Older runs load with **Load older runs**. Under the log, **Deliveries** lists each time items reached your desk.
-- **Digest**: the running list of everything that was delivered to you, newest first, with the rating buttons and **Research this item**.
-- **Settings**: the form below, plus the preferred agents.
-- **Taste**: your explicit rules (below) and, read only, what your ratings taught.
-
-### Creating and editing an interest
-
-**+ New interest** opens a dialog (a full screen sheet on a phone). The same fields are on the **Settings** tab:
-
-- **Name** and **Description** (markdown: the angle, what to include or leave out, the level). The scout and curator follow the description first.
-- **Vault**: Personal or Work. It decides where the interest's files live and which vault the agents use. **It is fixed once the interest has run**; create a new interest instead.
-- **Sub-category** and **Preferred sites**.
-- **What to collect**: article, video and podcast, and the **max total items** per run (the best N across all kinds together).
-- **Run schedule**: a preset ("Daily at 07:00", "Weekdays at 07:00", "Every hour", ...) or your own five-field cron expression, the time zone, **Look back (hours)** (empty means it follows the schedule: 1 hour for hourly, 24 for daily and weekdays, 168 for weekly), or **Only when I press Run now**.
-- **Delivery schedule**: **As one digest at set times** (the default for a new interest: weekdays at 07:00) or **As soon as a run finishes**. With a delivery time, the items every run found since the last delivery wait and arrive together as one digest on your desk. Nothing is pushed in between, and runs can happen as often as they like. It is also what the daily floor report and the interests e-mail digest count.
-- **Preferred agents** (Settings tab only): a scout, curator, researcher and fact checker. This is a **soft preference**: the assigned agent is offered the run first, but any qualified agent that is allowed to work takes the run at once. Nobody waits for the preferred agent. An agent that you restricted to certain projects (on the agent's **Projects** dialog) still works an interest it is assigned to.
-
-### The daily quiet cap
-
-At the bottom of the Interests page, **Daily quiet cap** sets the most digest items that may reach your desk in a day across all interests (the last 24 hours are counted). Items over the cap stay held and arrive with the next delivery that has room. The Owner and Admins change it; everyone sees it. **Deliver now** on an interest page puts what waits on your desk ahead of the schedule (still within the cap).
-
-### Research this
-
-Research is **on demand only**. **Research this**, on an interest or on one item of its digest, starts a research run: a researcher and then a fact checker, with the question and the depth ("Quick", "Standard" or "Deep") you choose. The note is published in the interest's folder under `notes/` (or its sub-category folder), shows under **Notes** on the Overview, and the run appears in the run log. **Research this item** starts from that item's page.
-
-### Taste rules
-
-Besides the rules that grow from your ratings, you can write **explicit taste rules** on the **Taste** tab: a sentence each, such as "Skip beginner tutorials". The curators follow them first and they win when a rating line disagrees. A rule written as `skip "Exact title"` drops the item with exactly that title. The same role rule decides who may change them.
-
-- The rules belong to the interest: a rule only reaches runs of that interest.
-- They are written to `interests/<folder>/taste.md` in your vault as a single block under the heading **Explicit rules**, above the rating lines (headed by comment markers that say it is managed by the site). **Edits you make inside that block in Obsidian are overwritten**; the rating lines below it stay yours to edit. **Resync taste.md** writes the saved rules again. If the interest has no vault, or no workstation holds a clone, nothing is written; the curators still get the rules.
-
-### The interest's folder in your vault
-
-`interests/<name>/` holds `INTEREST.md` (its settings, rewritten by the site), `feed.md` (the running list of what was delivered, oldest to newest), `taste.md`, `runs.md` (one line per finished run), `transcripts/` and `notes/`.
-
-### Archive, restore and delete
-
-**Archive** (the menu on the interest page) stops its runs, cancels the ones in progress and hides it; **Restore** brings it back with a fresh schedule. **Delete permanently** is possible only for an archived interest and asks you to type its folder name: it removes its cards, items, seen-list and run log from the site. The vault folder is never touched.
-
-### Coming from feed projects
-
-If your installation had feed projects, they became interests the first time the new version started (see the deploy notes). A feed project is now the hidden project behind its first interest, and its other interests and feed schedules became interests of their own, with the seen-list, transcripts, members and taste rules copied. Past scans appear in each interest's run log (marked **migrated**), with their ratings. The feed schedules were removed: their cadence lives on as each interest's run schedule. The vault folders moved to `interests/<name>/`. A note on your desk lists what changed. The old addresses (`/p/KEY/feed`) lead to the interest.
-
-## Schedules and feeds
-
-### Schedules
-
-A schedule is **a trigger and one action**. The **Schedules** page (side menu, Work) lists them grouped by project, with the ones for the whole organization first. **New schedule** opens a three-step wizard: **When**, **What**, **Details**.
-
-**When (the trigger)**
+**When (the trigger):**
 
 | Trigger | What it does |
 | --- | --- |
-| **On a schedule** | A cron time with a preset ("Weekdays at 07:00", "Mondays at 07:00", "Every hour", ...) or your own five-field cron expression, in a time zone you choose. Missed fires (the server was down) happen once, not many times. |
-| **When something happens** | A phase is completed, a card is finalized, an interest run is done or a project is converted, optionally only in one project. The server watches for these itself: no agent polls, and the same event never runs a schedule twice. |
-| **When an issue is labelled** | A GitHub or Jira issue gets a label. One of your workstations polls on the cadence you pick, with its own `gh` login or Jira token; the credentials never leave it. Each new issue runs the action once. |
-| **Only when I run it** | No automatic trigger: use **Run now**. |
+| **On a schedule** | A time such as "Weekdays at 07:00" or your own cron expression, in a time zone you choose. If the server was down, a missed run happens once, not many times. |
+| **When something happens** | A phase is completed, a card is finalized, an interest run is done, or a project is converted. |
+| **When an issue is labelled** | A GitHub or Jira issue gets a label you choose. One of your workstations checks, using its own login. |
+| **Only when I run it** | No automatic trigger. Use **Run now**. |
 
-**What (the action)**
+**What (the action):**
 
-- **Create a card** from a template. A title without `{date}` or `{week}` gets the date appended; `{ref}`, `{project}` and `{issue.title}` work when an event or an issue ran it. The card is queued ahead of normal work.
-- **Run a regression**: one regression card per platform, queued at Test.
-- **Ask DevOps**: a request to the DevOps engineer of one of your workstations, or a repository hygiene run.
-- **Ask the BA**: free-text instructions. The BA reads (ledger, desk, vault, repositories; it changes nothing) and posts one report on your desk, with the BA chat open if you chose that. If no BA is available the desk gets a notice with your instructions instead.
-- **Poll GitHub or Jira issues**: new issues of a repository (or a JQL filter) go into **intake** with the BA, one conversation each. An issue is taken once.
-- **Send a webhook**: POST JSON to a URL. Formats: generic (n8n, Zapier, your own code), Slack incoming webhook and Microsoft Teams (both get a formatted `text`). You may append the floor report or a project summary. Each request is signed: the header `X-AOM-Signature` is `sha256=` plus the HMAC-SHA256 of `<X-AOM-Timestamp>.<body>` with the schedule's secret, which is shown **once** when you create it (**New secret** replaces it). A failed delivery (a 5xx, 429 or a network error) is retried after 1 minute, 5 minutes, 30 minutes and 2 hours, five tries in all; another 4xx answer is final. Addresses on this machine or a private network are refused unless the deployment allows them.
-- **E-mail a digest**: the floor report (the whole organization) or a project summary, sent at the time you set from the site's mail account. A failing mail server is retried like a webhook. A third digest, **Interests**, lists the top items each interest delivered to your desk in the last 24 hours, with the interests that cannot run.
+- **Create a card** from a template, with the date or the issue title in the name if you like.
+- **Run a regression** (a full test run).
+- **Ask DevOps** to do something on a workstation, or run repository hygiene.
+- **Ask the BA** to look at something and write a report on your desk.
+- **Poll GitHub or Jira issues** and send each new one into **intake**.
+- **Send a webhook** to Slack, Microsoft Teams, n8n, Zapier or your own code. Every request is signed so the receiver can check it came from you. Failed deliveries are retried a few times.
+- **E-mail a digest**: the floor report, a project summary or an interests digest, at a time you choose.
 
-**History.** **History** on a schedule shows every run: when, what triggered it, what it did, a link to the card or the intakes it made, and the reason when it failed. For a webhook or an e-mail the **Deliveries** view is the delivery log with every try, its HTTP status and its duration. **Send test** (webhooks and e-mails) sends one signed test delivery now; it is logged but never retried and is not counted as a run of the schedule.
+![The schedule wizard](guide/assets/schedule-wizard.jpg)
 
-**System rows.** Under **Run by the system** two jobs are listed read-only: the repository hygiene of each of your workstations and the BA floor report. They show when they run and last ran, with a **Configure** link to where you change them.
+**History** on each schedule lists every run, what triggered it, what it did and why it failed if it did. **Send test** sends one test delivery for webhooks and e-mails.
 
-**Who may do what.** A schedule tied to a project can be created, changed and run by any member of that project, guests on a shared project included. A schedule that acts for the whole organization (a BA task or an integration without a project, repository hygiene, the floor report digest) is for the Owner and Admins only; others see a note and must choose a project. A schedule that runs on a workstation (DevOps, issue polling) needs the workstation's user to create or change it, and it runs as the person who created it. A member may e-mail a digest to their own address only. If its owner loses access to the project, the schedule stops and a notice appears on the desk. A suspended organization skips its schedules and records it.
+**Who may do what.** A schedule inside a project can be made and run by any member of that project. A schedule that acts for the whole organization (BA tasks without a project, hygiene, the floor report digest) is for Owners and Admins. A suspended organization skips its schedules.
 
-**Feeds.** Feeds are [Interests](#interests) now: you cannot create a feed schedule, and an interest has no schedule row of its own. Its run and delivery schedules are part of the interest.
+**Intake and the outbox.** The **Intake** page (sidebar, Owners and Admins) is where you hand the BA a ticket: paste a Jira key or a GitHub issue address and the BA reads it, asks you about anything unclear, maps it to a project and drafts the cards. Updates the agents want to post back to the ticket (a comment, a resolution) wait on your desk as **Outbound update** items. You can edit them, approve or reject. Nothing is posted without your approval, and agent names and internal details are scrubbed from the text. Jira and GitHub logins stay on your workstation.
 
-### How a scan works
+![Intake](guide/assets/intake-view.jpg)
 
-A run of an interest is a feed card: a **scout** collects candidates (a few more than the maximum), then a **curator** picks the best N overall, whatever their kind, and posts the digest. The server keeps only items the scout really opened, drops duplicates (a seen URL, or the same story from another source) and applies the maximum and the kinds the interest wants. What reaches you follows the delivery schedule.
+![An outbound update waiting for approval](guide/assets/desk-outbound.jpg)
 
-1. Rate digest items on the desk or on the interest's **Digest** tab (useful, irrelevant, boring) and add your taste rules.
-2. The ratings become rule lines in the interest's `taste.md`. Future curators read it.
+> **In the app:** Help, "Schedules and integrations" (`/help/schedules-and-integrations`) and "Intake and outbox" (`/help/intake-and-outbox`).
 
-**Transcripts for videos and podcasts.** Every video or podcast in a digest comes with its transcript so you can read it quickly instead of watching it. On the desk rating item and in the run log each such item has a **Transcript** view that shows the text (or "No transcript available"). The transcript is also saved in your vault as `interests/<name>/transcripts/<date>-<title>.md`, and the curator writes the item's summary from it. Research runs do the same for video and podcast sources: the transcript is saved in the same folder, the fact checker verifies claims against it, and the published note links it.
+### 4.9 Interests
 
-Transcripts for YouTube and other video sites need **yt-dlp** on the workstation. If it is missing, the scout reports "transcript tool missing: yt-dlp" and asks the DevOps engineer to install it (you can also ask DevOps yourself: "install yt-dlp"); `aom-runner doctor` lists it as an optional tool. Podcasts use the transcript the episode page or feed publishes, when there is one. Where no transcript exists the item shows "No transcript available"; text is never made up.
+An **interest** is a topic you follow. Agents look for new items on a **run schedule**, and deliver what they found to your desk on a **delivery schedule**. Keeping those two apart is how you avoid being flooded.
 
-See `docs/SPEC.md` for the feed and interest rules.
+![The Interests page](guide/assets/interests.jpg)
 
-## The HR board
+**Create one:** **Interests** in the sidebar, then **New interest**. Fill in:
 
-Once you have hired agents, the HR board shows:
+- **Name and description:** the angle, what to include and what to leave out.
+- **What to collect:** articles, videos, podcasts, and the most items per run.
+- **Run schedule:** for example "Daily at 07:00", or only when you press **Run now**.
+- **Delivery schedule:** **As one digest at set times** (for example weekdays at 07:00) or **As soon as a run finishes**.
+- **Preferred agents:** a scout, a curator, a researcher and a fact checker. This is a soft preference. Any available qualified agent takes the run, so nobody waits.
 
-- **Agent cards**: name, status (idle, working), current card, hiring manager, what the agent cost this month and in total, quick actions
-- **Performance stats**: cards done, bounce rate, bugs escaped, utilisation, tokens per card vs role average
-- **Recommendations**: model changes, role splits, hiring, standing orders (one-click apply)
-- **Metrics dashboard**: team throughput, time blocked, queue depth, time-to-finish
+On the interest's page, **Overview** shows both schedules and what is waiting for delivery. **Run log** lists every run with its items, cost and agents. **Digest** is the running list of everything delivered, with rating buttons. **Settings** and **Taste** are where you tune it.
 
-Recommendations are rule-based; you can apply them directly or adjust and post a standing order to the desk.
+![An interest's Digest tab](guide/assets/feed.jpg)
 
-## Costs and budgets
+**Teach it your taste.** Rate digest items **useful**, **irrelevant** or **boring**. The curators learn from the ratings and write rules into the interest's `taste.md`. You can also type your own rules on the **Taste** tab ("Skip beginner tutorials"). Your written rules win over the learned ones.
 
-Every shift records what it used: input, output and cache tokens and the model, as the runtime reports them (a shift you stopped, or that timed out, still keeps what it spent). The server turns that into money at **list prices in US dollars** (Opus, Sonnet and Haiku have their own price; any other model is priced like Sonnet), and shows it in your organization's currency. These are estimates of what the work costs, not an invoice. The built-in prices are defaults; the platform administrator will be able to change them.
+![Taste rules](guide/assets/interest-taste.jpg)
 
-Chats count too: to the project when the chat is about a card or project, otherwise to **Org overhead**. Spend adds up per agent, card, phase, project and interest (an interest's hidden project carries its cost).
+**Research this.** On an interest or on one digest item, **Research this** starts a researcher and a fact checker, with the depth you choose (**Quick**, **Standard** or **Deep**), and publishes a note into the interest's folder. Research happens only on demand.
 
-### Where spend shows
+**The daily quiet cap** (bottom of the Interests page) limits how many digest items reach your desk in a day across all interests. Items over the cap wait for the next delivery.
 
-- **Project settings**: the month's spend in the header, and a **Monthly budget** panel with a progress bar.
-- **The board header**: `$9.00 of $10.00 this month`, and a banner when the project is near or over its budget.
-- **The HR board**: each agent's cost this month and in total.
-- **A phase** and **a card**: what its shifts and BA tasks cost.
-- **Interests**: the spend and budget of the interest (Settings tab).
-- **The floor report**: a Spend section.
-- **Costs** (Organization, Owner and Admin): the breakdown by project, agent, model and day for any date range, the daily bars, the prices used, the currency setting and an **Export CSV** button (one row per day, project, agent and model; spreadsheet formulas in names are neutralised).
+**Transcripts.** Videos and podcasts come with a transcript so you can read instead of watch. Transcripts of video sites need **yt-dlp** on the workstation (the installer offers it).
 
-### Monthly budgets
+**Who sees an interest.** Owners and Admins see all interests. An interest made by a Member or Guest is private to them until an Owner or Admin shares it. Whoever made an interest, or someone with an equal or higher role, may change it.
 
-An **Owner or Admin** sets a project's budget in project settings (**Monthly budget**), or an interest's in its Settings tab. The month runs from the 1st to the end of the month in your organization's time zone (the time zone of the Owner, set under Settings), so the budget starts again on the 1st at local midnight.
+> **In the app:** Help, "Interests" (`/help/interests`).
 
-- **At 80%**: you get one desk notice ("TOY has used 80% of its monthly budget"), and your BA gets a Budget signal for the daily report. Work carries on.
-- **At 100%**: the project is **paused**. Running shifts finish; nothing new starts on it (cards wait in the queue, the BA's tasks for it wait, an interest does not run). A banner on the board and the project says so, and a desk item offers:
-  - **Raise budget**: opens the Monthly budget panel; the moment the new amount is above the spend the pause lifts and the desk item closes.
-  - **Override for this month**: dispatching resumes although the budget is used up, until the 1st.
-- **On the 1st** the month starts again: the spend counts from zero, the thresholds re-arm and an old pause notice closes.
+### 4.10 Phases and follow-ups
 
-Setting a budget below what is already spent pauses the project at once. Members who are not Owner or Admin see the progress but cannot change the budget; guests of a shared project see only that it is paused, never the amounts.
+A **phase** is a named slice of a project's work, the cards you want to ship and check together. When all its cards are finished and merged into the working branch, your BA tells you and proposes what happens next: deploy, run the regression suite, something custom. **Nothing runs until you approve.**
 
-### Currency
+![A phase](guide/assets/phase.jpg)
 
-Under **Costs**, **Currency and prices**: type a three-letter currency code and how many units of it make one US dollar (for example `EUR` and `0.92`). Budgets and every amount you see use it. Changing the rate changes how all history is shown, not what was recorded.
+**Set up (project settings):** add **Deploy targets** (a local Docker stack on every project member's workstation, or a remote host that a workstation deploys to over SSH) and the **Default follow-ups** every new phase starts with, for example "Deploy to local, then Regression run against local". No passwords or keys are stored in the site.
 
-## The org chart
+**Create a phase** under **Project settings, Phases and deploys, New phase**, or let the BA propose one while you talk about the work ("this is phase 2"). Add cards from the phase page or from the card's **Phase** selector. A card belongs to at most one phase.
 
-**Organization, Org chart** shows who works for you and who answers whom, as a tree:
+**When is a phase done?** When every card is finalized and its work is in the working branch (or closed or cancelled). If the app cannot see a squash-merged branch, click **Mark merged** on the phase page.
 
-- the **manager** (you, the Owner, with the Admins) at the top;
-- below, the **business analysts**;
-- below them, each **department** (Delivery, Research, and any department you designed) as a box, with a group per role: the **seniors** on the upper row and the **juniors** under them.
+**The "Phase done" item** on your desk carries a report of what was delivered and what is outstanding. You can **Edit follow-ups**, **Approve all**, **Reject** (nothing runs), or **Reopen the phase**.
 
-The lines are the **escalation**: a question goes to a senior of the same role, then to the BA, then to your desk. A junior with no senior of its role goes straight to the BA. Where an agent reports to is on its card: the manager who hired it, and through them the Owner.
+![The phase-done approval](guide/assets/desk-phase-done.jpg)
 
-Every tile shows the agent's face, name, role and seniority, what it is doing in words (working on a card, blocked, idle, offline, needs a new workstation; the ring around the face repeats it), and its workstation. **Click an agent** for its card: the projects it may work on and prefers, who it reports to and escalates to, its cost, and its recent work.
+**What runs after you approve:** the follow-ups run **in order, one at a time**. If one fails, the ones after it are skipped. At the end a **Phase results** notice lists each result with its evidence.
 
-Pick a project in **Allowed on project** to see who may work it (agents allowed on any project always show). **List** shows the same organization as grouped lists; on a phone the list is the default. The **DevOps engineer** of each workstation is shown apart, below the chart: it looks after one machine and reports to your desk, not to the BA.
+> **In the app:** Help, "Phases and follow-ups" (`/help/phases`).
 
-## Organization design
+### 4.11 Your BA reports to you
 
-Expand your organization beyond built-in roles and workflows.
+The BA is your eyes and ears on the floor. It reports in three ways, and it never slows an agent down.
 
-### Custom roles
+**What goes through the BA.** With **routing** on (the default), urgent items such as blocking questions and approvals reach your desk **at once**, unchanged, and the BA adds a note a little later (how often this was asked, what the ledger says). Less urgent items wait up to **10 minutes** for the BA, which passes them on, folds duplicates together, or dismisses noise it can show is covered. If the BA is slow or offline, items reach you unchanged. Switch routing off in **Settings, Your BA reports to you** to see everything as it is raised.
 
-1. Go to **Organization** > **Roles**
-2. Click **Design** (or chat with the BA in Intake)
-3. Define:
-   - **Name and purpose**: what they do
-   - **Instructions**: behavior, guardrails, allowed tools
-   - **Permissions**: which repos, branches, tools
-   - **Skills**: special knowledge or expertise
-   - **Model**: default provider and model
-   - **Stages**: which workflow stages this role can claim
-4. The BA validates it and submits to the desk
-5. You approve on the desk, then hire the role
+**Signals the server watches** (every minute, without spending tokens):
 
-Built-in roles (builder, reviewer, tester, etc.) cannot be removed, but you can extend them with extra instructions and standing orders (owner only). When the app updates with new default versions, you can reset a role to the new default.
+| Signal | Threshold | You hear |
+| --- | --- | --- |
+| A card keeps failing | 3 failed shifts on one card in 10 minutes | At once |
+| The same approval asked again and again | 3 times in 24 hours | In the daily report |
+| Blocked too long | A blocked card waits more than 4 hours | In the daily report |
+| Nobody can take it | A queued card nobody can take for 30 minutes | In the daily report |
+| Repeated failures | A card in rework round 3, or finalize failed twice | In the daily report |
+| Repository hygiene problem | A conflict, wrong branch, login failure or missing clone | In the daily report |
+| Budget | 80% of a monthly budget, or 100% (paused) | 80% in the report, 100% at once |
 
-### Custom workflows
+**The daily floor report.** At **08:00 your time** (change it under Settings) the BA posts one **Floor report** on your desk, on days with something to say. It lists phases waiting, stuck and backing-off cards, repeated approvals, failures, open DevOps requests, what the BA resolved itself, **spend** and highlights from your interests. Open **The facts behind this report** for the same lists straight from the server, and use the **BA reports** chat to ask "why?".
 
-1. Go to **Organization** > **Workflows**
-2. Define a new workflow:
-   - **Stages**: name, role, required fields, success criteria, failure routing
-   - **Paths**: where cards go on success vs failure
-3. Validate: no unreachable stages, failure paths terminate, every stage has a claimable role
-4. Submit to the desk for approval
+![The floor report](guide/assets/desk-floor-report.jpg)
 
-Once approved, custom workflows appear on the Projects page as project types.
+![Settings: time zone and how your BA reports to you](guide/assets/settings.jpg)
 
-### Departments
+> **In the app:** Help, "Your BA reporter" (`/help/ba-reporter`).
 
-Group roles by function (Engineering, Support, Research, Marketing) so you can filter the HR board and board by department.
+### 4.12 Testing, finalizing and risk
 
-## Chat with agents
+Once a reviewer approves, the card moves to **Test**. A tester runs the tests of the test plan. If they fail, a bug card is created on the same branch, and the original card waits ("waiting on bug") until the bug is fixed and the tests pass.
 
-Click an agent card on the board to open its detail, then click **Chat**. This opens a live conversation with the agent (if the workstation is connected). You can:
+**Risk tier.** The app computes it from the size of the change: **Small**: one reviewer and one tester. **Large** (200 or more changed lines, or changes in the architectural areas you configured, or a refactor): two different senior reviewers. You can override it on the card (**Change** next to the risk tier) with a reason. A 50-line change to a critical system may deserve large-tier review.
 
-- Ask questions about the card
-- Offer suggestions
-- Discuss blockers or decisions
+![Setting the risk tier](guide/assets/dlg-risk.jpg)
 
-A chat with the business analyst (BA) is also how you get work specified: ask the BA in any chat, including one you started from the desk's **Chat** button, to create cards. The BA maps the project (or uses the project the chat is tied to), drafts and specifies the cards, and the conversation is linked to every card it creates (the chat becomes an intake with no external ticket). The BA works with your rights: it can only use projects you are a member of. Other agents cannot create cards from chat.
+**Finalize.** The BA completes the card in the way you chose: **PR** (push the branch and open a pull request), **Push branch**, or **Merge** to the working branch (small cards). **A large merge waits for your approval** on the desk, and the card stays in the Finalize column with an "Awaiting your approval" badge.
 
-In any chat the agent may write notes and drafts in its own scratch folder; it still cannot change your repositories, the vault or its configuration from a chat.
+![A large merge waiting for approval](guide/assets/desk-large-merge.jpg)
 
-Chat is saved to a thread and appears in the card's history. A chat that belongs to a project is marked "visible to this project's managers". Rights are checked on every message: if you are removed from the project, you can no longer talk to its agents through an old chat.
+> **Watch out:** in project settings, **Merge large changes without my approval** lets large changes merge as soon as they are finalized. Only the two reviews, the tests and the post-merge full suite then stand in between. It is off by default, only the project owner can change it, it asks you to confirm, and every change is recorded.
 
-## Windows workstation notes
+After a merge, a **full suite** card runs the entire end-to-end suite once. If it fails, a bug card and a desk notice follow. **Run regression** on the board runs the whole suite on demand.
 
-### Default: WSL2
+> **In the app:** Help, "Testing and finalization" (`/help/testing-and-finalization`).
 
-Install the runner inside a WSL2 Ubuntu distribution and follow the Linux instructions: `docs/RUNNER.md`, section
-"Windows: run the runner inside WSL2" (enable WSL2, install Ubuntu, Node 22 via nvm, git, gh, bubblewrap and socat, Claude
-Code, clone repos in the WSL filesystem rather than `/mnt/c`, pair, and run the runner as a systemd user service). This is
-the only Windows setup where agents run inside an OS sandbox.
+### 4.13 Conversion, the Research tab and research cards
 
-### Native Windows (unsandboxed, not recommended)
+**Research cards in any project.** Pick the card type **research** on the New card form to ask a question in any project. It runs on the research workflow (question, research, fact check, publish) and gets a **Research** chip on the board.
 
-Native Windows cannot sandbox agents. By default the runtime then reports itself unavailable and no agent is scheduled.
-To run agents there anyway, set `"sandbox": "best_effort", "allowUnsandboxed": true` under `runtimes.claude-code` in
-`%LOCALAPPDATA%\aom-runner\config.json`. A prompt-injected agent could then read any file your Windows user can read,
-including the runner token. The web UI warns about it everywhere the workstation and its agents appear.
+**Converting a project.** A project that started as research converts to a delivery project when the questions are answered. Owners and Admins do it in **Project settings, Stage, Convert project** (or the **Convert to project** button on a research project's board). A short dialog asks:
 
-### Installation (native)
+1. **Workflow:** the target, usually Code.
+2. **Repositories:** a workflow that works in code needs at least one. Add one, or **request a new GitHub repository**. The request lands on your desk and your own workstation creates it with your GitHub login when you approve.
+3. **Open cards:** for cards that run on another workflow, choose **Keep** (they finish on their own workflow) or **Cancel**.
+4. **Hand-over:** the published notes are listed in the project's `PROJECT.md` so every agent that works there reads them.
 
-1. Download `aom-runner-*.tgz` from the system
-2. Extract to `C:\Users\you\aom-runner` (or your preferred location)
-3. Run `aom-runner.cmd pair --server ... --code ... --name Desktop`
-4. Run `aom-runner.cmd repos add C:\Users\you\src`
+![The Convert project dialog](guide/assets/dlg-convert.jpg)
 
-### SSH for vaults
+Cards, notes and history stay as they are. For each repository added, the DevOps engineer asks which branch is the working branch.
 
-If your vault URLs use SSH:
-- Ensure `git` can reach your SSH keys (configure `OpenSSH` in Windows or use `PuTTY` with Pageant)
-- Or use HTTPS URLs with a GitHub PAT stored in `~/.git-credentials`
+**The Research tab.** A project with published research notes (or one that started as research) has a **Research** entry in the sidebar. It lists the research cards in progress and every published note with its path in the vault, a preview and its sources.
 
-### Run as a service (native)
+![The Research tab](guide/assets/research-tab.jpg)
 
-Use **Task Scheduler** to run `aom-runner.cmd start` on login:
-1. Task Scheduler > Create Task
-2. Trigger: "At log on"
-3. Action: `C:\Users\you\aom-runner\aom-runner.cmd`
-4. Arguments: `start --data-dir C:\Users\you\AppData\Local\aom-runner`
+> **In the app:** Help, "Converting a project" (`/help/project-conversion`).
 
-## Troubleshooting
+### 4.14 Archive and delete
 
-**Q: A workstation shows "Disconnected"**
+**Archive** a project you no longer use: **Project settings, Archive, Archive project**. The dialog lists what will stop (running shifts, open cards, schedules and open desk items) before you confirm. Branches and history are kept. Agents are not fired. They simply stop getting the project's work. **Restore** it from **Projects, Archived**. Cards the archive closed stay closed.
 
-The runner process stopped or the connection timed out. Check:
-```
-aom-runner status               # shows process state and connection
-aom-runner doctor               # checks node, git, claude, server connectivity
-```
+![Archiving a project shows what will stop](guide/assets/dlg-archive.jpg)
 
-Restart it: `aom-runner start` or check logs in `~/.aom-runner/logs/runner.log`.
+**Delete permanently** is possible only for an archived project, only for the project owner, and asks you to type the project key. The project's cards, threads, schedules and notes are removed from the database and cannot be recovered. The audit log keeps a record and the vault folder is never touched. An agent that was allowed on that project only is **benched**, and the desk names the benched agents so you can reassign them.
 
-**Q: An agent finished but I don't see a handoff**
+### 4.15 Security and two-factor login
 
-The shift may have timed out (server killed it after 1 hour offline) or the runner crashed. Check:
-- **Board**: card should be back in its queue with the last handoff attached
-- **Workstations**: is the runner connected?
-- **Logs**: `~/.aom-runner/logs/shifts/<shiftId>.jsonl` shows what happened
+Everyone can turn on two-factor login under **Your settings** (3.2). As Owner you can **require it for the organization** on **Organization, General** (see the General tab in 4.1). Members who have not set it up are then held at the setup screen until they do. You need it on your own account first.
 
-**Q: "The runner is running: stop it first" (rotate-token)**
+If a member loses their phone and their recovery codes, you reset their two-factor login on the **Members** tab (**Reset two-factor login**, Owner only). They set it up again at the next sign-in.
 
-`aom-runner rotate-token` replaces the token. Stop the runner first:
-```
-# Kill the running process or press Ctrl+C
-aom-runner rotate-token
-aom-runner start              # restart with the new token
-```
+> **Tip:** a suspended organization (unpaid, trial over) keeps its data. Running shifts finish, nothing new starts, and only the Owner can still sign in to see settings and members. Everything resumes where it stopped when the platform administrator reactivates the organization.
 
-**Q: Vault sync is paused with a conflict**
+### 4.16 Plan and limits
 
-Vault sync stops if a local change conflicts with a remote change. Go to the Vaults settings and resolve manually, then restart sync.
+**Organization, Plan & limits** shows your plan, status, licence date, how much you use, and which features are switched on. Today there is one plan, **Founding**, with every feature and **no limits** (the limit fields are empty, meaning unlimited). The platform administrator changes the plan. If a feature is switched off, its page leaves the sidebar, but its data is kept.
 
-**Q: Card does not match available agents**
+![Plan and limits](guide/assets/org-plan.jpg)
 
-Check the Workstations page: the repo must be listed under the workstation, and the agent must have the role and workstation assigned. If you just added a repo, agents see it after they reconnect (next heartbeat).
+### 4.17 Chatting with agents
 
-**Q: Out of scope when I expected to run**
+Click **Chat** in the top bar (or on the Desk), pick an agent and choose **Start chat**. Ask about a card, discuss a blocker, or ask the BA to draft cards. The BA works with your rights, so it can only use projects you are a member of. Conversations are saved, and a chat tied to a project is marked as visible to that project's managers.
 
-The agent reported work outside the scope of its role. Review the shift log in `~/.aom-runner/logs/shifts/<shiftId>.jsonl` and the card's comment thread. Adjust the card spec or agent skills and try again.
+![A chat with the BA](guide/assets/chat-ba.jpg)
 
-## See also
+![The chat start screen lists earlier conversations](guide/assets/chat-start.jpg)
 
-- `docs/RUNNER.md`: full runner reference, data directory, CLI, config
-- `docs/DEPLOY.md`: server deployment, scaling, backups
-- `docs/SPEC.md`: complete product spec and organization design
-- `docs/ARCHITECTURE.md`: technical design, event store, dispatcher, protocol
+> **In the app:** Help, "Chat with agents" (`/help/chat-with-agents`).
 
-## Known gap: Couchbase isolation and heavy-build queue
+## 5. For Members
 
-The spec's testing section asks for one Couchbase bucket or scope per worktree and for heavy builds (for example MAUI) to queue one at a time per workstation. Neither is built yet. Until it is, keep Couchbase-backed or MAUI projects to one tester and one builder per workstation.
+A **Member** works inside the projects an Owner or Admin has added them to. You do the day-to-day work: write cards, answer questions, hire your own agents and follow the board. You do not manage the organization.
+
+![What a Member sees: the projects they were added to](guide/assets/member-projects.jpg)
+
+### 5.1 What you can do
+
+| You can | You cannot |
+| --- | --- |
+| See the board, desk items and cards of **your** projects | See other projects, or create a project |
+| Create and edit cards, and comment | Add or remove people, or change project settings |
+| Move, release or cancel **your own** cards | Manage cards of other people (ask an Owner or Admin) |
+| Answer questions on your own cards | Answer project-level decisions (Owners and Admins do) |
+| Pair **your own** workstation and hire agents on it, for projects you are on | Hire agents on someone else's workstation, or widen an agent's permissions |
+| Change or fire the agents **you** hired | Change other people's agents |
+| Chat with the agents allowed on your projects | See Costs, Intake, Plan and limits or the Invitations tab |
+| Create interests, and schedules inside your projects | Create schedules that act for the whole organization |
+| Turn on two-factor login, and leave the organization | Change roles or remove people |
+
+The **Members** list under **Organization** is visible to you, read-only.
+
+![The read-only Members list for a Member](guide/assets/member-org.jpg)
+
+### 5.2 Your first day
+
+1. **Sign in** and take the tour (3.1 to 3.3). Turn on two-factor login (3.2).
+2. **Open the board** of a project you were added to. The sidebar's **Board** entry opens the project you used last. The project switcher at the top of the page changes project.
+3. **Create a card** (3.7), or ask the BA in a chat to draft one for you. Only cards you created, or that were assigned to you, show actions such as **Move** and **Cancel**.
+4. **Answer questions.** The desk shows questions about your cards. Questions about other people's cards are read-only for you, unless the project's decision policy allows any member to answer.
+5. **Use your own computer if you like.** Under **Workstations** you can add a workstation (3.4) and hire agents onto it. Those agents work for the projects you are on, and for no one else. Hire them with the allow-list limited to the projects you are on.
+
+### 5.3 Good habits
+
+- Write cards like a briefing to a new colleague. A clear card is the cheapest way to get good work.
+- Use the **Chat** button to ask the BA when you are unsure how to phrase something.
+- Check the desk once or twice a day. Blocked cards wait for answers, and waiting costs time, not money.
+- Keep an eye on the budget bar in the board header. If the project nears its budget, tell an Owner or Admin before the pause starts.
+
+> **In the app:** Help, "Board and cards" (`/help/board-and-cards`) and "The Decision desk" (`/help/desk`).
+
+## 6. For Guests
+
+A **Guest** is someone from another organization who was invited to work in one project of this one. You keep your own organization and your own account. The invitation adds one project, and nothing else.
+
+### 6.1 Accepting the invitation
+
+1. Sign in with the account the invitation was sent to. (There are no guests without an account in some organization. If you have none, ask for a Member invitation instead.)
+2. Open **Projects**. At the top, the **Project invitations** inbox names the organization that invited you. Click **Accept invitation**.
+3. The project now appears in your project list with a "Guest" label and the other organization's name. The organization switcher in the sidebar lists it under "Guest in".
+
+![The Project invitations inbox on the Projects page](guide/assets/guest-invitation.jpg)
+
+### 6.2 What you can do as a Guest
+
+- See the project's **board** and its cards, create cards, comment and answer questions on your own cards.
+- **Chat** with the agents that work on this project.
+- **Hire agents onto your own workstations**, for this project only. An agent of yours never works on the host organization's other projects, whatever its allow-list says.
+- Leave the project when you are done.
+
+### 6.3 What you cannot do
+
+- You see **nothing at organization level**: no org settings, members, costs, org chart or agents of other people.
+- You cannot change project settings, add people or archive the project.
+- You cannot see the host organization's vaults, ledger entries that belong to other projects, or other projects at all.
+- You never see the money: a paused project shows only that it is paused, not the amounts.
+
+![A project seen by a guest](guide/assets/guest-project.jpg)
+
+If you are removed from the project, the agents you hired for it move back to the owner of the project, and cards they held go back into the queue.
+
+## 7. For the platform administrator
+
+The **platform administrator** (also called the **super admin**) runs the Guildwise HQ service itself, not any one organization's work. You sign in at the same address as everyone else, but you see only the **Platform** area. You can never see an organization's cards, desk, vaults, ledger, chats or agents. That is by design.
+
+### 7.1 First sign-in and two-factor login
+
+A platform account is created on the server with a command (see `docs/DEPLOY.md`). At your first sign-in the app holds you at the two-factor setup: type your password, scan the QR code, type the first code and **save the ten recovery codes**. Two-factor login is mandatory for platform accounts. If you lose your password, an operator resets it on the server (`superadmin-reset-password`, with `--reset-two-factor` if the second factor is lost too).
+
+![The platform area, Organizations](guide/assets/platform-orgs.jpg)
+
+### 7.2 Organizations
+
+**Organizations** lists every organization with its status (trial, active, suspended, cancelled), its Owner, its plan and its usage (members, workstations, agents, projects). Click one for its detail page.
+
+![An organization's detail page](guide/assets/platform-org-detail.jpg)
+
+On the detail page you can:
+
+- **Suspend** an organization (unpaid, trial over, licence date passed). Running shifts finish and nothing new starts. Scheduled runs are skipped and recorded. A banner explains it. Only the Owner can still sign in, with read access plus organization settings and members. **Reactivate** it and everything resumes where it stopped.
+- **Cancel** an organization.
+- Change the **plan, limits, licence date, grace period and feature switches** (Interests, Integrations and intake, Outbound updates, Research, Phases, Browser tools, Custom roles and workflows). Every change needs a **reason**, and it goes into the audit log. Today there is one plan, **Founding**, with no limits.
+- **Transfer ownership** to one of the organization's Admins, for example when the Owner left the company. This needs a written reason and is audited.
+
+### 7.3 Invitations: starting a new organization
+
+**Invitations** is where a new customer begins. Type the **Owner's email** and the **organization name** and click **Send invitation**. The invitee receives a link, chooses a name and password, and becomes the Owner of the new organization (they may rename it). Invitations can be resent or revoked from the **All invitations** list.
+
+![Inviting a new organization](guide/assets/platform-invitations.jpg)
+
+### 7.4 Accounts
+
+**Accounts** lists every login. You can **deactivate** and reactivate an account. Deactivating someone unlinks their workstations, parks their agents and releases cards they held. You can also **reset a person's two-factor login** if they lost their phone and their recovery codes. The last active Owner of an active organization cannot be deactivated. Transfer ownership first.
+
+![Accounts](guide/assets/platform-users.jpg)
+
+### 7.5 The Support inbox
+
+**Support** collects every **Contact us** request from every organization and from visitors who are not signed in (chapter 10). Filter by status (open, answered, closed), type or organization, and search by reference, name, email or subject. Open a request to see who wrote, from which organization, the page they were on, the app version, browser and recent errors, and any screenshot. Then **reply** (the reply is emailed to the person and shows under **Help, My requests** in the app) or **reply and close**. A reply to an answered or closed request from the person reopens it.
+
+At the top, set the **support address**. Every new request and follow-up is also emailed there (with the writer's address as Reply-To), so your team can work from its own mailbox as well.
+
+![The Support inbox](guide/assets/platform-support.jpg)
+
+![One support request](guide/assets/platform-ticket.jpg)
+
+### 7.6 The audit log
+
+Every platform action (suspending, plan changes, invitations, ownership transfers, resets) is recorded in the **Audit log** with who did it, when, and the reason given. It is kept forever and cannot be edited. Filter it by action.
+
+![The audit log](guide/assets/platform-audit.jpg)
+
+> **In the app:** the platform area has its own Help, with "Organizations and roles" (`/platform/help`). Platform accounts get their own short tour.
+
+## 8. Everyday workflows
+
+Four situations you will meet again and again, start to finish.
+
+### 8.1 A feature, from intake to deploy
+
+**You want:** the order history page gets a CSV export, and it should be live for customers.
+
+1. **Say what you want.** Open a chat with the BA (**Chat** on the desk): "Customers keep asking for a spreadsheet of their orders. Add a CSV export to the order history page." Or paste the Jira or GitHub issue into **Intake**. The BA reads it, asks you what it cannot decide (which columns, which delimiter) and drafts the card with requirements and acceptance criteria.
+2. **Check the card.** Open it. If the draft is not quite right, **Edit** it (possible while it is a draft or queued and not yet claimed). Click **Specify** when it reads well.
+3. **Let the team work.** The builder builds, the reviewer reviews (sending the work back with comments if needed, which shows as *rework*), the tester tests. Open **Timeline** and **Handoffs** any time to see why.
+4. **Answer questions.** If the builder asks "should the CSV include cancelled orders?", the question reaches your desk with options and a recommendation. Pick one and add it to the ledger as a **decision**, and nobody will ask again.
+5. **Finalize.** For a small card the BA pushes the branch or opens a pull request as you chose. A large change waits on your desk for **Approve merge**.
+6. **Group it into a phase** if several cards ship together. When they are all merged, the **Phase done** item arrives with a report. Approve the **Deploy** and **Regression run** follow-ups and watch **Phase results**.
+7. **Done.** The card is in the Done column and the change is in your working branch (and, after the phase, deployed and tested).
+
+![A finished card with its timeline](guide/assets/card-detail.jpg)
+
+### 8.2 From research to a project
+
+**You want:** to find out whether a new payment provider is worth using, and build the integration if it is.
+
+1. **Create a research project.** **New project**, workflow **Research**. No repository is needed.
+2. **Ask the question as a card:** a title, the question, the scope and the depth (**Quick**, **Standard** or **Deep**). A researcher finds sources, a fact checker verifies every claim against them, and the result is **published as a note** in the project's vault folder, with sources.
+3. **Read the notes** on the **Research** tab. If a claim is not supported, the fact checker sends the note back for rework and says why.
+4. **Decide.** When the answers are good enough, **convert** the project (**Project settings, Stage, Convert project**): choose Code as the target, add the repository (or request a new GitHub repository, which waits for your approval on the desk), decide what happens to open research cards, and write a hand-over note.
+5. **Build.** The published notes are listed in the project's `PROJECT.md`, so every builder reads them. Create the first cards and carry on as in 8.1. The project remembers that it **started as research**, and the Research tab stays.
+
+![A published research note](guide/assets/card-published.jpg)
+
+### 8.3 Setting up interests without being flooded
+
+**You want:** to follow AI news, but not get a hundred links a day.
+
+1. **Create the interest** (**Interests, New interest**). Write the description like a briefing: "Practical agent engineering and coding assistants. No hype, no press releases." Choose the vault where its files live, and the kinds you want (articles, videos, podcasts).
+2. **Keep the volume low.** Set **max total items** to something small, such as 5 or 10 per run. Choose a **run schedule** that matches how fast the topic moves (daily is plenty for most), and a **delivery schedule** of **one digest at set times** (for example weekdays at 07:00) instead of "as soon as a run finishes". Runs can happen as often as they like, but you only hear from them at the times you chose.
+3. **Set the quiet cap.** At the bottom of the Interests page, **Daily quiet cap** limits how many items reach your desk per day across all interests.
+4. **Teach it.** For the first two weeks, rate what arrives: **useful**, **irrelevant** or **boring**, with a short reason. Add taste rules ("Prefer primary sources over summaries", "Skip beginner tutorials").
+5. **Go deeper only when it is worth it.** **Research this** on one item produces a fact-checked note. Research never starts by itself.
+6. **Watch the cost.** The interest's **Settings** tab has a monthly budget. A paused interest does not run.
+
+![An interest's schedules and settings](guide/assets/interest-settings.jpg)
+
+If an interest cannot run (for example its workstation is offline), it shows a red **Cannot run** badge with the reason and raises a notice on your desk after the third attempt.
+
+### 8.4 Controlling spend
+
+**You want:** the agents to be useful without surprises on the bill.
+
+1. **Look at what things cost.** Open **Costs** for the breakdown by project, agent, model and day, and the **Agents** page for each agent's monthly and total cost.
+2. **Set budgets.** For every project, set a **Monthly budget** in its settings. Start with a number you would be comfortable losing and raise it when you trust it.
+3. **Use the right model for the job.** A smaller model for reviewers and testers, a stronger one for builders and the BA. Change an agent's model any time (**Change model**).
+4. **Let the 80% notice work for you.** When it arrives, check the **Floor report's Spend section** for which projects and agents cost the most.
+5. **At 100%** the project pauses by itself. Decide on the desk: **Raise budget** or **Override for this month**. Declining to act is also a decision: the project stays paused until the 1st.
+6. **Stop loops early.** If a card keeps failing, the loop breaker already backs it off (see 9.3) and your BA warns you. Do not keep feeding a card that cannot succeed. Cancel it or fix what it cannot do.
+7. **Review monthly.** Export the Costs CSV and look for agents that cost more than they deliver.
+
+![The budget panel and the month's progress](guide/assets/budget-panel.jpg)
+
+## 9. Troubleshooting
+
+### 9.1 The installer
+
+| What you see | What to try |
+| --- | --- |
+| The wizard stays on "waiting for the installer" | The command was not run, or was run on a different computer than you chose. Run it on the computer that will host the agents. Check you pasted all of it. |
+| The command link says it expired | The link works for 30 minutes. Choose your system again on the page to get a new command. |
+| "Paired" never appears | The computer cannot reach this website. Check its internet connection, proxy and clock. Run the command again, it is safe to repeat. |
+| A health check shows a warning (Claude, sandbox, Docker, yt-dlp, a repository) | Each row says what is wrong and how to fix it. Claude not signed in: run `claude` on the workstation and sign in. Sandbox missing on Linux: install `bubblewrap` and `socat`. Docker and yt-dlp are optional. |
+| Windows asked to restart | Restart. The installer continues by itself when you sign in again. |
+| Anything else | Open **Contact us** from the installer's failure screen. It already knows what went wrong. |
+
+![The installer help in the Help centre](guide/assets/help-install.jpg)
+
+> **In the app:** Help, "Installing a workstation: if something goes wrong" (`/help/install-troubleshooting`).
+
+### 9.2 The runner is offline
+
+A workstation that shows **Offline** or **Disconnected** cannot take work. Its agents show "offline" and cards that only they could take show an amber warning ("Reviewer Linus is offline").
+
+1. Is the computer on and awake? Laptops that sleep disconnect.
+2. On the workstation open a terminal and run `aom-runner status`. It shows whether the runner is running and connected.
+3. If it is not running, `aom-runner start` (or restart the service the installer set up). Run `aom-runner doctor` for a health check of Node, git, Claude and the connection to the server.
+4. Still stuck? Running the installer command again repairs the installation and keeps the pairing.
+
+The warning icons clear by themselves when the machine returns (within about 30 seconds). Logs are in `~/.aom-runner/logs/`.
+
+![A workstation that is offline](guide/assets/ws-offline.jpg)
+
+### 9.3 A card is backing off
+
+An amber badge "Backing off until 14:32 (3 failures)" on a card means the **loop breaker** stepped in. When three shifts on the same card end without a report within 10 minutes (the agent crashed, timed out or was stopped by a denied tool), the dispatcher stops handing the card out. The wait starts at 1 minute and doubles with each failure, up to 1 hour. You also get one alert on the desk.
+
+1. Open the card and read the **Timeline** and the last **Handoff** for the reason. The usual cause is something the agent cannot do: a tool that is denied, a missing capability, a repository that is not on its workstation.
+2. Fix the cause (adjust the card, the agent or the workstation).
+3. Click **Release back-off** on the card to try again at once. Moving the card to another stage also clears it.
+4. If it keeps failing, cancel the card and write a better one.
+
+![The back-off badge on a card](guide/assets/card-backoff.jpg)
+
+### 9.4 A budget pause
+
+A banner "This project has used its monthly budget" and a desk item mean the project is paused. Running shifts finish, nothing new starts. See 4.6. On the desk choose **Raise budget** (the pause lifts as soon as the new amount is above the spend) or **Override for this month**. If you are a Member, tell an Owner or Admin.
+
+### 9.5 A missing working branch
+
+Symptom: the DevOps engineer does not commit or pull in a repository, and the desk asks "Which branch is the working branch?" (or the project settings show *not confirmed*). Answer the question on the desk, or set the branch in **Project settings, Repositories, Change**. The DevOps engineer commits and pushes right away. If the branch you named does not exist yet, create it in git first. See 4.4.
+
+### 9.6 Two-factor recovery
+
+- **You lost your phone, but have your recovery codes:** at the sign-in code step, type one of the ten recovery codes instead of the six digits. Each works once. Then set up two-factor login again on a new phone (**Your settings**), which gives you new codes.
+- **You lost both:** ask your Owner to **reset your two-factor login** (**Organization, Members**; only the Owner can). If you are the Owner, ask the platform administrator (**Accounts**). If you are the platform administrator, an operator resets it on the server with `superadmin-reset-password --reset-two-factor`.
+- **Too many wrong codes:** after five wrong codes the sign-in attempt is cancelled. Sign in again with your password and type the right code.
+
+![The sign-in code step](guide/assets/login-2fa.jpg)
+
+> **In the app:** Help, "Two-factor login" (`/help/two-factor`) and "Troubleshooting" (`/help/troubleshooting`).
+
+### 9.7 Other things you may see
+
+| What you see | What it means |
+| --- | --- |
+| A red warning icon on a card, "Not workable" | Nobody hired could ever take this stage. Hire the missing role (the tooltip has a **Hire** link). |
+| An amber icon, "Waiting" | Agents exist but are offline or busy. It clears by itself. |
+| The card says "waiting on bug" | The tester found a bug and a bug card is being fixed. |
+| A desk item "Could not post the update" | The ticket system refused the post. Fix the login on the workstation and use **Retry**. |
+| Vault sync paused with a conflict | A local and a remote change collided. Resolve it in the vault, then restart the sync. |
+| "Out of scope" in a handoff | The agent found work outside its role. Adjust the card or the agent's skills. |
+
+## 10. Contact us
+
+If something is broken, confusing or missing, tell us. **Contact us** is in your avatar menu, in the command palette (Ctrl+K, type "contact"), on the **Help** page, on the installer's failure screens and, for people who are not signed in, in the footer of the sign-in page.
+
+1. Choose what it is about: **bug report**, **question**, **feature request** or **billing**.
+2. Write a subject and a message.
+3. When you open it from the menu or the palette, a screenshot of the page you were looking at is attached automatically. You can remove it or upload a different image (PNG, JPEG or WebP up to 2.5 MB).
+4. Open **What we send with your request** to see exactly what goes along: the page you were on, the app version, your browser and screen, and the last few errors from your browser (untick the box to leave the errors out). Your name, email and organization are added so that support can answer.
+
+![Contact us](guide/assets/contact-us.jpg)
+
+We answer by email, and the answer also appears under **Help, My requests**, where you can reply. A request is **Open** until we answer, **Answered** until you write again, and **Closed** when we are done. A request with a new answer shows a "New reply" badge.
+
+![My requests](guide/assets/my-requests.jpg)
+
+> **In the app:** Help, "Writing to us" (`/help/writing-to-us`).
+
+## 11. Frequently asked questions
+
+**Do the agents see my whole computer?**
+No. They run inside a sandbox on the workstation, with access to the repositories and folders they need. Warnings appear if a workstation cannot provide a sandbox.
+
+**Where is my code stored?**
+On your workstations and in your git remotes, exactly as before. The Guildwise HQ website holds the board, cards, desk, ledger, and records of what the agents did. Passwords and tokens for Jira, GitHub and Claude stay on your workstation.
+
+**Can an agent change my main branch by itself?**
+Only for small cards you chose to **merge**, and only into the working branch you confirmed. Large merges wait for your approval, unless you turned that off in the project settings.
+
+**What does it cost?**
+Guildwise HQ itself is on the Founding plan with no limits. The AI work is billed by Claude: through your subscription or your API key. The app estimates the spend (4.6) and you set budgets.
+
+**How many agents do I need?**
+Start with a builder, a reviewer, a tester and a BA (3.5). Add more when cards queue up.
+
+**Can I stop an agent?**
+Yes. **Cancel** a card, or **Fire** an agent. A running shift is stopped, and its card goes back to the queue.
+
+**An agent asked something I already decided.**
+Add the decision to the ledger when you answer (4.5). Agents search the ledger before they ask.
+
+**What if two of my projects have a card with the same number?**
+Card numbers are unique only within one organization. If you are in two organizations with a `WEB-1` each, the app asks which one you mean.
+
+**Can I use it on my phone?**
+Yes: the board, the desk, cards, chat and most pages work on a phone. The installer needs a computer.
+
+![The board on a phone](guide/assets/m-board.jpg)
+
+![The desk on a phone](guide/assets/m-desk.jpg)
+
+![A card on a phone](guide/assets/m-card.jpg)
+
+**Where do I find help?**
+**Help** in the sidebar: articles, the glossary, Contact us and My requests. The **?** hints open the matching article. Press **Ctrl+K** to search the app.
+
+![The Help centre](guide/assets/help-centre.jpg)
+
+**Which keys can I press?**
+Press **?** (when not typing in a field) for the list of shortcuts. **Ctrl+K** opens the command palette.
+
+## Appendix A. Where to find things
+
+| I want to | Go to |
+| --- | --- |
+| See my work | **Board** (sidebar, Work) |
+| Answer questions and approve things | **Desk** |
+| Hand the BA a ticket | **Intake** (Owners and Admins) |
+| Set up recurring jobs and integrations | **Schedules** |
+| Create or change a project | **Projects** |
+| Follow a topic | **Interests** (Knowledge) |
+| Look up a past decision | **Ledger** (Knowledge) |
+| Register a notes vault | **Vaults** (Owners and Admins) |
+| Hire or change agents | **Agents** (Organization) |
+| See who answers whom | **Org chart** |
+| Design roles and workflows | **Roles & workflows** |
+| Add a computer | **Workstations** |
+| See how the team performs | **Metrics** |
+| See and control spend | **Costs** (Owners and Admins) |
+| Time zone, picture, two-factor, BA reporting | **Settings** (your avatar menu, Your settings) |
+| Members, invitations, plan | **Organization** (bottom of the sidebar) |
+| Help, glossary, contact us | **Help** |
+
+## Appendix B. More documentation
+
+- `docs/RUNNER.md`: the runner in depth (data folder, command-line, configuration, Windows and WSL2).
+- `docs/DEPLOY.md`: installing and running the Guildwise HQ server (for whoever hosts it).
+- `docs/SPEC.md`: the full product specification.
+- `docs/ARCHITECTURE.md`: technical design.
+- `docs/guide/Guildwise-HQ-User-Guide.pdf`: this guide with screenshots, as a PDF.

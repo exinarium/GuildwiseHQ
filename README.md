@@ -10,7 +10,7 @@ A self-hosted site for running an organization of AI coding agents. A manager cr
 - **Design contract**: `docs/ARCHITECTURE.md`
 - **Build plan**: `docs/PLAN.md` (all 10 milestones implemented)
 - **Deployment guide**: `docs/DEPLOY.md`
-- **User guide**: `docs/USER-GUIDE.md`
+- **User guide**: `docs/USER-GUIDE.md` (plain-language guide for every role), with an illustrated PDF: `docs/guide/Guildwise-HQ-User-Guide.pdf`
 - **Runner guide**: `docs/RUNNER.md`
 
 ## Features
@@ -156,5 +156,5 @@ See `docs/ARCHITECTURE.md` for the complete design, including the event envelope
 
 - For deployment: `docs/DEPLOY.md`
 - For running agents: `docs/RUNNER.md` or `apps/runner/README.md`
-- For manager features: `docs/USER-GUIDE.md`
+- For using the product (every role): `docs/USER-GUIDE.md`, or the illustrated PDF `docs/guide/Guildwise-HQ-User-Guide.pdf`
 - For customization and organization design: `docs/SPEC.md` §6 and §10
