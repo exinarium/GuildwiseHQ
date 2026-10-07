@@ -20,7 +20,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { releaseEvents } from './cards.ts';
-import { assertRemoteUrl, cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { assertRemoteUrl, cardMessage, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { cancelPhasesEvents } from './phases.ts';
 
 /** Only the organization's Owner and Admins create projects (owner decision 4). */
@@ -378,8 +378,8 @@ export async function restoreProject(ctx: Ctx, user: AuthSession['user'], projec
 
 /**
  * Deletes an archived project permanently (owner only; the caller types the project key). Appends `ProjectDeleted`;
- * its projector removes every row of the project. Agents belong to the organization: one that was scoped to the
- * project is kept and becomes org-wide (owner decision, 2026-10-06). The vault folder is never touched.
+ * its projector removes every row of the project. Agents belong to the organization: one that was allowed on
+ * this project only is kept but benched (empty allow-list), and one org-level desk notice names it. The vault folder is never touched.
  */
 export async function deleteProject(
   ctx: Ctx,
@@ -403,6 +403,38 @@ export async function deleteProject(
       actor: userActor(user.id),
       scope,
     });
+    // Agents allowed on this project only end up benched (empty allow-list). One org-level notice (it must not hang
+    // on the project, whose desk items go with it) lists them so the manager can reassign them.
+    const benched = await rows<{ name: string }>(
+      tx,
+      `SELECT name FROM agents WHERE allowed_project_ids = ARRAY[$1::uuid] AND status <> 'retired' ORDER BY name`,
+      [projectId],
+    );
+    if (benched.length) {
+      const deskItemId = randomUUID();
+      const names = benched.map((a) => a.name);
+      const many = names.length !== 1;
+      events.push({
+        streamId: streamId.desk(deskItemId),
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId,
+            kind: 'alert',
+            subkind: 'agents_benched',
+            title: `${names.length} agent${many ? 's' : ''} benched: ${p.key} was deleted`,
+            body: `${names.join(', ')} ${many ? 'were' : 'was'} allowed to work on ${p.name} (${p.key}) only. With the project gone the allow-list is empty, so ${many ? 'they take' : 'it takes'} no work. Open the agent's Projects dialog to reassign.`,
+            options: [],
+            blocking: false,
+            pinned: false,
+            affectedCardIds: [],
+            askedBy: { kind: 'system' },
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: orgScope(p.org_id),
+      });
+    }
     await ctx.store.append(events, { tx });
   });
 }

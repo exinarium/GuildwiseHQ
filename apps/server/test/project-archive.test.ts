@@ -312,13 +312,17 @@ describe('deleting a project permanently', () => {
     expect((await q('SELECT 1 FROM desk_items WHERE id=$1', [questionId])).length).toBe(0);
     expect((await q('SELECT 1 FROM schedules WHERE id=$1', [scheduleId])).length).toBe(0);
     expect((await q('SELECT 1 FROM workstation_repos WHERE project_repo_id=$1', [w.repoId])).length).toBe(0);
-    // agents belong to the org: the one allowed on this project only stays active and may now work any project;
-    // the id of the project it was hired for stays as history
+    // agents belong to the org: the one allowed on this project only stays active but is benched (empty allow-list);
+    // the id of the project it was hired for stays as history, and one org-level desk notice names it
     expect(
       (
         await q(`SELECT status, allowed_project_ids, hired_for_project_id FROM agents WHERE name='Scoped'`)
       )[0],
-    ).toEqual({ status: 'active', allowed_project_ids: null, hired_for_project_id: w.projectId });
+    ).toEqual({ status: 'active', allowed_project_ids: [], hired_for_project_id: w.projectId });
+    const notice = await q(`SELECT title, body, project_id FROM desk_items WHERE subkind='agents_benched'`);
+    expect(notice).toHaveLength(1);
+    expect(notice[0]?.project_id).toBeNull();
+    expect(notice[0]?.body).toContain('Scoped');
     expect((await q(`SELECT status FROM agents WHERE name='Una'`))[0]?.status).toBe('active');
     expect((await q('SELECT status FROM projects WHERE id=$1', [keepProjectId]))[0]?.status).toBe('active');
     expect((await q('SELECT count(*)::int AS n FROM cards WHERE project_id=$1', [keepProjectId]))[0]?.n).toBe(

@@ -128,16 +128,13 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
   );
   await exec(tx, 'DELETE FROM vaults WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM project_members WHERE project_id=$1', P);
-  // Agents belong to the organization and stay. The project leaves their allow-lists and focus (an agent that was
-  // allowed on this project only becomes allowed anywhere, as a project-scoped agent became org-wide before), and
-  // `hired_for_project_id` keeps the id as history.
+  // Agents belong to the organization and stay. The project leaves their allow-lists and focus. An agent that was
+  // allowed on this project only ends with an EMPTY allow-list: benched until the manager reassigns it (owner
+  // decision, 2026-10-07). `hired_for_project_id` keeps the id as history.
   await exec(
     tx,
     `UPDATE agents SET
-       allowed_project_ids = CASE
-         WHEN allowed_project_ids IS NULL THEN NULL
-         WHEN $1::uuid = ANY(allowed_project_ids) AND array_length(array_remove(allowed_project_ids, $1::uuid), 1) IS NULL THEN NULL
-         ELSE array_remove(allowed_project_ids, $1::uuid) END,
+       allowed_project_ids = array_remove(allowed_project_ids, $1::uuid),
        focus_project_ids = array_remove(focus_project_ids, $1::uuid)
      WHERE $1::uuid = ANY(allowed_project_ids) OR $1::uuid = ANY(focus_project_ids)`,
     P,
