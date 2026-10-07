@@ -13,6 +13,7 @@ import {
   validatorCompiler,
 } from 'fastify-type-provider-zod';
 import { checkContentType, checkOrigin } from './auth/origin-check.ts';
+import { SESSION_COOKIE } from './auth/sessions.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
 import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
@@ -91,6 +92,14 @@ declare module 'fastify' {
   interface FastifyInstance {
     ctx: Ctx;
   }
+}
+
+/** Which built page `/` serves: the landing page when nobody has a session cookie (and the build has one), else the app. */
+export function landingFor(
+  cookies: Record<string, string | undefined>,
+  root: string,
+): 'landing.html' | 'index.html' {
+  return !cookies[SESSION_COOKIE] && existsSync(join(root, 'landing.html')) ? 'landing.html' : 'index.html';
 }
 
 function webDistDir(config: Config): string | null {
@@ -333,8 +342,15 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
 
   if (config.serveWeb) {
     const root = webDistDir(config);
-    if (root) await app.register(fastifyStatic, { root, wildcard: false, index: ['index.html'] });
-    else app.log.warn('AOM_SERVE_WEB is set but apps/web/dist was not found');
+    if (root) {
+      // `/` is the landing page for visitors without a session cookie and the app for everyone else (the app then sends
+      // a signed-in person to their workspace and a stale cookie to /login). The page differs by cookie: never share it.
+      await app.register(fastifyStatic, { root, wildcard: false, index: false });
+      app.get('/', (req, reply) => {
+        void reply.header('cache-control', 'no-cache').header('vary', 'Cookie');
+        return reply.sendFile(landingFor(req.cookies, root));
+      });
+    } else app.log.warn('AOM_SERVE_WEB is set but apps/web/dist was not found');
   }
 
   const unhookDecisions = registerDecisionHook(ctx);

@@ -1,7 +1,10 @@
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { createServer, type ResolvedConfig } from 'vite';
 import { defineConfig, type Plugin } from 'vitest/config';
 import { BRAND } from './src/brand.ts';
 
@@ -30,12 +33,87 @@ const appVersion = (): string => {
 const brandHtml = (): Plugin => ({
   name: 'brand-html',
   transformIndexHtml: (html) =>
-    html.replaceAll('%BRAND_NAME%', BRAND.name).replaceAll('%BRAND_DESCRIPTOR%', BRAND.descriptor),
+    html
+      .replaceAll('%BRAND_NAME%', BRAND.name)
+      .replaceAll('%BRAND_DESCRIPTOR%', BRAND.descriptor)
+      .replaceAll('%BRAND_DOMAIN%', BRAND.domain),
 });
+
+const webRoot = fileURLToPath(new URL('.', import.meta.url));
+
+/**
+ * The landing page is its own entry (landing.html: React and the page, none of the app). The server hands it to visitors
+ * without a session cookie; this does the same on the dev server so `/` behaves like production.
+ */
+const landingInDev = (): Plugin => ({
+  name: 'landing-in-dev',
+  apply: 'serve',
+  configureServer(server) {
+    server.middlewares.use((req, _res, next) => {
+      const [path, query] = (req.url ?? '').split('?');
+      if (req.method === 'GET' && path === '/' && !/(^|;\s*)aom_sid=/.test(req.headers.cookie ?? ''))
+        req.url = `/landing.html${query ? `?${query}` : ''}`;
+      next();
+    });
+  },
+});
+
+/**
+ * Builds landing.html with its markup already in it (search engines and the first paint get the whole page; React
+ * hydrates it). Renders src/landing/render.tsx through a throwaway Vite server once the bundle is written.
+ */
+const prerenderLanding = (): Plugin => {
+  let cfg: ResolvedConfig;
+  return {
+    name: 'prerender-landing',
+    apply: 'build',
+    configResolved(c) {
+      cfg = c;
+    },
+    async closeBundle() {
+      const server = await createServer({
+        configFile: false,
+        root: webRoot,
+        appType: 'custom',
+        logLevel: 'silent',
+        plugins: [react()],
+        server: { middlewareMode: true },
+        optimizeDeps: { noDiscovery: true, include: [] },
+      });
+      try {
+        const mod = (await server.ssrLoadModule('/src/landing/render.tsx')) as { render: () => string };
+        const file = resolve(cfg.root, cfg.build.outDir, 'landing.html');
+        const html = readFileSync(file, 'utf8');
+        if (!html.includes('<!--app-html-->') && !html.includes('<div id="root"></div>'))
+          throw new Error('landing.html has no mount point to prerender into');
+        // the headline font arrives with the markup, so the text does not reflow when it swaps in
+        const font = readdirSync(resolve(cfg.root, cfg.build.outDir, 'assets')).find((f) =>
+          /^geist-latin-wght-normal-.*\.woff2$/.test(f),
+        );
+        const preload = font
+          ? `<link rel="preload" as="font" type="font/woff2" href="/assets/${font}" crossorigin />`
+          : '';
+        writeFileSync(
+          file,
+          html
+            .replace('</head>', `${preload}</head>`)
+            .replace(/<div id="root">(?:<!--app-html-->)?<\/div>/, `<div id="root">${mod.render()}</div>`),
+        );
+      } finally {
+        await server.close();
+      }
+    },
+  };
+};
 
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(appVersion()) },
-  plugins: [react(), tailwindcss(), brandHtml()],
+  plugins: [react(), tailwindcss(), brandHtml(), landingInDev(), prerenderLanding()],
+  build: {
+    rollupOptions: {
+      input: { main: resolve(webRoot, 'index.html'), landing: resolve(webRoot, 'landing.html') },
+    },
+  },
   server: {
     port: Number(process.env.AOM_WEB_PORT ?? 5173),
     proxy: {

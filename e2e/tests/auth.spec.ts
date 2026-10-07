@@ -12,7 +12,8 @@ test('AC1: the owner invites an admin who accepts via the mailed link and logs i
 }) => {
   await deleteMailFor(MEMBER.email);
 
-  await page.goto('/');
+  // a visitor with no session is sent to the login page from any app route (`/` itself is the landing page)
+  await page.goto('/projects');
   await expect(page).toHaveURL(/\/login/);
   await page.getByLabel('Email').fill(ADMIN.email);
   await page.getByLabel('Password').fill('wrong-password-xx');
