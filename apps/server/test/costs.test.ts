@@ -473,6 +473,13 @@ describe('budgets: thresholds, pause, raise, override, reset', () => {
     await addSpend(i.projectId, 2_000_000);
     const dto = (await ok<any>(owner('GET', `/api/interests/${i.id}`))).interest;
     expect(dto.budget).toMatchObject({ state: 'paused', canEdit: true });
+    // the desk notice is about the interest, not about its hidden project
+    await evaluateProjectBudget(ctx(), i.projectId);
+    const notice = (await ok<any>(owner('GET', '/api/desk'))).items.find(
+      (d: any) => d.subkind === 'budget_paused' && d.budgetProject?.projectId === i.projectId,
+    );
+    expect(notice.title).toBe('Pausable is paused: its monthly budget is used up');
+    expect(notice.budgetProject.interestId).toBe(i.id);
     const due = new Date(
       new Date(
         (await q('SELECT next_scan_at FROM interests WHERE id=$1', [i.id]))[0]?.next_scan_at,

@@ -198,7 +198,10 @@ export async function evaluateProjectBudget(ctx: Ctx, projectId: string): Promis
       (await noticeOpen(tx, p.budget_desk_item_id))
     )
       events.push(...resolveNotice(p, 'A new month began: the budget starts again.'));
-    const name = `${p.key} (${p.name})`;
+    // An interest's backing project is shown under the interest's name (the project key is internal).
+    const interest = await one(tx, 'SELECT id, name FROM interests WHERE project_id=$1', [p.id]);
+    const short = (interest?.name as string | undefined) ?? p.key;
+    const name = interest ? short : `${p.key} (${p.name})`;
     const money = (v: number) => formatMoney(v, c.currency);
     const resets = m.next.toISOString().slice(0, 10);
     if (state === 'paused' && p.budget_paused_month !== m.key) {
@@ -228,7 +231,7 @@ export async function evaluateProjectBudget(ctx: Ctx, projectId: string): Promis
               deskItemId,
               kind: 'alert',
               subkind: BUDGET_DESK.paused,
-              title: `${p.key} is paused: its monthly budget is used up`,
+              title: `${short} is paused: its monthly budget is used up`,
               body: `${name} has spent ${money(spent)} of its ${money(budget)} budget this month. Running shifts finish; nothing new starts on it until the budget is raised, you override it for this month, or the budget resets on ${resets}.`,
               options: [
                 { id: 'raise', label: 'Raise budget' },
@@ -242,6 +245,7 @@ export async function evaluateProjectBudget(ctx: Ctx, projectId: string): Promis
               data: {
                 projectId: p.id,
                 projectKey: p.key,
+                ...(interest ? { interestId: interest.id } : {}),
                 month: m.key,
                 spendMicros: spent,
                 budgetMicros: budget,
@@ -280,7 +284,7 @@ export async function evaluateProjectBudget(ctx: Ctx, projectId: string): Promis
               deskItemId,
               kind: 'alert',
               subkind: BUDGET_DESK.warning,
-              title: `${p.key} has used ${pct}% of its monthly budget`,
+              title: `${short} has used ${pct}% of its monthly budget`,
               body: `${name} has spent ${money(spent)} of its ${money(budget)} budget this month. At 100% its dispatching pauses (running shifts finish). The budget resets on ${resets}.`,
               options: [],
               blocking: false,
@@ -290,6 +294,7 @@ export async function evaluateProjectBudget(ctx: Ctx, projectId: string): Promis
               data: {
                 projectId: p.id,
                 projectKey: p.key,
+                ...(interest ? { interestId: interest.id } : {}),
                 month: m.key,
                 spendMicros: spent,
                 budgetMicros: budget,

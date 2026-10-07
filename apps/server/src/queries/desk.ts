@@ -143,7 +143,11 @@ export function toDeskDto(
     floor: r.subkind === 'floor_report' ? (r.data ?? null) : null,
     budgetProject:
       typeof r.subkind === 'string' && r.subkind.startsWith('budget_') && r.data?.projectId
-        ? { projectId: r.data.projectId, projectKey: r.data.projectKey ?? '' }
+        ? {
+            projectId: r.data.projectId,
+            projectKey: r.data.projectKey ?? '',
+            ...(r.data.interestId ? { interestId: r.data.interestId } : {}),
+          }
         : null,
     canAnswer: r.status === 'open' && canAnswerItem(r, userId, role, orgRoles.get(r.org_id) ?? null),
     createdAt: iso(r.created_at) as string,

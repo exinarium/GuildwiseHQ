@@ -18,8 +18,7 @@ import {
   TextInput,
   useToast,
 } from '../components/ui.tsx';
-import { tokens } from '../lib/hr.ts';
-import { money } from '../lib/money.ts';
+import { money, tokensShort as tokens } from '../lib/money.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -350,7 +349,10 @@ export function Costs() {
                 {r.byModel.map((m) => (
                   <tr key={m.model}>
                     <th scope="row" className="py-2 pr-3 text-left font-medium text-fg">
-                      {m.model} <span className="font-normal text-muted">{m.family}</span>
+                      {m.model}
+                      {m.family.toLowerCase() !== m.model.toLowerCase() && (
+                        <span className="font-normal text-muted"> {m.family}</span>
+                      )}
                     </th>
                     <td className="tnum py-2 pr-3 text-right">{money(m.costMicros, cur)}</td>
                     <td className="tnum py-2 pr-3 text-right text-muted">{tokenLine(m)}</td>

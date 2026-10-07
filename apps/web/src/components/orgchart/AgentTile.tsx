@@ -59,7 +59,10 @@ export function AgentTile({
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-base leading-tight font-semibold text-fg">{agent.name}</span>
-        <span className="block truncate text-xs text-muted">
+        <span
+          className="line-clamp-2 text-xs leading-snug text-muted"
+          title={`${agent.roleLabel}, ${agent.seniority}`}
+        >
           {agent.roleLabel}
           {agent.seniority === 'senior' ? ' · senior' : ''}
         </span>

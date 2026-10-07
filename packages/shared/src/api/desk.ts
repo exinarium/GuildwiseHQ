@@ -91,7 +91,10 @@ export const DeskItemDtoSchema = z.object({
   /** Part B: the structured digest behind a floor report. */
   floor: FloorDigestSchema.nullable().optional(),
   /** Budget notices: the project the notice is about ("Raise budget" and "Override" act on it). */
-  budgetProject: z.object({ projectId: z.uuid(), projectKey: z.string() }).nullable().optional(),
+  budgetProject: z
+    .object({ projectId: z.uuid(), projectKey: z.string(), interestId: z.uuid().optional() })
+    .nullable()
+    .optional(),
   /** False for members who may see but not answer (owner_only on a shared card). */
   canAnswer: z.boolean(),
   createdAt: IsoTime,

@@ -21,12 +21,12 @@ export function DayBars({
       <div
         role="img"
         aria-label={`Spend per day, ${days.length} days with spend, ${money(total, currency)} in total, highest on ${peak.date} at ${money(peak.costMicros, currency)}`}
-        className="flex h-40 items-end gap-1 border-b border-line pb-px"
+        className="flex h-40 items-end justify-start gap-1 border-b border-line pb-px"
       >
         {days.map((d) => (
           <div
             key={d.date}
-            className="group relative flex h-full min-w-1 flex-1 items-end"
+            className="group relative flex h-full min-w-1 max-w-10 flex-1 items-end"
             title={`${d.date}: ${money(d.costMicros, currency)}`}
           >
             <div

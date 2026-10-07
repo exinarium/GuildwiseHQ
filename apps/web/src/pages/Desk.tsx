@@ -576,7 +576,13 @@ function BudgetActions({ item }: { item: DeskItemDto }) {
       <Button
         variant="primary"
         data-testid="desk-budget-raise"
-        onClick={() => nav(`/projects/${item.budgetProject?.projectId}/settings#budget`)}
+        onClick={() =>
+          nav(
+            item.budgetProject?.interestId
+              ? `/interests/${item.budgetProject.interestId}?tab=settings#budget`
+              : `/projects/${item.budgetProject?.projectId}/settings#budget`,
+          )
+        }
       >
         Raise budget
       </Button>

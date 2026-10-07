@@ -8,14 +8,14 @@ import type { OrgChartAgent } from '@aom/shared';
  * of its role; a senior's (or a junior with no senior) goes up to the BAs; the BAs' go to the manager. DevOps engineers
  * are not part of the tree (they are listed per workstation).
  */
-export const NODE_W = 188;
-export const NODE_H = 92;
+export const NODE_W = 200;
+export const NODE_H = 100;
 export const GAP_X = 16;
 export const GAP_Y = 64;
 const PAD = 16;
 const BOX_HEAD = 34;
 const MANAGER_W = 240;
-const MANAGER_H = 92;
+const MANAGER_H = 100;
 
 export interface LaidNode {
   id: string;

@@ -161,3 +161,10 @@ export const CONVGUEST = {
   name: 'E2E ConvGuest',
   password: 'convguest-password-12345',
 };
+
+/** Budgets spec (cost tracking, per-project budgets): an owner with a mock runner on the toy repo. */
+export const BUDGETEER = {
+  email: 'budgeteer@e2e.test',
+  name: 'E2E Budgeteer',
+  password: 'budgeteer-password-12345',
+};
