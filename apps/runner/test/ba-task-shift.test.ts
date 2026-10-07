@@ -313,7 +313,7 @@ describe('ba_task shifts on the mock runtime', () => {
       });
     }, 60_000);
 
-    it('floor_report: the six sections from the digest', async () => {
+    it('floor_report: the seven sections from the digest', async () => {
       h = await startHarness();
       const msg = reporterShift(h, 'floor_report', {
         digest: {
@@ -328,12 +328,32 @@ describe('ba_task shifts on the mock runtime', () => {
           devopsOpen: [{ id: id(), summary: 'Deploy staging', status: 'needs_approval', workstation: 'WS' }],
           resolvedByBa: [{ id: id(), title: 'Noise', how: 'dismissed', note: null }],
           failures: [],
+          interests: {
+            count: 2,
+            active: 2,
+            runs: 3,
+            delivered: 2,
+            unrated: 1,
+            highlights: [
+              {
+                interest: 'Rust async',
+                items: [
+                  { title: 'Tokio 2.0', kind: 'article', source: 'tokio.rs', url: 'https://tokio.rs/x' },
+                ],
+                more: 0,
+              },
+            ],
+            failing: [],
+          },
         },
       });
       await run(h, msg);
       const rep = reports(h, msg.shiftId)[0]?.report as any;
       const text = rep.data.report as string;
-      expect((text.match(/^## /gm) ?? []).length).toBe(6);
+      expect((text.match(/^## /gm) ?? []).length).toBe(7);
+      expect(text).toContain('## Interests highlights');
+      expect(text).toContain('Interests: 2 active of 2, 2 items delivered, 1 unrated');
+      expect(text).toContain('Tokio 2.0 (article)');
       expect(text).toContain('TOY-P1 Autosave: open (late bugs TOY-9)');
       expect(text).toContain('TOY-2 backing off after 4 failed shifts');
       expect(text).toContain('Deploy staging: needs_approval');

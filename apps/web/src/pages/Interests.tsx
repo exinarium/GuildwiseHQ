@@ -1,122 +1,68 @@
 import type { InterestDto } from '@aom/shared';
 import { Lightbulb } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
-import {
-  useInterest,
-  useInterests,
-  usePatchInterest,
-  useResyncTasteSeed,
-  useRunInterest,
-  useSaveTasteSeed,
-  useTasteSeed,
-} from '../api/queries/interests.ts';
-import { useProjects } from '../api/queries/projects.ts';
-import { AdoptSchedulesDialog } from '../components/interests/AdoptSchedulesDialog.tsx';
-import { InterestDrawer } from '../components/interests/InterestDrawer.tsx';
+import { useNavigate, useSearchParams } from 'react-router';
+import { useInterests } from '../api/queries/interests.ts';
+import { InterestCard } from '../components/interests/InterestCard.tsx';
+import { NewInterestDialog } from '../components/interests/NewInterestDialog.tsx';
+import { QuietCapPanel } from '../components/interests/QuietCapPanel.tsx';
 import { ResearchThisDialog } from '../components/interests/ResearchThisDialog.tsx';
-import { TasteRulesEditor } from '../components/interests/TasteRulesEditor.tsx';
 import {
-  Badge,
   Button,
-  Callout,
-  Dialog,
   EmptyState,
   ErrorBox,
   ListSkeleton,
   PageHeader,
-  Panel,
   Select,
-  Spinner,
   TextInput,
-  useToast,
 } from '../components/ui.tsx';
-import { compactRatings, describeRatings, describeScan } from '../lib/interests.ts';
-import { formatDateTime } from '../lib/time.ts';
 
-const linkBtn =
-  'inline-flex h-9 items-center justify-center rounded-control border border-control bg-surface px-3.5 text-sm font-medium text-fg hover:bg-sunken [@media(pointer:coarse)]:min-h-11';
-
-/** Everything the manager cares about, across feed and research projects (docs/design/interests.md section 8.2). */
+/**
+ * What you follow (docs/design/restructure.md section 7.2). Each interest scans on its own schedule, delivers its
+ * results at the times you choose, and learns from your ratings. It lives under Knowledge; the project behind it stays hidden.
+ */
 export function Interests() {
   const [params, setParams] = useSearchParams();
-  const [projectId, setProjectId] = useState('');
+  const nav = useNavigate();
   const [status, setStatus] = useState<'' | 'active' | 'paused'>('');
+  const [archived, setArchived] = useState(false);
   const [search, setSearch] = useState('');
-  const list = useInterests({ projectId: projectId || undefined, status: status || undefined });
-  const projects = useProjects();
-  const [editing, setEditing] = useState<InterestDto | 'new' | null>(null);
+  const list = useInterests({ status: status || undefined, archived });
+  const [creating, setCreating] = useState(false);
   const [researching, setResearching] = useState<InterestDto | null>(null);
-  const [adopting, setAdopting] = useState(false);
-  const [bannerHidden, setBannerHidden] = useState(false);
-  const [tasteProject, setTasteProject] = useState<string | null>(null);
 
-  // Deep link: /interests?open=<id> opens the drawer.
+  // Deep links from the earlier layout: /interests?open=<id> opens the interest.
   const openId = params.get('open');
   useEffect(() => {
-    if (!openId || !list.data) return;
-    const found = list.data.interests.find((i) => i.id === openId);
-    if (found) {
-      setEditing(found);
-      const next = new URLSearchParams(params);
-      next.delete('open');
-      setParams(next, { replace: true });
-    }
-  }, [openId, list.data, params, setParams]);
+    if (!openId) return;
+    const next = new URLSearchParams(params);
+    next.delete('open');
+    setParams(next, { replace: true });
+    nav(`/interests/${openId}${params.get('tab') ? `?tab=${params.get('tab')}` : ''}`, { replace: true });
+  }, [openId, params, setParams, nav]);
 
   const needle = search.trim().toLowerCase();
   const shown = (list.data?.interests ?? []).filter(
     (i) => !needle || i.name.toLowerCase().includes(needle) || i.description.toLowerCase().includes(needle),
   );
-  const adoptable = list.data?.adoptableCount ?? 0;
-  const involved = new Set(
-    (list.data?.interests ?? []).flatMap((i) => [i.feedProject?.id, i.researchProject?.id]),
-  );
-  const filterProjects = (projects.data ?? []).filter((p) => involved.has(p.id) || p.id === projectId);
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-3">
       <PageHeader
         title="Interests"
-        sub="What you care about across feed and research projects."
+        sub="What you follow. Each interest scans on its own schedule and learns from your ratings."
         actions={
-          <>
-            {adoptable > 0 && (
-              <Button
-                className="min-h-11 sm:min-h-8"
-                data-testid="adopt-open"
-                onClick={() => setAdopting(true)}
-              >
-                Adopt {adoptable} {adoptable === 1 ? 'schedule' : 'schedules'}
-              </Button>
-            )}
-            <Button
-              variant="primary"
-              className="min-h-11 sm:min-h-8"
-              data-testid="interest-new"
-              onClick={() => setEditing('new')}
-            >
-              + New
-            </Button>
-          </>
+          <Button
+            variant="primary"
+            className="min-h-11 sm:min-h-8"
+            data-testid="interest-new"
+            onClick={() => setCreating(true)}
+          >
+            + New interest
+          </Button>
         }
       />
       <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-36">
-          <Select
-            label="Project"
-            value={projectId}
-            data-testid="interests-project-filter"
-            onChange={(e) => setProjectId(e.target.value)}
-          >
-            <option value="">All projects</option>
-            {filterProjects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.key} {p.name}
-              </option>
-            ))}
-          </Select>
-        </div>
         <div className="min-w-32">
           <Select
             label="Status"
@@ -137,34 +83,23 @@ export function Interests() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        <label className="flex min-h-9 items-center gap-2 pb-1 text-sm [@media(pointer:coarse)]:min-h-11">
+          <input
+            type="checkbox"
+            checked={archived}
+            data-testid="interests-archived"
+            onChange={(e) => setArchived(e.target.checked)}
+          />
+          Show archived
+        </label>
       </div>
-
-      {adoptable > 0 && !bannerHidden && (
-        <Callout
-          tone="warning"
-          data-testid="adopt-banner"
-          actions={
-            <>
-              <Button size="sm" onClick={() => setAdopting(true)}>
-                Review and adopt
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setBannerHidden(true)}>
-                Dismiss
-              </Button>
-            </>
-          }
-        >
-          {adoptable} feed {adoptable === 1 ? 'schedule is not an interest' : 'schedules are not interests'}{' '}
-          yet.
-        </Callout>
-      )}
 
       {list.isPending && <ListSkeleton label="Loading interests" rows={3} />}
       <ErrorBox error={list.error} onRetry={() => list.refetch()} />
       <ul className="flex flex-col gap-3" aria-label="Interests" data-testid="interests">
         {shown.map((i) => (
           <li key={i.id} data-testid={`interest-${i.name}`}>
-            <InterestCard interest={i} onEdit={() => setEditing(i)} onResearch={() => setResearching(i)} />
+            <InterestCard interest={i} onResearch={() => setResearching(i)} />
           </li>
         ))}
       </ul>
@@ -172,322 +107,28 @@ export function Interests() {
         <EmptyState
           data-testid="interests-empty"
           icon={Lightbulb}
-          title="No interests yet"
-          description="An interest is something you care about: a topic scanned on a schedule, rated by you, with its own taste rules. Add one, or adopt the feed schedules you already have."
+          title={archived ? 'No archived interests' : 'No interests yet'}
+          description="An interest is something you follow: a topic scanned on a schedule, delivered as a digest at the times you choose, rated by you, with its own taste rules."
           action={
-            <Button variant="primary" onClick={() => setEditing('new')}>
-              + New
-            </Button>
+            archived ? undefined : (
+              <Button variant="primary" onClick={() => setCreating(true)}>
+                + New interest
+              </Button>
+            )
           }
         />
       )}
 
-      {(list.data?.tasteProjects ?? []).length > 0 && (
-        <Panel data-testid="taste-projects">
-          <h2 className="mb-3 text-lg font-semibold text-fg">Project taste rules</h2>
-          <ul className="flex flex-col gap-2">
-            {list.data?.tasteProjects.map((t) => (
-              <li
-                key={t.projectId}
-                className="flex flex-wrap items-center justify-between gap-2 text-sm"
-                data-testid={`taste-project-${t.key}`}
-              >
-                <span>
-                  {t.key}: {t.ruleCount} explicit {t.ruleCount === 1 ? 'rule' : 'rules'}
-                  {!t.hasVault
-                    ? ' · no vault, brief only'
-                    : t.version > 0
-                      ? ` · written to taste.md v${t.version}`
-                      : ' · nothing written to taste.md yet'}
-                </span>
-                <Button size="sm" onClick={() => setTasteProject(t.projectId)}>
-                  Edit taste rules
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      )}
-
-      {editing && (
-        <InterestDrawer
-          key={editing === 'new' ? 'new' : editing.id}
-          interest={editing === 'new' ? null : editing}
-          onClose={() => setEditing(null)}
+      {list.data && (
+        <QuietCapPanel
+          cap={list.data.quietCap}
+          deliveredToday={list.data.deliveredToday}
+          canEdit={list.data.canSetCap}
         />
       )}
+
+      {creating && <NewInterestDialog onClose={() => setCreating(false)} />}
       {researching && <ResearchThisDialog interest={researching} onClose={() => setResearching(null)} />}
-      <AdoptSchedulesDialog open={adopting} onClose={() => setAdopting(false)} />
-      {tasteProject && <ProjectTasteDialog projectId={tasteProject} onClose={() => setTasteProject(null)} />}
     </div>
-  );
-}
-
-function InterestCard({
-  interest: i,
-  onEdit,
-  onResearch,
-}: {
-  interest: InterestDto;
-  onEdit: () => void;
-  onResearch: () => void;
-}) {
-  const run = useRunInterest();
-  const patch = usePatchInterest();
-  const toast = useToast();
-  const [showNotes, setShowNotes] = useState(false);
-  const s = i.stats;
-  const archived = !!(i.feedProject?.archived || i.researchProject?.archived);
-  return (
-    <Panel>
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-semibold text-fg">{i.name}</h2>
-        <Badge tone={i.status === 'active' ? 'green' : 'amber'}>
-          {i.status === 'active' ? 'Active' : 'Paused'}
-        </Badge>
-        {archived && <Badge tone="neutral">project archived</Badge>}
-        {s.failing && (
-          <Badge tone="red" title={i.schedule?.lastError ?? undefined}>
-            Cannot run ({i.schedule?.failCount} {i.schedule?.failCount === 1 ? 'try' : 'tries'})
-          </Badge>
-        )}
-        <span className="ml-auto text-xs text-subtle" data-testid="interest-projects">
-          {i.feedProject && <span title="feed project">{i.feedProject.key} (feed)</span>}
-          {i.feedProject && i.researchProject && ' · '}
-          {i.researchProject && <span title="research project">{i.researchProject.key} (research)</span>}
-          {i.subCategory && ` · ${i.subCategory}`}
-        </span>
-      </div>
-      {i.description && <p className="mt-1 line-clamp-2 text-sm text-muted">{i.description}</p>}
-      {s.failing && i.schedule?.lastError && (
-        <p className="mt-1 text-xs text-danger">{i.schedule.lastError}</p>
-      )}
-      <div className="mt-2 grid gap-x-6 gap-y-1 text-sm">
-        {i.feedProject && (
-          <>
-            <div data-testid="interest-cadence">{describeScan(i.scan)}</div>
-            <div className="text-muted" data-testid="interest-last-scan">
-              {s.lastScanAt ? (
-                <>
-                  Last scan {formatDateTime(s.lastScanAt)}
-                  {s.lastScanCard && (
-                    <>
-                      {' '}
-                      (
-                      <Link to={`/cards/${s.lastScanCard.id}`} className="underline">
-                        {s.lastScanCard.ref}
-                      </Link>
-                      , {s.items.lastScan} {s.items.lastScan === 1 ? 'item' : 'items'})
-                    </>
-                  )}
-                </>
-              ) : (
-                'No scan yet'
-              )}
-              {' · '}next {s.nextScanAt ? formatDateTime(s.nextScanAt) : 'not scheduled'}
-            </div>
-            <div data-testid="interest-ratings">
-              <span className="hidden sm:inline">Ratings {describeRatings(s.ratings)}</span>
-              <span className="sm:hidden">{compactRatings(s.ratings)}</span>
-              <span className="text-subtle">
-                {' '}
-                · scans 30d {s.scans30d} · items {s.items.total}
-              </span>
-            </div>
-          </>
-        )}
-        {i.researchProject && (
-          <div data-testid="interest-notes-line">
-            Notes {s.research.published} · open {s.research.open}
-          </div>
-        )}
-      </div>
-      <ErrorBox error={run.error ?? patch.error} />
-      {run.data && (
-        <p className="mt-2 text-sm" data-testid="interest-run-result">
-          Emitted{' '}
-          <Link to={`/cards/${run.data.ref}`} className="underline">
-            {run.data.ref}
-          </Link>
-          .
-        </p>
-      )}
-      <div className="mt-3 flex flex-wrap gap-2">
-        {i.canRun && i.scheduleId && (
-          <Button
-            variant="primary"
-            className="min-h-11 sm:min-h-8"
-            disabled={run.isPending || archived}
-            data-testid="interest-run"
-            onClick={() => run.mutate(i.id, { onSuccess: (r) => toast.success(`Scan started: ${r.ref}`) })}
-          >
-            Run now
-          </Button>
-        )}
-        {i.canResearch && (
-          <Button className="min-h-11 sm:min-h-8" data-testid="interest-research" onClick={onResearch}>
-            Research this
-          </Button>
-        )}
-        {i.feedProject && (
-          <Link
-            to={`/p/${i.feedProject.key}/feed?interest=${i.id}`}
-            className={linkBtn}
-            data-testid="interest-digests"
-          >
-            Digests
-          </Link>
-        )}
-        {i.researchProject && (
-          <Button
-            className="min-h-11 sm:min-h-8"
-            data-testid="interest-notes"
-            onClick={() => setShowNotes((x) => !x)}
-          >
-            Notes
-          </Button>
-        )}
-        <span className="ml-auto flex gap-2">
-          {i.canManage && (
-            <Button
-              className="min-h-11 sm:min-h-8"
-              disabled={patch.isPending}
-              data-testid="interest-toggle"
-              onClick={() =>
-                patch.mutate(
-                  { id: i.id, body: { status: i.status === 'active' ? 'paused' : 'active' } },
-                  {
-                    onSuccess: () =>
-                      toast.success(i.status === 'active' ? `${i.name} paused` : `${i.name} resumed`),
-                  },
-                )
-              }
-            >
-              {i.status === 'active' ? 'Pause' : 'Resume'}
-            </Button>
-          )}
-          <Button className="min-h-11 sm:min-h-8" data-testid="interest-edit" onClick={onEdit}>
-            {i.canManage ? 'Edit' : 'View'}
-          </Button>
-        </span>
-      </div>
-      {showNotes && <InterestNotes id={i.id} />}
-    </Panel>
-  );
-}
-
-/** Last scans and notes of one interest (the detail query). */
-function InterestNotes({ id }: { id: string }) {
-  const d = useInterest(id);
-  if (d.isPending) return <Spinner />;
-  return (
-    <div
-      className="mt-3 grid gap-3 border-t border-line pt-3 text-sm sm:grid-cols-2"
-      data-testid="interest-notes-panel"
-    >
-      <div>
-        <h3 className="mb-1 text-xs font-semibold text-subtle">Recent scans</h3>
-        {d.data?.scans.length === 0 && <p className="text-subtle">None yet.</p>}
-        <ul>
-          {d.data?.scans.map((s) => (
-            <li key={s.cardId}>
-              <Link to={`/cards/${s.cardId}`} className="underline">
-                {s.ref}
-              </Link>{' '}
-              {s.nothingQualified ? 'nothing qualified' : `${s.items} items`} · {s.status}
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div>
-        <h3 className="mb-1 text-xs font-semibold text-subtle">Notes</h3>
-        {d.data?.publications.length === 0 && <p className="text-subtle">None yet.</p>}
-        <ul data-testid="interest-publications">
-          {d.data?.publications.map((p) => (
-            <li key={p.id}>
-              <Link to={`/cards/${p.cardId}`} className="underline">
-                {p.cardRef}
-              </Link>{' '}
-              {p.title}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
-}
-
-/** Project-wide explicit rules (untagged); rules tagged with an interest are edited in that interest's drawer. */
-function ProjectTasteDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
-  const seed = useTasteSeed(projectId);
-  const save = useSaveTasteSeed();
-  const resync = useResyncTasteSeed();
-  const toast = useToast();
-  const list = useInterests();
-  const [rules, setRules] = useState<string[] | null>(null);
-  useEffect(() => {
-    if (seed.data && rules === null)
-      setRules(seed.data.rules.filter((r) => !r.interestId).map((r) => r.text));
-  }, [seed.data, rules]);
-  const names = new Map((list.data?.interests ?? []).map((i) => [i.id, i.name]));
-  const tagged = (seed.data?.rules ?? []).filter((r) => r.interestId);
-  return (
-    <Dialog
-      open
-      onOpenChange={(o) => !o && onClose()}
-      title="Project taste rules"
-      description="Explicit rules for every scan of this project. The curators follow them before the rules from your ratings."
-    >
-      <div className="flex flex-col gap-3" data-testid="project-taste-dialog">
-        {rules === null ? (
-          <Spinner />
-        ) : (
-          <TasteRulesEditor rules={rules} onChange={setRules} testId="project-taste-rules" />
-        )}
-        {tagged.length > 0 && (
-          <div className="text-xs text-subtle">
-            <p className="font-medium">Rules of single interests (edit them on the interest)</p>
-            <ul className="list-disc pl-4">
-              {tagged.map((r) => (
-                <li key={`${r.interestId}-${r.text}`}>
-                  {r.text} ({names.get(r.interestId as string) ?? 'interest'})
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        <ErrorBox error={save.error ?? resync.error} />
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            className="mr-auto"
-            data-testid="project-taste-resync"
-            loading={resync.isPending}
-            title="Write the saved rules to taste.md in the vault again"
-            onClick={() =>
-              resync.mutate(projectId, { onSuccess: () => toast.success('Rules sent to taste.md again') })
-            }
-          >
-            Resync taste.md
-          </Button>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            variant="primary"
-            data-testid="project-taste-save"
-            disabled={save.isPending || rules === null}
-            onClick={() =>
-              save.mutate(
-                {
-                  projectId,
-                  rules: [...(rules ?? []).map((text) => ({ text, interestId: null })), ...tagged],
-                },
-                { onSuccess: onClose },
-              )
-            }
-          >
-            Save
-          </Button>
-        </div>
-      </div>
-    </Dialog>
   );
 }

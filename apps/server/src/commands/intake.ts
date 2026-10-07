@@ -100,7 +100,7 @@ async function visibleProjects(db: Queryable, userId: string, orgId: string): Pr
     `SELECT p.id, p.key, p.name, p.domain, p.org_id,
             COALESCE((SELECT array_agg(r.name ORDER BY r.name) FROM project_repos r WHERE r.project_id = p.id AND r.removed_at IS NULL), '{}') AS repos
        FROM projects p JOIN project_members m ON m.project_id = p.id AND m.user_id = $1 AND m.status = 'active'
-      WHERE p.status = 'active' ORDER BY (p.org_id = $2) DESC, p.key`,
+      WHERE p.status = 'active' AND p.kind = 'project' ORDER BY (p.org_id = $2) DESC, p.key`,
     [userId, orgId],
   );
 }
@@ -684,7 +684,7 @@ export async function mappingAnsweredEvents(
   const project = await one(
     tx,
     `SELECT p.key, p.name FROM projects p JOIN project_members m ON m.project_id = p.id AND m.user_id = $2 AND m.status = 'active'
-      WHERE p.id = $1 AND p.status = 'active'`,
+      WHERE p.id = $1 AND p.status = 'active' AND p.kind = 'project'`,
     [projectId, user.id],
   );
   if (!intake || !project) return null;

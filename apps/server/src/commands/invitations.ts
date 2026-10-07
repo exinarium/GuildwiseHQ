@@ -339,7 +339,7 @@ async function acceptEvents(
     await assertWithinLimit(tx, orgId, 'members', 0);
     const projects = await rows<{ id: string }>(
       tx,
-      `SELECT id FROM projects WHERE org_id=$1 AND status='active' AND id = ANY($2::uuid[])`,
+      `SELECT id FROM projects WHERE org_id=$1 AND kind='project' AND status='active' AND id = ANY($2::uuid[])`,
       [orgId, inv.project_ids ?? []],
     );
     events.push({

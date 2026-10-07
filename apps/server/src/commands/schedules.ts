@@ -127,21 +127,18 @@ const toDto = (r: Row, roles: Map<string, OrgRole>): ScheduleDto => {
     failCount: r.fail_count ?? 0,
     lastError: r.last_error ?? null,
     createdAt: iso(r.created_at) as string,
-    interestId: r.interest_id ?? null,
-    interestName: r.interest_name ?? null,
     ownerUserId: r.owner_user_id ?? null,
     ownerName: r.owner_name ?? null,
     orgLevel,
-    canEdit: !r.interest_id && (!orgLevel || isOrgManager({ orgRole: role })),
+    canEdit: !orgLevel || isOrgManager({ orgRole: role }),
     hasWebhookSecret: !!action && isWebhookAction(action) && !!action.secretEnc,
     lastStatus: r.last_status ?? null,
     lastSummary: r.last_summary ?? null,
   };
 };
 
-const SELECT = `SELECT s.*, p.key AS project_key, p.name AS project_name, i.name AS interest_name,
-       u.display_name AS owner_name
-  FROM schedules s LEFT JOIN projects p ON p.id = s.project_id LEFT JOIN interests i ON i.id = s.interest_id
+const SELECT = `SELECT s.*, p.key AS project_key, p.name AS project_name, u.display_name AS owner_name
+  FROM schedules s LEFT JOIN projects p ON p.id = s.project_id
   LEFT JOIN users u ON u.id = s.owner_user_id`;
 
 /** Project-bound: the viewer is an active member of the (active) project. Organization-level: the viewer is its Owner or an Admin. */
@@ -269,13 +266,11 @@ interface Normalized {
   enabled: boolean;
   trigger: ScheduleTrigger;
   action: ScheduleAction;
-  /** A feed schedule (only where `AOM_LEGACY_FEED_SCHEDULES` allows new ones): kind `feed`, run by the feed path. */
-  legacyFeed?: boolean;
 }
 
 /** The new `{trigger, action}` request, or the old `{projectId, kind, cron, timezone, cardTemplate}` one, as one shape. */
-function normalizeCreate(req: CreateScheduleRequest, legacyFeeds: boolean): Normalized {
-  if (req.kind === 'feed' && !legacyFeeds)
+function normalizeCreate(req: CreateScheduleRequest): Normalized {
+  if (req.kind === 'feed')
     throw badRequest(
       'use_interests',
       'feeds are interests now: create the feed on the Interests page (it brings its own schedule)',
@@ -295,13 +290,7 @@ function normalizeCreate(req: CreateScheduleRequest, legacyFeeds: boolean): Norm
       ? undefined
       : { kind: 'cron', cron: req.cron ?? '0 7 * * *', timezone: req.timezone ?? 'UTC' });
   if (!trigger) throw badRequest('trigger_required', 'a schedule needs a trigger (when it runs)');
-  return {
-    name: req.name,
-    enabled: req.enabled,
-    trigger,
-    action,
-    ...(req.kind === 'feed' ? { legacyFeed: true } : {}),
-  };
+  return { name: req.name, enabled: req.enabled, trigger, action };
 }
 
 /**
@@ -363,8 +352,6 @@ async function validate(
   project: Row | null,
   n: Normalized,
   isManager: boolean,
-  /** The kind of the schedule being changed: a feed schedule that already exists stays editable. */
-  existingKind?: string,
 ): Promise<void> {
   const t = n.trigger;
   if (t.kind === 'cron' || t.kind === 'issue_labelled') assertCronAndZone(t.cron, t.timezone);
@@ -382,15 +369,12 @@ async function validate(
     case 'create_card':
     case 'regression_run': {
       const wf = await resolveWorkflow(tx, (project as Row).org_id, (project as Row).workflow_key);
-      if (wf?.definition.fieldSet === 'feed' && ctx.config.legacyFeedSchedules && !existingKind)
-        n.legacyFeed = true;
-      const legacyFeed = existingKind === 'feed' || n.legacyFeed === true;
-      if (wf?.definition.fieldSet === 'feed' && !legacyFeed)
+      if (wf?.definition.fieldSet === 'feed')
         throw badRequest('use_interests', 'a feed is an interest now: create it on the Interests page');
       await checkTemplate(
         tx,
         project as Row,
-        a.kind === 'regression_run' ? 'regression' : legacyFeed ? 'feed' : 'card',
+        a.kind === 'regression_run' ? 'regression' : 'card',
         a.template,
       );
       break;
@@ -472,7 +456,7 @@ function bodyOf(
     scheduleId: id,
     projectId: actionProjectId(n.action),
     name: n.name,
-    kind: n.legacyFeed ? ('feed' as const) : actionKind(n.action),
+    kind: actionKind(n.action),
     cron: t.kind === 'cron' || t.kind === 'issue_labelled' ? t.cron : null,
     timezone: t.kind === 'cron' || t.kind === 'issue_labelled' ? t.timezone : null,
     ...(template ? { cardTemplate: template } : {}),
@@ -492,7 +476,7 @@ export async function createSchedule(
   org: OrgCtx | null,
   req: CreateScheduleRequest,
 ): Promise<{ id: string; webhookSecret?: string }> {
-  const n = normalizeCreate(req, ctx.config.legacyFeedSchedules);
+  const n = normalizeCreate(req);
   return withAppendTx(ctx.pool, async (tx) => {
     const { orgId, project } = await authorize(ctx, tx, user, org, n);
     const isManager = isOrgManager({ orgRole: await orgRoleOf(tx, user.id, orgId) });
@@ -521,14 +505,13 @@ export async function createSchedule(
 
 /**
  * Locks the schedule and checks that the user may manage it: a member of its project, or (organization-level) an
- * Owner or Admin. Interest-owned schedules are edited on the Interests page.
+ * Owner or Admin.
  */
 async function lockManaged(
   tx: Tx,
   user: AuthSession['user'],
   org: OrgCtx | null,
   id: string,
-  opts: { allowInterest?: boolean } = {},
 ): Promise<{ s: Row; project: Row | null; orgId: string }> {
   const s = await one(tx, 'SELECT * FROM schedules WHERE id=$1 FOR UPDATE', [id]);
   if (!s || !s.action) throw notFound('schedule not found');
@@ -541,12 +524,6 @@ async function lockManaged(
     if (!isOrgManager({ orgRole: role }))
       throw forbidden('only the Owner and Admins can change a schedule that acts for the whole organization');
   }
-  if (s.interest_id && !opts.allowInterest)
-    throw conflict(
-      'schedule_managed_by_interest',
-      'this schedule belongs to an interest; change it on the Interests page',
-      { interestId: s.interest_id },
-    );
   return { s, project, orgId: s.org_id };
 }
 
@@ -590,7 +567,6 @@ export async function patchSchedule(
       enabled: patch.enabled ?? s.enabled,
       trigger,
       action,
-      ...(s.kind === 'feed' ? { legacyFeed: true } : {}),
     };
     const actionChanged = JSON.stringify(action) !== JSON.stringify(cur);
     const triggerChanged = JSON.stringify(trigger) !== JSON.stringify(curTrigger);
@@ -604,7 +580,6 @@ export async function patchSchedule(
         project,
         n,
         isOrgManager({ orgRole: await orgRoleOf(tx, user.id, orgId) }),
-        s.kind,
       );
     }
     // A changed trigger, or re-enabling, recomputes the next fire; otherwise the pending fire is kept.
@@ -670,7 +645,7 @@ export async function rotateWebhookSecret(
 
 /**
  * The `ScheduleUpdated` for `next` (a full snapshot). Next-fire rules: disabled has none; a changed cron or time zone,
- * or re-enabling (`reschedule`), recomputes it; otherwise the pending fire is kept. Shared with the interest sync.
+ * or re-enabling (`reschedule`), recomputes it; otherwise the pending fire is kept.
  */
 export function scheduleUpdateEvent(
   s: Row,
@@ -742,7 +717,7 @@ export async function runScheduleNow(
   id: string,
 ): Promise<{ runId: string; status: string; summary: string; cardId: string | null; ref: string | null }> {
   const { outcome, card } = await withAppendTx(ctx.pool, async (tx) => {
-    const { s } = await lockManaged(tx, user, org, id, { allowInterest: true });
+    const { s } = await lockManaged(tx, user, org, id);
     if (s.kind === 'feed') throw conflict('use_interests', 'run a feed from the Interests page');
     const o = await runNow(ctx, tx, s, {
       trigger: 'manual',
@@ -915,12 +890,7 @@ export async function fireDueSchedules(ctx: Ctx): Promise<FiredSchedule[]> {
         // A suspended or cancelled organization starts nothing (docs/design/organizations.md section 7.2); a switched-off
         // feature stops its own schedules. The fire is skipped and recorded, the cron moves on.
         const org = await one(tx, 'SELECT status, plan, features FROM organizations WHERE id=$1', [s.org_id]);
-        const skip =
-          org && !isOrgOperational(org.status)
-            ? ('org_suspended' as const)
-            : org && s.interest_id && !effectiveFeatures(org.plan, org.features).interests
-              ? ('feature_disabled' as const)
-              : null;
+        const skip = org && !isOrgOperational(org.status) ? ('org_suspended' as const) : null;
         if (skip) {
           await ctx.store.append(
             [
@@ -1120,80 +1090,4 @@ async function recordFireFailure(ctx: Ctx, id: string, err: unknown, now: Date):
     }
     await ctx.store.append(events, { tx });
   });
-}
-
-// ----------------------------------------------------------------------------------- legacy "run feed"
-
-/** Default template for "Run now" on a feed project without a schedule. */
-const defaultFeedTemplate = (project: Row): CardTemplate => ({
-  title: `${project.name} feed`,
-  cardType: 'feed',
-  fields: { topic: project.name },
-});
-
-/**
- * "Run now" from the board: the same scheduled-card path as a due schedule (`FeedRunRequested` + `CardCreated`).
- * With a schedule, its template is used and its own timing is not touched; for a feed project without schedules a
- * default template (topic = project name) is used.
- */
-export async function runFeedNow(
-  ctx: Ctx,
-  user: AuthSession['user'],
-  target: { projectId?: string; scheduleId?: string },
-): Promise<{ cardId: string; ref: string }> {
-  const r = await withAppendTx(ctx.pool, async (tx) => {
-    let schedule: Row | undefined;
-    if (target.scheduleId) {
-      schedule = await one(tx, 'SELECT * FROM schedules WHERE id=$1', [target.scheduleId]);
-      if (!schedule) throw notFound('schedule not found');
-    }
-    const projectId = schedule?.project_id ?? target.projectId;
-    if (!projectId) throw badRequest('missing_target', 'a project or schedule is required');
-    const project = await loadVisibleProject(tx, user.id, projectId);
-    if (project.status !== 'active') throw conflict('project_archived', 'project is archived');
-    if (!schedule && target.projectId) {
-      schedule = await one(
-        tx,
-        `SELECT * FROM schedules WHERE project_id=$1 AND kind='feed' ORDER BY enabled DESC, created_at LIMIT 1`,
-        [project.id],
-      );
-    }
-    const wf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
-    if (!schedule && wf?.definition.fieldSet !== 'feed')
-      throw badRequest('not_a_feed_project', 'this project has no feed to run');
-    const template = (schedule?.card_template as CardTemplate | undefined) ?? defaultFeedTemplate(project);
-    const now = ctx.clock.now();
-    const timezone = (schedule?.timezone as string | undefined) ?? 'UTC';
-    const card = await scheduledCard(
-      tx,
-      project,
-      template,
-      schedule?.id,
-      `${template.title} (run now ${dayIn(now, timezone)} ${now.toISOString().slice(11, 16)}Z)`,
-      schedule?.interest_id,
-    );
-    await ctx.store.append(
-      [
-        card.event,
-        {
-          streamId: streamId.card(card.cardId),
-          event: {
-            type: 'FeedRunRequested',
-            payload: {
-              projectId: project.id,
-              ...(schedule ? { scheduleId: schedule.id } : {}),
-              cardId: card.cardId,
-              requestedBy: user.id,
-            },
-          },
-          actor: userActor(user.id),
-          scope: projectScope(project.org_id, project.id),
-        },
-      ],
-      { tx },
-    );
-    return { cardId: card.cardId, ref: card.ref };
-  });
-  ctx.services.dispatcher.trigger();
-  return r;
 }

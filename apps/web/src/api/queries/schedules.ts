@@ -69,6 +69,3 @@ export const useRotateSecret = () =>
   useScheduleAction((id: string) =>
     post<{ webhookSecret: string }>(`/schedules/${id}/rotate-secret`, {}, RotateSecretResponseSchema),
   );
-/** "Run now" on a feed project: uses its schedule's template, or a default one. */
-export const useRunFeed = () =>
-  useScheduleAction((projectId: string) => post<RunScheduleResponse>(`/projects/${projectId}/feed/run`, {}));

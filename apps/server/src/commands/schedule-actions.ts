@@ -58,6 +58,12 @@ export async function scheduledCard(
   scheduleId: string | undefined,
   title: string,
   interestId?: string | null,
+  /** An interest run: the run id, the soft preference for agents, and the `interest` origin. */
+  extra: {
+    interestRunId?: string;
+    preferredAgents?: Record<string, string>;
+    origin?: 'schedule' | 'interest';
+  } = {},
 ): Promise<{ cardId: string; ref: string; event: AppendInput }> {
   const projectWf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
   if (!projectWf) throw badRequest('unknown_workflow', `workflow '${project.workflow_key}' is not available`);
@@ -102,10 +108,12 @@ export async function scheduledCard(
           status: 'queued',
           fields: parsed.data,
           ownerUserId: await orgOwnerId(tx, project.org_id),
-          origin: 'schedule',
+          origin: extra.origin ?? 'schedule',
           scheduled: true,
           ...(scheduleId ? { scheduleId } : {}),
           ...(interestId ? { interestId } : {}),
+          ...(extra.interestRunId ? { interestRunId: extra.interestRunId } : {}),
+          ...(extra.preferredAgents ? { preferredAgents: extra.preferredAgents } : {}),
           priority: template.priority ?? DEFAULT_CARD_PRIORITY,
           docsNeeded: false,
           dependencies: [],

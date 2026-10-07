@@ -285,12 +285,16 @@ describe('org roles', () => {
     expect((await call(role, 'GET', '/api/reporting')).status).toBe(200);
   });
 
-  it('a member cannot start a project through an interest, nor an intake', async () => {
-    const i = await call('member', 'POST', '/api/interests', {
-      name: 'AI news',
-      newFeedProject: { key: 'FEEDX', name: 'Feed', domain: 'personal' },
-    });
-    expect(i.status).toBe(403);
+  it('a member may create an interest (private to them, its project hidden) but not start an intake', async () => {
+    const i = await call('member', 'POST', '/api/interests', { name: 'AI news' });
+    expect(i.status).toBe(201);
+    const projects = await ok<any>(call('member', 'GET', '/api/projects'));
+    expect(projects.projects.map((p: any) => p.name)).not.toContain('AI news');
+    // a backing project cannot be created or renamed as a project
+    expect(
+      (await call('member', 'POST', '/api/projects', { key: 'FEEDX', name: 'Feed', workflowKey: 'feed' }))
+        .status,
+    ).toBe(403);
     expect((await call('member', 'POST', '/api/intakes', { note: 'ACM-1' })).status).toBe(403);
   });
 

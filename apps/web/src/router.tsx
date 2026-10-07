@@ -1,4 +1,5 @@
-import { createBrowserRouter, Navigate } from 'react-router';
+import { createBrowserRouter, Navigate, useParams } from 'react-router';
+import { useInterests } from './api/queries/interests.ts';
 import { useProjects } from './api/queries/projects.ts';
 import { RequireAuth } from './components/Layout.tsx';
 import { PlatformShell } from './components/platform/PlatformShell.tsx';
@@ -12,8 +13,8 @@ import { CardDetail } from './pages/CardDetail.tsx';
 import { CardNew } from './pages/CardNew.tsx';
 import { Chat } from './pages/Chat.tsx';
 import { Desk } from './pages/Desk.tsx';
-import { FeedProject } from './pages/FeedProject.tsx';
 import { IntakeNew, IntakeView } from './pages/Intake.tsx';
+import { InterestDetail } from './pages/InterestDetail.tsx';
 import { Interests } from './pages/Interests.tsx';
 import { Ledger } from './pages/Ledger.tsx';
 import { Login } from './pages/Login.tsx';
@@ -42,6 +43,21 @@ function Home() {
   return <Navigate to={key ? `/p/${key}/board` : '/projects'} replace />;
 }
 
+/**
+ * The old per-project pages of a feed project (`/p/KEY/feed`, and the board of its hidden project) now live on the
+ * interest behind the key; any other key goes to the projects page.
+ */
+function InterestRedirect({ tab }: { tab?: string }) {
+  const { projectKey = '' } = useParams();
+  const list = useInterests();
+  const archived = useInterests({ archived: true });
+  if (list.isPending || archived.isPending) return <PageSkeleton label="Loading" />;
+  const found = [...(list.data?.interests ?? []), ...(archived.data?.interests ?? [])].find(
+    (i) => i.projectKey === projectKey,
+  );
+  return <Navigate to={found ? `/interests/${found.id}${tab ? `?tab=${tab}` : ''}` : '/projects'} replace />;
+}
+
 export const routes = [
   { path: '/login', element: <Login />, errorElement: <RouteError /> },
   { path: '/invite/:token', element: <AcceptInvite />, errorElement: <RouteError /> },
@@ -51,11 +67,12 @@ export const routes = [
     children: [
       { path: '/', element: <Home /> },
       { path: '/p/:projectKey/board', element: <Board /> },
-      { path: '/p/:projectKey/feed', element: <FeedProject /> },
+      { path: '/p/:projectKey/feed', element: <InterestRedirect tab="digest" /> },
       { path: '/p/:projectKey/research', element: <ResearchTab /> },
       { path: '/p/:projectKey/phases/:number', element: <Phase /> },
       { path: '/schedules', element: <Schedules /> },
       { path: '/interests', element: <Interests /> },
+      { path: '/interests/:id', element: <InterestDetail /> },
       { path: '/cards/new', element: <CardNew /> },
       { path: '/cards/:ref', element: <CardDetail /> },
       { path: '/projects', element: <Projects /> },

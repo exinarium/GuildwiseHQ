@@ -1,32 +1,11 @@
 import {
   type DigestItemDto,
-  type FeedListResponse,
-  FeedListResponseSchema,
   type RateDigestItemRequest,
-  type TasteResponse,
-  TasteResponseSchema,
   type TranscriptResponse,
   TranscriptResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, post } from '../client.ts';
-
-export function useFeedList(projectId: string | undefined) {
-  return useQuery({
-    queryKey: ['digest', 'feed', projectId],
-    enabled: !!projectId,
-    queryFn: () => get<FeedListResponse>(`/projects/${projectId}/feed`, FeedListResponseSchema),
-  });
-}
-
-/** `taste.md` as the ratings wrote it. */
-export function useTaste(projectId: string | undefined) {
-  return useQuery({
-    queryKey: ['digest', 'taste', projectId],
-    enabled: !!projectId,
-    queryFn: () => get<TasteResponse>(`/projects/${projectId}/taste`, TasteResponseSchema),
-  });
-}
 
 export function useRateDigestItem() {
   const qc = useQueryClient();

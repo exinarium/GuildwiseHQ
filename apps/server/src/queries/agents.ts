@@ -65,7 +65,7 @@ export async function listAgents(
       WHERE ((a.org_id = $3::uuid AND EXISTS (SELECT 1 FROM org_members om
                    WHERE om.org_id = a.org_id AND om.user_id = $1 AND om.status = 'active'))
              OR (NOT a.is_devops AND EXISTS (SELECT 1 FROM project_members pm JOIN projects pp ON pp.id = pm.project_id
-                         WHERE pp.org_id = a.org_id AND pm.user_id = $1 AND pm.status = 'active'
+                         WHERE pp.org_id = a.org_id AND pp.kind = 'project' AND pm.user_id = $1 AND pm.status = 'active'
                            AND (a.allowed_project_ids IS NULL OR pm.project_id = ANY (a.allowed_project_ids))
                            AND ${WS_USER_ON('pm.project_id')})))
         AND ($2::uuid IS NULL

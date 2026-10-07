@@ -24,7 +24,7 @@ export async function guestOrgs(ctx: Ctx, userId: string) {
     ctx.pool,
     `SELECT p.org_id, o.name AS org_name, p.id, p.key, p.name FROM project_members pm
        JOIN projects p ON p.id = pm.project_id JOIN organizations o ON o.id = p.org_id
-      WHERE pm.user_id = $1 AND pm.status = 'active' AND p.status = 'active' AND o.status IN ('trial','active')
+      WHERE pm.user_id = $1 AND pm.status = 'active' AND p.status = 'active' AND p.kind = 'project' AND o.status IN ('trial','active')
         AND NOT EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = p.org_id AND om.user_id = $1 AND om.status = 'active')
       ORDER BY o.name, p.key`,
     [userId],

@@ -366,6 +366,7 @@ export async function applyShiftReport(
         project: project as Row,
         note: report.note,
         data: payloadData as DigestData,
+        now: ctx.clock.now(),
       });
       if (!digest.ok) return { accepted: false, error: digest.error };
       main = digest.events[0] as AppendInput;

@@ -4,13 +4,14 @@ import {
   type VaultConfig,
   type VaultConfigureCommand,
   VaultConfigureCommandSchema,
+  type VaultMoveCommand,
   type VaultWriteCommand,
 } from '@aom/shared';
 import { confine } from '../fs-safe.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { ensureClone, identityEnv, isClean, isCloned, syncVault, type VaultSyncResult } from './sync.ts';
-import { VaultWriteError, writeVaultFile } from './write.ts';
+import { moveVaultFolder, type VaultMoveResult, VaultWriteError, writeVaultFile } from './write.ts';
 
 export interface VaultTransport {
   /** Acked types (`vault.conflict`) are persisted in the outbox; `vault.status` is best effort. */
@@ -222,6 +223,32 @@ export class VaultManager {
       });
       this.afterSync(cmd.vaultId, r);
       if (r.status === 'conflict') return { ...w, pushed: false, paused: true, conflict: r.files };
+      if (r.status === 'error') throw new VaultWriteError(r.error);
+      return { ...w, pushed: r.pushed, paused: false };
+    });
+  }
+
+  /** `vault.move`: renames a folder of the clone (one commit), then pushes through a sync pass like a write. */
+  move(
+    cmd: VaultMoveCommand,
+  ): Promise<VaultMoveResult & { pushed: boolean; paused: boolean; error?: string }> {
+    return this.serialize(cmd.vaultId, async () => {
+      const cfg = this.config;
+      const v = this.vault(cmd.vaultId);
+      if (!cfg || !v) throw new VaultWriteError(`vault ${cmd.vaultId} is not configured on this workstation`);
+      const dir = this.dir(cmd.vaultId);
+      await ensureClone(dir, v.remoteUrl, identityEnv(cfg.identity));
+      const w = await moveVaultFolder(dir, cmd, cfg.identity);
+      if (this.paused.has(cmd.vaultId)) return { ...w, pushed: false, paused: true };
+      if (!cmd.push) return { ...w, pushed: false, paused: false };
+      const r = await syncVault({
+        dir,
+        remoteUrl: v.remoteUrl,
+        identity: cfg.identity,
+        workstationName: cfg.workstationName,
+      });
+      this.afterSync(cmd.vaultId, r);
+      if (r.status === 'conflict') return { ...w, pushed: false, paused: true };
       if (r.status === 'error') throw new VaultWriteError(r.error);
       return { ...w, pushed: r.pushed, paused: false };
     });

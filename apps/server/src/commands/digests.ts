@@ -24,7 +24,7 @@ export async function rateDigestItem(
   return withAppendTx(ctx.pool, async (tx) => {
     const item = await one(tx, 'SELECT * FROM digest_items WHERE id=$1 FOR UPDATE', [itemId]);
     if (!item) throw notFound('digest item not found');
-    await requireProjectMember(tx, user.id, item.project_id);
+    await requireProjectMember(tx, user.id, item.project_id, { allowInterest: true });
     const project = await one(tx, 'SELECT org_id FROM projects WHERE id=$1', [item.project_id]);
     const scope = projectScope(project?.org_id, item.project_id);
     const events: AppendInput[] = [

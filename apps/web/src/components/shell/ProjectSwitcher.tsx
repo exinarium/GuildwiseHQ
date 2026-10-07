@@ -8,7 +8,7 @@ import { setLastProjectKey } from '../../lib/lastProject.ts';
 import { cx } from '../ui/cx.ts';
 import { useToast } from '../ui/Toast.tsx';
 
-const TYPE_LABEL: Record<string, string> = { code: 'Code', research: 'Research', feed: 'Feed' };
+const TYPE_LABEL: Record<string, string> = { code: 'Code', research: 'Research' };
 export const projectTypeLabel = (workflowKey: string) => TYPE_LABEL[workflowKey] ?? workflowKey;
 
 export function KeyChip({ children, className }: { children: string; className?: string }) {
@@ -51,8 +51,8 @@ export function ProjectSwitcher({
     setQ('');
     setLastProjectKey(p.key);
     const on = matchPath('/p/:key/:page', pathname);
-    if (on && (on.params.page === 'board' || on.params.page === 'feed')) {
-      nav(`/p/${p.key}/${p.workflowKey === 'feed' && on.params.page === 'feed' ? 'feed' : 'board'}`);
+    if (on && on.params.page === 'board') {
+      nav(`/p/${p.key}/board`);
     } else if (p.key !== current?.key) {
       toast.info(`Now working in ${p.name}`);
       nav(`/p/${p.key}/board`);

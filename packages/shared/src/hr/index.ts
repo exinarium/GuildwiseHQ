@@ -103,6 +103,7 @@ export function isThinSpec(fields: Record<string, unknown> | null | undefined): 
 export const HR_DESK_SUBKIND = {
   standingOrder: 'standing_order',
   scheduleFailed: 'schedule_failed',
+  interestFailing: 'interest_failing',
 } as const;
 
 /** Themed name lists of the Hire form's generator. */

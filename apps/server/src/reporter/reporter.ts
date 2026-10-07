@@ -234,7 +234,7 @@ async function queueFloorReports(ctx: Ctx, now: Date): Promise<number> {
     ctx.pool,
     `SELECT o.id FROM organizations o JOIN users u ON u.id = o.owner_user_id AND u.status='active'
       WHERE o.status IN ('trial','active')
-        AND EXISTS (SELECT 1 FROM projects p WHERE p.org_id = o.id AND p.status='active')`,
+        AND EXISTS (SELECT 1 FROM projects p WHERE p.org_id = o.id AND p.status='active' AND p.kind='project')`,
   );
   let n = 0;
   for (const o of orgs) {

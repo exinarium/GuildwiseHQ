@@ -30,8 +30,8 @@ export const SCHEDULE_EVENT_TRIGGERS: ReadonlyArray<{
   {
     id: 'interest_run_done',
     label: 'An interest run is done',
-    eventType: 'DigestPosted',
-    hint: 'A scan of an interest posted its digest.',
+    eventType: 'InterestRunDone',
+    hint: 'A scan of an interest posted its digest, or a research run published its note.',
   },
   {
     id: 'project_converted',

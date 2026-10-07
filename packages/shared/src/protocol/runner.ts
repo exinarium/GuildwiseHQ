@@ -15,7 +15,12 @@ import { RepoCreatePayloadSchema } from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import { VaultFolderSchema } from '../safe.ts';
 import { FinalizeExecutePayloadSchema } from '../testing/index.ts';
-import { VaultConfigureCommandSchema, VaultIdSchema, VaultWriteCommandSchema } from '../vaults/index.ts';
+import {
+  VaultConfigureCommandSchema,
+  VaultIdSchema,
+  VaultMoveCommandSchema,
+  VaultWriteCommandSchema,
+} from '../vaults/index.ts';
 import { LedgerMatchSchema, RpcMethodSchema, ShiftReportSchema } from './ipc.ts';
 
 /**
@@ -237,6 +242,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repos.rescan',
   'vault.configure',
   'vault.write',
+  'vault.move',
   'finalize.execute',
   'outbound.post',
   'repo.create',
@@ -259,6 +265,7 @@ export type ShiftVault = z.infer<typeof ShiftVaultSchema>;
 export const CommandPayloadSchemas = {
   'vault.configure': VaultConfigureCommandSchema,
   'vault.write': VaultWriteCommandSchema,
+  'vault.move': VaultMoveCommandSchema,
   'agent.wipe': z.object({ agentId: z.uuid() }),
   'worktree.remove': z.object({
     repoId: z.uuid().optional(),

@@ -815,7 +815,7 @@ async function rpcProject(ctx: Ctx, who: Responder, params: Record<string, unkno
   const project = await one(
     ctx.pool,
     `SELECT p.* FROM projects p JOIN project_members m ON m.project_id = p.id AND m.user_id = $1 AND m.status = 'active'
-      WHERE p.status = 'active' AND ($2::uuid IS NULL OR p.id = $2) AND ($3::text IS NULL OR p.key = $3)
+      WHERE p.status = 'active' AND p.kind = 'project' AND ($2::uuid IS NULL OR p.id = $2) AND ($3::text IS NULL OR p.key = $3)
       ORDER BY (p.org_id = $1) DESC LIMIT 1`,
     [intake.started_by, key ? null : intake.mapped_project_id, key ?? null],
   );

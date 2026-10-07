@@ -12,6 +12,7 @@ import {
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, cardMessage, projectScope } from './common.ts';
+import { deliveryEvents, type HeldItem, heldItems } from './interest-runs.ts';
 
 /** The scout's candidates for a card: the data of its latest `scan` handoff (undefined when there was none). */
 export async function scoutCandidates(
@@ -40,17 +41,22 @@ export async function seenUrls(db: Queryable, projectId: string, limit = 300): P
 }
 
 /**
- * The manager's explicit taste rules for a feed card (docs/design/interests.md section 6): the project-wide ones plus
- * those tagged with the card's interest, in the order they were set.
+ * The manager's explicit taste rules for a feed card (docs/design/restructure.md section 5.5): the rules built into the
+ * card's interest. A card of no interest (old history) falls back to the rules of its project's first model
+ * (`taste_seeds`, read only).
  */
 export async function tasteSeedFor(
   db: Queryable,
   projectId: string,
   interestId: string | null | undefined,
 ): Promise<string[]> {
+  if (interestId) {
+    const i = await one(db, 'SELECT taste_rules FROM interests WHERE id=$1', [interestId]);
+    return ((i?.taste_rules as string[] | undefined) ?? []).filter((x) => typeof x === 'string');
+  }
   const r = await one(db, 'SELECT rules FROM taste_seeds WHERE project_id=$1', [projectId]);
   const rules = (r?.rules as Array<{ text: string; interestId: string | null }> | undefined) ?? [];
-  return rules.filter((x) => !x.interestId || x.interestId === interestId).map((x) => x.text);
+  return rules.filter((x) => !x.interestId).map((x) => x.text);
 }
 
 export type DigestResult =
@@ -65,7 +71,7 @@ export type DigestResult =
  */
 export async function buildDigestEvents(
   tx: Queryable,
-  a: { card: Row; agent: Row; project: Row; note: string; data: DigestData },
+  a: { card: Row; agent: Row; project: Row; note: string; data: DigestData; now?: Date },
 ): Promise<DigestResult> {
   const { card, agent, project, data } = a;
   const candidates = await scoutCandidates(tx, card.id);
@@ -92,9 +98,13 @@ export async function buildDigestEvents(
     [project.id],
   );
 
+  // An interest that wants only some kinds of item: the others are dropped here, whatever the agents sent.
+  const wantedKinds = Array.isArray(card.fields?.kinds) ? (card.fields.kinds as string[]) : null;
+  const candidatesOfKind = wantedKinds ? data.items.filter((i) => wantedKinds.includes(i.kind)) : data.items;
+
   const accepted: typeof data.items = [];
   let duplicatesDropped = 0;
-  for (const item of data.items) {
+  for (const item of candidatesOfKind) {
     const norm = normalizeUrl(item.url);
     const dup =
       seen.has(norm) ||
@@ -115,7 +125,13 @@ export async function buildDigestEvents(
     publishedAt: new Date(i.publishedAt).toISOString(),
   }));
   const nothingQualified = items.length === 0;
-  const deskItemId = nothingQualified ? undefined : randomUUID();
+  // A card of an interest posts its items as held: they reach the desk at the interest's delivery time (or at once
+  // for an interest that delivers immediately), within the organization's quiet cap.
+  const interest = card.interest_id
+    ? await one(tx, 'SELECT * FROM interests WHERE id=$1 AND project_id IS NOT NULL', [card.interest_id])
+    : undefined;
+  const viaInterest = Boolean(interest && card.interest_run_id);
+  const deskItemId = nothingQualified || viaInterest ? undefined : randomUUID();
   const scope = projectScope(card.org_id, card.project_id);
   const cardStream = streamId.card(card.id);
 
@@ -132,20 +148,65 @@ export async function buildDigestEvents(
           duplicatesDropped,
           overMaximumDropped: dropped.length,
           ...(deskItemId ? { deskItemId } : {}),
+          held: viaInterest,
         },
       },
       actor: agentActor(agent.id),
       scope,
     },
   ];
+  let delivered = 0;
+  if (viaInterest && interest) {
+    events.push({
+      streamId: streamId.interest(interest.id),
+      event: {
+        type: 'InterestRunDone',
+        payload: {
+          runId: card.interest_run_id,
+          interestId: interest.id,
+          cardId: card.id,
+          kind: 'scan',
+          status: nothingQualified ? 'nothing' : 'published',
+          ...(candidates ? { found: candidates.length } : {}),
+          published: items.length,
+          duplicatesDropped,
+          overMaximumDropped: dropped.length,
+          itemIds: items.map((i) => i.itemId),
+        },
+      },
+      actor: agentActor(agent.id),
+      scope,
+    });
+    const delivery = (interest.delivery ?? { mode: 'immediate' }) as { mode: string };
+    if (delivery.mode === 'immediate' && !nothingQualified) {
+      const mine: HeldItem[] = items.map((i) => ({
+        id: i.itemId,
+        title: i.title,
+        kind: i.kind,
+        source: i.source,
+        cardId: card.id,
+      }));
+      const plan = await deliveryEvents(
+        tx,
+        interest,
+        [...(await heldItems(tx, interest.id)), ...mine],
+        a.now ?? new Date(),
+        'schedule',
+      );
+      events.push(...plan.events);
+      delivered = plan.delivered;
+    }
+  }
 
   const left = [
     duplicatesDropped ? `${duplicatesDropped} duplicate(s) skipped` : '',
     dropped.length ? `${dropped.length} over the maximum number of items left out` : '',
   ].filter(Boolean);
+  const heldNote =
+    viaInterest && !nothingQualified && delivered < items.length ? ' Held for the next delivery.' : '';
   const summary = nothingQualified
     ? `Nothing qualified in this run; nothing was logged.${left.length ? ` (${left.join(', ')})` : ''}`
-    : `Digest posted: ${items.length} new item(s) logged to the running list.${left.length ? ` (${left.join(', ')})` : ''}`;
+    : `Digest posted: ${items.length} new item(s) logged to the running list.${left.length ? ` (${left.join(', ')})` : ''}${heldNote}`;
   events.push(
     cardMessage(card, { kind: 'agent', agentId: agent.id }, 'system', `${summary}\n\n${a.note}`.trim()),
   );

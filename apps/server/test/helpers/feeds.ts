@@ -1,6 +1,3 @@
-import { randomUUID } from 'node:crypto';
-import { streamId } from '@aom/shared';
-import { nextFireAfter } from '../../src/commands/schedules.ts';
 import { q } from './db.ts';
 import type { FakeRunner } from './fake-runner.ts';
 import { shiftHelpers } from './shifts.ts';
@@ -27,66 +24,58 @@ export const item = (n: number, over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-/** A feed project (`NEWS`, personal domain) next to the world's code project. */
-export async function createFeedProject(w: World, over: Record<string, unknown> = {}): Promise<string> {
-  const r = await ok<any>(
-    w.t.req('POST', '/api/projects', {
+/**
+ * An interest (docs/design/restructure.md Part D) as the owner of the world creates it: personal domain, run by hand (no
+ * cadence), delivered at once. Returns its id and the id of its hidden backing project, whose key derives from the name
+ * (`News` -> `NEWS`). Users never see that project; tests that need cards, items or members use its id.
+ */
+export async function createFeedInterest(
+  w: World,
+  over: Record<string, unknown> = {},
+): Promise<{ id: string; projectId: string; key: string }> {
+  const r = await ok<{ id: string }>(
+    w.t.req('POST', '/api/interests', {
       cookie: w.owner.cookie,
-      body: { key: 'NEWS', name: 'News', workflowKey: 'feed', domain: 'personal', ...over },
+      body: { name: 'News', domain: 'personal', scan: { manual: true }, ...over },
     }),
     201,
   );
-  return r.project.id as string;
+  const row = (
+    await q(
+      'SELECT i.project_id, p.key FROM interests i JOIN projects p ON p.id = i.project_id WHERE i.id=$1',
+      [r.id],
+    )
+  )[0];
+  return { id: r.id, projectId: row?.project_id as string, key: row?.key as string };
+}
+
+/** The backing project of a new interest (for tests that only need a place for feed cards). */
+export async function createFeedProject(w: World, over: Record<string, unknown> = {}): Promise<string> {
+  return (await createFeedInterest(w, over)).projectId;
 }
 
 /**
- * A feed schedule as it was created before feeds became interests: a legacy `ScheduleCreated` (no trigger, no action,
- * `kind: 'feed'`). The API refuses new feed schedules (they are interests now), so tests that need one inject the old
- * event, exactly what an existing installation holds. Returns what `POST /api/schedules` used to.
+ * A manual run of the interest ("Run now"). `patch` first changes the interest (`description`, `scan: {maxItems}`, ...),
+ * so a test can say what the run's card should carry.
  */
-export async function feedSchedule(
+export async function runNow(
   w: World,
-  projectId: string,
-  over: Record<string, unknown> = {},
-): Promise<{ status: number; body: any }> {
-  const ctx = w.t.app.ctx;
-  const b = {
-    name: 'Daily news',
-    cron: '0 7 * * *',
-    timezone: 'UTC',
-    cardTemplate: { title: 'News run', fields: { topic: 'reloading' } },
-    enabled: true,
-    ...over,
-  } as { name: string; cron: string; timezone: string; cardTemplate: unknown; enabled: boolean };
-  const proj = (await q('SELECT org_id FROM projects WHERE id=$1', [projectId]))[0];
-  const id = randomUUID();
-  await ctx.store.append([
-    {
-      streamId: streamId.schedule(id),
-      event: {
-        type: 'ScheduleCreated',
-        payload: {
-          scheduleId: id,
-          projectId,
-          name: b.name,
-          kind: 'feed',
-          cron: b.cron,
-          timezone: b.timezone,
-          cardTemplate: b.cardTemplate as never,
-          enabled: b.enabled,
-          nextFireAt: b.enabled
-            ? (nextFireAfter(b.cron, b.timezone, ctx.clock.now())?.toISOString() ?? null)
-            : null,
-        },
-      },
-      actor: { kind: 'user', id: w.owner.id } as never,
-      scope: { orgId: proj?.org_id, projectId, audience: 'project' } as never,
-    },
-  ]);
-  await ctx.notifier.flush();
-  const list = (await w.t.req('GET', `/api/schedules?projectId=${projectId}`, { cookie: w.owner.cookie }))
-    .body.schedules as any[];
-  return { status: 201, body: list.find((x) => x.id === id) };
+  interestId: string,
+  patch: Record<string, unknown> = {},
+  cookie: string = w.owner.cookie,
+): Promise<{ runId: string; cardId: string; ref: string }> {
+  if (Object.keys(patch).length)
+    await ok(w.t.req('PATCH', `/api/interests/${interestId}`, { cookie, body: patch }));
+  return ok<{ runId: string; cardId: string; ref: string }>(
+    w.t.req('POST', `/api/interests/${interestId}/run`, { cookie, body: {} }),
+    201,
+  );
+}
+
+/** The interest's running list (delivered items), oldest first. */
+export async function feedItems(w: World, interestId: string, cookie: string = w.owner.cookie) {
+  return (await ok<{ items: any[] }>(w.t.req('GET', `/api/interests/${interestId}/digest`, { cookie })))
+    .items;
 }
 
 /** Drives scout and curator shifts of one feed card through a fake runner. */

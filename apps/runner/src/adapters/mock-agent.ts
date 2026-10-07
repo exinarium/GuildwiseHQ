@@ -562,6 +562,17 @@ interface BaTaskBrief extends Brief {
         devopsOpen: Array<{ summary: string; status: string }>;
         resolvedByBa: Array<{ title: string; how: string }>;
         failures: Array<{ ref: string; failedShifts: number }>;
+        interests?: {
+          count: number;
+          active: number;
+          delivered: number;
+          unrated: number;
+          highlights: Array<{
+            interest: string;
+            items: Array<{ title: string; kind: string }>;
+          }>;
+          failing: Array<{ interest: string; failCount: number }>;
+        };
       };
     };
     cards: Array<{
@@ -675,6 +686,9 @@ async function reporterTaskMain(
           .filter((s) => ['rework', 'finalize_failures', 'repo_hygiene'].includes(s.kind))
           .map((s) => s.subject.title),
         ...(d?.failures ?? []).map((f) => `${f.ref}: ${f.failedShifts} failed shifts`),
+        ...(d?.interests?.failing ?? []).map(
+          (f) => `Interest ${f.interest} cannot run (${f.failCount} tries)`,
+        ),
       ]),
       '',
       '## DevOps requests that are open',
@@ -682,6 +696,17 @@ async function reporterTaskMain(
       '',
       '## Resolved without bothering you',
       ...list((d?.resolvedByBa ?? []).map((x) => `${x.title} (${x.how})`)),
+      '',
+      '## Interests highlights',
+      ...(d?.interests
+        ? [
+            `Interests: ${d.interests.active} active of ${d.interests.count}, ${d.interests.delivered} items delivered, ${d.interests.unrated} unrated`,
+            ...d.interests.highlights.flatMap((h) => [
+              `- ${h.interest}`,
+              ...h.items.map((x) => `  - ${x.title} (${x.kind})`),
+            ]),
+          ]
+        : ['- none']),
     ].join('\n');
     res = aom(['report', 'floor', '--summary-file', tmpText('floor.md', md)]);
   }

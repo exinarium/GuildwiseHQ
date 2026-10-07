@@ -51,6 +51,21 @@ export const VaultWriteCommandSchema = z
   });
 export type VaultWriteCommand = z.infer<typeof VaultWriteCommandSchema>;
 
+/**
+ * `vault.move` (the restructure migration, docs/design/restructure.md owner decision 6): moves a folder of the vault with
+ * the history kept (a rename, one commit, pushed). Idempotent and safe to repeat after an interruption: a folder that is
+ * already moved is success, and files that exist at both places are merged without overwriting anything.
+ */
+export const VaultMoveCommandSchema = z.object({
+  vaultId: VaultIdSchema,
+  /** Vault-relative folders, forward slashes, no `..`. */
+  from: z.string().min(1),
+  to: z.string().min(1),
+  commitMessage: z.string().min(1),
+  push: z.boolean().default(true),
+});
+export type VaultMoveCommand = z.infer<typeof VaultMoveCommandSchema>;
+
 /** Rejects absolute paths, `..` segments and anything inside `.git`. */
 export function isSafeVaultPath(path: string): boolean {
   if (!path || path.startsWith('/') || path.includes('\\') || /^[a-zA-Z]:/.test(path)) return false;
@@ -59,7 +74,14 @@ export function isSafeVaultPath(path: string): boolean {
 }
 
 /** `projects/<folder>`: `projects.vault_folder` or the lowercase project key. */
-export function projectVaultFolder(project: { key: string; vaultFolder?: string | null }): string {
+export function projectVaultFolder(project: {
+  key: string;
+  vaultFolder?: string | null;
+  /** `projects.vault_dir`: the full folder of a backing project (`interests/<slug>`); wins over the other two. */
+  vaultDir?: string | null;
+}): string {
+  const dir = project.vaultDir?.trim().replace(/^\/+|\/+$/g, '');
+  if (dir) return dir;
   const raw = (project.vaultFolder?.trim() || project.key.toLowerCase()).replace(/^\/+|\/+$/g, '');
   return raw.startsWith('projects/') ? raw : `projects/${raw}`;
 }

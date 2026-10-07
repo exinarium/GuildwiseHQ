@@ -1,4 +1,5 @@
 import { fireDueHygiene } from '../commands/hygiene.ts';
+import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
 import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
@@ -59,11 +60,20 @@ export class Scheduler {
     if (this.stopped) return Promise.resolve([]);
     const next = this.chain.then(async () => {
       const fired = await fireDueSchedules(this.ctx);
+      await this.interests();
       await this.triggers();
       return fired;
     });
     this.chain = next.catch(() => {});
     return next;
+  }
+
+  /** The interests' run schedules, then their delivery schedules (digests to the desk within the quiet cap). */
+  private async interests(): Promise<void> {
+    await fireDueInterests(this.ctx).catch((err) => this.ctx.log.error({ err }, 'interest runs failed'));
+    await deliverDueInterests(this.ctx).catch((err) =>
+      this.ctx.log.error({ err }, 'interest deliveries failed'),
+    );
   }
 
   /** Event triggers and the deliveries (webhooks, e-mail) that are due; a failure of one never stops the other. */

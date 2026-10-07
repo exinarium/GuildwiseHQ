@@ -1,12 +1,11 @@
-import type { DeskItemDto, DigestItemDto, ProjectDto, ScheduleDto } from '@aom/shared';
+import type { DeskItemDto, DigestItemDto } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildFeedTemplate, defaultTimezone, describeCron, parseSites } from '../lib/feeds.ts';
+import { defaultTimezone, describeCron, parseSites } from '../lib/feeds.ts';
 import { DeskItem } from '../pages/Desk.tsx';
-import { Schedules } from '../pages/Schedules.tsx';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -89,31 +88,12 @@ describe('feed helpers', () => {
     expect(defaultTimezone()).toMatch(/\w/);
   });
 
-  it('parses preferred sites and builds the feed card template with a description and one maximum number of items', () => {
+  it('parses preferred sites, one per line or comma separated', () => {
     expect(parseSites('https://a.test, https://b.test\n\n c.test ')).toEqual([
       'https://a.test',
       'https://b.test',
       'c.test',
     ]);
-    expect(
-      buildFeedTemplate({
-        title: ' Daily firearms ',
-        topic: ' reloading ',
-        sites: 'https://a.test',
-        description: '  Deep dives only.\n\nNo news.  ',
-        maxItems: 'x',
-      }),
-    ).toEqual({
-      title: 'Daily firearms',
-      cardType: 'feed',
-      fields: {
-        topic: 'reloading',
-        description: 'Deep dives only.\n\nNo news.',
-        windowHours: 24,
-        preferredSites: ['https://a.test'],
-        maxItems: 10,
-      },
-    });
   });
 });
 

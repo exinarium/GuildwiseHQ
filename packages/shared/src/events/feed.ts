@@ -22,6 +22,11 @@ export const feedEvents = [
       overMaximumDropped: z.number().int().nonnegative().default(0),
       /** The grouped rating item on the desk (absent when nothing qualified). */
       deskItemId: Id.optional(),
+      /**
+       * The interest delivers on a schedule: the items wait (no desk item) until an `InterestDigestDelivered`
+       * puts them on the manager's desk.
+       */
+      held: z.boolean().default(false),
     }),
   ),
   defineEvent(

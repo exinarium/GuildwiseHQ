@@ -11,7 +11,7 @@ import { pendingConversionOf } from '../commands/convert.ts';
 import { hygieneDtos } from '../commands/hygiene.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
-import { notFound } from '../errors.ts';
+import { conflict, notFound } from '../errors.ts';
 
 /** The department of a project's workflow (its type): the owner's own workflow first, else the built-in. */
 export const PROJECT_DEPARTMENT_SQL = `(SELECT w.department FROM workflow_versions w
@@ -68,7 +68,7 @@ export async function listProjects(
          FROM projects p JOIN project_members pm
          ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
          LEFT JOIN organizations o ON o.id = p.org_id
-        WHERE ($2 = 'all' OR p.status = $2)
+        WHERE ($2 = 'all' OR p.status = $2) AND p.kind = 'project'
           AND (o.id IS NULL OR o.status IN ('trial','active') OR o.owner_user_id = $1)
         ORDER BY p.created_at`,
       [userId, status],
@@ -91,6 +91,8 @@ export async function getProjectDetail(
     [userId, projectId],
   );
   if (!p) throw notFound('project not found');
+  if (p.kind === 'interest')
+    throw conflict('managed_by_interest', 'this is an interest: manage it on the Interests page');
   if (p.org_status && !isOrgOperational(p.org_status) && p.org_owner !== userId)
     throw orgSuspended({ name: p.org_name ?? 'The organization', status: p.org_status });
   const repos = await rows(

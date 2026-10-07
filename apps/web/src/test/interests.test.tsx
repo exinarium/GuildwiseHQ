@@ -1,87 +1,131 @@
-import type { InterestDto, ProjectDto, ScheduleDto } from '@aom/shared';
+import type { DigestItemDto, InterestDetailResponse, InterestDto, InterestRunDto } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cronOf, emptyValues, validateInterest } from '../lib/interests.ts';
+import {
+  cronOf,
+  describeDelivery,
+  describeScan,
+  emptyValues,
+  toCreateRequest,
+  toPatchRequest,
+  validateInterest,
+  valuesFromInterest,
+} from '../lib/interests.ts';
+import { InterestDetail } from '../pages/InterestDetail.tsx';
 import { Interests } from '../pages/Interests.tsx';
-import { Schedules } from '../pages/Schedules.tsx';
 import { keysForEvent } from '../ws/invalidate.ts';
 
 afterEach(() => vi.unstubAllGlobals());
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-const wrap = (node: React.ReactNode, path = '/') => {
+const wrap = (node: React.ReactNode, path = '/interests') => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={[path]}>{node}</MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          {path.startsWith('/interests/') ? (
+            <Route path="/interests/:id" element={node} />
+          ) : (
+            <>
+              <Route path="/interests" element={node} />
+              <Route path="/interests/:id" element={<p>elsewhere</p>} />
+            </>
+          )}
+          <Route path="*" element={<p>elsewhere</p>} />
+        </Routes>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 };
 
 const U = (n: number) => `0192f3a0-0000-7000-8000-0000000000${String(n).padStart(2, '0')}`;
-const project = (
-  n: number,
-  key: string,
-  workflowKey: string,
-  over: Partial<ProjectDto> = {},
-): ProjectDto => ({
-  id: U(n),
-  orgId: U(99),
-  key,
-  name: `${key} project`,
-  domain: 'personal',
-  workflowKey,
-  priorityTier: 2,
-  branchPrefix: 'aom/',
-  workingBranch: 'main',
-  subCategories: ['rust/async'],
-  vaultFolder: null,
-  architecturalGlobs: [],
-  e2eGlobs: [],
-  status: 'active',
-  createdAt: '2026-10-01T00:00:00.000Z',
-  myRole: 'owner',
-  ...over,
-});
-const NEWS = project(1, 'NEWS', 'feed');
-const RES = project(2, 'RES', 'research');
 
 const stats = {
-  lastScanAt: '2026-10-05T05:02:00.000Z',
-  lastScanCard: { id: U(50), ref: 'NEWS-41', status: 'done' },
+  lastRunAt: '2026-10-05T05:02:00.000Z',
+  lastRun: { id: U(70), kind: 'scan', status: 'published', found: 14, published: 6, cardRef: 'RUSTAS-41' },
   nextScanAt: '2026-10-06T05:00:00.000Z',
-  scans30d: 6,
-  items: { total: 22, last30d: 22, lastScan: 6 },
+  nextDeliveryAt: '2026-10-06T05:00:00.000Z',
+  lastDeliveredAt: '2026-10-05T05:00:00.000Z',
+  runs30d: 6,
+  items: { total: 22, last30d: 22, lastRun: 6, held: 3 },
   ratings: { useful: 12, irrelevant: 3, boring: 5, unrated: 2 },
   research: { open: 1, published: 2 },
   failing: false,
-};
+  failCount: 0,
+  lastError: null,
+} as const;
+const agent = (n: number, name: string) => ({ id: U(n), name, online: true });
 const interest = (over: Partial<InterestDto> = {}): InterestDto => ({
   id: U(10),
   orgId: U(99),
   name: 'Rust async',
   description: 'Deep dives on tokio internals',
-  feedProject: { id: NEWS.id, key: 'NEWS', name: 'News', archived: false },
-  researchProject: { id: RES.id, key: 'RES', name: 'Research', archived: false },
+  slug: 'rust-async',
+  domain: 'personal',
+  vaultDir: 'interests/rust-async',
+  hasVault: true,
+  projectKey: 'RUSTAS',
   subCategory: 'rust/async',
   preferredSites: ['lobste.rs'],
+  kinds: ['article', 'video', 'podcast'],
   scan: { cron: '0 7 * * *', timezone: 'Africa/Johannesburg', windowHours: 24, maxItems: 10, manual: false },
+  delivery: { mode: 'scheduled', cron: '0 7 * * 1-5', timezone: 'Africa/Johannesburg' },
   status: 'active',
-  scheduleId: U(20),
-  adoptedFrom: null,
+  archived: false,
+  agents: { scout: agent(30, 'Sid'), curator: null, researcher: null, checker: null },
   canManage: true,
-  canRun: true,
-  canResearch: true,
+  canShare: true,
+  createdBy: { id: U(1), name: 'Pieter' },
   tasteRuleCount: 1,
-  schedule: { id: U(20), enabled: true, nextFireAt: stats.nextScanAt, failCount: 0, lastError: null },
+  tasteVersion: 2,
   stats,
   createdAt: '2026-10-01T00:00:00.000Z',
   updatedAt: '2026-10-01T00:00:00.000Z',
   ...over,
+});
+
+const run = (n: number, over: Partial<InterestRunDto> = {}): InterestRunDto => ({
+  id: U(70 + n),
+  kind: 'scan',
+  trigger: 'cron',
+  status: 'published',
+  startedAt: '2026-10-05T05:00:00.000Z',
+  finishedAt: '2026-10-05T05:06:12.000Z',
+  found: 14,
+  published: 6,
+  duplicatesDropped: 3,
+  overMaxDropped: 5,
+  startedBy: null,
+  ratings: { useful: 3, irrelevant: 0, boring: 1, unrated: 2 },
+  card: { id: U(80 + n), ref: `RUSTAS-${40 + n}` },
+  parentRunId: null,
+  childRunIds: [],
+  ...over,
+});
+
+const digestItem = (n: number): DigestItemDto => ({
+  id: U(90 + n),
+  cardId: U(81),
+  cardRef: 'RUSTAS-41',
+  projectId: U(5),
+  projectKey: 'RUSTAS',
+  kind: 'article',
+  url: `https://news.example.test/s${n}`,
+  title: `Headline ${n}`,
+  source: 'News Example',
+  publishedAt: '2026-10-02T00:00:00.000Z',
+  summary: `Summary ${n}`,
+  transcript: null,
+  verdict: null,
+  verdictReason: null,
+  ratedAt: null,
+  deskItemId: null,
+  createdAt: '2026-10-03T07:00:00.000Z',
 });
 
 interface Call {
@@ -92,111 +136,197 @@ interface Call {
 function stubApi(
   interests: InterestDto[],
   calls: Call[],
-  extra: { adoptable?: unknown[]; adoptableCount?: number } = {},
+  extra: { quietCap?: number | null; canSetCap?: boolean } = {},
 ) {
+  const detail = (i: InterestDto): InterestDetailResponse => ({
+    interest: i,
+    publications: [
+      {
+        id: U(60),
+        cardId: U(61),
+        cardRef: 'RUSTAS-44',
+        title: 'Is the new scheduler faster?',
+        vaultPath: 'interests/rust-async/notes/x.md',
+        createdAt: '2026-10-04T00:00:00.000Z',
+      },
+    ],
+    taste: {
+      rules: ['Skip beginner tutorials'],
+      version: 2,
+      hasVault: true,
+      ratingLines: ['- Prefer articles like "Tokio 2.0" from tokio.rs (rated useful).'],
+    },
+    members: [{ userId: U(1), name: 'Pieter', role: 'owner', orgGrant: true }],
+  });
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init: RequestInit = {}) => {
       const method = init.method ?? 'GET';
+      const body = init.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ method, url, body });
       if (method === 'GET') {
-        if (url.startsWith('/api/interests/adoptable')) return json({ schedules: extra.adoptable ?? [] });
-        if (url.startsWith('/api/interests/')) {
-          const found = interests.find((i) => url.includes(i.id));
-          return found
-            ? json({
-                interest: found,
-                scans: [],
-                publications: [],
-                taste: { rules: ['Skip beginner tutorials'], version: 2, hasVault: true },
-              })
-            : json({}, 404);
-        }
+        const found = interests.find((i) => url.startsWith(`/api/interests/${i.id}`));
+        if (url.includes('/runs/'))
+          return json({
+            run: run(1),
+            items: [
+              {
+                id: U(95),
+                kind: 'video',
+                title: 'Async traits deep dive',
+                url: 'https://v.test/1',
+                source: 'YouTube',
+                summary: 's',
+                verdict: null,
+                verdictReason: null,
+                transcript: { status: 'ok', chars: 14000 },
+                delivered: true,
+              },
+            ],
+            notes: [],
+            shifts: [
+              {
+                id: U(96),
+                role: 'scout',
+                agentName: 'Sid',
+                status: 'ended',
+                startedAt: '2026-10-05T05:00:00.000Z',
+                endedAt: null,
+              },
+            ],
+          });
+        if (url.includes('/runs'))
+          return json({
+            runs: [
+              run(1),
+              run(2, {
+                kind: 'research',
+                trigger: 'manual',
+                status: 'checking',
+                published: null,
+                found: null,
+              }),
+            ],
+            hasMore: false,
+          });
+        if (url.includes('/deliveries'))
+          return json({
+            deliveries: [
+              {
+                id: U(97),
+                at: '2026-10-05T05:00:00.000Z',
+                itemCount: 6,
+                heldBack: 2,
+                trigger: 'schedule',
+                deskItemId: null,
+              },
+            ],
+          });
+        if (url.includes('/digest')) return json({ items: [digestItem(1), digestItem(2)] });
+        if (url.includes('/agents/eligible'))
+          return json({
+            scout: [agent(30, 'Sid'), agent(31, 'Sam')],
+            curator: [agent(32, 'Cleo')],
+            researcher: [],
+            checker: [],
+          });
+        if (url.startsWith('/api/interests/') && found) return json(detail(found));
+        if (url.startsWith('/api/interests/')) return json({}, 404);
         if (url.startsWith('/api/interests'))
           return json({
             interests,
-            tasteProjects: [
+            quietCap: extra.quietCap ?? 12,
+            deliveredToday: 5,
+            canSetCap: extra.canSetCap ?? true,
+          });
+        if (url.startsWith('/api/org/members'))
+          return json({
+            members: [
               {
-                projectId: NEWS.id,
-                key: 'NEWS',
-                name: 'News',
-                ruleCount: 3,
-                version: 4,
-                hasVault: true,
-                canManage: true,
+                userId: U(2),
+                displayName: 'Ana',
+                email: 'a@x.test',
+                role: 'member',
+                joinedAt: '2026-10-01T00:00:00.000Z',
+                allProjects: false,
+                projects: [],
+                twoFactorEnabled: false,
               },
             ],
-            adoptableCount: extra.adoptableCount ?? 0,
           });
-        if (url.startsWith('/api/projects/') && url.endsWith('/taste-seed'))
-          return json({
-            projectId: NEWS.id,
-            version: 4,
-            rules: [{ text: 'Prefer primary sources', interestId: null }],
-            hasVault: true,
-          });
-        if (url.startsWith('/api/projects')) return json({ projects: [NEWS, RES] });
         return json({});
       }
-      const body = JSON.parse(String(init.body ?? '{}'));
-      calls.push({ method, url, body });
-      if (url.endsWith('/run')) return json({ cardId: U(60), ref: 'NEWS-42' }, 201);
-      if (url === '/api/cards') return json({ card: { id: U(61), ref: 'RES-7' } }, 201);
+      if (url.endsWith('/run')) return json({ runId: U(75), cardId: U(60), ref: 'RUSTAS-42' }, 201);
       if (url === '/api/interests') return json({ id: U(11) }, 201);
-      if (url === '/api/interests/adopt')
-        return json(
-          {
-            results: body.scheduleIds.map((id: string, n: number) =>
-              n === 0
-                ? { scheduleId: id, interestId: U(12) }
-                : { scheduleId: id, error: 'project is archived' },
-            ),
-          },
-          200,
-        );
       return json({ ok: true });
     }),
   );
 }
 
 describe('lib/interests', () => {
-  it('validates the form: name, a project, cron, max items', () => {
+  it('validates the form: name, cron, max items, kinds', () => {
     const v = emptyValues('UTC');
-    expect(validateInterest(v)).toMatchObject({ name: expect.any(String), project: expect.any(String) });
-    expect(validateInterest({ ...v, name: 'X', feedProjectId: NEWS.id })).toEqual({});
+    expect(validateInterest(v)).toMatchObject({ name: expect.any(String) });
+    expect(validateInterest({ ...v, name: 'X' })).toEqual({});
+    expect(validateInterest({ ...v, name: 'X', preset: 'custom', cron: 'nope' }).cron).toBeTruthy();
     expect(
-      validateInterest({ ...v, name: 'X', feedProjectId: NEWS.id, preset: 'custom', cron: 'nope' }).cron,
+      validateInterest({ ...v, name: 'X', manual: true, preset: 'custom', cron: 'nope' }).cron,
+    ).toBeUndefined();
+    expect(validateInterest({ ...v, name: 'X', maxItems: '500' }).maxItems).toBeTruthy();
+    expect(
+      validateInterest({ ...v, name: 'X', deliveryPreset: 'custom', deliveryCron: '1 2' }).deliveryCron,
     ).toBeTruthy();
     expect(
-      validateInterest({ ...v, name: 'X', feedProjectId: NEWS.id, maxItems: '500' }).maxItems,
-    ).toBeTruthy();
-    expect(
-      validateInterest({ ...v, name: 'X', newFeed: true, newFeedKey: 'a', newFeedName: '' }).newFeed,
+      validateInterest({ ...v, name: 'X', kinds: { article: false, video: false, podcast: false } }).kinds,
     ).toBeTruthy();
     expect(cronOf({ preset: 'weekdays-0700', cron: '' })).toBe('0 7 * * 1-5');
   });
-  it('maps interest and schedule events to query keys', () => {
-    const keys = keysForEvent({ type: 'InterestUpdated', streamId: `interest-${U(10)}`, projectId: NEWS.id });
-    expect(keys).toContainEqual(['interests']);
-    expect(keys).toContainEqual(['schedules']);
+
+  it('describes schedules and builds the requests', () => {
+    const i = interest();
+    expect(describeScan(i.scan)).toBe('Daily at 07:00 (Africa/Johannesburg) · up to 10 items');
+    expect(describeScan({ ...i.scan, manual: true })).toBe('Manual only · up to 10 items');
+    expect(describeDelivery(i.delivery)).toBe('Weekdays at 07:00 (Africa/Johannesburg)');
+    expect(describeDelivery({ ...i.delivery, mode: 'immediate' })).toBe('As soon as a run finishes');
+    const v = valuesFromInterest(i);
+    expect(v).toMatchObject({
+      domain: 'personal',
+      deliveryMode: 'scheduled',
+      deliveryPreset: 'weekdays-0700',
+      windowHours: '',
+    });
     expect(
-      keysForEvent({ type: 'ScheduleLinked', streamId: `schedule-${U(20)}`, projectId: NEWS.id }),
-    ).toContainEqual(['interests']);
-    expect(
-      keysForEvent({ type: 'TasteSeedSet', streamId: `project-${NEWS.id}`, projectId: NEWS.id }),
-    ).toContainEqual(['taste']);
+      toCreateRequest({ ...v, kinds: { article: true, video: false, podcast: true } }, ['A rule']),
+    ).toMatchObject({
+      name: 'Rust async',
+      kinds: ['article', 'podcast'],
+      tasteRules: ['A rule'],
+      scan: { cron: '0 7 * * *', maxItems: 10, manual: false },
+      delivery: { mode: 'scheduled', cron: '0 7 * * 1-5' },
+    });
+    expect('domain' in toPatchRequest(v, true)).toBe(false);
+    expect(toPatchRequest(v, false).domain).toBe('personal');
+  });
+
+  it('maps interest events to query keys', () => {
+    const keys = keysForEvent({ type: 'InterestRunStarted', streamId: `interest-${U(10)}`, projectId: U(5) });
+    for (const k of ['interests', 'interest', 'interest-runs', 'interest-deliveries', 'desk', 'digest'])
+      expect(keys).toContainEqual([k]);
+    expect(keysForEvent({ type: 'CardCreated', streamId: `card-${U(60)}`, projectId: U(5) })).toContainEqual([
+      'interest-runs',
+    ]);
   });
 });
 
 describe('Interests page', () => {
-  it('lists an interest with its cadence, last scan, ratings and failing badge', async () => {
+  it('lists an interest with its schedules, last run, waiting items and ratings, and a failing one', async () => {
     stubApi(
       [
         interest(),
         interest({
           id: U(13),
           name: 'Broken',
-          stats: { ...stats, failing: true },
-          schedule: { id: U(21), enabled: true, nextFireAt: null, failCount: 3, lastError: 'no repo' },
+          stats: { ...stats, failing: true, failCount: 3, lastError: 'no curator online' },
         }),
       ],
       [],
@@ -204,251 +334,261 @@ describe('Interests page', () => {
     wrap(<Interests />);
     const card = await screen.findByTestId('interest-Rust async');
     expect(within(card).getByTestId('interest-cadence')).toHaveTextContent(
-      'Daily at 07:00 (Africa/Johannesburg) · 24 h · 10 items',
+      'Daily at 07:00 (Africa/Johannesburg) · up to 10 items',
     );
-    expect(within(card).getByTestId('interest-last-scan')).toHaveTextContent('NEWS-41');
+    expect(within(card).getByTestId('interest-delivery')).toHaveTextContent('Delivery: Weekdays at 07:00');
+    expect(within(card).getByTestId('interest-last-run')).toHaveTextContent('found 14');
+    expect(within(card).getByTestId('interest-last-run')).toHaveTextContent('RUSTAS-41');
+    expect(within(card).getByText('3 waiting for delivery')).toBeInTheDocument();
     expect(within(card).getByTestId('interest-ratings')).toHaveTextContent(
       'useful 12 · irrelevant 3 · boring 5 · unrated 2',
     );
-    expect(within(card).getByTestId('interest-notes-line')).toHaveTextContent('Notes 2 · open 1');
+    expect(within(card).getByTestId('interest-meta')).toHaveTextContent('interests/rust-async');
+    expect(within(card).getByTestId('interest-agents')).toHaveTextContent('Scout: Sid');
     const broken = screen.getByTestId('interest-Broken');
     expect(within(broken).getByText(/Cannot run \(3 tries\)/)).toBeInTheDocument();
-    expect(screen.getByTestId('taste-project-NEWS')).toHaveTextContent(
-      '3 explicit rules · written to taste.md v4',
-    );
+    expect(within(broken).getByText('no curator online')).toBeInTheDocument();
+    expect(screen.getByTestId('quiet-cap-line')).toHaveTextContent('At most 12 digest items a day');
   });
 
-  it('resyncs taste.md from the project taste rules dialog', async () => {
-    const calls: Call[] = [];
-    stubApi([interest()], calls);
-    wrap(<Interests />);
-    const row = await screen.findByTestId('taste-project-NEWS');
-    await userEvent.setup().click(within(row).getByRole('button'));
-    await userEvent.setup().click(await screen.findByTestId('project-taste-resync'));
-    await waitFor(() =>
-      expect(calls).toContainEqual(
-        expect.objectContaining({ method: 'POST', url: `/api/projects/${NEWS.id}/taste-seed/resync` }),
-      ),
-    );
-  });
-
-  it('runs an interest now and links Digests to the filtered feed', async () => {
+  it('the active tick pauses and resumes; run scan starts a run', async () => {
     const calls: Call[] = [];
     stubApi([interest()], calls);
     wrap(<Interests />);
     const card = await screen.findByTestId('interest-Rust async');
-    expect(within(card).getByTestId('interest-digests')).toHaveAttribute(
-      'href',
-      `/p/NEWS/feed?interest=${U(10)}`,
+    const u = userEvent.setup();
+    await u.click(within(card).getByTestId('interest-toggle'));
+    await waitFor(() =>
+      expect(calls).toContainEqual(
+        expect.objectContaining({
+          method: 'PATCH',
+          url: `/api/interests/${U(10)}`,
+          body: { status: 'paused' },
+        }),
+      ),
     );
-    await userEvent.setup().click(within(card).getByTestId('interest-run'));
+    await u.click(within(card).getByTestId('interest-run'));
     await waitFor(() =>
       expect(calls).toContainEqual(
         expect.objectContaining({ method: 'POST', url: `/api/interests/${U(10)}/run` }),
       ),
     );
-    expect(await within(card).findByTestId('interest-run-result')).toHaveTextContent('NEWS-42');
+    expect(await within(card).findByTestId('interest-run-result')).toHaveTextContent('RUSTAS-42');
+    expect(within(card).getByTestId('interest-digests')).toHaveAttribute(
+      'href',
+      `/interests/${U(10)}?tab=digest`,
+    );
   });
 
-  it('hides run and research for a member who cannot, and shows View instead of Edit', async () => {
-    stubApi([interest({ canManage: false, canRun: false, canResearch: false })], []);
+  it('hides the controls of someone who may not change the interest', async () => {
+    stubApi([interest({ canManage: false })], []);
     wrap(<Interests />);
     const card = await screen.findByTestId('interest-Rust async');
     expect(within(card).queryByTestId('interest-run')).toBeNull();
     expect(within(card).queryByTestId('interest-research')).toBeNull();
-    expect(within(card).queryByTestId('interest-toggle')).toBeNull();
-    expect(within(card).getByTestId('interest-edit')).toHaveTextContent('View');
+    expect(within(card).getByTestId('interest-toggle')).toBeDisabled();
+    expect(within(card).getByTestId('interest-edit')).toHaveTextContent('Open');
   });
 
-  it('creates an interest with an inline new feed project', async () => {
+  it('creates an interest with its schedules, kinds and taste rules, then opens it', async () => {
     const calls: Call[] = [];
     stubApi([], calls);
     wrap(<Interests />);
-    const user = userEvent.setup();
-    await user.click(await screen.findByTestId('interest-new'));
-    const drawer = await screen.findByTestId('interest-drawer');
-    // empty form: validation errors, nothing sent
-    await user.click(within(drawer).getByTestId('interest-save'));
-    expect(await within(drawer).findByText('A name is required')).toBeInTheDocument();
-    expect(calls).toHaveLength(0);
-    await user.type(within(drawer).getByTestId('interest-name'), 'AI feeds');
-    await user.selectOptions(within(drawer).getByTestId('interest-feed-project'), '__new');
-    expect(within(drawer).getByTestId('new-feed-key')).toHaveValue('AF');
-    await user.click(within(drawer).getByTestId('interest-save'));
-    await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0]).toMatchObject({ method: 'POST', url: '/api/interests' });
-    expect(calls[0]?.body).toMatchObject({
-      name: 'AI feeds',
-      newFeedProject: { key: 'AF', name: 'AI feeds', domain: 'personal' },
-      scan: { cron: '0 7 * * *', maxItems: 10, manual: false },
-    });
-  });
-
-  it('is read-only for a guest and a full-screen sheet on phones (class check)', async () => {
-    stubApi([interest({ canManage: false })], []);
-    wrap(<Interests />);
-    await userEvent.setup().click(await screen.findByTestId('interest-edit'));
-    const drawer = await screen.findByTestId('interest-drawer');
-    expect(drawer.className).toContain('inset-0');
-    expect(drawer.className).toContain('sm:w-[480px]');
-    expect(within(drawer).getByTestId('interest-name')).toBeDisabled();
-    expect(within(drawer).getByTestId('interest-save')).toBeDisabled();
-    expect(within(drawer).getByText(/not a member of every project/)).toBeInTheDocument();
-  });
-
-  it('saves edits and the interest taste rules (PATCH, then PUT taste)', async () => {
-    const calls: Call[] = [];
-    stubApi([interest()], calls);
-    wrap(<Interests />);
-    const user = userEvent.setup();
-    await user.click(await screen.findByTestId('interest-edit'));
-    const drawer = await screen.findByTestId('interest-drawer');
-    await waitFor(() => expect(within(drawer).getAllByTestId('taste-rule')).toHaveLength(1));
-    await user.type(within(drawer).getByTestId('taste-rule-input'), 'Prefer primary sources');
-    await user.click(within(drawer).getByTestId('taste-rule-add'));
-    const desc = within(drawer).getByTestId('interest-description');
-    await user.clear(desc);
-    await user.type(desc, 'new angle');
-    await user.click(within(drawer).getByTestId('interest-save'));
+    const u = userEvent.setup();
+    await u.click(await screen.findByTestId('interest-new'));
+    const dialog = await screen.findByTestId('interest-new-dialog');
+    await u.click(within(dialog).getByTestId('interest-save'.replace('save', 'name')));
+    await u.type(within(dialog).getByTestId('interest-name'), 'AI agents');
+    await u.click(within(dialog).getByTestId('interest-kind-podcast'));
+    await u.selectOptions(within(dialog).getByTestId('interest-delivery-mode'), 'immediate');
+    await u.type(within(dialog).getByTestId('taste-rule-input'), 'Skip hype{enter}');
+    await u.click(screen.getByTestId('interest-save'));
     await waitFor(() =>
-      expect(calls.map((c) => c.method + c.url)).toEqual([
-        `PATCH/api/interests/${U(10)}`,
-        `PUT/api/interests/${U(10)}/taste`,
-      ]),
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/interests')).toBe(true),
     );
-    expect(calls[0]?.body).toMatchObject({
-      description: 'new angle',
-      feedProjectId: NEWS.id,
-      researchProjectId: RES.id,
-      status: 'active',
+    const post = calls.find((c) => c.method === 'POST' && c.url === '/api/interests');
+    expect(post?.body).toMatchObject({
+      name: 'AI agents',
+      kinds: ['article', 'video'],
+      tasteRules: ['Skip hype'],
+      delivery: { mode: 'immediate' },
+      scan: { manual: false },
     });
-    expect(calls[1]?.body).toEqual({ rules: ['Skip beginner tutorials', 'Prefer primary sources'] });
+    expect(await screen.findByText('elsewhere')).toBeInTheDocument();
   });
 
-  it('Research this prefills the dialog and sends interestId with specify', async () => {
+  it('shows the quiet cap and saves a new one', async () => {
     const calls: Call[] = [];
     stubApi([interest()], calls);
     wrap(<Interests />);
-    const user = userEvent.setup();
-    await user.click(await screen.findByTestId('interest-research'));
-    const dialog = await screen.findByTestId('research-dialog');
-    expect(within(dialog).getByTestId('research-title')).toHaveValue('Research: Rust async');
-    expect(within(dialog).getByTestId('research-question')).toHaveValue(
-      'What should I know now about Rust async?',
+    const u = userEvent.setup();
+    await u.click(await screen.findByTestId('quiet-cap-edit'));
+    const input = screen.getByTestId('quiet-cap-input');
+    await u.clear(input);
+    await u.type(input, '20');
+    await u.click(screen.getByTestId('quiet-cap-save'));
+    await waitFor(() =>
+      expect(calls).toContainEqual(
+        expect.objectContaining({ method: 'PUT', url: '/api/reporting', body: { interestDigestCap: 20 } }),
+      ),
     );
-    await user.click(within(dialog).getByTestId('research-submit'));
-    await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0]).toMatchObject({ method: 'POST', url: '/api/cards' });
-    expect(calls[0]?.body).toMatchObject({
-      projectId: RES.id,
-      cardType: 'research',
-      interestId: U(10),
-      specify: true,
-      fields: {
-        question: 'What should I know now about Rust async?',
-        depth: 'standard',
-        subCategory: 'rust/async',
-        scope: 'Deep dives on tokio internals',
-        preferredSites: ['lobste.rs'],
-      },
-    });
-    expect(await screen.findByTestId('research-card-link')).toHaveTextContent('RES-7');
   });
 
-  it('Save as draft sends specify false', async () => {
+  it('only the Owner and Admins see the change button of the quiet cap', async () => {
+    stubApi([interest()], [], { canSetCap: false });
+    wrap(<Interests />);
+    await screen.findByTestId('quiet-cap');
+    expect(screen.queryByTestId('quiet-cap-edit')).toBeNull();
+  });
+
+  it('Research this opens the dialog and sends a research run with the question and depth', async () => {
     const calls: Call[] = [];
     stubApi([interest()], calls);
     wrap(<Interests />);
-    const user = userEvent.setup();
-    await user.click(await screen.findByTestId('interest-research'));
-    await user.click(await screen.findByTestId('research-draft'));
-    await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0]?.body.specify).toBe(false);
-  });
-
-  it('shows the adopt banner and reports the result per schedule', async () => {
-    const calls: Call[] = [];
-    const sched = (n: number, name: string) => ({
-      id: U(30 + n),
-      name,
-      projectId: NEWS.id,
-      projectKey: 'NEWS',
-      cron: '0 7 * * *',
-      timezone: 'UTC',
-      enabled: true,
-      topic: name,
-    });
-    stubApi([], calls, { adoptableCount: 2, adoptable: [sched(1, 'First'), sched(2, 'Second')] });
-    wrap(<Interests />);
-    const user = userEvent.setup();
-    expect(await screen.findByTestId('adopt-banner')).toHaveTextContent(
-      '2 feed schedules are not interests yet',
+    const u = userEvent.setup();
+    await u.click(await screen.findByTestId('interest-research'));
+    const q = await screen.findByTestId('research-question');
+    expect((q as HTMLTextAreaElement).value).toBe('What should I know now about Rust async?');
+    await u.selectOptions(screen.getByTestId('research-depth'), 'deep');
+    await u.click(screen.getByTestId('research-submit'));
+    await waitFor(() =>
+      expect(calls).toContainEqual(
+        expect.objectContaining({
+          method: 'POST',
+          url: `/api/interests/${U(10)}/run`,
+          body: { kind: 'research', question: 'What should I know now about Rust async?', depth: 'deep' },
+        }),
+      ),
     );
-    await user.click(
-      within(screen.getByTestId('adopt-banner')).getByRole('button', { name: 'Review and adopt' }),
-    );
-    const dialog = await screen.findByTestId('adopt-dialog');
-    await within(dialog).findByTestId('adopt-row-First');
-    await user.click(within(dialog).getByTestId('adopt-submit'));
-    await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0]?.body).toEqual({ scheduleIds: [U(31), U(32)] });
-    const results = await within(dialog).findAllByTestId('adopt-result');
-    expect(results.map((r) => r.textContent)).toEqual(['Adopted', 'project is archived']);
+    expect(await screen.findByTestId('research-card-link')).toHaveTextContent('RUSTAS-42');
   });
 });
 
-describe('Schedules page with interests', () => {
-  const schedule = (over: Partial<ScheduleDto>): ScheduleDto => ({
-    id: U(20),
-    projectId: NEWS.id,
-    projectKey: 'NEWS',
-    projectName: 'News',
-    name: 'Rust async',
-    kind: 'feed',
-    cron: '0 7 * * *',
-    timezone: 'UTC',
-    trigger: { kind: 'cron', cron: '0 7 * * *', timezone: 'UTC' },
-    action: {
-      kind: 'create_card',
-      projectId: NEWS.id,
-      template: { title: 'Rust async', fields: { topic: 'Rust async' } },
-    },
-    cardTemplate: { title: 'Rust async', fields: { topic: 'Rust async' } },
-    enabled: true,
-    nextFireAt: '2026-10-06T07:00:00.000Z',
-    lastFiredAt: null,
-    lastCardId: null,
-    createdAt: '2026-10-01T00:00:00.000Z',
-    ...over,
+describe('Interest detail', () => {
+  it('shows the overview, switches tabs and reads the tab from the address', async () => {
+    stubApi([interest()], []);
+    wrap(<InterestDetail />, `/interests/${U(10)}`);
+    expect(await screen.findByTestId('overview-tab')).toBeInTheDocument();
+    expect(screen.getByTestId('overview-scan')).toHaveTextContent('Daily at 07:00');
+    expect(screen.getByTestId('overview-delivery')).toHaveTextContent('Weekdays at 07:00');
+    expect(screen.getByTestId('overview-held')).toHaveTextContent('3 items');
+    expect(screen.getByTestId('interest-publications')).toHaveTextContent('Is the new scheduler faster?');
+    expect(screen.getByTestId('interest-sub')).toHaveTextContent('interests/rust-async');
+    await userEvent.setup().click(screen.getByTestId('interest-tab-runs'));
+    expect(await screen.findByTestId('run-log')).toBeInTheDocument();
   });
-  it('locks a linked schedule: run now stays, edit controls are replaced by a link to the interest', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        if (url.startsWith('/api/schedules'))
-          return json({
-            schedules: [
-              schedule({ interestId: U(10), interestName: 'Rust async' }),
-              schedule({ id: U(21), name: 'Plain' }),
-            ],
-          });
-        if (url.startsWith('/api/projects')) return json({ projects: [NEWS] });
-        return json({});
+
+  it('the run log lists runs with found and published, expands to items and agents', async () => {
+    stubApi([interest()], []);
+    wrap(<InterestDetail />, `/interests/${U(10)}?tab=runs`);
+    const row = await screen.findByTestId('run-RUSTAS-41');
+    expect(within(row).getByTestId('run-counts')).toHaveTextContent(
+      'found 14 → 6 published (dup 3, over max 5)',
+    );
+    expect(within(row).getByTestId('run-ratings')).toHaveTextContent('useful 3');
+    expect(within(row).getByText('Published')).toBeInTheDocument();
+    expect(screen.getByTestId('run-RUSTAS-42')).toHaveTextContent('Research');
+    await userEvent.setup().click(within(row).getByTestId('run-toggle'));
+    const detail = await within(row).findByTestId('run-detail');
+    expect(within(detail).getByTestId('run-item')).toHaveTextContent('transcript: 14000 characters');
+    expect(within(detail).getByTestId('run-shifts')).toHaveTextContent('Sid (scout): ended');
+    expect(screen.getByTestId('delivery-log')).toHaveTextContent(
+      '6 items on your desk, 2 held back by the quiet cap',
+    );
+  });
+
+  it('settings: saves the schedules, locks the vault after the first run and sends the preferred agents', async () => {
+    const calls: Call[] = [];
+    stubApi([interest()], calls);
+    wrap(<InterestDetail />, `/interests/${U(10)}?tab=settings`);
+    const u = userEvent.setup();
+    const domain = await screen.findByTestId('interest-domain');
+    expect(domain).toBeDisabled();
+    await u.clear(screen.getByTestId('interest-max-items'));
+    await u.type(screen.getByTestId('interest-max-items'), '15');
+    await u.selectOptions(await screen.findByTestId('interest-delivery-mode'), 'immediate');
+    await u.selectOptions(screen.getByTestId('interest-agent-curator'), U(32));
+    await u.click(screen.getByTestId('interest-save'));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'PATCH' && c.url === `/api/interests/${U(10)}`)).toBe(true),
+    );
+    const patch = calls.find((c) => c.method === 'PATCH');
+    expect(patch?.body).toMatchObject({
+      scan: { maxItems: 15, cron: '0 7 * * *' },
+      delivery: { mode: 'immediate' },
+      agents: { scout: U(30), curator: U(32), researcher: null, checker: null },
+    });
+    expect(patch?.body).not.toHaveProperty('domain');
+  });
+
+  it('taste: edits the rules, saves them and resyncs taste.md; the ratings are read only', async () => {
+    const calls: Call[] = [];
+    stubApi([interest()], calls);
+    wrap(<InterestDetail />, `/interests/${U(10)}?tab=taste`);
+    const u = userEvent.setup();
+    await screen.findByTestId('taste-tab');
+    expect(screen.getByTestId('taste-mirror-status')).toHaveTextContent('version 2');
+    expect(screen.getByTestId('taste-ratings')).toHaveTextContent('Prefer articles like "Tokio 2.0"');
+    expect(screen.getByTestId('taste-save')).toBeDisabled();
+    await u.type(screen.getByTestId('taste-rule-input'), 'Prefer primary sources{enter}');
+    await u.click(screen.getByTestId('taste-save'));
+    await waitFor(() =>
+      expect(calls).toContainEqual(
+        expect.objectContaining({
+          method: 'PUT',
+          url: `/api/interests/${U(10)}/taste`,
+          body: { rules: ['Skip beginner tutorials', 'Prefer primary sources'] },
+        }),
+      ),
+    );
+    await u.click(screen.getByTestId('taste-resync'));
+    await waitFor(() =>
+      expect(calls).toContainEqual(
+        expect.objectContaining({ method: 'POST', url: `/api/interests/${U(10)}/taste/resync` }),
+      ),
+    );
+  });
+
+  it('digest: lists delivered items with ratings and starts research from an item', async () => {
+    const calls: Call[] = [];
+    stubApi([interest()], calls);
+    wrap(<InterestDetail />, `/interests/${U(10)}?tab=digest`);
+    const u = userEvent.setup();
+    expect(await screen.findByTestId('digest-held')).toHaveTextContent('3 more waiting');
+    const items = await screen.findByTestId('digest-items');
+    expect(within(items).getAllByTestId('item-research')).toHaveLength(2);
+    await u.click(within(items).getAllByTestId('item-research')[0] as HTMLElement);
+    await u.click(await screen.findByTestId('research-submit'));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.url.endsWith('/run'))?.body).toMatchObject({
+        kind: 'research',
+        sourceItemId: U(92),
       }),
     );
-    wrap(<Schedules />);
-    const linked = await screen.findByTestId('schedule-Rust async');
-    expect(within(linked).getByRole('button', { name: 'Run now' })).toBeInTheDocument();
-    expect(within(linked).queryByRole('button', { name: 'Pause' })).toBeNull();
-    expect(within(linked).queryByRole('button', { name: 'Delete' })).toBeNull();
-    expect(within(linked).getByTestId('schedule-managed')).toHaveTextContent(
-      'Managed by interest Rust async',
+  });
+
+  it('archive asks first; an archived interest offers restore and a typed delete', async () => {
+    const calls: Call[] = [];
+    stubApi([interest({ archived: true })], calls);
+    wrap(<InterestDetail />, `/interests/${U(10)}`);
+    const u = userEvent.setup();
+    await u.click(await screen.findByLabelText('More actions'));
+    await u.click(await screen.findByText('Delete permanently'));
+    const confirm = await screen.findByTestId('interest-delete-confirm');
+    expect(confirm).toBeDisabled();
+    await u.type(screen.getByTestId('interest-delete-slug'), 'rust-async');
+    await u.click(confirm);
+    await waitFor(() =>
+      expect(calls).toContainEqual(
+        expect.objectContaining({ method: 'DELETE', url: `/api/interests/${U(10)}?confirmSlug=rust-async` }),
+      ),
     );
-    expect(within(linked).getByRole('link', { name: 'Rust async' })).toHaveAttribute(
-      'href',
-      `/interests?open=${U(10)}`,
-    );
-    const plain = screen.getByTestId('schedule-Plain');
-    expect(within(plain).getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+  });
+
+  it('a read-only viewer sees a notice and no save button', async () => {
+    stubApi([interest({ canManage: false })], []);
+    wrap(<InterestDetail />, `/interests/${U(10)}?tab=settings`);
+    expect(await screen.findByTestId('interest-readonly')).toBeInTheDocument();
+    expect(screen.queryByTestId('interest-save')).toBeNull();
   });
 });

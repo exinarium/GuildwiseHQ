@@ -3,12 +3,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
-import { createFeedProject, feedRunner, feedSchedule, item } from './helpers/feeds.ts';
+import { createFeedInterest, feedRunner, item, runNow } from './helpers/feeds.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
 
 let w: World;
 let r: FakeRunner;
 let feedId: string;
+let interestId: string;
 let vaultId: string;
 let run: ReturnType<typeof feedRunner>;
 let ratingDesk: any;
@@ -16,7 +17,9 @@ let items: any[];
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
   r = await w.connectRunner();
-  feedId = await createFeedProject(w);
+  const fi = await createFeedInterest(w);
+  feedId = fi.projectId;
+  interestId = fi.id;
   await w.hire('Scout', 'scout', 'junior');
   await w.hire('Cora', 'curator', 'junior');
   const vault = await ok<any>(
@@ -59,15 +62,14 @@ const ackAll = () => {
 };
 const writesTo = (file: string) => {
   ackAll();
-  return writes().filter((x) => x.cmd.path === `projects/news/${file}`);
+  return writes().filter((x) => x.cmd.path === `interests/news/${file}`);
 };
 const rate = (id: string, body: Record<string, unknown>, cookie = w.owner.cookie) =>
   w.t.req('POST', `/api/digest-items/${id}/rate`, { cookie, body });
 
 describe('digest on the desk and ratings', () => {
   it('a posted digest appends its items to feed.md (oldest first) and raises one rating item', async () => {
-    const s = await ok<any>(feedSchedule(w, feedId), 201);
-    await ok(owner('POST', `/api/schedules/${s.id}/run`), 201);
+    await runNow(w, interestId);
     const { curator } = await run.scan([item(1), item(2), item(3)]);
     const res = await run.digest(curator.shiftId, {
       items: [item(1), item(2), item(3)],
@@ -126,12 +128,10 @@ describe('digest on the desk and ratings', () => {
     );
     expect(closed).toMatchObject({ status: 'answered', answerOption: 'acknowledged' });
 
-    // taste.md preview rebuilt from the verdicts
-    const taste = await ok<any>(owner('GET', `/api/projects/${feedId}/taste`));
-    expect(taste.path).toBe('projects/news/taste.md');
-    expect(taste.lines).toHaveLength(3);
-    expect(taste.content.startsWith(TASTE_HEADER)).toBe(true);
-    expect(taste.content).toContain('Skip articles like');
+    // the rating lines taste.md holds, rebuilt from the verdicts (newest first)
+    const taste = (await ok<any>(owner('GET', `/api/interests/${interestId}`))).taste;
+    expect(taste.ratingLines).toHaveLength(3);
+    expect(taste.ratingLines.join('\n')).toContain('Skip articles like');
     const unrated = await ok<any>(owner('GET', `/api/digest-items?projectId=${feedId}&status=unrated`));
     expect(unrated.items).toEqual([]);
   });
@@ -140,7 +140,7 @@ describe('digest on the desk and ratings', () => {
     const stranger = await w.t.userSession(uniqueEmail('stranger'));
     expect((await rate(items[0].id, { verdict: 'useful' }, stranger.cookie)).status).toBe(404);
     expect((await rate(items[0].id, { verdict: 'meh' })).status).toBe(400);
-    expect((await w.t.req('GET', `/api/projects/${feedId}/taste`, { cookie: stranger.cookie })).status).toBe(
+    expect((await w.t.req('GET', `/api/interests/${interestId}`, { cookie: stranger.cookie })).status).toBe(
       404,
     );
   });
@@ -167,13 +167,12 @@ describe('digest on the desk and ratings', () => {
     expect(writesTo('taste.md')[3]?.cmd.content).toBe(
       '- Rule: Prefer manufacturer announcements that include load data\n',
     );
-    const taste = await ok<any>(owner('GET', `/api/projects/${feedId}/taste`));
-    expect(taste.lines.at(-1)).toBe('- Rule: Prefer manufacturer announcements that include load data');
+    const taste = (await ok<any>(owner('GET', `/api/interests/${interestId}`))).taste;
+    expect(taste.ratingLines[0]).toBe('- Rule: Prefer manufacturer announcements that include load data');
   });
 
   it('a rejected proposal writes nothing', async () => {
-    const s = await ok<any>(feedSchedule(w, feedId, { name: 'second' }), 201);
-    await ok(owner('POST', `/api/schedules/${s.id}/run`), 201);
+    await runNow(w, interestId);
     const { curator } = await run.scan([item(4)]);
     await run.digest(curator.shiftId, {
       items: [item(4)],
@@ -187,7 +186,7 @@ describe('digest on the desk and ratings', () => {
     await ok(owner('POST', `/api/desk/${proposal.id}/resolve`, { resolution: 'rejected' }));
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(writesTo('taste.md')).toHaveLength(before);
-    const taste = await ok<any>(owner('GET', `/api/projects/${feedId}/taste`));
-    expect(taste.content).not.toContain('shotguns');
+    const taste = (await ok<any>(owner('GET', `/api/interests/${interestId}`))).taste;
+    expect(taste.ratingLines.join('\n')).not.toContain('shotguns');
   });
 });

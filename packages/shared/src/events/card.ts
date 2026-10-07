@@ -55,6 +55,10 @@ export const cardEvents = [
       scheduleId: Id.optional(),
       /** The interest this card belongs to (a scan of its schedule, or "Research this"). */
       interestId: Id.optional(),
+      /** The run of that interest this card is (an `InterestRunStarted` is appended with it). */
+      interestRunId: Id.optional(),
+      /** The interest's preferred agents by workflow role: a soft preference, never a claim window. */
+      preferredAgents: z.record(z.string(), Id).optional(),
       repoId: Id.optional(),
       priority: z.number().int().min(1).max(9).default(DEFAULT_CARD_PRIORITY),
       docsNeeded: z.boolean().default(false),

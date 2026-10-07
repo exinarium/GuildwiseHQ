@@ -1,10 +1,10 @@
-import { ArrowRightLeft, Rss, Search, Settings, SquareKanban } from 'lucide-react';
+import { ArrowRightLeft, Search, Settings, SquareKanban } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router';
+import { Navigate, useParams } from 'react-router';
 import { useBoard } from '../api/queries/board.ts';
+import { useInterests } from '../api/queries/interests.ts';
 import { usePhases } from '../api/queries/phases.ts';
 import { useProject, useProjects } from '../api/queries/projects.ts';
-import { useRunFeed } from '../api/queries/schedules.ts';
 import { BoardView, NO_FILTER } from '../components/BoardView.tsx';
 import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { PhaseFilter } from '../components/PhaseFilter.tsx';
@@ -19,7 +19,6 @@ import {
   PageHeader,
   PriorityPicker,
   Skeleton,
-  useToast,
 } from '../components/ui.tsx';
 import { setLastProjectKey } from '../lib/lastProject.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
@@ -53,16 +52,19 @@ export function Board() {
   const { projectKey = '' } = useParams();
   const projects = useProjects();
   const project = projects.data?.find((p) => p.key === projectKey);
+  // The key of an interest's hidden project is not a project: its board is the interest.
+  const interests = useInterests();
+  const interestOfKey = project
+    ? undefined
+    : interests.data?.interests.find((i) => i.projectKey === projectKey);
   const [phaseId, setPhaseId] = useState('');
   const board = useBoard(project?.id, phaseId || undefined);
   const phases = usePhases(project?.id);
-  const runFeed = useRunFeed();
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
   const [filter, setFilter] = useState(NO_FILTER);
   const [converting, setConverting] = useState(false);
   const detail = useProject(project?.workflowKey === 'research' ? project.id : undefined);
   const canConvert = useCanConvert(project);
-  const toast = useToast();
 
   useEffect(() => {
     if (project) setLastProjectKey(project.key);
@@ -82,6 +84,7 @@ export function Board() {
         <ErrorBox error={projects.error} onRetry={() => projects.refetch()} />
       </>
     );
+  if (!project && interestOfKey) return <Navigate to={`/interests/${interestOfKey.id}`} replace />;
   if (!project) {
     return (
       <>
@@ -130,22 +133,6 @@ export function Board() {
                 Convert to project
               </Button>
             )}
-            {project.workflowKey === 'feed' && (
-              <>
-                <ButtonLink to={`/p/${project.key}/feed`}>
-                  <Rss aria-hidden="true" className="size-4" />
-                  Feed
-                </ButtonLink>
-                <Button
-                  loading={runFeed.isPending}
-                  onClick={() =>
-                    runFeed.mutate(project.id, { onSuccess: () => toast.success('Feed scan started') })
-                  }
-                >
-                  Run now
-                </Button>
-              </>
-            )}
             <ButtonLink
               to={`/projects/${project.id}/settings`}
               variant="ghost"
@@ -168,7 +155,6 @@ export function Board() {
           onOpenChange={setConverting}
         />
       )}
-      <ErrorBox error={runFeed.error} />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="relative w-full sm:w-72">
           <Search

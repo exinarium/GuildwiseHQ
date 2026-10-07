@@ -24,6 +24,7 @@ export async function reportingOf(db: Queryable, orgId: string): Promise<OrgRepo
   return {
     routeViaBa: r.routeViaBa ?? DEFAULT_REPORTING.routeViaBa,
     dailyAt: r.dailyAt ?? DEFAULT_REPORTING.dailyAt,
+    interestDigestCap: r.interestDigestCap ?? null,
     timezone: u?.timezone ?? null,
     floorReportDay: u?.floor_report_day ?? null,
     chatThreadId: u?.ba_chat_thread_id ?? null,

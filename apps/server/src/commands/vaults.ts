@@ -367,9 +367,11 @@ export async function vaultForProject(
   projectId: string,
   workstationUserId: string,
 ): Promise<{ id: string; kind: 'work' | 'personal' | 'project'; folder: string } | null> {
-  const p = await one(db, 'SELECT id, org_id, key, domain, vault_folder FROM projects WHERE id=$1', [
-    projectId,
-  ]);
+  const p = await one(
+    db,
+    'SELECT id, org_id, key, domain, vault_folder, vault_dir FROM projects WHERE id=$1',
+    [projectId],
+  );
   if (!p) return null;
   const v =
     (await one(db, 'SELECT id, kind FROM vaults WHERE project_id=$1', [projectId])) ??
@@ -380,7 +382,11 @@ export async function vaultForProject(
         ])
       : undefined);
   if (!v) return null;
-  return { id: v.id, kind: v.kind, folder: projectVaultFolder({ key: p.key, vaultFolder: p.vault_folder }) };
+  return {
+    id: v.id,
+    kind: v.kind,
+    folder: projectVaultFolder({ key: p.key, vaultFolder: p.vault_folder, vaultDir: p.vault_dir }),
+  };
 }
 
 // ------------------------------------------------------------------------------------- vault.write

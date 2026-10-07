@@ -144,17 +144,14 @@ export async function createCardIn(
   const def = wf.definition;
   assertNoMockFields(ctx, req.fields);
   if (req.interestId) {
-    // "Research this": the interest must be visible and its research (or feed) project must be the card's project.
+    // A research card in a project that cites an interest: the interest must be visible to the user.
     const interest = await one(
       tx,
-      `SELECT feed_project_id, research_project_id FROM interests WHERE id=$1
-          AND (feed_project_id IN (SELECT project_id FROM project_members WHERE user_id=$2 AND status='active')
-            OR research_project_id IN (SELECT project_id FROM project_members WHERE user_id=$2 AND status='active'))`,
+      `SELECT 1 AS x FROM interests i JOIN project_members pm ON pm.project_id = i.project_id
+        AND pm.user_id = $2 AND pm.status = 'active' WHERE i.id = $1`,
       [req.interestId, user.id],
     );
     if (!interest) throw notFound('interest not found');
-    if (interest.feed_project_id !== project.id && interest.research_project_id !== project.id)
-      throw badRequest('interest_project_mismatch', "the card's project is not a project of this interest");
   }
   const parsed = parseCardFields(def.fieldSet, { ...emptyFields(def.fieldSet), ...req.fields });
   if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);

@@ -1,6 +1,5 @@
 import {
   type CreateScheduleResponse,
-  feedMaxItems,
   isWebhookAction,
   type ScheduleDto,
   type SystemScheduleDto,
@@ -210,11 +209,8 @@ function ScheduleRow({
   const [history, setHistory] = useState(false);
   const webhook = isWebhookAction(s.action);
   const testable = webhook || (s.action.kind === 'integration' && s.action.integration === 'email');
-  const managed = !!s.interestId;
-  const editable = s.canEdit !== false && !managed;
+  const editable = s.canEdit !== false;
   const Chevron = history ? ChevronDown : ChevronRight;
-  // A feed schedule (older installations, until feeds are interests) shows what it asks the scout for.
-  const feed = s.kind === 'feed' ? ((s.cardTemplate?.fields ?? {}) as Record<string, unknown>) : null;
 
   return (
     <Panel>
@@ -270,22 +266,6 @@ function ScheduleRow({
             <dd>{s.ownerName}</dd>
           </div>
         )}
-        {feed && (
-          <>
-            <div>
-              <dt className="text-xs text-subtle">Max items</dt>
-              <dd data-testid="schedule-max-items">{feedMaxItems(feed)}</dd>
-            </div>
-            {typeof feed.description === 'string' && feed.description.trim() && (
-              <div className="sm:col-span-2">
-                <dt className="text-xs text-subtle">Description</dt>
-                <dd className="whitespace-pre-wrap" data-testid="schedule-description">
-                  {feed.description.trim()}
-                </dd>
-              </div>
-            )}
-          </>
-        )}
       </dl>
       <ErrorBox error={patch.error ?? run.error ?? del.error ?? test.error ?? rotate.error} />
       {test.data && test.variables === s.id && (
@@ -300,7 +280,7 @@ function ScheduleRow({
         </p>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        {(editable || managed) && (
+        {editable && (
           <Button
             variant="primary"
             loading={run.isPending && run.variables === s.id}
@@ -329,15 +309,7 @@ function ScheduleRow({
           History
           <Chevron aria-hidden="true" className="size-4" />
         </Button>
-        {managed ? (
-          // Owned by an interest: it is edited, paused and deleted there (the server answers 409 otherwise).
-          <span className="text-sm" data-testid="schedule-managed">
-            Managed by interest{' '}
-            <Link to={`/interests?open=${s.interestId}`} className="font-medium underline">
-              {s.interestName ?? 'interest'}
-            </Link>
-          </span>
-        ) : editable ? (
+        {editable ? (
           <>
             <Button onClick={onEdit}>
               <Pencil aria-hidden="true" className="size-4" />

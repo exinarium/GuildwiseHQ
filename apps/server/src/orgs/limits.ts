@@ -13,7 +13,7 @@ export async function orgUsage(db: Queryable, orgId: string): Promise<OrgUsage> 
        (SELECT count(*)::int FROM org_members WHERE org_id=$1 AND status='active')
          + (SELECT count(*)::int FROM invitations WHERE org_id=$1 AND kind='org_member' AND status='pending'
               AND expires_at > now()) AS members,
-       (SELECT count(*)::int FROM projects WHERE org_id=$1 AND status='active') AS projects,
+       (SELECT count(*)::int FROM projects WHERE org_id=$1 AND status='active' AND kind='project') AS projects,
        (SELECT count(*)::int FROM agents WHERE org_id=$1 AND status <> 'retired' AND NOT is_devops) AS agents,
        (SELECT count(DISTINCT workstation_id)::int FROM agents
          WHERE org_id=$1 AND status='active' AND NOT is_devops AND workstation_id IS NOT NULL) AS workstations`,

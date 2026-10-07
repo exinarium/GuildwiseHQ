@@ -15,6 +15,7 @@ export const reporterProjectors: Record<string, Projector> = {
     const patch: Record<string, unknown> = {};
     if (p.routeViaBa !== undefined) patch.routeViaBa = p.routeViaBa;
     if (p.dailyAt !== undefined) patch.dailyAt = p.dailyAt;
+    if (p.interestDigestCap !== undefined) patch.interestDigestCap = p.interestDigestCap;
     await exec(tx, `UPDATE users SET reporting = reporting || $2::jsonb WHERE id=$1`, [
       p.userId,
       JSON.stringify(patch),

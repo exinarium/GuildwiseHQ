@@ -11,7 +11,7 @@ import { rateDigestItem } from '../commands/digests.ts';
 import { transcriptFor } from '../commands/transcripts.ts';
 import type { Ctx } from '../context.ts';
 import { HttpError } from '../errors.ts';
-import { feedListFor, listDigestItems, tasteFor } from '../queries/digests.ts';
+import { listDigestItems } from '../queries/digests.ts';
 import { typed } from './util.ts';
 
 export function digestRoutes(ctx: Ctx) {
@@ -32,17 +32,12 @@ export function digestRoutes(ctx: Ctx) {
       },
     );
 
-    app.get('/api/projects/:id/feed', { schema: { params: IdParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
-      return feedListFor(ctx.pool, s.user.id, await loadVisibleProject(ctx.pool, s.user.id, req.params.id));
-    });
-
     app.get(
       '/api/projects/:id/transcript',
       { schema: { params: IdParamsSchema, querystring: TranscriptQuerySchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        const project = await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
+        const project = await loadVisibleProject(ctx.pool, s.user.id, req.params.id, { allowInterest: true });
         const t = await transcriptFor(ctx.pool, project.id, req.query.url);
         if (!t) throw new HttpError(404, 'not_found', 'no transcript available');
         return {
@@ -56,10 +51,5 @@ export function digestRoutes(ctx: Ctx) {
         };
       },
     );
-
-    app.get('/api/projects/:id/taste', { schema: { params: IdParamsSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
-      return tasteFor(ctx.pool, await loadVisibleProject(ctx.pool, s.user.id, req.params.id));
-    });
   };
 }

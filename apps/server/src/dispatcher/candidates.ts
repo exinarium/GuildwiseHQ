@@ -76,11 +76,14 @@ export function eligibility(A: AgentRefs) {
                           AND om.org_id = v.org_id AND om.status = 'active' AND om.role IN ('owner','admin')
                           WHERE w.id = ${A.workstationId})))`;
   return {
+    // (An agent whose list is restricted still works an interest it is the assigned agent of.)
     // The agent's organization, then where its manager allowed it, then who may see the project: the user who owns the
     // agent's workstation must be an active member of the card's project (the Owner and Admins hold a row in every
     // project of their organization; a guest holds one only in the projects shared with them).
     scope: `c.org_id = ${A.orgId}
-      AND (${A.allowedProjects}::uuid[] IS NULL OR c.project_id = ANY (${A.allowedProjects}::uuid[]))
+      AND (${A.allowedProjects}::uuid[] IS NULL OR c.project_id = ANY (${A.allowedProjects}::uuid[])
+           OR (p.kind = 'interest' AND EXISTS (SELECT 1 FROM jsonb_each_text(c.preferred_agents) pa
+                                                WHERE pa.value = (${A.id}::uuid)::text)))
       AND EXISTS (SELECT 1 FROM workstations aw JOIN project_members apm ON apm.user_id = aw.user_id
                    WHERE aw.id = ${A.workstationId} AND apm.project_id = c.project_id AND apm.status = 'active')`,
     role: `st.kind = 'agent' AND st.claim_role = ${A.roleKey}`,
@@ -138,6 +141,9 @@ ORDER BY
     ELSE 2
   END,
   (c.project_id = ANY ($10::uuid[])) DESC,
+  -- an interest's preferred agent sorts ahead (a soft preference: no claim window, any allowed agent takes the run)
+  (c.preferred_agents IS NOT NULL AND EXISTS (SELECT 1 FROM jsonb_each_text(c.preferred_agents) pa
+                                               WHERE pa.value = ($1::uuid)::text)) DESC,
   p.priority_tier ASC,
   c.priority ASC,
   c.queued_at ASC,

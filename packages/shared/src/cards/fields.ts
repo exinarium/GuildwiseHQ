@@ -179,6 +179,8 @@ const FeedFieldsBase = z.object({
   subCategory: z.string().optional(),
   /** The digest holds the best N items overall, whatever their kind. */
   maxItems: z.number().int().positive().max(100).optional(),
+  /** The kinds of item the interest wants (absent: all three). Items of another kind are dropped by the server. */
+  kinds: z.array(z.enum(['article', 'video', 'podcast'])).optional(),
   /** Legacy (read only): per-kind maxima, converted to `maxItems` on read. */
   maxPerKind: z.record(z.string(), z.number().int().nonnegative()).optional(),
   mock: MockScriptSchema.optional(),
@@ -219,6 +221,7 @@ export const FEED_FIELDS: Record<string, FieldMeta> = {
   preferredSites: { label: 'Preferred sites', kind: 'url-list' },
   subCategory: { label: 'Sub-category', kind: 'text' },
   maxItems: { label: 'Max items', kind: 'number' },
+  kinds: { label: 'Kinds', kind: 'list' },
   mock: { label: 'Mock script', kind: 'json' },
   mockFeed: { label: 'Mock feed items', kind: 'json' },
 };

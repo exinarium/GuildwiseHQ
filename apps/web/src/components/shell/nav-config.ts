@@ -9,7 +9,6 @@ import {
   KanbanSquare,
   Lightbulb,
   type LucideIcon,
-  Rss,
   Server,
   Settings,
   Timer,
@@ -35,10 +34,9 @@ export interface NavSection {
   items: NavEntry[];
 }
 
-/** The sidebar as data. Board points at the current project; Feed appears for feed projects (see `buildNav`). */
+/** The sidebar as data. Board points at the current project; Interests live under Knowledge. */
 export function buildNav(opts: {
   projectKey: string | null;
-  isFeed: boolean;
   /** The current project has published research notes or started as research: it gets a Research entry. */
   hasResearch?: boolean;
   /** Owner or Admin of the active organization. */
@@ -51,7 +49,7 @@ export function buildNav(opts: {
   sections: NavSection[];
   footer: NavEntry[];
 } {
-  const { projectKey, isFeed, hasResearch = false, canManage = false, features = {} } = opts;
+  const { projectKey, hasResearch = false, canManage = false, features = {} } = opts;
   const on = (f: string) => features[f] !== false;
   const work: NavEntry[] = [
     {
@@ -62,14 +60,6 @@ export function buildNav(opts: {
       match: (p) => p.startsWith('/p/') || p.startsWith('/cards/'),
     },
   ];
-  if (isFeed && projectKey)
-    work.push({
-      id: 'feed',
-      label: 'Feed',
-      to: `/p/${projectKey}/feed`,
-      icon: Rss,
-      match: (p) => p.endsWith('/feed'),
-    });
   if (hasResearch && projectKey)
     work.push({
       id: 'research',

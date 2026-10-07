@@ -1,7 +1,12 @@
 import { existsSync, lstatSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { applyManagedSection, isSafeVaultPath, type VaultWriteCommand } from '@aom/shared';
+import {
+  applyManagedSection,
+  isSafeVaultPath,
+  type VaultMoveCommand,
+  type VaultWriteCommand,
+} from '@aom/shared';
 import { git, gitOk } from '../git/git.ts';
 import { identityEnv, type VaultIdentity } from './sync.ts';
 
@@ -87,4 +92,84 @@ function refuseSymlinks(root: string, path: string): void {
     }
     if (st.isSymbolicLink()) throw new VaultWriteError(`refusing to write through a symlink: ${path}`);
   }
+}
+
+export interface VaultMoveResult {
+  /** Something was moved or merged now (false: it was moved before, or there was nothing to move). */
+  moved: boolean;
+  committed: boolean;
+  /** Files that exist at both places with different content: they stay where they are for the manager to sort out. */
+  conflicts: string[];
+}
+
+/** Moves every entry of `src` into `dst` without overwriting: identical files are dropped from `src`, differing ones are reported. */
+async function mergeInto(src: string, dst: string, rel: string, conflicts: string[]): Promise<boolean> {
+  let changed = false;
+  for (const name of await readdir(src)) {
+    const from = join(src, name);
+    const to = join(dst, name);
+    const here = rel ? `${rel}/${name}` : name;
+    const st = await stat(from);
+    if (!existsSync(to)) {
+      await mkdir(dirname(to), { recursive: true });
+      await rename(from, to);
+      changed = true;
+    } else if (st.isDirectory()) {
+      if (await mergeInto(from, to, here, conflicts)) changed = true;
+    } else if ((await readFile(from)).equals(await readFile(to))) {
+      await rm(from);
+      changed = true;
+    } else conflicts.push(here);
+  }
+  const left = await readdir(src);
+  if (left.length === 0) await rm(src, { recursive: true });
+  return changed;
+}
+
+/**
+ * `vault.move`: renames a folder of the vault clone and commits it as one change, so the history follows the files.
+ * Idempotent and safe if interrupted: a folder that is gone from `from` and present at `to` only needs its commit (a
+ * crash between the rename and the commit is finished by running it again); a folder present at both places is merged
+ * without overwriting. The caller pushes (sync) when `cmd.push`.
+ */
+export async function moveVaultFolder(
+  dir: string,
+  cmd: VaultMoveCommand,
+  identity: VaultIdentity,
+): Promise<VaultMoveResult> {
+  const { from, to } = cmd;
+  if (!isSafeVaultPath(from) || !isSafeVaultPath(to))
+    throw new VaultWriteError(`unsafe vault path: ${from} -> ${to}`);
+  if (from === to || to.startsWith(`${from}/`) || from.startsWith(`${to}/`))
+    throw new VaultWriteError(`cannot move ${from} to ${to}: one is inside the other`);
+  refuseSymlinks(dir, from);
+  refuseSymlinks(dir, to);
+  const src = join(dir, ...from.split('/'));
+  const dst = join(dir, ...to.split('/'));
+  const conflicts: string[] = [];
+  let moved = false;
+  if (existsSync(src)) {
+    if (!(await stat(src)).isDirectory()) throw new VaultWriteError(`${from} is not a folder`);
+    if (!existsSync(dst)) {
+      await mkdir(dirname(dst), { recursive: true });
+      await rename(src, dst);
+      moved = true;
+    } else moved = await mergeInto(src, dst, '', conflicts);
+  }
+  const env = identityEnv(identity);
+  // Stage both sides (the deletions of `from` and the files of `to`), then commit what changed, if anything. A side that
+  // is neither on disk nor tracked has nothing to stage (git refuses such a pathspec).
+  const known: string[] = [];
+  for (const p of [from, to]) {
+    const tracked = (await git(dir, ['ls-files', '--', p], { env })).stdout.trim() !== '';
+    if (existsSync(join(dir, ...p.split('/'))) || tracked) known.push(p);
+  }
+  if (known.length === 0) return { moved, committed: false, conflicts };
+  await gitOk(dir, ['add', '-A', '--', ...known], { env });
+  const staged = await git(dir, ['diff', '--cached', '--quiet', '--', ...known], { env });
+  if (staged.exitCode === 0) return { moved, committed: false, conflicts };
+  await gitOk(dir, ['-c', 'commit.gpgsign=false', 'commit', '-m', cmd.commitMessage, '--', ...known], {
+    env,
+  });
+  return { moved: true, committed: true, conflicts };
 }

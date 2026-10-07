@@ -38,7 +38,11 @@ export function buildPublicationEvents(a: {
       error: `invalid publication: ${parsed.error.issues.map((i) => `${i.path.join('.') || 'data'}: ${i.message}`).join('; ')}`,
     };
   const pub = parsed.data;
-  const folder = projectVaultFolder({ key: a.project.key, vaultFolder: a.project.vault_folder });
+  const folder = projectVaultFolder({
+    key: a.project.key,
+    vaultFolder: a.project.vault_folder,
+    vaultDir: a.project.vault_dir,
+  });
   if (
     !isSafeVaultPath(pub.vaultPath) ||
     !pub.vaultPath.endsWith('.md') ||
@@ -68,6 +72,27 @@ export function buildPublicationEvents(a: {
     },
     cardMessage(a.card, { kind: 'agent', agentId: a.agent.id }, 'system', summary),
   ];
+  // A research run of an interest is done with its note (the event `interest_run_done` schedule triggers listen to).
+  if (a.card.interest_run_id && a.card.interest_id)
+    events.push({
+      streamId: streamId.interest(a.card.interest_id),
+      event: {
+        type: 'InterestRunDone',
+        payload: {
+          runId: a.card.interest_run_id,
+          interestId: a.card.interest_id,
+          cardId: a.card.id,
+          kind: 'research',
+          status: 'published',
+          published: 1,
+          duplicatesDropped: 0,
+          overMaximumDropped: 0,
+          itemIds: [],
+        },
+      },
+      actor: agentActor(a.agent.id),
+      scope: projectScope(a.card.org_id, a.card.project_id),
+    });
   return {
     ok: true,
     events,

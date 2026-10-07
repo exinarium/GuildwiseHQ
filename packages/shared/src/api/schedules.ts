@@ -48,9 +48,6 @@ export const ScheduleDtoSchema = z.object({
   failCount: z.number().int().nonnegative().optional(),
   lastError: z.string().nullable().optional(),
   createdAt: IsoTime,
-  /** The interest that owns this schedule (locked for direct edits), when linked. */
-  interestId: z.uuid().nullable().optional(),
-  interestName: z.string().nullable().optional(),
   ownerUserId: z.uuid().nullable().optional(),
   ownerName: z.string().nullable().optional(),
   /** An organization-level action: only the Owner and Admins create or change it. */

@@ -3,7 +3,6 @@ import {
   IdParamsSchema,
   OkResponseSchema,
   PatchScheduleRequestSchema,
-  RunFeedRequestSchema,
   SchedulesQuerySchema,
 } from '@aom/shared';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -20,7 +19,6 @@ import {
   type OrgCtx,
   patchSchedule,
   rotateWebhookSecret,
-  runFeedNow,
   runScheduleNow,
   testSchedule,
 } from '../commands/schedules.ts';
@@ -84,10 +82,7 @@ export function scheduleRoutes(ctx: Ctx) {
     app.post('/api/schedules/:id/run', { schema: { params: IdParamsSchema } }, async (req, reply) => {
       const s = await requireUser(ctx, req);
       await getScheduleDto(ctx.pool, s.user.id, req.params.id);
-      const row = await one(ctx.pool, 'SELECT kind FROM schedules WHERE id=$1', [req.params.id]);
       reply.code(201);
-      // A feed schedule keeps its own path until feeds move to interests.
-      if (row?.kind === 'feed') return runFeedNow(ctx, s.user, { scheduleId: req.params.id });
       return runScheduleNow(ctx, s.user, await orgOf(req, s), req.params.id);
     });
 
@@ -105,19 +100,5 @@ export function scheduleRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       return { webhookSecret: await rotateWebhookSecret(ctx, s.user, await orgOf(req, s), req.params.id) };
     });
-
-    app.post(
-      '/api/projects/:id/feed/run',
-      { schema: { params: IdParamsSchema, body: RunFeedRequestSchema.optional() } },
-      async (req, reply) => {
-        const s = await requireUser(ctx, req);
-        const r = await runFeedNow(ctx, s.user, {
-          projectId: req.params.id,
-          ...(req.body?.scheduleId ? { scheduleId: req.body.scheduleId } : {}),
-        });
-        reply.code(201);
-        return r;
-      },
-    );
   };
 }

@@ -25,6 +25,7 @@ export async function getReporting(
   return {
     routeViaBa: r.routeViaBa,
     dailyAt: r.dailyAt,
+    interestDigestCap: r.interestDigestCap,
     timezone: r.timezone,
     effectiveTimezone: r.timezone ?? 'UTC',
     canEdit: isOrgManager({ orgRole: org.role }),
@@ -49,6 +50,7 @@ export async function updateReporting(
           userId: ownerId,
           ...(req.routeViaBa !== undefined ? { routeViaBa: req.routeViaBa } : {}),
           ...(req.dailyAt !== undefined ? { dailyAt: req.dailyAt } : {}),
+          ...(req.interestDigestCap !== undefined ? { interestDigestCap: req.interestDigestCap } : {}),
         },
       },
       actor: userActor(user.id),

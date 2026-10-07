@@ -4,13 +4,15 @@ import {
   CreateInterestRequestSchema,
   DomainEventSchema,
   defaultWindowHours,
+  describeCron,
   type InterestBody,
+  interestBackingKey,
   interestCardTemplate,
+  interestSlug,
   renderShiftPrompt,
   renderTasteSeedSection,
   researchCardDefaults,
-  scheduleEnabled,
-  scheduleSyncPlan,
+  researchRunFields,
   stripManagedSection,
   suggestProjectKey,
   TASTE_HEADER,
@@ -24,13 +26,14 @@ const base = (over: Partial<InterestBody> = {}): InterestBody => ({
   orgId: uuid(2),
   name: 'Rust async',
   description: '',
-  feedProjectId: uuid(3),
-  researchProjectId: null,
+  projectId: uuid(3),
   subCategory: null,
   preferredSites: [],
+  kinds: ['article', 'video', 'podcast'],
+  agents: {},
+  delivery: { mode: 'immediate', cron: '0 7 * * 1-5', timezone: 'UTC' },
   scan: { cron: '0 7 * * *', timezone: 'UTC', windowHours: 24, maxItems: 10, manual: false },
   status: 'active',
-  scheduleId: uuid(4),
   ...over,
 });
 
@@ -73,50 +76,43 @@ describe('defaultWindowHours', () => {
   ])('%s -> %i', (cron, hours) => expect(defaultWindowHours(cron)).toBe(hours));
 });
 
-describe('scheduleEnabled / scheduleSyncPlan', () => {
-  it('is enabled only when active, not manual and with a feed project', () => {
-    expect(scheduleEnabled(base())).toBe(true);
-    expect(scheduleEnabled(base({ status: 'paused' }))).toBe(false);
-    expect(scheduleEnabled(base({ scan: { ...(base().scan as object), manual: true } as never }))).toBe(
-      false,
-    );
-    expect(scheduleEnabled(base({ feedProjectId: null }))).toBe(false);
+describe('slugs and backing keys', () => {
+  it('makes unique vault folder names', () => {
+    expect(interestSlug('Rust async!')).toBe('rust-async');
+    expect(interestSlug('Rust async', ['rust-async'])).toBe('rust-async-2');
+    expect(interestSlug('???')).toBe('interest');
   });
-  it('covers every row of the sync table', () => {
-    const b = base();
-    expect(scheduleSyncPlan(b, b)).toEqual({ action: 'none' });
-    expect(scheduleSyncPlan(base({ feedProjectId: null }), b)).toEqual({ action: 'create' });
-    expect(scheduleSyncPlan(b, base({ feedProjectId: null }))).toEqual({ action: 'delete' });
-    expect(scheduleSyncPlan(b, base({ feedProjectId: uuid(9) }))).toEqual({ action: 'replace' });
-    expect(scheduleSyncPlan(b, base({ description: 'x' }))).toEqual({
-      action: 'update',
-      template: true,
-      reschedule: false,
-      enabled: true,
+  it('makes valid project keys, numbered on a collision', () => {
+    expect(interestBackingKey('rust-async')).toBe('RUSTAS');
+    expect(interestBackingKey('rust-async', ['RUSTAS'])).toBe('RUSTAS2');
+    expect(interestBackingKey('3d-printing')).toMatch(/^[A-Z][A-Z0-9]{1,9}$/);
+    expect(interestBackingKey('x')).toMatch(/^[A-Z][A-Z0-9]{1,9}$/);
+  });
+});
+
+describe('describeCron', () => {
+  it('names the common presets', () => {
+    expect(describeCron('0 7 * * *')).toBe('Daily at 07:00');
+    expect(describeCron('30 7 * * 1-5')).toBe('Weekdays at 07:30');
+    expect(describeCron('0 9 * * 1')).toBe('Mondays at 09:00');
+    expect(describeCron('0 * * * *')).toBe('Hourly at :00');
+    expect(describeCron('*/5 * * * *')).toBe('*/5 * * * *');
+  });
+});
+
+describe('researchRunFields', () => {
+  it('uses the question, defaults the depth and puts notes in notes/', () => {
+    expect(researchRunFields(base())).toEqual({
+      question: 'What should I know now about Rust async?',
+      depth: 'standard',
+      subCategory: 'notes',
     });
-    expect(scheduleSyncPlan(b, base({ name: 'Other' }))).toMatchObject({ action: 'update', template: true });
     expect(
-      scheduleSyncPlan(b, base({ scan: { ...(b.scan as object), cron: '0 8 * * *' } as never })),
-    ).toEqual({ action: 'update', template: false, reschedule: true, enabled: true });
-    expect(scheduleSyncPlan(b, base({ status: 'paused' }))).toEqual({
-      action: 'update',
-      template: false,
-      reschedule: false,
-      enabled: false,
-    });
-    expect(scheduleSyncPlan(base({ status: 'paused' }), b)).toEqual({
-      action: 'update',
-      template: false,
-      reschedule: true,
-      enabled: true,
-    });
-    expect(scheduleSyncPlan(b, base({ researchProjectId: uuid(7) }))).toEqual({ action: 'none' });
-    expect(
-      scheduleSyncPlan(
-        base({ feedProjectId: null, researchProjectId: uuid(7) }),
-        base({ feedProjectId: null, researchProjectId: uuid(8) }),
-      ),
-    ).toEqual({ action: 'none' });
+      researchRunFields(base({ subCategory: 'rust/async', description: 'Tokio' }), {
+        question: 'Why?',
+        depth: 'deep',
+      }),
+    ).toMatchObject({ question: 'Why?', depth: 'deep', scope: 'Tokio', subCategory: 'rust/async' });
   });
 });
 
@@ -220,6 +216,33 @@ describe('events, requests and prompt', () => {
       { type: 'InterestCreated', payload: body },
       { type: 'InterestUpdated', payload: body },
       { type: 'InterestDeleted', payload: { interestId: body.interestId, keepSchedule: true } },
+      { type: 'InterestArchived', payload: { interestId: body.interestId, by: uuid(8) } },
+      { type: 'InterestTasteSet', payload: { interestId: body.interestId, version: 1, rules: ['Rule'] } },
+      {
+        type: 'InterestRunStarted',
+        payload: {
+          runId: uuid(9),
+          interestId: body.interestId,
+          kind: 'scan',
+          trigger: 'cron',
+          cardId: uuid(10),
+        },
+      },
+      {
+        type: 'InterestRunDone',
+        payload: {
+          runId: uuid(9),
+          interestId: body.interestId,
+          cardId: uuid(10),
+          kind: 'scan',
+          status: 'published',
+          published: 3,
+        },
+      },
+      {
+        type: 'InterestDigestDelivered',
+        payload: { deliveryId: uuid(11), interestId: body.interestId, itemIds: [], nextDeliveryAt: null },
+      },
       { type: 'ScheduleLinked', payload: { scheduleId: uuid(4), interestId: null } },
       {
         type: 'TasteSeedSet',
@@ -268,8 +291,34 @@ describe('events, requests and prompt', () => {
     ).toBe(false);
   });
   it('defaults a create request', () => {
-    const r = CreateInterestRequestSchema.parse({ name: 'X', researchProjectId: uuid(7) });
-    expect(r).toMatchObject({ description: '', preferredSites: [], status: 'active' });
+    const r = CreateInterestRequestSchema.parse({ name: 'X' });
+    expect(r).toMatchObject({
+      description: '',
+      preferredSites: [],
+      status: 'active',
+      domain: 'personal',
+      kinds: ['article', 'video', 'podcast'],
+      tasteRules: [],
+    });
+  });
+  it('replays an event of the first model (no backing project, a feed project and a schedule)', () => {
+    const r = DomainEventSchema.parse({
+      type: 'InterestCreated',
+      payload: {
+        interestId: uuid(1),
+        orgId: uuid(2),
+        name: 'Old',
+        description: '',
+        feedProjectId: uuid(3),
+        researchProjectId: null,
+        subCategory: null,
+        preferredSites: [],
+        scan: { cron: '0 7 * * *', timezone: 'UTC', windowHours: 24, maxItems: 10, manual: false },
+        status: 'active',
+        scheduleId: uuid(4),
+      },
+    });
+    expect(r.payload).toMatchObject({ feedProjectId: uuid(3), kinds: ['article', 'video', 'podcast'] });
   });
   it('puts explicit taste rules ahead of taste.md in the feed prompt', () => {
     const brief = buildBrief();

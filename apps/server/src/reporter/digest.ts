@@ -108,6 +108,8 @@ export async function buildFloorDigest(
     [orgId, sinceOrEpoch],
   );
 
+  const interests = await interestsDigest(db, orgId, sinceOrEpoch);
+
   return {
     generatedAt: now.toISOString(),
     localDate,
@@ -133,5 +135,71 @@ export async function buildFloorDigest(
       note: r.ba_note ?? r.answer ?? null,
     })),
     failures: failures.map((f) => ({ ref: f.ref, title: f.title, failedShifts: f.n })),
+    interests,
+  };
+}
+
+const HIGHLIGHTS_PER_INTEREST = 3;
+
+/**
+ * The interests of the organization for the floor report and the interests e-mail: counts, the top delivered items per
+ * interest since `since` (what a delivery put on the desk: useful-rated first, then the curator's order, never an item
+ * rated irrelevant or boring) and the interests that cannot run.
+ */
+export async function interestsDigest(
+  db: Queryable,
+  orgId: string,
+  since: Date,
+): Promise<FloorDigest['interests']> {
+  const all = await rows(
+    db,
+    `SELECT id, name, status, fail_count, last_error FROM interests
+      WHERE org_id=$1 AND project_id IS NOT NULL AND archived_at IS NULL ORDER BY lower(name), id`,
+    [orgId],
+  );
+  const runs = await rows<{ n: number }>(
+    db,
+    `SELECT count(*)::int AS n FROM interest_runs WHERE org_id=$1 AND started_at > $2`,
+    [orgId, since],
+  );
+  const items = await rows(
+    db,
+    `SELECT c.interest_id, d.title, d.kind, d.source, d.url, d.verdict FROM digest_items d
+       JOIN cards c ON c.id = d.card_id JOIN interests i ON i.id = c.interest_id
+      WHERE i.org_id=$1 AND i.archived_at IS NULL AND d.delivered_at IS NOT NULL AND d.delivered_at > $2
+      ORDER BY d.event_seq, d.position`,
+    [orgId, since],
+  );
+  const highlights = [];
+  let delivered = 0;
+  let unrated = 0;
+  for (const i of all) {
+    const mine = items.filter((x) => x.interest_id === i.id);
+    delivered += mine.length;
+    unrated += mine.filter((x) => x.verdict == null).length;
+    const shown = [
+      ...mine.filter((x) => x.verdict === 'useful'),
+      ...mine.filter((x) => x.verdict == null),
+    ].slice(0, HIGHLIGHTS_PER_INTEREST);
+    if (shown.length)
+      highlights.push({
+        interest: i.name as string,
+        items: shown.map((x) => ({ title: x.title, kind: x.kind, source: x.source, url: x.url })),
+        more: Math.max(
+          0,
+          mine.filter((x) => x.verdict !== 'irrelevant' && x.verdict !== 'boring').length - shown.length,
+        ),
+      });
+  }
+  return {
+    count: all.length,
+    active: all.filter((i) => i.status === 'active').length,
+    runs: runs[0]?.n ?? 0,
+    delivered,
+    unrated,
+    highlights,
+    failing: all
+      .filter((i) => Number(i.fail_count) >= 3)
+      .map((i) => ({ interest: i.name, failCount: Number(i.fail_count), error: i.last_error ?? null })),
   };
 }

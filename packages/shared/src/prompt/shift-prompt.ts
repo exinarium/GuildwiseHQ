@@ -27,6 +27,9 @@ function feedContext(brief: ShiftBrief): string {
   lines.push(
     `- Maximum items: ${feedMaxItems(f)} in the digest overall, whatever their kind (article, video, podcast)`,
   );
+  const kinds = list(f.kinds);
+  if (kinds.length > 0 && kinds.length < 3)
+    lines.push(`- Only these kinds of item are wanted: ${kinds.join(', ')} (others are dropped)`);
   const feed = brief.feed;
   if (feed) {
     lines.push(`- Seen-list: ${feed.seenUrls.length} URL(s) already logged for this project; skip them`);

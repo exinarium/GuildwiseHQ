@@ -41,13 +41,28 @@ export async function requireProjectMember(
   db: Queryable,
   userId: string,
   projectId: string,
+  opts: { allowInterest?: boolean } = {},
 ): Promise<'owner' | 'manager'> {
   const role = await projectRole(db, userId, projectId);
   if (!role) throw notFound('project not found');
+  if (!opts.allowInterest) {
+    const p = await one<{ kind: string }>(db, 'SELECT kind FROM projects WHERE id=$1', [projectId]);
+    if (p?.kind === 'interest')
+      throw conflict('managed_by_interest', 'this is an interest: manage it on the Interests page');
+  }
   return role;
 }
 
-export async function loadVisibleProject(db: Queryable, userId: string, projectId: string): Promise<Row> {
+/**
+ * A project the user is a member of. The hidden backing project of an interest is refused (409 `managed_by_interest`)
+ * unless the caller works on the interest itself (`allowInterest`): every project route manages visible projects only.
+ */
+export async function loadVisibleProject(
+  db: Queryable,
+  userId: string,
+  projectId: string,
+  opts: { allowInterest?: boolean } = {},
+): Promise<Row> {
   const p = await one(
     db,
     `SELECT p.*, pm.role AS my_role, ${ORG_COLS} FROM projects p JOIN project_members pm
@@ -57,6 +72,14 @@ export async function loadVisibleProject(db: Queryable, userId: string, projectI
   );
   if (!p) throw notFound('project not found');
   assertOrgRunning(p, userId);
+  if (p.kind === 'interest' && !opts.allowInterest) {
+    const i = await one<{ id: string }>(db, 'SELECT id FROM interests WHERE project_id=$1', [projectId]);
+    throw conflict(
+      'managed_by_interest',
+      'this is an interest: manage it on the Interests page',
+      i ? { interestId: i.id } : undefined,
+    );
+  }
   return p;
 }
 

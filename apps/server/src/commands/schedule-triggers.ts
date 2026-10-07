@@ -4,6 +4,7 @@ import {
   IntegrationRunResultSchema,
   isOrgOperational,
   type PolledIssue,
+  SCHEDULE_EVENT_TRIGGERS,
   type ScheduleEventName,
   type ScheduleTrigger,
   scheduleEventLabel,
@@ -33,14 +34,10 @@ import { afterRun, assertOwnerStillAllowed } from './schedules.ts';
  * (`schedule_runs (schedule_id, source_key)`) makes a replayed event run its schedule once.
  */
 
-/** The domain events each trigger is read from. */
-const EVENT_TYPES: Record<string, ScheduleEventName> = {
-  PhaseCompleted: 'phase_completed',
-  CardFinalized: 'card_finalized',
-  // Part D replaces the feed digest with the interest run's own completion event; the mapping lives here only.
-  DigestPosted: 'interest_run_done',
-  ProjectConverted: 'project_converted',
-};
+/** The domain events each trigger is read from: the one table in `SCHEDULE_EVENT_TRIGGERS` (shared), by event type. */
+const EVENT_TYPES: Record<string, ScheduleEventName> = Object.fromEntries(
+  SCHEDULE_EVENT_TRIGGERS.map((t) => [t.eventType, t.id]),
+);
 
 interface EventContext {
   name: ScheduleEventName;
@@ -73,7 +70,8 @@ async function contextOf(db: Queryable, e: Row): Promise<EventContext | null> {
     const c = await one(db, 'SELECT ref, title, project_id, interest_id FROM cards WHERE id=$1', [p.cardId]);
     if (!c) return null;
     projectId = c.project_id;
-    interestId = c.interest_id ?? null;
+    interestId =
+      name === 'interest_run_done' ? (p.interestId ?? c.interest_id ?? null) : (c.interest_id ?? null);
     ref = c.ref;
     if (name === 'card_finalized') {
       what = `card ${c.ref} (${c.title}) finalized`;
@@ -84,13 +82,15 @@ async function contextOf(db: Queryable, e: Row): Promise<EventContext | null> {
         ...(p.resultRef ? { result: p.resultRef } : {}),
       };
     } else {
-      if (!interestId) return null; // a plain feed run belongs to no interest
+      if (!interestId) return null;
       const i = await one(db, 'SELECT name FROM interests WHERE id=$1', [interestId]);
       what = `interest run done: ${i?.name ?? c.ref}`;
       details.interest = {
         id: interestId,
         name: i?.name ?? null,
-        newItems: Array.isArray(p.items) ? p.items.length : 0,
+        kind: p.kind,
+        status: p.status,
+        newItems: typeof p.published === 'number' ? p.published : 0,
       };
     }
   } else {

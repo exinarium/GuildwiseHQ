@@ -290,35 +290,6 @@ describe('Schedules page', () => {
     expect(within(sys).getAllByRole('link', { name: 'Configure' })).toHaveLength(2);
   });
 
-  it('a feed schedule shows its description and its maximum items, reading an old per-kind maximum as their sum', async () => {
-    const feed: ScheduleDto = {
-      ...hook,
-      id: ID(22),
-      name: 'Morning scan',
-      kind: 'feed',
-      cron: '0 7 * * *',
-      timezone: 'UTC',
-      trigger: { kind: 'cron', cron: '0 7 * * *', timezone: 'UTC' },
-      action: { kind: 'create_card', projectId: project.id, template: { title: 'Morning scan', fields: {} } },
-      cardTemplate: {
-        title: 'Morning scan',
-        fields: { topic: 'reloading', description: 'Load data first.', maxPerKind: { article: 5, video: 3 } },
-      },
-    };
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        if (url.startsWith('/api/schedules')) return json({ schedules: [feed], system: [] });
-        if (url.startsWith('/api/projects')) return json({ projects: [project] });
-        return json({});
-      }),
-    );
-    wrap();
-    const row = await screen.findByTestId('schedule-Morning scan');
-    expect(within(row).getByTestId('schedule-description')).toHaveTextContent('Load data first.');
-    expect(within(row).getByTestId('schedule-max-items')).toHaveTextContent('8');
-  });
-
   it('runs a schedule now and tells what happened', async () => {
     wrap();
     const row = await screen.findByTestId('schedule-Friday review');

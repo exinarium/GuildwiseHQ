@@ -7,6 +7,9 @@ import { defineEvent, Id } from './define.ts';
 export const ProjectDomain = z.enum(['work', 'personal']);
 export type ProjectDomain = z.infer<typeof ProjectDomain>;
 
+export const ProjectKind = z.enum(['project', 'interest']);
+export type ProjectKind = z.infer<typeof ProjectKind>;
+
 /** Mutable project columns (also the body of PATCH /api/projects/:id). */
 export const ProjectChangesSchema = z
   .object({
@@ -45,8 +48,16 @@ export const projectEvents = [
       workingBranch: z.string().min(1),
       subCategories: z.array(z.string()),
       vaultFolder: z.string().nullable(),
+      /** `interest`: the hidden backing project of an interest (docs/design/restructure.md D1). Absent: a visible project. */
+      kind: ProjectKind.optional(),
+      /** The full vault-relative folder (`interests/<slug>`); absent: `projects/<vault folder or key>`. */
+      vaultDir: z.string().min(1).optional(),
+      /** People added with the project besides the Owners and Admins of the organization (a shared or private interest). */
+      members: z.array(z.object({ userId: Id, role: z.enum(['owner', 'manager']) })).optional(),
     }),
   ),
+  /** Data migration: a feed project became the backing project of an interest (hidden from every project list). */
+  defineEvent('ProjectKindChanged', z.object({ projectId: Id, kind: ProjectKind, interestId: Id })),
   defineEvent('ProjectUpdated', z.object({ projectId: Id, changes: ProjectChangesSchema })),
   defineEvent(
     'ProjectRepoAdded',

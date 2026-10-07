@@ -1,29 +1,33 @@
 import {
-  type AdoptResponse,
-  AdoptResponseSchema,
   type CreateInterestRequest,
   type DigestItemDto,
+  type EligibleAgentsResponse,
+  type InterestDeliveriesResponse,
   type InterestDetailResponse,
   InterestDetailResponseSchema,
+  type InterestRunDetailResponse,
+  type InterestRunsResponse,
+  type InterestsResponse,
   InterestsResponseSchema,
   type PatchInterestRequest,
-  type RunScheduleResponse,
-  type TasteSeedLine,
-  type TasteSeedResponse,
-  TasteSeedResponseSchema,
+  type RunInterestRequest,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, patch, post, put, qs } from '../client.ts';
 
 export interface InterestFilter {
-  projectId?: string | undefined;
   status?: 'active' | 'paused' | undefined;
+  archived?: boolean | undefined;
 }
 
 export function useInterests(filter: InterestFilter = {}) {
   return useQuery({
-    queryKey: ['interests', filter.projectId ?? 'all', filter.status ?? 'any'],
-    queryFn: () => get(`/interests${qs({ ...filter })}`, InterestsResponseSchema),
+    queryKey: ['interests', filter.status ?? 'any', filter.archived ? 'archived' : 'live'],
+    queryFn: () =>
+      get<InterestsResponse>(
+        `/interests${qs({ status: filter.status, archived: filter.archived ? 'true' : undefined })}`,
+        InterestsResponseSchema,
+      ),
   });
 }
 
@@ -35,12 +39,67 @@ export function useInterest(id: string | undefined) {
   });
 }
 
+/** One page of the run log (newest first); `before` continues it. */
+export function useInterestRuns(id: string | undefined, limit = 20) {
+  return useQuery({
+    queryKey: ['interest-runs', id, limit],
+    enabled: !!id,
+    queryFn: () => get<InterestRunsResponse>(`/interests/${id}/runs${qs({ limit })}`),
+  });
+}
+
+export function useInterestRun(id: string, runId: string | null) {
+  return useQuery({
+    queryKey: ['interest-run', id, runId],
+    enabled: !!runId,
+    queryFn: () => get<InterestRunDetailResponse>(`/interests/${id}/runs/${runId}`),
+  });
+}
+
+export function useInterestDeliveries(id: string | undefined) {
+  return useQuery({
+    queryKey: ['interest-deliveries', id],
+    enabled: !!id,
+    queryFn: () => get<InterestDeliveriesResponse>(`/interests/${id}/deliveries`),
+  });
+}
+
+/** The interest's running list (what deliveries put on the desk), oldest first. */
+export function useInterestDigest(id: string | undefined) {
+  return useQuery({
+    queryKey: ['digest', 'interest', id],
+    enabled: !!id,
+    queryFn: async () => (await get<{ items: DigestItemDto[] }>(`/interests/${id}/digest`)).items,
+  });
+}
+
+export function useEligibleAgents(id: string | undefined) {
+  return useQuery({
+    queryKey: ['interest-agents', id],
+    enabled: !!id,
+    queryFn: () => get<EligibleAgentsResponse>(`/interests/${id}/agents/eligible`),
+  });
+}
+
 function useInterestAction<V, R = unknown>(fn: (v: V) => Promise<R>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
     onSuccess: () => {
-      for (const key of ['interests', 'interest', 'schedules', 'projects', 'board', 'card', 'digest'])
+      for (const key of [
+        'interests',
+        'interest',
+        'interest-runs',
+        'interest-run',
+        'interest-deliveries',
+        'interest-agents',
+        'schedules',
+        'projects',
+        'card',
+        'desk',
+        'digest',
+        'reporting',
+      ])
         void qc.invalidateQueries({ queryKey: [key] });
     },
   });
@@ -50,80 +109,32 @@ export const useCreateInterest = () =>
   useInterestAction((b: CreateInterestRequest) => post<{ id: string }>('/interests', b));
 export const usePatchInterest = () =>
   useInterestAction((v: { id: string; body: PatchInterestRequest }) => patch(`/interests/${v.id}`, v.body));
+export const useArchiveInterest = () =>
+  useInterestAction((id: string) => post(`/interests/${id}/archive`, {}));
+export const useRestoreInterest = () =>
+  useInterestAction((id: string) => post(`/interests/${id}/restore`, {}));
 export const useDeleteInterest = () =>
-  useInterestAction((v: { id: string; keepSchedule: boolean }) =>
-    del(`/interests/${v.id}${qs({ keepSchedule: v.keepSchedule ? 'true' : 'false' })}`),
+  useInterestAction((v: { id: string; confirmSlug: string }) =>
+    del(`/interests/${v.id}${qs({ confirmSlug: v.confirmSlug })}`),
   );
+/** "Run now" (a scan) and "Research this". */
 export const useRunInterest = () =>
-  useInterestAction((id: string) => post<RunScheduleResponse>(`/interests/${id}/run`, {}));
+  useInterestAction((v: { id: string; body?: RunInterestRequest }) =>
+    post<{ runId: string; cardId: string; ref: string }>(`/interests/${v.id}/run`, v.body ?? {}),
+  );
+export const useDeliverInterest = () =>
+  useInterestAction((id: string) =>
+    post<{ delivered: number; heldBack: number }>(`/interests/${id}/deliver`, {}),
+  );
 export const useSaveInterestTaste = () =>
   useInterestAction((v: { id: string; rules: string[] }) =>
     put(`/interests/${v.id}/taste`, { rules: v.rules }),
   );
-
-export function useAdoptable(enabled: boolean) {
-  return useQuery({
-    queryKey: ['interests', 'adoptable'],
-    enabled,
-    queryFn: async () =>
-      (
-        await get<{
-          schedules: Array<{
-            id: string;
-            name: string;
-            projectKey: string;
-            cron: string;
-            timezone: string;
-            enabled: boolean;
-            topic: string | null;
-          }>;
-        }>('/interests/adoptable')
-      ).schedules,
-  });
-}
-
-export const useAdopt = () =>
-  useInterestAction((scheduleIds: string[]) =>
-    post<AdoptResponse>('/interests/adopt', { scheduleIds }, AdoptResponseSchema),
+export const useResyncInterestTaste = () =>
+  useInterestAction((id: string) => post(`/interests/${id}/taste/resync`, {}));
+export const useShareInterest = () =>
+  useInterestAction((v: { id: string; userId: string }) =>
+    post(`/interests/${v.id}/members`, { userId: v.userId }),
   );
-
-/** The explicit taste rules of a feed project (project-wide and interest-tagged). */
-export function useTasteSeed(projectId: string | undefined) {
-  return useQuery({
-    queryKey: ['taste', projectId],
-    enabled: !!projectId,
-    queryFn: () => get<TasteSeedResponse>(`/projects/${projectId}/taste-seed`, TasteSeedResponseSchema),
-  });
-}
-
-export function useSaveTasteSeed() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (v: { projectId: string; rules: TasteSeedLine[] }) =>
-      put<TasteSeedResponse>(`/projects/${v.projectId}/taste-seed`, { rules: v.rules }),
-    onSuccess: () => {
-      for (const key of ['taste', 'interests', 'interest', 'digest'])
-        void qc.invalidateQueries({ queryKey: [key] });
-    },
-  });
-}
-
-export function useResyncTasteSeed() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (projectId: string) =>
-      post<TasteSeedResponse>(`/projects/${projectId}/taste-seed/resync`, {}),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['taste'] }),
-  });
-}
-
-/** The running list of a feed project, limited to the scans of one interest. */
-export function useInterestDigestItems(projectId: string | undefined, interestId: string | null) {
-  return useQuery({
-    queryKey: ['digest', 'interest', projectId, interestId],
-    enabled: !!projectId && !!interestId,
-    queryFn: async () =>
-      (await get<{ items: DigestItemDto[] }>(`/digest-items${qs({ projectId, interestId, status: 'all' })}`))
-        .items,
-  });
-}
+export const useUnshareInterest = () =>
+  useInterestAction((v: { id: string; userId: string }) => del(`/interests/${v.id}/members/${v.userId}`));

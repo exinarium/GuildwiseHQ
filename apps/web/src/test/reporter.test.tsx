@@ -212,6 +212,7 @@ const digest: FloorDigest = {
   devopsOpen: [{ id: U(30), summary: 'Deploy staging', status: 'needs_approval', workstation: 'Box' }],
   resolvedByBa: [{ id: U(31), title: 'Noise', how: 'dismissed', note: 'duplicate' }],
   failures: [{ ref: 'TOY-2', title: 'Looping builder', failedShifts: 4 }],
+  interests: { count: 0, active: 0, runs: 0, delivered: 0, unrated: 0, highlights: [], failing: [] },
 };
 
 const base: DeskItemDto = {

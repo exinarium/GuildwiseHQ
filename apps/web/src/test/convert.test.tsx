@@ -371,9 +371,9 @@ describe('navigation and board', () => {
   it('the Research entry shows for a project with notes or one that started as research', () => {
     const labels = (o: Parameters<typeof buildNav>[0]) =>
       buildNav(o).sections.flatMap((s) => s.items.map((i) => i.label));
-    expect(labels({ projectKey: 'RLD', isFeed: false, hasResearch: true })).toContain('Research');
-    expect(labels({ projectKey: 'RLD', isFeed: false })).not.toContain('Research');
-    const item = buildNav({ projectKey: 'RLD', isFeed: false, hasResearch: true })
+    expect(labels({ projectKey: 'RLD', hasResearch: true })).toContain('Research');
+    expect(labels({ projectKey: 'RLD' })).not.toContain('Research');
+    const item = buildNav({ projectKey: 'RLD', hasResearch: true })
       .sections.flatMap((s) => s.items)
       .find((i) => i.id === 'research');
     expect(item?.to).toBe('/p/RLD/research');

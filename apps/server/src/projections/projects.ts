@@ -97,19 +97,30 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
   await exec(tx, 'DELETE FROM ba_signals WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM hygiene_findings WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM deploy_targets WHERE project_id=$1', P);
-  // Interests: those that only lived in this project go; one that also has another project loses just this link.
+  // The interest this project backs goes with it (its run log and deliveries too); an interest of the first model
+  // only loses the link.
   await exec(
     tx,
-    `DELETE FROM interests WHERE COALESCE(feed_project_id, research_project_id) = $1
-        AND COALESCE(research_project_id, feed_project_id) = $1`,
+    'DELETE FROM interest_runs WHERE interest_id IN (SELECT id FROM interests WHERE project_id=$1)',
     P,
   );
   await exec(
     tx,
-    'UPDATE interests SET feed_project_id = NULL, scan = NULL, schedule_id = NULL WHERE feed_project_id=$1',
+    'DELETE FROM interest_deliveries WHERE interest_id IN (SELECT id FROM interests WHERE project_id=$1)',
     P,
   );
-  await exec(tx, 'UPDATE interests SET research_project_id = NULL WHERE research_project_id=$1', P);
+  await exec(tx, 'DELETE FROM interests WHERE project_id=$1', P);
+  await exec(
+    tx,
+    `UPDATE interests SET legacy_feed_project_id = NULL, scan = NULL, legacy_schedule_id = NULL
+      WHERE legacy_feed_project_id=$1`,
+    P,
+  );
+  await exec(
+    tx,
+    'UPDATE interests SET legacy_research_project_id = NULL WHERE legacy_research_project_id=$1',
+    P,
+  );
   await exec(tx, 'DELETE FROM taste_seeds WHERE project_id=$1', P);
   // Project-level rows.
   for (const t of ['feed_seen', 'transcripts', 'repo_requests', 'schedules']) {
@@ -148,8 +159,8 @@ export const projectProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO projects (id, org_id, key, name, domain, workflow_key, priority_tier, branch_prefix,
-         working_branch, sub_categories, vault_folder, created_at, created_by, started_as)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$6)`,
+         working_branch, sub_categories, vault_folder, created_at, created_by, started_as, kind, vault_dir)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$6,$14,$15)`,
       [
         p.projectId,
         p.orgId,
@@ -164,6 +175,8 @@ export const projectProjectors: Record<string, Projector> = {
         p.vaultFolder,
         e.createdAt,
         p.createdByUserId ?? p.orgId,
+        p.kind ?? 'project',
+        p.vaultDir ?? null,
       ],
     );
     if (p.createdByUserId) {
@@ -184,6 +197,20 @@ export const projectProjectors: Record<string, Projector> = {
         [p.projectId, p.orgId, e.createdAt],
       );
     }
+    // People added with the project (an interest created by a Member or a guest is private to them and the org's Owner and Admins).
+    for (const m of p.members ?? []) {
+      await exec(
+        tx,
+        `INSERT INTO project_members (project_id, user_id, role, status, invited_by, invited_at, joined_at, direct, org_grant)
+         VALUES ($1,$2,$3,'active',$4,$5,$5,true,false)
+         ON CONFLICT (project_id, user_id) DO UPDATE SET direct = true`,
+        [p.projectId, m.userId, m.role, p.createdByUserId ?? p.orgId, e.createdAt],
+      );
+    }
+  },
+  ProjectKindChanged: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectKindChanged'>).payload;
+    await exec(tx, 'UPDATE projects SET kind=$2 WHERE id=$1', [p.projectId, p.kind]);
   },
   ProjectUpdated: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectUpdated'>).payload;

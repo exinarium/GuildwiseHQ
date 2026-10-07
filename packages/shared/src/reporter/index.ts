@@ -59,13 +59,28 @@ export const ReportingPrefsSchema = z.object({
   routeViaBa: z.boolean(),
   /** Local time of the daily floor report. */
   dailyAt: HHMM,
+  /**
+   * The quiet cap (docs/design/restructure.md): at most this many interest digest items reach the desk per day across all
+   * interests of the organization; the rest wait for the next delivery. Null: no cap.
+   */
+  interestDigestCap: z.number().int().min(1).max(1000).nullable().default(null),
 });
 export type ReportingPrefs = z.infer<typeof ReportingPrefsSchema>;
-export const DEFAULT_REPORTING: ReportingPrefs = { routeViaBa: true, dailyAt: REPORTER.defaultDailyAt };
+export const DEFAULT_REPORTING: ReportingPrefs = {
+  routeViaBa: true,
+  dailyAt: REPORTER.defaultDailyAt,
+  interestDigestCap: null,
+};
 
 export const UpdateReportingRequestSchema = z
-  .object({ routeViaBa: z.boolean().optional(), dailyAt: HHMM.optional() })
-  .refine((v) => v.routeViaBa !== undefined || v.dailyAt !== undefined, { message: 'nothing to change' });
+  .object({
+    routeViaBa: z.boolean().optional(),
+    dailyAt: HHMM.optional(),
+    interestDigestCap: z.number().int().min(1).max(1000).nullable().optional(),
+  })
+  .refine((v) => v.routeViaBa !== undefined || v.dailyAt !== undefined || v.interestDigestCap !== undefined, {
+    message: 'nothing to change',
+  });
 export type UpdateReportingRequest = z.infer<typeof UpdateReportingRequestSchema>;
 
 /** `GET /api/reporting`. `timezone` is the manager's own setting; reports use UTC while it is unset. */
@@ -231,6 +246,32 @@ export const FloorDigestSchema = z.object({
   ),
   /** Failed shifts and other failures since the last report, by card. */
   failures: z.array(z.object({ ref: z.string(), title: z.string(), failedShifts: z.number().int() })),
+  /**
+   * The organization's interests (docs/design/restructure.md decision 13): a count line, the top delivered items per
+   * interest since the last report (only what a delivery put on the desk, within the quiet cap) and the interests that
+   * cannot run.
+   */
+  interests: z
+    .object({
+      count: z.number().int().nonnegative(),
+      active: z.number().int().nonnegative(),
+      runs: z.number().int().nonnegative(),
+      delivered: z.number().int().nonnegative(),
+      unrated: z.number().int().nonnegative(),
+      highlights: z.array(
+        z.object({
+          interest: z.string(),
+          items: z.array(
+            z.object({ title: z.string(), kind: z.string(), source: z.string(), url: z.string() }),
+          ),
+          more: z.number().int().nonnegative(),
+        }),
+      ),
+      failing: z.array(
+        z.object({ interest: z.string(), failCount: z.number().int(), error: z.string().nullable() }),
+      ),
+    })
+    .default({ count: 0, active: 0, runs: 0, delivered: 0, unrated: 0, highlights: [], failing: [] }),
 });
 export type FloorDigest = z.infer<typeof FloorDigestSchema>;
 
@@ -240,7 +281,9 @@ export const floorDigestIsEmpty = (d: FloorDigest): boolean =>
   d.backingOff.length === 0 &&
   d.devopsOpen.length === 0 &&
   d.resolvedByBa.length === 0 &&
-  d.failures.length === 0;
+  d.failures.length === 0 &&
+  d.interests.highlights.length === 0 &&
+  d.interests.failing.length === 0;
 
 // ------------------------------------------------------------------------------------ BA reporter tasks
 
@@ -365,6 +408,19 @@ export function reporterBriefOutcomes(kind: ReporterTaskKind) {
 
 // ------------------------------------------------------------------------------------ template texts
 
+/** The count line and the top items per interest of a floor report or an interests e-mail. */
+export function renderInterestHighlights(i: FloorDigest['interests']): string[] {
+  const lines = [
+    `Interests: ${i.active} active of ${i.count}, ${i.runs} run${i.runs === 1 ? '' : 's'} since the last report, ${i.delivered} item${i.delivered === 1 ? '' : 's'} delivered, ${i.unrated} unrated`,
+  ];
+  for (const h of i.highlights) {
+    lines.push(`- ${h.interest}`);
+    for (const x of h.items) lines.push(`  - ${x.title} (${x.kind}, ${x.source}) ${x.url}`);
+    if (h.more > 0) lines.push(`  - and ${h.more} more on the desk`);
+  }
+  return lines;
+}
+
 const list = (xs: string[]): string => (xs.length ? xs.map((x) => `- ${x}`).join('\n') : '- none');
 
 /** The daily floor report the server posts when no BA is available (and the base the BA starts from). */
@@ -403,8 +459,13 @@ export function renderFloorReportFallback(d: FloorDigest): string {
         .filter((s) => s.kind === 'rework' || s.kind === 'finalize_failures' || s.kind === 'repo_hygiene')
         .map((s) => `${s.subject.title}${s.subject.detail ? ` (${s.subject.detail})` : ''}`),
       ...d.failures.map((f) => `${f.ref} ${f.title}: ${f.failedShifts} failed shifts`),
+      ...d.interests.failing.map(
+        (f) => `Interest ${f.interest} cannot run (${f.failCount} tries)${f.error ? `: ${f.error}` : ''}`,
+      ),
     ]),
   );
+  out.push('', '## Interests highlights');
+  out.push(...renderInterestHighlights(d.interests));
   out.push('', '## DevOps requests that are open');
   out.push(list(d.devopsOpen.map((r) => `${r.summary} on ${r.workstation}: ${r.status}`)));
   out.push('', '## Resolved by the BA without bothering you');

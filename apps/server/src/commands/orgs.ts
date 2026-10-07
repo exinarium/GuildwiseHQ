@@ -87,7 +87,7 @@ export async function listMembers(ctx: Ctx, orgId: string): Promise<OrgMemberDto
   const projects = await rows(
     ctx.pool,
     `SELECT pm.user_id, p.id, p.key, p.name FROM project_members pm JOIN projects p ON p.id = pm.project_id
-      WHERE p.org_id=$1 AND pm.status='active' AND pm.direct AND p.status='active' ORDER BY p.key`,
+      WHERE p.org_id=$1 AND p.kind='project' AND pm.status='active' AND pm.direct AND p.status='active' ORDER BY p.key`,
     [orgId],
   );
   return list.map((m) => ({
@@ -110,7 +110,7 @@ export async function listGuests(ctx: Ctx, orgId: string): Promise<OrgGuestDto[]
     ctx.pool,
     `SELECT pm.user_id, u.display_name, u.email, p.id, p.key, p.name, pm.joined_at
        FROM project_members pm JOIN projects p ON p.id = pm.project_id JOIN users u ON u.id = pm.user_id
-      WHERE p.org_id=$1 AND pm.status='active' AND pm.direct
+      WHERE p.org_id=$1 AND p.kind='project' AND pm.status='active' AND pm.direct
         AND NOT EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = p.org_id AND om.user_id = pm.user_id AND om.status='active')
       ORDER BY lower(u.display_name), p.key`,
     [orgId],
@@ -327,7 +327,7 @@ export async function setMemberProjects(
       throw badRequest('not_a_member_role', 'Owners and Admins already see every project');
     const valid = await rows<{ id: string }>(
       tx,
-      `SELECT id FROM projects WHERE org_id=$1 AND status='active' AND id = ANY($2::uuid[])`,
+      `SELECT id FROM projects WHERE org_id=$1 AND kind='project' AND status='active' AND id = ANY($2::uuid[])`,
       [a.orgId, projectIds],
     );
     if (valid.length !== new Set(projectIds).size)
@@ -335,7 +335,7 @@ export async function setMemberProjects(
     const current = await rows<{ project_id: string; status: string }>(
       tx,
       `SELECT pm.project_id, pm.status FROM project_members pm JOIN projects p ON p.id = pm.project_id
-        WHERE p.org_id=$1 AND pm.user_id=$2 AND pm.status <> 'removed'`,
+        WHERE p.org_id=$1 AND p.kind='project' AND pm.user_id=$2 AND pm.status <> 'removed'`,
       [a.orgId, userId],
     );
     const have = new Set(current.map((c) => c.project_id));
@@ -497,7 +497,7 @@ export async function inviteOrgMember(
     if (input.projectIds.length) {
       const ok = await rows<{ id: string }>(
         tx,
-        `SELECT id FROM projects WHERE org_id=$1 AND status='active' AND id = ANY($2::uuid[])`,
+        `SELECT id FROM projects WHERE org_id=$1 AND kind='project' AND status='active' AND id = ANY($2::uuid[])`,
         [a.orgId, input.projectIds],
       );
       if (ok.length !== new Set(input.projectIds).size)

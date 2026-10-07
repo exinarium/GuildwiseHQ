@@ -18,6 +18,8 @@ export const reporterEvents = [
         .string()
         .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
         .optional(),
+      /** The org's quiet cap on interest digest items per day (null clears it). */
+      interestDigestCap: z.number().int().min(1).max(1000).nullable().optional(),
     }),
   ),
   /** The standing "BA reports" chat of the organization owner (created on the first report). */

@@ -284,14 +284,30 @@ export async function projectImpact(
  * for each enabled schedule and `DeskItemResolved{dismissed}` for each open desk item. The cards' worktrees are removed
  * with `worktree.remove` (the branches are kept). Agents are not touched: the dispatcher simply finds no work for them.
  */
-export async function archiveProject(ctx: Ctx, user: AuthSession['user'], projectId: string): Promise<void> {
+export async function archiveProject(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  /** The interest whose backing project this is: archiving it is the interest's own command. */
+  opts: { interestId?: string } = {},
+): Promise<void> {
   const workstations = new Set<string>();
   await withAppendTx(ctx.pool, async (tx) => {
-    const p = await loadVisibleProject(tx, user.id, projectId);
+    const p = await loadVisibleProject(tx, user.id, projectId, { allowInterest: !!opts.interestId });
     if (p.status === 'archived') throw conflict('already_archived', 'this project is already archived');
     const scope = projectScope(p.org_id, projectId);
     const actor = userActor(user.id);
     const events: AppendInput[] = [
+      ...(opts.interestId
+        ? [
+            {
+              streamId: streamId.interest(opts.interestId),
+              event: { type: 'InterestArchived', payload: { interestId: opts.interestId, by: user.id } },
+              actor,
+              scope,
+            } as AppendInput,
+          ]
+        : []),
       {
         streamId: streamId.project(projectId),
         event: { type: 'ProjectArchived', payload: { projectId, archivedBy: user.id } },
@@ -387,13 +403,28 @@ export async function archiveProject(ctx: Ctx, user: AuthSession['user'], projec
 }
 
 /** Restores an archived project (any active member). Closed cards stay closed; schedules stay disabled. */
-export async function restoreProject(ctx: Ctx, user: AuthSession['user'], projectId: string): Promise<void> {
+export async function restoreProject(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  opts: { interestId?: string } = {},
+): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
-    const p = await loadVisibleProject(tx, user.id, projectId);
+    const p = await loadVisibleProject(tx, user.id, projectId, { allowInterest: !!opts.interestId });
     if (p.status !== 'archived') throw conflict('not_archived', 'this project is not archived');
-    await assertWithinLimit(tx, p.org_id, 'projects');
+    if (!opts.interestId) await assertWithinLimit(tx, p.org_id, 'projects');
     await ctx.store.append(
       [
+        ...(opts.interestId
+          ? [
+              {
+                streamId: streamId.interest(opts.interestId),
+                event: { type: 'InterestRestored', payload: { interestId: opts.interestId, by: user.id } },
+                actor: userActor(user.id),
+                scope: projectScope(p.org_id, projectId),
+              } as AppendInput,
+            ]
+          : []),
         {
           streamId: streamId.project(projectId),
           event: { type: 'ProjectRestored', payload: { projectId, restoredBy: user.id } },

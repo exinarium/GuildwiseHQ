@@ -31,6 +31,7 @@ export const CardOrigin = z.enum([
   'test_failure',
   'full_suite',
   'regression',
+  'interest',
 ]);
 export type CardOrigin = z.infer<typeof CardOrigin>;
 

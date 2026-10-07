@@ -33,6 +33,7 @@ export async function listPublications(
   const r = await rows(
     db,
     `${SELECT} WHERE r.project_id IN (SELECT project_id FROM project_members WHERE user_id=$1 AND status='active')
+       AND (p.kind = 'project' OR $3::uuid IS NOT NULL)
        AND ($2::uuid IS NULL OR r.project_id=$2) AND ($3::uuid IS NULL OR c.interest_id=$3)
      ORDER BY r.event_seq DESC`,
     [userId, projectId ?? null, interestId ?? null],

@@ -28,7 +28,7 @@ export async function metrics(
     await rows<{ project_id: string }>(
       ctx.pool,
       `SELECT pm.project_id FROM project_members pm JOIN projects p ON p.id = pm.project_id
-        WHERE pm.user_id=$1 AND pm.status='active' AND ($2::uuid IS NULL OR pm.project_id = $2)
+        WHERE pm.user_id=$1 AND pm.status='active' AND p.kind='project' AND ($2::uuid IS NULL OR pm.project_id = $2)
           AND ($2::uuid IS NOT NULL OR p.org_id = $3)`,
       [userId, q.projectId ?? null, who.orgId],
     )

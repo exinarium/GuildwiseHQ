@@ -1,8 +1,13 @@
-import { type DigestKind, localParts, renderFloorReportFallback } from '@aom/shared';
+import {
+  type DigestKind,
+  localParts,
+  renderFloorReportFallback,
+  renderInterestHighlights,
+} from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, rows } from '../db/sql.ts';
 import { badRequest } from '../errors.ts';
-import { buildFloorDigest } from '../reporter/digest.ts';
+import { buildFloorDigest, interestsDigest } from '../reporter/digest.ts';
 import { reportingOf } from '../reporter/settings.ts';
 
 export interface DigestArgs {
@@ -70,15 +75,23 @@ const projectSummary: DigestBuilder = async (_ctx, db, a) => {
   return { subject: `${p.key} summary`, text: lines.join('\n') };
 };
 
+/** What the interests delivered to the desk in the last 24 hours: the top items of each interest (decision 16). */
+const interestsDigestBuilder: DigestBuilder = async (_ctx, db, a) => {
+  const d = await interestsDigest(db, a.orgId, new Date(a.now.getTime() - 86_400_000));
+  const day = localParts(a.now, (await reportingOf(db, a.orgId)).timezone ?? 'UTC').date;
+  const lines = [`# Interests ${day}`, '', ...renderInterestHighlights(d)];
+  if (d.failing.length)
+    lines.push('', '## Cannot run', ...d.failing.map((f) => `- ${f.interest}: ${f.error ?? 'failing'}`));
+  return { subject: `Interests digest ${day}`, text: lines.join('\n') };
+};
+
 const builders: Partial<Record<DigestKind, DigestBuilder>> = {
   floor_report: floorReport,
   project_summary: projectSummary,
+  interests: interestsDigestBuilder,
 };
 
-/**
- * Part D hook: the interests digest registers itself here (docs/design/restructure.md decision 16). Until then the
- * `interests` kind is refused when a schedule is created.
- */
+/** Extra digest kinds register themselves here (the interests digest is built in). */
 export function registerDigest(kind: DigestKind, builder: DigestBuilder): void {
   builders[kind] = builder;
 }

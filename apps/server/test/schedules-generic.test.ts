@@ -645,13 +645,18 @@ describe('e-mail digests', () => {
       await ok(owner('POST', `/api/schedules/${ps.id}/run`), 201);
       expect(sent[1]?.subject).toBe('TOY summary');
       expect(sent[1]?.text).toContain('## Open work');
-      // the interest digest is a hook for the interests restructure: refused until it exists
-      const interests = await create({
-        name: 'Interests',
-        trigger: manual,
-        action: { kind: 'integration', integration: 'email', to: [w.owner.email], digest: 'interests' },
-      });
-      expect(interests.body.error?.code).toBe('digest_unavailable');
+      // the interests digest (what the interests delivered to the desk in the last 24 hours)
+      const interests = await ok<any>(
+        create({
+          name: 'Interests',
+          trigger: manual,
+          action: { kind: 'integration', integration: 'email', to: [w.owner.email], digest: 'interests' },
+        }),
+        201,
+      );
+      await ok(owner('POST', `/api/schedules/${interests.id}/run`), 201);
+      expect(sent[2]?.subject).toMatch(/^Interests digest \d{4}-\d{2}-\d{2}$/);
+      expect(sent[2]?.text).toContain('Interests: 0 active of 0');
       // a failing mailer is retried like a webhook
       ctx().mailer.send = async () => {
         throw new Error('smtp down');

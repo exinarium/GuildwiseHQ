@@ -72,10 +72,8 @@ export function AppShell({ name, live }: { name: string; live: string }) {
   const canManage = org?.role === 'owner' || org?.role === 'admin';
   const { sections, footer } = buildNav({
     projectKey: project?.key ?? null,
-    isFeed: project?.workflowKey === 'feed',
     hasResearch:
       !!project &&
-      project.workflowKey !== 'feed' &&
       ((project.publishedNotes ?? 0) > 0 || (project.startedAs ?? project.workflowKey) === 'research'),
     canManage,
     features: org?.features ?? {},

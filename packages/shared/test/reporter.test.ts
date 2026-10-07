@@ -66,7 +66,7 @@ describe('reporter contract', () => {
     expect(reporterBriefOutcomes('floor_report')[0]?.id).toBe('floor_report');
   });
 
-  it('the template report has the six sections the manager expects', () => {
+  it('the template report has the seven sections the manager expects', () => {
     const d: FloorDigest = {
       generatedAt: '2026-11-10T06:00:00.000Z',
       localDate: '2026-11-10',
@@ -77,10 +77,32 @@ describe('reporter contract', () => {
       devopsOpen: [],
       resolvedByBa: [],
       failures: [],
+      interests: {
+        count: 2,
+        active: 1,
+        runs: 3,
+        delivered: 2,
+        unrated: 2,
+        highlights: [
+          {
+            interest: 'Rust async',
+            items: [{ title: 'Tokio 2.0', kind: 'article', source: 'tokio.rs', url: 'https://tokio.rs/x' }],
+            more: 1,
+          },
+        ],
+        failing: [{ interest: 'AI weekly', failCount: 3, error: 'no curator online' }],
+      },
     };
     const text = renderFloorReportFallback(d);
     expect(text).toContain('TOY-P1 Autosave: open, held open by late bugs TOY-9');
-    expect((text.match(/^## /gm) ?? []).length).toBe(6);
+    expect((text.match(/^## /gm) ?? []).length).toBe(7);
+    expect(text).toContain('## Interests highlights');
+    expect(text).toContain(
+      'Interests: 1 active of 2, 3 runs since the last report, 2 items delivered, 2 unrated',
+    );
+    expect(text).toContain('Tokio 2.0 (article, tokio.rs)');
+    expect(text).toContain('and 1 more on the desk');
+    expect(text).toContain('Interest AI weekly cannot run (3 tries): no curator online');
     expect(
       renderSignalFallback({
         id: '8a8d0b0e-0c3b-4c6c-9a5b-0f2d2b3b2a11',

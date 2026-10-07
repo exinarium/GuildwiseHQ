@@ -1,71 +1,101 @@
 import {
-  AdoptableSchedulesResponseSchema,
-  AdoptRequestSchema,
-  AdoptResponseSchema,
   CreateInterestRequestSchema,
   CreateInterestResponseSchema,
-  DeleteInterestQuerySchema,
+  DeleteInterestRequestSchema,
+  DeliverInterestResponseSchema,
+  DigestItemsResponseSchema,
+  EligibleAgentsResponseSchema,
   IdParamsSchema,
+  InterestDeliveriesResponseSchema,
   InterestDetailResponseSchema,
+  InterestMemberRequestSchema,
+  InterestRunDetailResponseSchema,
+  InterestRunsQuerySchema,
+  InterestRunsResponseSchema,
   InterestsQuerySchema,
   InterestsResponseSchema,
   InterestTasteRequestSchema,
+  isOrgManager,
   OkResponseSchema,
   PatchInterestRequestSchema,
+  RunInterestRequestSchema,
   RunInterestResponseSchema,
-  TasteSeedRequestSchema,
-  TasteSeedResponseSchema,
 } from '@aom/shared';
-import type { FastifyInstance } from 'fastify';
-import { requireOrg, requireUserWithFeature } from '../auth/guards.ts';
-import { loadVisibleProject } from '../authz/scope.ts';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import { requireUser, requireUserWithFeature } from '../auth/guards.ts';
 import {
-  adoptSchedules,
-  assertCanEditInterest,
+  loadOrg,
+  orgRoleOf,
+  rankInOrg,
+  requestedOrgId,
+  requireFeature,
+  resolveOrgId,
+} from '../auth/org-context.ts';
+import { deliveredInLastDay, deliverInterestNow, runInterest } from '../commands/interest-runs.ts';
+import {
+  archiveInterest,
   createInterest,
   deleteInterest,
-  resyncTasteSeed,
+  restoreInterest,
+  resyncInterestTaste,
   setInterestTaste,
-  setTasteSeed,
+  shareInterest,
+  unshareInterest,
   updateInterest,
 } from '../commands/interests.ts';
-import { runFeedNow } from '../commands/schedules.ts';
 import type { Ctx } from '../context.ts';
-import { one } from '../db/sql.ts';
-import { conflict, forbidden, notFound } from '../errors.ts';
+import { forbidden, notFound } from '../errors.ts';
+import { toDigestDto } from '../queries/digests.ts';
 import {
-  adoptableSchedules,
+  eligibleAgents,
   getInterestDto,
+  interestDeliveries,
   interestDetail,
+  interestItems,
+  interestRunDetail,
+  interestRuns,
   listInterests,
-  projectHasVault,
-  tasteProjects,
 } from '../queries/interests.ts';
+import { reportingOf } from '../reporter/settings.ts';
 import { typed } from './util.ts';
 
+const RunParamsSchema = z.object({ id: z.uuid(), runId: z.uuid() });
+const MemberParamsSchema = z.object({ id: z.uuid(), userId: z.uuid() });
+const DigestQuerySchema = z.object({ status: z.enum(['unrated', 'all']).default('all') });
+
 export function interestRoutes(ctx: Ctx) {
+  /**
+   * The organization a new interest goes to: the tab's. A guest (no membership, access to a shared project of it) may
+   * create any interest there, private to them unless shared (owner decision).
+   */
+  async function creationOrg(req: FastifyRequest) {
+    const s = await requireUser(ctx, req);
+    const requested = requestedOrgId(req);
+    const orgId = requested ?? (await resolveOrgId(ctx, s, null));
+    if (!orgId) throw forbidden('you do not belong to an organization');
+    const org = await loadOrg(ctx.pool, orgId);
+    if (!org) throw notFound('organization not found');
+    if ((await rankInOrg(ctx.pool, s.user.id, orgId)) < 1)
+      throw forbidden('you have no access to this organization');
+    requireFeature(org, 'interests');
+    return { session: s, orgId, role: await orgRoleOf(ctx.pool, s.user.id, orgId) };
+  }
+
   return async (fastify: FastifyInstance) => {
     const app = typed(fastify);
 
     app.get('/api/interests', { schema: { querystring: InterestsQuerySchema } }, async (req) => {
       const s = await requireUserWithFeature(ctx, req, 'interests');
+      const orgId = await resolveOrgId(ctx, s, requestedOrgId(req)).catch(() => null);
+      const reporting = orgId ? await reportingOf(ctx.pool, orgId) : null;
+      const role = orgId ? await orgRoleOf(ctx.pool, s.user.id, orgId) : null;
       return InterestsResponseSchema.parse({
         interests: await listInterests(ctx.pool, s.user.id, ctx.clock.now(), req.query),
-        tasteProjects: await tasteProjects(ctx.pool, s.user.id),
-        adoptableCount: (await adoptableSchedules(ctx.pool, s.user.id)).length,
+        quietCap: reporting?.interestDigestCap ?? null,
+        deliveredToday: orgId ? await deliveredInLastDay(ctx.pool, orgId, ctx.clock.now()) : 0,
+        canSetCap: isOrgManager({ orgRole: role }),
       });
-    });
-
-    app.get('/api/interests/adoptable', async (req) => {
-      const s = await requireUserWithFeature(ctx, req, 'interests');
-      return AdoptableSchedulesResponseSchema.parse({
-        schedules: await adoptableSchedules(ctx.pool, s.user.id),
-      });
-    });
-
-    app.post('/api/interests/adopt', { schema: { body: AdoptRequestSchema } }, async (req) => {
-      const s = await requireUserWithFeature(ctx, req, 'interests');
-      return AdoptResponseSchema.parse({ results: await adoptSchedules(ctx, s.user, req.body.scheduleIds) });
     });
 
     app.get('/api/interests/:id', { schema: { params: IdParamsSchema } }, async (req) => {
@@ -76,7 +106,7 @@ export function interestRoutes(ctx: Ctx) {
     });
 
     app.post('/api/interests', { schema: { body: CreateInterestRequestSchema } }, async (req, reply) => {
-      const a = await requireOrg(ctx, req, { feature: 'interests' });
+      const a = await creationOrg(req);
       const id = await createInterest(ctx, a.session.user, { id: a.orgId, role: a.role }, req.body);
       reply.code(201);
       return CreateInterestResponseSchema.parse({ id });
@@ -92,29 +122,84 @@ export function interestRoutes(ctx: Ctx) {
       },
     );
 
+    app.post('/api/interests/:id/archive', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUserWithFeature(ctx, req, 'interests');
+      await archiveInterest(ctx, s.user, req.params.id);
+      return OkResponseSchema.parse({ ok: true });
+    });
+
+    app.post('/api/interests/:id/restore', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUserWithFeature(ctx, req, 'interests');
+      await restoreInterest(ctx, s.user, req.params.id);
+      return OkResponseSchema.parse({ ok: true });
+    });
+
     app.delete(
       '/api/interests/:id',
-      { schema: { params: IdParamsSchema, querystring: DeleteInterestQuerySchema } },
+      { schema: { params: IdParamsSchema, querystring: DeleteInterestRequestSchema } },
       async (req) => {
         const s = await requireUserWithFeature(ctx, req, 'interests');
-        await deleteInterest(ctx, s.user, req.params.id, { keepSchedule: req.query.keepSchedule });
+        await deleteInterest(ctx, s.user, req.params.id, req.query.confirmSlug);
         return OkResponseSchema.parse({ ok: true });
       },
     );
 
-    app.post('/api/interests/:id/run', { schema: { params: IdParamsSchema } }, async (req, reply) => {
+    app.post(
+      '/api/interests/:id/run',
+      { schema: { params: IdParamsSchema, body: RunInterestRequestSchema.optional() } },
+      async (req, reply) => {
+        const s = await requireUserWithFeature(ctx, req, 'interests');
+        const r = await runInterest(
+          ctx,
+          s.user,
+          req.params.id,
+          RunInterestRequestSchema.parse(req.body ?? {}),
+        );
+        reply.code(201);
+        return RunInterestResponseSchema.parse(r);
+      },
+    );
+
+    app.post('/api/interests/:id/deliver', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUserWithFeature(ctx, req, 'interests');
-      const i = await getInterestDto(ctx.pool, s.user.id, req.params.id, ctx.clock.now());
-      if (!i) throw notFound('interest not found');
-      if (!i.scheduleId) throw conflict('no_feed_project', 'this interest has no feed project to run');
-      if (!i.canRun) throw forbidden('you are not a member of the feed project');
-      // "Run now" follows the interest's edit rule (its creator, or a higher role in the organization).
-      const row = await one(ctx.pool, 'SELECT * FROM interests WHERE id=$1', [req.params.id]);
-      if (row) await assertCanEditInterest(ctx.pool, s.user.id, row);
-      const r = await runFeedNow(ctx, s.user, { scheduleId: i.scheduleId });
-      reply.code(201);
-      return RunInterestResponseSchema.parse(r);
+      return DeliverInterestResponseSchema.parse(await deliverInterestNow(ctx, s.user, req.params.id));
     });
+
+    app.get(
+      '/api/interests/:id/runs',
+      { schema: { params: IdParamsSchema, querystring: InterestRunsQuerySchema } },
+      async (req) => {
+        const s = await requireUserWithFeature(ctx, req, 'interests');
+        const r = await interestRuns(ctx.pool, s.user.id, req.params.id, req.query);
+        if (!r) throw notFound('interest not found');
+        return InterestRunsResponseSchema.parse(r);
+      },
+    );
+
+    app.get('/api/interests/:id/runs/:runId', { schema: { params: RunParamsSchema } }, async (req) => {
+      const s = await requireUserWithFeature(ctx, req, 'interests');
+      const r = await interestRunDetail(ctx.pool, s.user.id, req.params.id, req.params.runId);
+      if (!r) throw notFound('run not found');
+      return InterestRunDetailResponseSchema.parse(r);
+    });
+
+    app.get('/api/interests/:id/deliveries', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUserWithFeature(ctx, req, 'interests');
+      const r = await interestDeliveries(ctx.pool, s.user.id, req.params.id);
+      if (!r) throw notFound('interest not found');
+      return InterestDeliveriesResponseSchema.parse(r);
+    });
+
+    app.get(
+      '/api/interests/:id/digest',
+      { schema: { params: IdParamsSchema, querystring: DigestQuerySchema } },
+      async (req) => {
+        const s = await requireUserWithFeature(ctx, req, 'interests');
+        const r = await interestItems(ctx.pool, s.user.id, req.params.id, req.query.status);
+        if (!r) throw notFound('interest not found');
+        return DigestItemsResponseSchema.parse({ items: r.map(toDigestDto) });
+      },
+    );
 
     app.put(
       '/api/interests/:id/taste',
@@ -126,36 +211,37 @@ export function interestRoutes(ctx: Ctx) {
       },
     );
 
-    const seedOf = async (userId: string, projectId: string) => {
-      const p = await loadVisibleProject(ctx.pool, userId, projectId);
-      const r = await one(ctx.pool, 'SELECT version, rules FROM taste_seeds WHERE project_id=$1', [p.id]);
-      return TasteSeedResponseSchema.parse({
-        projectId: p.id,
-        version: r?.version ?? 0,
-        rules: r?.rules ?? [],
-        hasVault: await projectHasVault(ctx.pool, p.id),
-      });
-    };
-
-    app.get('/api/projects/:id/taste-seed', { schema: { params: IdParamsSchema } }, async (req) => {
+    app.post('/api/interests/:id/taste/resync', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUserWithFeature(ctx, req, 'interests');
-      return seedOf(s.user.id, req.params.id);
+      await resyncInterestTaste(ctx, s.user, req.params.id);
+      return OkResponseSchema.parse({ ok: true });
     });
 
-    app.put(
-      '/api/projects/:id/taste-seed',
-      { schema: { params: IdParamsSchema, body: TasteSeedRequestSchema } },
+    app.get('/api/interests/:id/agents/eligible', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUserWithFeature(ctx, req, 'interests');
+      const r = await eligibleAgents(ctx.pool, s.user.id, req.params.id, ctx.clock.now());
+      if (!r) throw notFound('interest not found');
+      return EligibleAgentsResponseSchema.parse(r);
+    });
+
+    app.post(
+      '/api/interests/:id/members',
+      { schema: { params: IdParamsSchema, body: InterestMemberRequestSchema } },
       async (req) => {
         const s = await requireUserWithFeature(ctx, req, 'interests');
-        await setTasteSeed(ctx, s.user, req.params.id, req.body.rules);
-        return seedOf(s.user.id, req.params.id);
+        await shareInterest(ctx, s.user, req.params.id, req.body.userId);
+        return OkResponseSchema.parse({ ok: true });
       },
     );
 
-    app.post('/api/projects/:id/taste-seed/resync', { schema: { params: IdParamsSchema } }, async (req) => {
-      const s = await requireUserWithFeature(ctx, req, 'interests');
-      await resyncTasteSeed(ctx, s.user, req.params.id);
-      return seedOf(s.user.id, req.params.id);
-    });
+    app.delete(
+      '/api/interests/:id/members/:userId',
+      { schema: { params: MemberParamsSchema } },
+      async (req) => {
+        const s = await requireUserWithFeature(ctx, req, 'interests');
+        await unshareInterest(ctx, s.user, req.params.id, req.params.userId);
+        return OkResponseSchema.parse({ ok: true });
+      },
+    );
   };
 }

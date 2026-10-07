@@ -43,7 +43,7 @@ export async function carrierProject(
   if (projectId) return projectId;
   const p = await one<{ id: string }>(
     db,
-    `SELECT id FROM projects WHERE org_id=$1 AND status='active' ORDER BY created_at, id LIMIT 1`,
+    `SELECT id FROM projects WHERE org_id=$1 AND status='active' AND kind='project' ORDER BY created_at, id LIMIT 1`,
     [orgId],
   );
   return p?.id ?? null;
