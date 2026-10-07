@@ -149,3 +149,15 @@ export const ALLOWER = {
   name: 'E2E Allower',
   password: 'allower-password-12345',
 };
+
+/** Project convert spec (docs/design/restructure.md Part C): an owner with a runner, and a guest on one shared research project. */
+export const CONVERTER = {
+  email: 'converter@e2e.test',
+  name: 'E2E Converter',
+  password: 'converter-password-12345',
+};
+export const CONVGUEST = {
+  email: 'convguest@e2e.test',
+  name: 'E2E ConvGuest',
+  password: 'convguest-password-12345',
+};
