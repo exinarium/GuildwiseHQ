@@ -245,7 +245,10 @@ esac
   S.ids.fakeGh = fakeGh;
   const owner = (n: string) =>
     makeVault(n, { 'README.md': `# ${n} vault\n\nMarkdown notes of Pieter Demo.\n` });
-  owner('org');
+  makeVault('org', {
+    'README.md': '# org vault\n\nMarkdown notes of Pieter Demo.\n',
+    'projects/shoot/PROJECT.md': '# Shooting research\n\nResearch notes about shooting and reloading.\n',
+  });
   owner('project');
 });
 
@@ -298,7 +301,7 @@ step('workstation A, projects, agents', async () => {
   await waitFor(
     'vaults cloned',
     () => q<any>('SELECT local_path FROM workstation_vaults'),
-    (r) => r.length >= 3 && r.every((x) => !!x.local_path),
+    (r) => r.length >= 2 && r.every((x) => !!x.local_path),
     60_000,
   );
   const devops = (await (await p.get('/api/agents')).json()).agents.find((a: any) => a.isDevops);
