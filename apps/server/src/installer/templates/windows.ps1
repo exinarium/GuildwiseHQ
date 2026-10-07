@@ -100,7 +100,7 @@ if (-not (Test-Admin)) {
   Write-Host "$AppName needs administrator rights once, to turn on Windows' Linux support (WSL2). Windows will ask you to allow it."
   Invoke-WebRequest -UseBasicParsing -Uri $ScriptUrl -OutFile $SelfPath -ErrorAction Stop
   Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$SelfPath`"")
-  exit 0
+  return
 }
 if (-not (Test-Path $SelfPath) -or $MyInvocation.MyCommand.Path -ne $SelfPath) {
   try { Invoke-WebRequest -UseBasicParsing -Uri $ScriptUrl -OutFile $SelfPath } catch { }
@@ -185,10 +185,17 @@ $wslConf = @"
 set -e
 f=/etc/wsl.conf
 touch "`$f"
-if grep -Eq '^[[:space:]]*systemd[[:space:]]*=[[:space:]]*true' "`$f"; then echo unchanged; exit 0; fi
-sed -i '/^[[:space:]]*systemd[[:space:]]*=/d' "`$f"
-if grep -q '^\[boot\]' "`$f"; then sed -i '/^\[boot\]/a systemd=true' "`$f"; else printf '\n[boot]\nsystemd=true\n' >> "`$f"; fi
-echo changed
+changed=0
+if ! grep -Eq '^[[:space:]]*systemd[[:space:]]*=[[:space:]]*true' "`$f"; then
+  sed -i '/^[[:space:]]*systemd[[:space:]]*=/d' "`$f"
+  if grep -q '^\[boot\]' "`$f"; then sed -i '/^\[boot\]/a systemd=true' "`$f"; else printf '\n[boot]\nsystemd=true\n' >> "`$f"; fi
+  changed=1
+fi
+if ! grep -Eq '^[[:space:]]*default[[:space:]]*=' "`$f"; then
+  printf '\n[user]\ndefault=%s\n' '$LinuxUser' >> "`$f"
+  changed=1
+fi
+if [ "`$changed" = 1 ]; then echo changed; else echo unchanged; fi
 "@
 $r = Invoke-WslBash $Distro 'root' $wslConf
 if ($r.Text -notmatch 'changed|unchanged') { Stop-Install "Could not set systemd=true in /etc/wsl.conf: $($r.Text)" 'Run the command again.' }
@@ -196,7 +203,7 @@ if ($r.Text -match 'changed' -and $r.Text -notmatch 'unchanged') {
   & wsl.exe --terminate $Distro 2>&1 | Out-Null
   Write-Info 'systemd switched on; Ubuntu is restarting.'
 }
-Complete-Step 'systemd=true is set in /etc/wsl.conf'
+Complete-Step 'systemd=true and the default user are set in /etc/wsl.conf'
 
 # ---- 5. keep WSL alive (.wslconfig) -----------------------------------------------------------------------------------------
 Start-Step 'Keeping Ubuntu running in the background'
