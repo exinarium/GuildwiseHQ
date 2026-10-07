@@ -1,13 +1,21 @@
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
+import { migrateRestructure } from './restructure.ts';
 
 export { type DataMigrationEnv, formatPlan, migrateOrgs, ORGS_MIGRATION, planOrgMigration } from './orgs.ts';
+export {
+  formatRestructurePlan,
+  migrateRestructure,
+  planRestructure,
+  RESTRUCTURE_MIGRATION,
+} from './restructure.ts';
 
 /**
  * Boot data migrations, run after the SQL migrations and before the dispatcher, scheduler and HTTP listener
- * (docs/design/organizations.md section 2.3). Each is idempotent. The restructure adds its own after `orgs-2026-10`.
+ * (docs/design/organizations.md section 2.3). Each is idempotent. `restructure-2026-10` follows `orgs-2026-10`.
  */
 export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv) => Promise<unknown> }> = [
   { name: 'orgs-2026-10', run: (env) => migrateOrgs(env) },
+  { name: 'restructure-2026-10', run: (env) => migrateRestructure(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

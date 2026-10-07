@@ -223,6 +223,8 @@ export const RunInterestRequestSchema = z.object({
   question: z.string().trim().min(1).max(2000).optional(),
   depth: z.enum(['quick', 'standard', 'deep']).optional(),
   sourceItemId: z.uuid().optional(),
+  /** Mock runtime only (`AOM_MOCK_UI`): the scripted pages or claims the mock agents work from (`mockFeed`, `mockResearch`, `mock`). */
+  mock: z.record(z.string(), z.unknown()).optional(),
 });
 export type RunInterestRequest = z.infer<typeof RunInterestRequestSchema>;
 export const RunInterestResponseSchema = z.object({ runId: z.uuid(), cardId: z.uuid(), ref: z.string() });

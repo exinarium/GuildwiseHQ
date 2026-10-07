@@ -125,20 +125,19 @@ The platform administrator signs in at the same address and sees only the **Plat
 
 1. Go to **Projects** (as Owner or Admin; Members do not see the button)
 2. Click **Create project**
-3. Enter a name and key (e.g., `WEB`, `DOCS`), type (Code/Research/Feed), and domain (Work/Personal)
-4. For a Code project, add repositories (by URL or by linking to one already scanned on a workstation). Research and Feed projects need no repository
+3. Enter a name and key (e.g., `WEB`, `DOCS`), type (Code or Research, or a custom workflow of your organization), and domain (Work/Personal). Following a topic? Create an [interest](#interests) instead
+4. For a Code project, add repositories (by URL or by linking to one already scanned on a workstation). A Research project needs no repository
 5. For work domain projects, set up vaults (work/personal folders in your knowledge system)
 6. Click **Create**
 
 ### Project types and workflows
 
-Research and Feed projects need no repository and have no testing or regression controls: their project settings show no Repositories section, E2E or architectural globs, or large-merge setting, and their boards have no Regression button. Results go to the project's vault folder. (A research or feed project that already has repositories still lists them so you can remove them.) A project in the research stage takes no repositories at all until you convert it (see below), and repository hygiene ignores it.
+Research projects need no repository and have no testing or regression controls: their project settings show no Repositories section, E2E or architectural globs, or large-merge setting, and their boards have no Regression button. Results go to the project's vault folder. (A research project that already has repositories still lists them so you can remove them.) A project in the research stage takes no repositories at all until you convert it (see below), and repository hygiene ignores it.
 
 | Type | Stages | Typical roles | When to use |
 | --- | --- | --- | --- |
 | **Code** | Spec → Build → Review → Test → Finalize | BA/architect, builder, reviewer, tester, technical writer | Feature work, bug fixes, refactors, documentation |
 | **Research** | Question → Research → Fact-check → Publish | Researcher, checker | Deep dives, investigations, knowledge base articles |
-| **Feed** | Scheduled → Filter → Digest | Scout, curator | Regular scans, curated digests, newsletter items |
 
 ### Research is a stage: research cards in any project, and converting a project
 
@@ -557,9 +556,10 @@ At **08:00 on your clock** the BA posts one **Floor report** on your desk (only 
 1. phases waiting or open, and the ones held open by late bug cards;
 2. stuck, blocked and backing-off cards;
 3. repeated approvals;
-4. failures;
+4. failures, including interests that cannot run;
 5. DevOps requests that are open;
-6. what the BA resolved itself without bothering you.
+6. what the BA resolved itself without bothering you;
+7. **Interests highlights**: a count line (how many interests, how many runs since the last report, how many items were delivered and how many are unrated) and the top items of each interest since the last report. Only what a delivery already put on your desk is counted, so the report respects each interest's delivery schedule and the daily quiet cap.
 
 Open **The facts behind this report** for the same lists straight from the server, with links. Every report links to your standing **BA reports** chat (one per organization): ask "why?" there. The desk item stays the record; the chat holds the discussion. With no BA available (none hired, or none online for 15 minutes) the server posts the same report from a template, and passes items on unchanged.
 
@@ -586,53 +586,74 @@ Results show matching entries with context. Agents can search the ledger during 
 
 ## Interests
 
-The **Interests** page (side menu, Knowledge: Interests) is the one place that says what you care about, across all your feed and research projects. An interest is a topic with a name and a description. It owns the feed schedule that scans for it, it prefills research cards about it, it carries your explicit taste rules, and it shows what came of it: scans, items, your ratings and published notes.
+The **Interests** page (side menu, Knowledge: Interests) is the one place that says what you follow. An interest is a topic with a name and a description. It scans on its own **run schedule**, puts what it found on your desk on its own **delivery schedule**, prefills research about it, carries its own taste rules, and keeps a **run log** of everything it did. Interests belong to the organization. The project behind each interest is hidden: you never see it in project lists, pickers, the board switcher, the Research tab or the metrics, and the card refs of its runs use its short key (for example `RUSTAS-41`).
 
-Anyone who is a member of the projects an interest links to can create, edit, pause and delete it, and set its taste rules (the same "any member" rule as phases). Someone who is a member of only one of its two projects can see it, run it and research it but not edit it.
+### Who may see and change an interest
 
-### Reading the page
+- **Seeing**: anyone who is an active member of the project behind it. An Owner or Admin of the organization sees every interest. An interest that a Member or a guest creates is private to them (and to the Owner and Admins) until an Owner or Admin shares it (**Overview**, then **Share with**).
+- **Changing** (edit, pause, run, research, archive, delete, taste rules): its creator, or someone whose role in the organization is the same or higher (Owner, then Admin, then Member, then Guest). The role the creator has now counts; if they left the organization, the role they had when they created it counts. Everyone else can read it.
+- **Creating**: any member, and guests too (a guest creates in the organization of a project that was shared with them, for example by choosing that organization in the switcher first).
 
-Each interest is a card with its name, whether it is active or paused, its feed and research project, and its sub-category. Below that:
+### The list
 
-- **The scan**: when it runs ("Daily at 07:00 (Africa/Johannesburg)"), how many hours back it looks, how many items the digest holds, or "Manual only".
-- **The last scan** (a link to its card, with the number of items) and the next one.
-- **Ratings**: how many items you rated useful, irrelevant and boring, and how many are still unrated. On a phone this is the compact `U12 I3 B5 ?2`.
-- **Notes**: how many research notes were published for it and how many research cards are still open.
-- A red **Cannot run** badge, with the reason, when its schedule keeps failing (it retries with growing pauses, like any schedule).
+Each interest is a card with a **tick** (Active or Paused: pausing stops its runs and deliveries), its name and vault folder (`interests/rust-async`), and below that:
 
-Buttons: **Run now** (scan once, straight away), **Research this**, **Digests** (the feed page filtered to this interest), **Notes** (recent scans and published notes), **Pause/Resume** and **Edit**. The filters above the list narrow it by project, status and search text.
+- **The run schedule**: when it scans ("Daily at 07:00 (Africa/Johannesburg)"), the most items a run may publish, or "Manual only", and when it runs next.
+- **The delivery schedule**: when results reach you ("Weekdays at 07:00", or "As soon as a run finishes"), and the next delivery. A badge says how many items are **waiting for delivery**.
+- **The last run**: when, how it ended, how many items it found and published, with a link to its card.
+- **Ratings**: useful, irrelevant, boring and unrated (on a phone the compact `U12 I3 B5 ?2`).
+- A red **Cannot run** badge, with the reason, when it keeps failing (it retries with growing pauses and opens a notice on your desk after the third try).
+
+Buttons: **Run scan**, **Research this**, **Run log**, **Digest** and **Open**. The filters above the list narrow it by status and text; **Show archived** lists the archived ones.
+
+### The interest page
+
+**Open** shows one interest with five tabs.
+
+- **Overview**: the schedules, the last run, what waits for delivery, the notes research published, and who can see the interest.
+- **Run log**: every scan and research run, newest first. A row says when, what started it (the schedule, you, or a migration), how it ended, how many items it **found** and **published** (and how many it dropped as duplicates or because the maximum was reached), the ratings of its items, the card and how long it took. Open a row to see its items with their transcript status, the notes a research run published, and the agents that worked on it (with a link to the card for their shift logs). A research run shows its note. Older runs load with **Load older runs**. Under the log, **Deliveries** lists each time items reached your desk.
+- **Digest**: the running list of everything that was delivered to you, newest first, with the rating buttons and **Research this item**.
+- **Settings**: the form below, plus the preferred agents.
+- **Taste**: your explicit rules (below) and, read only, what your ratings taught.
 
 ### Creating and editing an interest
 
-**+ New** (or **Edit**) opens a panel on the right (a full-screen sheet on a phone). Fields:
+**+ New interest** opens a dialog (a full screen sheet on a phone). The same fields are on the **Settings** tab:
 
-- **Name**: a short label. It is also the feed topic and the title of the scan cards.
-- **Description**: markdown. The angle, what to include or leave out, the level. The scout and curator follow this first.
-- **Feed project**: the feed project that scans for it, or **+ New feed project** (a key, a name and a domain; it uses the Feed workflow and the default vault folder). Leave it empty for a research-only interest.
-- **Research project**: where "Research this" creates cards. Optional.
+- **Name** and **Description** (markdown: the angle, what to include or leave out, the level). The scout and curator follow the description first.
+- **Vault**: Personal or Work. It decides where the interest's files live and which vault the agents use. **It is fixed once the interest has run**; create a new interest instead.
 - **Sub-category** and **Preferred sites**.
-- **Scan**: a preset or a custom cron expression, the time zone, the **window** in hours (empty: derived from the cadence, 1 hour for hourly, 24 for daily and weekdays, 168 for weekly), **max items** (the best N overall, whatever the kind) and **Manual only**.
-- **Taste rules for this interest**, and **Status** (Active or Paused).
+- **What to collect**: article, video and podcast, and the **max total items** per run (the best N across all kinds together).
+- **Run schedule**: a preset ("Daily at 07:00", "Weekdays at 07:00", "Every hour", ...) or your own five-field cron expression, the time zone, **Look back (hours)** (empty means it follows the schedule: 1 hour for hourly, 24 for daily and weekdays, 168 for weekly), or **Only when I press Run now**.
+- **Delivery schedule**: **As one digest at set times** (the default for a new interest: weekdays at 07:00) or **As soon as a run finishes**. With a delivery time, the items every run found since the last delivery wait and arrive together as one digest on your desk. Nothing is pushed in between, and runs can happen as often as they like. It is also what the daily floor report and the interests e-mail digest count.
+- **Preferred agents** (Settings tab only): a scout, curator, researcher and fact checker. This is a **soft preference**: the assigned agent is offered the run first, but any qualified agent that is allowed to work takes the run at once. Nobody waits for the preferred agent. An agent that you restricted to certain projects (on the agent's **Projects** dialog) still works an interest it is assigned to.
 
-An interest always has exactly one feed schedule when it has a feed project. You change the schedule by changing the interest: the description, sites, window and max items rewrite the schedule's card template; a new cadence recomputes the next run; pausing (or Manual only) disables it and resuming gives it a fresh next run. Moving the interest to another feed project replaces its schedule; removing the feed project deletes it. Deleting an interest asks whether to **keep the schedule as a plain schedule**.
+### The daily quiet cap
 
-On the **Schedules** page a schedule that belongs to an interest says "Managed by interest ..." with a link to it. Its Edit, Pause and Delete are gone (the server refuses them with a 409); **Run now** still works.
-
-### Adopting the schedules you already have
-
-If you have feed schedules that are not interests, a banner says so ("3 feed schedules are not interests yet") and the **Adopt** button lists them. **Adopt selected** makes one interest per schedule, named after its topic (a duplicate name gets " (2)"), and leaves the schedule as it is; the first time you edit the interest its template is normalized. Earlier scans of an adopted schedule count for the interest. A schedule that cannot be adopted (for instance its project is archived) shows the reason next to it; the others are adopted anyway.
+At the bottom of the Interests page, **Daily quiet cap** sets the most digest items that may reach your desk in a day across all interests (the last 24 hours are counted). Items over the cap stay held and arrive with the next delivery that has room. The Owner and Admins change it; everyone sees it. **Deliver now** on an interest page puts what waits on your desk ahead of the schedule (still within the cap).
 
 ### Research this
 
-**Research this** opens a research card prefilled from the interest: the title ("Research: Rust async"), the question ("What should I know now about Rust async?"), the description as the scope, the sub-category and the sites. Edit anything, then **Create and queue** (the card goes to the researcher at once) or **Save as draft**. If the interest has no research project, choose one; tick "Remember this project for the interest" to keep it. The published note appears under the interest's **Notes**.
+Research is **on demand only**. **Research this**, on an interest or on one item of its digest, starts a research run: a researcher and then a fact checker, with the question and the depth ("Quick", "Standard" or "Deep") you choose. The note is published in the interest's folder under `notes/` (or its sub-category folder), shows under **Notes** on the Overview, and the run appears in the run log. **Research this item** starts from that item's page.
 
 ### Taste rules
 
-Besides the rules that grow from your ratings, you can write **explicit taste rules**: a sentence each, such as "Skip beginner tutorials". The curators follow them first and they win when a rating line disagrees. A rule written as `skip "Exact title"` drops the item with exactly that title.
+Besides the rules that grow from your ratings, you can write **explicit taste rules** on the **Taste** tab: a sentence each, such as "Skip beginner tutorials". The curators follow them first and they win when a rating line disagrees. A rule written as `skip "Exact title"` drops the item with exactly that title. The same role rule decides who may change them.
 
-- Rules are stored per feed project. A rule set in an interest's panel only reaches scans of that interest; a rule in **Project taste rules** (the panel at the bottom of the page, **Edit taste rules**) reaches every scan of the project.
-- They are written to the project's `taste.md` in your vault as a single block under the heading **Explicit rules**, above the rating lines (headed by comment markers that say it is managed by the site). **Edits you make inside that block in Obsidian are overwritten**; the rating lines below it stay yours to edit. If the project has no vault, or no workstation holds a clone, nothing is written and the panel says so; the curators still get the rules.
-- The `taste.md` preview on the feed page lists explicit rules first.
+- The rules belong to the interest: a rule only reaches runs of that interest.
+- They are written to `interests/<folder>/taste.md` in your vault as a single block under the heading **Explicit rules**, above the rating lines (headed by comment markers that say it is managed by the site). **Edits you make inside that block in Obsidian are overwritten**; the rating lines below it stay yours to edit. **Resync taste.md** writes the saved rules again. If the interest has no vault, or no workstation holds a clone, nothing is written; the curators still get the rules.
+
+### The interest's folder in your vault
+
+`interests/<name>/` holds `INTEREST.md` (its settings, rewritten by the site), `feed.md` (the running list of what was delivered, oldest to newest), `taste.md`, `runs.md` (one line per finished run), `transcripts/` and `notes/`.
+
+### Archive, restore and delete
+
+**Archive** (the menu on the interest page) stops its runs, cancels the ones in progress and hides it; **Restore** brings it back with a fresh schedule. **Delete permanently** is possible only for an archived interest and asks you to type its folder name: it removes its cards, items, seen-list and run log from the site. The vault folder is never touched.
+
+### Coming from feed projects
+
+If your installation had feed projects, they became interests the first time the new version started (see the deploy notes). A feed project is now the hidden project behind its first interest, and its other interests and feed schedules became interests of their own, with the seen-list, transcripts, members and taste rules copied. Past scans appear in each interest's run log (marked **migrated**), with their ratings. The feed schedules were removed: their cadence lives on as each interest's run schedule. The vault folders moved to `interests/<name>/`. A note on your desk lists what changed. The old addresses (`/p/KEY/feed`) lead to the interest.
 
 ## Schedules and feeds
 
@@ -657,7 +678,7 @@ A schedule is **a trigger and one action**. The **Schedules** page (side menu, W
 - **Ask the BA**: free-text instructions. The BA reads (ledger, desk, vault, repositories; it changes nothing) and posts one report on your desk, with the BA chat open if you chose that. If no BA is available the desk gets a notice with your instructions instead.
 - **Poll GitHub or Jira issues**: new issues of a repository (or a JQL filter) go into **intake** with the BA, one conversation each. An issue is taken once.
 - **Send a webhook**: POST JSON to a URL. Formats: generic (n8n, Zapier, your own code), Slack incoming webhook and Microsoft Teams (both get a formatted `text`). You may append the floor report or a project summary. Each request is signed: the header `X-AOM-Signature` is `sha256=` plus the HMAC-SHA256 of `<X-AOM-Timestamp>.<body>` with the schedule's secret, which is shown **once** when you create it (**New secret** replaces it). A failed delivery (a 5xx, 429 or a network error) is retried after 1 minute, 5 minutes, 30 minutes and 2 hours, five tries in all; another 4xx answer is final. Addresses on this machine or a private network are refused unless the deployment allows them.
-- **E-mail a digest**: the floor report (the whole organization) or a project summary, sent at the time you set from the site's mail account. A failing mail server is retried like a webhook. Interest digests will join once interests move to the organization.
+- **E-mail a digest**: the floor report (the whole organization) or a project summary, sent at the time you set from the site's mail account. A failing mail server is retried like a webhook. A third digest, **Interests**, lists the top items each interest delivered to your desk in the last 24 hours, with the interests that cannot run.
 
 **History.** **History** on a schedule shows every run: when, what triggered it, what it did, a link to the card or the intakes it made, and the reason when it failed. For a webhook or an e-mail the **Deliveries** view is the delivery log with every try, its HTTP status and its duration. **Send test** (webhooks and e-mails) sends one signed test delivery now; it is logged but never retried and is not counted as a run of the schedule.
 
@@ -665,33 +686,20 @@ A schedule is **a trigger and one action**. The **Schedules** page (side menu, W
 
 **Who may do what.** A schedule tied to a project can be created, changed and run by any member of that project, guests on a shared project included. A schedule that acts for the whole organization (a BA task or an integration without a project, repository hygiene, the floor report digest) is for the Owner and Admins only; others see a note and must choose a project. A schedule that runs on a workstation (DevOps, issue polling) needs the workstation's user to create or change it, and it runs as the person who created it. A member may e-mail a digest to their own address only. If its owner loses access to the project, the schedule stops and a notice appears on the desk. A suspended organization skips its schedules and records it.
 
-**Feeds.** New feed schedules are not created here any more: feeds are [Interests](#interests). Feed schedules that already exist keep running and stay listed (those that belong to an interest are changed on the Interests page).
+**Feeds.** Feeds are [Interests](#interests) now: you cannot create a feed schedule, and an interest has no schedule row of its own. Its run and delivery schedules are part of the interest.
 
-### Feeds
+### How a scan works
 
-Feed projects run curated scans (e.g., daily news, AI articles, research opportunities) and post digests.
+A run of an interest is a feed card: a **scout** collects candidates (a few more than the maximum), then a **curator** picks the best N overall, whatever their kind, and posts the digest. The server keeps only items the scout really opened, drops duplicates (a seen URL, or the same story from another source) and applies the maximum and the kinds the interest wants. What reaches you follows the delivery schedule.
 
-1. Create a project with type **Feed**
-2. Add a **Schedule** to run the scout (scan for items). The form has:
-   - **Topic**: a short label for the feed
-   - **Description**: markdown, optional but encouraged. Say in detail what you want: the angle, what to include or leave out, the level. The scout and curator treat it as the main statement of what you want, ahead of the topic. Schedules created before this field existed keep working without it
-   - **Max items**: one number (default 10). The curator ranks everything the scout found, whatever the kind (article, video, podcast), and posts the best N overall. Older schedules that set a maximum per kind are read as the sum of their numbers
-   - **Preferred sites**: searched first
-3. The scout collects a few more candidates than Max items; the curator picks the best and appends them to the project feed file in your vault
-4. You rate digest items (useful, irrelevant, boring) and add your taste preferences
-5. Future curators learn from your ratings
+1. Rate digest items on the desk or on the interest's **Digest** tab (useful, irrelevant, boring) and add your taste rules.
+2. The ratings become rule lines in the interest's `taste.md`. Future curators read it.
 
-Feed rules (added to vault):
-- General search patterns
-- Preferred sources (prioritize these)
-- Deduplication
-- One top-N limit across kinds
-
-**Transcripts for videos and podcasts.** Every video or podcast in a digest comes with its transcript so you can read it quickly instead of watching it. On the desk rating item and on the feed project page each such item has a **Transcript** button that shows the text (or "No transcript available"). The transcript is also saved in your vault as `projects/<name>/transcripts/<date>-<title>.md`, and the curator writes the item's summary from it. Research cards do the same for video and podcast sources: the transcript is saved in the same folder, the fact checker verifies claims against it, and the published note links it.
+**Transcripts for videos and podcasts.** Every video or podcast in a digest comes with its transcript so you can read it quickly instead of watching it. On the desk rating item and in the run log each such item has a **Transcript** view that shows the text (or "No transcript available"). The transcript is also saved in your vault as `interests/<name>/transcripts/<date>-<title>.md`, and the curator writes the item's summary from it. Research runs do the same for video and podcast sources: the transcript is saved in the same folder, the fact checker verifies claims against it, and the published note links it.
 
 Transcripts for YouTube and other video sites need **yt-dlp** on the workstation. If it is missing, the scout reports "transcript tool missing: yt-dlp" and asks the DevOps engineer to install it (you can also ask DevOps yourself: "install yt-dlp"); `aom-runner doctor` lists it as an optional tool. Podcasts use the transcript the episode page or feed publishes, when there is one. Where no transcript exists the item shows "No transcript available"; text is never made up.
 
-See `docs/SPEC.md` §5 for the full feed design.
+See `docs/SPEC.md` for the feed and interest rules.
 
 ## The HR board
 

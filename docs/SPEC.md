@@ -270,20 +270,20 @@ Each role tests at its own level and may change only the tests it owns: builders
 
 ## Research and feeds
 
-Research and feed projects run on the same board and desk as code; what changes is the pipeline and what "done" means: a fact-checked note in the vault, or a digest the manager rates.
+Research projects and interests (the feeds) run on the same board and desk as code; what changes is the pipeline and what "done" means: a fact-checked note in the vault, or a digest the manager rates. A feed is an **interest**: there are no feed projects (the project behind an interest is hidden) and no feed schedules.
 
 **Research cards** carry a question, scope, depth, and the sub-category they belong to. A researcher gathers and writes, a checker verifies claims against the sources (for a video or podcast source, against its transcript, saved in the same `transcripts/` folder and linked from the note), and the result is published to the project's vault folder with citations. Open questions go to the desk like any other.
 
 **Research is a stage, and projects convert.** A research card can be created in any project: the card type picks the research workflow, whatever workflow the project runs, and the board shows the research columns next to the project's own while such cards are open. A project that is only researching (the research workflow) has no repositories. When the questions are answered, the organization's Owner or an Admin converts it to a delivery project (usually Code, or any custom workflow; any workflow converts to any other): they add or request the repositories (a new GitHub repository goes through the same desk approval as `aom repo create`), choose for each open card the new workflow cannot place whether it is kept or cancelled ("Project converted"), and the published notes are listed in `PROJECT.md` of the project's vault folder so every agent reads them. The project remembers that it started as research and keeps a Research tab (notes, citations, transcripts). The DevOps engineer asks which branch is the working branch of each repository the conversion added.
 
-**Feeds** are recurring tasks that search the last 24 hours, daily by default; the manager can also run any feed immediately from the board. Each run emits a card; a scout collects candidates and a curator picks the best and appends them to the project's list.
+**Feeds** are the runs of an interest: it searches the last 24 hours on its run schedule (daily by default), or when the manager presses Run now. Each run emits a card; a scout collects candidates and a curator picks the best and appends them to the interest's running list. What reaches the manager follows the interest's delivery schedule (below).
 
 **Feed and research rules**
 
 - Searches are general for the topic; a card may list preferred sites, searched first, and otherwise the agent chooses where to look
-- Each card sets one maximum number of items (default 10); the curator ranks everything across kinds (article, video, podcast) and logs the best N overall, and fewer is fine. Older cards that set a maximum per kind are read as the sum of their values
+- Each interest sets one maximum number of items per run (default 10) and the kinds it wants; the curator ranks everything across the wanted kinds (article, video, podcast) and logs the best N overall, and fewer is fine. Older cards that set a maximum per kind are read as the sum of their values
 - A feed card has a short topic label and an optional description (markdown) saying in detail what the manager wants; the agents treat the description as the primary statement of intent
-- Videos and podcasts come with a transcript: the scout fetches it (`aom transcript`, run by the runner), it is saved in the vault under `projects/<name>/transcripts/` and shown on the site, and the curator writes the summary from it. When there is none the item says so; text is never invented
+- Videos and podcasts come with a transcript: the scout fetches it (`aom transcript`, run by the runner), it is saved in the vault under `interests/<slug>/transcripts/` and shown on the site, and the curator writes the summary from it. When there is none the item says so; text is never invented
 - Results append to the project's running list, ordered oldest to newest; a new run never drops, rewrites or reorders earlier entries
 - No duplicates: a candidate is skipped if its URL is on the seen-list or it is the same story already listed from another source
 - No fabrication: every logged item is a real page the agent opened during the run, with title, source, date and a summary written from that page; if nothing qualifies, the run logs nothing and says so on the card
@@ -291,15 +291,20 @@ Research and feed projects run on the same board and desk as code; what changes 
 **Feedback loop**
 
 - Every digest item gets a quick verdict on the desk: useful, irrelevant, or boring, with an optional reason
-- Verdicts are written to the project's `taste.md` as explicit rules and examples, never an opaque score, so the manager can read and correct them
+- Verdicts are written to the interest's `taste.md` as explicit rules and examples, never an opaque score, so the manager can read and correct them
 - Curators read `taste.md` before filtering and keep a seen-list by URL so nothing repeats
 - A curator may propose a new taste rule from a pattern of verdicts; it lands on the desk as an approval item
-- The manager can also write **explicit taste rules** (per feed project, optionally limited to one interest) on the Interests page. They are kept on the site, mirrored into `taste.md` as a managed block above the rating lines, and put in front of the curator in its brief; they come first and win when a rating line disagrees
+- The manager can also write **explicit taste rules**, built into each interest, on its Taste tab. They are kept on the site, mirrored into `taste.md` as a managed block above the rating lines, and put in front of the curator in its brief; they come first and win when a rating line disagrees. The same role rule as the interest decides who may change them
 
 **Interests**
 
-- An **interest** is the single statement of a topic the manager cares about, across all feed and research projects: a name, a description, a feed project and/or a research project, a sub-category, preferred sites and a scan cadence (cron, time zone, window, maximum items, or manual only). It owns the one feed schedule that scans for it (that schedule is changed through the interest only), it prefills research cards ("Research this") and shows what came of it: scans, items, ratings and published notes
-- Any member of the projects an interest links to may create, edit, pause and delete it and set its taste rules; existing feed schedules can be adopted into interests, explicitly and never automatically
+- An **interest** is an organization-level statement of a topic: a name, a description, a vault (work or personal, fixed once it has run), a sub-category, preferred sites, the kinds it wants (article, video, podcast), a **maximum total number of items** per run across the kinds, an active/paused tick, and its taste rules. Each interest is backed by a **hidden project** (`kind interest`) that carries its feed and research cards, its seen-list, transcripts and vault folder `interests/<slug>/`; the project never appears in project lists, pickers, the board switcher, the Research tab or the metrics
+- **Run schedule and delivery schedule are separate.** The run schedule (cron or presets, time-zone aware, or manual only) says when scans happen. The **delivery schedule** says when results reach the manager: new items are held and delivered as one digest at the chosen times (for example weekdays 07:00), with nothing pushed in between, or as soon as a run finishes. An organization-level **quiet cap** limits the digest items that reach the desk per day (the last 24 hours) across all interests; items over it stay held for the next delivery. Delivery is what lands on the desk and in the floor report (an **Interests highlights** section, a count line, and the failing interests under Failures) and what the interests e-mail digest lists
+- The manager may assign a preferred scout, curator, researcher and fact checker. It is a **soft preference only**: there is no claim window, and any qualified, allowed agent takes a run at once; an agent restricted to some projects still works an interest it is assigned to
+- A **run log** records every scan and research run: its trigger, status, how many items it found, published and dropped, and its card, with the ratings, transcripts and shift logs joined when read
+- **Research is on demand only**: "Research this" on an interest or on one of its items starts a research run; notes are published under `notes/` of the interest's folder
+- **Role rule**: any active member of the interest's project sees it. Editing, deleting, pausing, running and changing its taste rules need a role in the organization at or above the creator's (Owner, then Admin, then Member, then Guest; the creator's current role counts, the stored one if they left). A guest may create any interest, private to them unless shared; the Owner and Admins share it
+- Feed schedules no longer exist. A one-off migration (`restructure-2026-10`) turns every feed project into the backing project of its first interest, and its other interests and unadopted feed schedules into interests of their own, copying the seen-list, transcripts, members and taste rules
 
 ## External systems boundary
 

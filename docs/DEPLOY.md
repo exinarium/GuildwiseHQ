@@ -124,6 +124,16 @@ Migrations run on boot. Downtime is minimal (seconds).
 4. Create the platform account (step 3 above) with a new email.
 5. The old `/api/admin/*` endpoints answer 410 and point to their replacements.
 
+### Upgrading from before org-level interests (October 2026)
+
+Feed projects and feed schedules are replaced by **interests** (`docs/design/restructure.md` Part D). The change is one-way, so:
+
+1. **Back up the database and the vaults** first (see Backups). The migration moves vault folders (`projects/<folder>/` becomes `interests/<name>/`) with `git mv` and a commit on the first runner that holds each vault; the history is kept, but take a copy of the vault repositories anyway.
+2. Optional preview, which reads and prints what would happen and writes nothing: `docker compose -f docker-compose.prod.yml exec app node dist/restructure-migrate.mjs --dry-run`. It lists each feed project with its interests, unadopted feed schedules, cards, items, ratings and transcripts, and where its vault folder moves.
+3. Deploy. On boot the schema migration `1316_interests_org` runs, then the data migration `restructure-2026-10` (after `orgs-2026-10`). For each feed project it makes the project the hidden backing project of its first interest and gives its other interests and unadopted feed schedules new hidden projects (members, seen-list, transcripts and taste rules copied), removes the feed schedules, links past scans to their interest (they appear in the run log as "migrated") and posts one desk note to each Owner. The vault commands (`vault.move`, then the `INTEREST.md` and taste writes) are queued and run when a workstation that holds the vault is online; until then agents read an empty folder, so keep a runner connected during the upgrade. The migration is idempotent: running it again (or `restructure-migrate.mjs`) finds nothing to do. `AOM_DATA_MIGRATIONS=false` skips it (it then runs the next time the flag is on).
+4. Interests default to **immediate delivery** after migration, so nothing about what reaches the desk changes until you choose delivery times. Set a **daily quiet cap** on the Interests page if you want one.
+5. The old addresses `/p/<KEY>/feed` and the board of a feed project redirect to the interest. `AOM_LEGACY_FEED_SCHEDULES` is gone.
+
 ## Environment variables (server)
 
 Set these in `.env` before starting the server. All have defaults suitable for development or HTTPS deployment.

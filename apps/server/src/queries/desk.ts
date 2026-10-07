@@ -19,7 +19,8 @@ SELECT d.*, c.ref AS card_ref, c.title AS card_title, c.stage AS card_stage, c.s
        c.owner_user_id AS card_owner, c.decision_policy AS card_policy, p.key AS project_key, p.merge_large_without_approval AS project_merge_large_ok,
        a.name AS agent_name, u.display_name AS answered_by_name, aa.name AS answered_by_agent_name,
        u.avatar_kind, u.avatar_seed, u.avatar_style, u.avatar_image_id,
-       (SELECT i.id FROM intakes i WHERE i.mapping_desk_item_id = d.id) AS intake_id
+       (SELECT i.id FROM intakes i WHERE i.mapping_desk_item_id = d.id) AS intake_id,
+       (SELECT json_build_object('id', ii.id, 'name', ii.name) FROM interests ii WHERE ii.project_id = d.project_id AND d.kind = 'rating') AS interest
   FROM desk_items d
   LEFT JOIN cards c ON c.id = d.card_id
   LEFT JOIN projects p ON p.id = d.project_id
@@ -114,6 +115,7 @@ export function toDeskDto(
         }
       : null,
     projectId: r.project_id,
+    ...(r.interest ? { interest: r.interest } : {}),
     dedupEntries: (r.dedup_ledger_ids as string[]).flatMap((id) => {
       const e = dedup.get(id);
       return e ? [e] : [];

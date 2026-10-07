@@ -62,6 +62,12 @@ async function upsert(
   );
 }
 
+/** The id of a migrated run: derived from its card id (a uuid v4 shape), so a rebuild reproduces it. */
+const runIdSql = (cardId: string): string => {
+  const h = `md5('interest-run-' || ${cardId}::text)`;
+  return `(substr(${h},1,8) || '-' || substr(${h},9,4) || '-4' || substr(${h},13,3) || '-8' || substr(${h},17,3) || '-' || substr(${h},21,12))::uuid`;
+};
+
 export const interestProjectors: Record<string, Projector> = {
   InterestCreated: async (tx, e) =>
     upsert(
@@ -132,11 +138,19 @@ export const interestProjectors: Record<string, Projector> = {
             AND (($3::uuid IS NOT NULL AND schedule_id = $3) OR $4::boolean)`,
         [p.interestId, f.projectId, f.scheduleId ?? null, f.untaggedFeedCards],
       );
+      // The cards are the runs: the run id is derived from the card id (deterministic, so a rebuild reproduces it).
+      await exec(
+        tx,
+        `UPDATE cards c SET interest_run_id = ${runIdSql('c.id')}
+          WHERE c.interest_id = $1 AND c.project_id = $2 AND c.card_type IN ('feed','research')
+            AND c.interest_run_id IS NULL`,
+        [p.interestId, f.projectId],
+      );
       await exec(
         tx,
         `INSERT INTO interest_runs (id, interest_id, org_id, kind, trigger, card_id, status, found, published,
            started_at, finished_at)
-         SELECT md5('interest-run-' || c.id::text)::uuid, $1, c.org_id,
+         SELECT ${runIdSql('c.id')}, $1, c.org_id,
                 CASE WHEN c.card_type = 'research' THEN 'research' ELSE 'scan' END, 'migrated', c.id,
                 CASE WHEN c.status = 'cancelled' THEN 'cancelled'
                      WHEN c.status = 'done' THEN

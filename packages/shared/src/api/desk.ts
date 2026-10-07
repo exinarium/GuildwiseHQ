@@ -76,6 +76,8 @@ export const DeskItemDtoSchema = z.object({
   answeredByAgentName: z.string().nullable().optional(),
   /** M5: the items of a digest rating item (`kind 'rating'`), for rating them in place. */
   digestItems: z.array(DigestItemDtoSchema).optional(),
+  /** The interest a digest rating item belongs to (a link to its digest tab). */
+  interest: z.object({ id: z.uuid(), name: z.string() }).nullable().optional(),
   /** Phases: the phase a `phase_proposal`, `phase_done` or `phase_results` item is about (live data). */
   phase: PhaseDeskBlockSchema.nullable().optional(),
   /** Part B: the BA's note on this item (context, how often it was asked, a recommendation). */

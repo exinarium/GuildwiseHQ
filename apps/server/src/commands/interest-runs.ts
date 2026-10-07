@@ -74,6 +74,8 @@ export async function interestRunEvents(
     question?: string | undefined;
     depth?: 'quick' | 'standard' | 'deep' | undefined;
     sourceItem?: { title: string; url: string } | undefined;
+    /** Mock runtime only: scripted fields for the mock agents. */
+    mock?: Record<string, unknown> | undefined;
     /** A cron fire moves the next scan to the next slot after `now`. */
     advance?: boolean;
   } = {},
@@ -102,6 +104,7 @@ export async function interestRunEvents(
       fields: researchRunFields(body, { question: withSource, depth: opts.depth }),
     };
   }
+  if (opts.mock) template = { ...template, fields: { ...template.fields, ...opts.mock } };
   const card = await scheduledCard(tx, project, template as never, undefined, template.title, interest.id, {
     interestRunId: runId,
     origin: 'interest',
@@ -160,6 +163,13 @@ export async function runInterest(
           cardId: open.card_id,
         });
     }
+    if (req.mock && !ctx.config.mockUi)
+      throw badRequest('mock_disabled', 'scripted mock fields are only accepted by the mock runtime');
+    const mock = req.mock
+      ? Object.fromEntries(
+          Object.entries(req.mock).filter(([k]) => ['mock', 'mockFeed', 'mockResearch'].includes(k)),
+        )
+      : undefined;
     let sourceItem: { title: string; url: string } | undefined;
     if (req.sourceItemId) {
       const it = await one(
@@ -176,6 +186,7 @@ export async function runInterest(
       question: req.question,
       depth: req.depth,
       sourceItem,
+      mock,
     });
     await ctx.store.append(run.events, { tx });
     return { runId: run.runId, cardId: run.cardId, ref: run.ref };

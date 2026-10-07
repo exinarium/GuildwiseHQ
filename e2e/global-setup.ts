@@ -79,7 +79,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       'sharer@e2e.test',
       'guest@e2e.test',
       'tester@e2e.test',
-      'feeder@e2e.test',
+      'migrant@e2e.test',
       'scholar@e2e.test',
       'intaker@e2e.test',
       'outboxer@e2e.test',
@@ -115,8 +115,6 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_HYGIENE_SCHEDULE: 'false',
     // schedules: the webhook receivers of the specs listen on this machine
     AOM_WEBHOOK_ALLOW_PRIVATE: 'true',
-    // feeds are interests now and the API refuses new feed schedules; the specs of the old feed flow still make them
-    AOM_LEGACY_FEED_SCHEDULES: 'true',
     LOG_LEVEL: 'info',
   };
   sh(

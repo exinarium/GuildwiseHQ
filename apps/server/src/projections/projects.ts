@@ -210,7 +210,11 @@ export const projectProjectors: Record<string, Projector> = {
   },
   ProjectKindChanged: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectKindChanged'>).payload;
-    await exec(tx, 'UPDATE projects SET kind=$2 WHERE id=$1', [p.projectId, p.kind]);
+    await exec(tx, 'UPDATE projects SET kind=$2, vault_dir=COALESCE($3, vault_dir) WHERE id=$1', [
+      p.projectId,
+      p.kind,
+      p.vaultDir ?? null,
+    ]);
   },
   ProjectUpdated: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectUpdated'>).payload;

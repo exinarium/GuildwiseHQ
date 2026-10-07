@@ -57,7 +57,10 @@ export const projectEvents = [
     }),
   ),
   /** Data migration: a feed project became the backing project of an interest (hidden from every project list). */
-  defineEvent('ProjectKindChanged', z.object({ projectId: Id, kind: ProjectKind, interestId: Id })),
+  defineEvent(
+    'ProjectKindChanged',
+    z.object({ projectId: Id, kind: ProjectKind, interestId: Id, vaultDir: z.string().min(1).optional() }),
+  ),
   defineEvent('ProjectUpdated', z.object({ projectId: Id, changes: ProjectChangesSchema })),
   defineEvent(
     'ProjectRepoAdded',

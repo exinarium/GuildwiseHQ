@@ -384,6 +384,19 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
           to see the stage table, graph and validation. Nothing is available until you approve.
         </p>
       )}
+      {item.kind === 'rating' && item.interest && (
+        <p className="mt-1 text-sm text-muted">
+          From the interest{' '}
+          <Link
+            to={`/interests/${item.interest.id}?tab=digest`}
+            className="text-brand-text underline"
+            data-testid="desk-interest-link"
+          >
+            {item.interest.name}
+          </Link>
+          .
+        </p>
+      )}
       {item.kind === 'rating' && item.digestItems && (
         <DigestRating items={item.digestItems} canRate={item.status === 'open' && item.canAnswer} />
       )}

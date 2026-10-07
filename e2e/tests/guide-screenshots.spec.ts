@@ -203,7 +203,6 @@ esac
     makeVault(n, { 'README.md': `# ${n} vault\n\nMarkdown notes of Pieter Demo.\n` });
   makeVault('personal', {
     'projects/shoot/PROJECT.md': '# Shooting research\n\nResearch notes about shooting and reloading.\n',
-    'projects/news/PROJECT.md': '# AI news feed\n\nDaily digest of AI news.\n',
   });
   owner('work');
   owner('project');
@@ -229,7 +228,6 @@ step('workstation A, projects, agents', async () => {
   for (const [key, name, workflowKey, domain, extra] of [
     ['WEB', 'Web shop', 'code', 'work', {}],
     ['SHOOT', 'Shooting research', 'research', 'personal', { subCategories: ['hunting', 'reloading'] }],
-    ['NEWS', 'AI news feed', 'feed', 'personal', {}],
   ] as const) {
     const r = await p.post('/api/projects', { data: { key, name, workflowKey, domain, ...extra } });
     expect(r.status(), await r.text()).toBe(201);
@@ -793,8 +791,22 @@ step('research and the feed', async () => {
   });
   expect(draft.status(), await draft.text()).toBe(201);
 
-  // feed: schedules and two runs
-  const news = S.ids['project:NEWS'];
+  // the interest: an org-level feed with its own run and delivery schedules, and two runs
+  const created = await p.post('/api/interests', {
+    data: {
+      name: 'AI news feed',
+      description: 'Practical agent engineering and coding assistants. No hype, no press releases.',
+      domain: 'personal',
+      subCategory: 'ai/agents',
+      preferredSites: ['https://news.example.com'],
+      scan: { cron: '0 7 * * *', timezone: 'Africa/Johannesburg', maxItems: 10 },
+      delivery: { mode: 'immediate' },
+      tasteRules: ['Prefer primary sources over summaries'],
+    },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const interestId = (await created.json()).id as string;
+  S.ids['interest:NEWS'] = interestId;
   const item = (n: number, title: string, summary: string, over: Record<string, string> = {}) => ({
     kind: 'article',
     url: `https://news.example.com/ai/story-${n}`,
@@ -831,25 +843,14 @@ step('research and the feed', async () => {
       },
     ),
   ];
-  const mk = async (title: string, items: unknown[], rule?: string) => {
-    const r = await p.post('/api/cards', {
-      data: {
-        projectId: news,
-        title,
-        cardType: 'feed',
-        fields: {
-          topic: 'AI agents and coding assistants',
-          preferredSites: ['https://news.example.com'],
-          maxItems: 10,
-          mockFeed: { items, ...(rule ? { proposeRule: rule } : {}) },
-        },
-        specify: true,
-      },
+  const mk = async (items: unknown[], rule?: string) => {
+    const r = await p.post(`/api/interests/${interestId}/run`, {
+      data: { mock: { mockFeed: { items, ...(rule ? { proposeRule: rule } : {}) } } },
     });
     expect(r.status(), await r.text()).toBe(201);
-    return (await r.json()).card.ref as string;
+    return (await r.json()).ref as string;
   };
-  const f1 = await mk('AI news, Monday', run1);
+  const f1 = await mk(run1);
   await done(f1);
   const digest1 = await waitFor(
     'digest items',
@@ -885,32 +886,20 @@ step('research and the feed', async () => {
     ),
     item(7, 'Opinion: will agents replace junior developers?', 'A long opinion piece without data.'),
   ];
-  const f2 = await mk('AI news, Tuesday', run2, 'Prefer posts that include benchmark or study data');
+  const f2 = await mk(run2, 'Prefer posts that include benchmark or study data');
+  S.ids['ref:feed2'] = f2;
   await done(f2);
-  for (const [name, cron, tz, enabled] of [
-    ['Daily AI news', '0 7 * * *', 'Africa/Johannesburg', true],
-    ['Weekend long reads', '0 8 * * 6', 'Africa/Johannesburg', false],
-  ] as const) {
-    const r = await p.post('/api/schedules', {
-      data: {
-        projectId: news,
-        name,
-        cron,
-        timezone: tz,
-        enabled,
-        cardTemplate: {
-          title: name,
-          fields: {
-            topic: 'AI agents and coding assistants',
-            preferredSites: ['https://news.example.com'],
-            maxItems: 10,
-            mockFeed: { items: [] },
-          },
-        },
-      },
-    });
-    expect(r.status(), await r.text()).toBe(201);
-  }
+  // a second interest that only runs when asked, with a delivery time
+  const weekend = await p.post('/api/interests', {
+    data: {
+      name: 'Weekend long reads',
+      description: 'Long essays worth a slow Saturday.',
+      scan: { cron: '0 8 * * 6', timezone: 'Africa/Johannesburg', maxItems: 5 },
+      delivery: { mode: 'scheduled', cron: '0 7 * * 6', timezone: 'Africa/Johannesburg' },
+      status: 'paused',
+    },
+  });
+  expect(weekend.status(), await weekend.text()).toBe(201);
 });
 
 step('devops requests and the access of workstation A', async () => {
@@ -1523,8 +1512,8 @@ cap('the board', async () => {
   ] as const) {
     await snapColumn(pPage, `col-${id}`, pPage.getByTestId(`column-${col}`));
   }
-  await open(pPage, '/p/NEWS/board');
-  await snap(pPage, 'board-feed', { maxH: 700 });
+  await open(pPage, '/interests');
+  await snap(pPage, 'interests', { maxH: 900, noHeader: true, cx: { x: 190, width: 900 } });
   await open(pPage, '/p/SHOOT/board');
   await snap(pPage, 'board-research', { maxH: 700 });
   await open(pPage, '/p/WEB/board');
@@ -1540,8 +1529,6 @@ cap('new card', async () => {
   await snap(pPage, 'card-new-errors', { maxH: 1900, noHeader: true, cx: { x: 230, width: 820 } });
   await open(pPage, '/cards/new?project=SHOOT');
   await snap(pPage, 'card-new-research', { maxH: 1300, noHeader: true, cx: { x: 230, width: 820 } });
-  await open(pPage, '/cards/new?project=NEWS');
-  await snap(pPage, 'card-new-feed', { maxH: 1100, noHeader: true, cx: { x: 230, width: 820 } });
   {
     // creates one more draft card (once)
     await open(pPage, '/cards/new?project=WEB');
@@ -1586,7 +1573,7 @@ cap('card detail', async () => {
   await pPage.getByTestId('set-risk').click();
   await snap(pPage, 'dlg-risk', { sel: pPage.getByRole('dialog') });
   await pPage.keyboard.press('Escape');
-  await detail('card-feed-run', 'NEWS-2', { maxH: 1100 });
+  await detail('card-feed-run', S.ids['ref:feed2'] as string, { maxH: 1100 });
   const panel = async (name: string, ref: string, heading: RegExp) => {
     await open(pPage, `/cards/${ref}`);
     const el = pPage
@@ -1763,8 +1750,15 @@ cap('intake', async () => {
 });
 
 cap('feeds, schedules, research', async () => {
-  await open(pPage, '/p/NEWS/feed');
+  const interestUrl = `/interests/${S.ids['interest:NEWS']}`;
+  await open(pPage, `${interestUrl}?tab=digest`);
   await snap(pPage, 'feed', { maxH: 1700, noHeader: true, cx: { x: 190, width: 900 } });
+  await open(pPage, `${interestUrl}?tab=runs`);
+  await snap(pPage, 'interest-runs', { maxH: 1400, noHeader: true, cx: { x: 190, width: 900 } });
+  await open(pPage, `${interestUrl}?tab=settings`);
+  await snap(pPage, 'interest-settings', { maxH: 1900, noHeader: true, cx: { x: 190, width: 900 } });
+  await open(pPage, `${interestUrl}?tab=taste`);
+  await snap(pPage, 'interest-taste', { maxH: 1100, noHeader: true, cx: { x: 190, width: 900 } });
   await open(pPage, '/schedules');
   await snap(pPage, 'schedules', { maxH: 1500, noHeader: true, cx: { x: 190, width: 900 } });
   await open(pPage, `/p/SHOOT/board`);

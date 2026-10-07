@@ -63,11 +63,12 @@ export async function runNow(
   interestId: string,
   patch: Record<string, unknown> = {},
   cookie: string = w.owner.cookie,
+  mock?: Record<string, unknown>,
 ): Promise<{ runId: string; cardId: string; ref: string }> {
   if (Object.keys(patch).length)
     await ok(w.t.req('PATCH', `/api/interests/${interestId}`, { cookie, body: patch }));
   return ok<{ runId: string; cardId: string; ref: string }>(
-    w.t.req('POST', `/api/interests/${interestId}/run`, { cookie, body: {} }),
+    w.t.req('POST', `/api/interests/${interestId}/run`, { cookie, body: mock ? { mock } : {} }),
     201,
   );
 }
