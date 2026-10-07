@@ -12,8 +12,10 @@ import { Board } from './pages/Board.tsx';
 import { CardDetail } from './pages/CardDetail.tsx';
 import { CardNew } from './pages/CardNew.tsx';
 import { Chat } from './pages/Chat.tsx';
+import { ContactPublic } from './pages/ContactPublic.tsx';
 import { Costs } from './pages/Costs.tsx';
 import { Desk } from './pages/Desk.tsx';
+import { Help } from './pages/Help.tsx';
 import { IntakeNew, IntakeView } from './pages/Intake.tsx';
 import { InterestDetail } from './pages/InterestDetail.tsx';
 import { Interests } from './pages/Interests.tsx';
@@ -30,6 +32,8 @@ import { PlatformAudit } from './pages/platform/PlatformAudit.tsx';
 import { PlatformInvitations } from './pages/platform/PlatformInvitations.tsx';
 import { PlatformOrgDetail } from './pages/platform/PlatformOrgDetail.tsx';
 import { PlatformOrgs } from './pages/platform/PlatformOrgs.tsx';
+import { PlatformSupport } from './pages/platform/PlatformSupport.tsx';
+import { PlatformSupportTicket } from './pages/platform/PlatformSupportTicket.tsx';
 import { PlatformUsers } from './pages/platform/PlatformUsers.tsx';
 import { ResearchTab } from './pages/ResearchTab.tsx';
 import { Schedules } from './pages/Schedules.tsx';
@@ -62,6 +66,7 @@ function InterestRedirect({ tab }: { tab?: string }) {
 
 export const routes = [
   { path: '/login', element: <Login />, errorElement: <RouteError /> },
+  { path: '/contact', element: <ContactPublic />, errorElement: <RouteError /> },
   { path: '/invite/:token', element: <AcceptInvite />, errorElement: <RouteError /> },
   {
     element: <RequireAuth />,
@@ -91,6 +96,10 @@ export const routes = [
       { path: '/settings/org', element: <OrgSettings /> },
       { path: '/admin', element: <Navigate to="/settings/org" replace /> },
       { path: '/desk', element: <Desk /> },
+      { path: '/help', element: <Help /> },
+      { path: '/help/contact', element: <Help /> },
+      { path: '/help/requests', element: <Help /> },
+      { path: '/help/requests/:id', element: <Help /> },
       { path: '/ledger', element: <Ledger /> },
       { path: '/chat/:threadId', element: <Chat /> },
       { path: '/intake', element: <IntakeNew /> },
@@ -108,6 +117,8 @@ export const routes = [
           { path: '/platform/orgs/:id', element: <PlatformOrgDetail /> },
           { path: '/platform/invitations', element: <PlatformInvitations /> },
           { path: '/platform/users', element: <PlatformUsers /> },
+          { path: '/platform/support', element: <PlatformSupport /> },
+          { path: '/platform/support/:id', element: <PlatformSupportTicket /> },
           { path: '/platform/audit', element: <PlatformAudit /> },
         ],
       },

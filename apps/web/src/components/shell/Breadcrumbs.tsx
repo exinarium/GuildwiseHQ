@@ -51,6 +51,17 @@ export function crumbsFor(pathname: string, search: string, projects: ProjectDto
     ['/interests', () => [{ label: 'Knowledge' }, { label: 'Interests' }]],
     ['/settings/vaults', () => [{ label: 'Knowledge' }, { label: 'Vaults' }]],
     ['/settings', () => [{ label: 'Settings' }]],
+    ['/help/contact', () => [{ label: 'Help', to: '/help' }, { label: 'Contact us' }]],
+    [
+      '/help/requests/:id',
+      () => [
+        { label: 'Help', to: '/help' },
+        { label: 'My requests', to: '/help/requests' },
+        { label: 'Request' },
+      ],
+    ],
+    ['/help/requests', () => [{ label: 'Help', to: '/help' }, { label: 'My requests' }]],
+    ['/help', () => [{ label: 'Help' }]],
     ['/intake/:id', () => [{ label: 'Intake', to: '/intake' }, { label: 'Conversation' }]],
     ['/intake', () => [{ label: 'Work' }, { label: 'Intake' }]],
     ['/chat/:threadId', () => [{ label: 'Desk', to: '/desk' }, { label: 'Chat' }]],

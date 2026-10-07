@@ -1,4 +1,4 @@
-import { Building2, LogOut, MailPlus, ScrollText, Users } from 'lucide-react';
+import { Building2, LifeBuoy, LogOut, MailPlus, ScrollText, Users } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router';
 import { useLogout, useMe } from '../../api/queries/auth.ts';
 import { Logo } from '../Logo.tsx';
@@ -9,6 +9,7 @@ const NAV = [
   { to: '/platform', label: 'Organizations', icon: Building2, end: true },
   { to: '/platform/invitations', label: 'Invitations', icon: MailPlus, end: false },
   { to: '/platform/users', label: 'Accounts', icon: Users, end: false },
+  { to: '/platform/support', label: 'Support', icon: LifeBuoy, end: false },
   { to: '/platform/audit', label: 'Audit log', icon: ScrollText, end: false },
 ];
 

@@ -8,6 +8,7 @@ import {
   Inbox,
   Keyboard,
   type LucideIcon,
+  MessageCircleQuestion,
   MessageSquare,
   Moon,
   PlusCircle,
@@ -31,6 +32,7 @@ export interface PaletteContext {
   projectKey: string | null;
   onChat: () => void;
   onHelp: () => void;
+  onContact?: () => void;
 }
 
 function Item({
@@ -156,6 +158,22 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
             onSelect={run(() => setTheme(dark ? 'light' : 'dark'))}
           >
             Toggle theme ({dark ? 'switch to light' : 'switch to dark'})
+          </Item>
+          <Item
+            value="action contact us support"
+            keywords={['help', 'bug', 'question', 'feature', 'billing', 'report', 'feedback']}
+            icon={MessageCircleQuestion}
+            onSelect={run(() => ctx.onContact?.())}
+          >
+            Contact us
+          </Item>
+          <Item
+            value="action my requests support tickets"
+            keywords={['help', 'replies', 'answers']}
+            icon={Inbox}
+            onSelect={go('/help/requests')}
+          >
+            My requests
           </Item>
           <Item
             value="action keyboard shortcuts help"

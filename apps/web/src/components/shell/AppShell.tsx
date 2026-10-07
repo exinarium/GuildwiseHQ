@@ -14,6 +14,7 @@ import { AgentFacesSync } from '../AgentFacesSync.tsx';
 import { ChatDrawer } from '../ChatDrawer.tsx';
 import { CommandPalette } from '../palette/CommandPalette.tsx';
 import { ShortcutsDialog } from '../palette/ShortcutsDialog.tsx';
+import { ContactProvider, useContact } from '../support/ContactDialog.tsx';
 import { cx } from '../ui/cx.ts';
 import { Breadcrumbs, crumbsFor } from './Breadcrumbs.tsx';
 import { buildNav } from './nav-config.ts';
@@ -51,6 +52,15 @@ function LiveIndicator({ live, compact = false }: { live: string; compact?: bool
 
 /** The signed-in application frame: dark sidebar (rail on tablets, drawer on phones), top bar, `main`. */
 export function AppShell({ name, live }: { name: string; live: string }) {
+  return (
+    <ContactProvider>
+      <Shell name={name} live={live} />
+    </ContactProvider>
+  );
+}
+
+function Shell({ name, live }: { name: string; live: string }) {
+  const contact = useContact();
   const me = useMe();
   const logout = useLogout();
   const desk = useDesk();
@@ -314,6 +324,7 @@ export function AppShell({ name, live }: { name: string; live: string }) {
           projectKey: project?.key ?? null,
           onChat: () => setChat(true),
           onHelp: () => setHelp(true),
+          onContact: () => contact.open(),
         }}
       />
       <ShortcutsDialog open={help} onOpenChange={setHelp} />

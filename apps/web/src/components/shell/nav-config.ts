@@ -8,6 +8,7 @@ import {
   FolderKanban,
   Inbox,
   KanbanSquare,
+  LifeBuoy,
   Lightbulb,
   type LucideIcon,
   Network,
@@ -128,6 +129,7 @@ export function buildNav(opts: {
       icon: Building2,
       testId: 'nav-organization',
     },
+    { id: 'help', label: 'Help', to: '/help', icon: LifeBuoy, testId: 'nav-help' },
   ];
   return { sections, footer };
 }
