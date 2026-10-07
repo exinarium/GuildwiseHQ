@@ -19,6 +19,7 @@ import {
   Panel,
   useToast,
 } from '../components/ui.tsx';
+import { AddWorkstationWizard } from '../components/workstations/AddWorkstationWizard.tsx';
 import { unavailableRuntimes, unsandboxedConsequence, unsandboxedRuntimes } from '../lib/sandbox.ts';
 import { copyText } from '../lib/secure.ts';
 import { formatDateTime } from '../lib/time.ts';
@@ -65,15 +66,21 @@ export function Workstations() {
   const me = useMe();
   const [open, setOpen] = useOpenRows(me.data?.user.id);
   const [pairOpen, setPairOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   return (
     <div className="mx-auto max-w-4xl">
       <PageHeader
         title="Workstations"
         sub="The machines that run your agents."
         actions={
-          <Button variant="primary" onClick={() => setPairOpen(true)}>
-            Pair workstation
-          </Button>
+          <>
+            <Button variant="secondary" onClick={() => setPairOpen(true)}>
+              Pair workstation
+            </Button>
+            <Button variant="primary" data-testid="add-workstation-button" onClick={() => setAddOpen(true)}>
+              Add a workstation
+            </Button>
+          </>
         }
       />
       {q.isPending && <ListSkeleton label="Loading workstations" rows={2} />}
@@ -82,10 +89,16 @@ export function Workstations() {
         <EmptyState
           icon={Server}
           title="No workstations paired"
-          description="A workstation is a machine of yours that runs the agents. Pair one with a one-time code and the aom-runner command."
+          description="A workstation is a computer of yours that runs your agents. The guided setup installs everything for you and connects it to your account."
+          data-testid="workstations-empty"
           action={
-            <Button variant="primary" onClick={() => setPairOpen(true)}>
-              Pair workstation
+            <Button variant="primary" data-testid="add-workstation-empty" onClick={() => setAddOpen(true)}>
+              Add a workstation
+            </Button>
+          }
+          secondaryAction={
+            <Button variant="ghost" onClick={() => setPairOpen(true)}>
+              Pair with a code
             </Button>
           }
         />
@@ -102,6 +115,11 @@ export function Workstations() {
             />
           ))}
       </ul>
+      <AddWorkstationWizard
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        onPairWithCode={() => setPairOpen(true)}
+      />
       <PairDialog open={pairOpen} onOpenChange={setPairOpen} />
     </div>
   );
