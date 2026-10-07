@@ -82,14 +82,29 @@ test('setup: a runner with the personal vault that still has projects/news/, the
 });
 
 test('dry run: the plan is printed and nothing is written', async () => {
-  const events = (await q<{ n: number }>('SELECT count(*)::int AS n FROM events'))[0]?.n;
+  // Only what the migration could write: the server keeps appending signal and connection events in the background
+  // (clock-driven detectors, runners coming and going), so the table as a whole is never still.
+  const MIGRATION_EVENTS = `SELECT count(*)::int AS n FROM events WHERE org_id = $1 AND type = ANY($2::text[])`;
+  const types = [
+    'DeskItemCreated',
+    'InterestArchived',
+    'InterestMigrated',
+    'InterestTasteSet',
+    'InterestUpdated',
+    'ProjectArchived',
+    'ProjectCreated',
+    'ProjectKindChanged',
+    'ProjectUpdated',
+    'ScheduleDeleted',
+  ];
+  const events = (await q<{ n: number }>(MIGRATION_EVENTS, [orgId, types]))[0]?.n;
   const text = server('restructure:migrate', '--dry-run');
   expect(text).toContain('feed project NEWS "Firearm news"');
   expect(text).toContain('interest "Optics" (gets a new backing project)');
   expect(text).toContain('feed schedule "Shotgun news" becomes an interest');
   expect(text).toContain('folder projects/news -> interests/reloading');
   expect(text).toContain('Dry run: nothing was written.');
-  expect((await q<{ n: number }>('SELECT count(*)::int AS n FROM events'))[0]?.n).toBe(events);
+  expect((await q<{ n: number }>(MIGRATION_EVENTS, [orgId, types]))[0]?.n).toBe(events);
 });
 
 test('migrate: the feed project is hidden, four interests exist, the feed schedules are gone and the history is linked', async () => {
