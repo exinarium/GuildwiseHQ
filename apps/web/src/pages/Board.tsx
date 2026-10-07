@@ -1,7 +1,6 @@
 import { ArrowRightLeft, Rss, Search, Settings, SquareKanban } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
-import { useMe } from '../api/queries/auth.ts';
 import { useBoard } from '../api/queries/board.ts';
 import { usePhases } from '../api/queries/phases.ts';
 import { useProject, useProjects } from '../api/queries/projects.ts';
@@ -23,7 +22,7 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { setLastProjectKey } from '../lib/lastProject.ts';
-import { useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
+import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 
 function BoardSkeleton() {
   return (
@@ -62,8 +61,7 @@ export function Board() {
   const [filter, setFilter] = useState(NO_FILTER);
   const [converting, setConverting] = useState(false);
   const detail = useProject(project?.workflowKey === 'research' ? project.id : undefined);
-  const orgRole = useMe().data?.activeOrg?.role;
-  const canConvert = orgRole === 'owner' || orgRole === 'admin';
+  const canConvert = useCanConvert(project);
   const toast = useToast();
 
   useEffect(() => {

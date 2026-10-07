@@ -1,6 +1,5 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'react-router';
-import { useMe } from '../api/queries/auth.ts';
 import { useAddRepo, usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
 import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { ConvertPanel } from '../components/ConvertPanel.tsx';
@@ -23,7 +22,7 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { WorkingBranchControl } from '../components/WorkingBranchControl.tsx';
-import { useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
+import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 
 const lines = (s: string) =>
   s
@@ -49,9 +48,7 @@ export function ProjectSettings() {
   const [repoErr, setRepoErr] = useState<Record<string, string>>({});
   const project = q.data?.project;
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
-  const me = useMe();
-  const orgRole = me.data?.activeOrg?.role;
-  const canConvert = orgRole === 'owner' || orgRole === 'admin';
+  const canConvert = useCanConvert(project);
 
   useEffect(() => {
     if (!project) return;

@@ -18,6 +18,7 @@ import { ConvertPanel } from '../components/ConvertPanel.tsx';
 import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { FollowupEditor } from '../components/FollowupEditor.tsx';
 import { buildNav } from '../components/shell/nav-config.ts';
+import { useCanConvert } from '../lib/projectWorkflow.ts';
 import { CardNewForm } from '../pages/CardNew.tsx';
 import { ResearchTab } from '../pages/ResearchTab.tsx';
 import { keysForEvent } from '../ws/invalidate.ts';
@@ -140,7 +141,7 @@ describe('convert dialog', () => {
     expect(code).toHaveTextContent('Usual next step');
     expect(screen.queryByTestId('convert-workflow-feed')).toBeNull();
     expect(screen.queryByTestId('convert-workflow-research')).toBeNull();
-    expect(screen.getByRole('radio', { name: /Code/ })).toBeChecked();
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Code/ })).toBeChecked());
     expect(screen.getByText(/started as research and has 2 published notes/)).toBeInTheDocument();
   });
 
@@ -466,5 +467,33 @@ describe('follow-ups the project cannot run', () => {
     expect(screen.getByTestId('add-regression')).toBeDisabled();
     expect(screen.getByTestId('add-custom')).toBeEnabled();
     expect(screen.getByTestId('followup-unavailable')).toHaveTextContent('no repository');
+  });
+});
+
+describe('who may convert', () => {
+  const me = (orgs: Array<{ id: string; role: string }>) => ({
+    user: { id: U(5), email: 'a@b.test', displayName: 'A', role: 'member' },
+    isAdmin: false,
+    orgs: orgs.map((o) => ({ ...o, name: 'Org', status: 'active' })),
+    activeOrg: null,
+    visibleProjectIds: [],
+  });
+  function Probe({ orgId }: { orgId: string }) {
+    return <p data-testid="can">{String(useCanConvert({ orgId }))}</p>;
+  }
+  const check = async (orgs: Array<{ id: string; role: string }>, expected: string) => {
+    fetchMock.mockImplementation(async () => json(me(orgs)));
+    wrap(<Probe orgId={U(99)} />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId('can')).toHaveTextContent(expected));
+  };
+  it('Owner and Admins of the project organization', async () => {
+    await check([{ id: U(99), role: 'admin' }], 'true');
+  });
+  it('a Member of it may not', async () => {
+    await check([{ id: U(99), role: 'member' }], 'false');
+  });
+  it('a guest who owns another organization may not: the project belongs to ' + 'someone else', async () => {
+    await check([{ id: U(98), role: 'owner' }], 'false');
   });
 });

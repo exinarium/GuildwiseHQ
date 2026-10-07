@@ -1,5 +1,6 @@
 import { type WorkflowDefinition, workflowHasTestStage, workflowUsesRepos } from '@aom/shared';
 import { useWorkflows } from '../api/queries/agents.ts';
+import { useMe } from '../api/queries/auth.ts';
 import { useProject } from '../api/queries/projects.ts';
 
 /**
@@ -41,4 +42,15 @@ export function useFollowupAvailability(projectId: string | undefined): {
         ? { regression: 'This workflow has no test stage.' }
         : {}),
   };
+}
+
+/**
+ * May the user convert this project? Owner and Admins of the organization that OWNS the project (a guest on a shared
+ * project belongs to another organization, even when they own that one); the server enforces it regardless.
+ */
+export function useCanConvert(project: { orgId: string } | null | undefined): boolean {
+  const me = useMe();
+  if (!project) return false;
+  const role = me.data?.orgs?.find((o) => o.id === project.orgId)?.role;
+  return role === 'owner' || role === 'admin';
 }
