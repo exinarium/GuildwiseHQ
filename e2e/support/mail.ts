@@ -31,3 +31,25 @@ export async function waitForMail(
 export async function deleteMailFor(to: string): Promise<void> {
   await fetch(`${MAILPIT_API}/api/v1/search?query=${encodeURIComponent(`to:${to}`)}`, { method: 'DELETE' });
 }
+
+/** Waits for a message to `to` whose subject matches `subject`, and returns its subject and text body. */
+export async function waitForMailMatching(
+  to: string,
+  subject: RegExp,
+  timeoutMs = 20_000,
+): Promise<{ subject: string; text: string }> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const res = await fetch(`${MAILPIT_API}/api/v1/search?query=${encodeURIComponent(`to:${to}`)}&limit=50`);
+    const body = (await res.json()) as { messages?: MailSummary[] };
+    const msg = body.messages?.find((m) => subject.test(m.Subject));
+    if (msg) {
+      const full = (await (await fetch(`${MAILPIT_API}/api/v1/message/${msg.ID}`)).json()) as {
+        Text: string;
+      };
+      return { subject: msg.Subject, text: full.Text };
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`no mail for ${to} matching ${subject} within ${timeoutMs} ms`);
+}

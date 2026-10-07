@@ -109,6 +109,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       'interester@e2e.test',
       'scheduler@e2e.test',
       'installer@e2e.test',
+      'supporter@e2e.test',
+      'visitor@e2e.test',
       SUPER.email,
       NEWORG.email,
       ORGMEM.email,

@@ -86,6 +86,14 @@ aom-runner.cmd pair --server ... --code ...  # pairs once
 
 With `default`, each agent gets a symlink to your `~/.claude/.credentials.json`.
 
+## Help, Contact us and My requests
+
+**Help** (in the sidebar and the user menu) has three tabs: the **Help centre** (plain-language answers, starting with "Installing a workstation: if something goes wrong"), **Contact us** and **My requests**.
+
+**Contact us** is in the user menu, in the command palette (press Ctrl K and type "contact"), on the Help page, on the installer's failure screens and, for people who are not signed in, in the footer of the sign-in page (visitors give their name and email; there is a limit of a few requests an hour). Choose what it is about (bug report, question, feature request or billing), write a subject and a message, and optionally attach a screenshot. When you open it from the menu or the palette, the page you were looking at is captured first and attached (look at it, remove it, or upload a different image: PNG, JPEG or WebP up to 2.5 MB). Open **What we send with your request** to see exactly what goes along: the page you were on, the app version, your browser and screen, and the last few errors from your browser (untick the box to leave the errors out). Your name, email and organization are added so that support can answer and look at your account.
+
+We answer by email, and the answer also appears under **Help, My requests**, where you can reply (a reply to an answered or closed request reopens it). A request is **Open** until we answer, **Answered** until you write again, and **Closed** when we are done. Requests with a new answer show a "New reply" badge.
+
 ## Organizations, roles and security
 
 An **organization** owns projects, agents, the catalogue, the desk, the ledger and the vaults. Everyone works inside an organization, in one of these roles:
@@ -128,7 +136,7 @@ A platform administrator can suspend an organization (unpaid, trial over, a lice
 
 ### The platform area (platform administrators only)
 
-The platform administrator signs in at the same address and sees only the **Platform** area: organizations (status, Owner, plan, usage, limits, features), invitations to start a new organization, accounts (deactivate, reset two-factor) and the audit log. They never see an organization's cards, desk or vaults. Every platform action is recorded in the audit log, which is kept forever. The administrator can suspend, reactivate or cancel an organization and, with a written reason, move ownership to one of its Admins (for example when the Owner left the company).
+The platform administrator signs in at the same address and sees only the **Platform** area: organizations (status, Owner, plan, usage, limits, features), invitations to start a new organization, accounts (deactivate, reset two-factor) and the audit log. They never see an organization's cards, desk or vaults. **Support** is their inbox for Contact us requests from every organization and from visitors: filter by status (open, answered, closed), type or organization, search by reference, name, email or subject, open a request to see who wrote (and which organization), the page, version, browser, recent errors and the screenshot, then reply (the reply is emailed to the person and appears in their My requests) or reply and close. At the top, set the **support address**: every new request and follow-up is also emailed there (with the writer's address as Reply-To), so the team can work from its own mailbox as well. Every platform action is recorded in the audit log, which is kept forever. The administrator can suspend, reactivate or cancel an organization and, with a written reason, move ownership to one of its Admins (for example when the Owner left the company).
 
 ## Projects
 

@@ -175,3 +175,15 @@ export const INSTALLER = {
   name: 'E2E Installer',
   password: 'installer-password-12345',
 };
+
+/** Contact us spec: a member who writes in, and a second platform account that answers in the Support inbox. */
+export const SUPPORTER = {
+  email: 'supporter@e2e.test',
+  name: 'E2E Supporter',
+  password: 'supporter-password-12345',
+};
+export const SUPPORT_ADMIN = {
+  email: 'support-admin@e2e.test',
+  name: 'E2E Support Admin',
+  password: 'support-admin-password-12345',
+};
