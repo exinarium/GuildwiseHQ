@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   type FloorDigest,
+  FloorDigestSchema,
+  floorDigestIsEmpty,
   floorReportDue,
   isValidTimeZone,
   localParts,
@@ -57,6 +59,28 @@ describe('reporter contract', () => {
     expect(REPORTER.blockedHours).toBe(4);
     expect(REPORTER.unclaimedMinutes).toBe(30);
     expect(REPORTER.defaultDailyAt).toBe('08:00');
+  });
+
+  it('spend alone does not make a quiet day worth a floor report', () => {
+    const d = FloorDigestSchema.parse({
+      generatedAt: '2026-11-10T06:00:00.000Z',
+      localDate: '2026-11-10',
+      since: null,
+      phases: [],
+      signals: [],
+      backingOff: [],
+      devopsOpen: [],
+      resolvedByBa: [],
+      failures: [],
+      spend: {
+        currency: 'USD',
+        sinceMicros: 5_000_000,
+        monthMicros: 50_000_000,
+        overheadMonthMicros: 0,
+        projects: [],
+      },
+    });
+    expect(floorDigestIsEmpty(d)).toBe(true);
   });
 
   it('prefs and decisions validate', () => {

@@ -309,8 +309,9 @@ export const floorDigestIsEmpty = (d: FloorDigest): boolean =>
   d.resolvedByBa.length === 0 &&
   d.failures.length === 0 &&
   d.interests.highlights.length === 0 &&
-  d.interests.failing.length === 0 &&
-  d.spend.monthMicros === 0;
+  d.interests.failing.length === 0;
+// (spend alone does not make a day worth a report: it rides along when there is one, and a project near or over its
+// budget is a signal, which does.)
 
 // ------------------------------------------------------------------------------------ BA reporter tasks
 
