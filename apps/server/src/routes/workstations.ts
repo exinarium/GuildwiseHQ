@@ -37,7 +37,8 @@ export function workstationRoutes(ctx: Ctx) {
     app.post('/api/workstations/pairing-codes', async (req, reply) => {
       const s = await requireUser(ctx, req);
       reply.code(201);
-      return PairingCodeResponseSchema.parse(await createPairingCode(ctx, s.user));
+      const { code, expiresAt } = await createPairingCode(ctx, s.user);
+      return PairingCodeResponseSchema.parse({ code, expiresAt });
     });
 
     app.patch(

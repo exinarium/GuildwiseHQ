@@ -28,6 +28,10 @@ const EnvSchema = z.object({
   AOM_HYGIENE_SCHEDULE: bool(true),
   AOM_WEBHOOK_ALLOW_PRIVATE: bool(false),
   AOM_MAX_SHIFTS_PER_WORKSTATION: z.coerce.number().int().min(1).max(256).default(16),
+  /** Where the packaged runner (`aom-runner-<version>.tgz`, `pnpm package:runner`) is served from. */
+  AOM_RUNNER_RELEASE_DIR: z.string().optional(),
+  /** The support address new Contact us requests are emailed to, until the super admin sets one in the platform settings. */
+  AOM_SUPPORT_EMAIL: z.string().optional(),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -59,6 +63,10 @@ export interface Config {
   maxShiftsPerWorkstation: number;
   /** Let outgoing webhooks reach loopback and private-network addresses (local tests; off in production). */
   webhookAllowPrivate: boolean;
+  /** Directory holding the runner release tarballs; undefined: the usual places are tried. */
+  runnerReleaseDir: string | undefined;
+  /** Fallback support address (the platform setting wins). */
+  supportEmail: string | undefined;
   logLevel: string;
   /** Cookie `Secure` flag: true when the public origin is https. */
   secureCookies: boolean;
@@ -87,6 +95,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     hygieneSchedule: e.AOM_HYGIENE_SCHEDULE,
     maxShiftsPerWorkstation: e.AOM_MAX_SHIFTS_PER_WORKSTATION,
     webhookAllowPrivate: e.AOM_WEBHOOK_ALLOW_PRIVATE,
+    runnerReleaseDir: e.AOM_RUNNER_RELEASE_DIR || undefined,
+    supportEmail: e.AOM_SUPPORT_EMAIL || undefined,
     logLevel: e.LOG_LEVEL,
     secureCookies: publicOrigin.startsWith('https://'),
   };

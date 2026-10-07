@@ -14,11 +14,22 @@ const CODE_TTL_MS = 10 * 60_000;
 const MAX_ACTIVE_CODES = 3;
 const MAX_CODE_ATTEMPTS = 5;
 
-export async function createPairingCode(ctx: Ctx, user: AuthSession['user']) {
+export async function createPairingCode(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  opts: { ttlMs?: number; supersedeIds?: string[] } = {},
+) {
   const now = ctx.clock.now();
-  const expiresAt = new Date(now.getTime() + CODE_TTL_MS);
+  const expiresAt = new Date(now.getTime() + (opts.ttlMs ?? CODE_TTL_MS));
   const code = generatePairingCode();
-  await withAppendTx(ctx.pool, async (tx) => {
+  const id = await withAppendTx(ctx.pool, async (tx) => {
+    // A wizard that starts over retires its earlier unused codes first, so they do not count against the limit.
+    if (opts.supersedeIds?.length)
+      await exec(
+        tx,
+        `UPDATE pairing_codes SET expires_at = $2 WHERE id = ANY($1::uuid[]) AND used_at IS NULL`,
+        [opts.supersedeIds, now],
+      );
     const active = await one(
       tx,
       `SELECT count(*)::int AS n FROM pairing_codes WHERE user_id=$1 AND used_at IS NULL AND expires_at > $2 AND attempts < $3`,
@@ -31,13 +42,14 @@ export async function createPairingCode(ctx: Ctx, user: AuthSession['user']) {
         'too many active pairing codes; use or wait for one to expire',
       );
     }
-    await exec(
+    const row = await one(
       tx,
-      `INSERT INTO pairing_codes (user_id, code_hash, expires_at, created_at) VALUES ($1,$2,$3,$4)`,
+      `INSERT INTO pairing_codes (user_id, code_hash, expires_at, created_at) VALUES ($1,$2,$3,$4) RETURNING id`,
       [user.id, sha256Hex(normalizePairingCode(code)), expiresAt, now],
     );
+    return String(row?.id);
   });
-  return { code, expiresAt: expiresAt.toISOString() };
+  return { id, code, expiresAt: expiresAt.toISOString() };
 }
 
 export class PairingError extends HttpError {
@@ -69,7 +81,11 @@ export async function pairRunner(
     );
     if (!c || c.used_at || new Date(c.expires_at) <= now || c.attempts > MAX_CODE_ATTEMPTS)
       throw new PairingError();
-    await exec(tx, 'UPDATE pairing_codes SET used_at=$2 WHERE id=$1', [c.id, now]);
+    await exec(tx, 'UPDATE pairing_codes SET used_at=$2, workstation_id=$3 WHERE id=$1', [
+      c.id,
+      now,
+      workstationId,
+    ]);
     // Every workstation gets its own DevOps engineer, hired in the same append (docs/ARCHITECTURE.md section 16.2).
     // One DevOps engineer per organization the user belongs to (owner decision 15), hired in the same append.
     const devopsHires = await devopsHireEventsNew(tx, c.user_id, workstationId);

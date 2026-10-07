@@ -12,6 +12,7 @@ export * from './desk.ts';
 export * from './devops.ts';
 export * from './digest.ts';
 export * from './hr.ts';
+export * from './installer.ts';
 export * from './intake.ts';
 export * from './interests.ts';
 export * from './invitations.ts';

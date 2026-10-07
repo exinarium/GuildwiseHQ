@@ -23,4 +23,6 @@ export default defineConfig({
   },
   clean: true,
   sourcemap: true,
+  // The installer scripts are real files (lintable) read at runtime: ship them beside the bundle.
+  onSuccess: 'rm -rf dist/installer-templates && cp -r src/installer/templates dist/installer-templates',
 });

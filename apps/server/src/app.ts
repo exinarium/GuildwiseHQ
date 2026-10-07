@@ -49,6 +49,7 @@ import { deskRoutes } from './routes/desk.ts';
 import { devopsRoutes } from './routes/devops.ts';
 import { digestRoutes } from './routes/digests.ts';
 import { hrRoutes } from './routes/hr.ts';
+import { installerRoutes } from './routes/installer.ts';
 import { intakeRoutes } from './routes/intakes.ts';
 import { interestRoutes } from './routes/interests.ts';
 import { invitationRoutes } from './routes/invitations.ts';
@@ -264,6 +265,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(orgRoutes(ctx));
   await app.register(platformRoutes(ctx));
   await app.register(workstationRoutes(ctx));
+  await app.register(installerRoutes(ctx));
   await app.register(projectRoutes(ctx));
   await app.register(cardRoutes(ctx));
   await app.register(agentRoutes(ctx));

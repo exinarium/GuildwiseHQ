@@ -7,6 +7,8 @@ WORKDIR /repo
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @aom/web build && pnpm --filter @aom/server build
+# The runner release the "Add a workstation" installers download from this app (release/aom-runner-<version>.tgz).
+RUN scripts/package-runner.sh && mkdir -p /out/release && cp release/aom-runner-*.tgz /out/release/
 # Production-only node_modules for the server (@aom/shared is bundled into dist/main.mjs).
 RUN pnpm --filter @aom/server deploy --prod /out/server \
  && rm -rf /out/server/src /out/server/test /out/server/scripts /out/server/tsconfig.json \
@@ -19,10 +21,12 @@ ENV NODE_ENV=production \
     AOM_PORT=4600 \
     AOM_SERVE_WEB=true \
     AOM_WEB_DIST=/app/web \
+    AOM_RUNNER_RELEASE_DIR=/app/release \
     AOM_MIGRATE_ON_BOOT=true
 WORKDIR /app/server
 COPY --from=build --chown=node:node /out/server /app/server
 COPY --from=build --chown=node:node /out/web /app/web
+COPY --from=build --chown=node:node /out/release /app/release
 USER node
 EXPOSE 4600
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=6 \
