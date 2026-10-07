@@ -34,7 +34,14 @@ export const vaultEvents = [
    */
   defineEvent(
     'VaultMerged',
-    z.object({ vaultId: Id, orgId: Id, intoVaultId: Id.nullable(), folder: z.string().min(1) }),
+    z.object({
+      vaultId: Id,
+      orgId: Id,
+      intoVaultId: Id.nullable(),
+      folder: z.string().min(1),
+      /** Both vaults pointed at the same repository: nothing was copied, the registration was only retired. */
+      sameRepository: z.boolean().optional(),
+    }),
   ),
   /** A runner could not rebase a vault onto its remote. A pinned desk escalation exists (desk port, M2). */
   defineEvent(

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  normalizeRemoteUrl,
   type VaultConfig,
   type VaultConfigureCommand,
   VaultConfigureCommandSchema,
@@ -11,7 +12,7 @@ import {
 import { confine } from '../fs-safe.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
-import { mergeVaultInto, type VaultMergeResult } from './merge.ts';
+import { mergeVaultInto, SAME_REPOSITORY_MESSAGE, type VaultMergeResult } from './merge.ts';
 import { ensureClone, identityEnv, isClean, isCloned, syncVault, type VaultSyncResult } from './sync.ts';
 import { moveVaultFolder, type VaultMoveResult, VaultWriteError, writeVaultFile } from './write.ts';
 
@@ -271,6 +272,16 @@ export class VaultManager {
       const dir = this.dir(cmd.vaultId);
       const srcDir = this.dir(cmd.from.vaultId);
       const env = identityEnv(cfg.identity);
+      // A repository is never merged into itself (before cloning: the URLs; mergeVaultInto checks the clones again).
+      if (normalizeRemoteUrl(cmd.from.remoteUrl) === normalizeRemoteUrl(v.remoteUrl))
+        return {
+          copied: 0,
+          committed: false,
+          conflicts: [],
+          skipped: SAME_REPOSITORY_MESSAGE,
+          pushed: false,
+          paused: false,
+        };
       await ensureClone(dir, v.remoteUrl, env);
       await ensureClone(srcDir, cmd.from.remoteUrl, env);
       // The latest state of the source: pull what other workstations pushed (a source that was never configured here has no local edits).
@@ -287,6 +298,7 @@ export class VaultManager {
             : fresh.error,
         );
       const w = await mergeVaultInto(dir, srcDir, cmd, cfg.identity);
+      if (w.skipped) return { ...w, pushed: false, paused: false };
       if (this.paused.has(cmd.vaultId)) return { ...w, pushed: false, paused: true };
       if (!cmd.push) return { ...w, pushed: false, paused: false };
       const r = await syncVault({

@@ -185,4 +185,44 @@ describe('VaultManager.merge: cloned from the URL in the command, committed and 
     await expect(m.merge(cmd(p))).rejects.toThrow(/not configured/);
     m.stop();
   });
+
+  it('is a no-op success when the source is the same repository (URL spelled differently), and copies nothing', async () => {
+    const o = makeVault(ORG);
+    const root = tmp('aom-merge-same-');
+    const m = new VaultManager({
+      paths: runnerPaths(root),
+      secondMs: 60_000,
+      transport: { send: () => {} },
+    });
+    m.configure({
+      vaults: [{ vaultId: 'org1', kind: 'org', name: 'Org', remoteUrl: o.origin, syncIntervalSec: 3600 }],
+      identity: IDENTITY,
+      workstationName: 'Desk',
+      resume: [],
+    });
+    const head = sh(o.origin, 'git', ['rev-parse', 'HEAD']);
+    const r = await m.merge(cmd(o, { from: { vaultId: 'pers1', remoteUrl: `${o.origin}/` } }));
+    expect(r).toMatchObject({ copied: 0, committed: false, pushed: false, conflicts: [] });
+    expect(r.skipped).toMatch(/same repository/);
+    expect(sh(o.origin, 'git', ['rev-parse', 'HEAD'])).toBe(head);
+    expect(existsSync(join(root, 'vaults', 'pers1'))).toBe(false);
+    m.stop();
+  });
+});
+
+describe('mergeVaultInto: the same repository', () => {
+  it('refuses to copy a clone of the target into itself (same origin after cloning)', async () => {
+    const { o } = await pair();
+    const second = tmp('aom-merge-clone-');
+    sh(second, 'git', ['clone', o.origin, 'again']);
+    const r = await mergeVaultInto(
+      o.mine,
+      join(second, 'again'),
+      cmd(o, { from: { vaultId: 'x', remoteUrl: 'file:///elsewhere' } }),
+      IDENTITY,
+    );
+    expect(r).toMatchObject({ copied: 0, committed: false, conflicts: [] });
+    expect(r.skipped).toMatch(/same repository/);
+    expect(existsSync(join(o.mine, 'personal'))).toBe(false);
+  });
 });

@@ -1,7 +1,7 @@
 import { existsSync, lstatSync } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { isSafeVaultPath, type VaultMergeCommand } from '@aom/shared';
+import { isSafeVaultPath, normalizeRemoteUrl, type VaultMergeCommand } from '@aom/shared';
 import { git, gitOk } from '../git/git.ts';
 import { identityEnv, type VaultIdentity } from './sync.ts';
 import { VaultWriteError } from './write.ts';
@@ -12,7 +12,24 @@ export interface VaultMergeResult {
   committed: boolean;
   /** Files that exist at the destination with different content: they stay as they are for the manager to sort out. */
   conflicts: string[];
+  /** Set when the source is the same repository as the target: nothing was copied (a no-op success). */
+  skipped?: string;
 }
+
+/** The normalized `origin` of a clone (null when it has none). */
+async function originOf(dir: string): Promise<string | null> {
+  const r = await git(dir, ['remote', 'get-url', 'origin']);
+  return r.exitCode === 0 && r.stdout.trim() ? normalizeRemoteUrl(r.stdout.trim()) : null;
+}
+
+/** True when the two clones have the same `origin` after normalization (the safety net after cloning). */
+export async function isSameRepository(dir: string, srcDir: string): Promise<boolean> {
+  const [a, b] = [await originOf(dir), await originOf(srcDir)];
+  return a !== null && a === b;
+}
+
+export const SAME_REPOSITORY_MESSAGE =
+  'the source vault is the same repository as the target: nothing to merge, nothing copied';
 
 /** Every regular file below `root` (relative, forward slashes), skipping `.git` and symlinks. */
 async function listFiles(root: string, rel = ''): Promise<string[]> {
@@ -47,6 +64,11 @@ export async function mergeVaultInto(
   identity: VaultIdentity,
 ): Promise<VaultMergeResult> {
   const { into, lift } = cmd;
+  if (
+    (await isSameRepository(dir, srcDir)) ||
+    normalizeRemoteUrl(cmd.from.remoteUrl) === (await originOf(dir))
+  )
+    return { copied: 0, committed: false, conflicts: [], skipped: SAME_REPOSITORY_MESSAGE };
   for (const p of [into, ...lift])
     if (!isSafeVaultPath(p)) throw new VaultWriteError(`unsafe vault path: ${p}`);
   if (lift.some((f) => f === into || f.startsWith(`${into}/`) || into.startsWith(`${f}/`)))

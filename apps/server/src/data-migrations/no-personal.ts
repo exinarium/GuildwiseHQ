@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { interestVaultDir, projectVaultFolder, streamId } from '@aom/shared';
+import { interestVaultDir, normalizeRemoteUrl, projectVaultFolder, streamId } from '@aom/shared';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { chooseVaultWriteTarget } from '../commands/vaults.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -20,6 +20,10 @@ import type { DataMigrationEnv } from './orgs.ts';
  *   backup). The folders of personal interests are lifted to `interests/<slug>/` (where every interest lives) and the
  *   personal projects point at `personal/projects/<key>` (`ProjectVaultDirSet`). `VaultMerged` retires the vault row. An
  *   organization with a personal vault and no organization vault keeps the repository: it becomes the organization vault.
+ *   When both vaults point at the SAME repository (after `normalizeRemoteUrl`), nothing is merged (copying a repository
+ *   into itself would duplicate every file): no runner command is queued, no folder moves, the paths of projects and
+ *   interests stay as they are (the layout inside the shared repository is already `projects/<key>`, `interests/<slug>`),
+ *   and `VaultMerged{sameRepository:true}` only retires the personal registration.
  * - **Notice.** One desk alert tells the Owner what happened.
  *
  * One-off, idempotent and rebuild-safe: everything it decides is an event (`ProjectsRanked`, `ProjectVaultDirSet`,
@@ -49,8 +53,11 @@ export interface NoPersonalOrgPlan {
   rankPending: boolean;
   projects: NoPersonalProjectPlan[];
   vaultPending: boolean;
-  /** `merge`: files go into the organization vault under `personal/`; `promote`: the personal vault becomes the organization vault. */
-  vaultAction: 'none' | 'merge' | 'promote';
+  /**
+   * `merge`: files go into the organization vault under `personal/`; `promote`: the personal vault becomes the
+   * organization vault; `retire`: both vaults use the same repository, so only the personal registration is retired.
+   */
+  vaultAction: 'none' | 'merge' | 'promote' | 'retire';
   personalVault: { name: string; remoteUrl: string } | null;
   /** Folders of personal interests that are lifted out of `personal/` into `interests/<slug>/`. */
   liftedInterests: string[];
@@ -68,7 +75,7 @@ export interface NoPersonalOrgReport {
   orgId: string;
   ranked: number;
   personalProjects: number;
-  vault: 'none' | 'merged' | 'promoted' | 'waiting';
+  vault: 'none' | 'merged' | 'promoted' | 'retired' | 'waiting';
   liftedInterests: number;
   warnings: string[];
 }
@@ -126,6 +133,10 @@ async function personalInterestDirs(db: Queryable, orgId: string): Promise<strin
   return r.map((x) => interestVaultDir(x.slug));
 }
 
+/** Both vaults use one git remote (scp, ssh://, https://, `.git`, trailing slash and case differences ignored). */
+const sameRepository = (a: Row | null, b: Row | null): boolean =>
+  Boolean(a && b && normalizeRemoteUrl(String(a.remote_url)) === normalizeRemoteUrl(String(b.remote_url)));
+
 const vaultsOf = async (db: Queryable, orgId: string) => ({
   org: await one(db, `SELECT * FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [orgId]),
   personal: await one(db, `SELECT * FROM vaults WHERE org_id=$1 AND kind='personal' AND project_id IS NULL`, [
@@ -152,7 +163,13 @@ export async function planNoPersonal(db: Queryable): Promise<NoPersonalPlan> {
     const vaults = await vaultsOf(db, o.id);
     const projects = await rankedProjects(db, o.id);
     const action: NoPersonalOrgPlan['vaultAction'] =
-      vaultPending && vaults.personal ? (vaults.org ? 'merge' : 'promote') : 'none';
+      vaultPending && vaults.personal
+        ? vaults.org
+          ? sameRepository(vaults.org, vaults.personal)
+            ? 'retire'
+            : 'merge'
+          : 'promote'
+        : 'none';
     const plan: NoPersonalOrgPlan = {
       orgId: o.id,
       name: o.name,
@@ -215,7 +232,11 @@ export function formatNoPersonalPlan(r: NoPersonalPlan): string {
       for (const d of o.liftedInterests) lines.push(`    interest folder ${d} is kept at ${d}`);
       for (const p of o.projects.filter((x) => x.vaultDir))
         lines.push(`    project ${p.key}: folder ${p.vaultDir?.from} -> ${p.vaultDir?.to}`);
-    } else if (o.vaultAction === 'promote')
+    } else if (o.vaultAction === 'retire')
+      lines.push(
+        `  personal vault "${o.personalVault?.name}" uses the same repository as the organization vault: nothing to move; the personal vault registration is retired (no vault.merge is queued, project and interest folders keep their paths)`,
+      );
+    else if (o.vaultAction === 'promote')
       lines.push(
         `  personal vault "${o.personalVault?.name}" becomes the organization vault (the organization had none); no files move`,
       );
@@ -282,6 +303,28 @@ async function migrateOrg(tx: Tx, run: OrgRun): Promise<void> {
       report.vault = 'promoted';
       notes.push(
         'There are no personal vaults any more. Your organization had no organization vault, so the personal vault became it: nothing moved.',
+      );
+      await markStep(env, tx, 'vault', orgId);
+    } else if (sameRepository(vaults.org, vaults.personal)) {
+      // One repository behind both vaults: copying it into itself would duplicate every file. Retire the registration only.
+      events.push({
+        streamId: streamId.vault(vaults.personal.id),
+        event: {
+          type: 'VaultMerged',
+          payload: {
+            vaultId: vaults.personal.id,
+            orgId,
+            intoVaultId: vaults.org.id,
+            folder: '.',
+            sameRepository: true,
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: orgScope(orgId),
+      });
+      report.vault = 'retired';
+      notes.push(
+        'There are no personal vaults any more. Your personal vault used the same repository as your organization vault, so nothing was moved or copied: the personal vault registration was simply retired, and your projects and interests keep their folders.',
       );
       await markStep(env, tx, 'vault', orgId);
     } else {
@@ -414,7 +457,7 @@ export async function migrateNoPersonal(
         [NO_PERSONAL_MIGRATION, env.clock.now(), JSON.stringify({ orgs: reports })],
       );
     log(
-      `${NO_PERSONAL_MIGRATION}: ${reports.reduce((n, r) => n + r.ranked, 0)} project(s) ranked, ${reports.filter((r) => r.vault === 'merged' || r.vault === 'promoted').length} personal vault(s) handled${pending ? ' (some steps are waiting, see the warnings)' : ''}`,
+      `${NO_PERSONAL_MIGRATION}: ${reports.reduce((n, r) => n + r.ranked, 0)} project(s) ranked, ${reports.filter((r) => r.vault === 'merged' || r.vault === 'promoted' || r.vault === 'retired').length} personal vault(s) handled${pending ? ' (some steps are waiting, see the warnings)' : ''}`,
     );
   } finally {
     try {

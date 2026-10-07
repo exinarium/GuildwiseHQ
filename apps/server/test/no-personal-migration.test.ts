@@ -397,6 +397,79 @@ describe('other shapes', () => {
   });
 });
 
+describe('both vaults point at the same repository (the live UAT shape)', () => {
+  it('queues no merge, retires the personal vault, keeps every path, is idempotent and rebuild-safe', async () => {
+    const t = w.t;
+    const ownerS = await t.userSession(uniqueEmail('owner5'));
+    const org5 = await t.createOrg(ownerS.id, 'Same repo');
+    await pairWorkstation(t, ownerS, 'owner5-box');
+    const post = (path: string, body: unknown) =>
+      ok<any>(t.req('POST', path, { cookie: ownerS.cookie, headers: { 'x-aom-org': org5 }, body }), 201);
+    const side = await post('/api/projects', { key: 'PSIDE', name: 'Personal side' });
+    await snapshotDomain(side.project.id, 'personal', 2);
+    const interest = await post('/api/interests', { name: 'Personal reading', scan: { manual: true } });
+    const irow = (await q('SELECT project_id, slug FROM interests WHERE id=$1', [interest.id]))[0]!;
+    await snapshotDomain(irow.project_id, 'personal');
+    const workV = await registerLegacyVault(t, {
+      orgId: org5,
+      kind: 'work',
+      remoteUrl: 'git@github.com:example/agent-vault.git',
+    });
+    // spelled differently: ssh scheme, upper case, trailing slash
+    const persV = await registerLegacyVault(t, {
+      orgId: org5,
+      kind: 'personal',
+      remoteUrl: 'ssh://git@GitHub.com/Exinarium/Agent-Vault/',
+    });
+    const dirsBefore = await q(
+      `SELECT key, vault_dir, vault_folder FROM projects WHERE org_id=$1 ORDER BY key`,
+      [org5],
+    );
+    const merges = (await mergeCommands()).length;
+
+    const plan = (await planNoPersonal(ctx().pool)).orgs.find((o) => o.orgId === org5)!;
+    expect(plan.vaultAction).toBe('retire');
+    expect(plan.projects.every((p) => p.vaultDir === null)).toBe(true);
+    expect(plan.liftedInterests).toEqual([]);
+    expect(formatNoPersonalPlan(await planNoPersonal(ctx().pool))).toContain(
+      'personal vault "Personal vault" uses the same repository as the organization vault: nothing to move; the personal vault registration is retired',
+    );
+
+    const report = await migrateNoPersonal(env());
+    expect(report.orgs.find((o) => o.orgId === org5)).toMatchObject({ vault: 'retired', warnings: [] });
+    expect((await mergeCommands()).length).toBe(merges);
+    expect(await q('SELECT id FROM vaults WHERE org_id=$1', [org5])).toEqual([{ id: workV }]);
+    expect(await q('SELECT 1 FROM vaults WHERE id=$1', [persV])).toHaveLength(0);
+    expect(
+      await q(`SELECT key, vault_dir, vault_folder FROM projects WHERE org_id=$1 ORDER BY key`, [org5]),
+    ).toEqual(dirsBefore);
+    const merged = await q(`SELECT payload FROM events WHERE type='VaultMerged' AND payload->>'vaultId'=$1`, [
+      persV,
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.payload).toMatchObject({ intoVaultId: workV, sameRepository: true });
+    expect(
+      (await q(`SELECT body FROM desk_items WHERE org_id=$1 AND subkind='no_personal_migrated'`, [org5]))[0]!
+        .body,
+    ).toContain('same repository');
+
+    // idempotent
+    const events = (await q('SELECT count(*)::int AS n FROM events'))[0]!.n;
+    await migrateNoPersonal(env());
+    expect((await q('SELECT count(*)::int AS n FROM events'))[0]!.n).toBe(events);
+    expect((await mergeCommands()).length).toBe(merges);
+
+    // rebuild-safe
+    const before = await snapshot();
+    await rebuildProjections(ctx().pool, ctx().store);
+    expect(await snapshot()).toEqual(before);
+    expect(await q('SELECT 1 FROM vaults WHERE id=$1', [persV])).toHaveLength(0);
+    expect(
+      await q(`SELECT key, vault_dir, vault_folder FROM projects WHERE org_id=$1 ORDER BY key`, [org5]),
+    ).toEqual(dirsBefore);
+  });
+});
+
 describe('dry run on a database that is not migrated yet (withPendingMigrations)', () => {
   const SCHEMA = 'mig_nopers';
   const client = new pg.Client({ connectionString: TEST_DB_URL });
@@ -434,8 +507,8 @@ describe('dry run on a database that is not migrated yet (withPendingMigrations)
       ['00000000-0000-4000-8000-0000000000b2', 'personal'],
     ])
       await client.query(
-        `INSERT INTO vaults (id, org_id, kind, name, remote_url, created_at) VALUES ($1, $2, $3, 'v', 'git@example.test:x.git', now())`,
-        [id, O, kind],
+        `INSERT INTO vaults (id, org_id, kind, name, remote_url, created_at) VALUES ($1, $2, $3, 'v', $4, now())`,
+        [id, O, kind, `git@example.test:${kind}.git`],
       );
     await client.query(`SET session_replication_role = DEFAULT`);
     const migrationsBefore = (await client.query(`SELECT count(*)::int AS n FROM schema_migrations`)).rows[0]
