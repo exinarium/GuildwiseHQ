@@ -6,6 +6,18 @@ import { ActiveOrgSchema, GuestOrgRefSchema, OrgRefSchema } from './orgs.ts';
 export const LoginRequestSchema = z.object({ email: z.email(), password: z.string().min(1).max(256) });
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
+/** The user's first-login tour: `new` (never shown), `in_progress` (resumable at `step`), `completed` or `dismissed` (skipped). */
+export const TourStateSchema = z.object({
+  status: z.enum(['new', 'in_progress', 'completed', 'dismissed']),
+  step: z.number().int().min(0).default(0),
+});
+export type TourState = z.infer<typeof TourStateSchema>;
+export const UpdateTourRequestSchema = z.object({
+  status: z.enum(['in_progress', 'completed', 'dismissed']),
+  step: z.number().int().min(0).max(100).default(0),
+});
+export type UpdateTourRequest = z.infer<typeof UpdateTourRequestSchema>;
+
 export const UserDtoSchema = z.object({
   id: z.uuid(),
   email: z.string(),
@@ -20,6 +32,8 @@ export const UserDtoSchema = z.object({
   /** The user's picture (null: initials). */
   avatar: UserAvatarSchema.nullable().optional(),
   twoFactorEnabled: z.boolean().default(false),
+  /** Only on `me`. Kept per user on the server, so the tour does not come back on another device. */
+  tour: TourStateSchema.optional(),
 });
 export type UserDto = z.infer<typeof UserDtoSchema>;
 

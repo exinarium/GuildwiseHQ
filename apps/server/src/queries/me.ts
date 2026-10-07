@@ -1,4 +1,4 @@
-import type { MeResponse } from '@aom/shared';
+import type { MeResponse, TourState } from '@aom/shared';
 import { loadOrg, membershipsOf, type OrgRow, orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
@@ -41,6 +41,13 @@ export async function guestOrgs(ctx: Ctx, userId: string) {
   return [...byOrg.values()];
 }
 
+/** `new` is the state of a user who never saw the tour; with auto-start off (the e2e suite) they count as done. */
+function tourOf(ctx: Ctx, u: Record<string, any>): TourState {
+  const status =
+    (u.tour_status as TourState['status'] | null) ?? (ctx.config.tourAutostart ? 'new' : 'completed');
+  return { status, step: Number(u.tour_step ?? 0) };
+}
+
 /**
  * The `me` response: the account, its organizations, the active organization of this request and the guest access.
  * `requestedOrg` is the tab's `X-AOM-Org`; a stale one (no longer a member) falls back to the default instead of failing,
@@ -75,7 +82,10 @@ export async function buildMe(
     [userId, ctx.clock.now(), session.user.email],
   );
   return {
-    user: toUserDto(u as Record<string, any>),
+    user: {
+      ...toUserDto(u as Record<string, any>),
+      tour: tourOf(ctx, u as Record<string, any>),
+    },
     account: { kind: session.user.kind },
     isAdmin: activeOrg ? activeOrg.role === 'owner' || activeOrg.role === 'admin' : false,
     orgs,

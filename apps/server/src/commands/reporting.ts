@@ -60,6 +60,22 @@ export async function updateReporting(
   return getReporting(ctx, org);
 }
 
+export async function setTourState(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  status: 'in_progress' | 'completed' | 'dismissed',
+  step: number,
+): Promise<void> {
+  await ctx.store.append([
+    {
+      streamId: streamId.user(user.id),
+      event: { type: 'UserTourStateChanged', payload: { userId: user.id, status, step } },
+      actor: userActor(user.id),
+      scope: userScope(user.id),
+    },
+  ]);
+}
+
 export async function setTimezone(ctx: Ctx, user: AuthSession['user'], timezone: string): Promise<void> {
   if (!isValidTimeZone(timezone)) throw badRequest('invalid_timezone', `${timezone} is not a time zone`);
   await ctx.store.append([

@@ -40,7 +40,7 @@ Without a running systemd (a container, or WSL without `systemd=true`) the unit 
 
 **Windows:** the PowerShell script elevates itself, enables WSL2 and installs Ubuntu if needed (when Windows has to restart it registers a `RunOnce` entry and continues after you sign in; a copy of the script and the Linux installer are kept in `%LOCALAPPDATA%\GuildwiseHQ`), creates the Ubuntu user if the distribution has only root, sets `systemd=true` in `/etc/wsl.conf`, sets `vmIdleTimeout=-1` in `%USERPROFILE%\.wslconfig`, registers the **"WSL Boot"** scheduled task (at logon: `wsl.exe -d Ubuntu --exec sleep infinity`), turns lingering on for the Ubuntu user and runs the Linux installer inside Ubuntu.
 
-All installers are **idempotent**: running the command again upgrades the runner, repairs the service and keeps the pairing (`GUILDWISE_REPAIR=1` pairs again). They finish with a success or failure summary that links to the install help (`/help#install-troubleshooting`) and Contact us (`/contact`).
+All installers are **idempotent**: running the command again upgrades the runner, repairs the service and keeps the pairing (`GUILDWISE_REPAIR=1` pairs again). They finish with a success or failure summary that links to the install help (`/help/install-troubleshooting`) and Contact us (`/contact`).
 
 Environment variables the Linux and macOS scripts understand (unattended installs and tests): `GUILDWISE_YES=1` (take every default, never ask), `GUILDWISE_NAME` (workstation name), `GUILDWISE_REPO_DIRS` (space-separated folders), `GUILDWISE_WITH_YTDLP`, `GUILDWISE_WITH_DOCKER`, `GUILDWISE_WITH_HOMEBREW` (1 or 0), `GUILDWISE_MOCK=1` (enable the mock runtime), `GUILDWISE_SKIP_CLAUDE=1` (skip the sign-in), `GUILDWISE_SKIP_CLAUDE_INSTALL=1`, `GUILDWISE_ALLOW_ROOT=1`.
 

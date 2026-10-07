@@ -1,6 +1,7 @@
 import type { WorkstationDto } from '@aom/shared';
 import { ChevronRight, Server, TriangleAlert } from 'lucide-react';
 import { useCallback, useId, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { usePairingCode, useUnlinkWorkstation, useWorkstations } from '../api/queries/workstations.ts';
 import { BRAND } from '../brand.ts';
@@ -66,7 +67,8 @@ export function Workstations() {
   const me = useMe();
   const [open, setOpen] = useOpenRows(me.data?.user.id);
   const [pairOpen, setPairOpen] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
+  const [params] = useSearchParams();
+  const [addOpen, setAddOpen] = useState(() => params.get('add') === '1');
   return (
     <div className="mx-auto max-w-4xl">
       <PageHeader

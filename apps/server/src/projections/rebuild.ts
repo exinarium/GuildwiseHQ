@@ -43,7 +43,7 @@ export async function rebuildProjections(
       await exec(tx, `CREATE TEMP TABLE _save_${s.table} ON COMMIT DROP AS SELECT * FROM ${s.table}`);
     await exec(
       tx,
-      'CREATE TEMP TABLE _save_users ON COMMIT DROP AS SELECT id, last_login_at, last_org_id FROM users',
+      'CREATE TEMP TABLE _save_users ON COMMIT DROP AS SELECT id, last_login_at, last_org_id, tour_status, tour_step FROM users',
     );
     await exec(
       tx,
@@ -80,6 +80,12 @@ export async function rebuildProjections(
     await exec(
       tx,
       'UPDATE users u SET last_login_at = s.last_login_at, last_org_id = s.last_org_id FROM _save_users s WHERE u.id = s.id',
+    );
+    // Users who had the tour marked done by migration 1321 (before it had events) keep that; an event replayed above wins.
+    await exec(
+      tx,
+      `UPDATE users u SET tour_status = s.tour_status, tour_step = s.tour_step FROM _save_users s
+        WHERE u.id = s.id AND u.tour_status IS NULL AND s.tour_status IS NOT NULL`,
     );
     await exec(
       tx,

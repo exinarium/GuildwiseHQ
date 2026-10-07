@@ -114,6 +114,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       'scheduler@e2e.test',
       'installer@e2e.test',
       'supporter@e2e.test',
+      'tourist@e2e.test',
       'visitor@e2e.test',
       SUPER.email,
       NEWORG.email,
@@ -141,6 +142,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_TEST_CLOCK: 'true',
     AOM_ALLOW_LOCAL_REMOTES: 'true',
     AOM_MOCK_UI: 'true',
+    // the first-login tour is off for every user (the tour spec switches it on for its own); it would cover the page under test
+    AOM_TOUR_AUTOSTART: 'false',
     // phases: re-check a finalized pull request / pushed branch against the working branch every few seconds
     AOM_MERGE_CHECK_SECONDS: '4',
     // BA reporter: sweep for signals, expired holds and the daily report every few seconds

@@ -424,7 +424,7 @@ export function InstallFailure({
       </p>
       <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
         <Link
-          to="/help#install-troubleshooting"
+          to="/help/install-troubleshooting"
           onClick={onClose}
           className="inline-flex items-center gap-1 font-medium underline"
           data-testid="install-help"

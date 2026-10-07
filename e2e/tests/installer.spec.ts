@@ -142,7 +142,7 @@ test('a failed install shows help and Contact us; starting over retires the old 
   await report(token, { step: 'summary', status: 'done', detail: 'failed: Could not download the runner' });
   const failure = page.getByTestId('install-failure');
   await expect(failure).toContainText('Could not download the runner');
-  await expect(failure.getByTestId('install-help')).toHaveAttribute('href', '/help#install-troubleshooting');
+  await expect(failure.getByTestId('install-help')).toHaveAttribute('href', '/help/install-troubleshooting');
   await expect(failure.getByTestId('install-contact')).toHaveAttribute(
     'href',
     '/help/contact?from=installer',

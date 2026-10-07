@@ -49,6 +49,7 @@ function Item({
       to={entry.to}
       onClick={onNavigate}
       aria-current={active ? 'page' : undefined}
+      data-tour={`nav-${entry.id}`}
       {...(entry.testId ? { 'data-testid': entry.testId } : {})}
       className={cx(
         'group relative flex items-center gap-3 rounded-control text-[14px] font-medium transition-colors duration-100',

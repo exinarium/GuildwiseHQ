@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useOverrideBudget, useSetBudget } from '../api/queries/costs.ts';
 import { money, resetDay } from '../lib/money.ts';
 import { BudgetMeter } from './BudgetMeter.tsx';
+import { HelpHint } from './help/HelpHint.tsx';
 import { Badge, Button, ErrorBox, Panel, TextInput } from './ui.tsx';
 
 const STATE_LABEL = {
@@ -60,7 +61,11 @@ export function BudgetPanel({
       <p className="mb-3 text-sm text-muted">
         Agents' work on this {what} is priced at list prices and added up per month ({budget.month}). At 80%
         your BA and the desk are warned; at 100% nothing new starts on it (running shifts finish) until you
-        raise the budget or override it for the month. It starts again on {resetDay(budget.resetsAt)}.
+        raise the budget or override it for the month. It starts again on {resetDay(budget.resetsAt)}.{' '}
+        <HelpHint article="budgets-and-costs#override" label="About budgets and the override">
+          A budget is a monthly spending limit. At the limit new work pauses; an override lets work continue
+          until the month ends, and the budget applies again next month.
+        </HelpHint>
       </p>
       {budget.spentMicros !== null && (
         <p className="mb-3 text-sm text-muted tnum" data-testid="budget-spend-line">

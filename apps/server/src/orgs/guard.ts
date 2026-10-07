@@ -14,9 +14,12 @@ const ALLOWED_WHEN_SUSPENDED = [
   /^Invitation/,
   /^TwoFactor/,
   /^PlatformOrg/,
-  /^(ProjectMemberRemoved|ClaimReleased|CardRehomed|AgentRetired|PasswordChanged|UserAvatarSet|UserTimezoneChanged)$/,
+  /^(ProjectMemberRemoved|ClaimReleased|CardRehomed|AgentRetired|PasswordChanged|UserAvatarSet|UserTimezoneChanged|UserTourStateChanged)$/,
 ];
-const ALLOWED_WHEN_CANCELLED = [/^TwoFactor/, /^(PasswordChanged|UserAvatarSet|UserTimezoneChanged)$/];
+const ALLOWED_WHEN_CANCELLED = [
+  /^TwoFactor/,
+  /^(PasswordChanged|UserAvatarSet|UserTimezoneChanged|UserTourStateChanged)$/,
+];
 
 /**
  * The append-level backstop for "suspended means read-only" (docs/design/organizations.md section 7.2): an event

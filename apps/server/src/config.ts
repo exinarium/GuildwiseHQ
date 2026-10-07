@@ -24,6 +24,7 @@ const EnvSchema = z.object({
   AOM_TEST_CLOCK: bool(false),
   AOM_ALLOW_LOCAL_REMOTES: bool(false),
   AOM_MOCK_UI: bool(false),
+  AOM_TOUR_AUTOSTART: bool(true),
   AOM_REPORTER_SECONDS: z.coerce.number().int().min(1).max(3600).default(60),
   AOM_HYGIENE_SCHEDULE: bool(true),
   AOM_WEBHOOK_ALLOW_PRIVATE: bool(false),
@@ -55,6 +56,8 @@ export interface Config {
   allowLocalRemotes: boolean;
   /** Mock-runtime card fields (Mock script, ...) are shown in the UI and accepted on the API (dev and e2e only). */
   mockUi: boolean;
+  /** A user who has never seen the first-login tour gets it on their first visit (off in the e2e suite, which switches it on per user). */
+  tourAutostart: boolean;
   /** Ceiling for a workstation's `maxConcurrentShifts` (the runner's own setting, default 4, is what applies). */
   /** How often the reporter sweeps for signals, expired triage holds and the daily floor report (docs/design/phases.md B4). */
   reporterSeconds: number;
@@ -91,6 +94,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     testClock: e.AOM_TEST_CLOCK,
     allowLocalRemotes: e.AOM_ALLOW_LOCAL_REMOTES,
     mockUi: e.AOM_MOCK_UI,
+    tourAutostart: e.AOM_TOUR_AUTOSTART,
     reporterSeconds: e.AOM_REPORTER_SECONDS,
     hygieneSchedule: e.AOM_HYGIENE_SCHEDULE,
     maxShiftsPerWorkstation: e.AOM_MAX_SHIFTS_PER_WORKSTATION,

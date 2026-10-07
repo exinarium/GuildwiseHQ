@@ -197,7 +197,7 @@ describe('Add a workstation wizard', () => {
     };
     const box = await screen.findByTestId('install-failure', {}, { timeout: 5000 });
     expect(box).toHaveTextContent('Could not download the runner');
-    expect(within(box).getByTestId('install-help')).toHaveAttribute('href', '/help#install-troubleshooting');
+    expect(within(box).getByTestId('install-help')).toHaveAttribute('href', '/help/install-troubleshooting');
     expect(within(box).getByTestId('install-contact')).toHaveAttribute(
       'href',
       '/help/contact?from=installer',

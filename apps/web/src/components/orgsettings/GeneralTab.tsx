@@ -3,6 +3,7 @@ import { ArrowRightLeft, LogOut, ShieldCheck } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useLeaveOrg, useOrgMembers, usePatchOrg, useTransferOwnership } from '../../api/queries/orgs.ts';
 import { PasswordInput } from '../auth/PasswordInput.tsx';
+import { HelpHint } from '../help/HelpHint.tsx';
 import { Button, ConfirmDialog, Dialog, ErrorBox, Panel, Select, TextInput, useToast } from '../ui.tsx';
 
 /** Name, owner and the Owner's controls: ownership transfer and the organization-wide two-factor requirement. */
@@ -86,7 +87,13 @@ export function GeneralTab({ org, userId }: { org: OrgDetailResponse; userId: st
             <ShieldCheck aria-hidden="true" className="size-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-semibold text-fg">Require two-factor login</h2>
+            <h2 className="flex items-center gap-1 text-lg font-semibold text-fg">
+              Require two-factor login
+              <HelpHint article="two-factor#enforcement" label="About requiring two-factor login">
+                When this is on, every member must sign in with a code from an authenticator app. Anyone who
+                has not set it up is asked to at their next visit.
+              </HelpHint>
+            </h2>
             <p className="mt-1 text-sm text-muted">
               Every member signs in with a code from an authenticator app. Members who have not set it up are
               asked to at their next visit.

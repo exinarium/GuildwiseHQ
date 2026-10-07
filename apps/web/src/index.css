@@ -95,6 +95,7 @@
   --animate-rise: rise 200ms var(--ease-out);
   --animate-sheet: sheet 220ms var(--ease-out);
   --animate-drawer: drawer 200ms var(--ease-out);
+  --animate-drawer-right: drawer-right 200ms var(--ease-out);
   --animate-fade: fade 160ms var(--ease-out);
   --animate-toast: toast 220ms var(--ease-out);
   --animate-flash: flash 1.4s ease-out;
@@ -133,6 +134,11 @@
   @keyframes drawer {
     from {
       transform: translateX(-100%);
+    }
+  }
+  @keyframes drawer-right {
+    from {
+      transform: translateX(100%);
     }
   }
   @keyframes fade {

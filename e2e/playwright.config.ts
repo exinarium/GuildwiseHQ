@@ -46,6 +46,7 @@ export default defineConfig({
     { name: 'org-chart', testMatch: 'org-chart.spec.ts', dependencies: ['budgets'] },
     { name: 'installer', testMatch: 'installer.spec.ts', dependencies: ['org-chart'] },
     { name: 'support', testMatch: 'support.spec.ts', dependencies: ['installer'] },
+    { name: 'tour', testMatch: 'tour.spec.ts', dependencies: ['support'] },
     // The screenshot run for docs/guide (never part of `pnpm e2e`): AOM_E2E_GUIDE=1 playwright test --project=guide
     ...(process.env.AOM_E2E_GUIDE === '1'
       ? [{ name: 'guide', testMatch: 'guide-screenshots.spec.ts', timeout: 600_000 }]

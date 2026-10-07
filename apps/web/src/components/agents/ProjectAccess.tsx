@@ -2,6 +2,7 @@ import type { AgentDto, ProjectDto } from '@aom/shared';
 import { Star } from 'lucide-react';
 import { useState } from 'react';
 import { useSetAllowedProjects, useSetFocusProjects } from '../../api/queries/agents.ts';
+import { HelpHint } from '../help/HelpHint.tsx';
 import { cx } from '../ui/cx.ts';
 import { Badge, Button, Dialog, ErrorBox, Segmented } from '../ui.tsx';
 
@@ -57,7 +58,15 @@ export function ProjectAccessEditor({
 
   return (
     <fieldset className="flex flex-col gap-2" data-testid={`${idPrefix}-editor`}>
-      <legend className="mb-1 text-sm font-medium text-fg">Where may this agent work?</legend>
+      <legend className="mb-1 text-sm font-medium text-fg">
+        <span className="inline-flex items-center gap-1">
+          Where may this agent work?
+          <HelpHint article="agents#allow-lists" label="About the allow-list of projects">
+            The allow-list is the set of projects this agent may work on. It is only offered cards from those
+            projects; an empty list keeps it on the bench.
+          </HelpHint>
+        </span>
+      </legend>
       <Segmented
         label="Allowed projects"
         value={any ? 'any' : 'some'}
@@ -69,6 +78,10 @@ export function ProjectAccessEditor({
           ? 'Any current or future project of the organization that the owner of its workstation can open.'
           : 'Only these projects. The agent also needs its workstation owner to be on the project.'}{' '}
         Star the projects it should work first.
+        <HelpHint article="agents#focus" label="About focus">
+          The starred projects are the agent's focus: it picks cards from them first and turns to the others
+          only when there is nothing there.
+        </HelpHint>
       </p>
       {projects.length === 0 ? (
         <p className="text-sm text-muted">No projects yet.</p>

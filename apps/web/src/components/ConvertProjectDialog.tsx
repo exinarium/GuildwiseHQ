@@ -10,6 +10,7 @@ import { GitBranch, Plus, Sparkles, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useWorkflows } from '../api/queries/agents.ts';
 import { useConvertPreview, useConvertProject } from '../api/queries/projects.ts';
+import { HelpHint } from './help/HelpHint.tsx';
 import { Badge, Button, Callout, cx, Dialog, ErrorBox, Select, Spinner, TextInput, useToast } from './ui.tsx';
 
 type RepoEntry =
@@ -195,8 +196,12 @@ export function ConvertProjectDialog({
     >
       <div data-testid="convert-dialog" className="flex flex-col gap-6">
         <section aria-labelledby="convert-step-workflow" className="flex flex-col gap-2">
-          <h3 id="convert-step-workflow" className="text-sm font-semibold text-fg">
+          <h3 id="convert-step-workflow" className="flex items-center gap-1 text-sm font-semibold text-fg">
             1. Workflow
+            <HelpHint article="project-conversion#converting" label="About converting a project">
+              Converting changes what kind of project this is, for example from research to code. Its cards,
+              notes and history are kept; you decide what happens to cards that do not fit the new workflow.
+            </HelpHint>
           </h3>
           {workflows.isPending && <Spinner inline label="Loading workflows" />}
           <div role="radiogroup" aria-label="Target workflow" className="flex flex-col gap-2">

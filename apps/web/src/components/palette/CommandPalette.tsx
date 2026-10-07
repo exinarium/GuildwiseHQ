@@ -4,9 +4,11 @@ import {
   CornerDownLeft,
   FileText,
   FolderKanban,
+  GraduationCap,
   HelpCircle,
   Inbox,
   Keyboard,
+  LifeBuoy,
   type LucideIcon,
   MessageCircleQuestion,
   MessageSquare,
@@ -23,6 +25,7 @@ import { useCardSearch } from '../../api/queries/search.ts';
 import { useTheme } from '../../lib/useTheme.ts';
 import { AgentAvatar } from '../Face.tsx';
 import type { NavSection } from '../shell/nav-config.ts';
+import { useTour } from '../tour/TourContext.tsx';
 import { cx } from '../ui/cx.ts';
 
 export interface PaletteContext {
@@ -33,6 +36,7 @@ export interface PaletteContext {
   onChat: () => void;
   onHelp: () => void;
   onContact?: () => void;
+  onPageHelp?: () => void;
 }
 
 function Item({
@@ -73,6 +77,7 @@ const GroupHeading = ({ children }: { children: ReactNode }) => (
 /** The body is mounted only while the palette is open, so the lists load on demand. */
 function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void }) {
   const nav = useNavigate();
+  const tour = useTour();
   const [query, setQuery] = useState('');
   const [theme, setTheme] = useTheme();
   const agents = useAgents();
@@ -160,6 +165,32 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
             Toggle theme ({dark ? 'switch to light' : 'switch to dark'})
           </Item>
           <Item
+            value="action help centre articles search glossary"
+            keywords={['help', 'docs', 'documentation', 'guide', 'how', 'learn']}
+            icon={LifeBuoy}
+            onSelect={go('/help')}
+          >
+            Help
+          </Item>
+          <Item
+            value="action what is on this page help"
+            keywords={['help', 'explain', 'controls', 'page']}
+            icon={HelpCircle}
+            onSelect={run(() => ctx.onPageHelp?.())}
+          >
+            What is on this page
+          </Item>
+          {tour.available && (
+            <Item
+              value="action take the tour replay onboarding"
+              keywords={['help', 'tour', 'welcome', 'walkthrough', 'onboarding']}
+              icon={GraduationCap}
+              onSelect={run(tour.start)}
+            >
+              Take the tour
+            </Item>
+          )}
+          <Item
             value="action contact us support"
             keywords={['help', 'bug', 'question', 'feature', 'billing', 'report', 'feedback']}
             icon={MessageCircleQuestion}
@@ -187,11 +218,13 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
         </Command.Group>
 
         <Command.Group heading={<GroupHeading>Pages</GroupHeading>}>
-          {[...ctx.sections.flatMap((s) => s.items), ...ctx.footer].map((e) => (
-            <Item key={e.id} value={`page ${e.label}`} icon={e.icon} onSelect={go(e.to)}>
-              {e.label}
-            </Item>
-          ))}
+          {[...ctx.sections.flatMap((s) => s.items), ...ctx.footer]
+            .filter((e) => e.id !== 'help')
+            .map((e) => (
+              <Item key={e.id} value={`page ${e.label}`} icon={e.icon} onSelect={go(e.to)}>
+                {e.label}
+              </Item>
+            ))}
         </Command.Group>
 
         {ctx.projects.length > 0 && (

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useUpdateReporting } from '../../api/queries/reporting.ts';
+import { HelpHint } from '../help/HelpHint.tsx';
 import { Button, ErrorBox, Panel, TextInput, useToast } from '../ui.tsx';
 
 /**
@@ -25,7 +26,13 @@ export function QuietCapPanel({
     <Panel data-testid="quiet-cap">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold text-fg">Daily quiet cap</h2>
+          <h2 className="flex items-center gap-1 text-base font-semibold text-fg">
+            Daily quiet cap
+            <HelpHint article="interests#quiet-cap" label="About the daily quiet cap">
+              The most digest items interests may put on your desk in one day, across all of them. The rest
+              wait for the next day, so a busy day never floods you.
+            </HelpHint>
+          </h2>
           <p className="text-sm text-muted" data-testid="quiet-cap-line">
             {cap == null
               ? 'No limit on the digest items that reach your desk.'

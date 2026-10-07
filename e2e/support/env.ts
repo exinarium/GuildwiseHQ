@@ -182,6 +182,12 @@ export const SUPPORTER = {
   name: 'E2E Supporter',
   password: 'supporter-password-12345',
 };
+/** Tour spec: an organization Owner whose first-login tour the spec switches on. */
+export const TOURIST = {
+  email: 'tourist@e2e.test',
+  name: 'E2E Tourist',
+  password: 'tourist-password-12345',
+};
 export const SUPPORT_ADMIN = {
   email: 'support-admin@e2e.test',
   name: 'E2E Support Admin',

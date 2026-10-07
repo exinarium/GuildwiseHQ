@@ -15,7 +15,7 @@ import { Chat } from './pages/Chat.tsx';
 import { ContactPublic } from './pages/ContactPublic.tsx';
 import { Costs } from './pages/Costs.tsx';
 import { Desk } from './pages/Desk.tsx';
-import { Help } from './pages/Help.tsx';
+import { Help, PlatformHelp } from './pages/Help.tsx';
 import { IntakeNew, IntakeView } from './pages/Intake.tsx';
 import { InterestDetail } from './pages/InterestDetail.tsx';
 import { Interests } from './pages/Interests.tsx';
@@ -97,9 +97,11 @@ export const routes = [
       { path: '/admin', element: <Navigate to="/settings/org" replace /> },
       { path: '/desk', element: <Desk /> },
       { path: '/help', element: <Help /> },
+      { path: '/help/glossary', element: <Help /> },
       { path: '/help/contact', element: <Help /> },
       { path: '/help/requests', element: <Help /> },
       { path: '/help/requests/:id', element: <Help /> },
+      { path: '/help/:slug', element: <Help /> },
       { path: '/ledger', element: <Ledger /> },
       { path: '/chat/:threadId', element: <Chat /> },
       { path: '/intake', element: <IntakeNew /> },
@@ -120,6 +122,9 @@ export const routes = [
           { path: '/platform/support', element: <PlatformSupport /> },
           { path: '/platform/support/:id', element: <PlatformSupportTicket /> },
           { path: '/platform/audit', element: <PlatformAudit /> },
+          { path: '/platform/help', element: <PlatformHelp /> },
+          { path: '/platform/help/glossary', element: <PlatformHelp /> },
+          { path: '/platform/help/:slug', element: <PlatformHelp /> },
         ],
       },
     ],

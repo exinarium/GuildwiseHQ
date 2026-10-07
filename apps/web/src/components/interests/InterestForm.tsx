@@ -1,5 +1,6 @@
 import { ALL_INTEREST_KINDS, type InterestKind, SCHEDULE_PRESETS } from '@aom/shared';
 import { cronOf, derivedWindow, type FormErrors, type InterestFormValues } from '../../lib/interests.ts';
+import { HelpHint } from '../help/HelpHint.tsx';
 import { Select, TextArea, TextInput } from '../ui.tsx';
 
 const KIND_LABEL: Record<InterestKind, string> = {
@@ -133,7 +134,15 @@ export function InterestForm({
       </fieldset>
 
       <fieldset className="flex flex-col gap-2 rounded-card border border-line p-3">
-        <legend className="px-1 text-sm font-medium text-fg">Run schedule: when it scans</legend>
+        <legend className="px-1 text-sm font-medium text-fg">
+          <span className="inline-flex items-center gap-1">
+            Run schedule: when it scans
+            <HelpHint article="interests#run-and-delivery" label="About the run schedule and delivery">
+              The run schedule is when the agent looks for new things. The delivery schedule, below, is when
+              you get what it found. They are separate: it can look every hour and tell you once a day.
+            </HelpHint>
+          </span>
+        </legend>
         <label className="flex min-h-9 items-center gap-2 text-sm [@media(pointer:coarse)]:min-h-11">
           <input
             type="checkbox"
@@ -193,7 +202,13 @@ export function InterestForm({
 
       <fieldset className="flex flex-col gap-2 rounded-card border border-line p-3">
         <legend className="px-1 text-sm font-medium text-fg">
-          Delivery schedule: when results reach you
+          <span className="inline-flex items-center gap-1">
+            Delivery schedule: when results reach you
+            <HelpHint article="interests#quiet-cap" label="About delivery and the daily quiet cap">
+              Delivery decides when results reach your desk, as one digest or as soon as a run finishes. The
+              organization's daily quiet cap limits how many items reach you in a day, whatever the schedule.
+            </HelpHint>
+          </span>
         </legend>
         <p className="text-xs text-subtle">
           Runs can happen ahead of delivery. New items wait and arrive as one digest on your desk; nothing is

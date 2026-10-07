@@ -42,6 +42,7 @@ import {
   wizardIsOrgLevel,
 } from '../../lib/schedules.ts';
 import { CardFormFields } from '../CardFormFields.tsx';
+import { HelpHint } from '../help/HelpHint.tsx';
 import { cx } from '../ui/cx.ts';
 import { Button, Callout, Dialog, ErrorBox, Select, Stepper, TextArea, TextInput, useToast } from '../ui.tsx';
 
@@ -309,6 +310,13 @@ function WizardDialog({
         {header}
         {step === 0 && (
           <div className="flex flex-col gap-4">
+            <p className="-mb-2 flex items-center gap-1 text-sm font-medium text-fg">
+              When should it run?
+              <HelpHint article="schedules-and-integrations#triggers" label="About schedule triggers">
+                The trigger is what starts the schedule: a time of day, an incoming webhook, a labelled issue
+                or a button you press.
+              </HelpHint>
+            </p>
             <TileGrid
               label="Trigger"
               value={s.triggerKind}
@@ -329,14 +337,23 @@ function WizardDialog({
           </div>
         )}
         {step === 1 && (
-          <TileGrid
-            label="Action"
-            value={s.tile}
-            onChange={(v) => set({ tile: v })}
-            tiles={ACTION_TILES}
-            icons={ACTION_ICON}
-            disabled={tileDisabled}
-          />
+          <div className="flex flex-col gap-3">
+            <p className="flex items-center gap-1 text-sm font-medium text-fg">
+              What should it do?
+              <HelpHint article="schedules-and-integrations#actions" label="About schedule actions">
+                The action is the work done each time the schedule fires, for example creating a card or
+                posting an update. Some actions only fit certain triggers.
+              </HelpHint>
+            </p>
+            <TileGrid
+              label="Action"
+              value={s.tile}
+              onChange={(v) => set({ tile: v })}
+              tiles={ACTION_TILES}
+              icons={ACTION_ICON}
+              disabled={tileDisabled}
+            />
+          </div>
         )}
         {step === 2 && (
           <div className="flex flex-col gap-4">

@@ -13,8 +13,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, patch, post } from '../client.ts';
 
-export function useWorkstations() {
+export function useWorkstations(opts: { enabled?: boolean } = {}) {
   return useQuery({
+    enabled: opts.enabled ?? true,
     queryKey: ['workstations'],
     queryFn: async () => (await get('/workstations', WorkstationsResponseSchema)).workstations,
     // Repo matching (workstation_repos) is an operational projection that emits no event, so poll lightly.

@@ -111,5 +111,14 @@ export const userEvents = [
     }),
   ),
   defineEvent('UserTimezoneChanged', z.object({ userId: Id, timezone: z.string().min(1).max(64) })),
+  /** The first-login tour: where the user is in it (`step`, 0-based) and whether they finished or skipped it. Replaying sets `in_progress` at step 0. */
+  defineEvent(
+    'UserTourStateChanged',
+    z.object({
+      userId: Id,
+      status: z.enum(['in_progress', 'completed', 'dismissed']),
+      step: z.number().int().min(0).max(100),
+    }),
+  ),
   defineEvent('PasswordChanged', z.object({ userId: Id, passwordHash: z.string().min(1) })),
 ] as const;

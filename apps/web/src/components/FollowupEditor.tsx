@@ -1,5 +1,6 @@
 import type { DeployTargetDto, FollowupSpec, PhaseFollowupDto } from '@aom/shared';
 import { Link } from 'react-router';
+import { HelpHint } from './help/HelpHint.tsx';
 import { Badge, Button, Select, TextArea } from './ui.tsx';
 
 type Spec = FollowupSpec;
@@ -82,6 +83,13 @@ export function FollowupEditor({
 
   return (
     <div className="flex flex-col gap-2" data-testid="followup-editor">
+      <div className="flex items-center gap-1 text-sm font-medium text-fg">
+        Follow-ups
+        <HelpHint article="phases#followups" label="About follow-ups">
+          Follow-ups are steps that run by themselves, in order, after you approve a finished phase: for
+          example a deploy, a regression run or a custom instruction.
+        </HelpHint>
+      </div>
       {value.length === 0 && (
         <p className="text-sm text-subtle" data-testid="followups-empty">
           No follow-ups: nothing runs after this phase.

@@ -39,6 +39,7 @@ export function UserMenu({
     <DM.Root>
       <DM.Trigger
         data-testid="user-menu"
+        data-tour="user-menu"
         aria-label={collapsed ? `Account menu for ${name}` : undefined}
         className={cx(
           'flex w-full items-center gap-2.5 rounded-control text-left text-side-strong hover:bg-side-hover',
