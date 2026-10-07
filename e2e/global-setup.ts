@@ -64,6 +64,26 @@ async function waitHealthy(timeoutMs = 30_000): Promise<void> {
   throw new Error(`server did not become healthy; see ${paths.serverLog}`);
 }
 
+/**
+ * Pins the server's test clock to a fixed time of day, so the suite does not depend on when it runs. The daily floor
+ * report fires once the manager's local clock passes 08:00, and specs advance the clock (core-loop by an hour and a
+ * minute), so a run started shortly before 08:00 local would see a report appear mid-suite. The clock only moves
+ * forward: to the next 10:00 UTC (12:00 in Johannesburg), which leaves hours of headroom either side for any zone.
+ */
+async function pinTestClock(): Promise<void> {
+  const post = (advanceMs: number) =>
+    fetch(`${BASE_URL}/api/test/clock`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: BASE_URL },
+      body: JSON.stringify({ advanceMs }),
+    });
+  const now = new Date(((await (await post(0)).json()) as { now: string }).now);
+  const target = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 10, 0, 0);
+  const next = target > now.getTime() ? target : target + 86_400_000;
+  const r = await post(next - now.getTime());
+  if (!r.ok) throw new Error(`could not pin the test clock: ${r.status}`);
+}
+
 export default async function globalSetup(): Promise<() => Promise<void>> {
   process.env.AOM_E2E_DIR = E2E_DIR;
   rmSync(E2E_DIR, { recursive: true, force: true });
@@ -156,6 +176,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const server: ChildProcess = spawn('node', [paths.server], { env, stdio: ['ignore', log, log] });
   closeSync(log);
   await waitHealthy();
+  await pinTestClock();
   writeFileSync(paths.pids, JSON.stringify({ server: server.pid }));
 
   return async () => {
