@@ -5,6 +5,8 @@ export interface MailMessage {
   subject: string;
   text: string;
   html?: string;
+  /** Where a reply from the recipient's mail program goes (support mail: the person who wrote in). */
+  replyTo?: string;
 }
 
 export interface Mailer {
