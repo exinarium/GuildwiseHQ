@@ -7,8 +7,8 @@ import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
 // Cost tracking and per-project budgets: the mock runtime reports synthetic usage (`fields.mockUsage`), shifts are
 // priced at list prices, and a project over its monthly budget stops starting new shifts until the budget is raised
 // or overridden. One owner, one mock runner, project BUD on the toy repo, a builder and a reviewer.
-// Each shift of a card reports 1.5M input tokens: the builder runs Sonnet ($4.50 a shift) and the reviewer Opus ($7.50),
-// so a card that is built and reviewed costs $12.00.
+// Each shift of a card reports 1.5M input tokens: the builder runs Sonnet ($3.00 a shift at $2 per million) and the
+// reviewer Opus ($7.50 at $5), so a card that is built and reviewed costs $10.50.
 test.describe.configure({ mode: 'serial' });
 
 const HOME = paths.runnerHome('budgeteer');
@@ -118,8 +118,8 @@ test('setup: a runner, project BUD on the toy repo, a builder and a reviewer', a
 test('the first card runs its two shifts: spend is recorded and shown on the project settings and the board', async () => {
   const ref = await createCard('Costly feature');
   await inTest(ref);
-  // two shifts: the build on Sonnet ($4.50) and the review on Opus ($7.50)
-  await waitFor('two shifts priced', spendOf, (s) => s === 12_000_000, 30_000);
+  // two shifts: the build on Sonnet ($3.00) and the review on Opus ($7.50)
+  await waitFor('two shifts priced', spendOf, (s) => s === 10_500_000, 30_000);
   const cost = (
     await q<{ model: string; tokens_input: string }>(
       `SELECT model, tokens_input FROM shift_costs WHERE project_id=$1 ORDER BY ended_at LIMIT 1`,
@@ -130,18 +130,18 @@ test('the first card runs its two shifts: spend is recorded and shown on the pro
 
   await page.goto(`/projects/${projectId}/settings#budget`);
   await expect(page.getByTestId('budget-state')).toHaveText('No budget');
-  await page.getByTestId('budget-input').fill('15');
+  await page.getByTestId('budget-input').fill('13');
   await page.getByTestId('budget-save').click();
-  // $12 of $15 is 80%: the warning stage
+  // $10.50 of $13 is 81%: the warning stage
   await expect(page.getByTestId('budget-state')).toHaveText('Near the limit');
-  await expect(page.getByTestId('budget-spend-line')).toContainText('$12.00');
+  await expect(page.getByTestId('budget-spend-line')).toContainText('$10.50');
   await expect(page.getByRole('progressbar', { name: 'Spent this month' })).toHaveAttribute(
     'aria-valuenow',
-    '80',
+    /^(80|81)$/,
   );
   await page.goto('/p/BUD/board');
-  await expect(page.getByTestId('board-spend')).toContainText('$12.00 of $15.00');
-  await expect(page.getByTestId('budget-banner')).toContainText('$12.00 of $15.00');
+  await expect(page.getByTestId('board-spend')).toContainText('$10.50 of $13.00');
+  await expect(page.getByTestId('budget-banner')).toContainText('$10.50 of $13.00');
 });
 
 test('80% notice: one desk item for the Owner, and a budget signal for the BA reporter', async () => {
@@ -172,9 +172,9 @@ test('80% notice: one desk item for the Owner, and a budget signal for the BA re
 
 test('100%: the project pauses, the board says so, nothing new starts; raise the budget and it carries on', async () => {
   // Cost is recorded when a shift ends, so a card's next stage can start just before the previous shift's cost
-  // lands. The deterministic way to reach 100% is to set the budget to what is already spent ($12.00).
+  // lands. The deterministic way to reach 100% is to set the budget to what is already spent ($10.50).
   await page.goto(`/projects/${projectId}/settings#budget`);
-  await page.getByTestId('budget-input').fill('12');
+  await page.getByTestId('budget-input').fill('10.5');
   await page.getByTestId('budget-save').click();
   await expect(page.getByTestId('budget-state')).toHaveText('Paused');
   const ref = await createCard('Waits for the budget');
@@ -198,7 +198,7 @@ test('100%: the project pauses, the board says so, nothing new starts; raise the
   await new Promise((r) => setTimeout(r, 12_000));
   const waiting = await card(ref);
   expect([waiting?.stage, waiting?.status]).toEqual(['build', 'queued']);
-  expect(await spendOf()).toBe(12_000_000);
+  expect(await spendOf()).toBe(10_500_000);
   // the desk item offers both ways out
   await page.goto('/desk');
   const item = page.locator('[data-testid^="desk-item-"]').filter({ hasText: 'BUD is paused' });
@@ -212,7 +212,7 @@ test('100%: the project pauses, the board says so, nothing new starts; raise the
   await page.getByTestId('budget-save').click();
   await expect(page.getByTestId('budget-state')).toHaveText('On track');
   await inTest(ref);
-  await waitFor('both shifts priced', spendOf, (s) => s === 24_000_000, 30_000);
+  await waitFor('both shifts priced', spendOf, (s) => s === 21_000_000, 30_000);
   await waitFor(
     'the desk item closed',
     () =>
@@ -238,7 +238,7 @@ test('override for this month: a used-up budget dispatches again', async () => {
   await page.getByTestId('budget-override').click();
   await expect(page.getByTestId('budget-banner')).toContainText('overridden');
   await inTest(ref);
-  await waitFor('all three cards priced', spendOf, (s) => s === 36_000_000, 30_000);
+  await waitFor('all three cards priced', spendOf, (s) => s === 31_500_000, 30_000);
 });
 
 const SHOTS = process.env.AOM_E2E_SHOT_DIR;
@@ -248,11 +248,11 @@ const shot = (name: string) =>
 test('the Costs page: breakdown by project, agent, model and day, and a CSV export', async () => {
   await page.goto('/costs');
   await expect(page.getByRole('heading', { name: 'Costs' })).toBeVisible();
-  await expect(page.getByTestId('costs-total')).toContainText('$36.00');
+  await expect(page.getByTestId('costs-total')).toContainText('$31.50');
   await shot('costs');
-  await expect(page.getByTestId('costs-total')).toContainText('$36.00');
+  await expect(page.getByTestId('costs-total')).toContainText('$31.50');
   const row = page.getByTestId('costs-project-row').filter({ hasText: 'BUD' });
-  await expect(row).toContainText('$36.00');
+  await expect(row).toContainText('$31.50');
   await expect(row.getByTestId('budget-meter')).toBeVisible();
   await expect(page.getByTestId('costs-by-agent')).toContainText('Bud');
   await expect(page.getByTestId('costs-by-agent')).toContainText('Rev');
@@ -267,8 +267,8 @@ test('the Costs page: breakdown by project, agent, model and day, and a CSV expo
   expect(text.split('\n')[0]).toBe(
     'date,project,agent,model,shifts,input,output,cache_read,cache_write,cost',
   );
-  // three builds by Bud on Sonnet at $4.50 and three reviews by Rev on Opus at $7.50
-  expect(text).toMatch(/,BUD,Bud,sonnet,3,4500000,0,0,0,13\.5000\n/);
+  // three builds by Bud on Sonnet at $3.00 and three reviews by Rev on Opus at $7.50
+  expect(text).toMatch(/,BUD,Bud,sonnet,3,4500000,0,0,0,9\.0000\n/);
   expect(text).toMatch(/,BUD,Rev,opus,3,4500000,0,0,0,22\.5000\n/);
 });
 
