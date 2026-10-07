@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { defaultMigrationsDir, MigrationChecksumError, migrate } from '../src/db/migrate.ts';
+import { planRestructure } from '../src/data-migrations/index.ts';
+import {
+  defaultMigrationsDir,
+  MigrationChecksumError,
+  migrate,
+  withPendingMigrations,
+} from '../src/db/migrate.ts';
 import { TEST_DB_URL } from './helpers/db.ts';
 
 const SCHEMA = 'mig_test';
@@ -289,5 +295,32 @@ describe('1315_project_stage', () => {
     await client.query(sql);
     await client.query(sql);
     expect((await read()).find((r) => r.key === 'BARE')).toMatchObject({ started_as: 'custom' });
+  });
+
+  it('withPendingMigrations plans against a migrated schema and rolls everything back (dry-run CLIs)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aom-mig-'));
+    await cp(defaultMigrationsDir(), dir, { recursive: true });
+    for (const f of (await readdir(dir)).filter((f) => /^131[3-6]_/.test(f))) await rm(join(dir, f));
+    await migrate(TEST_DB_URL, { schema: SCHEMA, dir });
+    const before = (await client.query(`SELECT count(*)::int AS n FROM ${SCHEMA}.schema_migrations`)).rows[0]
+      .n;
+    // Without 1316 the plan cannot see the interest tables; with the pending files applied it can.
+    const { result, pending } = await withPendingMigrations(
+      TEST_DB_URL,
+      async (db) => ({
+        interests: (await db.query(`SELECT to_regclass('interest_runs') AS t`)).rows[0].t,
+        plan: await planRestructure(db),
+      }),
+      { schema: SCHEMA },
+    );
+    // the real migrations dir has 1313-1316 pending for this schema
+    expect(pending.some((f) => f.startsWith('1316_'))).toBe(true);
+    expect(result.interests).not.toBeNull();
+    // rolled back: no pending file was recorded and the interest table does not exist
+    const after = (await client.query(`SELECT count(*)::int AS n FROM ${SCHEMA}.schema_migrations`)).rows[0]
+      .n;
+    expect(after).toBe(before);
+    const t = await client.query(`SELECT to_regclass('${SCHEMA}.interest_runs') AS t`);
+    expect(t.rows[0].t).toBeNull();
   });
 });

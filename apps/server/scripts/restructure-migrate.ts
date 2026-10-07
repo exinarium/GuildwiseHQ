@@ -1,8 +1,8 @@
 import { parseArgs } from 'node:util';
 import { createClock } from '../src/clock.ts';
 import { loadConfig } from '../src/config.ts';
-import { formatRestructurePlan, migrateRestructure } from '../src/data-migrations/index.ts';
-import { migrate } from '../src/db/migrate.ts';
+import { formatRestructurePlan, migrateRestructure, planRestructure } from '../src/data-migrations/index.ts';
+import { migrate, withPendingMigrations } from '../src/db/migrate.ts';
 import { createPool } from '../src/db/pool.ts';
 import { PgEventStore } from '../src/eventstore/pg-event-store.ts';
 import { buildProjectors } from '../src/projections/index.ts';
@@ -19,23 +19,32 @@ const pool = createPool(config.databaseUrl, 2);
 try {
   const clock = createClock();
   const store = new PgEventStore(pool, buildProjectors(), clock);
-  if (!values['dry-run']) {
+  if (values['dry-run']) {
+    // Pending SQL migrations are applied in a transaction that is rolled back, so the plan sees the migrated schema.
+    const { result, pending } = await withPendingMigrations(config.databaseUrl, (db) => planRestructure(db));
+    if (pending.length)
+      console.log(
+        `${pending.length} SQL migration(s) pending (${pending.join(', ')}): applied in a rolled-back transaction for this plan.`,
+      );
+    const orgsDone = await pool
+      .query(`SELECT 1 FROM data_migrations WHERE name='orgs-2026-10'`)
+      .catch(() => null);
+    if (!orgsDone?.rowCount)
+      console.log('Note: orgs-2026-10 has not run yet; run orgs:migrate first for a complete plan.');
+    console.log(formatRestructurePlan(result));
+    console.log('\nDry run: nothing was written.');
+  } else {
     const applied = await migrate(config.databaseUrl, { log: (m) => console.log(m) });
     if (applied.length) console.log(`applied ${applied.length} SQL migration(s)`);
-  }
-  const report = await migrateRestructure(
-    { pool, store, clock, log: (m) => console.log(m) },
-    { dryRun: values['dry-run'] },
-  );
-  console.log(formatRestructurePlan(report.plan));
-  if (values['dry-run']) console.log('\nDry run: nothing was written.');
-  else
+    const report = await migrateRestructure({ pool, store, clock, log: (m) => console.log(m) });
+    console.log(formatRestructurePlan(report.plan));
     for (const o of report.orgs) {
       console.log(
         `\nOrganization ${o.orgId}: ${o.feedProjects} feed project(s), ${o.interests} interest(s), ${o.newProjects} new backing project(s), ${o.schedulesRemoved} feed schedule(s) removed, ${o.transcriptsCopied} transcript(s) copied, ${o.vaultMoves} vault folder move(s) queued.`,
       );
       for (const w of o.warnings) console.log(`  warning: ${w}`);
     }
+  }
 } catch (e) {
   console.error((e as Error).message);
   process.exitCode = 1;

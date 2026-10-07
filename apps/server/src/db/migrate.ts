@@ -90,6 +90,63 @@ export async function migrate(connectionString: string, opts: MigrateOptions = {
   return applied;
 }
 
+/**
+ * Dry-run support for the data-migration CLIs: applies every pending SQL migration inside one transaction on a single
+ * connection, hands that connection to `fn` (so a plan sees the migrated schema), then ROLLS BACK. Nothing is written.
+ * Returns the pending file names alongside the result. An applied file whose checksum changed still aborts.
+ */
+export async function withPendingMigrations<T>(
+  connectionString: string,
+  fn: (db: pg.ClientBase, pending: string[]) => Promise<T>,
+  opts: MigrateOptions = {},
+): Promise<{ result: T; pending: string[] }> {
+  const dir = opts.dir ?? defaultMigrationsDir();
+  const files = (await readdir(dir)).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort();
+  const client = new pg.Client({ connectionString });
+  await client.connect();
+  try {
+    if (opts.schema) await client.query(`SET search_path TO "${opts.schema}"`);
+    await client.query('BEGIN');
+    try {
+      await client.query('SELECT pg_advisory_xact_lock($1)', [MIGRATION_LOCK_ID]);
+      const hasTable =
+        (await client.query(`SELECT to_regclass('schema_migrations') AS t`)).rows[0].t !== null;
+      const done = new Map<string, string>(
+        hasTable
+          ? (
+              await client.query<{ version: string; checksum: string }>(
+                'SELECT version, checksum FROM schema_migrations',
+              )
+            ).rows.map((r) => [r.version, r.checksum])
+          : [],
+      );
+      const pending: string[] = [];
+      for (const file of files) {
+        const body = await readFile(join(dir, file), 'utf8');
+        const checksum = createHash('sha256').update(body).digest('hex');
+        const prior = done.get(file);
+        if (prior !== undefined) {
+          if (prior !== checksum) throw new MigrationChecksumError(file);
+          continue;
+        }
+        pending.push(file);
+        try {
+          await client.query('SAVEPOINT m');
+          await client.query(body);
+          await client.query('RELEASE SAVEPOINT m');
+        } catch (err) {
+          throw new Error(`migration ${file} failed: ${(err as Error).message}`);
+        }
+      }
+      return { result: await fn(client, pending), pending };
+    } finally {
+      await client.query('ROLLBACK');
+    }
+  } finally {
+    await client.end();
+  }
+}
+
 // CLI: `pnpm db:migrate`
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const cfg = loadConfig();
