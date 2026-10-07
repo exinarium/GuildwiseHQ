@@ -271,6 +271,12 @@ test('AC7a: removing the member: agents need a new home, claims are released wit
   expect(mine.status()).toBe(201);
   guestCardId = (await json(mine)).card.id;
 
+  // the shift that hangs on the member's workstation: the one thing that must end when the member is removed
+  const hungShiftId = (
+    await q<{ id: string }>('SELECT claim_shift_id AS id FROM cards WHERE id=$1', [cardId])
+  )[0]?.id;
+  expect(hungShiftId).toBeTruthy();
+
   await ownerPage.goto(`/projects/${projectId}/settings`);
   await ownerPage.getByRole('button', { name: `Remove ${GUEST.name}` }).click();
   const preview = ownerPage.getByTestId('removal-preview');
@@ -331,13 +337,13 @@ test('AC7a: removing the member: agents need a new home, claims are released wit
   await waitFor(
     "the member's hung shift was stopped",
     () =>
-      q<{ status: string; outcome: string | null }>(
-        `SELECT status, outcome FROM shifts WHERE agent_id=$1 AND status='ended' AND outcome='stopped'`,
-        [giaId],
-      ),
-    (r) => r.length === 1,
-    60_000,
-  );
+      q<{ status: string; outcome: string | null }>('SELECT status, outcome FROM shifts WHERE id=$1', [
+        hungShiftId,
+      ]),
+    // wait for the shift itself to end (the stop travels server -> runner -> back), then judge how it ended
+    (r) => r[0]?.status === 'ended',
+    90_000,
+  ).then((r) => expect(r[0]?.outcome).toBe('stopped'));
 });
 
 test("AC7b: re-homing onto the owner's workstation keeps name, history and the track record; she picks up her card again", async () => {

@@ -48,14 +48,28 @@ export function pipeline(w: World, r: FakeRunner) {
   const used = new Set<string>();
   /** The next not yet consumed `shift.start` for `agentName` (dispatching may already have happened eagerly). */
   async function next(agentName: string) {
-    await r.barrier(); // see dispatchTo: the previous shift's end must be recorded before a pass
-    await h.dispatcher().run();
-    const start = (await r.waitFor(
-      'shift.start',
-      (f) => f.agent.name === agentName && !used.has(f.shiftId),
-    )) as any;
-    used.add(start.shiftId);
-    return start as Awaited<ReturnType<typeof h.dispatchTo>>;
+    // The dispatcher only hands work to a workstation it heard from in the last 45 s (ONLINE_WINDOW_MS) and the fake
+    // runner never sends heartbeats. A long file (recommendations.test.ts runs about a hundred shifts, and slows down
+    // when the whole monorepo is tested in parallel) outlived that window and its last tests dispatched to nobody.
+    // The keepalive is what a real runner's heartbeat does, done before every pass.
+    // A dispatch pass is idempotent: re-running it until the start arrives waits for the condition.
+    const deadline = Date.now() + 20_000;
+    for (;;) {
+      await q('UPDATE workstations SET last_seen_at=$1 WHERE connected', [w.t.clock.now()]);
+      await r.barrier(); // see dispatchTo: the previous shift's end must be recorded before a pass
+      await h.dispatcher().run();
+      const until1 = Math.min(deadline, Date.now() + 1500);
+      for (;;) {
+        const start = r.of('shift.start').find((f) => f.agent.name === agentName && !used.has(f.shiftId));
+        if (start) {
+          used.add(start.shiftId);
+          return start as unknown as Awaited<ReturnType<typeof h.dispatchTo>>;
+        }
+        if (Date.now() >= until1) break;
+        await new Promise((res) => setTimeout(res, 25));
+      }
+      if (Date.now() >= deadline) throw new Error(`timed out waiting for a shift.start for ${agentName}`);
+    }
   }
   async function run(
     agentName: string,
