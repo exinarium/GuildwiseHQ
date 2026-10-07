@@ -313,8 +313,8 @@ function WizardDialog({
             <p className="-mb-2 flex items-center gap-1 text-sm font-medium text-fg">
               When should it run?
               <HelpHint article="schedules-and-integrations#triggers" label="About schedule triggers">
-                The trigger is what starts the schedule: a time of day, an incoming webhook, a labelled issue
-                or a button you press.
+                The trigger is what starts the schedule: a time of day, something happening in a project, a
+                labelled issue or a button you press. A webhook is an action: it is what a schedule sends.
               </HelpHint>
             </p>
             <TileGrid

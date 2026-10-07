@@ -60,7 +60,7 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
   },
   schedules: {
     title: 'Schedules',
-    body: 'Work that starts by itself: every weekday morning, when a webhook arrives, or when a ticket gets a label. Pick a trigger, then an action such as creating a card or posting an update.',
+    body: 'Work that starts by itself: every weekday morning, when a phase finishes, or when a ticket gets a label. Pick a trigger, then an action such as creating a card or sending a webhook.',
     more: 'schedules-and-integrations#triggers',
   },
   agents: {
