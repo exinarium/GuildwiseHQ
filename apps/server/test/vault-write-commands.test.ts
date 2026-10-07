@@ -47,9 +47,9 @@ describe('decision files (QuestionAnswered -> vault.write)', () => {
     });
   });
 
-  it('writes projects/<name>/decisions/<date>-<slug>.md into the domain vault through a durable command', async () => {
+  it('writes projects/<name>/decisions/<date>-<slug>.md into the organization vault through a durable command', async () => {
     const vault = await ok<any>(
-      owner('POST', '/api/vaults', { kind: 'work', remoteUrl: 'git@example.test:srv/work.git' }),
+      owner('POST', '/api/vaults', { kind: 'org', remoteUrl: 'git@example.test:srv/work.git' }),
       201,
     );
     const res = await writeDecisionFile(ctx(), record());
@@ -199,7 +199,7 @@ describe('standing orders (desk -> vault.write append)', () => {
       body: 'Short answers.',
     });
     expect(res).toMatchObject({ queued: true, path: 'standing-orders.md' });
-    const vault = (await q(`SELECT id FROM vaults WHERE kind='work'`))[0]!;
+    const vault = (await q(`SELECT id FROM vaults WHERE kind='org'`))[0]!;
     const row = (
       await q(
         `SELECT payload FROM runner_commands WHERE type='vault.write' AND payload->>'path'='standing-orders.md'`,

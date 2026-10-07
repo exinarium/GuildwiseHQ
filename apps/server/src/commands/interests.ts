@@ -57,7 +57,6 @@ export function interestBody(r: Row): InterestBody {
     ...(r.created_by_rank ? { creatorRank: r.created_by_rank } : {}),
     ...(r.project_id ? { projectId: r.project_id } : {}),
     ...(r.slug ? { slug: r.slug } : {}),
-    ...(r.domain ? { domain: r.domain } : {}),
     kinds: r.kinds ?? ['article', 'video', 'podcast'],
     agents: (r.agents as InterestAgents) ?? {},
     delivery: (r.delivery as DeliverySpec) ?? IMMEDIATE_DELIVERY,
@@ -186,7 +185,6 @@ export async function createInterest(
       status: req.status,
       projectId,
       slug,
-      domain: req.domain,
       kinds: req.kinds,
       agents: Object.fromEntries(Object.entries(req.agents ?? {}).filter(([, v]) => v)) as InterestAgents,
       delivery,
@@ -206,9 +204,7 @@ export async function createInterest(
             createdByUserId: user.id,
             key,
             name: req.name,
-            domain: req.domain,
             workflowKey: 'feed',
-            priorityTier: 2,
             branchPrefix: 'aom/',
             workingBranch: 'main',
             subCategories: [],
@@ -297,14 +293,6 @@ export async function updateInterest(
     const before = interestBody(row);
     const name = patch.name ?? before.name;
     if (name.toLowerCase() !== before.name.toLowerCase()) await assertNameFree(tx, before.orgId, name, id);
-    if (patch.domain && patch.domain !== before.domain) {
-      const ran = await one(tx, 'SELECT 1 FROM interest_runs WHERE interest_id=$1 LIMIT 1', [id]);
-      if (ran)
-        throw badRequest(
-          'domain_locked',
-          'the vault (work or personal) is fixed once the interest has run: create a new interest instead',
-        );
-    }
     const scan = patch.scan ? resolveScan(patch.scan, before.scan) : before.scan;
     const delivery = patch.delivery ? resolveDelivery(patch.delivery, before.delivery) : before.delivery;
     const agents: Record<string, string | undefined> = { ...(before.agents ?? {}) };
@@ -329,7 +317,6 @@ export async function updateInterest(
       subCategory: patch.subCategory !== undefined ? patch.subCategory : before.subCategory,
       preferredSites: patch.preferredSites ?? before.preferredSites,
       kinds: patch.kinds ?? before.kinds,
-      domain: patch.domain ?? before.domain,
       scan,
       delivery,
       agents: agents as InterestAgents,
@@ -348,14 +335,14 @@ export async function updateInterest(
         scope,
       },
     ];
-    if (after.name !== before.name || after.domain !== before.domain)
+    if (after.name !== before.name)
       events.push({
         streamId: streamId.project(row.project_id),
         event: {
           type: 'ProjectUpdated',
           payload: {
             projectId: row.project_id,
-            changes: { name: after.name, ...(after.domain ? { domain: after.domain } : {}) },
+            changes: { name: after.name },
           },
         },
         actor: userActor(user.id),

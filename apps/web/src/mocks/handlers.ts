@@ -173,6 +173,7 @@ export const handlers = [
       ...b,
       id: uuid(),
       orgId: ORG_ID,
+      rank: Math.max(0, ...db.projects.map((p) => p.rank ?? 0)) + 1,
       architecturalGlobs: [],
       e2eGlobs: [],
       status: 'active' as const,
@@ -182,6 +183,20 @@ export const handlers = [
     db.projects.push(project);
     emit('ProjectCreated', `project-${project.id}`, project.id);
     return HttpResponse.json({ project }, { status: 201 });
+  }),
+  http.put(`${A}/projects/ranking`, async ({ request }) => {
+    const b = (await request.json()) as { projectIds?: string[] };
+    const active = db.projects.filter((p) => p.status === 'active');
+    const ids = b.projectIds ?? [];
+    if (ids.length !== active.length || !active.every((p) => ids.includes(p.id)))
+      return err(409, 'ranking_stale', 'The projects changed: reload the page');
+    ids.forEach((id, i) => {
+      const p = db.projects.find((x) => x.id === id);
+      if (p) p.rank = i + 1;
+    });
+    db.projects.sort((a, b2) => (a.rank ?? 99) - (b2.rank ?? 99));
+    emit('ProjectsRanked', `org-${ORG_ID}`, null);
+    return HttpResponse.json({ projects: db.projects.filter((p) => p.status === 'active') });
   }),
   http.get(`${A}/projects/:id`, ({ params }) => {
     const project = db.projects.find((p) => p.id === params.id);

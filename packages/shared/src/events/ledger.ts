@@ -18,7 +18,7 @@ export const ledgerEvents = [
       body: z.string().min(1).max(20000),
       tags: z.array(z.string()).default([]),
       sourceDeskItemId: Id.optional(),
-      /** Set when the entry should also be written to the domain vault (M3 `vault.write`). */
+      /** Set when the entry should also be written to the organization or project vault (M3 `vault.write`). */
       vaultPath: z.string().optional(),
     }),
   ),

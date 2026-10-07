@@ -153,7 +153,6 @@ describe('renderInstructions', () => {
 
       - Key: WEB
       - Name: Web app
-      - Domain: work
       - Working branch: main
       - Architectural paths (changes here make a card large): apps/web/src/router.tsx
       - End-to-end test paths: e2e/**
@@ -214,7 +213,6 @@ describe('renderInstructions', () => {
 
       - Key: WEB
       - Name: Web app
-      - Domain: work
       - Working branch: main
       - Architectural paths (changes here make a card large): apps/web/src/router.tsx
       - End-to-end test paths: e2e/**

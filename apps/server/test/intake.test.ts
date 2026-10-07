@@ -125,7 +125,7 @@ describe('starting an intake', () => {
       intakeId: intake.id,
       externalSystem: 'jira',
       externalKey: 'ABC-123',
-      projects: [{ key: 'TOY', name: 'Toy', domain: 'work', repos: ['toy'] }],
+      projects: [{ key: 'TOY', name: 'Toy', repos: ['toy'] }],
       cards: [],
     });
     const msgs = (await get(`/api/threads/${intake.threadId}/messages`)).messages;

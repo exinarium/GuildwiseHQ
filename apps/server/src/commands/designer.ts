@@ -772,7 +772,7 @@ export function registerDefinitionHook(ctx: Ctx): () => void {
       if (!row || row.org_id === null) return;
       const vault = await one(
         ctx.pool,
-        `SELECT id FROM vaults WHERE org_id=$1 AND project_id IS NULL ORDER BY (kind='work') DESC, created_at LIMIT 1`,
+        `SELECT id FROM vaults WHERE org_id=$1 AND project_id IS NULL ORDER BY (kind='org') DESC, created_at LIMIT 1`,
         [row.org_id],
       );
       if (!vault) return;

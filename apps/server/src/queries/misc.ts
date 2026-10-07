@@ -33,10 +33,9 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     orgName: p.org_name ?? '',
     key: p.key,
     name: p.name,
-    domain: p.domain,
     workflowKey: p.workflow_key,
     department: p.department ?? null,
-    priorityTier: p.priority_tier,
+    rank: p.rank ?? null,
     branchPrefix: p.branch_prefix,
     workingBranch: p.working_branch,
     subCategories: p.sub_categories,
@@ -72,7 +71,7 @@ export async function listProjects(
          LEFT JOIN organizations o ON o.id = p.org_id
         WHERE ($2 = 'all' OR p.status = $2) AND p.kind = 'project'
           AND (o.id IS NULL OR o.status IN ('trial','active') OR o.owner_user_id = $1)
-        ORDER BY p.created_at`,
+        ORDER BY p.org_id, p.rank NULLS LAST, p.created_at`,
       [userId, status],
     )
   ).filter((p) => !department || p.department === department);

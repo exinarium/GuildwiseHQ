@@ -71,7 +71,6 @@ export const IntakeUnmappedParamsSchema = z.object({
 export const IntakeProjectSchema = z.object({
   key: z.string(),
   name: z.string(),
-  domain: z.enum(['work', 'personal']),
   repos: z.array(z.string()).default([]),
 });
 
@@ -82,8 +81,8 @@ export const IntakeContextSchema = z.object({
   externalKey: z.string().optional(),
   /** Project key once mapped. */
   mappedProjectKey: z.string().optional(),
-  /** The manager's work vault: its `skills/jira.md` (if any) replaces the built-in Jira skill text. */
-  workVaultId: z.string().optional(),
+  /** The organization vault: its `skills/jira.md` (if any) replaces the built-in Jira skill text. */
+  orgVaultId: z.string().optional(),
   /** The intake was started lazily from a desk chat (no ticket): the chat keeps its normal instructions. */
   fromChat: z.boolean().optional(),
   projects: z.array(IntakeProjectSchema),

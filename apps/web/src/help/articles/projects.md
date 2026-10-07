@@ -1,7 +1,7 @@
 ---
 title: Projects
-summary: Creating projects, project types and workflows, research cards, sharing, archiving and decision policy.
-keywords: [project, code, research, workflow, card, sharing, archiving]
+summary: Creating projects, the priority order, project types and workflows, research cards, sharing, archiving and decision policy.
+keywords: [project, priority, ranking, order, code, research, workflow, card, sharing, archiving]
 order: 4
 ---
 
@@ -16,7 +16,29 @@ A project is a container for cards and agents working on a shared goal. Every ca
 
 For a Code project, add its repositories afterwards in the project's settings (the gear on its board), under **Repos**: give the repository name, remote URL and optionally a branch, and click **Add repository**. Research projects need no repository.
 
-Cards stay as drafts until you are ready to specify them.
+Cards stay as drafts until you are ready to specify them. A new project goes to the bottom of your priority order.
+
+## The priority order {#ranking}
+
+Your organization's projects are ranked: the project at the top of the **Projects** page is the most important. When an agent looks for its next card, it takes work in this order:
+
+1. **Scheduled work** first: the cards of schedules, the scans of interests and an on-demand **Research this** (interests are not ranked; they run on their own schedule, and their budgets and the daily quiet cap limit how much they take).
+2. The agent's **own rework**: cards that came back to it from review.
+3. Its **focus** projects, if you set any (a gentle preference, see Agents).
+4. The **project order**: cards of the project higher on the page come before cards of the one below.
+5. Then the card's own priority, how long it has waited, and its dependencies.
+
+A shift that has started is never interrupted: a more important card waits for the current shift to end.
+
+To change the order (Owner and Admins):
+
+1. Go to **Projects**.
+2. Drag a project by its grip (the dotted handle on the left) to a new place. Or press **Move up** or **Move down** on a row. With the grip focused, the up and down arrow keys move it too, and Home and End send it to the top or bottom.
+3. The order saves by itself. If the projects changed since you loaded the page (someone added or archived one), the page reloads and you drag again.
+
+Members and Guests see the order but cannot change it. Archived projects are not ranked; a restored project returns to its old place. Projects you are a guest of in other organizations are listed under **Shared with you** and are not part of your order. The hidden projects behind interests never appear here.
+
+When you filter by department the order cannot be changed (it only makes sense for all projects): clear the filter first.
 
 ## Project types {#project-types}
 

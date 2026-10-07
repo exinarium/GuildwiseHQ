@@ -5,9 +5,7 @@ import type { Projector } from '../eventstore/types.ts';
 
 const PROJECT_COLUMNS: Record<string, string> = {
   name: 'name',
-  domain: 'domain',
   workflowKey: 'workflow_key',
-  priorityTier: 'priority_tier',
   branchPrefix: 'branch_prefix',
   workingBranch: 'working_branch',
   subCategories: 'sub_categories',
@@ -158,17 +156,17 @@ export const projectProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ProjectCreated'>).payload;
     await exec(
       tx,
-      `INSERT INTO projects (id, org_id, key, name, domain, workflow_key, priority_tier, branch_prefix,
-         working_branch, sub_categories, vault_folder, created_at, created_by, started_as, kind, vault_dir)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$6,$14,$15)`,
+      `INSERT INTO projects (id, org_id, key, name, workflow_key, branch_prefix,
+         working_branch, sub_categories, vault_folder, created_at, created_by, started_as, kind, vault_dir, rank)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$5,$12,$13,
+         CASE WHEN $12 = 'interest' THEN NULL
+              ELSE (SELECT COALESCE(max(rank), 0) + 1 FROM projects WHERE org_id = $2 AND kind = 'project') END)`,
       [
         p.projectId,
         p.orgId,
         p.key,
         p.name,
-        p.domain,
         p.workflowKey,
-        p.priorityTier,
         p.branchPrefix,
         p.workingBranch,
         p.subCategories,
@@ -210,11 +208,30 @@ export const projectProjectors: Record<string, Projector> = {
   },
   ProjectKindChanged: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectKindChanged'>).payload;
-    await exec(tx, 'UPDATE projects SET kind=$2, vault_dir=COALESCE($3, vault_dir) WHERE id=$1', [
-      p.projectId,
-      p.kind,
-      p.vaultDir ?? null,
-    ]);
+    // An interest's project is not ranked; a project that becomes visible goes to the bottom.
+    await exec(
+      tx,
+      `UPDATE projects SET kind=$2, vault_dir=COALESCE($3, vault_dir),
+              rank = CASE WHEN $2 = 'interest' THEN NULL
+                          ELSE COALESCE(rank, (SELECT COALESCE(max(r.rank), 0) + 1 FROM projects r
+                                                WHERE r.org_id = projects.org_id AND r.kind = 'project')) END
+        WHERE id=$1`,
+      [p.projectId, p.kind, p.vaultDir ?? null],
+    );
+  },
+  ProjectsRanked: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectsRanked'>).payload;
+    await exec(
+      tx,
+      `UPDATE projects SET rank = o.pos::int
+         FROM unnest($2::uuid[]) WITH ORDINALITY AS o(id, pos)
+        WHERE projects.id = o.id AND projects.org_id = $1 AND projects.kind = 'project'`,
+      [p.orgId, p.projectIds],
+    );
+  },
+  ProjectVaultDirSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectVaultDirSet'>).payload;
+    await exec(tx, 'UPDATE projects SET vault_dir=$2 WHERE id=$1', [p.projectId, p.vaultDir]);
   },
   ProjectUpdated: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectUpdated'>).payload;

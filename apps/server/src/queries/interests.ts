@@ -198,7 +198,6 @@ async function toDto(
     name: r.name,
     description: r.description ?? '',
     slug: r.slug ?? null,
-    domain: r.domain ?? 'personal',
     vaultDir: r.project_vault_dir ?? null,
     hasVault: await projectHasVault(db, r.project_id),
     projectKey: r.project_key ?? null,
@@ -370,15 +369,14 @@ async function ratingLines(db: Queryable, interest: Row): Promise<string[]> {
     .map((e) => e.line);
 }
 
-/** A vault exists that the project's files go to (its own or the organization's vault of its domain). */
+/** A vault exists that the project's files go to (its own or the organization vault). */
 export async function projectHasVault(db: Queryable, projectId: string): Promise<boolean> {
-  const p = await one(db, 'SELECT org_id, domain FROM projects WHERE id=$1', [projectId]);
+  const p = await one(db, 'SELECT org_id FROM projects WHERE id=$1', [projectId]);
   if (!p) return false;
   const v =
     (await one(db, 'SELECT 1 AS x FROM vaults WHERE project_id=$1', [projectId])) ??
-    (await one(db, 'SELECT 1 AS x FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [
+    (await one(db, `SELECT 1 AS x FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [
       p.org_id,
-      p.domain,
     ]));
   return Boolean(v);
 }

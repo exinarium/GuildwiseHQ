@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
+import { createFeedInterest } from './helpers/feeds.ts';
 import { createWorld, markOnline, ok, pairWorkstation, type World } from './helpers/world.ts';
 
 let w: World;
@@ -18,12 +19,59 @@ async function drain(): Promise<string[]> {
   return out;
 }
 
+/** Creates a code project with the toy repository and returns its id. */
+async function newProject(key: string, name: string): Promise<string> {
+  const existing = (await q('SELECT id FROM projects WHERE org_id=$1 AND key=$2', [w.owner.id, key]))[0];
+  const p = existing
+    ? { project: { id: existing.id as string } }
+    : await ok<any>(w.t.req('POST', '/api/projects', { cookie: w.owner.cookie, body: { key, name } }), 201);
+  if (!existing)
+    await w.t.req('POST', `/api/projects/${p.project.id}/repos`, {
+      cookie: w.owner.cookie,
+      body: { name: 'toy', remoteUrl: 'https://github.com/acme/toy.git' },
+    });
+  await markOnline(w.t, w.workstationId, {
+    repoIds: (await q('SELECT id FROM project_repos')).map((r) => r.id),
+  });
+  return p.project.id;
+}
+
+/** The Owner orders the projects by key, most important first (every active project must be named). */
+async function rank(keys: string[]) {
+  const ids = await Promise.all(
+    keys.map(
+      async (k) => (await q('SELECT id FROM projects WHERE org_id=$1 AND key=$2', [w.owner.id, k]))[0]!.id,
+    ),
+  );
+  const rest = (
+    await q(
+      `SELECT id FROM projects WHERE org_id=$1 AND kind='project' AND status='active' AND NOT (id = ANY($2::uuid[]))`,
+      [w.owner.id, ids],
+    )
+  ).map((r) => r.id);
+  await ok(
+    w.t.req('PUT', '/api/projects/ranking', {
+      cookie: w.owner.cookie,
+      body: { projectIds: [...ids, ...rest] },
+    }),
+  );
+}
+const ranks = async () =>
+  Object.fromEntries(
+    (await q(`SELECT key, rank FROM projects WHERE kind='project' ORDER BY rank`)).map((r) => [
+      r.key,
+      r.rank,
+    ]),
+  );
+
 async function reset() {
   await q(
     'TRUNCATE cards, card_dependencies, card_handoffs, card_transitions, shifts, threads, thread_messages, agents CASCADE',
   );
   await q('UPDATE projects SET next_card_number = 1');
-  await markOnline(w.t, w.workstationId, { repoIds: [w.repoId] });
+  await markOnline(w.t, w.workstationId, {
+    repoIds: (await q('SELECT id FROM project_repos')).map((r) => r.id),
+  });
 }
 
 beforeAll(async () => {
@@ -35,12 +83,12 @@ afterAll(async () => {
 });
 
 describe('dispatcher ordering', () => {
-  it('prefers scheduled > work > personal', async () => {
+  it('takes scheduled cards first, then projects in the order the organization ranked them', async () => {
     await reset();
     const personal = await ok<any>(
       w.t.req('POST', '/api/projects', {
         cookie: w.owner.cookie,
-        body: { key: 'PER', name: 'Personal', domain: 'personal' },
+        body: { key: 'PER', name: 'Side project' },
       }),
       201,
     );
@@ -56,6 +104,8 @@ describe('dispatcher ordering', () => {
     const sched = await w.card({ projectId: personal.project.id, title: 'scheduled personal' }); // PER-2
     await q('UPDATE cards SET scheduled = true WHERE id=$1', [sched.id]);
     expect(p1.ref).toBe('PER-1');
+    // PER was created after TOY, so it is ranked below it (a new project goes to the bottom)
+    expect(await ranks()).toEqual({ TOY: 1, PER: 2 });
     expect(await drain()).toEqual(['PER-2', 'TOY-1', 'PER-1']);
   });
 
@@ -107,32 +157,97 @@ describe('dispatcher ordering', () => {
     expect(await drain()).toEqual(['TOY-2']);
   });
 
-  it('orders by project tier, card priority, then FIFO', async () => {
+  it('orders by project rank, then card priority, then FIFO', async () => {
     await reset();
     await w.hire('Prio', 'builder', 'junior', { capacity: 8 });
-    const hi = await ok<any>(
-      w.t.req('POST', '/api/projects', {
-        cookie: w.owner.cookie,
-        body: { key: 'HI', name: 'Hi', priorityTier: 1 },
-      }),
-      201,
-    );
-    await w.t.req('POST', `/api/projects/${hi.project.id}/repos`, {
-      cookie: w.owner.cookie,
-      body: { name: 'toy', remoteUrl: 'https://github.com/acme/toy.git' },
-    });
-    await markOnline(w.t, w.workstationId, {
-      repoIds: (await q('SELECT id FROM project_repos')).map((r) => r.id),
-    });
-    const a = await w.card({ title: 'a' }); // TOY-1 tier 2 prio 2
-    const b = await w.card({ title: 'b', priority: 1 }); // TOY-2 tier 2 prio 1
-    const c = await w.card({ title: 'c', projectId: hi.project.id, priority: 5 }); // HI-1 tier 1
-    const d = await w.card({ title: 'd' }); // TOY-3 tier 2 prio 2 (younger than a)
+    const hi = await newProject('HI', 'Hi');
+    await rank(['HI', 'TOY']); // the Owner dragged HI to the top
+    const a = await w.card({ title: 'a' }); // TOY-1 prio 2
+    const b = await w.card({ title: 'b', priority: 1 }); // TOY-2 prio 1
+    const c = await w.card({ title: 'c', projectId: hi, priority: 5 }); // HI-1 in the top project
+    const d = await w.card({ title: 'd' }); // TOY-3 prio 2 (younger than a)
     await q(`UPDATE cards SET queued_at = now() - interval '10 minutes' WHERE id=$1`, [a.id]);
     await q(`UPDATE cards SET queued_at = now() - interval '5 minutes' WHERE id=$1`, [d.id]);
     expect(b.priority).toBe(1);
     expect(c.ref).toBe('HI-1');
+    // the project's rank beats the card's own priority
     expect(await drain()).toEqual(['HI-1', 'TOY-2', 'TOY-1', 'TOY-3']);
+  });
+
+  it('moving a project in the ranking changes who is served first', async () => {
+    await reset();
+    await w.hire('Mover', 'builder', 'junior', { capacity: 8 });
+    const lo = await newProject('LOW', 'Low');
+    await rank(['TOY', 'LOW']);
+    await w.card({ title: 'toy' }); // TOY-1
+    await w.card({ title: 'low', projectId: lo }); // LOW-1
+    expect(await drain()).toEqual(['TOY-1', 'LOW-1']);
+    await reset();
+    await w.hire('Mover2', 'builder', 'junior', { capacity: 8 });
+    await rank(['LOW', 'TOY']);
+    await w.card({ title: 'toy' });
+    await w.card({ title: 'low', projectId: lo });
+    expect(await drain()).toEqual(['LOW-1', 'TOY-1']);
+  });
+
+  it("an agent's own rework comes before the ranking; a focus project is a soft preference ahead of it", async () => {
+    await reset();
+    const me = await w.hire('Focus', 'builder', 'junior', { capacity: 8 });
+    const lo = await newProject('LOW', 'Low');
+    await rank(['TOY', 'LOW']);
+    const top = await w.card({ title: 'top project' }); // TOY-1, rank 1
+    const low = await w.card({ title: 'low project', projectId: lo }); // LOW-1, rank 2
+    const rework = await w.card({ title: 'my rework', projectId: lo }); // LOW-2, rank 2, own rework
+    await q('UPDATE cards SET rework_round=1, original_builder_agent_id=$2 WHERE id=$1', [rework.id, me.id]);
+    expect(top.ref).toBe('TOY-1');
+    expect(low.ref).toBe('LOW-1');
+    // without a focus: own rework, then the ranking
+    expect(await drain()).toEqual(['LOW-2', 'TOY-1', 'LOW-1']);
+    await reset();
+    const me2 = await w.hire('Focus2', 'builder', 'junior', { capacity: 8 });
+    await q(`UPDATE agents SET focus_project_ids = ARRAY[$1]::uuid[] WHERE id=$2`, [lo, me2.id]);
+    await w.card({ title: 'top project' });
+    await w.card({ title: 'low project', projectId: lo });
+    // the focus project's card is preferred although its project is ranked lower
+    expect(await drain()).toEqual(['LOW-1', 'TOY-1']);
+  });
+
+  it('an interest run and "Research this" count as scheduled: they come before ranked project work', async () => {
+    await reset();
+    await w.hire('Rhea', 'researcher', 'junior', { capacity: 8 });
+    const research = await ok<any>(
+      w.t.req('POST', '/api/projects', {
+        cookie: w.owner.cookie,
+        body: { key: 'RSCH', name: 'Research', workflowKey: 'research' },
+      }),
+      201,
+    );
+    await rank(['RSCH', 'TOY']);
+    await ok(
+      w.t.req('POST', '/api/cards', {
+        cookie: w.owner.cookie,
+        body: {
+          projectId: research.project.id,
+          title: 'A ranked research question',
+          cardType: 'research',
+          fields: { question: 'Why?', depth: 'quick' },
+          specify: true,
+        },
+      }),
+      201,
+    );
+    const { id, projectId } = await createFeedInterest(w, { name: 'Topic' });
+    // the interest's project is never ranked
+    expect((await q('SELECT rank FROM projects WHERE id=$1', [projectId]))[0]!.rank).toBeNull();
+    const run = await ok<any>(
+      w.t.req('POST', `/api/interests/${id}/run`, { cookie: w.owner.cookie, body: { kind: 'research' } }),
+      201,
+    );
+    expect((await q('SELECT scheduled FROM cards WHERE id=$1', [run.cardId]))[0]!.scheduled).toBe(true);
+    const order = await drain();
+    expect(order).toHaveLength(2);
+    expect(order[0]).toBe(run.ref);
+    expect(order[1]).toBe('RSCH-1');
   });
 
   it('never dispatches to offline agents, stale workstations, or agents at capacity', async () => {

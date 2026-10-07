@@ -294,7 +294,6 @@ describe('M5 contract', () => {
         id: U.b,
         key: 'FEED',
         name: 'Feed',
-        domain: 'personal',
         workingBranch: 'main',
         e2eGlobs: [],
         architecturalGlobs: [],

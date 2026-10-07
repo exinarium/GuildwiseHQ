@@ -32,7 +32,7 @@ const read = async (file: string, root: string): Promise<string | undefined> => 
 
 /**
  * What a card shift may see of the knowledge vault (docs/ARCHITECTURE.md section 16.1): only the clone of the vault
- * the server named for this card (its domain vault or its project vault). Reads `standing-orders.md`,
+ * the server named for this card (its project vault or the organization vault). Reads `standing-orders.md`,
  * `<folder>/standing-orders.md` and `<folder>/PROJECT.md`. No clone yet: no vault context.
  */
 export async function readVaultContext(

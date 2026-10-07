@@ -183,13 +183,12 @@ describe('org roles', () => {
   });
 
   it.each([
-    ['owner', 201],
     ['admin', 201],
+    ['owner', 409], // the organization has one organization vault: the Admin's registration came first
     ['member', 403],
   ] as const)('register the organization vault: %s -> %s', async (role, status) => {
-    const kind = role === 'owner' ? 'work' : role === 'admin' ? 'personal' : 'work';
     const r = await call(role, 'POST', '/api/vaults', {
-      kind,
+      kind: 'org',
       remoteUrl: 'https://github.com/acme/vault.git',
     });
     expect(r.status).toBe(status);

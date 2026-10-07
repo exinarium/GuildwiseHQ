@@ -182,11 +182,12 @@ describe('vault helpers', () => {
     expect(md).toContain('Postgres, because');
     expect(md).toContain(`Ledger entry: ${U.b}`);
   });
-  it('project vaults need a project id, work and personal must not have one', () => {
+  it('project vaults need a project id, the organization vault must not have one', () => {
     const p = (v: Record<string, unknown>) =>
       RegisterVaultRequestSchema.safeParse({ remoteUrl: '/x.git', ...v }).success;
-    expect(p({ kind: 'work' })).toBe(true);
-    expect(p({ kind: 'work', projectId: U.a })).toBe(false);
+    expect(p({ kind: 'org' })).toBe(true);
+    expect(p({ kind: 'work' })).toBe(false);
+    expect(p({ kind: 'org', projectId: U.a })).toBe(false);
     expect(p({ kind: 'project' })).toBe(false);
     expect(p({ kind: 'project', projectId: U.a })).toBe(true);
   });

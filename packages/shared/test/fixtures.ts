@@ -60,7 +60,6 @@ export const buildBrief = (): ShiftBrief => ({
     id: U.d,
     key: 'WEB',
     name: 'Web app',
-    domain: 'work',
     workingBranch: 'main',
     e2eGlobs: ['e2e/**'],
     architecturalGlobs: ['apps/web/src/router.tsx'],

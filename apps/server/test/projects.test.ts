@@ -25,7 +25,6 @@ describe('projects', () => {
     expect(r.status).toBe(201);
     expect(r.body.project).toMatchObject({
       key: 'WEB',
-      domain: 'work',
       workflowKey: 'code',
       workingBranch: 'main',
       branchPrefix: 'aom/',

@@ -94,6 +94,37 @@ export function useCreateProject() {
   });
 }
 
+/**
+ * Orders the organization's active projects (Owner and Admins). The list is reordered in the cache at once, so the row
+ * stays where it was dropped; a failure puts the old order back and a refetch shows what the server has.
+ */
+export function useRankProjects() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (projectIds: string[]) =>
+      put<{ projects: ProjectDto[] }>('/projects/ranking', { projectIds }),
+    onMutate: async (projectIds) => {
+      await qc.cancelQueries({ queryKey: ['projects'], exact: true });
+      const previous = qc.getQueryData<ProjectDto[]>(['projects']);
+      if (previous) {
+        const place = new Map(projectIds.map((id, i) => [id, i + 1]));
+        const ranked = previous.filter((p) => place.has(p.id));
+        const rest = previous.filter((p) => !place.has(p.id));
+        const next = [...ranked]
+          .sort((a, b) => (place.get(a.id) ?? 0) - (place.get(b.id) ?? 0))
+          .map((p) => ({ ...p, rank: place.get(p.id) ?? p.rank }));
+        // keep the other organizations' projects (a guest's) after the ranked ones, as the server lists them
+        qc.setQueryData<ProjectDto[]>(['projects'], [...next, ...rest]);
+      }
+      return { previous };
+    },
+    onError: (_e, _ids, ctx) => {
+      if (ctx?.previous) qc.setQueryData(['projects'], ctx.previous);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
 export function usePatchProject(id: string) {
   const qc = useQueryClient();
   return useMutation({

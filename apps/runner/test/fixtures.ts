@@ -97,7 +97,6 @@ export function makeShiftStart(o: ShiftOptions): Record<string, unknown> {
       id: projectIdFor(key),
       key,
       name: 'Toy',
-      domain: 'work',
       workingBranch: 'main',
       e2eGlobs: o.e2eGlobs ?? ['e2e/**'],
       architecturalGlobs: o.architecturalGlobs ?? [],

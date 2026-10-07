@@ -97,12 +97,9 @@ export async function registerVault(
       if (await one(tx, 'SELECT 1 FROM vaults WHERE project_id=$1', [p.id]))
         throw conflict('vault_exists', 'this project already has a vault');
     } else if (
-      await one(tx, 'SELECT 1 FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [
-        orgId,
-        req.kind,
-      ])
+      await one(tx, `SELECT 1 FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [orgId])
     ) {
-      throw conflict('vault_exists', `the organization already has a ${req.kind} vault; edit it instead`);
+      throw conflict('vault_exists', 'the organization already has an organization vault; edit it instead');
     }
     assertRemoteUrl(ctx, req.remoteUrl.trim());
     const payload = {
@@ -110,11 +107,7 @@ export async function registerVault(
       orgId,
       projectId: req.projectId,
       kind: req.kind,
-      name:
-        req.name ??
-        (req.kind === 'project'
-          ? 'Project vault'
-          : `${req.kind[0]?.toUpperCase()}${req.kind.slice(1)} vault`),
+      name: req.name ?? (req.kind === 'project' ? 'Project vault' : 'Organization vault'),
       remoteUrl: req.remoteUrl.trim(),
       syncIntervalSec: req.syncIntervalSec,
     };
@@ -359,26 +352,23 @@ export async function vaultAudience(
 
 /**
  * The one vault a card of `projectId` may read when its shift runs on a workstation of `workstationUserId`:
- * the project vault if the project has one, else the owner's vault of the project's domain (only on the owner's
- * own workstations). Work knowledge never reaches personal projects or the reverse (docs/ARCHITECTURE.md 16.1).
+ * the project vault if the project has one, else the organization vault (only on the workstations of the
+ * organization's Owner and Admins). Knowledge never crosses organizations (docs/ARCHITECTURE.md 16.1).
  */
 export async function vaultForProject(
   db: Queryable,
   projectId: string,
   workstationUserId: string,
-): Promise<{ id: string; kind: 'work' | 'personal' | 'project'; folder: string } | null> {
-  const p = await one(
-    db,
-    'SELECT id, org_id, key, domain, vault_folder, vault_dir FROM projects WHERE id=$1',
-    [projectId],
-  );
+): Promise<{ id: string; kind: 'org' | 'project'; folder: string } | null> {
+  const p = await one(db, 'SELECT id, org_id, key, vault_folder, vault_dir FROM projects WHERE id=$1', [
+    projectId,
+  ]);
   if (!p) return null;
   const v =
     (await one(db, 'SELECT id, kind FROM vaults WHERE project_id=$1', [projectId])) ??
     (isOrgManager({ orgRole: await orgRoleOf(db, workstationUserId, p.org_id) })
-      ? await one(db, 'SELECT id, kind FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [
+      ? await one(db, `SELECT id, kind FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [
           p.org_id,
-          p.domain,
         ])
       : undefined);
   if (!v) return null;

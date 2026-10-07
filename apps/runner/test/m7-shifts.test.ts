@@ -167,7 +167,7 @@ describe('the BA intake chat on the mock runtime', () => {
     context: {
       intake: {
         intakeId: uuidv7(),
-        projects: [{ key: 'TOY', name: 'Toy', domain: 'work', repos: ['toy'] }],
+        projects: [{ key: 'TOY', name: 'Toy', repos: ['toy'] }],
         cards: [],
         ...intake,
       },
@@ -305,7 +305,7 @@ describe('the BA intake chat on the mock runtime', () => {
     expect(done.messageText).toContain('Read GitHub issue acme/toy#12: Add dark mode');
   }, 60_000);
 
-  it("reads the manager's own Jira skill from the work vault into the instructions", async () => {
+  it("reads the manager's own Jira skill from the organization vault into the instructions", async () => {
     const s = server();
     h = await startHarness({ rpc: s.rpc });
     const vaultId = 'work-vault-1';
@@ -315,14 +315,14 @@ describe('the BA intake chat on the mock runtime', () => {
       '# My Jira skill\nUse jira-cli.\n',
     );
     fixture(h, 'ABC-1', { title: 'T', project: 'TOY' });
-    const msg = chat('ABC-1', { externalSystem: 'jira', externalKey: 'ABC-1', workVaultId: vaultId });
+    const msg = chat('ABC-1', { externalSystem: 'jira', externalKey: 'ABC-1', orgVaultId: vaultId });
     h.server.send('chat.start', msg as never);
     await h.server.waitFor('chat.done', (d) => d.chatId === msg.chatId, 60_000);
     const md = readFileSync(join(h.dataDir, 'agents', BA_ID, 'claude', 'CLAUDE.md'), 'utf8');
     expect(md).toContain('Use jira-cli.');
     expect(md).not.toContain('Skill: read a Jira ticket');
     // without the file the built-in skill is used
-    const again = chat('ABC-1', { externalSystem: 'jira', externalKey: 'ABC-1', workVaultId: 'other-vault' });
+    const again = chat('ABC-1', { externalSystem: 'jira', externalKey: 'ABC-1', orgVaultId: 'other-vault' });
     h.server.send('chat.start', again as never);
     await h.server.waitFor('chat.done', (d) => d.chatId === again.chatId, 60_000);
     expect(readFileSync(join(h.dataDir, 'agents', BA_ID, 'claude', 'CLAUDE.md'), 'utf8')).toContain(

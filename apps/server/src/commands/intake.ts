@@ -97,7 +97,7 @@ export async function getIntake(ctx: Ctx, orgId: string, id: string): Promise<In
 async function visibleProjects(db: Queryable, userId: string, orgId: string): Promise<Row[]> {
   return rows(
     db,
-    `SELECT p.id, p.key, p.name, p.domain, p.org_id,
+    `SELECT p.id, p.key, p.name, p.org_id,
             COALESCE((SELECT array_agg(r.name ORDER BY r.name) FROM project_repos r WHERE r.project_id = p.id AND r.removed_at IS NULL), '{}') AS repos
        FROM projects p JOIN project_members m ON m.project_id = p.id AND m.user_id = $1 AND m.status = 'active'
       WHERE p.status = 'active' AND p.kind = 'project' ORDER BY (p.org_id = $2) DESC, p.key`,
@@ -112,19 +112,19 @@ export async function intakeContext(ctx: Ctx, threadId: string): Promise<IntakeC
   const fromChat = !!(await one(ctx.pool, `SELECT 1 FROM threads WHERE id=$1 AND kind='chat'`, [threadId]));
   const projects = await visibleProjects(ctx.pool, i.started_by, i.org_id);
   const cards = (await toDto(ctx, [i]))[0]?.cards ?? [];
-  const work = await one(
+  const org = await one(
     ctx.pool,
-    `SELECT id FROM vaults WHERE org_id=$1 AND kind='work' AND project_id IS NULL`,
+    `SELECT id FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`,
     [i.org_id],
   );
   return {
     intakeId: i.id,
     ...(fromChat ? { fromChat: true } : {}),
-    ...(work ? { workVaultId: work.id } : {}),
+    ...(org ? { orgVaultId: org.id } : {}),
     ...(i.external_system ? { externalSystem: i.external_system as ExternalSystem } : {}),
     ...(i.external_key ? { externalKey: i.external_key } : {}),
     ...(i.project_key ? { mappedProjectKey: i.project_key } : {}),
-    projects: projects.map((p) => ({ key: p.key, name: p.name, domain: p.domain, repos: p.repos })),
+    projects: projects.map((p) => ({ key: p.key, name: p.name, repos: p.repos })),
     cards: cards.map((c) => ({ ref: c.ref, title: c.title, status: c.status })),
   };
 }

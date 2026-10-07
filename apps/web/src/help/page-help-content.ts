@@ -342,8 +342,16 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Show projects in a specific department. Leave empty to see all departments.',
       },
       {
-        name: 'Project card',
-        text: 'Shows the project name, key, workflow, department, domain and whether you own it or it is shared with you. Click to open its board.',
+        name: 'Priority order',
+        text: 'The projects of your organization, most important first. Agents take the next card from the highest project that has work, after scheduled work and their own rework. Owners and Admins change the order by dragging a project by its grip, or with the up and down buttons. A new project starts at the bottom.',
+      },
+      {
+        name: 'Project row',
+        text: 'Shows the priority number, the project name, key, workflow, department and whether you own it or it is shared with you. Click the name to open its board.',
+      },
+      {
+        name: 'Shared with you',
+        text: 'Projects of other organizations that you are a guest of. They are not part of your priority order.',
       },
       {
         name: 'Settings link',
@@ -796,7 +804,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'Register a vault',
-        text: 'Add a Work or Personal vault, or a project vault, by its git URL and sync interval. Agents never see credentials: the workstation uses its own git access.',
+        text: 'Add the organization vault (Owner and Admins) or a project vault by its git URL and sync interval. Agents never see credentials: the workstation uses its own git access.',
       },
       {
         name: 'Vault card',

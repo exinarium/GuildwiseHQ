@@ -68,7 +68,6 @@ describe('creating an interest', () => {
   it('is backed by a hidden project and its vault folder interests/<slug>', async () => {
     const id = await made('owner', 'Rust async', {
       description: 'Deep dives on tokio internals',
-      domain: 'personal',
       subCategory: 'rust/async',
       preferredSites: ['lobste.rs'],
       kinds: ['article', 'video'],
@@ -80,7 +79,6 @@ describe('creating an interest', () => {
     expect(i).toMatchObject({
       name: 'Rust async',
       slug: 'rust-async',
-      domain: 'personal',
       status: 'active',
       kinds: ['article', 'video'],
       taste_version: 1,
@@ -101,7 +99,7 @@ describe('creating an interest', () => {
       kind: 'interest',
       workflow_key: 'feed',
       vault_dir: 'interests/rust-async',
-      domain: 'personal',
+      rank: null,
     });
     expect(p?.key).toMatch(/^[A-Z][A-Z0-9]{1,9}$/);
     const detail = await ok<any>(call('owner', 'GET', `/api/interests/${id}`));
@@ -238,7 +236,7 @@ describe('who sees and who edits (the role rule)', () => {
   });
 
   it('a guest may create any interest, private to them; the Owner sees it', async () => {
-    const id = await made('guest', 'Guest topic', { domain: 'work' });
+    const id = await made('guest', 'Guest topic');
     expect((await row(id)).created_by_rank).toBe(1);
     expect((await call('guest', 'GET', `/api/interests/${id}`)).status).toBe(200);
     expect((await call('member', 'GET', `/api/interests/${id}`)).status).toBe(404);
@@ -287,13 +285,14 @@ describe('changing an interest', () => {
     });
   });
 
-  it('the vault (work or personal) is fixed after the first run', async () => {
-    const id = await made('owner', 'Domain lock', { domain: 'personal', scan: { manual: true } });
+  it('has no vault domain: a domain in the request is ignored, and an interest project is never ranked', async () => {
+    const id = await made('owner', 'No domain', { domain: 'personal', scan: { manual: true } });
     expect((await call('owner', 'PATCH', `/api/interests/${id}`, { domain: 'work' })).status).toBe(200);
-    await ok(call('owner', 'POST', `/api/interests/${id}/run`, {}), 201);
-    const locked = await call('owner', 'PATCH', `/api/interests/${id}`, { domain: 'personal' });
-    expect(locked.status).toBe(400);
-    expect(locked.body.error.code).toBe('domain_locked');
+    const detail = await ok<any>(call('owner', 'GET', `/api/interests/${id}`));
+    expect(detail.interest).not.toHaveProperty('domain');
+    expect(detail.interest.vaultDir).toBe('interests/no-domain');
+    const p = (await q('SELECT rank FROM projects WHERE id=$1', [(await row(id)).project_id]))[0];
+    expect(p?.rank).toBeNull();
   });
 
   it('archives (cancelling its open run), restores, and deletes only an archived one after typing the slug', async () => {

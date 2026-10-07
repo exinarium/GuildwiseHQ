@@ -13,13 +13,28 @@ export const vaultProjectors: Record<string, Projector> = {
         p.vaultId,
         p.orgId,
         p.projectId ?? null,
-        p.kind,
+        // `work` was the organization vault before the work/personal split was dropped.
+        p.kind === 'work' ? 'org' : p.kind,
         p.name,
         scrubRemoteUrl(p.remoteUrl),
         p.syncIntervalSec,
         e.createdAt,
       ],
     );
+  },
+  VaultMerged: async (tx, e) => {
+    const p = (e.event as EventOf<'VaultMerged'>).payload;
+    if (p.intoVaultId === null) {
+      // No organization vault to merge into: the personal vault itself becomes it (its repository is the vault).
+      await exec(
+        tx,
+        `UPDATE vaults SET kind='org', name = CASE WHEN name = 'Personal vault' THEN 'Organization vault' ELSE name END WHERE id=$1`,
+        [p.vaultId],
+      );
+      return;
+    }
+    await exec(tx, 'DELETE FROM workstation_vaults WHERE vault_id=$1', [p.vaultId]);
+    await exec(tx, 'DELETE FROM vaults WHERE id=$1', [p.vaultId]);
   },
   VaultUpdated: async (tx, e) => {
     const p = (e.event as EventOf<'VaultUpdated'>).payload;

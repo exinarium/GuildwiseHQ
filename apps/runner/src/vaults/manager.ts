@@ -4,12 +4,14 @@ import {
   type VaultConfig,
   type VaultConfigureCommand,
   VaultConfigureCommandSchema,
+  type VaultMergeCommand,
   type VaultMoveCommand,
   type VaultWriteCommand,
 } from '@aom/shared';
 import { confine } from '../fs-safe.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { mergeVaultInto, type VaultMergeResult } from './merge.ts';
 import { ensureClone, identityEnv, isClean, isCloned, syncVault, type VaultSyncResult } from './sync.ts';
 import { moveVaultFolder, type VaultMoveResult, VaultWriteError, writeVaultFile } from './write.ts';
 
@@ -239,6 +241,52 @@ export class VaultManager {
       const dir = this.dir(cmd.vaultId);
       await ensureClone(dir, v.remoteUrl, identityEnv(cfg.identity));
       const w = await moveVaultFolder(dir, cmd, cfg.identity);
+      if (this.paused.has(cmd.vaultId)) return { ...w, pushed: false, paused: true };
+      if (!cmd.push) return { ...w, pushed: false, paused: false };
+      const r = await syncVault({
+        dir,
+        remoteUrl: v.remoteUrl,
+        identity: cfg.identity,
+        workstationName: cfg.workstationName,
+      });
+      this.afterSync(cmd.vaultId, r);
+      if (r.status === 'conflict') return { ...w, pushed: false, paused: true };
+      if (r.status === 'error') throw new VaultWriteError(r.error);
+      return { ...w, pushed: r.pushed, paused: false };
+    });
+  }
+
+  /**
+   * `vault.merge`: copies the files of another vault into this one under a folder (see `mergeVaultInto`). The source is
+   * cloned from the URL the command carries (it is no longer a registered vault) and synced first, so the merge sees its
+   * latest state; then the target is committed and pushed through a sync pass like a write.
+   */
+  merge(
+    cmd: VaultMergeCommand,
+  ): Promise<VaultMergeResult & { pushed: boolean; paused: boolean; error?: string }> {
+    return this.serialize(cmd.vaultId, async () => {
+      const cfg = this.config;
+      const v = this.vault(cmd.vaultId);
+      if (!cfg || !v) throw new VaultWriteError(`vault ${cmd.vaultId} is not configured on this workstation`);
+      const dir = this.dir(cmd.vaultId);
+      const srcDir = this.dir(cmd.from.vaultId);
+      const env = identityEnv(cfg.identity);
+      await ensureClone(dir, v.remoteUrl, env);
+      await ensureClone(srcDir, cmd.from.remoteUrl, env);
+      // The latest state of the source: pull what other workstations pushed (a source that was never configured here has no local edits).
+      const fresh = await syncVault({
+        dir: srcDir,
+        remoteUrl: cmd.from.remoteUrl,
+        identity: cfg.identity,
+        workstationName: cfg.workstationName,
+      });
+      if (fresh.status !== 'ok')
+        throw new VaultWriteError(
+          fresh.status === 'conflict'
+            ? `the source vault has a sync conflict in ${fresh.files.join(', ')}`
+            : fresh.error,
+        );
+      const w = await mergeVaultInto(dir, srcDir, cmd, cfg.identity);
       if (this.paused.has(cmd.vaultId)) return { ...w, pushed: false, paused: true };
       if (!cmd.push) return { ...w, pushed: false, paused: false };
       const r = await syncVault({

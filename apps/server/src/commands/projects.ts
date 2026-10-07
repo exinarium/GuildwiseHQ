@@ -3,6 +3,7 @@ import {
   type AddRepoRequest,
   type CreateProjectRequest,
   canCreateProject,
+  isOrgManager,
   isResearchStage,
   normalizeRemoteUrl,
   type OrgRole,
@@ -59,6 +60,58 @@ export async function createProject(
     );
   });
   return projectId;
+}
+
+/**
+ * The Owner or an Admin orders the organization's active projects (drag and drop on the Projects page). `projectIds`
+ * must name every active project of the organization exactly once; a list that is out of date (a project was added,
+ * archived or deleted meanwhile) is refused with 409 so the page reloads. Archived projects keep their relative order
+ * below the active ones. Appends one `ProjectsRanked` (nothing when the order did not change).
+ */
+export async function rankProjects(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  org: { id: string; role: OrgRole | null },
+  projectIds: string[],
+): Promise<void> {
+  if (!isOrgManager({ orgRole: org.role }))
+    throw forbidden('only the organization Owner and Admins can rank the projects');
+  await withAppendTx(ctx.pool, async (tx) => {
+    // Serialize concurrent reorders of one organization: the rows are read under lock.
+    const all = await rows<{ id: string; status: string; rank: number | null }>(
+      tx,
+      `SELECT id, status, rank FROM projects WHERE org_id=$1 AND kind='project'
+        ORDER BY rank NULLS LAST, created_at, id FOR UPDATE`,
+      [org.id],
+    );
+    const active = all.filter((p) => p.status === 'active');
+    const given = new Set(projectIds);
+    if (
+      given.size !== projectIds.length ||
+      projectIds.length !== active.length ||
+      !active.every((p) => given.has(p.id))
+    )
+      throw conflict(
+        'ranking_stale',
+        'the projects changed since you loaded the page: reload it and order them again',
+      );
+    const order = [...projectIds, ...all.filter((p) => p.status !== 'active').map((p) => p.id)];
+    if (order.every((id, i) => all[i]?.id === id)) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.org(org.id),
+          event: {
+            type: 'ProjectsRanked',
+            payload: { orgId: org.id, projectIds: order, rankedBy: user.id, reason: 'manual' },
+          },
+          actor: userActor(user.id),
+          scope: orgScope(org.id),
+        },
+      ],
+      { tx },
+    );
+  });
 }
 
 async function ownedProject(tx: Parameters<typeof loadVisibleProject>[0], userId: string, projectId: string) {

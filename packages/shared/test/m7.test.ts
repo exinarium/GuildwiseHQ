@@ -160,14 +160,14 @@ describe('BA instructions and prompts', () => {
           intakeId: U.a,
           externalSystem: 'jira',
           externalKey: 'ABC-123',
-          projects: [{ key: 'TOY', name: 'Toy', domain: 'work', repos: ['toy'] }],
+          projects: [{ key: 'TOY', name: 'Toy', repos: ['toy'] }],
           cards: [{ ref: 'TOY-1', title: 'Login', status: 'draft' }],
         },
       },
     );
     expect(text).toContain('Jira ticket ABC-123');
     expect(text).toContain('not mapped to a project yet');
-    expect(text).toContain('- TOY: Toy (work), repos: toy');
+    expect(text).toContain('- TOY: Toy, repos: toy');
     expect(text).toContain('TOY-1 Login (draft)');
     expect(text).toContain('Skill: read a Jira ticket');
     expect(renderChatInstructions(agentSpec, {})).not.toContain('# Intake');

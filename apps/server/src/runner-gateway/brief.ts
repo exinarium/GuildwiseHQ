@@ -117,7 +117,6 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       id: project.id,
       key: project.key,
       name: project.name,
-      domain: project.domain,
       workingBranch: project.working_branch,
       e2eGlobs: project.e2e_globs,
       architecturalGlobs: project.architectural_globs,
@@ -192,7 +191,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
         path: claim.worktree.created ? undefined : claim.worktree.worktreePath,
       }
     : null;
-  // The one vault this card may read: its domain (or project) vault, only if this workstation's user can access it.
+  // The one vault this card may read: its project vault (or the organization vault), only if this workstation's user can access it.
   const ws = await one(ctx.pool, 'SELECT user_id FROM workstations WHERE id=$1', [claim.workstationId]);
   const vault = ws ? await vaultForProject(ctx.pool, brief.project.id, ws.user_id) : null;
   return {
@@ -273,7 +272,6 @@ export async function buildDevopsShiftStart(
       id: placeholder.id,
       key: placeholder.key,
       name: placeholder.name,
-      domain: 'work',
       workingBranch: 'main',
       e2eGlobs: [],
       architecturalGlobs: [],

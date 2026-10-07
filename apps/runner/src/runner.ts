@@ -431,6 +431,8 @@ export class Runner {
         done(true, await this.vaults.write(CommandPayloadSchemas['vault.write'].parse(payload)));
       } else if (command === 'vault.move') {
         done(true, await this.vaults.move(CommandPayloadSchemas['vault.move'].parse(payload)));
+      } else if (command === 'vault.merge') {
+        done(true, await this.vaults.merge(CommandPayloadSchemas['vault.merge'].parse(payload)));
       } else if (command === 'finalize.execute') {
         const p = CommandPayloadSchemas['finalize.execute'].parse(payload);
         const repo = await this.findRepo(p.remoteUrlNormalized);

@@ -19,19 +19,17 @@ export interface DecisionRecord {
   answeredBy?: string;
 }
 
-/** The vault a project's files go to: the project vault if it has one, else the owner's vault of its domain. */
+/** The vault a project's files go to: the project vault if it has one, else the organization vault. */
 export async function projectVault(db: Queryable, projectId: string) {
-  const p = await one(
-    db,
-    'SELECT id, org_id, key, domain, vault_folder, vault_dir FROM projects WHERE id=$1',
-    [projectId],
-  );
+  const p = await one(db, 'SELECT id, org_id, key, vault_folder, vault_dir FROM projects WHERE id=$1', [
+    projectId,
+  ]);
   if (!p) return null;
   const vault =
     (await one(db, 'SELECT id FROM vaults WHERE project_id=$1', [p.id])) ??
     (await one(db, 'SELECT id FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [
       p.org_id,
-      p.domain,
+      'org',
     ]));
   return {
     vaultId: vault?.id as string | undefined,
@@ -57,7 +55,7 @@ export async function plannedVaultPath(
       const t = await projectVault(db, q.projectId);
       return t?.vaultId ? `${t.folder}/standing-orders.md` : undefined;
     }
-    const w = await one(db, `SELECT id FROM vaults WHERE org_id=$1 AND kind='work' AND project_id IS NULL`, [
+    const w = await one(db, `SELECT id FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [
       q.orgId,
     ]);
     return w ? 'standing-orders.md' : undefined;
@@ -74,23 +72,21 @@ export type DecisionWriteResult =
   | { queued: false; reason: 'no_vault' | 'no_workstation' | 'project_not_found' };
 
 /**
- * Writes the ADR-style decision file of an answered question into the project's domain vault
+ * Writes the ADR-style decision file of an answered question into the project's vault
  * (`projects/<name>/decisions/<date>-<slug>.md`, docs/ARCHITECTURE.md section 16.4) through a durable `vault.write`
  * command; the runner commits and pushes it. The vault is the project vault if the project has one, else the
- * owner's vault of the project's domain. No registered vault: nothing is written (the ledger entry still exists).
+ * organization vault. No registered vault: nothing is written (the ledger entry still exists).
  */
 export async function writeDecisionFile(ctx: Ctx, rec: DecisionRecord): Promise<DecisionWriteResult> {
-  const p = await one(
-    ctx.pool,
-    'SELECT id, org_id, key, domain, vault_folder, vault_dir FROM projects WHERE id=$1',
-    [rec.projectId],
-  );
+  const p = await one(ctx.pool, 'SELECT id, org_id, key, vault_folder, vault_dir FROM projects WHERE id=$1', [
+    rec.projectId,
+  ]);
   if (!p) return { queued: false, reason: 'project_not_found' };
   const vault =
     (await one(ctx.pool, 'SELECT id FROM vaults WHERE project_id=$1', [p.id])) ??
     (await one(ctx.pool, 'SELECT id FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [
       p.org_id,
-      p.domain,
+      'org',
     ]));
   if (!vault) return { queued: false, reason: 'no_vault' };
   const folder = projectVaultFolder({ key: p.key, vaultFolder: p.vault_folder, vaultDir: p.vault_dir });
@@ -108,7 +104,7 @@ export async function writeDecisionFile(ctx: Ctx, rec: DecisionRecord): Promise<
 
 /**
  * Appends a standing order added on the desk to the vault: `projects/<name>/standing-orders.md` for a project order,
- * the work vault's `standing-orders.md` for an organization-wide one (docs/ARCHITECTURE.md section 16.4).
+ * the organization vault's `standing-orders.md` for an organization-wide one (docs/ARCHITECTURE.md section 16.4).
 
  * Called by `registerDecisionHook` for every standing order added to the ledger.
  */
@@ -121,7 +117,7 @@ export async function appendStandingOrder(
   if (input.projectId) {
     const p = await one(
       ctx.pool,
-      'SELECT id, org_id, key, domain, vault_folder, vault_dir FROM projects WHERE id=$1',
+      'SELECT id, org_id, key, vault_folder, vault_dir FROM projects WHERE id=$1',
       [input.projectId],
     );
     if (!p) return { queued: false, reason: 'project_not_found' };
@@ -129,13 +125,13 @@ export async function appendStandingOrder(
       (await one(ctx.pool, 'SELECT id FROM vaults WHERE project_id=$1', [p.id])) ??
       (await one(ctx.pool, 'SELECT id FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL', [
         p.org_id,
-        p.domain,
+        'org',
       ]))
     )?.id;
     path = `${projectVaultFolder({ key: p.key, vaultFolder: p.vault_folder, vaultDir: p.vault_dir })}/standing-orders.md`;
   } else {
     vaultId = (
-      await one(ctx.pool, `SELECT id FROM vaults WHERE org_id=$1 AND kind='work' AND project_id IS NULL`, [
+      await one(ctx.pool, `SELECT id FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`, [
         input.orgId,
       ])
     )?.id;
@@ -154,7 +150,7 @@ export async function appendStandingOrder(
 }
 
 /**
- * Subscribes to the event store: an answered question writes its decision file into the project's domain vault,
+ * Subscribes to the event store: an answered question writes its decision file into the project's vault,
  * and a standing order added to the ledger is appended to the vault's `standing-orders.md`. Both go through the
  * durable `vault.write` command; with no vault registered nothing is written (the ledger entry still exists).
  */

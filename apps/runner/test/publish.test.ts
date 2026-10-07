@@ -121,7 +121,7 @@ async function startWithVault(adapter?: ScriptedAdapter) {
       vaults: [
         {
           vaultId: 'vault-1',
-          kind: 'personal',
+          kind: 'org',
           name: 'Personal',
           remoteUrl: vault.origin,
           syncIntervalSec: 3600,
@@ -135,7 +135,7 @@ async function startWithVault(adapter?: ScriptedAdapter) {
   return vault;
 }
 
-const VAULT = { vaultId: 'vault-1', kind: 'personal' as const, folder: FOLDER };
+const VAULT = { vaultId: 'vault-1', kind: 'org' as const, folder: FOLDER };
 const run = async (msg: Record<string, unknown>) => {
   h!.server.send('shift.start', msg);
   return h!.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId, 90_000);

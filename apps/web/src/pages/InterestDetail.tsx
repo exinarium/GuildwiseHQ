@@ -82,7 +82,7 @@ export function InterestDetail() {
         documentTitle={`${i.name} · Interests`}
         sub={
           <span className="text-sm text-subtle" data-testid="interest-sub">
-            {i.domain} vault{i.vaultDir ? ` · ${i.vaultDir}` : ''}
+            Organization vault{i.vaultDir ? ` · ${i.vaultDir}` : ''}
             {i.createdBy ? ` · created by ${i.createdBy.name}` : ''}
           </span>
         }

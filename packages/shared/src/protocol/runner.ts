@@ -4,7 +4,7 @@ import { DevopsShiftSchema } from '../devops/index.ts';
 import { Usage } from '../events/define.ts';
 import { GuardViolation, ShiftKind } from '../events/shift.ts';
 import { TestEnvProblem } from '../events/testing.ts';
-import { VaultKind } from '../events/vault.ts';
+import { VaultEventKind } from '../events/vault.ts';
 import { OutboundPostPayloadSchema } from '../external/index.ts';
 import { FeedItemInputSchema } from '../feed/index.ts';
 import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
@@ -18,6 +18,7 @@ import { FinalizeExecutePayloadSchema } from '../testing/index.ts';
 import {
   VaultConfigureCommandSchema,
   VaultIdSchema,
+  VaultMergeCommandSchema,
   VaultMoveCommandSchema,
   VaultWriteCommandSchema,
 } from '../vaults/index.ts';
@@ -128,12 +129,13 @@ export const ShiftBriefSchema = z.object({
     id: z.uuid(),
     key: z.string(),
     name: z.string(),
-    domain: z.enum(['work', 'personal']),
+    /** Legacy (ignored): the server no longer sends it. */
+    domain: z.enum(['work', 'personal']).optional(),
     workingBranch: z.string(),
     e2eGlobs: z.array(z.string()),
     architecturalGlobs: z.array(z.string()),
     vaultFolder: z.string().optional(),
-    /** M3: `PROJECT.md` from the card's domain vault, filled in by the runner (the site holds no vault content). */
+    /** M3: `PROJECT.md` from the card's vault, filled in by the runner (the site holds no vault content). */
     projectDoc: z.string().optional(),
   }),
   role: z.object({
@@ -243,6 +245,7 @@ export const RunnerCommandNameSchema = z.enum([
   'vault.configure',
   'vault.write',
   'vault.move',
+  'vault.merge',
   'finalize.execute',
   'outbound.post',
   'repo.create',
@@ -252,10 +255,10 @@ export const RunnerCommandNameSchema = z.enum([
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
-/** The one vault a card shift may read (docs/ARCHITECTURE.md section 16.1): its domain vault or the project vault. */
+/** The one vault a card shift may read (docs/ARCHITECTURE.md section 16.1): its project vault, or the organization vault. */
 export const ShiftVaultSchema = z.object({
   vaultId: VaultIdSchema,
-  kind: VaultKind,
+  kind: VaultEventKind,
   /** `projects/<name>` inside the vault. */
   folder: VaultFolderSchema,
 });
@@ -266,6 +269,7 @@ export const CommandPayloadSchemas = {
   'vault.configure': VaultConfigureCommandSchema,
   'vault.write': VaultWriteCommandSchema,
   'vault.move': VaultMoveCommandSchema,
+  'vault.merge': VaultMergeCommandSchema,
   'agent.wipe': z.object({ agentId: z.uuid() }),
   'worktree.remove': z.object({
     repoId: z.uuid().optional(),
@@ -453,7 +457,7 @@ export const ShiftStartSchema = msg('shift.start', {
   question: QuestionShiftSchema.optional(),
   /** Phases: for `kind: 'ba_task'` the background task (phase report, follow-up briefs, ...); the brief carries a placeholder card. */
   baTask: BaTaskShiftSchema.optional(),
-  /** M3: the card's domain vault; the runner reads only this vault and passes only it as `--add-dir`. */
+  /** M3: the card's vault (its project vault or the organization vault); the runner reads only this vault and passes only it as `--add-dir`. */
   vault: ShiftVaultSchema.nullable().optional(),
 });
 export const ShiftStopSchema = msg('shift.stop', { shiftId: z.uuid(), reason: ShiftStopReasonSchema });

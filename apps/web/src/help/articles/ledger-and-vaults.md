@@ -31,15 +31,16 @@ Results show matching entries with context. Agents can also search the ledger du
 
 Vaults are git repositories of markdown notes that your DevOps engineers keep in sync on your workstations. By default each workstation syncs every 300 seconds (5 minutes); you can set another interval per vault.
 
-There are three kinds:
+There are two kinds:
 
-- **Personal vault**: the knowledge of your Personal-domain projects. An organization has at most one.
-- **Work vault**: the knowledge of your Work-domain projects. An organization has at most one.
+- **Organization vault**: the knowledge of your organization, including your interests (under `interests/<name>/`). An organization has at most one.
 - **Project vault**: one per project, shared with the members of that project.
 
-The Personal and Work vaults belong to the organization and sync only to the workstations of the Owner and Admins. Project vaults sync to the workstations of the project's members. An agent only reads the vault of its card's domain, so work knowledge never reaches personal projects.
+There are no personal vaults any more: "personal" simply means your own organization. If you had a personal vault, its files were merged into the organization vault under `personal/`.
 
-To register a vault (Owner and Admin for the Personal and Work vaults; the project's owner for a project vault):
+The organization vault syncs only to the workstations of the Owner and Admins. Project vaults sync to the workstations of the project's members. An agent only reads the vault of its card's project: the project vault if it has one, otherwise the organization vault (on an Owner's or Admin's workstation).
+
+To register a vault (Owner and Admin for the organization vault; the project's owner for a project vault):
 
 1. Open **Vaults** in the sidebar (under Knowledge).
 2. Click **Register a vault** and choose the **Kind**.
@@ -51,7 +52,7 @@ Your agents use vaults to store research notes, transcripts, and knowledge. You 
 
 ## Shared knowledge {#shared-knowledge}
 
-Agents read your vaults during shifts to find shared knowledge. Research interests store their notes in the interest's vault folder under `notes/`. Converted projects keep their research notes in `PROJECT.md` of the project vault.
+Agents read your vaults during shifts to find shared knowledge. Research interests store their notes in the interest's folder in the organization vault (`interests/<name>/`) under `notes/`. Converted projects keep their research notes in `PROJECT.md` of the project vault.
 
 Vaults let you keep a searchable knowledge base that grows with your team's work.
 

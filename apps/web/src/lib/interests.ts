@@ -68,7 +68,6 @@ export const runStatusTone = (s: InterestRunStatus): 'green' | 'amber' | 'red' |
 export interface InterestFormValues {
   name: string;
   description: string;
-  domain: 'personal' | 'work';
   subCategory: string;
   sites: string;
   kinds: Record<InterestKind, boolean>;
@@ -93,7 +92,6 @@ export function valuesFromInterest(i: InterestDto): InterestFormValues {
   return {
     name: i.name,
     description: i.description,
-    domain: i.domain,
     subCategory: i.subCategory ?? '',
     sites: i.preferredSites.join('\n'),
     kinds,
@@ -118,7 +116,6 @@ export function emptyValues(zone: string): InterestFormValues {
   return {
     name: '',
     description: '',
-    domain: 'personal',
     subCategory: '',
     sites: '',
     kinds: allKinds(),
@@ -192,7 +189,6 @@ export function toCreateRequest(v: InterestFormValues, tasteRules: string[] = []
   return {
     name: v.name.trim(),
     description: v.description,
-    domain: v.domain,
     preferredSites: parseSites(v.sites),
     kinds: kindsOf(v),
     scan: scanBody(v),
@@ -203,11 +199,10 @@ export function toCreateRequest(v: InterestFormValues, tasteRules: string[] = []
   };
 }
 
-export function toPatchRequest(v: InterestFormValues, domainLocked: boolean): PatchInterestRequest {
+export function toPatchRequest(v: InterestFormValues): PatchInterestRequest {
   return {
     name: v.name.trim(),
     description: v.description,
-    ...(domainLocked ? {} : { domain: v.domain }),
     subCategory: v.subCategory.trim() || null,
     preferredSites: parseSites(v.sites),
     kinds: kindsOf(v),

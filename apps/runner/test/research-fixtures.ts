@@ -6,7 +6,7 @@ export interface ResearchShiftOptions {
   fields?: Record<string, unknown>;
   reworkRound?: number;
   handoffs?: ShiftBrief['handoffs'];
-  vault?: { vaultId: string; kind: 'personal' | 'work'; folder: string } | null;
+  vault?: { vaultId: string; kind: 'org' | 'project'; folder: string } | null;
   shiftId?: string;
 }
 
@@ -55,7 +55,7 @@ export function makeResearchShiftStart(o: ResearchShiftOptions): Record<string, 
           ...o.fields,
         },
       },
-      project: { ...brief.project, key: 'SHOOT', name: 'Shooting', domain: 'personal' },
+      project: { ...brief.project, key: 'SHOOT', name: 'Shooting' },
       role: {
         key: role.key,
         name: role.name,

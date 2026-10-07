@@ -3,16 +3,19 @@ import { CreateProjectRequestSchema, workflowUsesRepos } from '@aom/shared';
 import { Archive, Code2, FlaskConical, FolderKanban, Rss, Settings } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
+import { errorMessage } from '../api/client.ts';
 import { useWorkflows } from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
 import {
   useArchivedProjects,
   useCreateProject,
   useProjects,
+  useRankProjects,
   useRestoreProject,
 } from '../api/queries/projects.ts';
 import { DeleteProjectDialog } from '../components/DeleteProjectDialog.tsx';
 import { ProjectInvitations } from '../components/ProjectInvitations.tsx';
+import { ProjectRankList } from '../components/ProjectRankList.tsx';
 import { projectTypeLabel } from '../components/shell/ProjectSwitcher.tsx';
 import { cx } from '../components/ui/cx.ts';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
@@ -67,7 +70,6 @@ function ProjectCard({ p, activeOrgId }: { p: ProjectDto; activeOrgId: string | 
       <p className="mt-3 flex flex-wrap items-center gap-1.5">
         <Badge>{p.workflowKey}</Badge>
         {p.department && <Badge tone="violet">{p.department}</Badge>}
-        <Badge>{p.domain}</Badge>
         {guest ? (
           <Badge tone="amber" title="You are a guest of this project's organization">
             Guest{p.orgName ? ` · ${p.orgName}` : ''}
@@ -92,6 +94,13 @@ export function Projects() {
   const [department, setDepartment] = useState('');
   const departments = departmentsOf(projects.data ?? []);
   const shown = inDepartment(projects.data ?? [], department);
+  const rank = useRankProjects();
+  const toast = useToast();
+  const activeOrgId = me.data?.activeOrg?.id ?? null;
+  // The organization's own projects are ranked; the ones shared by other organizations (a guest's) are not ours to order.
+  const own = shown.filter((p) => !activeOrgId || p.orgId === activeOrgId);
+  const shared = shown.filter((p) => !!activeOrgId && p.orgId !== activeOrgId);
+  const ownAll = (projects.data ?? []).filter((p) => !activeOrgId || p.orgId === activeOrgId);
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader
@@ -157,11 +166,47 @@ export function Projects() {
             }
           />
         )}
-        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" hidden={showArchived}>
-          {shown.map((p) => (
-            <ProjectCard key={p.id} p={p} activeOrgId={me.data?.activeOrg?.id ?? null} />
-          ))}
-        </ul>
+        <div hidden={showArchived}>
+          {own.length > 0 && (
+            <section aria-labelledby="priority-heading" data-testid="ranked-projects">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <h2 id="priority-heading" className="text-base font-semibold text-fg">
+                  Priority order
+                </h2>
+                <p className="text-sm text-muted">
+                  The project at the top is served first: agents take the next card from the highest project
+                  that has work.
+                </p>
+              </div>
+              <ProjectRankList
+                projects={own}
+                canRank={canCreate}
+                disabledReason={
+                  canCreate && own.length < ownAll.length
+                    ? 'Clear the department filter to change the order: it only makes sense for all projects.'
+                    : undefined
+                }
+                onReorder={(ids) =>
+                  rank.mutate(ids, {
+                    onError: (e) => toast.error(`The order was not saved: ${errorMessage(e)}`),
+                  })
+                }
+              />
+            </section>
+          )}
+          {shared.length > 0 && (
+            <section aria-labelledby="shared-heading" className={own.length > 0 ? 'mt-8' : ''}>
+              <h2 id="shared-heading" className="mb-3 text-base font-semibold text-fg">
+                Shared with you
+              </h2>
+              <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {shared.map((p) => (
+                  <ProjectCard key={p.id} p={p} activeOrgId={activeOrgId} />
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
       </div>
       <NewProjectDialog open={open} onOpenChange={setOpen} />
     </div>

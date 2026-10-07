@@ -33,7 +33,7 @@ export const VaultDtoSchema = z.object({
 export type VaultDto = z.infer<typeof VaultDtoSchema>;
 export const VaultsResponseSchema = z.object({ vaults: z.array(VaultDtoSchema) });
 
-/** `POST /api/vaults`: work and personal vaults belong to the caller; a project vault needs `projectId` (owner). */
+/** `POST /api/vaults`: the organization vault (Owner and Admins); a project vault needs `projectId` (the project owner). */
 export const RegisterVaultRequestSchema = z
   .object({
     kind: VaultKind,

@@ -452,7 +452,7 @@ describe('converting a project', () => {
 
   it('lists the research notes in PROJECT.md of the project vault', async () => {
     const vault = await ok<any>(
-      owner('POST', '/api/vaults', { kind: 'work', remoteUrl: 'git@example.test:srv/work.git' }),
+      owner('POST', '/api/vaults', { kind: 'org', remoteUrl: 'git@example.test:srv/work.git' }),
       201,
     );
     const res = await newProject('research');

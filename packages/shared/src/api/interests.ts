@@ -4,7 +4,6 @@ import {
   ALL_INTEREST_KINDS,
   DeliverySpecSchema,
   InterestAgentsSchema,
-  InterestDomain,
   InterestKind,
   InterestRunKind,
   InterestRunStatus,
@@ -61,7 +60,6 @@ export const InterestDtoSchema = z.object({
   name: z.string(),
   description: z.string(),
   slug: z.string().nullable(),
-  domain: InterestDomain,
   /** The vault folder, e.g. `interests/rust-async`. */
   vaultDir: z.string().nullable(),
   hasVault: z.boolean(),
@@ -180,7 +178,6 @@ export const DeliveryPatchSchema = z.object({
 export const CreateInterestRequestSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().max(20000).default(''),
-  domain: InterestDomain.default('personal'),
   subCategory: z.string().trim().min(1).max(120).optional(),
   preferredSites: z.array(z.string().trim().min(1).max(500)).max(50).default([]),
   kinds: z.array(InterestKind).min(1).max(3).default(ALL_INTEREST_KINDS),
@@ -192,12 +189,11 @@ export const CreateInterestRequestSchema = z.object({
 });
 export type CreateInterestRequest = z.infer<typeof CreateInterestRequestSchema>;
 
-/** `PATCH /api/interests/:id`. `domain` is refused after the first run. A null agent clears the preference. */
+/** `PATCH /api/interests/:id`. A null agent clears the preference. */
 export const PatchInterestRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
     description: z.string().max(20000),
-    domain: InterestDomain,
     subCategory: z.string().trim().min(1).max(120).nullable(),
     preferredSites: z.array(z.string().trim().min(1).max(500)).max(50),
     kinds: z.array(InterestKind).min(1).max(3),

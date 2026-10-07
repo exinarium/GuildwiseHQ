@@ -123,6 +123,13 @@ export const GLOSSARY: GlossaryEntry[] = [
     article: 'phases#creating-a-phase',
   },
   {
+    term: 'Priority order',
+    aka: ['project rank', 'ranking'],
+    definition:
+      'The order of your projects on the Projects page, most important first. Agents serve the project higher up first. Owners and Admins change it by dragging.',
+    article: 'projects#ranking',
+  },
+  {
     term: 'Quiet cap',
     aka: ['daily cap', 'digest cap'],
     definition:

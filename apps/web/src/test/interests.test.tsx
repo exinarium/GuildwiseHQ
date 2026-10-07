@@ -66,7 +66,6 @@ const interest = (over: Partial<InterestDto> = {}): InterestDto => ({
   name: 'Rust async',
   description: 'Deep dives on tokio internals',
   slug: 'rust-async',
-  domain: 'personal',
   vaultDir: 'interests/rust-async',
   hasVault: true,
   projectKey: 'RUSTAS',
@@ -290,7 +289,6 @@ describe('lib/interests', () => {
     expect(describeDelivery({ ...i.delivery, mode: 'immediate' })).toBe('As soon as a run finishes');
     const v = valuesFromInterest(i);
     expect(v).toMatchObject({
-      domain: 'personal',
       deliveryMode: 'scheduled',
       deliveryPreset: 'weekdays-0700',
       windowHours: '',
@@ -304,8 +302,8 @@ describe('lib/interests', () => {
       scan: { cron: '0 7 * * *', maxItems: 10, manual: false },
       delivery: { mode: 'scheduled', cron: '0 7 * * 1-5' },
     });
-    expect('domain' in toPatchRequest(v, true)).toBe(false);
-    expect(toPatchRequest(v, false).domain).toBe('personal');
+    expect(toPatchRequest(v)).not.toHaveProperty('domain');
+    expect(toCreateRequest(v)).not.toHaveProperty('domain');
   });
 
   it('maps interest events to query keys', () => {
@@ -497,13 +495,14 @@ describe('Interest detail', () => {
     );
   });
 
-  it('settings: saves the schedules, locks the vault after the first run and sends the preferred agents', async () => {
+  it('settings: saves the schedules and sends the preferred agents; there is no vault to choose', async () => {
     const calls: Call[] = [];
     stubApi([interest()], calls);
     wrap(<InterestDetail />, `/interests/${U(10)}?tab=settings`);
     const u = userEvent.setup();
-    const domain = await screen.findByTestId('interest-domain');
-    expect(domain).toBeDisabled();
+    await screen.findByTestId('interest-form');
+    expect(screen.queryByTestId('interest-domain')).toBeNull();
+    expect(screen.queryByLabelText('Vault')).toBeNull();
     await u.clear(screen.getByTestId('interest-max-items'));
     await u.type(screen.getByTestId('interest-max-items'), '15');
     await u.selectOptions(await screen.findByTestId('interest-delivery-mode'), 'immediate');

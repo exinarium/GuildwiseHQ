@@ -1,6 +1,7 @@
 import type { VaultDto } from '@aom/shared';
 import { Vault as VaultIcon } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
+import { useMe } from '../api/queries/auth.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import {
   usePatchVault,
@@ -24,18 +25,21 @@ import {
 } from '../components/ui.tsx';
 import { formatDateTime } from '../lib/time.ts';
 
-const KIND_LABEL = { work: 'Work vault', personal: 'Personal vault', project: 'Project vault' } as const;
+const KIND_LABEL = { org: 'Organization vault', project: 'Project vault' } as const;
 
 /** Settings > Vaults: git URLs of the knowledge vaults. The site stores URLs and sync status, never vault content. */
 export function Vaults() {
   const q = useVaults();
+  const me = useMe();
   const projects = useProjects();
+  const manager = me.data?.activeOrg?.role === 'owner' || me.data?.activeOrg?.role === 'admin';
   const [registering, setRegistering] = useState(false);
   const owned = (projects.data ?? []).filter((p) => p.myRole === 'owner');
   const vaults = q.data ?? [];
-  const has = (kind: 'work' | 'personal') => vaults.some((v) => v.kind === kind);
+  const hasOrgVault = vaults.some((v) => v.kind === 'org');
   const projectsWithoutVault = owned.filter((p) => !vaults.some((v) => v.projectId === p.id));
-  const canRegister = !has('work') || !has('personal') || projectsWithoutVault.length > 0;
+  const canOrgVault = manager && !hasOrgVault;
+  const canRegister = canOrgVault || projectsWithoutVault.length > 0;
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4">
@@ -78,8 +82,7 @@ export function Vaults() {
         description="Give the git URL of an existing repository. Agents never see credentials: the workstation uses its own git access."
       >
         <RegisterVault
-          canWork={!has('work')}
-          canPersonal={!has('personal')}
+          canOrg={canOrgVault}
           projects={projectsWithoutVault.map((p) => ({ id: p.id, key: p.key, name: p.name }))}
           onDone={() => setRegistering(false)}
         />
@@ -126,7 +129,7 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
           {vault.projectId ? vault.name : KIND_LABEL[vault.kind]}
           {projectKey && <span className="ml-1 font-normal text-subtle">({projectKey})</span>}
         </h2>
-        <Badge>{vault.kind}</Badge>
+        <Badge>{vault.kind === 'org' ? 'organization' : vault.kind}</Badge>
         {!vault.canEdit && <Badge tone="blue">shared with you</Badge>}
         {vault.workstations.length > 0 && (
           <span className="text-sm text-muted">
@@ -250,21 +253,18 @@ function VaultCard({ vault, projectKey }: { vault: VaultDto; projectKey?: string
 }
 
 function RegisterVault({
-  canWork,
-  canPersonal,
+  canOrg,
   projects,
   onDone,
 }: {
-  canWork: boolean;
-  canPersonal: boolean;
+  canOrg: boolean;
   projects: Array<{ id: string; key: string; name: string }>;
   onDone: () => void;
 }) {
   const register = useRegisterVault();
   const toast = useToast();
   const kinds = [
-    ...(canWork ? [{ value: 'work', label: 'Work vault' }] : []),
-    ...(canPersonal ? [{ value: 'personal', label: 'Personal vault' }] : []),
+    ...(canOrg ? [{ value: 'org', label: 'Organization vault (for the whole organization)' }] : []),
     ...(projects.length > 0 ? [{ value: 'project', label: 'Project vault (shared with members)' }] : []),
   ];
   const [kind, setKind] = useState('');
@@ -286,7 +286,7 @@ function RegisterVault({
     if (Object.keys(errs).length) return;
     register.mutate(
       {
-        kind: effKind as 'work',
+        kind: effKind as 'org' | 'project',
         remoteUrl: url.trim(),
         syncIntervalSec: sec,
         ...(effKind === 'project' ? { projectId: effProject } : {}),
@@ -320,7 +320,7 @@ function RegisterVault({
       )}
       <TextInput
         label="Git URL"
-        placeholder="git@github.com:me/work-vault.git"
+        placeholder="git@github.com:acme/knowledge.git"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         error={err.url}

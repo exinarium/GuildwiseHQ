@@ -62,7 +62,7 @@ describe('migrate', () => {
         `INSERT INTO vaults (id, org_id, kind, name, remote_url, created_at) VALUES ($1, gen_random_uuid(), $2, 'v', $3, now())`,
         [id, kind, url],
       );
-    await vault('00000000-0000-4000-8000-000000000001', 'work', dirty);
+    await vault('00000000-0000-4000-8000-000000000001', 'org', dirty);
     await vault('00000000-0000-4000-8000-000000000002', 'personal', ssh);
     await client.query(
       `INSERT INTO events (stream_id, stream_version, type, payload, actor_kind, audience) VALUES ('vault-x', 1, 'VaultRegistered', $1, 'system', 'org'), ('vault-x', 2, 'VaultUpdated', $2, 'system', 'org')`,
@@ -117,8 +117,8 @@ describe('1313_agent_allow_list', () => {
     const P = '00000000-0000-4000-8000-0000000000a1';
     const U = '00000000-0000-4000-8000-0000000000b1';
     await client.query(
-      `INSERT INTO projects (id, org_id, key, name, domain, workflow_key, created_at)
-       VALUES ($1, $2, 'OLD', 'Old', 'work', 'code', now())`,
+      `INSERT INTO projects (id, org_id, key, name, workflow_key, created_at)
+       VALUES ($1, $2, 'OLD', 'Old', 'code', now())`,
       [P, U],
     );
     const agent = (id: string, name: string, project: string | null) =>
@@ -168,8 +168,8 @@ describe('1314_generic_schedules', () => {
     const P = '00000000-0000-4000-8000-0000000000a2';
     const U = '00000000-0000-4000-8000-0000000000b2';
     await client.query(
-      `INSERT INTO projects (id, org_id, key, name, domain, workflow_key, created_at)
-       VALUES ($1, $2, 'OLD2', 'Old', 'work', 'code', now())`,
+      `INSERT INTO projects (id, org_id, key, name, workflow_key, created_at)
+       VALUES ($1, $2, 'OLD2', 'Old', 'code', now())`,
       [P, U],
     );
     const schedule = (id: string, kind: string) =>
@@ -235,8 +235,8 @@ describe('1315_project_stage', () => {
     const U = '00000000-0000-4000-8000-0000000000b3';
     const mk = (id: string, key: string, workflow: string) =>
       client.query(
-        `INSERT INTO projects (id, org_id, key, name, domain, workflow_key, created_at)
-         VALUES ($1, $2, $3, $3, 'work', $4, now())`,
+        `INSERT INTO projects (id, org_id, key, name, workflow_key, created_at)
+         VALUES ($1, $2, $3, $3, $4, now())`,
         [id, U, key, workflow],
       );
     const RES = '00000000-0000-4000-8000-0000000000a3';
@@ -300,7 +300,7 @@ describe('1315_project_stage', () => {
   it('withPendingMigrations plans against a migrated schema and rolls everything back (dry-run CLIs)', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'aom-mig-'));
     await cp(defaultMigrationsDir(), dir, { recursive: true });
-    for (const f of (await readdir(dir)).filter((f) => /^131[3-6]_/.test(f))) await rm(join(dir, f));
+    for (const f of (await readdir(dir)).filter((f) => /^(131[3-6]|1322)_/.test(f))) await rm(join(dir, f));
     await migrate(TEST_DB_URL, { schema: SCHEMA, dir });
     const before = (await client.query(`SELECT count(*)::int AS n FROM ${SCHEMA}.schema_migrations`)).rows[0]
       .n;

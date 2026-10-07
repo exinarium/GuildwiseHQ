@@ -56,13 +56,13 @@ describe('owner-controlled strings are validated at the API (review M1, M5)', ()
 
   it('refuses credentials and local paths in vault URLs', async () => {
     for (const remoteUrl of ['https://u:p@github.com/acme/vault.git', 'file:///tmp/v.git', '-oProxy=x']) {
-      const r = await w.t.req('POST', '/api/vaults', { ...owner(), body: { kind: 'work', remoteUrl } });
+      const r = await w.t.req('POST', '/api/vaults', { ...owner(), body: { kind: 'org', remoteUrl } });
       expect(r.status, remoteUrl).toBe(400);
     }
     const vault = await ok<any>(
       w.t.req('POST', '/api/vaults', {
         ...owner(),
-        body: { kind: 'work', remoteUrl: 'git@github.com:acme/vault.git' },
+        body: { kind: 'org', remoteUrl: 'git@github.com:acme/vault.git' },
       }),
       201,
     );

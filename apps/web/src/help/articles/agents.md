@@ -37,7 +37,7 @@ Also, an agent can only work on projects that its hiring manager can access. If 
 
 ## Focus {#focus}
 
-**Focus** (a star next to a project in the allow-list) is a soft preference. When a card from a starred project and a card from another project are both waiting, the agent takes the starred one first.
+**Focus** (a star next to a project in the allow-list) is a soft preference. When a card from a starred project and a card from another project are both waiting, the agent takes the starred one first, even when the other project is higher in your [priority order](/help/projects#ranking). Without a focus, an agent follows the priority order of the Projects page.
 
 You can star up to 10 projects per agent. Removing a project from the allow-list also removes it from the focused ones.
 

@@ -114,7 +114,7 @@ describe('VaultManager.write: committed and pushed', () => {
   }
   const configure = (m: VaultManager, origin: string) =>
     m.configure({
-      vaults: [{ vaultId: 'v1', kind: 'work', name: 'Work', remoteUrl: origin, syncIntervalSec: 3600 }],
+      vaults: [{ vaultId: 'v1', kind: 'org', name: 'Org', remoteUrl: origin, syncIntervalSec: 3600 }],
       identity: IDENTITY,
       workstationName: 'Desk',
       resume: [],

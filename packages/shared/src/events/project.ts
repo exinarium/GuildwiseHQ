@@ -4,8 +4,12 @@ import { ProjectKeySchema } from '../ids.ts';
 import { BranchPrefixSchema, GitRefSchema, VaultFolderSchema } from '../safe.ts';
 import { defineEvent, Id } from './define.ts';
 
-export const ProjectDomain = z.enum(['work', 'personal']);
-export type ProjectDomain = z.infer<typeof ProjectDomain>;
+/**
+ * The work/personal domain and the priority tier of a project were dropped (the organization ranks its projects; see
+ * `ProjectsRanked`). Old events still carry them, so the schemas accept and ignore both.
+ */
+const LegacyDomain = z.enum(['work', 'personal']).optional();
+const LegacyTier = z.number().int().min(1).max(4).optional();
 
 export const ProjectKind = z.enum(['project', 'interest']);
 export type ProjectKind = z.infer<typeof ProjectKind>;
@@ -14,9 +18,7 @@ export type ProjectKind = z.infer<typeof ProjectKind>;
 export const ProjectChangesSchema = z
   .object({
     name: z.string().min(1).max(120),
-    domain: ProjectDomain,
     workflowKey: z.string().min(1),
-    priorityTier: z.number().int().min(1).max(4),
     branchPrefix: BranchPrefixSchema,
     workingBranch: GitRefSchema,
     subCategories: z.array(z.string()),
@@ -26,6 +28,12 @@ export const ProjectChangesSchema = z
   })
   .partial();
 export type ProjectChanges = z.infer<typeof ProjectChangesSchema>;
+
+/** What the event log may still carry in a `ProjectUpdated` from before the ranking: accepted, never applied. */
+const ProjectUpdatedChangesSchema = ProjectChangesSchema.extend({
+  domain: LegacyDomain,
+  priorityTier: LegacyTier,
+});
 
 /** What happens to an open card the new workflow cannot place: it finishes where it is, or it is cancelled. */
 export const ConvertCardDecision = z.enum(['keep', 'cancel']);
@@ -41,9 +49,10 @@ export const projectEvents = [
       createdByUserId: Id.optional(),
       key: ProjectKeySchema,
       name: z.string().min(1),
-      domain: ProjectDomain,
+      /** Legacy: events from before the organization ranked its projects carry a domain and a tier; both are ignored. */
+      domain: LegacyDomain,
       workflowKey: z.string().min(1),
-      priorityTier: z.number().int().min(1).max(4),
+      priorityTier: LegacyTier,
       branchPrefix: z.string(),
       workingBranch: z.string().min(1),
       subCategories: z.array(z.string()),
@@ -61,7 +70,24 @@ export const projectEvents = [
     'ProjectKindChanged',
     z.object({ projectId: Id, kind: ProjectKind, interestId: Id, vaultDir: z.string().min(1).optional() }),
   ),
-  defineEvent('ProjectUpdated', z.object({ projectId: Id, changes: ProjectChangesSchema })),
+  defineEvent('ProjectUpdated', z.object({ projectId: Id, changes: ProjectUpdatedChangesSchema })),
+  /**
+   * The Owner or an Admin ordered the organization's projects (drag and drop on the Projects page, or the data migration):
+   * `projectIds` is the whole order, first = most important. The projector gives each its position as `rank`. A new
+   * project (`ProjectCreated`) goes to the bottom. Interest projects are never ranked.
+   */
+  defineEvent(
+    'ProjectsRanked',
+    z.object({
+      orgId: Id,
+      projectIds: z.array(Id).min(1),
+      rankedBy: Id.optional(),
+      /** `migration`: the "drop personal" data migration put personal projects below the work ones. */
+      reason: z.enum(['manual', 'migration']).default('manual'),
+    }),
+  ),
+  /** The data migration pointed a project at its folder in the organization vault (`personal/projects/<key>` after the merge). */
+  defineEvent('ProjectVaultDirSet', z.object({ projectId: Id, vaultDir: z.string().min(1) })),
   defineEvent(
     'ProjectRepoAdded',
     z.object({

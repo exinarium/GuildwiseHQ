@@ -21,7 +21,6 @@ To create an interest:
 2. Click **+ New interest**.
 3. Fill in:
    - **Name** and **Description** (markdown: the angle, what to include, the level).
-   - **Vault**: Personal or Work (where files and notes live, fixed once the interest has run).
    - **What to collect**: Articles, Videos and/or Podcasts, and **Max total items per run**.
    - **Run schedule: when it scans**: a preset ("Daily at 07:00") or a custom cron, the time zone and **Look back (hours)**, or tick **Only when I press Run now** for manual scans.
    - **Deliver**: **As one digest at set times** (for example weekdays at 07:00) or **As soon as a run finishes**.

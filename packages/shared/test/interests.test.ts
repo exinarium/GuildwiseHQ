@@ -296,7 +296,6 @@ describe('events, requests and prompt', () => {
       description: '',
       preferredSites: [],
       status: 'active',
-      domain: 'personal',
       kinds: ['article', 'video', 'podcast'],
       tasteRules: [],
     });

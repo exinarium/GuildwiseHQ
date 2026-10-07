@@ -120,10 +120,7 @@ function renderIntakeSection(intake: NonNullable<ChatContext['intake']>, jiraSki
   out.push(
     intake.projects.length > 0
       ? intake.projects
-          .map(
-            (p) =>
-              `- ${p.key}: ${p.name} (${p.domain})${p.repos.length ? `, repos: ${p.repos.join(', ')}` : ''}`,
-          )
+          .map((p) => `- ${p.key}: ${p.name}${p.repos.length ? `, repos: ${p.repos.join(', ')}` : ''}`)
           .join('\n')
       : 'None. Tell the manager to create a project first.',
   );

@@ -24,7 +24,7 @@ export interface ShiftStartInput {
   agent: AgentRuntimeSpec;
   /** AOM_IPC_URL, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, PATH prefix, plus the sandbox env. */
   env: Record<string, string>;
-  /** Read access: vault folder for the card's domain. */
+  /** Read access: vault folder of the card's project. */
   addDirs: string[];
   maxShiftMinutes: number;
   /** Chat only. */

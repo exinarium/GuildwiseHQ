@@ -217,11 +217,11 @@ describe('a card shift sees only the vault of its domain', () => {
     vault,
   });
 
-  it('a work card: only the work vault is passed as --add-dir and read into the instructions', async () => {
+  it('a card of a project without its own vault: only the organization vault is passed as --add-dir and read into the instructions', async () => {
     const v = await twoVaults();
     const agentId = uuidv7();
     await run(
-      withVault({ vaultId: v.workId, kind: 'work', folder: 'projects/toy' }, { agentId, ref: 'TOY-1' }),
+      withVault({ vaultId: v.workId, kind: 'org', folder: 'projects/toy' }, { agentId, ref: 'TOY-1' }),
     );
     expect(v.adapter.inputs[0]?.addDirs).toEqual([v.workDir]);
     const md = v.adapter.inputs[0]?.instructionsMarkdown ?? '';
@@ -234,12 +234,12 @@ describe('a card shift sees only the vault of its domain', () => {
     expect(JSON.stringify(v.adapter.inputs[0])).not.toContain(v.personalId);
   });
 
-  it('a personal card: only the personal vault', async () => {
+  it("a card of a project with its own vault: only the project's vault", async () => {
     const v = await twoVaults();
     const agentId = uuidv7();
     await run(
       withVault(
-        { vaultId: v.personalId, kind: 'personal', folder: 'projects/toy' },
+        { vaultId: v.personalId, kind: 'project', folder: 'projects/toy' },
         { agentId, ref: 'TOY-2', shiftId: uuidv7() },
       ),
     );
@@ -258,7 +258,7 @@ describe('a card shift sees only the vault of its domain', () => {
     expect(v.adapter.inputs[0]?.instructionsMarkdown).not.toContain('WORK-');
     const b = uuidv7();
     await run(
-      withVault({ vaultId: uuidv7(), kind: 'work', folder: 'projects/toy' }, { agentId: b, ref: 'TOY-4' }),
+      withVault({ vaultId: uuidv7(), kind: 'org', folder: 'projects/toy' }, { agentId: b, ref: 'TOY-4' }),
     );
     expect(v.adapter.inputs[1]?.addDirs).toEqual([]);
     expect(v.adapter.inputs[1]?.instructionsMarkdown).not.toContain('PROJECT.md (from');
@@ -273,7 +273,9 @@ describe('vault commands from the server', () => {
   };
   const configure = (v: { origin: string }, id = 'vault-1', resume: string[] = []) =>
     send('vault.configure', {
-      vaults: [{ vaultId: id, kind: 'work', name: 'Work', remoteUrl: v.origin, syncIntervalSec: 3600 }],
+      vaults: [
+        { vaultId: id, kind: 'org', name: 'Organization', remoteUrl: v.origin, syncIntervalSec: 3600 },
+      ],
       identity: IDENTITY,
       workstationName: 'Desk',
       resume,

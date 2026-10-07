@@ -104,9 +104,9 @@ describe('remote URLs (review M1, M5)', () => {
       false,
     );
     expect(
-      RegisterVaultRequestSchema.safeParse({ kind: 'work', remoteUrl: 'https://u:p@h.com/v.git' }).success,
+      RegisterVaultRequestSchema.safeParse({ kind: 'org', remoteUrl: 'https://u:p@h.com/v.git' }).success,
     ).toBe(false);
-    expect(RegisterVaultRequestSchema.safeParse({ kind: 'work', remoteUrl: 'git@h.com:v.git' }).success).toBe(
+    expect(RegisterVaultRequestSchema.safeParse({ kind: 'org', remoteUrl: 'git@h.com:v.git' }).success).toBe(
       true,
     );
   });

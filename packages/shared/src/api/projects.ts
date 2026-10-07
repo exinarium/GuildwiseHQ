@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ConvertCardDecision, ProjectChangesSchema, ProjectDomain } from '../events/project.ts';
+import { ConvertCardDecision, ProjectChangesSchema } from '../events/project.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { RepoDescriptionSchema, RepoNameSchema, RepoVisibilitySchema } from '../repo/index.ts';
 import { BranchPrefixSchema, GitRefSchema, RemoteUrlSchema, VaultFolderSchema } from '../safe.ts';
@@ -30,11 +30,11 @@ export const ProjectDtoSchema = z.object({
   orgName: z.string().optional(),
   key: z.string(),
   name: z.string(),
-  domain: ProjectDomain,
   workflowKey: z.string(),
   /** M10: the department of the project's workflow (its type). */
   department: z.string().nullable().optional(),
-  priorityTier: z.number().int(),
+  /** The place in the organization's ranking (1 = most important); null for a project that is not ranked (archived ones keep theirs). */
+  rank: z.number().int().nullable().optional(),
   branchPrefix: z.string(),
   workingBranch: z.string(),
   subCategories: z.array(z.string()),
@@ -109,9 +109,7 @@ export type ProjectDetailResponse = z.infer<typeof ProjectDetailResponseSchema>;
 export const CreateProjectRequestSchema = z.object({
   key: ProjectKeySchema,
   name: z.string().min(1).max(120),
-  domain: ProjectDomain.default('work'),
   workflowKey: z.string().min(1).default('code'),
-  priorityTier: z.number().int().min(1).max(4).default(2),
   branchPrefix: BranchPrefixSchema.default('aom/'),
   workingBranch: GitRefSchema.default('main'),
   subCategories: z.array(z.string()).default([]),
@@ -125,6 +123,13 @@ export type SetMergePolicyRequest = z.infer<typeof SetMergePolicyRequestSchema>;
 
 export const PatchProjectRequestSchema = ProjectChangesSchema;
 export type PatchProjectRequest = z.infer<typeof PatchProjectRequestSchema>;
+
+/**
+ * `PUT /api/projects/ranking` (Owner and Admins): the organization's active projects in the new order, most important
+ * first. It must name every active project of the organization once (a stale list is refused with 409 and the page reloads).
+ */
+export const RankProjectsRequestSchema = z.object({ projectIds: z.array(z.uuid()).min(1).max(500) });
+export type RankProjectsRequest = z.infer<typeof RankProjectsRequestSchema>;
 
 export const AddRepoRequestSchema = z.object({
   name: z.string().min(1).max(120),

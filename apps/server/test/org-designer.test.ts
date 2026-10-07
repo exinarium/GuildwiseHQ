@@ -208,7 +208,7 @@ describe('draft, validate, desk approval, availability', () => {
     const v = await ok<any>(
       w.t.req('POST', '/api/vaults', {
         cookie: w.owner.cookie,
-        body: { kind: 'work', remoteUrl: 'git@example.test:acme/vault.git' },
+        body: { kind: 'org', remoteUrl: 'git@example.test:acme/vault.git' },
       }),
       201,
     );

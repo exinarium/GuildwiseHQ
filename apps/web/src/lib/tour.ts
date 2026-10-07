@@ -50,8 +50,8 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
   },
   projects: {
     title: 'Projects and phases',
-    body: 'Each project has its own board, repository and settings. Inside a project, phases group cards into a milestone: when the last card of a phase is done, a follow-up (such as a release check) can start by itself.',
-    more: 'phases#followups',
+    body: 'Each project has its own board, repository and settings, and the Projects page puts them in priority order: drag a project up to have your agents serve it first (the Owner and Admins can; everyone sees the order). Inside a project, phases group cards into a milestone: when the last card of a phase is done, a follow-up (such as a release check) can start by itself.',
+    more: 'projects#ranking',
   },
   interests: {
     title: 'Interests',

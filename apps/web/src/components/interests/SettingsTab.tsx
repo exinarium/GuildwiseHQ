@@ -44,7 +44,7 @@ export function SettingsTab({ interest }: { interest: InterestDto }) {
       {
         id: interest.id,
         body: {
-          ...toPatchRequest(v, interest.stats.lastRunAt !== null),
+          ...toPatchRequest(v),
           agents: Object.fromEntries(ROLES.map((r) => [r.key, agents[r.key] || null])),
         },
       },
@@ -60,13 +60,7 @@ export function SettingsTab({ interest }: { interest: InterestDto }) {
             : 'You can see this interest but not change it: only its creator, or someone of the same or a higher role, can.'}
         </Callout>
       )}
-      <InterestForm
-        v={v}
-        set={set}
-        errors={errors}
-        disabled={readOnly}
-        domainLocked={interest.stats.lastRunAt !== null}
-      />
+      <InterestForm v={v} set={set} errors={errors} disabled={readOnly} />
       <fieldset className="flex flex-col gap-2 rounded-card border border-line p-3">
         <legend className="px-1 text-sm font-medium text-fg">Preferred agents</legend>
         <p className="text-xs text-subtle">

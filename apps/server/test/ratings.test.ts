@@ -25,7 +25,7 @@ beforeAll(async () => {
   const vault = await ok<any>(
     w.t.req('POST', '/api/vaults', {
       cookie: w.owner.cookie,
-      body: { kind: 'personal', remoteUrl: 'git@example.test:srv/personal.git' },
+      body: { kind: 'org', remoteUrl: 'git@example.test:srv/org.git' },
     }),
     201,
   );

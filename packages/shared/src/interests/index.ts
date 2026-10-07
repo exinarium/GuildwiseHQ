@@ -43,7 +43,8 @@ export const InterestKind = z.enum(['article', 'video', 'podcast']);
 export type InterestKind = z.infer<typeof InterestKind>;
 export const ALL_INTEREST_KINDS: InterestKind[] = ['article', 'video', 'podcast'];
 
-export const InterestDomain = z.enum(['work', 'personal']);
+/** Events from before the work/personal domain was dropped still carry one: accepted and ignored. */
+export const LegacyInterestDomain = z.enum(['work', 'personal']);
 
 /**
  * The agents an interest prefers, by workflow role. A soft preference only: no claim window, any qualified, allowed
@@ -74,7 +75,8 @@ export const InterestBodySchema = z.object({
   projectId: Id.optional(),
   /** The vault folder name `interests/<slug>/`, immutable. */
   slug: z.string().min(1).max(60).optional(),
-  domain: InterestDomain.optional(),
+  /** Legacy (ignored): the vault domain of an interest from before the domain was dropped. */
+  domain: LegacyInterestDomain.optional(),
   kinds: z.array(InterestKind).min(1).max(3).default(ALL_INTEREST_KINDS),
   agents: InterestAgentsSchema.default({}),
   delivery: DeliverySpecSchema.default(IMMEDIATE_DELIVERY),
@@ -229,7 +231,7 @@ export function suggestProjectKey(name: string): string {
   return key.length >= 2 ? key : `${key}X`.slice(0, 6);
 }
 
-/** The vault folder of an interest in its domain vault. */
+/** The vault folder of an interest in the organization vault. */
 export const interestVaultDir = (slug: string): string => `interests/${slug}`;
 
 /** Interest run lifecycle (docs/design/restructure.md section 3.4). */

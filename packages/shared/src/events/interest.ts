@@ -94,7 +94,8 @@ export const interestEvents = [
       interestId: Id,
       projectId: Id,
       slug: z.string().min(1),
-      domain: z.enum(['work', 'personal']),
+      /** Legacy (ignored). */
+      domain: z.enum(['work', 'personal']).optional(),
       fromFeedProjectId: Id.optional(),
       fromScheduleId: Id.optional(),
       cardFilter: z.object({

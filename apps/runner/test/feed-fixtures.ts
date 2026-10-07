@@ -16,7 +16,7 @@ export interface FeedShiftOptions {
   fields?: Record<string, unknown>;
   feed?: ShiftBrief['feed'];
   shiftId?: string;
-  vault?: { vaultId: string; kind: 'personal' | 'work'; folder: string };
+  vault?: { vaultId: string; kind: 'org' | 'project'; folder: string };
 }
 
 /** A `shift.start` for a feed card (scout at `scan`, curator at `curate`): no worktree, no repo. */
@@ -50,7 +50,7 @@ export function makeFeedShiftStart(o: FeedShiftOptions): Record<string, unknown>
         cardType: 'feed',
         fields: { topic: 'reloading', ...o.fields },
       },
-      project: { ...brief.project, key: 'NEWS', name: 'News', domain: 'personal' },
+      project: { ...brief.project, key: 'NEWS', name: 'News' },
       role: {
         key: role.key,
         name: role.name,

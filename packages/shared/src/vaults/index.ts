@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { VaultKind } from '../events/vault.ts';
+import { VaultEventKind } from '../events/vault.ts';
 import { slugify } from '../ids.ts';
 
 /** `vault.configure`: the full set of vaults one workstation syncs (replace semantics) plus resume requests. */
@@ -8,7 +8,8 @@ export const VaultIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 
 export const VaultConfigSchema = z.object({
   vaultId: VaultIdSchema,
-  kind: VaultKind,
+  /** The wire accepts the kinds of before the split was dropped too (a runner's persisted configuration may hold one). */
+  kind: VaultEventKind,
   projectId: z.string().optional(),
   name: z.string(),
   remoteUrl: z.string().min(1),
@@ -65,6 +66,27 @@ export const VaultMoveCommandSchema = z.object({
   push: z.boolean().default(true),
 });
 export type VaultMoveCommand = z.infer<typeof VaultMoveCommandSchema>;
+
+/**
+ * `vault.merge` (the "drop personal" data migration): copies the files of another vault into this one under the folder
+ * `into` (`personal`), except the `lift` folders, which keep their own path (a personal interest's `interests/<slug>`
+ * lands where every interest lives). The runner clones the source from `from.remoteUrl` itself: the source is no
+ * longer a registered vault. Nothing is overwritten (identical files are skipped, differing ones are reported) and the
+ * source is never changed, so the command is idempotent, safe to repeat after an interruption, and leaves the old
+ * repository as a backup.
+ */
+export const VaultMergeCommandSchema = z.object({
+  /** The vault that receives the files (the organization vault). */
+  vaultId: VaultIdSchema,
+  from: z.object({ vaultId: VaultIdSchema, remoteUrl: z.string().min(1) }),
+  /** Vault-relative folder of the target the source goes into. */
+  into: z.string().min(1),
+  /** Folders of the source (e.g. `interests/ainews`) that go to the same path in the target, not under `into`. */
+  lift: z.array(z.string().min(1)).max(500).default([]),
+  commitMessage: z.string().min(1),
+  push: z.boolean().default(true),
+});
+export type VaultMergeCommand = z.infer<typeof VaultMergeCommandSchema>;
 
 /** Rejects absolute paths, `..` segments and anything inside `.git`. */
 export function isSafeVaultPath(path: string): boolean {

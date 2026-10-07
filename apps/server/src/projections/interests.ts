@@ -17,17 +17,17 @@ async function upsert(
 ): Promise<void> {
   await exec(
     tx,
-    `INSERT INTO interests (id, org_id, name, description, project_id, slug, domain, sub_category, preferred_sites,
+    `INSERT INTO interests (id, org_id, name, description, project_id, slug, sub_category, preferred_sites,
        kinds, scan, delivery, agents, status, next_scan_at, next_delivery_at, legacy_feed_project_id,
        legacy_research_project_id, legacy_schedule_id, adopted_from, created_by, created_at, updated_at, created_by_rank)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$22,$23)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$21,$22)
      ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description,
        project_id=COALESCE(EXCLUDED.project_id, interests.project_id), slug=COALESCE(EXCLUDED.slug, interests.slug),
-       domain=COALESCE(EXCLUDED.domain, interests.domain), sub_category=EXCLUDED.sub_category,
+       sub_category=EXCLUDED.sub_category,
        preferred_sites=EXCLUDED.preferred_sites, kinds=EXCLUDED.kinds, scan=EXCLUDED.scan, delivery=EXCLUDED.delivery,
        agents=EXCLUDED.agents, status=EXCLUDED.status,
-       next_scan_at = CASE WHEN $24::boolean THEN EXCLUDED.next_scan_at ELSE interests.next_scan_at END,
-       next_delivery_at = CASE WHEN $25::boolean THEN EXCLUDED.next_delivery_at ELSE interests.next_delivery_at END,
+       next_scan_at = CASE WHEN $23::boolean THEN EXCLUDED.next_scan_at ELSE interests.next_scan_at END,
+       next_delivery_at = CASE WHEN $24::boolean THEN EXCLUDED.next_delivery_at ELSE interests.next_delivery_at END,
        legacy_feed_project_id=COALESCE(EXCLUDED.legacy_feed_project_id, interests.legacy_feed_project_id),
        legacy_research_project_id=COALESCE(EXCLUDED.legacy_research_project_id, interests.legacy_research_project_id),
        legacy_schedule_id=COALESCE(EXCLUDED.legacy_schedule_id, interests.legacy_schedule_id),
@@ -39,7 +39,6 @@ async function upsert(
       p.description,
       p.projectId ?? null,
       p.slug ?? null,
-      p.domain ?? null,
       p.subCategory,
       p.preferredSites,
       p.kinds,
@@ -123,11 +122,10 @@ export const interestProjectors: Record<string, Projector> = {
    */
   InterestMigrated: async (tx, e) => {
     const p = (e.event as EventOf<'InterestMigrated'>).payload;
-    await exec(tx, 'UPDATE interests SET project_id=$2, slug=$3, domain=$4, updated_at=$5 WHERE id=$1', [
+    await exec(tx, 'UPDATE interests SET project_id=$2, slug=$3, updated_at=$4 WHERE id=$1', [
       p.interestId,
       p.projectId,
       p.slug,
-      p.domain,
       e.createdAt,
     ]);
     const f = p.cardFilter;

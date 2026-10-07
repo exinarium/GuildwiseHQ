@@ -151,9 +151,9 @@ export class ChatManager {
     };
   }
 
-  /** The manager's own Jira skill (`skills/jira.md` in their work vault) replaces the built-in text in an intake chat. */
+  /** The manager's own Jira skill (`skills/jira.md` in the organization vault) replaces the built-in text in an intake chat. */
   private async jiraSkill(msg: ChatStartMsg): Promise<string | undefined> {
-    const vaultId = msg.context.intake?.workVaultId;
+    const vaultId = msg.context.intake?.orgVaultId;
     if (!vaultId) return undefined;
     try {
       const file = join(this.deps.paths.vaults, vaultId, ...JIRA_SKILL_PATH.split('/'));

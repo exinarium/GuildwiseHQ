@@ -25,7 +25,7 @@ export const item = (n: number, over: Record<string, unknown> = {}) => ({
 });
 
 /**
- * An interest (docs/design/restructure.md Part D) as the owner of the world creates it: personal domain, run by hand (no
+ * An interest (docs/design/restructure.md Part D) as the owner of the world creates it: run by hand (no
  * cadence), delivered at once. Returns its id and the id of its hidden backing project, whose key derives from the name
  * (`News` -> `NEWS`). Users never see that project; tests that need cards, items or members use its id.
  */
@@ -36,7 +36,7 @@ export async function createFeedInterest(
   const r = await ok<{ id: string }>(
     w.t.req('POST', '/api/interests', {
       cookie: w.owner.cookie,
-      body: { name: 'News', domain: 'personal', scan: { manual: true }, ...over },
+      body: { name: 'News', scan: { manual: true }, ...over },
     }),
     201,
   );

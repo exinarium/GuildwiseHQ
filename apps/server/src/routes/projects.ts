@@ -7,6 +7,7 @@ import {
   IdParamsSchema,
   PatchProjectRequestSchema,
   ProjectsQuerySchema,
+  RankProjectsRequestSchema,
   RepoParamsSchema,
   SetConcurrencyCapRequestSchema,
   SetMergePolicyRequestSchema,
@@ -22,6 +23,7 @@ import {
   createProject,
   deleteProject,
   projectImpact,
+  rankProjects,
   removeRepo,
   restoreProject,
   setConcurrencyCap,
@@ -47,6 +49,13 @@ export function projectRoutes(ctx: Ctx) {
       const id = await createProject(ctx, s.user, { id: a.orgId, role: a.role }, req.body);
       reply.code(201);
       return getProjectDetail(ctx, s.user.id, id);
+    });
+
+    /** Orders the organization's active projects, most important first (Owner and Admins). */
+    app.put('/api/projects/ranking', { schema: { body: RankProjectsRequestSchema } }, async (req) => {
+      const a = await requireOrg(ctx, req);
+      await rankProjects(ctx, a.session.user, { id: a.orgId, role: a.role }, req.body.projectIds);
+      return { projects: await listProjects(ctx, a.session.user.id) };
     });
 
     app.get('/api/projects/:id', { schema: { params: IdParamsSchema } }, async (req) => {

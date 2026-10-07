@@ -10,6 +10,7 @@ import { buildProjectors, PROJECTION_TABLES } from '../src/projections/index.ts'
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { buildLegacyFeeds, type LegacyFeeds } from './fixtures/legacy-feeds.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
+import { registerLegacyVault, snapshotDomain } from './helpers/domains.ts';
 import { addMember, type Member } from './helpers/members.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
@@ -67,12 +68,14 @@ beforeAll(async () => {
   });
   await w.hire('Sid', 'scout', 'junior', { allowedProjectIds: [f.newsId], focusProjectIds: [f.newsId] });
   scoutId = (await q(`SELECT id FROM agents WHERE name='Sid'`))[0]?.id as string;
-  vaultId = (
-    await ok<any>(
-      owner('POST', '/api/vaults', { kind: 'personal', remoteUrl: 'git@example.test:srv/personal.git' }),
-      201,
-    )
-  ).id;
+  // the feed project was a personal one: its vault was the personal vault (migration 1322 snapshotted the domain)
+  const orgId = (await q('SELECT org_id FROM projects WHERE id=$1', [w.projectId]))[0]?.org_id as string;
+  vaultId = await registerLegacyVault(w.t, {
+    orgId,
+    kind: 'personal',
+    remoteUrl: 'git@example.test:srv/personal.git',
+  });
+  for (const id of [f.newsId, f.researchId]) await snapshotDomain(id, 'personal');
   await q(
     `INSERT INTO workstation_vaults (workstation_id, vault_id, local_path) VALUES ($1,$2,'/vaults/p')`,
     [w.workstationId, vaultId],
@@ -145,7 +148,6 @@ describe('restructure-2026-10: feed projects become interests', () => {
     expect(reloading).toMatchObject({
       project_id: f.newsId,
       slug: 'reloading',
-      domain: 'personal',
       archived_at: null,
     });
     for (const name of ['Optics', 'Shotgun news'.replace('Shotgun news', 'Shotguns'), 'Powders']) {

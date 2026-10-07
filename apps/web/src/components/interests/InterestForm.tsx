@@ -29,14 +29,12 @@ export function InterestForm({
   set,
   errors,
   disabled,
-  domainLocked,
   subCategories = [],
 }: {
   v: InterestFormValues;
   set: <K extends keyof InterestFormValues>(k: K, val: InterestFormValues[K]) => void;
   errors: FormErrors;
   disabled?: boolean;
-  domainLocked?: boolean;
   subCategories?: string[];
 }) {
   return (
@@ -59,21 +57,6 @@ export function InterestForm({
         onChange={(e) => set('description', e.target.value)}
       />
       <div className="grid gap-3 sm:grid-cols-2">
-        <Select
-          label="Vault"
-          hint={
-            domainLocked
-              ? 'Fixed once the interest has run.'
-              : 'Where its notes and files live: your personal or your work vault.'
-          }
-          value={v.domain}
-          disabled={disabled || domainLocked}
-          data-testid="interest-domain"
-          onChange={(e) => set('domain', e.target.value as 'personal' | 'work')}
-        >
-          <option value="personal">Personal</option>
-          <option value="work">Work</option>
-        </Select>
         <TextInput
           label="Sub-category"
           list="interest-subcategories"

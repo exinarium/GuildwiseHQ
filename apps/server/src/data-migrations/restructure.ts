@@ -81,6 +81,34 @@ export interface RestructureReport {
   orgs: RestructureOrgReport[];
 }
 
+/** A project created by this migration keeps the old domain of the project it comes from (for `no-personal-2026-10`). */
+async function inheritLegacyDomain(
+  tx: Queryable,
+  fromProjectId: string,
+  to: { projectId: string; orgId: string; key: string; vaultDir: string },
+): Promise<void> {
+  const domain = await legacyDomain(tx, fromProjectId);
+  await exec(
+    tx,
+    `INSERT INTO legacy_project_domains (project_id, org_id, key, kind, domain, priority_tier, created_at, vault_dir)
+     VALUES ($1,$2,$3,'interest',$4,2,now(),$5) ON CONFLICT (project_id) DO NOTHING`,
+    [to.projectId, to.orgId, to.key, domain, to.vaultDir],
+  );
+}
+
+/**
+ * The work/personal domain a project had: the columns are gone (migration 1322), their values are kept in
+ * `legacy_project_domains` until `no-personal-2026-10` has run. A project without a snapshot row is a work project.
+ */
+async function legacyDomain(db: Queryable, projectId: string): Promise<'work' | 'personal'> {
+  const r = await one<{ domain: string }>(
+    db,
+    `SELECT domain FROM legacy_project_domains WHERE project_id=$1`,
+    [projectId],
+  );
+  return r?.domain === 'personal' ? 'personal' : 'work';
+}
+
 const feedProjects = (db: Queryable, orgId: string) =>
   rows(
     db,
@@ -135,7 +163,7 @@ export async function planRestructure(db: Queryable): Promise<RestructurePlan> {
         key: p.key,
         name: p.name,
         status: p.status,
-        domain: p.domain,
+        domain: await legacyDomain(db, p.id),
         interests: interests.map((i) => i.name),
         unlinkedSchedules: unlinked.map((s) => s.name),
         schedulesToRemove: await count(
@@ -203,7 +231,8 @@ async function projectVaultTarget(
     (await one(
       db,
       'SELECT id, org_id, project_id FROM vaults WHERE org_id=$1 AND kind=$2 AND project_id IS NULL',
-      [p.org_id, p.domain],
+      // the vault of the project's old domain: `work` became the organization vault; a personal one is merged later
+      [p.org_id, (await legacyDomain(db, p.id)) === 'personal' ? 'personal' : 'org'],
     ));
   return {
     vaultId: vault?.id as string | undefined,
@@ -443,9 +472,7 @@ async function migrateFeedProject(tx: Queryable, c: OrgCtx, p: Row): Promise<voi
             createdByUserId: c.ownerId,
             key: plans[n]?.key as string,
             name: s.name,
-            domain: p.domain,
             workflowKey: 'feed',
-            priorityTier: 2,
             branchPrefix: 'aom/',
             workingBranch: 'main',
             subCategories: [],
@@ -465,6 +492,12 @@ async function migrateFeedProject(tx: Queryable, c: OrgCtx, p: Row): Promise<voi
           actor: SYSTEM_ACTOR,
           scope: projectScope(orgId, projectId),
         });
+      await inheritLegacyDomain(tx, p.id, {
+        projectId,
+        orgId,
+        key: plans[n]?.key as string,
+        vaultDir: interestVaultDir(slug),
+      });
       c.report.newProjects++;
     }
     const body: InterestBody = {
@@ -481,7 +514,6 @@ async function migrateFeedProject(tx: Queryable, c: OrgCtx, p: Row): Promise<voi
       status: s.status,
       projectId,
       slug,
-      domain: p.domain,
       kinds: [...ALL_INTEREST_KINDS],
       agents: prefer,
       delivery: IMMEDIATE_DELIVERY as DeliverySpec,
@@ -527,7 +559,6 @@ async function migrateFeedProject(tx: Queryable, c: OrgCtx, p: Row): Promise<voi
           interestId: s.id,
           projectId,
           slug,
-          domain: p.domain,
           fromFeedProjectId: p.id,
           ...(s.schedule ? { fromScheduleId: s.schedule.id } : {}),
           cardFilter:
@@ -709,7 +740,6 @@ async function migrateResearchOnly(tx: Queryable, c: OrgCtx, i: Row): Promise<vo
     status: i.status,
     projectId,
     slug,
-    domain: r.domain,
     kinds: [...ALL_INTEREST_KINDS],
     agents: {},
     delivery: IMMEDIATE_DELIVERY as DeliverySpec,
@@ -727,9 +757,7 @@ async function migrateResearchOnly(tx: Queryable, c: OrgCtx, i: Row): Promise<vo
           createdByUserId: c.ownerId,
           key,
           name: i.name,
-          domain: r.domain,
           workflowKey: 'feed',
-          priorityTier: 2,
           branchPrefix: 'aom/',
           workingBranch: 'main',
           subCategories: [],
@@ -756,7 +784,6 @@ async function migrateResearchOnly(tx: Queryable, c: OrgCtx, i: Row): Promise<vo
           interestId: i.id,
           projectId,
           slug,
-          domain: r.domain,
           cardFilter: { projectId: null, untaggedFeedCards: false },
         },
       },
@@ -764,6 +791,7 @@ async function migrateResearchOnly(tx: Queryable, c: OrgCtx, i: Row): Promise<vo
       scope,
     },
   );
+  await inheritLegacyDomain(tx, r.id, { projectId, orgId, key, vaultDir: interestVaultDir(slug) });
   c.report.newProjects++;
   c.report.interests++;
 }

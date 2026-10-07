@@ -20,7 +20,6 @@ beforeAll(async () => {
         key: 'SHOOT',
         name: 'Shooting',
         workflowKey: 'research',
-        domain: 'personal',
         subCategories: ['hunting'],
       },
     }),

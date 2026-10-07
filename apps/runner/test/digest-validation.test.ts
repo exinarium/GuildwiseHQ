@@ -222,7 +222,7 @@ describe('mock adapter: scripted feed runs through the real aom CLI', () => {
         mockFeed: { items: [], proposeRule: 'Prefer videos with chronograph data' },
       },
       feed: { candidates, seenUrls: [], tasteSeed: [] },
-      vault: { vaultId, kind: 'personal', folder: 'projects/news' },
+      vault: { vaultId, kind: 'org', folder: 'projects/news' },
     });
     const ended = await runFeedShift(msg);
     expect(ended.outcome).toBe('reported');

@@ -68,11 +68,11 @@ export const PARAM_AGENT: AgentRefs = {
  * one named clause each. Hiring-level clauses say who could ever do the stage; placement clauses say where.
  */
 export function eligibility(A: AgentRefs) {
-  // Cards without a repo (research, feed) work on a vault: when the card's domain has a registered vault the agent's
+  // Cards without a repo (research, feed) work on a vault: when the card's project has a registered vault the agent's
   // workstation must hold a clone of it (docs/ARCHITECTURE.md section 9.3, M3). The vault applicable to a card is its
-  // project's vault, or the organization's vault of the project's domain (only for workstations of its Owner and Admins, decision 12).
+  // project's vault, or the organization vault (only for workstations of its Owner and Admins, decision 12).
   const vaultOfCard = `(v.project_id = c.project_id
-         OR (v.project_id IS NULL AND v.org_id = c.org_id AND v.kind = p.domain
+         OR (v.project_id IS NULL AND v.org_id = c.org_id AND v.kind = 'org'
              AND EXISTS (SELECT 1 FROM workstations w JOIN org_members om ON om.user_id = w.user_id
                           AND om.org_id = v.org_id AND om.status = 'active' AND om.role IN ('owner','admin')
                           WHERE w.id = ${A.workstationId})))`;
@@ -136,18 +136,21 @@ WHERE c.status = 'queued'
            AND dc.status NOT IN ('done','cancelled'))
   ${cardFilter}
 ORDER BY
+  -- 1. scheduled work first: schedules, interest scans and an on-demand "Research this" (they are scheduled cards)
   c.scheduled DESC,
-  (p.domain = 'work') DESC,
+  -- 2. the agent's own rework, then other rework
   CASE
     WHEN c.is_rework_or_bug AND c.original_builder_agent_id = $1 THEN 0
     WHEN c.is_rework_or_bug THEN 1
     ELSE 2
   END,
+  -- 3. the agent's focus projects: a soft preference, ahead of the ranking
   (c.project_id = ANY ($10::uuid[])) DESC,
-  -- an interest's preferred agent sorts ahead (a soft preference: no claim window, any allowed agent takes the run)
+  -- 4. an interest's preferred agent sorts ahead (a soft preference: no claim window, any allowed agent takes the run)
   (c.preferred_agents IS NOT NULL AND EXISTS (SELECT 1 FROM jsonb_each_text(c.preferred_agents) pa
                                                WHERE pa.value = ($1::uuid)::text)) DESC,
-  p.priority_tier ASC,
+  -- 5. the organization's ranking of its projects (1 = most important); interests are not ranked
+  p.rank ASC NULLS LAST,
   c.priority ASC,
   c.queued_at ASC,
   c.created_at ASC

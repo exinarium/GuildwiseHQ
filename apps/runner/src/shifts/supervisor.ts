@@ -642,7 +642,7 @@ export class ShiftSupervisor {
       return {
         ok: false,
         error:
-          'there is no knowledge vault for this project (register the work or personal vault in Settings, Vaults), so the note cannot be published',
+          'there is no knowledge vault for this project (register the organization vault or a project vault in Settings, Vaults), so the note cannot be published',
       };
     if (!this.deps.writeVault) return { ok: false, error: 'this runner cannot write into a vault' };
     const sub = msg.brief.card.fields.subCategory;

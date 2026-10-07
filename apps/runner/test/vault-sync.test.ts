@@ -130,7 +130,7 @@ describe('VaultManager', () => {
     return { m, paths, sent, root };
   }
   const cfg = (vaultId: string, origin: string, syncIntervalSec = 1) => ({
-    vaults: [{ vaultId, kind: 'work' as const, name: 'Work', remoteUrl: origin, syncIntervalSec }],
+    vaults: [{ vaultId, kind: 'org' as const, name: 'Org', remoteUrl: origin, syncIntervalSec }],
     identity: IDENTITY,
     workstationName: 'Desk',
     resume: [] as string[],

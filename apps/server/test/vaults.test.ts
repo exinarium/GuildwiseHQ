@@ -45,15 +45,15 @@ async function configured(runner: FakeRunner, pred: (p: any) => boolean) {
 }
 
 describe('registering vaults', () => {
-  it('a user registers one work and one personal vault by URL; the site stores no content', async () => {
+  it('the Owner registers the organization vault by URL; the site stores no content', async () => {
     const work = await owner().post('/api/vaults', {
-      kind: 'work',
+      kind: 'org',
       remoteUrl: 'git@example.test:me/work.git',
     });
     expect(work.status).toBe(201);
     expect(work.body).toMatchObject({
-      kind: 'work',
-      name: 'Work vault',
+      kind: 'org',
+      name: 'Organization vault',
       remoteUrl: 'git@example.test:me/work.git',
       syncIntervalSec: 300,
       projectId: null,
@@ -63,16 +63,14 @@ describe('registering vaults', () => {
       expect.objectContaining({ workstationId: w.workstationId, localPath: null, paused: false }),
     ]);
     expect(
-      (await owner().post('/api/vaults', { kind: 'work', remoteUrl: 'git@example.test:x.git' })).body.error
+      (await owner().post('/api/vaults', { kind: 'org', remoteUrl: 'git@example.test:x.git' })).body.error
         .code,
     ).toBe('vault_exists');
-    const personal = await owner().post('/api/vaults', {
-      kind: 'personal',
-      remoteUrl: 'git@example.test:srv/personal.git',
-      syncIntervalSec: 60,
-    });
-    expect(personal.status).toBe(201);
-    expect(personal.body.syncIntervalSec).toBe(60);
+    // there are no personal or work vaults any more
+    for (const kind of ['personal', 'work'])
+      expect(
+        (await owner().post('/api/vaults', { kind, remoteUrl: 'git@example.test:srv/personal.git' })).status,
+      ).toBe(400);
     // validation
     expect(
       (await owner().post('/api/vaults', { kind: 'project', remoteUrl: 'git@example.test:x.git' })).status,
@@ -80,7 +78,7 @@ describe('registering vaults', () => {
     expect(
       (
         await owner().post('/api/vaults', {
-          kind: 'work',
+          kind: 'org',
           remoteUrl: 'git@example.test:x.git',
           projectId: w.projectId,
         })
@@ -89,7 +87,7 @@ describe('registering vaults', () => {
     expect(
       (
         await owner().post('/api/vaults', {
-          kind: 'personal',
+          kind: 'org',
           remoteUrl: 'git@example.test:y.git',
           syncIntervalSec: 0,
         })
@@ -97,12 +95,12 @@ describe('registering vaults', () => {
     ).toBe(400);
   });
 
-  it('a personal vault is visible only to its owner; the owner can edit the URL and interval', async () => {
+  it('the organization vault is visible only to the Owner and Admins; the Owner can edit the URL and interval', async () => {
     const other = await w.t.userSession(uniqueEmail('nosy'));
     expect((await as(other.cookie).get('/api/vaults')).body.vaults).toEqual([]);
     const list = (await owner().get('/api/vaults')).body.vaults;
-    expect(list.map((v: any) => v.kind)).toEqual(['personal', 'work']);
-    const work = list.find((v: any) => v.kind === 'work');
+    expect(list.map((v: any) => v.kind)).toEqual(['org']);
+    const work = list.find((v: any) => v.kind === 'org');
     expect(
       (await as(other.cookie).patch(`/api/vaults/${work.id}`, { remoteUrl: 'git@example.test:evil.git' }))
         .status,
@@ -120,31 +118,31 @@ describe('registering vaults', () => {
     });
     expect(
       (await q(`SELECT type FROM events WHERE type LIKE 'Vault%' ORDER BY seq`)).map((e) => e.type),
-    ).toEqual(['VaultRegistered', 'VaultRegistered', 'VaultUpdated']);
+    ).toEqual(['VaultRegistered', 'VaultUpdated']);
   });
 
   it('the runner gets the full vault set (replace semantics) with the DevOps identity, also after changes', async () => {
     const p = await configured(
       r,
       (c) =>
-        c.vaults.length === 2 && c.vaults.some((v: any) => v.remoteUrl === 'git@example.test:srv/work.git'),
+        c.vaults.length === 1 && c.vaults.some((v: any) => v.remoteUrl === 'git@example.test:srv/work.git'),
     );
     expect(p.identity).toEqual({
       name: expect.stringMatching(/ \(aom\)$/),
       email: expect.stringMatching(/@agents\.aom\.invalid$/),
     });
     expect(p.workstationName).toBe('Desk');
-    expect(p.vaults.map((v: any) => v.kind).sort()).toEqual(['personal', 'work']);
+    expect(p.vaults.map((v: any) => v.kind).sort()).toEqual(['org']);
     // a reconnect re-sends it (at most one configure row per workstation)
     r.close();
     r = await w.connectRunner();
-    const again = await configured(r, (c) => c.vaults.length === 2);
-    expect(again.vaults).toHaveLength(2);
+    const again = await configured(r, (c) => c.vaults.length === 1);
+    expect(again.vaults).toHaveLength(1);
     expect(await q(`SELECT 1 FROM runner_commands WHERE type='vault.configure'`)).toHaveLength(1);
   });
 
   it("the runner reports clones and sync status; the vault list shows them for the viewer's workstations", async () => {
-    const work = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'work');
+    const work = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org');
     // the clone location arrives with the next hello
     r.send('hello', {
       runnerVersion: '0.0.0-test',
@@ -159,11 +157,11 @@ describe('registering vaults', () => {
     });
     await until(
       async () =>
-        (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'work').workstations[0]
+        (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org').workstations[0]
           .localPath,
     );
     expect(
-      (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'work').workstations[0]
+      (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org').workstations[0]
         .localPath,
     ).toBe('/vaults/work');
     r.send('vault.status', {
@@ -179,10 +177,10 @@ describe('registering vaults', () => {
     });
     await until(
       async () =>
-        (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'work').workstations[0]
+        (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org').workstations[0]
           .lastPushAt,
     );
-    const s = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'work')
+    const s = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org')
       .workstations[0];
     expect(s).toMatchObject({
       lastPullAt: '2026-10-03T10:00:00.000Z',
@@ -197,10 +195,10 @@ describe('registering vaults', () => {
     });
     await until(
       async () =>
-        (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'work').workstations[0]
+        (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org').workstations[0]
           .lastError,
     );
-    const s2 = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'work')
+    const s2 = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org')
       .workstations[0];
     expect(s2.lastError).toBe('remote unreachable');
     expect(s2.lastPushAt).toBe('2026-10-03T10:01:00.000Z'); // errors do not erase the last success
@@ -209,7 +207,7 @@ describe('registering vaults', () => {
 
 describe('sync conflicts', () => {
   it('a conflict pauses the vault on that workstation and raises one pinned escalation until resolved', async () => {
-    const work = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'work');
+    const work = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org');
     const id = r.send('vault.conflict', { vaultId: work.id, files: ['projects/toy/PROJECT.md'] });
     await r.waitFor('ack', (f) => f.ackOf === id);
     const ev = await q(`SELECT payload FROM events WHERE type='VaultSyncConflict'`);
@@ -236,7 +234,7 @@ describe('sync conflicts', () => {
   });
 
   it('resolving resumes syncing: VaultConflictResolved and vault.configure{resume}', async () => {
-    const work = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'work');
+    const work = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org');
     const stranger = await w.t.userSession(uniqueEmail('stranger'));
     expect(
       (
@@ -265,7 +263,7 @@ describe('sync conflicts', () => {
 
 describe('sync conflicts resolved on the desk', () => {
   it('acknowledging the desk escalation resumes sync like the vault page does', async () => {
-    const work = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'work');
+    const work = (await owner().get('/api/vaults')).body.vaults.find((v: any) => v.kind === 'org');
     const id = r.send('vault.conflict', { vaultId: work.id, files: ['a.md'] });
     await r.waitFor('ack', (f) => f.ackOf === id);
     const item = (await q(`SELECT id FROM desk_items WHERE subkind='vault_conflict' AND status='open'`))[0]!;
@@ -292,7 +290,7 @@ describe('project vaults and shared projects', () => {
     m = await addMember(w, 'vmember');
     mr = await connectMemberRunner(w, m);
     const noVault = await configured(mr, () => true);
-    expect(noVault.vaults).toEqual([]); // the owner's work and personal vaults never reach a member
+    expect(noVault.vaults).toEqual([]); // the organization vault never reaches a Member
     expect(
       (
         await as(m.cookie).post('/api/vaults', {
@@ -333,9 +331,9 @@ describe('project vaults and shared projects', () => {
       remoteUrl: 'git@example.test:srv/toy-vault.git',
       projectId: w.projectId,
     });
-    // the owner's runner syncs all three
-    expect((await configured(r, (c) => c.vaults.length === 3)).vaults.map((v: any) => v.kind).sort()).toEqual(
-      ['personal', 'project', 'work'],
+    // the owner's runner syncs both
+    expect((await configured(r, (c) => c.vaults.length === 2)).vaults.map((v: any) => v.kind).sort()).toEqual(
+      ['org', 'project'],
     );
   });
 
@@ -350,19 +348,25 @@ describe('project vaults and shared projects', () => {
   });
 });
 
-describe('a card shift sees only its domain vault', () => {
-  const workId = () => q(`SELECT id FROM vaults WHERE kind='work'`).then((x) => x[0]!.id as string);
-  const personalId = () => q(`SELECT id FROM vaults WHERE kind='personal'`).then((x) => x[0]!.id as string);
+describe('a card shift sees only the vault of its project', () => {
+  const orgId = () => q(`SELECT id FROM vaults WHERE kind='org'`).then((x) => x[0]!.id as string);
 
-  it('a work project gets the work vault, a personal project the personal vault, with their project folders', async () => {
+  it('a project without a vault of its own gets the organization vault, one with its own vault gets that, each with its folder', async () => {
     await q(`DELETE FROM workstation_vaults WHERE vault_id IN (SELECT id FROM vaults WHERE kind='project')`);
     await q(`DELETE FROM vaults WHERE kind='project'`);
     const personal = await ok<any>(
       owner().post('/api/projects', {
-        key: 'PERS',
-        name: 'Personal things',
-        domain: 'personal',
+        key: 'HOBB',
+        name: 'Hobbies',
         vaultFolder: 'projects/hobbies',
+      }),
+      201,
+    );
+    const hobbyVault = await ok<any>(
+      owner().post('/api/vaults', {
+        kind: 'project',
+        projectId: personal.project.id,
+        remoteUrl: 'git@example.test:srv/hobbies.git',
       }),
       201,
     );
@@ -379,7 +383,7 @@ describe('a card shift sees only its domain vault', () => {
     await dispatcher().run();
     const workStart = await r.waitFor('shift.start', (f) => f.agent.name === 'Pat', 5000, from);
     expect(workStart.brief.card.id).toBe(workCard.id);
-    expect(workStart.vault).toEqual({ vaultId: await workId(), kind: 'work', folder: 'projects/toy' });
+    expect(workStart.vault).toEqual({ vaultId: await orgId(), kind: 'org', folder: 'projects/toy' });
 
     // finish the work shift so the (single) builder is free for the personal card
     r.accepted(workStart.shiftId);
@@ -420,8 +424,8 @@ describe('a card shift sees only its domain vault', () => {
       from2,
     );
     expect(persStart.vault).toEqual({
-      vaultId: await personalId(),
-      kind: 'personal',
+      vaultId: hobbyVault.id,
+      kind: 'project',
       folder: 'projects/hobbies',
     });
     expect(persStart.vault?.vaultId).not.toBe(workStart.vault?.vaultId);
@@ -429,9 +433,9 @@ describe('a card shift sees only its domain vault', () => {
     r.ended(persStart.shiftId, 'stopped');
   });
 
-  it('a project without a registered vault of its domain has none', async () => {
-    await q(`DELETE FROM workstation_vaults WHERE vault_id IN (SELECT id FROM vaults WHERE kind='work')`);
-    await q(`DELETE FROM vaults WHERE kind='work'`);
+  it('a project without a vault of its own, in an organization without a vault, has none', async () => {
+    await q(`DELETE FROM workstation_vaults WHERE vault_id IN (SELECT id FROM vaults WHERE kind='org')`);
+    await q(`DELETE FROM vaults WHERE kind='org'`);
     const card = await w.card({ title: 'No vault card' });
     const from = r.received.length;
     await dispatcher().run();
@@ -441,7 +445,7 @@ describe('a card shift sees only its domain vault', () => {
     r.ended(start.shiftId, 'stopped');
   });
 
-  it("a project vault wins over the owner's domain vault", async () => {
+  it('a project vault wins over the organization vault', async () => {
     const pv = await ok<any>(
       owner().post('/api/vaults', {
         kind: 'project',
@@ -468,17 +472,17 @@ describe('a card shift sees only its domain vault', () => {
 });
 
 describe('repo-less cards need the vault on the workstation', () => {
-  it('with a registered domain vault only agents whose workstation holds a clone may claim', async () => {
+  it('with a registered vault only agents whose workstation holds a clone may claim', async () => {
     const research = await ok<any>(
       owner().post('/api/projects', {
         key: 'RSCH',
         name: 'Research',
         workflowKey: 'research',
-        domain: 'personal',
       }),
       201,
     );
-    const vault = (await q(`SELECT id FROM vaults WHERE kind='personal'`))[0]!;
+    await ok(owner().post('/api/vaults', { kind: 'org', remoteUrl: 'git@example.test:srv/org.git' }), 201);
+    const vault = (await q(`SELECT id FROM vaults WHERE kind='org'`))[0]!;
     await w.hire('Rhea', 'researcher', 'junior');
     const card = await ok<any>(
       owner().post('/api/cards', {
@@ -493,7 +497,7 @@ describe('repo-less cards need the vault on the workstation', () => {
     expect(card.card.status).toBe('queued');
     const from = r.received.length;
     await dispatcher().run();
-    // the workstation has no clone of the personal vault yet: not claimable
+    // the workstation has no clone of the organization vault yet: not claimable
     expect(
       r.received.slice(from).filter((f) => f.type === 'shift.start' && f.agent.name === 'Rhea'),
     ).toHaveLength(0);
@@ -506,12 +510,12 @@ describe('repo-less cards need the vault on the workstation', () => {
     await dispatcher().run();
     const start = await r.waitFor('shift.start', (f) => f.agent.name === 'Rhea', 5000, from);
     expect(start.brief.card.id).toBe(card.card.id);
-    expect(start.vault).toMatchObject({ kind: 'personal', folder: 'projects/rsch' });
+    expect(start.vault).toMatchObject({ kind: 'org', folder: 'projects/rsch' });
     r.accepted(start.shiftId);
     r.ended(start.shiftId, 'stopped');
   });
 
-  it('a domain without any vault stays claimable by every agent', async () => {
+  it('a project without any vault stays claimable by every agent', async () => {
     await q(`DELETE FROM workstation_vaults`);
     await q(`DELETE FROM vaults`);
     const rp = (await q(`SELECT id FROM projects WHERE key='RSCH'`))[0]!;

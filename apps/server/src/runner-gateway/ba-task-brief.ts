@@ -133,7 +133,6 @@ export async function buildBaTaskShiftStart(
       id: project.id,
       key: project.key,
       name: project.name,
-      domain: project.domain,
       workingBranch: baTask.phase?.workingBranch ?? project.working_branch ?? 'main',
       e2eGlobs: [],
       architecturalGlobs: [],

@@ -40,7 +40,6 @@ export function renderInstructions(brief: ShiftBrief): string {
   const projectLines = [
     `- Key: ${brief.project.key}`,
     `- Name: ${brief.project.name}`,
-    `- Domain: ${brief.project.domain}`,
     `- Working branch: ${brief.project.workingBranch}`,
   ];
   if (brief.project.architecturalGlobs.length > 0) {

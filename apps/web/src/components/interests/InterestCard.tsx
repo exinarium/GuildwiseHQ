@@ -77,9 +77,7 @@ export function InterestCard({ interest: i, onResearch }: { interest: InterestDt
           </Badge>
         )}
         <span className="ml-auto text-xs text-subtle" data-testid="interest-meta">
-          {i.domain}
-          {i.subCategory ? ` · ${i.subCategory}` : ''}
-          {i.vaultDir ? ` · ${i.vaultDir}` : ''}
+          {[i.subCategory, i.vaultDir].filter(Boolean).join(' · ')}
         </span>
       </div>
       {i.description && <p className="mt-1 line-clamp-2 text-sm text-muted">{i.description}</p>}
