@@ -45,6 +45,7 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { getLastProjectKey } from '../lib/lastProject.ts';
+import { money } from '../lib/money.ts';
 import { agentWarning, isRuntimeUnsandboxed, sandboxReasonOf } from '../lib/sandbox.ts';
 
 /**
@@ -320,6 +321,12 @@ function AgentCard({
       <p className="text-xs text-subtle" data-testid="agent-hired-by">
         Hired by {hr.hiredByName}
       </p>
+      {hr.spend && (
+        <p className="tnum text-xs text-subtle" data-testid="agent-spend">
+          Cost: {money(hr.spend.monthMicros, hr.spend.currency)} this month,{' '}
+          {money(hr.spend.totalMicros, hr.spend.currency)} in total
+        </p>
+      )}
       <p className="rounded-control bg-sunken px-3 py-2 text-sm text-muted" data-testid="agent-current-card">
         {a.activeCards.length === 0
           ? hr.blockedOn.length

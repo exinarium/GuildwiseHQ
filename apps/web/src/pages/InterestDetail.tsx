@@ -8,6 +8,7 @@ import {
   useRestoreInterest,
   useRunInterest,
 } from '../api/queries/interests.ts';
+import { BudgetBanner } from '../components/BudgetBanner.tsx';
 import { DigestTab } from '../components/interests/DigestTab.tsx';
 import { ActiveTick } from '../components/interests/InterestCard.tsx';
 import { OverviewTab } from '../components/interests/OverviewTab.tsx';
@@ -161,6 +162,13 @@ export function InterestDetail() {
         }
       />
       <ErrorBox error={run.error ?? deliver.error ?? archive.error ?? restore.error} />
+      <BudgetBanner
+        budget={i.budget}
+        projectId={i.id}
+        kind="interests"
+        name={i.name}
+        settingsTo={`/interests/${i.id}?tab=settings#budget`}
+      />
       <Tabs
         label="Interest sections"
         prefix="interest"

@@ -53,6 +53,7 @@ import { intakeRoutes } from './routes/intakes.ts';
 import { interestRoutes } from './routes/interests.ts';
 import { invitationRoutes } from './routes/invitations.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
+import { orgChartRoutes } from './routes/org-chart.ts';
 import { orgRoutes } from './routes/orgs.ts';
 import { outboundRoutes } from './routes/outbound.ts';
 import { phaseRoutes } from './routes/phases.ts';
@@ -287,6 +288,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(phaseRoutes(ctx));
   await app.register(reportingRoutes(ctx));
   await app.register(costRoutes(ctx));
+  await app.register(orgChartRoutes(ctx));
 
   // Gateways: runner WS (/api/runner/ws) and browser WS (/api/ws).
   const runners = new RunnerRegistry();

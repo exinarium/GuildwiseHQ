@@ -12,6 +12,7 @@ import { Board } from './pages/Board.tsx';
 import { CardDetail } from './pages/CardDetail.tsx';
 import { CardNew } from './pages/CardNew.tsx';
 import { Chat } from './pages/Chat.tsx';
+import { Costs } from './pages/Costs.tsx';
 import { Desk } from './pages/Desk.tsx';
 import { IntakeNew, IntakeView } from './pages/Intake.tsx';
 import { InterestDetail } from './pages/InterestDetail.tsx';
@@ -19,6 +20,7 @@ import { Interests } from './pages/Interests.tsx';
 import { Ledger } from './pages/Ledger.tsx';
 import { Login } from './pages/Login.tsx';
 import { Metrics } from './pages/Metrics.tsx';
+import { OrgChartPage } from './pages/OrgChart.tsx';
 import { OrgDesigner } from './pages/OrgDesigner.tsx';
 import { OrgSettings } from './pages/OrgSettings.tsx';
 import { Phase } from './pages/Phase.tsx';
@@ -81,6 +83,8 @@ export const routes = [
       { path: '/hr', element: <Agents /> },
       { path: '/metrics', element: <Metrics /> },
       { path: '/org', element: <OrgDesigner /> },
+      { path: '/org-chart', element: <OrgChartPage /> },
+      { path: '/costs', element: <Costs /> },
       { path: '/workstations', element: <Workstations /> },
       { path: '/settings', element: <Settings /> },
       { path: '/settings/vaults', element: <Vaults /> },

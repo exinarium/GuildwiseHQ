@@ -546,6 +546,7 @@ The server checks the floor every minute, without using any tokens (the BA only 
 | Nobody can take it | A queued card nobody is able to take for more than 30 minutes | Daily report |
 | Repeated failures | A card in rework round 3, or a failed finalize twice | Daily report |
 | Repository hygiene problem | The DevOps engineer could not resolve something in a repository (conflict, changes on the wrong branch, authentication, missing clone) or found a leftover worktree with uncommitted changes | Daily report, under Failures |
+| Budget | A project has used 80% of its monthly budget (normal), or 100% and is paused (urgent). See [Costs and budgets](#costs-and-budgets) | At 80% in the daily report and on the desk; at 100% at once |
 
 A signal appears once however long it lasts, and clears by itself when the cause is gone (a notice the BA posted is then acknowledged for you).
 
@@ -559,7 +560,8 @@ At **08:00 on your clock** the BA posts one **Floor report** on your desk (only 
 4. failures, including interests that cannot run;
 5. DevOps requests that are open;
 6. what the BA resolved itself without bothering you;
-7. **Interests highlights**: a count line (how many interests, how many runs since the last report, how many items were delivered and how many are unrated) and the top items of each interest since the last report. Only what a delivery already put on your desk is counted, so the report respects each interest's delivery schedule and the daily quiet cap.
+7. **Spend**: what the agents cost since the last report and this month, the projects that cost the most, and every project near or over its budget (see [Costs and budgets](#costs-and-budgets));
+8. **Interests highlights**: a count line (how many interests, how many runs since the last report, how many items were delivered and how many are unrated) and the top items of each interest since the last report. Only what a delivery already put on your desk is counted, so the report respects each interest's delivery schedule and the daily quiet cap.
 
 Open **The facts behind this report** for the same lists straight from the server, with links. Every report links to your standing **BA reports** chat (one per organization): ask "why?" there. The desk item stays the record; the chat holds the discussion. With no BA available (none hired, or none online for 15 minutes) the server posts the same report from a template, and passes items on unchanged.
 
@@ -705,12 +707,58 @@ See `docs/SPEC.md` for the feed and interest rules.
 
 Once you have hired agents, the HR board shows:
 
-- **Agent cards**: name, status (idle, working), current card, hiring manager, quick actions
+- **Agent cards**: name, status (idle, working), current card, hiring manager, what the agent cost this month and in total, quick actions
 - **Performance stats**: cards done, bounce rate, bugs escaped, utilisation, tokens per card vs role average
 - **Recommendations**: model changes, role splits, hiring, standing orders (one-click apply)
 - **Metrics dashboard**: team throughput, time blocked, queue depth, time-to-finish
 
 Recommendations are rule-based; you can apply them directly or adjust and post a standing order to the desk.
+
+## Costs and budgets
+
+Every shift records what it used: input, output and cache tokens and the model, as the runtime reports them (a shift you stopped, or that timed out, still keeps what it spent). The server turns that into money at **list prices in US dollars** (Opus, Sonnet and Haiku have their own price; any other model is priced like Sonnet), and shows it in your organization's currency. These are estimates of what the work costs, not an invoice. The built-in prices are defaults; the platform administrator will be able to change them.
+
+Chats count too: to the project when the chat is about a card or project, otherwise to **Org overhead**. Spend adds up per agent, card, phase, project and interest (an interest's hidden project carries its cost).
+
+### Where spend shows
+
+- **Project settings**: the month's spend in the header, and a **Monthly budget** panel with a progress bar.
+- **The board header**: `$9.00 of $10.00 this month`, and a banner when the project is near or over its budget.
+- **The HR board**: each agent's cost this month and in total.
+- **A phase** and **a card**: what its shifts and BA tasks cost.
+- **Interests**: the spend and budget of the interest (Settings tab).
+- **The floor report**: a Spend section.
+- **Costs** (Organization, Owner and Admin): the breakdown by project, agent, model and day for any date range, the daily bars, the prices used, the currency setting and an **Export CSV** button (one row per day, project, agent and model; spreadsheet formulas in names are neutralised).
+
+### Monthly budgets
+
+An **Owner or Admin** sets a project's budget in project settings (**Monthly budget**), or an interest's in its Settings tab. The month runs from the 1st to the end of the month in your organization's time zone (the time zone of the Owner, set under Settings), so the budget starts again on the 1st at local midnight.
+
+- **At 80%**: you get one desk notice ("TOY has used 80% of its monthly budget"), and your BA gets a Budget signal for the daily report. Work carries on.
+- **At 100%**: the project is **paused**. Running shifts finish; nothing new starts on it (cards wait in the queue, the BA's tasks for it wait, an interest does not run). A banner on the board and the project says so, and a desk item offers:
+  - **Raise budget**: opens the Monthly budget panel; the moment the new amount is above the spend the pause lifts and the desk item closes.
+  - **Override for this month**: dispatching resumes although the budget is used up, until the 1st.
+- **On the 1st** the month starts again: the spend counts from zero, the thresholds re-arm and an old pause notice closes.
+
+Setting a budget below what is already spent pauses the project at once. Members who are not Owner or Admin see the progress but cannot change the budget; guests of a shared project see only that it is paused, never the amounts.
+
+### Currency
+
+Under **Costs**, **Currency and prices**: type a three-letter currency code and how many units of it make one US dollar (for example `EUR` and `0.92`). Budgets and every amount you see use it. Changing the rate changes how all history is shown, not what was recorded.
+
+## The org chart
+
+**Organization, Org chart** shows who works for you and who answers whom, as a tree:
+
+- the **manager** (you, the Owner, with the Admins) at the top;
+- below, the **business analysts**;
+- below them, each **department** (Delivery, Research, and any department you designed) as a box, with a group per role: the **seniors** on the upper row and the **juniors** under them.
+
+The lines are the **escalation**: a question goes to a senior of the same role, then to the BA, then to your desk. A junior with no senior of its role goes straight to the BA. Where an agent reports to is on its card: the manager who hired it, and through them the Owner.
+
+Every tile shows the agent's face, name, role and seniority, what it is doing in words (working on a card, blocked, idle, offline, needs a new workstation; the ring around the face repeats it), and its workstation. **Click an agent** for its card: the projects it may work on and prefers, who it reports to and escalates to, its cost, and its recent work.
+
+Pick a project in **Allowed on project** to see who may work it (agents allowed on any project always show). **List** shows the same organization as grouped lists; on a phone the list is the default. The **DevOps engineer** of each workstation is shown apart, below the chart: it looks after one machine and reports to your desk, not to the BA.
 
 ## Organization design
 

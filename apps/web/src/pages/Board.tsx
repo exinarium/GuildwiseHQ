@@ -6,6 +6,7 @@ import { useInterests } from '../api/queries/interests.ts';
 import { usePhases } from '../api/queries/phases.ts';
 import { useProject, useProjects } from '../api/queries/projects.ts';
 import { BoardView, NO_FILTER } from '../components/BoardView.tsx';
+import { BudgetBanner } from '../components/BudgetBanner.tsx';
 import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { PhaseFilter } from '../components/PhaseFilter.tsx';
 import { RegressionDialog } from '../components/RegressionDialog.tsx';
@@ -21,6 +22,7 @@ import {
   Skeleton,
 } from '../components/ui.tsx';
 import { setLastProjectKey } from '../lib/lastProject.ts';
+import { money } from '../lib/money.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 
 function BoardSkeleton() {
@@ -121,6 +123,15 @@ export function Board() {
             {project.key} · {projectTypeLabel(project.workflowKey)}
             {open !== null && ` · ${open} open`}
             {blocked > 0 && ` · ${blocked} blocked`}
+            {project.budget?.spentMicros !== null && project.budget?.spentMicros !== undefined && (
+              <span data-testid="board-spend">
+                {' · '}
+                {money(project.budget.spentMicros, project.budget.currency)}
+                {project.budget.monthlyMicros !== null &&
+                  ` of ${money(project.budget.monthlyMicros, project.budget.currency)}`}
+                {' this month'}
+              </span>
+            )}
           </span>
         }
         actions={
@@ -146,6 +157,12 @@ export function Board() {
             </ButtonLink>
           </>
         }
+      />
+      <BudgetBanner
+        budget={project.budget}
+        projectId={project.id}
+        name={project.key}
+        settingsTo={`/projects/${project.id}/settings#budget`}
       />
       {detail.data && (
         <ConvertProjectDialog

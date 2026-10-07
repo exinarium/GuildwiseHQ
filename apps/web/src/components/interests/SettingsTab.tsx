@@ -7,6 +7,7 @@ import {
   validateInterest,
   valuesFromInterest,
 } from '../../lib/interests.ts';
+import { BudgetPanel } from '../BudgetPanel.tsx';
 import { Button, Callout, ErrorBox, Select, useToast } from '../ui.tsx';
 import { InterestForm } from './InterestForm.tsx';
 
@@ -110,6 +111,9 @@ export function SettingsTab({ interest }: { interest: InterestDto }) {
         ))}
       </fieldset>
       <ErrorBox error={patch.error} />
+      <div id="budget" className="scroll-mt-20">
+        <BudgetPanel kind="interests" id={interest.id} budget={interest.budget} what="interest" />
+      </div>
       {!readOnly && (
         <div className="sticky bottom-0 -mx-4 flex justify-end gap-2 border-t border-line bg-surface px-4 py-3 sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0">
           <Button variant="primary" loading={patch.isPending} data-testid="interest-save" onClick={submit}>

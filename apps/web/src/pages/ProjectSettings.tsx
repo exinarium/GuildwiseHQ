@@ -1,6 +1,8 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { useAddRepo, usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
+import { BudgetBanner } from '../components/BudgetBanner.tsx';
+import { BudgetPanel } from '../components/BudgetPanel.tsx';
 import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { ConvertPanel } from '../components/ConvertPanel.tsx';
 import { DeployTargetsPanel } from '../components/DeployTargetsPanel.tsx';
@@ -22,6 +24,7 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { WorkingBranchControl } from '../components/WorkingBranchControl.tsx';
+import { money } from '../lib/money.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 
 const lines = (s: string) =>
@@ -120,6 +123,7 @@ export function ProjectSettings() {
           { id: 'merge', label: 'Merging' },
         ]
       : []),
+    { id: 'budget', label: 'Budget' },
     { id: 'members', label: 'Team' },
     { id: 'danger', label: 'Archive' },
   ];
@@ -134,6 +138,14 @@ export function ProjectSettings() {
             <span className="font-mono text-sm">{project?.key}</span>
             {project?.status === 'archived' && <Badge tone="amber">Archived</Badge>}
             {project?.myRole !== 'owner' && <Badge>shared with you</Badge>}
+            {project?.budget?.spentMicros !== null && project?.budget?.spentMicros !== undefined && (
+              <span className="tnum text-muted" data-testid="settings-spend">
+                {money(project.budget.spentMicros, project.budget.currency)}
+                {project.budget.monthlyMicros !== null &&
+                  ` of ${money(project.budget.monthlyMicros, project.budget.currency)}`}{' '}
+                this month
+              </span>
+            )}
           </span>
         }
       />
@@ -148,6 +160,14 @@ export function ProjectSettings() {
           </a>
         ))}
       </nav>
+      {project && (
+        <BudgetBanner
+          budget={project.budget}
+          projectId={id}
+          name={project.key}
+          settingsTo={`/projects/${id}/settings#budget`}
+        />
+      )}
       {!traits.usesRepos && (
         <Callout tone="info">
           This is a {project?.workflowKey} project: it needs no repository, and results go to its vault
@@ -271,6 +291,11 @@ export function ProjectSettings() {
       {project && traits.usesRepos && (
         <div id="merge" className="scroll-mt-20">
           <MergePolicyPanel projectId={id} project={project} history={q.data.mergePolicyHistory ?? []} />
+        </div>
+      )}
+      {project && (
+        <div id="budget" className="scroll-mt-20">
+          <BudgetPanel kind="projects" id={id} budget={project.budget} />
         </div>
       )}
       {project && (

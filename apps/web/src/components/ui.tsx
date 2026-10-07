@@ -255,16 +255,19 @@ export function Badge({
   title,
   icon,
   className,
+  'data-testid': testId,
 }: {
   children: ReactNode;
   tone?: Tone;
   title?: string;
   icon?: ReactNode;
   className?: string;
+  'data-testid'?: string;
 }) {
   return (
     <span
       title={title}
+      data-testid={testId}
       className={cx(
         'inline-flex min-h-5 items-center gap-1 rounded-full px-2 py-px text-xs font-medium whitespace-nowrap [&>svg]:size-3',
         toneCls[toneAlias[tone]],

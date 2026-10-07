@@ -162,7 +162,7 @@ export async function getOrgChart(db: Queryable, orgId: string, now: Date): Prom
     db,
     `SELECT w.id, w.name, (w.connected AND w.last_seen_at > $2) AS online, u.display_name AS owner_name
        FROM workstations w JOIN users u ON u.id = w.user_id
-      WHERE w.status = 'active' AND w.id = ANY($1::uuid[]) ORDER BY w.created_at, w.id`,
+      WHERE w.status = 'active' AND w.id = ANY($1::uuid[]) ORDER BY w.name, w.id`,
     [[...new Set(list.map((a) => a.workstation_id).filter(Boolean))], online],
   );
   return {

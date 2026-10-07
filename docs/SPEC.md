@@ -326,6 +326,7 @@ State changes only through events; the board, desk and dashboard are projections
 | `TicketMapped` | BA | Card assigned to a project; unmapped tickets become a desk question |
 | `CardSpecified` | BA | Card validated against schema, moved to To do |
 | `ScheduleFired` | Scheduler | Card emitted for a recurring task, jumps the queue for its role |
+| `ProjectBudgetSet`, `ProjectBudgetThresholdReached`, `ProjectBudgetOverridden`, `OrgCostSettingsChanged` | Owner or Admin, system | Monthly budget, its 80% / 100% thresholds (once per month), the override for the month, the organization's currency |
 | `CardClaimed` | Dispatcher | Exclusive claim taken (fails if already held), agent assigned, worktree created or reused, shift started |
 | `QuestionRaised` | Any agent | Card to Blocked, routed up the escalation chain |
 | `QuestionAnswered` | Senior, BA or manager | Decision written to the vault, waiting cards unblocked |
@@ -407,6 +408,8 @@ Three views make up the manager's day: the board, the decision desk, and a team 
 - **Board**: columns per lifecycle stage, each card showing assignee, age, risk tier and blocked state
 - **Decision desk**: open questions and approvals, sorted by blocking count then age
 - **Team view**: the HR board, described below
+- **Org chart**: roles, seniority, escalation and reporting lines, described below
+- **Costs**: what the agents cost, by project, agent, model and day, and per-project monthly budgets (Owner and Admin), described below
 
 Metrics:
 
@@ -423,7 +426,7 @@ The HR board is where agents are hired, tuned and fired: one card per agent, wit
 
 &#91;embedded content: HR board · one agent card, illustrative numbers\]
 
-**Agent card**: avatar (generated from the name), name, role, seniority, model and effort, status (idle, on shift, blocked) with the current card, the manager who hired it, and actions to change model, change role or fire. A Hire button opens a form for role, seniority, model, skills and a name, typed or generated.
+**Agent card**: avatar (generated from the name), name, role, seniority, model and effort, status (idle, on shift, blocked) with the current card, the manager who hired it, what the agent cost this month and in total, and actions to change model, change role or fire. A Hire button opens a form for role, seniority, model, skills and a name, typed or generated.
 
 **Stats** over a rolling window, each shown against the team average for the role:
 
@@ -457,6 +460,16 @@ Idle agents use no tokens, since sessions only exist during shifts; the waste to
 - **Test coverage of its changes**: whether the builder wrote or updated tests with the code
 
 The recommendations act on these too: a recurring cause becomes a proposed standing order, low scores on large cards suggest a stronger model, and low scores across all card sizes suggest firing, which also clears any cached context that may be causing the failures, and hiring a fresh profile.
+
+## Costs and budgets
+
+**Cost tracking.** Every shift records the tokens it used (input, output, cache read, cache write) and the model, taken from the runtime's own session output; a shift that is stopped, times out or crashes keeps what it had spent so far. Chats are shifts too. The server prices each ended shift at the **list price of its model family** (a price table in shared configuration, marked as defaults, to be editable by the platform administrator; an unknown model is priced like Sonnet) and stores one cost row per shift with its project (a card's project, a chat's project, a BA task's project; none means **org overhead**). Spend is rolled up per agent, card, phase, project and interest (an interest's hidden backing project carries its cost). Amounts are shown in the organization's currency (USD by default, with a rate for others); costs are estimates, not invoices. The mock runtime reports synthetic usage so the whole path is testable.
+
+**Budgets.** An Owner or Admin sets a **monthly budget** per project (and per interest, which sets it on its backing project). The month is the calendar month in the organization's time zone, so it resets on the 1st. At **80%** the manager gets a desk notice and the BA reporter a budget signal; at **100%** dispatching for that project **pauses**: running shifts finish, nothing new starts (cards, the BA's tasks for the project, interest runs), a banner says so on the board and the project, and a desk item offers **Raise budget** and **Override for this month**. Raising the budget above the spend, or overriding, resumes work at once; the pause is a function of the month's spend, so the 1st lifts it by itself. Spend shows in the project settings and header, the board header, the HR board (per agent), the phase page, the floor report and a **Costs** page (Owner and Admin) with the breakdown and a CSV export.
+
+## Org chart
+
+A page under Organization that draws the organization as a tree: the manager (Owner, with the Admins), the business analysts, then each department with its roles, seniors above juniors. The lines are the escalation chain (a senior of the same role, then the BA, then the manager's desk), and each agent's card names the manager it reports to and, through them, the Owner. Agents show their generated faces, what they are doing in words and their workstation; filters narrow the chart to the agents allowed on a project; clicking an agent opens its allowed projects, focus, spend and recent work. The DevOps engineer of each workstation is shown apart from the tree. It is visible to organization members, responsive (a grouped list on phones) and accessible.
 
 ## Build plan and open questions
 

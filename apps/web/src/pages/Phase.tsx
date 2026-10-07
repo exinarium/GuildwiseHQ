@@ -28,6 +28,7 @@ import {
   TextInput,
   useToast,
 } from '../components/ui.tsx';
+import { money } from '../lib/money.ts';
 import { OUTCOME_LABEL, PHASE_STATUS_LABEL, phaseTone, specOf } from '../lib/phases.ts';
 import { useFollowupAvailability } from '../lib/projectWorkflow.ts';
 import { formatDateTime } from '../lib/time.ts';
@@ -87,6 +88,15 @@ function PhaseView({ phase }: { phase: PhaseDetailDto }) {
                 : `created by ${phase.createdBy.name ?? 'a member'}`}
             </span>
             {phase.workingBranch && <Badge title="Working branch of this phase">{phase.workingBranch}</Badge>}
+            {phase.spend && (
+              <span
+                className="tnum text-muted"
+                data-testid="phase-spend"
+                title="What the agents' shifts on this phase's cards and BA tasks cost, at list prices"
+              >
+                {money(phase.spend.totalMicros, phase.spend.currency)} spent
+              </span>
+            )}
           </span>
         }
         actions={

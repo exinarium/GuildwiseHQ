@@ -349,6 +349,7 @@ describe('budgets: thresholds, pause, raise, override, reset', () => {
       (d: any) => d.subkind === 'budget_paused',
     );
     expect(item.options.map((o: any) => o.label)).toEqual(['Raise budget', 'Override for this month']);
+    expect(item.budgetProject).toEqual({ projectId: w.projectId, projectKey: 'TOY' });
     expect((await project()).budget.state).toBe('paused');
     // the running shift finishes normally
     expect((await q(`SELECT status FROM shifts WHERE id=$1`, [start.shiftId]))[0]?.status).toBe('running');
@@ -505,15 +506,62 @@ describe('budgets: thresholds, pause, raise, override, reset', () => {
   });
 });
 
+describe('guests', () => {
+  it('see that a shared project is paused but never its amounts, and cannot change anything', async () => {
+    const { addMember } = await import('./helpers/members.ts');
+    await q(
+      `UPDATE projects SET budget_micros=5000000, budget_paused_month=NULL, budget_override_month=NULL WHERE id=$1`,
+      [w.projectId],
+    );
+    await q(`DELETE FROM shift_costs WHERE project_id=$1 AND shift_id NOT IN (SELECT id FROM shifts)`, [
+      w.projectId,
+    ]);
+    await addSpend(w.projectId, 6_000_000);
+    const guest = await addMember(w, 'guest');
+    const p = (await ok<any>(w.t.req('GET', `/api/projects/${w.projectId}`, { cookie: guest.cookie })))
+      .project;
+    expect(p.budget).toMatchObject({
+      state: 'paused',
+      monthlyMicros: null,
+      spentMicros: null,
+      percent: null,
+      canEdit: false,
+    });
+    const list = (await ok<any>(w.t.req('GET', '/api/projects', { cookie: guest.cookie }))).projects.find(
+      (x: any) => x.id === w.projectId,
+    );
+    expect(list.budget.spentMicros).toBeNull();
+    expect(
+      (
+        await w.t.req('PUT', `/api/projects/${w.projectId}/budget`, {
+          cookie: guest.cookie,
+          body: { monthly: 100 },
+        })
+      ).status,
+    ).toBe(404);
+    const card = await q(`SELECT ref FROM cards LIMIT 1`);
+    if (card[0]) {
+      const detail = await ok<any>(w.t.req('GET', `/api/cards/${card[0].ref}`, { cookie: guest.cookie }));
+      expect(detail.spend).toBeUndefined();
+    }
+    await q(`UPDATE projects SET budget_micros=NULL WHERE id=$1`, [w.projectId]);
+    await q(`DELETE FROM shift_costs WHERE project_id=$1 AND shift_id NOT IN (SELECT id FROM shifts)`, [
+      w.projectId,
+    ]);
+  });
+});
+
 describe('the floor report spend section and the CSV export', () => {
   it('the digest carries spend and budgets (the BA and the template render them)', async () => {
     const { buildFloorDigest } = await import('../src/reporter/digest.ts');
     await q(`UPDATE projects SET budget_micros=$2 WHERE id=$1`, [w.projectId, 10_000_000]);
+    await addSpend(w.projectId, 3_000_000);
     const d = await buildFloorDigest(ctx().pool, await orgId(), ctx().clock.now(), '2026-10-07');
     expect(d.spend.currency).toBe('USD');
     expect(d.spend.monthMicros).toBeGreaterThan(0);
     const toy = d.spend.projects.find((p) => p.key === 'TOY');
     expect(toy?.budgetMicros).toBe(10_000_000);
+    expect(toy?.monthMicros).toBeGreaterThanOrEqual(3_000_000);
     expect(['ok', 'warning', 'paused', 'overridden']).toContain(toy?.state);
   });
 

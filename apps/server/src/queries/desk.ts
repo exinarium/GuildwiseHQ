@@ -141,6 +141,10 @@ export function toDeskDto(
     supersededBy: r.superseded_by ?? null,
     chatThreadId: r.chat_thread_id ?? null,
     floor: r.subkind === 'floor_report' ? (r.data ?? null) : null,
+    budgetProject:
+      typeof r.subkind === 'string' && r.subkind.startsWith('budget_') && r.data?.projectId
+        ? { projectId: r.data.projectId, projectKey: r.data.projectKey ?? '' }
+        : null,
     canAnswer: r.status === 'open' && canAnswerItem(r, userId, role, orgRoles.get(r.org_id) ?? null),
     createdAt: iso(r.created_at) as string,
   };

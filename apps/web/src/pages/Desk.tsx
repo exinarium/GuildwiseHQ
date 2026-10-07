@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
+import { useOverrideBudget } from '../api/queries/costs.ts';
 import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
 import { BaNote, FloorReport } from '../components/BaNote.tsx';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
@@ -565,6 +566,34 @@ function AnswerForm({ item }: { item: DeskItemDto }) {
   );
 }
 
+/** The pause notice of a project over its monthly budget: raise the budget, or override it for this month. */
+function BudgetActions({ item }: { item: DeskItemDto }) {
+  const nav = useNavigate();
+  const override = useOverrideBudget('projects', item.budgetProject?.projectId ?? '');
+  const toast = useToast();
+  return (
+    <>
+      <Button
+        variant="primary"
+        data-testid="desk-budget-raise"
+        onClick={() => nav(`/projects/${item.budgetProject?.projectId}/settings#budget`)}
+      >
+        Raise budget
+      </Button>
+      <Button
+        loading={override.isPending}
+        data-testid="desk-budget-override"
+        onClick={() =>
+          override.mutate(undefined, { onSuccess: () => toast.success('Overridden for this month') })
+        }
+      >
+        Override for this month
+      </Button>
+      <ErrorBox error={override.error} />
+    </>
+  );
+}
+
 function ResolveButtons({ item }: { item: DeskItemDto }) {
   const nav = useNavigate();
   const resolve = useResolveDeskItem();
@@ -616,6 +645,8 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
                   : 'Approve'}
             </Button>
           </>
+        ) : item.subkind === 'budget_paused' && item.budgetProject ? (
+          <BudgetActions item={item} />
         ) : item.subkind === 'repo_create_failed' ? (
           // Also for alerts the server stored without options: Retry queues the same request again.
           <Button
