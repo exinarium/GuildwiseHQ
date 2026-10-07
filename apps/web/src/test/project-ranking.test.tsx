@@ -144,6 +144,21 @@ describe('the Projects page: priority order', () => {
     expect(order()).toEqual(['AAA', 'CCC', 'DDD', 'BBB']);
   });
 
+  it('presses in a quick burst each act on the order the previous one made, and the saves run in order', async () => {
+    const user = userEvent.setup();
+    page('owner');
+    await screen.findByTestId('project-rank-list');
+    screen.getByTestId('rank-grip-DDD').focus();
+    await user.keyboard('{ArrowUp}{ArrowUp}{ArrowUp}');
+    await waitFor(() => expect(rankCalls()).toHaveLength(3));
+    expect(rankCalls()).toEqual([
+      [id(1), id(2), id(4), id(3)],
+      [id(1), id(4), id(2), id(3)],
+      [id(4), id(1), id(2), id(3)],
+    ]);
+    expect(order()).toEqual(['DDD', 'AAA', 'BBB', 'CCC']);
+  });
+
   it('dragging a row onto another moves it there', async () => {
     page('owner');
     await screen.findByTestId('project-rank-list');

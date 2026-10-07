@@ -45,7 +45,7 @@ export function Vaults() {
     <div className="mx-auto flex max-w-4xl flex-col gap-4">
       <PageHeader
         title="Vaults"
-        sub="Git repositories of markdown that your agents read and your DevOps engineer keeps in sync on every workstation."
+        sub="Git repositories of markdown that your agents read and your DevOps engineer keeps in sync. One organization vault holds your organization's knowledge (and your interests); a project can have a vault of its own."
         actions={
           canRegister && (
             <Button variant="primary" onClick={() => setRegistering(true)}>

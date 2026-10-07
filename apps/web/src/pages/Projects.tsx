@@ -187,9 +187,7 @@ export function Projects() {
                     : undefined
                 }
                 onReorder={(ids) =>
-                  rank.mutate(ids, {
-                    onError: (e) => toast.error(`The order was not saved: ${errorMessage(e)}`),
-                  })
+                  rank.rank(ids).catch((e) => toast.error(`The order was not saved: ${errorMessage(e)}`))
                 }
               />
             </section>

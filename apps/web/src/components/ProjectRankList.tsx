@@ -9,7 +9,7 @@ import {
   Rss,
   Settings,
 } from 'lucide-react';
-import { type DragEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react';
+import { type DragEvent, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { projectTypeLabel } from './shell/ProjectSwitcher.tsx';
 import { cx } from './ui/cx.ts';
@@ -33,7 +33,7 @@ export function moveTo(ids: string[], id: string, to: number): string[] {
  * pointer. Anyone else sees the order read-only. Each change is announced to screen readers.
  */
 export function ProjectRankList({
-  projects,
+  projects: given,
   canRank,
   disabledReason,
   onReorder,
@@ -42,10 +42,21 @@ export function ProjectRankList({
   canRank: boolean;
   /** Set while the list cannot be reordered (a filter hides some projects). */
   disabledReason?: string | undefined;
-  /** Called with the new order of every project in `projects`. */
-  onReorder: (projectIds: string[]) => void;
+  /** Called with the new order of every project in `projects`; the promise settles when it is saved (or failed). */
+  onReorder: (projectIds: string[]) => void | Promise<unknown>;
 }) {
   const interactive = canRank && !disabledReason;
+  // A move shows at once, before the parent's data has caught up (the next key press or drop must work on the new order):
+  // `pending` holds the order just asked for until `projects` changes.
+  const [pending, setPending] = useState<string[] | null>(null);
+  const givenKey = given.map((p) => p.id).join(',');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the parent's list changed: it has caught up (or rolled back)
+  useEffect(() => setPending(null), [givenKey]);
+  const byId = new Map(given.map((p) => [p.id, p]));
+  const projects =
+    pending && pending.length === given.length && pending.every((id) => byId.has(id))
+      ? pending.map((id) => byId.get(id) as ProjectDto)
+      : given;
   const ids = projects.map((p) => p.id);
   const [dragId, setDragId] = useState<string | null>(null);
   // where the dragged row would land: the index of the row it is over
@@ -54,9 +65,10 @@ export function ProjectRankList({
   const refocus = useRef<{ id: string; control: 'up' | 'down' | 'grip' } | null>(null);
   const rows = useRef(new Map<string, HTMLLIElement>());
 
-  // After a move the same control must keep the focus (the row is re-rendered in its new place).
+  // After a move the same control must keep the focus (moving the row's element in the DOM drops it). A layout effect puts
+  // it back before the browser handles the next key press.
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs after every reorder
-  useEffect(() => {
+  useLayoutEffect(() => {
     const f = refocus.current;
     if (!f) return;
     refocus.current = null;
@@ -70,7 +82,11 @@ export function ProjectRankList({
     if (next === ids) return;
     refocus.current = { id: p.id, control };
     setAnnounce(`${p.name} moved to position ${to + 1} of ${ids.length}`);
-    onReorder(next);
+    setPending(next);
+    // once saved (or failed and rolled back) the parent's list is the truth again
+    void Promise.resolve(onReorder(next))
+      .catch(() => undefined)
+      .finally(() => setPending((cur) => (cur === next ? null : cur)));
   };
 
   const onKey = (e: KeyboardEvent, p: ProjectDto, i: number) => {

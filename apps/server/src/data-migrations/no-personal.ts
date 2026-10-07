@@ -58,7 +58,10 @@ export interface NoPersonalOrgPlan {
   workstationAvailable: boolean;
 }
 export interface NoPersonalPlan {
+  /** The migration is recorded as complete and no organization has a step left. */
   alreadyDone: boolean;
+  /** The migration is recorded (it may still have steps left for an organization that was not ready). */
+  hasRun?: boolean;
   orgs: NoPersonalOrgPlan[];
 }
 export interface NoPersonalOrgReport {
@@ -182,15 +185,18 @@ export async function planNoPersonal(db: Queryable): Promise<NoPersonalPlan> {
     };
     if (rankPending || vaultPending) orgs.push(plan);
   }
-  return {
-    alreadyDone: Boolean(done),
-    orgs: orgs.filter((o) => o.projects.length > 0 || o.vaultAction !== 'none'),
-  };
+  const pending = orgs.filter((o) => o.projects.length > 0 || o.vaultAction !== 'none');
+  // Done: recorded, and nothing left to do (an organization whose vault step waits for a workstation is not done).
+  return { alreadyDone: Boolean(done) && pending.length === 0, hasRun: Boolean(done), orgs: pending };
 }
 
 export function formatNoPersonalPlan(r: NoPersonalPlan): string {
   const lines = [
-    r.alreadyDone ? `${NO_PERSONAL_MIGRATION} has already run.` : `${NO_PERSONAL_MIGRATION} has not run yet.`,
+    r.alreadyDone
+      ? `${NO_PERSONAL_MIGRATION} has already run.`
+      : r.hasRun
+        ? `${NO_PERSONAL_MIGRATION} has run, but some organizations still have steps left:`
+        : `${NO_PERSONAL_MIGRATION} has not run yet.`,
   ];
   if (r.orgs.length === 0) lines.push('No organization has projects to rank or a personal vault to merge.');
   for (const o of r.orgs) {

@@ -198,8 +198,8 @@ test('setup: a runner with the organization vault, a personal vault with files, 
     'standing-orders.md': '# Standing orders\n- PERSONAL-RULE\n',
     'projects/cabin/PROJECT.md': '# Cabin\n\nPERSONAL-MARK notes about the cabin.\n',
     'projects/garden/PROJECT.md': '# Garden\n\nPERSONAL-MARK notes about the garden.\n',
-    'interests/ai-news/INTEREST.md': '# AI news\n\nPERSONAL-MARK interest document.\n',
-    'interests/ai-news/taste.md': '# Taste\n- PERSONAL-MARK no hype\n',
+    'interests/ai-news/INTEREST.md': '# AI news\n\nPERSONAL-MARK old interest document.\n',
+    'interests/ai-news/notes/2026-10-01-a-story.md': '# A story\n\nPERSONAL-MARK note from the old scans.\n',
   });
   await q(
     `INSERT INTO vaults (id, org_id, kind, name, remote_url, created_at)
@@ -237,7 +237,8 @@ test('dry run: the plan is printed and nothing is written', async () => {
     order: await dbOrder(),
   };
   const text = server('ranking:migrate', '--dry-run');
-  expect(text).toContain('has not run yet');
+  // the boot of the e2e server recorded the migration (it had nothing to do then); this organization still has steps
+  expect(text).toContain('still have steps left');
   expect(text).toMatch(/1\. CHECK "Checkout" \(work, tier 1\)/);
   expect(text).toMatch(/2\. BILL "Billing" \(work, tier 2\)/);
   expect(text).toMatch(/3\. GARDEN "Garden" \(personal, tier 1\)/);
@@ -306,8 +307,10 @@ test('the runner merges the personal vault: files under personal/, the interest 
   // the organization's own files are untouched
   expect(originFile(orgVault, 'standing-orders.md')).toContain('ORG-RULE');
   // the personal interest lives where every interest lives, not under personal/
-  expect(originFile(orgVault, 'interests/ai-news/INTEREST.md')).toContain('PERSONAL-MARK interest document');
-  expect(originHas(orgVault, 'personal/interests/ai-news/INTEREST.md')).toBe(false);
+  expect(originFile(orgVault, 'interests/ai-news/notes/2026-10-01-a-story.md')).toContain('PERSONAL-MARK');
+  expect(originHas(orgVault, 'personal/interests/ai-news/notes/2026-10-01-a-story.md')).toBe(false);
+  // the file the server wrote for the interest since is never overwritten by the old one
+  expect(originFile(orgVault, 'interests/ai-news/INTEREST.md')).not.toContain('PERSONAL-MARK');
   // the old repository is a backup: unchanged
   expect(originFile(personalVault, 'projects/cabin/PROJECT.md')).toContain('PERSONAL-MARK');
   const cmd = await q<{ status: string }>(`SELECT status FROM runner_commands WHERE type='vault.merge'`);

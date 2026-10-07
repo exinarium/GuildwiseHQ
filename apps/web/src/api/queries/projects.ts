@@ -16,6 +16,7 @@ import {
   PublicationsResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRef } from 'react';
 import { del, get, patch, post, put } from '../client.ts';
 
 /** Active projects: what every picker, the sidebar and the board redirect use. Archived ones never appear here. */
@@ -94,35 +95,51 @@ export function useCreateProject() {
   });
 }
 
+/** The cached project list in the order `projectIds` names (the other organizations' projects stay after them). */
+function reordered(list: ProjectDto[], projectIds: string[]): ProjectDto[] {
+  const place = new Map(projectIds.map((id, i) => [id, i + 1]));
+  const ranked = list
+    .filter((p) => place.has(p.id))
+    .sort((a, b) => (place.get(a.id) ?? 0) - (place.get(b.id) ?? 0))
+    .map((p) => ({ ...p, rank: place.get(p.id) ?? p.rank }));
+  return [...ranked, ...list.filter((p) => !place.has(p.id))];
+}
+
 /**
- * Orders the organization's active projects (Owner and Admins). The list is reordered in the cache at once, so the row
- * stays where it was dropped; a failure puts the old order back and a refetch shows what the server has.
+ * Orders the organization's active projects (Owner and Admins). The cached list is reordered at once, in the same tick
+ * as the call (so a second key press or drop works on the new order, not the old one), and the saves run one after the
+ * other (`scope`). A failure puts the order from before the burst back, and a refetch shows what the server has.
  */
 export function useRankProjects() {
   const qc = useQueryClient();
-  return useMutation({
+  const before = useRef<ProjectDto[] | undefined>(undefined);
+  const inFlight = useRef(0);
+  const m = useMutation({
+    scope: { id: 'project-ranking' },
     mutationFn: (projectIds: string[]) =>
       put<{ projects: ProjectDto[] }>('/projects/ranking', { projectIds }),
-    onMutate: async (projectIds) => {
-      await qc.cancelQueries({ queryKey: ['projects'], exact: true });
-      const previous = qc.getQueryData<ProjectDto[]>(['projects']);
-      if (previous) {
-        const place = new Map(projectIds.map((id, i) => [id, i + 1]));
-        const ranked = previous.filter((p) => place.has(p.id));
-        const rest = previous.filter((p) => !place.has(p.id));
-        const next = [...ranked]
-          .sort((a, b) => (place.get(a.id) ?? 0) - (place.get(b.id) ?? 0))
-          .map((p) => ({ ...p, rank: place.get(p.id) ?? p.rank }));
-        // keep the other organizations' projects (a guest's) after the ranked ones, as the server lists them
-        qc.setQueryData<ProjectDto[]>(['projects'], [...next, ...rest]);
+    onError: () => {
+      if (before.current) qc.setQueryData(['projects'], before.current);
+    },
+    onSettled: () => {
+      inFlight.current -= 1;
+      if (inFlight.current <= 0) {
+        before.current = undefined;
+        return qc.invalidateQueries({ queryKey: ['projects'] });
       }
-      return { previous };
     },
-    onError: (_e, _ids, ctx) => {
-      if (ctx?.previous) qc.setQueryData(['projects'], ctx.previous);
-    },
-    onSettled: () => qc.invalidateQueries({ queryKey: ['projects'] }),
   });
+  /** Reorders the cached list now and saves; resolves when the save is done, rejects when it failed. */
+  const rank = (projectIds: string[]): Promise<unknown> => {
+    const current = qc.getQueryData<ProjectDto[]>(['projects']);
+    if (current) {
+      if (inFlight.current === 0) before.current = current;
+      qc.setQueryData<ProjectDto[]>(['projects'], reordered(current, projectIds));
+    }
+    inFlight.current += 1;
+    return m.mutateAsync(projectIds);
+  };
+  return { rank, isPending: m.isPending, error: m.error };
 }
 
 export function usePatchProject(id: string) {
