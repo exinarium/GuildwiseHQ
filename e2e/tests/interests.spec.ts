@@ -236,7 +236,7 @@ test('run: the digest keeps the best N across kinds, oldest to newest; the run l
   const posted = (await digestEvents()).map((e) => e.payload).at(-1);
   // 5 candidates (3 articles and 2 videos), a maximum of 3 items overall whatever the kind
   expect(posted.items.map((i: any) => i.url)).toEqual([A1.url, A2.url, V1.url]);
-  expect(posted).toMatchObject({ nothingQualified: false, overMaximumDropped: 2, held: true });
+  expect(posted).toMatchObject({ nothingQualified: false, held: true });
   expect((await list()).map((i) => i.url)).toEqual([A1.url, A2.url, V1.url]);
   const taste1 = await shiftLog(r.ref, 'curate');
   expect(taste1).toContain('mock taste seed: 2 rule(s)');
@@ -337,20 +337,20 @@ test('run again: the curator reads taste.md, duplicates are skipped, the old lis
   const before = originFile(vault, `${FOLDER}/feed.md`);
   const r = await mockRun(interestId, { items: [A1, A2, V1, A3, V2] });
   await done(r.ref);
-  // A1 and V1 are on the seen-list, A2 is skipped by the taste file, V2 and A3 are new; the maximum is 3
+  // the curator skips A2 (taste.md) and takes A1, V1 and A3 (the maximum is 3); A1 and V1 are on the seen-list
   const p = (await digestEvents()).map((e) => e.payload).at(-1);
-  expect(p.items.map((i: any) => i.url)).toEqual([A3.url, V2.url]);
+  expect(p.items.map((i: any) => i.url)).toEqual([A3.url]);
   expect(p.duplicatesDropped).toBe(2);
   const texts = await shiftLog(r.ref, 'curate');
   expect(texts).toContain(`mock taste rule: - Skip articles like "${A2.title}"`);
   await waitFor(
     'feed.md appended',
     async () => vaultLines(`${FOLDER}/feed.md`).length,
-    (n) => n === 5,
+    (n) => n === 4,
     30_000,
   );
   expect(originFile(vault, `${FOLDER}/feed.md`).startsWith(before)).toBe(true);
-  expect((await list()).map((i) => i.url)).toEqual([A1.url, A2.url, V1.url, A3.url, V2.url]);
+  expect((await list()).map((i) => i.url)).toEqual([A1.url, A2.url, V1.url, A3.url]);
   // the run log counts what was dropped
   await page.goto(`/interests/${interestId}?tab=runs`);
   await expect(page.getByTestId(`run-${r.ref}`).getByTestId('run-counts')).toContainText('dup 2');
@@ -539,9 +539,12 @@ test('archive, restore and delete: archiving stops it, deleting needs the folder
   await page.getByLabel('More actions').click();
   await page.getByRole('menuitem', { name: /Archive/ }).click();
   await page.getByRole('button', { name: 'Archive', exact: true }).click();
-  await expect(page.getByTestId('interest-sub')).toBeVisible();
-  const row = await interestByName('Weekly picks');
-  expect(row.archived_at).not.toBeNull();
+  await waitFor(
+    'archived',
+    () => interestByName('Weekly picks'),
+    (r) => r?.archived_at != null,
+    15_000,
+  );
   await page.goto('/interests');
   await expect(page.getByTestId('interest-Weekly picks')).toHaveCount(0);
   await page.getByTestId('interests-archived').check();

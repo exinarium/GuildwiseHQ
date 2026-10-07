@@ -1,6 +1,6 @@
 # Design: the Interests page (one place to say "what I care about")
 
-Oct 5, 2026 · status: built (Oct 6, 2026; see "Implementation status" at the end) · companion to `docs/SPEC.md` ("Research and feeds"), `docs/ARCHITECTURE.md` (referenced as §n) and `docs/design/phases.md` (style)
+Oct 5, 2026 · status: built (Oct 6, 2026; see "Implementation status" at the end), **superseded in part by `docs/design/restructure.md` Part D (7 Oct 2026)**: interests are org-level with a hidden backing project, there is no adopt flow and no feed schedule, taste rules are built into the interest, and runs, delivery schedule and the quiet cap are new. Read the restructure document for the current model · companion to `docs/SPEC.md` ("Research and feeds"), `docs/ARCHITECTURE.md` (referenced as §n) and `docs/design/phases.md` (style)
 
 Today a manager's interests are scattered: one feed schedule per topic (`/schedules`), ad-hoc research cards, and a `taste.md` that only grows from digest ratings. This design adds one global **Interests** page across all feed and research projects. An interest is the single statement of a topic; it owns the feed schedule that scans for it, prefills research cards about it, carries explicit taste rules, and shows what came of it (scans, items, ratings, notes).
 

@@ -24,7 +24,11 @@ export function useUpdateReporting() {
   return useMutation({
     mutationFn: (b: UpdateReportingRequest) =>
       put<ReportingResponse>('/reporting', b, ReportingResponseSchema),
-    onSuccess: (r) => qc.setQueryData(reportingKey, r),
+    onSuccess: (r) => {
+      qc.setQueryData(reportingKey, r);
+      // the quiet cap shows on the Interests page
+      void qc.invalidateQueries({ queryKey: ['interests'] });
+    },
   });
 }
 

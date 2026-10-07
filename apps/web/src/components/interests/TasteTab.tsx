@@ -46,12 +46,7 @@ export function TasteTab({ interestId, canManage }: { interestId: string; canMan
               onClick={() =>
                 save.mutate(
                   { id: interestId, rules },
-                  {
-                    onSuccess: () => {
-                      toast.success('Taste rules saved');
-                      setRules(null);
-                    },
-                  },
+                  { onSuccess: () => toast.success('Taste rules saved') },
                 )
               }
             >
