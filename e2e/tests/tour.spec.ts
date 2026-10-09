@@ -86,12 +86,16 @@ test('a new user is shown the tour on the first login, and Skip keeps it away on
   await other.context().close();
 });
 
-test('Escape closes the tour like Skip, and an interrupted tour picks up where it stopped', async ({
+test('an interrupted tour does not pop up again on the next login; Escape closes a resumed tour like Skip', async ({
   browser,
 }) => {
   await setTour('in_progress', 3);
   const page = await signedIn(browser);
   await page.goto('/');
+  await expect(page.getByTestId('palette-button')).toBeVisible();
+  await expect(page.getByTestId('tour')).toHaveCount(0);
+  await page.goto('/help');
+  await page.getByTestId('help-resume-tour').click();
   await expect(page.getByTestId('tour-progress')).toHaveText(/Step 4 of/);
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('tour')).toHaveCount(0);

@@ -275,16 +275,16 @@ export function TourProvider({
     [save],
   );
 
-  // First visit (or an interrupted tour): open it, once per page load.
+  // First visit only: open it once. It is recorded as started at once, so a later login (after the tab was closed
+  // mid-tour, say) does not show it again; an unfinished tour is resumed from Help.
   // biome-ignore lint/correctness/useExhaustiveDependencies: once per load, when the saved state arrives
   useEffect(() => {
     if (auto.current || !saved || total === 0) return;
-    if (saved.status === 'new' || saved.status === 'in_progress') {
+    if (saved.status === 'new') {
       auto.current = true;
-      const step = saved.status === 'new' ? 0 : Math.min(saved.step, total - 1);
-      setIndex(step);
+      setIndex(0);
       setActive(true);
-      if (saved.status === 'new') persist('in_progress', 0);
+      persist('in_progress', 0);
     }
   }, [saved?.status, total]);
 

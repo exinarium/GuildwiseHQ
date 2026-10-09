@@ -19,7 +19,7 @@ Every account belongs to an organization. There are no standalone accounts excep
 
 The first time you sign in, Guildwise HQ starts a guided tour of the main pages: the board where your cards live, the desk where you answer questions, intake from external systems, and more. The tour takes you to each area, shows you what is there and what you can do.
 
-You can play the tour again any time: open **Help** in the sidebar and click **Replay the tour** (or press Ctrl K and choose **Take the tour**).
+You can play the tour again any time: open **Help** in the sidebar and click **Replay the tour** (or press Ctrl K and choose **Take the tour**). The tour is shown once. If you close it half way it does not come back by itself; **Help** offers to resume it where you stopped.
 
 ## The sidebar {#the-sidebar}
 

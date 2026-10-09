@@ -257,9 +257,15 @@ describe('the first-login tour', () => {
     expect(puts).toHaveLength(0);
   });
 
-  it('picks up an interrupted tour where it stopped', async () => {
+  it('does not pop up again for an interrupted tour (new login, other device); Help resumes it', async () => {
     me = makeMe({ status: 'in_progress', step: 3 });
+    const user = userEvent.setup();
     mount();
+    await screen.findByTestId('state');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(puts).toHaveLength(0);
+    await user.click(screen.getByText('resume'));
     expect(await screen.findByTestId('tour-progress')).toHaveTextContent(/Step 4 of/);
   });
 
@@ -268,6 +274,7 @@ describe('the first-login tour', () => {
     workstations = [];
     const user = userEvent.setup();
     mount();
+    await user.click(await screen.findByText('resume'));
     expect(await screen.findByTestId('tour-offer')).toHaveTextContent('Add a workstation');
     await user.click(screen.getByTestId('tour-offer'));
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -279,6 +286,7 @@ describe('the first-login tour', () => {
     me = makeMe({ status: 'in_progress', step: 100 });
     const user = userEvent.setup();
     mount();
+    await user.click(await screen.findByText('resume'));
     await screen.findByRole('dialog');
     expect(screen.queryByTestId('tour-offer')).toBeNull();
     await user.click(screen.getByTestId('tour-next'));
