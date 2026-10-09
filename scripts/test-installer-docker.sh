@@ -41,9 +41,9 @@ for image in "${IMAGES[@]}"; do
     echo "tester ALL=(ALL) NOPASSWD:ALL" >/etc/sudoers.d/tester
     printf "export GUILDWISE_YES=1 GUILDWISE_MOCK=1 GUILDWISE_SKIP_CLAUDE=1\n%s\n" "$ONE_LINER" >/home/tester/run.sh
     su - tester -c "bash /home/tester/run.sh"
-    # run it again: an upgrade/repair must succeed and keep the pairing
+    # run it again: an upgrade/repair must succeed, keep the pairing and report the spent code instead of failing
     printf "export GUILDWISE_YES=1 GUILDWISE_MOCK=1 GUILDWISE_SKIP_CLAUDE=1\n%s\n" "$ONE_LINER" >/home/tester/run2.sh
-    su - tester -c "bash /home/tester/run2.sh" | grep -q "keeping that pairing"
+    su - tester -c "bash /home/tester/run2.sh" | grep -q "keeping the existing pairing"
     test -f /home/tester/.config/systemd/user/aom-runner.service
   '; then
     echo "FAILED on $image" >&2

@@ -29,7 +29,7 @@ The link works for 30 minutes. The script embeds the server URL, a fresh **singl
 4. installs Claude Code (`npm install -g @anthropic-ai/claude-code`);
 5. optionally installs yt-dlp (asks, default yes) and Docker (asks, default no);
 6. downloads `aom-runner-<version>.tgz` from the app, verifies its sha256 against the value embedded in the script and unpacks it to `~/.local/share/guildwise/runner/<version>` (`current` points at the active version; `~/.local/bin/aom-runner` and `aom` link to it);
-7. pairs (`aom-runner pair`), unless the machine is already paired;
+7. pairs (`aom-runner pair`) with the workstation the one-time code belongs to. A machine that already has a runner (any server or organization) keeps it: the installer upgrades it only if the server offers a newer version, and the new code pairs it with the new workstation instead of failing or installing a second copy; a code that was already used (the same command run again) is reported and the existing pairing stays;
 8. asks which folders hold your code (suggests `~/src`) and runs `aom-runner repos add` for each;
 9. walks you through the `claude` sign-in: subscription (browser login, usage counts against your plan) or API key (stored in `config.json`, mode 0600), or later;
 10. installs the systemd **user service** `aom-runner` (unit in `~/.config/systemd/user`, `PATH` set to the Node and Claude directories), enables lingering (`loginctl enable-linger`) so it survives logout and starts at boot, waits for the runner to connect and runs `aom-runner doctor`, streaming each line to the wizard.
@@ -40,7 +40,7 @@ Without a running systemd (a container, or WSL without `systemd=true`) the unit 
 
 **Windows:** the PowerShell script elevates itself, enables WSL2 and installs Ubuntu if needed (when Windows has to restart it registers a `RunOnce` entry and continues after you sign in; a copy of the script and the Linux installer are kept in `%LOCALAPPDATA%\GuildwiseHQ`), creates the Ubuntu user if the distribution has only root, sets `systemd=true` in `/etc/wsl.conf`, sets `vmIdleTimeout=-1` in `%USERPROFILE%\.wslconfig`, registers the **"WSL Boot"** scheduled task (at logon: `wsl.exe -d Ubuntu --exec sleep infinity`), turns lingering on for the Ubuntu user and runs the Linux installer inside Ubuntu.
 
-All installers are **idempotent**: running the command again upgrades the runner, repairs the service and keeps the pairing (`GUILDWISE_REPAIR=1` pairs again). They finish with a success or failure summary that links to the install help (`/help/install-troubleshooting`) and Contact us (`/contact`).
+All installers are **idempotent**: running the command again upgrades the runner, repairs the service and keeps the existing pairing(s) and adds the new one when the command carries a fresh code. They finish with a success or failure summary that links to the install help (`/help/install-troubleshooting`) and Contact us (`/contact`).
 
 Environment variables the Linux and macOS scripts understand (unattended installs and tests): `GUILDWISE_YES=1` (take every default, never ask), `GUILDWISE_NAME` (workstation name), `GUILDWISE_REPO_DIRS` (space-separated folders), `GUILDWISE_WITH_YTDLP`, `GUILDWISE_WITH_DOCKER`, `GUILDWISE_WITH_HOMEBREW` (1 or 0), `GUILDWISE_MOCK=1` (enable the mock runtime), `GUILDWISE_SKIP_CLAUDE=1` (skip the sign-in), `GUILDWISE_SKIP_CLAUDE_INSTALL=1`, `GUILDWISE_ALLOW_ROOT=1`.
 

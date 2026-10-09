@@ -107,7 +107,31 @@ sha256_of() {
   else return 1; fi
 }
 
+# The version of a runner that is already installed here (empty: none). The installer keeps it and only upgrades it.
+existing_runner_version() {
+  [ -x "${RUNNER_ROOT}/current/aom-runner" ] || return 0
+  "${RUNNER_ROOT}/current/aom-runner" --version 2>/dev/null | head -n1 | tr -d '[:space:]' || true
+}
+
+# 0 when version $1 is newer than version $2 (plain dotted numbers, optional suffix after a dash).
+version_newer() {
+  [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
+}
+
 install_runner_release() {
+  local before; before="$(existing_runner_version)"
+  if [ -n "${before}" ]; then
+    note "A runner ${before} is already installed on this computer: keeping it and its settings (upgrading only if this server offers a newer one)."
+    report "Runner" info "existing runner ${before}"
+    if [ -n "${RELEASE_VERSION}" ] && version_newer "${before}" "${RELEASE_VERSION}"; then
+      step_ok "The installed runner ${before} is newer than this server's ${RELEASE_VERSION}: kept as it is"
+      mkdir -p "${BIN_DIR}"
+      ln -sfn "${RUNNER_ROOT}/current/aom-runner" "${BIN_DIR}/aom-runner" 2>/dev/null || true
+      return
+    fi
+  elif have aom-runner && [ "$(command -v aom-runner)" != "${BIN_DIR}/aom-runner" ]; then
+    warn "Another aom-runner is on this computer ($(command -v aom-runner)). The installer adds its own copy in ${RUNNER_ROOT} and uses that one."
+  fi
   if [ -z "${RELEASE_VERSION}" ] || [ -z "${RELEASE_SHA256}" ]; then
     die "This ${APP_NAME} server has no runner download to offer." "Ask your administrator to publish the runner release, then create a new install command."
   fi
@@ -129,7 +153,8 @@ install_runner_release() {
     tar -xzf "${file}" -C "${target}" || die "The runner archive could not be unpacked." "Run the command again."
     printf '%s' "${RELEASE_SHA256}" >"${target}/.sha256"
     rm -rf "${tmp}"
-    step_ok "Runner ${RELEASE_VERSION} installed"
+    if [ -n "${before}" ] && [ "${before}" != "${RELEASE_VERSION}" ]; then step_ok "Runner upgraded from ${before} to ${RELEASE_VERSION}"
+    else step_ok "Runner ${RELEASE_VERSION} installed"; fi
   fi
   ln -sfn "${target}/aom-runner" "${RUNNER_ROOT}/current"
   mkdir -p "${BIN_DIR}"
@@ -143,13 +168,21 @@ is_paired() {
   [ -f "${DATA_DIR}/config.json" ] && grep -q '"runnerToken"' "${DATA_DIR}/config.json" 2>/dev/null
 }
 
+# The server a config.json is paired with (empty when unreadable).
+paired_server() {
+  sed -n 's/.*"serverUrl": *"\([^"]*\)".*/\1/p' "${DATA_DIR}/config.json" 2>/dev/null | head -n1
+}
+
+# Pairs this computer's runner with the workstation the one-time code belongs to. A runner that is already paired
+# (to this server or another organization's) is kept: the code adds the new workstation instead of failing or
+# installing a second runner. Running the same command twice is fine: a used code is reported, not treated as an error.
 pair_runner() {
   local name="${GUILDWISE_NAME:-${DEFAULT_NAME}}"
   [ -n "${name}" ] || name="$(hostname 2>/dev/null || echo 'My workstation')"
-  if is_paired && [ "${GUILDWISE_REPAIR:-}" != 1 ]; then
-    step_ok "Already paired with a server; keeping that pairing (set GUILDWISE_REPAIR=1 to pair again)"
-    report "Pairing" info "already paired"
-    return
+  local already=0
+  if is_paired; then
+    already=1
+    note "This computer's runner is already paired with $(paired_server). Keeping it and pairing it with this workstation as well."
   fi
   local mock=()
   [ "${GUILDWISE_MOCK:-}" = 1 ] && mock=(--mock)
@@ -159,7 +192,14 @@ pair_runner() {
     report "Paired" ok "${name}"
   else
     case "${out}" in
-      *401*|*invalid*|*expired*) die "The one-time pairing code was refused (it is single-use and expires after 30 minutes)." "Go back to the Add a workstation page, choose your system again and copy the new command." ;;
+      *401*|*invalid*|*expired*)
+        if [ "${already}" = 1 ]; then
+          # The same command was run again: its single-use code is spent, and the pairing it made is still in place.
+          step_ok "The one-time pairing code was already used; keeping the existing pairing"
+          report "Pairing" info "code already used; kept existing pairing"
+          return
+        fi
+        die "The one-time pairing code was refused (it is single-use and expires after 30 minutes)." "Go back to the Add a workstation page, choose your system again and copy the new command." ;;
       *) die "Pairing failed: ${out}" "Check that this computer can reach ${SERVER_URL}, then run the command again." ;;
     esac
   fi
