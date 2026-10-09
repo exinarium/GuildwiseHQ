@@ -70,6 +70,13 @@ export const hygieneProjectors: Record<string, Projector> = {
       `UPDATE project_repos SET working_branch=$2, working_branch_set_by=$3, working_branch_set_at=$4 WHERE id=$1`,
       [p.repoId, p.workingBranch, p.setBy, e.createdAt],
     );
+    // Cards the runner turned away for the old branch are dispatchable again at once.
+    await exec(
+      tx,
+      `UPDATE cards SET last_rejection=NULL, retry_after=NULL, retry_failures=0, retry_episode_id=NULL
+        WHERE repo_id=$1 AND last_rejection->>'kind' = 'branch'`,
+      [p.repoId],
+    );
   },
 
   HygieneRepoReported: async (tx, e) => {

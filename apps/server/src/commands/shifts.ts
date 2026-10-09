@@ -25,7 +25,8 @@ import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_AC
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { applyQuestionReport, endQuestionShift } from './escalation.ts';
 import { buildDigestEvents } from './feeds.ts';
-import { loopBreakerPlan } from './loop-breaker.ts';
+import { workingBranchQuestionEvents } from './hygiene.ts';
+import { loopBreakerPlan, rejectionBackoffEvents } from './loop-breaker.ts';
 import { raiseQuestion } from './questions.ts';
 import { rebaseConflictEvents } from './rebase.ts';
 import { buildPublicationEvents } from './research.ts';
@@ -113,6 +114,7 @@ export async function releaseClaimEvents(
   message: string | null,
   shiftOutcome: ShiftEndOutcome | null,
   extraEvents: AppendInput[] = [],
+  rejection?: { reason: string; detail: string; kind?: 'branch'; repoId?: string },
 ): Promise<AppendInput[]> {
   const events: AppendInput[] = [...extraEvents];
   events.push({
@@ -125,6 +127,7 @@ export async function releaseClaimEvents(
         agentId: card.claimed_by_agent_id,
         reason,
         lastHandoffId: await lastHandoffId(tx, card.id),
+        ...(rejection ? { rejection } : {}),
       },
     },
     actor: SYSTEM_ACTOR,
@@ -530,10 +533,63 @@ export async function applyShiftRejected(
   } else if (msg.reason === 'environment_not_ready' && msg.environment) {
     extra.push(...(await environmentNotReadyEvents(ctx, tx, ws, card, msg.environment)));
   }
+  let rejection: { reason: string; detail: string; kind?: 'branch'; repoId?: string } | undefined;
+  if (msg.reason === 'worktree_failed' && msg.branchProblem && card.repo_id) {
+    const branch = await branchProblemEvents(ctx, tx, card, msg.branchProblem);
+    extra.push(...branch.events);
+    rejection = branch.rejection;
+  } else if (['repo_missing', 'worktree_failed', 'runtime_unavailable', 'internal'].includes(msg.reason)) {
+    rejection = { reason: msg.reason, detail: msg.detail ?? msg.reason.replaceAll('_', ' ') };
+  }
   const text = `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
-  await ctx.store.append(await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra), {
-    tx,
-  });
+  await ctx.store.append(
+    await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra, rejection),
+    { tx },
+  );
+}
+
+/**
+ * The runner says the card's working branch does not exist in its clone. Asks the manager (one open working-branch
+ * question per repository: later rejections add nothing) with the repository's branches as options and its default
+ * branch preselected, and holds the card back with a growing pause so the queue is not hammered. A branch the manager
+ * confirmed is never changed here: the question offers it, the manager decides.
+ */
+async function branchProblemEvents(
+  ctx: Ctx,
+  tx: Tx,
+  card: Row,
+  problem: { base: string; defaultBranch?: string | undefined; branches: string[] },
+): Promise<{
+  events: AppendInput[];
+  rejection: { reason: string; detail: string; kind: 'branch'; repoId: string };
+}> {
+  const repo = await one(tx, 'SELECT * FROM project_repos WHERE id=$1 AND removed_at IS NULL', [
+    card.repo_id,
+  ]);
+  const project = await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id]);
+  const where = repo?.name ?? 'the repository';
+  const rejection = {
+    reason: 'worktree_failed',
+    detail: `working branch '${problem.base}' does not exist in ${where}${problem.defaultBranch ? ` (default branch is ${problem.defaultBranch})` : ''}`,
+    kind: 'branch' as const,
+    repoId: card.repo_id as string,
+  };
+  const events = rejectionBackoffEvents(ctx, card);
+  if (repo && project) {
+    events.push(
+      ...(await workingBranchQuestionEvents(ctx, tx, project, repo, {
+        reason: repo.working_branch ? 'manual' : 'unconfirmed',
+        branches: problem.branches,
+        missing: {
+          base: problem.base,
+          defaultBranch: problem.defaultBranch ?? null,
+          cardId: card.id,
+          cardRef: card.ref,
+        },
+      })),
+    );
+  }
+  return { events, rejection };
 }
 
 export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerToServerOf<'shift.ended'>) {

@@ -119,6 +119,19 @@ describe('repository hygiene request', () => {
     expect(await questions()).toHaveLength(1);
   });
 
+  it('a repository with exactly one branch has it preselected as the suggested answer', async () => {
+    const [open] = await questions();
+    await ok(owner('POST', `/api/desk/${open?.id}/dismiss`, {}));
+    const { start } = await startHygiene();
+    await finish(start, {
+      repos: [result({ branches: ['master'], problem: { kind: 'needs_branch', detail: 'not confirmed' } })],
+    });
+    const [item] = await questions();
+    expect(item?.recommendation).toBe('branch:master');
+    expect(item?.options.map((o: any) => o.id)).toEqual(['branch:master', 'other']);
+    expect((await repoRow()).working_branch).toBeNull(); // suggested, never assumed
+  });
+
   it('a missing branch that holds back a commit is a blocking, pinned question', async () => {
     // settle the open one first, then see the blocking variant
     const [open] = await questions();

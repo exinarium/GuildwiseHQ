@@ -13,6 +13,8 @@ export const WorkabilitySchema = z.object({
   reason: z.string().optional(),
   /** What to hire to fix a `blocked` card: the HR board's Hire form is prefilled with it. */
   hire: z.object({ roleKey: z.string(), seniority: Seniority.optional() }).optional(),
+  /** Set when the cause is a project setting (a working branch the runner rejected): the tab to open in project settings. */
+  settings: z.enum(['repositories']).optional(),
 });
 export type Workability = z.infer<typeof WorkabilitySchema>;
 

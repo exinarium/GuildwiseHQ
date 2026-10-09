@@ -278,6 +278,12 @@ export interface BranchQuestion {
   /** What triggered it, for the explanation ("phase WEB-P2", "a new intake"). */
   because?: string;
   phaseId?: string;
+  /**
+   * The runner turned a card away because this branch does not exist in the clone: the question is linked to the card
+   * and says what is wrong (the system asks and it is pinned, so it reaches the manager without the BA's triage hold);
+   * the card stays queued, retried with a growing pause. `defaultBranch` is the repository's own.
+   */
+  missing?: { base: string; defaultBranch?: string | null; cardId: string; cardRef: string };
 }
 
 /**
@@ -301,12 +307,22 @@ export async function workingBranchQuestionEvents(
   if (open) return [];
   const current: string | null = repo.working_branch ?? null;
   const known: string[] = q.branches?.length ? q.branches : (repo.known_branches ?? []);
-  const branches = [...new Set(known)].filter((b) => b !== current).slice(0, MAX_OPTIONS);
+  // "Keep" makes no sense for a branch that does not exist.
+  const keep = current && !q.missing ? current : null;
+  const branches = [...new Set(known)].filter((b) => b !== keep).slice(0, MAX_OPTIONS);
+  // The suggested answer: the repository's default branch when known, else the only branch there is.
+  const defaultBranch = q.missing?.defaultBranch ?? null;
+  const suggested = defaultBranch ?? (branches.length === 1 ? (branches[0] as string) : null);
+  if (suggested && suggested !== keep && !branches.includes(suggested)) branches.unshift(suggested);
   const options: DeskOption[] = [
-    ...(current
-      ? [{ id: WORKING_BRANCH_KEEP_OPTION, label: `Keep ${current}`, description: 'No change.' }]
-      : []),
-    ...branches.map((b) => ({ id: branchOptionId(b), label: b })),
+    ...(keep ? [{ id: WORKING_BRANCH_KEEP_OPTION, label: `Keep ${keep}`, description: 'No change.' }] : []),
+    ...branches.map((b) => ({
+      id: branchOptionId(b),
+      label: b,
+      ...(b === suggested
+        ? { description: defaultBranch === b ? "The repository's default branch." : 'The only branch.' }
+        : {}),
+    })),
     {
       id: WORKING_BRANCH_OTHER_OPTION,
       label: 'Another branch',
@@ -316,16 +332,20 @@ export async function workingBranchQuestionEvents(
   const uncommitted = q.uncommitted ?? [];
   const blocking = !current && uncommitted.length > 0;
   const where = `${repo.name} (${project.key})`;
-  const title = current
-    ? `Keep ${current} as the working branch of ${where}${q.because ? ` for ${q.because}` : ''}, or use another branch?`
-    : `Which branch is the working branch of ${where}?`;
-  const doing = current
-    ? `Confirming the working branch of ${where}${q.because ? ` because of ${q.because}` : ''}. Hygiene commits and pushes unsaved work to this branch and agents merge their cards into it.${q.reason === 'phase' ? ' A branch you name here applies to this phase only; the repository keeps its default and uses it again when the phase is done.' : ''}`
-    : `Repository hygiene found no confirmed working branch for ${where}, so it did not commit or push anything. ${
-        uncommitted.length
-          ? `${uncommitted.length} file(s) have uncommitted changes (${uncommitted.slice(0, 8).join(', ')}${uncommitted.length > 8 ? ', ...' : ''}); they stay untouched until you answer.`
-          : 'Nothing is waiting to be committed.'
-      } Pick the branch hygiene should commit to and push, or name another one.`;
+  const title = q.missing
+    ? `Working branch '${q.missing.base}' does not exist in ${where}${defaultBranch ? ` (its default branch is ${defaultBranch})` : ''}: which branch should it be?`
+    : current
+      ? `Keep ${current} as the working branch of ${where}${q.because ? ` for ${q.because}` : ''}, or use another branch?`
+      : `Which branch is the working branch of ${where}?`;
+  const doing = q.missing
+    ? `The runner could not start ${q.missing.cardRef}: working branch '${q.missing.base}' does not exist in this repo${defaultBranch ? `; its default branch is '${defaultBranch}'` : ''}. Cards on this repository are retried with a growing pause until the branch is set.`
+    : current
+      ? `Confirming the working branch of ${where}${q.because ? ` because of ${q.because}` : ''}. Hygiene commits and pushes unsaved work to this branch and agents merge their cards into it.${q.reason === 'phase' ? ' A branch you name here applies to this phase only; the repository keeps its default and uses it again when the phase is done.' : ''}`
+      : `Repository hygiene found no confirmed working branch for ${where}, so it did not commit or push anything. ${
+          uncommitted.length
+            ? `${uncommitted.length} file(s) have uncommitted changes (${uncommitted.slice(0, 8).join(', ')}${uncommitted.length > 8 ? ', ...' : ''}); they stay untouched until you answer.`
+            : 'Nothing is waiting to be committed.'
+        } Pick the branch hygiene should commit to and push, or name another one.`;
   const deskItemId = randomUUID();
   return [
     {
@@ -335,17 +355,22 @@ export async function workingBranchQuestionEvents(
         payload: {
           deskItemId,
           projectId: project.id,
-          askedBy: await askerOf(tx, project, q.agentId),
+          askedBy: q.missing ? { kind: 'system' as const } : await askerOf(tx, project, q.agentId),
           doing,
           question: title,
           options,
-          ...(current ? { recommendation: WORKING_BRANCH_KEEP_OPTION } : {}),
+          ...(keep
+            ? { recommendation: WORKING_BRANCH_KEEP_OPTION }
+            : suggested
+              ? { recommendation: branchOptionId(suggested) }
+              : {}),
+          ...(q.missing ? { cardId: q.missing.cardId } : {}),
           blocking,
           routedTo: 'manager',
           chainLevel: 'desk',
           dedupLedgerIds: [],
-          affectedCardIds: [],
-          pinned: blocking,
+          affectedCardIds: q.missing ? [q.missing.cardId] : [],
+          pinned: blocking || !!q.missing,
           subkind: WORKING_BRANCH_SUBKIND,
           data: {
             repoId: repo.id,

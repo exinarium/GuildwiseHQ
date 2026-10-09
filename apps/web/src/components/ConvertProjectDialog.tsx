@@ -319,6 +319,7 @@ export function ConvertProjectDialog({
               />
               <TextInput
                 label="Branch (optional)"
+                hint="Leave empty and the manager is asked which branch to use once the runner has seen the repository."
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
                 data-testid="convert-repo-branch"

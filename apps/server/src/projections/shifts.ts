@@ -58,6 +58,11 @@ export const shiftProjectors: Record<string, Projector> = {
           p.projectId ?? null,
         ],
       );
+      // A shift that started is the end of "the last attempt failed" on the board.
+      if (p.cardId)
+        await exec(tx, 'UPDATE cards SET last_rejection=NULL WHERE id=$1 AND last_rejection IS NOT NULL', [
+          p.cardId,
+        ]);
     }
     if (p.worktree && p.cardId) {
       await exec(

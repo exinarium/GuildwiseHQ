@@ -1,5 +1,6 @@
 import type { BoardCard, Workability } from '@aom/shared';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { CardTile } from '../components/BoardView.tsx';
@@ -49,16 +50,19 @@ describe('workability warning', () => {
     expect(screen.queryByTestId('workability-warning')).toBeNull();
   });
 
-  it('red and accessible for a card nobody could take, with the reason and a prefilled hire link', () => {
+  it('red and accessible for a card nobody could take, with the reason and a prefilled hire link', async () => {
     renderTile(blocked);
     const warn = screen.getByTestId('workability-warning');
     expect(warn).toHaveAttribute('data-level', 'blocked');
     const button = screen.getByRole('button', { name: blocked.reason as string });
     expect(button.className).toContain('text-danger');
-    // the reason is the tooltip the button points at (shown on hover and on keyboard focus)
-    expect(screen.getByRole('tooltip')).toHaveTextContent('needs a second senior reviewer other than Linus');
+    // the reason is the popover the button points at (hover, keyboard focus or a click open it)
+    await userEvent.click(button);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'needs a second senior reviewer other than Linus',
+    );
     expect(button).toHaveAttribute('aria-describedby', screen.getByRole('tooltip').id);
-    const hire = screen.getByTestId('workability-hire');
+    const hire = await screen.findByTestId('workability-hire');
     expect(hire).toHaveTextContent('Hire senior reviewer');
     expect(hire).toHaveAttribute('href', `/agents?hire=reviewer&seniority=senior&projectId=${PROJECT}`);
   });
@@ -79,12 +83,55 @@ describe('workability warning', () => {
     );
   });
 
-  it('is usable on its own (card detail)', () => {
+  it('is usable on its own (card detail)', async () => {
     render(
       <MemoryRouter>
         <WorkabilityWarning workability={blocked} projectId={PROJECT} />
       </MemoryRouter>,
     );
-    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('workability-warning').querySelector('button') as HTMLElement);
+    expect(await screen.findByRole('tooltip')).toBeInTheDocument();
+  });
+
+  it('the reason is reachable by click, outside the card (a portal escapes overflow-hidden), and Esc closes it', async () => {
+    renderTile(waiting);
+    expect(screen.queryByTestId('workability-reason')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: waiting.reason as string }));
+    const reason = await screen.findByTestId('workability-reason');
+    expect(reason).toHaveTextContent('Reviewer Linus is offline');
+    expect(screen.getByTestId('card-tile-TOY-1').contains(reason)).toBe(false);
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('workability-reason')).toBeNull());
+  });
+
+  it('opens on keyboard focus', async () => {
+    renderTile(waiting);
+    await userEvent.tab(); // the tile link
+    await userEvent.tab();
+    expect(await screen.findByTestId('workability-reason')).toHaveTextContent('offline');
+  });
+
+  it('a runner rejection for the working branch links to the repository settings', async () => {
+    render(
+      <MemoryRouter>
+        <WorkabilityWarning
+          workability={{
+            ok: false,
+            level: 'waiting',
+            reason:
+              "Last attempt failed: working branch 'main' does not exist in Barcode Camera (default branch is master). Fix the working branch in project settings.",
+            settings: 'repositories',
+          }}
+          projectId={PROJECT}
+        />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole('button'));
+    expect(await screen.findByTestId('workability-reason')).toHaveTextContent('Last attempt failed');
+    expect(screen.getByTestId('workability-settings')).toHaveAttribute(
+      'href',
+      `/projects/${PROJECT}/settings#repos`,
+    );
+    expect(screen.queryByTestId('workability-hire')).toBeNull();
   });
 });

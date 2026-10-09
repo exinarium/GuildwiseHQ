@@ -106,3 +106,33 @@ export async function openLoopAlerts(tx: Tx, cardId: string): Promise<string[]> 
   ]);
   return r.rows.map((x) => x.id as string);
 }
+
+/**
+ * A runner turned the shift away for a reason that will not fix itself (the working branch does not exist): the card
+ * is held back from the first rejection, 1 min and doubling per further rejection of the episode, capped at 1 h, so
+ * the dispatcher does not claim it again every tick. No desk alert of its own: the cause has its own question.
+ * A manager releasing the back-off, or fixing the cause, ends the episode.
+ */
+export function rejectionBackoffEvents(ctx: Ctx, card: Row): AppendInput[] {
+  const failures = Number(card.retry_failures ?? 0) + 1;
+  const minutes = Math.min(LOOP_BREAKER.capMinutes, LOOP_BREAKER.baseMinutes * 2 ** (failures - 1));
+  const until = new Date(ctx.clock.now().getTime() + minutes * 60_000);
+  const inEpisode = Number(card.retry_failures ?? 0) > 0 && !!card.retry_episode_id;
+  return [
+    {
+      streamId: streamId.card(card.id),
+      event: {
+        type: 'CardRetryDeferred',
+        payload: {
+          cardId: card.id,
+          until: until.toISOString(),
+          failures,
+          episodeId: inEpisode ? card.retry_episode_id : randomUUID(),
+          newEpisode: !inEpisode,
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(card.org_id, card.project_id),
+    },
+  ];
+}

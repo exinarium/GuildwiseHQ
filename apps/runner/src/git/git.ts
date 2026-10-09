@@ -55,6 +55,29 @@ export async function hasRemote(cwd: string, name = 'origin'): Promise<boolean> 
   return r.exitCode === 0;
 }
 
+/** Short names of a clone's branches (local and origin), sorted; `HEAD` excluded. */
+export async function branchNames(cwd: string): Promise<string[]> {
+  const r = await git(cwd, ['for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes/origin']);
+  const names = new Set<string>();
+  for (const ref of r.stdout.split('\n')) {
+    const m = /^refs\/(?:heads|remotes\/origin)\/(.+)$/.exec(ref.trim());
+    if (m?.[1] && m[1] !== 'HEAD') names.add(m[1]);
+  }
+  return [...names].sort();
+}
+
+/**
+ * The repository's own default branch as the clone knows it: `origin/HEAD`, else the only branch there is. Null when
+ * it cannot be told (several branches and no `origin/HEAD`).
+ */
+export async function defaultBranchOf(cwd: string, branches?: string[]): Promise<string | null> {
+  const r = await git(cwd, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+  const head = r.exitCode === 0 ? /^origin\/(.+)$/.exec(r.stdout.trim())?.[1] : undefined;
+  if (head) return head;
+  const all = branches ?? (await branchNames(cwd));
+  return all.length === 1 ? (all[0] as string) : null;
+}
+
 /** `git --version` as [major, minor], or null. */
 export async function gitVersion(): Promise<{ raw: string; major: number; minor: number } | null> {
   try {

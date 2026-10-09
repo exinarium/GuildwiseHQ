@@ -254,6 +254,20 @@ describe('supervisor', () => {
     expect(h!.server.invalid).toEqual([]);
   });
 
+  it('rejects a base branch the clone lacks with a precise reason and the branches it has', async () => {
+    await start(async () => {});
+    const msg = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized, ref: 'TOY-9' }) as any;
+    msg.worktree.baseBranch = 'trunk';
+    h!.server.send('shift.start', msg);
+    const rej = await h!.server.waitFor('shift.rejected', (m) => m.shiftId === msg.shiftId);
+    expect(rej.reason).toBe('worktree_failed');
+    expect(rej.detail).toContain(
+      "working branch 'trunk' does not exist in this repo; its default branch is 'main'",
+    );
+    expect(rej.branchProblem).toMatchObject({ base: 'trunk', defaultBranch: 'main', branches: ['main'] });
+    expect(h!.server.invalid).toEqual([]);
+  });
+
   it('shift.stop ends the shift as stopped and acks the stop', async () => {
     await start(async (_i, ctl) => {
       await new Promise<void>((resolve) => ctl.signal.addEventListener('abort', () => resolve()));

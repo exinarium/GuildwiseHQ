@@ -4,9 +4,25 @@ import { dirname } from 'node:path';
 import type { WorktreeSpec } from '@aom/shared';
 import { isSafeGitRef } from '@aom/shared';
 import { confineAny } from '../fs-safe.ts';
-import { currentBranch, git, gitOk, hasRemote, revParse } from './git.ts';
+import { branchNames, currentBranch, defaultBranchOf, git, gitOk, hasRemote, revParse } from './git.ts';
 
 export class WorktreeError extends Error {}
+
+/**
+ * The working branch the server named does not exist in the clone. Carries what the manager needs to fix it: the
+ * repository's default branch (when the clone knows it) and the branches there are.
+ */
+export class BaseBranchMissingError extends WorktreeError {
+  constructor(
+    readonly base: string,
+    readonly defaultBranch: string | null,
+    readonly branches: string[],
+  ) {
+    super(
+      `working branch '${base}' does not exist in this repo${defaultBranch ? `; its default branch is '${defaultBranch}'` : ''}`,
+    );
+  }
+}
 
 export interface WorktreeResult {
   path: string;
@@ -97,7 +113,10 @@ export async function ensureWorktree(input: EnsureWorktreeInput): Promise<Worktr
       if (await revParse(repoPath, `refs/remotes/origin/${base}`)) startPoint = `origin/${base}`;
     }
   }
-  if (!(await revParse(repoPath, startPoint))) fail(`Base branch ${base} not found in ${repoPath}`);
+  if (!(await revParse(repoPath, startPoint))) {
+    const branches = await branchNames(repoPath);
+    throw new BaseBranchMissingError(base, await defaultBranchOf(repoPath, branches), branches);
+  }
   const r = await git(repoPath, ['worktree', 'add', '-b', branch, '--', path, startPoint]);
   if (r.exitCode !== 0) fail(`git worktree add -b ${branch} failed: ${r.stderr.trim()}`);
   return result(true);

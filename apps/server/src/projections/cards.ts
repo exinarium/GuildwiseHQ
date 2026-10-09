@@ -260,9 +260,10 @@ export const cardProjectors: Record<string, Projector> = {
                   status = CASE WHEN status='claimed' THEN 'queued' ELSE status END,
                   home_workstation_id = CASE WHEN $4 = 'workstation_unlinked' THEN NULL ELSE home_workstation_id END,
                   worktree_path = CASE WHEN $4 = 'workstation_unlinked' THEN NULL ELSE worktree_path END,
+                  last_rejection = COALESCE($5::jsonb, last_rejection),
                   updated_at=$3
             WHERE id=$1 AND claim_id=$2`,
-          [p.cardId, p.claimId, e.createdAt, p.reason],
+          [p.cardId, p.claimId, e.createdAt, p.reason, p.rejection ? JSON.stringify(p.rejection) : null],
         ),
       { agentId: p.agentId },
     );

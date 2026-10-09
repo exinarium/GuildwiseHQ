@@ -349,6 +349,15 @@ export const ShiftRejectedSchema = msg('shift.rejected', {
   conflictedFiles: z.array(z.string()).optional(),
   /** Set with `reason: 'environment_not_ready'`. */
   environment: z.object({ problem: TestEnvProblem, detail: z.string().optional() }).optional(),
+  /** Set with `reason: 'worktree_failed'` when the card's base (working) branch does not exist in the clone. */
+  branchProblem: z
+    .object({
+      base: z.string(),
+      /** `origin/HEAD` of the clone, or its only branch. */
+      defaultBranch: z.string().optional(),
+      branches: z.array(z.string()).max(200),
+    })
+    .optional(),
 });
 export const ShiftStartedSchema = msg('shift.started', {
   shiftId: z.uuid(),

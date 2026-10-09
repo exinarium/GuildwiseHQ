@@ -32,6 +32,7 @@ import { checkFeedItemsFetched, FetchedUrls } from '../feeds/validation.ts';
 import { computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git } from '../git/git.ts';
 import {
+  BaseBranchMissingError,
   ensureWorktree,
   RebaseConflictError,
   rebaseOntoBase,
@@ -314,6 +315,7 @@ export class ShiftSupervisor {
     detail?: string,
     conflictedFiles?: string[],
     environment?: { problem: string; detail?: string },
+    branchProblem?: { base: string; defaultBranch?: string; branches: string[] },
   ): void {
     this.deps.transport.send('shift.rejected', {
       shiftId,
@@ -321,6 +323,7 @@ export class ShiftSupervisor {
       ...(detail ? { detail } : {}),
       ...(conflictedFiles ? { conflictedFiles } : {}),
       ...(environment ? { environment } : {}),
+      ...(branchProblem ? { branchProblem } : {}),
     });
   }
 
@@ -354,6 +357,12 @@ export class ShiftSupervisor {
       } catch (err) {
         if (err instanceof RebaseConflictError) {
           this.reject(msg.shiftId, 'rebase_conflict', err.message, err.conflictedFiles);
+        } else if (err instanceof BaseBranchMissingError) {
+          this.reject(msg.shiftId, 'worktree_failed', err.message, undefined, undefined, {
+            base: err.base,
+            ...(err.defaultBranch ? { defaultBranch: err.defaultBranch } : {}),
+            branches: err.branches.slice(0, 200),
+          });
         } else if (err instanceof WorktreeError) {
           this.reject(msg.shiftId, 'worktree_failed', err.message);
         } else {

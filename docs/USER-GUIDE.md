@@ -953,8 +953,9 @@ Symptom: the DevOps engineer does not commit or pull in a repository, and the de
 
 | What you see | What it means |
 | --- | --- |
-| A red warning icon on a card, "Not workable" | Nobody hired could ever take this stage. Hire the missing role (the tooltip has a **Hire** link). |
+| A red warning icon on a card, "Not workable" | Nobody hired could ever take this stage. Hire the missing role (hover, focus or click the icon: the explanation has a **Hire** link). |
 | An amber icon, "Waiting" | Agents exist but are offline or busy. It clears by itself. |
+| An amber icon, "Last attempt failed: ..." | The runner turned the last shift down (for a missing working branch it names the branch and the repository's default, and links to Project settings, Repositories). A desk question offers the existing branches, with the default preselected; the message clears when a shift starts. |
 | The card says "waiting on bug" | The tester found a bug and a bug card is being fixed. |
 | A desk item "Could not post the update" | The ticket system refused the post. Fix the login on the workstation and use **Retry**. |
 | Vault sync paused with a conflict | A local and a remote change collided. Resolve it in the vault, then restart the sync. |

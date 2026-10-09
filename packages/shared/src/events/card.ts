@@ -113,6 +113,17 @@ export const cardEvents = [
       agentId: Id,
       reason: ClaimReleaseReason,
       lastHandoffId: Id.optional(),
+      /** `runner_rejected`: why the runner refused the shift, for the board's workability warning. */
+      rejection: z
+        .object({
+          reason: z.string(),
+          /** The runner's detail, readable on its own ("working branch 'main' does not exist in Barcode Camera ..."). */
+          detail: z.string(),
+          /** `branch`: the cause is the repository's working branch (fixed in project settings). */
+          kind: z.enum(['branch']).optional(),
+          repoId: Id.optional(),
+        })
+        .optional(),
     }),
   ),
   defineEvent(

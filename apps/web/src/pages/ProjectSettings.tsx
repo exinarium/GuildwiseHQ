@@ -262,6 +262,7 @@ export function ProjectSettings() {
                 />
                 <TextInput
                   label="Branch (optional)"
+                  hint="Leave empty and the manager is asked which branch to use once the runner has seen the repository."
                   value={repoBranch}
                   onChange={(e) => setRepoBranch(e.target.value)}
                 />

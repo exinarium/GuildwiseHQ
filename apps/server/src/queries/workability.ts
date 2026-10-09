@@ -10,6 +10,19 @@ const BUSY_REPORT_AFTER_MS = 10 * 60_000;
 
 const OK: Workability = { ok: true };
 
+/** The runner's latest rejection of a queued card (`cards.last_rejection`), as the board's warning. */
+function rejected(r: { reason: string; detail: string; kind?: string }): Workability {
+  const detail = r.detail.replace(/\s+/g, ' ').trim().slice(0, 300);
+  return r.kind === 'branch'
+    ? {
+        ok: false,
+        level: 'waiting',
+        reason: `Last attempt failed: ${detail}. Fix the working branch in project settings.`,
+        settings: 'repositories',
+      }
+    : { ok: false, level: 'waiting', reason: `Last attempt failed: ${detail}` };
+}
+
 /** Names `a`, `a and b`, `a, b and c`. */
 const nameList = (names: string[]): string =>
   names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
@@ -81,7 +94,9 @@ export async function cardWorkability(ctx: Ctx, cards: Row[]): Promise<Map<strin
     const project = (await rows(ctx.pool, 'SELECT status FROM projects WHERE id=$1', [c.project_id]))[0];
     if (project?.status !== 'active') continue;
     const verdict = await judge(c, stage, byCard.get(c.id) ?? [], now);
-    if (!verdict.ok) out.set(c.id, verdict);
+    // Someone could take it, but the runner turned the last attempt away: say why (it is the more useful news).
+    if (verdict.level !== 'blocked' && c.last_rejection) out.set(c.id, rejected(c.last_rejection));
+    else if (!verdict.ok) out.set(c.id, verdict);
     else out.set(c.id, OK);
   }
   return out;

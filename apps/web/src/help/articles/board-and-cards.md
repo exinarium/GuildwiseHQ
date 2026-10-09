@@ -26,10 +26,11 @@ A **Blocked** column holds cards that are waiting for your answer from the desk.
 
 ## Why a card does not move {#why-a-card-does-not-move}
 
-If a queued card has a warning icon, no agent can pick it up right now. Hover the icon to see why:
+If a queued card has a warning icon, no agent can pick it up right now. Hover the icon, focus it with the keyboard or click or tap it to see why (Esc closes the explanation):
 
-- **Red, "Not workable"**: no hired agent could ever take this stage. For example, you hired no builders, the Review stage needs a senior reviewer and you only hired juniors, or the only reviewer built the card itself (a reviewer never reviews their own work, and a large change needs two different reviewers). The tooltip has a **Hire** link to open the Hire form with the missing role and seniority pre-filled.
+- **Red, "Not workable"**: no hired agent could ever take this stage. For example, you hired no builders, the Review stage needs a senior reviewer and you only hired juniors, or the only reviewer built the card itself (a reviewer never reviews their own work, and a large change needs two different reviewers). The explanation has a **Hire** link to open the Hire form with the missing role and seniority pre-filled.
 - **Amber, "Waiting"**: agents exist but cannot work right now. Their workstation is offline, the card's repository is not cloned on any of their machines, or they have all been busy with other work for more than ten minutes. This clears by itself when the workstation comes back, the repository is cloned, or the agent is free.
+- **Amber, "Last attempt failed"**: an agent's workstation turned the last shift down, for example because the repository's working branch does not exist there ("working branch 'main' does not exist in Barcode Camera (default branch is master)"). For a branch problem the explanation links to **Project settings, Repositories**, and the same question is waiting on your desk with the repository's branches as options and its default branch preselected. The card is retried with a growing pause meanwhile, and the message clears when you set the branch or a shift starts.
 
 ## Creating a card {#creating-a-card}
 

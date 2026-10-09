@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { computeDiffStats, riskTier } from '../src/git/diffstat.ts';
 import { scanRepos } from '../src/git/repo-scan.ts';
 import {
+  BaseBranchMissingError,
   ensureWorktree,
   RebaseConflictError,
   rebaseOntoBase,
@@ -165,6 +166,57 @@ describe('worktrees', () => {
     expect((err as RebaseConflictError).conflictedFiles).toEqual(['README.md']);
     expect(sh(path, 'git', ['status', '--porcelain'])).toBe('');
     expect(sh(path, 'git', ['branch', '--show-current'])).toBe('aom/toy-1-add-greeting');
+  });
+});
+
+describe('a working branch the clone does not have', () => {
+  const masterOnly = () => {
+    const root = tmp();
+    const origin = join(root, 'origin.git');
+    const clone = join(root, 'barcode');
+    sh(root, 'git', ['init', '--bare', '-b', 'master', origin]);
+    sh(root, 'git', ['clone', origin, clone]);
+    sh(clone, 'git', ['checkout', '-b', 'master']);
+    writeFileSync(join(clone, 'README.md'), '# barcode\n');
+    sh(clone, 'git', ['add', '-A']);
+    sh(clone, 'git', ['commit', '-m', 'initial']);
+    sh(clone, 'git', ['push', '-u', 'origin', 'master']);
+    sh(clone, 'git', ['remote', 'set-head', 'origin', 'master']);
+    return clone;
+  };
+
+  it("says which branch is missing and what the repository's default branch is", async () => {
+    const clone = masterOnly();
+    const err = await ensureWorktree({
+      repoPath: clone,
+      roots: ['/'],
+      spec: spec({ baseBranch: 'main' }),
+      defaultPath: join(tmp(), 'wt', 'BC-1'),
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(BaseBranchMissingError);
+    expect(err).toBeInstanceOf(WorktreeError);
+    expect(err.message).toBe(
+      "working branch 'main' does not exist in this repo; its default branch is 'master'",
+    );
+    expect(err).toMatchObject({ base: 'main', defaultBranch: 'master', branches: ['master'] });
+  });
+
+  it('takes the only branch for the default when origin/HEAD is not set, and none when it cannot tell', async () => {
+    const clone = masterOnly();
+    sh(clone, 'git', ['remote', 'set-head', 'origin', '--delete']);
+    const miss = (base: string) =>
+      ensureWorktree({
+        repoPath: clone,
+        roots: ['/'],
+        spec: spec({ baseBranch: base }),
+        defaultPath: join(tmp(), 'wt', 'BC-2'),
+      }).catch((e) => e);
+    expect((await miss('main')).defaultBranch).toBe('master');
+    sh(clone, 'git', ['branch', 'develop']);
+    const two = await miss('main');
+    expect(two.defaultBranch).toBeNull();
+    expect(two.message).toBe("working branch 'main' does not exist in this repo");
+    expect(two.branches).toEqual(['develop', 'master']);
   });
 });
 
