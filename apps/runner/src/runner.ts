@@ -61,6 +61,11 @@ export interface RunnerOptions {
   startupSweepMs?: number;
   /** How long a sweep waits for the server's answer about live worktrees (default 15 s). */
   sweepAnswerMs?: number;
+  /**
+   * Several pairings in one process share one concurrency budget: this returns how many shifts THIS runner may still
+   * hold given what the others run (machine total minus the others' running shifts). Unset: no shared budget.
+   */
+  sharedCap?: () => number;
 }
 
 /** The long-running runner process: connection, IPC server, supervisor and command handlers. */
@@ -132,7 +137,8 @@ export class Runner {
       findRepo: (norm) => this.findRepo(norm),
       writeVault: (cmd) => this.vaults.write(cmd),
       rpc: (shiftId, method, params) => this.rpc(shiftId, method, params),
-      maxConcurrentShifts: () => this.maxConcurrent,
+      maxConcurrentShifts: () =>
+        Math.min(this.maxConcurrent, this.opts.sharedCap?.() ?? Number.POSITIVE_INFINITY),
       maxShiftMsOverride: opts.maxShiftMsOverride,
       reportWaitMs: opts.reportWaitMs,
       exitGraceMs: opts.exitGraceMs,

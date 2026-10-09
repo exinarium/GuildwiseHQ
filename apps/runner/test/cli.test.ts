@@ -84,4 +84,70 @@ describe('aom-runner cli', () => {
       await server.close();
     }
   }, 60_000);
+
+  it('a second pair adds a pairing to a running runner; pairings and unpair manage them', async () => {
+    const s1 = await FakeServer.start({ token: 'aomr_one' });
+    const s2 = await FakeServer.start({ token: 'aomr_two' });
+    const dir = tmp();
+    const repo = makeRepo();
+    expect(
+      (
+        await run([
+          'pair',
+          '--server',
+          s1.url,
+          '--code',
+          'ABCD-EFGH',
+          '--name',
+          'Acme desk',
+          '--data-dir',
+          dir,
+          '--mock',
+        ])
+      ).exitCode,
+    ).toBe(0);
+    await run(['repos', 'add', repo.scanRoot, '--data-dir', dir]);
+    const child = execa(process.execPath, [tsx, cli, 'start', '--data-dir', dir], {
+      reject: false,
+      extendEnv: true,
+    });
+    try {
+      await s1.waitFor('hello');
+      const before = s1.helloCount;
+      const second = await run([
+        'pair',
+        '--server',
+        s2.url,
+        '--code',
+        'ABCD-EFGH',
+        '--name',
+        'Globex desk',
+        '--data-dir',
+        dir,
+        '--mock',
+      ]);
+      expect(second.exitCode, second.stderr).toBe(0);
+      expect(second.stdout).toContain('Added next to the existing pairings');
+      // the running process starts the new pairing by itself; the first one is not disturbed
+      const hello = await s2.waitFor('hello');
+      expect(hello.repos.map((r) => r.localPath)).toEqual([repo.clone]);
+      expect(s1.helloCount).toBe(before);
+      const list = await run(['pairings', '--data-dir', dir]);
+      expect(list.stdout).toContain('Acme desk');
+      expect(list.stdout).toContain('Globex desk');
+      expect(list.stdout).toContain('running');
+      const status = await run(['status', '--data-dir', dir]);
+      expect(status.stdout).toContain('pairing:');
+      expect(status.stdout).toContain(s2.url);
+      // repos add reaches every pairing; the second pairing has its own data dir
+      const gone = await run(['unpair', 'globex desk', '--data-dir', dir]);
+      expect(gone.exitCode, gone.stderr).toBe(0);
+      expect((await run(['pairings', '--data-dir', dir])).stdout).not.toContain('Globex desk');
+      expect((await run(['unpair', 'nobody', '--data-dir', dir])).exitCode).toBe(1);
+    } finally {
+      child.kill('SIGTERM');
+      await child;
+      await Promise.all([s1.close(), s2.close()]);
+    }
+  }, 90_000);
 });

@@ -94,7 +94,9 @@ describe('an install session', () => {
       expect(ttl).toBeLessThanOrEqual(30 * 60_000);
       expect(s.release).toMatchObject({ version: '0.10.2' });
       expect(s.oneLiner).toContain('http://aom.test/install/');
-      expect(s.oneLiner.startsWith(os === 'windows' ? '[Net.ServicePointManager]' : 'curl -fsSL ')).toBe(true);
+      expect(s.oneLiner.startsWith(os === 'windows' ? '[Net.ServicePointManager]' : 'curl -fsSL ')).toBe(
+        true,
+      );
       expect(s.oneLiner.endsWith(os === 'windows' ? '| iex' : '| bash')).toBe(true);
       expect(s.downloadUrl).toContain('?download=1');
       expect(s.fileName).toMatch(os === 'windows' ? /\.ps1$/ : /\.sh$/);

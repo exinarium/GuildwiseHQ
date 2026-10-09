@@ -108,7 +108,9 @@ describe('rendered scripts', () => {
     const ps = renderPowerShell({ ...win, workstationName: 'Pieter\u2019s Caf\u00e9 \ud83d\ude00' });
     // biome-ignore lint/suspicious/noControlCharactersInRegex: checking for non-ASCII bytes
     expect(ps).not.toMatch(/[^\u0000-\u007f]/);
-    expect(ps).toContain("$DefaultName = ('Pieter' + [char]8217 + 's Caf' + [char]233 + ' ' + [char]55357 + [char]56832)");
+    expect(ps).toContain(
+      "$DefaultName = ('Pieter' + [char]8217 + 's Caf' + [char]233 + ' ' + [char]55357 + [char]56832)",
+    );
     expect(psq("it's \u2018x\u2019")).toBe("('it''s ' + [char]8216 + 'x' + [char]8217)");
     expect(psq('plain')).toBe("'plain'");
   });
