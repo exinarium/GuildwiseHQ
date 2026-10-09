@@ -113,7 +113,10 @@ export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
 export const PasswordResetRequestSchema = z.object({ email: z.email().max(320) });
 export type PasswordResetRequest = z.infer<typeof PasswordResetRequestSchema>;
 /** `POST /api/auth/password-reset/confirm`: the emailed token and the new password (the usual password rules). */
-export const PasswordResetConfirmSchema = z.object({ token: z.string().min(16).max(200), password: PasswordSchema });
+export const PasswordResetConfirmSchema = z.object({
+  token: z.string().min(16).max(200),
+  password: PasswordSchema,
+});
 export type PasswordResetConfirm = z.infer<typeof PasswordResetConfirmSchema>;
 export const PasswordResetTokenParamsSchema = z.object({ token: z.string().min(16).max(200) });
 /** `POST /api/platform/users/:id/send-password-reset`: who the link went to and until when it works. */

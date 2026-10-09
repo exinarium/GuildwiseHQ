@@ -90,7 +90,7 @@ The ink band scales down gracefully; the three benefit bullets are dropped on mo
 - **Do not name the reveal button anything containing the word "password".** The e2e suite uses `getByLabel('Password')`, which matches `aria-label` text as well and would then hit two elements. Use `aria-label="Show characters"` / `"Hide characters"`.
 - Caps Lock hint: on `keydown/keyup` read `event.getModifierState('CapsLock')`; show a warning-tone line with an icon "Caps Lock is on" under the password (`role="status"`). Never block submit.
 - Submit: full width primary "Sign in" (accessible name stays exactly `Sign in`; pending label "Signing in..." and `aria-busy`, button disabled, spinner at the left). Enter submits. The form keeps `aria-label="Sign in"`, `noValidate`.
-- Remember me: not offered (cookie session policy is the server's; do not invent). Forgot password: there is no reset flow, so show "Forgot your password? Ask your admin to send a new invitation." as plain text, not a link.
+- Remember me: not offered (cookie session policy is the server's; do not invent). Forgot password: a link "Forgot your password?" to `/forgot-password` (email form, neutral answer), then `/reset-password/:token` (new password twice; on success back to `/login` with a "Your password is changed" notice).
 - Footer line (12 px, subtle): connection check text "Server reachable" is **not** built (no health call from the login page); instead show the product line "Self-hosted · your data stays on your machines" and the version if the server exposes it. Keep it static copy; drop anything that implies a feature that does not exist.
 - Security niceties that cost nothing: `autocomplete` values as above so password managers work; do not clear the email on failure; clear the password and focus it after a failed attempt.
 
@@ -107,7 +107,7 @@ The ink band scales down gracefully; the three benefit bullets are dropped on mo
 | Email label | Email |
 | Password label | Password |
 | Button | Sign in |
-| Help | Forgot your password? Ask your admin to send a new invitation. |
+| Help | Forgot your password? (link to /forgot-password) |
 
 ## 5. States
 

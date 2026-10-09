@@ -13,6 +13,10 @@ When you sign in for the first time, Guildwise HQ shows you around and introduce
 2. Click the link, choose your name and a password (12 or more characters). If you already have an account, sign in instead and confirm.
 3. You are now logged in and can access the dashboard.
 
+## Forgot your password {#forgot-password}
+
+On the sign-in page click **Forgot your password?** and type your email. We send a link that works once and expires after an hour. Choose a new password (12 or more characters); you are signed out everywhere else, then sign in with the new one. If you use two-factor login you still enter your code. We answer the same way for every address, so the page never tells whether an email has an account. If nothing arrives, check your spam folder or ask your Owner or the platform administrator to send you a link.
+
 Every account belongs to an organization. There are no standalone accounts except for the platform administrator.
 
 ## The tour {#the-tour}

@@ -10,6 +10,8 @@ export const NO_PAGE_HELP = [
   '/p/:projectKey/feed',
   '/login',
   '/invite/:token',
+  '/forgot-password',
+  '/reset-password/:token',
   '/contact',
 ];
 

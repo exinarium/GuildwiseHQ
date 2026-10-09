@@ -214,3 +214,25 @@ export function useSetMyAvatar() {
     },
   });
 }
+
+// ---- forgot password: request a link, check it, set the new password
+export function useRequestPasswordReset() {
+  return useMutation({
+    mutationFn: (email: string) => post('/auth/password-reset/request', { email }),
+  });
+}
+
+export function useResetLinkValid(token: string) {
+  return useQuery({
+    queryKey: ['password-reset', token],
+    queryFn: () => get<{ valid: boolean }>(`/auth/password-reset/${encodeURIComponent(token)}`),
+    retry: false,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+export function useConfirmPasswordReset() {
+  return useMutation({
+    mutationFn: (v: { token: string; password: string }) => post('/auth/password-reset/confirm', v),
+  });
+}

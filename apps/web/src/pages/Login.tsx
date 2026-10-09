@@ -1,6 +1,6 @@
 import { LoginRequestSchema } from '@aom/shared';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
-import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
 import { useLogin, useLogin2fa, useMe } from '../api/queries/auth.ts';
 import { AuthFrame } from '../components/auth/AuthFrame.tsx';
@@ -45,6 +45,7 @@ export function Login() {
   const passRef = useRef<HTMLInputElement>(null);
   const failure = failureText(login.error);
   const expired = !failure && (loc.state as { expired?: boolean } | null)?.expired;
+  const passwordReset = !failure && (loc.state as { passwordReset?: boolean } | null)?.passwordReset;
 
   useEffect(() => {
     if (login.isError) {
@@ -168,6 +169,11 @@ export function Login() {
         <h1 className="text-3xl font-semibold tracking-tight text-fg">Welcome back</h1>
         <p className="mt-1.5 text-base text-muted">Sign in to your guild.</p>
       </div>
+      {passwordReset && (
+        <Callout tone="success" className="mb-4" role="status">
+          Your password is changed. Sign in with the new one.
+        </Callout>
+      )}
       {expired && (
         <Callout tone="info" className="mb-4" role="status">
           Your session ended. Sign in to continue.
@@ -210,7 +216,9 @@ export function Login() {
         </Button>
       </form>
       <p className="mt-6 text-sm text-subtle">
-        Forgot your password? Ask your admin to send a new invitation.
+        <Link to="/forgot-password" className="text-brand-text underline-offset-2 hover:underline">
+          Forgot your password?
+        </Link>
       </p>
     </AuthFrame>
   );

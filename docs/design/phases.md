@@ -887,3 +887,16 @@ Where the build differs from the text above (decisions of the task win):
 - `AOM_HYGIENE_SCHEDULE=false` turns the scheduled job off (the e2e stack, whose specs move the clock by days); "Run hygiene now" works regardless.
 
 **Deferred**: nothing from the owner decisions. Not built: deleting branches on the remote (the `branch.check_merged` check does that for `push_branch`), hygiene for repositories no runner has reported (it needs a clone), per-repository cadence, and a web mock-API (`apps/web/src/mocks`) handler set for the new endpoints.
+
+## Implementation status (accounts and email, built Oct 9, 2026)
+
+| Item | Built |
+|---|---|
+| Password reset | `migrations/1330_password_resets.sql`, `commands/password-reset.ts`, auth routes `/api/auth/password-reset/{request,:token,confirm}`, `POST /api/platform/users/:id/send-password-reset`, event `PasswordResetLinkSent` + audit projector, web `ForgotPassword`, `ResetPassword`, Accounts "Send reset link" |
+| Branded mail | `mail/layout.ts` (`brandedMail`, `senderName`), all templates moved onto it, scheduled-report mail wrapped, `scripts/render-mails.ts` (`mails:render`) |
+| Autoresponder | `supportReceivedMail`: reference, what happens next, response time (`SUPPORT_RESPONSE_TIME`) |
+| Notification addresses | platform settings `support_email` and `contact_email` (comma-separated lists), Support page form |
+| Tests | server `password-reset`, `mail-layout`, `support`; web `password-reset`, `support` |
+
+Decisions: platform (super admin) accounts are excluded from self-service reset and from the admin-sent link (they are managed on the server, as for deactivation); organization Owners/Admins cannot send reset links (accounts are global, and the Owner can already reset 2FA); the reset never signs in; a reset spends pending two-factor challenges; response time is "within two working days"; the logo is the existing PNG mark (apple-touch-icon) because SVG is not safe in mail.
+

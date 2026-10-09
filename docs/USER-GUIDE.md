@@ -198,6 +198,8 @@ If the link says the invitation is no longer valid, it has expired, was used alr
 
 ![An invitation link that no longer works](guide/assets/invite-invalid.jpg)
 
+**Forgot your password?** On the sign-in page click **Forgot your password?**, type your email and we send a link (it works once and expires after an hour). We answer the same way whether or not the email has an account, so nobody can find out who is registered. Choose a new password (at least 12 characters); every other place you were signed in is signed out. Then sign in as usual: if you use two-factor login you still enter your code. A platform administrator can also send you this link (7.4). Platform accounts are managed on the server and do not use it.
+
 Visitors who are not signed in see the landing page, with a **Sign in** button.
 
 ![The landing page](guide/assets/landing.jpg)
@@ -809,7 +811,7 @@ On the detail page you can:
 
 ### 7.4 Accounts
 
-**Accounts** lists every login. You can **deactivate** and reactivate an account. Deactivating someone unlinks their workstations, parks their agents and releases cards they held. You can also **reset a person's two-factor login** if they lost their phone and their recovery codes. The last active Owner of an active organization cannot be deactivated. Transfer ownership first.
+**Accounts** lists every login. You can **deactivate** and reactivate an account. Deactivating someone unlinks their workstations, parks their agents and releases cards they held. You can also **reset a person's two-factor login** if they lost their phone and their recovery codes. **Send reset link** emails the person a one-time link to choose a new password (valid for an hour); the page shows when the last link was sent, and the send is recorded in the audit log. Organization Owners and Admins cannot do this for their members: the link goes to the member's own mailbox, and accounts belong to the person, not to one organization. The last active Owner of an active organization cannot be deactivated. Transfer ownership first.
 
 ![Accounts](guide/assets/platform-users.jpg)
 
@@ -817,7 +819,7 @@ On the detail page you can:
 
 **Support** collects every **Contact us** request from every organization and from visitors who are not signed in (chapter 10). Filter by status (open, answered, closed), type or organization, and search by reference, name, email or subject. Open a request to see who wrote, from which organization, the page they were on, the app version, browser and recent errors, and any screenshot. Then **reply** (the reply is emailed to the person and shows under **Help, My requests** in the app) or **reply and close**. A reply to an answered or closed request from the person reopens it.
 
-At the top, set the **support address**. Every new request and follow-up is also emailed there (with the writer's address as Reply-To), so your team can work from its own mailbox as well.
+At the top, set the **notification addresses** (one address or several, separated by commas). The **support address** receives new requests from signed-in users and every follow-up; the **Contact us address** receives the messages visitors send from the public Contact us page, and falls back to the support address when empty. Both are emailed with the writer's address as Reply-To, so your team can work from its own mailbox as well. The person who wrote in gets an acknowledgement with their reference, what happens next and when to expect an answer (within two working days).
 
 ![The Support inbox](guide/assets/platform-support.jpg)
 

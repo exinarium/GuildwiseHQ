@@ -15,6 +15,7 @@ import { Chat } from './pages/Chat.tsx';
 import { ContactPublic } from './pages/ContactPublic.tsx';
 import { Costs } from './pages/Costs.tsx';
 import { Desk } from './pages/Desk.tsx';
+import { ForgotPassword } from './pages/ForgotPassword.tsx';
 import { Help, PlatformHelp } from './pages/Help.tsx';
 import { IntakeNew, IntakeView } from './pages/Intake.tsx';
 import { InterestDetail } from './pages/InterestDetail.tsx';
@@ -36,6 +37,7 @@ import { PlatformSupport } from './pages/platform/PlatformSupport.tsx';
 import { PlatformSupportTicket } from './pages/platform/PlatformSupportTicket.tsx';
 import { PlatformUsers } from './pages/platform/PlatformUsers.tsx';
 import { ResearchTab } from './pages/ResearchTab.tsx';
+import { ResetPassword } from './pages/ResetPassword.tsx';
 import { Schedules } from './pages/Schedules.tsx';
 import { Settings } from './pages/Settings.tsx';
 import { Vaults } from './pages/Vaults.tsx';
@@ -66,6 +68,8 @@ function InterestRedirect({ tab }: { tab?: string }) {
 
 export const routes = [
   { path: '/login', element: <Login />, errorElement: <RouteError /> },
+  { path: '/forgot-password', element: <ForgotPassword />, errorElement: <RouteError /> },
+  { path: '/reset-password/:token', element: <ResetPassword />, errorElement: <RouteError /> },
   { path: '/contact', element: <ContactPublic />, errorElement: <RouteError /> },
   { path: '/invite/:token', element: <AcceptInvite />, errorElement: <RouteError /> },
   {

@@ -26,6 +26,8 @@ To send a message:
 
 Your name, email and organization are included so we can answer and look at your account.
 
+Right after you send it you get a confirmation email with your reference (for example SUP-1001), what happens next and when to expect an answer (within two working days).
+
 ## What we send with your message {#what-we-receive}
 
 Open **What we send with your request** to see exactly what goes along:
@@ -57,4 +59,4 @@ If you cannot sign in:
 2. Give your name and email.
 3. Write your message.
 
-We answer by email so you can reset your password or we can help you access your account.
+We answer by email and can help you access your account. To reset a forgotten password yourself, use **Forgot your password?** on the sign-in page.

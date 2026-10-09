@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import { usePatchPlatformUser, usePlatformUsers, useResetUserTwoFactor } from '../../api/queries/platform.ts';
+import {
+  usePatchPlatformUser,
+  usePlatformUsers,
+  useResetUserTwoFactor,
+  useSendPasswordReset,
+} from '../../api/queries/platform.ts';
 import {
   Badge,
   Button,
@@ -19,7 +24,9 @@ export function PlatformUsers() {
   const users = usePlatformUsers(q);
   const patch = usePatchPlatformUser();
   const reset = useResetUserTwoFactor();
+  const sendReset = useSendPasswordReset();
   const toast = useToast();
+  const [mailing, setMailing] = useState<{ id: string; name: string; email: string } | null>(null);
   const [resetting, setResetting] = useState<{ id: string; name: string } | null>(null);
   return (
     <div>
@@ -38,6 +45,7 @@ export function PlatformUsers() {
       {users.isPending && <ListSkeleton label="Loading accounts" rows={4} />}
       {users.isError && <ErrorBox error={users.error} />}
       {patch.isError && <ErrorBox error={patch.error} />}
+      {sendReset.isError && <ErrorBox error={sendReset.error} />}
       {users.data && (
         <Panel padding="none">
           <ul className="divide-y divide-line text-sm" data-testid="platform-users">
@@ -53,10 +61,23 @@ export function PlatformUsers() {
                   <span className="block text-xs break-all text-subtle">
                     {u.email} · {u.orgCount} organization{u.orgCount === 1 ? '' : 's'}
                     {u.lastLoginAt ? ` · last sign-in ${formatDateTime(u.lastLoginAt)}` : ''}
+                    {u.passwordResetSentAt
+                      ? ` · reset link sent ${formatDateTime(u.passwordResetSentAt)}`
+                      : ''}
                   </span>
                 </span>
                 {u.kind === 'user' && (
                   <span className="flex gap-1">
+                    {u.status === 'active' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Send a password reset link to ${u.displayName}`}
+                        onClick={() => setMailing({ id: u.id, name: u.displayName, email: u.email })}
+                      >
+                        Send reset link
+                      </Button>
+                    )}
                     {u.twoFactorEnabled && (
                       <Button
                         variant="ghost"
@@ -83,6 +104,20 @@ export function PlatformUsers() {
           </ul>
         </Panel>
       )}
+      <ConfirmDialog
+        open={!!mailing}
+        onOpenChange={(o) => !o && setMailing(null)}
+        title={`Send a password reset link to ${mailing?.name ?? ''}?`}
+        description={`The link goes to ${mailing?.email ?? ''}, works once and expires in an hour. Their other sessions end when they use it, and two-factor login still applies. The send is recorded in the audit log.`}
+        confirmLabel="Send"
+        onConfirm={() => {
+          if (mailing)
+            sendReset.mutate(mailing.id, {
+              onSuccess: (r) => toast.success(`Reset link sent to ${r.sentTo}`),
+            });
+          setMailing(null);
+        }}
+      />
       <ConfirmDialog
         open={!!resetting}
         onOpenChange={(o) => !o && setResetting(null)}

@@ -109,6 +109,15 @@ export function useResetUserTwoFactor() {
   });
 }
 
+export function useSendPasswordReset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      post<{ sentTo: string; expiresAt: string }>(`/platform/users/${id}/send-password-reset`, {}),
+    onSuccess: () => refresh(qc),
+  });
+}
+
 export function usePlatformAudit(filter: {
   orgId?: string;
   actorId?: string;
