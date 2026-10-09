@@ -2,6 +2,7 @@ import {
   IdParamsSchema,
   NewOrgInvitationRequestSchema,
   OrgStatusActionRequestSchema,
+  PasswordResetSentSchema,
   PatchPlatformOrgRequestSchema,
   PatchPlatformUserRequestSchema,
   PlatformAuditQuerySchema,
@@ -18,6 +19,7 @@ import {
   resendNewOrgInvitation,
   revokeNewOrgInvitation,
 } from '../commands/invitations.ts';
+import { sendPasswordResetAsAdmin } from '../commands/password-reset.ts';
 import {
   auditLog,
   getPlatformOrg,
@@ -141,6 +143,17 @@ export function platformRoutes(ctx: Ctx) {
         const s = await requireSuperAdmin(ctx, req);
         await resetUserTwoFactor(ctx, s, req.params.id, meta(req));
         return { ok: true };
+      },
+    );
+
+    app.post(
+      '/api/platform/users/:id/send-password-reset',
+      { schema: { params: IdParamsSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return PasswordResetSentSchema.parse(
+          await sendPasswordResetAsAdmin(ctx, s, req.params.id, meta(req)),
+        );
       },
     );
 

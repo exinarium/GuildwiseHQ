@@ -17,6 +17,7 @@ import { iso, one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { senderName } from '../mail/layout.ts';
 import { newOrgInvitationMail } from '../mail/templates.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { orgScope, userScope } from './common.ts';
@@ -60,7 +61,15 @@ async function sendNewOrgMail(
 ) {
   try {
     await ctx.mailer.send(
-      newOrgInvitationMail({ to, link: invitationLink(ctx, token), orgName, terms, invitedBy, expiresAt }),
+      newOrgInvitationMail({
+        to,
+        link: invitationLink(ctx, token),
+        orgName,
+        terms,
+        invitedBy,
+        expiresAt,
+        origin: ctx.config.publicOrigin,
+      }),
     );
   } catch (err) {
     ctx.log.error({ err, to }, 'failed to send invitation mail');
@@ -133,7 +142,7 @@ export async function inviteNewOrg(
     token,
     input.proposedOrgName,
     describeTerms(terms),
-    admin.user.displayName,
+    senderName({ displayName: admin.user.displayName, email: admin.user.email }),
     expiresAt,
   );
   return invitationId;
@@ -208,7 +217,7 @@ export async function resendNewOrgInvitation(
     token,
     inv.proposed_org_name,
     describeTerms((inv.org_terms ?? {}) as Parameters<typeof describeTerms>[0]),
-    admin.user.displayName,
+    senderName({ displayName: admin.user.displayName, email: admin.user.email }),
     expiresAt,
   );
 }

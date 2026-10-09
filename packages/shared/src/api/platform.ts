@@ -139,6 +139,8 @@ export const PlatformUserDtoSchema = z.object({
   twoFactorEnabled: z.boolean(),
   createdAt: IsoTime,
   lastLoginAt: IsoTime.nullable(),
+  /** When a super admin last sent this user a password reset link (null: never). */
+  passwordResetSentAt: IsoTime.nullable(),
 });
 export type PlatformUserDto = z.infer<typeof PlatformUserDtoSchema>;
 export const PlatformUsersResponseSchema = z.object({ users: z.array(PlatformUserDtoSchema) });

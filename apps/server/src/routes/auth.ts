@@ -4,6 +4,9 @@ import {
   Login2faRequestSchema,
   LoginRequestSchema,
   type MeResponse,
+  PasswordResetConfirmSchema,
+  PasswordResetRequestSchema,
+  PasswordResetTokenParamsSchema,
   SetMyAvatarRequestSchema,
   streamId,
   TwoFactorConfirmRequestSchema,
@@ -30,6 +33,7 @@ import {
 } from '../auth/two-factor.ts';
 import { changePassword, verifyLogin } from '../commands/auth.ts';
 import { avatarImageFor, setMyAvatar } from '../commands/avatar.ts';
+import { requestPasswordReset, resetLinkState, resetPassword } from '../commands/password-reset.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -95,6 +99,9 @@ export function authRoutes(ctx: Ctx) {
     // and a stolen session cannot be used to guess the current password.
     const loginPerIp = new SlidingLimit(30, 60_000);
     const passwordPerAccount = new SlidingLimit(5, 60_000);
+    // "Forgot password?": per address (no mail bombing), whether or not the address has an account.
+    const resetPerEmail = new SlidingLimit(3, 60 * 60_000);
+    const resetPerIp = new SlidingLimit(10, 60 * 60_000);
 
     app.post(
       '/api/auth/login',
@@ -161,6 +168,44 @@ export function authRoutes(ctx: Ctx) {
       await changePassword(ctx, s, req.body.current, req.body.new);
       return { ok: true };
     });
+
+    // ---- forgot password: a one-time link by email. It never signs anyone in (the next sign-in asks for 2FA).
+    app.post(
+      '/api/auth/password-reset/request',
+      {
+        schema: { body: PasswordResetRequestSchema },
+        config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
+      },
+      async (req) => {
+        if (ctx.config.rateLimit) {
+          resetPerIp.hit(req.ip);
+          resetPerEmail.hit(req.body.email.toLowerCase());
+        }
+        await requestPasswordReset(ctx, req.body.email, req.ip);
+        return { ok: true };
+      },
+    );
+
+    app.get(
+      '/api/auth/password-reset/:token',
+      {
+        schema: { params: PasswordResetTokenParamsSchema },
+        config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+      },
+      async (req) => resetLinkState(ctx, req.params.token),
+    );
+
+    app.post(
+      '/api/auth/password-reset/confirm',
+      {
+        schema: { body: PasswordResetConfirmSchema },
+        config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+      },
+      async (req) => {
+        await resetPassword(ctx, req.body.token, req.body.password);
+        return { ok: true };
+      },
+    );
 
     // ---- two-factor login (owner decision 7): set up, confirm, switch off, new recovery codes.
     // These work in a session that still has to set it up (a super admin's first sign-in).

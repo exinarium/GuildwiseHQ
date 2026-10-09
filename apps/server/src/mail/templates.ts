@@ -1,27 +1,37 @@
+import { brandedMail, esc, type MailBlock, oneLine, PRODUCT, SLOGAN } from './layout.ts';
 import type { MailMessage } from './mailer.ts';
 
-// User-facing product name (the web app keeps the same constant in apps/web/src/brand.ts).
-const PRODUCT = 'Guildwise HQ';
+// Every template builds its content as data and hands it to `brandedMail` (layout.ts), which owns the look, the
+// plain-text part and the footer. Templates take `origin` (the public origin) for the logo and the footer links.
+// Whoever a mail names is a display name, an organization or the team: pass `senderName(...)`, never a login.
 
-const esc = (s: string) =>
-  s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
+/** How soon the team answers; stated in the acknowledgement mail. */
+export const SUPPORT_RESPONSE_TIME = 'within two working days';
 
+const expiry = (d: Date) => d.toUTCString();
+
+/** "<name> invited you to join <product>": a plain invitation (account only). */
 export function invitationMail(opts: {
   to: string;
   link: string;
   invitedBy: string;
   expiresAt: Date;
+  origin: string;
 }): MailMessage {
-  const expires = opts.expiresAt.toUTCString();
-  return {
+  return brandedMail({
     to: opts.to,
     subject: `You are invited to ${PRODUCT}`,
-    text: `${opts.invitedBy} invited you to ${PRODUCT}, your guild of AI agents.\n\nAccept the invitation and choose a password:\n${opts.link}\n\nThis link expires ${expires} and can be used once.\n\nMany hands. One master.\n`,
-    html: `<p>${esc(opts.invitedBy)} invited you to ${PRODUCT}, your guild of AI agents.</p><p><a href="${esc(opts.link)}">Accept the invitation</a> and choose a password.</p><p>This link expires ${esc(expires)} and can be used once.</p><p style="color:#5E687A">Many hands. One master.</p>`,
-  };
+    preheader: `${opts.invitedBy} invited you to ${PRODUCT}, your guild of AI agents.`,
+    heading: `You are invited to ${PRODUCT}`,
+    origin: opts.origin,
+    body: [
+      `${opts.invitedBy} invited you to ${PRODUCT}, your guild of AI agents.`,
+      'Accept the invitation and choose a password to get started.',
+    ],
+    cta: { label: 'Accept the invitation', url: opts.link },
+    note: `This link expires ${expiry(opts.expiresAt)} and can be used once.`,
+  });
 }
-
-const expiry = (d: Date) => d.toUTCString();
 
 /** "<name> invited you to join <org> as <role>": accepted on /invite/<token> (new account or signed in). */
 export function orgInvitationMail(opts: {
@@ -31,14 +41,25 @@ export function orgInvitationMail(opts: {
   role: string;
   invitedBy: string;
   expiresAt: Date;
+  origin: string;
 }): MailMessage {
   const role = opts.role === 'admin' ? 'an Admin' : 'a Member';
-  return {
+  return brandedMail({
     to: opts.to,
     subject: `Join ${opts.orgName} on ${PRODUCT}`,
-    text: `${opts.invitedBy} invited you to join ${opts.orgName} on ${PRODUCT} as ${role}.\n\nAccept the invitation (you create an account first if you do not have one):\n${opts.link}\n\nThis link expires ${expiry(opts.expiresAt)} and can be used once.\n\nMany hands. One master.\n`,
-    html: `<p>${esc(opts.invitedBy)} invited you to join <strong>${esc(opts.orgName)}</strong> on ${PRODUCT} as ${role}.</p><p><a href="${esc(opts.link)}">Accept the invitation</a> (you create an account first if you do not have one).</p><p>This link expires ${esc(expiry(opts.expiresAt))} and can be used once.</p><p style="color:#5E687A">Many hands. One master.</p>`,
-  };
+    preheader: `${opts.invitedBy} invited you to join ${opts.orgName} as ${role}.`,
+    heading: `Join ${opts.orgName}`,
+    origin: opts.origin,
+    body: [
+      {
+        html: `${esc(opts.invitedBy)} invited you to join <strong>${esc(opts.orgName)}</strong> on ${PRODUCT} as ${role}.`,
+        text: `${opts.invitedBy} invited you to join ${opts.orgName} on ${PRODUCT} as ${role}.`,
+      },
+      'You create an account first if you do not have one.',
+    ],
+    cta: { label: 'Accept the invitation', url: opts.link },
+    note: `This link expires ${expiry(opts.expiresAt)} and can be used once.`,
+  });
 }
 
 /** The platform invites someone to start their own organization. */
@@ -49,13 +70,78 @@ export function newOrgInvitationMail(opts: {
   terms: string;
   invitedBy: string;
   expiresAt: Date;
+  origin: string;
 }): MailMessage {
-  return {
+  return brandedMail({
     to: opts.to,
     subject: `Start ${opts.orgName} on ${PRODUCT}`,
-    text: `${opts.invitedBy} set up the organization ${opts.orgName} for you on ${PRODUCT}, your guild of AI agents (${opts.terms}).\n\nAccept the invitation and become its Owner:\n${opts.link}\n\nThis link expires ${expiry(opts.expiresAt)} and can be used once.\n\nMany hands. One master.\n`,
-    html: `<p>${esc(opts.invitedBy)} set up the organization <strong>${esc(opts.orgName)}</strong> for you on ${PRODUCT}, your guild of AI agents (${esc(opts.terms)}).</p><p><a href="${esc(opts.link)}">Accept the invitation</a> and become its Owner.</p><p>This link expires ${esc(expiry(opts.expiresAt))} and can be used once.</p><p style="color:#5E687A">Many hands. One master.</p>`,
-  };
+    preheader: `${opts.invitedBy} set up ${opts.orgName} for you on ${PRODUCT}.`,
+    heading: `Start ${opts.orgName}`,
+    origin: opts.origin,
+    body: [
+      {
+        html: `${esc(opts.invitedBy)} set up the organization <strong>${esc(opts.orgName)}</strong> for you on ${PRODUCT}, your guild of AI agents.`,
+        text: `${opts.invitedBy} set up the organization ${opts.orgName} for you on ${PRODUCT}, your guild of AI agents.`,
+      },
+      { facts: [['Terms', opts.terms]] },
+      'Accept the invitation and become its Owner.',
+    ],
+    cta: { label: 'Accept the invitation', url: opts.link },
+    note: `This link expires ${expiry(opts.expiresAt)} and can be used once.`,
+  });
+}
+
+// ------------------------------------------------------------------------------------------------ password reset
+
+/**
+ * The link that sets a new password. Sent when the person asks for it on the sign-in page, or when a platform admin
+ * sends it for them (`byTeam`). A two-factor code is still asked at the next sign-in.
+ */
+export function passwordResetMail(opts: {
+  to: string;
+  name: string;
+  link: string;
+  expiresAt: Date;
+  origin: string;
+  /** True when the platform team sent it, not the person themselves. */
+  byTeam?: boolean | undefined;
+}): MailMessage {
+  return brandedMail({
+    to: opts.to,
+    subject: `Reset your ${PRODUCT} password`,
+    preheader: 'Choose a new password. The link works once and expires in an hour.',
+    heading: 'Reset your password',
+    origin: opts.origin,
+    body: [
+      `Hello ${opts.name},`,
+      opts.byTeam
+        ? `The ${PRODUCT} team sent you this link so you can choose a new password.`
+        : `Someone, hopefully you, asked to reset the password of your ${PRODUCT} account.`,
+      'Choose a new password with the button below. Every other place you are signed in will be signed out, and if you use two-factor login you will still be asked for your code.',
+    ],
+    cta: { label: 'Choose a new password', url: opts.link },
+    note: `This link expires ${expiry(opts.expiresAt)} and works once. If you did not ask for it, you can ignore this mail: your password stays as it is.`,
+  });
+}
+
+// ------------------------------------------------------------------------------------------------ scheduled reports
+
+/** A scheduled report or digest delivered by email: the text the schedule produced, in the layout. */
+export function scheduledReportMail(opts: {
+  to: string;
+  subject: string;
+  text: string;
+  origin: string;
+}): MailMessage {
+  return brandedMail({
+    to: opts.to,
+    subject: opts.subject,
+    preheader: oneLine(opts.text).slice(0, 110),
+    heading: oneLine(opts.subject),
+    origin: opts.origin,
+    body: [{ quote: opts.text }],
+    note: 'You receive this because a schedule in your organization delivers it by email.',
+  });
 }
 
 // ------------------------------------------------------------------------------------------------ support (Contact us)
@@ -74,58 +160,109 @@ export interface SupportMailTicket {
   hasScreenshot: boolean;
 }
 
-const oneLine = (s: string) => s.replace(/[\r\n]+/g, ' ');
-
-/** A new request, to the support address. Replying to it in a mail program reaches the person who wrote in. */
+/** A new request, to the notification address. Replying to it in a mail program reaches the person who wrote in. */
 export function supportNewMail(opts: {
   to: string;
   ticket: SupportMailTicket;
   message: string;
   link: string;
+  origin: string;
+  /** A visitor's Contact us message, as opposed to a request from a signed-in user. */
+  fromVisitor?: boolean | undefined;
 }): MailMessage {
   const t = opts.ticket;
-  const lines = [
-    `${t.kindLabel} from ${t.contactName} <${t.contactEmail}>${t.orgName ? ` (${t.orgName})` : ''}`,
-    ...(t.page ? [`Page: ${t.page}`] : []),
-    ...(t.appVersion ? [`Version: ${t.appVersion}`] : []),
-    ...(t.browser ? [`Browser: ${t.browser}`] : []),
-    ...(t.hasScreenshot ? ['Screenshot attached (open it in the inbox).'] : []),
+  const facts: Array<[string, string]> = [
+    ['From', `${t.contactName} <${t.contactEmail}>`],
+    ...(t.orgName ? ([['Organization', t.orgName]] as Array<[string, string]>) : []),
+    ...(t.page ? ([['Page', t.page]] as Array<[string, string]>) : []),
+    ...(t.appVersion ? ([['Version', t.appVersion]] as Array<[string, string]>) : []),
+    ...(t.browser ? ([['Browser', t.browser]] as Array<[string, string]>) : []),
   ];
-  const errorText = t.errors.length ? `\n\nRecent errors:\n${t.errors.map((e) => `- ${e}`).join('\n')}` : '';
-  return {
+  const body: MailBlock[] = [
+    { facts },
+    { quote: opts.message },
+    ...(t.hasScreenshot ? ['Screenshot attached (open it in the inbox).'] : []),
+    ...(t.errors.length ? [{ small: 'Recent errors' }, { list: t.errors }] : []),
+  ];
+  return brandedMail({
     to: opts.to,
     replyTo: t.contactEmail,
     subject: `[${t.ref}] ${t.kindLabel}: ${oneLine(t.subject)}`,
-    text: `${lines.join('\n')}\n\n${opts.message}${errorText}\n\nOpen in the Support inbox:\n${opts.link}\n`,
-    html: `<p>${lines.map(esc).join('<br>')}</p><blockquote style="white-space:pre-wrap;border-left:3px solid #d0d5de;margin:0;padding:4px 12px">${esc(opts.message)}</blockquote>${
-      t.errors.length
-        ? `<p>Recent errors:</p><ul>${t.errors.map((e) => `<li><code>${esc(e)}</code></li>`).join('')}</ul>`
-        : ''
-    }<p><a href="${esc(opts.link)}">Open in the Support inbox</a></p>`,
-  };
+    preheader: oneLine(opts.message).slice(0, 110),
+    heading: opts.fromVisitor ? `Contact us: ${oneLine(t.subject)}` : `${t.kindLabel}: ${oneLine(t.subject)}`,
+    origin: opts.origin,
+    body,
+    cta: { label: 'Open in the Support inbox', url: opts.link },
+    note: 'Reply to this mail to answer the person directly.',
+  });
 }
 
-/** "We received your request": to the person who wrote in. */
+/** A signed-in user wrote again on an open request, to the notification address. */
+export function supportFollowUpMail(opts: {
+  to: string;
+  ref: string;
+  subject: string;
+  name: string;
+  email: string;
+  body: string;
+  link: string;
+  origin: string;
+}): MailMessage {
+  return brandedMail({
+    to: opts.to,
+    replyTo: opts.email,
+    subject: `[${opts.ref}] New message from ${oneLine(opts.name)}: ${oneLine(opts.subject)}`,
+    preheader: oneLine(opts.body).slice(0, 110),
+    heading: `New message on ${opts.ref}`,
+    origin: opts.origin,
+    body: [{ facts: [['From', `${opts.name} <${opts.email}>`]] }, { quote: opts.body }],
+    cta: { label: 'Open in the Support inbox', url: opts.link },
+  });
+}
+
+/**
+ * The acknowledgement for the person who wrote in: their reference, what happens next and when to expect an answer.
+ * Sent once per new request, only in answer to the form (there is no inbound mail), so it cannot start a reply loop.
+ */
 export function supportReceivedMail(opts: {
   to: string;
   name: string;
   ref: string;
   subject: string;
   link: string | null;
+  origin: string;
+  replyTo?: string | undefined;
 }): MailMessage {
-  const where = opts.link
-    ? `You can follow it, and read our reply, under Help, My requests:\n${opts.link}`
-    : 'We will answer by email to this address.';
-  return {
+  const subject = oneLine(opts.subject);
+  const next = `A person on the team reads your message and answers by email${
+    opts.link ? ', and the answer also appears under Help, My requests' : ''
+  }. ${
+    opts.link
+      ? 'You can add details there while you wait.'
+      : 'Reply to this mail if you want to add something; please keep the reference in the subject.'
+  }`;
+  return brandedMail({
     to: opts.to,
-    subject: `We received your request ${opts.ref}: ${oneLine(opts.subject)}`,
-    text: `Hello ${opts.name},\n\nThank you for contacting ${PRODUCT} support. Your request ${opts.ref} ("${oneLine(opts.subject)}") is with us.\n\n${where}\n\nMany hands. One master.\n`,
-    html: `<p>Hello ${esc(opts.name)},</p><p>Thank you for contacting ${PRODUCT} support. Your request <strong>${esc(opts.ref)}</strong> (&ldquo;${esc(opts.subject)}&rdquo;) is with us.</p><p>${
-      opts.link
-        ? `You can follow it, and read our reply, under <a href="${esc(opts.link)}">Help, My requests</a>.`
-        : 'We will answer by email to this address.'
-    }</p><p style="color:#5E687A">Many hands. One master.</p>`,
-  };
+    ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+    subject: `We received your request ${opts.ref}: ${subject}`,
+    preheader: `Your reference is ${opts.ref}. We answer ${SUPPORT_RESPONSE_TIME}.`,
+    heading: 'We received your message',
+    origin: opts.origin,
+    body: [
+      `Hello ${opts.name},`,
+      `Thank you for contacting ${PRODUCT} support. Your message is with us.`,
+      {
+        facts: [
+          ['Reference', opts.ref],
+          ['Subject', subject],
+          ['Expected answer', SUPPORT_RESPONSE_TIME],
+        ],
+      },
+      { html: `<strong>What happens next.</strong> ${esc(next)}`, text: `What happens next. ${next}` },
+    ],
+    ...(opts.link ? { cta: { label: 'Follow your request', url: opts.link } } : {}),
+    note: 'This is an automatic confirmation. Nothing more is needed from you.',
+  });
 }
 
 /** The support team's answer, to the person who wrote in. */
@@ -137,16 +274,23 @@ export function supportReplyMail(opts: {
   body: string;
   closed: boolean;
   link: string | null;
+  origin: string;
+  replyTo?: string | undefined;
 }): MailMessage {
-  const tail = opts.link
-    ? `\n\nYou can answer under Help, My requests:\n${opts.link}`
-    : '\n\nReply to this email to answer.';
-  return {
+  return brandedMail({
     to: opts.to,
+    ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
     subject: `Re: [${opts.ref}] ${oneLine(opts.subject)}`,
-    text: `Hello ${opts.name},\n\n${opts.body}${opts.closed ? '\n\nWe have closed this request. Write to us again if you need anything else.' : ''}${tail}\n\n${PRODUCT} support\n`,
-    html: `<p>Hello ${esc(opts.name)},</p><div style="white-space:pre-wrap">${esc(opts.body)}</div>${
-      opts.closed ? '<p>We have closed this request. Write to us again if you need anything else.</p>' : ''
-    }<p>${opts.link ? `You can answer under <a href="${esc(opts.link)}">Help, My requests</a>.` : 'Reply to this email to answer.'}</p><p style="color:#5E687A">${PRODUCT} support</p>`,
-  };
+    preheader: oneLine(opts.body).slice(0, 110),
+    heading: `Our answer to ${opts.ref}`,
+    origin: opts.origin,
+    body: [
+      `Hello ${opts.name},`,
+      { quote: opts.body },
+      ...(opts.closed ? ['We have closed this request. Write to us again if you need anything else.'] : []),
+      ...(opts.link ? [] : ['Reply to this email to answer.']),
+    ],
+    ...(opts.link ? { cta: { label: 'Answer in Help, My requests', url: opts.link } } : {}),
+    note: `${PRODUCT} support. ${SLOGAN}`,
+  });
 }

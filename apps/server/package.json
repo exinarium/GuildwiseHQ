@@ -16,6 +16,7 @@
     "restructure:migrate": "tsx scripts/restructure-migrate.ts",
     "ranking:migrate": "tsx scripts/ranking-migrate.ts",
     "legacy-feeds-fixture": "tsx test/fixtures/run-legacy-feeds.ts",
+    "mails:render": "tsx scripts/render-mails.ts",
     "projections:rebuild": "tsx scripts/projections-rebuild.ts"
   },
   "dependencies": {

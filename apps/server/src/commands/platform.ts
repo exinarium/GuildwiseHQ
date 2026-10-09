@@ -390,7 +390,13 @@ export async function listPlatformUsers(ctx: Ctx, q?: string): Promise<PlatformU
     `SELECT id, name, status, owner_user_id FROM organizations WHERE owner_user_id = ANY($1::uuid[]) ORDER BY name`,
     [list.map((u) => u.id)],
   );
+  const sent = await rows(
+    ctx.pool,
+    `SELECT user_id, max(created_at) AS at FROM password_resets WHERE requested_by IS NOT NULL AND user_id = ANY($1::uuid[]) GROUP BY user_id`,
+    [list.map((u) => u.id)],
+  );
   return list.map((u) => ({
+    passwordResetSentAt: iso(sent.find((x) => x.user_id === u.id)?.at) ?? null,
     id: u.id,
     email: u.email,
     displayName: u.display_name,

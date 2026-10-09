@@ -13,6 +13,7 @@ import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest } from '../errors.ts';
+import { scheduledReportMail } from '../mail/templates.ts';
 import { SYSTEM_ACTOR } from './common.ts';
 import { scheduleScope, webhookSecret } from './schedule-actions.ts';
 
@@ -135,7 +136,10 @@ async function postWebhook(
 async function sendMail(ctx: Ctx, d: Extract<ScheduleDelivery, { kind: 'email' }>): Promise<AttemptResult> {
   const started = Date.now();
   try {
-    for (const to of d.to) await ctx.mailer.send({ to, subject: d.subject, text: d.text });
+    for (const to of d.to)
+      await ctx.mailer.send(
+        scheduledReportMail({ to, subject: d.subject, text: d.text, origin: ctx.config.publicOrigin }),
+      );
     return { ok: true, retryable: false, durationMs: Date.now() - started };
   } catch (err) {
     return {

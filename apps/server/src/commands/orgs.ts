@@ -25,6 +25,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { userAvatarOf } from '../dto.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { senderName } from '../mail/layout.ts';
 import { orgInvitationMail } from '../mail/templates.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
@@ -454,7 +455,15 @@ async function sendOrgInvitationMail(
 ) {
   try {
     await ctx.mailer.send(
-      orgInvitationMail({ to, link: invitationLink(ctx, token), orgName, role, invitedBy, expiresAt }),
+      orgInvitationMail({
+        to,
+        link: invitationLink(ctx, token),
+        orgName,
+        role,
+        invitedBy,
+        expiresAt,
+        origin: ctx.config.publicOrigin,
+      }),
     );
   } catch (err) {
     // The invitation exists; resend once mail is healthy.
@@ -534,7 +543,11 @@ export async function inviteOrgMember(
     token,
     a.org.name,
     input.role,
-    a.session.user.displayName,
+    senderName({
+      displayName: a.session.user.displayName,
+      email: a.session.user.email,
+      orgName: a.org.name,
+    }),
     expiresAt,
   );
   return invitationId;
@@ -581,7 +594,11 @@ export async function resendOrgInvitation(ctx: Ctx, a: OrgAccess, invitationId: 
     token,
     a.org.name,
     inv.org_role,
-    a.session.user.displayName,
+    senderName({
+      displayName: a.session.user.displayName,
+      email: a.session.user.email,
+      orgName: a.org.name,
+    }),
     expiresAt,
   );
 }

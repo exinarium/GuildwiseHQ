@@ -292,6 +292,15 @@ export const platformAuditProjectors: Record<string, Projector> = {
       meta: p.meta,
     };
   }),
+  PasswordResetLinkSent: byPlatform(async (tx, e) => {
+    const p = ev<'PasswordResetLinkSent'>(e).payload;
+    return {
+      action: e.event.type,
+      targetUserId: p.userId,
+      summary: `Sent a password reset link to ${await userName(tx, p.userId)}`,
+      meta: p.meta,
+    };
+  }),
   SuperAdminCreated: always(async (_tx, e) => {
     const p = ev<'SuperAdminCreated'>(e).payload;
     return { action: e.event.type, targetUserId: p.userId, summary: `Super admin ${p.email} created` };

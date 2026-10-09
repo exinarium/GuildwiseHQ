@@ -121,4 +121,6 @@ export const userEvents = [
     }),
   ),
   defineEvent('PasswordChanged', z.object({ userId: Id, passwordHash: z.string().min(1) })),
+  /** A super admin sent the user a password reset link (the platform audit log shows it). The link itself is not in the log. */
+  defineEvent('PasswordResetLinkSent', z.object({ userId: Id, by: Id, meta: EventMetaSchema })),
 ] as const;
