@@ -204,6 +204,8 @@ Visitors who are not signed in see the landing page, with a **Sign in** button.
 
 ![The landing page](guide/assets/landing.jpg)
 
+The footer links the **Privacy policy** and the **Terms and conditions**. The sign-in and invitation pages remind you that signing in or creating an account means you accept them.
+
 To sign in later, go to the sign-in page, type your email and password, and press **Sign in**.
 
 ![The sign-in page](guide/assets/login.jpg)

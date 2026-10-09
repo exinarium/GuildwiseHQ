@@ -299,6 +299,17 @@ export function AcceptInvite() {
               : `Join ${inv.orgName}`}
         </Button>
       </form>
+      <p className="mt-6 text-sm text-subtle">
+        By creating an account or joining you agree to the{' '}
+        <a href="/terms" className="underline underline-offset-2 hover:no-underline">
+          Terms and conditions
+        </a>{' '}
+        and the{' '}
+        <a href="/privacy" className="underline underline-offset-2 hover:no-underline">
+          Privacy policy
+        </a>
+        .
+      </p>
     </AuthFrame>
   );
 }

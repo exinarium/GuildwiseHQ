@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
@@ -51,7 +51,8 @@ const landingInDev = (): Plugin => ({
   configureServer(server) {
     server.middlewares.use((req, _res, next) => {
       const [path, query] = (req.url ?? '').split('?');
-      if (req.method === 'GET' && path === '/' && !/(^|;\s*)aom_sid=/.test(req.headers.cookie ?? ''))
+      if (req.method === 'GET' && (path === '/privacy' || path === '/terms')) req.url = '/legal.html';
+      else if (req.method === 'GET' && path === '/' && !/(^|;\s*)aom_sid=/.test(req.headers.cookie ?? ''))
         req.url = `/landing.html${query ? `?${query}` : ''}`;
       next();
     });
@@ -82,6 +83,9 @@ const prerenderLanding = (): Plugin => {
       });
       try {
         const mod = (await server.ssrLoadModule('/src/landing/render.tsx')) as { render: () => string };
+        const legalMod = (await server.ssrLoadModule('/src/landing/render-legal.tsx')) as {
+          renderLegal: (doc: 'privacy' | 'terms') => { html: string; title: string; description: string };
+        };
         const file = resolve(cfg.root, cfg.build.outDir, 'landing.html');
         const html = readFileSync(file, 'utf8');
         if (!html.includes('<!--app-html-->') && !html.includes('<div id="root"></div>'))
@@ -99,6 +103,23 @@ const prerenderLanding = (): Plugin => {
             .replace('</head>', `${preload}</head>`)
             .replace(/<div id="root">(?:<!--app-html-->)?<\/div>/, `<div id="root">${mod.render()}</div>`),
         );
+        // /privacy and /terms: the same shell with the text of src/legal/*.md already in it (the server sends them as static files).
+        const attr = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        const legalFile = resolve(cfg.root, cfg.build.outDir, 'legal.html');
+        const shell = readFileSync(legalFile, 'utf8');
+        for (const doc of ['privacy', 'terms'] as const) {
+          const r = legalMod.renderLegal(doc);
+          writeFileSync(
+            resolve(cfg.root, cfg.build.outDir, `${doc}.html`),
+            shell
+              .replaceAll('%LEGAL_TITLE%', attr(r.title))
+              .replaceAll('%LEGAL_DESCRIPTION%', attr(r.description))
+              .replaceAll('%LEGAL_PATH%', `/${doc}`)
+              .replace('</head>', `${preload}</head>`)
+              .replace(/<div id="root">(?:<!--app-html-->)?<\/div>/, `<div id="root">${r.html}</div>`),
+          );
+        }
+        rmSync(legalFile);
       } finally {
         await server.close();
       }
@@ -111,7 +132,11 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), brandHtml(), landingInDev(), prerenderLanding()],
   build: {
     rollupOptions: {
-      input: { main: resolve(webRoot, 'index.html'), landing: resolve(webRoot, 'landing.html') },
+      input: {
+        main: resolve(webRoot, 'index.html'),
+        landing: resolve(webRoot, 'landing.html'),
+        legal: resolve(webRoot, 'legal.html'),
+      },
     },
   },
   server: {

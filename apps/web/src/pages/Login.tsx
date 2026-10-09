@@ -220,6 +220,17 @@ export function Login() {
           Forgot your password?
         </Link>
       </p>
+      <p className="mt-6 text-sm text-subtle">
+        By signing in you agree to the{' '}
+        <a href="/terms" className="underline underline-offset-2 hover:no-underline">
+          Terms and conditions
+        </a>{' '}
+        and the{' '}
+        <a href="/privacy" className="underline underline-offset-2 hover:no-underline">
+          Privacy policy
+        </a>
+        .
+      </p>
     </AuthFrame>
   );
 }
