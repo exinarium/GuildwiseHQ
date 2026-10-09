@@ -104,10 +104,30 @@ describe('rendered scripts', () => {
     expect(ps).toContain('RunOnce');
   });
 
+  it('the Windows script stays ASCII for a name with typographic quotes and accents, and keeps them intact', () => {
+    const ps = renderPowerShell({ ...win, workstationName: 'Pieter\u2019s Caf\u00e9 \ud83d\ude00' });
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: checking for non-ASCII bytes
+    expect(ps).not.toMatch(/[^\u0000-\u007f]/);
+    expect(ps).toContain("$DefaultName = ('Pieter' + [char]8217 + 's Caf' + [char]233 + ' ' + [char]55357 + [char]56832)");
+    expect(psq("it's \u2018x\u2019")).toBe("('it''s ' + [char]8216 + 'x' + [char]8217)");
+    expect(psq('plain')).toBe("'plain'");
+  });
+
+  it('the Windows script never pipes text to wsl.exe (PowerShell would append a carriage return)', () => {
+    const ps = renderPowerShell(win);
+    expect(ps).not.toMatch(/\|\s*&\s*wsl\.exe/);
+    expect(ps).toContain('base64 -d | bash');
+    expect(ps).toContain('base64 -d | chpasswd');
+    // the elevated copy is told whose profile it is for
+    expect(ps).toContain('$env:USERPROFILE');
+  });
+
   it('one-line commands quote the URL', () => {
     expect(oneLiner('linux', 'https://a/b')).toBe("curl -fsSL 'https://a/b' | bash");
     expect(oneLiner('macos', 'https://a/b')).toBe("curl -fsSL 'https://a/b' | bash");
-    expect(oneLiner('windows', 'https://a/b')).toBe("irm 'https://a/b' | iex");
+    expect(oneLiner('windows', 'https://a/b')).toBe(
+      "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; irm 'https://a/b' | iex",
+    );
   });
 });
 

@@ -62,17 +62,24 @@ function Test-Admin {
   ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Text sent to bash inside WSL: Unix line endings only.
+# Text for bash inside WSL. It travels as base64 inside the command line: piping a string to a native program makes
+# PowerShell append a carriage return and line feed, and a trailing CR breaks bash ("fi" followed by CR is not "fi")
+# and ends up inside a password. Unix line endings only.
+function ConvertTo-Base64Unix([string]$Text) {
+  $unix = ($Text -replace "`r", '').TrimEnd("`n") + "`n"
+  return [Convert]::ToBase64String([System.Text.UTF8Encoding]::new($false).GetBytes($unix))
+}
 function Invoke-WslBash([string]$Distro, [string]$User, [string]$BashScript) {
-  $unix = $BashScript -replace "`r", ''
-  $out = $unix | & wsl.exe -d $Distro -u $User -- bash -s 2>&1
+  $b64 = ConvertTo-Base64Unix $BashScript
+  $out = & wsl.exe -d $Distro -u $User -- bash -c "echo $b64 | base64 -d | bash" 2>&1
   $text = ($out | Out-String) -replace "`0", ''
   return @{ Code = $LASTEXITCODE; Text = $text.Trim() }
 }
 
 function Get-Distros {
   $raw = & wsl.exe -l -q 2>$null
-  if (-not $raw) { return @() }
+  # With no distribution installed wsl.exe prints an explanation (and fails): that is not a list of names.
+  if (-not $raw -or $LASTEXITCODE -ne 0) { return @() }
   return @(($raw | Out-String) -replace "`0", '' -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
@@ -98,9 +105,20 @@ trap { Stop-Install "Unexpected problem: $($_.Exception.Message)" 'Run the comma
 New-Item -ItemType Directory -Path $WorkDir -Force -ErrorAction Stop | Out-Null
 if (-not (Test-Admin)) {
   Write-Host "$AppName needs administrator rights once, to turn on Windows' Linux support (WSL2). Windows will ask you to allow it."
-  Invoke-WebRequest -UseBasicParsing -Uri $ScriptUrl -OutFile $SelfPath -ErrorAction Stop
-  Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$SelfPath`"")
+  # After a restart this is the saved copy itself (the one-time link may be gone by then): only fetch when it is not.
+  if (-not (Test-Path $SelfPath) -or $MyInvocation.MyCommand.Path -ne $SelfPath) {
+    try { Invoke-WebRequest -UseBasicParsing -Uri $ScriptUrl -OutFile $SelfPath -ErrorAction Stop }
+    catch { if (-not (Test-Path $SelfPath)) { throw } }
+  }
+  # The elevated copy is told whose PC this is: if Windows asked for another administrator's password, WSL and
+  # Ubuntu would be set up for that account instead of yours.
+  Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$SelfPath`"", "`"$env:USERPROFILE`"")
+  Write-Host 'Carry on in the administrator window that opened. This window can be closed.'
   return
+}
+$OriginalProfile = if ($args.Count -gt 0) { [string]$args[0] } else { '' }
+if ($OriginalProfile -and $OriginalProfile -ne $env:USERPROFILE) {
+  Stop-Install "Windows ran the installer as a different user ($env:USERNAME) than the one who started it." 'Run the command again in a PowerShell window you open as your own user, and choose Yes (not another account) when Windows asks for permission. WSL and Ubuntu belong to one Windows user.'
 }
 if (-not (Test-Path $SelfPath) -or $MyInvocation.MyCommand.Path -ne $SelfPath) {
   try { Invoke-WebRequest -UseBasicParsing -Uri $ScriptUrl -OutFile $SelfPath } catch { }
@@ -168,12 +186,16 @@ if (-not $LinuxUser -or $LinuxUser -eq 'root') {
   do {
     $LinuxUser = (Read-Host '    Choose a user name (lowercase letters and digits)').Trim().ToLower()
   } until ($LinuxUser -match '^[a-z_][a-z0-9_-]{0,30}$')
-  $secure = Read-Host '    Choose a password' -AsSecureString
-  $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+  do {
+    $secure = Read-Host '    Choose a password' -AsSecureString
+    $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+  } until ($plain)
   $made = Invoke-WslBash $Distro 'root' "id -u '$LinuxUser' >/dev/null 2>&1 || useradd -m -s /bin/bash -G sudo '$LinuxUser'; echo ready"
   if ($made.Text -notmatch 'ready') { Stop-Install "Could not create the Ubuntu user: $($made.Text)" 'Run the command again.' }
-  $null = ("$LinuxUser`:$plain" | & wsl.exe -d $Distro -u root -- chpasswd 2>&1)
+  $pwB64 = ConvertTo-Base64Unix "$LinuxUser`:$plain"
+  $null = & wsl.exe -d $Distro -u root -- bash -c "echo $pwB64 | base64 -d | chpasswd" 2>&1
   $plain = $null
+  $pwB64 = $null
   Complete-Step "Ubuntu user '$LinuxUser' created"
 } else {
   Complete-Step "Ubuntu ($Distro) is ready for user '$LinuxUser'"
@@ -209,7 +231,7 @@ Complete-Step 'systemd=true and the default user are set in /etc/wsl.conf'
 Start-Step 'Keeping Ubuntu running in the background'
 $wslConfig = Join-Path $env:USERPROFILE '.wslconfig'
 $lines = @()
-if (Test-Path $wslConfig) { $lines = @(Get-Content $wslConfig) }
+if (Test-Path $wslConfig) { $lines = @([System.IO.File]::ReadAllLines($wslConfig)) }
 $hasSetting = $lines | Where-Object { $_ -match '^\s*vmIdleTimeout\s*=\s*-1\s*$' }
 $configChanged = $false
 if (-not $hasSetting) {
@@ -217,7 +239,8 @@ if (-not $hasSetting) {
   $at = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match '^\s*\[wsl2\]\s*$' })
   if ($at -ge 0) { $lines = @($lines[0..$at]) + @('vmIdleTimeout=-1') + @($(if ($at + 1 -lt $lines.Count) { $lines[($at + 1)..($lines.Count - 1)] } else { @() })) }
   else { $lines = @($lines) + @('', '[wsl2]', 'vmIdleTimeout=-1') }
-  Set-Content -Path $wslConfig -Value $lines -Encoding ASCII
+  # UTF-8 without a byte order mark, whatever the file held (Set-Content -Encoding ASCII turns accents into '?').
+  [System.IO.File]::WriteAllLines($wslConfig, [string[]]$lines, [System.Text.UTF8Encoding]::new($false))
   $configChanged = $true
 }
 $taskArgs = "-d $Distro --exec sleep infinity"
@@ -251,7 +274,10 @@ Write-Info 'The next lines come from Ubuntu. It may ask for your Ubuntu password
 $env:GUILDWISE_NAME = if ($DefaultName) { $DefaultName } else { "$env:COMPUTERNAME (WSL2)" }
 $env:GUILDWISE_SCRIPT = $LinuxScriptPath
 $env:WSLENV = 'GUILDWISE_NAME/u:GUILDWISE_SCRIPT/p'
-& wsl.exe -d $Distro -u $LinuxUser --cd '~' -- bash -c 'bash "$GUILDWISE_SCRIPT"'
+# The command carries no quote characters of its own (Windows PowerShell 5.1 strips embedded double quotes from native
+# arguments, which would split a path with spaces such as C:\Users\Jane Doe): the line to run travels as base64.
+$runB64 = ConvertTo-Base64Unix 'exec bash "$GUILDWISE_SCRIPT"'
+& wsl.exe -d $Distro -u $LinuxUser --cd '~' -- bash -c "echo $runB64 | base64 -d | bash"
 $code = $LASTEXITCODE
 
 # ---- 8. summary -------------------------------------------------------------------------------------------------------------

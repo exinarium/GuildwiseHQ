@@ -31,8 +31,30 @@ export interface InstallerParams {
 
 /** Bash single-quoted literal: everything is literal inside, except the quote itself. */
 export const shq = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
-/** PowerShell single-quoted literal: only the quote itself is special (doubled). */
-export const psq = (s: string): string => `'${s.replace(/'/g, "''")}'`;
+/**
+ * PowerShell single-quoted literal: only the quote itself is special (doubled). Windows PowerShell 5.1 reads a script
+ * without a byte order mark as the ANSI code page and treats the typographic quotes (U+2018, U+2019, U+201A, U+201B) as
+ * quote characters, so any non-ASCII text (a name like "Pieter's laptop" typed with a smart quote) is emitted as
+ * `[char]` code units: the generated script stays pure ASCII and survives every encoding.
+ */
+export const psq = (s: string): string => {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: splitting on non-ASCII
+  if (!/[^\u0000-\u007f]/.test(s)) return `'${s.replace(/'/g, "''")}'`;
+  const parts: string[] = [];
+  let run = '';
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code < 128) {
+      run += s[i];
+      continue;
+    }
+    if (run) parts.push(`'${run.replace(/'/g, "''")}'`);
+    run = '';
+    parts.push(`[char]${code}`);
+  }
+  if (run) parts.push(`'${run.replace(/'/g, "''")}'`);
+  return `(${parts.join(' + ')})`;
+};
 
 /** Control characters never belong in a name; one line, at most 80 characters. */
 export const cleanName = (s: string): string =>
@@ -120,9 +142,12 @@ export function renderPowerShell(p: WindowsParams): string {
   ].join('\n')}\n${template('windows.ps1')}`.replace(/\r?\n/g, '\r\n');
 }
 
+const WINDOWS_TLS12 = '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12';
+
 /** What the wizard shows for "copy one command" per system. The URL carries the short-lived token. */
 export function oneLiner(os: InstallerOs, scriptUrl: string): string {
-  if (os === 'windows') return `irm ${psq(scriptUrl)} | iex`;
+  // Windows PowerShell 5.1 on older builds offers only TLS 1.0/1.1 by default, which the server refuses: ask for TLS 1.2 first.
+  if (os === 'windows') return `${WINDOWS_TLS12}; irm ${psq(scriptUrl)} | iex`;
   return `curl -fsSL ${shq(scriptUrl)} | bash`;
 }
 
