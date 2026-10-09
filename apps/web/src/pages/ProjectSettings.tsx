@@ -10,6 +10,7 @@ import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
 import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
 import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
+import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
 import {
   Badge,
   Button,
@@ -49,6 +50,9 @@ export function ProjectSettings() {
   const [repoUrl, setRepoUrl] = useState('');
   const [repoBranch, setRepoBranch] = useState('');
   const [repoErr, setRepoErr] = useState<Record<string, string>>({});
+  const [repoMode, setRepoMode] = useState<'clone' | 'create'>('clone');
+  const [newName, setNewName] = useState('');
+  const [repoVisibility, setRepoVisibility] = useState<'private' | 'public'>('private');
   const project = q.data?.project;
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
   const canConvert = useCanConvert(project);
@@ -92,22 +96,33 @@ export function ProjectSettings() {
   const add = (e: FormEvent) => {
     e.preventDefault();
     const errs: Record<string, string> = {};
-    if (!repoName.trim()) errs.name = 'Repository name is required';
-    if (!repoUrl.trim()) errs.url = 'Remote URL is required';
+    const creating = repoMode === 'create';
+    const fullName = newName.trim();
+    if (creating && !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/.test(fullName))
+      errs.newName = 'Use owner/name, for example acme/barcode-camera';
+    const name = repoName.trim() || (creating ? (fullName.split('/')[1] ?? '') : '');
+    if (!name) errs.name = 'Repository name is required';
+    if (!creating && !repoUrl.trim()) errs.url = 'Remote URL is required';
     setRepoErr(errs);
     if (Object.keys(errs).length) return;
     addRepo.mutate(
       {
-        name: repoName.trim(),
-        remoteUrl: repoUrl.trim(),
+        name,
+        remoteUrl: creating ? `https://github.com/${fullName}.git` : repoUrl.trim(),
         ...(repoBranch.trim() ? { workingBranch: repoBranch.trim() } : {}),
+        ...(creating ? { create: { name: fullName, visibility: repoVisibility } } : {}),
       },
       {
         onSuccess: () => {
-          toast.success('Repository added');
+          toast.success(
+            creating
+              ? 'Repository added: the DevOps engineer creates it'
+              : 'Repository added: the DevOps engineer clones it',
+          );
           setRepoName('');
           setRepoUrl('');
           setRepoBranch('');
+          setNewName('');
         },
       },
     );
@@ -233,6 +248,9 @@ export function ProjectSettings() {
                     </Button>
                   </div>
                   {traits.usesRepos && (
+                    <RepoSetupStatus projectId={id} repo={r} canRetry={project?.myRole === 'owner'} />
+                  )}
+                  {traits.usesRepos && (
                     <WorkingBranchControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
                   )}
                 </li>
@@ -248,18 +266,62 @@ export function ProjectSettings() {
                 aria-label="Add repository"
                 className="grid gap-4 border-t border-line pt-4 sm:grid-cols-3"
               >
+                <fieldset className="flex flex-wrap gap-4 text-sm sm:col-span-3">
+                  <legend className="mb-1 font-medium">What to add</legend>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="repo-mode"
+                      checked={repoMode === 'clone'}
+                      onChange={() => setRepoMode('clone')}
+                    />
+                    An existing repository (cloned onto the workstations)
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="repo-mode"
+                      checked={repoMode === 'create'}
+                      onChange={() => setRepoMode('create')}
+                    />
+                    Create a new repository
+                  </label>
+                </fieldset>
                 <TextInput
                   label="Repository name"
                   value={repoName}
                   onChange={(e) => setRepoName(e.target.value)}
                   error={repoErr.name}
                 />
-                <TextInput
-                  label="Remote URL"
-                  value={repoUrl}
-                  onChange={(e) => setRepoUrl(e.target.value)}
-                  error={repoErr.url}
-                />
+                {repoMode === 'clone' ? (
+                  <TextInput
+                    label="Remote URL"
+                    value={repoUrl}
+                    onChange={(e) => setRepoUrl(e.target.value)}
+                    error={repoErr.url}
+                  />
+                ) : (
+                  <>
+                    <TextInput
+                      label="GitHub name (owner/name)"
+                      hint="Created with the GitHub login of the DevOps engineer's workstation (gh), then cloned."
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      error={repoErr.newName}
+                    />
+                    <label className="flex flex-col gap-1 text-sm">
+                      <span className="font-medium">Visibility</span>
+                      <select
+                        className="h-9 rounded-control border border-control bg-surface px-2"
+                        value={repoVisibility}
+                        onChange={(e) => setRepoVisibility(e.target.value as 'private' | 'public')}
+                      >
+                        <option value="private">Private</option>
+                        <option value="public">Public</option>
+                      </select>
+                    </label>
+                  </>
+                )}
                 <TextInput
                   label="Branch (optional)"
                   hint="Leave empty and the manager is asked which branch to use once the runner has seen the repository."
@@ -280,6 +342,15 @@ export function ProjectSettings() {
               </form>
             )}
           </Panel>
+        </div>
+      )}
+      {project && traits.usesRepos && (q.data.environments ?? []).length > 0 && (
+        <div id="environment" className="scroll-mt-20">
+          <EnvironmentPanel
+            projectId={id}
+            environments={q.data.environments ?? []}
+            canCheck={project.myRole === 'owner'}
+          />
         </div>
       )}
       {project && traits.usesRepos && (

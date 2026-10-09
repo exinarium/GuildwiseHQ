@@ -6,6 +6,7 @@ import {
 } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import {
+  useClearSudoPassword,
   useCreateDevOpsRequest,
   useDevOpsRequest,
   useDevOpsRequests,
@@ -13,6 +14,8 @@ import {
   useResolveDevOpsApproval,
   useRunHygiene,
   useSetHygieneInterval,
+  useSetSudoPassword,
+  useVerifyRights,
 } from '../api/queries/devops.ts';
 import { formatDateTime } from '../lib/time.ts';
 import { Badge, Button, ErrorBox, Select, TextArea, TextInput } from './ui.tsx';
@@ -95,6 +98,7 @@ export function DevOpsPanel({ w }: { w: WorkstationDto }) {
         </Button>
       </div>
       <ErrorBox error={patch.error} />
+      <RightsStatus w={w} access={access} />
       <HygieneSettings w={w} />
       <AskDevOps workstationId={w.id} name={w.name} />
       <ul
@@ -108,6 +112,140 @@ export function DevOpsPanel({ w }: { w: WorkstationDto }) {
         ))}
       </ul>
     </section>
+  );
+}
+
+const RIGHT_LABEL = {
+  install: 'Install packages and tools',
+  docker: 'Docker',
+  sudo: 'Elevated privileges (sudo)',
+  paths: 'Writable paths',
+} as const;
+
+/**
+ * A ticked right is a promise until the runner proves it on the machine: one badge per ticked right (verified or failed,
+ * with the reason and how to fix it), and the sudo password form when sudo needs one.
+ */
+function RightsStatus({
+  w,
+  access,
+}: {
+  w: WorkstationDto;
+  access: NonNullable<WorkstationDto['devopsAccess']>;
+}) {
+  const verify = useVerifyRights();
+  const ticked = (
+    [
+      ['install', access.allowInstall],
+      ['docker', access.allowDocker],
+      ['sudo', access.sudo],
+      ['paths', access.allowedPaths.length > 0],
+    ] as const
+  ).filter(([, on]) => on);
+  if (ticked.length === 0) return null;
+  const checks = w.rights?.checks ?? {};
+  const stale = !!w.rights?.stale;
+  return (
+    <div className="mt-3 rounded-control border border-line p-2" data-testid={`rights-${w.name}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="text-sm font-semibold">Rights on this machine</h4>
+        <Button disabled={verify.isPending || !w.connected} onClick={() => verify.mutate(w.id)}>
+          Verify now
+        </Button>
+        {!w.connected && <span className="text-xs text-subtle">The runner is offline.</span>}
+        {w.rights && (
+          <span className="text-xs text-subtle">
+            Checked {formatDateTime(w.rights.checkedAt)}
+            {stale ? ' (before your last change)' : ''}
+          </span>
+        )}
+      </div>
+      <ul className="mt-2 flex flex-col gap-2">
+        {ticked.map(([key]) => {
+          const c = checks[key];
+          return (
+            <li key={key} data-testid={`right-${key}`} data-status={c?.status ?? 'unchecked'}>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <Badge tone={c ? (c.status === 'verified' ? 'green' : 'red') : 'neutral'}>
+                  {c ? (c.status === 'verified' ? 'verified' : 'failed') : 'not checked'}
+                </Badge>
+                <span className="font-medium">{RIGHT_LABEL[key]}</span>
+              </div>
+              {c && <p className="ml-1 text-xs text-subtle">{c.reason}</p>}
+              {c?.status === 'failed' && c.fix && <p className="ml-1 text-xs">How to fix: {c.fix}</p>}
+            </li>
+          );
+        })}
+      </ul>
+      {access.sudo && <SudoPassword w={w} />}
+      <ErrorBox error={verify.error} />
+    </div>
+  );
+}
+
+/**
+ * The sudo password. It is encrypted in this browser with the runner's own key; the server only relays ciphertext, the
+ * runner keeps it in its data folder (readable by the runner user only), and it is never shown again.
+ */
+function SudoPassword({ w }: { w: WorkstationDto }) {
+  const set = useSetSudoPassword();
+  const clear = useClearSudoPassword();
+  const [pw, setPw] = useState('');
+  const sudo = w.sudo;
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!pw) return;
+    set.mutate({ workstationId: w.id, password: pw }, { onSuccess: () => setPw('') });
+  };
+  return (
+    <form
+      onSubmit={submit}
+      aria-label={`Sudo password for ${w.name}`}
+      className="mt-3 border-t border-line pt-2"
+      autoComplete="off"
+    >
+      <p className="text-sm font-medium">
+        Sudo password{' '}
+        {sudo?.passwordSet ? (
+          <Badge tone={sudo.works === false ? 'red' : 'green'}>
+            {sudo.works === false ? 'stored, not accepted' : 'stored'}
+          </Badge>
+        ) : (
+          <Badge tone="neutral">not set</Badge>
+        )}
+      </p>
+      <p className="text-xs text-subtle">
+        Only needed when sudo asks for a password on this machine. It is encrypted here with a key only this
+        runner holds, stored on the runner alone and used for the DevOps engineer's commands only. It is never
+        shown again and never written to a log.
+        {sudo?.keyId ? ` Key ${sudo.keyId} (the same as \`aom-runner doctor\` shows).` : ''}
+      </p>
+      <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-end">
+        <div className="flex-1">
+          <TextInput
+            label={sudo?.passwordSet ? 'New sudo password' : 'Sudo password'}
+            type="password"
+            autoComplete="new-password"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+          />
+        </div>
+        <Button type="submit" variant="primary" disabled={!pw || set.isPending || !w.connected}>
+          Send to {w.name}
+        </Button>
+        {sudo?.passwordSet && (
+          <Button disabled={clear.isPending} onClick={() => clear.mutate(w.id)}>
+            Forget it
+          </Button>
+        )}
+      </div>
+      {set.isSuccess && (
+        <p role="status" className="text-sm text-success">
+          Sent. The runner checks it and the badge above updates.
+        </p>
+      )}
+      <ErrorBox error={set.error ?? clear.error} />
+    </form>
   );
 }
 

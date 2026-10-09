@@ -48,7 +48,7 @@ Names are handles, not personas. Official memory is the card history, ledger and
 
 **DevOps engineer**: every user gets one dedicated DevOps engineer on each workstation. It cannot be fired, only reset, which wipes its sandbox like a firing does. It is not driven by cards alone: other agents and the manager ask it directly, and every request and action is logged as events on a thread so there is a record.
 
-- **Project setup**: clone the project's repositories, install dependencies, start containers, seed data, and deploy the app locally so testers and builders can work
+- **Project setup**: clone the project's repositories (a repository added in project settings is cloned onto the project's workstations, or created first when the manager chose a new one), make the toolchain ready before build work (it detects the stacks, installs what is missing within the rights the manager ticked, and holds back the project's build cards on that workstation until it is ready), prove the ticked rights on the machine (verified or failed with the fix; a sudo password, if needed, is encrypted in the browser for the runner and stored only there), install dependencies, start containers, seed data, and deploy the app locally so testers and builders can work
 - **Vault sync**: clone the user's vaults and shared project vaults onto the workstation, pull updates on a regular interval, and commit and push changes on a regular interval (default every 5 minutes, configurable)
 - **Environment management**: with the access the manager grants on that workstation, install tools and manage the machine's environment
 - **Guardrails**: access is set per workstation; anything destructive or outside the granted access goes to the desk for approval first
@@ -364,6 +364,10 @@ DevOps events:
 | `DevOpsRequested` | Any agent or manager | Request queued for that user's DevOps engineer, thread opened |
 | `EnvironmentChanged` | DevOps engineer | Setup or change on the workstation logged with what was done |
 | `DevOpsApprovalNeeded` | DevOps engineer | Destructive or out-of-access action waits on the desk |
+| `RepoCloneRequested` / `RepoCloneReported` | Manager adds a repository / DevOps engineer | A repository is being cloned (or created) onto a workstation; the result (cloned, created, failed with a reason, needs the manager) shows in project settings |
+| `EnvironmentPrepareRequested` / `EnvironmentPrepared` | System / DevOps engineer | The project's toolchain on a workstation is checked and installed; build and test cards wait there until it is ready |
+| `DevOpsRightsVerified` | DevOps engineer | The rights the manager ticked were checked on the machine (verified or failed with the fix) |
+| `DevOpsSudoPasswordSet` / `DevOpsSudoPasswordCleared` | Manager | A sudo password was sent (encrypted for the runner) or forgotten; the password itself is never in an event |
 | `ProjectShared` | Project owner | Existing user added as a project member |
 
 ## Architecture

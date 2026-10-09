@@ -35,6 +35,18 @@ The panel shows the last and next run and any open findings.
 
 If hygiene finds a conflict, uncommitted changes on the wrong branch, an authentication failure, or a missing clone, it does not force anything. These show as failures in your BA's daily report until a later run finds the repository clean.
 
+## New repositories and the toolchain {#setup}
+
+When you add a repository in **Project settings, Repositories**, the DevOps engineer of each workstation of the project puts it there. Pick **An existing repository** and it is cloned into the workstation's first repository folder (`aom-runner repos add`); a folder that already holds something else is never overwritten. Pick **Create a new repository** (owner/name and visibility) and the DevOps engineer creates it on GitHub with the workstation's `gh` login, then clones it. Under each repository you see **Cloning**, **Cloned on <workstation>** or **Failed: <reason>** with **Try again**.
+
+Before the first build work on a new project, the DevOps engineer checks that the tools the repository needs are installed: .NET and the MAUI workloads, Node and its package manager, Python, Docker, Go, Rust, Java and more. It installs what is missing only if you ticked **Install packages and tools** (and **Docker**, **Elevated privileges** where needed). Until the workstation is ready, build and test cards wait there with the reason on the card, and **Project settings, Development environment** shows each tool, what is missing and how to fix it, with **Check again**.
+
+## Rights and the sudo password {#rights}
+
+A ticked right is checked on the machine itself. On the Workstations page each ticked right shows **verified** or **failed** with the reason and how to fix it (for Docker: add the runner user to the docker group, start the daemon; for sudo: enter the password or allow passwordless sudo). **Verify now** checks again.
+
+If sudo asks for a password, enter it under the rights. Your browser encrypts it with a key that only that workstation's runner holds; Guildwise HQ's server only passes the encrypted text on. The runner keeps it in its own data folder, uses it only for the DevOps engineer's commands, never writes it to a log, and never shows it again. **Forget it** deletes it. To check that nobody swapped the key, compare the key id on the page with `aom-runner doctor` on the machine.
+
 ## The working branch {#working-branch}
 
 The **working branch** is the main branch where agents commit their finished work. It is something you confirm: it is never guessed.

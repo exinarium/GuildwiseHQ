@@ -801,6 +801,79 @@ the runner token and every credential of the user. Treat the DevOps agent as you
 workstation you are willing to give it to, keep it to requests from your own cards, and prefer a dedicated runner user and
 machine (see the recommendation below).
 
+### Repository setup, toolchain and rights (DevOps)
+
+The DevOps engineer prepares a workstation for a project. This is plain runner code driven by server commands (no agent is
+involved), so it is deterministic and tested; every command it runs is logged.
+
+**1. A repository added to a project is put on the workstations** (Project settings, Repositories, "Add repository").
+The server queues `repo.clone` on every active workstation of the project's members. The runner (`src/repo/clone.ts`):
+uses a clone it already has (anywhere under the repository folders, matched by the normalized remote); refuses to touch a
+non-empty folder that is not that clone; probes the remote (`git ls-remote`, again with gh's credential helper for https
+hosts); then clones into the **first repository folder** (`aom-runner repos add`), the same place `repo.create` uses. If the
+manager chose **Create a new repository** and the remote does not exist, the runner creates it with `gh repo create`
+(the same `RepoCreator` as the approved `aom repo create`: private or public as chosen, a first commit on the working
+branch, then a clone) on ONE workstation; the others clone it afterwards. When the cause is access (no `gh` login, no SSH
+key) the state is `needs_manager` with the reason. The state per workstation (`repo_clones`: Cloning, Cloned, Created,
+Failed, Needs you) shows under the repository, with "Try again". It is idempotent. Creating without a desk approval is a
+decision: the manager asking from the settings page is the approval (agents still need the desk, see `aom repo create`).
+
+**2. The toolchain is made ready before build work.** When a project's repository first appears on a workstation (after a
+clone, a hand clone, or a new workstation joining) the server queues `env.ensure`; the table `project_environments` goes
+`preparing`, and **build and test cards of the project wait on that workstation** until it is `ready` (dispatcher
+eligibility clause `env`; the card shows "the development environment on <workstation> is not ready (...)"). Projects
+with no row (everything that existed before) are never held back. The runner (`src/toolchain`):
+
+- detects the stacks from the repository files (depth 3, build and dependency folders skipped) using the **table in
+  `src/toolchain/stacks.ts`**: .NET (`*.csproj`, `*.sln`, `global.json`; SDK major from `global.json`, else the highest
+  target framework), **.NET MAUI** (`<UseMaui>`, a `Microsoft.Maui.*` package or MAUI platform target frameworks; the
+  `maui` workload, plus `android`, `ios`, `maccatalyst` as the target frameworks and the OS require; on Linux only
+  `maui-android`, which is all Linux can build; a JDK for Android), Node (`package.json`; pnpm/yarn/bun/npm from
+  `packageManager` or the lock file; the Node major from `.nvmrc`, `.node-version`, `.tool-versions` or `engines`), Python
+  (`pyproject.toml`, `requirements*.txt`, `Pipfile`; venv, uv, poetry, pipenv), Docker (`Dockerfile`, compose files: the
+  CLI and a daemon the runner user may use), Go, Rust, Java (Maven, Gradle; a wrapper means no build tool is needed),
+  Ruby, PHP. Adding a stack is one object in that table plus a fixture test (`test/toolchain-detect.test.ts`);
+- verifies each tool with its own check (`dotnet --version`, `dotnet workload list`, `node --version`, `docker info`, ...)
+  against the version the repository asks for;
+- installs what is missing **only if the manager allowed it** ("Install packages and tools"; Docker also needs "Docker"):
+  with the OS package manager (apt, dnf, brew, winget, choco) or the official installer (`dotnet-install.sh`, rustup, bun,
+  `npm -g`). Administrator rights come from root, passwordless sudo or the stored sudo password and need "Elevated privileges
+  (sudo)" ticked; an installer that needs root is not used without it, and a user-level installer is preferred then.
+  Otherwise the report says `needs_access` with what to tick and the manual command;
+- reports per tool `ok | installed | missing | failed | needs_access | skipped` and a verdict `ready | failed |
+  needs_access`; the last 80 log lines are in the report (Project settings, Development environment) and the full log is in
+  `logs/env/<project id>.log` on the workstation. Changing the DevOps access, entering the sudo password or "Check again"
+  re-runs it. A tool installed at user level (`~/.dotnet`, `~/.cargo`) is found by the runner through the user bin folders it
+  adds to `PATH`; agents in the sandbox read `runtimes.claude-code.toolchainPaths` (add `~/.dotnet` there).
+
+**3. Ticked rights are proven.** For every right the manager ticks on a DevOps engineer the runner checks it on the
+machine (`rights.verify`, sent when the ticks change and on "Verify now") and the Workstations page shows
+`verified` or `failed` with the reason and the fix: Docker (`docker info` as the runner user: not installed, permission
+denied -> `usermod -aG docker`, daemon stopped), sudo (root, `sudo -n true`, or the stored password with `sudo -S -v`; on
+Windows the runner must be elevated), install (a package manager usable with the rights there are) and writable paths.
+
+**4. The sudo password.** Design (open question for the owner): *encrypted in the browser with a key only the runner holds*.
+
+1. The runner creates an RSA-2048 key pair on first start (`<data dir>/secrets/runner-key.pem`, mode 0600 in a 0700 folder)
+   and announces the public key and its id (first 16 hex digits of the SHA-256 of the key) in `hello.sudoKey`.
+2. The browser fetches it (`GET /api/workstations/:id/sudo-key`), encrypts the password with WebCrypto RSA-OAEP / SHA-256
+   and sends only the ciphertext (`PUT /api/workstations/:id/sudo-password`). The server cannot read it. It travels in
+   the durable runner command `sudo.set`; when the runner answers, the command payload is emptied. No event carries it
+   (`DevOpsSudoPasswordSet` has the key id and whether sudo accepted it).
+3. The runner decrypts it in memory, stores the **ciphertext** in `<data dir>/secrets/sudo.enc` (mode 0600), checks it with
+   `sudo -S -v`, and registers the plain text with the redaction registry: the runner log, command output and install logs
+   replace it with `***`. After a restart it is registered again before the first log line.
+4. It is used only through `sudo -S -p ''` with the password on **stdin** (never an argument or environment variable): by the
+   toolchain installer, and by the DevOps engineer through `aom sudo -- <command>` (an IPC call to the runner; refused for
+   any agent but the DevOps engineer, and only while "Elevated privileges (sudo)" is ticked). The password never enters the
+   agent's context. "Forget it" deletes the file.
+
+Limits, stated plainly: the browser trusts the public key the server gives it, so a malicious server could substitute its own
+key; compare the key id shown on the page with `aom-runner doctor` on the machine if you do not trust the server. The DevOps
+engineer is unsandboxed (previous sections) and runs as the runner user, so a prompt-injected DevOps agent can read the
+`secrets` folder like it can read `config.json`; the alternative (the OS keychain) is no stronger against a same-user process.
+Windows has no sudo: the runner must run elevated and no password is stored.
+
 ### Threat model and residual risk
 
 What the layers above protect against: an agent (or a prompt injection that steers it) reading the runner's

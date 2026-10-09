@@ -83,6 +83,32 @@ export function useProject(id: string | undefined) {
     queryKey: ['project', id],
     enabled: !!id,
     queryFn: () => get<ProjectDetailResponse>(`/projects/${id}`, ProjectDetailResponseSchema),
+    // While a DevOps engineer is cloning a repository or preparing the toolchain, watch it happen.
+    refetchInterval: (query) => {
+      const d = query.state.data;
+      const busy =
+        d?.repos.some((r) => r.setup?.some((s) => s.state === 'cloning')) ||
+        d?.environments?.some((e) => e.state === 'preparing');
+      return busy ? 3000 : false;
+    },
+  });
+}
+
+/** Try again to put a repository on the project's workstations (clone it, or create it). */
+export function useRetryRepoSetup(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (repoId: string) => post(`/projects/${projectId}/repos/${repoId}/setup`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  });
+}
+
+/** Check the development environment of the project on its workstations again. */
+export function useCheckEnvironment(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => post(`/projects/${projectId}/environment/check`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   });
 }
 
