@@ -40,9 +40,12 @@ describe('loop breaker back-off', () => {
         </ul>
       </MemoryRouter>,
     );
-    expect(screen.getByTestId('backoff-badge')).toHaveTextContent(
-      /backing off until \d{2}:\d{2} \(4 failures\)/,
-    );
+    const banner = screen.getByTestId('backoff-badge');
+    expect(banner).toHaveTextContent(/backing off until \d{2}:\d{2} \(4 failures\)/);
+    // a coloured line on the card, with the explanation as its hover title and one tap away
+    expect(banner.className).toContain('text-warning-soft-fg');
+    expect(banner).toHaveAttribute('title', expect.stringContaining('A manager can release it'));
+    expect(screen.getByTestId('card-tile-TEST01-4').contains(banner)).toBe(false);
   });
 
   it('shows no badge without a back-off or after it expired', () => {

@@ -211,7 +211,11 @@ export function CardDetailView({
             <Badge>{card.cardType}</Badge>
             {card.reworkRound > 0 && <Badge tone="violet">Rework {card.reworkRound}</Badge>}
             <BackoffBadge backoff={card.backoff} />
-            <WorkabilityWarning workability={data.workability} projectId={card.projectId} />
+            <WorkabilityWarning
+              workability={data.workability}
+              projectId={card.projectId}
+              className="w-full max-w-xl rounded-control border"
+            />
           </div>
         }
         sub={

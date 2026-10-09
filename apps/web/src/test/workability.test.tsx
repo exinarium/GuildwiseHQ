@@ -1,5 +1,5 @@
 import type { BoardCard, Workability } from '@aom/shared';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
@@ -50,33 +50,43 @@ describe('workability warning', () => {
     expect(screen.queryByTestId('workability-warning')).toBeNull();
   });
 
-  it('red and accessible for a card nobody could take, with the reason and a prefilled hire link', async () => {
+  it('red banner on the card for a card nobody could take: the reason written out, a prefilled hire link', () => {
     renderTile(blocked);
     const warn = screen.getByTestId('workability-warning');
     expect(warn).toHaveAttribute('data-level', 'blocked');
-    const button = screen.getByRole('button', { name: blocked.reason as string });
-    expect(button.className).toContain('text-danger');
-    // the reason is the popover the button points at (hover, keyboard focus or a click open it)
-    await userEvent.click(button);
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+    expect(warn.className).toContain('text-danger-soft-fg');
+    // the reason is text on the card (not a hidden tooltip) and the hover title
+    expect(screen.getByTestId('workability-warning-text')).toHaveTextContent(
       'needs a second senior reviewer other than Linus',
     );
-    expect(button).toHaveAttribute('aria-describedby', screen.getByRole('tooltip').id);
-    const hire = await screen.findByTestId('workability-hire');
+    expect(warn).toHaveAttribute('title', blocked.reason as string);
+    const hire = screen.getByTestId('workability-hire');
     expect(hire).toHaveTextContent('Hire senior reviewer');
     expect(hire).toHaveAttribute('href', `/agents?hire=reviewer&seniority=senior&projectId=${PROJECT}`);
   });
 
+  it('a long reason is cut to two lines and unfolds in place on tap, with aria-expanded', async () => {
+    renderTile(blocked);
+    const text = screen.getByTestId('workability-warning-text');
+    expect(text.className).toContain('line-clamp-2');
+    const toggle = screen.getByRole('button', { name: 'Show the full reason' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveAttribute('aria-controls', text.id);
+    await userEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true');
+    expect(text.className).not.toContain('line-clamp-2');
+  });
+
   it('amber for waiting, without a hire link', () => {
     renderTile(waiting);
-    expect(screen.getByTestId('workability-warning')).toHaveAttribute('data-level', 'waiting');
-    expect(screen.getByRole('button', { name: 'Waiting: Reviewer Linus is offline.' }).className).toContain(
-      'text-warning',
-    );
+    const warn = screen.getByTestId('workability-warning');
+    expect(warn).toHaveAttribute('data-level', 'waiting');
+    expect(warn.className).toContain('text-warning-soft-fg');
+    expect(warn).toHaveTextContent('Waiting: Reviewer Linus is offline.');
     expect(screen.queryByTestId('workability-hire')).toBeNull();
   });
 
-  it('the icon is not nested inside the tile link (no interactive content inside a link)', () => {
+  it('the banner is not nested inside the tile link (no interactive content inside a link)', () => {
     renderTile(blocked);
     expect(screen.getByTestId('card-tile-TOY-1').contains(screen.getByTestId('workability-warning'))).toBe(
       false,
@@ -89,29 +99,10 @@ describe('workability warning', () => {
         <WorkabilityWarning workability={blocked} projectId={PROJECT} />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByTestId('workability-warning').querySelector('button') as HTMLElement);
-    expect(await screen.findByRole('tooltip')).toBeInTheDocument();
+    expect(screen.getByTestId('workability-warning')).toHaveTextContent('second senior reviewer');
   });
 
-  it('the reason is reachable by click, outside the card (a portal escapes overflow-hidden), and Esc closes it', async () => {
-    renderTile(waiting);
-    expect(screen.queryByTestId('workability-reason')).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: waiting.reason as string }));
-    const reason = await screen.findByTestId('workability-reason');
-    expect(reason).toHaveTextContent('Reviewer Linus is offline');
-    expect(screen.getByTestId('card-tile-TOY-1').contains(reason)).toBe(false);
-    await userEvent.keyboard('{Escape}');
-    await waitFor(() => expect(screen.queryByTestId('workability-reason')).toBeNull());
-  });
-
-  it('opens on keyboard focus', async () => {
-    renderTile(waiting);
-    await userEvent.tab(); // the tile link
-    await userEvent.tab();
-    expect(await screen.findByTestId('workability-reason')).toHaveTextContent('offline');
-  });
-
-  it('a runner rejection for the working branch links to the repository settings', async () => {
+  it('a runner rejection for the working branch is written on the card and links to the repository settings', () => {
     render(
       <MemoryRouter>
         <WorkabilityWarning
@@ -126,8 +117,7 @@ describe('workability warning', () => {
         />
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole('button'));
-    expect(await screen.findByTestId('workability-reason')).toHaveTextContent('Last attempt failed');
+    expect(screen.getByTestId('workability-warning')).toHaveTextContent('Last attempt failed');
     expect(screen.getByTestId('workability-settings')).toHaveAttribute(
       'href',
       `/projects/${PROJECT}/settings#repos`,

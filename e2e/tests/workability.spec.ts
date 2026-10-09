@@ -109,16 +109,16 @@ test('a large card with one senior reviewer: warning on the tile and the card wi
   await expect(tile).toBeVisible();
   const warning = page.getByTestId('column-Review').getByTestId('workability-warning');
   await expect(warning).toHaveAttribute('data-level', 'blocked');
-  await warning.getByRole('button').focus();
-  await expect(warning.getByRole('tooltip')).toBeVisible();
-  await expect(warning.getByRole('tooltip')).toContainText(
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText(
     'Not workable: this large change needs a second senior reviewer other than Rae. Hire another senior reviewer.',
   );
 
   // the card page says the same
   await page.goto(`/cards/${created.ref}`);
-  await page.getByTestId('workability-warning').hover();
-  await expect(page.getByTestId('workability-reason')).toContainText('second senior reviewer other than Rae');
+  await expect(page.getByTestId('workability-warning')).toContainText(
+    'second senior reviewer other than Rae',
+  );
 
   // the link opens the Hire form with the missing role prefilled
   await page.getByTestId('workability-hire').click();

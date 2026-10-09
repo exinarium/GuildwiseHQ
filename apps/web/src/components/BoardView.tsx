@@ -92,9 +92,7 @@ export function CardTile({
           </span>
         </div>
         <p className="mt-1 line-clamp-2 leading-snug font-medium text-fg">{card.title}</p>
-        <div
-          className={`mt-2.5 flex flex-wrap items-center gap-1.5 ${card.workability && !card.workability.ok ? 'pr-6' : ''}`}
-        >
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           {card.assignee && (
             <span className="inline-flex items-center gap-1.5 text-xs text-muted" data-testid="tile-assignee">
               <AgentAvatar agentId={card.assignee.agentId} name={card.assignee.name} size={18} />
@@ -116,7 +114,6 @@ export function CardTile({
               Rework {card.reworkRound}
             </Badge>
           )}
-          <BackoffBadge backoff={card.backoff} />
           {card.workflowKey && (
             <span data-testid="workflow-chip">
               <Badge tone="violet" title={`Runs on the ${card.workflowKey} workflow`}>
@@ -145,11 +142,8 @@ export function CardTile({
           )}
         </div>
       </Link>
-      <WorkabilityWarning
-        workability={card.workability}
-        projectId={projectId}
-        className="absolute right-2 bottom-2"
-      />
+      <BackoffBadge backoff={card.backoff} banner />
+      <WorkabilityWarning workability={card.workability} projectId={projectId} />
       {card.status === 'waiting' && card.waitingOn && (
         <Link
           to={`/cards/${card.waitingOn.id}`}
