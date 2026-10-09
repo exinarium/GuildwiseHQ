@@ -2,13 +2,21 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { freshState } from './helpers/shifts.ts';
-import { createWorld, MOCK_RUNTIME, ok, until, type World } from './helpers/world.ts';
+import { createWorld, MOCK_RUNTIME, ok, REPO_SSH, until, type World } from './helpers/world.ts';
 
 let w: World;
 let r: FakeRunner;
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
-  r = await w.connectRunner();
+  // A runner of this version announces the key for the sudo password in hello.
+  r = await w.connectRunner({ hello: false });
+  r.hello({
+    repos: [{ remoteUrl: REPO_SSH, localPath: '/tmp/toy', headBranch: 'main' }],
+    runtimes: MOCK_RUNTIME,
+    sudoKey: { keyId: 'abcd1234abcd1234', publicKey: 'AAAA' },
+  });
+  await r.waitFor('welcome');
+  await w.t.app.ctx.notifier.flush();
 });
 afterAll(async () => {
   r.close();

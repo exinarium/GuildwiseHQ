@@ -229,6 +229,8 @@ export async function environmentRequestEvents(
     [projectId, workstationId],
   );
   if (repos.length === 0) return [];
+  // Only a runner that announced its key (a version that can do this) is asked; others are never held back.
+  if (!(await one(tx, 'SELECT 1 FROM workstation_keys WHERE workstation_id=$1', [workstationId]))) return [];
   const current = await one(
     tx,
     'SELECT state, updated_at FROM project_environments WHERE project_id=$1 AND workstation_id=$2',
@@ -272,13 +274,15 @@ export async function applyEnvEnsureResult(
   error: string | undefined,
 ): Promise<void> {
   const parsed = ok ? EnvironmentReportSchema.safeParse(result) : null;
+  // A runner that cannot do the check at all (too old, crashed) says nothing about the tools: it must not hold the
+  // project's cards back. Only a real finding (a tool missing, an install failing) does.
   const report = parsed?.success
     ? parsed.data
     : {
-        state: 'failed' as const,
+        state: 'ready' as const,
         stacks: [],
         tools: [],
-        summary: `Not ready: the runner could not prepare the environment${error ? ` (${error})` : ''}. Update the runner and check again.`,
+        summary: `Not checked: the runner could not check the environment${error ? ` (${error})` : ''}. Update the runner and check again.`,
         logTail: [],
       };
   await withAppendTx(ctx.pool, async (tx) => {
@@ -330,6 +334,8 @@ export async function queueRightsVerify(
   workstationId: string,
   access: unknown,
 ): Promise<void> {
+  // Only a runner that announced its key can check rights (older ones would answer with an error).
+  if (!(await one(db, 'SELECT 1 FROM workstation_keys WHERE workstation_id=$1', [workstationId]))) return;
   await enqueueRunnerCommand(db, workstationId, 'rights.verify', {
     access: DevOpsAccessSchema.parse(access),
   });

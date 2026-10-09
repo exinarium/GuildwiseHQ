@@ -359,6 +359,7 @@ export class RunnerHandlers {
       [conn.workstationId, JSON.stringify(msg.runtimes), msg.runnerVersion, msg.hostname, msg.platform, now],
     );
     // The public key the sudo password is encrypted with (the private half stays on the runner).
+    conn.setupCapable = !!msg.sudoKey;
     if (msg.sudoKey)
       await exec(
         ctx.pool,
@@ -639,10 +640,11 @@ export class RunnerHandlers {
         }
       }
     });
-    await this.prepareNewProjects(
-      conn,
-      [...matched].filter((id) => !before.has(id)),
-    );
+    if (conn.setupCapable)
+      await this.prepareNewProjects(
+        conn,
+        [...matched].filter((id) => !before.has(id)),
+      );
     ctx.services.dispatcher.trigger();
   }
 

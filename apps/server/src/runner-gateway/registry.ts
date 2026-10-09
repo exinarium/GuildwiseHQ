@@ -16,6 +16,11 @@ export interface RunnerConn {
   stopSentAt: Map<string, number>;
   /** Shifts this workstation takes at once: the runner's `maxConcurrentShifts`, capped by the server. */
   maxShifts: number;
+  /**
+   * The runner can prepare toolchains, check rights and keep a sudo password (it announced a `sudoKey` in `hello`).
+   * An older runner answers those commands with an error, and holding its cards back for that would be wrong.
+   */
+  setupCapable?: boolean;
 }
 
 /** Live runner sockets by workstation. A second connection supersedes the first. */

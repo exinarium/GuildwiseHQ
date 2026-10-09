@@ -2,13 +2,21 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { freshState } from './helpers/shifts.ts';
-import { createWorld, MOCK_RUNTIME, ok, until, type World } from './helpers/world.ts';
+import { createWorld, MOCK_RUNTIME, ok, REPO_SSH, type World } from './helpers/world.ts';
 
 let w: World;
 let r: FakeRunner;
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
-  r = await w.connectRunner();
+  // A runner of this version announces the key for the sudo password in hello.
+  r = await w.connectRunner({ hello: false });
+  r.hello({
+    repos: [{ remoteUrl: REPO_SSH, localPath: '/tmp/toy', headBranch: 'main' }],
+    runtimes: MOCK_RUNTIME,
+    sudoKey: { keyId: 'abcd1234abcd1234', publicKey: 'AAAA' },
+  });
+  await r.waitFor('welcome');
+  await w.t.app.ctx.notifier.flush();
 });
 afterAll(async () => {
   r.close();
@@ -54,9 +62,9 @@ describe('the toolchain is prepared before build work', () => {
     await reportRepos('git@github.com:acme/toy.git');
     const env = await nextCommand('env.ensure', from);
     expect(env.payload).toMatchObject({ projectId: w.projectId, access: { allowInstall: false } });
-    expect(env.payload.repos.map((x: any) => x.name)).toContain('toy');
+    expect((env.payload as any).repos.map((x: any) => x.name)).toContain('toy');
     const row = (await q('SELECT * FROM project_environments WHERE project_id=$1', [w.projectId]))[0];
-    expect(row.state).toBe('preparing');
+    expect(row?.state).toBe('preparing');
 
     // while preparing the card is not dispatched and says why
     w.t.app.ctx.services.dispatcher.cooldown.clear();
@@ -97,7 +105,7 @@ describe('the toolchain is prepared before build work', () => {
     const before = r.received.length;
     await ok(owner('PATCH', `/api/workstations/${w.workstationId}/devops-access`, { allowInstall: true }));
     const second = await nextCommand('env.ensure', before);
-    expect(second.payload.access.allowInstall).toBe(true);
+    expect((second.payload as any).access.allowInstall).toBe(true);
     answer(second.commandId, {
       state: 'ready',
       stacks: [],
