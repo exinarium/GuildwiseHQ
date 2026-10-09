@@ -21,6 +21,10 @@ export interface RunnerPaths {
   integration: string;
   vaults: string;
   logs: string;
+  /** Full logs of environment preparation (`env.ensure`), one file per project. */
+  envLogs: string;
+  /** Keys and the stored sudo password (mode 0600/0700, never read by agents: sandboxes deny the data dir). */
+  secrets: string;
   shiftLogs: string;
   runnerLog: string;
   status: string;
@@ -47,6 +51,8 @@ export function runnerPaths(root: string): RunnerPaths {
     integration: join(root, 'integration'),
     vaults: join(root, 'vaults'),
     logs: join(root, 'logs'),
+    envLogs: join(root, 'logs', 'env'),
+    secrets: join(root, 'secrets'),
     shiftLogs: join(root, 'logs', 'shifts'),
     runnerLog: join(root, 'logs', 'runner.log'),
     status: join(root, 'status.json'),

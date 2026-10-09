@@ -166,6 +166,8 @@ export const RpcMethodSchema = z.enum([
   /** Approved repository setup: the BA (chat) or the DevOps engineer asks; the project owner approves on the desk. */
   'repo.create',
   /** Videos and podcasts: `transcript.fetch` is answered by the runner itself; `transcript.store` goes on to the site. */
+  /** The DevOps engineer runs a command with the stored sudo password; answered by the runner itself. */
+  'sudo.run',
   'transcript.fetch',
   'transcript.store',
   /** Phases, the BA's intake chat: list phases and deploy targets, propose a phase, assign cards, submit for confirmation. */

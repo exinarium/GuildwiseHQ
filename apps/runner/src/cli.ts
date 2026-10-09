@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from 'node:fs';
 import { hostname, platform } from 'node:os';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { RunnerPairRequestSchema, RunnerPairResponseSchema } from '@aom/shared';
 import { Command } from 'commander';
 import { execa } from 'execa';
@@ -23,6 +23,7 @@ import {
   removePairing,
 } from './pairings.ts';
 import { resolveDataDir, runnerPaths } from './paths.ts';
+import { RunnerKeys } from './secrets/keys.ts';
 import { RUNNER_VERSION } from './version.ts';
 
 const dataDirOpt = [
@@ -269,6 +270,17 @@ async function doctor(opts: { dataDir?: string; pairing?: string }): Promise<voi
       ? String(y.stdout).trim()
       : 'not found (optional: `aom transcript` needs it for YouTube and other video sites; ask DevOps to install it)',
   );
+  // The key the sudo password is encrypted with: compare this id with the one shown on the Workstations page.
+  try {
+    const keys = new RunnerKeys(join(paths.secrets, 'runner-key.pem'));
+    line(
+      true,
+      'sudo key',
+      `${keys.publicKey.keyId} (the Workstations page shows the same id next to the sudo password; password ${existsSync(join(paths.secrets, 'sudo.enc')) ? 'stored' : 'not stored'})`,
+    );
+  } catch (err) {
+    line('warn', 'sudo key', err instanceof Error ? err.message : String(err));
+  }
   if (config) {
     const repos = await scanRepos(config.repoRoots);
     line(

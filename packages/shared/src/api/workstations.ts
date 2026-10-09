@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RightsReportSchema } from '../devops/environment.ts';
 import { DevOpsAccessSchema } from '../events/devops.ts';
 import { RuntimeInfoSchema } from '../protocol/runner.ts';
 import { IsoTime } from './common.ts';
@@ -32,6 +33,22 @@ export const WorkstationDtoSchema = z.object({
   devopsAccess: DevOpsAccessSchema.optional(),
   devopsAgentId: z.uuid().nullable().optional(),
   hygiene: WorkstationHygieneSchema.optional(),
+  /**
+   * What the runner found when it last checked the rights ticked on the DevOps engineer (null: never checked, or
+   * nothing ticked). `stale`: the ticks changed since.
+   */
+  rights: RightsReportSchema.extend({ stale: z.boolean().default(false) })
+    .nullable()
+    .optional(),
+  /** The sudo password: whether one is stored on the runner and the key it is encrypted with (never the password). */
+  sudo: z
+    .object({
+      keyId: z.string().nullable(),
+      passwordSet: z.boolean(),
+      setAt: IsoTime.nullable(),
+      works: z.boolean().nullable(),
+    })
+    .optional(),
   /** Shifts running now and how many this workstation takes at once (`limit` is null while it is offline). */
   shifts: z
     .object({ running: z.number().int().nonnegative(), limit: z.number().int().positive().nullable() })
@@ -39,6 +56,16 @@ export const WorkstationDtoSchema = z.object({
 });
 export type WorkstationDto = z.infer<typeof WorkstationDtoSchema>;
 export const WorkstationsResponseSchema = z.object({ workstations: z.array(WorkstationDtoSchema) });
+
+/** `GET /api/workstations/:id/sudo-key`: the public key to encrypt the sudo password with (RSA-OAEP, SHA-256). */
+export const SudoKeyResponseSchema = z.object({ keyId: z.string(), publicKey: z.string() });
+export type SudoKeyResponse = z.infer<typeof SudoKeyResponseSchema>;
+/** `PUT /api/workstations/:id/sudo-password`: the password encrypted in the browser; the server cannot read it. */
+export const SetSudoPasswordRequestSchema = z.object({
+  ciphertext: z.string().min(1).max(2000),
+  keyId: z.string().min(1).max(64),
+});
+export type SetSudoPasswordRequest = z.infer<typeof SetSudoPasswordRequestSchema>;
 
 export const PatchWorkstationRequestSchema = z.object({ name: z.string().min(1).max(80) });
 

@@ -3,6 +3,7 @@ import { hostname, platform } from 'node:os';
 import { join } from 'node:path';
 import {
   CommandPayloadSchemas,
+  type EnvEnsurePayload,
   type IpcRpcResponse,
   normalizeRemoteUrl,
   type RepoReport,
@@ -18,6 +19,7 @@ import { ChatManager } from './chat/chat.ts';
 import type { RunnerConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
+import { verifyRights } from './devops/rights.ts';
 import { ExternalAdapters } from './external/index.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { executeCompletion } from './git/completion.ts';
@@ -30,10 +32,16 @@ import { IntegrationPoller } from './integrations/poll.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
+import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
 import { wipeAgent } from './sandbox/sandbox.ts';
+import { RunnerKeys } from './secrets/keys.ts';
+import { SudoVault } from './secrets/sudo.ts';
 import { ShiftSupervisor } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
+import { ensureEnvironment } from './toolchain/ensure.ts';
+import { type Executor, realExecutor } from './toolchain/exec.ts';
+import type { Platform } from './toolchain/types.ts';
 import { VaultManager } from './vaults/manager.ts';
 import { RUNNER_VERSION } from './version.ts';
 
@@ -66,6 +74,10 @@ export interface RunnerOptions {
    * hold given what the others run (machine total minus the others' running shifts). Unset: no shared budget.
    */
   sharedCap?: () => number;
+  /** Test hook: runs the commands of toolchain installs, rights checks and sudo (default: real processes). */
+  executor?: Executor;
+  /** Test hook: platform for the toolchain table (default: this machine). */
+  platform?: Platform;
 }
 
 /** The long-running runner process: connection, IPC server, supervisor and command handlers. */
@@ -81,6 +93,11 @@ export class Runner {
   readonly outbound: OutboundExecutor;
   private readonly poller: IntegrationPoller;
   readonly repoCreator: RepoCreator;
+  readonly repoCloner: RepoCloner;
+  /** The key pair for secrets the manager sends (the sudo password) and the store that holds the password. */
+  readonly keys: RunnerKeys;
+  readonly sudo: SudoVault;
+  private readonly exec: Executor;
   private readonly log: Logger;
   private readonly adapters: Map<string, RuntimeAdapter>;
   private readonly external: ExternalAdapters;
@@ -105,6 +122,13 @@ export class Runner {
     this.log = opts.log ?? nullLogger;
     this.paths = runnerPaths(opts.dataDir);
     this.outbox = new Outbox(this.paths.outbox);
+    this.exec = opts.executor ?? realExecutor;
+    this.keys = new RunnerKeys(join(this.paths.secrets, 'runner-key.pem'));
+    this.sudo = new SudoVault({
+      file: join(this.paths.secrets, 'sudo.enc'),
+      keys: this.keys,
+      exec: this.exec,
+    });
     this.maxConcurrent = opts.config.maxConcurrentShifts;
     this.adapters = opts.adapters ?? buildAdapters(opts.config, this.paths);
     this.client = new RunnerClient({
@@ -143,6 +167,7 @@ export class Runner {
       reportWaitMs: opts.reportWaitMs,
       exitGraceMs: opts.exitGraceMs,
       envChecker: opts.envChecker,
+      sudoRun: (cmd, args) => this.sudo.run(cmd, args),
     });
     this.external =
       opts.external ??
@@ -164,6 +189,14 @@ export class Runner {
       dir: this.paths.outbound,
       repoRoots: () => this.opts.config.repoRoots,
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
+    });
+    this.repoCloner = new RepoCloner({
+      repoRoots: () => this.opts.config.repoRoots,
+      exec: this.exec,
+      findExisting: (n) => this.findRepo(n),
+      creator: this.repoCreator,
+      ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
+      afterClone: () => this.rescan(),
     });
     this.poller = new IntegrationPoller({
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
@@ -261,6 +294,7 @@ export class Runner {
       vaults: await this.vaults.report(),
       activeShifts: this.supervisor.activeShifts(),
       maxConcurrentShifts: this.opts.config.maxConcurrentShifts,
+      sudoKey: this.keys.publicKey,
     };
   }
 
@@ -326,6 +360,21 @@ export class Runner {
       this.sweeping = null;
     });
     return this.sweeping;
+  }
+
+  private platform(): Platform {
+    return this.opts.platform ?? (process.platform as Platform);
+  }
+
+  /** `env.ensure`: detect the stacks of the project's repositories, verify and install their tools. */
+  private ensureEnv(p: EnvEnsurePayload) {
+    return ensureEnvironment(p, {
+      exec: this.exec,
+      platform: this.platform(),
+      root: this.sudo,
+      findRepo: (n) => this.findRepo(n),
+      logFile: join(this.paths.envLogs, `${p.projectId}.log`),
+    });
   }
 
   private async findRepo(normalized: string): Promise<RepoReport | undefined> {
@@ -476,6 +525,28 @@ export class Runner {
       } else if (command === 'repo.create') {
         // Failures are answered as `ok:true, result.ok:false`: the server puts them on the desk.
         done(true, await this.repoCreator.run(CommandPayloadSchemas['repo.create'].parse(payload)));
+      } else if (command === 'repo.clone') {
+        // A clone that cannot be done is an answer (ok:true, result.ok:false): the Repositories tab shows why.
+        done(true, await this.repoCloner.run(CommandPayloadSchemas['repo.clone'].parse(payload)));
+      } else if (command === 'env.ensure') {
+        done(true, await this.ensureEnv(CommandPayloadSchemas['env.ensure'].parse(payload)));
+      } else if (command === 'rights.verify') {
+        const p = CommandPayloadSchemas['rights.verify'].parse(payload);
+        done(
+          true,
+          await verifyRights(p.access, {
+            exec: this.exec,
+            root: this.sudo,
+            platform: this.platform(),
+            sudoPasswordStored: this.sudo.has(),
+          }),
+        );
+      } else if (command === 'sudo.set') {
+        // The payload is ciphertext; the answer never contains the password.
+        done(true, await this.sudo.set(CommandPayloadSchemas['sudo.set'].parse(payload)));
+      } else if (command === 'sudo.clear') {
+        this.sudo.clear();
+        done(true, { cleared: true });
       } else {
         done(false, undefined, `command ${command} is not supported by this runner version`);
       }

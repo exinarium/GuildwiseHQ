@@ -79,3 +79,5 @@ export function needsApproval(access: z.infer<typeof DevOpsAccessSchema>, text: 
   if (/\binstall\b/.test(t)) return !access.allowInstall;
   return false;
 }
+
+export * from './environment.ts';

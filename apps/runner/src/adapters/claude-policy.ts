@@ -143,6 +143,7 @@ export const RUNNER_PRIVATE = [
   'status.json',
   'logs',
   'mock-state',
+  'secrets',
 ];
 
 /**

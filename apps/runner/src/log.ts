@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { redact } from './secrets/redact.ts';
 
 export interface Logger {
   info(msg: string, extra?: unknown): void;
@@ -13,7 +14,9 @@ export const nullLogger: Logger = { info() {}, warn() {}, error() {} };
 export function createLogger(file?: string, quiet = false): Logger {
   if (file) mkdirSync(dirname(file), { recursive: true });
   const write = (level: string, msg: string, extra?: unknown) => {
-    const line = `${new Date().toISOString()} ${level} ${msg}${extra === undefined ? '' : ` ${safeJson(extra)}`}\n`;
+    const line = redact(
+      `${new Date().toISOString()} ${level} ${msg}${extra === undefined ? '' : ` ${safeJson(extra)}`}\n`,
+    );
     if (!quiet) process.stderr.write(line);
     if (file) {
       try {

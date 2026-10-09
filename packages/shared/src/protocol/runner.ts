@@ -1,5 +1,12 @@
 import { z } from 'zod';
 import { DiffStats } from '../cards/types.ts';
+import {
+  EnvEnsurePayloadSchema,
+  RepoClonePayloadSchema,
+  RightsVerifyPayloadSchema,
+  SudoKeySchema,
+  SudoSetPayloadSchema,
+} from '../devops/environment.ts';
 import { DevopsShiftSchema } from '../devops/index.ts';
 import { Usage } from '../events/define.ts';
 import { GuardViolation, ShiftKind } from '../events/shift.ts';
@@ -252,6 +259,11 @@ export const RunnerCommandNameSchema = z.enum([
   'branch.check_merged',
   'worktrees.sweep',
   'integration.run',
+  'repo.clone',
+  'env.ensure',
+  'rights.verify',
+  'sudo.set',
+  'sudo.clear',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -284,6 +296,11 @@ export const CommandPayloadSchemas = {
   'branch.check_merged': BranchCheckMergedPayloadSchema,
   'worktrees.sweep': WorktreesSweepPayloadSchema,
   'integration.run': IntegrationRunPayloadSchema,
+  'repo.clone': RepoClonePayloadSchema,
+  'env.ensure': EnvEnsurePayloadSchema,
+  'rights.verify': RightsVerifyPayloadSchema,
+  'sudo.set': SudoSetPayloadSchema,
+  'sudo.clear': z.object({}),
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([
@@ -332,6 +349,8 @@ export const HelloSchema = msg('hello', {
   outboxPending: z.number().int().nonnegative(),
   /** The runner's configured `maxConcurrentShifts` (shown on the Workstations page; the server caps it). */
   maxConcurrentShifts: z.number().int().positive().optional(),
+  /** The key the manager's browser encrypts the sudo password with (the private half never leaves the runner). */
+  sudoKey: SudoKeySchema.optional(),
 });
 export const OutboxFlushedSchema = msg('outbox.flushed', {});
 export const HeartbeatSchema = msg('heartbeat', {

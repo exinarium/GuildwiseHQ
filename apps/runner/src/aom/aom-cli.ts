@@ -57,6 +57,8 @@ const takesInlineJson = (verb: string | undefined, argv: string[]): boolean =>
   (verb === 'card' && (argv[0] === 'create' || argv[0] === 'update')) || verb === 'org';
 
 export function parseArgs(argv: string[], verb?: string): Parsed {
+  // `aom sudo -- <command> [args...]`: everything after the verb is the command, flags included.
+  if (verb === 'sudo') return { flags: new Map(), positionals: argv[0] === '--' ? argv.slice(1) : argv };
   const inlineJson = takesInlineJson(verb, argv);
   const flags = new Map<string, string[]>();
   const positionals: string[] = [];
@@ -765,6 +767,18 @@ const VERBS: Record<string, Verb> = {
   org: async (ctx, p) => orgDesign(ctx, p),
   phase: async (ctx, p) => phaseVerb(ctx, p),
   report: async (ctx, p) => reportVerb(ctx, p),
+  /** `aom sudo -- <command> [args...]` (DevOps engineer): the runner runs it with administrator rights. */
+  sudo: async (ctx, p) => {
+    if (p.positionals.length === 0) throw new UsageError('usage: aom sudo -- <command> [args...]');
+    const r = (await rpc(ctx, 'sudo.run', { argv: p.positionals })) as {
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+    };
+    if (r.stdout) ctx.io.out(r.stdout.endsWith('\n') ? r.stdout : `${r.stdout}\n`);
+    if (r.stderr) ctx.io.err(r.stderr.endsWith('\n') ? r.stderr : `${r.stderr}\n`);
+    return r.exitCode === 0 ? 0 : 1;
+  },
   transcript: async (ctx, p) => {
     const url = one(p, 'url');
     if (!url) throw new UsageError('usage: aom transcript --url <video or podcast URL>');
@@ -821,6 +835,7 @@ export const USAGE = `usage: aom <verb> [options]
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed
+  sudo -- <command> [args...]                 DevOps engineer: run a command as administrator (only when the manager granted sudo; the password stays on the runner)
   hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
 `;
 

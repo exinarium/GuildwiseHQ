@@ -11,7 +11,7 @@ Need the app started, a tool installed or the environment fixed? Run \`aom devop
 const accessLines = (a: DevopsShift['access']): string[] => [
   `- Install packages and tools: ${a.allowInstall ? 'allowed' : 'NOT allowed (needs approval)'}`,
   `- Docker (install, run, manage containers): ${a.allowDocker ? 'allowed' : 'NOT allowed (needs approval)'}`,
-  `- Elevated privileges (sudo): ${a.sudo ? 'allowed' : 'NOT allowed (needs approval)'}`,
+  `- Elevated privileges (sudo): ${a.sudo ? 'allowed: run privileged commands as `aom sudo -- <command> [args]` (the runner supplies the stored password; a bare `sudo` may prompt and hang; never ask for, print or store a password)' : 'NOT allowed (needs approval)'}`,
   `- Paths you may write (beyond your scratch dir): ${a.allowedPaths.length ? a.allowedPaths.join(', ') : 'none'}`,
 ];
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { EnvironmentReportSchema, EnvStateSchema, RepoCloneStateSchema } from '../devops/environment.ts';
 import { ConvertCardDecision, ProjectChangesSchema } from '../events/project.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { RepoDescriptionSchema, RepoNameSchema, RepoVisibilitySchema } from '../repo/index.ts';
@@ -20,6 +21,19 @@ export const ProjectRepoDtoSchema = z.object({
   workingBranchSetAt: IsoTime.nullable().optional(),
   /** The open desk question that asks for this repository's working branch. */
   branchQuestionId: z.uuid().nullable().optional(),
+  /** Where the DevOps engineers put this repository: one entry per workstation of the project (clone state). */
+  setup: z
+    .array(
+      z.object({
+        workstationId: z.uuid(),
+        workstationName: z.string(),
+        state: RepoCloneStateSchema,
+        detail: z.string().nullable(),
+        localPath: z.string().nullable(),
+        updatedAt: IsoTime,
+      }),
+    )
+    .optional(),
 });
 export type ProjectRepoDto = z.infer<typeof ProjectRepoDtoSchema>;
 
@@ -98,6 +112,19 @@ export const ProjectsResponseSchema = z.object({ projects: z.array(ProjectDtoSch
 export const ProjectDetailResponseSchema = z.object({
   project: ProjectDtoSchema,
   repos: z.array(ProjectRepoDtoSchema),
+  /** The development environment of the project per workstation (toolchain installed, ready to build). */
+  environments: z
+    .array(
+      z.object({
+        workstationId: z.uuid(),
+        workstationName: z.string(),
+        state: EnvStateSchema,
+        summary: z.string().nullable(),
+        report: EnvironmentReportSchema.nullable(),
+        updatedAt: IsoTime,
+      }),
+    )
+    .default([]),
   members: z.array(ProjectMemberDtoSchema),
   /** The setting's change history, newest first (who turned it on or off, when). */
   mergePolicyHistory: z
@@ -135,6 +162,17 @@ export const AddRepoRequestSchema = z.object({
   name: z.string().min(1).max(120),
   remoteUrl: RemoteUrlSchema,
   workingBranch: GitRefSchema.optional(),
+  /**
+   * "Create new": the repository does not exist yet. `remoteUrl` is where it will live; the DevOps engineer creates it
+   * on the code host (gh) and clones it. Without this the repository is cloned (it must exist).
+   */
+  create: z
+    .object({
+      name: RepoNameSchema,
+      visibility: RepoVisibilitySchema.default('private'),
+      description: RepoDescriptionSchema.optional(),
+    })
+    .optional(),
 });
 export type AddRepoRequest = z.infer<typeof AddRepoRequestSchema>;
 export const RepoParamsSchema = z.object({ id: z.uuid(), repoId: z.uuid() });
