@@ -17,9 +17,11 @@ export class BaseBranchMissingError extends WorktreeError {
     readonly base: string,
     readonly defaultBranch: string | null,
     readonly branches: string[],
+    /** Why the runner could not create the branch from the default branch (set when it tried). */
+    readonly createFailed?: string,
   ) {
     super(
-      `working branch '${base}' does not exist in this repo${defaultBranch ? `; its default branch is '${defaultBranch}'` : ''}`,
+      `working branch '${base}' does not exist in this repo${defaultBranch ? `; its default branch is '${defaultBranch}'` : ''}${createFailed ? `; creating it failed: ${createFailed}` : ''}`,
     );
   }
 }
@@ -30,6 +32,8 @@ export interface WorktreeResult {
   baseBranch: string;
   created: boolean;
   headSha: string;
+  /** Set when the working branch did not exist and was created (and pushed) from the repository's default branch. */
+  createdBranch?: { base: string; from: string; pushed: boolean };
 }
 
 export interface EnsureWorktreeInput {
@@ -113,13 +117,49 @@ export async function ensureWorktree(input: EnsureWorktreeInput): Promise<Worktr
       if (await revParse(repoPath, `refs/remotes/origin/${base}`)) startPoint = `origin/${base}`;
     }
   }
+  let createdBranch: WorktreeResult['createdBranch'];
   if (!(await revParse(repoPath, startPoint))) {
-    const branches = await branchNames(repoPath);
-    throw new BaseBranchMissingError(base, await defaultBranchOf(repoPath, branches), branches);
+    // The working branch exists neither locally nor on origin: create it from the default branch and push it.
+    const made = await createWorkingBranch(repoPath, base);
+    if (!made.ok) throw new BaseBranchMissingError(base, made.defaultBranch, made.branches, made.error);
+    createdBranch = made.created;
+    startPoint = base;
   }
   const r = await git(repoPath, ['worktree', 'add', '-b', branch, '--', path, startPoint]);
   if (r.exitCode !== 0) fail(`git worktree add -b ${branch} failed: ${r.stderr.trim()}`);
-  return result(true);
+  return { ...(await result(true)), ...(createdBranch ? { createdBranch } : {}) };
+}
+
+/**
+ * Creates the missing working branch `base` from the repository's default branch (`origin/HEAD`, else the only branch,
+ * else main/master) and, when there is an origin, pushes it with upstream. When no default branch can be told or the
+ * push is refused it returns `ok: false` and leaves nothing behind; the caller then asks the manager.
+ */
+export async function createWorkingBranch(
+  repoPath: string,
+  base: string,
+): Promise<
+  | { ok: true; created: NonNullable<WorktreeResult['createdBranch']> }
+  | { ok: false; defaultBranch: string | null; branches: string[]; error?: string }
+> {
+  const branches = await branchNames(repoPath);
+  const def = await defaultBranchOf(repoPath, branches);
+  if (!def || !isSafeGitRef(def)) return { ok: false, defaultBranch: null, branches };
+  const failed = (error: string) => ({ ok: false as const, defaultBranch: def, branches, error });
+  const remote = await hasRemote(repoPath);
+  if (remote) await git(repoPath, ['fetch', '--', 'origin', def]);
+  const from = (await revParse(repoPath, `refs/remotes/origin/${def}`)) ? `origin/${def}` : def;
+  if (!(await revParse(repoPath, from))) return failed(`the default branch '${def}' has no commits`);
+  const b = await git(repoPath, ['branch', '--no-track', '--', base, from]);
+  if (b.exitCode !== 0) return failed(`git branch failed: ${b.stderr.trim()}`);
+  if (remote) {
+    const push = await git(repoPath, ['push', '-u', 'origin', `${base}:${base}`]);
+    if (push.exitCode !== 0) {
+      await git(repoPath, ['branch', '-D', '--', base]);
+      return failed(`git push failed: ${(push.stderr || push.stdout).trim().slice(0, 300)}`);
+    }
+  }
+  return { ok: true, created: { base, from: def, pushed: remote } };
 }
 
 /** `worktree.remove` command: idempotent. Deletes the branch only when asked. */

@@ -937,7 +937,7 @@ A banner "This project has used its monthly budget" and a desk item mean the pro
 
 ### 9.5 A missing working branch
 
-Symptom: the DevOps engineer does not commit or pull in a repository, and the desk asks "Which branch is the working branch?" (or the project settings show *not confirmed*). Answer the question on the desk, or set the branch in **Project settings, Repositories, Change**. The DevOps engineer commits and pushes right away. If the branch you named does not exist yet, create it in git first. See 4.4.
+Symptom: the DevOps engineer does not commit or pull in a repository, and the desk asks "Which branch is the working branch?" (or the project settings show *not confirmed*). Answer the question on the desk, or set the branch in **Project settings, Repositories, Change**. The DevOps engineer commits and pushes right away. If the branch you named does not exist yet, the runner creates it from the repository's default branch and pushes it when the next card starts (the card shows "Created working branch X from Y"); you only get this question when it cannot tell the default branch or the push is refused. See 4.4.
 
 ### 9.6 Two-factor recovery
 

@@ -43,6 +43,8 @@ When a repository has no confirmed working branch (project settings show **not c
 
 When the repository has uncommitted changes waiting, the question is pinned and blocking; otherwise it is an ordinary question. Answer it by picking a branch from the options or typing its name. If the repository has exactly one branch (or its default branch is known), that one is preselected as the suggestion; nothing is stored until you answer. Your answer is stored for the repository.
 
+If the working branch does not exist in the clone yet, you are not asked: when the next card starts, the runner creates the branch from the repository's default branch (`origin/HEAD`, else the only branch, else `main` or `master`), pushes it, and the card shows "Created working branch X from Y". Only if it cannot tell the default branch, or the push is refused (a protected repository, no access), does the question reach your desk, with the reason.
+
 A repository added without a branch stays unconfirmed: `main` is never assumed. If an agent's workstation cannot start a card because the working branch does not exist there, the same question appears on the desk, linked to the card, naming the repository's default branch (for example `master`). There is one open question per repository however many cards fail, and a branch you confirmed is never changed without your answer.
 
 When something changes (for example a new phase is created), the DevOps engineer asks again ("Keep `<branch>` as the working branch...?") so you can keep or change it.

@@ -187,3 +187,34 @@ describe('a base branch the runner does not have', () => {
     expect(item?.recommendation).toBe('branch:trunk');
   });
 });
+
+describe('a working branch the runner created', () => {
+  it('says so on the card', async () => {
+    await reset();
+    await w.hire('Bea', 'builder', 'junior');
+    const card = await w.card({ title: 'Branch made' });
+    const start = await p.next('Bea');
+    r.accepted(start.shiftId);
+    r.send('shift.started', {
+      shiftId: start.shiftId,
+      branchCreated: { base: 'main', from: 'master', pushed: true },
+    });
+    await new Promise((res) => setTimeout(res, 300));
+    const events = await q(`SELECT payload FROM events WHERE type='ThreadMessagePosted' AND stream_id=$1`, [
+      `thread-${card.id}`,
+    ]);
+    expect(events.map((e) => e.payload.body)).toContain(
+      'Created working branch main from master and pushed it to origin: it did not exist in the repository.',
+    );
+    r.ended(start.shiftId, 'stopped');
+  });
+
+  it('a failed creation reaches the question', async () => {
+    await reset();
+    await w.hire('Bea', 'builder', 'junior');
+    await w.card({ title: 'Branch refused' });
+    await rejectMissing('Bea', { ...missing, createFailed: 'git push failed: protected' } as typeof missing);
+    const [item] = await questions();
+    expect(JSON.stringify(item)).toContain('could not: git push failed: protected');
+  });
+});

@@ -470,8 +470,20 @@ export async function applyShiftStarted(ctx: Ctx, tx: Tx, ws: WsRef, msg: Runner
     s.id,
     ctx.clock.now(),
   ]);
+  const created = msg.branchCreated;
   await ctx.store.append(
     [
+      ...(card && created
+        ? [
+            cardMessage(
+              card,
+              { kind: 'system' },
+              'system',
+              `Created working branch ${created.base} from ${created.from}${created.pushed ? ' and pushed it to origin' : ''}: it did not exist in the repository.`,
+              { branchCreated: created },
+            ),
+          ]
+        : []),
       {
         streamId: streamId.shift(s.id),
         event: {
@@ -558,7 +570,12 @@ async function branchProblemEvents(
   ctx: Ctx,
   tx: Tx,
   card: Row,
-  problem: { base: string; defaultBranch?: string | undefined; branches: string[] },
+  problem: {
+    base: string;
+    defaultBranch?: string | undefined;
+    branches: string[];
+    createFailed?: string | undefined;
+  },
 ): Promise<{
   events: AppendInput[];
   rejection: { reason: string; detail: string; kind: 'branch'; repoId: string };
@@ -585,6 +602,7 @@ async function branchProblemEvents(
           defaultBranch: problem.defaultBranch ?? null,
           cardId: card.id,
           cardRef: card.ref,
+          ...(problem.createFailed ? { createFailed: problem.createFailed } : {}),
         },
       })),
     );

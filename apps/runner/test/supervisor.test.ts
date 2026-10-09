@@ -254,17 +254,31 @@ describe('supervisor', () => {
     expect(h!.server.invalid).toEqual([]);
   });
 
-  it('rejects a base branch the clone lacks with a precise reason and the branches it has', async () => {
+  it('creates a base branch the clone lacks from the default branch and says so on shift.started', async () => {
     await start(async () => {});
     const msg = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized, ref: 'TOY-9' }) as any;
     msg.worktree.baseBranch = 'trunk';
     h!.server.send('shift.start', msg);
+    const started = await h!.server.waitFor('shift.started', (m) => m.shiftId === msg.shiftId);
+    expect(started.branchCreated).toEqual({ base: 'trunk', from: 'main', pushed: true });
+    expect(started.worktree).toMatchObject({ baseBranch: 'trunk', created: true });
+    expect(h!.server.invalid).toEqual([]);
+  });
+
+  it('rejects with the branches it has when the base branch cannot be created', async () => {
+    await start(async () => {});
+    sh(h!.repo.clone, 'git', ['remote', 'set-head', 'origin', '--delete']);
+    sh(h!.repo.clone, 'git', ['branch', '-m', 'main', 'trunk']);
+    sh(h!.repo.clone, 'git', ['branch', 'develop']);
+    sh(h!.repo.clone, 'git', ['branch', '-dr', 'origin/main']);
+    const msg = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized, ref: 'TOY-9' }) as any;
+    msg.worktree.baseBranch = 'release';
+    h!.server.send('shift.start', msg);
     const rej = await h!.server.waitFor('shift.rejected', (m) => m.shiftId === msg.shiftId);
     expect(rej.reason).toBe('worktree_failed');
-    expect(rej.detail).toContain(
-      "working branch 'trunk' does not exist in this repo; its default branch is 'main'",
-    );
-    expect(rej.branchProblem).toMatchObject({ base: 'trunk', defaultBranch: 'main', branches: ['main'] });
+    expect(rej.detail).toContain("working branch 'release' does not exist in this repo");
+    expect(rej.branchProblem).toMatchObject({ base: 'release' });
+    expect(rej.branchProblem?.defaultBranch).toBeUndefined();
     expect(h!.server.invalid).toEqual([]);
   });
 

@@ -283,7 +283,14 @@ export interface BranchQuestion {
    * and says what is wrong (the system asks and it is pinned, so it reaches the manager without the BA's triage hold);
    * the card stays queued, retried with a growing pause. `defaultBranch` is the repository's own.
    */
-  missing?: { base: string; defaultBranch?: string | null; cardId: string; cardRef: string };
+  missing?: {
+    base: string;
+    defaultBranch?: string | null;
+    cardId: string;
+    cardRef: string;
+    /** Why creating the branch from the default branch did not work. */
+    createFailed?: string;
+  };
 }
 
 /**
@@ -338,7 +345,7 @@ export async function workingBranchQuestionEvents(
       ? `Keep ${current} as the working branch of ${where}${q.because ? ` for ${q.because}` : ''}, or use another branch?`
       : `Which branch is the working branch of ${where}?`;
   const doing = q.missing
-    ? `The runner could not start ${q.missing.cardRef}: working branch '${q.missing.base}' does not exist in this repo${defaultBranch ? `; its default branch is '${defaultBranch}'` : ''}. Cards on this repository are retried with a growing pause until the branch is set.`
+    ? `The runner could not start ${q.missing.cardRef}: working branch '${q.missing.base}' does not exist in this repo${defaultBranch ? `; its default branch is '${defaultBranch}'` : ''}. ${q.missing.createFailed ? `The runner tried to create it from the default branch and could not: ${q.missing.createFailed}. ` : 'The runner could not tell which branch to create it from. '}Cards on this repository are retried with a growing pause until the branch is set.`
     : current
       ? `Confirming the working branch of ${where}${q.because ? ` because of ${q.because}` : ''}. Hygiene commits and pushes unsaved work to this branch and agents merge their cards into it.${q.reason === 'phase' ? ' A branch you name here applies to this phase only; the repository keeps its default and uses it again when the phase is done.' : ''}`
       : `Repository hygiene found no confirmed working branch for ${where}, so it did not commit or push anything. ${

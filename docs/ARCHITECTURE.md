@@ -1352,8 +1352,8 @@ Runner → server:
 | `heartbeat` | `{activeShifts: string[], load:{runningShifts:number}}` | no |
 | `repos.report` | `{repos:[...]}` | no |
 | `shift.accepted` | `{shiftId}` | yes |
-| `shift.rejected` | `{shiftId, reason:'busy'|'runtime_unavailable'|'repo_missing'|'worktree_failed'|'rebase_conflict'|'internal', detail?, conflictedFiles?, branchProblem?:{base, defaultBranch?, branches[]}}` | yes |
-| `shift.started` | `{shiftId, runtimeSessionId?, worktree?:{path, branchName, baseBranch, created:boolean, headSha}}` | yes |
+| `shift.rejected` | `{shiftId, reason:'busy'|'runtime_unavailable'|'repo_missing'|'worktree_failed'|'rebase_conflict'|'internal', detail?, conflictedFiles?, branchProblem?:{base, defaultBranch?, branches[], createFailed?}}` | yes |
+| `shift.started` | `{shiftId, runtimeSessionId?, worktree?:{path, branchName, baseBranch, created:boolean, headSha}, branchCreated?:{base, from, pushed}}` | yes |
 | `shift.progress` | `{shiftId, items:[{at, kind:'text'|'tool'|'status', text}]}` (batched ≤ 1/s, text ≤ 500 chars each) | no |
 | `shift.report` | `{shiftId, reportId, report: ShiftReport}` (§13.4) | yes; server replies `shift.report.result {reportId, accepted, error?}` |
 | `shift.ended` | `{shiftId, outcome:'reported'|'no_report'|'stopped'|'crashed'|'timeout', exitCode?, durationMs, usage:Usage, finalText?:string(≤4000), guardViolations:[{rule, detail}]}` | yes |

@@ -362,6 +362,7 @@ export class ShiftSupervisor {
             base: err.base,
             ...(err.defaultBranch ? { defaultBranch: err.defaultBranch } : {}),
             branches: err.branches.slice(0, 200),
+            ...(err.createFailed ? { createFailed: err.createFailed } : {}),
           });
         } else if (err instanceof WorktreeError) {
           this.reject(msg.shiftId, 'worktree_failed', err.message);
@@ -453,7 +454,16 @@ export class ShiftSupervisor {
               },
             }
           : {}),
+        ...(s.worktree?.createdBranch ? { branchCreated: s.worktree.createdBranch } : {}),
       });
+    if (s.worktree?.createdBranch && !s.startedSent) {
+      const b = s.worktree.createdBranch;
+      this.addProgress(
+        s,
+        'status',
+        `created working branch ${b.base} from ${b.from}${b.pushed ? ' and pushed it' : ''}`,
+      );
+    }
     if (!s.startedSent) {
       s.startedSent = true;
       this.persist(s);

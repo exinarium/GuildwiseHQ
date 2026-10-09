@@ -356,6 +356,8 @@ export const ShiftRejectedSchema = msg('shift.rejected', {
       /** `origin/HEAD` of the clone, or its only branch. */
       defaultBranch: z.string().optional(),
       branches: z.array(z.string()).max(200),
+      /** Why creating the branch from the default branch did not work (the runner tries first). */
+      createFailed: z.string().max(500).optional(),
     })
     .optional(),
 });
@@ -371,6 +373,8 @@ export const ShiftStartedSchema = msg('shift.started', {
       headSha: z.string(),
     })
     .optional(),
+  /** The working branch did not exist: the runner created it from `from` (the default branch) and pushed it. */
+  branchCreated: z.object({ base: z.string(), from: z.string(), pushed: z.boolean() }).optional(),
 });
 export const ShiftProgressSchema = msg('shift.progress', {
   shiftId: z.uuid(),

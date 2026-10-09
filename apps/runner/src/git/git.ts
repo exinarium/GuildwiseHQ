@@ -75,7 +75,9 @@ export async function defaultBranchOf(cwd: string, branches?: string[]): Promise
   const head = r.exitCode === 0 ? /^origin\/(.+)$/.exec(r.stdout.trim())?.[1] : undefined;
   if (head) return head;
   const all = branches ?? (await branchNames(cwd));
-  return all.length === 1 ? (all[0] as string) : null;
+  if (all.length === 1) return all[0] as string;
+  // Several branches and no origin/HEAD: the conventional names, `main` before `master`.
+  return ['main', 'master'].find((b) => all.includes(b)) ?? null;
 }
 
 /** `git --version` as [major, minor], or null. */
