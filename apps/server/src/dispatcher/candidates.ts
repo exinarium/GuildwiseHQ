@@ -96,6 +96,11 @@ export function eligibility(A: AgentRefs) {
     repo: `(c.repo_id IS NULL OR EXISTS (
         SELECT 1 FROM workstation_repos wr
          WHERE wr.workstation_id = ${A.workstationId} AND wr.project_repo_id = c.repo_id))`,
+    // The DevOps engineer prepares the toolchain of a project on a workstation before any build work (migration 1370):
+    // while that is not done, build and test cards wait there. A project without a row is not gated.
+    env: `(c.repo_id IS NULL OR st.claim_role NOT IN ('builder', 'tester') OR NOT EXISTS (
+        SELECT 1 FROM project_environments pe
+         WHERE pe.project_id = c.project_id AND pe.workstation_id = ${A.workstationId} AND pe.state <> 'ready'))`,
     vault: `(c.repo_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM vaults v WHERE ${vaultOfCard}) OR EXISTS (
         SELECT 1 FROM vaults v JOIN workstation_vaults wv ON wv.vault_id = v.id AND wv.workstation_id = ${A.workstationId}
          WHERE ${vaultOfCard}))`,
@@ -123,6 +128,7 @@ WHERE c.status = 'queued'
   AND ${E.caps}
   AND ${E.home}
   AND ${E.repo}
+  AND ${E.env}
   AND ${E.vault}
   AND ${E.worktree}
   AND (p.max_concurrent_shifts IS NULL OR (SELECT count(*) FROM cards pc

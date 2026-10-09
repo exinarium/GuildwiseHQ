@@ -32,6 +32,14 @@ import {
 } from '../commands/shifts.ts';
 import { transcriptStoreRpc } from '../commands/transcripts.ts';
 import { applyVaultConflict, markVaultStatus, queueVaultConfigure } from '../commands/vaults.ts';
+import {
+  applyEnvEnsureResult,
+  applyRepoCloneResult,
+  applyRightsResult,
+  applySudoSetResult,
+  deliver,
+  environmentRequestEvents,
+} from '../commands/workstation-setup.ts';
 import { liveWorktreePaths } from '../commands/worktree-sweep.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
@@ -240,6 +248,41 @@ export class RunnerHandlers {
             msg.result,
             msg.error,
           );
+        } else if (cmd?.type === 'repo.clone') {
+          // Terminal: cloned, created, or a reason that shows in the Repositories tab (the manager retries there).
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyRepoCloneResult(
+            this.ctx,
+            conn.workstationId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
+        } else if (cmd?.type === 'env.ensure') {
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyEnvEnsureResult(
+            this.ctx,
+            conn.workstationId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
+        } else if (cmd?.type === 'rights.verify') {
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyRightsResult(this.ctx, conn.workstationId, msg.ok, msg.result);
+        } else if (cmd?.type === 'sudo.set') {
+          // The ciphertext is forgotten here (applySudoSetResult empties the payload) whatever the answer was.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applySudoSetResult(
+            this.ctx,
+            conn.workstationId,
+            msg.commandId,
+            msg.ok,
+            msg.result,
+            String(cmd.payload.keyId ?? ''),
+          );
         } else {
           await completeCommand(this.ctx.pool, msg.commandId, msg.ok, msg.error, this.ctx.clock.now());
         }
@@ -315,6 +358,14 @@ export class RunnerHandlers {
       `UPDATE workstations SET runtimes=$2, runner_version=$3, hostname=$4, platform=$5, last_seen_at=$6 WHERE id=$1`,
       [conn.workstationId, JSON.stringify(msg.runtimes), msg.runnerVersion, msg.hostname, msg.platform, now],
     );
+    // The public key the sudo password is encrypted with (the private half stays on the runner).
+    if (msg.sudoKey)
+      await exec(
+        ctx.pool,
+        `INSERT INTO workstation_keys (workstation_id, key_id, public_key, updated_at) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (workstation_id) DO UPDATE SET key_id=EXCLUDED.key_id, public_key=EXCLUDED.public_key, updated_at=EXCLUDED.updated_at`,
+        [conn.workstationId, msg.sudoKey.keyId, msg.sudoKey.publicKey, now],
+      );
     // Whatever the previous connection was sent may not have arrived: it is due again on this one.
     await requeueSentCommands(ctx.pool, conn.workstationId);
     await this.matchRepos(conn);
@@ -558,6 +609,14 @@ export class RunnerHandlers {
   async matchRepos(conn: RunnerConn) {
     const { ctx } = this;
     const now = ctx.clock.now();
+    const before = new Set(
+      (
+        await rows(ctx.pool, 'SELECT project_repo_id FROM workstation_repos WHERE workstation_id=$1', [
+          conn.workstationId,
+        ])
+      ).map((r) => r.project_repo_id as string),
+    );
+    const matched = new Set<string>();
     await withAppendTx(ctx.pool, async (tx) => {
       await exec(tx, 'DELETE FROM workstation_repos WHERE workstation_id=$1', [conn.workstationId]);
       for (const r of conn.lastRepos) {
@@ -570,6 +629,7 @@ export class RunnerHandlers {
           [n, conn.userId],
         );
         for (const m of matches) {
+          matched.add(m.id as string);
           await exec(
             tx,
             `INSERT INTO workstation_repos (workstation_id, project_repo_id, local_path, reported_at) VALUES ($1,$2,$3,$4)
@@ -579,7 +639,40 @@ export class RunnerHandlers {
         }
       }
     });
+    await this.prepareNewProjects(
+      conn,
+      [...matched].filter((id) => !before.has(id)),
+    );
     ctx.services.dispatcher.trigger();
+  }
+
+  /**
+   * A project's repository appeared on this workstation (cloned by the DevOps engineer or by hand, or a new
+   * workstation joined): make the toolchain ready before build work, unless it is being or was prepared already.
+   */
+  private async prepareNewProjects(conn: RunnerConn, repoIds: string[]): Promise<void> {
+    if (repoIds.length === 0) return;
+    const { ctx } = this;
+    try {
+      await withAppendTx(ctx.pool, async (tx) => {
+        const projects = await rows(
+          tx,
+          `SELECT DISTINCT pr.project_id FROM project_repos pr JOIN projects p ON p.id = pr.project_id AND p.status='active'
+            WHERE pr.id = ANY($1::uuid[]) AND NOT EXISTS (
+              SELECT 1 FROM project_environments pe WHERE pe.project_id = pr.project_id AND pe.workstation_id = $2)`,
+          [repoIds, conn.workstationId],
+        );
+        const events = [];
+        for (const p of projects)
+          events.push(
+            ...(await environmentRequestEvents(ctx, tx, p.project_id, conn.workstationId, 'repo_found')),
+          );
+        if (events.length) await ctx.store.append(events, { tx });
+      });
+      deliver(ctx, [conn.workstationId]);
+    } catch (err) {
+      ctx.log.warn({ err }, 'could not queue the environment preparation');
+    }
   }
 
   /** `aom devops "<text>"` from a running shift: a request for this workstation's DevOps engineer (non-terminal). */

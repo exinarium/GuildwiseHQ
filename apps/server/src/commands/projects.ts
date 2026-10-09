@@ -25,6 +25,13 @@ import { releaseEvents } from './cards.ts';
 import { assertRemoteUrl, cardMessage, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { cancelConversionEvents } from './convert.ts';
 import { cancelPhasesEvents } from './phases.ts';
+import {
+  deliver,
+  projectWorkstations,
+  recheckProjectEnvironment,
+  repoSetupEvents,
+  retryRepoSetup,
+} from './workstation-setup.ts';
 
 /** Only the organization's Owner and Admins create projects (owner decision 4). */
 export async function createProject(
@@ -218,15 +225,24 @@ export async function addRepo(
   const normalized = normalizeRemoteUrl(input.remoteUrl);
   if (!normalized.includes('/'))
     throw badRequest('invalid_remote_url', 'remote URL must include a host and a path');
-  return withAppendTx(ctx.pool, async (tx) => {
+  let stations: string[] = [];
+  const id = await withAppendTx(ctx.pool, async (tx) => {
     const p = await ownedProject(tx, user.id, projectId);
     if (isResearchStage(p.workflow_key))
       throw conflict(
         'research_stage_no_repos',
         'This project is still in the research stage: convert it to a delivery project first, then add repositories.',
       );
-    return addRepoIn(ctx, tx, p, input, userActor(user.id));
+    const repoId = await addRepoIn(ctx, tx, p, input, userActor(user.id));
+    // The DevOps engineers put the repository on the project's workstations (clone it, or create it first).
+    const repo = (await one(tx, 'SELECT * FROM project_repos WHERE id=$1', [repoId])) as Row;
+    const events = await repoSetupEvents(tx, p, repo, { create: input.create, requestedBy: user.id });
+    if (events.length) await ctx.store.append(events, { tx });
+    stations = (await projectWorkstations(tx, projectId)).map((w) => w.id);
+    return repoId;
   });
+  deliver(ctx, stations);
+  return id;
 }
 
 /**
@@ -551,4 +567,24 @@ export async function deleteProject(
     }
     await ctx.store.append(events, { tx });
   });
+}
+
+/** The manager asks the DevOps engineers to try putting a repository on the project's workstations again. */
+export async function retryRepoClone(ctx: Ctx, user: AuthSession['user'], projectId: string, repoId: string) {
+  let stations: string[] = [];
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await ownedProject(tx, user.id, projectId);
+    stations = await retryRepoSetup(ctx, tx, p, repoId, user.id);
+  });
+  deliver(ctx, stations);
+}
+
+/** The manager asks to check the project's development environment again (after fixing something by hand). */
+export async function recheckEnvironment(ctx: Ctx, user: AuthSession['user'], projectId: string) {
+  await withAppendTx(ctx.pool, (tx) => ownedProject(tx, user.id, projectId));
+  await recheckProjectEnvironment(ctx, projectId);
+  deliver(
+    ctx,
+    (await projectWorkstations(ctx.pool, projectId)).map((w) => w.id),
+  );
 }

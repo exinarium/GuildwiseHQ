@@ -6,6 +6,7 @@ import { chatProjectors } from './chats.ts';
 import { costProjectors } from './costs.ts';
 import { deskProjectors } from './desk.ts';
 import { devopsProjectors } from './devops.ts';
+import { environmentProjectors } from './environment.ts';
 import { feedProjectors } from './feeds.ts';
 import { hygieneProjectors } from './hygiene.ts';
 import { intakeProjectors } from './intake.ts';
@@ -51,6 +52,7 @@ const domains: Array<Record<string, Projector>> = [
   chatProjectors,
   vaultProjectors,
   devopsProjectors,
+  environmentProjectors,
   hygieneProjectors,
   sharingProjectors,
   testingProjectors,
@@ -114,6 +116,8 @@ export const PROJECTION_TABLES = [
   'ledger_entries',
   'vaults',
   'devops_requests',
+  'repo_clones',
+  'project_environments',
   'environment_changes',
   'test_runs',
   'schedules',

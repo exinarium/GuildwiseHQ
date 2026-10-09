@@ -16,6 +16,7 @@ export interface HelloOptions {
   activeShifts?: Array<{ shiftId: string; cardId?: string; agentId: string; startedAt: string }>;
   outboxPending?: number;
   maxConcurrentShifts?: number;
+  sudoKey?: { keyId: string; publicKey: string };
 }
 
 /** In-process runner speaking the shared protocol; auto-acks server messages that need it. */
@@ -92,6 +93,7 @@ export class FakeRunner {
       activeShifts: o.activeShifts ?? [],
       outboxPending: o.outboxPending ?? 0,
       ...(o.maxConcurrentShifts ? { maxConcurrentShifts: o.maxConcurrentShifts } : {}),
+      ...(o.sudoKey ? { sudoKey: o.sudoKey } : {}),
     });
   }
 

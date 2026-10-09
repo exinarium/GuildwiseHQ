@@ -136,6 +136,18 @@ export async function getProjectDetail(
       WHERE project_id=$1 AND subkind='working_branch' AND status='open' AND triage <> 'pending' ORDER BY created_at`,
     [projectId],
   );
+  const clones = await rows(
+    ctx.pool,
+    `SELECT rc.*, w.name AS workstation_name FROM repo_clones rc JOIN workstations w ON w.id = rc.workstation_id
+      WHERE rc.project_id=$1 AND w.status='active' ORDER BY w.name`,
+    [projectId],
+  );
+  const envs = await rows(
+    ctx.pool,
+    `SELECT pe.*, w.name AS workstation_name FROM project_environments pe JOIN workstations w ON w.id = pe.workstation_id
+      WHERE pe.project_id=$1 AND w.status='active' ORDER BY w.name`,
+    [projectId],
+  );
   const members = await rows(
     ctx.pool,
     `SELECT pm.*, u.display_name, u.email FROM project_members pm JOIN users u ON u.id = pm.user_id
@@ -166,6 +178,24 @@ export async function getProjectDetail(
       knownBranches: r.known_branches ?? [],
       workingBranchSetAt: iso(r.working_branch_set_at),
       branchQuestionId: questions.find((q) => q.repo_id === r.id)?.id ?? null,
+      setup: clones
+        .filter((c) => c.project_repo_id === r.id)
+        .map((c) => ({
+          workstationId: c.workstation_id,
+          workstationName: c.workstation_name,
+          state: c.state,
+          detail: c.detail ?? null,
+          localPath: c.local_path ?? null,
+          updatedAt: iso(c.updated_at) as string,
+        })),
+    })),
+    environments: envs.map((e) => ({
+      workstationId: e.workstation_id,
+      workstationName: e.workstation_name,
+      state: e.state,
+      summary: e.summary ?? null,
+      report: e.report ?? null,
+      updatedAt: iso(e.updated_at) as string,
     })),
     members: members.map((m) => ({
       userId: m.user_id,
@@ -206,6 +236,15 @@ export async function workstationDtos(
     [list.map((w) => w.id)],
   );
   const hygiene = await hygieneDtos(ctx.pool, list as never);
+  const keys = new Map<string, string>(
+    (
+      await rows(
+        ctx.pool,
+        'SELECT workstation_id, key_id FROM workstation_keys WHERE workstation_id = ANY($1::uuid[])',
+        [list.map((w) => w.id)],
+      )
+    ).map((k) => [k.workstation_id as string, k.key_id as string]),
+  );
   return list.map((w) => ({
     id: w.id,
     userId: w.user_id,
@@ -228,6 +267,13 @@ export async function workstationDtos(
     devopsAccess: w.devops_access,
     devopsAgentId: w.devops_agent_id ?? null,
     hygiene: hygiene.get(w.id),
+    rights: w.devops_rights ? { ...w.devops_rights, stale: !!w.devops_rights_stale } : null,
+    sudo: {
+      keyId: keys.get(w.id) ?? null,
+      passwordSet: !!w.devops_sudo_set_at,
+      setAt: iso(w.devops_sudo_set_at),
+      works: w.devops_sudo_works ?? null,
+    },
     shifts: {
       running: running.find((r) => r.workstation_id === w.id)?.n ?? 0,
       limit: ctx.services.runners.isOnline(w.id) ? (ctx.services.runners.get(w.id)?.maxShifts ?? null) : null,

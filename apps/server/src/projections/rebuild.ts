@@ -13,6 +13,8 @@ const SAVED: Array<{ table: string; restoreWhere: string }> = [
   { table: 'user_recovery_codes', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'login_challenges', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'runner_commands', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
+  // The runner's public key for the sudo password (migration 1370): announced in `hello`, not an event.
+  { table: 'workstation_keys', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
   { table: 'runner_token_rotations', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
   {
     table: 'workstation_repos',

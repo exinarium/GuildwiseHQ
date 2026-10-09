@@ -24,8 +24,10 @@ import {
   deleteProject,
   projectImpact,
   rankProjects,
+  recheckEnvironment,
   removeRepo,
   restoreProject,
+  retryRepoClone,
   setConcurrencyCap,
   setMergePolicy,
   updateProject,
@@ -169,6 +171,24 @@ export function projectRoutes(ctx: Ctx) {
         return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );
+
+    /** Try again to put the repository on the project's workstations (clone it, or create it). */
+    app.post(
+      '/api/projects/:id/repos/:repoId/setup',
+      { schema: { params: RepoParamsSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await retryRepoClone(ctx, s.user, req.params.id, req.params.repoId);
+        return getProjectDetail(ctx, s.user.id, req.params.id);
+      },
+    );
+
+    /** Check the development environment (toolchain) of the project on its workstations again. */
+    app.post('/api/projects/:id/environment/check', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await recheckEnvironment(ctx, s.user, req.params.id);
+      return getProjectDetail(ctx, s.user.id, req.params.id);
+    });
 
     app.delete('/api/projects/:id/repos/:repoId', { schema: { params: RepoParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);

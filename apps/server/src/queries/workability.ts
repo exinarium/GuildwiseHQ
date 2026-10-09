@@ -45,10 +45,10 @@ const AGENT_REFS = {
 const E = eligibility(AGENT_REFS);
 
 const AGENTS_SQL = `
-SELECT c.id AS card_id, a.id AS agent_id, a.name, a.capacity,
+SELECT c.id AS card_id, a.id AS agent_id, ws.id AS workstation_id, a.name, a.capacity,
        (a.seniority = 'senior') AS is_senior,
        (${E.senior}) AS senior_ok, (${E.notExcluded}) AS not_excluded, (${E.tier}) AS tier_ok,
-       (${E.home}) AS home_ok, (${E.worktree}) AS worktree_ok, (${E.repo}) AS repo_ok,
+       (${E.home}) AS home_ok, (${E.worktree}) AS worktree_ok, (${E.repo}) AS repo_ok, (${E.env}) AS env_ok,
        (${E.vault}) AS vault_ok, (${E.caps}) AS caps_ok,
        (ws.status = 'active' AND wu.status = 'active' AND ws.connected AND ws.last_seen_at > $2
          AND EXISTS (SELECT 1 FROM jsonb_array_elements(ws.runtimes) r
@@ -165,7 +165,9 @@ export async function cardWorkability(ctx: Ctx, cards: Row[]): Promise<Map<strin
     }
     // From here on someone is hired who could take it: the rest is where they are and whether they are up.
     // 5. Placement: the card's repo, vault, worktree home and capabilities on some eligible agent's workstation.
-    const placed = free.filter((a) => a.home_ok && a.worktree_ok && a.repo_ok && a.vault_ok && a.caps_ok);
+    const placed = free.filter(
+      (a) => a.home_ok && a.worktree_ok && a.repo_ok && a.env_ok && a.vault_ok && a.caps_ok,
+    );
     if (placed.length === 0) return waiting(await placementReason(c, free, roleLower));
     // 6. Online.
     const online = placed.filter((a) => a.online);
@@ -202,6 +204,22 @@ export async function cardWorkability(ctx: Ctx, cards: Row[]): Promise<Map<strin
     if (allFail('repo_ok')) {
       const repo = (await rows(ctx.pool, 'SELECT name FROM project_repos WHERE id=$1', [c.repo_id]))[0];
       return `no workstation with an eligible ${roleLower} holds repo ${repo?.name ?? 'of this card'}.`;
+    }
+    if (allFail('env_ok')) {
+      const env = (
+        await rows(
+          ctx.pool,
+          `SELECT pe.state, pe.summary, w.name FROM project_environments pe JOIN workstations w ON w.id = pe.workstation_id
+            WHERE pe.project_id=$1 AND pe.state <> 'ready'
+              AND pe.workstation_id = ANY($2::uuid[]) ORDER BY pe.updated_at DESC`,
+          [c.project_id, free.map((a) => a.workstation_id)],
+        )
+      )[0];
+      return `the development environment on ${env?.name ?? 'the workstation'} is not ready (${
+        env?.state === 'preparing'
+          ? 'the DevOps engineer is setting it up'
+          : (env?.summary ?? 'see Project settings, Repositories')
+      }).`;
     }
     if (allFail('vault_ok')) return `no workstation with an eligible ${roleLower} holds the project's vault.`;
     if (allFail('caps_ok'))

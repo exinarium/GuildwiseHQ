@@ -30,6 +30,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, orgScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { hygieneReportEvents } from './hygiene.ts';
 import type { ReportResult, WsRef } from './shifts.ts';
+import { afterAccessChangedIn, deliver } from './workstation-setup.ts';
 
 const DEVOPS_NAMES = [
   'Atlas',
@@ -436,6 +437,11 @@ export async function patchDevOpsAccess(
       ],
       { tx },
     );
+    // Check that the ticked rights are real on the machine, and retry environments that waited for them.
+    await afterAccessChangedIn(ctx, tx, workstationId, access);
+    return access;
+  }).then((access) => {
+    deliver(ctx, [workstationId]);
     return access;
   });
 }
