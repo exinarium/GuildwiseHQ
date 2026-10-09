@@ -219,12 +219,34 @@ launchctl list | grep aom.runner      # check status
 5. Actions tab: set program to `C:\Users\you\aom-runner\aom-runner.cmd` and arguments to `start --data-dir %LOCALAPPDATA%\aom-runner`
 6. Click OK
 
+## Several pairings (one runner, several accounts or organizations)
+
+One runner process on a machine can be paired with more than one workstation: for example your own organization on one server and a client's account on another, or a second account on the same server. Each pairing is a separate workstation on the server side (a workstation belongs to one user; the same machine simply appears once per pairing), and on the machine each pairing is **fully isolated**.
+
+Note that you do **not** need a second pairing for a second organization of the same account: a workstation is owned by a user, not by an organization, and already serves every organization that user belongs to (each organization gets its own DevOps engineer on it, and projects of any of those organizations share it). A second pairing is for a different account or server.
+
+```sh
+aom-runner pair --server https://aom.example.com --code XXXX-XXXX --name "Acme desk"   # the first pairing
+aom-runner pair --server https://hq.client.example --code YYYY-YYYY --name "Client desk" # adds a second; the first is untouched
+aom-runner pairings                      # id, name, server, workstation id, state, data directory
+aom-runner status [--pairing <id|name>]  # one block per pairing
+aom-runner unpair "Client desk" [--purge] # forget it on this machine
+```
+
+- **What a pairing is.** `pairings.json` in the data directory lists them (`id`, `label`, `dir`, `serverUrl`, `workstationId`). The installer's pairing command is the same `pair`: running the install command on a machine that already has a runner keeps that runner, upgrades it only when the server offers a newer version, and **adds** the new workstation as another pairing. The same server and the same workstation name again is a re-pair of that pairing (new credentials, settings and data kept). `--pairing` takes the id, the name, the workstation id or an unambiguous prefix.
+- **Where things live.** The first pairing stays in the data directory itself (`config.json`, `agents/`, `worktrees/`, `vaults/`, `outbox/`, `logs/`), exactly where a single-pairing runner always kept it. Later pairings live in `pairings/<id>/` with the same layout. A data directory from before pairings is migrated in place on first use: only `pairings.json` is created around it, nothing is moved or rewritten, and an older runner that ignores the index keeps working on the first pairing.
+- **Isolation per pairing.** Own `config.json` (server, token, Jira token, Claude API key or OAuth token), own agent homes, worktrees, vault clones, integration worktrees, outbox, outbound records, logs and status file, and its own IPC server and shift tokens. Nothing a shift of one pairing can reach is shared with another pairing's directory, and each connects to its server with its own token. A new pairing inherits only non-secret settings from the first one (code folders, concurrency limit, sandbox and runtime options); credentials are never copied (an API key or OAuth token setting falls back to the machine's own `claude` login), so give it its own with `aom-runner` config under `pairings/<id>/config.json` if it needs one. Code folders added with `aom-runner repos add` go to every pairing unless `--pairing` names one (a repository checked out once can be seen by several pairings; their worktrees are separate).
+- **One process, one connection per pairing.** `aom-runner start` (the service) runs one connection per pairing in the same process; it does not multiplex. A pairing added or removed with `pair`/`unpair`, or re-paired, is picked up by the running process within about five seconds without disconnecting the others. If the server unpairs one workstation, only that pairing stops (it is marked `unpaired` in `pairings.json` and is not retried); the process exits only when no pairing is left, with the usual exit code 0 for an unpair, and a service manager is not asked to restart a runner that cannot work.
+- **Concurrency budget.** The machine's shift limit is shared: a pairing may run its own `maxConcurrentShifts` (and what its server allows) as long as the pairings together stay under the machine limit, which is `maxConcurrentShifts` in `pairings.json` or, when unset, the largest per-pairing limit. First come, first served: when the limit is reached a shift offered to another pairing is rejected as `busy` and its card waits, exactly as at the per-workstation limit. There is no reservation per pairing.
+- **Not supported.** Two runner processes on the same data directory (use one process); the same workstation paired twice on the same server under different names (it would connect twice and the second supersedes the first, exit code 3 for that pairing only).
+
 ## Data directory structure
 
 The runner stores all data in `~/.aom-runner` (Linux/macOS) or `%LOCALAPPDATA%\aom-runner` (Windows). You can override with `--data-dir <path>` or `AOM_RUNNER_HOME` env var.
 
 ```
-config.json                     runner config (mode 0600: server URL, token, repos, runtimes)
+config.json                     runner config of the first pairing (mode 0600: server URL, token, repos, runtimes)
+pairings.json                   the pairings of this machine (see "Several pairings"); later ones live in pairings/<id>/ with this same layout
 status.json                     updated by start (process state, connection status)
 outbox/                         pending messages (persisted, retried on reconnect)
 agents/
@@ -381,7 +403,7 @@ Connects to the server and listens for work. Runs in foreground (Ctrl+C to stop)
 Exit codes:
 - `0`: stopped by SIGINT/SIGTERM
 - `2`: server rejected token (re-pair needed)
-- `3`: another runner connected to the same workstation (only one per workstation)
+- `3`: another runner connected to the same workstation (only one per workstation; with several pairings only the affected pairing stops)
 
 ### Heartbeat and reconnect
 
@@ -397,7 +419,7 @@ Shift state is persisted in `active-shifts/` and resumed when the runner restart
 aom-runner status [--data-dir <path>]
 ```
 
-Shows config summary and whether a runner process is alive (with PID, connection state, active shifts, pending outbox).
+Shows config summary and whether a runner process is alive (with PID, connection state, active shifts, pending outbox). With several pairings it prints one block per pairing (`--pairing <id|name>` picks one); `aom-runner pairings` lists them in one line each.
 
 ### Troubleshooting
 
