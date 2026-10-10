@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from 'fastify';
-import type { SocialClient } from './blog/social-client.ts';
 import type { BillingRuntime } from './billing/runtime.ts';
+import type { SocialClient } from './blog/social-client.ts';
 import type { BrowserGateway } from './browser-gateway/gateway.ts';
 import type { ChatRelay } from './chat/relay.ts';
 import type { Clock } from './clock.ts';
