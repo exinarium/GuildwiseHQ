@@ -23,6 +23,8 @@ ENV NODE_ENV=production \
     AOM_WEB_DIST=/app/web \
     AOM_RUNNER_RELEASE_DIR=/app/release \
     AOM_MIGRATE_ON_BOOT=true
+# Simulation organizations: the server creates local throwaway repositories and unpacks the runner release.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates tar && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/server
 COPY --from=build --chown=node:node /out/server /app/server
 COPY --from=build --chown=node:node /out/web /app/web

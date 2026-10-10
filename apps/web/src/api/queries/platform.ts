@@ -1,4 +1,5 @@
 import {
+  type DemoScenarioResponse,
   type NewOrgInvitationRequest,
   type OrgStatusActionRequest,
   type PatchPlatformOrgRequest,
@@ -68,6 +69,14 @@ export function useSetSimulation(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (b: SetSimulationRequest) => put<PlatformOrgDetail>(`/platform/orgs/${id}/simulation`, b),
+    onSuccess: () => refresh(qc),
+  });
+}
+
+export function useLoadDemo(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => post<DemoScenarioResponse>(`/platform/orgs/${id}/demo-scenario`, {}),
     onSuccess: () => refresh(qc),
   });
 }

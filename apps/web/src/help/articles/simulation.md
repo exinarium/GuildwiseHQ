@@ -1,6 +1,6 @@
 ---
 title: Simulation organizations
-summary: A safe sandbox for testing and demos. Agents run on a simulated workstation hosted by Guildwise, nothing real is built, nothing is billed, and the whole organization can be wiped.
+summary: A safe sandbox for tests and demos: agents run on a simulated workstation, nothing real is built or billed, and the whole organization can be deleted.
 keywords: [simulation, demo, test, mock, sandbox, wipe, delete, simulated workstation, banner]
 order: 25
 ---

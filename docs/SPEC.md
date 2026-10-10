@@ -520,6 +520,10 @@ Guildwise HQ has a platform-level blog about AI agents and AI automation, run by
   backoff, never twice, a status per post and network, an alert before a token expires. No Buffer or Zapier. Unpublishing does
   not delete the social posts.
 
+## Simulation organizations
+
+A super admin can create an organization as a simulation, or switch one over, for testing and demos. It shows an always-visible Simulation banner, is never billed (the Billing tab explains), sends mail with `[Simulation] ` in the subject, and runs its agents on a simulated workstation hosted by the Guildwise server (mock agents, scripted chat replies, local throwaway repositories; no model, no tokens, nothing contacts a forge). Real workstations paired to it receive no work. The super admin sets the pace (fast, normal, slow), can load a demo scenario into an empty simulation organization, and can delete the whole organization: its events (the single, deliberate exception to the append-only log, restricted to simulation organizations), all its rows, its simulated runner and files, and the accounts that existed only in it. A permanent platform audit entry remains. See `docs/ARCHITECTURE.md` section 33.
+
 ## Build plan and open questions
 
 Build the smallest loop that removes terminal juggling first, then let the team build the rest of itself.

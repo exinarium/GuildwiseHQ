@@ -11,6 +11,7 @@ import { SandboxUnavailable, SandboxWarning } from '../components/SandboxWarning
 import {
   Badge,
   Button,
+  Callout,
   ConfirmDialog,
   ConnectionDot,
   Dialog,
@@ -89,6 +90,14 @@ export function Workstations() {
           </>
         }
       />
+      {me.data?.activeOrg?.simulation && (
+        <div className="mb-4">
+          <Callout tone="warning" role="status" data-testid="simulation-workstations-note">
+            This is a simulation organization. Its agents run on the <strong>Simulated workstation</strong>,
+            which Guildwise hosts. Your own workstations do not receive any work from it.
+          </Callout>
+        </div>
+      )}
       {q.isPending && <ListSkeleton label="Loading workstations" rows={2} />}
       {q.isError && <ErrorBox error={q.error} onRetry={() => q.refetch()} />}
       {q.data?.length === 0 && (

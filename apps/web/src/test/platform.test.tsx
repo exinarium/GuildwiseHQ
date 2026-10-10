@@ -59,6 +59,8 @@ beforeEach(() => {
         sim = (init.body ? JSON.parse(String(init.body)) : {}).enabled;
         return json(detail(current));
       }
+      if (method === 'POST' && url.endsWith('/demo-scenario'))
+        return json({ projects: 2, agents: 9, cards: 12, deskQuestions: 2, schedules: 1, note: 'Loaded' });
       if (method === 'POST' && url.endsWith('/wipe-simulation'))
         return json({
           orgName: 'Acme',
@@ -149,6 +151,11 @@ describe('platform area', () => {
       expect(calls.some((c) => c.method === 'PUT' && (c.body as { enabled: boolean }).enabled === true)).toBe(
         true,
       ),
+    );
+    // on: the demo scenario can be loaded
+    await user.click(await screen.findByTestId('simulation-demo'));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/demo-scenario'))).toBe(true),
     );
     // on: the delete button opens a dialog that needs the name
     expect(await screen.findByTestId('simulation-wipe')).toBeTruthy();

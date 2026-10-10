@@ -174,4 +174,33 @@ describe.skipIf(!hasRunner)('the simulated workstation', () => {
     expect((await q('SELECT 1 FROM workstations WHERE simulation_org_id=$1', [orgId])).length).toBe(0);
     expect((await q('SELECT 1 FROM events WHERE org_id=$1', [orgId])).length).toBe(0);
   });
+
+  it('loads the demo scenario into an empty simulation organization, and only into an empty one', async () => {
+    const demoOwner = await t.userSession(uniqueEmail('demo'));
+    const orgId = demoOwner.id;
+    const refuseReal = await t.req('POST', `/api/platform/orgs/${orgId}/demo-scenario`, {
+      cookie: root.cookie,
+    });
+    expect(refuseReal.status).toBe(409);
+    expect(refuseReal.body.error.code).toBe('not_simulation');
+    await t.req('PUT', `/api/platform/orgs/${orgId}/simulation`, {
+      cookie: root.cookie,
+      body: { enabled: true, pace: 'fast' },
+    });
+    const r = await t.req('POST', `/api/platform/orgs/${orgId}/demo-scenario`, { cookie: root.cookie });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ projects: 2, deskQuestions: 2, schedules: 1 });
+    expect((await q('SELECT count(*)::int AS n FROM projects WHERE org_id=$1', [orgId]))[0]!.n).toBe(2);
+    expect((await q('SELECT count(*)::int AS n FROM cards WHERE org_id=$1', [orgId]))[0]!.n).toBeGreaterThan(
+      8,
+    );
+    const repos = await q(
+      'SELECT remote_url FROM project_repos pr JOIN projects p ON p.id=pr.project_id WHERE p.org_id=$1',
+      [orgId],
+    );
+    expect(repos.every((x) => !x.remote_url.includes('hub.com'))).toBe(true);
+    const again = await t.req('POST', `/api/platform/orgs/${orgId}/demo-scenario`, { cookie: root.cookie });
+    expect(again.status).toBe(409);
+    expect(again.body.error.code).toBe('demo_not_empty');
+  }, 120_000);
 });

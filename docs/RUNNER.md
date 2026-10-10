@@ -1058,6 +1058,10 @@ Vault writes are staged and included in the next sync commit.
 
 A builder on a work-domain card sees only the work vault; personal cards see only personal.
 
+## Simulated workstation
+
+A simulation organization (see `docs/ARCHITECTURE.md` section 33) has no workstation of yours. The server pairs one for the Owner and runs a normal runner process on the server itself: mock runtime only (`--mock`, `AOM_RUNNER_MOCK=1`), its own data directory `AOM_SIMULATION_DIR/<org id>/runner`, repo root `.../repos`, and local bare "origin" repositories `.../origin`. The pace is `AOM_MOCK_STEP_MS` (100, 1500 or 5000 ms for fast, normal and slow) and `AOM_MOCK_CHAT_TOKEN_MS`. Chat replies come from `AOM_MOCK_REPLIES_FILE`, a JSON map whose keys are an exact message, a `/regular expression/flags`, or `*` for the default; a value is a reply or a list of replies (`{name}` is the agent, `{message}` the user's text). The same file format is used for the training video. `ANTHROPIC_API_KEY`, `GH_TOKEN` and `GITHUB_TOKEN` are blanked in its environment. It needs `git` and the built runner on the server (`AOM_SIMULATION_RUNNER_BIN`, or the packaged release in `AOM_RUNNER_RELEASE_DIR`, which the server unpacks once).
+
 ## Credentials and secrets
 
 **Credentials stay on the machine:**

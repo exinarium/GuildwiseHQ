@@ -129,9 +129,13 @@ export class SimulationHostImpl implements SimulationHost {
     this.queue.set(orgId, next);
   }
 
-  /** Resolves when the queued work of the organization is done (tests). */
+  /** Resolves when the queued work of the organization is done. */
   idle(orgId: string): Promise<void> {
     return this.queue.get(orgId) ?? Promise.resolve();
+  }
+
+  ready(orgId: string): Promise<void> {
+    return this.idle(orgId);
   }
 
   /** A local throwaway origin for a repository added in this organization (whatever URL the user typed). */

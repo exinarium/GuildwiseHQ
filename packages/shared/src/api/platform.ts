@@ -112,6 +112,16 @@ export const WipeSimulationResponseSchema = z.object({
 });
 export type WipeSimulationResponse = z.infer<typeof WipeSimulationResponseSchema>;
 
+export const DemoScenarioResponseSchema = z.object({
+  projects: z.number().int(),
+  agents: z.number().int(),
+  cards: z.number().int(),
+  deskQuestions: z.number().int(),
+  schedules: z.number().int(),
+  note: z.string(),
+});
+export type DemoScenarioResponse = z.infer<typeof DemoScenarioResponseSchema>;
+
 export const OrgStatusActionRequestSchema = z.object({
   reason: z.string().trim().min(1).max(200),
   note: z.string().trim().max(1000).optional(),

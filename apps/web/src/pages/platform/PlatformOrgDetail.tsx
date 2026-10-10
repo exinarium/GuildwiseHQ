@@ -2,6 +2,7 @@ import { ORG_FEATURES, type OrgFeature } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import {
+  useLoadDemo,
   useOrgStatusAction,
   usePatchPlatformOrg,
   usePlatformOrg,
@@ -53,6 +54,7 @@ export function PlatformOrgDetail() {
   const transfer = usePlatformTransfer(id);
   const simulate = useSetSimulation(id);
   const wipe = useWipeSimulation(id);
+  const demo = useLoadDemo(id);
   const navigate = useNavigate();
   const [wipeOpen, setWipeOpen] = useState(false);
   const [wipeName, setWipeName] = useState('');
@@ -248,6 +250,18 @@ export function PlatformOrgDetail() {
                 <option value="slow">Slow (good for demos)</option>
               </Select>
               <Button
+                variant="secondary"
+                data-testid="simulation-demo"
+                disabled={demo.isPending}
+                onClick={() =>
+                  demo.mutate(undefined, {
+                    onSuccess: (r) => toast.success(r.note || 'Demo scenario loaded'),
+                  })
+                }
+              >
+                Load demo scenario
+              </Button>
+              <Button
                 variant="danger"
                 data-testid="simulation-wipe"
                 onClick={() => {
@@ -260,6 +274,11 @@ export function PlatformOrgDetail() {
             </>
           )}
         </div>
+        {demo.isError && (
+          <div className="mt-3">
+            <ErrorBox error={demo.error} />
+          </div>
+        )}
         {simulate.isError && (
           <div className="mt-3">
             <ErrorBox error={simulate.error} />

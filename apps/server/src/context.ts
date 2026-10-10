@@ -40,6 +40,8 @@ export interface SimulationHost {
   dispose(orgId: string): Promise<void>;
   /** A local throwaway origin for a repository added in a simulation organization; resolves to its path. */
   createOrigin(orgId: string, name: string): Promise<string>;
+  /** Resolves when the queued start or stop of the org's simulated workstation is done. */
+  ready(orgId: string): Promise<void>;
   /** The state of the org's simulated runner process. */
   status(orgId: string): { state: 'running' | 'starting' | 'stopped' | 'unavailable'; detail: string };
 }

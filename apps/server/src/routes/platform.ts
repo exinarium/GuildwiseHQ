@@ -1,4 +1,5 @@
 import {
+  DemoScenarioResponseSchema,
   IdParamsSchema,
   NewOrgInvitationRequestSchema,
   OrgStatusActionRequestSchema,
@@ -36,6 +37,7 @@ import {
 } from '../commands/platform.ts';
 import { setOrgSimulation, wipeSimulationOrg } from '../commands/simulation.ts';
 import type { Ctx } from '../context.ts';
+import { loadDemoScenario } from '../simulation/demo.ts';
 import { typed } from './util.ts';
 
 const meta = (req: FastifyRequest) => ({
@@ -104,6 +106,12 @@ export function platformRoutes(ctx: Ctx) {
         );
       },
     );
+
+    // Fills an empty simulation organization with a busy demo company.
+    app.post('/api/platform/orgs/:id/demo-scenario', { schema: { params: IdParamsSchema } }, async (req) => {
+      await requireSuperAdmin(ctx, req);
+      return DemoScenarioResponseSchema.parse(await loadDemoScenario(ctx, fastify, req.params.id));
+    });
 
     app.post(
       '/api/platform/orgs/:id/transfer-ownership',

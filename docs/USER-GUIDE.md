@@ -913,6 +913,15 @@ Everyone else reads the blog under **Help**, **Blog**, and can turn the weekly d
 
 > **In the app:** the platform area has its own Help, with "Organizations and roles" (`/platform/help`). Platform accounts get their own short tour.
 
+### 7.8 Simulation organizations, demos and deleting them
+
+A **simulation organization** is a safe sandbox for testing (for example your family member trying the product) and for demos. Everyone in it sees a **Simulation** banner. Its agents run on a **Simulated workstation** hosted by Guildwise, so nothing real is built, no model is used and nothing is billed. Repositories added there are throwaway copies on the server, whatever address is typed. Chats are answered with prepared replies. Emails still go out, with **[Simulation]** at the start of the subject. Your own workstations receive no work from it.
+
+- **Create one:** on **Invitations** tick **Simulation organization** and invite the Owner. Or open an existing organization and switch **Simulation** on (a real organization with a subscription loses its subscription and card, so only do this on test organizations).
+- **Pace:** Fast (tests), Normal or Slow (demos, so people can watch cards move).
+- **Load demo scenario:** on an empty simulation organization it adds two projects with repositories, a team for each, cards at several priorities, two desk questions, a draft idea and a schedule. It refuses when the organization already has projects.
+- **Delete simulation organization:** removes the organization and everything in it, including its history. You type its name to confirm. Accounts that belong only to it are deleted so their email addresses can be used again; accounts that also belong elsewhere only leave this organization. The audit log keeps a short record. The server does not back up the database for you: on a live system take a backup first (`docs/DEPLOY.md`).
+
 ## 8. Everyday workflows
 
 Four situations you will meet again and again, start to finish.

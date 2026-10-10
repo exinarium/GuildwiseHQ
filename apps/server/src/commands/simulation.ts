@@ -1,3 +1,5 @@
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   type SetSimulationRequest,
   streamId,
@@ -209,9 +211,11 @@ export async function wipeSimulationOrg(
   });
 
   // Outside the transaction: the simulated workstation process and its files, and any open browser sessions.
-  await ctx.services.simulation
-    ?.dispose(orgId)
-    .catch((err) => ctx.log.error({ err, orgId }, 'simulation dispose'));
+  if (ctx.services.simulation)
+    await ctx.services.simulation
+      .dispose(orgId)
+      .catch((err) => ctx.log.error({ err, orgId }, 'simulation dispose'));
+  else rmSync(join(ctx.config.simulationDir, orgId), { recursive: true, force: true });
   for (const id of out.deletedIds) ctx.services.browser.closeUser(id);
   return {
     orgName: out.orgName,

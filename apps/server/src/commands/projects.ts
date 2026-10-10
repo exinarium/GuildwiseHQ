@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import {
   type AddRepoRequest,
   type CreateProjectRequest,
@@ -21,6 +22,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { createLocalOrigin } from '../simulation/repos.ts';
 import { releaseEvents } from './cards.ts';
 import { assertRemoteUrl, cardMessage, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { cancelConversionEvents } from './convert.ts';
@@ -295,9 +297,8 @@ export async function repoAddedEvent(
   // In a simulation organization the repository is a local throwaway origin on the server, whatever URL was typed:
   // nothing ever contacts GitHub or another host.
   if (await isSimulationOrg(tx, project.org_id)) {
-    if (!ctx.services.simulation)
-      throw conflict('simulation_unavailable', 'simulation hosting is switched off on this server');
-    input = { ...input, remoteUrl: await ctx.services.simulation.createOrigin(project.org_id, input.name) };
+    const origins = join(ctx.config.simulationDir, project.org_id, 'origin');
+    input = { ...input, remoteUrl: await createLocalOrigin(origins, input.name) };
   } else assertRemoteUrl(ctx, input.remoteUrl);
   const normalized = normalizeRemoteUrl(input.remoteUrl);
   if (!normalized.includes('/'))

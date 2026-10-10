@@ -371,6 +371,21 @@ Users can run agents on a server of their own (any VPS reached over SSH) or on a
 - The scheduler wakes and stops Codespaces every 15 seconds; run one server instance, as for the dispatcher.
 - Migration `1470_cloud_workstations.sql` adds `cloud_workstations` and `cloud_github_connections` (operational tables).
 
+## Simulation organizations (testing and demos)
+
+A super admin can flag an organization as a simulation (Platform, organization page). The server then hosts a simulated workstation for it: a mock runner process plus local throwaway Git repositories, no model and no network access to any forge.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AOM_SIMULATION_HOST` | `true` | Host simulated workstations. `false` switches the feature's runner off (the flag, billing exemption and wipe still work). |
+| `AOM_SIMULATION_DIR` | `<temp dir>/aom-simulation` | Where each simulation keeps its runner data and repositories. In Docker mount a volume here, or it is rebuilt after a restart (the organization's data in the database is unaffected). |
+| `AOM_SIMULATION_RUNNER_BIN` | unpacked from the runner release | Path of `aom-runner.mjs`. |
+| `AOM_SIMULATION_SERVER_URL` | `http://127.0.0.1:<AOM_PORT>` | How the simulated runner reaches the server. |
+
+The image needs `git` (the Dockerfile installs it) and the packaged runner (`AOM_RUNNER_RELEASE_DIR`, already set in the image).
+
+**Deleting a simulation organization removes its events from the append-only log for good.** The server has no database backup of its own. On a production database take one first, for example `docker compose exec db pg_dump -U aom aom > backup-before-wipe.sql`. A short permanent record (names, member emails, counts) stays in the platform audit log.
+
 ## Isolation and multi-tenancy
 
 Each organization is sandboxed: members see only their organization's projects, cards and desk (the projects they were added to), and guests see only the projects they were invited to. The server enforces org-scoped queries and authorization checks in every route, and the platform account sees organization metadata only. Tests verify cross-organization isolation.
