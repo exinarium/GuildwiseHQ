@@ -1,5 +1,8 @@
 import {
   type BoardResponse,
+  type BlockedReason,
+  type CardBudget,
+  type CardHygiene,
   boardColumnsWith,
   type CardDetailResponse,
   type CardDto,
@@ -16,7 +19,14 @@ import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
 import { memberRefusal } from '../commands/phases.ts';
 import type { Ctx } from '../context.ts';
-import { orgCostCtx, spendBriefs } from '../costs/index.ts';
+import {
+  budgetDto,
+  canEditBudget,
+  monthSpendByProject,
+  orgCostCtx,
+  seesAmounts,
+  spendBriefs,
+} from '../costs/index.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 import { cardPhaseRef } from './phases.ts';
@@ -253,6 +263,72 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
   };
 }
 
+/**
+ * What the board cards say beyond workability and back-off (T1): the reason behind "Blocked" (the desk item holding
+ * the card), open hygiene findings on the card's repository, and the project's budget when it is at the warning level
+ * or beyond. Each map is keyed by card id and holds only cards that have something to say.
+ */
+export async function boardNotices(
+  ctx: Ctx,
+  userId: string,
+  project: Row,
+  cards: Row[],
+): Promise<{
+  blocked: Map<string, BlockedReason>;
+  hygiene: Map<string, CardHygiene[]>;
+  budget: CardBudget | null;
+}> {
+  const blocked = new Map<string, BlockedReason>();
+  const blockedIds = cards.filter((c) => c.status === 'blocked').map((c) => c.id as string);
+  if (blockedIds.length > 0) {
+    const held = await rows(
+      ctx.pool,
+      `SELECT cb.card_id, d.id, d.kind, d.title FROM card_blockers cb JOIN desk_items d ON d.id = cb.desk_item_id
+        WHERE cb.card_id = ANY($1::uuid[]) AND d.status = 'open' ORDER BY d.created_at`,
+      [blockedIds],
+    );
+    for (const h of held) {
+      const prev = blocked.get(h.card_id);
+      if (prev) prev.others += 1;
+      else blocked.set(h.card_id, { deskItemId: h.id, kind: h.kind, title: h.title, others: 0 });
+    }
+  }
+  const hygiene = new Map<string, CardHygiene[]>();
+  const repoIds = [...new Set(cards.filter((c) => c.repo_id && c.status !== 'done').map((c) => c.repo_id as string))];
+  if (repoIds.length > 0) {
+    const found = await rows(
+      ctx.pool,
+      `SELECT subject, kind, subject_name, detail FROM hygiene_findings
+        WHERE status = 'open' AND project_id = $1 AND subject = ANY($2::text[]) ORDER BY first_seen_at`,
+      [project.id, repoIds],
+    );
+    for (const c of cards) {
+      if (!c.repo_id || c.status === 'done') continue;
+      const mine = found.filter((f) => f.subject === c.repo_id);
+      if (mine.length > 0)
+        hygiene.set(
+          c.id,
+          mine.map((f) => ({ kind: f.kind, repoName: f.subject_name, detail: String(f.detail ?? '').slice(0, 300) })),
+        );
+    }
+  }
+  let budget: CardBudget | null = null;
+  if (project.budget_micros !== null && project.budget_micros !== undefined) {
+    const role = await orgRoleOf(ctx.pool, userId, project.org_id);
+    const c = await orgCostCtx(ctx.pool, project.org_id);
+    const now = ctx.clock.now();
+    const spend = await monthSpendByProject(ctx.pool, c, now, [project.id]);
+    const b = budgetDto(project, spend.get(project.id) ?? 0, c, now, {
+      canEdit: canEditBudget(role),
+      showAmounts: seesAmounts(role),
+    });
+    const percent = b.percent ?? null;
+    if (b.state === 'warning' || b.state === 'paused' || b.state === 'overridden')
+      budget = { state: b.state, percent, resetsAt: b.resetsAt, canEdit: b.canEdit };
+  }
+  return { blocked, hygiene, budget };
+}
+
 export async function getBoard(
   ctx: Ctx,
   userId: string,
@@ -291,6 +367,7 @@ export async function getBoard(
   }
   const columns = boardColumnsWith(wf.definition as WorkflowDefinition, others);
   const workability = await cardWorkability(ctx, cards);
+  const notices = await boardNotices(ctx, userId, project, cards);
   const byColumn = new Map<string, BoardResponse['columns'][number]['cards']>(columns.map((c) => [c, []]));
   for (const c of cards) {
     const { column } = await cardColumn(ctx, c);
@@ -326,6 +403,15 @@ export async function getBoard(
       origin: c.origin,
       backoff: backoffOf(c, ctx.clock.now()),
       phase: c.phase_id ? { id: c.phase_id, ref: c.phase_ref, assignment: c.phase_assignment } : null,
+      ...(notices.blocked.has(c.id) ? { blockedReason: notices.blocked.get(c.id) as BlockedReason } : {}),
+      ...(notices.hygiene.has(c.id) ? { hygiene: notices.hygiene.get(c.id) as CardHygiene[] } : {}),
+      // A paused budget holds back what is still queued; a warning or override matters to anything not finished.
+      ...(notices.budget &&
+      (notices.budget.state === 'paused'
+        ? c.status === 'queued'
+        : c.status === 'queued' || c.status === 'claimed')
+        ? { budget: notices.budget }
+        : {}),
       ...(workability.get(c.id)?.ok === false ? { workability: workability.get(c.id) } : {}),
     });
   }

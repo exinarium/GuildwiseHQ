@@ -18,6 +18,34 @@ export const WorkabilitySchema = z.object({
 });
 export type Workability = z.infer<typeof WorkabilitySchema>;
 
+/** Why a `blocked` card is blocked: the open desk item holding it (the question or approval waiting on a manager). */
+export const BlockedReasonSchema = z.object({
+  deskItemId: z.uuid(),
+  kind: z.string(),
+  title: z.string(),
+  /** More items hold the card when above zero. */
+  others: z.number().int().default(0),
+});
+export type BlockedReason = z.infer<typeof BlockedReasonSchema>;
+
+/** An open repository hygiene finding on the card's repository (a conflict, failed auth, an unconfirmed branch, ...). */
+export const CardHygieneSchema = z.object({
+  kind: z.string(),
+  repoName: z.string(),
+  detail: z.string(),
+});
+export type CardHygiene = z.infer<typeof CardHygieneSchema>;
+
+/** The project's budget when it affects this card (the card waits for, or runs under, a used-up or nearly used-up month). */
+export const CardBudgetSchema = z.object({
+  state: z.enum(['warning', 'paused', 'overridden']),
+  /** Null for a viewer who may not see amounts. */
+  percent: z.number().nullable(),
+  resetsAt: IsoTime,
+  canEdit: z.boolean(),
+});
+export type CardBudget = z.infer<typeof CardBudgetSchema>;
+
 export const BoardCardSchema = z.object({
   id: z.uuid(),
   ref: z.string(),
@@ -45,6 +73,12 @@ export const BoardCardSchema = z.object({
   workability: WorkabilitySchema.optional(),
   /** Loop breaker: the card is held back until `until` after `failures` failed shifts. */
   backoff: z.object({ until: IsoTime, failures: z.number().int() }).nullable().optional(),
+  /** Present on a `blocked` card: the reason, so the card can say it. */
+  blockedReason: BlockedReasonSchema.nullable().optional(),
+  /** Open hygiene findings on this card's repository (absent when none). */
+  hygiene: z.array(CardHygieneSchema).optional(),
+  /** Absent unless the project's budget is at the warning level or beyond. */
+  budget: CardBudgetSchema.optional(),
   /** The phase this card belongs to (a small chip on the card). */
   phase: z
     .object({ id: z.uuid(), ref: z.string(), assignment: z.enum(['proposed', 'confirmed']) })

@@ -7,6 +7,7 @@ import { DEFAULT_PRIORITY, priorityLabel, priorityLevel } from '../lib/priority.
 import { stageStyle } from '../lib/stages.ts';
 import { ageLabel } from '../lib/time.ts';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
+import { BlockedReasonNotice, BudgetNotice, HygieneNotice } from './BoardCardNotices.tsx';
 import { BackoffBadge } from './BackoffBadge.tsx';
 import { AgentAvatar } from './Face.tsx';
 import { cx } from './ui/cx.ts';
@@ -142,6 +143,9 @@ export function CardTile({
           )}
         </div>
       </Link>
+      <BlockedReasonNotice reason={card.blockedReason} />
+      <BudgetNotice budget={card.budget} projectId={projectId} />
+      <HygieneNotice findings={card.hygiene} projectId={projectId} />
       <BackoffBadge backoff={card.backoff} banner />
       <WorkabilityWarning workability={card.workability} projectId={projectId} />
       {card.status === 'waiting' && card.waitingOn && (
