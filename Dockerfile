@@ -29,6 +29,8 @@ WORKDIR /app/server
 COPY --from=build --chown=node:node /out/server /app/server
 COPY --from=build --chown=node:node /out/web /app/web
 COPY --from=build --chown=node:node /out/release /app/release
+# Where simulation organizations keep their runner data and local repositories (mount a volume here: AOM_SIMULATION_DIR).
+RUN mkdir -p /data/simulation && chown node:node /data/simulation
 USER node
 EXPOSE 4600
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=6 \

@@ -378,7 +378,7 @@ A super admin can flag an organization as a simulation (Platform, organization p
 | Variable | Default | Meaning |
 |---|---|---|
 | `AOM_SIMULATION_HOST` | `true` | Host simulated workstations. `false` switches the feature's runner off (the flag, billing exemption and wipe still work). |
-| `AOM_SIMULATION_DIR` | `<temp dir>/aom-simulation` | Where each simulation keeps its runner data and repositories. In Docker mount a volume here, or it is rebuilt after a restart (the organization's data in the database is unaffected). |
+| `AOM_SIMULATION_DIR` | `<temp dir>/aom-simulation` | Where each simulation keeps its runner data and repositories. In Docker set it to `/data/simulation` (the image creates it, owned by the app user) and mount a volume there, or it is rebuilt after a restart (the organization's data in the database is unaffected). |
 | `AOM_SIMULATION_RUNNER_BIN` | unpacked from the runner release | Path of `aom-runner.mjs`. |
 | `AOM_SIMULATION_SERVER_URL` | `http://127.0.0.1:<AOM_PORT>` | How the simulated runner reaches the server. |
 
