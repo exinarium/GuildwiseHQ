@@ -28,7 +28,6 @@ import { STATUS_TONE } from './PlatformOrgs.tsx';
 const LIMITS = [
   ['maxMembers', 'Members'],
   ['maxWorkstations', 'Workstations'],
-  ['maxAgents', 'Agents'],
   ['maxProjects', 'Projects'],
 ] as const;
 const FEATURE_LABEL: Record<OrgFeature, string> = {
@@ -77,9 +76,12 @@ export function PlatformOrgDetail() {
     e.preventDefault();
     const body: Parameters<typeof patch.mutate>[0] = { note: note.trim() };
     if (limits)
-      body.limits = Object.fromEntries(
-        LIMITS.map(([k]) => [k, limitVal(k).trim() === '' ? null : Number(limitVal(k))]),
-      ) as never;
+      body.limits = {
+        ...Object.fromEntries(
+          LIMITS.map(([k]) => [k, limitVal(k).trim() === '' ? null : Number(limitVal(k))]),
+        ),
+        maxAgents: null, // plans never limit agents
+      } as never;
     if (features) body.features = features as never;
     if (license !== null) body.licenseExpiresAt = license === '' ? null : new Date(license).toISOString();
     patch.mutate(body, {

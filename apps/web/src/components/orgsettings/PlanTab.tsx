@@ -11,13 +11,12 @@ const FEATURE_LABEL: Record<string, string> = {
   customRoles: 'Custom roles and workflows',
 };
 const USAGE: Array<{
-  key: 'members' | 'projects' | 'agents' | 'workstations';
+  key: 'members' | 'projects' | 'workstations';
   label: string;
   limit: string;
 }> = [
   { key: 'members', label: 'Members', limit: 'maxMembers' },
   { key: 'projects', label: 'Projects', limit: 'maxProjects' },
-  { key: 'agents', label: 'Agents', limit: 'maxAgents' },
   { key: 'workstations', label: 'Workstations', limit: 'maxWorkstations' },
 ];
 

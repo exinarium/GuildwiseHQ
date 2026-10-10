@@ -126,16 +126,16 @@ describe('organizations', () => {
       note: 'pilot terms agreed on the call',
     });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
-    expect(r.body.limits).toMatchObject({ maxMembers: 2, maxAgents: 12 });
+    expect(r.body.limits).toMatchObject({ maxMembers: 2, maxAgents: null });
     expect(r.body.features.phases).toBe(false);
     expect(r.body.featureOverrides).toEqual({ phases: false });
     expect(r.body.graceDays).toBe(14);
     const audit = await ok<any>(api('GET', `/api/platform/audit?orgId=${org}`));
     const limits = audit.rows.find((x: any) => x.action === 'OrgLimitsSet');
-    expect(limits.summary).toMatch(/Initech limits: members unlimited -> 2, agents unlimited -> 12/);
+    expect(limits.summary).toMatch(/Initech limits: members unlimited -> 2$/);
     expect(limits.details).toMatchObject({
       before: { maxMembers: null, maxAgents: null },
-      after: { maxMembers: 2, maxAgents: 12 },
+      after: { maxMembers: 2, maxAgents: null },
       note: 'pilot terms agreed on the call',
     });
     expect(limits.actorUserId).toBe(root.id);

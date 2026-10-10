@@ -263,7 +263,6 @@ export async function hireAgent(
     ) {
       throw forbidden('you cannot hire agents here');
     }
-    await assertWithinLimit(tx, orgId, 'agents');
     // A workstation the organization does not use yet counts as one more (the DevOps engineer does not count).
     const uses = await one(
       tx,

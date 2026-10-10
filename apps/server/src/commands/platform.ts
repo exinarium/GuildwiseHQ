@@ -39,7 +39,7 @@ const actorOf = (a: AuthSession) => userActor(a.user.id);
 const limitsOf = (o: Row): OrgLimits => ({
   maxMembers: o.max_members ?? null,
   maxWorkstations: o.max_workstations ?? null,
-  maxAgents: o.max_agents ?? null,
+  maxAgents: null,
   maxProjects: o.max_projects ?? null,
 });
 
@@ -224,10 +224,11 @@ export async function patchPlatformOrg(
     }
     if (patch.limits !== undefined) {
       const before = limitsOf(o);
-      if (JSON.stringify(before) !== JSON.stringify(patch.limits))
+      const next = { ...patch.limits, maxAgents: null }; // B11: agents are never limited
+      if (JSON.stringify(before) !== JSON.stringify(next))
         push({
           type: 'OrgLimitsSet',
-          payload: { orgId, limits: patch.limits, previous: before, note, ...m },
+          payload: { orgId, limits: next, previous: before, note, ...m },
         });
     }
     const dates =

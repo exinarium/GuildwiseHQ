@@ -29,7 +29,6 @@ import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput, StoredEvent } from '../eventstore/types.ts';
-import { assertWithinLimit } from '../orgs/limits.ts';
 import { listAgents } from '../queries/agents.ts';
 import { computeRecommendations } from './recommendations.ts';
 import { computeTrack, type StatsAgent } from './track-record.ts';
@@ -253,7 +252,6 @@ export async function applyRecommendation(
         let name = action.juniorName;
         if (await one(tx, 'SELECT 1 FROM agents WHERE org_id=$1 AND lower(name)=lower($2)', [a.org_id, name]))
           name = (await suggestNames(ctx, a.org_id, undefined, 1))[0] ?? `${name} 2`;
-        await assertWithinLimit(tx, a.org_id, 'agents');
         const juniorId = randomUUID();
         const perms = a.permissions ?? {};
         const effect = `${a.name} now takes large cards (${action.seniorModel}); ${name} was hired for small ones (${action.juniorModel})`;

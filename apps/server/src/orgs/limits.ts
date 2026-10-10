@@ -26,15 +26,12 @@ export async function orgLimits(db: Queryable, orgId: string): Promise<OrgLimits
   const r = await one<{
     max_members: number | null;
     max_workstations: number | null;
-    max_agents: number | null;
     max_projects: number | null;
-  }>(db, 'SELECT max_members, max_workstations, max_agents, max_projects FROM organizations WHERE id=$1', [
-    orgId,
-  ]);
+  }>(db, 'SELECT max_members, max_workstations, max_projects FROM organizations WHERE id=$1', [orgId]);
   return {
     maxMembers: r?.max_members ?? null,
     maxWorkstations: r?.max_workstations ?? null,
-    maxAgents: r?.max_agents ?? null,
+    maxAgents: null, // B11: plans never limit agents; the max_agents column is unused
     maxProjects: r?.max_projects ?? null,
   };
 }
@@ -75,16 +72,17 @@ export async function assertWithinLimit(
   kind: LimitKind,
   delta = 1,
 ): Promise<void> {
+  // Owner decision B11: plans never limit agents (the max_agents column is kept but ignored).
+  if (kind === 'agents') return;
   const org = await one<Record<string, number | null>>(
     tx,
-    'SELECT max_members, max_workstations, max_agents, max_projects FROM organizations WHERE id=$1 FOR UPDATE',
+    'SELECT max_members, max_workstations, max_projects FROM organizations WHERE id=$1 FOR UPDATE',
     [orgId],
   );
   if (!org) return;
   const column = {
     members: 'max_members',
     projects: 'max_projects',
-    agents: 'max_agents',
     workstations: 'max_workstations',
   }[kind];
   const max = org[column] ?? null;
