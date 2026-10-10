@@ -52,6 +52,8 @@ const EnvSchema = z.object({
   AOM_BILLING_JOBS: bool(true),
   /** Staging only: allow the fake provider (no money taken) on an https public origin; otherwise payments are "not configured" and sign-up and cards are hidden (billing/guard.ts). */
   AOM_ALLOW_FAKE_PAYMENTS: bool(false),
+  /** DEV ONLY, never set in production: lets `pnpm seed:dev` fill a local stack with test data. Reported by /api/public/plans as `devSeedAllowed` only on an http local-network origin with the fake provider. */
+  AOM_DEV_SEED: bool(false),
   /** Which gateway: `paystack` (primary), `payfast` (fallback) or `fake`. Unset: Paystack when its keys are set, else PayFast when its keys are set, else fake (local and UAT). */
   AOM_PAYMENT_PROVIDER: z.enum(['paystack', 'payfast', 'fake']).optional(),
   AOM_PAYSTACK_SECRET_KEY: z.string().optional(),
@@ -121,6 +123,8 @@ export interface Config {
   linkedinClientSecret: string | undefined;
   billingJobs: boolean;
   allowFakePayments: boolean;
+  /** `AOM_DEV_SEED`: dev only (see billing/guard.ts `devSeedAllowed`). */
+  devSeed: boolean;
   billingProvider: 'auto' | 'fake' | 'payfast' | 'paystack';
   paystack: { secretKey: string | undefined; publicKey: string | undefined; cardCheckZar: number };
   payfast: {
@@ -174,6 +178,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     linkedinClientSecret: e.AOM_LINKEDIN_CLIENT_SECRET || undefined,
     billingJobs: e.AOM_BILLING_JOBS,
     allowFakePayments: e.AOM_ALLOW_FAKE_PAYMENTS,
+    devSeed: e.AOM_DEV_SEED,
     billingProvider: e.AOM_PAYMENT_PROVIDER ?? e.AOM_BILLING_PROVIDER,
     paystack: {
       secretKey: e.AOM_PAYSTACK_SECRET_KEY?.trim() || undefined,

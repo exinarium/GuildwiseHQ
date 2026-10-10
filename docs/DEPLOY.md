@@ -214,6 +214,7 @@ Billing runs on the fake provider (simulated payments, a "Test mode" notice in t
 | --- | --- | --- |
 | `AOM_PAYMENT_PROVIDER` | unset | `paystack`, `payfast` or `fake`. Unset: Paystack when `AOM_PAYSTACK_SECRET_KEY` is set, else PayFast when its keys are set, else fake. Naming a provider without its keys refuses to start. (`AOM_BILLING_PROVIDER` is a deprecated alias.) |
 | `AOM_ALLOW_FAKE_PAYMENTS` | `false` | Staging only: allow the fake provider on a public https `AOM_PUBLIC_ORIGIN` (otherwise payments are "not configured": sign-up and card payments are hidden, see above) |
+| `AOM_DEV_SEED` | `false` | **Dev/UAT only, never set in production.** Lets `pnpm --filter @aom/server seed:dev -- --dev` fill the stack with test data. `GET /api/public/plans` reports `devSeedAllowed: true` only when this is `true` AND `AOM_PUBLIC_ORIGIN` is plain `http` on localhost or a private LAN address AND the payment provider is the fake one; the script refuses otherwise |
 | `AOM_PAYSTACK_SECRET_KEY` | unset | Paystack secret key (`sk_test_...` runs in test mode, `sk_live_...` is live). Also signs and verifies webhooks |
 | `AOM_PAYSTACK_PUBLIC_KEY` | unset | Paystack public key (`pk_...`). Kept for the hosted checkout; the current flow redirects to Paystack and does not need it in the browser |
 | `AOM_PAYSTACK_CARD_CHECK_ZAR` | `5` | Rand charged and refunded to save a card. `UNVERIFIED`: Paystack's minimum amount for ZAR |
