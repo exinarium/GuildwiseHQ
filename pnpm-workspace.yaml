@@ -5,3 +5,6 @@ packages:
 
 allowBuilds:
   esbuild: true
+  # ssh2 (cloud workstations over SSH) works in pure JavaScript; its optional native add-ons are not built.
+  ssh2: false
+  cpu-features: false
