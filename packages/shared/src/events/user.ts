@@ -56,7 +56,7 @@ export const userEvents = [
   ),
   defineEvent('UserEmailVerified', z.object({ userId: Id })),
   /**
-   * A self-service sign-up whose email was never verified within the grace period: the account and the empty organization
+   * A self-service sign-up whose email was never verified within 7 days, or that was verified but never saved a card within 14 days: the account and the empty organization
    * created for it are removed so the address can sign up again. The only event that deletes a user; the email, names
    * and dates are kept here because the projection rows are gone (the platform audit reads them from the event).
    */
@@ -69,6 +69,8 @@ export const userEvents = [
       displayName: z.string().min(1),
       orgName: z.string().min(1),
       registeredAt: IsoDate,
+      /** The email was verified but no card was saved within 14 days (absent: never verified within 7 days). */
+      verified: z.boolean().optional(),
     }),
   ),
   /** The platform account: no organization, platform routes only. Created by the CLI only. */

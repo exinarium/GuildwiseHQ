@@ -113,6 +113,25 @@ export function orgBanners(
   return out;
 }
 
+/** The full-page billing screen an Owner gets instead of the app (see `ActiveOrg.gate`); null for everything else. */
+export function billingGate(
+  org: { status: OrgStatus; status_reason: string | null; plan: string; simulation?: boolean | null },
+  role: OrgRole,
+): ActiveOrg['gate'] {
+  if (role !== 'owner' || org.status !== 'suspended' || org.simulation || org.plan === 'unlimited')
+    return null;
+  switch (org.status_reason) {
+    case 'billing:setup':
+      return { kind: 'setup', reason: 'setup' };
+    case 'billing:payment_failed':
+      return { kind: 'resubscribe', reason: 'payment_failed' };
+    case 'billing:cancelled':
+      return { kind: 'resubscribe', reason: 'cancelled' };
+    default:
+      return null;
+  }
+}
+
 /** The `activeOrg` block of `me` and `GET /api/org` for a member in `role`. */
 export async function activeOrgDto(ctx: Ctx, org: OrgRow, role: OrgRole): Promise<ActiveOrg> {
   const manager = isOrgManager({ orgRole: role });
@@ -155,5 +174,9 @@ export async function activeOrgDto(ctx: Ctx, org: OrgRow, role: OrgRole): Promis
     simulation: Boolean(org.simulation),
     // Members see "suspended" and "cancelled" only.
     banners: banners.filter((b) => manager || b.audience === 'all'),
+    gate: billingGate(
+      { status: org.status, status_reason: org.status_reason ?? null, plan: org.plan, simulation: org.simulation },
+      role,
+    ),
   };
 }

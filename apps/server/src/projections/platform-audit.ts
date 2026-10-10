@@ -307,8 +307,10 @@ export const platformAuditProjectors: Record<string, Projector> = {
       action: e.event.type,
       orgId: p.orgId,
       targetUserId: p.userId,
-      summary: `Removed the unverified sign-up ${p.displayName} <${p.email}> and its empty organization ${p.orgName}`,
-      details: { registeredAt: p.registeredAt },
+      summary: p.verified
+        ? `Removed the sign-up ${p.displayName} <${p.email}> (verified, no card saved within 14 days) and its empty organization ${p.orgName}`
+        : `Removed the unverified sign-up ${p.displayName} <${p.email}> and its empty organization ${p.orgName}`,
+      details: { registeredAt: p.registeredAt, verified: p.verified === true },
     };
   }),
   UserReactivated: byPlatform(async (tx, e) => {
