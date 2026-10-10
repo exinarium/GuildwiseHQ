@@ -64,7 +64,7 @@ export async function blogSettings(ctx: Ctx): Promise<BlogSettings> {
   let autoPublishFrom: string | null = null;
   if (from.present) autoPublishFrom = typeof from.value === 'string' ? from.value : null;
   else {
-    const first = await one(ctx.pool, 'SELECT min(created_at) AS t FROM blog_posts');
+    const first = await one(ctx.pool, 'SELECT min(created_at) AS t FROM blog_posts WHERE NOT launch');
     if (first?.t)
       autoPublishFrom = new Date(new Date(first.t).getTime() + REVIEW_PERIOD_DAYS * 24 * HOUR).toISOString();
   }

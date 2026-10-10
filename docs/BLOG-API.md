@@ -235,6 +235,10 @@ Quality bar: if you cannot find enough credible sources for a topic, pick anothe
 | Posts always wait for review | the review period is not over, or the post has a content warning (shown on the post) |
 | No post appeared | the workstation was offline when the schedule fired; the missed run happens once when it is back |
 
+## Launch articles
+
+Four articles ship with the product (`apps/server/src/blog/launch/*.md`: Markdown with YAML frontmatter for title, slug, summary, tags, cover, sources, seo and the Facebook/LinkedIn captions) and are imported once on boot by the data migration `blog-launch-2026-10`: `what-is-an-ai-agent-team`, `keeping-humans-in-charge-of-ai-agents`, `from-idea-to-tested-change` and `ai-automation-for-small-businesses-2026`. The owner signed the content off, so they skip the review queue. Blog on: published at boot time. Blog off (kill switch): drafts, to be published by the super admin. A slug that already exists is skipped and no other post is touched. They carry the `launch` flag: they are not shared to social networks, not in the digest, and do not start the two-week review period. They appear in the API like any other post and can be edited or unpublished in Platform > Blog.
+
 ## Weekly digest
 
 Mondays 08:00 Africa/Johannesburg, one mail per person for the posts published since the previous digest (nothing when

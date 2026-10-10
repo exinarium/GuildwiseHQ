@@ -989,3 +989,7 @@ Plans in a table the super admin edits, self-service sign-up with email verifica
 ## Built: simulation organizations (overnight, 2026-10-10, track t12)
 
 Flag, banner, billing exemption, `[Simulation]` mail prefix, server-hosted simulated workstation with local throwaway repositories, demo scenario and the complete wipe. See `docs/SPEC.md` Simulation organizations, `docs/ARCHITECTURE.md` section 33, `docs/RUNNER.md` Simulated workstation, `docs/DEPLOY.md`, `docs/OWNER-SETUP.md` section 10. Migrations `1540_simulation.sql`, `1541_simulated_workstation.sql`. Tests: server `simulation-wipe`, `simulation-dispatch`, `simulation-host`; runner `scripted-replies`; web `platform`, `simulation-banner`.
+
+## Built: blog launch articles (overnight, 2026-10-10, track t13)
+
+Four owner-approved launch articles (`apps/server/src/blog/launch/*.md`) and the one-time data migration `blog-launch-2026-10` (published when the blog is on, drafts when it is off, skipped per existing slug, `launch` flag so no social share, no digest and no review-period start). Migration `1560_blog_launch.sql`, `parseBlogArticle` in `@aom/shared`. See `docs/BLOG-API.md` Launch articles, `docs/DEPLOY.md`. Tests: server `blog-launch`.

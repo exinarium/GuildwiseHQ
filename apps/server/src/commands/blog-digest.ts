@@ -133,7 +133,7 @@ export async function blogDigestTick(ctx: Ctx): Promise<DigestResult> {
     const since = last?.t ? new Date(last.t) : new Date(now.getTime() - 7 * DAY);
     const found = await rows(
       ctx.pool,
-      `SELECT id FROM blog_posts WHERE status='published' AND published_at > $1 AND published_at <= $2
+      `SELECT id FROM blog_posts WHERE status='published' AND NOT launch AND published_at > $1 AND published_at <= $2
         ORDER BY published_at DESC LIMIT ${MAX_POSTS}`,
       [since, now],
     );

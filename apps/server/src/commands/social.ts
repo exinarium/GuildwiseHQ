@@ -187,7 +187,7 @@ async function createMissingShares(ctx: Ctx): Promise<void> {
     `INSERT INTO social_shares (post_id, network, status, attempts, next_attempt_at, created_at, updated_at)
      SELECT p.id, c.network, 'pending', 0, $1, $1, $1
        FROM blog_posts p CROSS JOIN social_channels c
-      WHERE p.status='published' AND c.status='ok'
+      WHERE p.status='published' AND NOT p.launch AND c.status='ok'
         AND p.published_at >= c.connected_at AND p.published_at > $2
      ON CONFLICT (post_id, network) DO NOTHING`,
     [now, new Date(now.getTime() - FRESH_MS)],

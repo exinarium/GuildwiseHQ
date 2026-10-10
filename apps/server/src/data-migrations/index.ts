@@ -1,7 +1,9 @@
+import { migrateBlogLaunch } from './blog-launch.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
 import { migrateRestructure } from './restructure.ts';
 
+export { BLOG_LAUNCH_MIGRATION, loadLaunchArticles, migrateBlogLaunch } from './blog-launch.ts';
 export {
   formatNoPersonalPlan,
   migrateNoPersonal,
@@ -24,6 +26,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'orgs-2026-10', run: (env) => migrateOrgs(env) },
   { name: 'restructure-2026-10', run: (env) => migrateRestructure(env) },
   { name: 'no-personal-2026-10', run: (env) => migrateNoPersonal(env) },
+  { name: 'blog-launch-2026-10', run: (env) => migrateBlogLaunch(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

@@ -26,6 +26,8 @@ export const blogEvents = [
       status: z.enum(['draft', 'in_review']),
       /** Content-check findings (suspicious links, ...) that keep the post from auto-publishing. */
       warnings: z.array(z.string()).default([]),
+      /** A launch-set article pre-loaded by the `blog-launch-2026-10` data migration: never shared to social networks, never in the digest. */
+      launch: z.boolean().optional(),
     }),
   ),
   defineEvent(
