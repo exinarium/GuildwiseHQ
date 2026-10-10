@@ -278,8 +278,21 @@ export class RunnerHandlers {
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
           await applyForgeReposResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
         } else if (cmd?.type === 'rights.verify') {
-          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-          await applyRightsResult(this.ctx, conn.workstationId, msg.ok, msg.result);
+          // Terminal. A failed or unreadable answer is kept on the command so the Workstations page can show it.
+          const problem = await applyRightsResult(
+            this.ctx,
+            conn.workstationId,
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
+          if (problem)
+            await exec(
+              this.ctx.pool,
+              `UPDATE runner_commands SET status='failed', last_error=$2, done_at=$3 WHERE id=$1`,
+              [msg.commandId, problem.slice(0, 500), this.ctx.clock.now()],
+            );
+          else await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
         } else if (cmd?.type === 'sudo.set') {
           // The ciphertext is forgotten here (applySudoSetResult empties the payload) whatever the answer was.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

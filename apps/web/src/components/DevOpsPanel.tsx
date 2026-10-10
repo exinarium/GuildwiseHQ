@@ -153,12 +153,15 @@ function RightsStatus({
   if (ticked.length === 0) return null;
   const checks = w.rights?.checks ?? {};
   const stale = !!w.rights?.stale;
+  const check = w.rightsCheck;
+  const checking = verify.isPending || check?.state === 'checking';
+  const unsupported = check?.state === 'unsupported';
   return (
     <div className="mt-3 rounded-control border border-line p-2" data-testid={`rights-${w.name}`}>
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="text-sm font-semibold">Rights on this machine</h4>
-        <Button disabled={verify.isPending || !w.connected} onClick={() => verify.mutate(w.id)}>
-          Verify now
+        <Button disabled={checking || unsupported || !w.connected} onClick={() => verify.mutate(w.id)}>
+          {checking ? 'Verifying...' : 'Verify now'}
         </Button>
         {!w.connected && <span className="text-xs text-subtle">The runner is offline.</span>}
         {w.rights && (
@@ -168,6 +171,16 @@ function RightsStatus({
           </span>
         )}
       </div>
+      {checking && (
+        <p role="status" className="mt-1 text-xs text-subtle" data-testid="rights-checking">
+          Asking the runner to check these rights. This page updates when it answers.
+        </p>
+      )}
+      {check && (check.state === 'failed' || check.state === 'timed_out' || unsupported) && (
+        <p role="alert" className="mt-1 text-sm text-danger" data-testid="rights-check-problem">
+          {check.state === 'failed' ? `The check failed: ${check.message}` : check.message}
+        </p>
+      )}
       <ul className="mt-2 flex flex-col gap-2">
         {ticked.map(([key]) => {
           const c = checks[key];

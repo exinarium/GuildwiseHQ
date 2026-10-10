@@ -257,3 +257,70 @@ describe('rights and the sudo password', () => {
     expect(put.status).toBe(404);
   });
 });
+
+describe('Verify now (POST verify-rights) never fails silently', () => {
+  const verify = () => owner('POST', `/api/workstations/${w.workstationId}/verify-rights`, {});
+  const report = () => ({
+    checkedAt: new Date().toISOString(),
+    platform: 'linux',
+    checks: { docker: { status: 'verified', reason: 'docker info works' } },
+    sudoPasswordStored: false,
+  });
+
+  it('shows checking, then the result; a runner error and a missing answer are reported', async () => {
+    let from = r.received.length;
+    expect((await verify()).status).toBe(202);
+    let cmd = await nextCommand('rights.verify', from);
+    expect((await workstation()).rightsCheck.state).toBe('checking');
+    answer(cmd.commandId, report());
+    await settle();
+    expect((await workstation()).rightsCheck.state).toBe('idle');
+    expect((await workstation()).rights.checks.docker.status).toBe('verified');
+
+    // the runner answers with an error: shown, not dropped
+    from = r.received.length;
+    await verify();
+    cmd = await nextCommand('rights.verify', from);
+    answer(cmd.commandId, 'docker binary vanished', false);
+    await settle();
+    expect((await workstation()).rightsCheck).toMatchObject({
+      state: 'failed',
+      message: 'docker binary vanished',
+    });
+
+    // no answer within a minute: timed out, and a new click replaces the unanswered check
+    from = r.received.length;
+    await verify();
+    await nextCommand('rights.verify', from);
+    await q(
+      `UPDATE runner_commands SET created_at = now() - (CASE WHEN status='sent' THEN interval '5 minutes' ELSE interval '1 day' END) WHERE type='rights.verify'`,
+    );
+    expect((await workstation()).rightsCheck.state).toBe('timed_out');
+    from = r.received.length;
+    expect((await verify()).status).toBe(202);
+    cmd = await nextCommand('rights.verify', from);
+    expect((await workstation()).rightsCheck.state).toBe('checking');
+    answer(cmd.commandId, report());
+    await settle();
+    expect((await workstation()).rightsCheck.state).toBe('idle');
+  });
+
+  it('a runner that never announced its key is too old: 409 runner_outdated, state unsupported', async () => {
+    const saved = await q('SELECT * FROM workstation_keys');
+    await q('DELETE FROM workstation_keys');
+    try {
+      const before = (await q(`SELECT 1 FROM runner_commands WHERE type='rights.verify'`)).length;
+      const res = await verify();
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({ error: { code: 'runner_outdated' } });
+      expect((await workstation()).rightsCheck.state).toBe('unsupported');
+      expect((await q(`SELECT 1 FROM runner_commands WHERE type='rights.verify'`)).length).toBe(before);
+    } finally {
+      for (const k of saved)
+        await q(
+          'INSERT INTO workstation_keys (workstation_id, key_id, public_key, updated_at) VALUES ($1,$2,$3,$4)',
+          [k.workstation_id, k.key_id, k.public_key, k.updated_at],
+        );
+    }
+  });
+});

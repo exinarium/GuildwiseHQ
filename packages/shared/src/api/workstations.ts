@@ -41,6 +41,18 @@ export const WorkstationDtoSchema = z.object({
   rights: RightsReportSchema.extend({ stale: z.boolean().default(false) })
     .nullable()
     .optional(),
+  /**
+   * The state of the latest "Verify now": `checking` (asked, no answer yet), `failed` (the runner answered with an
+   * error, `message` says which), `timed_out` (no answer within a minute), `unsupported` (this runner is too old to
+   * check rights: it never announced its key), `idle` (nothing outstanding; `rights` holds the latest result).
+   */
+  rightsCheck: z
+    .object({
+      state: z.enum(['idle', 'checking', 'failed', 'timed_out', 'unsupported']),
+      message: z.string().nullable(),
+      requestedAt: IsoTime.nullable(),
+    })
+    .optional(),
   /** The sudo password: whether one is stored on the runner and the key it is encrypted with (never the password). */
   sudo: z
     .object({

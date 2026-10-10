@@ -444,11 +444,13 @@ export async function applyRightsResult(
   workstationId: string,
   ok: boolean,
   result: unknown,
-): Promise<void> {
-  const parsed = ok ? RightsReportSchema.safeParse(result) : null;
-  if (!parsed?.success) return;
+  error?: string,
+): Promise<string | null> {
+  if (!ok) return error || 'The runner could not check the rights.';
+  const parsed = RightsReportSchema.safeParse(result);
+  if (!parsed.success) return 'The runner sent a rights report this server does not understand.';
   const ws = await one(ctx.pool, 'SELECT user_id FROM workstations WHERE id=$1', [workstationId]);
-  if (!ws) return;
+  if (!ws) return null;
   await ctx.store.append([
     {
       streamId: streamId.workstation(workstationId),
@@ -457,6 +459,7 @@ export async function applyRightsResult(
       scope: userScope(ws.user_id),
     },
   ]);
+  return null;
 }
 
 /** After the access changed (inside its transaction): verify the new ticks and retry environments waiting for access. */
@@ -490,6 +493,19 @@ export async function verifyRightsNow(
     [workstationId, user.id],
   );
   if (!ws) throw notFound('workstation not found');
+  // A runner that never announced its key is older than the rights check: say so instead of queueing into the void.
+  if (!(await one(ctx.pool, 'SELECT 1 FROM workstation_keys WHERE workstation_id=$1', [workstationId])))
+    throw conflict(
+      'runner_outdated',
+      'This workstation runner is too old to check rights. Update the runner on the machine, then try again.',
+    );
+  // An earlier check that never got an answer is replaced by this one.
+  await exec(
+    ctx.pool,
+    `UPDATE runner_commands SET status='failed', last_error='replaced by a newer check'
+      WHERE workstation_id=$1 AND type='rights.verify' AND status IN ('pending','sent')`,
+    [workstationId],
+  );
   await queueRightsVerify(ctx.pool, workstationId, ws.devops_access ?? {});
   deliver(ctx, [workstationId]);
 }

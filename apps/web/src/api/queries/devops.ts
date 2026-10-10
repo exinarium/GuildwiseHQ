@@ -81,8 +81,8 @@ export function useVerifyRights() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (workstationId: string) => post(`/workstations/${workstationId}/verify-rights`, {}),
-    // The runner answers a moment later; the workstation list polls.
-    onSuccess: () => setTimeout(() => qc.invalidateQueries({ queryKey: ['workstations'] }), 1500),
+    // The list now says "checking" (rightsCheck); it keeps polling until the runner's answer, an error or the timeout.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['workstations'] }),
   });
 }
 

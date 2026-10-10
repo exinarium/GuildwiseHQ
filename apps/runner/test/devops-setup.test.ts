@@ -1,7 +1,7 @@
 import { webcrypto } from 'node:crypto';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { uuidv7 } from '@aom/shared';
+import { RightsReportSchema, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { unregisterSecret } from '../src/secrets/redact.ts';
 import type { ExecResult, Executor } from '../src/toolchain/exec.ts';
@@ -103,6 +103,19 @@ describe('DevOps workstation setup commands', () => {
 
     expect(await send('sudo.clear', {})).toMatchObject({ ok: true, result: { cleared: true } });
     expect(existsSync(join(h.dataDir, 'secrets', 'sudo.enc'))).toBe(false);
+  });
+
+  it('rights.verify answers a report the server accepts, and an error (never silence) for a bad payload', async () => {
+    h = await startHarness({}, { executor: machine([]), platform: 'linux' });
+    const res = (await send('rights.verify', {
+      access: { allowInstall: false, allowDocker: true, allowedPaths: [], sudo: false },
+    })) as { ok: boolean; result: unknown };
+    expect(res.ok).toBe(true);
+    expect(RightsReportSchema.safeParse(res.result).success).toBe(true);
+
+    const bad = await send('rights.verify', { access: 'nope' });
+    expect(bad).toMatchObject({ ok: false });
+    expect((bad as { error?: string }).error).toBeTruthy();
   });
 
   it('sudo.set with ciphertext for another key is refused', async () => {

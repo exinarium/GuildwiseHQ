@@ -250,6 +250,43 @@ export async function workstationDtos(
       )
     ).map((k) => [k.workstation_id as string, k.key_id as string]),
   );
+  const rightsCmds = new Map<string, Row>(
+    (
+      await rows(
+        ctx.pool,
+        `SELECT DISTINCT ON (workstation_id) workstation_id, status, last_error, created_at FROM runner_commands
+          WHERE type='rights.verify' AND workstation_id = ANY($1::uuid[])
+          ORDER BY workstation_id, created_at DESC, id DESC`,
+        [list.map((w) => w.id)],
+      )
+    ).map((c) => [c.workstation_id as string, c]),
+  );
+  const nowMs = ctx.clock.now().getTime();
+  const rightsCheck = (w: Row) => {
+    const c = rightsCmds.get(w.id);
+    const requestedAt = c ? iso(c.created_at) : null;
+    if (!keys.has(w.id))
+      return {
+        state: 'unsupported' as const,
+        message: `This runner${w.runner_version ? ` (${w.runner_version})` : ''} is too old to check rights. Update the runner on the machine, then press Verify now.`,
+        requestedAt,
+      };
+    if (!c || c.status === 'done') return { state: 'idle' as const, message: null, requestedAt };
+    if (c.status === 'failed')
+      return {
+        state: 'failed' as const,
+        message: c.last_error ?? 'The runner could not check the rights.',
+        requestedAt,
+      };
+    if (nowMs - +c.created_at > RIGHTS_CHECK_TIMEOUT_MS)
+      return {
+        state: 'timed_out' as const,
+        message:
+          'The runner did not answer. It may be offline, busy, or too old to know this check; update it if the problem stays.',
+        requestedAt,
+      };
+    return { state: 'checking' as const, message: null, requestedAt };
+  };
   return list.map((w) => ({
     id: w.id,
     userId: w.user_id,
@@ -273,6 +310,7 @@ export async function workstationDtos(
     devopsAgentId: w.devops_agent_id ?? null,
     hygiene: hygiene.get(w.id),
     rights: w.devops_rights ? { ...w.devops_rights, stale: !!w.devops_rights_stale } : null,
+    rightsCheck: rightsCheck(w),
     sudo: {
       keyId: keys.get(w.id) ?? null,
       passwordSet: !!w.devops_sudo_set_at,
@@ -287,5 +325,8 @@ export async function workstationDtos(
     ownerEmail: w.owner_email,
   }));
 }
+
+/** How long a rights check may wait for the runner before the page calls it unanswered. */
+const RIGHTS_CHECK_TIMEOUT_MS = 60_000;
 
 export type RoleEntry = z.infer<typeof RoleCatalogueEntrySchema>;
