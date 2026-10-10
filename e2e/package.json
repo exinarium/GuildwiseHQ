@@ -6,6 +6,7 @@
   "scripts": {
     "e2e": "pnpm -C .. build && playwright test",
     "e2e:run": "playwright test",
+    "video": "playwright test -c video/playwright.video.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {

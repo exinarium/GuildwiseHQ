@@ -1,4 +1,4 @@
 {
   "extends": "../tsconfig.base.json",
-  "include": ["playwright.config.ts", "global-setup.ts", "guide-global-setup.ts", "support", "tests"]
+  "include": ["playwright.config.ts", "global-setup.ts", "guide-global-setup.ts", "support", "tests", "video"]
 }

@@ -3,6 +3,7 @@ import { ArrowLeft, BookOpen, GraduationCap, Play, Search } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMyTickets } from '../api/queries/support.ts';
+import { GettingStartedVideo } from '../components/help/GettingStartedVideo.tsx';
 import { ContactForm, prefillFor } from '../components/support/ContactForm.tsx';
 import { MyRequest } from '../components/support/MyRequest.tsx';
 import { StatusBadge } from '../components/support/StatusBadge.tsx';
@@ -230,6 +231,7 @@ function Results({ q, base }: { q: string; base: string }) {
 function Home({ base }: { base: string }) {
   return (
     <>
+      <GettingStartedVideo />
       <TourCard />
       <section aria-labelledby="help-articles-h">
         <h2 id="help-articles-h" className="mb-2 text-sm font-semibold tracking-wide text-subtle uppercase">
@@ -309,6 +311,11 @@ function ArticleView({ article, base }: { article: ReturnType<typeof articleBySl
           {article.title}
         </h2>
         <p className="mt-1 mb-4 text-base text-muted">{article.summary}</p>
+        {article.slug === 'getting-started' && (
+          <div className="mb-5">
+            <GettingStartedVideo />
+          </div>
+        )}
         <Markdown blocks={article.blocks} />
         {base === '/help' && (
           <p className="mt-8 border-t border-line pt-4 text-sm text-muted">
