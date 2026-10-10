@@ -514,8 +514,8 @@ Guildwise HQ has a platform-level blog about AI agents and AI automation, run by
 - **The writer agent** runs inside Guildwise: a schedule creates a card for a writer agent, which posts through the API with a key
   held in the workstation's environment (set-up steps and the prompt are in `docs/BLOG-API.md`).
 - **Weekly digest** on Mondays at 08:00 Africa/Johannesburg: organization Owners get it unless they opt out, everyone else
-  opts in (checkbox at invitation acceptance, Settings); users whose organizations are all suspended are skipped; one-click
-  unsubscribe; sent once per week, not at all in a week without new posts.
+  opts in (checkbox at invitation acceptance, Settings); users whose organizations are all suspended are skipped; unsubscribe
+  link with a confirm button (the mail program's one-click unsubscribe also works); sent once per week, not at all in a week without new posts.
 - **Facebook Page and LinkedIn organization** sharing on publish once a token is configured: encrypted tokens, retries with
   backoff, never twice, a status per post and network, an alert before a token expires. No Buffer or Zapier. Unpublishing does
   not delete the social posts.

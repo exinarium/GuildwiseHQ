@@ -225,11 +225,16 @@ export function blogPublicRoutes(ctx: Ctx) {
       },
     );
 
-    // ---- one-click unsubscribe (signed token, no sign-in); mail programs POST here (RFC 8058)
+    // ---- unsubscribe (signed token, no sign-in). Opening the link (GET) only shows a confirm page: mail scanners and
+    // link previews open links, so a GET must never change anything. The POST unsubscribes: the page's confirm button
+    // sends it, and mail programs send the RFC 8058 one-click POST (`List-Unsubscribe=One-Click`) to the same URL.
     const tokenParams = z.object({ token: z.string().min(10).max(300) });
     const limit = ctx.config.rateLimit ? { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } } : {};
     const resubscribeForm = (token: string) =>
       `<form class="inline" method="post" action="/blog/unsubscribe/${encodeURIComponent(token)}/resubscribe"><button type="submit">Subscribe again</button></form>`;
+
+    const confirmForm = (token: string) =>
+      `<form class="inline" method="post" action="/blog/unsubscribe/${encodeURIComponent(token)}"><input type="hidden" name="confirm" value="1"><button type="submit">Unsubscribe from the weekly digest</button></form> <a href="/blog" style="margin-left:12px">Keep me subscribed</a>`;
 
     app.get('/blog/unsubscribe/:token', { schema: { params: tokenParams }, ...limit }, async (req, reply) => {
       const userId = await userOfUnsubscribeToken(ctx, req.params.token);
@@ -238,16 +243,15 @@ export function blogPublicRoutes(ctx: Ctx) {
           .code(400)
           .type(HTML)
           .send(messagePage(origin, 'Link not valid', 'This unsubscribe link is not valid.'));
-      await setDigestPreference(ctx, userId, false, 'link');
       void reply.header('cache-control', 'no-store');
       return reply
         .type(HTML)
         .send(
           messagePage(
             origin,
-            'You are unsubscribed',
-            'You will not get the weekly blog digest any more. You can change this any time in your settings.',
-            resubscribeForm(req.params.token),
+            'Unsubscribe from the weekly digest?',
+            'Confirm below and you will not get the weekly blog digest any more. You can change this any time in your settings.',
+            confirmForm(req.params.token),
           ),
         );
     });
@@ -256,9 +260,29 @@ export function blogPublicRoutes(ctx: Ctx) {
       { schema: { params: tokenParams }, ...limit },
       async (req, reply) => {
         const userId = await userOfUnsubscribeToken(ctx, req.params.token);
-        if (!userId) return reply.code(400).type('text/plain').send('invalid link');
+        // The confirm button of the page sends `confirm=1` and gets a page back; a mail program's one-click POST
+        // (`List-Unsubscribe=One-Click`) gets plain text.
+        const fromPage = typeof req.body === 'string' && /(^|&)confirm=1(&|$)/.test(req.body);
+        if (!userId)
+          return fromPage
+            ? reply
+                .code(400)
+                .type(HTML)
+                .send(messagePage(origin, 'Link not valid', 'This unsubscribe link is not valid.'))
+            : reply.code(400).type('text/plain').send('invalid link');
         await setDigestPreference(ctx, userId, false, 'link');
-        return reply.type('text/plain').send('unsubscribed');
+        void reply.header('cache-control', 'no-store');
+        if (!fromPage) return reply.type('text/plain').send('unsubscribed');
+        return reply
+          .type(HTML)
+          .send(
+            messagePage(
+              origin,
+              'You are unsubscribed',
+              'You will not get the weekly blog digest any more. You can change this any time in your settings.',
+              resubscribeForm(req.params.token),
+            ),
+          );
       },
     );
     app.post(

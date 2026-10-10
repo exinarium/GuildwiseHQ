@@ -19,7 +19,7 @@ Once a week, on Monday at 08:00 (Johannesburg time), you can get one email with 
 - **Owners** of an organization get it unless they turn it off.
 - **Everyone else** only gets it if they ask for it: tick the box when you accept an invitation, or turn it on in **Settings**.
 - People whose organizations are all suspended are not mailed.
-- Every digest has an **Unsubscribe** link, and your mail program may show its own unsubscribe button. One click is enough, you do not have to sign in. You can subscribe again from the page that opens, or in Settings.
+- Every digest has an **Unsubscribe** link, and your mail program may show its own unsubscribe button. The link opens a page where you press **Unsubscribe from the weekly digest** to confirm (or **Keep me subscribed**); opening the link alone changes nothing. You do not have to sign in. You can subscribe again from the page that follows, or in Settings.
 
 To change your choice yourself, open **Settings** and use **Weekly blog digest**.
 

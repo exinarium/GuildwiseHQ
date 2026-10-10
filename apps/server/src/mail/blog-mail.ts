@@ -41,7 +41,7 @@ export function digestMail(opts: {
     origin: opts.origin,
     body,
     cta: { label: 'See all articles', url: utm(`${opts.origin}/blog`, opts.digestId) },
-    note: `Do not want these mails? Unsubscribe with one click: ${opts.unsubscribeUrl}`,
+    note: `Do not want these mails? Unsubscribe: ${opts.unsubscribeUrl}`,
   });
   return {
     ...mail,

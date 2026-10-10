@@ -239,7 +239,7 @@ Quality bar: if you cannot find enough credible sources for a topic, pick anothe
 Mondays 08:00 Africa/Johannesburg, one mail per person for the posts published since the previous digest (nothing when
 there are none). Organization Owners get it unless they opted out; everyone else only if they ticked the box at sign-up or
 invitation acceptance, or in Settings. Users whose organizations are all suspended or cancelled are skipped. Every mail has
-a one-click unsubscribe (a signed link, no sign-in) and `List-Unsubscribe` / `List-Unsubscribe-Post` headers. Switch it off
+an unsubscribe link (signed, no sign-in: opening it shows a page with an "Unsubscribe from the weekly digest" button and a "Keep me subscribed" link, and only the button, a POST, unsubscribes) and `List-Unsubscribe` / `List-Unsubscribe-Post` headers (the one-click POST of RFC 8058 keeps working for mail programs). Switch it off
 with `AOM_BLOG_DIGEST=false` or in Platform > Blog. See `docs/DEPLOY.md`.
 
 ## Facebook and LinkedIn

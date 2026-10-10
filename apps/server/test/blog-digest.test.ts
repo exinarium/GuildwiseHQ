@@ -138,10 +138,35 @@ describe('weekly digest', () => {
     expect(re.statusCode).toBe(200);
     expect((await digestRecipients(t.app.ctx)).map((r) => r.email)).toContain(ownerIn.email);
 
+    // opening the link only shows the confirm page: it changes nothing (mail scanners open links)
     const link = await t.app.inject({ method: 'GET', url: `/blog/unsubscribe/${token}` });
     expect(link.statusCode).toBe(200);
-    expect(link.body).toContain('You are unsubscribed');
-    expect(link.body).toContain('Subscribe again');
+    expect(link.body).toContain('Unsubscribe from the weekly digest');
+    expect(link.body).toContain('Keep me subscribed');
+    expect(link.body).not.toContain('You are unsubscribed');
+    expect((await digestRecipients(t.app.ctx)).map((r) => r.email)).toContain(ownerIn.email);
+    await t.app.inject({ method: 'GET', url: `/blog/unsubscribe/${token}` });
+    expect((await digestRecipients(t.app.ctx)).map((r) => r.email)).toContain(ownerIn.email);
+    // the confirm button posts and gets a page back
+    const confirm = await t.app.inject({
+      method: 'POST',
+      url: `/blog/unsubscribe/${token}`,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: 'confirm=1',
+    });
+    expect(confirm.statusCode).toBe(200);
+    expect(confirm.headers['content-type']).toContain('text/html');
+    expect(confirm.body).toContain('You are unsubscribed');
+    expect(confirm.body).toContain('Subscribe again');
+    expect((await digestRecipients(t.app.ctx)).map((r) => r.email)).not.toContain(ownerIn.email);
+    const badConfirm = await t.app.inject({
+      method: 'POST',
+      url: '/blog/unsubscribe/not-a-real-token-at-all',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: 'confirm=1',
+    });
+    expect(badConfirm.statusCode).toBe(400);
+    expect(badConfirm.body).toContain('Link not valid');
     const cookie = await t.login(ownerIn.email);
     const pref = await ok(t.req('GET', '/api/me/blog-digest', { cookie }));
     expect(pref).toEqual({ optedIn: false, isOwner: true });
