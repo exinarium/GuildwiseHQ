@@ -219,6 +219,35 @@ launchctl list | grep aom.runner      # check status
 5. Actions tab: set program to `C:\Users\you\aom-runner\aom-runner.cmd` and arguments to `start --data-dir %LOCALAPPDATA%\aom-runner`
 6. Click OK
 
+## Cloud workstations (VPS over SSH, GitHub Codespaces)
+
+The user chooses where agents run (**Add a workstation**: My computer, A VPS (SSH), GitHub Codespaces). The runner makes outbound connections only, so a cloud machine needs no open port. Guide for a server you rent: `docs/BYO-VPS.md`. Design and server side: `docs/ARCHITECTURE.md` 11.4.
+
+### `aom-runner up`: pair if needed, then run
+
+```
+GUILDWISE_SERVER=https://app.example.com GUILDWISE_PAIR_CODE=ABCD-EFGH GUILDWISE_NAME="Build server" aom-runner up
+```
+
+Idempotent and safe at every boot. If the data directory already has a (not disabled) pairing for the server, it only starts (the single-use code is ignored). Otherwise it pairs with `GUILDWISE_PAIR_CODE` (or `--code`), or, inside a Codespace the server created, **enrolls** with `CODESPACE_NAME` and `GITHUB_TOKEN` (which GitHub sets in every codespace): `POST /api/runner/enroll`, no code needed. Then it runs like `aom-runner start`. Flags: `--server`, `--code`, `--name`, `--mock`, `--data-dir`.
+
+### Claude credentials on a cloud workstation
+
+The server never receives or stores a Claude credential.
+
+- `ANTHROPIC_API_KEY` in the environment of `up` (a Codespaces secret) is written into this machine's `config.json` (mode 0600, `authMode: api_key`).
+- `CLAUDE_CODE_OAUTH_TOKEN` likewise (`authMode: oauth`; a subscription token, individual use).
+- `aom-runner auth api-key` / `aom-runner auth oauth-token` read the value from stdin and store it the same way: `read -rs K; printf %s "$K" | aom-runner auth api-key`, then restart the service.
+- The default recommended in the app is the customer's own API key; a subscription login is allowed with an "individual use" warning.
+
+### `aom-runner devcontainer [path] --server <url>`
+
+Prints a `devcontainer.json` for the repository at `path` (default `.`), with dev container features chosen from the toolchain detection (`src/toolchain/stacks.ts`: .NET, Python, Go, Rust, Java, Ruby, PHP on top of Node, git and the GitHub CLI). Its `postStartCommand` is `curl -fsSL <server>/api/runner/codespaces-bootstrap.sh | bash`: that script (served by the server, no secret in it) installs the runner release (checksum verified) into `~/.aom-runner-install` and starts `aom-runner up` in the background. Docker is not offered in a Codespace. `runArgs` carries `--security-opt seccomp=unconfined` so the agent sandbox (bubblewrap) can create user namespaces; confirm it works in your codespace with `aom-runner doctor`.
+
+### Sleeping and waking
+
+Handled by the server (`docs/ARCHITECTURE.md` 11.4): a Codespace is stopped after 30 minutes (configurable) with no open shift and woken when a card is queued for an agent on it. The runner reconnects by itself when the machine wakes (the data directory, including `config.json`, survives stop and start; a rebuild of the codespace wipes the home folder and enrolls again). GitHub also stops a codespace after at most four hours without user activity, headless runner or not; a shift running then is recovered by the lease and reaper (`runner_lost_shift`). Keep-alive tricks are deliberately not shipped.
+
 ## Several pairings (one runner, several accounts or organizations)
 
 One runner process on a machine can be paired with more than one workstation: for example your own organization on one server and a client's account on another, or a second account on the same server. Each pairing is a separate workstation on the server side (a workstation belongs to one user; the same machine simply appears once per pairing), and on the machine each pairing is **fully isolated**.
@@ -450,7 +479,10 @@ The runner respects these environment variables:
 | `AOM_ALLOW_LOCAL_REMOTES` | Set to `1` to accept `file://` and path git remotes (tests only; production refuses them) |
 | `AOM_CLAUDE_SMOKE` | Set to `1` to run the real-Claude smoke test (spends tokens) |
 | `AOM_CLAUDE_SMOKE_MODEL` | Smoke test model (default `opus`; try `haiku` to save tokens) |
-| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Claude Code (from `claude setup-token`) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Claude Code (from `claude setup-token`); stored by `aom-runner up` |
+| `ANTHROPIC_API_KEY` | The customer's API key; stored by `aom-runner up` in the runner config |
+| `GUILDWISE_SERVER`, `GUILDWISE_PAIR_CODE`, `GUILDWISE_NAME` | Used by `aom-runner up` for unattended pairing |
+| `CODESPACE_NAME`, `GITHUB_TOKEN` | Set by GitHub inside a Codespace; `aom-runner up` enrolls with them |
 
 ## The `aom` command (inside a shift)
 
@@ -1039,4 +1071,5 @@ rm -rf ~/.aom-runner/agents/*/claude/cache
 - `apps/runner/README.md`: quick reference
 - `docs/USER-GUIDE.md`: manager features and agent hiring
 - `docs/DEPLOY.md`: server deployment
+- `docs/BYO-VPS.md`: running agents on a server you rent
 - `docs/ARCHITECTURE.md`: technical design and protocol

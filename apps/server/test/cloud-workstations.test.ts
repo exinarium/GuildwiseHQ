@@ -380,5 +380,12 @@ describe('a Codespace only world', () => {
     );
     const list = await ok<any>(w.t.req('GET', '/api/cloud-workstations', { cookie: cookie() }));
     expect(list.hasDockerCapableWorkstation).toBe(false);
+    // a deploy target cannot point at a Codespace workstation
+    const r = await w.t.req('POST', `/api/projects/${w.projectId}/deploy-targets`, {
+      cookie: cookie(),
+      body: { name: 'prod', kind: 'remote_ssh', host: 'h.example.com', workstationId: ws.workstationId },
+    });
+    expect(r.status).toBe(422);
+    expect(r.body.error.message).toMatch(/Codespace cannot deploy Docker/);
   });
 });

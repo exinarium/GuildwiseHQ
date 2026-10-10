@@ -285,6 +285,16 @@ aom-runner start
 
 Workstations connect outbound over WebSocket (no inbound ports needed). Code, credentials and work stay local.
 
+### Cloud workstations (VPS over SSH, Codespaces)
+
+Users can run agents on a server of their own (any VPS reached over SSH) or on a GitHub Codespace (`docs/RUNNER.md` "Cloud workstations", `docs/BYO-VPS.md`). What this means for the server:
+
+- **Outbound access.** The app container connects out over SSH (port of the user's VPS) to install the runner, and to `api.github.com` for Codespaces. Nothing inbound is added.
+- **`AOM_SECRET_KEY` is required in production** when users connect GitHub: their token is kept encrypted with it (AES-256-GCM). Without the variable a random key is generated in the database, which a database dump would also contain.
+- **No SSH password, key or Claude credential is ever stored.** The runner release must be published (`AOM_RUNNER_RELEASE_DIR`), because both the VPS installer and the Codespaces bootstrap download it from this server. `AOM_PUBLIC_ORIGIN` must be the address cloud machines can reach.
+- The scheduler wakes and stops Codespaces every 15 seconds; run one server instance, as for the dispatcher.
+- Migration `1470_cloud_workstations.sql` adds `cloud_workstations` and `cloud_github_connections` (operational tables).
+
 ## Isolation and multi-tenancy
 
 Each organization is sandboxed: members see only their organization's projects, cards and desk (the projects they were added to), and guests see only the projects they were invited to. The server enforces org-scoped queries and authorization checks in every route, and the platform account sees organization metadata only. Tests verify cross-organization isolation.

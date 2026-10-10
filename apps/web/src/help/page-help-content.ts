@@ -736,6 +736,14 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'If the wizard is not available, pair a workstation using a one-time code.',
       },
       {
+        name: 'Where agents run',
+        text: 'In the wizard, choose My computer (the installer), A VPS (SSH: any Linux server) or GitHub Codespaces. You pay your VPS company or GitHub; Guildwise adds no charge.',
+      },
+      {
+        name: 'Cloud workstations',
+        text: 'Servers and Codespaces you added: whether they are running or asleep, Wake and Stop, the estimated monthly cost, how long they idle before stopping and optional office hours. A Codespace cannot run Docker, so keep a workstation or VPS for Docker deploys.',
+      },
+      {
         name: 'Workstation card',
         text: 'Name, system and runner version, whether it is connected, and an Unpair button. Click the name to expand: runtimes, shifts running, repositories and the DevOps engineer panel.',
       },

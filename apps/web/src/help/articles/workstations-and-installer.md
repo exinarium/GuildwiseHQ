@@ -20,6 +20,8 @@ The runner on each workstation:
 
 ## Add a workstation {#add-a-workstation}
 
+First choose **where your agents should run**: **My computer** (below), **A VPS (SSH)** or **GitHub Codespaces**. The last two are explained in "Cloud workstations (VPS and Codespaces)".
+
 1. Go to **Workstations** (sidebar: Organization) and click **Add a workstation** (or the button in the middle if the list is empty).
 2. **Pick the system**: Windows, Linux or macOS. The page guesses from your browser; change it if needed. Optionally type a name for the workstation.
 3. **Read the steps and click Copy command**: the command contains a link (works 30 minutes) and a pairing code (one time only). It never contains a password. You can also read the whole script first with **Download the script**. If 30 minutes pass, choose your system again for a new one.
