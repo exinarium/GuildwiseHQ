@@ -137,7 +137,10 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
   return {
     bin: cfg.bin,
     args,
-    env: sessionEnv({ env: input.env, sandbox: input.sandbox, agent: { isDevops: input.agent.isDevops } }, cfg),
+    env: sessionEnv(
+      { env: input.env, sandbox: input.sandbox, agent: { isDevops: input.agent.isDevops } },
+      cfg,
+    ),
   };
 }
 

@@ -22,6 +22,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { baFinalizeEvents } from './ba-finalize.ts';
 import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
+import { cardConflictAttemptEvents } from './conflict-attempts.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { applyQuestionReport, endQuestionShift } from './escalation.ts';
 import { buildDigestEvents } from './feeds.ts';
@@ -541,6 +542,15 @@ export async function applyShiftRejected(
   if (msg.reason === 'rebase_conflict') {
     extra.push(
       ...rebaseConflictEvents(card, ws.id, card.stage, card.base_branch ?? '', msg.conflictedFiles ?? []),
+      ...(await cardConflictAttemptEvents(
+        ctx,
+        tx,
+        card,
+        ws.id,
+        card.stage,
+        card.base_branch ?? '',
+        msg.conflictedFiles ?? [],
+      )),
     );
   } else if (msg.reason === 'environment_not_ready' && msg.environment) {
     extra.push(...(await environmentNotReadyEvents(ctx, tx, ws, card, msg.environment)));

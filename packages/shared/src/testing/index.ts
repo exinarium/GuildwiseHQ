@@ -26,6 +26,8 @@ export const DESK_SUBKIND = {
   environmentAttention: 'environment_attention',
   /** G-Q2: DevOps is trying to resolve a rebase/merge conflict (a notice). */
   conflictAttempt: 'conflict_attempt',
+  /** G-Q2: two DevOps attempts failed; the conflict needs a person. */
+  conflictUnresolved: 'conflict_unresolved',
 } as const;
 
 /** Card origins whose card is a suite (full E2E suite or regression run) rather than a feature under test. */

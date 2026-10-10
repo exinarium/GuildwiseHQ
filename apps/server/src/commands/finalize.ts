@@ -17,6 +17,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { loadManageable } from './cards.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { cardConflictAttemptEvents } from './conflict-attempts.ts';
 import { rebaseConflictEvents } from './rebase.ts';
 import { spawnCardEvent } from './spawn.ts';
 
@@ -361,6 +362,15 @@ export async function applyFinalizeResult(
           card.base_branch ?? '',
           result.conflictedFiles ?? [],
         ),
+        ...(await cardConflictAttemptEvents(
+          ctx,
+          tx,
+          card,
+          workstationId,
+          'finalize',
+          card.base_branch ?? '',
+          result.conflictedFiles ?? [],
+        )),
       );
     } else {
       const message = result?.error ?? error ?? 'the completion action failed';

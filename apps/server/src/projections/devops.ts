@@ -130,6 +130,15 @@ export const devopsProjectors: Record<string, Projector> = {
       [p.requestId, p.resolution, e.createdAt, p.note ?? null],
     );
   },
+  // G-Q2: the card waits for DevOps' attempt, then goes on to Rework (the dispatcher's unpark pass).
+  ConflictAttemptStarted: async (tx, e) => {
+    const p = (e.event as EventOf<'ConflictAttemptStarted'>).payload;
+    await exec(
+      tx,
+      `UPDATE cards SET status='waiting', parked_request_id=$2, park_problem='conflict', updated_at=$3 WHERE id=$1`,
+      [p.cardId, p.requestId, e.createdAt],
+    );
+  },
   DevOpsRequestRequeued: async (tx, e) => {
     const p = (e.event as EventOf<'DevOpsRequestRequeued'>).payload;
     await exec(tx, `UPDATE devops_requests SET status='queued', shift_id=NULL, updated_at=$2 WHERE id=$1`, [

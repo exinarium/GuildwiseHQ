@@ -21,6 +21,7 @@ import {
   randomAvatarSeed,
   streamId,
 } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard } from '../authz/scope.ts';
 import { loadRole } from '../catalogue/loader.ts';
@@ -30,7 +31,6 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { orgRoleOf } from '../auth/org-context.ts';
 import { agentActor, orgScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { hygieneReportEvents } from './hygiene.ts';
 import type { ReportResult, WsRef } from './shifts.ts';
@@ -394,7 +394,10 @@ export async function listDevOpsRequests(
 }
 
 export async function getDevOpsRequest(ctx: Ctx, userId: string, id: string): Promise<DevOpsRequestDetail> {
-  const r = await one(ctx.pool, `${REQUEST_SQL} WHERE r.id = $1 AND ${VISIBLE_SQL.replaceAll('$1', '$2')}`, [id, userId]);
+  const r = await one(ctx.pool, `${REQUEST_SQL} WHERE r.id = $1 AND ${VISIBLE_SQL.replaceAll('$1', '$2')}`, [
+    id,
+    userId,
+  ]);
   if (!r) throw notFound('request not found');
   const messages = await rows(
     ctx.pool,
@@ -520,14 +523,7 @@ export async function resolveDevOpsApprovalIn(
     throw conflict('not_awaiting_approval', 'this request is not waiting for approval');
 
   const message = (text: string, data?: Record<string, unknown>) =>
-    threadMessage(
-      r.thread_id,
-      r.org_id,
-      { kind: 'user', userId: user.id },
-      'answer',
-      text,
-      data,
-    );
+    threadMessage(r.thread_id, r.org_id, { kind: 'user', userId: user.id }, 'answer', text, data);
   if (resolution === 'approved') {
     const managerOk = ap.managerApproved === true || isManager;
     const wsOk = ap.workstationUserAgreed === true || isWsUser;
@@ -535,7 +531,8 @@ export async function resolveDevOpsApprovalIn(
       // Only one party so far: record it and wait for the other.
       const party = isManager ? 'manager' : 'workstation_user';
       const already = party === 'manager' ? ap.managerApproved : ap.workstationUserAgreed;
-      if (already) throw conflict('already_agreed', 'you already approved this; waiting for the other person');
+      if (already)
+        throw conflict('already_agreed', 'you already approved this; waiting for the other person');
       await ctx.store.append(
         [
           {

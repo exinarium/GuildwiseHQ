@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { DESK_SUBKIND, streamId, TESTER_BOTTLENECK_MINUTES } from '@aom/shared';
-import { orgScope, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
+import { cardMessage, orgScope, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -22,7 +22,8 @@ export async function testingPass(ctx: Ctx): Promise<void> {
 export async function unparkPass(ctx: Ctx): Promise<number> {
   const parked = await rows(
     ctx.pool,
-    `SELECT c.id, c.org_id, c.project_id, c.parked_request_id FROM cards c
+    `SELECT c.id, c.org_id, c.project_id, c.ref, c.parked_request_id, c.park_problem, r.status AS request_status,
+            r.result_summary FROM cards c
        JOIN devops_requests r ON r.id = c.parked_request_id
       WHERE c.status='waiting' AND r.status IN ('done','failed')`,
   );
@@ -35,6 +36,19 @@ export async function unparkPass(ctx: Ctx): Promise<number> {
       if (cur.rowCount === 0) return;
       await ctx.store.append(
         [
+          // G-Q2: say on the card what DevOps' conflict attempt came to; the card then goes on to Rework.
+          ...(c.park_problem === 'conflict'
+            ? [
+                cardMessage(
+                  c,
+                  { kind: 'system' },
+                  'system',
+                  c.request_status === 'done'
+                    ? `DevOps finished its conflict attempt: ${c.result_summary ?? 'no summary'}. The card goes on to Rework, then review and test run again.`
+                    : `DevOps could not finish its conflict attempt (${c.result_summary ?? 'it failed'}). The card goes on to Rework.`,
+                ),
+              ]
+            : []),
           {
             streamId: streamId.card(c.id),
             event: {

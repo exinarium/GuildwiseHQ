@@ -236,7 +236,9 @@ export async function withRequestContext(ctx: Ctx, req: Record<string, any>): Pr
     if (d) lines.push(`Desk item: ${d.title}`);
   }
   if (c.errorText) lines.push(`Last error:\n${c.errorText}`);
-  return lines.length ? `${req.summary}\n\nContext the user was looking at:\n${lines.join('\n')}` : req.summary;
+  return lines.length
+    ? `${req.summary}\n\nContext the user was looking at:\n${lines.join('\n')}`
+    : req.summary;
 }
 
 /**

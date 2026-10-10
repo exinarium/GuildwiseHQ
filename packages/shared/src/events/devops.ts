@@ -25,7 +25,15 @@ export const DevOpsRequester = z.object({
 export type DevOpsRequester = z.infer<typeof DevOpsRequester>;
 
 /** Where an "Ask DevOps" request was started (additive; absent on older clients). */
-export const DevOpsRequestOrigin = z.enum(['app', 'palette', 'card', 'desk', 'workstation', 'chat']);
+export const DevOpsRequestOrigin = z.enum([
+  'app',
+  'palette',
+  'card',
+  'desk',
+  'workstation',
+  'chat',
+  'conflict',
+]);
 export type DevOpsRequestOrigin = z.infer<typeof DevOpsRequestOrigin>;
 
 /** The page, project, card and so on the user was looking at when they asked; rendered into the DevOps brief. */
@@ -86,6 +94,16 @@ export const devopsEvents = [
       action: z.string().min(1),
       reason: z.string().min(1),
       commands: z.array(z.string()).default([]),
+    }),
+  ),
+  /** G-Q2: DevOps tries to resolve a card's rebase/merge conflict on a branch; the card waits on the request. */
+  defineEvent(
+    'ConflictAttemptStarted',
+    z.object({
+      cardId: Id,
+      requestId: Id,
+      attempt: z.number().int().positive(),
+      source: z.enum(['rebase', 'finalize']),
     }),
   ),
   /**

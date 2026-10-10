@@ -28,6 +28,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { agentActor, orgScope, projectScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
+import { hygieneConflictEvents } from './conflict-attempts.ts';
 import { createDevOpsRequestIn, threadMessage } from './devops.ts';
 import { userBy } from './phase-events.ts';
 
@@ -615,6 +616,27 @@ export async function hygieneReportEvents(
     scope: orgScope(req.org_id),
   });
   for (const r of reported) {
+    // G-Q2: DevOps tries to combine a diverged working branch on a separate branch first; two failures go to the desk.
+    // (Not for a hygiene run that was itself a conflict attempt: that one is the attempt.)
+    if (r.problem?.kind === 'conflict' && req.origin !== 'conflict') {
+      const spec1 = byRepo.get(r.repoId) as HygieneRepoSpec;
+      events.push(
+        ...(await hygieneConflictEvents(
+          ctx,
+          tx,
+          req,
+          {
+            repoId: r.repoId,
+            projectId: spec1.projectId,
+            name: spec1.name,
+            localPath: spec1.localPath,
+            workingBranch: spec1.workingBranch,
+          },
+          r.problem.detail,
+        )),
+      );
+      continue;
+    }
     if (r.problem?.kind !== 'needs_branch') continue;
     const repo = await one(tx, 'SELECT * FROM project_repos WHERE id=$1 AND removed_at IS NULL', [r.repoId]);
     const project = await one(tx, 'SELECT * FROM projects WHERE id=$1', [

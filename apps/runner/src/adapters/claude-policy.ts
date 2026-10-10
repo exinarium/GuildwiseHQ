@@ -163,11 +163,7 @@ export const SESSION_TOOLS_DENIED = [
   'ExitWorktree',
 ];
 
-const ALWAYS_DENIED = [
-  ...SESSION_TOOLS_DENIED,
-  'Bash(git push:*)',
-  'Bash(git reset --hard:*)',
-];
+const ALWAYS_DENIED = [...SESSION_TOOLS_DENIED, 'Bash(git push:*)', 'Bash(git reset --hard:*)'];
 
 /**
  * G-Q12: rebase, checkout and switch were denied for every role. The builder may now run them to

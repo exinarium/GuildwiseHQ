@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { DevOpsRequestContextSchema, DevOpsRequester, DevOpsRequestOrigin, DevOpsRequestStatus } from '../events/devops.ts';
+import {
+  DevOpsRequestContextSchema,
+  DevOpsRequester,
+  DevOpsRequestOrigin,
+  DevOpsRequestStatus,
+} from '../events/devops.ts';
 import { IsoTime } from './common.ts';
 
 export const DevOpsRequestDtoSchema = z.object({
