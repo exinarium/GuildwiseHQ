@@ -4,26 +4,26 @@
   "type": "video/webm",
   "captions": "/videos/getting-started.vtt",
   "voice": "Piper en_GB-jenny_dioco-medium",
-  "duration": 162.8,
+  "duration": 164.2,
   "chapters": [
     {
-      "t": 17,
+      "t": 16.9,
       "title": "Create your first project"
     },
     {
-      "t": 41.9,
+      "t": 44.2,
       "title": "Hire your agents"
     },
     {
-      "t": 77.3,
+      "t": 78.8,
       "title": "Create cards"
     },
     {
-      "t": 104.1,
+      "t": 105.6,
       "title": "Talk to the business analyst"
     },
     {
-      "t": 126.8,
+      "t": 128.2,
       "title": "Test your running project"
     }
   ]

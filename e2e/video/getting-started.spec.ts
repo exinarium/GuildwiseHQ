@@ -114,7 +114,6 @@ test('record the getting-started video', async ({ browser }) => {
     await click(page, add.getByLabel('Remote URL'), 100);
     await add.getByLabel('Remote URL').fill(paths.origin);
     await pause(800);
-    await add.getByLabel('Branch (optional)').fill('main');
     await click(page, add.getByRole('button', { name: /add/i }));
     await expect(page.getByTestId('repos')).toContainText('shop');
   });
@@ -153,7 +152,6 @@ test('record the getting-started video', async ({ browser }) => {
   await narrate('c3-b', async () => {
     await type(page, form.getByLabel('Title', { exact: true }), 'Show a welcome banner');
     await form.getByLabel('Repository').selectOption({ label: 'shop' });
-    await form.getByLabel('Completion action').selectOption('push_branch');
     await form.getByLabel('Context', { exact: true }).fill('Visitors do not know what the shop sells.');
     await form.getByLabel('Requirements').fill('Show a welcome banner on the home page.');
     await form.getByLabel('Acceptance criteria').fill('The banner is visible\nIt can be closed');
