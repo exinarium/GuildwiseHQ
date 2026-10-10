@@ -41,29 +41,6 @@ describe('the getting-started video', () => {
     expect(player.currentTime).toBe(30);
   });
 
-  it('offers the MP4 as a download when there is one', async () => {
-    respond({
-      ...info,
-      sources: [
-        { src: '/videos/getting-started.mp4', type: 'video/mp4' },
-        { src: '/videos/getting-started.webm', type: 'video/webm' },
-      ],
-    });
-    render(<GettingStartedVideo />);
-    const player = (await screen.findByTestId('getting-started-player')) as HTMLVideoElement;
-    expect(player.querySelector('source')).toHaveAttribute('src', '/videos/getting-started.mp4');
-    const link = screen.getByTestId('video-download');
-    expect(link).toHaveAttribute('href', '/videos/getting-started.mp4');
-    expect(link).toHaveAttribute('download', 'Guildwise-HQ-getting-started.mp4');
-  });
-
-  it('has no download link without an MP4', async () => {
-    respond(info);
-    render(<GettingStartedVideo />);
-    await screen.findByTestId('getting-started-player');
-    expect(screen.queryByTestId('video-download')).toBeNull();
-  });
-
   it('says it is coming soon when there is no video yet (an HTML fallback page, a 404 or a network error)', async () => {
     for (const setup of [
       () => respond(null),

@@ -17,7 +17,7 @@ On the **Help** page, the **Getting started in five steps** video is a spoken tu
 4. **Talk to the business analyst:** open the chat, pick the analyst and ask in plain words. The analyst can turn a conversation into cards.
 5. **Test your running project:** watch the cards move across the board, open one to see its plan and cost, and try the result.
 
-The captions show everything the voice says and are on by default; use the **CC** button on the player to turn them off. Under the video, each step is a button that jumps to that part. To keep it or send it to someone, choose **Download video (MP4)** below the steps; the MP4 plays on any phone or computer.
+The captions show everything the voice says and are on by default; use the **CC** button on the player to turn them off. Under the video, each step is a button that jumps to that part.
 
 ## First login {#first-login}
 
