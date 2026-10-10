@@ -58,13 +58,12 @@ describe('the tour steps', () => {
     ]);
   });
 
-  it('the first step of the Owner, Admin and Member tours is the training video; Guests and the platform tour have none', () => {
-    for (const role of ['manager', 'member'] as const) {
+  it('the first step of the Owner, Admin, Member and Guest tours is the training video; the platform tour has none', () => {
+    for (const role of ['manager', 'member', 'guest'] as const) {
       const first = tourSteps(role, new Set(ALL_NAV))[0];
       expect(first).toMatchObject({ id: 'video', video: true, nextLabel: 'Next: take the tour' });
       expect(first?.title).toBe('Watch the 3-minute getting-started video');
     }
-    expect(tourSteps('guest', new Set(ALL_NAV)).some((s) => s.video)).toBe(false);
     expect(tourSteps('platform', new Set()).some((s) => s.video)).toBe(false);
   });
 
@@ -78,6 +77,7 @@ describe('the tour steps', () => {
   it('a Guest gets the short tour', () => {
     const steps = ids('guest', MEMBER_NAV);
     expect(steps).toEqual([
+      'video',
       'welcome',
       'board',
       'desk',
@@ -90,7 +90,7 @@ describe('the tour steps', () => {
       'help',
       'done',
     ]);
-    expect(tourSteps('guest', new Set(MEMBER_NAV))[0]?.body).toMatch(/invited/);
+    expect(tourSteps('guest', new Set(MEMBER_NAV))[1]?.body).toMatch(/invited/);
   });
 
   it('a platform administrator gets the platform area, not the work sidebar', () => {
@@ -330,9 +330,12 @@ describe('the first-login tour', () => {
     await waitFor(() => expect(onDrawer).toHaveBeenLastCalledWith(false));
   });
 
-  it('the guest tour is chosen from the role of the tab', async () => {
+  it('the guest tour is chosen from the role of the tab (after the video step)', async () => {
+    const user = userEvent.setup();
     me = makeMe({ status: 'new', step: 0 }, { activeOrg: null });
     mount();
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/getting-started video/);
+    await user.click(screen.getByTestId('tour-next'));
     expect(await screen.findByRole('dialog')).toHaveTextContent(/invited to work on someone else/);
   });
 

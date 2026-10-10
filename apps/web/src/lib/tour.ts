@@ -285,6 +285,7 @@ export function tourSteps(role: TourRole, nav: ReadonlySet<string>): TourStep[] 
       ];
     case 'guest':
       return [
+        VIDEO,
         {
           ...WELCOME,
           body: 'You have been invited to work on someone else’s project. This tour takes a minute and lights up the parts of the screen you will use. You can skip it now and replay it any time from Help.',
