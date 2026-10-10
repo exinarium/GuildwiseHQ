@@ -1,11 +1,11 @@
 ---
 title: Testing and finalization
-summary: Test stage, finalization with pull requests and merging, full suite and regression.
-keywords: [test, finalize, merge, PR, regression, full suite]
+summary: The test stage, how finished work lands (main or a pull request), simple and expert mode, the full suite and regression runs.
+keywords: [test, finalize, merge, PR, pull request, how finished work lands, protected branch, expert mode, simple mode, git, completion action, mark merged, regression, full suite]
 order: 11
 ---
 
-After a card is reviewed and approved, it moves to the Test stage where a tester runs E2E tests. Once tests pass, the card moves to Finalize where its work is shipped (pull request, pushed branch or merge). A full test suite runs after each finalized card.
+After a card is reviewed and approved, it moves to the Test stage where a tester runs E2E tests. Once tests pass, the card moves to Finalize where its work lands the way the project says: straight into main, or as a pull request for you to approve. A full test suite runs after each finalized card.
 
 ## Test stage {#test-stage}
 
@@ -30,13 +30,25 @@ At the Finalize stage, your BA ships the work the way the project says. In each 
 
 With **expert mode** on (Settings), each card also has its own **completion action**, which the BA may revise:
 
-- **PR**: Push the branch to GitHub and create a pull request (if `gh` is available), or ask the desk if it is not.
-- **Push branch**: Push the branch to GitHub without creating a PR.
+- **PR**: Push the branch to the git host and open a pull request (when the workstation is connected to the host), or ask the desk if it cannot.
+- **Push branch**: Push the branch to the git host without opening a pull request.
 - **Merge**: Merge the card's branch into the project's working branch. Small cards merge directly; large cards wait for your approval on the desk (**Approve merge**).
 
-After the action, the branch is removed and the card moves to Done.
+After the action, the branch is removed and the card moves to Done. If the card's changes clash with other work on the way in, the DevOps engineer tries to fix that first (see [When two branches conflict](/help/devops-and-hygiene#conflicts)).
 
 A merge is large when the card's risk tier is large (see Board and cards). The project owner can let large merges through without waiting for you: open the project's settings, go to **Merging**, and click **Merge large changes without my approval** (off by default; you are asked to confirm).
+
+## Simple mode and expert mode {#expert-mode}
+
+You do not need to know git to use Guildwise HQ. By default (simple mode) cards and the desk speak in results: *"Goes into main after review and test"*, *"Your change is live on main"*, *"Waiting for you to merge the pull request"*. Guildwise picks the repository's default branch as the main line, keeps branch names out of sight, and only asks you about branches when it cannot work them out itself.
+
+If you know git and want the details, open **Settings** and tick **Show me branches and git controls** under **Expert mode for code changes**. It is per person, off by default, and only changes what you see. With it on you also get:
+
+- the working-branch field in the project's repository settings, and questions about keeping or changing the working branch when a new intake or phase starts;
+- the **Completion action** per card (see above);
+- branch names and commit details on cards;
+- **Mark merged** on the phase page (see [Phases and follow-ups](/help/phases#phase-done));
+- the folder questions in the workstation installer.
 
 ## Full suite and regression {#full-suite}
 

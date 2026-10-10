@@ -32,7 +32,7 @@ The server checks the floor every minute without using tokens. The BA only works
 
 **Repeated failures** (a card in rework round 3, or failed finalize twice): you hear about it in the daily report.
 
-**Repository hygiene problem** (DevOps could not resolve a conflict, missing clone, etc.): you hear about it in the daily report under Failures.
+**Repository hygiene problem** (DevOps could not resolve a conflict after two attempts, missing clone, etc.): you hear about it in the daily report under Failures. See [Repository hygiene](/help/devops-and-hygiene#hygiene).
 
 **Budget** (a project used 80% of its monthly budget, or 100% and paused): at 80% it is in the daily report (the desk also gets a Budget warning); at 100% you get an urgent desk item at once.
 

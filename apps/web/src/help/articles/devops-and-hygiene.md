@@ -1,11 +1,11 @@
 ---
 title: DevOps and repository hygiene
-summary: The DevOps engineer, repository hygiene, the working branch and creating new repositories.
-keywords: [DevOps, hygiene, repository, working branch, git]
+summary: The DevOps engineer and Ask DevOps, approvals, conflicts, repository hygiene and saved work, the toolchain, the working branch and new repositories.
+keywords: [DevOps, ask devops, chat, approval, two people, conflict, hygiene, saved work, repository, toolchain, packages, android sdk, sudo, working branch, git]
 order: 7
 ---
 
-Every workstation has a **DevOps engineer** agent: one per machine, free and always available. It handles system tasks that agents ask for or you request directly. It is not driven by cards like other agents. Repository hygiene is a daily cleanup that commits changes, pushes branches and removes finished work from disk.
+Every workstation has a **DevOps engineer** agent: one per machine, free and always available. It handles system tasks that agents ask for or you request directly. It is not driven by cards like other agents. Repository hygiene is a daily tidy-up that pulls the latest changes, keeps your unsaved edits safe and removes finished work from disk.
 
 ## The DevOps engineer {#devops-engineer}
 
@@ -13,12 +13,14 @@ You get one DevOps engineer per workstation automatically. It cannot be fired, o
 
 The DevOps engineer handles:
 - Cloning and setting up projects.
-- Installing tools and dependencies.
+- Installing tools and the project's own packages.
+- Running commands, Docker builds and deploys you ask for in a chat.
 - Starting containers and databases.
+- Fixing conflicts between changes before they reach you.
 - Pulling and pushing vault changes.
 - Repository hygiene (see below).
 
-You can ask it directly from anywhere: click **Ask DevOps** in the top bar, choose **Ask DevOps...** in the command palette (Ctrl K), or use the **Ask DevOps** button on a card, on a desk item or on the workstation. The page, project, card or error you were looking at is attached (remove any chip you do not want to share), and the right workstation's engineer is chosen for you when it is obvious. **Start chat** talks to it; **Send as a task** files a request that you can follow on the Workstations page.
+You can ask it directly from anywhere: click **Ask DevOps** in the top bar, choose **Ask DevOps...** in the command palette (Ctrl K), or use the **Ask DevOps** button on a card, on a desk item or on the workstation. The page, project, card or error you were looking at is attached (remove any chip you do not want to share), and the right workstation's engineer is chosen for you when it is obvious. **Start chat** talks to it; **Send as a task** files a request that you can follow on the Workstations page. See also [Chat with agents](/help/chat-with-agents).
 
 The DevOps engineer works **as you, on your machine**, outside the safety box that other agents work in. In a chat with it, a command, a Docker build or a deploy you ask for runs right away. The tick boxes in the workstation's panel (install packages and tools, use Docker, use elevated privileges (sudo), write to extra paths) are instructions to it and decide what the automatic tool setup may do, but they do not physically stop it: only give this agent to a machine you are happy to hand it. Anything it decides is outside its instructions waits for approval on the desk.
 
@@ -49,7 +51,7 @@ If hygiene finds a conflict, an authentication failure, or a missing clone, it d
 
 ## New repositories and the toolchain {#setup}
 
-When you add a repository in **Project settings, Repositories**, the DevOps engineer of each workstation of the project puts it there. Pick **An existing repository** and it is cloned into the workstation's first repository folder (`aom-runner repos add`); a folder that already holds something else is never overwritten. Pick **Create a new repository** (owner/name and visibility) and the DevOps engineer creates it on GitHub with the workstation's `gh` login, then clones it. Under each repository you see **Cloning**, **Cloned on <workstation>** or **Failed: <reason>** with **Try again**.
+When you add a repository in **Project settings, Repositories**, the DevOps engineer of each workstation of the project puts it there. Pick **An existing repository** and it is cloned into the workstation's first repository folder (`aom-runner repos add`); a folder that already holds something else is never overwritten. Pick **Create a new repository**, choose the git host and fill in what it asks (for example owner and name, and the visibility), and the DevOps engineer creates it there with that workstation's login for the host, then clones it. The workstation must be connected to the host first (see [Git hosts](/help/workstations-and-installer#git-hosts)). Under each repository you see **Cloning**, **Cloned on <workstation>** or **Failed: <reason>** with **Try again**.
 
 Before the first build work on a new project, the DevOps engineer checks that the tools the repository needs are installed: .NET and the MAUI workloads, Node and its package manager, Python, Docker, Go, Rust, Java and more. It installs what is missing only if you ticked **Install packages and tools** (and **Docker**, **Elevated privileges** where needed). Once the tools are in place it also installs **the project's own packages** (pnpm, yarn, npm or bun install; Python packages into the project's own environment; .NET restore; Go, Rust, Maven, Ruby and PHP packages), and for Android and .NET MAUI projects it installs the **Android SDK** (command-line tools, platform tools, and the Android version and build tools the project needs). Every step is logged where you can read it. Until the workstation is ready, **every agent's card in that project** waits there with the reason on the card, and **Project settings, Development environment** shows each tool, what is missing and how to fix it, with **Check again**. If the setup needs your help or fails, a notice appears on your desk (once), and it disappears when the workstation is ready.
 
@@ -77,7 +79,7 @@ You can also set or change it any time in **Project settings**, under **Repos**:
 
 ## Creating a new repository {#new-repository}
 
-Agents cannot create GitHub repositories themselves: their sandbox has no GitHub login. When a project needs a new repository:
+Agents cannot create repositories themselves: their sandbox has no login for your git host. You can create one on any host yourself from the project settings (see above). When an agent needs a new repository, it asks, and today that works for GitHub only:
 
 1. The BA or DevOps engineer asks with `aom repo create`.
 2. The request appears on your desk as **Create repository `<owner/repo>`**.

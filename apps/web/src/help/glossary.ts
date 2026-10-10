@@ -60,7 +60,7 @@ export const GLOSSARY: GlossaryEntry[] = [
     term: 'DevOps engineer',
     aka: ['devops'],
     definition:
-      'A special agent that looks after a workstation: it keeps repositories and vaults in sync, tidies branches and runs hygiene.',
+      'A free agent that looks after one workstation. It works as you, outside the sandbox: it installs tools and packages, keeps repositories and vaults in sync, runs hygiene, fixes conflicts and runs what you ask in a chat.',
     article: 'devops-and-hygiene#devops-engineer',
   },
   {
@@ -73,7 +73,7 @@ export const GLOSSARY: GlossaryEntry[] = [
     term: 'Follow-up',
     aka: ['followup', 'phase follow-up'],
     definition:
-      'Work that starts by itself when a phase is finished, such as a deploy or a regression run. You approve it on the desk first.',
+      'Work that runs after a phase is finished, such as a deploy or a regression run, once you approve it on the desk.',
     article: 'phases#followups',
   },
   {
@@ -93,7 +93,7 @@ export const GLOSSARY: GlossaryEntry[] = [
     term: 'Hygiene',
     aka: ['repository hygiene'],
     definition:
-      'Routine tidying of a repository by the DevOps engineer: removing merged branches and stale worktrees, and checking the working branch.',
+      'Routine tidying of a repository by the DevOps engineer: pulling the latest changes, keeping your unsaved edits on a saved-work branch, and removing the leftovers of finished cards.',
     article: 'devops-and-hygiene#hygiene',
   },
   {
@@ -200,14 +200,56 @@ export const GLOSSARY: GlossaryEntry[] = [
     term: 'Workstation',
     aka: ['machine', 'computer', 'host'],
     definition:
-      'A computer of yours that runs your agents. Nothing runs until you have added one with Add a workstation.',
+      'The machine that runs your agents: a computer of yours, a server you rent (VPS) or a GitHub Codespace. Nothing runs until you have added one with Add a workstation.',
     article: 'workstations-and-installer#add-a-workstation',
   },
   {
     term: 'Working branch',
     aka: ['default branch', 'main'],
     definition:
-      'The branch of a repository that agents branch from and merge back into. The DevOps engineer asks you to confirm it.',
+      'The main line of a repository (usually main) that agents start from and finished work goes into. Guildwise uses the repository default without asking, and asks only when it cannot tell.',
     article: 'devops-and-hygiene#working-branch',
+  },
+  {
+    term: 'Cloud workstation',
+    aka: ['vps', 'codespace', 'codespaces', 'server'],
+    definition:
+      'A workstation that is not your own computer: a Linux server you log in to over SSH, or a GitHub Codespace. It pairs itself, can sleep when idle and shows an estimated monthly cost.',
+    article: 'cloud-workstations',
+  },
+  {
+    term: 'Expert mode',
+    aka: ['git expert mode', 'simple mode', 'git'],
+    definition:
+      'A personal setting that shows branch names and the git controls. Off by default: cards then say plain things such as "Your change is live on main".',
+    article: 'testing-and-finalization#expert-mode',
+  },
+  {
+    term: 'Free trial',
+    aka: ['trial', 'plan', 'sign up', 'pricing'],
+    definition:
+      'Seven days of a paid plan at no cost, after you sign up, confirm your email and add a card. The first payment is taken when it ends; cancel before then and you pay nothing.',
+    article: 'billing-and-plans#trial',
+  },
+  {
+    term: 'Git host',
+    aka: ['forge', 'github', 'gitlab', 'bitbucket', 'azure devops', 'plain git'],
+    definition:
+      'Where a repository lives: GitHub, GitLab, Bitbucket, Azure DevOps or a plain git server. Each repository has one, and the workstation connects to it with its own login.',
+    article: 'workstations-and-installer#git-hosts',
+  },
+  {
+    term: 'Get started checklist',
+    aka: ['checklist', 'setup', 'get started'],
+    definition:
+      'The five steps from an empty organization to a working team (project, repository, workstation, team, talking to the BA). It ticks itself off and disappears when everything is done.',
+    article: 'getting-started#get-started',
+  },
+  {
+    term: 'Saved-work branch',
+    aka: ['saved work', 'unsaved edits'],
+    definition:
+      'Where hygiene keeps a copy of edits you had not saved in a repository, so nothing is lost and nothing reaches main by surprise.',
+    article: 'devops-and-hygiene#hygiene',
   },
 ];

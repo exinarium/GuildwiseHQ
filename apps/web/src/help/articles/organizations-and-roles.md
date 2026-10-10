@@ -1,7 +1,7 @@
 ---
 title: Organizations and roles
-summary: Four roles, what each can do, members, invitations, guests, and switching organizations.
-keywords: [organization, owner, admin, member, guest, roles, invitations]
+summary: Four roles, what each can do, members, invitations, guests, temporary passwords, suspension and the platform area.
+keywords: [organization, owner, admin, member, guest, roles, invitations, temporary password, reset password, suspended, paused, platform, super admin, support emails, landing assistant, ask guildwise]
 order: 2
 ---
 
@@ -11,7 +11,7 @@ An organization is your workspace: it owns your projects, agents, the board, the
 
 Each role has different permissions. Here is what each can do:
 
-- **Owner**: Everything an Admin can do, plus invite Admins, change roles, require two-factor login, and hand ownership to an Admin. There is exactly one Owner per organization.
+- **Owner**: Everything an Admin can do, plus invite Admins, change roles, require two-factor login, reset a member's password or two-factor login, manage [billing](/help/billing-and-plans), and hand ownership to an Admin. There is exactly one Owner per organization.
 - **Admin**: Create projects, invite Members and remove them, manage vaults, design roles and workflows, hire and fire any agent, set budgets, and see the plan and limits. Admins cannot invite Admins, change roles or change the organization's security settings.
 - **Member**: Work in the projects they were added to: create cards, hire agents onto their own workstations for those projects, and answer the desk items they are allowed to (by default only on cards they own).
 - **Guest**: Not a member. Has access to one or more projects that were shared with them. Guests see nothing at organization level.
@@ -26,7 +26,7 @@ At the top of the sidebar, you see the name of the organization the current tab 
 
 ## Members and invitations {#members-and-invitations}
 
-To manage people in your organization, open **Organization** at the bottom of the sidebar, then the **Members** tab (Members see the list but cannot change it; the **Invitations**, **Guests** and **Plan & limits** tabs are for Owner and Admins).
+To manage people in your organization, open **Organization** at the bottom of the sidebar, then the **Members** tab (Members see the list but cannot change it; the **Invitations**, **Guests** and **Plan & limits** tabs are for Owner and Admins, and the **Billing** tab is for the Owner).
 
 **Members** lists everyone with their role. The Owner can change roles and remove people. Admins can remove Members. When someone is removed, their agents go back to the Owner and need a new home (**Re-home** on the agent's card), and any cards they held are released back to the queue. Anyone except the Owner can leave the organization on their own (**Leave organization** on the **General** tab); the Owner must hand over ownership first (**Transfer ownership**).
 
@@ -37,9 +37,9 @@ The **Invitations** tab shows pending and past invitations. You can **Resend** o
 3. Pick which **Projects** they start on (Members only; you can change this later with **Change projects** on their row).
 4. Click **Send invitation**. They receive an email with a link; people without an account create one.
 
-If a member cannot get the reset email, the Owner can open the actions menu on their row and choose **Reset password**. You get a temporary password to copy and pass on yourself (it is shown once and no email is sent). The member is signed out everywhere and chooses their own password at the next sign-in. Their account is one account for every organization, so the new password applies in their other organizations too.
+Everyone can reset their own password with **Forgot your password?** on the sign-in page (see [Getting started](/help/getting-started#forgot-password)). If a member cannot get the reset email, the Owner can open the actions menu on their row and choose **Reset password**. You get a temporary password to copy and pass on yourself (it is shown once and no email is sent). The member is signed out everywhere and chooses their own password at the next sign-in. Their account is one account for every organization, so the new password applies in their other organizations too.
 
-The Owner can change an Admin or Member's role from the role selector on their row. Your plan may limit how many members you can have; the **Plan & limits** tab shows it.
+The Owner can change an Admin or Member's role from the role selector on their row. Your plan may limit how many members you can have; the **Plan & limits** tab shows it (see [Plans and billing](/help/billing-and-plans#plans)).
 
 ## Guests {#guests}
 
@@ -56,14 +56,18 @@ The **Guests** tab under **Organization** shows who from other organizations has
 
 ## Suspension {#suspension}
 
-A platform administrator can suspend your organization (for example if a trial ended or a payment was missed). Running shifts finish and nothing new starts. Scheduled actions are skipped and recorded. A banner at the top explains the suspension.
+A platform administrator can suspend your organization. Running shifts finish and nothing new starts. Scheduled actions are skipped and recorded. A banner at the top explains the suspension.
 
 Only the Owner can still sign in, with read access plus organization settings and member management. To resume, the administrator reactivates the organization and everything continues where it stopped. An organization that is paused because of billing shows a banner with a link to the Billing page: see [Plans and billing](/help/billing-and-plans#failed-payments).
 
 ## Platform area {#platform-area}
 
-Platform administrators sign in at the same address but see only the **Platform** area instead of organizations. They can view and manage all organizations, accounts, invitations, the audit log and support requests. They never see a specific organization's cards, desk or vaults. [Contact us](/help/contact) if you need a platform administrator.
+Platform administrators sign in at the same address but see only the **Platform** area instead of organizations. They can view and manage all organizations, accounts, invitations, billing, the blog, the audit log and support requests. They never see a specific organization's cards, desk or vaults. [Contact us](/help/contact) if you need a platform administrator.
+
+### Support emails {#console-emails}
+
+Everything that reaches the platform area by **Contact us** is also emailed to the support address set on **Platform, Support**: new requests, Contact us messages from visitors, and a person's reply on a request. Two more emails are switches on the same page, off until you turn them on: **new organizations and sign-ups**, and **platform audit events**. The person who wrote in gets an automatic reply with their reference and when to expect an answer (within 24 to 48 hours). See [Writing to us](/help/writing-to-us).
 
 ### The landing-page assistant {#landing-assistant}
 
-The public landing page can show a small **Ask Guildwise** chat that answers questions about the product. It is paid by Guildwise (the server needs an Anthropic API key), answers in English only, cannot see any account or data, and keeps no conversations, only counts. It never quotes prices or promises dates, and sends people to Contact us for sales, support, legal and pricing questions. On **Platform, Support** a platform administrator sees a panel with a **Turn off** / **Turn on** button, today's message count and the spend against the daily budget (the server's `AOM_ASSISTANT_PUBLIC_DAILY_USD`, ten dollars by default). When the budget is used up the chat says so and the landing page offers Contact us until the next day (UTC).
+The public landing page can show a small **Ask Guildwise** chat that answers questions about the product. It is paid by Guildwise (the server needs an Anthropic API key), answers in English only, cannot see any account or data, and keeps no conversations, only counts. It answers only from a reviewed list of product facts (the plans and prices included) and an outline of these help articles, never promises discounts, dates or anything not written there, and sends people to Contact us for sales, support, legal and account questions. On **Platform, Support** a platform administrator sees a panel with a **Turn off** / **Turn on** button, today's message count and the spend against the daily budget (the server's `AOM_ASSISTANT_PUBLIC_DAILY_USD`, ten dollars by default). When the budget is used up the chat says so and the landing page offers Contact us until the next day (UTC).

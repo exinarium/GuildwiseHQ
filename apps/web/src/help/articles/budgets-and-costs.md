@@ -5,14 +5,14 @@ keywords: [budget, cost, spend, monthly, override, currency, tokens]
 order: 16
 ---
 
-Every shift records what it uses: input tokens, output tokens, and which model ran. Guildwise HQ turns this into money at US dollar list prices and shows it in your organization's currency. These are estimates of what the work costs, not an invoice.
+Every shift records what it uses: input tokens, output tokens, and which model ran. Guildwise HQ turns this into money at US dollar list prices and shows it in your organization's currency. These are estimates of what the work costs, not an invoice. Your Guildwise HQ subscription is separate: see [Plans and billing](/help/billing-and-plans).
 
 ## Where spend shows {#where-spend-shows}
 
 You can see costs in several places:
 
 - **Project settings**: the month's spend in the header and a **Monthly budget** panel with a progress bar.
-- **Board header**: (e.g., "$9.00 of $10.00 this month") and a banner when near or over budget.
+- **Board header**: (e.g., "$9.00 of $10.00 this month") and a banner when near or over budget; each waiting card also says so in a [warning banner](/help/board-and-cards#reading-the-board).
 - **HR board**: each agent's cost this month and in total.
 - **A phase or a card**: what its shifts and BA work cost.
 - **Interests**: the spend and budget of the interest.

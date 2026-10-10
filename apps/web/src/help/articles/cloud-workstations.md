@@ -7,7 +7,7 @@ order: 19
 
 A **cloud workstation** is a machine somewhere else that runs your agents, so your own computer can stay off. You choose where your agents run when you click **Add a workstation**:
 
-- **My computer**: the installer for Windows, macOS or Linux (see "Workstations and the installer").
+- **My computer**: the installer for Windows, macOS or Linux (see [Workstations and the installer](/help/workstations-and-installer#add-a-workstation)).
 - **A VPS (SSH)**: any Linux server you can log in to.
 - **GitHub Codespaces**: a cloud machine from GitHub, for repositories on GitHub.
 
@@ -39,7 +39,7 @@ GitHub itself stops a Codespace that has had no user activity for up to four hou
 
 ## Sleeping and waking {#sleep}
 
-- A Codespace **stops after 30 minutes** with no agent working (you can choose 15 minutes to 2 hours in **Settings**).
+- A Codespace **stops after 30 minutes** with no agent working (choose 15 minutes to 2 hours with **Settings** on its card on the Workstations page).
 - It **wakes by itself** when a card is queued that its agents can take.
 - Optional **office hours** (days, hours and time zone) keep it asleep outside working time.
 - **Wake** and **Stop** buttons are always there for you.

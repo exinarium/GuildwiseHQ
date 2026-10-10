@@ -1,7 +1,7 @@
 ---
 title: Plans and billing
 summary: Plans and limits, the 7-day free trial, cards and invoices, changing plan, Business add-ons, cancelling and what happens when a payment fails.
-keywords: [billing, plan, price, trial, card, invoice, payfast, upgrade, cancel, subscription, paused, add-ons]
+keywords: [billing, plan, pricing, price, starter, team, business, sign up, free trial, card, invoice, payfast, rand, vat, upgrade, cancel, subscription, paused, add-ons, unlimited]
 order: 24
 ---
 
@@ -17,11 +17,13 @@ Every plan has every feature and **no limit on agents**. Plans differ only in ho
 | Team | $49 | 5 | 3 | 10 |
 | Business | $149 | 20 | 10 | Unlimited |
 
-Prices are in US dollars and do not include VAT. The platform administrator can change them; a subscription keeps the price it started at until you change plan. Organizations set up by invitation stay free until the Owner subscribes. An **Unlimited** plan, with no billing and no limits, is only given out by the platform administrator.
+Prices are in US dollars and do not include VAT. The platform administrator can change them; a subscription keeps the price it started at until you change plan. Organizations set up by invitation stay free until the Owner chooses a plan on the **Billing** page. An **Unlimited** plan, with no billing and no limits, is only given out by the platform administrator.
+
+The plan pays for Guildwise HQ itself. The AI work is billed to you by Claude (your subscription or API key; see [Budgets and costs](/help/budgets-and-costs) for the estimates), and a VPS or Codespace by its provider (see [Cloud workstations](/help/cloud-workstations#cost)).
 
 ## Signing up and the free trial {#trial}
 
-1. Choose a plan on the sign-up page and enter your organization name, your name, email and a password.
+1. Click **Start free trial** on the website (or a plan's button under **Pricing**), choose a plan and enter your organization name, your name, email and a password.
 2. Open the link in the email we send you. Signing in needs the confirmed email.
 3. Add a card on the **Billing** page. Your **7-day free trial** starts and nothing is charged.
 4. When the trial ends, the first invoice is charged to your card, and then once a month.
@@ -30,9 +32,9 @@ Until a card is saved your organization is paused: only you can sign in and the 
 
 ## Cards and invoices {#cards}
 
-We never see or keep your card number. With PayFast you enter your card on PayFast's secure page; a small amount is charged to check the card and refunded straight away. Only a secure token, the card type, the last four digits and the expiry are kept.
+We never see or keep your card number. With PayFast you enter your card on PayFast's secure page; a small amount is charged to check the card and refunded straight away. Only a secure token is kept. PayFast does not share the card number with us, so the **Billing** page shows the card simply as *Card*.
 
-Your card is charged in **South African rand**. The dollar price is converted at that day's exchange rate, and every invoice shows both the dollar amount and the rand amount charged, with the rate. The **Billing** page lists all invoices. We email you before the card expires.
+Your card is charged in **South African rand**. The dollar price is converted at that day's exchange rate, and every invoice shows both the dollar amount and the rand amount charged, with the rate. The **Billing** page lists all invoices.
 
 ## Changing plan {#changing-plan}
 

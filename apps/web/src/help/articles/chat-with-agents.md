@@ -1,7 +1,7 @@
 ---
 title: Chat with agents
 summary: Starting a chat with an agent, threads, asking the BA and archiving chats.
-keywords: [chat, agent, BA, thread, conversation, discuss]
+keywords: [chat, agent, BA, thread, conversation, discuss, devops, ask devops, run commands, deploy]
 order: 21
 ---
 
@@ -25,7 +25,7 @@ Rights are checked on every message: if you are removed from the project, you ca
 
 **Note**: agents may write notes and drafts in their own scratch folder during a chat. They cannot change your repositories, the vault or their own configuration from a chat.
 
-**The DevOps engineer is different.** A chat with the DevOps engineer works on your machine as you: when you ask it to install something, build a Docker image or deploy, it does it. It can also turn a longer instruction into a tracked DevOps task. The quickest way in is **Ask DevOps** in the top bar, which attaches the page you are on. See DevOps and repository hygiene.
+**The DevOps engineer is different.** A chat with the DevOps engineer works on your machine as you: when you ask it to install something, build a Docker image or deploy, it does it. It can also turn a longer instruction into a tracked DevOps task. The quickest way in is **Ask DevOps** in the top bar, which attaches the page you are on. See [DevOps and repository hygiene](/help/devops-and-hygiene#devops-engineer).
 
 ## Asking the BA {#asking-the-ba}
 
@@ -38,7 +38,7 @@ Start a chat with the BA the same way. Ask the BA to:
 
 The BA works with your rights: it can only use projects you are a member of. It reads the ledger, desk, vault and repositories (never changes anything), and posts one report on your desk with the conversation linked.
 
-Other agents cannot create cards from chat; only the BA can.
+Other agents cannot create cards from chat; only the BA can. For a ticket from Jira or GitHub, an [intake](/help/intake-and-outbox#intake) does the same with the ticket attached.
 
 ## Archiving chats {#archiving-chats}
 

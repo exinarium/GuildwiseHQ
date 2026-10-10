@@ -1,11 +1,11 @@
 ---
 title: Workstations and the installer
-summary: What a workstation is, the Add a workstation wizard, installing by hand, Claude credentials and Windows.
-keywords: [workstation, installer, runner, WSL2, setup, wizard, credentials]
+summary: What a workstation is, the Add a workstation wizard, installing by hand, Claude sign-in, Windows and connecting git hosts.
+keywords: [workstation, installer, runner, WSL2, setup, wizard, credentials, src folder, windows task, git host, git-connect, github, gitlab, bitbucket, azure devops, plain git, connect]
 order: 18
 ---
 
-A **workstation** is a computer of yours (Windows, macOS or Linux) where your agents run and work on your code. The **runner** is the software on that computer that pairs with Guildwise HQ and lets agents work. The guided installer sets everything up; you do not need to know about servers.
+A **workstation** is a computer of yours (Windows, macOS or Linux) where your agents run and work on your code. The **runner** is the software on that computer that pairs with Guildwise HQ and lets agents work. The guided installer sets everything up; you do not need to know about servers. Agents can also run on a server you rent or in a GitHub Codespace: see [Cloud workstations](/help/cloud-workstations).
 
 ## What is a workstation {#what-is-a-workstation}
 
@@ -13,14 +13,14 @@ A workstation is your own machine: a laptop, desktop or server. It holds your gi
 
 The runner on each workstation:
 - Stays connected to Guildwise HQ.
-- Sandboxes agents so they cannot read your SSH keys or other projects.
+- Sandboxes agents so they cannot read your SSH keys or other projects. The DevOps engineer is the exception: it works as you (see [DevOps and repository hygiene](/help/devops-and-hygiene#devops-engineer)).
 - Manages git, Docker and other tools.
 - Syncs vaults (your shared knowledge base).
-- Runs repository hygiene (commit changes, push branches, clean up).
+- Runs repository hygiene (pull the latest changes, keep your unsaved edits safe, clean up finished work).
 
 ## Add a workstation {#add-a-workstation}
 
-First choose **where your agents should run**: **My computer** (below), **A VPS (SSH)** or **GitHub Codespaces**. The last two are explained in "Cloud workstations (VPS and Codespaces)".
+First choose **where your agents should run**: **My computer** (below), **A VPS (SSH)** or **GitHub Codespaces**. The last two are explained in [Cloud workstations](/help/cloud-workstations).
 
 1. Go to **Workstations** (sidebar: Organization) and click **Add a workstation** (or the button in the middle if the list is empty).
 2. **Pick the system**: Windows, Linux or macOS. The page guesses from your browser; change it if needed. Optionally type a name for the workstation.
@@ -76,9 +76,9 @@ Open the workstation card on the **Workstations** page: **Git hosts** shows Conn
 - `aom-runner git-connect azure-devops --organization <name>` asks for a personal access token, or uses your Azure sign-in (`az login`). Use a token for one organization: global tokens stop working on 1 December 2026.
 - Add `--ssh-key` to any of them to create an SSH key and see where to upload it.
 
-Then click **Check again**. The DevOps engineer can walk you through any of these in a chat.
+Then click **Check again**. The DevOps engineer can walk you through any of these in a chat (**Ask DevOps** on the workstation).
 
-A **plain git** server needs no connection, but no pull request is opened: the branch is pushed and the desk tells you to open the request yourself. If a project's working branch is protected on the host, finishing a card with Merge opens a pull request instead.
+A **plain git** server needs no connection, but no pull request is opened: the branch is pushed and the desk tells you to open the request yourself. If a project's main line is protected on the host, finished work arrives as a pull request instead of going straight in (see [Testing and finalization](/help/testing-and-finalization#finalization)).
 
 ## Unpairing {#unpairing}
 

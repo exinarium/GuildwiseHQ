@@ -4,7 +4,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   '/p/:projectKey/board': {
     title: 'Board',
     intro:
-      'The project board shows all cards in stages of work. Move cards to report progress, and click any card for details.',
+      'The project board shows all cards in stages of work. Cards move by themselves as agents work; a card that is stuck says why in a banner under it. Click any card for details.',
     controls: [
       {
         name: 'Search cards',
@@ -45,6 +45,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'New card',
         text: 'Create a new card to describe a piece of work.',
+      },
+      {
+        name: 'Warning banners',
+        text: 'Under a card: why it is blocked, a problem with its repository, or the monthly budget nearly or fully used, each with a link that fixes it. Tap the arrow for the full reason.',
       },
     ],
     article: 'board-and-cards#reading-the-board',
@@ -222,8 +226,8 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'A short name for the work.',
       },
       {
-        name: 'Repository and Completion action',
-        text: 'For code work: which repository, and how to ship it (pr, push_branch or merge).',
+        name: 'Repository',
+        text: "For code work: which repository. How the work lands follows the project's setting; in expert mode you can also pick a completion action (pr, push_branch or merge).",
       },
       {
         name: 'Priority',
@@ -275,7 +279,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Edit button',
-        text: 'Change the title, priority, completion action and the other fields. Only while the card is a draft or queued and not yet claimed.',
+        text: 'Change the title, priority and the other fields (and the completion action in expert mode). Only while the card is a draft or queued and not yet claimed.',
       },
       {
         name: 'Move button',
@@ -288,6 +292,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'More actions menu',
         text: 'Release (let another agent claim it), Re-home (forget its workstation and worktree) or Cancel card (a reason is required).',
+      },
+      {
+        name: 'Ask DevOps',
+        text: 'Ask the DevOps engineer for help with this card (a missing tool, a repository problem). The card is attached to the request.',
       },
       {
         name: 'What to build panel',
@@ -307,7 +315,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Details panel',
-        text: 'Stage, risk tier, completion action, docs needed, branch, priority, phase and who answers its questions, in one place.',
+        text: 'Stage, risk tier, how the work lands, docs needed, priority, phase and who answers its questions, in one place (the completion action and branch in expert mode).',
       },
       {
         name: 'Risk tier',
@@ -729,11 +737,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   '/workstations': {
     title: 'Workstations',
     intro:
-      'Computers that run your agents. Add a workstation with the installer wizard, or pair one with a code.',
+      'The machines that run your agents: your own computers, a VPS or a GitHub Codespace. Add a workstation with the wizard, or pair one with a code.',
     controls: [
       {
         name: 'Add a workstation',
-        text: 'Launch the setup wizard to install Guildwise HQ on a new machine and pair it with your account.',
+        text: 'Launch the setup wizard: install the runner on your own computer, on a VPS over SSH, or in a GitHub Codespace, and pair it with your organization.',
       },
       {
         name: 'Pair workstation',
@@ -777,7 +785,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   '/settings': {
     title: 'Settings',
     intro:
-      'Your personal preferences: picture, time zone, two-factor security and how the BA reports to you.',
+      'Your personal preferences: picture, expert mode for code changes, the weekly blog digest, time zone, two-factor security and how the BA reports to you.',
     controls: [
       {
         name: 'Your picture',
@@ -786,6 +794,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'Change picture',
         text: 'Pick a generated cartoon face, take a photo or upload your own image.',
+      },
+      {
+        name: 'Expert mode for code changes',
+        text: 'Off by default: cards speak in plain results and Guildwise takes care of branches. Tick Show me branches and git controls to see branch names, choose how each card lands and use the manual merge controls. Only changes what you see.',
       },
       {
         name: 'Two-factor security',
@@ -863,7 +875,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Plan & limits tab',
-        text: 'Your plan and status, usage against the limits (members, projects, agents, workstations) and the features switched on. Owner and Admins only.',
+        text: 'Your plan and status, usage against the limits and the features switched on. Plans limit members, projects and workstations, never agents. Owner and Admins only.',
       },
       {
         name: 'Billing tab',
@@ -985,6 +997,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'Help centre tab',
         text: 'Searchable articles on every feature: the board, desk, agents, roles, workflows and more.',
+      },
+      {
+        name: 'Getting started video',
+        text: 'A spoken tutorial of about three minutes in five steps, with captions (CC). Each step under the video jumps to that part.',
       },
       {
         name: 'Get started checklist',
@@ -1291,6 +1307,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'Reset 2FA',
         text: "Clear a person's two-factor login so they set it up again (recorded in the audit log).",
+      },
+      {
+        name: 'Send reset link',
+        text: 'Email the person a one-time link to choose a new password (valid for an hour). Shows when the last link was sent; recorded in the audit log.',
       },
       {
         name: 'Deactivate and Reactivate',

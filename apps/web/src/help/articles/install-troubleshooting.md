@@ -37,7 +37,7 @@ The runner needs git 2.40 or newer. The installer upgrades it on Ubuntu (from th
 
 ## The health check "sandbox" is not "enforced" {#sandbox}
 
-Agents run inside a sandbox so they cannot read your SSH keys or other projects. On Linux and WSL2 it needs bubblewrap and socat; on Ubuntu 24.04 and newer an AppArmor setting can block bubblewrap (the Claude Code sandboxing documentation shows the one-line fix). macOS needs nothing. Until it says enforced, agents are not scheduled on that workstation.
+Agents (all except the DevOps engineer) run inside a sandbox so they cannot read your SSH keys or other projects. On Linux and WSL2 it needs bubblewrap and socat; on Ubuntu 24.04 and newer an AppArmor setting can block bubblewrap (the Claude Code sandboxing documentation shows the one-line fix). macOS needs nothing. Until it says enforced, agents are not scheduled on that workstation.
 
 ## Which Claude sign-in should I choose? {#claude-sign-in-choice}
 
@@ -49,4 +49,4 @@ Both are optional. Docker is only needed if your testers run containers; yt-dlp 
 
 ## I still need help {#still-need-help}
 
-Use Contact us and say which system you use and which step stopped. The form attaches the details we need.
+If the workstation is already paired, **Ask DevOps** on it can often fix the problem for you. Otherwise use [Contact us](/help/writing-to-us#contact-us) and say which system you use and which step stopped. The form attaches the details we need. For a server or Codespace, see [Cloud workstations](/help/cloud-workstations).

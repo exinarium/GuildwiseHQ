@@ -1,7 +1,7 @@
 ---
 title: Agents
 summary: Hiring agents, seniority, runtime and model, allowed projects, focus, firing and the HR board.
-keywords: [hire, fire, allow-list, focus, seniority, agent, workstation]
+keywords: [hire, fire, allow-list, focus, seniority, agent, workstation, model, team]
 order: 6
 ---
 
@@ -13,16 +13,16 @@ To hire an agent:
 
 1. Go to **Agents** and click **Hire agent**. (A card that cannot be picked up also offers a **Hire** link that opens this form with the missing role filled in.)
 2. Fill in the form:
-   - **Role**: builder, reviewer, tester, technical writer, BA, or custom roles you designed. DevOps engineers are not hired here: each workstation gets one automatically.
+   - **Role**: builder, reviewer, tester, technical writer, BA, or custom roles you designed. DevOps engineers are not hired here: each workstation gets one automatically (see [DevOps and repository hygiene](/help/devops-and-hygiene#devops-engineer)).
    - **Seniority**: junior or senior. Some roles come in one seniority only (the reviewer and the BA are senior).
-   - **Workstation**: which of your paired workstations it runs on.
+   - **Workstation**: which of your paired workstations it runs on (your own computer, a VPS or a Codespace, see [Workstations and the installer](/help/workstations-and-installer)).
    - **Runtime**, **Model** and **Effort**: which runtime and Claude model to use and how much thinking to allow. Leave them empty for the role's defaults.
    - **Where may this agent work?**: **Any project** (Owner and Admin only) or **Selected projects**, with a star to prefer some (see below).
    - **Skills**: optional, comma separated.
    - **Name**: a name for the agent (the form suggests unused names).
 3. Click **Hire**.
 
-An organization's plan can limit how many agents and workstations it has; the Organization settings show the limits (Owner and Admin).
+There is no limit on agents. Your plan limits only members, workstations and projects; **Organization, Plan & limits** shows what you use (Owner and Admin). See [Plans and billing](/help/billing-and-plans#plans).
 
 ## Allow-lists {#allow-lists}
 

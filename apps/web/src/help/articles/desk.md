@@ -11,11 +11,13 @@ The **desk** is where every question and approval reaches you. Cards that wait o
 
 Each item shows:
 
-- **What kind it is**: a label like Question, DevOps approval (on a team member's workstation both an Owner or Admin and the machine's user have to agree; the item stays open until they have), Merge approval, Outbound update, Escalation, Create repository, Budget paused, Phase done or Vault conflict.
+- **What kind it is**: a label like Question, DevOps approval (on a team member's workstation both an Owner or Admin and the machine's user have to agree; the item stays open until they have, see [Who approves](/help/devops-and-hygiene#devops-engineer)), Merge approval, Outbound update, Escalation, Create repository, Budget paused, Phase done or Vault conflict.
 - **Who asked**: the agent and its role.
 - **What they are doing**: which card or project.
 - **The question**: with options and a recommendation.
 - **How many cards are blocked**: a count of cards waiting on this answer, and the item's age.
+
+Alerts, approvals and notices also have **Ask DevOps about this**, which opens a request to the DevOps engineer with the item attached.
 
 Some items are urgent: approval requests, blocking questions, pinned alerts and cards that keep failing. Everything else can wait up to 10 minutes while your BA reviews it first (if you have routing on).
 
@@ -63,4 +65,4 @@ When you answer a desk question, **Add to ledger as** decides how it is saved:
 - **Requirement (this card)**: a rule for that card's work.
 - **Standing order (this project)** or **Standing order (every project)**: an instruction every agent loads at the start of a shift.
 
-The ledger stores it and future agents can search it. See Ledger and vaults.
+The ledger stores it and future agents can search it. See [Ledger and vaults](/help/ledger-and-vaults#ledger).

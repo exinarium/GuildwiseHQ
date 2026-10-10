@@ -11,7 +11,7 @@ A **phase** is a named slice of work you want to ship together: "Phase 2: autosa
 
 To set up what can happen after a phase is done, open the project's settings (the gear on its board) and go to **Phases and deploys**. There you configure:
 
-- **Deploy targets**: where a phase can be deployed. A local Docker stack deploys on every member workstation. A remote host deploys over SSH, using the DevOps engineer of the workstation you choose. No passwords or keys are stored in the app.
+- **Deploy targets**: where a phase can be deployed. A local Docker stack deploys on every member workstation (not in a GitHub Codespace, which cannot run Docker: see [Cloud workstations](/help/cloud-workstations#codespaces)). A remote host deploys over SSH, using the DevOps engineer of the workstation you choose. No passwords or keys are stored in the app.
 - **Default follow-ups**: the list every new phase starts with (e.g., Deploy to local, then Regression run). Click **Save defaults** after changing it.
 
 Deploy and regression follow-ups need a repository on the project, and regression needs a test stage. In research projects or projects without repositories, **Add deploy** and **Add regression run** are greyed out (a phase has at most 10 follow-ups; **Add custom** is the third kind).
@@ -37,9 +37,9 @@ A phase is **done** when:
 - Every card is finalized and its work is live on main, OR
 - The card is closed by hand or cancelled.
 - Research cards count as done when their note is published.
-- Cards finalized with PR or push branch count once the runner confirms the branch is merged (it checks every few minutes).
+- Cards that arrived as a pull request count once the runner sees the pull request merged (it checks every few minutes).
 
-With expert mode on (Settings), and if the runner cannot see the merge (a squash merge or deleted branch), click **Mark merged** on the phase page.
+With [expert mode](/help/testing-and-finalization#expert-mode) on, and if the runner cannot see the merge (a squash merge or deleted branch), click **Mark merged** on the phase page.
 
 Full E2E suites that run after a merge never delay a phase: they are listed as passed, failed or still running.
 

@@ -13,7 +13,7 @@ Click **Got it** (or close the window) and the changes you were shown are marked
 
 ## Who sees what {#who-sees-what}
 
-You only see changes that matter for your role in the organization you are working in. Some changes are for everyone, some only for Owners, some for Owners and Admins. Platform administrators see the changes for the platform area. If you have just created your account you will not be shown changes from before you joined: the guided tour introduces the product instead.
+You only see changes that matter for your role in the organization you are working in. Some changes are for everyone, some only for Owners, some for Owners and Admins. Platform administrators see the changes for the platform area. If you have just created your account you will not be shown changes from before you joined: the [guided tour and the Get started checklist](/help/getting-started#the-tour) introduce the product instead.
 
 The window never opens on top of the guided tour. It waits until the tour is closed.
 

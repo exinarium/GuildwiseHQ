@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-summary: Day-to-day problems: disconnected workstations, missing handoffs, vault conflicts, mismatched agents.
+summary: Day-to-day problems: offline workstations, missing handoffs, vault conflicts, mismatched agents, waiting projects and cloud workstations.
 keywords: [troubleshooting, problem, workstation, agent, vault, conflict, fix]
 order: 23
 ---
@@ -51,7 +51,15 @@ The repository must be listed under the workstation, and the agent must have the
 - **Workstations**: open the workstation on the Workstations page and see if the repository is listed under **Repositories**.
 - **Agents**: go to the agent's card and check its workstation, role, seniority and allowed projects (**Projects**).
 
-The warning icon on the card says which of these it is (see Board and cards). If you just added a repository folder to the runner, it is re-scanned when the runner connects and every 10 minutes.
+The warning icon on the card says which of these it is (see [Board and cards](/help/board-and-cards#why-a-card-does-not-move)). If you just added a repository folder to the runner, it is re-scanned when the runner connects and every 10 minutes.
+
+## Every card of a project is waiting {#toolchain-waiting}
+
+Before agents build on a workstation, its DevOps engineer installs the tools and packages the project needs. Until that is done, every agent card of the project waits and says why. Open **Project settings, Development environment** to see what is missing and press **Check again** after fixing it, or look on your desk for a notice that needs your help (for example a right you did not tick). See [New repositories and the toolchain](/help/devops-and-hygiene#setup).
+
+## A cloud workstation needs attention {#cloud-attention}
+
+A Codespace that cannot start (credits or spending limit used up on GitHub) shows **Needs attention** and leaves a notice on your desk. Fix it on GitHub and press **Wake**. See [Cloud workstations](/help/cloud-workstations#codespaces).
 
 ## An agent says the work is out of scope {#out-of-scope}
 

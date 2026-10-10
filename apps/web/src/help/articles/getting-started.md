@@ -1,7 +1,7 @@
 ---
 title: Getting started
-summary: The training video, first login, the guided tour, the Get started checklist, sidebar areas, command palette and keyboard shortcuts.
-keywords: [video, tutorial, training, login, tour, get started, checklist, setup, sidebar, command palette, keyboard shortcuts, help panel]
+summary: The training video, signing up or in, the guided tour, the Get started checklist, the sidebar, the command palette and keyboard shortcuts.
+keywords: [video, tutorial, training, sign up, free trial, login, password, tour, get started, checklist, setup, sidebar, command palette, keyboard shortcuts, help panel, ask devops, privacy, terms, legal]
 order: 1
 ---
 
@@ -21,9 +21,12 @@ The captions show everything the voice says and are on by default; use the **CC*
 
 ## First login {#first-login}
 
-1. Check your email for an invitation link. It comes either from the platform administrator if you are starting a new organization, or from the Owner or an Admin if you are joining an existing one.
-2. Click the link, choose your name and a password (12 or more characters). If you already have an account, sign in instead and confirm.
-3. You are now logged in and can access the dashboard.
+There are two ways in:
+
+- **Start your own organization.** On the website click **Start free trial**, pick a plan and fill in your organization name, your name, email and a password (12 or more characters). Open the link in the confirmation email, sign in and add a card on the **Billing** page to start the 7-day free trial. See [Plans and billing](/help/billing-and-plans#trial).
+- **Join with an invitation.** Open the invitation email. It comes from the Owner or an Admin of the organization you join (or from the platform administrator for a new organization). Click the link and choose your name and a password. If you already have an account, sign in instead and confirm.
+
+After you sign in you land in the app, and the guided tour starts.
 
 ## Forgot your password {#forgot-password}
 
@@ -33,9 +36,9 @@ Every account belongs to an organization. There are no standalone accounts excep
 
 ## The tour {#the-tour}
 
-The first time you sign in, Guildwise HQ starts a guided tour of the main pages: the board where your cards live, the desk where you answer questions, intake from external systems, and more. The tour takes you to each area, shows you what is there and what you can do.
+The first time you sign in, Guildwise HQ starts a guided tour of the main pages: the board where your cards live, the desk where you answer questions, intake from external systems, **Ask DevOps** for help with your workstation, and more. The tour takes you to each area, shows you what is there and what you can do.
 
-You can play the tour again any time: open **Help** in the sidebar and click **Replay the tour** (or press Ctrl K and choose **Take the tour**). The tour is shown once. If you close it half way it does not come back by itself; **Help** offers to resume it where you stopped.
+You can play the tour again any time: open **Help** in the sidebar and click **Replay the tour** (or press Ctrl K and choose **Take the tour**). The tour is shown once. If you close it half way it does not come back by itself; **Help** offers to resume it where you stopped. After an update, the [What's new](/help/whats-new) window tells you what changed; it never opens on top of the tour.
 
 ## The Get started checklist {#get-started}
 
@@ -43,11 +46,11 @@ Until your organization is set up, the sidebar shows a **Get started** button wi
 
 1. **Create your first project.**
 2. **Add its repository** (the code repository the agents work in).
-3. **Pair a workstation**, the computer that runs your agents. Its DevOps engineer is hired for you.
-4. **Hire your team**: a business analyst, a builder, a reviewer and a tester.
-5. **Talk to the business analyst**: describe something you need and it turns it into cards.
+3. **Pair a workstation**: the machine that runs your agents. It can be your own computer, a server (VPS) or a GitHub Codespace (see [Workstations and the installer](/help/workstations-and-installer#add-a-workstation) and [Cloud workstations](/help/cloud-workstations)). Its DevOps engineer is hired for you.
+4. **Hire your team**: a business analyst, a builder, a reviewer and a tester (see [Agents](/help/agents#hiring)).
+5. **Talk to the business analyst**: describe something you need, in a chat or an intake, and it turns it into cards (see [Chat with agents](/help/chat-with-agents#asking-the-ba)).
 
-Each step has a button that opens the right page, with the form already open where there is one. You never tick anything yourself: a step shows as done as soon as it is true, whoever did it and wherever. When all five are done the button disappears.
+Each step has a button that opens the right page, with the form already open where there is one. The first two steps are for Owners and Admins; anyone can do the others. You never tick anything yourself: a step shows as done as soon as it is true, whoever did it and wherever. When all five are done the button disappears.
 
 Everyone in the organization sees the same progress. Members cannot create projects or add repositories, so those two steps show "An Owner or Admin does this step" for them. Click **Hide this checklist** to put it away; it stays hidden for you on every device. To bring it back, open **Help** and click **Show the checklist**.
 
@@ -60,7 +63,9 @@ The left side of the app is split into areas. Each area groups related pages. Fr
 - **Work**: Board (the current project's cards), Research (only on projects with research notes), Desk (questions waiting for you), Intake (tickets from Jira and GitHub; Owner and Admin), Schedules (automatic actions) and Projects.
 - **Organization**: Agents, Org chart, Roles & workflows (custom organization design), Workstations (the computers where your agents run), Metrics and Costs (Costs is for Owner and Admin).
 - **Knowledge**: Interests (topics you watch), Ledger (decisions and standing orders) and Vaults (Owner and Admin).
-- **Bottom of the sidebar**: **Settings** (your own account), **Organization** (members, plan and security of the organization) and **Help**. Your name there opens the user menu with theme, **Your settings**, **Help**, **Contact us**, **My requests** and **Log out**.
+- **Bottom of the sidebar**: the **Get started** button while your organization is being set up, **Settings** (your own account), **Organization** (members, plan, billing and security of the organization) and **Help**. Your name there opens the user menu with theme, **Your settings**, **Help**, **Contact us**, **My requests** and **Log out**.
+
+The bar at the top of every page has the search box (the command palette), the **?** button (what is on this page), **Ask DevOps** (see [DevOps and repository hygiene](/help/devops-and-hygiene#devops-engineer)) and **Chat** (see [Chat with agents](/help/chat-with-agents)).
 
 At the top of the sidebar, the organization switcher lets you change organizations if you belong to several.
 
@@ -91,3 +96,7 @@ Press **?** anywhere (when you are not typing in a field) to see a list of all k
 Many pages in Guildwise HQ have a **What's on this page** panel. Open it with the **?** button in the top bar (or choose **What is on this page** in the command palette). The panel lists every control and area of the page and what it does: useful when you first visit a page or need a reminder about a button.
 
 The panel also links to related help articles if you want to read more.
+
+## Privacy and terms {#privacy-and-terms}
+
+The **Privacy policy** (`/privacy`) says what data Guildwise HQ keeps and how it is handled. The **Terms and conditions** (`/terms`) cover using the service, the free trial and billing. Both are linked from the footer of the website and from the sign-in, sign-up and invitation pages; signing up or accepting an invitation means you accept them. Questions about them go through [Contact us](/help/writing-to-us#contact-us).

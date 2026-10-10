@@ -1,7 +1,7 @@
 ---
 title: Projects
 summary: Creating projects, the priority order, project types and workflows, research cards, sharing, archiving and decision policy.
-keywords: [project, priority, ranking, order, code, research, workflow, card, sharing, archiving]
+keywords: [project, priority, ranking, order, code, research, workflow, card, sharing, archiving, repository, git host, github, gitlab, bitbucket, azure devops, pull request, how finished work lands]
 order: 4
 ---
 
@@ -14,9 +14,9 @@ A project is a container for cards and agents working on a shared goal. Every ca
 3. Choose the **Workflow**: Code, Research, or a custom workflow your organization designed.
 4. Click **Create project**.
 
-For a Code project, add its repositories afterwards in the project's settings (the gear on its board), under **Repos**: give the repository name and its address (or create a new one), and click **Add repository**. Finished work goes into the repository's main line after review and test; change **How finished work lands** in the same settings to receive pull requests instead. The branch field is shown only in expert mode (Settings). Research projects need no repository.
+For a Code project, add its repositories afterwards in the project's settings (the gear on its board), under **Repos**: give the repository name and its address (or create a new one), and click **Add repository**. Finished work goes into the repository's main line after review and test; change **How finished work lands** in the same settings to receive pull requests instead (see [Testing and finalization](/help/testing-and-finalization#finalization)). The branch field is shown only in [expert mode](/help/testing-and-finalization#expert-mode). Research projects need no repository.
 
-The **git host** (GitHub, GitLab, Bitbucket, Azure DevOps or a plain git server) is detected from the address; choose another one in the **Git host** list if the address is a server we cannot recognise. One project can use repositories from different hosts. See [Git hosts](/help/workstations-and-installer#git-hosts) for connecting them.
+The **git host** (GitHub, GitLab, Bitbucket, Azure DevOps or a plain git server) is detected from the address; choose another one in the **Git host** list if the address is a server we cannot recognise. One project can use repositories from different hosts. See [Git hosts](/help/workstations-and-installer#git-hosts) for connecting them. When you add a repository, the DevOps engineer clones it onto the project's workstations and installs what it needs (see [New repositories and the toolchain](/help/devops-and-hygiene#setup)).
 
 You can also click **Pick from my repositories** to list the repositories of a connected host and use one, or choose **Create a new repository**: the form then asks for what that host needs (owner for GitHub, group for GitLab, workspace for Bitbucket, organization and project for Azure DevOps).
 

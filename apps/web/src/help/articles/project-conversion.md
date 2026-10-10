@@ -27,7 +27,7 @@ When you convert:
 
 **Step 1: Workflow.** Pick the target: Code (the usual next step from research), or any custom workflow of your organization. Any workflow can convert to any other, including back to research.
 
-**Step 2: Repositories.** If the target workflow works in repositories (Code does; Research does not), add at least one. You can add an existing repository (name, URL, optionally a branch) or request a new GitHub repository. The request lands on your desk as **Create repository `<owner/repo>`**, exactly like asking the BA or DevOps. Your runner creates it when you approve.
+**Step 2: Repositories.** If the target workflow works in repositories (Code does; Research does not), add at least one. You can add an existing repository (name, URL, optionally a branch) or request a new GitHub repository (repositories on other git hosts can be added afterwards in the project settings, see [Projects](/help/projects#creating-a-project)). The request lands on your desk as **Create repository `<owner/repo>`**, exactly like asking the BA or DevOps. Your runner creates it when you approve.
 
 If the new repository is the only one, the project stays as is until it exists, then converts by itself. The Stage panel shows the waiting request and a **Cancel the conversion** button (declining the request cancels it).
 
@@ -39,4 +39,4 @@ Once you approve, the project converts and takes its new workflow. Each reposito
 
 Deploy and regression follow-ups of a phase need a repository (and regression needs a test stage). They are greyed out until the project has them.
 
-The DevOps engineer then asks you which branch is the working branch (like for a new intake or phase).
+The repository's default branch becomes its main line by itself. With [expert mode](/help/testing-and-finalization#expert-mode) on, the DevOps engineer asks you which branch is the working branch (like for a new intake or phase).
