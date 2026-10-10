@@ -1392,11 +1392,15 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   '/platform/blog': {
     title: 'Blog',
     intro:
-      'The Guildwise HQ blog: the review queue, the kill switch, moderation, the weekly digest and social sharing.',
+      'The Guildwise HQ blog: the Writer, the review queue, the kill switch, moderation, the weekly digest and social sharing.',
     controls: [
       {
+        name: 'Writer',
+        text: "The blog writer runs on the Guildwise server with the platform Anthropic key. Switch it on (off by default), choose 1 or 2 articles a day, edit the topics, pick the model and set the monthly cap (default $10). It shows this month's spend and each run, and Write one now writes an article straight away. It stops before the cap and while the blog is switched off.",
+      },
+      {
         name: 'Switch the blog off',
-        text: 'The kill switch. Agents are refused when they create posts, and nothing is published, mailed or shared until you switch it on again.',
+        text: 'The kill switch. The writer and API tools are refused when they create posts, and nothing is published, mailed or shared until you switch it on again.',
       },
       {
         name: 'Auto-publish starts on and Hold',
@@ -1431,7 +1435,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Reject',
-        text: 'Send it back with a reason. The writer agent sees the reason and can revise it.',
+        text: 'Send it back with a reason. The reason stays with the post; an outside tool that sent it can read it and resubmit.',
       },
       {
         name: 'Unpublish',
@@ -1450,7 +1454,8 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   },
   '/platform/api-keys': {
     title: 'API keys',
-    intro: 'Keys that let an agent post to the blog through the agent API.',
+    intro:
+      'Keys that let an outside tool post to the blog through the blog API. The built-in blog writer does not need one.',
     controls: [
       {
         name: 'New key',

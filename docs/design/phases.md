@@ -970,7 +970,7 @@ Not built: Gitea/Forgejo, CodeCommit, Bitbucket Data Center API, server-held for
 | Public pages | server-rendered `/blog`, `/blog/:slug`, tags, RSS, sitemap, robots, Open Graph, JSON-LD, ETag cache; default covers; landing header and footer link; Help > Blog (`/help/blog`, reserved slug, search group) |
 | Agent API | `/api/v1` Bearer keys (hashed, shown once, scopes, last used, request log, 60 reads/min, 10 writes/h, 8 posts/24 h, idempotent on slug); Platform > API keys |
 | Review queue UI | Platform > Blog and Blog post (preview, edit, approve, reject, unpublish), pending badge |
-| Writer agent | documented schedule, card template and prompt in `docs/BLOG-API.md` (nothing hard-wired into the database) |
+| Blog writer | server-side platform job (owner decision 2026-10-10, replaces the workstation writer agent): `blog/writer/*`, migration 1580 (`blog_writer_runs`, `blog_posts.origin_system`), Haiku with web search, own monthly cap ($10), slot claims, Platform > Blog > Writer; tests `blog-writer` |
 | Weekly digest | migration 1451, `commands/blog-digest.ts`, `brandedMail`, Monday 08:00 Johannesburg, `AOM_BLOG_DIGEST`, Owners default in, opt-in checkbox at invitation acceptance and in Settings, one-click unsubscribe with `List-Unsubscribe` headers, exactly-once deliveries |
 | Facebook and LinkedIn | migration 1452, `commands/social.ts` behind `SocialClient`, encrypted tokens, retries with backoff, never twice, status per post and network, expiry alerts |
 | Tests | server `blog`, `blog-public`, `blog-digest`, `blog-social`, `blog-signup`; shared `blog-markdown`; web `blog` |

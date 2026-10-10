@@ -506,15 +506,19 @@ Guildwise HQ has a platform-level blog about AI agents and AI automation, run by
   written by an AI agent. Statuses: draft, in review, published, rejected, unpublished (an unpublished address answers 410).
 - **Public pages** `/blog`, `/blog/:slug`, `/blog/tag/:tag`, the RSS feed, `sitemap.xml` and `robots.txt` are rendered by the
   server with a cache; the landing header and footer link to the blog. Signed-in people read the same articles under Help > Blog.
-- **Agent API** `/api/v1` with super-admin managed Bearer keys: hashed, shown once, scoped (`blog:read`, `blog:write`,
+- **Blog API** `/api/v1` (for outside tools) with super-admin managed Bearer keys: hashed, shown once, scoped (`blog:read`, `blog:write`,
   `blog:publish`, `social:write`), with last-used, an audit, rate limits, idempotent submits and a hard cap of 8 new posts
   per key in 24 hours.
 - **Moderation.** The owner reviews each post for the first two weeks (approve, edit or reject with a reason); after that a
   post without content warnings publishes by itself after a 3-hour hold (switch date and hold are settings).
 - **Kill switch.** The super admin can switch the blog off: creating (the API answers 503) and publishing (manual, automatic),
   the digest and social posts all stop. Public articles stay readable.
-- **The writer agent** runs inside Guildwise: a schedule creates a card for a writer agent, which posts through the API with a key
-  held in the workstation's environment (set-up steps and the prompt are in `docs/BLOG-API.md`).
+- **The blog writer** is a platform job on the Guildwise server (no workstation, organization or agent). With the platform
+  `ANTHROPIC_API_KEY` it writes one or two articles a day (08:00 and 15:00 Johannesburg) from the super admin's topic list on
+  Claude Haiku, researching with Anthropic's web search, and submits them through the normal blog path (review queue during the
+  review period, auto-publish after the hold afterwards). It is off by default, has its own monthly spend cap (default $10,
+  tokens and searches counted per run in `blog_writer_runs`), refuses a model without a known price, stops with the blog kill
+  switch, claims each slot before calling the API so it never runs twice, and offers **Write one now**. Details: `docs/BLOG-API.md`.
 - **Weekly digest** on Mondays at 08:00 Africa/Johannesburg: organization Owners get it unless they opt out, everyone else
   opts in (checkbox at invitation acceptance, Settings); users whose organizations are all suspended are skipped; unsubscribe
   link with a confirm button (the mail program's one-click unsubscribe also works); sent once per week, not at all in a week without new posts.

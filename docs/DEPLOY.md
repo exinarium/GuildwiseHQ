@@ -204,7 +204,9 @@ The blog itself, the API keys, the kill switch and the Facebook and LinkedIn tok
 in the environment. The social tokens are encrypted with `AOM_SECRET_KEY`: **set it in production** (and keep it, or the
 stored tokens cannot be read again). Prefer sending the digest from a dedicated address (SPF, DKIM and DMARC on the
 sending domain; see `docs/design/support-mail-from.md`). The public blog pages (`/blog`, `/sitemap.xml`, `/robots.txt`)
-are rendered by the server, so a reverse proxy must pass those paths to it, not only `/api`. Migrations 1450 to 1452.
+are rendered by the server, so a reverse proxy must pass those paths to it, not only `/api`. Migrations 1450 to 1452, 1560 and 1580.
+
+**The blog writer** (Platform > Blog > Writer) needs **no new environment variable**: it uses the same `ANTHROPIC_API_KEY` as the landing assistant and is **off until the super admin switches it on**. Its settings (articles per day, topics, model, price overrides) and its monthly cap live in `platform_settings`. **Cost:** capped by default at **$10 a month** (tokens plus web searches); on Claude Haiku 4.5 ($1 / $5 per million tokens, web search $10 per 1,000) one article costs roughly $0.05 to $0.15, so 1 a day is about $2 to $5 a month. This is separate from the assistant's daily cap, and both draw on the same Anthropic account. The server needs outbound HTTPS to `api.anthropic.com`; an article takes one to two minutes, and the writer runs outside the scheduler's main pass so schedules are never delayed. Migration `1580_blog_writer` adds `blog_writer_runs` (the spend ledger, kept through projection rebuilds) and `blog_posts.origin_system`.
 
 ### Billing
 
