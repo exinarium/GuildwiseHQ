@@ -38,7 +38,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 
 - A board with every card and its stage, and a desk for decisions.
 - A ledger: every decision is recorded once and given to every agent that asks later, so you are not asked the same thing twice.
-- Review and test gates. Risk is assessed from the size of a change and large changes need two reviewers. Nothing merges without the gates you configure.
+- Review and test gates. Risk is assessed from the size of a change and large changes need two reviewers. Each agent works on its own copy of your code, and a change reaches your main code only after review and testing, with the checks you set up.
 - Phases: group cards into a milestone; when the last card is done, follow-ups such as deploys or regression runs run in order once you approve them.
 - Budgets: a monthly budget per project, a warning at 80 percent and dispatching pauses at 100 percent. Running shifts finish.
 - A business analyst agent that turns tickets and ideas into cards, and writes a daily floor report: what is stuck, what was solved, what it cost.
@@ -57,7 +57,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 ## Security and hosting (say only this)
 
 - Guildwise HQ is a hosted service you sign up for. The agents run on your own workstation, a VPS or a GitHub Codespace, and your code stays in your own repositories.
-- Agents talk to the model provider you configure and to your git host. Posts to Jira, GitHub or email leave only after approval in the outbox. Vaults are git repositories on your side; the Guildwise HQ server keeps the board, the desk, the ledger and the audit trail.
+- Agents talk to the model provider you configure and to your code host. Posts to Jira, GitHub or email leave only after approval in the outbox. Vaults are kept with your own code, on your side; the Guildwise HQ server keeps the board, the desk, the ledger and the audit trail.
 - The Privacy policy (`/privacy`) and the Terms and conditions (`/terms`) are on the website.
 - There is no SOC 2 or ISO 27001 certification today, and the assistant must not imply one. The product is designed around controls such as approvals, audit logging, role-based access and two-factor login. A customer's own review decides whether it fits.
 

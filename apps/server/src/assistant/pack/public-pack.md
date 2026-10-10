@@ -35,7 +35,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 
 - A board with every card and its stage, and a desk for decisions.
 - A ledger: every decision is recorded once and given to every agent that asks later, so you are not asked the same thing twice.
-- Review and test gates. Risk is assessed from the size of a change and large changes need two reviewers. Nothing merges without the gates you configure.
+- Review and test gates. Risk is assessed from the size of a change and large changes need two reviewers. Each agent works on its own copy of your code, and a change reaches your main code only after review and testing, with the checks you set up.
 - Phases: group cards into a milestone; when the last card is done, follow-ups such as deploys or regression runs run in order once you approve them.
 - Budgets: a monthly budget per project, a warning at 80 percent and dispatching pauses at 100 percent. Running shifts finish.
 - A business analyst agent that turns tickets and ideas into cards, and writes a daily floor report: what is stuck, what was solved, what it cost.
@@ -54,7 +54,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 ## Security and hosting (say only this)
 
 - Guildwise HQ is a hosted service you sign up for. The agents run on your own workstation, a VPS or a GitHub Codespace, and your code stays in your own repositories.
-- Agents talk to the model provider you configure and to your git host. Posts to Jira, GitHub or email leave only after approval in the outbox. Vaults are git repositories on your side; the Guildwise HQ server keeps the board, the desk, the ledger and the audit trail.
+- Agents talk to the model provider you configure and to your code host. Posts to Jira, GitHub or email leave only after approval in the outbox. Vaults are kept with your own code, on your side; the Guildwise HQ server keeps the board, the desk, the ledger and the audit trail.
 - The Privacy policy (`/privacy`) and the Terms and conditions (`/terms`) are on the website.
 - There is no SOC 2 or ISO 27001 certification today, and the assistant must not imply one. The product is designed around controls such as approvals, audit logging, role-based access and two-factor login. A customer's own review decides whether it fits.
 
@@ -158,7 +158,7 @@ The DevOps engineer and Ask DevOps, approvals, conflicts, repository hygiene and
 - New repositories and the toolchain: When you add a repository in Project settings, Repositories, the DevOps engineer of each workstation of the project puts it there. Pick An existing repository and it is cloned into the workstation's first repository folder (aom-runner repos add); a folder that already holds something else is never overwritten.…
 - Rights and the sudo password: A ticked right is checked on the machine itself. On the Workstations page each ticked right shows verified or failed with the reason and how to fix it (for Docker: add the runner user to the docker group, start the daemon; for sudo: enter the password or allow passwordless sudo). Verify now checks again.
 - The working branch: The working branch is the main line where finished work goes: the repository's default branch (usually main). Guildwise confirms it for you automatically the first time it sees the repository, so you are not asked.…
-- Creating a new repository: Agents cannot create repositories themselves: their sandbox has no login for your git host. You can create one on any host yourself from the project settings (see above). When an agent needs a new repository, it asks, and today that works for GitHub only:
+- Creating a new repository: Agents cannot create repositories themselves: their sandbox has no login for your git host. You can create one on any host yourself from the project settings (see above). When an agent needs a new repository, it asks, on GitHub, GitLab, Azure DevOps or Bitbucket Cloud:
 
 ### The Decision desk
 Desk items and kinds, blocking, answering questions, standing orders and adding to the ledger.

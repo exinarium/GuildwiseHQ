@@ -87,7 +87,9 @@ describe('aom git status / connect (the runner drives the login for the DevOps e
       ok: true;
       result: { state: string; message: string };
     };
-    expect(calls).toEqual([['gh', ['auth', 'login', '--web', '--hostname', 'github.com', '--git-protocol', 'https']]]);
+    expect(calls).toEqual([
+      ['gh', ['auth', 'login', '--web', '--hostname', 'github.com', '--git-protocol', 'https']],
+    ]);
     expect(r.result.state).toBe('waiting_for_user');
     expect(r.result.message).toContain('ABCD-1234');
     expect(r.result.message).toContain('https://github.com/login/device');
@@ -114,13 +116,18 @@ describe('aom git status / connect (the runner drives the login for the DevOps e
       },
     });
     for (const provider of ['bitbucket-cloud', 'gitlab', 'azure-devops']) {
-      const r = (await g.handle('git.connect', { provider })) as { ok: true; result: { state: string; message: string } };
+      const r = (await g.handle('git.connect', { provider })) as {
+        ok: true;
+        result: { state: string; message: string };
+      };
       expect(r.result.state, provider).toBe('needs_secret');
       expect(r.result.message).toContain(`aom-runner git-connect ${provider}`);
       expect(r.result.message).toMatch(/Do not ask for it in this chat/);
       expect(r.result.message).toMatch(/Connect helper/);
     }
-    const az = (await g.handle('git.connect', { provider: 'azure-devops' })) as { result: { message: string } };
+    const az = (await g.handle('git.connect', { provider: 'azure-devops' })) as {
+      result: { message: string };
+    };
     expect(az.result.message).toContain('2026-12-01');
     expect(az.result.message).toContain('service principal');
     expect(spawned).toBe(0);
@@ -142,7 +149,9 @@ describe('aom git status / connect (the runner drives the login for the DevOps e
         return login.proc;
       },
     });
-    const r = (await g.handle('git.connect', { provider: 'azure-devops' })) as { result: { message: string } };
+    const r = (await g.handle('git.connect', { provider: 'azure-devops' })) as {
+      result: { message: string };
+    };
     expect(calls).toEqual([['az', 'login', '--use-device-code']]);
     expect(r.result.message).toContain('XYZ123');
     login.finish();
@@ -152,14 +161,19 @@ describe('aom git status / connect (the runner drives the login for the DevOps e
     const t = new MemoryTokenStore();
     t.set({ provider: 'gitlab', host: 'gitlab.com', token: 'glpat-SECRET' });
     const { env, secretsDir } = mk(new FakeExec(), { tokens: t });
-    env.fetch = (async () => new Response(JSON.stringify({ username: 'jo' }), { status: 200 })) as typeof fetch;
+    env.fetch = (async () =>
+      new Response(JSON.stringify({ username: 'jo' }), { status: 200 })) as typeof fetch;
     let spawned = 0;
     const g = new AgentGit({ env, secretsDir, spawn: () => (spawned++, fakeLogin('').proc) });
-    const r = (await g.handle('git.connect', { provider: 'gitlab' })) as { result: { state: string; message: string } };
+    const r = (await g.handle('git.connect', { provider: 'gitlab' })) as {
+      result: { state: string; message: string };
+    };
     expect(r.result.state).toBe('connected');
     expect(JSON.stringify(r)).not.toContain('glpat-SECRET');
     expect(spawned).toBe(0);
     expect(((await g.handle('git.connect', { provider: 'nope' })) as { ok: boolean }).ok).toBe(false);
-    expect(((await g.handle('git.connect', { provider: 'github', host: 'a b;rm' })) as { ok: boolean }).ok).toBe(false);
+    expect(
+      ((await g.handle('git.connect', { provider: 'github', host: 'a b;rm' })) as { ok: boolean }).ok,
+    ).toBe(false);
   });
 });

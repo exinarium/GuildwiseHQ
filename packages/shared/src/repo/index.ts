@@ -45,9 +45,12 @@ export const RepoProviderSchema = z.enum(CONNECTABLE_FORGES);
 export type RepoProvider = z.infer<typeof RepoProviderSchema>;
 
 /** A host name for a GitHub Enterprise Server or self-managed GitLab. */
-export const RepoHostSchema = z.string().trim().regex(/^[A-Za-z0-9]([A-Za-z0-9.-]{0,198}[A-Za-z0-9])?$/, {
-  message: 'the host must be a plain host name such as gitlab.example.com',
-});
+export const RepoHostSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9]([A-Za-z0-9.-]{0,198}[A-Za-z0-9])?$/, {
+    message: 'the host must be a plain host name such as gitlab.example.com',
+  });
 
 /** The name shape each provider takes, in plain words (for usage text and errors). */
 export const REPO_NAME_SHAPE: Record<RepoProvider, string> = {

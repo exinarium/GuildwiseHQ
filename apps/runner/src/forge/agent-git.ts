@@ -61,7 +61,8 @@ export interface AgentGitDeps {
 const isProvider = (p: unknown): p is ConnectableForge =>
   typeof p === 'string' && (CONNECTABLE_FORGES as readonly string[]).includes(p);
 
-const hostOk = (h: unknown): h is string => typeof h === 'string' && /^[A-Za-z0-9][A-Za-z0-9.-]{0,198}$/.test(h);
+const hostOk = (h: unknown): h is string =>
+  typeof h === 'string' && /^[A-Za-z0-9][A-Za-z0-9.-]{0,198}$/.test(h);
 
 /**
  * `aom git status` and `aom git connect <provider>` for the DevOps engineer. The runner drives the login on this
@@ -114,7 +115,7 @@ export class AgentGit {
           `${FORGE_LABELS[provider]} needs a secret (${why}). Do not ask for it in this chat and do not type one yourself.`,
           'Tell the user to do ONE of these:',
           `- in a terminal on this workstation, run: aom-runner git-connect ${provider}${host !== defaultHost(provider) ? ` --host ${host}` : ''}  (it asks for the token and keeps it on this machine);`,
-          "- or open Workstations in the app and use the Connect helper for this git host.",
+          '- or open Workstations in the app and use the Connect helper for this git host.',
           'The steps for the user:',
           ...connectSteps(provider, host),
           `When they say it is done, check with: aom git status ${provider}`,
@@ -173,7 +174,8 @@ export class AgentGit {
       };
     } else if (provider === 'gitlab') {
       const glab = bin.glabBin ?? 'glab';
-      if (!(await this.has(glab))) return this.needsSecret(provider, host, 'the GitLab CLI (glab) is not installed');
+      if (!(await this.has(glab)))
+        return this.needsSecret(provider, host, 'the GitLab CLI (glab) is not installed');
       login = { cmd: glab, args: ['auth', 'login', '--hostname', host, '--web'] };
     } else if (provider === 'azure-devops') {
       const az = bin.azBin ?? 'az';
@@ -204,8 +206,20 @@ export class AgentGit {
       const code = await proc.done;
       const text = redact(proc.output()).trim().slice(-1500);
       return code === 0
-        ? { ok: true, result: { state: 'connected', message: `${text}\n${(await this.lines(provider, host)).join('\n')}`.trim() } }
-        : { ok: true, result: { state: 'failed', message: `The ${label} sign-in did not start (exit ${code}).\n${text}` } };
+        ? {
+            ok: true,
+            result: {
+              state: 'connected',
+              message: `${text}\n${(await this.lines(provider, host)).join('\n')}`.trim(),
+            },
+          }
+        : {
+            ok: true,
+            result: {
+              state: 'failed',
+              message: `The ${label} sign-in did not start (exit ${code}).\n${text}`,
+            },
+          };
     }
     const text = redact(proc.output()).trim().slice(-1500);
     return {
@@ -214,7 +228,10 @@ export class AgentGit {
         state: 'waiting_for_user',
         message: [
           `The ${label} sign-in is waiting for the user. Show them this, exactly, and ask them to finish it in their browser:`,
-          text || '(no URL printed yet: run `aom git status` in a moment, or ask the user to run `aom-runner git-connect ' + provider + '`)',
+          text ||
+            '(no URL printed yet: run `aom git status` in a moment, or ask the user to run `aom-runner git-connect ' +
+              provider +
+              '`)',
           `When they say it is done, check with: aom git status ${provider}`,
         ].join('\n'),
       },

@@ -174,10 +174,19 @@ describe('aom intake and card drafting', () => {
     expect(await t.run('git', 'connect')).toBe(1);
     expect(await t.run('git', 'nope')).toBe(1);
     expect(t.rpcs.map((r) => [r.method, r.params])).toEqual([
-      ['repo.create', { name: 'acme/Shop/web', project: 'TOY', provider: 'azure-devops', visibility: 'private' }],
       [
         'repo.create',
-        { name: 'team/tools', project: 'TOY', provider: 'gitlab', host: 'git.example.com', visibility: 'public' },
+        { name: 'acme/Shop/web', project: 'TOY', provider: 'azure-devops', visibility: 'private' },
+      ],
+      [
+        'repo.create',
+        {
+          name: 'team/tools',
+          project: 'TOY',
+          provider: 'gitlab',
+          host: 'git.example.com',
+          visibility: 'public',
+        },
       ],
       ['git.connect', { provider: 'gitlab', host: 'git.example.com' }],
       ['git.status', {}],

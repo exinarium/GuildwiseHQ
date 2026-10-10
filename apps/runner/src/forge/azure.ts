@@ -62,7 +62,12 @@ export class AzureDevOpsForge implements Forge {
   private sp: { header: string; until: number } | undefined;
 
   /** The service principal named by the environment, if complete. The secret is never logged or returned. */
-  private servicePrincipal(): { tenant: string; client: string; secret?: string; assertionFile?: string } | null {
+  private servicePrincipal(): {
+    tenant: string;
+    client: string;
+    secret?: string;
+    assertionFile?: string;
+  } | null {
     const e = this.env.processEnv ?? process.env;
     const tenant = e.AZURE_TENANT_ID?.trim();
     const client = e.AZURE_CLIENT_ID?.trim();

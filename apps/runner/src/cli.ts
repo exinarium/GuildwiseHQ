@@ -582,7 +582,9 @@ async function gitConnect(providerArg: string, opts: GitConnectOpts): Promise<vo
   if (provider === 'azure-devops' && !opts.organization) {
     const sp = await new AzureDevOpsForge({ ...env, processEnv: process.env }, host).status();
     if (sp.state === 'connected' && sp.method === 'service-principal') {
-      console.log('A Microsoft Entra service principal is set in the environment (AZURE_TENANT_ID, AZURE_CLIENT_ID, ...); using it.');
+      console.log(
+        'A Microsoft Entra service principal is set in the environment (AZURE_TENANT_ID, AZURE_CLIENT_ID, ...); using it.',
+      );
       console.log(describeConnection(sp));
       return done();
     }
