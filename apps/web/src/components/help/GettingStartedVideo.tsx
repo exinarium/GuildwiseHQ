@@ -6,6 +6,8 @@ export interface VideoInfo {
   title: string;
   src: string;
   type: string;
+  /** WebVTT captions with the narration (optional). */
+  captions?: string;
   duration: number;
   chapters: Array<{ t: number; title: string }>;
 }
@@ -56,8 +58,9 @@ export function GettingStartedVideo() {
         Getting started in five steps
       </h2>
       <p className="mt-1 mb-3 text-sm text-muted">
-        Create your first project, hire agents, create cards, talk to the business analyst and test your
-        running project.
+        A voice-over tutorial of about three minutes: create your first project, hire agents, create cards,
+        talk to the business analyst and test your running project. Captions are on; use the CC button to turn
+        them off.
       </p>
       {info === 'none' || broken ? (
         <p
@@ -69,7 +72,6 @@ export function GettingStartedVideo() {
         </p>
       ) : (
         <>
-          {/* biome-ignore lint/a11y/useMediaCaption: the steps are shown as on-screen captions and listed as chapters */}
           <video
             ref={video}
             controls
@@ -81,6 +83,14 @@ export function GettingStartedVideo() {
             onError={() => setBroken(true)}
           >
             <source src={info.src} type={info.type} onError={() => setBroken(true)} />
+            {/* the narration as captions (on by default; the CC button turns them off) */}
+            <track
+              kind="captions"
+              src={info.captions ?? '/videos/getting-started.vtt'}
+              srcLang="en"
+              label="English"
+              default
+            />
           </video>
           <ol className="mt-3 flex flex-wrap gap-2" aria-label="Chapters">
             {info.chapters.map((c, i) => (

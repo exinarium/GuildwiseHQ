@@ -7,6 +7,7 @@ const info = {
   title: 'Getting started with Guildwise HQ',
   src: '/videos/getting-started.webm',
   type: 'video/webm',
+  captions: '/videos/getting-started.vtt',
   duration: 120,
   chapters: [
     { t: 0, title: 'Create your first project' },
@@ -30,6 +31,9 @@ describe('the getting-started video', () => {
     render(<GettingStartedVideo />);
     const player = (await screen.findByTestId('getting-started-player')) as HTMLVideoElement;
     expect(player.querySelector('source')).toHaveAttribute('src', '/videos/getting-started.webm');
+    const track = player.querySelector('track');
+    expect(track).toHaveAttribute('src', '/videos/getting-started.vtt');
+    expect(track).toHaveAttribute('kind', 'captions');
     expect(screen.getAllByRole('listitem')).toHaveLength(3);
     expect(screen.getByTestId('video-chapter-3')).toHaveTextContent('1:05');
     player.play = vi.fn(async () => undefined);

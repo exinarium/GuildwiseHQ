@@ -12,10 +12,10 @@ const INIT = `
     if (document.getElementById('gw-caption')) return;
     const style = document.createElement('style');
     style.textContent = \`
-      #gw-caption{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:2147483647;max-width:min(920px,88vw);
-        display:none;align-items:center;gap:14px;padding:14px 22px;border-radius:14px;background:rgba(15,23,42,.92);color:#fff;
-        font:600 22px/1.3 system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.35);pointer-events:none}
-      #gw-caption .n{flex:none;min-width:34px;height:34px;border-radius:17px;background:#6366f1;display:flex;align-items:center;justify-content:center;font-size:18px}
+      #gw-caption{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:2147483647;max-width:min(560px,60vw);
+        display:none;align-items:center;gap:14px;padding:9px 16px;border-radius:12px;background:rgba(15,23,42,.92);color:#fff;
+        font:600 17px/1.3 system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.35);pointer-events:none}
+      #gw-caption .n{flex:none;min-width:28px;height:28px;border-radius:14px;background:#6366f1;display:flex;align-items:center;justify-content:center;font-size:15px}
       #gw-cursor{position:fixed;left:-40px;top:-40px;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;z-index:2147483646;
         background:rgba(99,102,241,.35);border:2px solid #4f46e5;pointer-events:none;transition:transform .08s}
       #gw-cursor.down{transform:scale(.7);background:rgba(99,102,241,.7)}\`;
@@ -49,6 +49,27 @@ const INIT = `
     el.querySelector('.t').textContent = c.text;
     el.style.display = 'flex';
   };
+  // Recording only: the demo shows a real-looking runtime and account, never the stand-in "mock" or the test address.
+  const FIX = [[/mock · mock/g, 'Claude Code · Sonnet'], [/\\bmock\\b/gi, 'Claude Code'], [/admin@e2e\\.test/g, 'alex@acme.com']];
+  const fix = (n) => {
+    let v = n.nodeValue; if (!v) return;
+    for (const [re, to] of FIX) v = v.replace(re, to);
+    if (v !== n.nodeValue) n.nodeValue = v;
+  };
+  const sweep = (root) => {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) fix(n);
+  };
+  const watch = () => {
+    sweep(document.body);
+    new MutationObserver((ms) => {
+      for (const m of ms) {
+        if (m.type === 'characterData') fix(m.target);
+        else m.addedNodes.forEach((a) => (a.nodeType === 3 ? fix(a) : a.nodeType === 1 && sweep(a)));
+      }
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch); else watch();
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount); else mount();
 })();
 `;

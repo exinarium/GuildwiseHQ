@@ -1,11 +1,23 @@
 ---
 title: Getting started
-summary: First login, the guided tour, sidebar areas, command palette and keyboard shortcuts.
-keywords: [login, tour, sidebar, command palette, keyboard shortcuts, help panel]
+summary: The training video, first login, the guided tour, sidebar areas, command palette and keyboard shortcuts.
+keywords: [video, tutorial, training, login, tour, sidebar, command palette, keyboard shortcuts, help panel]
 order: 1
 ---
 
 When you sign in for the first time, Guildwise HQ shows you around and introduces the main areas you will work in. You can replay the tour any time from the Help page.
+
+## The training video {#training-video}
+
+On the **Help** page, the **Getting started in five steps** video is a spoken tutorial of about three minutes. A friendly voice walks you through the five steps while you watch them happen on screen:
+
+1. **Create your first project:** open **Projects**, choose **New project**, give it a key and a name, and add the repository the agents work in.
+2. **Hire your agents:** a business analyst, a builder, a reviewer and a tester make a small, complete team.
+3. **Create cards:** describe one thing you want done, then choose **Specify** so the team picks it up.
+4. **Talk to the business analyst:** open the chat, pick the analyst and ask in plain words. The analyst can turn a conversation into cards.
+5. **Test your running project:** watch the cards move across the board, open one to see its plan and cost, and try the result.
+
+The captions show everything the voice says and are on by default; use the **CC** button on the player to turn them off. Under the video, each step is a button that jumps to that part.
 
 ## First login {#first-login}
 
