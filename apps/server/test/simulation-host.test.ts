@@ -31,6 +31,8 @@ beforeAll(async () => {
       AOM_SIMULATION_DIR: dir,
       AOM_SIMULATION_RUNNER_BIN: RUNNER_BIN,
       AOM_FIRST_RUN_HIRE_CAP: 'false',
+      // Like production: mock fields must work in simulation organizations without the flag.
+      AOM_MOCK_UI: 'false',
     },
   });
   const addr = t.app.server.address();
@@ -175,7 +177,8 @@ describe.skipIf(!hasRunner)('the simulated workstation', () => {
     expect((await q('SELECT 1 FROM events WHERE org_id=$1', [orgId])).length).toBe(0);
   });
 
-  it('loads the demo scenario into an empty simulation organization, and only into an empty one', async () => {
+  it('loads the demo scenario into a simulation organization with AOM_MOCK_UI off, and a second run changes nothing', async () => {
+    expect(t.app.ctx.config.mockUi).toBe(false);
     const demoOwner = await t.userSession(uniqueEmail('demo'));
     const orgId = demoOwner.id;
     const refuseReal = await t.req('POST', `/api/platform/orgs/${orgId}/demo-scenario`, {
@@ -183,24 +186,84 @@ describe.skipIf(!hasRunner)('the simulated workstation', () => {
     });
     expect(refuseReal.status).toBe(409);
     expect(refuseReal.body.error.code).toBe('not_simulation');
+    // A real organization still refuses mock fields when the flag is off.
+    const proj = await t.req('POST', '/api/projects', {
+      cookie: demoOwner.cookie,
+      body: { key: 'REAL', name: 'Real' },
+    });
+    expect(proj.status, JSON.stringify(proj.body)).toBe(201);
+    const refused = await t.req('POST', '/api/cards', {
+      cookie: demoOwner.cookie,
+      body: {
+        projectId: proj.body.project.id,
+        title: 'x',
+        cardType: 'feature',
+        fields: { ...fullFields(), mock: { build: ['ok'] } },
+      },
+    });
+    expect(refused.status).toBe(422);
+    expect(refused.body.error.code).toBe('mock_fields_disabled');
     await t.req('PUT', `/api/platform/orgs/${orgId}/simulation`, {
       cookie: root.cookie,
       body: { enabled: true, pace: 'fast' },
     });
+    const counts = async () => ({
+      projects: (await q('SELECT count(*)::int AS n FROM projects WHERE org_id=$1', [orgId]))[0]!.n,
+      cards: (await q('SELECT count(*)::int AS n FROM cards WHERE org_id=$1', [orgId]))[0]!.n,
+      agents: (await q('SELECT count(*)::int AS n FROM agents WHERE org_id=$1', [orgId]))[0]!.n,
+      repos: (
+        await q(
+          'SELECT count(*)::int AS n FROM project_repos pr JOIN projects p ON p.id=pr.project_id WHERE p.org_id=$1',
+          [orgId],
+        )
+      )[0]!.n,
+      schedules: (await q('SELECT count(*)::int AS n FROM schedules WHERE org_id=$1', [orgId]))[0]!.n,
+    });
+    const before = await counts();
     const r = await t.req('POST', `/api/platform/orgs/${orgId}/demo-scenario`, { cookie: root.cookie });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body).toMatchObject({ projects: 2, deskQuestions: 2, schedules: 1 });
-    expect((await q('SELECT count(*)::int AS n FROM projects WHERE org_id=$1', [orgId]))[0]!.n).toBe(2);
-    expect((await q('SELECT count(*)::int AS n FROM cards WHERE org_id=$1', [orgId]))[0]!.n).toBeGreaterThan(
-      8,
-    );
+    const full = await counts();
+    expect(full.projects).toBe(before.projects + 2);
+    expect(full.cards).toBeGreaterThan(8);
     const repos = await q(
       'SELECT remote_url FROM project_repos pr JOIN projects p ON p.id=pr.project_id WHERE p.org_id=$1',
       [orgId],
     );
     expect(repos.every((x) => !x.remote_url.includes('hub.com'))).toBe(true);
     const again = await t.req('POST', `/api/platform/orgs/${orgId}/demo-scenario`, { cookie: root.cookie });
-    expect(again.status).toBe(409);
-    expect(again.body.error.code).toBe('demo_not_empty');
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(again.body).toMatchObject({ projects: 0, agents: 0, cards: 0, deskQuestions: 0, schedules: 0 });
+    expect(await counts()).toEqual(full);
+  }, 120_000);
+
+  it('completes a partial demo scenario: what exists is skipped, what is missing is added', async () => {
+    const partOwner = await t.userSession(uniqueEmail('partial'));
+    const orgId = partOwner.id;
+    await t.req('PUT', `/api/platform/orgs/${orgId}/simulation`, {
+      cookie: root.cookie,
+      body: { enabled: true, pace: 'fast' },
+    });
+    // A failed first attempt left the SHOP project behind.
+    const proj = await t.req('POST', '/api/projects', {
+      cookie: partOwner.cookie,
+      body: { key: 'SHOP', name: 'Online Shop' },
+    });
+    expect(proj.status, JSON.stringify(proj.body)).toBe(201);
+    const r = await t.req('POST', `/api/platform/orgs/${orgId}/demo-scenario`, { cookie: root.cookie });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ projects: 1, deskQuestions: 2, schedules: 1 });
+    expect((await q('SELECT count(*)::int AS n FROM projects WHERE org_id=$1', [orgId]))[0]!.n).toBe(2);
+    expect(
+      (
+        await q(
+          `SELECT count(*)::int AS n FROM project_repos pr JOIN projects p ON p.id=pr.project_id
+        WHERE p.org_id=$1 AND pr.removed_at IS NULL`,
+          [orgId],
+        )
+      )[0]!.n,
+    ).toBe(2);
+    const again = await t.req('POST', `/api/platform/orgs/${orgId}/demo-scenario`, { cookie: root.cookie });
+    expect(again.body).toMatchObject({ projects: 0, agents: 0, cards: 0, schedules: 0 });
   }, 120_000);
 });

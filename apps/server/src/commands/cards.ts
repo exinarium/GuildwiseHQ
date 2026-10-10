@@ -74,18 +74,34 @@ export function cardView(c: Row): FillableCard {
   };
 }
 
-/** Mock-runtime fields are refused unless the server runs with `AOM_MOCK_UI=true`. */
-function assertNoMockFields(ctx: Ctx, fields: Record<string, unknown> | undefined) {
+/** True when mock-runtime fields may be used in this project: `AOM_MOCK_UI=true`, or a simulation organization. */
+export async function mockFieldsAllowed(ctx: Ctx, db: Queryable, projectId: string): Promise<boolean> {
+  if (ctx.config.mockUi) return true;
+  const o = await one(
+    db,
+    'SELECT o.simulation FROM projects p JOIN organizations o ON o.id = p.org_id WHERE p.id=$1',
+    [projectId],
+  );
+  return !!o?.simulation;
+}
+
+/** Mock-runtime fields are refused unless the server runs with `AOM_MOCK_UI=true` or the project's org is a simulation. */
+async function assertNoMockFields(
+  ctx: Ctx,
+  db: Queryable,
+  projectId: string,
+  fields: Record<string, unknown> | undefined,
+) {
   if (ctx.config.mockUi || !fields) return;
   const used = Object.keys(fields).filter(
     (k) => isMockField(k) && fields[k] !== undefined && fields[k] !== null,
   );
-  if (used.length)
-    throw unprocessable(
-      'mock_fields_disabled',
-      `mock runtime fields (${used.join(', ')}) are only available when the server runs with AOM_MOCK_UI=true`,
-      { fields: used },
-    );
+  if (!used.length || (await mockFieldsAllowed(ctx, db, projectId))) return;
+  throw unprocessable(
+    'mock_fields_disabled',
+    `mock runtime fields (${used.join(', ')}) are only available when the server runs with AOM_MOCK_UI=true or in a simulation organization`,
+    { fields: used },
+  );
 }
 
 async function assertRepoInProject(tx: Tx, projectId: string, repoId: string) {
@@ -143,7 +159,7 @@ export async function createCardIn(
     );
   }
   const def = wf.definition;
-  assertNoMockFields(ctx, req.fields);
+  await assertNoMockFields(ctx, tx, project.id, req.fields);
   if (req.interestId) {
     // A research card in a project that cites an interest: the interest must be visible to the user.
     const interest = await one(
@@ -327,7 +343,7 @@ export async function patchCardIn(
     changes.riskTierOverridden = patch.riskTier !== null;
   }
   if (patch.fields !== undefined) {
-    assertNoMockFields(ctx, patch.fields);
+    await assertNoMockFields(ctx, tx, card.project_id, patch.fields);
     // A field sent as null is removed from the card.
     const merged: Record<string, unknown> = { ...card.fields };
     for (const [k, v] of Object.entries(patch.fields)) {

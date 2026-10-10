@@ -26,6 +26,7 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { mockFieldsAllowed } from './cards.ts';
 import { cardMessage, projectScope, userActor } from './common.ts';
 import { liveTarget } from './deploy-targets.ts';
 import type { Responder, RpcReply } from './intake.ts';
@@ -75,10 +76,10 @@ export async function normalizeFollowups(
       );
     if (f.kind === 'deploy' || (f.kind === 'regression' && f.targetId))
       await liveTarget(db, projectId, f.targetId as string);
-    if (f.kind === 'regression' && f.mock && !ctx.config.mockUi)
+    if (f.kind === 'regression' && f.mock && !(await mockFieldsAllowed(ctx, db, projectId)))
       throw unprocessable(
         'mock_fields_disabled',
-        'a mock script on a follow-up is only available when the server runs with AOM_MOCK_UI=true',
+        'a mock script on a follow-up is only available when the server runs with AOM_MOCK_UI=true or in a simulation organization',
       );
     out.push({ ...f, id } as FollowupSpecWithId);
   }

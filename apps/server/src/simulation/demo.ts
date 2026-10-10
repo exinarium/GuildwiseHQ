@@ -58,20 +58,17 @@ const TEAM = [
 ] as const;
 
 /**
- * Fills an EMPTY simulation organization with a busy company, like the getting-started video: two projects with local
+ * Fills a simulation organization with a busy company, like the getting-started video: two projects with local
  * repositories, a hired team per project and a business analyst, cards at different priorities (a few start with a
  * scripted desk question, one stays a draft) and a schedule. It drives the same API a person would, as the Owner, so
- * every rule applies. Refuses (409) when the organization already has a project: it never mixes into existing work.
+ * every rule applies. It is add-only and idempotent by project key and by name or title: whatever already exists is
+ * skipped, so running it again finishes a partial scenario and a complete one is left unchanged. Refuses (409) for
+ * organizations that are not simulations.
  */
 export async function loadDemoScenario(ctx: Ctx, app: FastifyInstance, orgId: string): Promise<DemoSummary> {
   const org = await one(ctx.pool, 'SELECT owner_user_id, simulation FROM organizations WHERE id=$1', [orgId]);
   if (!org?.simulation)
     throw conflict('not_simulation', 'the demo scenario can only be loaded into a simulation organization');
-  if (await one(ctx.pool, 'SELECT 1 FROM projects WHERE org_id=$1', [orgId]))
-    throw conflict(
-      'demo_not_empty',
-      'this organization already has projects: the demo scenario is only loaded into an empty one',
-    );
   const sim = ctx.services.simulation;
   if (!sim) throw conflict('simulation_unavailable', 'simulation hosting is switched off on this server');
   sim.reconcile(orgId);
@@ -98,6 +95,13 @@ export async function loadDemoScenario(ctx: Ctx, app: FastifyInstance, orgId: st
   const out: DemoSummary = { projects: 0, agents: 0, cards: 0, deskQuestions: 0, schedules: 0, note: '' };
   try {
     const hire = async (name: string, roleKey: string, seniority: string, allowed: string[] | null) => {
+      if (
+        await one(ctx.pool, `SELECT 1 FROM agents WHERE org_id=$1 AND name=$2 AND status<>'retired'`, [
+          orgId,
+          name,
+        ])
+      )
+        return;
       await call('POST', '/api/agents', {
         name,
         roleKey,
@@ -111,14 +115,33 @@ export async function loadDemoScenario(ctx: Ctx, app: FastifyInstance, orgId: st
     };
     const projectIds: string[] = [];
     for (const p of PROJECTS) {
-      const created = await call('POST', '/api/projects', { key: p.key, name: p.name });
-      const projectId = created.project.id as string;
+      const existing = await one<{ id: string }>(
+        ctx.pool,
+        'SELECT id FROM projects WHERE org_id=$1 AND key=$2',
+        [orgId, p.key],
+      );
+      let projectId: string;
+      if (existing) projectId = existing.id;
+      else {
+        const created = await call('POST', '/api/projects', { key: p.key, name: p.name });
+        projectId = created.project.id as string;
+        out.projects++;
+      }
       projectIds.push(projectId);
-      out.projects++;
-      await call('POST', `/api/projects/${projectId}/repos`, { name: p.repo.name, remoteUrl: p.repo.url });
+      if (
+        !(await one(
+          ctx.pool,
+          'SELECT 1 FROM project_repos WHERE project_id=$1 AND name=$2 AND removed_at IS NULL',
+          [projectId, p.repo.name],
+        ))
+      )
+        await call('POST', `/api/projects/${projectId}/repos`, { name: p.repo.name, remoteUrl: p.repo.url });
+      const hasCard = async (title: string) =>
+        !!(await one(ctx.pool, 'SELECT 1 FROM cards WHERE project_id=$1 AND title=$2', [projectId, title]));
       for (const [name, roleKey, seniority] of TEAM)
         await hire(`${name} (${p.key})`, roleKey, seniority, [projectId]);
       for (const [title, cardType, priority] of p.cards) {
+        if (await hasCard(title)) continue;
         await call('POST', '/api/cards', {
           projectId,
           title,
@@ -132,40 +155,55 @@ export async function loadDemoScenario(ctx: Ctx, app: FastifyInstance, orgId: st
       }
       // A card whose builder (or reviewer) asks a question on the desk, scripted by the mock agent.
       const [qTitle, qStage] = p.question;
-      await call('POST', '/api/cards', {
-        projectId,
-        title: qTitle,
-        cardType: 'feature',
-        fields: FIELDS({ mock: { [qStage]: ['question', 'ok'] } }),
-        priority: 2,
-        completionAction: 'merge',
-        specify: true,
-      });
-      out.cards++;
-      out.deskQuestions++;
+      if (!(await hasCard(qTitle))) {
+        await call('POST', '/api/cards', {
+          projectId,
+          title: qTitle,
+          cardType: 'feature',
+          fields: FIELDS({ mock: { [qStage]: ['question', 'ok'] } }),
+          priority: 2,
+          completionAction: 'merge',
+          specify: true,
+        });
+        out.cards++;
+        out.deskQuestions++;
+      }
       // One idea that is not specified yet.
-      await call('POST', '/api/cards', {
-        projectId,
-        title: `Idea: ${p.name} loyalty points`,
-        cardType: 'feature',
-        fields: {},
-        priority: 5,
-        specify: false,
-      });
-      out.cards++;
+      const ideaTitle = `Idea: ${p.name} loyalty points`;
+      if (!(await hasCard(ideaTitle))) {
+        await call('POST', '/api/cards', {
+          projectId,
+          title: ideaTitle,
+          cardType: 'feature',
+          fields: {},
+          priority: 5,
+          specify: false,
+        });
+        out.cards++;
+      }
     }
     await hire('Bailey', 'ba', 'senior', null);
-    await call('POST', '/api/schedules', {
-      projectId: projectIds[0],
-      name: 'Weekly dependency check',
-      kind: 'card',
-      cron: '0 7 * * 1',
-      timezone: 'Africa/Johannesburg',
-      cardTemplate: { title: 'Check dependencies for updates', fields: FIELDS() },
-    });
-    out.schedules++;
+    const scheduleName = 'Weekly dependency check';
+    if (
+      !(await one(ctx.pool, 'SELECT 1 FROM schedules WHERE project_id=$1 AND name=$2', [
+        projectIds[0],
+        scheduleName,
+      ]))
+    ) {
+      await call('POST', '/api/schedules', {
+        projectId: projectIds[0],
+        name: scheduleName,
+        kind: 'card',
+        cron: '0 7 * * 1',
+        timezone: 'Africa/Johannesburg',
+        cardTemplate: { title: 'Check dependencies for updates', fields: FIELDS() },
+      });
+      out.schedules++;
+    }
     out.note =
-      'Added two projects with local repositories, a team for each, cards, desk questions and a schedule.';
+      out.projects + out.agents + out.cards + out.schedules === 0
+        ? 'The demo scenario is already complete: nothing was added.'
+        : `Added what was missing from the demo scenario: ${out.projects} projects, ${out.agents} agents, ${out.cards} cards (${out.deskQuestions} with desk questions) and ${out.schedules} schedules.`;
   } finally {
     await deleteSession(ctx, sha256Hex(token));
   }

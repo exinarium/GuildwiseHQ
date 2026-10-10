@@ -1268,7 +1268,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Simulation',
-        text: 'Switch simulation on for testing and demos (agents run on a simulated workstation, nothing is built or billed), set its pace, load the demo scenario, or delete the whole simulation organization with all its data (you type its name to confirm).',
+        text: 'Switch simulation on for testing and demos (agents run on a simulated workstation, nothing is built or billed), set its pace, load the demo scenario (it only adds what is missing, so it is safe to load again), or delete the whole simulation organization with all its data (you type its name to confirm).',
       },
       {
         name: 'Recent activity',

@@ -107,7 +107,7 @@ export function platformRoutes(ctx: Ctx) {
       },
     );
 
-    // Fills an empty simulation organization with a busy demo company.
+    // Adds the missing parts of a busy demo company to a simulation organization (add-only, safe to repeat).
     app.post('/api/platform/orgs/:id/demo-scenario', { schema: { params: IdParamsSchema } }, async (req) => {
       await requireSuperAdmin(ctx, req);
       return DemoScenarioResponseSchema.parse(await loadDemoScenario(ctx, fastify, req.params.id));
