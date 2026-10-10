@@ -210,6 +210,36 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
 const DEVOPS_MAX_SHIFT_MINUTES = 30;
 
 /**
+ * "Ask DevOps": the instruction followed by what the user was looking at (page, project, card, repository, workstation,
+ * the last error), resolved to names. Plain text, so the runner's brief needs no new field.
+ */
+export async function withRequestContext(ctx: Ctx, req: Record<string, any>): Promise<string> {
+  const c = (req.context ?? null) as Record<string, string | undefined> | null;
+  if (!c) return req.summary;
+  const lines: string[] = [];
+  if (req.origin) lines.push(`Asked from: ${req.origin}`);
+  if (c.route) lines.push(`Page: ${c.route}`);
+  if (c.projectId) {
+    const p = await one(ctx.pool, 'SELECT key, name FROM projects WHERE id=$1', [c.projectId]);
+    if (p) lines.push(`Project: ${p.name} (${p.key})`);
+  }
+  if (c.cardId) {
+    const k = await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1', [c.cardId]);
+    if (k) lines.push(`Card: ${k.ref} ${k.title}`);
+  }
+  if (c.repoId) {
+    const r = await one(ctx.pool, 'SELECT name FROM project_repos WHERE id=$1', [c.repoId]);
+    if (r) lines.push(`Repository: ${r.name}`);
+  }
+  if (c.deskItemId) {
+    const d = await one(ctx.pool, 'SELECT title FROM desk_items WHERE id=$1', [c.deskItemId]);
+    if (d) lines.push(`Desk item: ${d.title}`);
+  }
+  if (c.errorText) lines.push(`Last error:\n${c.errorText}`);
+  return lines.length ? `${req.summary}\n\nContext the user was looking at:\n${lines.join('\n')}` : req.summary;
+}
+
+/**
  * The `shift.start` for one DevOps request. A DevOps shift has no card, but the runner's shift machinery is brief
  * driven, so the brief carries a placeholder card ("DEVOPS") and the real request travels in `devops`.
  */
@@ -301,7 +331,7 @@ export async function buildDevopsShiftStart(
     devops: {
       requestId,
       threadId: req.thread_id,
-      summary: req.summary,
+      summary: await withRequestContext(ctx, req),
       requestedBy: {
         kind: req.requested_by_kind,
         id: req.requested_by_id,

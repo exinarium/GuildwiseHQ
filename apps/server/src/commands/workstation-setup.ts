@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  DESK_SUBKIND,
   DevOpsAccessSchema,
   EnvironmentReportSchema,
   type RepoCloneResult,
@@ -302,8 +303,86 @@ export async function applyEnvEnsureResult(
       ],
       { tx },
     );
+    await syncEnvironmentNotice(ctx, tx, project, workstationId, report);
   });
   ctx.services.dispatcher.trigger();
+}
+
+/**
+ * D5: a desk notice while a project's environment on a workstation is `needs_access` or `failed`. One open notice per
+ * project and workstation (a repeated finding only refreshes nothing, it does not add another), and it is closed again
+ * once the environment is ready.
+ */
+export async function syncEnvironmentNotice(
+  ctx: Ctx,
+  tx: Tx,
+  project: Row,
+  workstationId: string,
+  report: { state: string; summary: string },
+): Promise<void> {
+  const open = await one(
+    tx,
+    `SELECT id FROM desk_items WHERE subkind=$1 AND status='open' AND project_id=$2
+        AND data->>'workstationId' = $3 FOR UPDATE`,
+    [DESK_SUBKIND.environmentAttention, project.id, workstationId],
+  );
+  const scope = projectScope(project.org_id, project.id);
+  if (report.state === 'ready') {
+    if (!open) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.desk(open.id),
+          event: {
+            type: 'DeskItemResolved',
+            payload: {
+              deskItemId: open.id,
+              resolution: 'acknowledged',
+              note: 'The development environment is ready.',
+              by: { kind: 'system' },
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope,
+        },
+      ],
+      { tx },
+    );
+    return;
+  }
+  if (open || (report.state !== 'needs_access' && report.state !== 'failed')) return;
+  const ws = await one(tx, 'SELECT name FROM workstations WHERE id=$1', [workstationId]);
+  const deskItemId = randomUUID();
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.desk(deskItemId),
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId,
+            kind: 'alert',
+            subkind: DESK_SUBKIND.environmentAttention,
+            title:
+              report.state === 'needs_access'
+                ? `The development environment needs your help on ${ws?.name ?? 'a workstation'}`
+                : `The development environment could not be prepared on ${ws?.name ?? 'a workstation'}`,
+            body: `${report.summary}\n\nCards of this project wait on that workstation until it is ready. Open the project's Development environment, follow the steps, then press Check again.`,
+            options: [],
+            blocking: false,
+            pinned: false,
+            projectId: project.id,
+            affectedCardIds: [],
+            askedBy: { kind: 'system' },
+            data: { projectId: project.id, workstationId, state: report.state },
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope,
+      },
+    ],
+    { tx },
+  );
 }
 
 /** The manager asks to check a project's environment again (or the access changed). */

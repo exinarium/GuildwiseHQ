@@ -16,8 +16,8 @@ export const devopsProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO devops_requests (id, org_id, workstation_id, devops_agent_id, thread_id, requested_by_kind,
-         requested_by_id, requested_by_name, card_id, summary, hygiene, status, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$12::jsonb,'queued',$11,$11)`,
+         requested_by_id, requested_by_name, card_id, summary, hygiene, status, created_at, updated_at, origin, context)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$12::jsonb,'queued',$11,$11,$13,$14::jsonb)`,
       [
         p.requestId,
         orgId,
@@ -31,6 +31,8 @@ export const devopsProjectors: Record<string, Projector> = {
         p.summary,
         e.createdAt,
         p.hygiene ? JSON.stringify(p.hygiene) : null,
+        p.origin ?? null,
+        p.context ? JSON.stringify(p.context) : null,
       ],
     );
     if (p.hygiene)
@@ -102,6 +104,17 @@ export const devopsProjectors: Record<string, Projector> = {
           resolution: null,
         }),
       ],
+    );
+  },
+  // G-Q8: one party said yes; the request keeps waiting for the other.
+  DevOpsApprovalAgreed: async (tx, e) => {
+    const p = (e.event as EventOf<'DevOpsApprovalAgreed'>).payload;
+    await exec(
+      tx,
+      `UPDATE devops_requests
+          SET approval = COALESCE(approval, '{}'::jsonb) || jsonb_build_object($2::text, true), updated_at = $3
+        WHERE id=$1`,
+      [p.requestId, p.party === 'manager' ? 'managerApproved' : 'workstationUserAgreed', e.createdAt],
     );
   },
   DevOpsApprovalResolved: async (tx, e) => {

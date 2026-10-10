@@ -97,8 +97,9 @@ export function eligibility(A: AgentRefs) {
         SELECT 1 FROM workstation_repos wr
          WHERE wr.workstation_id = ${A.workstationId} AND wr.project_repo_id = c.repo_id))`,
     // The DevOps engineer prepares the toolchain of a project on a workstation before any build work (migration 1370):
-    // while that is not done, build and test cards wait there. A project without a row is not gated.
-    env: `(c.repo_id IS NULL OR st.claim_role NOT IN ('builder', 'tester') OR NOT EXISTS (
+    // while that is not done, ALL agent cards of the project wait on that workstation (D3; the DevOps engineer's own
+    // stages are the one exception, they are how the environment gets fixed). A project without a row is not gated.
+    env: `(c.repo_id IS NULL OR st.claim_role = 'devops' OR NOT EXISTS (
         SELECT 1 FROM project_environments pe
          WHERE pe.project_id = c.project_id AND pe.workstation_id = ${A.workstationId} AND pe.state <> 'ready'))`,
     vault: `(c.repo_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM vaults v WHERE ${vaultOfCard}) OR EXISTS (

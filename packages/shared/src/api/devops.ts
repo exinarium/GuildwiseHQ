@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DevOpsRequester, DevOpsRequestStatus } from '../events/devops.ts';
+import { DevOpsRequestContextSchema, DevOpsRequester, DevOpsRequestOrigin, DevOpsRequestStatus } from '../events/devops.ts';
 import { IsoTime } from './common.ts';
 
 export const DevOpsRequestDtoSchema = z.object({
@@ -22,6 +22,9 @@ export const DevOpsRequestDtoSchema = z.object({
       reason: z.string(),
       commands: z.array(z.string()),
       resolution: z.enum(['approved', 'rejected']).nullable(),
+      /** G-Q8: two-party approval on a member's workstation. Optional so older rows still parse. */
+      managerApproved: z.boolean().optional(),
+      workstationUserAgreed: z.boolean().optional(),
     })
     .nullable(),
   resultSummary: z.string().nullable(),
@@ -58,6 +61,8 @@ export const CreateDevOpsRequestSchema = z.object({
   workstationId: z.uuid(),
   summary: z.string().min(1).max(20000),
   cardId: z.uuid().optional(),
+  origin: DevOpsRequestOrigin.optional(),
+  context: DevOpsRequestContextSchema.optional(),
 });
 export type CreateDevOpsRequest = z.infer<typeof CreateDevOpsRequestSchema>;
 

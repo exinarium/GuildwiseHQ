@@ -22,6 +22,10 @@ export const DESK_SUBKIND = {
   repoCreate: 'repo_create',
   repoCreateFailed: 'repo_create_failed',
   loopBackoff: 'loop_backoff',
+  /** D5: a project environment needs access or failed on a workstation. */
+  environmentAttention: 'environment_attention',
+  /** G-Q2: DevOps is trying to resolve a rebase/merge conflict (a notice). */
+  conflictAttempt: 'conflict_attempt',
 } as const;
 
 /** Card origins whose card is a suite (full E2E suite or regression run) rather than a feature under test. */

@@ -220,6 +220,7 @@ async function closeItem(
 ) {
   let workstationToDeliver: string | undefined;
   let devops = false;
+  let partial = false;
   let phases = false;
   await withAppendTx(ctx.pool, async (tx) => {
     const { item, mayAct } = await lockItem(tx, user, id);
@@ -243,7 +244,7 @@ async function closeItem(
         item.id,
       ]);
       if (!req) throw notFound('devops request not found');
-      await resolveDevOpsApprovalIn(
+      const r = await resolveDevOpsApprovalIn(
         ctx,
         tx,
         user,
@@ -252,6 +253,8 @@ async function closeItem(
         note,
       );
       devops = true;
+      // G-Q8: one of the two parties said yes; the item stays open for the other.
+      partial = !r.final;
     } else if (item.kind === 'approval' && item.subkind === 'large_merge' && resolution !== 'dismissed') {
       if (resolution === 'acknowledged')
         throw badRequest('wrong_resolution', 'a merge approval is approved or rejected');
@@ -290,7 +293,7 @@ async function closeItem(
       await resolveVaultConflictIn(ctx, tx, user, wv.vault_id, wv.workstation_id);
       workstationToDeliver = wv.workstation_id;
     }
-    if (!retryClosedAlert)
+    if (!retryClosedAlert && !partial)
       await ctx.store.append(
         [
           {

@@ -7,12 +7,15 @@ import {
   DEVOPS_ROLE_KEY,
   type DevOpsAccess,
   DevOpsAccessSchema,
+  type DevOpsRequestContext,
   type DevOpsRequestDetail,
   type DevOpsRequestDto,
   type DevOpsRequester,
+  type DevOpsRequestOrigin,
   DevopsApprovalDataSchema,
   DevopsDoneDataSchema,
   type HygieneSpec,
+  isOrgManager,
   type PatchDevOpsAccessRequest,
   type RunnerToServerOf,
   randomAvatarSeed,
@@ -27,6 +30,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { orgRoleOf } from '../auth/org-context.ts';
 import { agentActor, orgScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { hygieneReportEvents } from './hygiene.ts';
 import type { ReportResult, WsRef } from './shifts.ts';
@@ -251,6 +255,8 @@ export async function createDevOpsRequestIn(
     hygiene?: HygieneSpec;
     /** The organization the request is for: its DevOps engineer on this workstation works it (else the oldest one). */
     orgId?: string | null;
+    origin?: DevOpsRequestOrigin;
+    context?: DevOpsRequestContext;
   },
 ): Promise<{ requestId: string; threadId: string }> {
   const ws = await one(tx, `SELECT id, user_id FROM workstations WHERE id=$1 AND status='active'`, [
@@ -281,6 +287,8 @@ export async function createDevOpsRequestIn(
             cardId: input.cardId,
             summary: input.summary,
             ...(input.hygiene ? { hygiene: input.hygiene } : {}),
+            ...(input.origin ? { origin: input.origin } : {}),
+            ...(input.context ? { context: input.context } : {}),
           },
         },
         actor:
@@ -316,6 +324,8 @@ export async function createDevOpsRequest(
       summary: req.summary,
       requestedBy: { kind: 'user', id: user.id, name: user.displayName },
       cardId: req.cardId,
+      ...(req.origin ? { origin: req.origin } : {}),
+      ...(req.context ? { context: req.context } : {}),
     });
     return requestId;
   });
@@ -325,6 +335,10 @@ const REQUEST_SQL = `SELECT r.*, w.name AS workstation_name, a.name AS agent_nam
    FROM devops_requests r JOIN workstations w ON w.id = r.workstation_id
    JOIN agents a ON a.id = r.devops_agent_id LEFT JOIN cards c ON c.id = r.card_id`;
 
+/** Requests the user may see: on their own workstations, or in organizations they own or administer (G-Q8). */
+const VISIBLE_SQL = `(w.user_id = $1 OR EXISTS (SELECT 1 FROM org_members om WHERE om.user_id = $1 AND om.org_id = r.org_id
+   AND om.status = 'active' AND om.role IN ('owner','admin')))`;
+
 function toRequestDto(r: Row): DevOpsRequestDto {
   const ap = r.approval as {
     deskItemId: string;
@@ -332,6 +346,8 @@ function toRequestDto(r: Row): DevOpsRequestDto {
     reason: string;
     commands: string[];
     resolution: 'approved' | 'rejected' | null;
+    managerApproved?: boolean;
+    workstationUserAgreed?: boolean;
   } | null;
   return {
     id: r.id,
@@ -352,6 +368,8 @@ function toRequestDto(r: Row): DevOpsRequestDto {
           reason: ap.reason,
           commands: ap.commands ?? [],
           resolution: ap.resolution ?? null,
+          ...(ap.managerApproved ? { managerApproved: true } : {}),
+          ...(ap.workstationUserAgreed ? { workstationUserAgreed: true } : {}),
         }
       : null,
     resultSummary: r.result_summary,
@@ -368,7 +386,7 @@ export async function listDevOpsRequests(
 ): Promise<DevOpsRequestDto[]> {
   const r = await rows(
     ctx.pool,
-    `${REQUEST_SQL} WHERE w.user_id = $1 AND ($2::uuid IS NULL OR r.workstation_id = $2) AND ($3::text IS NULL OR r.status = $3)
+    `${REQUEST_SQL} WHERE ${VISIBLE_SQL} AND ($2::uuid IS NULL OR r.workstation_id = $2) AND ($3::text IS NULL OR r.status = $3)
       ORDER BY r.created_at DESC, r.id DESC LIMIT 200`,
     [userId, filter.workstationId ?? null, filter.status ?? null],
   );
@@ -376,7 +394,7 @@ export async function listDevOpsRequests(
 }
 
 export async function getDevOpsRequest(ctx: Ctx, userId: string, id: string): Promise<DevOpsRequestDetail> {
-  const r = await one(ctx.pool, `${REQUEST_SQL} WHERE r.id = $1 AND w.user_id = $2`, [id, userId]);
+  const r = await one(ctx.pool, `${REQUEST_SQL} WHERE r.id = $1 AND ${VISIBLE_SQL.replaceAll('$1', '$2')}`, [id, userId]);
   if (!r) throw notFound('request not found');
   const messages = await rows(
     ctx.pool,
@@ -449,8 +467,12 @@ export async function patchDevOpsAccess(
 // ---------------------------------------------------------------------------------------- approval
 
 /**
- * The manager answers a DevOps approval. Called by the M3 endpoint and by the M2 desk resolve for
- * `subkind 'devops'` (see desk-port.ts). Approved: the request is queued again with the approval attached.
+ * An Owner or Admin of the request's organization, or the workstation's own user, answers a DevOps approval. Called by
+ * the M3 endpoint and by the M2 desk resolve for `subkind 'devops'` (see desk-port.ts).
+ *
+ * G-Q8 (two parties): the approver must be an Owner/Admin, and the workstation's own user must be that approver or
+ * agree. When they are different people the request waits until both said yes; either one rejecting ends it. The desk
+ * item stays open until the second answer.
  */
 export async function resolveDevOpsApproval(
   ctx: Ctx,
@@ -460,13 +482,16 @@ export async function resolveDevOpsApproval(
   note?: string,
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
-    const deskItemId = await resolveDevOpsApprovalIn(ctx, tx, user, requestId, resolution, note);
-    await closeDeskItemIn(ctx, tx, deskItemId, { userId: user.id }, resolution, note);
+    const r = await resolveDevOpsApprovalIn(ctx, tx, user, requestId, resolution, note);
+    if (r.final) await closeDeskItemIn(ctx, tx, r.deskItemId, { userId: user.id }, resolution, note);
   });
   ctx.services.dispatcher.trigger();
 }
 
-/** Same inside the caller's append transaction (the desk resolve path); returns the approval's desk item id. */
+/**
+ * Same inside the caller's append transaction (the desk resolve path). `final` is false when only one of the two
+ * parties has said yes so far (the desk item must stay open).
+ */
 export async function resolveDevOpsApprovalIn(
   ctx: Ctx,
   tx: Tx,
@@ -474,18 +499,66 @@ export async function resolveDevOpsApprovalIn(
   requestId: string,
   resolution: 'approved' | 'rejected',
   note?: string,
-): Promise<string> {
-  // The machine's own user answers: approving runs commands on their workstation.
+): Promise<{ deskItemId: string; final: boolean }> {
   const r = await one(
     tx,
-    `SELECT r.* FROM devops_requests r JOIN workstations w ON w.id = r.workstation_id
-      WHERE r.id=$1 AND w.user_id=$2 FOR UPDATE OF r`,
-    [requestId, user.id],
+    `SELECT r.*, w.user_id AS ws_user_id FROM devops_requests r JOIN workstations w ON w.id = r.workstation_id
+      WHERE r.id=$1 FOR UPDATE OF r`,
+    [requestId],
   );
   if (!r) throw notFound('request not found');
-  const ap = r.approval as { deskItemId: string; resolution: string | null } | null;
+  const isWsUser = r.ws_user_id === user.id;
+  const isManager = isOrgManager({ orgRole: await orgRoleOf(tx, user.id, r.org_id) });
+  if (!isWsUser && !isManager) throw notFound('request not found');
+  const ap = r.approval as {
+    deskItemId: string;
+    resolution: string | null;
+    managerApproved?: boolean;
+    workstationUserAgreed?: boolean;
+  } | null;
   if (r.status !== 'needs_approval' || !ap || ap.resolution)
     throw conflict('not_awaiting_approval', 'this request is not waiting for approval');
+
+  const message = (text: string, data?: Record<string, unknown>) =>
+    threadMessage(
+      r.thread_id,
+      r.org_id,
+      { kind: 'user', userId: user.id },
+      'answer',
+      text,
+      data,
+    );
+  if (resolution === 'approved') {
+    const managerOk = ap.managerApproved === true || isManager;
+    const wsOk = ap.workstationUserAgreed === true || isWsUser;
+    if (!(managerOk && wsOk)) {
+      // Only one party so far: record it and wait for the other.
+      const party = isManager ? 'manager' : 'workstation_user';
+      const already = party === 'manager' ? ap.managerApproved : ap.workstationUserAgreed;
+      if (already) throw conflict('already_agreed', 'you already approved this; waiting for the other person');
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.thread(requestId),
+            event: {
+              type: 'DevOpsApprovalAgreed',
+              payload: { requestId, deskItemId: ap.deskItemId, party, by: user.id },
+            },
+            actor: userActor(user.id),
+            scope: orgScope(r.org_id),
+          },
+          message(
+            party === 'manager'
+              ? `Approved by an Owner/Admin${note ? `: ${note}` : ''}. Waiting for the workstation's user to agree, because it is their machine.`
+              : `The workstation's user agrees${note ? `: ${note}` : ''}. Waiting for an Owner or Admin to approve.`,
+            { agreed: party },
+          ),
+        ],
+        { tx },
+      );
+      return { deskItemId: ap.deskItemId, final: false };
+    }
+  }
   await ctx.store.append(
     [
       {
@@ -497,18 +570,13 @@ export async function resolveDevOpsApprovalIn(
         actor: userActor(user.id),
         scope: orgScope(r.org_id),
       },
-      threadMessage(
-        r.thread_id,
-        r.org_id,
-        { kind: 'user', userId: user.id },
-        'answer',
-        `${resolution === 'approved' ? 'Approved' : 'Rejected'}${note ? `: ${note}` : ''}`,
-        { resolution },
-      ),
+      message(`${resolution === 'approved' ? 'Approved' : 'Rejected'}${note ? `: ${note}` : ''}`, {
+        resolution,
+      }),
     ],
     { tx },
   );
-  return ap.deskItemId;
+  return { deskItemId: ap.deskItemId, final: true };
 }
 
 // ------------------------------------------------------------------------- reports of a DevOps shift

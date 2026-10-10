@@ -60,6 +60,9 @@ export function canAnswerItem(
     });
   }
   if (r.project_id) return isProjectOwner(role);
+  // G-Q8: a DevOps approval is answered by the workstation's user AND an Owner/Admin (two parties when different).
+  if (r.kind === 'approval' && r.subkind === 'devops')
+    return r.addressee_user_id === userId || isOrgManager({ orgRole });
   if (r.addressee_user_id) return r.addressee_user_id === userId;
   return isOrgManager({ orgRole });
 }
