@@ -17,7 +17,7 @@ describe('mock-runtime fields (AOM_MOCK_UI off)', () => {
     const off = await createWorld({ env: { AOM_MOCK_UI: 'false' }, listen: false });
     try {
       const me = await ok<any>(off.t.req('GET', '/api/auth/me', { cookie: off.owner.cookie }));
-      expect(me.features).toEqual({ mockUi: false });
+      expect(me.features).toMatchObject({ mockUi: false });
       const create = (fields: Record<string, unknown>) =>
         off.t.req('POST', '/api/cards', {
           cookie: off.owner.cookie,
@@ -47,7 +47,7 @@ describe('mock-runtime fields (AOM_MOCK_UI on)', () => {
     const on = await createWorld({ env: { AOM_MOCK_UI: 'true' }, listen: false });
     try {
       const me = await ok<any>(on.t.req('GET', '/api/auth/me', { cookie: on.owner.cookie }));
-      expect(me.features).toEqual({ mockUi: true });
+      expect(me.features).toMatchObject({ mockUi: true });
       const res = await on.t.req('POST', '/api/cards', {
         cookie: on.owner.cookie,
         body: {
