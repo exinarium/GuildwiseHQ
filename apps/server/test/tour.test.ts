@@ -34,6 +34,13 @@ describe('first-login tour state', () => {
     expect(await me(u.cookie)).toEqual({ status: 'completed', step: 9 });
   });
 
+  it('a platform administrator can save tour progress too (the platform area has its own tour)', async () => {
+    const sa = await w.t.superAdminSession();
+    const done = await ok<any>(put(sa.cookie, { status: 'dismissed', step: 2 }));
+    expect(done.user.tour).toEqual({ status: 'dismissed', step: 2 });
+    expect(await me(sa.cookie)).toEqual({ status: 'dismissed', step: 2 });
+  });
+
   it("one user's tour does not touch another's, and bad input is refused", async () => {
     const a = await w.t.userSession('tour-a@example.test');
     const b = await w.t.userSession('tour-b@example.test');

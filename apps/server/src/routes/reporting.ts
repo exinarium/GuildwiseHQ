@@ -40,7 +40,7 @@ export function reportingRoutes(ctx: Ctx) {
     });
 
     app.put('/api/auth/tour', { schema: { body: UpdateTourRequestSchema } }, async (req) => {
-      const s = await requireUser(ctx, req);
+      const s = await requireSession(ctx, req); // the platform area has a tour too: its progress must save
       await setTourState(ctx, s.user, req.body.status, req.body.step);
       return meResponse(ctx, s.user.id, requestedOrgId(req));
     });
