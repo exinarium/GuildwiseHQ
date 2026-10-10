@@ -1580,7 +1580,7 @@ Runner-attached data: for build outcomes the runner computes `diffStats` with `g
 
 ### 13.6 Rebase step (M4)
 
-Before `test` and `finalize` shifts (`stage.rebaseBefore`), the runner (not the agent) runs in the worktree: `git fetch origin <base>`; `git rebase origin/<base>`; on non-zero exit `git rebase --abort`, collect `git diff --name-only --diff-filter=U` beforehand, and reject the shift with `rebase_conflict`. No agent ever resolves conflicts silently; the conflict becomes Rework for the builder with the conflicted files in the event.
+Before `test` and `finalize` shifts (`stage.rebaseBefore`), the runner (not the agent) runs in the worktree: `git fetch origin <base>`; `git rebase origin/<base>`; on non-zero exit `git rebase --abort`, collect `git diff --name-only --diff-filter=U` beforehand, and reject the shift with `rebase_conflict`. The conflict becomes Rework for the builder with the conflicted files in the event, but first (when the workstation has a DevOps engineer) `cardConflictAttemptEvents` (server `commands/conflict-attempts.ts`) raises a DevOps request with `origin: 'conflict'` for the card and appends `ConflictAttemptStarted`, which parks the card (`status waiting`, `park_problem 'conflict'`) on that request; the dispatcher's unpark pass posts the result on the card thread and releases it to Rework. A card thread note and a desk notice (`conflict_attempt`) make the attempt visible. The attempts are counted per card from `devops_requests`; the third conflict raises a desk escalation (`conflict_unresolved`) instead. Repository hygiene conflicts (`HygieneProblemKind 'conflict'`) follow the same rule per repository (two attempts in 24 hours).
 
 ### 13.7 Post-shift guard and auto-commit (`shifts/guard.ts`, `shifts/autocommit.ts`)
 

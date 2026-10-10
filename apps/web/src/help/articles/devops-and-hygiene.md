@@ -18,9 +18,19 @@ The DevOps engineer handles:
 - Pulling and pushing vault changes.
 - Repository hygiene (see below).
 
-You can ask it directly: open the workstation on the **Workstations** page, type what you need in **Ask DevOps** and click **Send request**. You can also start a chat with it (see Chat with agents). In the same panel you decide what it may do on its own: install packages and tools, use Docker, use elevated privileges (sudo) and write to extra paths. Anything outside that waits for your approval on the desk.
+You can ask it directly from anywhere: click **Ask DevOps** in the top bar, choose **Ask DevOps...** in the command palette (Ctrl K), or use the **Ask DevOps** button on a card, on a desk item or on the workstation. The page, project, card or error you were looking at is attached (remove any chip you do not want to share), and the right workstation's engineer is chosen for you when it is obvious. **Start chat** talks to it; **Send as a task** files a request that you can follow on the Workstations page.
+
+The DevOps engineer works **as you, on your machine**, outside the safety box that other agents work in. In a chat with it, a command, a Docker build or a deploy you ask for runs right away. The tick boxes in the workstation's panel (install packages and tools, use Docker, use elevated privileges (sudo), write to extra paths) are instructions to it and decide what the automatic tool setup may do, but they do not physically stop it: only give this agent to a machine you are happy to hand it. Anything it decides is outside its instructions waits for approval on the desk.
+
+**Who approves.** On a workstation that belongs to a team member, an Owner or Admin approves, and the person whose machine it is must agree as well. If you are an Owner approving on your own machine, one click is enough. When two people are needed, the desk item stays open after the first answer, and either of them can say no.
 
 Because it is free, you cannot extend it with extra instructions, skills or custom permissions. Only its model, effort and runtime can change.
+
+## When two branches conflict {#conflicts}
+
+If a card's branch conflicts with the working branch (before testing or when finishing), or hygiene cannot combine your working branch with its remote, the DevOps engineer **tries to fix it first**, on a temporary branch, and runs the build and tests before it moves anything. You can see it happen: a note on the card, a notice on your desk and the request in the workstation's list. The card then goes to Rework so review and testing run again. If two attempts do not work, the conflict goes to your desk as an item for you to decide.
+
+Builders can also run `git rebase` in their own checkout of a card to tidy up their branch.
 
 ## Repository hygiene {#hygiene}
 
@@ -39,7 +49,7 @@ If hygiene finds a conflict, uncommitted changes on the wrong branch, an authent
 
 When you add a repository in **Project settings, Repositories**, the DevOps engineer of each workstation of the project puts it there. Pick **An existing repository** and it is cloned into the workstation's first repository folder (`aom-runner repos add`); a folder that already holds something else is never overwritten. Pick **Create a new repository** (owner/name and visibility) and the DevOps engineer creates it on GitHub with the workstation's `gh` login, then clones it. Under each repository you see **Cloning**, **Cloned on <workstation>** or **Failed: <reason>** with **Try again**.
 
-Before the first build work on a new project, the DevOps engineer checks that the tools the repository needs are installed: .NET and the MAUI workloads, Node and its package manager, Python, Docker, Go, Rust, Java and more. It installs what is missing only if you ticked **Install packages and tools** (and **Docker**, **Elevated privileges** where needed). Until the workstation is ready, build and test cards wait there with the reason on the card, and **Project settings, Development environment** shows each tool, what is missing and how to fix it, with **Check again**.
+Before the first build work on a new project, the DevOps engineer checks that the tools the repository needs are installed: .NET and the MAUI workloads, Node and its package manager, Python, Docker, Go, Rust, Java and more. It installs what is missing only if you ticked **Install packages and tools** (and **Docker**, **Elevated privileges** where needed). Once the tools are in place it also installs **the project's own packages** (pnpm, yarn, npm or bun install; Python packages into the project's own environment; .NET restore; Go, Rust, Maven, Ruby and PHP packages), and for Android and .NET MAUI projects it installs the **Android SDK** (command-line tools, platform tools, and the Android version and build tools the project needs). Every step is logged where you can read it. Until the workstation is ready, **every agent's card in that project** waits there with the reason on the card, and **Project settings, Development environment** shows each tool, what is missing and how to fix it, with **Check again**. If the setup needs your help or fails, a notice appears on your desk (once), and it disappears when the workstation is ready.
 
 ## Rights and the sudo password {#rights}
 

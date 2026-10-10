@@ -11,7 +11,7 @@ The **desk** is where every question and approval reaches you. Cards that wait o
 
 Each item shows:
 
-- **What kind it is**: a label like Question, DevOps approval, Merge approval, Outbound update, Escalation, Create repository, Budget paused, Phase done or Vault conflict.
+- **What kind it is**: a label like Question, DevOps approval (on a team member's workstation both an Owner or Admin and the machine's user have to agree; the item stays open until they have), Merge approval, Outbound update, Escalation, Create repository, Budget paused, Phase done or Vault conflict.
 - **Who asked**: the agent and its role.
 - **What they are doing**: which card or project.
 - **The question**: with options and a recommendation.

@@ -193,7 +193,7 @@ AC:
 - Tester mock `fail` creates a linked bug card (shares the parent's branch) routed first to the original builder; the parent shows "waiting"; after the bug card passes review the parent re-enters the Test queue; `pass` moves to Docs (if docs-needed) or Finalize with evidence attached.
 - A tester that edits a file outside E2E globs gets its report rejected.
 - A large-tier card needs two distinct senior reviewer approvals.
-- Changing the working branch so the card conflicts → `RebaseConflict`, card in Rework with conflicted files listed; no agent resolves it.
+- Changing the working branch so the card conflicts → `RebaseConflict`, card in Rework with conflicted files listed; DevOps first tries to resolve it on a branch (visible, at most two attempts, review and test run again), then the desk decides.
 - Finalize `merge` on a small card merges to the working branch without the manager; on a large card it waits for desk approval; the worktree is removed afterwards and a full-suite card is spawned for a tester; full-suite failure creates a bug card in Spec and a desk notice without blocking anything.
 - When E2E work waits 5 min and all testers are busy, a single pinned desk alert appears with a hire recommendation that opens a pre-filled Hire form.
 

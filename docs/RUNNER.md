@@ -651,7 +651,7 @@ On top of that, Claude Code sessions run inside Claude Code's own sandbox and pe
 [Threat model](#threat-model-and-residual-risk) for what this does and does not protect against.
 
 **Exception: the DevOps engineer.** The workstation's DevOps engineer (the agent with `isDevops`, built-in role `devops`)
-runs its shifts outside this sandbox by design, so that it can deploy to the local Docker stack
+runs its shifts **and its chats** outside this sandbox by design, so that it can deploy to the local Docker stack
 (`docker compose -p aom-uat ... up -d --build`), to remote hosts (ssh, scp, docker contexts), install tools and use sudo.
 See [DevOps shifts are unsandboxed](#devops-shifts-are-unsandboxed).
 
@@ -706,7 +706,7 @@ cannot loosen anything.
 | --- | --- | --- |
 | `permissions.defaultMode` | `dontAsk` | anything no allow rule approves is denied (`acceptEdits` approved every edit in the worktree whatever the role) |
 | `permissions.allow` | per `allowedTools`: `Read, Glob, Grep`; `Bash`; `WebFetch, WebSearch`; `Edit(//<worktree>/**)` or one `Edit(//<worktree>/<glob>)` per `writableGlobs` entry | explicit allow |
-| `permissions.deny` | `ListAgents`, `SendMessage`, `RemoteTrigger`, `Cron*`, `ScheduleWakeup`, `PushNotification`, `EnterWorktree`/`ExitWorktree` (tools that reach other Claude sessions on the machine or outside the shift; `dontAsk` would otherwise still run them); `Edit, Write, NotebookEdit` when the role has no `edit` tool; `WebFetch, WebSearch` without `web`; `Bash` without `shell`; the role's `deniedShellPatterns` and `git push/rebase/checkout/switch/reset --hard`; `Edit` on the vault, the agent's config dir and the worktree `.git`; `Read` on the runner's `config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`, `logs` and on `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.claude`, ... | deny wins over allow in every scope |
+| `permissions.deny` | `ListAgents`, `SendMessage`, `RemoteTrigger`, `Cron*`, `ScheduleWakeup`, `PushNotification`, `EnterWorktree`/`ExitWorktree` (tools that reach other Claude sessions on the machine or outside the shift; `dontAsk` would otherwise still run them); `Edit, Write, NotebookEdit` when the role has no `edit` tool; `WebFetch, WebSearch` without `web`; `Bash` without `shell`; the role's `deniedShellPatterns` and `git push/reset --hard` (and, for every role except the builder, `git rebase/checkout/switch`: see "Builders may rebase" below); `Edit` on the vault, the agent's config dir and the worktree `.git`; `Read` on the runner's `config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`, `logs` and on `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.claude`, ... | deny wins over allow in every scope |
 | `permissions.blockReadsOutsideWorkingDirectories` | `true` | the Read/Grep/Glob tools only see the worktree (or scratch dir), the agent's scratch dir and the vault (`--add-dir`); other agents' sandboxes and other cards' worktrees are out of reach |
 | `sandbox.enabled`, `failIfUnavailable`, `allowUnsandboxedCommands` | `true`, `true` (`sandbox: "required"`), `false` | Bash runs inside bubblewrap (Linux/WSL2) or Seatbelt (macOS); no `dangerouslyDisableSandbox` retry; no silent fallback to unsandboxed |
 | `sandbox.filesystem.denyRead` | the runner data dir, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.config/gh`, `~/.config/gcloud`, `~/.claude`, `~/.claude.json` | runner token, Jira and provider credentials, the linked `.credentials.json` |
@@ -717,7 +717,8 @@ cannot loosen anything.
 
 Claude Code's sandbox wraps shell commands only; the Read/Edit/Write/WebFetch tools are governed by the permission rules
 above, which is why both exist. Chat sessions get the same layer with only `Read, Glob, Grep, Bash(aom:*)` and `Edit(//<scratch>/**)` (Edit covers Write and NotebookEdit; the agent's scratch dir only, so a card's worktree and the vault stay read-only), and `Edit`
-denied when a card worktree is in context.
+denied when a card worktree is in context. The one exception is the DevOps engineer's chat, which is unsandboxed like its
+shifts (see [DevOps shifts are unsandboxed](#devops-shifts-are-unsandboxed)); every other role's chat stays as described here.
 
 Config keys (`runtimes.claude-code`): `sandbox` (`required` default, `best_effort`, `off`), `extraAllowedDomains`
 (array of hosts), `toolchainPaths` (array of directories sandboxed commands may read, e.g. `["~/.dotnet", "~/.cargo"]`;
@@ -809,6 +810,15 @@ BA's daily report; it closes when a later run finds the repository in order. The
 logged in the request's record (`aom devops-done`). The DevOps agent may `git push` from its own shell (owner decision: it is the workstation-management agent);
 the push in `aom hygiene run` is still done by the runner, not by the model.
 
+#### Builders may rebase in their own worktree
+
+A builder (and only a builder) may run `git rebase`, plus the `git checkout` / `git switch` that a rebase needs, inside its
+own card worktree, to reconcile its branch with the working branch (for example when the runner's pre-test rebase
+conflicted and the card is in Rework). The worktree is the only repository the builder can write to (the sandbox and the
+`Edit` rules keep everything else read-only), so this can only move its own branch. `git push` and `git reset --hard` stay
+denied for every role; all other roles keep denying `rebase`, `checkout` and `switch`. The built-in builder role is version 2
+for this change.
+
 ### DevOps shifts are unsandboxed
 
 For a DevOps shift (`agent.isDevops`) `settings.json` has no `sandbox` block, whatever `runtimes.claude-code.sandbox` says
@@ -823,7 +833,35 @@ every agent, DevOps included, because the runtime is reported unavailable as a w
   `git push` is not denied for DevOps (it is for the other roles). The credential-store read denies (`~/.ssh`, `~/.docker`, `~/.kube`, ...) are dropped: it needs them.
 - environment: `HOME` is the user's real home (docker, ssh and kube configs work); `CLAUDE_CONFIG_DIR` and `TMPDIR` stay the
   agent's own; `SSH_AUTH_SOCK`, `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `KUBECONFIG` and `XDG_RUNTIME_DIR` are
-  passed through when set; `scrubSubprocessEnv` is not applied. Chat sessions of the same agent stay sandboxed.
+  passed through when set; `scrubSubprocessEnv` is not applied.
+- `git push` is **allowed** for the DevOps engineer (it keeps vaults in sync with the user's own git credentials); the
+  no-force-push rule and creating a new repository (`aom repo create`) are unchanged.
+
+**The DevOps chat is unsandboxed too (G-Q1).** The DevOps agent is the workstation-management agent: it runs as the user.
+A chat with it gets exactly the settings, environment and tool permissions of a DevOps shift (no `sandbox` block, the real
+home, the same denies), so a command, a `docker build` or a deploy asked for in the conversation runs on the workstation. A
+missing `bwrap`/`socat` does not stop a DevOps chat either. Every other agent's chat is unchanged: sandboxed, read-only,
+scratch directory only. In a DevOps chat the verb `aom devops "<instruction>"` (`devops.request`) is available, which turns an
+instruction into a DevOps task with its own thread (the same request the Ask DevOps dialog can send); other chats cannot use it.
+Commands in a DevOps chat run at once, with no approval step. The decision is deliberate: it is the user's own machine and the
+chat is the user talking to their own engineer.
+
+**Access checkboxes stay guidance (G-Q5).** The ticked rights on the Workstations page (install, Docker, administrator,
+paths) are instructions to the DevOps engineer and a precondition of the toolchain step, not an enforced boundary: shifts and
+chats of the DevOps engineer are unsandboxed, so a prompt-injected agent is not stopped by an unticked box. The runner's own
+toolchain code (below) does honour them.
+
+**Approvals on a member's workstation (G-Q8).** When a DevOps shift asks for approval (`aom devops-approval`), the approver
+must be an Owner or Admin of the organization, and the workstation's own user must be that approver or agree. When they are
+the same person (an Owner on their own machine) one answer is enough. When they differ, the request waits until both said
+yes (the desk item stays open after the first answer); either of them rejecting ends the request.
+
+**Conflicts (G-Q2).** When a card's rebase conflicts (before test, at finalize) or repository hygiene cannot combine a
+working branch with its remote, the DevOps engineer tries to resolve it **on a temporary branch first** (`conflict/<ref>-aN`),
+runs the build and tests, and only moves the real branch if they pass. The attempt is visible: a note on the card's thread, a
+notice on the desk, and the request in the DevOps thread. The card waits for the attempt and then goes on to Rework, so
+review and test run again. After two attempts that did not hold, the conflict goes to the desk as an escalation and the
+builder (who may rebase, above) takes the card as before.
 
 What this implies: a DevOps shift has the full privileges of the runner's OS user on that workstation, and root through
 `sudo` or the Docker socket (access to `docker.sock` is root). The `devops_access` flags (install, Docker, sudo, paths) and
@@ -852,8 +890,8 @@ decision: the manager asking from the settings page is the approval (agents stil
 
 **2. The toolchain is made ready before build work.** When a project's repository first appears on a workstation (after a
 clone, a hand clone, or a new workstation joining) the server queues `env.ensure`; the table `project_environments` goes
-`preparing`, and **build and test cards of the project wait on that workstation** until it is `ready` (dispatcher
-eligibility clause `env`; the card shows "the development environment on <workstation> is not ready (...)"). Projects
+`preparing`, and **every agent card of the project waits on that workstation** until it is `ready` (D3; dispatcher
+eligibility clause `env`; only the DevOps engineer's own stages are exempt, they are how it gets fixed; the card shows "the development environment on <workstation> is not ready (...)"). Projects
 with no row (everything that existed before) are never held back. The runner (`src/toolchain`):
 
 - detects the stacks from the repository files (depth 3, build and dependency folders skipped) using the **table in
@@ -864,7 +902,8 @@ with no row (everything that existed before) are never held back. The runner (`s
   `packageManager` or the lock file; the Node major from `.nvmrc`, `.node-version`, `.tool-versions` or `engines`), Python
   (`pyproject.toml`, `requirements*.txt`, `Pipfile`; venv, uv, poetry, pipenv), Docker (`Dockerfile`, compose files: the
   CLI and a daemon the runner user may use), Go, Rust, Java (Maven, Gradle; a wrapper means no build tool is needed),
-  Ruby, PHP. Adding a stack is one object in that table plus a fixture test (`test/toolchain-detect.test.ts`);
+  Ruby, PHP, and **native Android** (Gradle with the Android plugin, or an `AndroidManifest.xml`). Adding a stack is one
+  object in that table plus a fixture test (`test/toolchain-detect.test.ts`);
 - verifies each tool with its own check (`dotnet --version`, `dotnet workload list`, `node --version`, `docker info`, ...)
   against the version the repository asks for;
 - installs what is missing **only if the manager allowed it** ("Install packages and tools"; Docker also needs "Docker"):
@@ -872,8 +911,22 @@ with no row (everything that existed before) are never held back. The runner (`s
   `npm -g`). Administrator rights come from root, passwordless sudo or the stored sudo password and need "Elevated privileges
   (sudo)" ticked; an installer that needs root is not used without it, and a user-level installer is preferred then.
   Otherwise the report says `needs_access` with what to tick and the manual command;
+- **installs the Android SDK** (D6) for MAUI projects that target Android and for native Android projects, at user level in
+  `$ANDROID_HOME` (else `~/Android/Sdk`, `~/Library/Android/sdk`, `%LOCALAPPDATA%\Android\Sdk`): the command-line tools
+  (downloaded from Google, licences accepted; needs `curl` and `unzip`, a JDK first), `platform-tools`, the platform the
+  project targets (`platforms;android-<API>`: from `net8.0-android34.0` or the .NET release default, or `compileSdk`) and
+  `build-tools;<version>` (from `buildToolsVersion`, else `<API>.0.0`). Only with "Install packages and tools" ticked;
+  native Windows gets the manual command;
+- **installs the project's dependencies** (D6), once the tools are fine and with "Install packages and tools" ticked, in
+  the repository folder and in this table-driven order per stack: Node `pnpm|yarn|npm|bun install`; Python `uv sync`,
+  `poetry install`, `pipenv install --dev`, or pip into the project's own `.venv` (`-r requirements.txt`, `-e .`; never the
+  system Python); .NET `dotnet restore` (the solution at the root, else the project); Go `go mod download`; Rust
+  `cargo fetch`; Maven `mvn dependency:resolve` (or `./mvnw`); Ruby `bundle install`; PHP `composer install`. A step waits
+  for its tools. A failing install makes the verdict `failed` (log tail and the command to run by hand in the report);
+  without the install right the steps are reported `skipped`. The logs are the same as for the tools;
 - reports per tool `ok | installed | missing | failed | needs_access | skipped` and a verdict `ready | failed |
-  needs_access`; the last 80 log lines are in the report (Project settings, Development environment) and the full log is in
+  needs_access`; when a project's environment on a workstation becomes `needs_access` or `failed` the server puts one
+  notice on the desk (deduplicated per project and workstation; closed again when it is ready); the last 80 log lines are in the report (Project settings, Development environment) and the full log is in
   `logs/env/<project id>.log` on the workstation. Changing the DevOps access, entering the sudo password or "Check again"
   re-runs it. A tool installed at user level (`~/.dotnet`, `~/.cargo`) is found by the runner through the user bin folders it
   adds to `PATH`; agents in the sandbox read `runtimes.claude-code.toolchainPaths` (add `~/.dotnet` there).

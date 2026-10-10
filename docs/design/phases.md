@@ -889,6 +889,24 @@ Where the build differs from the text above (decisions of the task win):
 
 **Deferred**: nothing from the owner decisions. Not built: deleting branches on the remote (the `branch.check_merged` check does that for `push_branch`), hygiene for repositories no runner has reported (it needs a clone), per-repository cadence, and a web mock-API (`apps/web/src/mocks`) handler set for the new endpoints.
 
+## Implementation status (DevOps everywhere, track t2a, 2026-10-10)
+
+Owner decisions G-Q1, G-Q2, G-Q5, G-Q8, G-Q12, D3, D5, D6 built; design in `docs/design/git-free-and-devops-instructions.md` part 2, adjusted by the decisions.
+
+| Item | Built |
+|---|---|
+| G-Q1 DevOps chat unsandboxed | `claude-policy.ts` `buildDevopsChatSettings`, `claude-code.ts` `startChat` / `buildClaudeChatCommand` (real HOME for `isDevops`), `chat.ts` (`devops.request` for DevOps chats only, no read-only worktree), chat prompt in `packages/shared/src/prompt/chat.ts`; RUNNER.md |
+| Ask DevOps everywhere | web `components/devops/AskDevOps.tsx` (provider, dialog, button), header, command palette, card, desk item, Workstations; `CreateDevOpsRequest.origin/context`, `DevOpsRequested` origin/context, `migrations/1410_devops_request_context.sql`, brief renders the context |
+| G-Q5 | RUNNER.md says plainly that DevOps shifts and chats are unsandboxed and the access ticks are guidance |
+| G-Q8 | `resolveDevOpsApprovalIn` two-party (Owner/Admin + workstation user; one answer when the same person), event `DevOpsApprovalAgreed`, desk item stays open, requests visible to org managers |
+| G-Q2 | `commands/conflict-attempts.ts`, event `ConflictAttemptStarted`, cards park on the request, card note + desk notice, two attempts then `conflict_unresolved`; hygiene conflicts too; SPEC rule changed |
+| G-Q12 | builder role v2 allows `git rebase/checkout/switch`, other roles keep the deny |
+| D3 | dispatcher clause `env` gates all agent claim roles except `devops` |
+| D5 | `syncEnvironmentNotice`: `environment_attention` alert, one per project and workstation, closed when ready |
+| D6 | `toolchain/stacks.ts` `deps` per stack, `android` stack and Android SDK tools, `ensure.ts` `installDependencies` |
+
+Decisions to confirm: the DevOps engineer's own stages stay exempt from D3 (they repair the environment); a dependency install failure makes the environment `failed`; conflict attempts are counted per card (not per rebase) and the card goes through Rework after each attempt even when DevOps succeeded.
+
 ## Implementation status (accounts and email, built Oct 9, 2026)
 
 | Item | Built |

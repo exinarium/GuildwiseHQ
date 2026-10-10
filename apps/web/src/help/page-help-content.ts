@@ -757,7 +757,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'DevOps engineer panel',
-        text: 'What the DevOps engineer may do on its own (install, Docker, sudo, extra paths), Repository hygiene (how often, and Run hygiene now), Ask DevOps, and its requests.',
+        text: 'What the DevOps engineer may do on its own (install, Docker, sudo, extra paths), Repository hygiene (how often, and Run hygiene now), Ask DevOps (a quick request, or Ask DevOps in a chat that works on the machine), and its requests.',
       },
       {
         name: 'Unpair',
