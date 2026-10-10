@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BLOG_API_SCOPES, BLOG_STATUSES, SOCIAL_NETWORKS } from '../blog/constants.ts';
+import { BLOG_API_SCOPES, BLOG_STATUSES, BLOG_WRITER, SOCIAL_NETWORKS } from '../blog/constants.ts';
 import { BlogContentSchema, BlogSlugSchema } from '../blog/schema.ts';
 import { IsoTime } from './common.ts';
 
@@ -164,3 +164,78 @@ export const ConnectSocialChannelRequestSchema = z.object({
   expiresAt: z.iso.datetime().nullable().optional(),
 });
 export const SocialNetworkParamsSchema = z.object({ network: SocialNetworkSchema });
+
+// ---- the server-side blog writer (platform job; super admin only)
+export const BlogWriterPriceSchema = z.object({
+  /** US dollars per million input tokens. */
+  inputPerMTok: z.number().min(0).max(1000),
+  /** US dollars per million output tokens. */
+  outputPerMTok: z.number().min(0).max(1000),
+});
+export type BlogWriterPrice = z.infer<typeof BlogWriterPriceSchema>;
+
+export const BlogWriterRunSchema = z.object({
+  id: z.uuid(),
+  kind: z.enum(['scheduled', 'manual']),
+  status: z.enum(['running', 'ok', 'failed', 'skipped']),
+  slot: z.string().nullable(),
+  topic: z.string().nullable(),
+  model: z.string().nullable(),
+  startedAt: IsoTime,
+  finishedAt: IsoTime.nullable(),
+  inputTokens: z.number().int(),
+  outputTokens: z.number().int(),
+  searches: z.number().int(),
+  costUsd: z.number(),
+  postId: z.uuid().nullable(),
+  slug: z.string().nullable(),
+  error: z.string().nullable(),
+});
+export type BlogWriterRun = z.infer<typeof BlogWriterRunSchema>;
+
+export const BlogWriterSchema = z.object({
+  enabled: z.boolean(),
+  /** 0 = off, 1 or 2 posts a day. */
+  postsPerDay: z.number().int().min(0).max(2),
+  topics: z.array(z.string()),
+  model: z.string(),
+  models: z.array(z.string()),
+  /** Prices in use per selectable model; null when unknown (the writer refuses to run on it). */
+  prices: z.record(z.string(), BlogWriterPriceSchema.nullable()),
+  priceOverrides: z.record(z.string(), BlogWriterPriceSchema),
+  searchUsd: z.number(),
+  capUsd: z.number(),
+  spentMonthUsd: z.number(),
+  runsMonth: z.number().int(),
+  postsMonth: z.number().int(),
+  month: z.string(),
+  /** What one more run is expected to cost (used to stop before the cap is passed). */
+  estimateRunUsd: z.number(),
+  keyConfigured: z.boolean(),
+  blogEnabled: z.boolean(),
+  /** Why the writer would not run right now (null: it would). */
+  blockedReason: z.string().nullable(),
+  nextSlot: IsoTime.nullable(),
+  lastRun: BlogWriterRunSchema.nullable(),
+  runs: z.array(BlogWriterRunSchema),
+});
+export type BlogWriter = z.infer<typeof BlogWriterSchema>;
+
+export const PatchBlogWriterRequestSchema = z.object({
+  enabled: z.boolean().optional(),
+  postsPerDay: z.number().int().min(0).max(2).optional(),
+  topics: z.array(z.string().trim().min(3).max(BLOG_WRITER.topicChars)).max(BLOG_WRITER.topicsMax).optional(),
+  model: z.string().trim().min(1).max(100).optional(),
+  capUsd: z.number().min(0).max(BLOG_WRITER.maxCapUsd).optional(),
+  searchUsd: z.number().min(0).max(1).optional(),
+  /** Sets (or, with null, clears) the price override of one model. */
+  price: z
+    .object({ model: z.string().trim().min(1).max(100), value: BlogWriterPriceSchema.nullable() })
+    .optional(),
+});
+export type PatchBlogWriterRequest = z.infer<typeof PatchBlogWriterRequestSchema>;
+
+export const BlogWriterRunResultSchema = z.object({
+  run: BlogWriterRunSchema,
+  post: BlogPostSchema.nullable(),
+});

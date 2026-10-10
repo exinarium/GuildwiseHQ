@@ -4,7 +4,12 @@ import { BlogContentSchema } from '../blog/schema.ts';
 import { defineEvent, Id, IsoDate } from './define.ts';
 
 /** Who wrote a post: a platform API key, or a super admin typing in the platform UI. */
-export const BlogOriginSchema = z.object({ apiKeyId: Id.optional(), userId: Id.optional() });
+export const BlogOriginSchema = z.object({
+  apiKeyId: Id.optional(),
+  userId: Id.optional(),
+  /** A platform job (no key, no person): the server-side blog writer. */
+  system: z.literal('blog-writer').optional(),
+});
 
 const SettingsChange = z.object({
   enabled: z.boolean().optional(),
@@ -49,6 +54,8 @@ export const blogEvents = [
   defineEvent('BlogPostRejected', z.object({ postId: Id, reason: z.string().min(1).max(2000), by: Id })),
   defineEvent('BlogPostUnpublished', z.object({ postId: Id, by: Id })),
   defineEvent('BlogSettingsChanged', z.object({ change: SettingsChange, by: Id })),
+  /** The super admin changed the blog writer's settings (the values are summarised, never secrets). */
+  defineEvent('BlogWriterSettingsChanged', z.object({ change: z.record(z.string(), z.unknown()), by: Id })),
   defineEvent(
     'ApiKeyCreated',
     z.object({

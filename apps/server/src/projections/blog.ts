@@ -16,8 +16,8 @@ export const blogProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO blog_posts (id, slug, content, title, summary, tags, status, content_hash, origin_key_id,
-         origin_user_id, warnings, word_count, reading_minutes, review_since, created_at, updated_at, launch)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15,$16)
+         origin_user_id, warnings, word_count, reading_minutes, review_since, created_at, updated_at, launch, origin_system)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15,$16,$17)
        ON CONFLICT (id) DO NOTHING`,
       [
         p.postId,
@@ -36,6 +36,7 @@ export const blogProjectors: Record<string, Projector> = {
         p.status === 'in_review' ? e.createdAt : null,
         e.createdAt,
         p.launch ?? false,
+        p.origin.system ?? null,
       ],
     );
   },

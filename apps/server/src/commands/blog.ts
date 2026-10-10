@@ -237,7 +237,7 @@ export function postDto(r: Row, settings: BlogSettings, shares: BlogShare[] = []
     readingMinutes: r.reading_minutes,
     wordCount: r.word_count,
     warnings: r.warnings ?? [],
-    origin: r.key_name ?? r.user_name ?? null,
+    origin: r.key_name ?? r.user_name ?? (r.origin_system === 'blog-writer' ? 'Blog writer' : null),
     autoPublishAt,
     shares,
   };
@@ -377,7 +377,7 @@ export async function lastPublishedChange(ctx: Ctx): Promise<Date | null> {
 
 // ---- writing
 
-export type Origin = { apiKeyId?: string; userId?: string };
+export type Origin = { apiKeyId?: string; userId?: string; system?: 'blog-writer' };
 
 /** Creates a post. API submissions enter review; a super admin's own first save is a draft. */
 export async function submitPost(

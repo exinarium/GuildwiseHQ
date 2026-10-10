@@ -18,6 +18,7 @@ import { checkContentType, checkOrigin } from './auth/origin-check.ts';
 import { lookupSession, SESSION_COOKIE } from './auth/sessions.ts';
 import { createBillingRuntime } from './billing/runtime.ts';
 import { createSocialClient, type SocialClient } from './blog/social-client.ts';
+import type { WriterClient } from './blog/writer/client.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
 import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
@@ -98,6 +99,8 @@ export interface BuildOptions {
   assistantClient?: AnthropicLike | null;
   /** Facebook and LinkedIn; tests pass a fake, nothing else reaches those networks. */
   social?: SocialClient;
+  /** The blog writer's Anthropic client (tests pass a fake or nothing; default: the real SDK when a key is set). */
+  blogWriterClient?: WriterClient | null;
   clock?: Clock;
   /** Fastify logger: `false` silences it. Defaults to config.logLevel. */
   logger?: boolean;
@@ -213,6 +216,17 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     notifier,
     mailer,
     social: opts.social ?? createSocialClient(),
+    blogWriter:
+      opts.blogWriterClient !== undefined
+        ? opts.blogWriterClient
+        : config.anthropicApiKey
+          ? (new Anthropic({
+              apiKey: config.anthropicApiKey,
+              maxRetries: 1,
+              // an article with web searches takes a minute or two
+              timeout: 300_000,
+            }) as unknown as WriterClient)
+          : null,
     log: app.log,
     services: {} as Ctx['services'],
   };

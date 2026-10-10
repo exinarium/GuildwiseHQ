@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { BillingRuntime } from './billing/runtime.ts';
 import type { SocialClient } from './blog/social-client.ts';
+import type { WriterClient } from './blog/writer/client.ts';
 import type { BrowserGateway } from './browser-gateway/gateway.ts';
 import type { ChatRelay } from './chat/relay.ts';
 import type { Clock } from './clock.ts';
@@ -27,6 +28,8 @@ export interface Ctx {
   mailer: Mailer;
   /** Facebook and LinkedIn (a fake in tests; nothing else reaches those networks). */
   social: SocialClient;
+  /** The Anthropic client of the blog writer (platform key; a fake in tests, null without a key). */
+  blogWriter: WriterClient | null;
   log: FastifyBaseLogger;
   /** Late-bound long-lived services (assigned by createApp before any request is served). */
   services: Services;

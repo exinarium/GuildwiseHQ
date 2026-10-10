@@ -346,7 +346,7 @@ export const platformAuditProjectors: Record<string, Projector> = {
     const p = ev<'BlogPostSubmitted'>(e).payload;
     return {
       action: e.event.type,
-      summary: `Blog post submitted${p.origin.apiKeyId ? ' by an API key' : ''}: ${p.content.title}`,
+      summary: `Blog post submitted${p.origin.apiKeyId ? ' by an API key' : p.origin.system ? ' by the blog writer' : ''}: ${p.content.title}`,
       details: { postId: p.postId, slug: p.content.slug, origin: p.origin, warnings: p.warnings },
     };
   }),
@@ -396,6 +396,14 @@ export const platformAuditProjectors: Record<string, Projector> = {
     if (c.holdHours !== undefined) parts.push(`hold ${c.holdHours} h`);
     if (c.digestEnabled !== undefined) parts.push(`digest ${c.digestEnabled ? 'on' : 'off'}`);
     return { action: e.event.type, summary: `Blog settings: ${parts.join(', ')}`, details: { change: c } };
+  }),
+  BlogWriterSettingsChanged: always(async (_tx, e) => {
+    const p = ev<'BlogWriterSettingsChanged'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Blog writer settings: ${Object.keys(p.change).join(', ')}`,
+      details: { change: p.change },
+    };
   }),
   ApiKeyCreated: always(async (_tx, e) => {
     const p = ev<'ApiKeyCreated'>(e).payload;

@@ -5,12 +5,14 @@ import {
   EditBlogPostRequestSchema,
   IdParamsSchema,
   PatchBlogSettingsRequestSchema,
+  PatchBlogWriterRequestSchema,
   PlatformBlogQuerySchema,
   RejectBlogPostRequestSchema,
   SocialNetworkParamsSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireSuperAdmin } from '../auth/guards.ts';
+import { patchWriter, writeNow, writerState } from '../blog/writer/index.ts';
 import {
   blogSettings,
   getPost,
@@ -119,6 +121,26 @@ export function blogPlatformRoutes(ctx: Ctx) {
       if (p.status !== 'published') throw badRequest('not_published', 'only a published post can be shared');
       await requestShares(ctx, p.id, ['facebook', 'linkedin']);
       return getPost(ctx, 'id', p.id);
+    });
+
+    // ---- the server-side writer (platform job)
+    app.get('/api/platform/blog/writer', async (req) => {
+      await requireSuperAdmin(ctx, req);
+      return writerState(ctx, ctx.blogWriter);
+    });
+    app.patch(
+      '/api/platform/blog/writer',
+      { schema: { body: PatchBlogWriterRequestSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        await patchWriter(ctx, s.user, req.body);
+        return writerState(ctx, ctx.blogWriter);
+      },
+    );
+    /** "Write one now": waits for the run (a minute or two) and answers with the run and the queued post. */
+    app.post('/api/platform/blog/writer/run', async (req) => {
+      await requireSuperAdmin(ctx, req);
+      return writeNow(ctx, ctx.blogWriter);
     });
 
     // ---- digests

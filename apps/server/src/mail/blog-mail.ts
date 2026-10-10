@@ -73,3 +73,19 @@ export function socialAlertMail(opts: {
     cta: { label: 'Open the social settings', url: `${opts.origin}/platform/blog` },
   });
 }
+
+/** The blog writer stopped for the month: its spend plus one more run would pass the monthly cap. */
+export function writerCapMail(opts: { to: string; reason: string; origin: string }): MailMessage {
+  return brandedMail({
+    to: opts.to,
+    subject: 'The blog writer reached its monthly cap',
+    preheader: 'No more articles are written until next month or until you raise the cap',
+    heading: 'The blog writer reached its monthly cap',
+    origin: opts.origin,
+    body: [
+      'The blog writer skipped a scheduled article because it would pass its monthly spending cap. It writes nothing more this month unless you raise the cap. You get this notice once a month.',
+      { facts: [['Why', opts.reason]] },
+    ],
+    cta: { label: 'Open the blog writer', url: `${opts.origin}/platform/blog` },
+  });
+}

@@ -5,6 +5,7 @@ import type { AnthropicLike } from '../../src/assistant/service.ts';
 import { hashPassword } from '../../src/auth/password.ts';
 import { encryptSecret } from '../../src/auth/secrets.ts';
 import { generateTotpSecret, totpCode, totpStep } from '../../src/auth/totp.ts';
+import type { WriterClient } from '../../src/blog/writer/client.ts';
 import { registerBuiltins } from '../../src/catalogue/boot.ts';
 import { createClock } from '../../src/clock.ts';
 import { loadConfig } from '../../src/config.ts';
@@ -64,6 +65,8 @@ export async function createTestApp(
     listen?: boolean;
     /** The landing-page assistant's Anthropic client (a fake; the real API is never called in tests). */
     assistantClient?: AnthropicLike | null;
+    /** The blog writer's Anthropic client (a fake; the real API is never called in tests). */
+    blogWriterClient?: WriterClient | null;
   } = {},
 ): Promise<TestApp> {
   if (opts.reset !== false) await resetDb();
@@ -74,6 +77,7 @@ export async function createTestApp(
     logger: process.env.TEST_LOG ? true : false,
     background: false,
     assistantClient: opts.assistantClient ?? null,
+    blogWriterClient: opts.blogWriterClient ?? null,
   });
   if (opts.builtins !== false) await registerBuiltins(app.ctx);
   if (opts.listen) await app.listen({ port: 0, host: '127.0.0.1' });

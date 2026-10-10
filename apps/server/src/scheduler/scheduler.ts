@@ -1,4 +1,5 @@
 import { type BillingTickResult, billingTick } from '../billing/engine.ts';
+import { blogWriterTick } from '../blog/writer/index.ts';
 import { cloudTick } from '../cloud/tick.ts';
 import { autoPublishDue } from '../commands/blog.ts';
 import { blogDigestTick } from '../commands/blog-digest.ts';
@@ -29,6 +30,8 @@ export class Scheduler {
   private stopped = false;
   private kicked: NodeJS.Timeout | null = null;
   private unsubscribe: (() => void) | null = null;
+  /** The writer's run in flight: it takes minutes and must never hold up the schedules, so it is not on the chain. */
+  private writer: Promise<unknown> | null = null;
 
   constructor(private readonly ctx: Ctx) {}
 
@@ -116,6 +119,20 @@ export class Scheduler {
     await autoPublishDue(this.ctx).catch((err) => this.ctx.log.error({ err }, 'blog auto-publish failed'));
     await socialTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'blog social sharing failed'));
     await blogDigestTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'blog digest failed'));
+    this.runWriter();
+  }
+
+  /** Starts the server-side blog writer when a slot is due; one at a time, outside the chain. Resolves when it is done (tests). */
+  runWriter(): Promise<unknown> {
+    if (this.stopped) return Promise.resolve();
+    if (!this.writer) {
+      this.writer = blogWriterTick(this.ctx, this.ctx.blogWriter)
+        .catch((err) => this.ctx.log.error({ err }, 'blog writer failed'))
+        .finally(() => {
+          this.writer = null;
+        });
+    }
+    return this.writer;
   }
 
   /** The interests' run schedules, then their delivery schedules (digests to the desk within the quiet cap). */
@@ -151,5 +168,6 @@ export class Scheduler {
     if (this.kicked) clearTimeout(this.kicked);
     this.unsubscribe?.();
     await this.chain.catch(() => {});
+    await this.writer?.catch(() => {});
   }
 }

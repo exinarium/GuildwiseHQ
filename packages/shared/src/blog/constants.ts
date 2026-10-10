@@ -40,3 +40,33 @@ export const BLOG_LIMITS = {
 
 export const SOCIAL_NETWORKS = ['facebook', 'linkedin'] as const;
 export type SocialNetwork = (typeof SOCIAL_NETWORKS)[number];
+
+/** The server-side blog writer (docs/design/open-questions-2026-10-09.md, "Blog writer"). */
+export const BLOG_WRITER = {
+  /** Selectable models. Only the first has built-in prices; any other needs a price set by the super admin. */
+  models: ['claude-haiku-4-5', 'claude-haiku-5-5'] as const,
+  defaultModel: 'claude-haiku-4-5',
+  defaultCapUsd: 10,
+  maxCapUsd: 1000,
+  /** US dollars per search of Anthropic's web search tool ($10 per 1,000 searches), editable. */
+  defaultSearchUsd: 0.01,
+  maxSearches: 5,
+  topicsMax: 40,
+  topicChars: 200,
+  /** Slots (hour, UTC) of one or two posts a day: 08:00 and 15:00 Africa/Johannesburg (UTC+2, no daylight saving). */
+  slotHoursUtc: { 1: [6], 2: [6, 13] } as Record<number, number[]>,
+} as const;
+export type BlogWriterModel = (typeof BLOG_WRITER.models)[number];
+
+export const DEFAULT_WRITER_TOPICS: readonly string[] = [
+  'How to give an AI agent a narrow job and a clear definition of done',
+  'Reviewing AI agent output without slowing the team down',
+  'Where AI automation helps a small business and where it does not',
+  'Keeping a human in charge of a team of AI agents: approvals, budgets and kill switches',
+  'What AI agents cost to run and how to keep the bill predictable',
+  'Testing and evaluating AI agents before you trust them with real work',
+  'Securing AI agents: secrets, permissions and prompt injection',
+  'Automating routine operations with AI: reporting, triage and follow-ups',
+  'Choosing between one general AI agent and several specialised ones',
+  'Recent developments in AI agent tooling and what they mean for small teams',
+];
