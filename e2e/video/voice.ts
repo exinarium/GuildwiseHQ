@@ -11,7 +11,7 @@ import type { Cue } from './narration.ts';
  * `AOM_VIDEO_HOME` (default ~/.cache/aom-video). Audio is cached by text, so unchanged cues are not spoken again.
  */
 export const VIDEO_HOME = process.env.AOM_VIDEO_HOME ?? join(homedir(), '.cache/aom-video');
-export const VOICE = process.env.AOM_VIDEO_VOICE ?? 'en_GB-jenny_dioco-medium';
+export const VOICE = process.env.AOM_VIDEO_VOICE ?? 'en_GB-cori-high';
 const PIPER = process.env.AOM_PIPER ?? join(VIDEO_HOME, 'venv/bin/piper');
 const MODEL = join(VIDEO_HOME, 'voices', `${VOICE}.onnx`);
 const LENGTH_SCALE = process.env.AOM_VIDEO_LENGTH_SCALE ?? '1.08'; // a touch slower than default: easier to follow
