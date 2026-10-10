@@ -69,6 +69,25 @@ describe('chat on the runner (mock adapter)', () => {
     expect(h.runner.chat.size).toBe(0);
   });
 
+  it('answers from the recording-only replies file when AOM_MOCK_REPLIES_FILE is set', async () => {
+    const file = join(tmp('replies'), 'replies.json');
+    writeFileSync(file, JSON.stringify({ 'Say Hi': 'Hello from {name}.' }));
+    process.env.AOM_MOCK_REPLIES_FILE = file;
+    try {
+      h = await startHarness();
+      const known = chatStart(' say hi ');
+      h.server.send('chat.start', known);
+      const d1 = await h.server.waitFor('chat.done', (d) => d.chatId === known.chatId);
+      expect(d1.messageText).toBe('Hello from Ada.');
+      const other = chatStart('something else');
+      h.server.send('chat.start', other);
+      const d2 = await h.server.waitFor('chat.done', (d) => d.chatId === other.chatId);
+      expect(d2.messageText).toBe('[mock] Ada heard: something else (turn 1)');
+    } finally {
+      delete process.env.AOM_MOCK_REPLIES_FILE;
+    }
+  });
+
   it('resumes the session: the echo counts turns', async () => {
     h = await startHarness();
     const first = chatStart('one');

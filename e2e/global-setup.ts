@@ -165,9 +165,11 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       '--email',
       ADMIN.email,
       '--name',
-      ADMIN.name,
+      process.env.AOM_E2E_ADMIN_NAME ?? ADMIN.name,
       '--password',
       ADMIN.password,
+      // the getting-started video renames the demo organization ("Acme")
+      ...(process.env.AOM_E2E_ADMIN_ORG ? ['--org', process.env.AOM_E2E_ADMIN_ORG] : []),
     ],
     {
       cwd: ROOT,

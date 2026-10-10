@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Usage } from '@aom/shared';
@@ -60,7 +61,9 @@ export class MockAdapter implements RuntimeAdapter {
     const prior = /-(\d+)$/.exec(input.resumeSessionId ?? '');
     const turn = (prior ? Number(prior[1]) : 0) + 1;
     const sessionId = `mock-${input.agent.agentId}-${turn}`;
-    const reply = `[mock] ${input.agent.name} heard: ${input.message} (turn ${turn})`;
+    const reply =
+      scriptedReply(input.message, input.agent.name) ??
+      `[mock] ${input.agent.name} heard: ${input.message} (turn ${turn})`;
     const tokenMs = Number(process.env.AOM_MOCK_CHAT_TOKEN_MS ?? 40);
     const usage: Usage = {
       inputTokens: input.message.length,
@@ -188,4 +191,23 @@ export class MockAdapter implements RuntimeAdapter {
       },
     });
   }
+}
+
+/**
+ * Recording only: `AOM_MOCK_REPLIES_FILE` names a JSON map `{ "<message>": "<reply>" }` (matched ignoring case and
+ * surrounding space; `{name}` in a reply becomes the agent's name). It lets the getting-started video show a real-looking
+ * answer. Unset (always, outside the video recording), nothing changes.
+ */
+function scriptedReply(message: string, agentName: string): string | null {
+  const file = process.env.AOM_MOCK_REPLIES_FILE;
+  if (!file) return null;
+  try {
+    const map = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>;
+    const key = message.trim().toLowerCase();
+    for (const [k, v] of Object.entries(map))
+      if (k.trim().toLowerCase() === key) return v.replaceAll('{name}', agentName);
+  } catch {
+    /* an unreadable map is ignored */
+  }
+  return null;
 }
