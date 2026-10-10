@@ -40,7 +40,7 @@ const EnvSchema = z.object({
   /** Kill switch of the assistant: `off` or `public` (landing page). Unset: `public` when a key is set, else `off`. */
   AOM_ASSISTANT: z.preprocess((v) => (v === '' ? undefined : v), z.enum(['off', 'public']).optional()),
   /** Spend ceiling per UTC day for the public assistant, in US dollars. */
-  AOM_ASSISTANT_PUBLIC_DAILY_USD: z.coerce.number().min(0).max(10_000).default(10),
+  AOM_ASSISTANT_PUBLIC_DAILY_USD: z.coerce.number().min(0).max(10_000).default(2),
   /** Model of the public assistant. */
   AOM_ASSISTANT_MODEL_PUBLIC: z.string().min(1).default('claude-haiku-4-5'),
   /** Weekly blog digest mail (Monday 08:00 Africa/Johannesburg). Switch off with AOM_BLOG_DIGEST=false (the platform setting can also stop it). */

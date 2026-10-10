@@ -46,12 +46,21 @@ export const PlatformAssistantSchema = z.object({
   mode: z.enum(['off', 'public']),
   keyConfigured: z.boolean(),
   model: z.string(),
+  /** The cap in force: the super admin's setting, or the server default when none is set. */
   dailyCapUsd: z.number(),
+  /** The server's initial default (`AOM_ASSISTANT_PUBLIC_DAILY_USD`, $2). */
+  defaultCapUsd: z.number().optional(),
+  /** The cap was set by the super admin (not the default). */
+  capOverridden: z.boolean().optional(),
   spentTodayUsd: z.number(),
   messagesToday: z.number().int(),
   /** The assistant answers visitors right now. */
   live: z.boolean(),
 });
 export type PlatformAssistant = z.infer<typeof PlatformAssistantSchema>;
-export const UpdatePlatformAssistantRequestSchema = z.object({ enabled: z.boolean() });
+/** Either field may be sent. `dailyCapUsd: null` goes back to the server default. */
+export const UpdatePlatformAssistantRequestSchema = z.object({
+  enabled: z.boolean().optional(),
+  dailyCapUsd: z.number().min(0).max(10_000).nullable().optional(),
+});
 export type UpdatePlatformAssistantRequest = z.infer<typeof UpdatePlatformAssistantRequestSchema>;

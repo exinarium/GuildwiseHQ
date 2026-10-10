@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AnthropicLike } from '../src/assistant/service.ts';
-import { createTestApp, type TestApp } from './helpers/app.ts';
+import { createTestApp, type TestApp, uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 
 /** A scripted stand-in for the Anthropic SDK: records the request and streams the raw events the SDK would. */
@@ -219,6 +219,40 @@ describe('limits', () => {
       messagesToday: 1,
       live: false,
     });
+  });
+
+  it('defaults to $2 a day; the super admin overrides it and can go back to the default', async () => {
+    await boot();
+    const admin = await t.superAdminSession();
+    const get = async () => (await t.req('GET', '/api/platform/assistant', { cookie: admin.cookie })).body;
+    expect(await get()).toMatchObject({ dailyCapUsd: 2, defaultCapUsd: 2, capOverridden: false });
+    const put = (body: unknown, cookie = admin.cookie) =>
+      t.req('PUT', '/api/platform/assistant', { cookie, body });
+    expect((await put({ dailyCapUsd: 0.01 })).body).toMatchObject({ dailyCapUsd: 0.01, capOverridden: true });
+    // the override beats the environment: one answer spends more than $0.01, then the chat is busy
+    expect((await ask({ messages: [user('hi')] })).statusCode).toBe(200);
+    expect((await t.req('GET', '/api/public/assistant/status')).body).toEqual({
+      available: false,
+      reason: 'busy',
+    });
+    expect((await put({ dailyCapUsd: 5 })).body).toMatchObject({ dailyCapUsd: 5, live: true });
+    expect((await put({ enabled: false })).body).toMatchObject({ enabled: false, dailyCapUsd: 5 });
+    expect((await put({ dailyCapUsd: null })).body).toMatchObject({ dailyCapUsd: 2, capOverridden: false });
+    expect((await put({ dailyCapUsd: -1 })).status).toBe(400);
+  });
+
+  it('only the super admin can change the daily cap', async () => {
+    await boot();
+    const user1 = await t.userSession(uniqueEmail('plain'));
+    const r = await t.req('PUT', '/api/platform/assistant', {
+      cookie: user1.cookie,
+      body: { dailyCapUsd: 99 },
+    });
+    expect([403, 404]).toContain(r.status);
+    const admin = await t.superAdminSession();
+    expect((await t.req('GET', '/api/platform/assistant', { cookie: admin.cookie })).body.dailyCapUsd).toBe(
+      2,
+    );
   });
 
   it('asks for a proof of work from the sixth message, and each solution works once', async () => {

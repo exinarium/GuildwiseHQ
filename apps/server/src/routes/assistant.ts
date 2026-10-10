@@ -15,6 +15,7 @@ import {
   availability,
   platformAssistant,
   setAdminEnabled,
+  setDailyCapUsd,
 } from '../assistant/service.ts';
 import { requireSuperAdmin } from '../auth/guards.ts';
 import type { Ctx } from '../context.ts';
@@ -94,7 +95,8 @@ export function assistantRoutes(ctx: Ctx, client: AnthropicLike | null) {
       { schema: { body: UpdatePlatformAssistantRequestSchema } },
       async (req) => {
         const s = await requireSuperAdmin(ctx, req);
-        await setAdminEnabled(ctx, s.user.id, req.body.enabled);
+        if (req.body.enabled !== undefined) await setAdminEnabled(ctx, s.user.id, req.body.enabled);
+        if (req.body.dailyCapUsd !== undefined) await setDailyCapUsd(ctx, s.user.id, req.body.dailyCapUsd);
         return PlatformAssistantSchema.parse(await platformAssistant(ctx, client));
       },
     );

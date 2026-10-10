@@ -13,10 +13,12 @@ import {
   checkPow,
   costMicros,
   countMessage,
+  dailyCapUsd,
   ipHash,
   LIMITS,
   messagesToday,
   POW_AFTER,
+  setDailyCapUsd,
   spentTodayMicros,
   visitorCounts,
 } from './limits.ts';
@@ -53,6 +55,8 @@ export async function setAdminEnabled(ctx: Ctx, by: string, enabled: boolean): P
   );
 }
 
+export { setDailyCapUsd };
+
 export type Availability = { available: true } | { available: false; reason: 'off' | 'busy' };
 
 /** The kill switch (environment), the super admin's switch, and the day's spend cap, in that order. */
@@ -65,12 +69,15 @@ export async function availability(ctx: Ctx, client: AnthropicLike | null): Prom
 
 export async function platformAssistant(ctx: Ctx, client: AnthropicLike | null): Promise<PlatformAssistant> {
   const a = await availability(ctx, client);
+  const cap = await dailyCapUsd(ctx);
   return {
     enabled: await adminEnabled(ctx),
     mode: ctx.config.assistantMode,
     keyConfigured: !!ctx.config.anthropicApiKey,
     model: ctx.config.assistantModelPublic,
-    dailyCapUsd: ctx.config.assistantPublicDailyUsd,
+    dailyCapUsd: cap.usd,
+    defaultCapUsd: ctx.config.assistantPublicDailyUsd,
+    capOverridden: cap.overridden,
     spentTodayUsd: (await spentTodayMicros(ctx)) / 1_000_000,
     messagesToday: await messagesToday(ctx),
     live: a.available,

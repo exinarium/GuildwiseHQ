@@ -1337,7 +1337,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Landing-page assistant',
-        text: 'Turn the "Ask Guildwise" chat on the public landing page on or off, and see today\'s messages and spend against the daily budget.',
+        text: 'Turn the "Ask Guildwise" chat on the public landing page on or off, see today\'s messages and spend against the daily budget, and change the daily budget (US$2 by default).',
       },
       {
         name: 'Status chips',

@@ -1,12 +1,14 @@
 import { Bot } from 'lucide-react';
+import { useState } from 'react';
 import { usePlatformAssistant, useSetPlatformAssistant } from '../../api/queries/assistant.ts';
-import { Badge, Button, ErrorBox, Panel } from '../ui.tsx';
+import { Badge, Button, ErrorBox, Panel, TextInput } from '../ui.tsx';
 
 /** The super admin's switch for the landing-page assistant ("Ask Guildwise"), with today's spend against the cap. */
 export function AssistantPanel() {
   const q = usePlatformAssistant();
   const set = useSetPlatformAssistant();
   const a = q.data;
+  const [draft, setDraft] = useState<string | null>(null);
   if (!a || typeof a.live !== 'boolean') return null;
   const why =
     a.mode === 'off'
@@ -51,6 +53,45 @@ export function AssistantPanel() {
             {a.enabled ? 'Turn off' : 'Turn on'}
           </Button>
         </div>
+        <form
+          aria-label="Daily budget"
+          className="mt-3 flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const n = Number(draft);
+            if (draft !== null && draft.trim() !== '' && Number.isFinite(n) && n >= 0)
+              set.mutate({ dailyCapUsd: n }, { onSuccess: () => setDraft(null) });
+          }}
+        >
+          <div className="w-44">
+            <TextInput
+              label="Daily budget (US$)"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="0.5"
+              value={draft ?? String(a.dailyCapUsd)}
+              onChange={(e) => setDraft(e.target.value)}
+              data-testid="assistant-cap-input"
+            />
+          </div>
+          <Button type="submit" variant="primary" loading={set.isPending} data-testid="assistant-cap-save">
+            Save budget
+          </Button>
+          {a.capOverridden && (
+            <Button
+              type="button"
+              data-testid="assistant-cap-reset"
+              onClick={() => set.mutate({ dailyCapUsd: null }, { onSuccess: () => setDraft(null) })}
+            >
+              Use the default (${(a.defaultCapUsd ?? 2).toFixed(2)})
+            </Button>
+          )}
+        </form>
+        <p className="mt-1 text-xs text-subtle">
+          The most the assistant may spend per day (UTC). Once it is reached, the chat says it is busy until
+          tomorrow.
+        </p>
         <ErrorBox error={set.error} />
       </Panel>
     </div>

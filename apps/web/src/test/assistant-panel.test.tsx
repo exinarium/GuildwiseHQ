@@ -16,7 +16,9 @@ beforeEach(() => {
     mode: 'public',
     keyConfigured: true,
     model: 'claude-haiku-4-5',
-    dailyCapUsd: 10,
+    dailyCapUsd: 2,
+    defaultCapUsd: 2,
+    capOverridden: false,
     spentTodayUsd: 1.234,
     messagesToday: 42,
     live: true,
@@ -27,7 +29,13 @@ beforeEach(() => {
       if (init.method === 'PUT') {
         const body = JSON.parse(String(init.body));
         puts.push(body);
-        state = { ...state, enabled: body.enabled, live: body.enabled };
+        if (body.enabled !== undefined) state = { ...state, enabled: body.enabled, live: body.enabled };
+        if (body.dailyCapUsd !== undefined)
+          state = {
+            ...state,
+            dailyCapUsd: body.dailyCapUsd ?? 2,
+            capOverridden: body.dailyCapUsd !== null,
+          };
       }
       return json(state);
     }),
@@ -53,6 +61,19 @@ describe('the landing-page assistant panel (super admin)', () => {
     expect(puts).toEqual([{ enabled: false }]);
     await userEvent.click(screen.getByTestId('assistant-toggle'));
     await waitFor(() => expect(screen.getByText('Answering visitors')).toBeInTheDocument());
+  });
+
+  it('changes the daily budget and goes back to the default', async () => {
+    mount();
+    const input = await screen.findByTestId('assistant-cap-input');
+    expect(input).toHaveValue(2);
+    expect(screen.queryByTestId('assistant-cap-reset')).not.toBeInTheDocument();
+    await userEvent.clear(input);
+    await userEvent.type(input, '5');
+    await userEvent.click(screen.getByTestId('assistant-cap-save'));
+    await waitFor(() => expect(puts).toEqual([{ dailyCapUsd: 5 }]));
+    await userEvent.click(await screen.findByTestId('assistant-cap-reset'));
+    await waitFor(() => expect(puts).toEqual([{ dailyCapUsd: 5 }, { dailyCapUsd: null }]));
   });
 
   it('says why it is off when the server has no key', async () => {

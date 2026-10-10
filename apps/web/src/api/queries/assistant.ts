@@ -12,7 +12,12 @@ export function usePlatformAssistant() {
 export function useSetPlatformAssistant() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (enabled: boolean) => put('/platform/assistant', { enabled }, PlatformAssistantSchema),
+    mutationFn: (body: boolean | { enabled?: boolean; dailyCapUsd?: number | null }) =>
+      put(
+        '/platform/assistant',
+        typeof body === 'boolean' ? { enabled: body } : body,
+        PlatformAssistantSchema,
+      ),
     onSuccess: (a) => qc.setQueryData(key, a),
   });
 }

@@ -84,8 +84,34 @@ export async function messagesToday(ctx: Ctx): Promise<number> {
 export async function addSpend(ctx: Ctx, micros: number): Promise<void> {
   if (micros > 0) await bump(ctx, 'spend', dayBucket(ctx.clock.now()), micros);
 }
+
+const CAP_KEY = 'assistant_daily_cap_usd';
+
+/** The daily spend cap in US dollars: the super admin's setting if there is one, else the server's initial default ($2). */
+export async function dailyCapUsd(ctx: Ctx): Promise<{ usd: number; overridden: boolean }> {
+  const r = await one<{ value: unknown }>(ctx.pool, 'SELECT value FROM platform_settings WHERE key=$1', [
+    CAP_KEY,
+  ]);
+  if (typeof r?.value === 'number' && r.value >= 0) return { usd: r.value, overridden: true };
+  return { usd: ctx.config.assistantPublicDailyUsd, overridden: false };
+}
+
+/** Sets the daily cap (super admin); null goes back to the server default. */
+export async function setDailyCapUsd(ctx: Ctx, by: string, usd: number | null): Promise<void> {
+  if (usd === null) {
+    await exec(ctx.pool, 'DELETE FROM platform_settings WHERE key=$1', [CAP_KEY]);
+    return;
+  }
+  await exec(
+    ctx.pool,
+    `INSERT INTO platform_settings (key, value, updated_by, updated_at) VALUES ($1, $2::jsonb, $3, $4)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at`,
+    [CAP_KEY, JSON.stringify(usd), by, ctx.clock.now()],
+  );
+}
+
 export const capReached = async (ctx: Ctx): Promise<boolean> =>
-  (await spentTodayMicros(ctx)) >= ctx.config.assistantPublicDailyUsd * 1_000_000;
+  (await spentTodayMicros(ctx)) >= (await dailyCapUsd(ctx)).usd * 1_000_000;
 
 // ------------------------------------------------------------------------------------------ proof of work
 
