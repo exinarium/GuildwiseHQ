@@ -458,6 +458,7 @@ Exit codes:
 
 - Sends heartbeat every 15 seconds
 - Reconnects with full-jitter backoff on disconnect (1 s → 30 s)
+- Gives up on a connection attempt that has not finished the handshake in 15 s, on a socket that gets no `welcome` within 30 s of opening, and on a ready socket that has received nothing (frames, acks or ws pongs; the runner pings every heartbeat) for three heartbeat intervals; each case goes through the normal backoff retry
 - Resends outbox (pending messages) on each reconnect
 
 Shift state is persisted in `active-shifts/` and resumed when the runner restarts, so killing and restarting within the one-hour lease keeps the card claim.

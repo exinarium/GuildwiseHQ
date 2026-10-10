@@ -39,6 +39,13 @@ export function toWsUrl(serverUrl: string): string {
   return u.toString();
 }
 
+/** Opening handshake (TCP + TLS + HTTP upgrade) must finish within this, else the attempt fails and is retried. */
+export const HANDSHAKE_TIMEOUT_MS = 15_000;
+/** After `open`, the server must send `welcome` within this, else the socket is terminated and retried. */
+export const WELCOME_TIMEOUT_MS = 30_000;
+/** A ready connection is dead when nothing was received for this many heartbeat intervals. */
+export const LIVENESS_HEARTBEATS = 3;
+
 export interface ClientOptions {
   url: string;
   token: string;
@@ -49,6 +56,11 @@ export interface ClientOptions {
   log?: Logger;
   backoff?: BackoffOptions;
   random?: () => number;
+  /** Overrides for tests; defaults are the constants above. */
+  handshakeTimeoutMs?: number;
+  welcomeTimeoutMs?: number;
+  /** Silence after which a ready connection is declared dead (default 3 x heartbeat interval). */
+  livenessMs?: number;
 }
 
 export interface ClientEvents {
@@ -76,6 +88,9 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
   private connectedAt = 0;
   private retryTimer: NodeJS.Timeout | null = null;
   private hbTimer: NodeJS.Timeout | null = null;
+  private welcomeTimer: NodeJS.Timeout | null = null;
+  private livenessTimer: NodeJS.Timeout | null = null;
+  private lastRx = 0;
   private readonly log: Logger;
   private readonly backoff: BackoffOptions;
   private readonly random: () => number;
@@ -101,6 +116,7 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.clearHeartbeat();
+    this.clearWelcomeTimer();
     this.ready = false;
     const ws = this.ws;
     this.ws = null;
@@ -144,13 +160,31 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
     if (this.stopped) return;
     const ws = new WebSocket(this.opts.url, RUNNER_SUBPROTOCOL, {
       headers: { Authorization: `Bearer ${this.opts.token}` },
+      handshakeTimeout: this.opts.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS,
     });
     this.ws = ws;
     ws.on('open', () => {
       this.connectedAt = Date.now();
+      this.lastRx = Date.now();
+      this.clearWelcomeTimer();
+      this.welcomeTimer = setTimeout(() => {
+        if (ws !== this.ws || this.ready) return;
+        this.log.warn('no welcome from the server in time; dropping the connection');
+        ws.terminate();
+      }, this.opts.welcomeTimeoutMs ?? WELCOME_TIMEOUT_MS);
+      this.welcomeTimer.unref?.();
       void this.sendHello(ws);
     });
-    ws.on('message', (data) => this.onFrame(ws, data.toString()));
+    ws.on('message', (data) => {
+      if (ws === this.ws) this.lastRx = Date.now();
+      this.onFrame(ws, data.toString());
+    });
+    ws.on('pong', () => {
+      if (ws === this.ws) this.lastRx = Date.now();
+    });
+    ws.on('ping', () => {
+      if (ws === this.ws) this.lastRx = Date.now();
+    });
     ws.on('unexpected-response', (_req, res) => {
       if (res.statusCode === 401 || res.statusCode === 403) {
         this.stopped = true;
@@ -206,10 +240,30 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
     for (const entry of this.opts.outbox.list()) this.raw(entry.frame);
     this.raw(makeEnvelope('outbox.flushed', {}));
     this.ready = true;
+    this.clearWelcomeTimer();
     this.clearHeartbeat();
     const sec = msg.heartbeatSec || HEARTBEAT_SEC;
-    this.hbTimer = setInterval(() => this.send('heartbeat', this.opts.buildHeartbeat()), sec * 1000);
+    this.lastRx = Date.now();
+    this.hbTimer = setInterval(() => {
+      this.send('heartbeat', this.opts.buildHeartbeat());
+      try {
+        if (ws.readyState === WebSocket.OPEN) ws.ping();
+      } catch {
+        // socket going away; close handling retries
+      }
+    }, sec * 1000);
     this.hbTimer.unref?.();
+    // Half-open detection: any frame, ack or pong counts as proof of life.
+    const livenessMs = this.opts.livenessMs ?? LIVENESS_HEARTBEATS * sec * 1000;
+    this.livenessTimer = setInterval(
+      () => {
+        if (ws !== this.ws || Date.now() - this.lastRx < livenessMs) return;
+        this.log.warn(`nothing received from the server for ${livenessMs} ms; dropping the connection`);
+        ws.terminate();
+      },
+      Math.max(10, Math.min(sec * 1000, Math.floor(livenessMs / 3))),
+    );
+    this.livenessTimer.unref?.();
     this.emit('welcome', msg);
     this.emit('connected');
   }
@@ -217,6 +271,13 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
   private clearHeartbeat(): void {
     if (this.hbTimer) clearInterval(this.hbTimer);
     this.hbTimer = null;
+    if (this.livenessTimer) clearInterval(this.livenessTimer);
+    this.livenessTimer = null;
+  }
+
+  private clearWelcomeTimer(): void {
+    if (this.welcomeTimer) clearTimeout(this.welcomeTimer);
+    this.welcomeTimer = null;
   }
 
   private onClose(ws: WebSocket, code: number, reason = ''): void {
@@ -225,6 +286,7 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
     const wasReady = this.ready;
     this.ready = false;
     this.clearHeartbeat();
+    this.clearWelcomeTimer();
     if (wasReady) this.emit('disconnected', code);
     if (this.stopped) return;
     if (code === WS_CLOSE.unauthorized || code === WS_CLOSE.forbidden || code === WS_CLOSE.superseded) {
@@ -242,6 +304,7 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
     this.connectedAt = 0;
     const delay = backoffDelay(this.attempt++, this.backoff, this.random);
     this.log.info(`disconnected (code ${code}); reconnecting in ${delay} ms`);
+    if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = setTimeout(() => this.connect(), delay);
   }
 }

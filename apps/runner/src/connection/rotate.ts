@@ -14,6 +14,7 @@ export function requestRotatedToken(opts: {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(opts.url, RUNNER_SUBPROTOCOL, {
       headers: { Authorization: `Bearer ${opts.token}` },
+      handshakeTimeout: opts.timeoutMs ?? 15_000,
     });
     let settled = false;
     const done = (err: Error | null, token?: string) => {

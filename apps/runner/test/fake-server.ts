@@ -28,6 +28,10 @@ export interface FakeServerOptions {
   rpc?: (msg: RunnerToServerOf<'rpc.request'>) => { ok: boolean; result?: unknown; error?: string };
   pairCode?: string;
   /** Answer to each `worktrees.query`: the paths still in use. Unset: the query is not answered. */
+  /** Never answer `hello` (upgrade succeeds, no welcome). */
+  noWelcome?: boolean;
+  /** Accept TCP but never complete the HTTP upgrade. */
+  stallUpgrade?: boolean;
   worktreesLive?: (paths: string[]) => string[];
 }
 
@@ -41,6 +45,9 @@ export class FakeServer {
   readonly invalid: unknown[] = [];
   readonly pairRequests: RunnerPairRequest[] = [];
   connections = 0;
+  /** Upgrade requests left hanging by `stallUpgrade`. */
+  stalled = 0;
+  private stalledSockets: import('node:stream').Duplex[] = [];
   helloCount = 0;
   autoAck: boolean;
   private socket: WebSocket | null = null;
@@ -74,6 +81,11 @@ export class FakeServer {
   private async listen(): Promise<void> {
     this.http = createServer((req, res) => void this.onHttp(req, res));
     this.http.on('upgrade', (req, sock, head) => {
+      if (this.opts.stallUpgrade) {
+        this.stalled++;
+        this.stalledSockets.push(sock);
+        return;
+      }
       if (req.url !== '/api/runner/ws') return sock.destroy();
       this.wss.handleUpgrade(req, sock, head, (ws) => this.onSocket(ws, req));
     });
@@ -84,6 +96,7 @@ export class FakeServer {
   async close(): Promise<void> {
     this.socket?.terminate();
     for (const c of this.wss.clients) c.terminate();
+    for (const s of this.stalledSockets) s.destroy();
     this.http.closeAllConnections?.();
     await new Promise<void>((r) => this.http.close(() => r()));
   }
@@ -140,6 +153,7 @@ export class FakeServer {
     }
     if (msg.type === 'hello') {
       this.helloCount++;
+      if (this.opts.noWelcome) return;
       this.sendRaw(ws, 'welcome', {
         workstationId: '019e3f6a-7b1c-7a2d-8c3e-0123456789b1',
         serverTime: new Date().toISOString(),
@@ -170,6 +184,11 @@ export class FakeServer {
   send(type: ServerToRunnerType, payload: Record<string, unknown>): void {
     if (!this.socket) throw new Error('runner not connected');
     this.sendRaw(this.socket, type, payload);
+  }
+
+  /** Stops reading from the runner's socket: no pongs, no frames, no close (a half-open dead peer). */
+  goSilent(): void {
+    (this.socket as unknown as { _socket: { pause(): void } } | null)?._socket.pause();
   }
 
   /** Closes the runner's socket from the server side (simulates a network drop). */

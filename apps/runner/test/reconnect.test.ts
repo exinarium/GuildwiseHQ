@@ -3,6 +3,7 @@ import { UNPAIRED_CLOSE_REASON, WS_CLOSE } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import {
   backoffDelay,
+  type ClientOptions,
   DEFAULT_BACKOFF,
   RunnerClient,
   toWsUrl,
@@ -34,8 +35,14 @@ describe('backoff', () => {
   });
 });
 
-const newClient = (server: FakeServer, outbox: Outbox, token = server.token) =>
+const newClient = (
+  server: FakeServer,
+  outbox: Outbox,
+  token = server.token,
+  extra: Partial<ClientOptions> = {},
+) =>
   new RunnerClient({
+    ...extra,
     url: toWsUrl(server.url),
     token,
     outbox,
@@ -115,6 +122,62 @@ describe('connection', () => {
     await waitUntil(() => new Outbox(dir).count() === 0, 5000, 'outbox emptied');
     await c2.stop();
     await server.close();
+  });
+
+  it('retries when the opening handshake stalls (server accepts TCP, never upgrades)', async () => {
+    const server = await FakeServer.start({ stallUpgrade: true });
+    const client = newClient(server, new Outbox(join(tmp(), 'o')), server.token, { handshakeTimeoutMs: 150 });
+    client.start();
+    try {
+      await waitUntil(() => server.stalled >= 3, 5000, 'repeated attempts after handshake timeout');
+    } finally {
+      await client.stop();
+      await server.close();
+    }
+  });
+
+  it('terminates and retries when the server upgrades but never sends welcome', async () => {
+    const server = await FakeServer.start({ noWelcome: true });
+    const client = newClient(server, new Outbox(join(tmp(), 'o')), server.token, { welcomeTimeoutMs: 150 });
+    client.start();
+    try {
+      await waitUntil(() => server.connections >= 3, 5000, 'repeated attempts after welcome timeout');
+      expect(client.isReady).toBe(false);
+    } finally {
+      await client.stop();
+      await server.close();
+    }
+  });
+
+  it('terminates and retries when a ready connection goes silent', async () => {
+    const server = await FakeServer.start({ heartbeatSec: 1 });
+    const client = newClient(server, new Outbox(join(tmp(), 'o')), server.token, { livenessMs: 400 });
+    client.start();
+    try {
+      await waitUntil(() => client.isReady, 5000, 'ready');
+      const dropped = new Promise<number>((resolve) => client.once('disconnected', resolve));
+      server.goSilent();
+      await dropped;
+      await waitUntil(() => server.connections >= 2, 5000, 'reconnect after silence');
+    } finally {
+      await client.stop();
+      await server.close();
+    }
+  });
+
+  it('a healthy ready connection is not dropped by the liveness check', async () => {
+    const server = await FakeServer.start({ heartbeatSec: 1 });
+    const client = newClient(server, new Outbox(join(tmp(), 'o')), server.token, { livenessMs: 1500 });
+    client.start();
+    try {
+      await waitUntil(() => client.isReady, 5000, 'ready');
+      await new Promise((r) => setTimeout(r, 3500));
+      expect(client.isReady).toBe(true);
+      expect(server.connections).toBe(1);
+    } finally {
+      await client.stop();
+      await server.close();
+    }
   });
 
   it('a wrong token is fatal (4401) and not retried', async () => {
