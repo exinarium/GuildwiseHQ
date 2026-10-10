@@ -13,12 +13,13 @@ import {
 import { useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router';
 import { useLogout, useMe } from '../../api/queries/auth.ts';
+import { usePlatformBillingSettings } from '../../api/queries/billing.ts';
 import { useBlogSummary } from '../../api/queries/blog.ts';
 import { PageHelpPanel } from '../help/PageHelpPanel.tsx';
 import { Logo } from '../Logo.tsx';
 import { TourProvider } from '../tour/Tour.tsx';
 import { cx } from '../ui/cx.ts';
-import { Button } from '../ui.tsx';
+import { Button, Callout } from '../ui.tsx';
 import { WhatsNewHost } from '../whatsnew/WhatsNew.tsx';
 
 const NAV = [
@@ -40,6 +41,7 @@ export function PlatformShell() {
   const logout = useLogout();
   const [pageHelp, setPageHelp] = useState(false);
   const blog = useBlogSummary();
+  const unavailable = usePlatformBillingSettings().data?.paymentsUnavailable ?? null;
   return (
     <TourProvider navIds={NO_NAV} mobile={false}>
       <div className="flex min-h-dvh flex-col bg-canvas" data-testid="platform-shell">
@@ -110,6 +112,13 @@ export function PlatformShell() {
             </div>
           </div>
         </header>
+        {unavailable && (
+          <div className="mx-auto w-full max-w-6xl px-4 pt-4 sm:px-6">
+            <Callout tone="warning" data-testid="payments-unavailable-banner">
+              {unavailable}
+            </Callout>
+          </div>
+        )}
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
           <Outlet />
         </main>

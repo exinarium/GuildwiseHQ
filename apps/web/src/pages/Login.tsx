@@ -3,7 +3,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
 import { useLogin, useLogin2fa, useMe } from '../api/queries/auth.ts';
-import { useResendVerification } from '../api/queries/billing.ts';
+import { usePublicPlans, useResendVerification } from '../api/queries/billing.ts';
 import { AuthFrame } from '../components/auth/AuthFrame.tsx';
 import { PasswordInput } from '../components/auth/PasswordInput.tsx';
 import { Button, Callout, TextInput } from '../components/ui.tsx';
@@ -32,6 +32,9 @@ export function Login() {
   usePageTitle('Sign in');
   const me = useMe();
   const login = useLogin();
+  // Hidden until the server says sign-up is open (it is closed while payments are not configured).
+  const publicPlans = usePublicPlans();
+  const signupAvailable = publicPlans.isSuccess && publicPlans.data.signupAvailable !== false;
   const login2fa = useLogin2fa();
   const resendVerification = useResendVerification();
   const [challenge, setChallenge] = useState<string | null>(null);
@@ -236,16 +239,18 @@ export function Login() {
           Forgot your password?
         </Link>
       </p>
-      <p className="mt-3 text-sm text-subtle">
-        New here?{' '}
-        <Link
-          to="/signup"
-          className="text-brand-text underline-offset-2 hover:underline"
-          data-testid="login-signup"
-        >
-          Start a 7-day free trial
-        </Link>
-      </p>
+      {signupAvailable && (
+        <p className="mt-3 text-sm text-subtle">
+          New here?{' '}
+          <Link
+            to="/signup"
+            className="text-brand-text underline-offset-2 hover:underline"
+            data-testid="login-signup"
+          >
+            Start a 7-day free trial
+          </Link>
+        </p>
+      )}
       <p className="mt-6 text-sm text-subtle">
         By signing in you agree to the{' '}
         <a href="/terms" className="underline underline-offset-2 hover:no-underline">

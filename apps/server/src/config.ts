@@ -50,7 +50,7 @@ const EnvSchema = z.object({
   AOM_LINKEDIN_CLIENT_SECRET: z.string().optional(),
   /** Billing: renewals, retries, expiry notices and trial reminders run on the scheduler. */
   AOM_BILLING_JOBS: bool(true),
-  /** Staging only: allow the fake provider (no money taken) on an https public origin; otherwise boot refuses (billing/guard.ts). */
+  /** Staging only: allow the fake provider (no money taken) on an https public origin; otherwise payments are "not configured" and sign-up and cards are hidden (billing/guard.ts). */
   AOM_ALLOW_FAKE_PAYMENTS: bool(false),
   /** Which gateway: `paystack` (primary), `payfast` (fallback) or `fake`. Unset: Paystack when its keys are set, else PayFast when its keys are set, else fake (local and UAT). */
   AOM_PAYMENT_PROVIDER: z.enum(['paystack', 'payfast', 'fake']).optional(),

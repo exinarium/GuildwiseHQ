@@ -60,6 +60,12 @@ If a charge fails we try again after one day and again after three days (three a
 
 A paused organization keeps all its data. Agents stop picking up work and only the Owner can sign in, to a banner and the **Billing** page. Add a card if needed and press **Resubscribe now**: you are charged for a new month and everything continues where it stopped.
 
+## When payments are not available yet {#not-available}
+
+While a server has no real payment provider set up, the **Billing** page says **Payments are not available yet** and hides choosing a plan, adding or updating a card and changing plan. Nothing is charged, and your organization keeps working. The public sign-up is closed too: the landing page and the sign-up page point to **Contact us** to get started.
+
 ## For platform administrators {#platform}
 
 Under **Platform** > **Billing** you see which payment provider is active and whether it is in sandbox (test keys) or live mode, and you edit the plan prices and limits (US dollars, VAT included), the add-on prices, the VAT percentage (15 by default; it is taken out of the price, never added on top), the invoice details printed on every tax invoice (company name, address, VAT number) and an exchange-rate override. On an organization's page the **Billing** panel shows its subscription, card and invoices, and lets you **Pause**, **Unpause** or **Assign Unlimited**. Each of these needs a reason and is written to the audit log.
+
+If no real payment provider is configured on a production address, a banner in the platform area and a note under **Platform** > **Billing** say so: self-service sign-up is hidden until `AOM_PAYMENT_PROVIDER=paystack` and `AOM_PAYSTACK_SECRET_KEY` are set.

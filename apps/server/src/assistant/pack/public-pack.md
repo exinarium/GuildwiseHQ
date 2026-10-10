@@ -313,6 +313,7 @@ Plans and limits, the 7-day free trial, cards and invoices, changing plan, Busin
 - Business add-ons: On Business you can add members, workstations and projects on top of the plan, each at a small monthly price shown on the page. Changes apply from your next billing cycle, and you can never go below the Business base. To go lower, change plan.
 - Cancelling: Cancel subscription keeps your organization active until the end of what you have paid for (or the end of the trial), then pauses it. Nothing more is charged. Changed your mind before then? Use Keep my subscription.
 - When a payment fails: If a charge fails we try again after one day and again after three days (three attempts in all) and email you each time. Update your card on the Billing page to fix it. If the third attempt fails, the organization is paused.
+- When payments are not available yet: While a server has no real payment provider set up, the Billing page says Payments are not available yet and hides choosing a plan, adding or updating a card and changing plan. Nothing is charged, and your organization keeps working.…
 - For platform administrators: Under Platform > Billing you see which payment provider is active and whether it is in sandbox (test keys) or live mode, and you edit the plan prices and limits (US dollars, VAT included), the add-on prices, the VAT percentage (15 by default;…
 
 ### The blog and the weekly digest
