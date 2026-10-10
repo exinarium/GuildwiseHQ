@@ -70,6 +70,8 @@ const CHAT_RPC = new Set([
   /** Approved repository setup: the BA asks, the project owner approves on the desk. */
   'repo.create',
 ]);
+/** G-Q1: the DevOps agent's chat can also turn an instruction into a DevOps task (`aom devops "<text>"`). */
+const DEVOPS_CHAT_RPC = new Set(['devops.request']);
 
 const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
 
@@ -144,7 +146,7 @@ export class ChatManager {
       },
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
         if (req.method === 'source.read') return this.readSource(req.params);
-        return CHAT_RPC.has(req.method)
+        return CHAT_RPC.has(req.method) || (chat.msg.agent.isDevops && DEVOPS_CHAT_RPC.has(req.method))
           ? this.deps.rpc(chatId, req.method, req.params)
           : { ok: false, error: `${req.method} is not available in a chat conversation` };
       },
@@ -187,7 +189,8 @@ export class ChatManager {
     const sandbox = await ensureSandbox(paths, msg.agent.agentId, msg.agent.name);
     // A card in context: read its worktree (if this workstation has it) without being able to change it.
     const wt = chatWorktree(paths, msg.context);
-    const readOnly = !!wt && existsSync(wt);
+    const devops = msg.agent.isDevops === true; // G-Q1: runs as the user, unsandboxed, like its shifts
+    const readOnly = !devops && !!wt && existsSync(wt);
     const cwd = readOnly && wt ? wt : sandbox.scratch;
 
     await adapter.writeInstructions(

@@ -11,6 +11,7 @@ import { selfCommand } from '../shims.ts';
 import {
   agentEnv,
   buildChatSettings,
+  buildDevopsChatSettings,
   buildShiftSettings,
   type ClaudePolicyContext,
   DEVOPS_INHERITED_ENV,
@@ -132,8 +133,12 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
     join(input.sandbox.configDir, 'mcp.json'),
   );
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
-  // chats stay sandboxed, even a DevOps agent's: only shifts get its real home
-  return { bin: cfg.bin, args, env: sessionEnv({ env: input.env, sandbox: input.sandbox }, cfg) };
+  // G-Q1: the DevOps agent's chat works as the user like its shifts (real HOME, no sandbox); other chats stay sandboxed
+  return {
+    bin: cfg.bin,
+    args,
+    env: sessionEnv({ env: input.env, sandbox: input.sandbox, agent: { isDevops: input.agent.isDevops } }, cfg),
+  };
 }
 
 /**
@@ -261,18 +266,21 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   async startChat(input: ChatStartInput): Promise<RuntimeSession> {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
-    this.assertCanRun();
+    const devops = input.agent.isDevops === true;
+    if (!devops) this.assertCanRun();
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     await writeFile(
       join(dir, 'settings.json'),
       `${JSON.stringify(
-        buildChatSettings(
-          input.readOnly,
-          input.intake ? (this.cfg.intake?.allowedTools ?? []) : [],
-          this.policy(input, input.cwd),
-          input.sandbox,
-        ),
+        devops
+          ? buildDevopsChatSettings(input.agent.permissions, this.policy(input, input.cwd), input.sandbox)
+          : buildChatSettings(
+              input.readOnly,
+              input.intake ? (this.cfg.intake?.allowedTools ?? []) : [],
+              this.policy(input, input.cwd),
+              input.sandbox,
+            ),
         null,
         2,
       )}\n`,

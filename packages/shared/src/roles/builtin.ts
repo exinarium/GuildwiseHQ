@@ -36,7 +36,7 @@ If this card is in rework, read the review comments first and fix exactly what w
 const BUILDER_CORE_RULES = [
   'Never modify existing unit tests outside the scope of this card; new tests for your change are expected.',
   'Never write or change end-to-end (E2E) tests; the tester owns them.',
-  'Work only in the worktree you were given; never push, rebase, checkout or switch branches.',
+  'Work only in the worktree you were given; never push. You may run `git rebase` (and the checkout or switch it needs) inside your own worktree to reconcile your card branch with the working branch; never touch any other repository or worktree.',
   'Hand off only when the build passes, all unit tests pass and your work is committed.',
 ];
 
@@ -234,10 +234,14 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     purpose: 'Implements specified cards with unit tests in a git worktree.',
     department: 'delivery',
     instructions: BUILDER_INSTRUCTIONS,
+    version: 2,
     coreRules: BUILDER_CORE_RULES,
     seniorityLevels: ['junior', 'senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },
-    permissions: perms(),
+    // G-Q12: a builder may rebase (with the checkout/switch it needs) inside its own worktree
+    permissions: perms({
+      deniedShellPatterns: COMMON_DENIED_SHELL.filter((x) => !/^git (rebase|checkout|switch)/.test(x)),
+    }),
     skills: [],
     claimableStages: [
       { workflowKey: 'code', stageId: 'build' },

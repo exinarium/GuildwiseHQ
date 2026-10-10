@@ -166,11 +166,15 @@ export const SESSION_TOOLS_DENIED = [
 const ALWAYS_DENIED = [
   ...SESSION_TOOLS_DENIED,
   'Bash(git push:*)',
-  'Bash(git rebase:*)',
-  'Bash(git checkout:*)',
-  'Bash(git switch:*)',
   'Bash(git reset --hard:*)',
 ];
+
+/**
+ * G-Q12: rebase, checkout and switch were denied for every role. The builder may now run them to
+ * reconcile their card branch: the worktree is the only repository they can write to (the sandbox and the Edit denies
+ * keep every other path read-only), so this can only move their own branch. Other roles keep the deny.
+ */
+export const BRANCH_MOVING_DENIED = ['Bash(git rebase:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)'];
 
 /** `git push*` -> `Bash(git push:*)`, `rm -rf /*` -> `Bash(rm -rf /*)`. */
 export function shellDeny(pattern: string): string {
@@ -351,7 +355,11 @@ export function buildShiftSettings(
   if (isDevops) return buildDevopsSettings(p, ctx, paths);
   const tools = new Set(p.allowedTools);
   const allow: string[] = [];
-  const deny: string[] = [...ALWAYS_DENIED, ...p.deniedShellPatterns.map(shellDeny)];
+  const deny: string[] = [
+    ...ALWAYS_DENIED,
+    ...(roleKey === 'builder' ? [] : BRANCH_MOVING_DENIED),
+    ...p.deniedShellPatterns.map(shellDeny),
+  ];
   for (const tool of p.allowedTools) {
     if (tool === 'read') allow.push('Read', 'Glob', 'Grep');
     else if (tool === 'edit') {
@@ -384,6 +392,18 @@ export function buildShiftSettings(
   return out;
 }
 
+/**
+ * G-Q1: the DevOps agent's chat runs exactly like its shifts: unsandboxed, as the user, with the same tool
+ * permissions, so commands, docker builds and deploys work from the conversation. Other agents' chats stay sandboxed.
+ */
+export function buildDevopsChatSettings(
+  p: AgentPermissions,
+  ctx: ClaudePolicyContext,
+  paths: { home: string; configDir: string; scratch: string; tmp: string },
+): ClaudeSettings {
+  return buildDevopsSettings(p, ctx, paths);
+}
+
 /** Chat sessions read and talk; the only shell command they may run is `aom` (comment, ledger search). */
 export function buildChatSettings(
   readOnly: boolean,
@@ -393,6 +413,7 @@ export function buildChatSettings(
 ): ClaudeSettings {
   const deny = [
     ...ALWAYS_DENIED,
+    ...BRANCH_MOVING_DENIED,
     'WebSearch',
     // A card's worktree is read-only; a bare `Edit` deny would also beat the scratch allow, so it is path-scoped.
     ...(readOnly ? [`Edit(${ruleAbs(ctx.cwd)}/**)`] : []),

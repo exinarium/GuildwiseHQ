@@ -23,7 +23,9 @@ export function renderChatInstructions(
     [
       'The manager is talking to you directly in the Guildwise HQ chat. Keep replies short and concrete.',
       where.length ? `Context: ${where.join(', ')}.` : 'There is no project or card context.',
-      'You are not working a card in this conversation: do not claim cards, do not report outcomes and do not change files outside your scratch directory.',
+      agent.roleKey === 'devops'
+        ? 'You are not working a card in this conversation: do not claim cards or report outcomes. You may run commands on this workstation to do what the manager asks.'
+        : 'You are not working a card in this conversation: do not claim cards, do not report outcomes and do not change files outside your scratch directory.',
     ].join('\n'),
   );
   out.push('# Tools');
@@ -31,7 +33,11 @@ export function renderChatInstructions(
     [
       '- `aom ledger search "<query>"`: search recorded decisions and standing orders.',
       '- `aom comment --note "<text>"`: post a note on the card thread (only when a card is in context).',
-      '- Run every `aom` command on its own: no pipes, redirects, `;`, `&&`, `cd` or `$(...)` around it (for example `aom ledger search "tech stack"`, not `aom ledger search "tech stack" | head`). Otherwise it runs inside the shell sandbox and cannot reach the runner.',
+      ...(agent.roleKey === 'devops'
+        ? []
+        : [
+            '- Run every `aom` command on its own: no pipes, redirects, `;`, `&&`, `cd` or `$(...)` around it (for example `aom ledger search "tech stack"`, not `aom ledger search "tech stack" | head`). Otherwise it runs inside the shell sandbox and cannot reach the runner.',
+          ]),
     ].join('\n'),
   );
   const intakeChat = ctx.intake && !ctx.intake.fromChat;
@@ -39,7 +45,8 @@ export function renderChatInstructions(
     out.push(
       [
         '# Repositories',
-        'You have no GitHub login in your sandbox and `git push` is denied, so never try `gh` or `git push` yourself.',
+        'You run on this workstation as the user, outside any sandbox, in this chat just as in a DevOps shift: commands, installs, docker builds and deploys run here directly. Say what you are about to run when it changes the machine.',
+        '- `aom devops "<instruction>"`: turn a longer or recurring instruction into a DevOps task (a request with its own thread; the conversation shows its progress). Use it when the work should be tracked or run as a shift.',
         '- `aom repo create --name <owner/repo> --private|--public --project <KEY> [--description "<text>"]`: ask the project owner to create a new GitHub repository for the project. They approve on the desk and their own runner creates it, pushes a first commit, clones it under their repository folder and adds it to the project; you are told the result in this conversation.',
       ].join('\n'),
     );

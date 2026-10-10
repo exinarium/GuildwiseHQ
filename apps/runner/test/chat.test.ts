@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { BUILTIN_ROLES, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildClaudeChatCommand } from '../src/adapters/claude-code.ts';
-import { buildChatSettings } from '../src/adapters/claude-policy.ts';
+import { buildChatSettings, buildDevopsChatSettings } from '../src/adapters/claude-policy.ts';
 import { ClaudeStreamParser } from '../src/adapters/claude-stream-parser.ts';
 import { MockAdapter } from '../src/adapters/mock.ts';
 import type { ChatStartInput, RuntimeEvent } from '../src/adapters/types.ts';
@@ -308,6 +309,23 @@ describe('claude code chat adapter', () => {
       HOME: '/data/agents/a1/home',
       AOM_SHIFT_TOKEN: 't',
     });
+  });
+
+  it('G-Q1: the DevOps agent chat is unsandboxed like its shifts, with the real home; other chats stay sandboxed', () => {
+    const devopsRole = BUILTIN_ROLES.find((r) => r.key === 'devops');
+    if (!devopsRole) throw new Error('devops role');
+    const s = buildDevopsChatSettings(devopsRole.permissions, policyCtx(), POLICY_PATHS);
+    expect(s.sandbox).toBeUndefined();
+    expect(s.permissions.allow).toEqual(expect.arrayContaining(['Bash', 'Edit']));
+    expect(s.permissions.blockReadsOutsideWorkingDirectories).toBeUndefined();
+    const cfg = ClaudeRuntimeConfigSchema.parse({});
+    const devopsAgent = agent({ runtime: 'claude-code', roleKey: 'devops', isDevops: true });
+    const d = buildClaudeChatCommand(input({ agent: devopsAgent as ChatStartInput['agent'] }), cfg);
+    expect(d.env.HOME).toBe(homedir());
+    expect(d.env.CLAUDE_CONFIG_DIR).toBe('/data/agents/a1/claude');
+    const o = buildClaudeChatCommand(input(), cfg);
+    expect(o.env.HOME).toBe('/data/agents/a1/home');
+    expect(buildChatSettings(false, [], policyCtx(), POLICY_PATHS).sandbox).toBeDefined();
   });
 
   it('chat tools: read and aom only; a card worktree is also denied edits', () => {

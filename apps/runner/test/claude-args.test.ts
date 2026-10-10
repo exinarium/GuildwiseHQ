@@ -135,14 +135,13 @@ describe('claude settings.json: permissions per role (review M3)', () => {
     expect(s.includeCoAuthoredBy).toBe(false);
   });
 
-  it('builder: edits only inside its worktree; denies git push/rebase/checkout/switch/reset --hard', () => {
-    const s = settings(builder.permissions);
+  it('builder: edits only inside its worktree; may rebase/checkout/switch there (G-Q12); denies push and reset --hard', () => {
+    const s = buildShiftSettings(builder.permissions, policyCtx(), POLICY_PATHS, 'builder');
     expect(s.permissions.allow).toEqual(['Read', 'Glob', 'Grep', `Edit(${CWD}/**)`, 'Bash']);
+    for (const d of ['Bash(git rebase:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)'])
+      expect(s.permissions.deny).not.toContain(d);
     for (const d of [
       'Bash(git push:*)',
-      'Bash(git rebase:*)',
-      'Bash(git checkout:*)',
-      'Bash(git switch:*)',
       'Bash(git reset --hard:*)',
       'Bash(sudo:*)',
       'Bash(rm -rf /*)',
@@ -151,6 +150,12 @@ describe('claude settings.json: permissions per role (review M3)', () => {
       expect(s.permissions.deny).toContain(d);
     }
     expect(s.permissions.deny).not.toContain('Edit');
+  });
+
+  it('roles that may not commit keep the git rebase/checkout/switch deny (G-Q12)', () => {
+    const s = settings(reviewer.permissions);
+    for (const d of ['Bash(git rebase:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)'])
+      expect(s.permissions.deny).toContain(d);
   });
 
   it('restricts Edit to the writable globs inside the worktree (tester, writer, custom roles)', () => {
