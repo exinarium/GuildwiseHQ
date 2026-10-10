@@ -170,7 +170,7 @@ export function orgRoutes(ctx: Ctx) {
         config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
       },
       async (req, reply) => {
-        const a = await requireOrg(ctx, req, { min: 'owner' });
+        const a = await requireOrg(ctx, req, { min: 'admin' });
         reply.header('Cache-Control', 'no-store');
         return resetMemberPassword(ctx, a, req.params.userId);
       },

@@ -863,7 +863,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Members tab',
-        text: 'Everyone in the organization with their role, projects and 2FA state. Owner and Admins can Invite member, change projects or remove people; only the Owner changes roles, resets two-factor login or resets a password (a temporary one, shown once).',
+        text: 'Everyone in the organization with their role, projects and 2FA state. Owner and Admins can Invite member, change projects or remove people; only the Owner changes roles or resets two-factor login. Owner and Admins can reset a password (a temporary one, shown once): Admins for Members, the Owner for Members and Admins.',
       },
       {
         name: 'Invitations tab',

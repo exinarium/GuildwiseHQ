@@ -30,7 +30,7 @@ After you sign in you land in the app, and the guided tour starts.
 
 ## Forgot your password {#forgot-password}
 
-On the sign-in page click **Forgot your password?** and type your email. We send a link that works once and expires after an hour. Choose a new password (12 or more characters); you are signed out everywhere else, then sign in with the new one. If you use two-factor login you still enter your code. We answer the same way for every address, so the page never tells whether an email has an account. Platform administrators can use it too. If nothing arrives, check your spam folder, or ask your Owner for a temporary password (the Owner finds it under **Organization, Members**); you then choose your own password when you sign in.
+On the sign-in page click **Forgot your password?** and type your email. We send a link that works once and expires after an hour. Choose a new password (12 or more characters); you are signed out everywhere else, then sign in with the new one. If you use two-factor login you still enter your code. We answer the same way for every address, so the page never tells whether an email has an account. Platform administrators can use it too. If nothing arrives, check your spam folder, or ask your Owner or an Admin for a temporary password (they find it under **Organization, Members**); you then choose your own password when you sign in.
 
 Every account belongs to an organization. There are no standalone accounts except for the platform administrator.
 

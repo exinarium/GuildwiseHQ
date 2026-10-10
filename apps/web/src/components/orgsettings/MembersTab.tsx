@@ -58,6 +58,10 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
   const canTouch = (m: OrgMemberDto) =>
     m.role !== 'owner' && m.userId !== me.userId && (me.role === 'owner' || m.role === 'member');
 
+  // Owners reset Members and Admins; Admins reset Members only; nobody resets themselves this way.
+  const canResetPassword = (m: OrgMemberDto) =>
+    m.userId !== me.userId && (me.role === 'owner' ? m.role !== 'owner' : m.role === 'member');
+
   return (
     <Panel
       title={
@@ -144,7 +148,7 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
             </div>
             {manager && (
               <div className="w-9">
-                {canTouch(m) || (me.role === 'owner' && m.userId !== me.userId) ? (
+                {canTouch(m) || canResetPassword(m) ? (
                   <Menu label={`Actions for ${m.displayName}`}>
                     {m.role === 'member' && (
                       <MenuItem
@@ -168,7 +172,7 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
                         Reset two-factor login
                       </MenuItem>
                     )}
-                    {me.role === 'owner' && m.userId !== me.userId && (
+                    {canResetPassword(m) && (
                       <MenuItem
                         description="Give them a temporary password to pass on"
                         onSelect={() => setResettingPassword(m)}

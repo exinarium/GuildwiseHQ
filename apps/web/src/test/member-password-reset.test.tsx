@@ -72,12 +72,11 @@ describe('Owner resets a member password', () => {
     await waitFor(() => expect(screen.queryByTestId('temporary-password')).not.toBeInTheDocument());
   });
 
-  it('an Admin does not get the reset-password action', async () => {
+  it('an Admin may reset a Member', async () => {
     const user = userEvent.setup();
     wrap(<MembersTab me={{ userId: '11111111-1111-4111-8111-111111111111', role: 'admin' }} />);
     await user.click(await screen.findByRole('button', { name: 'Actions for Mia Member' }));
-    await screen.findByRole('menuitem', { name: /Change projects/ });
-    expect(screen.queryByRole('menuitem', { name: /Reset password/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: /Reset password/ })).toBeInTheDocument();
   });
 });
 

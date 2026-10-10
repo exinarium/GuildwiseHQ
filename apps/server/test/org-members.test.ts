@@ -269,8 +269,10 @@ describe('two-factor policy of an organization', () => {
 describe('the Owner resets a member’s password to a temporary one', () => {
   it('shows the temporary password once, ends sessions, forces a change at next sign-in and keeps it out of the log', async () => {
     const { owner, admin, member, as } = await acme();
-    // only the Owner may; not oneself
-    expect((await as(admin, 'POST', `/api/org/members/${member.id}/reset-password`)).status).toBe(403);
+    // an Admin may reset a Member, never an Owner or another Admin; nobody resets themselves
+    expect((await as(admin, 'POST', `/api/org/members/${owner.id}/reset-password`)).status).toBe(403);
+    expect((await as(admin, 'POST', `/api/org/members/${admin.id}/reset-password`)).status).toBe(409);
+    expect((await as(member, 'POST', `/api/org/members/${member.id}/reset-password`)).status).toBe(403);
     expect((await as(owner, 'POST', `/api/org/members/${owner.id}/reset-password`)).status).toBe(409);
     expect(
       (await as(owner, 'POST', '/api/org/members/00000000-0000-4000-8000-000000000000/reset-password'))
@@ -310,6 +312,17 @@ describe('the Owner resets a member’s password to a temporary one', () => {
     expect(
       (await t.req('POST', '/api/auth/login', { body: { email: member.email, password: NEXT } })).status,
     ).toBe(200);
+  });
+
+  it('an Admin resets a Member; the Owner resets an Admin; an Admin cannot reset another Admin', async () => {
+    const { owner, admin, member, org, as } = await acme();
+    const admin2 = await t.userSession(uniqueEmail('admin2'));
+    await t.addOrgMember(org, admin2.id, 'admin');
+    const byAdmin = await as(admin, 'POST', `/api/org/members/${member.id}/reset-password`);
+    expect(byAdmin.status).toBe(200);
+    expect(byAdmin.body.temporaryPassword).toHaveLength(20);
+    expect((await as(admin, 'POST', `/api/org/members/${admin2.id}/reset-password`)).status).toBe(403);
+    expect((await as(owner, 'POST', `/api/org/members/${admin2.id}/reset-password`)).status).toBe(200);
   });
 
   it('still asks for the second factor', async () => {

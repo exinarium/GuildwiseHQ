@@ -11,8 +11,8 @@ An organization is your workspace: it owns your projects, agents, the board, the
 
 Each role has different permissions. Here is what each can do:
 
-- **Owner**: Everything an Admin can do, plus invite Admins, change roles, require two-factor login, reset a member's password or two-factor login, manage [billing](/help/billing-and-plans), and hand ownership to an Admin. There is exactly one Owner per organization.
-- **Admin**: Create projects, invite Members and remove them, manage vaults, design roles and workflows, hire and fire any agent, set budgets, and see the plan and limits. Admins cannot invite Admins, change roles or change the organization's security settings.
+- **Owner**: Everything an Admin can do, plus invite Admins, change roles, require two-factor login, reset an Admin's password or a member's two-factor login, manage [billing](/help/billing-and-plans), and hand ownership to an Admin. There is exactly one Owner per organization.
+- **Admin**: Create projects, invite Members and remove them, manage vaults, design roles and workflows, hire and fire any agent, set budgets, and see the plan and limits. Admins can also give a Member a temporary password (see below). Admins cannot invite Admins, change roles, reset another Admin's password or change the organization's security settings.
 - **Member**: Work in the projects they were added to: create cards, hire agents onto their own workstations for those projects, and answer the desk items they are allowed to (by default only on cards they own).
 - **Guest**: Not a member. Has access to one or more projects that were shared with them. Guests see nothing at organization level.
 
@@ -37,7 +37,7 @@ The **Invitations** tab shows pending and past invitations. You can **Resend** o
 3. Pick which **Projects** they start on (Members only; you can change this later with **Change projects** on their row).
 4. Click **Send invitation**. They receive an email with a link; people without an account create one.
 
-Everyone can reset their own password with **Forgot your password?** on the sign-in page (see [Getting started](/help/getting-started#forgot-password)). If a member cannot get the reset email, the Owner can open the actions menu on their row and choose **Reset password**. You get a temporary password to copy and pass on yourself (it is shown once and no email is sent). The member is signed out everywhere and chooses their own password at the next sign-in. Their account is one account for every organization, so the new password applies in their other organizations too.
+Everyone can reset their own password with **Forgot your password?** on the sign-in page (see [Getting started](/help/getting-started#forgot-password)). If a member cannot get the reset email, the Owner or an Admin can open the actions menu on their row and choose **Reset password**. You get a temporary password to copy and pass on yourself (it is shown once and no email is sent). The member is signed out everywhere and chooses their own password at the next sign-in. An Admin can do this for Members only; the Owner can do it for Members and Admins. Nobody resets their own password this way (use Account, Security). Their account is one account for every organization, so the new password applies in their other organizations too.
 
 The Owner can change an Admin or Member's role from the role selector on their row. Your plan may limit how many members you can have; the **Plan & limits** tab shows it (see [Plans and billing](/help/billing-and-plans#plans)).
 

@@ -436,7 +436,7 @@ export function generateTemporaryPassword(): string {
 }
 
 /**
- * An Owner sets a temporary password for a member (they lost their password and the reset mail does not reach them).
+ * An Owner or Admin sets a temporary password for a member (they lost their password and the reset mail does not reach them).
  * The server makes it, returns it ONCE for the Owner to pass on, and never logs it: only its hash is stored, in an
  * event that carries no clear text. Every session of the member ends, and at next sign-in they must choose their
  * own password before anything else (two-factor still applies). The account is global: if the member belongs to other
@@ -447,13 +447,17 @@ export async function resetMemberPassword(
   a: OrgAccess,
   userId: string,
 ): Promise<{ temporaryPassword: string }> {
-  if (a.role !== 'owner') throw forbidden('only the Owner can reset a member’s password');
+  if (a.role !== 'owner' && a.role !== 'admin')
+    throw forbidden('only an Owner or an Admin can reset a member’s password');
   if (userId === a.session.user.id)
     throw conflict('use_change_password', 'change your own password under Account, Security');
   const temporaryPassword = generateTemporaryPassword();
   const passwordHash = await hashPassword(temporaryPassword);
   await withAppendTx(ctx.pool, async (tx) => {
-    await activeMember(tx, a.orgId, userId);
+    const target = await activeMember(tx, a.orgId, userId);
+    // Owners reset Members and Admins; Admins reset Members only (never an Owner or another Admin).
+    if (a.role === 'admin' && target.role !== 'member')
+      throw forbidden('an Admin can reset the password of a Member only; ask the Owner');
     const u = await one(tx, 'SELECT kind, status FROM users WHERE id=$1 FOR UPDATE', [userId]);
     if (u?.kind === 'super_admin') throw forbidden('platform accounts are managed on the server');
     if (u?.status !== 'active') throw conflict('user_deactivated', 'this account is deactivated');
