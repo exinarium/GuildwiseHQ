@@ -16,6 +16,10 @@ A project is a container for cards and agents working on a shared goal. Every ca
 
 For a Code project, add its repositories afterwards in the project's settings (the gear on its board), under **Repos**: give the repository name and its address (or create a new one), and click **Add repository**. Finished work goes into the repository's main line after review and test; change **How finished work lands** in the same settings to receive pull requests instead. The branch field is shown only in expert mode (Settings). Research projects need no repository.
 
+The **git host** (GitHub, GitLab, Bitbucket, Azure DevOps or a plain git server) is detected from the address; choose another one in the **Git host** list if the address is a server we cannot recognise. One project can use repositories from different hosts. See [Git hosts](/help/workstations-and-installer#git-hosts) for connecting them.
+
+You can also click **Pick from my repositories** to list the repositories of a connected host and use one, or choose **Create a new repository**: the form then asks for what that host needs (owner for GitHub, group for GitLab, workspace for Bitbucket, organization and project for Azure DevOps).
+
 Cards stay as drafts until you are ready to specify them. A new project goes to the bottom of your priority order.
 
 ## The priority order {#ranking}

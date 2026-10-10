@@ -129,7 +129,9 @@ export async function repoSetupEvents(
               ...opts.create,
               // The provider (and a self-managed host) the repository is made on, from the repository's own URL.
               ...(parsed && parsed.kind !== 'git' ? { provider: parsed.kind } : {}),
-              ...(parsed && (parsed.kind === 'gitlab' || parsed.kind === 'github') && !DEFAULT_HOSTS.includes(parsed.host)
+              ...(parsed &&
+              (parsed.kind === 'gitlab' || parsed.kind === 'github') &&
+              !DEFAULT_HOSTS.includes(parsed.host)
                 ? { host: parsed.host }
                 : {}),
             },

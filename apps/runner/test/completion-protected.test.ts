@@ -90,7 +90,12 @@ describe('completion: merge on a protected working branch (owner decision C9)', 
 
   it('plain git (no pull requests) pushes the branch and says to open the change by hand', async () => {
     const { repo, path } = await cardWorktree();
-    const res = await run(repo, payload(repo, path), new FakePr({ unavailable: 'plain git has no pull requests' }), blocked);
+    const res = await run(
+      repo,
+      payload(repo, path),
+      new FakePr({ unavailable: 'plain git has no pull requests' }),
+      blocked,
+    );
     expect(res.ok).toBe(true);
     expect(res.notice).toMatch(/open the pull request by hand/);
     expect(sh(repo.origin, 'git', ['branch', '--list'])).toContain(BRANCH);
@@ -98,7 +103,9 @@ describe('completion: merge on a protected working branch (owner decision C9)', 
 
   it('unknown rules (null) and allowed pushes merge directly, as before', async () => {
     const a = await cardWorktree();
-    expect((await run(a.repo, payload(a.repo, a.path), new FakePr({}), async () => null)).mergeCommit).toBeTruthy();
+    expect(
+      (await run(a.repo, payload(a.repo, a.path), new FakePr({}), async () => null)).mergeCommit,
+    ).toBeTruthy();
     const b = await cardWorktree();
     const allowed: Rules = async () => ({ directPushAllowed: true, requiresChange: false });
     expect((await run(b.repo, payload(b.repo, b.path), new FakePr({}), allowed)).mergeCommit).toBeTruthy();
@@ -111,7 +118,12 @@ describe('completion: merge on a protected working branch (owner decision C9)', 
       '#!/bin/sh\nwhile read old new ref; do if [ "$ref" = "refs/heads/main" ]; then echo "remote: error: GH006: Protected branch update failed" >&2; exit 1; fi; done\nexit 0\n',
       { mode: 0o755 },
     );
-    const res = await run(repo, payload(repo, path), new FakePr({ url: 'https://host/pull/1' }), async () => null);
+    const res = await run(
+      repo,
+      payload(repo, path),
+      new FakePr({ url: 'https://host/pull/1' }),
+      async () => null,
+    );
     expect(res).toMatchObject({ ok: true, action: 'merge', prUrl: 'https://host/pull/1' });
     expect(res.mergeCommit).toBeUndefined();
     expect(res.notice).toMatch(/refused a direct push/);

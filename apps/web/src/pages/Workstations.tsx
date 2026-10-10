@@ -5,8 +5,8 @@ import { useSearchParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { usePairingCode, useUnlinkWorkstation, useWorkstations } from '../api/queries/workstations.ts';
 import { BRAND } from '../brand.ts';
-import { GitConnectionsPanel } from '../components/GitConnections.tsx';
 import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
+import { GitConnectionsPanel } from '../components/GitConnections.tsx';
 import { SandboxUnavailable, SandboxWarning } from '../components/SandboxWarning.tsx';
 import {
   Badge,

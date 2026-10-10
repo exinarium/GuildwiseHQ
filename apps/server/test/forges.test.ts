@@ -77,9 +77,16 @@ describe('the git provider is per repository', () => {
     const corp = gl.repos.find((x: any) => x.name === 'corp');
     expect(corp).toMatchObject({ forge: 'gitlab', forgeOverride: 'gitlab' });
 
-    const patched = await ok<any>(owner('PATCH', `/api/projects/${w.projectId}/repos/${corp.id}`, { forge: null }));
-    expect(patched.repos.find((x: any) => x.id === corp.id)).toMatchObject({ forge: 'git', forgeOverride: null });
-    const set = await ok<any>(owner('PATCH', `/api/projects/${w.projectId}/repos/${corp.id}`, { forge: 'bitbucket-dc' }));
+    const patched = await ok<any>(
+      owner('PATCH', `/api/projects/${w.projectId}/repos/${corp.id}`, { forge: null }),
+    );
+    expect(patched.repos.find((x: any) => x.id === corp.id)).toMatchObject({
+      forge: 'git',
+      forgeOverride: null,
+    });
+    const set = await ok<any>(
+      owner('PATCH', `/api/projects/${w.projectId}/repos/${corp.id}`, { forge: 'bitbucket-dc' }),
+    );
     expect(set.repos.find((x: any) => x.id === corp.id)).toMatchObject({ forge: 'bitbucket-dc' });
   });
 
@@ -102,7 +109,7 @@ describe('the git provider is per repository', () => {
     );
     const cmd = await nextCommand('repo.clone', from);
     expect(cmd.payload.create).toMatchObject({ name: 'grp/sub/fresh', provider: 'gitlab' });
-    expect(cmd.payload.create.host).toBeUndefined();
+    expect((cmd.payload.create as { host?: string }).host).toBeUndefined();
   });
 
   it('a manager who is not the owner cannot change the provider', async () => {
@@ -119,8 +126,21 @@ describe('git connections reported by the workstation', () => {
     const at = new Date().toISOString();
     r.send('git.report', {
       connections: [
-        { provider: 'github', host: 'github.com', state: 'connected', account: 'octo', method: 'cli', checkedAt: at },
-        { provider: 'azure-devops', host: 'dev.azure.com', state: 'not_connected', detail: 'Run git-connect', checkedAt: at },
+        {
+          provider: 'github',
+          host: 'github.com',
+          state: 'connected',
+          account: 'octo',
+          method: 'cli',
+          checkedAt: at,
+        },
+        {
+          provider: 'azure-devops',
+          host: 'dev.azure.com',
+          state: 'not_connected',
+          detail: 'Run git-connect',
+          checkedAt: at,
+        },
       ],
     });
     await settle();
@@ -148,7 +168,9 @@ describe('the repository picker', () => {
     const cmd = await nextCommand('forge.repos', from);
     expect(cmd.payload).toMatchObject({ requestId: started.requestId, provider: 'gitlab', search: 'app' });
 
-    const pending = await ok<any>(owner('GET', `/api/workstations/${w.workstationId}/git/repos/${started.requestId}`));
+    const pending = await ok<any>(
+      owner('GET', `/api/workstations/${w.workstationId}/git/repos/${started.requestId}`),
+    );
     expect(pending.state).toBe('pending');
 
     r.send('command.result', {
@@ -156,11 +178,20 @@ describe('the repository picker', () => {
       ok: true,
       result: {
         ok: true,
-        repos: [{ provider: 'gitlab', fullName: 'grp/app', cloneUrl: 'https://gitlab.com/grp/app.git', private: true }],
+        repos: [
+          {
+            provider: 'gitlab',
+            fullName: 'grp/app',
+            cloneUrl: 'https://gitlab.com/grp/app.git',
+            private: true,
+          },
+        ],
       },
     });
     await settle();
-    const done = await ok<any>(owner('GET', `/api/workstations/${w.workstationId}/git/repos/${started.requestId}`));
+    const done = await ok<any>(
+      owner('GET', `/api/workstations/${w.workstationId}/git/repos/${started.requestId}`),
+    );
     expect(done).toMatchObject({ state: 'done', repos: [{ fullName: 'grp/app' }], error: null });
   });
 
@@ -174,10 +205,16 @@ describe('the repository picker', () => {
     r.send('command.result', {
       commandId: cmd.commandId,
       ok: true,
-      result: { ok: false, repos: [], error: 'not connected to Azure DevOps: run `aom-runner git-connect azure-devops`' },
+      result: {
+        ok: false,
+        repos: [],
+        error: 'not connected to Azure DevOps: run `aom-runner git-connect azure-devops`',
+      },
     });
     await settle();
-    const done = await ok<any>(owner('GET', `/api/workstations/${w.workstationId}/git/repos/${started.requestId}`));
+    const done = await ok<any>(
+      owner('GET', `/api/workstations/${w.workstationId}/git/repos/${started.requestId}`),
+    );
     expect(done.state).toBe('failed');
     expect(done.error).toMatch(/git-connect/);
   });

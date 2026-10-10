@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { EnvironmentReportSchema, EnvStateSchema, RepoCloneStateSchema } from '../devops/environment.ts';
 import { ConvertCardDecision, ProjectChangesSchema } from '../events/project.ts';
-import { ProjectKeySchema } from '../ids.ts';
 import { createFullNameError, detectForgeKind, ForgeKindSchema } from '../forge/index.ts';
-import { RepoNameSchema, repoNameError, RepoDescriptionSchema, RepoVisibilitySchema } from '../repo/index.ts';
+import { ProjectKeySchema } from '../ids.ts';
+import { RepoDescriptionSchema, RepoNameSchema, RepoVisibilitySchema, repoNameError } from '../repo/index.ts';
 import { BranchPrefixSchema, GitRefSchema, RemoteUrlSchema, VaultFolderSchema } from '../safe.ts';
 import { IsoTime } from './common.ts';
 import { BudgetDtoSchema } from './costs.ts';
@@ -165,29 +165,34 @@ export type PatchProjectRequest = z.infer<typeof PatchProjectRequestSchema>;
 export const RankProjectsRequestSchema = z.object({ projectIds: z.array(z.uuid()).min(1).max(500) });
 export type RankProjectsRequest = z.infer<typeof RankProjectsRequestSchema>;
 
-export const AddRepoRequestSchema = z.object({
-  name: z.string().min(1).max(120),
-  remoteUrl: RemoteUrlSchema,
-  workingBranch: GitRefSchema.optional(),
-  /** The git provider, when it cannot be detected from the URL (the manual override). */
-  forge: ForgeKindSchema.optional(),
-  /**
-   * "Create new": the repository does not exist yet. `remoteUrl` is where it will live; the DevOps engineer creates it
-   * on the code host (its CLI or API) and clones it. Without this the repository is cloned (it must exist).
-   */
-  create: z
-    .object({
-      name: z.string().min(3).max(400),
-      visibility: RepoVisibilitySchema.default('private'),
-      description: RepoDescriptionSchema.optional(),
-    })
-    .optional(),
-}).superRefine((v, ctx) => {
-  if (!v.create) return;
-  const kind = v.forge ?? detectForgeKind(v.remoteUrl);
-  const err = kind === 'github' || kind === 'git' ? repoNameError(v.create.name) : createFullNameError(kind, v.create.name);
-  if (err) ctx.addIssue({ code: 'custom', path: ['create', 'name'], message: err });
-});
+export const AddRepoRequestSchema = z
+  .object({
+    name: z.string().min(1).max(120),
+    remoteUrl: RemoteUrlSchema,
+    workingBranch: GitRefSchema.optional(),
+    /** The git provider, when it cannot be detected from the URL (the manual override). */
+    forge: ForgeKindSchema.optional(),
+    /**
+     * "Create new": the repository does not exist yet. `remoteUrl` is where it will live; the DevOps engineer creates it
+     * on the code host (its CLI or API) and clones it. Without this the repository is cloned (it must exist).
+     */
+    create: z
+      .object({
+        name: z.string().min(3).max(400),
+        visibility: RepoVisibilitySchema.default('private'),
+        description: RepoDescriptionSchema.optional(),
+      })
+      .optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (!v.create) return;
+    const kind = v.forge ?? detectForgeKind(v.remoteUrl);
+    const err =
+      kind === 'github' || kind === 'git'
+        ? repoNameError(v.create.name)
+        : createFullNameError(kind, v.create.name);
+    if (err) ctx.addIssue({ code: 'custom', path: ['create', 'name'], message: err });
+  });
 export type AddRepoRequest = z.infer<typeof AddRepoRequestSchema>;
 export const RepoParamsSchema = z.object({ id: z.uuid(), repoId: z.uuid() });
 

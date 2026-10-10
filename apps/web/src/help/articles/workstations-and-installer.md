@@ -64,6 +64,22 @@ Afterwards, a workstation's card on the **Workstations** page shows whether it i
 
 For vault SSH keys on Windows, ensure git can find them (OpenSSH or PuTTY with Pageant).
 
+## Git hosts {#git-hosts}
+
+Each repository of a project has a git host: GitHub, GitLab, Bitbucket Cloud, Azure DevOps, or a plain git server. For pull requests, the repository list and creating new repositories, the workstation must be **connected** to that host. Your login or token stays on the workstation; Guildwise HQ only learns whether it works.
+
+Open the workstation card on the **Workstations** page: **Git hosts** shows Connected or Not connected for each host. Click **Connect** for the one command to run in a terminal on that workstation:
+
+- `aom-runner git-connect github` opens a browser to sign in (GitHub CLI).
+- `aom-runner git-connect gitlab` signs in with the GitLab CLI or asks for a personal access token.
+- `aom-runner git-connect bitbucket-cloud` asks for your Atlassian e-mail and an API token (old app passwords no longer work).
+- `aom-runner git-connect azure-devops --organization <name>` asks for a personal access token, or uses your Azure sign-in (`az login`). Use a token for one organization: global tokens stop working on 1 December 2026.
+- Add `--ssh-key` to any of them to create an SSH key and see where to upload it.
+
+Then click **Check again**. The DevOps engineer can walk you through any of these in a chat.
+
+A **plain git** server needs no connection, but no pull request is opened: the branch is pushed and the desk tells you to open the request yourself. If a project's working branch is protected on the host, finishing a card with Merge opens a pull request instead.
+
 ## Unpairing {#unpairing}
 
 If a workstation goes away (you sold the computer, decommissioned a server), go to **Workstations** and click **Unpair** on its card, then confirm. Its runner token stops working and the runner shuts down, cards claimed there go back to the queue, and its agents wait until you re-home them. To use the machine again, pair it with a new code.

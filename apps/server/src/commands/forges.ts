@@ -2,14 +2,14 @@ import { randomUUID } from 'node:crypto';
 import {
   type ForgeKind,
   type ForgeRepoList,
-  ForgeRepoListSchema,
   type ForgeRepoListRequest,
+  ForgeRepoListSchema,
   ForgeReposResultSchema,
   GitConnectionsSchema,
   streamId,
 } from '@aom/shared';
-import { loadVisibleProject } from '../authz/scope.ts';
 import type { AuthSession } from '../auth/sessions.ts';
+import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
@@ -124,7 +124,11 @@ export async function applyForgeReposResult(
       requestId,
       good ? 'done' : 'failed',
       JSON.stringify(good && parsed.success ? parsed.data.repos : []),
-      good ? null : (parsed.success ? parsed.data.error : undefined) ?? error ?? 'the workstation could not list repositories',
+      good
+        ? null
+        : ((parsed.success ? parsed.data.error : undefined) ??
+          error ??
+          'the workstation could not list repositories'),
       ctx.clock.now(),
     ],
   );
@@ -141,10 +145,11 @@ export async function setRepoForge(
   await withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.my_role !== 'owner') throw forbidden('only the project owner can do this');
-    const r = await one(tx, 'SELECT id FROM project_repos WHERE id=$1 AND project_id=$2 AND removed_at IS NULL', [
-      repoId,
-      projectId,
-    ]);
+    const r = await one(
+      tx,
+      'SELECT id FROM project_repos WHERE id=$1 AND project_id=$2 AND removed_at IS NULL',
+      [repoId, projectId],
+    );
     if (!r) throw notFound('repository not found');
     await ctx.store.append(
       [

@@ -31,7 +31,14 @@ const station = (git: unknown) => ({
 
 const connectedGithub = {
   connections: [
-    { provider: 'github', host: 'github.com', state: 'connected', account: 'octo', method: 'cli', checkedAt: AT },
+    {
+      provider: 'github',
+      host: 'github.com',
+      state: 'connected',
+      account: 'octo',
+      method: 'cli',
+      checkedAt: AT,
+    },
     { provider: 'azure-devops', host: 'dev.azure.com', state: 'not_connected', detail: 'x', checkedAt: AT },
   ],
   checkedAt: AT,
@@ -52,7 +59,15 @@ beforeEach(() => {
       calls.push({ method, url, body });
       if (url === '/api/auth/me')
         return json({
-          user: { id: ID(1), email: 'me@example.test', displayName: 'Me', role: 'admin', status: 'active', createdAt: AT, lastLoginAt: null },
+          user: {
+            id: ID(1),
+            email: 'me@example.test',
+            displayName: 'Me',
+            role: 'admin',
+            status: 'active',
+            createdAt: AT,
+            lastLoginAt: null,
+          },
           isAdmin: true,
           visibleProjectIds: [],
           features: { mockUi: false },
@@ -60,14 +75,23 @@ beforeEach(() => {
       if (url === '/api/workstations') return json({ workstations: [station(gitState)] });
       if (method === 'POST' && url.endsWith('/git/recheck')) return json({ ok: true });
       if (method === 'POST' && url.endsWith('/git/repos'))
-        return json({ requestId: ID(77), provider: body.provider, state: 'pending', repos: [], error: null }, 202);
+        return json(
+          { requestId: ID(77), provider: body.provider, state: 'pending', repos: [], error: null },
+          202,
+        );
       if (url.includes('/git/repos/'))
         return json({
           requestId: ID(77),
           provider: 'github',
           state: 'done',
           repos: [
-            { provider: 'github', fullName: 'acme/barcode-camera', cloneUrl: 'https://github.com/acme/barcode-camera.git', defaultBranch: 'develop', private: true },
+            {
+              provider: 'github',
+              fullName: 'acme/barcode-camera',
+              cloneUrl: 'https://github.com/acme/barcode-camera.git',
+              defaultBranch: 'develop',
+              private: true,
+            },
           ],
           error: null,
         });
@@ -107,13 +131,17 @@ describe('Workstations page: git hosts', () => {
     const panel = await screen.findByTestId('git-connections');
     expect(within(panel).getByTestId('git-github')).toHaveTextContent('Connected as octo');
     expect(within(panel).getByTestId('git-azure-devops')).toHaveTextContent('Not connected');
-    await user.click(within(within(panel).getByTestId('git-azure-devops')).getByRole('button', { name: 'Connect' }));
+    await user.click(
+      within(within(panel).getByTestId('git-azure-devops')).getByRole('button', { name: 'Connect' }),
+    );
     const helper = await screen.findByTestId('connect-azure-devops');
     expect(helper).toHaveTextContent('aom-runner git-connect azure-devops');
     expect(helper).toHaveTextContent('2026-12-01');
     expect(within(helper).queryByLabelText(/token|password/i)).toBeNull();
     await user.click(within(helper).getByRole('button', { name: 'Check again' }));
-    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/git/recheck'))).toBe(true));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/git/recheck'))).toBe(true),
+    );
   });
 });
 
@@ -135,7 +163,13 @@ describe('repository provider control', () => {
   });
 
   it('plain git says no pull request is opened; a non-owner cannot change it', async () => {
-    wrap(<RepoProviderControl projectId={ID(2)} repo={repoDto({ forge: 'git', remoteUrl: 'https://git.example.com/a/b.git' }) as never} isOwner={false} />);
+    wrap(
+      <RepoProviderControl
+        projectId={ID(2)}
+        repo={repoDto({ forge: 'git', remoteUrl: 'https://git.example.com/a/b.git' }) as never}
+        isOwner={false}
+      />,
+    );
     expect(await screen.findByText(/no pull request is opened/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Change' })).toBeNull();
   });
@@ -149,7 +183,9 @@ describe('Add repository form', () => {
     expect(await screen.findByText('Detected: Azure DevOps')).toBeInTheDocument();
     await user.type(screen.getByLabelText('Repository name'), 'web');
     await user.click(screen.getByRole('button', { name: 'Add repository' }));
-    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.url.endsWith('/repos'))).toBeTruthy());
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.url.endsWith('/repos'))).toBeTruthy(),
+    );
     expect(calls.find((c) => c.method === 'POST' && c.url.endsWith('/repos'))?.body).toEqual({
       name: 'web',
       remoteUrl: 'git@ssh.dev.azure.com:v3/acme/shop/web',
@@ -201,7 +237,7 @@ describe('Add repository form', () => {
     expect(calls.find((c) => c.url.endsWith('/repos'))).toBeUndefined();
   });
 
-  it('lists the user\'s repositories from the connected provider and fills the form', async () => {
+  it("lists the user's repositories from the connected provider and fills the form", async () => {
     const user = userEvent.setup();
     wrap(<AddRepoForm projectId={ID(2)} />);
     await user.click(await screen.findByRole('button', { name: 'Pick from my repositories' }));

@@ -47,6 +47,19 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
   'outbox.flushed': { ...env('outbox.flushed') },
   heartbeat: { ...env('heartbeat'), activeShifts: [U.a], load: { runningShifts: 1 } },
   'repos.report': { ...env('repos.report'), repos },
+  'git.report': {
+    ...env('git.report'),
+    connections: [
+      {
+        provider: 'github',
+        host: 'github.com',
+        state: 'connected',
+        account: 'octo',
+        method: 'cli',
+        checkedAt: '2026-10-10T08:00:00.000Z',
+      },
+    ],
+  },
   'runtimes.report': {
     ...env('runtimes.report'),
     runtimes: [

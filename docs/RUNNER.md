@@ -401,14 +401,23 @@ Edit `config.json` manually (mode 0600) or use the pair command with `--mock` fl
    { "jira": { "baseUrl": "https://jira.example.com", "email": "you@example.com", "apiToken": "..." } }
    ```
 
-**GitHub setup (for PR creation):**
-1. Install the GitHub CLI: `brew install gh` (macOS), `choco install gh` (Windows), apt/dnf (Linux)
-2. Authenticate: `gh auth login` (one-time setup)
-3. Test: `gh pr list`
+**Git hosts (pull requests, repository list and creation):** the git host is chosen per project repository (GitHub, GitLab, Bitbucket Cloud, Azure DevOps, or plain git). Connect each one you use, on this workstation, with
 
-The `gh` CLI is required for approved repository setup (`aom repo create`, below): the runner creates the repository with your own `gh` login after you approve it on the desk. It needs a repository root (`aom-runner repos add <path>`; the new clone goes under the first one) and `gh auth login`. The command runs only on the project owner's workstation, with no shell (`gh` and `git` are run directly; `AOM_GH_BIN` overrides the `gh` path), refuses an existing GitHub repository unless it is empty and yours, confines the clone to the repository root and records each request so a retry never creates a second repository.
+```
+aom-runner git-connect github                 # runs `gh auth login --web`
+aom-runner git-connect gitlab [--host git.example.com]   # `glab auth login`, or paste a personal access token
+aom-runner git-connect bitbucket-cloud        # Atlassian e-mail + API token (app passwords no longer work)
+aom-runner git-connect azure-devops --organization acme  # PAT (organization-scoped); or `az login` and no token
+aom-runner git-connect <provider> --ssh-key   # create ~/.ssh/aom_<provider>, print the public key and where to upload it
+aom-runner git-connect <provider> --status    # connected or not
+aom-runner git-connect <provider> --disconnect  # forget a saved token
+```
 
-Otherwise `gh` is optional; if not available, finalize with action `pr` falls back to pushing the branch and posting a desk notice for manual PR creation. See the BA's `aom finalize --action <pr|push_branch|merge>` command.
+The command prints the steps, reads a token without echoing it and checks it against the provider before saving it. Tokens live in `<data dir>/secrets/git-tokens.json` (mode 0600, directory 0700; agents cannot read the data directory) and reach git only through the environment of the git process. A running runner reports `connected` / `not connected` (never the secret) to the server within a minute; the Workstations page and the repository settings show it with a Connect helper that gives the same command. Plain git needs no connection: it uses your SSH keys or Git Credential Manager as before.
+
+The `gh` CLI is required for GitHub for approved repository setup (`aom repo create`, below): the runner creates the repository with your own `gh` login after you approve it on the desk. It needs a repository root (`aom-runner repos add <path>`; the new clone goes under the first one) and `gh auth login`. The command runs only on the project owner's workstation, with no shell (`gh` and `git` are run directly; `AOM_GH_BIN` overrides the `gh` path), refuses an existing GitHub repository unless it is empty and yours, confines the clone to the repository root and records each request so a retry never creates a second repository.
+
+Without a login for the repository's host (or on plain git) finalize with action `pr` falls back to pushing the branch and posting a desk notice for manual PR creation. Finalize with action `merge` first asks the host whether the working branch allows direct pushes; when it is protected (or the push is refused by a branch policy) the runner pushes the card branch and opens a pull request instead, with a desk notice. See the BA's `aom finalize --action <pr|push_branch|merge>` command.
 
 **Rotate runner token** (invalidates old token):
 ```sh
@@ -476,6 +485,7 @@ The runner respects these environment variables:
 | `AOM_RUNNER_MAX_SHIFT_MS` | Override `maxShiftMinutes` for testing (milliseconds, e.g., 5000 for 5 seconds) |
 | `AOM_MOCK_STEP_MS` | Speed up mock adapter progress steps (default 100 ms) |
 | `AOM_GH_BIN` | Path to `gh` binary (default `gh`; for GitHub API integration) |
+
 | `AOM_ALLOW_LOCAL_REMOTES` | Set to `1` to accept `file://` and path git remotes (tests only; production refuses them) |
 | `AOM_CLAUDE_SMOKE` | Set to `1` to run the real-Claude smoke test (spends tokens) |
 | `AOM_CLAUDE_SMOKE_MODEL` | Smoke test model (default `opus`; try `haiku` to save tokens) |
@@ -1041,7 +1051,7 @@ A builder on a work-domain card sees only the work vault; personal cards see onl
 - Runner token: stored in `config.json` (mode 0600); agents are denied the data directory (see the threat model)
 - Claude credentials: stored in agent's `CLAUDE_CONFIG_DIR` (mode 0700) or symlinked to your `~/.claude/.credentials.json` (the sandbox denies reading the real file to shell commands; Claude Code itself reads it)
 - Jira token: stored in `config.json` (mode 0600)
-- GitHub: uses machine's `gh` login (via `gh auth login`)
+- Git hosts: the `gh` / `glab` logins, or tokens saved by `aom-runner git-connect` in `secrets/git-tokens.json` (0600); only connected / not connected is reported to the server
 - Vault SSH keys: used from machine's SSH agent or keyfiles
 
 **Nothing leaves the runner:**

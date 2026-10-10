@@ -376,7 +376,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Repos',
-        text: "Add or remove repositories. In expert mode you can also set or change each one's working branch. Only for projects whose workflow uses repositories.",
+        text: "Add or remove repositories and set or change each one's git host. Paste a URL, pick one from your connected host, or create a new one with that host's fields. In expert mode you can also set or change each one's working branch. Only for projects whose workflow uses repositories.",
+      },
+      {
+        name: 'Git host',
+        text: 'Shows GitHub, GitLab, Bitbucket, Azure DevOps or Plain git for each repository, whether the workstation is connected to it, and a Connect button with the command to run. The owner can change it with Change.',
       },
       {
         name: 'Phases and deploys',
@@ -746,6 +750,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'Workstation card',
         text: 'Name, system and runner version, whether it is connected, and an Unpair button. Click the name to expand: runtimes, shifts running, repositories and the DevOps engineer panel.',
+      },
+      {
+        name: 'Git hosts',
+        text: 'In the expanded card: whether this workstation is connected to GitHub, GitLab, Bitbucket and Azure DevOps. Connect shows the command to run on that computer; Check again refreshes the status. Your login stays on the workstation.',
       },
       {
         name: 'Connection dot',

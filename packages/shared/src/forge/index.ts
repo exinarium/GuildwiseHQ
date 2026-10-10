@@ -5,7 +5,14 @@ import { normalizeRemoteUrl } from '../ids.ts';
  * Git hosts ("forges"). The provider is chosen per project repository: detected from the remote URL, with a manual
  * override stored on the repository (`forge_kind`). `git` is the plain-git fallback (push a branch, no pull request).
  */
-export const FORGE_KINDS = ['github', 'gitlab', 'bitbucket-cloud', 'bitbucket-dc', 'azure-devops', 'git'] as const;
+export const FORGE_KINDS = [
+  'github',
+  'gitlab',
+  'bitbucket-cloud',
+  'bitbucket-dc',
+  'azure-devops',
+  'git',
+] as const;
 export const ForgeKindSchema = z.enum(FORGE_KINDS);
 export type ForgeKind = z.infer<typeof ForgeKindSchema>;
 
@@ -182,7 +189,8 @@ export function createNameFor(
   const spec = CREATE_FIELDS[kind];
   if (!spec.canCreate) return { ok: false, error: spec.hint };
   const clean = parts.map((p) => p.trim().replace(/^\/+|\/+$/g, ''));
-  if (clean.length !== spec.parts.length || clean.some((p) => !p)) return { ok: false, error: 'Fill in every field' };
+  if (clean.length !== spec.parts.length || clean.some((p) => !p))
+    return { ok: false, error: 'Fill in every field' };
   const name = clean[clean.length - 1] as string;
   if (!REPO_SEG.test(name) || name === '.' || name === '..' || name.startsWith('-') || name.endsWith('.git'))
     return {
@@ -192,7 +200,10 @@ export function createNameFor(
   for (const p of clean.slice(0, -1)) {
     const segs = kind === 'gitlab' ? p.split('/') : [p];
     if (segs.some((s) => !SEG.test(s) || s === '.' || s === '..'))
-      return { ok: false, error: `"${p}" is not a valid ${kind === 'azure-devops' ? 'name' : 'owner or namespace'}` };
+      return {
+        ok: false,
+        error: `"${p}" is not a valid ${kind === 'azure-devops' ? 'name' : 'owner or namespace'}`,
+      };
   }
   return { ok: true, fullName: clean.join('/') };
 }
@@ -217,7 +228,8 @@ export function cloneUrlFor(kind: ForgeKind, fullName: string, host?: string): s
 /** Splits a full name into the parts of the create form (GitLab keeps subgroups in the first part). */
 export function splitFullName(kind: ForgeKind, fullName: string): string[] {
   const seg = fullName.split('/');
-  if (kind === 'gitlab') return seg.length < 2 ? seg : [seg.slice(0, -1).join('/'), seg[seg.length - 1] as string];
+  if (kind === 'gitlab')
+    return seg.length < 2 ? seg : [seg.slice(0, -1).join('/'), seg[seg.length - 1] as string];
   return seg;
 }
 
@@ -259,7 +271,6 @@ export function connectSteps(provider: ConnectableForge, host = defaultHost(prov
       ];
   }
 }
-
 
 /** The default host of a connectable provider. */
 export function defaultHost(provider: ConnectableForge): string {

@@ -1,6 +1,6 @@
 import {
-  type ConnectableForge,
   CONNECTABLE_FORGES,
+  type ConnectableForge,
   connectCommand,
   connectSteps,
   FORGE_LABELS,
@@ -46,11 +46,14 @@ export function ConnectHelper({
   const recheck = useRecheckGit();
   const cmd = connectCommand(provider);
   return (
-    <div className="mt-2 rounded-control border border-line bg-sunken p-3 text-sm" data-testid={`connect-${provider}`}>
+    <div
+      className="mt-2 rounded-control border border-line bg-sunken p-3 text-sm"
+      data-testid={`connect-${provider}`}
+    >
       <p className="mb-2 font-medium text-fg">Connect {FORGE_LABELS[provider]} on this workstation</p>
       <p className="mb-2 text-muted">
-        Run this in a terminal on the workstation. Your login or token stays on that machine; the server only learns
-        whether it is connected. The DevOps engineer can walk you through it in chat.
+        Run this in a terminal on the workstation. Your login or token stays on that machine; the server only
+        learns whether it is connected. The DevOps engineer can walk you through it in chat.
       </p>
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <code className="rounded bg-surface px-2 py-1 font-mono text-xs break-all">{cmd}</code>
@@ -72,7 +75,9 @@ export function ConnectHelper({
       <Button size="sm" onClick={() => recheck.mutate(workstationId)} loading={recheck.isPending}>
         Check again
       </Button>
-      {recheck.isSuccess && <span className="ml-2 text-xs text-subtle">Asked the workstation; this updates in a moment.</span>}
+      {recheck.isSuccess && (
+        <span className="ml-2 text-xs text-subtle">Asked the workstation; this updates in a moment.</span>
+      )}
       <ErrorBox error={recheck.error} />
     </div>
   );
@@ -86,8 +91,8 @@ export function GitConnectionsPanel({ w }: { w: WorkstationDto }) {
       <p className="mb-2 text-xs font-medium text-subtle">Git hosts</p>
       {!w.git || w.git.connections.length === 0 ? (
         <p className="text-subtle">
-          Not reported yet (needs a current runner). Run <code className="font-mono text-xs">aom-runner git-connect github</code> to
-          set one up.
+          Not reported yet (needs a current runner). Run{' '}
+          <code className="font-mono text-xs">aom-runner git-connect github</code> to set one up.
         </p>
       ) : null}
       <ul className="flex flex-col gap-2">
@@ -98,16 +103,22 @@ export function GitConnectionsPanel({ w }: { w: WorkstationDto }) {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="w-40 font-medium text-fg">{FORGE_LABELS[p]}</span>
                 <ConnectionBadge c={c} />
-                {c?.host && c.host !== 'github.com' && c.host !== 'gitlab.com' && c.host !== 'bitbucket.org' && c.host !== 'dev.azure.com' && (
-                  <span className="font-mono text-xs text-subtle">{c.host}</span>
-                )}
+                {c?.host &&
+                  c.host !== 'github.com' &&
+                  c.host !== 'gitlab.com' &&
+                  c.host !== 'bitbucket.org' &&
+                  c.host !== 'dev.azure.com' && (
+                    <span className="font-mono text-xs text-subtle">{c.host}</span>
+                  )}
                 {c?.state !== 'connected' && w.connected && (
                   <Button size="sm" variant="secondary" onClick={() => setOpen(open === p ? null : p)}>
                     {open === p ? 'Hide' : 'Connect'}
                   </Button>
                 )}
               </div>
-              {open === p && <ConnectHelper provider={p} workstationId={w.id} {...(c?.host ? { host: c.host } : {})} />}
+              {open === p && (
+                <ConnectHelper provider={p} workstationId={w.id} {...(c?.host ? { host: c.host } : {})} />
+              )}
             </li>
           );
         })}

@@ -40,7 +40,10 @@ export class BitbucketCloudForge implements Forge {
 
   private async call<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
     const t = this.cred();
-    if (!t?.user) throw new ForgeUnavailableError('not connected to Bitbucket: run `aom-runner git-connect bitbucket-cloud`');
+    if (!t?.user)
+      throw new ForgeUnavailableError(
+        'not connected to Bitbucket: run `aom-runner git-connect bitbucket-cloud`',
+      );
     return jsonCall<T>(this.env.fetch, `${API}${path}`, {
       ...init,
       headers: { authorization: `Basic ${Buffer.from(`${t.user}:${t.token}`).toString('base64')}` },
@@ -59,9 +62,18 @@ export class BitbucketCloudForge implements Forge {
       };
     try {
       const u = await this.call<{ display_name?: string; nickname?: string }>('/user');
-      return { ...base, state: 'connected', method: 'token', ...(u.nickname || u.display_name ? { account: u.nickname ?? u.display_name } : {}) };
+      return {
+        ...base,
+        state: 'connected',
+        method: 'token',
+        ...(u.nickname || u.display_name ? { account: u.nickname ?? u.display_name } : {}),
+      };
     } catch (err) {
-      return { ...base, state: 'not_connected', detail: `Bitbucket refused the saved token (${errText(err)}).` };
+      return {
+        ...base,
+        state: 'not_connected',
+        detail: `Bitbucket refused the saved token (${errText(err)}).`,
+      };
     }
   }
 
@@ -95,10 +107,13 @@ export class BitbucketCloudForge implements Forge {
 
   async createRepo(r: CreateRepoInput): Promise<RepoRef> {
     const [ws, slug] = r.fullName.split('/') as [string, string];
-    const made = await this.call<BbRepo>(`/repositories/${encodeURIComponent(ws)}/${encodeURIComponent(slug.toLowerCase())}`, {
-      method: 'POST',
-      body: { scm: 'git', is_private: r.private, ...(r.description ? { description: r.description } : {}) },
-    });
+    const made = await this.call<BbRepo>(
+      `/repositories/${encodeURIComponent(ws)}/${encodeURIComponent(slug.toLowerCase())}`,
+      {
+        method: 'POST',
+        body: { scm: 'git', is_private: r.private, ...(r.description ? { description: r.description } : {}) },
+      },
+    );
     return this.toRef(made);
   }
 
@@ -122,22 +137,32 @@ export class BitbucketCloudForge implements Forge {
         },
       },
     );
-    return { id: String(pr.id), url: pr.links?.html?.href ?? `https://bitbucket.org/${repo.fullName}/pull-requests/${pr.id}` };
+    return {
+      id: String(pr.id),
+      url: pr.links?.html?.href ?? `https://bitbucket.org/${repo.fullName}/pull-requests/${pr.id}`,
+    };
   }
 
   async changeState(repo: RemoteRepo, id: string): Promise<ChangeState> {
-    const pr = await this.call<{ state: string }>(`/repositories/${repo.fullName}/pullrequests/${encodeURIComponent(id)}`);
+    const pr = await this.call<{ state: string }>(
+      `/repositories/${repo.fullName}/pullrequests/${encodeURIComponent(id)}`,
+    );
     return pr.state === 'MERGED' ? 'merged' : pr.state === 'OPEN' ? 'open' : 'closed';
   }
 
   async branchRules(repo: RemoteRepo, branch: string): Promise<BranchRules | null> {
     try {
-      const res = await this.call<{ values: Array<{ kind: string; pattern?: string; branch_match_kind?: string }> }>(
-        `/repositories/${repo.fullName}/branch-restrictions?pagelen=100`,
-      );
+      const res = await this.call<{
+        values: Array<{ kind: string; pattern?: string; branch_match_kind?: string }>;
+      }>(`/repositories/${repo.fullName}/branch-restrictions?pagelen=100`);
       const hit = res.values.some(
         (v) =>
-          ['push', 'restrict_merges', 'require_approvals_to_merge', 'require_passing_builds_to_merge'].includes(v.kind) &&
+          [
+            'push',
+            'restrict_merges',
+            'require_approvals_to_merge',
+            'require_passing_builds_to_merge',
+          ].includes(v.kind) &&
           (v.branch_match_kind === 'glob' ? globMatch(v.pattern ?? '', branch) : v.pattern === branch),
       );
       return { directPushAllowed: !hit, requiresChange: hit };

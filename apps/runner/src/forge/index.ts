@@ -54,7 +54,8 @@ export function forgeForUrl(
   if (!p) return null;
   const org = p.kind === 'azure-devops' ? p.namespace[0] : undefined;
   const forge = forgeOfKind(env, p.kind, p.host, org);
-  const fullName = p.kind === 'azure-devops' ? [...p.namespace, p.name].join('/') : [...p.namespace, p.name].join('/');
+  const fullName =
+    p.kind === 'azure-devops' ? [...p.namespace, p.name].join('/') : [...p.namespace, p.name].join('/');
   return { forge, repo: { kind: p.kind, host: p.host, fullName, url } };
 }
 
@@ -76,7 +77,9 @@ export function forgePrCreator(env: ForgeEnv): PrCreator {
       if (!hit) return { unavailable: 'this repository has no recognisable git host' };
       const { forge, repo } = hit;
       if (!forge.openChange)
-        return { unavailable: `${forge.kind === 'git' ? 'plain git' : forge.kind} has no pull request support here` };
+        return {
+          unavailable: `${forge.kind === 'git' ? 'plain git' : forge.kind} has no pull request support here`,
+        };
       try {
         const c = await forge.openChange(repo, {
           base: input.base,
@@ -129,9 +132,7 @@ export async function gitConnections(
     for (const t of known) if (t.provider === provider) list.add(t.host);
     for (const host of list) {
       const forge =
-        provider === 'azure-devops'
-          ? new AzureDevOpsForge(env, host)
-          : forgeOfKind(env, provider, host);
+        provider === 'azure-devops' ? new AzureDevOpsForge(env, host) : forgeOfKind(env, provider, host);
       if (forge.status) out.push(await forge.status());
     }
   }

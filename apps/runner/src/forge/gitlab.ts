@@ -1,5 +1,13 @@
 import type { GitConnection, RepoRef } from '@aom/shared';
-import { errText, ForgeHttpError, ForgeUnavailableError, hostOf, isHttps, jsonCall, tokenHelperEnv } from './http.ts';
+import {
+  errText,
+  ForgeHttpError,
+  ForgeUnavailableError,
+  hostOf,
+  isHttps,
+  jsonCall,
+  tokenHelperEnv,
+} from './http.ts';
 import type {
   BranchRules,
   ChangeState,
@@ -36,9 +44,13 @@ export class GitLabForge implements Forge {
   private async token(): Promise<{ token: string; user: string } | null> {
     const t = this.env.tokens.get('gitlab', this.host);
     if (t) return { token: t.token, user: t.user ?? 'oauth2' };
-    const r = await this.env.exec.run(this.env.glabBin ?? 'glab', ['config', 'get', 'token', '--host', this.host], {
-      timeoutMs: 15_000,
-    });
+    const r = await this.env.exec.run(
+      this.env.glabBin ?? 'glab',
+      ['config', 'get', 'token', '--host', this.host],
+      {
+        timeoutMs: 15_000,
+      },
+    );
     const tok = r.stdout.trim();
     return r.exitCode === 0 && tok ? { token: tok, user: 'oauth2' } : null;
   }
@@ -52,7 +64,8 @@ export class GitLabForge implements Forge {
 
   private async authed<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
     const t = await this.token();
-    if (!t) throw new ForgeUnavailableError(`not connected to ${this.host}: run \`aom-runner git-connect gitlab\``);
+    if (!t)
+      throw new ForgeUnavailableError(`not connected to ${this.host}: run \`aom-runner git-connect gitlab\``);
     return this.api<T>(path, t.token, init);
   }
 
@@ -64,7 +77,8 @@ export class GitLabForge implements Forge {
       return {
         ...base,
         state: 'not_connected',
-        detail: 'Run `aom-runner git-connect gitlab` (it runs `glab auth login` or saves a personal access token).',
+        detail:
+          'Run `aom-runner git-connect gitlab` (it runs `glab auth login` or saves a personal access token).',
       };
     try {
       const u = await this.api<{ username?: string }>('/user', t.token);
@@ -77,7 +91,9 @@ export class GitLabForge implements Forge {
   async gitAuth(url: string): Promise<GitAuth> {
     if (!isHttps(url)) return { args: [], env: {} };
     const t = await this.token();
-    return t ? { args: [], env: tokenHelperEnv(hostOf(url) ?? this.host, t.user, t.token) } : { args: [], env: {} };
+    return t
+      ? { args: [], env: tokenHelperEnv(hostOf(url) ?? this.host, t.user, t.token) }
+      : { args: [], env: {} };
   }
 
   private toRef(p: GlProject): RepoRef {
@@ -153,7 +169,8 @@ export class GitLabForge implements Forge {
       const allowed = (pb.push_access_levels ?? []).some((l) => l.access_level > 0);
       return { directPushAllowed: allowed, requiresChange: !allowed };
     } catch (err) {
-      if (err instanceof ForgeHttpError && err.status === 404) return { directPushAllowed: true, requiresChange: false };
+      if (err instanceof ForgeHttpError && err.status === 404)
+        return { directPushAllowed: true, requiresChange: false };
       return null;
     }
   }

@@ -53,24 +53,29 @@ export const REPO_REQUEST_STATUS = ['pending', 'approved', 'rejected', 'created'
 export type RepoRequestStatus = (typeof REPO_REQUEST_STATUS)[number];
 
 /** Payload of the `repo.create` runner command. */
-export const RepoCreatePayloadSchema = z.object({
-  requestId: z.uuid(),
-  /** `owner/repo` for GitHub; `group/sub/project` (GitLab), `workspace/repo`, `org/project/repo` for the others. */
-  name: z.string().min(3).max(400),
-  /** The git provider the repository is made on (absent: GitHub, the original behaviour). */
-  provider: ForgeKindSchema.optional(),
-  /** Host of a self-managed GitLab or a GitHub Enterprise Server (absent: the public host). */
-  host: z.string().max(200).optional(),
-  visibility: RepoVisibilitySchema,
-  description: RepoDescriptionSchema.optional(),
-  projectKey: z.string(),
-  projectName: z.string(),
-  /** The branch the initial commit goes to (the project's working branch). */
-  branch: z.string().default('main'),
-}).superRefine((v, ctx) => {
-  const err = (v.provider ?? 'github') === 'github' ? repoNameError(v.name) : createFullNameError(v.provider as never, v.name);
-  if (err) ctx.addIssue({ code: 'custom', path: ['name'], message: err });
-});
+export const RepoCreatePayloadSchema = z
+  .object({
+    requestId: z.uuid(),
+    /** `owner/repo` for GitHub; `group/sub/project` (GitLab), `workspace/repo`, `org/project/repo` for the others. */
+    name: z.string().min(3).max(400),
+    /** The git provider the repository is made on (absent: GitHub, the original behaviour). */
+    provider: ForgeKindSchema.optional(),
+    /** Host of a self-managed GitLab or a GitHub Enterprise Server (absent: the public host). */
+    host: z.string().max(200).optional(),
+    visibility: RepoVisibilitySchema,
+    description: RepoDescriptionSchema.optional(),
+    projectKey: z.string(),
+    projectName: z.string(),
+    /** The branch the initial commit goes to (the project's working branch). */
+    branch: z.string().default('main'),
+  })
+  .superRefine((v, ctx) => {
+    const err =
+      (v.provider ?? 'github') === 'github'
+        ? repoNameError(v.name)
+        : createFullNameError(v.provider as never, v.name);
+    if (err) ctx.addIssue({ code: 'custom', path: ['name'], message: err });
+  });
 export type RepoCreatePayload = z.infer<typeof RepoCreatePayloadSchema>;
 
 /** The runner's `command.result` for `repo.create`. */

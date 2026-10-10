@@ -47,7 +47,11 @@ export function RepoProviderControl({
             {open ? 'Hide' : 'Connect'}
           </Button>
         )}
-        {kind === 'git' && <span className="text-xs text-subtle">Plain git: the branch is pushed, no pull request is opened.</span>}
+        {kind === 'git' && (
+          <span className="text-xs text-subtle">
+            Plain git: the branch is pushed, no pull request is opened.
+          </span>
+        )}
         {isOwner && (
           <Button size="sm" variant="ghost" onClick={() => setEdit(!edit)}>
             Change
@@ -79,7 +83,11 @@ export function RepoProviderControl({
       )}
       <ErrorBox error={set.error} />
       {open && connectable && ws && (
-        <ConnectHelper provider={kind as ConnectableForge} workstationId={ws.id} {...(conn?.host ? { host: conn.host } : {})} />
+        <ConnectHelper
+          provider={kind as ConnectableForge}
+          workstationId={ws.id}
+          {...(conn?.host ? { host: conn.host } : {})}
+        />
       )}
     </div>
   );

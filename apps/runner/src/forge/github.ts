@@ -41,7 +41,11 @@ export class GitHubForge implements Forge {
   private gh(args: string[]) {
     return this.env.exec.run(this.bin, args, {
       timeoutMs: 120_000,
-      env: { GH_PROMPT_DISABLED: '1', NO_COLOR: '1', ...(this.host !== 'github.com' ? { GH_HOST: this.host } : {}) },
+      env: {
+        GH_PROMPT_DISABLED: '1',
+        NO_COLOR: '1',
+        ...(this.host !== 'github.com' ? { GH_HOST: this.host } : {}),
+      },
     });
   }
 
@@ -53,7 +57,8 @@ export class GitHubForge implements Forge {
       return {
         ...base,
         state: 'unavailable',
-        detail: 'The GitHub CLI (gh) is not installed. Install it from https://cli.github.com, then run `aom-runner git-connect github`.',
+        detail:
+          'The GitHub CLI (gh) is not installed. Install it from https://cli.github.com, then run `aom-runner git-connect github`.',
       };
     if (who.exitCode !== 0)
       return {
@@ -90,7 +95,8 @@ export class GitHubForge implements Forge {
 
   async listRepos(q: { search?: string }): Promise<RepoRef[]> {
     const r = await this.gh(['repo', 'list', '--limit', '200', '--json', FIELDS]);
-    if (r.exitCode !== 0) throw new Error(`gh repo list failed: ${(r.stderr || r.stdout).trim().slice(0, 300)}`);
+    if (r.exitCode !== 0)
+      throw new Error(`gh repo list failed: ${(r.stderr || r.stdout).trim().slice(0, 300)}`);
     const all = (JSON.parse(r.stdout || '[]') as GhRepo[]).map((x) => this.toRef(x));
     const s = q.search?.trim().toLowerCase();
     return (s ? all.filter((x) => x.fullName.toLowerCase().includes(s)) : all).slice(0, 100);
@@ -104,12 +110,22 @@ export class GitHubForge implements Forge {
       throw new Error(`gh repo create failed: ${(made.stderr || made.stdout).trim().slice(0, 300)}`);
     const v = await this.gh(['repo', 'view', r.fullName, '--json', FIELDS]);
     if (v.exitCode !== 0)
-      throw new Error(`${r.fullName} was created but could not be read back: ${v.stderr.trim().slice(0, 200)}`);
+      throw new Error(
+        `${r.fullName} was created but could not be read back: ${v.stderr.trim().slice(0, 200)}`,
+      );
     return this.toRef(JSON.parse(v.stdout) as GhRepo);
   }
 
   async defaultBranch(repo: RemoteRepo): Promise<string | null> {
-    const v = await this.gh(['repo', 'view', repo.fullName, '--json', 'defaultBranchRef', '--jq', '.defaultBranchRef.name']);
+    const v = await this.gh([
+      'repo',
+      'view',
+      repo.fullName,
+      '--json',
+      'defaultBranchRef',
+      '--jq',
+      '.defaultBranchRef.name',
+    ]);
     return v.exitCode === 0 && v.stdout.trim() ? v.stdout.trim() : null;
   }
 
@@ -141,7 +157,8 @@ export class GitHubForge implements Forge {
 
   async changeState(repo: RemoteRepo, id: string): Promise<ChangeState> {
     const r = await this.gh(['pr', 'view', id, '--repo', repo.fullName, '--json', 'state', '--jq', '.state']);
-    if (r.exitCode !== 0) throw new Error(`gh pr view failed: ${(r.stderr || r.stdout).trim().slice(0, 200)}`);
+    if (r.exitCode !== 0)
+      throw new Error(`gh pr view failed: ${(r.stderr || r.stdout).trim().slice(0, 200)}`);
     const s = r.stdout.trim().toUpperCase();
     return s === 'MERGED' ? 'merged' : s === 'CLOSED' ? 'closed' : 'open';
   }
@@ -156,7 +173,8 @@ export class GitHubForge implements Forge {
           required_pull_request_reviews?: unknown;
           required_status_checks?: { contexts?: unknown[]; checks?: unknown[] } | null;
         };
-        const checks = (p.required_status_checks?.contexts?.length ?? 0) + (p.required_status_checks?.checks?.length ?? 0);
+        const checks =
+          (p.required_status_checks?.contexts?.length ?? 0) + (p.required_status_checks?.checks?.length ?? 0);
         requiresChange = !!p.required_pull_request_reviews || checks > 0;
       } else if (!/not protected|404/i.test(prot.stderr + prot.stdout)) {
         return null; // no permission to read protection (403) or gh missing: unknown

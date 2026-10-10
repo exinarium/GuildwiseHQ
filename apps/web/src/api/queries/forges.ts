@@ -1,9 +1,4 @@
-import {
-  type ConnectableForge,
-  type ForgeKind,
-  type ForgeRepoList,
-  ForgeRepoListSchema,
-} from '@aom/shared';
+import { type ConnectableForge, type ForgeKind, type ForgeRepoList, ForgeRepoListSchema } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, patch, post } from '../client.ts';
 
@@ -14,7 +9,8 @@ export function useRecheckGit() {
     mutationFn: (workstationId: string) => post(`/workstations/${workstationId}/git/recheck`, {}),
     onSuccess: () => {
       // The runner answers within a moment; refresh a few times.
-      for (const ms of [1500, 4000, 8000]) setTimeout(() => qc.invalidateQueries({ queryKey: ['workstations'] }), ms);
+      for (const ms of [1500, 4000, 8000])
+        setTimeout(() => qc.invalidateQueries({ queryKey: ['workstations'] }), ms);
     },
   });
 }

@@ -1,7 +1,7 @@
 import {
   CONNECTABLE_FORGES,
-  CREATE_FIELDS,
   type ConnectableForge,
+  CREATE_FIELDS,
   cloneUrlFor,
   createNameFor,
   detectForgeKind,
@@ -44,7 +44,8 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
   const [search, setSearch] = useState('');
 
   const detected = repoUrl.trim() ? detectForgeKind(repoUrl.trim()) : null;
-  const kind: ForgeKind = mode === 'create' ? createKind : override === 'auto' ? (detected ?? 'git') : override;
+  const kind: ForgeKind =
+    mode === 'create' ? createKind : override === 'auto' ? (detected ?? 'git') : override;
   const spec = CREATE_FIELDS[kind];
 
   // The workstation that answers for this user: the first one that is connected.
@@ -121,7 +122,12 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
           An existing repository (cloned onto the workstations)
         </label>
         <label className="flex items-center gap-2">
-          <input type="radio" name="repo-mode" checked={mode === 'create'} onChange={() => setMode('create')} />
+          <input
+            type="radio"
+            name="repo-mode"
+            checked={mode === 'create'}
+            onChange={() => setMode('create')}
+          />
           Create a new repository
         </label>
       </fieldset>
@@ -209,8 +215,8 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
                 </p>
               )}
               <p className="text-xs text-subtle sm:col-span-3">
-                {spec.hint} It is created with the {FORGE_LABELS[kind]} login on the DevOps engineer&apos;s workstation,
-                then cloned.
+                {spec.hint} It is created with the {FORGE_LABELS[kind]} login on the DevOps engineer&apos;s
+                workstation, then cloned.
               </p>
             </>
           ) : (
@@ -226,7 +232,11 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
           </span>
           <ConnectionBadge c={conn} />
           {conn?.state !== 'connected' && (
-            <ConnectHelper provider={kind} workstationId={ws.id} {...(conn?.host ? { host: conn.host } : {})} />
+            <ConnectHelper
+              provider={kind}
+              workstationId={ws.id}
+              {...(conn?.host ? { host: conn.host } : {})}
+            />
           )}
         </div>
       )}
@@ -273,12 +283,16 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
               )}
               {picker.result?.state === 'done' && (
                 <ul className="mt-2 flex max-h-64 flex-col divide-y divide-line overflow-auto text-sm">
-                  {picker.result.repos.length === 0 && <li className="py-2 text-subtle">No repositories found.</li>}
+                  {picker.result.repos.length === 0 && (
+                    <li className="py-2 text-subtle">No repositories found.</li>
+                  )}
                   {picker.result.repos.map((r) => (
                     <li key={r.cloneUrl} className="flex items-center justify-between gap-2 py-2">
                       <span className="min-w-0 break-all">
                         {r.fullName}
-                        {r.private !== undefined && <span className="ml-2 text-xs text-subtle">{r.private ? 'private' : 'public'}</span>}
+                        {r.private !== undefined && (
+                          <span className="ml-2 text-xs text-subtle">{r.private ? 'private' : 'public'}</span>
+                        )}
                       </span>
                       <Button type="button" size="sm" variant="secondary" onClick={() => use(r)}>
                         Use
@@ -303,7 +317,12 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
       <div className="sm:col-span-3">
         <ErrorBox error={addRepo.error} />
       </div>
-      <Button type="submit" variant="primary" className="justify-self-start sm:col-span-3" loading={addRepo.isPending}>
+      <Button
+        type="submit"
+        variant="primary"
+        className="justify-self-start sm:col-span-3"
+        loading={addRepo.isPending}
+      >
         Add repository
       </Button>
     </form>

@@ -12,6 +12,9 @@ import {
 import { Command } from 'commander';
 import { execa } from 'execa';
 import { sandboxDoctorLines, sandboxState } from './adapters/claude-policy.ts';
+import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
+import { toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
+import { requestRotatedToken } from './connection/rotate.ts';
 import {
   connectSteps,
   describeConnection,
@@ -21,10 +24,6 @@ import {
   touchRecheck,
 } from './forge/connect.ts';
 import { defaultHost, FileTokenStore, gitConnections } from './forge/index.ts';
-import { realExecutor } from './toolchain/exec.ts';
-import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
-import { toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
-import { requestRotatedToken } from './connection/rotate.ts';
 import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { RunnerHost } from './host.ts';
@@ -42,6 +41,7 @@ import { resolveDataDir, runnerPaths } from './paths.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
 import { preparePairing } from './up.ts';
+import { realExecutor } from './toolchain/exec.ts';
 import { RUNNER_VERSION } from './version.ts';
 
 const dataDirOpt = [
@@ -527,7 +527,9 @@ async function gitConnect(providerArg: string, opts: GitConnectOpts): Promise<vo
   const first = stores[0] as (typeof stores)[number];
   const env = { exec: realExecutor, fetch, tokens: first.store };
   const show = async () => {
-    for (const c of (await gitConnections(env, { [provider]: [host] })).filter((c) => c.provider === provider))
+    for (const c of (await gitConnections(env, { [provider]: [host] })).filter(
+      (c) => c.provider === provider,
+    ))
       console.log(describeConnection(c));
   };
   const done = () => {
@@ -536,7 +538,9 @@ async function gitConnect(providerArg: string, opts: GitConnectOpts): Promise<vo
   };
   if (opts.disconnect) {
     for (const s of stores) s.store.remove(provider, host);
-    console.log('Saved token removed. (Logins held by gh or glab are removed with `gh auth logout` / `glab auth logout`.)');
+    console.log(
+      'Saved token removed. (Logins held by gh or glab are removed with `gh auth logout` / `glab auth logout`.)',
+    );
     return done();
   }
   if (opts.status) return show();
@@ -546,15 +550,22 @@ async function gitConnect(providerArg: string, opts: GitConnectOpts): Promise<vo
   console.log('');
   if (opts.sshKey) {
     const k = await ensureSshKey(realExecutor, provider);
-    console.log(`${k.created ? 'Created' : 'Using the existing'} SSH key ${k.path}. Add this public key:\n\n${k.publicKey}\n\n${sshUploadHelp(provider, host)}`);
-    console.log(`Then add to ~/.ssh/config:\n  Host ${host}\n    IdentityFile ${k.path}\n    IdentitiesOnly yes`);
+    console.log(
+      `${k.created ? 'Created' : 'Using the existing'} SSH key ${k.path}. Add this public key:\n\n${k.publicKey}\n\n${sshUploadHelp(provider, host)}`,
+    );
+    console.log(
+      `Then add to ~/.ssh/config:\n  Host ${host}\n    IdentityFile ${k.path}\n    IdentitiesOnly yes`,
+    );
     return;
   }
   if (provider === 'github') {
     const r = await realExecutor.run('gh', ['--version']);
     if (r.exitCode === 127) throw new Error('the GitHub CLI (gh) is not installed: https://cli.github.com');
     const { execa: ex } = await import('execa');
-    await ex('gh', ['auth', 'login', '--web', '--hostname', host, '--git-protocol', 'https'], { stdio: 'inherit', reject: false });
+    await ex('gh', ['auth', 'login', '--web', '--hostname', host, '--git-protocol', 'https'], {
+      stdio: 'inherit',
+      reject: false,
+    });
     await ex('gh', ['auth', 'setup-git', '--hostname', host], { stdio: 'inherit', reject: false });
     await show();
     return done();
@@ -579,18 +590,22 @@ async function gitConnect(providerArg: string, opts: GitConnectOpts): Promise<vo
   let user = opts.user;
   if (provider === 'bitbucket-cloud' && !user) user = await promptLine('Atlassian e-mail address: ');
   let organization = opts.organization;
-  if (provider === 'azure-devops' && !organization) organization = await promptLine('Azure DevOps organization: ');
+  if (provider === 'azure-devops' && !organization)
+    organization = await promptLine('Azure DevOps organization: ');
   const token = await promptSecret('Paste the token (it is not shown): ');
   if (!token) throw new Error('no token entered');
   let st: Awaited<ReturnType<typeof saveAndVerify>> | undefined;
   for (const s of stores) {
-    st = await saveAndVerify({ exec: realExecutor, fetch, tokens: s.store }, {
-      provider,
-      host,
-      token,
-      ...(user ? { user } : {}),
-      ...(organization ? { organization } : {}),
-    });
+    st = await saveAndVerify(
+      { exec: realExecutor, fetch, tokens: s.store },
+      {
+        provider,
+        host,
+        token,
+        ...(user ? { user } : {}),
+        ...(organization ? { organization } : {}),
+      },
+    );
   }
   if (!st || st.state !== 'connected') {
     console.error(`The token was not accepted${st?.detail ? `: ${st.detail}` : ''}. Nothing was saved.`);

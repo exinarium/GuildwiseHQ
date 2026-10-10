@@ -60,7 +60,10 @@ function fakeFetch(handlers: Array<[string, unknown | ((c: Call) => unknown)]>):
       if (m === call.method && url.includes(rest.join(' '))) {
         const v = typeof h === 'function' ? (h as (c: Call) => unknown)(call) : h;
         if (v instanceof Response) return v;
-        return new Response(JSON.stringify(v), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(JSON.stringify(v), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
       }
     }
     return new Response(JSON.stringify({ message: 'not found' }), { status: 404 });
@@ -126,25 +129,42 @@ describe('GitHub adapter (gh stubbed)', () => {
 
   it('an unprotected branch allows a direct push; unreadable rules are unknown', async () => {
     const open = new GitHubForge(
-      env({ exec: new FakeExec([[/protection/, { exitCode: 1, stderr: 'Branch not protected (HTTP 404)' }], [/rules\/branches/, { stdout: '[]' }]]) }),
+      env({
+        exec: new FakeExec([
+          [/protection/, { exitCode: 1, stderr: 'Branch not protected (HTTP 404)' }],
+          [/rules\/branches/, { stdout: '[]' }],
+        ]),
+      }),
     );
     expect(await open.branchRules(repo('github', 'github.com', 'a/b'), 'main')).toEqual({
       directPushAllowed: true,
       requiresChange: false,
     });
-    const denied = new GitHubForge(env({ exec: new FakeExec([[/protection/, { exitCode: 1, stderr: 'HTTP 403' }]]) }));
+    const denied = new GitHubForge(
+      env({ exec: new FakeExec([[/protection/, { exitCode: 1, stderr: 'HTTP 403' }]]) }),
+    );
     expect(await denied.branchRules(repo('github', 'github.com', 'a/b'), 'main')).toBeNull();
   });
 
   it('lists repositories with a search filter', async () => {
     const list = JSON.stringify([
-      { nameWithOwner: 'acme/web', url: 'https://github.com/acme/web', sshUrl: 'git@github.com:acme/web.git', isPrivate: true, defaultBranchRef: { name: 'main' } },
+      {
+        nameWithOwner: 'acme/web',
+        url: 'https://github.com/acme/web',
+        sshUrl: 'git@github.com:acme/web.git',
+        isPrivate: true,
+        defaultBranchRef: { name: 'main' },
+      },
       { nameWithOwner: 'acme/api', url: 'https://github.com/acme/api', isPrivate: false },
     ]);
     const gh = new GitHubForge(env({ exec: new FakeExec([[/^gh repo list/, { stdout: list }]]) }));
     const all = await gh.listRepos({});
     expect(all).toHaveLength(2);
-    expect(all[0]).toMatchObject({ fullName: 'acme/web', cloneUrl: 'https://github.com/acme/web.git', defaultBranch: 'main' });
+    expect(all[0]).toMatchObject({
+      fullName: 'acme/web',
+      cloneUrl: 'https://github.com/acme/web.git',
+      defaultBranch: 'main',
+    });
     expect((await gh.listRepos({ search: 'API' })).map((r) => r.fullName)).toEqual(['acme/api']);
   });
 });
@@ -161,22 +181,52 @@ describe('GitLab adapter (REST stubbed)', () => {
       ['GET /api/v4/user', { username: 'jo' }],
       [
         'GET /api/v4/projects?',
-        [{ path_with_namespace: 'grp/sub/app', http_url_to_repo: 'https://gitlab.com/grp/sub/app.git', default_branch: 'main', visibility: 'private' }],
+        [
+          {
+            path_with_namespace: 'grp/sub/app',
+            http_url_to_repo: 'https://gitlab.com/grp/sub/app.git',
+            default_branch: 'main',
+            visibility: 'private',
+          },
+        ],
       ],
       ['GET /api/v4/namespaces/grp%2Fsub', { id: 7 }],
-      ['POST /api/v4/projects', (c: Call) => ({ path_with_namespace: `grp/sub/${(c.body as { name: string }).name}`, http_url_to_repo: 'https://gitlab.com/grp/sub/new.git' })],
-      ['POST /api/v4/projects/grp%2Fsub%2Fapp/merge_requests', { iid: 4, web_url: 'https://gitlab.com/grp/sub/app/-/merge_requests/4' }],
+      [
+        'POST /api/v4/projects',
+        (c: Call) => ({
+          path_with_namespace: `grp/sub/${(c.body as { name: string }).name}`,
+          http_url_to_repo: 'https://gitlab.com/grp/sub/new.git',
+        }),
+      ],
+      [
+        'POST /api/v4/projects/grp%2Fsub%2Fapp/merge_requests',
+        { iid: 4, web_url: 'https://gitlab.com/grp/sub/app/-/merge_requests/4' },
+      ],
       ['GET /api/v4/projects/grp%2Fsub%2Fapp/merge_requests/4', { state: 'merged' }],
-      ['GET /api/v4/projects/grp%2Fsub%2Fapp/protected_branches/main', { push_access_levels: [{ access_level: 0 }] }],
+      [
+        'GET /api/v4/projects/grp%2Fsub%2Fapp/protected_branches/main',
+        { push_access_levels: [{ access_level: 0 }] },
+      ],
       ['GET /api/v4/projects/grp%2Fsub%2Fapp/protected_branches/dev', new Response('{}', { status: 404 })],
     ]);
     const gl = new GitLabForge(env({ fetch: f.fetch, tokens: tokens() }));
     expect(await gl.status?.()).toMatchObject({ state: 'connected', account: 'jo' });
-    expect((await gl.listRepos({ search: 'app' }))[0]).toMatchObject({ fullName: 'grp/sub/app', private: true });
-    expect((await gl.createRepo({ fullName: 'grp/sub/new', private: true })).cloneUrl).toBe('https://gitlab.com/grp/sub/new.git');
-    expect(f.calls.find((c) => c.method === 'POST' && c.url.endsWith('/projects'))?.body).toMatchObject({ name: 'new', namespace_id: 7, visibility: 'private' });
+    expect((await gl.listRepos({ search: 'app' }))[0]).toMatchObject({
+      fullName: 'grp/sub/app',
+      private: true,
+    });
+    expect((await gl.createRepo({ fullName: 'grp/sub/new', private: true })).cloneUrl).toBe(
+      'https://gitlab.com/grp/sub/new.git',
+    );
+    expect(f.calls.find((c) => c.method === 'POST' && c.url.endsWith('/projects'))?.body).toMatchObject({
+      name: 'new',
+      namespace_id: 7,
+      visibility: 'private',
+    });
     const r = repo('gitlab', 'gitlab.com', 'grp/sub/app');
-    expect(await gl.openChange(r, { base: 'main', head: 'x', title: 't', body: 'b' })).toMatchObject({ id: '4' });
+    expect(await gl.openChange(r, { base: 'main', head: 'x', title: 't', body: 'b' })).toMatchObject({
+      id: '4',
+    });
     expect(await gl.changeState(r, '4')).toBe('merged');
     expect(await gl.branchRules(r, 'main')).toEqual({ directPushAllowed: false, requiresChange: true });
     expect(await gl.branchRules(r, 'dev')).toEqual({ directPushAllowed: true, requiresChange: false });
@@ -196,7 +246,9 @@ describe('GitLab adapter (REST stubbed)', () => {
   it('without a token it is not connected and a merge request is "unavailable"', async () => {
     const gl = new GitLabForge(env());
     expect((await gl.status?.())?.state).toBe('not_connected');
-    await expect(gl.openChange(repo('gitlab', 'gitlab.com', 'a/b'), { base: 'm', head: 'h', title: 't', body: '' })).rejects.toThrow(/not connected/);
+    await expect(
+      gl.openChange(repo('gitlab', 'gitlab.com', 'a/b'), { base: 'm', head: 'h', title: 't', body: '' }),
+    ).rejects.toThrow(/not connected/);
   });
 });
 
@@ -211,18 +263,50 @@ describe('Azure DevOps adapter (REST stubbed)', () => {
   it('lists, creates, opens a PR, reads its state and the branch policies', async () => {
     const f = fakeFetch([
       ['GET https://dev.azure.com/acme/_apis/projects', { count: 1 }],
-      ['GET https://dev.azure.com/acme/_apis/git/repositories', { value: [{ name: 'web', remoteUrl: 'https://acme@dev.azure.com/acme/Shop/_git/web', sshUrl: 'git@ssh.dev.azure.com:v3/acme/Shop/web', defaultBranch: 'refs/heads/main', project: { name: 'Shop' } }] }],
-      ['POST https://dev.azure.com/acme/Shop/_apis/git/repositories', { name: 'new', remoteUrl: 'https://acme@dev.azure.com/acme/Shop/_git/new' }],
+      [
+        'GET https://dev.azure.com/acme/_apis/git/repositories',
+        {
+          value: [
+            {
+              name: 'web',
+              remoteUrl: 'https://acme@dev.azure.com/acme/Shop/_git/web',
+              sshUrl: 'git@ssh.dev.azure.com:v3/acme/Shop/web',
+              defaultBranch: 'refs/heads/main',
+              project: { name: 'Shop' },
+            },
+          ],
+        },
+      ],
+      [
+        'POST https://dev.azure.com/acme/Shop/_apis/git/repositories',
+        { name: 'new', remoteUrl: 'https://acme@dev.azure.com/acme/Shop/_git/new' },
+      ],
       ['POST https://dev.azure.com/acme/Shop/_apis/git/repositories/web/pullrequests', { pullRequestId: 9 }],
-      ['GET https://dev.azure.com/acme/Shop/_apis/git/repositories/web/pullrequests/9', { status: 'completed' }],
+      [
+        'GET https://dev.azure.com/acme/Shop/_apis/git/repositories/web/pullrequests/9',
+        { status: 'completed' },
+      ],
       ['GET https://dev.azure.com/acme/Shop/_apis/git/repositories/web?', { id: 'rid' }],
-      ['GET https://dev.azure.com/acme/Shop/_apis/policy/configurations', { value: [{ isEnabled: true, isBlocking: true, type: { id: 'fa4e907d-c16b-4a4c-9dfa-4906e5d171dd' } }] }],
+      [
+        'GET https://dev.azure.com/acme/Shop/_apis/policy/configurations',
+        {
+          value: [
+            { isEnabled: true, isBlocking: true, type: { id: 'fa4e907d-c16b-4a4c-9dfa-4906e5d171dd' } },
+          ],
+        },
+      ],
     ]);
     const az = new AzureDevOpsForge(env({ fetch: f.fetch, tokens: tokens() }));
     expect(await az.status?.()).toMatchObject({ state: 'connected', account: 'acme', method: 'token' });
     const list = await az.listRepos({});
-    expect(list[0]).toMatchObject({ fullName: 'acme/Shop/web', cloneUrl: 'https://dev.azure.com/acme/Shop/_git/web', defaultBranch: 'main' });
-    expect((await az.createRepo({ fullName: 'acme/Shop/new', private: true })).fullName).toBe('acme/Shop/new');
+    expect(list[0]).toMatchObject({
+      fullName: 'acme/Shop/web',
+      cloneUrl: 'https://dev.azure.com/acme/Shop/_git/web',
+      defaultBranch: 'main',
+    });
+    expect((await az.createRepo({ fullName: 'acme/Shop/new', private: true })).fullName).toBe(
+      'acme/Shop/new',
+    );
     const r = repo('azure-devops', 'dev.azure.com', 'acme/Shop/web');
     expect(await az.openChange(r, { base: 'main', head: 'aom/x', title: 't', body: 'b' })).toEqual({
       id: '9',
@@ -238,12 +322,16 @@ describe('Azure DevOps adapter (REST stubbed)', () => {
   });
 
   it('a bad PAT (sign-in page) is "not connected"; without a token az is tried, then not connected', async () => {
-    const bad = fakeFetch([['GET https://dev.azure.com/acme/_apis/projects', new Response('<html>', { status: 203 })]]);
+    const bad = fakeFetch([
+      ['GET https://dev.azure.com/acme/_apis/projects', new Response('<html>', { status: 203 })],
+    ]);
     const az = new AzureDevOpsForge(env({ fetch: bad.fetch, tokens: tokens() }));
     expect((await az.status?.())?.state).toBe('not_connected');
     const none = new AzureDevOpsForge(env());
     expect((await none.status?.())?.state).toBe('not_connected');
-    const viaAz = new AzureDevOpsForge(env({ exec: new FakeExec([[/^az account get-access-token/, { stdout: 'ENTRA\n' }]]) }));
+    const viaAz = new AzureDevOpsForge(
+      env({ exec: new FakeExec([[/^az account get-access-token/, { stdout: 'ENTRA\n' }]]) }),
+    );
     expect(await viaAz.status?.()).toMatchObject({ state: 'connected', method: 'cli' });
     const g = await viaAz.gitAuth('https://dev.azure.com/acme/Shop/_git/web');
     expect(g.env.GIT_CONFIG_VALUE_0).toBe('Authorization: Bearer ENTRA');
@@ -253,25 +341,67 @@ describe('Azure DevOps adapter (REST stubbed)', () => {
 describe('Bitbucket Cloud adapter (REST stubbed)', () => {
   const tokens = () => {
     const t = new MemoryTokenStore();
-    t.set({ provider: 'bitbucket-cloud', host: 'bitbucket.org', token: 'ATAT-SECRET', user: 'me@example.com' });
+    t.set({
+      provider: 'bitbucket-cloud',
+      host: 'bitbucket.org',
+      token: 'ATAT-SECRET',
+      user: 'me@example.com',
+    });
     return t;
   };
 
   it('lists, creates, opens a PR, reads its state and branch restrictions', async () => {
     const f = fakeFetch([
       ['GET https://api.bitbucket.org/2.0/user', { nickname: 'me' }],
-      ['GET https://api.bitbucket.org/2.0/repositories?', { values: [{ full_name: 'ws/app', is_private: true, mainbranch: { name: 'main' }, links: { clone: [{ name: 'https', href: 'https://me@bitbucket.org/ws/app.git' }, { name: 'ssh', href: 'git@bitbucket.org:ws/app.git' }] } }] }],
-      ['POST https://api.bitbucket.org/2.0/repositories/ws/new', { full_name: 'ws/new', links: { clone: [{ name: 'https', href: 'https://me@bitbucket.org/ws/new.git' }] } }],
-      ['POST https://api.bitbucket.org/2.0/repositories/ws/app/pullrequests', { id: 3, links: { html: { href: 'https://bitbucket.org/ws/app/pull-requests/3' } } }],
+      [
+        'GET https://api.bitbucket.org/2.0/repositories?',
+        {
+          values: [
+            {
+              full_name: 'ws/app',
+              is_private: true,
+              mainbranch: { name: 'main' },
+              links: {
+                clone: [
+                  { name: 'https', href: 'https://me@bitbucket.org/ws/app.git' },
+                  { name: 'ssh', href: 'git@bitbucket.org:ws/app.git' },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+      [
+        'POST https://api.bitbucket.org/2.0/repositories/ws/new',
+        {
+          full_name: 'ws/new',
+          links: { clone: [{ name: 'https', href: 'https://me@bitbucket.org/ws/new.git' }] },
+        },
+      ],
+      [
+        'POST https://api.bitbucket.org/2.0/repositories/ws/app/pullrequests',
+        { id: 3, links: { html: { href: 'https://bitbucket.org/ws/app/pull-requests/3' } } },
+      ],
       ['GET https://api.bitbucket.org/2.0/repositories/ws/app/pullrequests/3', { state: 'DECLINED' }],
-      ['GET https://api.bitbucket.org/2.0/repositories/ws/app/branch-restrictions', { values: [{ kind: 'push', pattern: 'main', branch_match_kind: 'glob' }] }],
+      [
+        'GET https://api.bitbucket.org/2.0/repositories/ws/app/branch-restrictions',
+        { values: [{ kind: 'push', pattern: 'main', branch_match_kind: 'glob' }] },
+      ],
     ]);
     const bb = new BitbucketCloudForge(env({ fetch: f.fetch, tokens: tokens() }));
     expect(await bb.status?.()).toMatchObject({ state: 'connected', account: 'me' });
-    expect((await bb.listRepos({ search: 'app' }))[0]).toMatchObject({ fullName: 'ws/app', cloneUrl: 'https://bitbucket.org/ws/app.git', sshUrl: 'git@bitbucket.org:ws/app.git' });
-    expect((await bb.createRepo({ fullName: 'ws/new', private: true })).cloneUrl).toBe('https://bitbucket.org/ws/new.git');
+    expect((await bb.listRepos({ search: 'app' }))[0]).toMatchObject({
+      fullName: 'ws/app',
+      cloneUrl: 'https://bitbucket.org/ws/app.git',
+      sshUrl: 'git@bitbucket.org:ws/app.git',
+    });
+    expect((await bb.createRepo({ fullName: 'ws/new', private: true })).cloneUrl).toBe(
+      'https://bitbucket.org/ws/new.git',
+    );
     const r = repo('bitbucket-cloud', 'bitbucket.org', 'ws/app');
-    expect((await bb.openChange(r, { base: 'main', head: 'x', title: 't', body: '' })).url).toBe('https://bitbucket.org/ws/app/pull-requests/3');
+    expect((await bb.openChange(r, { base: 'main', head: 'x', title: 't', body: '' })).url).toBe(
+      'https://bitbucket.org/ws/app/pull-requests/3',
+    );
     expect(await bb.changeState(r, '3')).toBe('closed');
     expect(await bb.branchRules(r, 'main')).toEqual({ directPushAllowed: false, requiresChange: true });
     expect(await bb.branchRules(r, 'feature')).toEqual({ directPushAllowed: true, requiresChange: false });
@@ -298,7 +428,13 @@ describe('plain git fallback', () => {
   it('a forge that is not logged in reports unavailable instead of failing the completion', async () => {
     const r = makeRepo();
     sh(r.clone, 'git', ['remote', 'set-url', 'origin', 'https://gitlab.com/grp/app.git']);
-    const res = await forgePrCreator(env()).create({ cwd: r.clone, base: 'main', branch: 'b', title: 't', body: 'b' });
+    const res = await forgePrCreator(env()).create({
+      cwd: r.clone,
+      base: 'main',
+      branch: 'b',
+      title: 't',
+      body: 'b',
+    });
     expect(res).toHaveProperty('unavailable');
   });
 
@@ -306,7 +442,14 @@ describe('plain git fallback', () => {
     const r = makeRepo();
     sh(r.clone, 'git', ['remote', 'set-url', 'origin', 'https://code.example.com/team/app.git']);
     const x = new FakeExec([[/^gh pr create/, { stdout: 'https://code.example.com/team/app/pull/1\n' }]]);
-    const res = await forgePrCreator(env({ exec: x })).create({ cwd: r.clone, base: 'main', branch: 'b', title: 't', body: 'b', forge: 'github' });
+    const res = await forgePrCreator(env({ exec: x })).create({
+      cwd: r.clone,
+      base: 'main',
+      branch: 'b',
+      title: 't',
+      body: 'b',
+      forge: 'github',
+    });
     expect(res).toEqual({ url: 'https://code.example.com/team/app/pull/1' });
   });
 });
@@ -316,7 +459,9 @@ describe('connections and the token store', () => {
     const tokens = new MemoryTokenStore();
     tokens.set({ provider: 'gitlab', host: 'gitlab.com', token: 'glpat-SECRET' });
     const f = fakeFetch([['GET https://gitlab.com/api/v4/user', { username: 'jo' }]]);
-    const list = await gitConnections(env({ tokens, fetch: f.fetch, exec: new FakeExec([[/^gh api user/, { stdout: 'octo' }]]) }));
+    const list = await gitConnections(
+      env({ tokens, fetch: f.fetch, exec: new FakeExec([[/^gh api user/, { stdout: 'octo' }]]) }),
+    );
     expect(list.map((c) => `${c.provider}:${c.state}`)).toEqual([
       'github:connected',
       'gitlab:connected',
@@ -333,7 +478,11 @@ describe('connections and the token store', () => {
     expect(st.state).toBe('connected');
     expect(tokens.get('gitlab', 'gitlab.com')?.token).toBe('t1');
     const bad = fakeFetch([]);
-    const st2 = await saveAndVerify(env({ tokens, fetch: bad.fetch }), { provider: 'gitlab', host: 'git.corp', token: 'nope' });
+    const st2 = await saveAndVerify(env({ tokens, fetch: bad.fetch }), {
+      provider: 'gitlab',
+      host: 'git.corp',
+      token: 'nope',
+    });
     expect(st2.state).toBe('not_connected');
     expect(tokens.get('gitlab', 'git.corp')).toBeUndefined();
   });
@@ -351,7 +500,15 @@ describe('connections and the token store', () => {
   });
 
   it('describes status and guidance in plain words', () => {
-    expect(describeConnection({ provider: 'github', host: 'github.com', state: 'connected', account: 'octo', checkedAt: '2026-10-10T00:00:00.000Z' })).toBe('GitHub (github.com): connected as octo');
+    expect(
+      describeConnection({
+        provider: 'github',
+        host: 'github.com',
+        state: 'connected',
+        account: 'octo',
+        checkedAt: '2026-10-10T00:00:00.000Z',
+      }),
+    ).toBe('GitHub (github.com): connected as octo');
     expect(connectSteps('bitbucket-cloud').join('\n')).toMatch(/API token/);
     expect(connectSteps('azure-devops').join('\n')).toMatch(/2026-12-01/);
   });

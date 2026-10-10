@@ -228,7 +228,9 @@ export class RepoCreator {
   }
 
   /** The clone folder inside the first repository root, confined to it. */
-  private targetFor(repo: string): { ok: true; realRoot: string; target: string } | { ok: false; error: string } {
+  private targetFor(
+    repo: string,
+  ): { ok: true; realRoot: string; target: string } | { ok: false; error: string } {
     const root = this.deps.repoRoots()[0];
     if (!root)
       return {
@@ -253,7 +255,10 @@ export class RepoCreator {
     if (!env) return { ok: false, error: 'this runner has no git-host support configured' };
     const forge = forgeOfKind(env, kind, p.host);
     if (!forge.createRepo)
-      return { ok: false, error: `repositories cannot be created on ${kind}: create it there and add its URL` };
+      return {
+        ok: false,
+        error: `repositories cannot be created on ${kind}: create it there and add its URL`,
+      };
     const status = forge.status ? await forge.status() : undefined;
     if (status && status.state !== 'connected')
       return {
@@ -273,7 +278,10 @@ export class RepoCreator {
     let existing = false;
     if (probe.exitCode === 0) {
       if (String(probe.stdout).trim() && !(await this.isOurClone(target, [expected])))
-        return { ok: false, error: `${p.name} already exists on ${kind} and is not empty, so it was not touched` };
+        return {
+          ok: false,
+          error: `${p.name} already exists on ${kind} and is not empty, so it was not touched`,
+        };
       ref = { cloneUrl: expected };
       existing = true;
     } else {
@@ -295,7 +303,11 @@ export class RepoCreator {
       if (clone.exitCode !== 0)
         return { ok: false, error: `git clone failed: ${String(clone.stderr || clone.stdout).trim()}` };
     }
-    const published = await this.git(target, [...gitAuth.args, 'ls-remote', '--heads', 'origin', p.branch], gitAuth.env);
+    const published = await this.git(
+      target,
+      [...gitAuth.args, 'ls-remote', '--heads', 'origin', p.branch],
+      gitAuth.env,
+    );
     if (!String(published.stdout).trim()) {
       const head = await this.git(target, ['symbolic-ref', 'HEAD', `refs/heads/${p.branch}`]);
       if (head.exitCode !== 0)

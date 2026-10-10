@@ -23,6 +23,7 @@ import { verifyRights } from './devops/rights.ts';
 import { ExternalAdapters } from './external/index.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
+import { recheckFile } from './forge/connect.ts';
 import {
   branchRulesFor,
   FileTokenStore,
@@ -31,8 +32,8 @@ import {
   gitAuthFor,
   gitConnections,
 } from './forge/index.ts';
-import { recheckFile } from './forge/connect.ts';
 import type { ForgeEnv } from './forge/types.ts';
+import { executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { scanRepos } from './git/repo-scan.ts';
@@ -378,14 +379,21 @@ export class Runner {
   }
 
   /** The repository picker: the user's repositories on a connected provider (the answer holds no credential). */
-  private async listForgeRepos(p: { provider: import('@aom/shared').ConnectableForge; search?: string | undefined }) {
+  private async listForgeRepos(p: {
+    provider: import('@aom/shared').ConnectableForge;
+    search?: string | undefined;
+  }) {
     const { forgeOfKind } = await import('./forge/index.ts');
     const forge = forgeOfKind(this.forgeEnv, p.provider);
     if (!forge.listRepos) return { ok: false, repos: [], error: `${p.provider} cannot list repositories` };
     try {
       return { ok: true, repos: await forge.listRepos({ search: p.search }) };
     } catch (err) {
-      return { ok: false, repos: [], error: (err instanceof Error ? err.message : String(err)).slice(0, 400) };
+      return {
+        ok: false,
+        repos: [],
+        error: (err instanceof Error ? err.message : String(err)).slice(0, 400),
+      };
     }
   }
 

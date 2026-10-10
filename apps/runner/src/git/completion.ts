@@ -19,13 +19,20 @@ export interface CompletionInput {
   integrationDir: string;
   pr: PrCreator;
   /** Credentials for git against the repository's host (clone, push). Absent in tests: the user's own git setup is used. */
-  auth?: (url: string, forge?: FinalizeExecutePayload['forge']) => Promise<{ args: string[]; env: Record<string, string> }>;
+  auth?: (
+    url: string,
+    forge?: FinalizeExecutePayload['forge'],
+  ) => Promise<{ args: string[]; env: Record<string, string> }>;
   /**
    * Branch protection of the working branch, read through the repository's forge adapter (GitHub, GitLab, Azure
    * DevOps, Bitbucket). Null: unknown (not connected, no permission, plain git); the merge is then tried and a
    * rejected push still falls back to a pull request.
    */
-  rules?: (cwd: string, branch: string, forge?: FinalizeExecutePayload['forge']) => Promise<BranchRules | null>;
+  rules?: (
+    cwd: string,
+    branch: string,
+    forge?: FinalizeExecutePayload['forge'],
+  ) => Promise<BranchRules | null>;
   /** Identity for the merge commit (the runner has no agent behind it). */
   identity?: { name: string; email: string };
 }

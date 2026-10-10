@@ -71,7 +71,10 @@ export class AzureDevOpsForge implements Forge {
 
   private async call<T>(url: string, init?: { method?: string; body?: unknown }): Promise<T> {
     const a = await this.auth();
-    if (!a) throw new ForgeUnavailableError('not connected to Azure DevOps: run `aom-runner git-connect azure-devops`');
+    if (!a)
+      throw new ForgeUnavailableError(
+        'not connected to Azure DevOps: run `aom-runner git-connect azure-devops`',
+      );
     return jsonCall<T>(this.env.fetch, url, { ...init, headers: { authorization: a.header } });
   }
 
@@ -88,14 +91,27 @@ export class AzureDevOpsForge implements Forge {
       };
     const org = this.org(a);
     if (!org)
-      return { ...base, state: 'connected', method: a.pat ? 'token' : 'cli', detail: 'Signed in; no organization chosen yet.' };
+      return {
+        ...base,
+        state: 'connected',
+        method: a.pat ? 'token' : 'cli',
+        detail: 'Signed in; no organization chosen yet.',
+      };
     try {
-      await jsonCall(this.env.fetch, `https://${this.host}/${encodeURIComponent(org)}/_apis/projects?$top=1&${API}`, {
-        headers: { authorization: a.header },
-      });
+      await jsonCall(
+        this.env.fetch,
+        `https://${this.host}/${encodeURIComponent(org)}/_apis/projects?$top=1&${API}`,
+        {
+          headers: { authorization: a.header },
+        },
+      );
       return { ...base, state: 'connected', method: a.pat ? 'token' : 'cli', account: org };
     } catch (err) {
-      return { ...base, state: 'not_connected', detail: `Azure DevOps refused the credential for ${org} (${errText(err)}).` };
+      return {
+        ...base,
+        state: 'not_connected',
+        detail: `Azure DevOps refused the credential for ${org} (${errText(err)}).`,
+      };
     }
   }
 
@@ -130,7 +146,10 @@ export class AzureDevOpsForge implements Forge {
   async listRepos(q: { search?: string }): Promise<RepoRef[]> {
     const a = await this.auth();
     const org = this.org(a);
-    if (!org) throw new Error('choose an Azure DevOps organization: `aom-runner git-connect azure-devops --organization <name>`');
+    if (!org)
+      throw new Error(
+        'choose an Azure DevOps organization: `aom-runner git-connect azure-devops --organization <name>`',
+      );
     const res = await this.call<{ value: AzRepo[] }>(
       `https://${this.host}/${encodeURIComponent(org)}/_apis/git/repositories?${API}`,
     );
@@ -151,10 +170,22 @@ export class AzureDevOpsForge implements Forge {
     return this.toRef(org, { ...made, project: made.project ?? { name: project } });
   }
 
-  private base(repo: RemoteRepo): { root: string; repoPath: string; org: string; project: string; name: string } {
+  private base(repo: RemoteRepo): {
+    root: string;
+    repoPath: string;
+    org: string;
+    project: string;
+    name: string;
+  } {
     const [org, project, name] = repo.fullName.split('/') as [string, string, string];
     const root = `https://${repo.host}/${encodeURIComponent(org)}/${encodeURIComponent(project)}`;
-    return { root, repoPath: `${root}/_apis/git/repositories/${encodeURIComponent(name)}`, org, project, name };
+    return {
+      root,
+      repoPath: `${root}/_apis/git/repositories/${encodeURIComponent(name)}`,
+      org,
+      project,
+      name,
+    };
   }
 
   async defaultBranch(repo: RemoteRepo): Promise<string | null> {
@@ -183,7 +214,9 @@ export class AzureDevOpsForge implements Forge {
   }
 
   async changeState(repo: RemoteRepo, id: string): Promise<ChangeState> {
-    const pr = await this.call<{ status: string }>(`${this.base(repo).repoPath}/pullrequests/${encodeURIComponent(id)}?${API}`);
+    const pr = await this.call<{ status: string }>(
+      `${this.base(repo).repoPath}/pullrequests/${encodeURIComponent(id)}?${API}`,
+    );
     return pr.status === 'completed' ? 'merged' : pr.status === 'abandoned' ? 'closed' : 'open';
   }
 
@@ -191,13 +224,19 @@ export class AzureDevOpsForge implements Forge {
     try {
       const b = this.base(repo);
       const r = await this.call<{ id: string }>(`${b.repoPath}?${API}`);
-      const pol = await this.call<{ value: Array<{ isEnabled: boolean; isBlocking?: boolean; type: { id: string } }> }>(
+      const pol = await this.call<{
+        value: Array<{ isEnabled: boolean; isBlocking?: boolean; type: { id: string } }>;
+      }>(
         `${b.root}/_apis/policy/configurations?repositoryId=${encodeURIComponent(r.id)}&refName=${encodeURIComponent(`refs/heads/${branch}`)}&${API}`,
       );
-      const requires = pol.value.some((p) => p.isEnabled && p.isBlocking !== false && BLOCKING_POLICIES.has(p.type.id));
+      const requires = pol.value.some(
+        (p) => p.isEnabled && p.isBlocking !== false && BLOCKING_POLICIES.has(p.type.id),
+      );
       return { directPushAllowed: !requires, requiresChange: requires };
     } catch (err) {
-      return err instanceof ForgeHttpError && err.status === 404 ? { directPushAllowed: true, requiresChange: false } : null;
+      return err instanceof ForgeHttpError && err.status === 404
+        ? { directPushAllowed: true, requiresChange: false }
+        : null;
     }
   }
 }

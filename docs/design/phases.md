@@ -947,3 +947,16 @@ Decisions taken: SSH credentials are used for the one install login and never st
 - **Card notices (T1).** The board card carries `blockedReason`, `hygiene` and `budget`; each shows as a `CardNotice` banner with a fix link.
 - **Landing-page assistant (I1).** Public Q&A helper on Haiku 4.5 with a committed knowledge pack, SSE, per-IP limits, proof of work, daily spend cap ($10), env kill switch and a super admin switch. No in-app assistant. See ARCHITECTURE section 30 and DEPLOY.
 
+## Built: git hosts per repository (overnight, 2026-10-10, track t6)
+
+| Item | Built |
+|---|---|
+| Forge layer | `packages/shared/src/forge/` (kinds, URL parsing and detection, per-provider create fields, connection schema), runner `apps/runner/src/forge/` (`Forge` interface; GitHub via `gh`, GitLab, Azure DevOps and Bitbucket Cloud over REST, plain git), `docs/ARCHITECTURE.md` 16.6 |
+| Per repository | `migrations/1460_forges.sql` (`project_repos.forge_kind`, `workstations.git_connections`, `forge_repo_lists`), `ProjectRepoAdded.forge`, `ProjectRepoForgeSet`, `PATCH /api/projects/:id/repos/:repoId` |
+| URL fix | `normalizeRemoteUrl`: Azure DevOps https/ssh/visualstudio.com and Bitbucket Data Center https/ssh are one repository |
+| Completion | `pr` through the repository's forge (plain git: push + desk notice); `merge` checks branch protection first (forge `branchRules`) and opens a change instead when direct pushes are refused (owner decision C9); the result is reported as `pr` with `protectedBranch`, so the server records a PR, sets the project default to PR (track t2b) and posts a card message |
+| Credentials on the workstation | `aom-runner git-connect <provider>` (`--ssh-key`, `--status`, `--disconnect`), token store `secrets/git-tokens.json` (0600), `git.report` (facts only) shown on the Workstations page and in repository settings with a Connect helper |
+| Forms | new-repository form per provider (no GitHub assumption), URL provider detection with override, repository picker from the connected provider (`forge.repos`) |
+| Tests | shared `normalize-remote`; runner `forge`, `completion-protected`, `repo-create-forge`; server `forges`; web `forge-hosts` (all stubbed: no real forge is called) |
+
+Not built: Gitea/Forgejo, CodeCommit, Bitbucket Data Center API, server-held forge connections and webhooks, an agent-side `aom git connect`, rewriting stored `remote_url_normalized` of Azure DevOps / Data Center repositories added before the fix.
