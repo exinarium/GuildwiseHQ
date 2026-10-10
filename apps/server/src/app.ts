@@ -258,7 +258,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     }
   });
 
-  // The one-click unsubscribe of the weekly digest is posted by mail programs as a form (RFC 8058); nothing else reads forms.
+  // Form posts stay raw strings: the one-click unsubscribe of the weekly digest (RFC 8058, mail programs) and PayFast's
+  // ITN (its signature is checked over the fields in the order received). Nothing else reads forms.
   app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) =>
     done(null, body),
   );

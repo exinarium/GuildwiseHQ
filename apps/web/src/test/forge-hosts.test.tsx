@@ -103,12 +103,16 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-const wrap = (el: React.ReactElement) =>
-  render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+const wrap = (el: React.ReactElement, opts: { expert?: boolean } = {}) => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // Expert mode for code changes (track t2b) shows the branch field; simple mode hides it.
+  if (opts.expert) qc.setQueryData(['me'], { user: { gitExpert: true } });
+  return render(
+    <QueryClientProvider client={qc}>
       <MemoryRouter>{el}</MemoryRouter>
     </QueryClientProvider>,
   );
+};
 
 const repoDto = (over: Record<string, unknown> = {}) => ({
   id: ID(50),
@@ -239,7 +243,7 @@ describe('Add repository form', () => {
 
   it("lists the user's repositories from the connected provider and fills the form", async () => {
     const user = userEvent.setup();
-    wrap(<AddRepoForm projectId={ID(2)} />);
+    wrap(<AddRepoForm projectId={ID(2)} />, { expert: true });
     await user.click(await screen.findByRole('button', { name: 'Pick from my repositories' }));
     await user.click(screen.getByRole('button', { name: 'List repositories' }));
     const row = await screen.findByText('acme/barcode-camera');
