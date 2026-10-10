@@ -63,3 +63,7 @@ Only the Owner can still sign in, with read access plus organization settings an
 ## Platform area {#platform-area}
 
 Platform administrators sign in at the same address but see only the **Platform** area instead of organizations. They can view and manage all organizations, accounts, invitations, the audit log and support requests. They never see a specific organization's cards, desk or vaults. [Contact us](/help/contact) if you need a platform administrator.
+
+### The landing-page assistant {#landing-assistant}
+
+The public landing page can show a small **Ask Guildwise** chat that answers questions about the product. It is paid by Guildwise (the server needs an Anthropic API key), answers in English only, cannot see any account or data, and keeps no conversations, only counts. It never quotes prices or promises dates, and sends people to Contact us for sales, support, legal and pricing questions. On **Platform, Support** a platform administrator sees a panel with a **Turn off** / **Turn on** button, today's message count and the spend against the daily budget (the server's `AOM_ASSISTANT_PUBLIC_DAILY_USD`, ten dollars by default). When the budget is used up the chat says so and the landing page offers Contact us until the next day (UTC).

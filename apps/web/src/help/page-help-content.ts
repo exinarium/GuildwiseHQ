@@ -971,6 +971,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Searchable articles on every feature: the board, desk, agents, roles, workflows and more.',
       },
       {
+        name: 'Get started checklist',
+        text: 'Shows how far your organization is set up (project, repository, workstation, team, business analyst). Open it, or bring it back if you hid it.',
+      },
+      {
         name: 'Contact us tab',
         text: 'A form to write to support. Your message includes your browser and current page for context.',
       },
@@ -1282,6 +1286,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'Also email me about',
         text: 'Two optional switches, off until you turn them on: new organizations and sign-ups, and platform audit events.',
+      },
+      {
+        name: 'Landing-page assistant',
+        text: 'Turn the "Ask Guildwise" chat on the public landing page on or off, and see today\'s messages and spend against the daily budget.',
       },
       {
         name: 'Status chips',

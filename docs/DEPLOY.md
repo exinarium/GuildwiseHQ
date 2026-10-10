@@ -176,6 +176,19 @@ Set these in `.env` before starting the server. All have defaults suitable for d
 | `AOM_MAIL_FROM` | `Guildwise <noreply@aom.local>` | From address in emails |
 | `AOM_SUPPORT_FROM` | unset | From address of the support mails to customers (acknowledgement, replies), e.g. `Guildwise HQ Support <support@guildwisehq.com>`; unset: `AOM_MAIL_FROM`. The mail relay must be allowed to send as this address (SPF/DKIM/DMARC, see `docs/design/support-mail-from.md`) |
 
+### Landing-page assistant ("Ask Guildwise")
+
+An optional chat widget on the public landing page, paid by Guildwise (Claude Haiku 4.5, no tools, English only). It answers questions about the product from a fixed knowledge pack and keeps no conversations, only counters. It is **off unless `ANTHROPIC_API_KEY` is set**.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | unset | Secret. The Anthropic API key the server uses for the assistant (never sent to the browser, never logged). Unset: the assistant is off and the widget is not shown. Put it in the server's environment file or secret store, not in the repository |
+| `AOM_ASSISTANT` | `public` with a key, `off` without | Kill switch, read at start: `off` or `public`. `off` answers every request with "not available" and hides the widget. The super admin has a second switch (Platform, Support) that works without a restart |
+| `AOM_ASSISTANT_PUBLIC_DAILY_USD` | `10` | Spend ceiling per UTC day, in US dollars, counted from the usage the API reports. When it is reached the widget answers "busy, use Contact us" until midnight UTC |
+| `AOM_ASSISTANT_MODEL_PUBLIC` | `claude-haiku-4-5` | Model id. Change only after checking cost (about $0.003 a turn on Haiku 4.5 with a warm cache) |
+
+Per visitor address (a salted hash, never the address): 20 messages an hour and 40 a day, and a small proof of work (about a second in the browser) from the sixth message. Rebuild the knowledge pack with `pnpm --filter @aom/server assistant:pack` after changing a help article or `docs/assistant/product-facts.md`, and commit it; a test fails when it is stale.
+
 ### Features
 
 | Variable | Default | Purpose |
