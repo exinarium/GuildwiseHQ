@@ -23,7 +23,7 @@ import {
   sshUploadHelp,
   touchRecheck,
 } from './forge/connect.ts';
-import { defaultHost, FileTokenStore, gitConnections } from './forge/index.ts';
+import { AzureDevOpsForge, defaultHost, FileTokenStore, gitConnections } from './forge/index.ts';
 import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { RunnerHost } from './host.ts';
@@ -580,6 +580,12 @@ async function gitConnect(providerArg: string, opts: GitConnectOpts): Promise<vo
     }
   }
   if (provider === 'azure-devops' && !opts.organization) {
+    const sp = await new AzureDevOpsForge({ ...env, processEnv: process.env }, host).status();
+    if (sp.state === 'connected' && sp.method === 'service-principal') {
+      console.log('A Microsoft Entra service principal is set in the environment (AZURE_TENANT_ID, AZURE_CLIENT_ID, ...); using it.');
+      console.log(describeConnection(sp));
+      return done();
+    }
     const az = await realExecutor.run('az', ['account', 'show', '--query', 'user.name', '-o', 'tsv']);
     if (az.exitCode === 0) {
       console.log(`Signed in to the Azure CLI as ${az.stdout.trim()}; using that sign-in.`);

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { connectSteps, describeConnection, saveAndVerify } from '../src/forge/connect.ts';
@@ -39,6 +39,14 @@ interface Call {
   body: unknown;
 }
 
+const parseBody = (b: string): unknown => {
+  try {
+    return JSON.parse(b);
+  } catch {
+    return b;
+  }
+};
+
 /** Scripted HTTP: handlers matched by "METHOD url-substring". No network. */
 function fakeFetch(handlers: Array<[string, unknown | ((c: Call) => unknown)]>): {
   fetch: typeof fetch;
@@ -52,7 +60,7 @@ function fakeFetch(handlers: Array<[string, unknown | ((c: Call) => unknown)]>):
       url,
       method: init?.method ?? 'GET',
       auth: headers.authorization ?? headers['PRIVATE-TOKEN'],
-      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      body: init?.body ? parseBody(String(init.body)) : undefined,
     };
     calls.push(call);
     for (const [key, h] of [...handlers].sort((a, b) => b[0].length - a[0].length)) {
@@ -76,6 +84,7 @@ const env = (over: Partial<ForgeEnv> = {}): ForgeEnv => ({
   fetch: fakeFetch([]).fetch,
   tokens: new MemoryTokenStore(),
   now: () => new Date('2026-10-10T08:00:00Z'),
+  processEnv: {},
   ...over,
 });
 
@@ -511,5 +520,88 @@ describe('connections and the token store', () => {
     ).toBe('GitHub (github.com): connected as octo');
     expect(connectSteps('bitbucket-cloud').join('\n')).toMatch(/API token/);
     expect(connectSteps('azure-devops').join('\n')).toMatch(/2026-12-01/);
+  });
+});
+
+describe('Azure DevOps with a Microsoft Entra service principal', () => {
+  const sp = { AZURE_TENANT_ID: 'tenant-1', AZURE_CLIENT_ID: 'client-1', AZURE_CLIENT_SECRET: 'S3CRET' };
+
+  it('asks Entra for a token with the client secret and uses it for REST and git', async () => {
+    const f = fakeFetch([
+      [
+        'POST https://login.microsoftonline.com/tenant-1/oauth2/v2.0/token',
+        { access_token: 'ENTRA-SP', expires_in: 3600 },
+      ],
+      ['GET https://dev.azure.com/acme/_apis/projects', { count: 1 }],
+    ]);
+    const az = new AzureDevOpsForge(
+      env({ fetch: f.fetch, processEnv: { ...sp, AZURE_DEVOPS_ORGANIZATION: 'acme' } }),
+    );
+    expect(await az.status?.()).toMatchObject({
+      state: 'connected',
+      method: 'service-principal',
+      account: 'acme',
+    });
+    const tokenCall = f.calls.find((c) => c.url.includes('login.microsoftonline.com'));
+    const form = new URLSearchParams(String(tokenCall?.body));
+    expect(form.get('grant_type')).toBe('client_credentials');
+    expect(form.get('client_id')).toBe('client-1');
+    expect(form.get('client_secret')).toBe('S3CRET');
+    expect(f.calls.find((c) => c.url.includes('_apis/projects'))?.auth).toBe('Bearer ENTRA-SP');
+    const g = await az.gitAuth('https://dev.azure.com/acme/Shop/_git/web');
+    expect(g.env.GIT_CONFIG_VALUE_0).toBe('Authorization: Bearer ENTRA-SP');
+    // the token is cached: one token request for the calls above
+    expect(f.calls.filter((c) => c.url.includes('login.microsoftonline.com'))).toHaveLength(1);
+  });
+
+  it('uses the workload identity token file instead of a secret', async () => {
+    const dir = tmp('azfed');
+    const file = join(dir, 'token');
+    writeFileSync(file, 'FEDERATED-JWT\n');
+    let sent = '';
+    const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).includes('login.microsoftonline.com')) {
+        sent = String(init?.body);
+        return new Response(JSON.stringify({ access_token: 'T', expires_in: 3600 }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    const az = new AzureDevOpsForge(
+      env({
+        fetch: fetcher,
+        processEnv: { AZURE_TENANT_ID: 't', AZURE_CLIENT_ID: 'c', AZURE_FEDERATED_TOKEN_FILE: file },
+      }),
+      'dev.azure.com',
+      'acme',
+    );
+    expect((await az.status?.())?.method).toBe('service-principal');
+    const form = new URLSearchParams(sent);
+    expect(form.get('client_assertion')).toBe('FEDERATED-JWT');
+    expect(form.get('client_secret')).toBeNull();
+    expect(form.get('scope')).toBe('499b84ac-1321-427f-aa17-267ca6975798/.default');
+  });
+
+  it('a saved PAT wins; a refused service principal falls back to az; incomplete settings are ignored', async () => {
+    const t = new MemoryTokenStore();
+    t.set({ provider: 'azure-devops', host: 'dev.azure.com', token: 'PAT', organization: 'acme' });
+    const f = fakeFetch([['GET https://dev.azure.com/acme/_apis/projects', { count: 1 }]]);
+    const withPat = new AzureDevOpsForge(env({ fetch: f.fetch, tokens: t, processEnv: sp }));
+    expect(await withPat.status?.()).toMatchObject({ method: 'token' });
+    expect(f.calls.some((c) => c.url.includes('login.microsoftonline.com'))).toBe(false);
+
+    const refused = fakeFetch([
+      ['POST https://login.microsoftonline.com', new Response('{"error":"invalid_client"}', { status: 401 })],
+    ]);
+    const viaAz = new AzureDevOpsForge(
+      env({
+        fetch: refused.fetch,
+        processEnv: sp,
+        exec: new FakeExec([[/^az account get-access-token/, { stdout: 'AZ\n' }]]),
+      }),
+    );
+    expect(await viaAz.status?.()).toMatchObject({ state: 'connected', method: 'cli' });
+
+    const partial = new AzureDevOpsForge(env({ processEnv: { AZURE_CLIENT_ID: 'c', AZURE_TENANT_ID: 't' } }));
+    expect((await partial.status?.())?.state).toBe('not_connected');
   });
 });

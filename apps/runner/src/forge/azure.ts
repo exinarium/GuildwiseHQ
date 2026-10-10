@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { GitConnection, RepoRef } from '@aom/shared';
 import { errText, ForgeHttpError, ForgeUnavailableError, isHttps, jsonCall, tokenHelperEnv } from './http.ts';
 import type {
@@ -21,6 +22,9 @@ const BLOCKING_POLICIES = new Set([
   'fd2167ab-b0be-447a-8ec8-39368250530e',
 ]);
 
+const methodOf = (a: { pat?: string; servicePrincipal?: boolean }): 'token' | 'service-principal' | 'cli' =>
+  a.pat ? 'token' : a.servicePrincipal ? 'service-principal' : 'cli';
+
 interface AzRepo {
   name: string;
   id?: string;
@@ -32,10 +36,17 @@ interface AzRepo {
 }
 
 /**
- * Azure DevOps Repos over REST. Authentication on this workstation: a personal access token saved by
- * `aom-runner git-connect azure-devops` (organization-scoped; global PATs stop working on 2026-12-01) or, without one,
- * the signed-in Azure CLI (`az login`, Entra ID). Git uses the same credential through the environment of its own
- * process (PAT) or an Authorization header (Entra); Git Credential Manager keeps working for plain git use.
+ * Azure DevOps Repos over REST. Authentication on this workstation, first match wins:
+ *
+ * 1. a personal access token saved by `aom-runner git-connect azure-devops` (organization-scoped; global PATs stop
+ *    working on 2026-12-01);
+ * 2. a Microsoft Entra service principal in the environment (`AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and either
+ *    `AZURE_CLIENT_SECRET` or, for workload identity, `AZURE_FEDERATED_TOKEN_FILE`): the main path, the runner asks
+ *    Entra for a token itself;
+ * 3. the signed-in Azure CLI (`az login`, which also covers `az login --service-principal`).
+ *
+ * Git uses the same credential through the environment of its own process (PAT) or an Authorization header (Entra);
+ * Git Credential Manager keeps working for plain git use.
  */
 export class AzureDevOpsForge implements Forge {
   readonly kind = 'azure-devops' as const;
@@ -48,7 +59,63 @@ export class AzureDevOpsForge implements Forge {
     private readonly organization?: string,
   ) {}
 
-  private async auth(): Promise<{ header: string; pat?: string; organization?: string } | null> {
+  private sp: { header: string; until: number } | undefined;
+
+  /** The service principal named by the environment, if complete. The secret is never logged or returned. */
+  private servicePrincipal(): { tenant: string; client: string; secret?: string; assertionFile?: string } | null {
+    const e = this.env.processEnv ?? process.env;
+    const tenant = e.AZURE_TENANT_ID?.trim();
+    const client = e.AZURE_CLIENT_ID?.trim();
+    if (!tenant || !client) return null;
+    const secret = e.AZURE_CLIENT_SECRET?.trim();
+    const assertionFile = e.AZURE_FEDERATED_TOKEN_FILE?.trim();
+    if (!secret && !assertionFile) return null;
+    return { tenant, client, ...(secret ? { secret } : {}), ...(assertionFile ? { assertionFile } : {}) };
+  }
+
+  /** An Entra access token for Azure DevOps from the service principal (client secret or workload identity). */
+  private async spToken(): Promise<string | null> {
+    const sp = this.servicePrincipal();
+    if (!sp) return null;
+    const now = (this.env.now?.() ?? new Date()).getTime();
+    if (this.sp && this.sp.until > now) return this.sp.header;
+    const form = new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: sp.client,
+      scope: `${AZDO_RESOURCE}/.default`,
+    });
+    if (sp.secret) form.set('client_secret', sp.secret);
+    else if (sp.assertionFile) {
+      form.set('client_assertion_type', 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
+      form.set('client_assertion', readFileSync(sp.assertionFile, 'utf8').trim());
+    }
+    try {
+      const res = await this.env.fetch(
+        `https://login.microsoftonline.com/${encodeURIComponent(sp.tenant)}/oauth2/v2.0/token`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+          body: form.toString(),
+          signal: AbortSignal.timeout(30_000),
+        },
+      );
+      if (!res.ok) return null;
+      const j = (await res.json()) as { access_token?: string; expires_in?: number };
+      if (!j.access_token) return null;
+      const header = `Bearer ${j.access_token}`;
+      this.sp = { header, until: now + Math.max(60, (j.expires_in ?? 600) - 120) * 1000 };
+      return header;
+    } catch {
+      return null;
+    }
+  }
+
+  private async auth(): Promise<{
+    header: string;
+    pat?: string;
+    organization?: string;
+    servicePrincipal?: boolean;
+  } | null> {
     const t = this.env.tokens.get('azure-devops', this.host);
     if (t)
       return {
@@ -56,6 +123,8 @@ export class AzureDevOpsForge implements Forge {
         pat: t.token,
         ...(t.organization ? { organization: t.organization } : {}),
       };
+    const spHeader = await this.spToken();
+    if (spHeader) return { header: spHeader, servicePrincipal: true };
     const r = await this.env.exec.run(
       this.env.azBin ?? 'az',
       ['account', 'get-access-token', '--resource', AZDO_RESOURCE, '--query', 'accessToken', '-o', 'tsv'],
@@ -66,7 +135,8 @@ export class AzureDevOpsForge implements Forge {
   }
 
   private org(a: { organization?: string } | null): string | undefined {
-    return this.organization ?? a?.organization;
+    const e = this.env.processEnv ?? process.env;
+    return this.organization ?? a?.organization ?? (e.AZURE_DEVOPS_ORGANIZATION?.trim() || undefined);
   }
 
   private async call<T>(url: string, init?: { method?: string; body?: unknown }): Promise<T> {
@@ -87,14 +157,14 @@ export class AzureDevOpsForge implements Forge {
         ...base,
         state: 'not_connected',
         detail:
-          'Run `aom-runner git-connect azure-devops --organization <name>` and paste a personal access token (Code: read and write), or sign in with `az login`.',
+          'Use a Microsoft Entra service principal (set the AZURE_TENANT_ID, AZURE_CLIENT_ID and client credential variables, or `az login --service-principal`), or run `aom-runner git-connect azure-devops --organization <name>` and paste a personal access token (Code: read and write).',
       };
     const org = this.org(a);
     if (!org)
       return {
         ...base,
         state: 'connected',
-        method: a.pat ? 'token' : 'cli',
+        method: methodOf(a),
         detail: 'Signed in; no organization chosen yet.',
       };
     try {
@@ -105,7 +175,7 @@ export class AzureDevOpsForge implements Forge {
           headers: { authorization: a.header },
         },
       );
-      return { ...base, state: 'connected', method: a.pat ? 'token' : 'cli', account: org };
+      return { ...base, state: 'connected', method: methodOf(a), account: org };
     } catch (err) {
       return {
         ...base,

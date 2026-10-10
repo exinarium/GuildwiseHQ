@@ -84,7 +84,7 @@ export const GitConnectionSchema = z.object({
   /** Account the login belongs to, when the provider told us. */
   account: z.string().max(200).optional(),
   /** How the login works on this workstation. */
-  method: z.enum(['cli', 'token', 'ssh']).optional(),
+  method: z.enum(['cli', 'token', 'ssh', 'service-principal']).optional(),
   /** Why it is not connected / what to do next, in a sentence. */
   detail: z.string().max(400).optional(),
   checkedAt: z.iso.datetime(),
@@ -264,9 +264,8 @@ export function connectSteps(provider: ConnectableForge, host = defaultHost(prov
       ];
     case 'azure-devops':
       return [
-        '1. Create a personal access token for your organization: dev.azure.com, User settings, Personal access tokens, scope "Code: Read & write" (and "Project and Team: Read" for the repository list).',
-        '   Use an organization-scoped token: global tokens stop working on 2026-12-01.',
-        '2. Run this command with --organization <name> and paste the token when asked.',
+        '1. Best: a Microsoft Entra service principal (workload identity). Add it to your Azure DevOps organization (Organization settings, Users) with Basic access and give it access to the project, then on this workstation set AZURE_TENANT_ID, AZURE_CLIENT_ID and AZURE_CLIENT_SECRET (or AZURE_FEDERATED_TOKEN_FILE for workload identity) and run this command again. `az login --service-principal` works too.',
+        '2. Fallback: a personal access token for your organization (dev.azure.com, User settings, Personal access tokens, scope "Code: Read & write" and "Project and Team: Read"). Use an organization-scoped token: global tokens stop working on 2026-12-01. Run this command with --organization <name> and paste the token when asked.',
         '3. Or sign in with the Azure CLI (`az login`): it works without a token.',
       ];
   }

@@ -10,6 +10,8 @@ export interface ForgeEnv {
   ghBin?: string;
   glabBin?: string;
   azBin?: string;
+  /** The process environment (`AZURE_*` service principal settings); defaults to `process.env`. */
+  processEnv?: Record<string, string | undefined>;
   now?: () => Date;
 }
 
