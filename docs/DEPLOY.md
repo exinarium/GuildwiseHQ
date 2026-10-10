@@ -189,6 +189,19 @@ An optional chat widget on the public landing page, paid by Guildwise (Claude Ha
 
 Per visitor address (a salted hash, never the address): 20 messages an hour and 40 a day, and a small proof of work (about a second in the browser) from the sixth message. Rebuild the knowledge pack with `pnpm --filter @aom/server assistant:pack` after changing a help article or `docs/assistant/product-facts.md`, and commit it; a test fails when it is stale.
 
+### Blog (docs/BLOG-API.md)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AOM_BLOG_DIGEST` | `true` | Send the weekly blog digest (Mondays 08:00 Africa/Johannesburg). `false` stops it; the super admin can also switch it off under Platform > Blog |
+| `AOM_LINKEDIN_CLIENT_ID`, `AOM_LINKEDIN_CLIENT_SECRET` | unset | The LinkedIn app credentials, only used to renew the organization token with its refresh token |
+
+The blog itself, the API keys, the kill switch and the Facebook and LinkedIn tokens are managed in the platform area, not
+in the environment. The social tokens are encrypted with `AOM_SECRET_KEY`: **set it in production** (and keep it, or the
+stored tokens cannot be read again). Prefer sending the digest from a dedicated address (SPF, DKIM and DMARC on the
+sending domain; see `docs/design/support-mail-from.md`). The public blog pages (`/blog`, `/sitemap.xml`, `/robots.txt`)
+are rendered by the server, so a reverse proxy must pass those paths to it, not only `/api`. Migrations 1450 to 1452.
+
 ### Features
 
 | Variable | Default | Purpose |

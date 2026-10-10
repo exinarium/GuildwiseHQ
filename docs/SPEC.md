@@ -476,6 +476,32 @@ The recommendations act on these too: a recurring cause becomes a proposed stand
 
 A page under Organization that draws the organization as a tree: the manager (Owner, with the Admins), the business analysts, then each department with its roles, seniors above juniors. The lines are the escalation chain (a senior of the same role, then the BA, then the manager's desk), and each agent's card names the manager it reports to and, through them, the Owner. Agents show their generated faces, what they are doing in words and their workstation; filters narrow the chart to the agents allowed on a project; clicking an agent opens its allowed projects, focus, spend and recent work. The DevOps engineer of each workstation is shown apart from the tree. It is visible to organization members, responsive (a grouped list on phones) and accessible.
 
+## Blog
+
+Guildwise HQ has a platform-level blog about AI agents and AI automation, run by the super admin (full requirements:
+`docs/design/blog-prd.md`; decisions: `docs/design/open-questions-2026-10-09.md`; API: `docs/BLOG-API.md`).
+
+- **Posts** have a slug, title, summary, restricted-Markdown body (no raw HTML), a branded cover per tag, 1 to 5 tags,
+  sources, search texts and social captions. The byline is always "The Guildwise HQ team" and every article says it was
+  written by an AI agent. Statuses: draft, in review, published, rejected, unpublished (an unpublished address answers 410).
+- **Public pages** `/blog`, `/blog/:slug`, `/blog/tag/:tag`, the RSS feed, `sitemap.xml` and `robots.txt` are rendered by the
+  server with a cache; the landing header and footer link to the blog. Signed-in people read the same articles under Help > Blog.
+- **Agent API** `/api/v1` with super-admin managed Bearer keys: hashed, shown once, scoped (`blog:read`, `blog:write`,
+  `blog:publish`, `social:write`), with last-used, an audit, rate limits, idempotent submits and a hard cap of 8 new posts
+  per key in 24 hours.
+- **Moderation.** The owner reviews each post for the first two weeks (approve, edit or reject with a reason); after that a
+  post without content warnings publishes by itself after a 3-hour hold (switch date and hold are settings).
+- **Kill switch.** The super admin can switch the blog off: creating (the API answers 503) and publishing (manual, automatic),
+  the digest and social posts all stop. Public articles stay readable.
+- **The writer agent** runs inside Guildwise: a schedule creates a card for a writer agent, which posts through the API with a key
+  held in the workstation's environment (set-up steps and the prompt are in `docs/BLOG-API.md`).
+- **Weekly digest** on Mondays at 08:00 Africa/Johannesburg: organization Owners get it unless they opt out, everyone else
+  opts in (checkbox at invitation acceptance, Settings); users whose organizations are all suspended are skipped; one-click
+  unsubscribe; sent once per week, not at all in a week without new posts.
+- **Facebook Page and LinkedIn organization** sharing on publish once a token is configured: encrypted tokens, retries with
+  backoff, never twice, a status per post and network, an alert before a token expires. No Buffer or Zapier. Unpublishing does
+  not delete the social posts.
+
 ## Build plan and open questions
 
 Build the smallest loop that removes terminal juggling first, then let the team build the rest of itself.

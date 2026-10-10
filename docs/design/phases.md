@@ -960,3 +960,19 @@ Decisions taken: SSH credentials are used for the one install login and never st
 | Tests | shared `normalize-remote`; runner `forge`, `completion-protected`, `repo-create-forge`; server `forges`; web `forge-hosts` (all stubbed: no real forge is called) |
 
 Not built: Gitea/Forgejo, CodeCommit, Bitbucket Data Center API, server-held forge connections and webhooks, an agent-side `aom git connect`, rewriting stored `remote_url_normalized` of Azure DevOps / Data Center repositories added before the fix.
+
+## Implementation status (the platform blog, built Oct 10, 2026, track t5)
+
+| Item | Built |
+|---|---|
+| Content model, moderation, kill switch | events `Blog*`, projection `blog_posts` (migration 1450), `commands/blog.ts`, statuses draft/in_review/published/rejected/unpublished, review period then hold window, `blog_enabled` switch |
+| Public pages | server-rendered `/blog`, `/blog/:slug`, tags, RSS, sitemap, robots, Open Graph, JSON-LD, ETag cache; default covers; landing header and footer link; Help > Blog (`/help/blog`, reserved slug, search group) |
+| Agent API | `/api/v1` Bearer keys (hashed, shown once, scopes, last used, request log, 60 reads/min, 10 writes/h, 8 posts/24 h, idempotent on slug); Platform > API keys |
+| Review queue UI | Platform > Blog and Blog post (preview, edit, approve, reject, unpublish), pending badge |
+| Writer agent | documented schedule, card template and prompt in `docs/BLOG-API.md` (nothing hard-wired into the database) |
+| Weekly digest | migration 1451, `commands/blog-digest.ts`, `brandedMail`, Monday 08:00 Johannesburg, `AOM_BLOG_DIGEST`, Owners default in, opt-in checkbox at invitation acceptance and in Settings, one-click unsubscribe with `List-Unsubscribe` headers, exactly-once deliveries |
+| Facebook and LinkedIn | migration 1452, `commands/social.ts` behind `SocialClient`, encrypted tokens, retries with backoff, never twice, status per post and network, expiry alerts |
+| Tests | server `blog`, `blog-public`, `blog-digest`, `blog-social`, `blog-signup`; shared `blog-markdown`; web `blog` |
+
+Not built: OAuth connect flows for Facebook and LinkedIn (tokens are pasted until the apps are approved), post images other than the
+default covers, view analytics, scheduled publish time, a public newsletter signup, an `Idempotency-Key` header (the slug and content hash are the key).

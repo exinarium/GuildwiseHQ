@@ -66,6 +66,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [7.4 Accounts](#74-accounts)
   - [7.5 The Support inbox](#75-the-support-inbox)
   - [7.6 The audit log](#76-the-audit-log)
+  - [7.7 The blog, API keys and social sharing](#77-the-blog-api-keys-and-social-sharing)
 - [8. Everyday workflows](#8-everyday-workflows)
   - [8.1 A feature, from intake to deploy](#81-a-feature-from-intake-to-deploy)
   - [8.2 From research to a project](#82-from-research-to-a-project)
@@ -866,6 +867,18 @@ Every platform action (suspending, plan changes, invitations, ownership transfer
 
 ![The audit log](guide/assets/platform-audit.jpg)
 
+### 7.7 The blog, API keys and social sharing
+
+**Blog** is where the Guildwise HQ blog is run (details for the agent API: `docs/BLOG-API.md`).
+
+- **The switch.** *Switch the blog off* is the kill switch: agents are refused when they create posts (the API answers 503), nothing is published (by you or automatically), and no digest or social post goes out. Public articles stay readable. Switch it on again to carry on.
+- **The review queue.** Posts arrive *In review* (the badge on **Blog** counts them). Open one to read it exactly as it will look, edit it, then **Approve and publish** or **Reject** with a reason the writer agent can read. You review every post until the date under **Auto-publish starts on** (by default two weeks after the first post). After it, a post with no content warning publishes by itself once it has waited the **hold** (3 hours by default). A post with a warning (for example a link that is not in its sources) always waits for you. **Unpublish** takes a post down.
+- **Weekly digest.** On Mondays at 08:00 (Johannesburg) one mail goes to every organization Owner who has not opted out and to everyone else who opted in. Nothing is sent in a week without new posts. You can switch it off, send a test to yourself and see what each week did.
+- **API keys.** Create a key for the writer agent with only the scopes it needs. It is shown once; revoke it at any time. The list shows when each key was last used and how much it did in the last 24 hours, and *Recent requests* is the audit.
+- **Social sharing.** Paste the Facebook Page and LinkedIn organization tokens (they are stored encrypted and never shown again). Published articles are shared automatically. If a token is refused or about to expire you get an email and a banner, and that network pauses until you paste a new token. Unpublishing does not remove a post that was already shared.
+
+Everyone else reads the blog under **Help**, **Blog**, and can turn the weekly digest on or off under **Settings**.
+
 > **In the app:** the platform area has its own Help, with "Organizations and roles" (`/platform/help`). Platform accounts get their own short tour.
 
 ## 8. Everyday workflows
@@ -1080,7 +1093,7 @@ Press **?** (when not typing in a field) for the list of shortcuts. **Ctrl+K** o
 | Add a computer | **Workstations** |
 | See how the team performs | **Metrics** |
 | See and control spend | **Costs** (Owners and Admins) |
-| Time zone, picture, two-factor, BA reporting, expert mode for code changes | **Settings** (your avatar menu, Your settings) |
+| Time zone, picture, two-factor, BA reporting, expert mode for code changes, weekly blog digest | **Settings** (your avatar menu, Your settings) |
 | Members, invitations, plan | **Organization** (bottom of the sidebar) |
 | Help, glossary, contact us | **Help** |
 
