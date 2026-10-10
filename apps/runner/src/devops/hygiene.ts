@@ -1,5 +1,4 @@
 import { existsSync } from 'node:fs';
-import { hostname } from 'node:os';
 import {
   HYGIENE_PROBLEM_LABEL,
   type HygieneProblemKind,
@@ -11,6 +10,7 @@ import {
 } from '@aom/shared';
 import { currentBranch, git, hasRemote, revParse } from '../git/git.ts';
 import { changedFiles } from '../git/sweep.ts';
+import { saveUncommittedWork } from './saved-work.ts';
 
 /**
  * Repository hygiene of one workstation (docs/design/phases.md, "DevOps repository hygiene and the working branch").
@@ -18,8 +18,10 @@ import { changedFiles } from '../git/sweep.ts';
  *
  * - the working branch must be confirmed: while the repository has none, nothing is committed, pulled or pushed, and
  *   the uncommitted changes are only reported (the server turns that into a question on the desk);
- * - on the working branch: commit uncommitted changes, pull (fast-forward, else rebase), push what is unpushed;
- * - on any other branch: leave the working tree alone (dirty: report it), only move the working branch ref and push it;
+ * - uncommitted edits in the user's checkout are stored on a `guildwise/saved-work/<date>` branch and pushed (files that
+ *   look like secrets are skipped); the checkout itself and the working branch are never touched by that;
+ * - on the working branch: pull (fast-forward, else rebase when the tree is clean), push what is unpushed;
+ * - on any other branch: leave the working tree alone, only move the working branch ref and push it;
  * - merged branches of finished cards are deleted locally, never an unmerged one;
  * - whatever cannot be resolved (conflict, auth failure, missing clone) is reported as the repository's problem.
  */
@@ -75,6 +77,27 @@ async function checkedOut(repo: Repo): Promise<Set<string>> {
 
 const isAncestor = async (repo: Repo, a: string, b: string): Promise<boolean> =>
   (await repo.git(['merge-base', '--is-ancestor', a, b])).exitCode === 0;
+
+/** The user's own uncommitted edits go to a saved-work branch (pushed), never onto the working branch. */
+async function saveWork(repo: Repo, res: HygieneRepoResult, remote: boolean): Promise<void> {
+  const { saved, error } = await saveUncommittedWork(repo.path, {
+    remote,
+    log: (c) => repo.commands.push(c),
+  });
+  if (saved?.branch) {
+    res.savedWork = saved;
+    res.actions.push(
+      `stored ${saved.files.length} unsaved file(s) on ${saved.branch}${saved.pushed ? ' and pushed it' : ''}; your checkout was not changed`,
+    );
+  } else if (saved?.skipped.length) {
+    res.savedWork = saved;
+  }
+  if (saved?.skipped.length)
+    res.actions.push(
+      `left ${saved.skipped.length} file(s) that look like secrets alone: ${saved.skipped.slice(0, 5).join(', ')}`,
+    );
+  if (error) mark(res, /authentication|permission|denied/i.test(error) ? 'auth_failed' : 'error', error);
+}
 
 const mark = (res: HygieneRepoResult, kind: HygieneProblemKind, detail: string) => {
   // The first problem wins, except that an unconfirmed branch is always the one to ask about.
@@ -141,32 +164,15 @@ export async function hygieneRepo(
   }
 
   if (cur === wb) {
-    if (dirty.length > 0) {
-      const identity = (await repo.git(['config', 'user.email'])).stdout.trim()
-        ? []
-        : ['user.name=AOM repository hygiene', 'user.email=hygiene@aom.invalid'];
-      const add = await repo.git(['add', '-A'], true);
-      const subject = 'chore: save work in progress (aom repository hygiene)';
-      const body = `Committed by the DevOps engineer's repository hygiene on ${hostname()}.\n\n${dirty
-        .slice(0, 20)
-        .map((f) => `- ${f}`)
-        .join('\n')}`;
-      const c =
-        add.exitCode === 0 ? await repo.git(['commit', '-m', subject, '-m', body], true, identity) : add;
-      if (c.exitCode === 0) {
-        res.commit = (await revParse(spec.localPath, 'HEAD')) ?? undefined;
-        res.actions.push(`committed ${dirty.length} file(s) on ${wb} (${res.commit?.slice(0, 7)})`);
-      } else {
-        res.uncommitted = dirty;
-        mark(res, 'error', `could not commit the changes: ${failText(c)}`);
-        return done();
-      }
-    }
+    if (dirty.length > 0) await saveWork(repo, res, remote);
     if (remote && fetched) {
       if (hasRemoteRef) {
         const pull = await repo.git(['pull', '--ff-only', 'origin', wb], true);
         if (pull.exitCode === 0) {
           if (!/already up to date/i.test(pull.stdout)) res.actions.push(`pulled ${wb}`);
+        } else if (dirty.length > 0) {
+          // Unsaved edits stay in the checkout: do not rebase over them, update again once they are committed.
+          res.actions.push(`${wb} not updated yet: your own unsaved edits are in the way`);
         } else {
           const rebase = await repo.git(['pull', '--rebase', 'origin', wb], true);
           if (rebase.exitCode === 0) res.actions.push(`rebased ${wb} onto origin/${wb}`);
@@ -203,17 +209,7 @@ export async function hygieneRepo(
     }
   } else {
     // The checkout is on another branch: its working tree is not ours to touch.
-    if (dirty.length > 0) {
-      res.uncommitted = dirty;
-      res.actions.push(
-        `${dirty.length} uncommitted file(s) on ${cur ?? '(detached HEAD)'}, not the working branch ${wb}: left as they are`,
-      );
-      mark(
-        res,
-        'dirty_other_branch',
-        `uncommitted changes on ${cur ?? 'a detached HEAD'}, but the working branch is ${wb}`,
-      );
-    }
+    if (dirty.length > 0) await saveWork(repo, res, remote);
     if (hasLocal && hasRemoteRef) {
       const local = `refs/heads/${wb}`;
       const origin = `refs/remotes/origin/${wb}`;

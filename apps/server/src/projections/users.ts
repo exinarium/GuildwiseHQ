@@ -16,6 +16,10 @@ const insertUser = (
   );
 
 export const userProjectors: Record<string, Projector> = {
+  UserGitExpertModeSet: async (tx, e) => {
+    const p = (e.event as EventOf<'UserGitExpertModeSet'>).payload;
+    await exec(tx, 'UPDATE users SET git_expert=$2 WHERE id=$1', [p.userId, p.enabled]);
+  },
   UserTourStateChanged: async (tx, e) => {
     const p = (e.event as EventOf<'UserTourStateChanged'>).payload;
     await exec(tx, 'UPDATE users SET tour_status=$2, tour_step=$3 WHERE id=$1', [p.userId, p.status, p.step]);

@@ -28,7 +28,7 @@ First choose **where your agents should run**: **My computer** (below), **A VPS 
 4. **Run the command on that computer**: open a terminal (Windows: PowerShell), paste and press Enter. Say yes when it asks permission. Windows may ask to restart; the installer carries on by itself when you sign in again.
 5. **Watch this page**: it shows the installer starting, pairing ("Paired as..."), then **Health checks** one by one, and finally **Ready**. The **Installer log** shows each step. If it stops, the last line marked [x] in the terminal (shown as [fail] in the log) says what to fix.
 
-The installer asks only what it must: your password once (to install system tools), whether you want optional extras (yt-dlp for video transcripts; Docker, only if testers run containers), the folders that hold your code (it suggests `~/src`), and how Claude should sign in.
+The installer asks only what it must: your password once (to install system tools), whether you want optional extras (yt-dlp for video transcripts; Docker, only if testers run containers), and how Claude should sign in. Your code lives in `~/src`; the installer asks about folders only if you turned on expert mode in Settings (or run it with `--choose-folders`). On Windows it names its start-up task "Guildwise HQ runner" and removes the older "WSL Boot" task when you run it again.
 
 ## Claude sign-in {#claude-sign-in}
 

@@ -152,7 +152,8 @@ export function buildCardRequest(
           title: v.title,
           cardType: v.cardType,
           repoId: v.repoId || null,
-          completionAction: v.completionAction || null,
+          // Left empty, the project's "how finished work lands" setting fills it in on the server.
+          completionAction: v.completionAction || 'merge',
           docsNeeded: v.docsNeeded,
           priority: priority ?? null,
           fields,

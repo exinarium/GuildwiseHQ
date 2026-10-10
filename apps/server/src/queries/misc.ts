@@ -38,6 +38,7 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     rank: p.rank ?? null,
     branchPrefix: p.branch_prefix,
     workingBranch: p.working_branch,
+    defaultCompletion: p.default_completion ?? 'merge',
     subCategories: p.sub_categories,
     vaultFolder: p.vault_folder,
     architecturalGlobs: p.architectural_globs,

@@ -37,13 +37,15 @@ Builders can also run `git rebase` in their own checkout of a card to tidy up th
 Once a day per workstation by default, the DevOps engineer tidies the repositories on that machine. On the **Workstations** page, open the workstation and find **Repository hygiene**: **Run** sets how often (off, every hour, every 6 hours, every 12 hours, daily or weekly) and **Run hygiene now** starts a run at once. For each repository it:
 
 - Fetches and pulls the latest changes.
-- Commits any uncommitted changes to the working branch.
+- Stores any unsaved edits of yours on a separate **saved-work branch** and uploads it, so nothing is lost. Your files stay exactly as they are, and nothing lands on main by surprise.
 - Pushes commits that have not been pushed yet.
 - Removes branches and worktrees (temporary checkouts) of finished cards.
 
 The panel shows the last and next run and any open findings.
 
-If hygiene finds a conflict, uncommitted changes on the wrong branch, an authentication failure, or a missing clone, it does not force anything. These show as failures in your BA's daily report until a later run finds the repository clean.
+Files that look like passwords or keys (`.env` files, `*.pem`, names with *key* or *secret*) are never copied; the notice on your desk names them. Hygiene never force-pushes and never throws work away.
+
+If hygiene finds a conflict, an authentication failure, or a missing clone, it does not force anything. These show as failures in your BA's daily report until a later run finds the repository clean.
 
 ## New repositories and the toolchain {#setup}
 
@@ -59,9 +61,9 @@ If sudo asks for a password, enter it under the rights. Your browser encrypts it
 
 ## The working branch {#working-branch}
 
-The **working branch** is the main branch where agents commit their finished work. It is something you confirm: it is never guessed.
+The **working branch** is the main line where finished work goes: the repository's default branch (usually `main`). Guildwise confirms it for you automatically the first time it sees the repository, so you are not asked. The rest of this section describes what you see with **expert mode** on (Settings, Expert mode for code changes); with it off, branch names stay out of sight and you only see plain results such as "Your change is live on main".
 
-When a repository has no confirmed working branch (project settings show **not confirmed**), the DevOps engineer does not commit, pull or push in it. Instead, it asks you on the desk: **Which branch is the working branch of `<repository>`?**
+When a repository has no confirmed working branch and Guildwise cannot tell the default (project settings show **not confirmed**), the DevOps engineer does not commit, pull or push in it. Instead, it asks you on the desk: **Which branch is the working branch of `<repository>`?**
 
 When the repository has uncommitted changes waiting, the question is pinned and blocking; otherwise it is an ordinary question. Answer it by picking a branch from the options or typing its name. If the repository has exactly one branch (or its default branch is known), that one is preselected as the suggestion; nothing is stored until you answer. Your answer is stored for the repository.
 

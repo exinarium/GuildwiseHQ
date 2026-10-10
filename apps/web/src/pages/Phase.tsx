@@ -28,8 +28,9 @@ import {
   TextInput,
   useToast,
 } from '../components/ui.tsx';
+import { useExpertMode } from '../lib/expert-mode.ts';
 import { money } from '../lib/money.ts';
-import { OUTCOME_LABEL, PHASE_STATUS_LABEL, phaseTone, specOf } from '../lib/phases.ts';
+import { OUTCOME_LABEL, PHASE_STATUS_LABEL, phaseTone, plainOutcomeLabel, specOf } from '../lib/phases.ts';
 import { useFollowupAvailability } from '../lib/projectWorkflow.ts';
 import { formatDateTime } from '../lib/time.ts';
 
@@ -54,6 +55,7 @@ export function Phase() {
 }
 
 function PhaseView({ phase }: { phase: PhaseDetailDto }) {
+  const expert = useExpertMode();
   const projects = useProjects();
   const project = projects.data?.find((p) => p.id === phase.projectId);
   const targets = useDeployTargets(phase.projectId);
@@ -87,7 +89,9 @@ function PhaseView({ phase }: { phase: PhaseDetailDto }) {
                 ? `proposed by ${phase.createdBy.name ?? 'the BA'}`
                 : `created by ${phase.createdBy.name ?? 'a member'}`}
             </span>
-            {phase.workingBranch && <Badge title="Working branch of this phase">{phase.workingBranch}</Badge>}
+            {expert && phase.workingBranch && (
+              <Badge title="Working branch of this phase">{phase.workingBranch}</Badge>
+            )}
             {phase.spend && (
               <span
                 className="tnum text-muted"
@@ -212,6 +216,7 @@ function PhaseView({ phase }: { phase: PhaseDetailDto }) {
 }
 
 function Members({ phase }: { phase: PhaseDetailDto }) {
+  const expert = useExpertMode();
   const assign = useAssignCardPhase();
   const confirm = useConfirmMerged();
   const board = useBoard(phase.projectId);
@@ -236,8 +241,9 @@ function Members({ phase }: { phase: PhaseDetailDto }) {
         {phase.proposedCount ? `, ${phase.proposedCount} proposed` : ''})
       </h2>
       <p className="mb-2 text-xs text-subtle">
-        The phase is complete when every card is finalized and its work is in the working branch, closed or
-        cancelled.
+        {expert
+          ? 'The phase is complete when every card is finalized and its work is in the working branch, closed or cancelled.'
+          : 'The phase is complete when every card is finished and its work is live on main, closed or cancelled.'}
       </p>
       <table className="w-full text-sm">
         <thead>
@@ -269,8 +275,12 @@ function Members({ phase }: { phase: PhaseDetailDto }) {
                 <span className="text-xs text-subtle"> · {m.stage}</span>
               </td>
               <td className="py-1 pr-2 text-xs">
-                {m.outcome ? OUTCOME_LABEL[m.outcome] : '-'}
-                {m.resultRef?.mergeCommit && (
+                {m.outcome
+                  ? expert
+                    ? OUTCOME_LABEL[m.outcome]
+                    : plainOutcomeLabel(m.outcome, m.resultRef?.prUrl, m.merged)
+                  : '-'}
+                {expert && m.resultRef?.mergeCommit && (
                   <span className="font-mono"> {m.resultRef.mergeCommit.slice(0, 10)}</span>
                 )}
                 {m.resultRef?.prUrl && (
@@ -286,11 +296,13 @@ function Members({ phase }: { phase: PhaseDetailDto }) {
                     </a>
                   </>
                 )}
-                {m.resultRef?.pushedBranch && <span className="font-mono"> {m.resultRef.pushedBranch}</span>}
+                {expert && m.resultRef?.pushedBranch && (
+                  <span className="font-mono"> {m.resultRef.pushedBranch}</span>
+                )}
                 {m.outcome === 'finalized' && m.action !== 'merge' && m.merged && ' · merged'}
               </td>
               <td className="py-1 text-right">
-                {m.canConfirmMerge && (
+                {expert && m.canConfirmMerge && (
                   <Button
                     variant="ghost"
                     data-testid={`confirm-merged-${m.ref}`}

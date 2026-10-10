@@ -24,6 +24,7 @@ export const toUserDto = (r: Row): UserDto =>
     timezone: r.timezone ?? null,
     avatar: userAvatarOf(r),
     twoFactorEnabled: Boolean(r.two_factor_enabled),
+    gitExpert: Boolean(r.git_expert),
   }) as UserDto;
 
 export const toInvitationDto = (r: Row): InvitationDto => ({

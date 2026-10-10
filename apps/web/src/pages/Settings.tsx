@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useMe } from '../api/queries/auth.ts';
-import { useReporting, useSetTimezone, useUpdateReporting } from '../api/queries/reporting.ts';
+import {
+  useReporting,
+  useSetExpertMode,
+  useSetTimezone,
+  useUpdateReporting,
+} from '../api/queries/reporting.ts';
 import { UserAvatar } from '../components/Face.tsx';
 import { AvatarPicker } from '../components/profile/AvatarPicker.tsx';
 import { TwoFactorPanel } from '../components/security/TwoFactorPanel.tsx';
@@ -21,6 +26,7 @@ export function Settings() {
   const me = useMe();
   const reporting = useReporting();
   const setZone = useSetTimezone();
+  const setExpert = useSetExpertMode();
   const update = useUpdateReporting();
   const toast = useToast();
   const [picking, setPicking] = useState(false);
@@ -73,6 +79,30 @@ export function Settings() {
       )}
 
       <TwoFactorPanel />
+
+      <Panel>
+        <h2 className="text-lg font-semibold text-fg">Expert mode for code changes</h2>
+        <p className="mt-1 text-sm text-muted">
+          Off, Guildwise describes code work in plain terms ("Your change is live on main", "Waiting for you
+          to merge the pull request") and takes care of branches for you. Turn it on to see branch names,
+          choose how each card lands, and use the manual merge controls. It only changes what you see.
+        </p>
+        <label className="mt-4 flex items-start gap-3 text-base text-fg">
+          <input
+            type="checkbox"
+            data-testid="git-expert"
+            className="mt-0.5 size-5"
+            checked={me.data?.user?.gitExpert === true}
+            disabled={setExpert.isPending}
+            onChange={(e) =>
+              setExpert.mutate(e.target.checked, {
+                onSuccess: () => toast.success(e.target.checked ? 'Expert mode is on' : 'Expert mode is off'),
+              })
+            }
+          />
+          <span>Show me branches and git controls</span>
+        </label>
+      </Panel>
 
       <Panel>
         <h2 className="text-lg font-semibold text-fg">Your time zone</h2>

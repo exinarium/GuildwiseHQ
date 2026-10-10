@@ -127,6 +127,8 @@ export const userEvents = [
     'UserWhatsNewSeen',
     z.object({ userId: Id, entryIds: z.array(z.string().min(1).max(200)).min(1).max(200) }),
   ),
+  /** The user turned expert mode for version control on or off (default off): it brings back branch names, completion pickers and "Mark merged". */
+  defineEvent('UserGitExpertModeSet', z.object({ userId: Id, enabled: z.boolean() })),
   defineEvent('PasswordChanged', z.object({ userId: Id, passwordHash: z.string().min(1) })),
   /**
    * An organization Owner set a temporary password for a member (the temporary password itself is never in the log).

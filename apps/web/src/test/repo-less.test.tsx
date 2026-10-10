@@ -96,7 +96,7 @@ describe('project settings for repo-less workflows', () => {
   it('hides repositories, globs and the merge policy for research', async () => {
     stub('research');
     open();
-    await screen.findByLabelText('Working branch');
+    await screen.findByLabelText('Name');
     await vi.waitFor(() => expect(screen.queryByText('Repositories')).toBeNull());
     expect(screen.queryByLabelText('E2E globs')).toBeNull();
     expect(screen.queryByLabelText('Architectural globs')).toBeNull();

@@ -26,7 +26,9 @@ Playwright's test output folders (`test-results/`, `playwright-report/`, `blob-r
 
 ## Finalization {#finalization}
 
-At the Finalize stage, your BA carries out the card's **completion action**, the way to ship the work that was set on the card (the BA may revise it):
+At the Finalize stage, your BA ships the work the way the project says. In each project's settings, **How finished work lands** is either **Straight into main after review and test** (the default) or **As a pull request I approve**. If the main line is protected on the code host, Guildwise opens a pull request instead, switches the project to pull requests and tells you on the card. On the card you see plain results: *"Your change is live on main"* or *"Waiting for you to merge the pull request"*.
+
+With **expert mode** on (Settings), each card also has its own **completion action**, which the BA may revise:
 
 - **PR**: Push the branch to GitHub and create a pull request (if `gh` is available), or ask the desk if it is not.
 - **Push branch**: Push the branch to GitHub without creating a PR.

@@ -262,7 +262,7 @@ A workstation is the computer where your agents will work. The guided installer 
 
 ![The installer wizard while it works: pairing and health checks](guide/assets/installer-progress.jpg)
 
-The installer asks only what it must: your password once to install system tools, whether you want the optional extras (yt-dlp for transcripts of videos and podcasts; Docker only if your tests run containers), the folder that holds your code (it suggests `~/src`), and how Claude should sign in. It explains the two ways in plain words. Choose **Claude subscription** if you have one: you sign in with your Claude account in a browser. Choose **API key** if you would rather pay for exactly what the agents use.
+The installer asks only what it must: your password once to install system tools, whether you want the optional extras (yt-dlp for transcripts of videos and podcasts; Docker only if your tests run containers), and how Claude should sign in. Your code lives in `~/src`; the installer asks about the folder only in expert mode (Settings) or with `--choose-folders`. It explains the two ways in plain words. Choose **Claude subscription** if you have one: you sign in with your Claude account in a browser. Choose **API key** if you would rather pay for exactly what the agents use.
 
 > **Good to know:** you can run the same command again at any time. It upgrades the runner, repairs a broken installation and keeps your existing pairing.
 
@@ -292,7 +292,7 @@ Each workstation also gets a free **DevOps engineer** automatically. You never h
 
 1. Open **Projects** and click **New project** (Owners and Admins only).
 2. Give it a **Name** and a short **Key** (for example `WEB`; card references look like `WEB-1`). Choose the **Workflow**: **Code** for software, **Research** for investigations, or a custom workflow your organization designed. Click **Create project**.
-3. For a code project, open the project's **Settings** (the gear on the Projects page) and, under **Repositories**, add your repository: a name, the git address of your code and the **working branch**, the branch that finished work goes into (usually `main`). A research project needs no repository.
+3. For a code project, open the project's **Settings** (the gear on the Projects page) and, under **Repositories**, add your repository: a name and the address of your code (or create a new one). Finished work goes into the repository's main line automatically after review and test; you can change **How finished work lands** in the same settings (see 4.4). A research project needs no repository.
 
 ![The new project dialog](guide/assets/dlg-new-project.jpg)
 
@@ -307,7 +307,7 @@ Each workstation also gets a free **DevOps engineer** automatically. You never h
    - **Requirements:** what must be done.
    - **Acceptance criteria:** how you will know it is done, one line each.
    - **Affected areas, Constraints, Test plan:** what to touch and not to touch, and how to check it.
-   - **Completion action:** what happens at the end: open a pull request, push the branch, or merge.
+   - **How it lands:** you do not need to choose. Finished work goes where the project's **How finished work lands** setting says (straight into main after review and test, or as a pull request you approve). With expert mode on (see 4.4) the form also offers a per-card **Completion action**.
 3. Click **Specify**. The card moves to **To do** and the agents pick it up. If a required field is missing, the form tells you which. Use **Save draft** if you want to finish later.
 
 ![The New card form](guide/assets/card-new.jpg)
@@ -445,13 +445,21 @@ Agents belong to the organization, not to a single project. For each agent you d
 
 > **In the app:** Help, "Agents" (`/help/agents`).
 
+#### How finished work lands (and expert mode)
+
+Guildwise keeps version control out of your way. In each project's settings, **How finished work lands** has two choices: **Straight into main after review and test** (the default) or **As a pull request I approve**. If the main line is protected on the code host (it refuses direct changes), Guildwise notices, opens a pull request instead, and switches the project to pull requests with a note on the card. The repository's default branch is used as the main line without asking you.
+
+You see plain outcomes instead of branch names: *"Your change is live on main"*, *"Waiting for you to merge the pull request"*, *"Two changes clashed; the DevOps engineer is fixing it"*.
+
+If you know git and want the details, turn on **Expert mode for code changes** in **Settings** (it is per person and off by default; it only changes what you see). It brings back the working-branch fields, the per-card completion action (pull request, push the branch, or merge), branch names and commit hashes, **Mark merged** on the phase page, and the questions about keeping or changing the working branch for a new intake or phase.
+
 #### Repository hygiene and the working branch
 
-Once a day per workstation the DevOps engineer tidies the project repositories on that machine: it fetches and pulls, **commits any uncommitted changes to the working branch** and pushes them, and removes branches and worktrees of cards that are finished and merged. Change the time or switch it off in the workstation's **Repository hygiene** panel on the Workstations page, or start it with **Run hygiene now**.
+Once a day per workstation the DevOps engineer tidies the project repositories on that machine: it fetches and pulls, **stores any uncommitted edits of yours on a separate saved-work branch** (`guildwise/saved-work/<date>`, pushed so nothing is lost; your files are left exactly as they are and nothing reaches main by surprise) and removes branches and worktrees of cards that are finished and merged. Files that look like passwords or keys (`.env*`, `*.pem`, names with *key* or *secret*) are never copied; the notice on your desk names them. Hygiene never force-pushes and never discards anything. Change the time or switch it off in the workstation's **Repository hygiene** panel on the Workstations page, or start it with **Run hygiene now**.
 
 ![Repository hygiene on the Workstations page](guide/assets/ws-hygiene.jpg)
 
-**The working branch is something you confirm. It is never guessed.** While a repository has no confirmed working branch, the DevOps engineer does not commit, pull or push in it. It only reports the changes and asks you on the desk: *Which branch is the working branch of this repository?* Your answer is stored on the repository and in the ledger, and the DevOps engineer carries on at once. You can also set it any time in the project settings, in the repository row (**Change**). You are asked again when a new intake or phase starts ("keep `main` as the working branch?").
+**The working branch is the repository's default branch**, confirmed automatically the first time Guildwise sees the repository. You are asked on the desk (*Which branch is the working branch of this repository?*) only when the default cannot be told. With expert mode on you can also set it in the project settings (**Change**) and you are asked again when a new intake or phase starts ("keep `main` as the working branch?").
 
 ![The desk asks which branch is the working branch](guide/assets/desk-branch.jpg)
 
@@ -610,7 +618,7 @@ A **phase** is a named slice of a project's work, the cards you want to ship and
 
 **Create a phase** under **Project settings, Phases and deploys, New phase**, or let the BA propose one while you talk about the work ("this is phase 2"). Add cards from the phase page or from the card's **Phase** selector. A card belongs to at most one phase.
 
-**When is a phase done?** When every card is finalized and its work is in the working branch (or closed or cancelled). If the app cannot see a squash-merged branch, click **Mark merged** on the phase page.
+**When is a phase done?** The phase is complete when every card is finalized and its work is live on main (or closed or cancelled). In expert mode, if the app cannot see a squash-merged branch, click **Mark merged** on the phase page.
 
 **The "Phase done" item** on your desk carries a report of what was delivered and what is outstanding. You can **Edit follow-ups**, **Approve all**, **Reject** (nothing runs), or **Reopen the phase**.
 
@@ -1070,7 +1078,7 @@ Press **?** (when not typing in a field) for the list of shortcuts. **Ctrl+K** o
 | Add a computer | **Workstations** |
 | See how the team performs | **Metrics** |
 | See and control spend | **Costs** (Owners and Admins) |
-| Time zone, picture, two-factor, BA reporting | **Settings** (your avatar menu, Your settings) |
+| Time zone, picture, two-factor, BA reporting, expert mode for code changes | **Settings** (your avatar menu, Your settings) |
 | Members, invitations, plan | **Organization** (bottom of the sidebar) |
 | Help, glossary, contact us | **Help** |
 

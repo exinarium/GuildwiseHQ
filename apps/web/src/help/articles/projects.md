@@ -14,7 +14,7 @@ A project is a container for cards and agents working on a shared goal. Every ca
 3. Choose the **Workflow**: Code, Research, or a custom workflow your organization designed.
 4. Click **Create project**.
 
-For a Code project, add its repositories afterwards in the project's settings (the gear on its board), under **Repos**: give the repository name, remote URL and optionally a branch, and click **Add repository**. Research projects need no repository.
+For a Code project, add its repositories afterwards in the project's settings (the gear on its board), under **Repos**: give the repository name and its address (or create a new one), and click **Add repository**. Finished work goes into the repository's main line after review and test; change **How finished work lands** in the same settings to receive pull requests instead. The branch field is shown only in expert mode (Settings). Research projects need no repository.
 
 Cards stay as drafts until you are ready to specify them. A new project goes to the bottom of your priority order.
 

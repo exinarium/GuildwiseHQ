@@ -34,12 +34,12 @@ You can also let the BA propose a phase during intake: it will suggest the cards
 
 A phase is **done** when:
 
-- Every card is finalized and its work is merged into the working branch, OR
+- Every card is finalized and its work is live on main, OR
 - The card is closed by hand or cancelled.
 - Research cards count as done when their note is published.
 - Cards finalized with PR or push branch count once the runner confirms the branch is merged (it checks every few minutes).
 
-If the runner cannot see the merge (a squash merge or deleted branch), click **Mark merged** on the phase page.
+With expert mode on (Settings), and if the runner cannot see the merge (a squash merge or deleted branch), click **Mark merged** on the phase page.
 
 Full E2E suites that run after a merge never delay a phase: they are listed as passed, failed or still running.
 

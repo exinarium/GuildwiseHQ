@@ -151,6 +151,16 @@ export const HygieneRepoResultSchema = z.object({
   commit: z.string().optional(),
   pushed: z.boolean().default(false),
   removedBranches: z.array(z.string()).default([]),
+  /** The user's uncommitted edits were stored on this branch (and pushed when `pushed`); their checkout is untouched. */
+  savedWork: z
+    .object({
+      branch: z.string(),
+      files: z.array(z.string()).default([]),
+      /** Left out because they look like secrets (`.env*`, `*.pem`, `*key*` ...). */
+      skipped: z.array(z.string()).default([]),
+      pushed: z.boolean().default(false),
+    })
+    .optional(),
 });
 export type HygieneRepoResult = z.infer<typeof HygieneRepoResultSchema>;
 
@@ -162,7 +172,7 @@ export function renderHygieneRequest(spec: HygieneSpec, workstationName: string)
   const lines = [
     `Repository hygiene on ${workstationName} (${spec.trigger === 'schedule' ? 'scheduled' : spec.trigger === 'branch_confirmed' ? 'the working branch was just confirmed' : 'started by the manager'}).`,
     '',
-    'For each repository below: fetch and pull, commit uncommitted changes to the working branch and push, push unpushed commits, and remove merged branches of finished cards. Run `aom hygiene run`: it does exactly that, refuses to commit or push to a repository whose working branch is not confirmed, logs what it did and ends this request.',
+    'For each repository below: fetch and pull, store uncommitted edits on a saved-work branch and push that (secret-looking files are skipped; nothing lands on the working branch), push unpushed commits, and remove merged branches of finished cards. Run `aom hygiene run`: it does exactly that, refuses to commit or push to a repository whose working branch is not confirmed, logs what it did and ends this request.',
     '',
     ...spec.repos.map(
       (r) =>

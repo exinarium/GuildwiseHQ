@@ -25,6 +25,9 @@ export const WhatsNewSeenRequestSchema = z.object({
     .max(200),
 });
 export type WhatsNewSeenRequest = z.infer<typeof WhatsNewSeenRequestSchema>;
+/** `PUT /api/auth/git-expert`: the user's own expert mode for version control (off by default). */
+export const SetGitExpertRequestSchema = z.object({ enabled: z.boolean() });
+export type SetGitExpertRequest = z.infer<typeof SetGitExpertRequestSchema>;
 
 export const UserDtoSchema = z.object({
   id: z.uuid(),
@@ -40,6 +43,8 @@ export const UserDtoSchema = z.object({
   /** The user's picture (null: initials). */
   avatar: UserAvatarSchema.nullable().optional(),
   twoFactorEnabled: z.boolean().default(false),
+  /** Expert mode for version control (per user, off by default): branch names, completion pickers and "Mark merged" are shown. */
+  gitExpert: z.boolean().optional(),
   /** Only on `me`. Kept per user on the server, so the tour does not come back on another device. */
   tour: TourStateSchema.optional(),
   /** Only on `me`. Ids of the "What's new" entries the user has seen (server-side, so it follows them across devices). */

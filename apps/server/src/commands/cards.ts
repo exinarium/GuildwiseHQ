@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   type CardChanges,
   type CardOrigin,
+  type CompletionAction,
   CROSS_PROJECT_CARD_TYPES,
   type CreateCardRequest,
   canManageCard,
@@ -168,6 +169,12 @@ export async function createCardIn(
     );
     if (repos.length === 1) repoId = repos[0]?.id;
   }
+  // No completion action named: the project's default decides how finished work lands (simple mode never asks).
+  const completionAction: CompletionAction | undefined =
+    req.completionAction ??
+    (workflowUsesRepos(def) && project.default_completion
+      ? (project.default_completion as CompletionAction)
+      : undefined);
   const dependencies = req.dependencies ?? [];
   await assertDependencies(tx, project.id, dependencies);
 
@@ -181,7 +188,7 @@ export async function createCardIn(
     title: req.title,
     cardType: req.cardType,
     repoId: repoId ?? null,
-    completionAction: req.completionAction ?? null,
+    completionAction: completionAction ?? null,
     docsNeeded: req.docsNeeded ?? false,
     riskTier: null,
     priority: req.priority ?? DEFAULT_CARD_PRIORITY,
@@ -211,7 +218,7 @@ export async function createCardIn(
           repoId,
           priority: req.priority ?? DEFAULT_CARD_PRIORITY,
           docsNeeded: req.docsNeeded ?? false,
-          completionAction: req.completionAction,
+          completionAction,
           dependencies,
           requiredCapabilities: [],
         },

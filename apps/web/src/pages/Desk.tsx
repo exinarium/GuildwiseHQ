@@ -53,6 +53,7 @@ import {
   type LedgerChoiceKey,
   sortDeskItems,
 } from '../lib/desk.ts';
+import { useExpertMode } from '../lib/expert-mode.ts';
 import { ageLabel, formatDateTime } from '../lib/time.ts';
 
 type FilterKey = 'all' | 'blocking' | 'questions' | 'approvals' | 'notices';
@@ -617,6 +618,7 @@ function BudgetActions({ item }: { item: DeskItemDto }) {
 }
 
 function ResolveButtons({ item }: { item: DeskItemDto }) {
+  const expert = useExpertMode();
   const nav = useNavigate();
   const resolve = useResolveDeskItem();
   const toast = useToast();
@@ -705,7 +707,9 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
       </div>
       {item.subkind === 'large_merge' && (
         <p className="text-xs text-subtle">
-          Approving merges into the working branch. It cannot be undone from here.
+          {expert
+            ? 'Approving merges into the working branch. It cannot be undone from here.'
+            : 'Approving puts this change live on main. It cannot be undone from here.'}
         </p>
       )}
     </div>

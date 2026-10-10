@@ -1,4 +1,5 @@
 import {
+  SetGitExpertRequestSchema,
   UpdateReportingRequestSchema,
   UpdateTimezoneRequestSchema,
   UpdateTourRequestSchema,
@@ -10,6 +11,7 @@ import { requestedOrgId } from '../auth/org-context.ts';
 import {
   getReporting,
   markWhatsNewSeen,
+  setGitExpert,
   setTimezone,
   setTourState,
   updateReporting,
@@ -36,6 +38,12 @@ export function reportingRoutes(ctx: Ctx) {
     app.put('/api/auth/timezone', { schema: { body: UpdateTimezoneRequestSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
       await setTimezone(ctx, s.user, req.body.timezone);
+      return meResponse(ctx, s.user.id, requestedOrgId(req));
+    });
+
+    app.put('/api/auth/git-expert', { schema: { body: SetGitExpertRequestSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await setGitExpert(ctx, s.user, req.body.enabled);
       return meResponse(ctx, s.user.id, requestedOrgId(req));
     });
 

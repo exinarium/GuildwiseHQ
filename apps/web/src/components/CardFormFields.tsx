@@ -1,6 +1,7 @@
 import { CompletionAction, ResearchDepth } from '@aom/shared';
 import type { CardFormValues } from '../lib/cardForm.ts';
 import { formFieldList } from '../lib/cardForm.ts';
+import { useExpertMode } from '../lib/expert-mode.ts';
 import { DEFAULT_PRIORITY } from '../lib/priority.ts';
 import { PriorityPicker, Select, TextArea, TextInput } from './ui.tsx';
 
@@ -28,6 +29,7 @@ export function CardFormFields({
   /** A template for a scheduled card: no repository, completion action or docs flag (they belong to a real card). */
   template?: boolean;
 }) {
+  const expert = useExpertMode();
   const v = values;
   const list = formFieldList(workflow, mockUi);
   // Repository and completion action belong to code work; research and feed cards live in the vault.
@@ -58,19 +60,21 @@ export function CardFormFields({
                 </option>
               ))}
             </Select>
-            <Select
-              label="Completion action"
-              value={v.completionAction}
-              onChange={(e) => onChange({ ...v, completionAction: e.target.value })}
-              error={errors.completionAction}
-            >
-              <option value="">None</option>
-              {CompletionAction.options.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </Select>
+            {expert && (
+              <Select
+                label="Completion action"
+                value={v.completionAction}
+                onChange={(e) => onChange({ ...v, completionAction: e.target.value })}
+                error={errors.completionAction}
+              >
+                <option value="">Project default</option>
+                {CompletionAction.options.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </Select>
+            )}
           </>
         )}
         <PriorityPicker

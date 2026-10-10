@@ -249,7 +249,7 @@ describe('the BA drafts cards in the intake chat', () => {
     (partial.fields as Record<string, unknown>).testPlan = undefined;
     const incomplete = await rpc(start.chatId, 'card.create', { ...partial, completionAction: undefined });
     expect(incomplete.ok).toBe(true);
-    expect(incomplete.result.missing.sort()).toEqual(['completionAction', 'testPlan']);
+    expect(incomplete.result.missing.sort()).toEqual(['testPlan']); // the completion action comes from the project default;
     const refused = await rpc(start.chatId, 'card.specify', { ref: incomplete.result.ref });
     expect(refused.ok).toBe(false);
     expect(refused.error).toMatch(/missing: .*testPlan/);

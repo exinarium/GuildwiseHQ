@@ -14,6 +14,8 @@ beforeAll(async () => {
   await w.hire('Ben', 'ba', 'senior');
   await ok(owner('PUT', '/api/reporting', { routeViaBa: true }));
   await online();
+  // These tests cover the questions a git expert gets; simple mode (the default) is covered in simple-mode.test.ts.
+  await q('UPDATE users SET git_expert=true WHERE id=$1', [w.owner.id]);
 });
 afterAll(async () => {
   r.close();
@@ -94,7 +96,7 @@ describe('the working-branch question goes through the BA routing', () => {
               repoId: w.repoId,
               actions: [],
               problem: { kind: 'needs_branch', detail: 'x' },
-              branches: ['main'],
+              branches: ['develop', 'staging'],
               uncommitted: ['wip.txt'],
             },
           ],

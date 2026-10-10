@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   branchOptionId,
+  DESK_SUBKIND,
   type DeskOption,
   type HygieneReport,
   type HygieneRepoSpec,
@@ -268,6 +269,19 @@ async function askerOf(db: Queryable, project: Row, preferAgentId?: string | nul
     : { kind: 'system' as const };
 }
 
+const PROJECT_OWNER_SQL = `SELECT user_id FROM project_members WHERE project_id=$1 AND role='owner' AND status='active' ORDER BY joined_at NULLS LAST LIMIT 1`;
+const EXPERT_MANAGER_SQL = `SELECT 1 AS x FROM project_members pm JOIN users u ON u.id = pm.user_id
+  WHERE pm.project_id=$1 AND pm.status='active' AND u.git_expert LIMIT 1`;
+
+/** The branch to confirm without asking: the project's own (default `main`), else main/master, else the only branch. */
+export function defaultWorkingBranch(project: Row, known: string[]): string | null {
+  const own = project.working_branch as string | undefined;
+  if (own && known.includes(own)) return own;
+  const common = ['main', 'master'].find((b) => known.includes(b));
+  if (common) return common;
+  return known.length === 1 ? (known[0] as string) : null;
+}
+
 export interface BranchQuestion {
   reason: WorkingBranchReason;
   /** Branches the clone has (hygiene), else the ones the last run saw. */
@@ -313,6 +327,19 @@ export async function workingBranchQuestionEvents(
     [WORKING_BRANCH_SUBKIND, repo.id],
   );
   if (open) return [];
+  if (!q.missing) {
+    // Simple mode: the repository's default branch is confirmed without asking. "Keep it?" questions (a new intake or
+    // phase) go only to managers who turned git expert mode on. Only when no default can be told, a person is asked.
+    if (!repo.working_branch) {
+      const auto = defaultWorkingBranch(
+        project,
+        q.branches?.length ? q.branches : (repo.known_branches ?? []),
+      );
+      const owner = auto ? await one(tx, PROJECT_OWNER_SQL, [project.id]) : null;
+      if (auto && owner)
+        return [workingBranchSetEvent(project, repo, auto, 'unconfirmed', owner.user_id as string)];
+    } else if (!(await one(tx, EXPERT_MANAGER_SQL, [project.id]))) return [];
+  }
   const current: string | null = repo.working_branch ?? null;
   const known: string[] = q.branches?.length ? q.branches : (repo.known_branches ?? []);
   // "Keep" makes no sense for a branch that does not exist.
@@ -615,6 +642,44 @@ export async function hygieneReportEvents(
     actor: agentActor(agentId),
     scope: orgScope(req.org_id),
   });
+  // The user's unsaved edits were stored on a saved-work branch: tell the project's managers (a notice, nothing to decide).
+  for (const r of reported) {
+    const sw = r.savedWork;
+    if (!sw?.branch && !sw?.skipped.length) continue;
+    const spec1 = byRepo.get(r.repoId) as HygieneRepoSpec;
+    const project = await one(tx, 'SELECT org_id FROM projects WHERE id=$1', [spec1.projectId]);
+    if (!project) continue;
+    const deskItemId = randomUUID();
+    const stored = sw.branch
+      ? `Unsaved edits in ${spec1.name} (${sw.files.length} file${sw.files.length === 1 ? '' : 's'}) were stored safely on the branch ${sw.branch}${sw.pushed ? ' and uploaded' : ' on that workstation'}. Nothing was changed in your files and nothing reached the working branch.`
+      : `Unsaved edits in ${spec1.name} were left alone.`;
+    const skipped = sw.skipped.length
+      ? ` ${sw.skipped.length} file${sw.skipped.length === 1 ? ' that looks' : 's that look'} like a password or key (${sw.skipped.slice(0, 5).join(', ')}) ${sw.skipped.length === 1 ? 'was' : 'were'} not copied.`
+      : '';
+    events.push({
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemCreated',
+        payload: {
+          deskItemId,
+          kind: 'alert',
+          subkind: DESK_SUBKIND.savedWork,
+          title: sw.branch
+            ? `Your unsaved work in ${spec1.name} was stored safely`
+            : `Secret-looking files in ${spec1.name} were left alone`,
+          body: stored + skipped,
+          options: [],
+          blocking: false,
+          pinned: false,
+          projectId: spec1.projectId,
+          affectedCardIds: [],
+          askedBy: { kind: 'system' },
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(project.org_id, spec1.projectId),
+    });
+  }
   for (const r of reported) {
     // G-Q2: DevOps tries to combine a diverged working branch on a separate branch first; two failures go to the desk.
     // (Not for a hygiene run that was itself a conflict attempt: that one is the attempt.)

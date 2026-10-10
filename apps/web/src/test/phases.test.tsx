@@ -810,6 +810,8 @@ describe('Phase page', () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
+    // this test covers the expert view (commit hashes, Mark merged); the plain view is tested in expert-mode.test.tsx
+    qc.setQueryData(['me'], { user: { gitExpert: true } });
     render(
       <QueryClientProvider client={qc}>
         <MemoryRouter initialEntries={['/p/TOY/phases/2']}>

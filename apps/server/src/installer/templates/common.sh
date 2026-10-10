@@ -10,6 +10,7 @@ SERVICE_MODE=""
 RUNNER_ROOT="${HOME}/.local/share/guildwise/runner"
 BIN_DIR="${HOME}/.local/bin"
 DATA_DIR="${AOM_RUNNER_HOME:-${HOME}/.aom-runner}"
+CHOOSE_FOLDERS="${GUILDWISE_CHOOSE_FOLDERS:-${EXPERT_MODE:-0}}"
 export PATH="${BIN_DIR}:${PATH}"
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -205,11 +206,19 @@ pair_runner() {
   fi
 }
 
+# Simple mode (the default) does not ask where your code lives: it is ~/src. Expert mode (turned on in your Settings),
+# GUILDWISE_CHOOSE_FOLDERS=1 or the --choose-folders flag lets you pick the folders.
 add_repo_folders() {
   local dirs="${GUILDWISE_REPO_DIRS:-}"
   if [ -z "${dirs}" ]; then
-    note "The runner looks for your git projects in these folders. Most people keep them in ~/src."
-    dirs="$(ask_text "Folder(s) with your code (separate several with spaces)" "${HOME}/src")"
+    if [ "${CHOOSE_FOLDERS:-0}" = 1 ]; then
+      note "The runner looks for your git projects in these folders. Most people keep them in ~/src."
+      dirs="$(ask_text "Folder(s) with your code (separate several with spaces)" "${HOME}/src")"
+    else
+      dirs="${HOME}/src"
+      note "Your projects will live in ${dirs}."
+      mkdir -p "${dirs}" 2>/dev/null || true
+    fi
   fi
   local d added=0
   for d in ${dirs}; do

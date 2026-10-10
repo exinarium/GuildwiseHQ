@@ -17,6 +17,7 @@ export const DESK_SUBKIND = {
   bugReported: 'bug_reported',
   finalizeFailed: 'finalize_failed',
   prNotice: 'pr_notice',
+  savedWork: 'saved_work',
   outbound: 'outbound',
   outboundFailed: 'outbound_failed',
   repoCreate: 'repo_create',
@@ -64,6 +65,8 @@ export const FinalizeResultSchema = z.object({
   pushedBranch: z.string().optional(),
   /** E.g. `gh` was not available: the branch was pushed and the manager opens the PR by hand. */
   notice: z.string().optional(),
+  /** The working branch is protected: the change went out as a pull request instead of a merge (`action` is then `pr`). */
+  protectedBranch: z.boolean().optional(),
   /** The pre-finalize rebase conflicted (card goes to Rework, no agent resolves it). */
   conflict: z.boolean().optional(),
   conflictedFiles: z.array(z.string()).optional(),

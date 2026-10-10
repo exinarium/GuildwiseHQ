@@ -27,6 +27,8 @@ export interface InstallerParams {
   /** When the one-time code and the links stop working. */
   expiresAt: Date;
   generatedAt: Date;
+  /** The user turned on expert mode: the installer then asks where the code lives (simple mode uses ~/src). */
+  expertMode?: boolean;
 }
 
 /** Bash single-quoted literal: everything is literal inside, except the quote itself. */
@@ -111,6 +113,7 @@ function bashHeader(os: string, p: InstallerParams): string {
     `DEFAULT_NAME=${shq(cleanName(p.workstationName))}`,
     `RELEASE_VERSION=${shq(rel?.version ?? '')}`,
     `RELEASE_SHA256=${shq(rel?.sha256 ?? '')}`,
+    `EXPERT_MODE=${p.expertMode ? '1' : '0'}`,
     'CURRENT_STEP=installer',
     'DOCTOR_FAILED=0',
     '',

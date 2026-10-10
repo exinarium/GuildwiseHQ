@@ -40,7 +40,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Settings',
-        text: 'The gear opens the project settings: name, working branch, repositories, phases, merging, budget, team and archiving.',
+        text: 'The gear opens the project settings: name, how finished work lands, repositories, phases, merging, budget, team and archiving.',
       },
       {
         name: 'New card',
@@ -80,7 +80,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Cards',
-        text: 'The cards in the phase with their state and result. Add a card with Add a card, take one out with Remove, or click Mark merged when the automatic check cannot see a merge.',
+        text: 'The cards in the phase with their state and result. Add a card with Add a card, take one out with Remove, or, in expert mode, click Mark merged when the automatic check cannot see a merge.',
       },
       {
         name: 'Follow-ups',
@@ -368,7 +368,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'Basics',
-        text: 'Project name, working branch, architectural globs (for repos) and E2E test globs.',
+        text: 'Project name, how finished work lands (straight into main, or as a pull request), architectural globs (for repos) and E2E test globs. The working branch field appears in expert mode.',
       },
       {
         name: 'Stage',
@@ -376,7 +376,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Repos',
-        text: "Add or remove repositories and set or change each one's working branch. Only for projects whose workflow uses repositories.",
+        text: "Add or remove repositories. In expert mode you can also set or change each one's working branch. Only for projects whose workflow uses repositories.",
       },
       {
         name: 'Phases and deploys',

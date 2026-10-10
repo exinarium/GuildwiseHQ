@@ -10,6 +10,8 @@ let r: FakeRunner;
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
   r = await w.connectRunner();
+  // These tests cover the questions a git expert gets; simple mode (the default) is covered in simple-mode.test.ts.
+  await q('UPDATE users SET git_expert=true WHERE id=$1', [w.owner.id]);
 });
 afterAll(async () => {
   r.close();
@@ -65,7 +67,7 @@ const result = (over: Record<string, unknown> = {}) => ({
   repoId: w.repoId,
   actions: ['fetched origin'],
   problem: null,
-  branches: ['develop', 'main'],
+  branches: ['develop', 'staging'],
   uncommitted: [],
   pushed: false,
   removedBranches: [],
@@ -108,8 +110,8 @@ describe('repository hygiene request', () => {
     expect(item).toBeTruthy();
     expect(item).toMatchObject({ kind: 'question', blocking: false, pinned: false, routed_to: 'manager' });
     expect(item?.title).toContain('Which branch is the working branch of toy (TOY)');
-    expect(item?.options.map((o: any) => o.label)).toEqual(['develop', 'main', 'Another branch']);
-    expect(item?.options.map((o: any) => o.id)).toEqual(['branch:develop', 'branch:main', 'other']);
+    expect(item?.options.map((o: any) => o.label)).toEqual(['develop', 'staging', 'Another branch']);
+    expect(item?.options.map((o: any) => o.id)).toEqual(['branch:develop', 'branch:staging', 'other']);
     expect(item?.asked_by_kind).toBe('agent');
     expect(item?.asked_by_role).toBe('devops');
     expect(item?.data).toMatchObject({ repoId: w.repoId, reason: 'unconfirmed' });
@@ -119,23 +121,25 @@ describe('repository hygiene request', () => {
     expect(await questions()).toHaveLength(1);
   });
 
-  it('a repository with exactly one branch has it preselected as the suggested answer', async () => {
+  it('a repository whose default branch can be told is confirmed without asking (a repository with only master gets master)', async () => {
     const [open] = await questions();
     await ok(owner('POST', `/api/desk/${open?.id}/dismiss`, {}));
     const { start } = await startHygiene();
     await finish(start, {
       repos: [result({ branches: ['master'], problem: { kind: 'needs_branch', detail: 'not confirmed' } })],
     });
-    const [item] = await questions();
-    expect(item?.recommendation).toBe('branch:master');
-    expect(item?.options.map((o: any) => o.id)).toEqual(['branch:master', 'other']);
-    expect((await repoRow()).working_branch).toBeNull(); // suggested, never assumed
+    expect(await questions()).toHaveLength(0);
+    expect((await repoRow()).working_branch).toBe('master');
+    await q('UPDATE project_repos SET working_branch=NULL, working_branch_set_at=NULL WHERE id=$1', [
+      w.repoId,
+    ]);
   });
 
   it('a missing branch that holds back a commit is a blocking, pinned question', async () => {
     // settle the open one first, then see the blocking variant
     const [open] = await questions();
-    await ok(owner('POST', `/api/desk/${open?.id}/dismiss`, {}));
+    if (open) await ok(owner('POST', `/api/desk/${open.id}/dismiss`, {}));
+
     const { start } = await startHygiene();
     await finish(start, {
       repos: [
@@ -257,12 +261,12 @@ describe('re-confirming when something changes', () => {
     expect(item?.data).toMatchObject({ repoId: w.repoId, reason: 'phase' });
     await ok(
       owner('POST', `/api/desk/${item?.id}/answer`, {
-        answer: 'main',
-        optionId: 'branch:main',
+        answer: 'develop',
+        optionId: 'branch:develop',
         ledger: { scope: 'decision' },
       }),
     );
-    expect((await repoRow()).working_branch).toBe('main');
+    expect((await repoRow()).working_branch).toBe('develop');
   });
 
   it('a new phase asks to keep the current branch or name another; one that names its own branch asks nothing', async () => {
@@ -284,7 +288,12 @@ describe('re-confirming when something changes', () => {
     const [item] = await questions();
     expect(item?.title).toContain('Keep main as the working branch of toy (TOY)');
     expect(item?.title).toContain('phase');
-    expect(item?.options.map((o: any) => o.id)).toEqual(['keep', 'branch:develop', 'other']);
+    expect(item?.options.map((o: any) => o.id)).toEqual([
+      'keep',
+      'branch:develop',
+      'branch:staging',
+      'other',
+    ]);
     expect(item?.recommendation).toBe('keep');
     expect(item).toMatchObject({ blocking: false, pinned: false });
     // keeping it changes nothing

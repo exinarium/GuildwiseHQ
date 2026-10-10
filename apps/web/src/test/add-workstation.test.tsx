@@ -257,7 +257,7 @@ describe('installer guide data', () => {
       expect(guideSteps(os).filter((s) => s.command)).toHaveLength(1);
       expect(whatItDoes(os).length).toBeGreaterThan(4);
     }
-    expect(whatItDoes('windows').join(' ')).toMatch(/WSL Boot/);
+    expect(whatItDoes('windows').join(' ')).toMatch(/Guildwise HQ runner/);
     expect(whatItDoes('macos').join(' ')).toMatch(/launchd/);
     expect(whatItDoes('linux').join(' ')).toMatch(/systemd/);
   });

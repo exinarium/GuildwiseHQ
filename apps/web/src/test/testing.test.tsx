@@ -183,7 +183,7 @@ describe('finalize panel', () => {
 
   it('shows running and failed states', () => {
     const { unmount } = panel({ ...testing().finalize, available: false, state: 'running' });
-    expect(screen.getByTestId('finalize-state').textContent).toContain('running');
+    expect(screen.getByTestId('finalize-state').textContent).toContain('Finalizing');
     expect(screen.queryByTestId('finalize-button')).toBeNull();
     unmount();
     panel({ ...testing().finalize, state: 'failed', lastError: 'push rejected' });

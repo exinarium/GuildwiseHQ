@@ -126,8 +126,9 @@ export async function installerScript(
   const now = ctx.clock.now();
   const s = await one(
     ctx.pool,
-    `SELECT i.id, i.workstation_name, i.expires_at, i.created_at, c.expires_at AS code_expires_at, c.id AS code_id
-       FROM installer_sessions i JOIN pairing_codes c ON c.id = i.pairing_code_id
+    `SELECT i.id, i.workstation_name, i.expires_at, i.created_at, c.expires_at AS code_expires_at, c.id AS code_id,
+            COALESCE(u.git_expert, false) AS expert
+       FROM installer_sessions i JOIN pairing_codes c ON c.id = i.pairing_code_id JOIN users u ON u.id = i.user_id
       WHERE i.token_hash=$1 AND i.expires_at > $2`,
     [sha256Hex(token), now],
   );
@@ -142,6 +143,7 @@ export async function installerScript(
     release: release ? { version: release.version, sha256: release.sha256 } : null,
     expiresAt: new Date(s.expires_at),
     generatedAt: now,
+    expertMode: s.expert === true,
   };
   await exec(
     ctx.pool,

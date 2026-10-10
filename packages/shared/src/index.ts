@@ -11,6 +11,7 @@ export * from './external/index.ts';
 export * from './feed/index.ts';
 export * from './hr/index.ts';
 export * from './hygiene/index.ts';
+export * from './hygiene/secrets.ts';
 export * from './ids.ts';
 export * from './intake/index.ts';
 export * from './interests/index.ts';

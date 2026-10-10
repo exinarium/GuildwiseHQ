@@ -110,7 +110,7 @@ export function whatItDoes(os: InstallerOs): string[] {
   if (os === 'windows')
     return [
       'Turns on WSL2 and installs Ubuntu if they are missing (may restart Windows once).',
-      'Sets systemd=true in Ubuntu, vmIdleTimeout=-1 in .wslconfig and adds a "WSL Boot" task so Ubuntu stays running.',
+      'Sets systemd=true in Ubuntu, vmIdleTimeout=-1 in .wslconfig and adds a "Guildwise HQ runner" task so Ubuntu stays running (and removes the older "WSL Boot" task).',
       'Then runs the Linux installer inside Ubuntu: Node 22, git, Claude Code, bubblewrap and socat, optional yt-dlp and Docker (it asks first).',
       ...common,
     ];

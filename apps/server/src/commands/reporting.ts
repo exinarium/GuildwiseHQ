@@ -91,6 +91,17 @@ export async function markWhatsNewSeen(
   ]);
 }
 
+export async function setGitExpert(ctx: Ctx, user: AuthSession['user'], enabled: boolean): Promise<void> {
+  await ctx.store.append([
+    {
+      streamId: streamId.user(user.id),
+      event: { type: 'UserGitExpertModeSet', payload: { userId: user.id, enabled } },
+      actor: userActor(user.id),
+      scope: userScope(user.id),
+    },
+  ]);
+}
+
 export async function setTimezone(ctx: Ctx, user: AuthSession['user'], timezone: string): Promise<void> {
   if (!isValidTimeZone(timezone)) throw badRequest('invalid_timezone', `${timezone} is not a time zone`);
   await ctx.store.append([

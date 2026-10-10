@@ -14,6 +14,38 @@ export interface PrCreator {
   create(input: PrInput): Promise<PrResult>;
 }
 
+/** What the code host says about a branch: `protected`, `open` (no protection) or `unknown` (no CLI, no rights, another host). */
+export type BranchProtection = 'protected' | 'open' | 'unknown';
+
+/** Asks the code host whether a branch is protected. A seam: real use shells out to `gh api`, tests inject a fake. */
+export interface BranchProtectionChecker {
+  check(input: { cwd: string; branch: string }): Promise<BranchProtection>;
+}
+
+/** `gh api repos/{owner}/{repo}/branches/<branch>/protection`: success is protected, "Branch not protected" is open, anything else unknown. */
+export const ghBranchProtection: BranchProtectionChecker = {
+  async check({ cwd, branch }) {
+    try {
+      const r = await execa(
+        'gh',
+        ['api', `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}/protection`],
+        { cwd, reject: false, stdin: 'ignore', timeout: 30_000 },
+      );
+      if (r.exitCode === 0) return 'protected';
+      return /branch not protected/i.test(String(r.stderr) + String(r.stdout)) ? 'open' : 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  },
+};
+
+/** A push the host rejected because the branch is protected (GitHub GH006/GH013, GitLab, Bitbucket and Azure wording). */
+export function isProtectedBranchRejection(output: string): boolean {
+  return /GH006|GH013|protected branch|branch is protected|pre-receive hook declined|push declined due to repository rule|TF402455/i.test(
+    output,
+  );
+}
+
 /** `gh pr create` when `gh` is installed; otherwise reports `unavailable` so the caller can push and notify instead. */
 export const ghPrCreator: PrCreator = {
   async create(input) {

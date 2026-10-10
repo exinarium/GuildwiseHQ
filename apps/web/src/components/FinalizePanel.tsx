@@ -2,6 +2,7 @@ import type { CardDetailResponse, CompletionAction } from '@aom/shared';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useFinalizeCard } from '../api/queries/testing.ts';
+import { useExpertMode } from '../lib/expert-mode.ts';
 import { Button, ErrorBox, Panel, Select } from './ui.tsx';
 
 type Testing = NonNullable<CardDetailResponse['testing']>;
@@ -24,6 +25,7 @@ export function FinalizePanel({
   canAct: boolean;
 }) {
   const run = useFinalizeCard(cardId);
+  const expert = useExpertMode();
   const [picked, setPicked] = useState<CompletionAction | null>(null);
   if (!finalize.available && finalize.state === 'idle') return null;
   const action = picked ?? finalize.action ?? completionAction ?? 'pr';
@@ -41,18 +43,26 @@ export function FinalizePanel({
         )}
         {finalize.available && canAct && (
           <div className="flex flex-col gap-2">
-            <Select
-              label="Completion action"
-              value={action}
-              onChange={(e) => setPicked(e.target.value as CompletionAction)}
-              data-testid="finalize-action"
-            >
-              {ACTIONS.map((a) => (
-                <option key={a.value} value={a.value}>
-                  {a.label}
-                </option>
-              ))}
-            </Select>
+            {expert ? (
+              <Select
+                label="Completion action"
+                value={action}
+                onChange={(e) => setPicked(e.target.value as CompletionAction)}
+                data-testid="finalize-action"
+              >
+                {ACTIONS.map((a) => (
+                  <option key={a.value} value={a.value}>
+                    {a.label}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <p className="text-sm text-fg" data-testid="finalize-plain-action">
+                {action === 'pr'
+                  ? 'This change will arrive as a pull request for you to merge.'
+                  : 'This change will go straight into main.'}
+              </p>
+            )}
             {needsApproval && (
               <p data-testid="finalize-approval-note" className="text-sm text-warning-soft-fg">
                 Large change: merging needs your approval on the desk first.{' '}
@@ -84,7 +94,9 @@ export function FinalizePanel({
         )}
         {state === 'running' && (
           <p data-testid="finalize-state" className="mt-2 text-sm">
-            Finalizing: the {action.replace('_', ' ')} is running.
+            {expert
+              ? `Finalizing: the ${action.replace('_', ' ')} is running.`
+              : 'Finalizing: your change is on its way.'}
           </p>
         )}
         {state === 'failed' && (

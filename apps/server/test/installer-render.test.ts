@@ -100,7 +100,10 @@ describe('rendered scripts', () => {
     expect(ps).toContain("$LinuxScriptUrl = 'https://hq.example.com/install/t/install-linux-wsl.sh'");
     expect(ps).toContain('vmIdleTimeout=-1');
     expect(ps).toContain('systemd=true');
-    expect(ps).toContain("'WSL Boot'");
+    expect(ps).toContain('$RunnerTaskName = "$AppName runner"');
+    expect(ps).toContain("$OldTaskName = 'WSL Boot'");
+    expect(ps).toContain('Unregister-ScheduledTask -TaskName $OldTaskName');
+    expect(ps).toContain('--exec\\s+sleep\\s+infinity'); // only our own old task is removed
     expect(ps).toContain('RunOnce');
   });
 

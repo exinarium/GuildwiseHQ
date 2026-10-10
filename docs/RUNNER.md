@@ -38,7 +38,7 @@ Without a running systemd (a container, or WSL without `systemd=true`) the unit 
 
 **macOS:** the same flow with Homebrew (installed if missing, after asking), `node@22` and `git`, no `bubblewrap` or `socat` (Seatbelt is built in), and a **launchd** agent `com.guildwisehq.runner` in `~/Library/LaunchAgents` (starts at login, restarts if it stops; log in `~/.aom-runner/logs/runner.log`).
 
-**Windows:** the PowerShell script elevates itself, enables WSL2 and installs Ubuntu if needed (when Windows has to restart it registers a `RunOnce` entry and continues after you sign in; a copy of the script and the Linux installer are kept in `%LOCALAPPDATA%\GuildwiseHQ`), creates the Ubuntu user if the distribution has only root, sets `systemd=true` in `/etc/wsl.conf`, sets `vmIdleTimeout=-1` in `%USERPROFILE%\.wslconfig`, registers the **"WSL Boot"** scheduled task (at logon: `wsl.exe -d Ubuntu --exec sleep infinity`), turns lingering on for the Ubuntu user and runs the Linux installer inside Ubuntu.
+**Windows:** the PowerShell script elevates itself, enables WSL2 and installs Ubuntu if needed (when Windows has to restart it registers a `RunOnce` entry and continues after you sign in; a copy of the script and the Linux installer are kept in `%LOCALAPPDATA%\GuildwiseHQ`), creates the Ubuntu user if the distribution has only root, sets `systemd=true` in `/etc/wsl.conf`, sets `vmIdleTimeout=-1` in `%USERPROFILE%\.wslconfig`, registers the **"Guildwise HQ runner"** scheduled task (at logon: `wsl.exe -d Ubuntu --exec sleep infinity`) and, on an upgrade or re-run, removes the old **"WSL Boot"** task when its action is that same command for this distribution, turns lingering on for the Ubuntu user and runs the Linux installer inside Ubuntu.
 
 All installers are **idempotent**: running the command again upgrades the runner, repairs the service and keeps the existing pairing(s) and adds the new one when the command carries a fresh code. They finish with a success or failure summary that links to the install help (`/help/install-troubleshooting`) and Contact us (`/contact`).
 
@@ -796,16 +796,22 @@ repositories: local path, remote and working branch (the active phase's, else th
 - **working branch not confirmed** (`project_repos.working_branch` is empty): does nothing else. It does not commit,
   pull or push. The uncommitted files and the branches are reported, and the server asks you on the desk which branch is
   the working branch (the answer is stored on the repository and in the ledger, so it is not asked again);
-- **on the working branch**: commits uncommitted changes (`chore: save work in progress (aom repository hygiene)`, with
-  your git identity, else `AOM repository hygiene <hygiene@aom.invalid>`), pulls (fast-forward, else rebase; a rebase
-  that conflicts is aborted), and pushes what is unpushed;
-- **on another branch**: leaves the working tree alone (uncommitted changes there are reported), moves the working
-  branch forward from `origin` and pushes it when it is only ahead;
+- **uncommitted edits in your own checkout** (on the working branch or any other branch): stored on a
+  `guildwise/saved-work/<date>` branch (a suffix `-2`, `-3` ... if the name is taken; the same content is never saved
+  twice) and pushed with `git push -u origin <branch>`. The commit is built from a throwaway index on top of the
+  checkout's current commit (`git commit-tree`), so your files, your index and your branch are untouched and nothing
+  reaches the working branch. Files that look like secrets (`.env*`, `*.pem`, `*.key`, `id_rsa`, names containing
+  key, secret, token, password or credential, unless they are source or notes) are skipped and named in a desk notice
+  (`saved_work`) that tells you where your work is;
+- **on the working branch**: pulls (fast-forward; with unsaved edits in the way it waits instead of rebasing over them;
+  a clean tree falls back to a rebase that is aborted on conflict), and pushes what is unpushed;
+- **on another branch**: leaves the working tree alone, moves the working branch forward from `origin` and pushes it
+  when it is only ahead;
 - deletes local `aom/...` branches of finished cards that are merged into the working branch and not checked out in a
   worktree, and runs `git worktree prune`.
 
 It never force-pushes, resets or discards anything. What it cannot resolve (a conflict, a branch that is not there, an
-authentication failure, a missing clone, uncommitted changes on the wrong branch) is reported and becomes a signal in the
+authentication failure, a missing clone) is reported and becomes a signal in the
 BA's daily report; it closes when a later run finds the repository in order. The commands that changed something are
 logged in the request's record (`aom devops-done`). The DevOps agent may `git push` from its own shell (owner decision: it is the workstation-management agent);
 the push in `aom hygiene run` is still done by the runner, not by the model.
@@ -818,6 +824,16 @@ conflicted and the card is in Rework). The worktree is the only repository the b
 `Edit` rules keep everything else read-only), so this can only move its own branch. `git push` and `git reset --hard` stay
 denied for every role; all other roles keep denying `rebase`, `checkout` and `switch`. The built-in builder role is version 2
 for this change.
+
+### How finished work lands (protected branches)
+
+The completion action `merge` is the project default (`projects.default_completion`, `merge` or `pr`; a card's own
+action wins, and a card created without one takes the project's). Before a merge the runner asks the code host whether
+the working branch is protected (`gh api repos/{owner}/{repo}/branches/<branch>/protection`; success means protected,
+"Branch not protected" means open, anything else is unknown) and treats a rejected push (GH006, "protected branch hook
+declined", GH013 and the like) the same way: the card branch is pushed and a pull request is opened instead
+(`FinalizeResult.protectedBranch`, `action: pr`). The server records `pr` on the card and switches the project default
+to `pr` with a note on the card. Nothing is forced. Hosts other than GitHub are covered by the rejected-push path only.
 
 ### DevOps shifts are unsandboxed
 

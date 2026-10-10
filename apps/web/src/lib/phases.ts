@@ -47,6 +47,18 @@ export function phasePath(ref: string): string {
   return m ? `/p/${m[1]}/phases/${m[2]}` : '/projects';
 }
 
+/** Plain-language outcome of a phase card for people who do not use expert mode (no branches, no merges). */
+export function plainOutcomeLabel(
+  outcome: keyof typeof OUTCOME_LABEL,
+  prUrl?: string | null,
+  merged?: boolean,
+): string {
+  if (outcome === 'finalized')
+    return prUrl && !merged ? 'waiting for you to merge the pull request' : 'live on main';
+  if (outcome === 'waiting_merge') return 'waiting for you to merge the pull request';
+  return OUTCOME_LABEL[outcome];
+}
+
 export const OUTCOME_LABEL = {
   finalized: 'finalized',
   closed_manually: 'closed by hand',

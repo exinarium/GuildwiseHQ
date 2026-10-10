@@ -23,7 +23,7 @@ import { verifyRights } from './devops/rights.ts';
 import { ExternalAdapters } from './external/index.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { executeCompletion } from './git/completion.ts';
-import { ghPrCreator, type PrCreator } from './git/gh.ts';
+import { type BranchProtectionChecker, ghBranchProtection, ghPrCreator, type PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { sweepWorktrees } from './git/sweep.ts';
@@ -61,6 +61,8 @@ export interface RunnerOptions {
   vaultSecondMs?: number;
   /** Opens pull requests for the `pr` completion action; default shells out to `gh` (tests inject a fake). */
   prCreator?: PrCreator;
+  /** Asks the code host whether a branch is protected (tests inject a fake). */
+  branchProtection?: BranchProtectionChecker;
   /** Ticket systems for `aom source read` (default: `gh` for GitHub, the agent's skill for Jira). Tests inject fakes. */
   external?: ExternalAdapters;
   /** Test hook: replaces the tester environment check (docker, deployed app). */
@@ -503,6 +505,7 @@ export class Runner {
               worktreesDir: this.paths.worktrees,
               integrationDir: this.paths.integration,
               pr: this.opts.prCreator ?? ghPrCreator,
+              protection: this.opts.branchProtection ?? ghBranchProtection,
             }),
           );
         }

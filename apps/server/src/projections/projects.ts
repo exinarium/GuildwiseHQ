@@ -8,6 +8,7 @@ const PROJECT_COLUMNS: Record<string, string> = {
   workflowKey: 'workflow_key',
   branchPrefix: 'branch_prefix',
   workingBranch: 'working_branch',
+  defaultCompletion: 'default_completion',
   subCategories: 'sub_categories',
   vaultFolder: 'vault_folder',
   architecturalGlobs: 'architectural_globs',

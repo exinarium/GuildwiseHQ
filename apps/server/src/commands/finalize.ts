@@ -263,11 +263,36 @@ export async function applyFinalizeResult(
   await withAppendTx(ctx.pool, async (tx) => {
     const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [cardId]);
     if (!card || card.status !== 'waiting' || card.finalize_state !== 'running') return;
-    const action = (card.finalize_action ?? card.completion_action) as CompletionAction;
+    const requested = (card.finalize_action ?? card.completion_action) as CompletionAction;
+    // A protected branch turns a merge into a pull request: record what actually happened.
+    const action: CompletionAction = ok && result?.ok && result.protectedBranch ? result.action : requested;
     const scope = projectScope(card.org_id, card.project_id);
     const events: AppendInput[] = [];
 
     if (ok && result?.ok) {
+      if (result.protectedBranch) {
+        const project = await one(tx, 'SELECT default_completion FROM projects WHERE id=$1', [
+          card.project_id,
+        ]);
+        if (project?.default_completion !== 'pr')
+          events.push({
+            streamId: streamId.project(card.project_id),
+            event: {
+              type: 'ProjectUpdated',
+              payload: { projectId: card.project_id, changes: { defaultCompletion: 'pr' } },
+            },
+            actor: SYSTEM_ACTOR,
+            scope,
+          });
+        events.push(
+          cardMessage(
+            card,
+            { kind: 'system' },
+            'system',
+            'The working branch is protected, so this change is waiting as a pull request for you to merge. New work in this project will arrive the same way.',
+          ),
+        );
+      }
       events.push(
         {
           streamId: streamId.card(card.id),

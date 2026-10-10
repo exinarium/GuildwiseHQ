@@ -32,6 +32,15 @@ export function useUpdateReporting() {
   });
 }
 
+/** Your own expert mode for version control (off by default). */
+export function useSetExpertMode() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => put<MeResponse>('/auth/git-expert', { enabled }, MeResponseSchema),
+    onSuccess: (me) => qc.setQueryData(meKey, me),
+  });
+}
+
 export function useSetTimezone() {
   const qc = useQueryClient();
   return useMutation({

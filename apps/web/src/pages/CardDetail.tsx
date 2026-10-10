@@ -53,6 +53,7 @@ import {
 } from '../components/ui.tsx';
 import { WorkabilityWarning } from '../components/WorkabilityWarning.tsx';
 import { fieldLabel } from '../lib/cardForm.ts';
+import { landingText } from '../lib/outcomes.ts';
 import { priorityLabel } from '../lib/priority.ts';
 import { stageStyle } from '../lib/stages.ts';
 import { formatDateTime } from '../lib/time.ts';
@@ -167,6 +168,7 @@ export function CardDetailView({
   const policy = useDecisionPolicy(card.id);
   const rehome = useRehomeCard(card.id);
   const me = useMe();
+  const expert = me.data?.user?.gitExpert === true;
   const [dialog, setDialog] = useState<'move' | 'cancel' | 'edit' | 'risk' | null>(null);
   const [confirm, setConfirm] = useState<'release' | 'rehome' | null>(null);
   const toast = useToast();
@@ -440,11 +442,15 @@ export function CardDetailView({
               )}
               {(!workflow || workflowUsesRepos(workflow)) && (
                 <>
-                  <Meta k="Completion action" v={card.completionAction ?? 'not set'} />
+                  {expert ? (
+                    <Meta k="Completion action" v={card.completionAction ?? 'not set'} />
+                  ) : (
+                    <Meta k="Where it lands" v={landingText(card)} />
+                  )}
                   <Meta k="Docs needed" v={card.docsNeeded ? 'yes' : 'no'} />
                 </>
               )}
-              {card.branchName && <Meta k="Branch" v={card.branchName} mono />}
+              {expert && card.branchName && <Meta k="Branch" v={card.branchName} mono />}
               <Meta k="Priority" v={priorityLabel(card.priority)} />
               {(data.phase || permissions.canSetPhase) && (
                 <div className="sm:col-span-2 lg:col-span-1">

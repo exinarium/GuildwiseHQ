@@ -271,6 +271,7 @@ install_service() {
 }
 
 main() {
+  case " $* " in *" --choose-folders "*) CHOOSE_FOLDERS=1 ;; esac
   STEP_TOTAL=10
   say "${C_BOLD}${APP_NAME}: set up this computer as a workstation${C_RESET}"
   say "${C_DIM}Safe to run again at any time: it upgrades or repairs what is already here.${C_RESET}"
@@ -283,7 +284,7 @@ main() {
   step "Optional extras"; install_ytdlp; install_docker
   step "Downloading the runner"; install_runner_release
   step "Pairing with ${APP_NAME}"; pair_runner
-  step "Choosing your code folders"; add_repo_folders
+  step "Choosing your code folder"; add_repo_folders
   step "Signing in to Claude"; sign_in_to_claude
   step "Starting the runner and checking everything"
   install_service

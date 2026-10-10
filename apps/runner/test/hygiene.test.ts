@@ -96,20 +96,66 @@ describe('repository hygiene: the working branch must be confirmed', () => {
 });
 
 describe('repository hygiene: commit, pull and push on the working branch', () => {
-  it('commits uncommitted changes to the working branch and pushes them', async () => {
+  it('stores uncommitted changes on a saved-work branch and pushes it; main and the checkout are untouched', async () => {
     const repo = makeRepo();
+    const mainBefore = originHead(repo);
     write(repo, 'wip.txt', 'unsaved');
     write(repo, 'README.md', '# changed\n');
     const { result, commands } = await hygieneRepo(spec(repo));
     expect(result.problem).toBeNull();
-    expect(result.commit).toMatch(/^[0-9a-f]{40}$/);
-    expect(result.pushed).toBe(true);
-    expect(result.actions.join(' ')).toContain('committed 2 file(s) on main');
-    expect(originHead(repo)).toBe(result.commit);
-    expect(sh(repo.clone, 'git', ['status', '--porcelain'])).toBe('');
-    expect(sh(repo.clone, 'git', ['log', '-1', '--format=%s'])).toContain('save work in progress');
-    expect(commands.some((c) => c.includes('commit'))).toBe(true);
-    expect(commands.some((c) => c.endsWith('push -u origin main'))).toBe(true);
+    const saved = result.savedWork;
+    expect(saved?.branch).toMatch(/^guildwise\/saved-work\/\d{4}-\d{2}-\d{2}$/);
+    expect(saved?.files.sort()).toEqual(['README.md', 'wip.txt']);
+    expect(saved?.pushed).toBe(true);
+    expect(result.actions.join(' ')).toContain('stored 2 unsaved file(s)');
+    // nothing landed on main, neither on the remote nor locally
+    expect(originHead(repo)).toBe(mainBefore);
+    expect(sh(repo.clone, 'git', ['rev-parse', 'main'])).toBe(mainBefore);
+    // the saved-work branch is on the remote with both files
+    const tree = sh(repo.origin, 'git', ['ls-tree', '-r', '--name-only', saved?.branch as string]);
+    expect(tree).toContain('wip.txt');
+    expect(sh(repo.origin, 'git', ['show', `${saved?.branch}:README.md`])).toBe('# changed');
+    // the user's files are exactly as they were
+    expect(readFileSync(join(repo.clone, 'wip.txt'), 'utf8')).toBe('unsaved');
+    expect(sh(repo.clone, 'git', ['status', '--porcelain'])).toContain('wip.txt');
+    expect(commands.some((c) => c.includes('push -u origin guildwise/saved-work/'))).toBe(true);
+    expect(commands.some((c) => /push.*(--force|-f\b)/.test(c))).toBe(false);
+  });
+
+  it('skips files that look like secrets and tells which', async () => {
+    const repo = makeRepo();
+    write(repo, 'wip.txt', 'unsaved');
+    write(repo, '.env', 'TOKEN=abc');
+    write(repo, 'deploy.pem', 'pem');
+    write(repo, 'api-key.json', '{}');
+    write(repo, 'keyboard.ts', 'export {}');
+    const { result } = await hygieneRepo(spec(repo));
+    const saved = result.savedWork;
+    expect(saved?.files.sort()).toEqual(['keyboard.ts', 'wip.txt']);
+    expect(saved?.skipped.sort()).toEqual(['.env', 'api-key.json', 'deploy.pem']);
+    const tree = sh(repo.origin, 'git', ['ls-tree', '-r', '--name-only', saved?.branch as string]);
+    expect(tree).not.toContain('.env');
+    expect(tree).not.toContain('deploy.pem');
+    // the secrets stay where they were
+    expect(readFileSync(join(repo.clone, '.env'), 'utf8')).toBe('TOKEN=abc');
+  });
+
+  it('does not save the same edits twice', async () => {
+    const repo = makeRepo();
+    write(repo, 'wip.txt', 'unsaved');
+    const first = await hygieneRepo(spec(repo));
+    const second = await hygieneRepo(spec(repo));
+    expect(second.result.savedWork?.branch).toBe(first.result.savedWork?.branch);
+    expect(second.result.savedWork?.pushed).toBe(false);
+    expect(sh(repo.clone, 'git', ['branch', '--list', 'guildwise/saved-work/*']).split('\n')).toHaveLength(1);
+  });
+
+  it('only secret-looking edits: nothing is saved, the files are named', async () => {
+    const repo = makeRepo();
+    write(repo, '.env.local', 'X=1');
+    const { result } = await hygieneRepo(spec(repo));
+    expect(result.savedWork).toMatchObject({ branch: '', files: [], skipped: ['.env.local'] });
+    expect(sh(repo.clone, 'git', ['branch', '--list', 'guildwise/saved-work/*'])).toBe('');
   });
 
   it('pushes commits that were not pushed', async () => {
@@ -135,44 +181,42 @@ describe('repository hygiene: commit, pull and push on the working branch', () =
     expect(second.result.actions).toContain('main is in order');
   });
 
-  it('rebases local work onto the remote when both moved, then pushes', async () => {
+  it('pulls what the remote has while the unsaved edits stay in the checkout', async () => {
     const repo = makeRepo();
     remoteCommit(repo, 'theirs.txt', 'x');
     write(repo, 'mine.txt', 'unsaved');
     const { result } = await hygieneRepo(spec(repo));
     expect(result.problem).toBeNull();
-    expect(result.pushed).toBe(true);
-    expect(sh(repo.clone, 'git', ['ls-files']).split('\n')).toEqual(
-      expect.arrayContaining(['theirs.txt', 'mine.txt']),
-    );
-    expect(originHead(repo)).toBe(sh(repo.clone, 'git', ['rev-parse', 'HEAD']));
+    expect(readFileSync(join(repo.clone, 'theirs.txt'), 'utf8')).toBe('x');
+    expect(readFileSync(join(repo.clone, 'mine.txt'), 'utf8')).toBe('unsaved');
+    expect(result.savedWork?.branch).toBeTruthy();
+    expect(sh(repo.origin, 'git', ['ls-tree', '-r', '--name-only', 'main'])).not.toContain('mine.txt');
   });
 
-  it('a conflict is reported, the clone is left clean and nothing is pushed', async () => {
+  it('edits that overlap the remote are saved and the update waits: no conflict, nothing lost, nothing pushed to main', async () => {
     const repo = makeRepo();
     remoteCommit(repo, 'README.md', '# theirs\n');
     const before = originHead(repo);
     write(repo, 'README.md', '# mine\n');
     const { result } = await hygieneRepo(spec(repo));
-    expect(result.problem?.kind).toBe('conflict');
-    expect(result.pushed).toBe(false);
+    expect(result.problem).toBeNull();
+    expect(result.actions.join(' ')).toContain('not updated yet');
     expect(originHead(repo)).toBe(before);
-    // the rebase was aborted: no rebase in progress, my commit is intact
-    expect(sh(repo.clone, 'git', ['status'])).not.toContain('rebase in progress');
-    expect(sh(repo.clone, 'git', ['log', '-1', '--format=%s'])).toContain('save work in progress');
+    expect(readFileSync(join(repo.clone, 'README.md'), 'utf8')).toBe('# mine\n');
+    expect(sh(repo.origin, 'git', ['show', `${result.savedWork?.branch}:README.md`])).toBe('# mine');
   });
 });
 
 describe('repository hygiene: a checkout on another branch', () => {
-  it('reports uncommitted changes on a branch that is not the working branch and does not commit them', async () => {
+  it('stores uncommitted changes of another branch on a saved-work branch built on that branch and leaves the checkout alone', async () => {
     const repo = makeRepo();
     sh(repo.clone, 'git', ['checkout', '-b', 'feature/x']);
     write(repo, 'wip.txt', 'unsaved');
     const head = sh(repo.clone, 'git', ['rev-parse', 'HEAD']);
     const { result } = await hygieneRepo(spec(repo));
-    expect(result.problem?.kind).toBe('dirty_other_branch');
-    expect(result.problem?.detail).toContain('feature/x');
-    expect(result.uncommitted).toEqual(['wip.txt']);
+    expect(result.problem).toBeNull();
+    expect(result.savedWork?.files).toEqual(['wip.txt']);
+    expect(sh(repo.clone, 'git', ['rev-parse', `${result.savedWork?.branch}~1`])).toBe(head);
     expect(sh(repo.clone, 'git', ['rev-parse', 'HEAD'])).toBe(head);
     expect(sh(repo.clone, 'git', ['branch', '--show-current'])).toBe('feature/x');
     expect(sh(repo.clone, 'git', ['status', '--porcelain'])).toContain('wip.txt');
@@ -316,9 +360,9 @@ describe('aom hygiene run', () => {
       hygiene: { repos: Array<{ repoId: string; problem: { kind: string } | null; commit?: string }> };
     };
     expect(data.summary).toContain('1 need attention');
-    expect(data.commands.some((c) => c.includes('commit'))).toBe(true);
+    expect(data.commands.some((c) => c.includes('saved-work'))).toBe(true);
     expect(data.hygiene.repos[0]?.problem).toBeNull();
-    expect(data.hygiene.repos[0]?.commit).toBeDefined();
+    expect((data.hygiene.repos[0] as { savedWork?: unknown }).savedWork).toBeDefined();
     expect(data.hygiene.repos[1]?.problem?.kind).toBe('needs_branch');
     expect(sh(unset.clone, 'git', ['status', '--porcelain'])).toContain('other.txt');
   });

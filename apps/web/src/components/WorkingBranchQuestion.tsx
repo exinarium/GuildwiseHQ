@@ -3,6 +3,7 @@ import { WORKING_BRANCH_OTHER_OPTION } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { useAnswerDeskItem, useDismissDeskItem } from '../api/queries/desk.ts';
 import { defaultOption } from '../lib/desk.ts';
+import { useExpertMode } from '../lib/expert-mode.ts';
 import { Badge, Button, ErrorBox, TextInput } from './ui.tsx';
 
 /**
@@ -11,6 +12,7 @@ import { Badge, Button, ErrorBox, TextInput } from './ui.tsx';
  * the repository and writes a ledger entry, so later runs do not ask again.
  */
 export function WorkingBranchQuestion({ item }: { item: DeskItemDto }) {
+  const expert = useExpertMode();
   const answer = useAnswerDeskItem();
   const dismiss = useDismissDeskItem();
   const [optionId, setOptionId] = useState<string | null>(defaultOption(item));
@@ -42,8 +44,16 @@ export function WorkingBranchQuestion({ item }: { item: DeskItemDto }) {
       noValidate
       data-testid="working-branch-question"
     >
+      {!expert && (
+        <p className="text-sm text-muted">
+          Guildwise could not tell on its own where finished work should go. Pick the main line of this
+          repository (usually the first choice); agents will deliver into it.
+        </p>
+      )}
       <fieldset className="flex flex-col gap-1.5">
-        <legend className="mb-1 text-xs font-medium text-muted">Working branch</legend>
+        <legend className="mb-1 text-xs font-medium text-muted">
+          {expert ? 'Working branch' : 'Where finished work goes'}
+        </legend>
         {item.options.map((o) => (
           <label
             key={o.id}

@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { type FinalizeExecutePayload, type FinalizeResult, isSafeGitRef } from '@aom/shared';
-import type { PrCreator } from './gh.ts';
+import { type BranchProtectionChecker, isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { git, gitOk, hasRemote, revParse } from './git.ts';
 import { baseTarget, RebaseConflictError, rebaseOntoBase } from './rebase.ts';
 import { ensureWorktree, removeWorktree } from './worktrees.ts';
@@ -17,6 +17,8 @@ export interface CompletionInput {
   /** Directory for the throwaway integration worktree of a merge. */
   integrationDir: string;
   pr: PrCreator;
+  /** Asks the code host whether the working branch is protected (a merge then becomes a pull request). */
+  protection?: BranchProtectionChecker;
   /** Identity for the merge commit (the runner has no agent behind it). */
   identity?: { name: string; email: string };
 }
@@ -38,7 +40,8 @@ const fail = (action: FinalizeResult['action'], error: string): FinalizeResult =
  */
 export async function executeCompletion(input: CompletionInput): Promise<FinalizeResult> {
   const { payload: p } = input;
-  const action = p.action;
+  let action = p.action;
+  let protectedBranch = false;
   // Owner-controlled refs: refuse anything git could parse as an option or an odd refspec.
   for (const ref of [p.branchName, p.baseBranch, `aom-integration/${p.ref.toLowerCase()}`])
     if (!isSafeGitRef(ref)) return fail(action, `refusing unsafe branch name ${JSON.stringify(ref)}`);
@@ -73,7 +76,18 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
     return fail(action, `rebase failed: ${errMsg(err)}`);
   }
 
-  if (action === 'merge') return merge(input, wt);
+  if (action === 'merge') {
+    // Known to be protected (the host says so): go straight to a pull request. Unknown: try, and fall back on a rejected push.
+    if ((await input.protection?.check({ cwd: wt, branch: p.baseBranch })) === 'protected') {
+      protectedBranch = true;
+    } else {
+      const merged = await merge(input, wt);
+      if (!merged.protectedBranch) return merged;
+      protectedBranch = true;
+    }
+    action = 'pr';
+  }
+  const flag = protectedBranch ? { protectedBranch: true } : {};
   const remote = await hasRemote(wt);
   if (!remote)
     return fail(
@@ -96,10 +110,11 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
       return {
         ok: true,
         action,
+        ...flag,
         pushedBranch: p.branchName,
         notice: `${r.unavailable}: the branch ${p.branchName} was pushed, open the pull request by hand`,
       };
-    return { ok: true, action, pushedBranch: p.branchName, ...(r.url ? { prUrl: r.url } : {}) };
+    return { ok: true, action, ...flag, pushedBranch: p.branchName, ...(r.url ? { prUrl: r.url } : {}) };
   } catch (err) {
     return fail(action, errMsg(err));
   }
@@ -159,8 +174,13 @@ async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult
     const mergeCommit = await gitOk(integration, ['rev-parse', 'HEAD']);
     if (remote) {
       const push = await git(integration, ['push', 'origin', `HEAD:refs/heads/${base}`]);
-      if (push.exitCode !== 0)
-        return fail('merge', `pushing ${base} failed: ${(push.stderr || push.stdout).trim()}`);
+      if (push.exitCode !== 0) {
+        const why = (push.stderr || push.stdout).trim();
+        // A protected branch refuses the push: the caller opens a pull request instead (nothing was changed on the host).
+        if (isProtectedBranchRejection(why))
+          return { ok: false, action: 'merge', protectedBranch: true, error: why };
+        return fail('merge', `pushing ${base} failed: ${why}`);
+      }
     }
     await advanceLocalBase(repoPath, base, mergeCommit);
     return { ok: true, action: 'merge', mergeCommit };

@@ -45,7 +45,7 @@ To create a card:
 2. Fill in the form:
    - **Project** and **Card type** (feature, bug, support, refactor, docs).
    - **Title**: what the work is (e.g., "Fix login timeout").
-   - **Repository** and **Completion action**: how to ship it (`pr`, `push_branch` or `merge`).
+   - **Repository**. How the work ships follows the project's **How finished work lands** setting; with expert mode on (Settings) you can also choose a **Completion action** per card (`pr`, `push_branch` or `merge`).
    - **Priority**, and **Docs needed** (whether a technical writer should document it).
    - **Context**: why this exists, the current behaviour.
    - **Requirements**: what must be done.

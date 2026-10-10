@@ -21,6 +21,8 @@ export const ProjectChangesSchema = z
     workflowKey: z.string().min(1),
     branchPrefix: BranchPrefixSchema,
     workingBranch: GitRefSchema,
+    /** How finished work lands by default: merge into the working branch after review and test, or a pull request. */
+    defaultCompletion: z.enum(['merge', 'pr']),
     subCategories: z.array(z.string()),
     vaultFolder: VaultFolderSchema.nullable(),
     architecturalGlobs: z.array(z.string()),

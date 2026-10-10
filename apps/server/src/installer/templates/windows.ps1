@@ -243,15 +243,28 @@ if (-not $hasSetting) {
   [System.IO.File]::WriteAllLines($wslConfig, [string[]]$lines, [System.Text.UTF8Encoding]::new($false))
   $configChanged = $true
 }
+$RunnerTaskName = "$AppName runner"
+$OldTaskName = 'WSL Boot'
 $taskArgs = "-d $Distro --exec sleep infinity"
 $action = New-ScheduledTaskAction -Execute 'wsl.exe' -Argument $taskArgs
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName 'WSL Boot' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Keeps Ubuntu running so the $AppName runner stays online." -Force -ErrorAction Stop | Out-Null
+Register-ScheduledTask -TaskName $RunnerTaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Keeps Ubuntu running so the $AppName runner stays online." -Force -ErrorAction Stop | Out-Null
+# Older installs called this task "WSL Boot". Remove it, but only when it is ours: it starts wsl.exe in this distribution
+# with `--exec sleep infinity`. A task of that name that does something else is left alone.
+$oldTask = Get-ScheduledTask -TaskName $OldTaskName -ErrorAction SilentlyContinue
+if ($oldTask) {
+  $oldAction = @($oldTask.Actions) | Select-Object -First 1
+  $isOurs = $oldAction -and ([string]$oldAction.Execute -match 'wsl(\.exe)?$') -and ([string]$oldAction.Arguments -match '--exec\s+sleep\s+infinity') -and ([string]$oldAction.Arguments -match ('-d\s+' + [regex]::Escape($Distro)))
+  if ($isOurs) {
+    try { Unregister-ScheduledTask -TaskName $OldTaskName -Confirm:$false -ErrorAction Stop; Write-Info "Removed the old $OldTaskName task (it is now called $RunnerTaskName)." }
+    catch { Write-Info "Could not remove the old $OldTaskName task: $($_.Exception.Message)" }
+  } else { Write-Info "A task called $OldTaskName exists but is not ours; it was left alone." }
+}
 if ($configChanged) { & wsl.exe --shutdown 2>&1 | Out-Null }
-Start-ScheduledTask -TaskName 'WSL Boot'
-Complete-Step 'vmIdleTimeout=-1 is set and the "WSL Boot" task starts Ubuntu when you sign in'
+Start-ScheduledTask -TaskName $RunnerTaskName
+Complete-Step "vmIdleTimeout=-1 is set and the $RunnerTaskName task starts Ubuntu when you sign in"
 
 # ---- 6. let the Ubuntu user run services without a login ----------------------------------------------------------------
 Start-Step 'Starting Ubuntu services'

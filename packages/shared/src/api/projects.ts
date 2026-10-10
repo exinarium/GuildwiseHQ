@@ -51,6 +51,8 @@ export const ProjectDtoSchema = z.object({
   rank: z.number().int().nullable().optional(),
   branchPrefix: z.string(),
   workingBranch: z.string(),
+  /** How finished work lands unless a card says otherwise: `merge` (after review and test) or `pr`. */
+  defaultCompletion: z.enum(['merge', 'pr']).optional(),
   subCategories: z.array(z.string()),
   vaultFolder: z.string().nullable(),
   architecturalGlobs: z.array(z.string()),

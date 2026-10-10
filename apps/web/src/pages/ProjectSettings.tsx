@@ -20,11 +20,13 @@ import {
   PageHeader,
   PageSkeleton,
   Panel,
+  Select,
   TextArea,
   TextInput,
   useToast,
 } from '../components/ui.tsx';
 import { WorkingBranchControl } from '../components/WorkingBranchControl.tsx';
+import { useExpertMode } from '../lib/expert-mode.ts';
 import { money } from '../lib/money.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
 
@@ -41,6 +43,8 @@ export function ProjectSettings() {
   const addRepo = useAddRepo(id);
   const removeRepo = useRemoveRepo(id);
   const toast = useToast();
+  const expert = useExpertMode();
+  const [landing, setLanding] = useState<'merge' | 'pr'>('merge');
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
   const [name, setName] = useState('');
   const [branch, setBranch] = useState('');
@@ -61,6 +65,7 @@ export function ProjectSettings() {
     if (!project) return;
     setName(project.name);
     setBranch(project.workingBranch);
+    setLanding(project.defaultCompletion ?? 'merge');
     setArch(project.architecturalGlobs.join('\n'));
     setE2e(project.e2eGlobs.join('\n'));
   }, [project]);
@@ -86,7 +91,8 @@ export function ProjectSettings() {
     patch.mutate(
       {
         name: name.trim(),
-        workingBranch: branch.trim(),
+        ...(expert ? { workingBranch: branch.trim() } : {}),
+        ...(traits.usesRepos ? { defaultCompletion: landing } : {}),
         ...(traits.usesRepos ? { architecturalGlobs: lines(arch) } : {}),
         ...(traits.hasTestStage ? { e2eGlobs: lines(e2e) } : {}),
       },
@@ -193,7 +199,25 @@ export function ProjectSettings() {
         <Panel title="General">
           <form onSubmit={save} className="flex flex-col gap-4" aria-label="Project settings">
             <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-            <TextInput label="Working branch" value={branch} onChange={(e) => setBranch(e.target.value)} />
+            {expert && (
+              <TextInput label="Working branch" value={branch} onChange={(e) => setBranch(e.target.value)} />
+            )}
+            {traits.usesRepos && (
+              <Select
+                label="How finished work lands"
+                data-testid="default-completion"
+                hint={
+                  expert
+                    ? 'The default completion action of new cards. A protected working branch switches this to a pull request on its own.'
+                    : 'Applies to every card in this project. If the main line is protected, Guildwise switches to pull requests by itself.'
+                }
+                value={landing}
+                onChange={(e) => setLanding(e.target.value as 'merge' | 'pr')}
+              >
+                <option value="merge">Straight into main after review and test</option>
+                <option value="pr">As a pull request I approve</option>
+              </Select>
+            )}
             {traits.usesRepos && (
               <TextArea
                 label="Architectural globs"
@@ -250,7 +274,7 @@ export function ProjectSettings() {
                   {traits.usesRepos && (
                     <RepoSetupStatus projectId={id} repo={r} canRetry={project?.myRole === 'owner'} />
                   )}
-                  {traits.usesRepos && (
+                  {traits.usesRepos && expert && (
                     <WorkingBranchControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
                   )}
                 </li>
@@ -322,12 +346,14 @@ export function ProjectSettings() {
                     </label>
                   </>
                 )}
-                <TextInput
-                  label="Branch (optional)"
-                  hint="Leave empty and the manager is asked which branch to use once the runner has seen the repository."
-                  value={repoBranch}
-                  onChange={(e) => setRepoBranch(e.target.value)}
-                />
+                {expert && (
+                  <TextInput
+                    label="Branch (optional)"
+                    hint="Leave empty and the repository's default branch is used."
+                    value={repoBranch}
+                    onChange={(e) => setRepoBranch(e.target.value)}
+                  />
+                )}
                 <div className="sm:col-span-3">
                   <ErrorBox error={addRepo.error ?? removeRepo.error} />
                 </div>

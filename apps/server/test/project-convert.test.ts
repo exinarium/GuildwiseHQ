@@ -421,6 +421,8 @@ describe('converting a project', () => {
   });
 
   it('asks the working-branch question for each repository it added', async () => {
+    // Questions about the working branch go to git experts (simple mode confirms the default branch itself).
+    await q('UPDATE users SET git_expert=true');
     const res = await newProject('research');
     await ok(
       convert(res.id, {
@@ -543,6 +545,8 @@ describe('a new repository from the convert dialog', () => {
     r.waitFor('command', (f: any) => f.command === 'repo.create', 15_000, from) as Promise<any>;
 
   it('waits for the owner approval and the runner, then converts', async () => {
+    // Questions about the working branch go to git experts (simple mode confirms the default branch itself).
+    await q('UPDATE users SET git_expert=true');
     const res = await newProject('research');
     const rc = await researchCard(res.id, 'Waiting');
     const out = await ok<any>(

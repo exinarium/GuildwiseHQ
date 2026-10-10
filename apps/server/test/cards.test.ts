@@ -90,14 +90,7 @@ describe('card creation', () => {
     expect(r.status).toBe(201);
     expect(r.body.card.status).toBe('draft');
     expect([...r.body.missing].sort()).toEqual(
-      [
-        'acceptanceCriteria',
-        'affectedAreas',
-        'completionAction',
-        'constraints',
-        'requirements',
-        'testPlan',
-      ].sort(),
+      ['acceptanceCriteria', 'affectedAreas', 'constraints', 'requirements', 'testPlan'].sort(),
     );
   });
 
@@ -107,7 +100,6 @@ describe('card creation', () => {
     expect(miss.status).toBe(422);
     expect(miss.body.error.code).toBe('missing_fields');
     expect(miss.body.error.details.missing).toContain('requirements');
-    expect(miss.body.error.details.missing).toContain('completionAction');
     expect(miss.body.error.details.missing).not.toContain('repoId');
 
     const patch = await w.t.req('PATCH', `/api/cards/${c.id}`, {

@@ -9,8 +9,10 @@ import { CardNewForm } from '../pages/CardNew.tsx';
 const PROJECT = '0192f3a0-0000-7000-8000-000000000001';
 const REPO = '0192f3a0-0000-7000-8000-000000000002';
 
-function setup(mockUi = true) {
+function setup(mockUi = true, expert = false) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  // expert mode shows the per-card completion action (it is off by default)
+  qc.setQueryData(['me'], { user: { gitExpert: expert } });
   render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
@@ -74,7 +76,6 @@ describe('CardNew validation', () => {
       'Affected areas',
       'Constraints',
       'Test plan',
-      'Completion action',
       'Repository',
     ]) {
       expect(screen.getByText(`${label} is required to specify this card`)).toBeInTheDocument();
@@ -100,7 +101,7 @@ describe('CardNew validation', () => {
   });
 
   it('a complete form posts specify=true with parsed list and mock fields', async () => {
-    const user = setup();
+    const user = setup(true, true);
     await user.type(screen.getByLabelText('Title'), 'Full card');
     await user.selectOptions(screen.getByLabelText('Repository'), REPO);
     await user.selectOptions(screen.getByLabelText('Completion action'), 'push_branch');
