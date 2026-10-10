@@ -98,6 +98,14 @@ describe('the toolchain is prepared before build work', () => {
       { workstationName: 'Desk', state: 'needs_access', summary: 'Needs access: .NET SDK (not found)' },
     ]);
     expect(detail.environments[0].report.tools[0].fix).toContain('Install packages');
+    // D5: one desk notice for the environment that needs access (a repeated finding adds none)
+    const notices = () =>
+      q(`SELECT status, kind, title FROM desk_items WHERE subkind='environment_attention' AND project_id=$1`, [
+        w.projectId,
+      ]);
+    expect(await notices()).toEqual([
+      expect.objectContaining({ status: 'open', kind: 'alert', title: expect.stringContaining('needs your help') }),
+    ]);
     const again = (await ok<any>(owner('GET', `/api/cards/${card.id}`))).workability;
     expect(again.reason).toContain('Needs access: .NET SDK');
 
@@ -117,6 +125,34 @@ describe('the toolchain is prepared before build work', () => {
     await w.t.app.ctx.services.dispatcher.run();
     const start = await r.waitFor('shift.start', (s) => s.brief.card.id === card.id, 5000, before);
     expect(start.agent.name).toBe('Bea');
+    // ...and the notice is cleared once the environment is ready
+    expect(
+      (await q(`SELECT status FROM desk_items WHERE subkind='environment_attention' AND project_id=$1`, [w.projectId]))
+        .map((x) => x.status),
+    ).toEqual(['answered']);
+  });
+
+  it('D3: while the toolchain is not ready, a reviewer card of that project waits too', async () => {
+    await freshState();
+    await q('DELETE FROM project_environments');
+    await w.hire('Bea', 'builder', 'junior');
+    await w.hire('Rex', 'reviewer', 'senior');
+    const card = await w.card({ title: 'Review me' });
+    await q(
+      `INSERT INTO project_environments (project_id, workstation_id, state, summary, updated_at)
+       VALUES ($1,$2,'failed','install failed', now())`,
+      [w.projectId, w.workstationId],
+    );
+    await q(`UPDATE cards SET stage='review' WHERE id=$1`, [card.id]);
+    const from = r.received.length;
+    w.t.app.ctx.services.dispatcher.cooldown.clear();
+    await w.t.app.ctx.services.dispatcher.run();
+    await r.barrier();
+    expect(r.received.slice(from).filter((f: any) => f.type === 'shift.start')).toEqual([]);
+    await q(`UPDATE project_environments SET state='ready' WHERE project_id=$1`, [w.projectId]);
+    await w.t.app.ctx.services.dispatcher.run();
+    const start = await r.waitFor('shift.start', (s) => s.brief.card.id === card.id, 5000, from);
+    expect(start.agent.name).toBe('Rex');
   });
 
   it('a project that was never prepared is not held back', async () => {
