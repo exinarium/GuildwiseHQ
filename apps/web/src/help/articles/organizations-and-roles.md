@@ -58,7 +58,7 @@ The **Guests** tab under **Organization** shows who from other organizations has
 
 A platform administrator can suspend your organization (for example if a trial ended or a payment was missed). Running shifts finish and nothing new starts. Scheduled actions are skipped and recorded. A banner at the top explains the suspension.
 
-Only the Owner can still sign in, with read access plus organization settings and member management. To resume, the administrator reactivates the organization and everything continues where it stopped.
+Only the Owner can still sign in, with read access plus organization settings and member management. To resume, the administrator reactivates the organization and everything continues where it stopped. An organization that is paused because of billing shows a banner with a link to the Billing page: see [Plans and billing](/help/billing-and-plans#failed-payments).
 
 ## Platform area {#platform-area}
 

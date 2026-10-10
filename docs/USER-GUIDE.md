@@ -50,6 +50,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.14 Archive and delete](#414-archive-and-delete)
   - [4.15 Security and two-factor login](#415-security-and-two-factor-login)
   - [4.16 Plan and limits](#416-plan-and-limits)
+  - [4.17 Billing](#417-billing)
   - [4.17 Chatting with agents](#417-chatting-with-agents)
 - [5. For Members](#5-for-members)
   - [5.1 What you can do](#51-what-you-can-do)
@@ -714,9 +715,29 @@ If a member loses their phone and their recovery codes, you reset their two-fact
 
 ### 4.16 Plan and limits
 
-**Organization, Plan & limits** shows your plan, status, licence date, how much you use, and which features are switched on. Today there is one plan, **Founding**, with every feature and **no limits** (the limit fields are empty, meaning unlimited). The platform administrator changes the plan. If a feature is switched off, its page leaves the sidebar, but its data is kept.
+**Organization, Plan & limits** shows your plan, status, licence date, how much you use, and which features are switched on. Organizations set up by invitation are on the free **Founding** plan with every feature and **no limits**; they stay free until the Owner subscribes (4.17). The platform administrator can also give an organization the **Unlimited** plan (no billing, no limits). If a feature is switched off, its page leaves the sidebar, but its data is kept.
 
 ![Plan and limits](guide/assets/org-plan.jpg)
+
+### 4.17 Billing
+
+Only the **Owner** sees **Organization, Billing**. Plans differ only in limits (members, workstations, projects); every plan has every feature and **no limit on agents**.
+
+| Plan | Per month (US dollars, excluding VAT) | Members | Workstations | Projects |
+|---|---|---|---|---|
+| Starter | $19 | 2 | 1 | 3 |
+| Team | $49 | 5 | 3 | 10 |
+| Business | $149 | 20 | 10 | Unlimited |
+
+- **Signing up.** Choose a plan at **Start free trial**, confirm your email (required), then add a card on the Billing page. The **7-day free trial** starts; the first invoice is charged when it ends, then monthly. A reminder is emailed two days before.
+- **Charged in rand.** The dollar price is converted at the day's exchange rate. Every invoice shows the dollar amount, the rate and the rand charged. We never keep the card number, only a token, the card type, the last four digits and the expiry.
+- **Change plan.** Takes effect at once and is prorated for the rest of the month: you pay the difference now, or get a credit on the next invoice. A plan too small for what you use is refused.
+- **Business add-ons.** Add members, workstations or projects (priced per unit). They start with the next billing cycle and never go below the Business base.
+- **Cancel.** The organization stays active until the end of the paid term (or trial), then is paused. **Keep my subscription** takes it back before then.
+- **Failed payments.** Three attempts (now, after 1 day, after 3 days); you are emailed each time and can update the card. After the third failure the organization is **paused**: agents stop picking up work and only the Owner can sign in, to a banner and the Billing page, where **Resubscribe now** charges a new month and resumes everything.
+- **Platform administrators** edit prices, limits, add-on prices, VAT and the exchange-rate override under **Platform, Billing**, and can pause, unpause or assign **Unlimited** from an organization's page (each with a reason, audited).
+
+See the help article *Plans and billing*.
 
 ### 4.17 Chatting with agents
 
@@ -1044,7 +1065,7 @@ On your workstations and in your git remotes, exactly as before. The Guildwise H
 Only for small cards you chose to **merge**, and only into the working branch you confirmed. Large merges wait for your approval, unless you turned that off in the project settings.
 
 **What does it cost?**
-Guildwise HQ itself is on the Founding plan with no limits. The AI work is billed by Claude: through your subscription or your API key. The app estimates the spend (4.6) and you set budgets.
+Guildwise HQ is $19 (Starter), $49 (Team) or $149 (Business) a month with a 7-day free trial, in US dollars excluding VAT, charged in rand (4.17). The AI work is billed by Claude: through your subscription or your API key. The app estimates the spend (4.6) and you set budgets.
 
 **How many agents do I need?**
 Start with a builder, a reviewer, a tester and a BA (3.5). Add more when cards queue up.

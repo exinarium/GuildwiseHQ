@@ -843,7 +843,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   },
   '/settings/org': {
     title: 'Organization',
-    intro: 'Manage your organization: members, invitations, guests and subscription plan.',
+    intro: 'Manage your organization: members, invitations, guests, plan and billing.',
     controls: [
       {
         name: 'General tab',
@@ -864,6 +864,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'Plan & limits tab',
         text: 'Your plan and status, usage against the limits (members, projects, agents, workstations) and the features switched on. Owner and Admins only.',
+      },
+      {
+        name: 'Billing tab',
+        text: 'Owner only. Your plan, status, next charge, card and invoices; change plan, add members, workstations or projects on Business, cancel, or resubscribe when paused.',
       },
       {
         name: 'Your role',
@@ -1239,6 +1243,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Set the limits (leave empty for unlimited), the licence expiry and which features are on, with a reason for the change.',
       },
       {
+        name: 'Billing',
+        text: 'Its subscription, card and invoices. Pause or Unpause the organization, or Assign Unlimited (no billing, no limits). Each asks for a reason and is audited.',
+      },
+      {
         name: 'Recent activity',
         text: 'The latest audit entries for this organization.',
       },
@@ -1453,6 +1461,30 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
     article: 'organizations-and-roles#platform-area',
+  },
+  '/platform/billing': {
+    title: 'Billing',
+    intro:
+      'The plan catalogue and the billing settings. Every change needs a reason and is written to the audit log.',
+    controls: [
+      {
+        name: 'Plans',
+        text: 'Edit each plan price (US dollars per month) and its member, workstation and project limits. Empty means unlimited. Existing subscriptions keep their price. Unlimited is only assigned from an organization page.',
+      },
+      {
+        name: 'Add-on prices',
+        text: 'What a Business organization pays per extra member, workstation or project each month.',
+      },
+      {
+        name: 'VAT percent',
+        text: 'Leave at 0 until the company is VAT registered; then it is added to every charge.',
+      },
+      {
+        name: 'Exchange rate override',
+        text: 'Replaces the daily dollar-to-rand rate used when charging. Empty uses the daily rate.',
+      },
+    ],
+    article: 'billing-and-plans#platform',
   },
   '/platform/help': {
     title: 'Help',

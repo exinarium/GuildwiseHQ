@@ -202,6 +202,23 @@ stored tokens cannot be read again). Prefer sending the digest from a dedicated 
 sending domain; see `docs/design/support-mail-from.md`). The public blog pages (`/blog`, `/sitemap.xml`, `/robots.txt`)
 are rendered by the server, so a reverse proxy must pass those paths to it, not only `/api`. Migrations 1450 to 1452.
 
+### Billing
+
+Billing runs on the fake provider (simulated payments, a "Test mode" notice in the UI) until PayFast keys are set, so local and UAT need nothing. **Never leave production on the fake provider**: it takes no money.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AOM_BILLING_PROVIDER` | `auto` | `auto` (PayFast when merchant id and key are set, else fake), `fake` or `payfast` (refuses to start without keys) |
+| `AOM_PAYFAST_MERCHANT_ID` / `AOM_PAYFAST_MERCHANT_KEY` | unset | Your PayFast merchant credentials |
+| `AOM_PAYFAST_PASSPHRASE` | unset | The salt passphrase set in PayFast; must match exactly, or every signature fails |
+| `AOM_PAYFAST_SANDBOX` | `true` | Use PayFast's sandbox (hosted page and API with `testing=true`). Set `false` for live payments |
+| `AOM_PAYFAST_CARD_CHECK_ZAR` | `5` | Rand charged and refunded to save a card (PayFast's minimum is R5) |
+| `AOM_FX_URL` | `https://open.er-api.com/v6/latest/USD` | JSON source for the USD to ZAR rate (`{"rates":{"ZAR":..}}`); `off` uses only the fallback |
+| `AOM_FX_FALLBACK_ZAR` | `18.5` | Rate used when the source is down and no earlier rate exists |
+| `AOM_BILLING_JOBS` | `true` | Run renewals, retries, pauses and notices on the scheduler (idempotent). Run it on one instance only |
+
+PayFast set-up: PayFast is told the notification URL `https://<your public origin>/api/billing/payfast/itn` with each card capture, so keep `AOM_PUBLIC_ORIGIN` exact, and make sure the proxy forwards the real client address (the ITN source check compares it with PayFast's hosts; Fastify runs with `trustProxy`). Enable tokenization on the merchant account. Before going live, run a full sandbox pass: sign-up, card capture and refund of the card check, an ad hoc charge, a decline, and the ITN. The adapter was written from PayFast's public documentation without a merchant account; the signature rules, the ad hoc response shape and refunds are marked `UNVERIFIED` in `apps/server/src/billing/payfast.ts`. Mail uses the normal `AOM_SMTP_URL` and `AOM_MAIL_FROM`. The USD prices, limits and add-on prices live in the database and are edited under Platform > Billing; the VAT percentage stays 0 until the company is VAT registered.
+
 ### Features
 
 | Variable | Default | Purpose |

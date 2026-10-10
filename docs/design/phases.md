@@ -976,3 +976,8 @@ Not built: Gitea/Forgejo, CodeCommit, Bitbucket Data Center API, server-held for
 
 Not built: OAuth connect flows for Facebook and LinkedIn (tokens are pasted until the apps are approved), post images other than the
 default covers, view analytics, scheduled publish time, a public newsletter signup, an `Idempotency-Key` header (the slug and content hash are the key).
+
+## Built: billing (overnight, 2026-10-10, track t4)
+
+Plans in a table the super admin edits, self-service sign-up with email verification and card capture, a 7-day trial, first invoice at the trial end, monthly renewals, prorated plan changes, Business add-ons, cancellation to a pause, 3-attempt failure schedule then pause, card-expiry and trial reminders, a PayFast adapter (unverified against a live account) and a fake provider, ZAR conversion with a daily rate and override, the Owner's Billing tab, the platform's catalogue editor and per-org billing panel, and the landing Pricing section. See `docs/SPEC.md` Billing, `docs/ARCHITECTURE.md` section 32, `docs/DEPLOY.md` Billing. Migration `1440_billing.sql`. Tests: server `billing`, `payfast`; web `billing`, `landing`.
+

@@ -13,6 +13,8 @@ export const NO_PAGE_HELP = [
   '/forgot-password',
   '/reset-password/:token',
   '/contact',
+  '/signup',
+  '/verify-email/:token',
 ];
 
 /** Routes that show another route's page (the Help centre's articles and glossary): they use its help. */
