@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto';
 import {
   BA_ROLE_KEY,
   DESK_SUBKIND,
+  FORGE_LABELS,
   isOrgManager,
   isResearchStage,
   normalizeRemoteUrl,
   RepoCreateParamsSchema,
   type RepoCreatePayload,
   RepoCreateResultSchema,
+  type RepoProvider,
   streamId,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -30,6 +32,17 @@ import { addRepoIn } from './projects.ts';
  */
 
 type RpcReply = [boolean, unknown?, string?];
+
+/** The repository name inside a `owner/repo`, `group/sub/project` or `org/project/repo` full name. */
+const lastSegment = (fullName: string): string => String(fullName).split('/').pop() as string;
+
+const approvalText = (provider: RepoProvider, projectKey: string): string => {
+  const how =
+    provider === 'github'
+      ? 'with your own GitHub login on that workstation (gh)'
+      : `on ${FORGE_LABELS[provider]} with the login you saved on that workstation (Connect git hosts)`;
+  return `Approving creates this repository ${how}, pushes a first commit (README.md) to main, clones it next to your other repositories and adds it to project ${projectKey}. Nothing is created until you approve.`;
+};
 const LIVE = ['pending', 'approved', 'created'];
 
 const issuesText = (issues: Array<{ path: PropertyKey[]; message: string }>): string =>
@@ -98,7 +111,7 @@ export async function repoCreateRpc(
     return [
       false,
       undefined,
-      `invalid request: ${issuesText(p.error.issues)}. usage: aom repo create --name <owner/repo> --private|--public --project <KEY> [--description "<text>"]`,
+      `invalid request: ${issuesText(p.error.issues)}. usage: aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] --name <owner/repo | group/project | org/project/repo | workspace/repo> --private|--public --project <KEY> [--description "<text>"]`,
     ];
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [shift.agent_id]);
   if (!agent) return [false, undefined, 'unknown agent'];
@@ -162,7 +175,7 @@ export async function repoCreateRpc(
       ...(r.remote_url ? { remoteUrl: r.remote_url } : {}),
       message:
         r.status === 'created'
-          ? `${r.name} was already created and added to project ${r.project_key}; use it as repo '${String(r.name).split('/')[1]}'.`
+          ? `${r.name} was already created and added to project ${r.project_key}; use it as repo '${lastSegment(r.name)}'.`
           : `A request for ${r.name} is already waiting for the project owner's approval on the desk. Tell the manager; do not ask again.`,
     },
   ];
@@ -174,13 +187,14 @@ export async function repoCreateRpc(
   const ws = await managerWorkstation(ctx.pool, project.org_id);
   const body = [
     `Repository: ${p.data.name}`,
+    `Git host: ${FORGE_LABELS[p.data.provider]}${p.data.host ? ` (${p.data.host})` : ''}`,
     `Visibility: ${p.data.visibility}`,
     `Project: ${project.key} (${project.name})`,
     ...(p.data.description ? [`Description: ${p.data.description}`] : []),
     `Requested by: ${agent.name}`,
     `Runs on: ${ws?.name ?? 'your connected workstation'} (your workstation)`,
     '',
-    `Approving creates this repository on GitHub with your own GitHub login on that workstation (gh), pushes a first commit (README.md) to main, clones it next to your other repositories and adds it to project ${project.key}. Nothing is created until you approve.`,
+    approvalText(p.data.provider, project.key),
   ].join('\n');
   const scope = projectScope(project.org_id, project.id);
   try {
@@ -218,6 +232,8 @@ export async function repoCreateRpc(
                 name: p.data.name,
                 visibility: p.data.visibility,
                 ...(p.data.description ? { description: p.data.description } : {}),
+                ...(p.data.provider !== 'github' ? { provider: p.data.provider } : {}),
+                ...(p.data.host ? { host: p.data.host } : {}),
                 requestedByAgentId: agent.id,
                 ...(threadId ? { threadId } : {}),
                 deskItemId,
@@ -281,7 +297,7 @@ export async function repoCreateRequestEvents(
     `Requested by: ${user.displayName ?? 'a manager'}, ${context}`,
     `Runs on: ${ws?.name ?? 'your connected workstation'} (your workstation)`,
     '',
-    `Approving creates this repository on GitHub with your own GitHub login on that workstation (gh), pushes a first commit (README.md) to main, clones it next to your other repositories and adds it to project ${project.key}. Nothing is created until you approve.`,
+    approvalText('github', project.key),
   ].join('\n');
   const scope = projectScope(project.org_id, project.id);
   const actor = userActor(user.id);
@@ -420,6 +436,8 @@ function repoCreatePayload(req: Row): RepoCreatePayload {
     name: req.name,
     visibility: req.visibility,
     ...(req.description ? { description: req.description } : {}),
+    ...(req.provider && req.provider !== 'github' ? { provider: req.provider } : {}),
+    ...(req.host ? { host: req.host } : {}),
     projectKey: req.project_key,
     projectName: req.project_name,
     branch: req.working_branch || 'main',
@@ -517,9 +535,10 @@ export async function applyRepoCreateResult(
             tx,
             { id: req.project_id, org_id: req.org_id },
             {
-              name: String(req.name).split('/')[1] as string,
+              name: lastSegment(req.name),
               remoteUrl: r.remoteUrl,
               workingBranch: 'main',
+              ...(req.provider && req.provider !== 'github' ? { forge: req.provider } : {}),
             },
             req.requested_by_agent_id
               ? agentActor(req.requested_by_agent_id)
@@ -547,7 +566,7 @@ export async function applyRepoCreateResult(
             ...(await threadNote(
               tx,
               req.thread_id,
-              `Repository ${req.name} is ready (${r.remoteUrl}) and was added to project ${req.project_key} as repo '${String(req.name).split('/')[1]}'. You can create cards on it now.`,
+              `Repository ${req.name} is ready (${r.remoteUrl}) and was added to project ${req.project_key} as repo '${lastSegment(req.name)}'. You can create cards on it now.`,
               { repoRequestId: req.id, remoteUrl: r.remoteUrl },
             )),
           ],

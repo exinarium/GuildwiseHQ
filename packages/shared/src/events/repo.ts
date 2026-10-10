@@ -16,6 +16,9 @@ export const repoEvents = [
       name: z.string().min(3).max(200),
       visibility: Visibility,
       description: z.string().max(350).optional(),
+      /** The git host the repository is made on (absent: GitHub) and, for a self-managed host, its name. */
+      provider: z.enum(['github', 'gitlab', 'bitbucket-cloud', 'azure-devops']).optional(),
+      host: z.string().max(200).optional(),
       /** Absent when the manager asked from the project's convert dialog (`requestedByUserId`). */
       requestedByAgentId: Id.optional(),
       requestedByUserId: Id.optional(),

@@ -19,8 +19,8 @@ export const repoProjectors: Record<string, Projector> = {
     const p = ev<'RepoCreateRequested'>(e).payload;
     await exec(
       tx,
-      `INSERT INTO repo_requests (id, org_id, project_id, name, visibility, description, requested_by_agent_id, thread_id, desk_item_id, status, created_at, updated_at, requested_by_user_id)
-       SELECT $1, pr.org_id, pr.id, $3, $4, $5, $6, $7, $8, 'pending', $9, $9, $10 FROM projects pr WHERE pr.id = $2`,
+      `INSERT INTO repo_requests (id, org_id, project_id, name, visibility, description, requested_by_agent_id, thread_id, desk_item_id, status, created_at, updated_at, requested_by_user_id, provider, host)
+       SELECT $1, pr.org_id, pr.id, $3, $4, $5, $6, $7, $8, 'pending', $9, $9, $10, $11, $12 FROM projects pr WHERE pr.id = $2`,
       [
         p.requestId,
         p.projectId,
@@ -32,6 +32,8 @@ export const repoProjectors: Record<string, Projector> = {
         p.deskItemId,
         e.createdAt,
         p.requestedByUserId ?? null,
+        p.provider ?? 'github',
+        p.host ?? null,
       ],
     );
   },

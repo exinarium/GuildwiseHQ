@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createFullNameError, ForgeKindSchema } from '../forge/index.ts';
+import { CONNECTABLE_FORGES, createFullNameError, ForgeKindSchema } from '../forge/index.ts';
 
 /**
  * Approved repository setup (docs/SPEC.md, "External systems boundary"): an agent asks, the project owner approves on
@@ -40,13 +40,50 @@ export const RepoDescriptionSchema = z
     message: 'the description must be a single line of text',
   });
 
-/** What `aom repo create` sends (`repo.create` rpc). */
-export const RepoCreateParamsSchema = z.object({
-  name: RepoNameSchema,
-  visibility: RepoVisibilitySchema,
-  project: z.string().min(1),
-  description: RepoDescriptionSchema.optional(),
+/** Git hosts a repository can be created on (the connectable ones). */
+export const RepoProviderSchema = z.enum(CONNECTABLE_FORGES);
+export type RepoProvider = z.infer<typeof RepoProviderSchema>;
+
+/** A host name for a GitHub Enterprise Server or self-managed GitLab. */
+export const RepoHostSchema = z.string().trim().regex(/^[A-Za-z0-9]([A-Za-z0-9.-]{0,198}[A-Za-z0-9])?$/, {
+  message: 'the host must be a plain host name such as gitlab.example.com',
 });
+
+/** The name shape each provider takes, in plain words (for usage text and errors). */
+export const REPO_NAME_SHAPE: Record<RepoProvider, string> = {
+  github: '<owner>/<repo>',
+  gitlab: '<group>[/<subgroup>...]/<project>',
+  'azure-devops': '<organization>/<project>/<repo>',
+  'bitbucket-cloud': '<workspace>/<repo>',
+};
+
+/** Null when `name` is a valid new-repository name for `provider`, else the reason (names the shape). */
+export function repoNameErrorFor(provider: RepoProvider, name: string): string | null {
+  const err = provider === 'github' ? repoNameError(name) : createFullNameError(provider, name);
+  return err ? `${err} (${provider} names look like ${REPO_NAME_SHAPE[provider]})` : null;
+}
+
+/**
+ * What `aom repo create` sends (`repo.create` rpc). `provider` defaults to GitHub; the name takes the provider's shape:
+ * `owner/repo` (GitHub), `group/subgroup/project` (GitLab), `organization/project/repo` (Azure DevOps),
+ * `workspace/repo` (Bitbucket Cloud).
+ */
+export const RepoCreateParamsSchema = z
+  .object({
+    name: z.string().trim().min(3).max(400),
+    provider: RepoProviderSchema.default('github'),
+    /** Only for GitHub Enterprise Server and self-managed GitLab. */
+    host: RepoHostSchema.optional(),
+    visibility: RepoVisibilitySchema,
+    project: z.string().min(1),
+    description: RepoDescriptionSchema.optional(),
+  })
+  .superRefine((v, ctx) => {
+    const err = repoNameErrorFor(v.provider, v.name);
+    if (err) ctx.addIssue({ code: 'custom', path: ['name'], message: err });
+    if (v.host && v.provider !== 'github' && v.provider !== 'gitlab')
+      ctx.addIssue({ code: 'custom', path: ['host'], message: `${v.provider} has no custom host` });
+  });
 export type RepoCreateParams = z.infer<typeof RepoCreateParamsSchema>;
 
 export const REPO_REQUEST_STATUS = ['pending', 'approved', 'rejected', 'created', 'failed'] as const;

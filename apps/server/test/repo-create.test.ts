@@ -454,4 +454,93 @@ describe('approved repository setup', () => {
     expect((await q('SELECT status FROM repo_requests'))[0]).toMatchObject({ status: 'pending' });
     expect(await projectRepos()).toHaveLength(1);
   });
+
+  it('agents can ask for a repository on GitLab, Azure DevOps and Bitbucket Cloud, with that provider name shape', async () => {
+    await setup();
+    const ba = await w.hire('Grace', 'ba', 'senior');
+    const { start } = await openChat(r, ba.id, w.owner.id, w.owner.cookie);
+    // wrong shapes are refused and name the shape
+    const bad = [
+      ['github', 'acme/mobile/app'],
+      ['gitlab', 'app'],
+      ['azure-devops', 'acme/app'],
+      ['bitbucket-cloud', 'acme/team/app'],
+      ['bitbucket-cloud', 'acme/app.git'],
+    ] as const;
+    for (const [provider, name] of bad) {
+      const res = await request(r, start.chatId, { provider, name });
+      expect(res.ok, `${provider} ${name}`).toBe(false);
+    }
+    const shape = await request(r, start.chatId, { provider: 'azure-devops', name: 'acme/app' });
+    expect(shape.error).toMatch(/organization>\/<project>\/<repo>/);
+    expect((await request(r, start.chatId, { provider: 'svn', name: 'acme/app' })).ok).toBe(false);
+    expect(await deskItems()).toHaveLength(0);
+
+    const cases = [
+      {
+        provider: 'gitlab',
+        name: 'acme/mobile/barcode',
+        label: 'GitLab',
+        url: 'https://gitlab.com/acme/mobile/barcode.git',
+        repo: 'barcode',
+        host: undefined,
+      },
+      {
+        provider: 'azure-devops',
+        name: 'acme/Shop/web',
+        label: 'Azure DevOps',
+        url: 'https://dev.azure.com/acme/Shop/_git/web',
+        repo: 'web',
+        host: undefined,
+      },
+      {
+        provider: 'bitbucket-cloud',
+        name: 'acme/api',
+        label: 'Bitbucket Cloud',
+        url: 'https://bitbucket.org/acme/api.git',
+        repo: 'api',
+        host: undefined,
+      },
+      {
+        provider: 'gitlab',
+        name: 'team/tools',
+        label: 'GitLab',
+        url: 'https://git.example.com/team/tools.git',
+        repo: 'tools',
+        host: 'git.example.com',
+      },
+    ];
+    for (const c of cases) {
+      const asked = await request(r, start.chatId, {
+        provider: c.provider,
+        name: c.name,
+        ...(c.host ? { host: c.host } : {}),
+      });
+      expect(asked.ok, asked.error).toBe(true);
+      const item = (await deskItems()).find((i: any) => i.title === `Create repository ${c.name}`);
+      expect(item.body).toContain(`Git host: ${c.label}`);
+      expect(item.body).not.toContain('GitHub login');
+      const from = r.received.length;
+      expect((await resolve(item.id, { resolution: 'approved' })).status).toBe(200);
+      const cmd = await nextCommand(r, from);
+      expect(cmd.payload).toMatchObject({ provider: c.provider, name: c.name, projectKey: 'TOY' });
+      if (c.host) expect(cmd.payload.host).toBe(c.host);
+      r.send('command.result', {
+        commandId: cmd.commandId ?? cmd.id,
+        ok: true,
+        result: { ok: true, remoteUrl: c.url, localPath: `/home/me/src/${c.repo}` },
+      });
+      await until(async () => (await projectRepos()).some((x) => x.name === c.repo), 5000, `${c.name} added`);
+      const forge = (
+        await q(`SELECT forge_kind FROM project_repos WHERE project_id=$1 AND name=$2`, [w.projectId, c.repo])
+      )[0]!.forge_kind;
+      expect(forge).toBe(c.provider);
+    }
+    // a GitHub request still sends no provider and keeps the old behaviour
+    expect((await request(r, start.chatId, { name: 'acme/plain' })).ok).toBe(true);
+    const gh = (await deskItems()).find((i: any) => i.title === 'Create repository acme/plain');
+    const from = r.received.length;
+    await resolve(gh.id, { resolution: 'approved' });
+    expect((await nextCommand(r, from)).payload.provider).toBeUndefined();
+  });
 });
