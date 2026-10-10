@@ -51,6 +51,7 @@ describe('the tour steps', () => {
       'settings',
       'palette',
       'page-help',
+      'ask-devops',
       'help',
       'done',
     ]);
@@ -74,6 +75,7 @@ describe('the tour steps', () => {
       'settings',
       'palette',
       'page-help',
+      'ask-devops',
       'help',
       'done',
     ]);
@@ -87,7 +89,9 @@ describe('the tour steps', () => {
       'platform-orgs',
       'platform-invitations',
       'platform-users',
+      'platform-billing',
       'platform-support',
+      'platform-blog',
       'platform-audit',
       'page-help',
       'platform-help',

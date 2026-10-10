@@ -50,7 +50,7 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
   },
   projects: {
     title: 'Projects and phases',
-    body: 'Each project has its own board, repository and settings, and the Projects page puts them in priority order: drag a project up to have your agents serve it first (the Owner and Admins can; everyone sees the order). Inside a project, phases group cards into a milestone: when the last card of a phase is done, a follow-up (such as a release check) can start by itself.',
+    body: 'Each project has its own board, repositories and settings, and the Projects page puts them in priority order: drag a project up to have your agents serve it first (the Owner and Admins can; everyone sees the order). Inside a project, phases group cards into a milestone: when the last card of a phase is done, you approve the follow-ups (such as a deploy and a regression run) and they run in order.',
     more: 'projects#ranking',
   },
   interests: {
@@ -75,7 +75,7 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
   },
   workstations: {
     title: 'Workstations',
-    body: 'The computers that run your agents. Nothing runs until you have one: click Add a workstation and the wizard gives you one command to paste, then shows its progress live.',
+    body: 'The machines that run your agents: your own computer, a server (VPS) or a GitHub Codespace. Nothing runs until you have one: click Add a workstation and the wizard sets it up and shows its progress live.',
     more: 'workstations-and-installer#add-a-workstation',
   },
   costs: {
@@ -95,7 +95,7 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
   },
   settings: {
     title: 'Settings',
-    body: 'Your own account: your picture, your time zone, when your daily report arrives and your two-factor login. Organization settings sit next to it.',
+    body: 'Your own account: your picture, your time zone, when your daily report arrives, your two-factor login, the weekly blog digest and expert mode for code changes (off by default, so you never need git). Organization settings sit next to it.',
     more: 'getting-started#first-login',
   },
 };
@@ -128,54 +128,76 @@ const PAGE_HELP: TourStep = {
   more: 'getting-started#page-help',
 };
 
+const ASK_DEVOPS: TourStep = {
+  id: 'ask-devops',
+  target: 'ask-devops',
+  title: 'Ask DevOps',
+  body: 'Each workstation has a DevOps engineer that installs tools, fixes setup problems and runs commands for you. Ask it from here, from a card, a desk item or a workstation: what you are looking at is attached.',
+  more: 'devops-and-hygiene#devops-engineer',
+};
+
 const HELP: TourStep = {
   id: 'help',
   target: 'nav-help',
   drawer: true,
   title: 'Help centre',
-  body: 'Searchable articles, a glossary of the terms used here, this tour again, and a way to write to us. Small ? buttons next to the harder controls open the matching article.',
+  body: 'A short training video, searchable articles, a glossary of the terms used here, what is new, this tour again, and a way to write to us. Small ? buttons next to the harder controls open the matching article.',
   more: 'getting-started#the-sidebar',
 };
 
 const DONE: TourStep = {
   id: 'done',
   title: 'You are set',
-  body: 'That is the tour. The Get started button at the bottom of the sidebar lists what is left to set up (project, repository, workstation, team, business analyst) and ticks each step off by itself. Press ? at any time for the shortcuts, or open Help to replay this.',
+  body: 'That is the tour. While your organization is being set up, the Get started button at the bottom of the sidebar lists what is left (project, repository, workstation, team, business analyst) and ticks each step off by itself. Press ? at any time for the shortcuts, or open Help to replay this.',
 };
 
 const PLATFORM_STEPS: TourStep[] = [
   {
     id: 'welcome',
     title: 'Welcome, platform administrator',
-    body: 'This is the platform area. You look after the organizations that use Guildwise HQ, not their work. This tour shows the five places you will use.',
+    body: 'This is the platform area. You look after the organizations that use Guildwise HQ, not their work. This tour shows the places you will use.',
     more: 'organizations-and-roles#platform-area',
   },
   {
     id: 'platform-orgs',
     target: 'platform-nav-orgs',
     title: 'Organizations',
-    body: 'Every organization with its owner, plan and limits. Create one, suspend or reinstate it, and change its licence.',
+    body: 'Every organization with its owner, plan and limits. Open one to suspend or reinstate it, change its limits, see its billing, or give it the Unlimited plan.',
     more: 'organizations-and-roles#suspension',
   },
   {
     id: 'platform-invitations',
     target: 'platform-nav-invitations',
     title: 'Invitations',
-    body: 'Invite the Owner of a new organization. They get an email and set their own password.',
+    body: 'Invite the Owner of a new organization (others sign up themselves on the website). They get an email and set their own password.',
     more: 'organizations-and-roles#members-and-invitations',
   },
   {
     id: 'platform-users',
     target: 'platform-nav-users',
     title: 'Accounts',
-    body: 'All accounts on the platform. Deactivate someone, reset their two-factor login, or see which organizations they belong to.',
+    body: 'All accounts on the platform. Deactivate someone, reset their two-factor login, send a password reset link, or see which organizations they belong to.',
+  },
+  {
+    id: 'platform-billing',
+    target: 'platform-nav-billing',
+    title: 'Billing',
+    body: 'The plans, their prices and limits, the Business add-on prices, VAT and the exchange rate. Every change needs a reason and is audited.',
+    more: 'billing-and-plans#platform',
   },
   {
     id: 'platform-support',
     target: 'platform-nav-support',
     title: 'Support',
-    body: 'Messages from people using Contact us, with their organization and page attached. Answer by email from here and set the support address.',
-    more: 'writing-to-us#contact-us',
+    body: 'Messages from people using Contact us, with their organization and page attached. Answer from here, set the address that gets them by email, and switch the landing-page assistant on or off.',
+    more: 'organizations-and-roles#console-emails',
+  },
+  {
+    id: 'platform-blog',
+    target: 'platform-nav-blog',
+    title: 'Blog',
+    body: 'The review queue for the blog posts the writer agent sends, the weekly digest, social sharing and the switch that turns the blog off. API keys for the writer agent sit next to it.',
+    more: 'blog-and-digest#platform-blog',
   },
   {
     id: 'platform-audit',
@@ -204,7 +226,7 @@ const PLATFORM_STEPS: TourStep[] = [
 export function tourSteps(role: TourRole, nav: ReadonlySet<string>): TourStep[] {
   if (role === 'platform') return PLATFORM_STEPS;
   const only = (...ids: string[]): TourStep[] => ids.filter((i) => nav.has(i)).map(navStep);
-  const common = [PALETTE, PAGE_HELP, HELP];
+  const common = [PALETTE, PAGE_HELP, ASK_DEVOPS, HELP];
   switch (role) {
     case 'manager':
       return [

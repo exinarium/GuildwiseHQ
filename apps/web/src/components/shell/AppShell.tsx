@@ -231,6 +231,7 @@ function Shell({ name, live }: { name: string; live: string }) {
                       onClick={() => askDevOps()}
                       aria-label="Ask DevOps"
                       data-testid="ask-devops-button"
+                      data-tour="ask-devops"
                       className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
                     >
                       <Wrench aria-hidden="true" className="size-4" />
