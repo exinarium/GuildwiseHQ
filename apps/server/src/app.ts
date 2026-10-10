@@ -247,7 +247,10 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   });
 
   // JSON bodies: tolerate an empty body (clients that always send the header).
-  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    // Paystack signs the raw body: keep it for the webhook (only that route).
+    if (req.url.split('?')[0] === '/api/billing/paystack/webhook')
+      (req as unknown as { rawBody?: string }).rawBody = body as string;
     if (body === '' || body === undefined) return done(null, undefined);
     try {
       done(null, JSON.parse(body as string));

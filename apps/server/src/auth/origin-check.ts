@@ -10,6 +10,7 @@ const EXEMPT_PREFIXES = [
   // The agent API is authenticated by a Bearer key only and ignores session cookies, so there is nothing to forge.
   '/api/v1/',
   '/api/billing/payfast/itn',
+  '/api/billing/paystack/webhook',
 ];
 
 /**

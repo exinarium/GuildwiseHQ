@@ -50,7 +50,13 @@ const EnvSchema = z.object({
   AOM_LINKEDIN_CLIENT_SECRET: z.string().optional(),
   /** Billing: renewals, retries, expiry notices and trial reminders run on the scheduler. */
   AOM_BILLING_JOBS: bool(true),
-  /** `auto`: PayFast when the merchant id and key are set, else the fake provider (local and UAT). */
+  /** Which gateway: `paystack` (primary), `payfast` (fallback) or `fake`. Unset: Paystack when its keys are set, else PayFast when its keys are set, else fake (local and UAT). */
+  AOM_PAYMENT_PROVIDER: z.enum(['paystack', 'payfast', 'fake']).optional(),
+  AOM_PAYSTACK_SECRET_KEY: z.string().optional(),
+  AOM_PAYSTACK_PUBLIC_KEY: z.string().optional(),
+  /** The ZAR amount charged (and refunded) to save a card with Paystack. UNVERIFIED: Paystack's minimum for ZAR. */
+  AOM_PAYSTACK_CARD_CHECK_ZAR: z.coerce.number().min(1).max(1000).default(5),
+  /** Deprecated alias of AOM_PAYMENT_PROVIDER (`auto` = unset). */
   AOM_BILLING_PROVIDER: z.enum(['auto', 'fake', 'payfast']).default('auto'),
   AOM_PAYFAST_MERCHANT_ID: z.string().optional(),
   AOM_PAYFAST_MERCHANT_KEY: z.string().optional(),
@@ -112,7 +118,8 @@ export interface Config {
   linkedinClientId: string | undefined;
   linkedinClientSecret: string | undefined;
   billingJobs: boolean;
-  billingProvider: 'auto' | 'fake' | 'payfast';
+  billingProvider: 'auto' | 'fake' | 'payfast' | 'paystack';
+  paystack: { secretKey: string | undefined; publicKey: string | undefined; cardCheckZar: number };
   payfast: {
     merchantId: string | undefined;
     merchantKey: string | undefined;
@@ -163,7 +170,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     linkedinClientId: e.AOM_LINKEDIN_CLIENT_ID || undefined,
     linkedinClientSecret: e.AOM_LINKEDIN_CLIENT_SECRET || undefined,
     billingJobs: e.AOM_BILLING_JOBS,
-    billingProvider: e.AOM_BILLING_PROVIDER,
+    billingProvider: e.AOM_PAYMENT_PROVIDER ?? e.AOM_BILLING_PROVIDER,
+    paystack: {
+      secretKey: e.AOM_PAYSTACK_SECRET_KEY?.trim() || undefined,
+      publicKey: e.AOM_PAYSTACK_PUBLIC_KEY?.trim() || undefined,
+      cardCheckZar: e.AOM_PAYSTACK_CARD_CHECK_ZAR,
+    },
     payfast: {
       merchantId: e.AOM_PAYFAST_MERCHANT_ID?.trim() || undefined,
       merchantKey: e.AOM_PAYFAST_MERCHANT_KEY?.trim() || undefined,
