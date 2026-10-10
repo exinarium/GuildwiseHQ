@@ -18,9 +18,9 @@ export const ProjectRepoDtoSchema = z.object({
   workingBranch: z.string().nullable(),
   removedAt: IsoTime.nullable(),
   /** The git provider in force: the manual choice, else detected from the URL. */
-  forge: ForgeKindSchema,
+  forge: ForgeKindSchema.optional(),
   /** The manual choice (null: detected). */
-  forgeOverride: ForgeKindSchema.nullable(),
+  forgeOverride: ForgeKindSchema.nullable().optional(),
   /** Branches of the clone, as the last hygiene run saw them (the options of the working-branch question). */
   knownBranches: z.array(z.string()).optional(),
   workingBranchSetAt: IsoTime.nullable().optional(),

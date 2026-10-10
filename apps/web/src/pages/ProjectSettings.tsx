@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'react-router';
-import { useAddRepo, usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
+import { usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
+import { AddRepoForm } from '../components/AddRepoForm.tsx';
 import { BudgetBanner } from '../components/BudgetBanner.tsx';
 import { BudgetPanel } from '../components/BudgetPanel.tsx';
 import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
@@ -10,6 +11,7 @@ import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
 import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
 import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
+import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
 import {
   Badge,
@@ -40,7 +42,6 @@ export function ProjectSettings() {
   const { id = '' } = useParams();
   const q = useProject(id);
   const patch = usePatchProject(id);
-  const addRepo = useAddRepo(id);
   const removeRepo = useRemoveRepo(id);
   const toast = useToast();
   const expert = useExpertMode();
@@ -50,13 +51,6 @@ export function ProjectSettings() {
   const [branch, setBranch] = useState('');
   const [arch, setArch] = useState('');
   const [e2e, setE2e] = useState('');
-  const [repoName, setRepoName] = useState('');
-  const [repoUrl, setRepoUrl] = useState('');
-  const [repoBranch, setRepoBranch] = useState('');
-  const [repoErr, setRepoErr] = useState<Record<string, string>>({});
-  const [repoMode, setRepoMode] = useState<'clone' | 'create'>('clone');
-  const [newName, setNewName] = useState('');
-  const [repoVisibility, setRepoVisibility] = useState<'private' | 'public'>('private');
   const project = q.data?.project;
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
   const canConvert = useCanConvert(project);
@@ -99,41 +93,6 @@ export function ProjectSettings() {
       { onSuccess: () => toast.success('Settings saved') },
     );
   };
-  const add = (e: FormEvent) => {
-    e.preventDefault();
-    const errs: Record<string, string> = {};
-    const creating = repoMode === 'create';
-    const fullName = newName.trim();
-    if (creating && !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/.test(fullName))
-      errs.newName = 'Use owner/name, for example acme/barcode-camera';
-    const name = repoName.trim() || (creating ? (fullName.split('/')[1] ?? '') : '');
-    if (!name) errs.name = 'Repository name is required';
-    if (!creating && !repoUrl.trim()) errs.url = 'Remote URL is required';
-    setRepoErr(errs);
-    if (Object.keys(errs).length) return;
-    addRepo.mutate(
-      {
-        name,
-        remoteUrl: creating ? `https://github.com/${fullName}.git` : repoUrl.trim(),
-        ...(repoBranch.trim() ? { workingBranch: repoBranch.trim() } : {}),
-        ...(creating ? { create: { name: fullName, visibility: repoVisibility } } : {}),
-      },
-      {
-        onSuccess: () => {
-          toast.success(
-            creating
-              ? 'Repository added: the DevOps engineer creates it'
-              : 'Repository added: the DevOps engineer clones it',
-          );
-          setRepoName('');
-          setRepoUrl('');
-          setRepoBranch('');
-          setNewName('');
-        },
-      },
-    );
-  };
-
   const sections = [
     { id: 'general', label: 'Basics' },
     { id: 'stage', label: 'Stage' },
@@ -272,6 +231,9 @@ export function ProjectSettings() {
                     </Button>
                   </div>
                   {traits.usesRepos && (
+                    <RepoProviderControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
+                  )}
+                  {traits.usesRepos && (
                     <RepoSetupStatus projectId={id} repo={r} canRetry={project?.myRole === 'owner'} />
                   )}
                   {traits.usesRepos && expert && (
@@ -283,90 +245,7 @@ export function ProjectSettings() {
                 <li className="text-sm text-subtle">No repositories yet. Add the first one below.</li>
               )}
             </ul>
-            {traits.usesRepos && (
-              <form
-                onSubmit={add}
-                noValidate
-                aria-label="Add repository"
-                className="grid gap-4 border-t border-line pt-4 sm:grid-cols-3"
-              >
-                <fieldset className="flex flex-wrap gap-4 text-sm sm:col-span-3">
-                  <legend className="mb-1 font-medium">What to add</legend>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="repo-mode"
-                      checked={repoMode === 'clone'}
-                      onChange={() => setRepoMode('clone')}
-                    />
-                    An existing repository (cloned onto the workstations)
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="repo-mode"
-                      checked={repoMode === 'create'}
-                      onChange={() => setRepoMode('create')}
-                    />
-                    Create a new repository
-                  </label>
-                </fieldset>
-                <TextInput
-                  label="Repository name"
-                  value={repoName}
-                  onChange={(e) => setRepoName(e.target.value)}
-                  error={repoErr.name}
-                />
-                {repoMode === 'clone' ? (
-                  <TextInput
-                    label="Remote URL"
-                    value={repoUrl}
-                    onChange={(e) => setRepoUrl(e.target.value)}
-                    error={repoErr.url}
-                  />
-                ) : (
-                  <>
-                    <TextInput
-                      label="GitHub name (owner/name)"
-                      hint="Created with the GitHub login of the DevOps engineer's workstation (gh), then cloned."
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      error={repoErr.newName}
-                    />
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="font-medium">Visibility</span>
-                      <select
-                        className="h-9 rounded-control border border-control bg-surface px-2"
-                        value={repoVisibility}
-                        onChange={(e) => setRepoVisibility(e.target.value as 'private' | 'public')}
-                      >
-                        <option value="private">Private</option>
-                        <option value="public">Public</option>
-                      </select>
-                    </label>
-                  </>
-                )}
-                {expert && (
-                  <TextInput
-                    label="Branch (optional)"
-                    hint="Leave empty and the repository's default branch is used."
-                    value={repoBranch}
-                    onChange={(e) => setRepoBranch(e.target.value)}
-                  />
-                )}
-                <div className="sm:col-span-3">
-                  <ErrorBox error={addRepo.error ?? removeRepo.error} />
-                </div>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  className="justify-self-start sm:col-span-3"
-                  loading={addRepo.isPending}
-                >
-                  Add repository
-                </Button>
-              </form>
-            )}
+            {traits.usesRepos && <AddRepoForm projectId={id} />}
           </Panel>
         </div>
       )}

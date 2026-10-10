@@ -1,6 +1,7 @@
 import {
   CONNECTABLE_FORGES,
   type ConnectableForge,
+  defaultHost,
   type ForgeKind,
   type GitConnection,
   parseRemote,
@@ -15,6 +16,7 @@ import { ForgeUnavailableError } from './http.ts';
 import { PlainGitForge } from './plain.ts';
 import type { BranchRules, Forge, ForgeEnv, RemoteRepo } from './types.ts';
 
+export { defaultHost } from '@aom/shared';
 export { AzureDevOpsForge } from './azure.ts';
 export { BitbucketCloudForge } from './bitbucket.ts';
 export { GitHubForge } from './github.ts';
@@ -134,14 +136,4 @@ export async function gitConnections(
     }
   }
   return out;
-}
-
-export function defaultHost(provider: ConnectableForge): string {
-  return provider === 'github'
-    ? 'github.com'
-    : provider === 'gitlab'
-      ? 'gitlab.com'
-      : provider === 'bitbucket-cloud'
-        ? 'bitbucket.org'
-        : 'dev.azure.com';
 }

@@ -127,6 +127,37 @@ export const handlers = [
     return HttpResponse.json({ workstation: w });
   }),
   http.post(`${A}/workstations/:id/unlink`, ({ params }) => unlink(String(params.id))),
+  http.post(`${A}/workstations/:id/git/recheck`, () => HttpResponse.json({ ok: true })),
+  http.post(`${A}/workstations/:id/git/repos`, async ({ request }) => {
+    const b = (await request.json()) as { provider: string };
+    return HttpResponse.json(
+      {
+        requestId: '0192f3a0-0000-7000-8000-00000000f001',
+        provider: b.provider,
+        state: 'pending',
+        repos: [],
+        error: null,
+      },
+      { status: 202 },
+    );
+  }),
+  http.get(`${A}/workstations/:id/git/repos/:requestId`, () =>
+    HttpResponse.json({
+      requestId: '0192f3a0-0000-7000-8000-00000000f001',
+      provider: 'github',
+      state: 'done',
+      repos: [
+        {
+          provider: 'github',
+          fullName: 'acme/barcode-camera',
+          cloneUrl: 'https://github.com/acme/barcode-camera.git',
+          private: true,
+          defaultBranch: 'main',
+        },
+      ],
+      error: null,
+    }),
+  ),
 
   // projects
   http.get(`${A}/projects`, ({ request }) => {
