@@ -16,6 +16,7 @@ import {
   PlusCircle,
   Search,
   Sun,
+  Wrench,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -34,6 +35,8 @@ export interface PaletteContext {
   projects: Array<{ id: string; key: string; name: string }>;
   projectKey: string | null;
   onChat: () => void;
+  /** Opens the Ask DevOps dialog with the current page attached. */
+  onAskDevOps?: () => void;
   onHelp: () => void;
   onContact?: () => void;
   onPageHelp?: () => void;
@@ -154,6 +157,23 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
             onSelect={run(ctx.onChat)}
           >
             Chat with an agent
+          </Item>
+          <Item
+            value="action ask devops"
+            keywords={[
+              'install',
+              'docker',
+              'sudo',
+              'fix',
+              'environment',
+              'deploy',
+              'build',
+              'command',
+            ]}
+            icon={Wrench}
+            onSelect={run(() => ctx.onAskDevOps?.())}
+          >
+            Ask DevOps...
           </Item>
           <Item
             value="action toggle theme"

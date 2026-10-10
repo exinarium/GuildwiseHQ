@@ -16,6 +16,7 @@ import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } fr
 import { BaNote, FloorReport } from '../components/BaNote.tsx';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
 import { DigestRating } from '../components/DigestRating.tsx';
+import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
 import { EscalationTrail } from '../components/EscalationTrail.tsx';
 import { AgentAvatar, UserAvatar } from '../components/Face.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
@@ -444,6 +445,21 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
         <AnswerForm item={item} />
       ) : (
         <ResolveButtons item={item} />
+      )}
+      {item.kind !== 'question' && item.kind !== 'rating' && (
+        <div className="mt-3">
+          <AskDevOpsButton
+            variant="quiet"
+            label="Ask DevOps about this"
+            request={{
+              origin: 'desk',
+              deskItemId: item.id,
+              deskLabel: item.title,
+              errorText: item.body.slice(0, 1500),
+              ...(item.projectId ? { projectId: item.projectId } : {}),
+            }}
+          />
+        </div>
       )}
     </article>
   );

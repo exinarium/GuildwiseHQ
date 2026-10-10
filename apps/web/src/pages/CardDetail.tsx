@@ -24,6 +24,7 @@ import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
 import { BackoffBadge } from '../components/BackoffBadge.tsx';
 import { EditCardDialog, RiskTierDialog } from '../components/CardEdit.tsx';
 import { CardPhase } from '../components/CardPhase.tsx';
+import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
 import { FinalizePanel } from '../components/FinalizePanel.tsx';
@@ -246,6 +247,19 @@ export function CardDetailView({
               </Button>
             )}
             {permissions.canMove && <Button onClick={() => setDialog('move')}>Move</Button>}
+            <AskDevOpsButton
+              variant="quiet"
+              label="Ask DevOps"
+              request={{
+                origin: 'card',
+                projectId: card.projectId,
+                cardId: card.id,
+                cardLabel: `${card.ref} ${card.title}`,
+                ...(data.workability?.ok === false && data.workability.reason
+                  ? { errorText: data.workability.reason }
+                  : {}),
+              }}
+            />
             {permissions.canReleaseBackoff && (
               <Button
                 data-testid="release-backoff"

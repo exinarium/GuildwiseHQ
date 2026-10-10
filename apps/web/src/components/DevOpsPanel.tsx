@@ -18,6 +18,7 @@ import {
   useVerifyRights,
 } from '../api/queries/devops.ts';
 import { formatDateTime } from '../lib/time.ts';
+import { AskDevOpsButton } from './devops/AskDevOps.tsx';
 import { Badge, Button, ErrorBox, Select, TextArea, TextInput } from './ui.tsx';
 
 const TONE = {
@@ -101,6 +102,13 @@ export function DevOpsPanel({ w }: { w: WorkstationDto }) {
       <RightsStatus w={w} access={access} />
       <HygieneSettings w={w} />
       <AskDevOps workstationId={w.id} name={w.name} />
+      <div className="mt-2">
+        <AskDevOpsButton
+          variant="quiet"
+          label="Ask DevOps in a chat"
+          request={{ origin: 'workstation', workstationId: w.id }}
+        />
+      </div>
       <ul
         className="mt-3 flex flex-col gap-2"
         data-testid="devops-requests"
@@ -394,6 +402,13 @@ function RequestThread({ id }: { id: string }) {
       {awaiting && request.approval && (
         <div className="rounded-control bg-warning-soft p-2" data-testid="devops-approval">
           <p className="font-medium">Approval needed: {request.approval.action}</p>
+          <p className="text-xs text-muted" data-testid="devops-approval-parties">
+            {request.approval.managerApproved && !request.approval.workstationUserAgreed
+              ? "An Owner or Admin approved. The workstation's user has to agree too, because it is their machine."
+              : request.approval.workstationUserAgreed && !request.approval.managerApproved
+                ? "The workstation's user agrees. An Owner or Admin has to approve too."
+                : "An Owner or Admin approves, and the workstation's user must agree (one person can be both)."}
+          </p>
           <p>{request.approval.reason}</p>
           {request.approval.commands.length > 0 && (
             <pre

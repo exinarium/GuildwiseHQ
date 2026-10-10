@@ -89,6 +89,7 @@ function Harness() {
           projects: [{ id: U(1), key: 'TOY', name: 'Toy' }],
           projectKey: 'TOY',
           onChat: () => {},
+          onAskDevOps: () => setPath((p) => [...p, 'devops']),
           onHelp: () => setHelp(true),
         }}
       />
@@ -132,6 +133,16 @@ describe('keyboard shortcuts', () => {
 });
 
 describe('command palette', () => {
+  it('G-Q1: "Ask DevOps..." is an action, found by install/docker/fix keywords', async () => {
+    const user = userEvent.setup();
+    setup();
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const input = await screen.findByRole('combobox');
+    await user.type(input, 'docker');
+    await user.click(await screen.findByText('Ask DevOps...'));
+    await waitFor(() => expect(screen.getByTestId('log')).toHaveTextContent('devops'));
+  });
+
   it('Ctrl+K opens it; pages, projects, agents and desk items are listed and filterable; Enter jumps', async () => {
     const user = userEvent.setup();
     setup();

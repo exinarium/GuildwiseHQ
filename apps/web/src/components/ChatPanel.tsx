@@ -30,11 +30,14 @@ export function ChatPanel({
   threadId,
   agentName,
   online,
+  initialMessage,
 }: {
   threadId: string;
   /** For conversations that are not in the chat list (the BA's intake chat). */
   agentName?: string;
   online?: boolean;
+  /** Sent once when the panel opens (Ask DevOps starts a conversation with the user's request). */
+  initialMessage?: string;
 }) {
   const chat = useChat(threadId).data;
   const name = agentName ?? chat?.agentName;
@@ -71,6 +74,21 @@ export function ChatPanel({
       }
     });
   }, [threadId, qc]);
+
+  const initialSent = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, on open
+  useEffect(() => {
+    if (!initialMessage || initialSent.current) return;
+    initialSent.current = true;
+    const id = newId();
+    if (!getSocket()?.sendChat(threadId, initialMessage, id)) {
+      setError('The live connection is down. Reload the page and try again.');
+      setDraft(initialMessage);
+      return;
+    }
+    setPending({ id, body: initialMessage });
+    setStreaming('');
+  }, []);
 
   const list = messages.data?.messages ?? [];
   const showPending = pending && !list.some((m) => m.data.clientMsgId === pending.id);

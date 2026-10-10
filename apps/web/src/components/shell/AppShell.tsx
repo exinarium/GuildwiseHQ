@@ -1,7 +1,7 @@
 import { ORG_ROLE_LABEL } from '@aom/shared';
 import * as RadixDialog from '@radix-ui/react-dialog';
 import * as Tooltip from '@radix-ui/react-tooltip';
-import { CircleHelp, Inbox, Menu, MessageSquare, Plus, Search, X } from 'lucide-react';
+import { CircleHelp, Inbox, Menu, MessageSquare, Plus, Search, Wrench, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import { useLogout, useMe } from '../../api/queries/auth.ts';
@@ -12,6 +12,7 @@ import { useIsDesktop, useIsTabletUp } from '../../lib/useMediaQuery.ts';
 import { getSocket, useSocketState } from '../../ws/socket.ts';
 import { AgentFacesSync } from '../AgentFacesSync.tsx';
 import { ChatDrawer } from '../ChatDrawer.tsx';
+import { AskDevOpsProvider, useAskDevOps } from '../devops/AskDevOps.tsx';
 import { PageHelpPanel } from '../help/PageHelpPanel.tsx';
 import { CommandPalette } from '../palette/CommandPalette.tsx';
 import { ShortcutsDialog } from '../palette/ShortcutsDialog.tsx';
@@ -59,13 +60,16 @@ function LiveIndicator({ live, compact = false }: { live: string; compact?: bool
 export function AppShell({ name, live }: { name: string; live: string }) {
   return (
     <ContactProvider>
-      <Shell name={name} live={live} />
+      <AskDevOpsProvider>
+        <Shell name={name} live={live} />
+      </AskDevOpsProvider>
     </ContactProvider>
   );
 }
 
 function Shell({ name, live }: { name: string; live: string }) {
   const contact = useContact();
+  const askDevOps = useAskDevOps();
   const me = useMe();
   const logout = useLogout();
   const desk = useDesk();
@@ -224,6 +228,16 @@ function Shell({ name, live }: { name: string; live: string }) {
                     <PageHelpButton onClick={() => setPageHelp(true)} />
                     <button
                       type="button"
+                      onClick={() => askDevOps()}
+                      aria-label="Ask DevOps"
+                      data-testid="ask-devops-button"
+                      className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
+                    >
+                      <Wrench aria-hidden="true" className="size-4" />
+                      <span className="hidden xl:inline">Ask DevOps</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setChat(true)}
                       aria-label="Chat with an agent"
                       className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
@@ -343,6 +357,7 @@ function Shell({ name, live }: { name: string; live: string }) {
               projects,
               projectKey: project?.key ?? null,
               onChat: () => setChat(true),
+              onAskDevOps: () => askDevOps(),
               onHelp: () => setHelp(true),
               onContact: () => contact.open(),
               onPageHelp: () => setPageHelp(true),
