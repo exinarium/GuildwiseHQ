@@ -43,7 +43,7 @@ export const CHAPTERS: NarratedChapter[] = [
       },
       {
         id: 'c1-c',
-        text: 'Now tell the project where its code lives. Add a repository, give it a name, and paste in its address. Your agents work on their own branches, so your main code stays safe.',
+        text: 'Now tell the project where its code lives. Add a repository, give it a name, and paste in its address. Your agents work on their own copy, and a change only reaches your main code after it has been reviewed and tested.',
       },
     ],
   },
