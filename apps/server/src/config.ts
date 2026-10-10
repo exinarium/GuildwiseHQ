@@ -33,6 +33,8 @@ const EnvSchema = z.object({
   AOM_RUNNER_RELEASE_DIR: z.string().optional(),
   /** The support address new Contact us requests are emailed to, until the super admin sets one in the platform settings. */
   AOM_SUPPORT_EMAIL: z.string().optional(),
+  /** From address of the support mails to the customer (acknowledgement, replies), e.g. `Guildwise HQ Support <support@guildwisehq.com>`. Unset: AOM_MAIL_FROM. */
+  AOM_SUPPORT_FROM: z.string().optional(),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -70,6 +72,8 @@ export interface Config {
   runnerReleaseDir: string | undefined;
   /** Fallback support address (the platform setting wins). */
   supportEmail: string | undefined;
+  /** From address for support mails to customers; undefined: the normal `mailFrom`. */
+  supportFrom: string | undefined;
   logLevel: string;
   /** Cookie `Secure` flag: true when the public origin is https. */
   secureCookies: boolean;
@@ -101,6 +105,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     webhookAllowPrivate: e.AOM_WEBHOOK_ALLOW_PRIVATE,
     runnerReleaseDir: e.AOM_RUNNER_RELEASE_DIR || undefined,
     supportEmail: e.AOM_SUPPORT_EMAIL || undefined,
+    supportFrom: e.AOM_SUPPORT_FROM?.trim() || undefined,
     logLevel: e.LOG_LEVEL,
     secureCookies: publicOrigin.startsWith('https://'),
   };

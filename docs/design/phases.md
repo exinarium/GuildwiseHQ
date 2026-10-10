@@ -897,6 +897,7 @@ Where the build differs from the text above (decisions of the task win):
 | Branded mail | `mail/layout.ts` (`brandedMail`, `senderName`), all templates moved onto it, scheduled-report mail wrapped, `scripts/render-mails.ts` (`mails:render`) |
 | Autoresponder | `supportReceivedMail`: reference, what happens next, response time (`SUPPORT_RESPONSE_TIME`) |
 | Notification addresses | platform settings `support_email` and `contact_email` (comma-separated lists), Support page form |
+| Support From | `AOM_SUPPORT_FROM`: the autoresponder and the super admin's replies come from the support address (unset: unchanged); findings and DNS checklist in `docs/design/support-mail-from.md` |
 | Desk mail | every new desk item mailed once to the support address(es): `migrations/1390_desk_mail.sql`, `commands/desk-mail.ts`, platform settings `desk_mail_*`, Support page form; design `docs/design/desk-mail.md` |
 | Tests | server `password-reset`, `mail-layout`, `support`, `desk-mail`; web `password-reset`, `support` |
 
