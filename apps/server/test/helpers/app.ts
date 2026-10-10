@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NO_LIMITS, streamId } from '@aom/shared';
 import { type AomApp, createApp } from '../../src/app.ts';
+import type { AnthropicLike } from '../../src/assistant/service.ts';
 import { hashPassword } from '../../src/auth/password.ts';
 import { encryptSecret } from '../../src/auth/secrets.ts';
 import { generateTotpSecret, totpCode, totpStep } from '../../src/auth/totp.ts';
@@ -56,7 +57,14 @@ export interface TestApp {
 }
 
 export async function createTestApp(
-  opts: { env?: Record<string, string>; reset?: boolean; builtins?: boolean; listen?: boolean } = {},
+  opts: {
+    env?: Record<string, string>;
+    reset?: boolean;
+    builtins?: boolean;
+    listen?: boolean;
+    /** The landing-page assistant's Anthropic client (a fake; the real API is never called in tests). */
+    assistantClient?: AnthropicLike | null;
+  } = {},
 ): Promise<TestApp> {
   if (opts.reset !== false) await resetDb();
   const config = loadConfig({ ...process.env, ...opts.env });
@@ -65,6 +73,7 @@ export async function createTestApp(
     clock,
     logger: process.env.TEST_LOG ? true : false,
     background: false,
+    assistantClient: opts.assistantClient ?? null,
   });
   if (opts.builtins !== false) await registerBuiltins(app.ctx);
   if (opts.listen) await app.listen({ port: 0, host: '127.0.0.1' });

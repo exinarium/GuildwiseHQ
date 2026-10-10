@@ -24,6 +24,8 @@ export default defineConfig({
   },
   clean: true,
   sourcemap: true,
+  // The assistant's knowledge pack is a committed text file too (src/assistant/pack, built by `assistant:pack`).
   // The installer scripts are real files (lintable) read at runtime: ship them beside the bundle.
-  onSuccess: 'rm -rf dist/installer-templates && cp -r src/installer/templates dist/installer-templates',
+  onSuccess:
+    'rm -rf dist/installer-templates && cp -r src/installer/templates dist/installer-templates && rm -rf dist/assistant-pack && cp -r src/assistant/pack dist/assistant-pack',
 });

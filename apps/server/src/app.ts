@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Anthropic from '@anthropic-ai/sdk';
 import { RUNNER_SUBPROTOCOL } from '@aom/shared';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
@@ -12,6 +13,7 @@ import {
   serializerCompiler,
   validatorCompiler,
 } from 'fastify-type-provider-zod';
+import type { AnthropicLike } from './assistant/service.ts';
 import { checkContentType, checkOrigin } from './auth/origin-check.ts';
 import { SESSION_COOKIE } from './auth/sessions.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
@@ -42,6 +44,7 @@ import { Reporter } from './reporter/reporter.ts';
 import { createRoutingInterceptor } from './reporter/routing.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { agentRoutes } from './routes/agents.ts';
+import { assistantRoutes } from './routes/assistant.ts';
 import { authRoutes } from './routes/auth.ts';
 import { cardRoutes } from './routes/cards.ts';
 import { catalogueRoutes } from './routes/catalogue.ts';
@@ -83,6 +86,8 @@ export interface BuildOptions {
   /** Start dispatcher/reaper timers (production). Tests drive them explicitly. */
   background?: boolean;
   mailer?: Mailer;
+  /** The Anthropic client of the landing-page assistant (tests pass a fake; default: the real SDK when a key is set). */
+  assistantClient?: AnthropicLike | null;
   clock?: Clock;
   /** Fastify logger: `false` silences it. Defaults to config.logLevel. */
   logger?: boolean;
@@ -306,6 +311,17 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(phaseRoutes(ctx));
   await app.register(reportingRoutes(ctx));
   await app.register(setupChecklistRoutes(ctx));
+  const assistantClient =
+    opts.assistantClient !== undefined
+      ? opts.assistantClient
+      : config.anthropicApiKey
+        ? (new Anthropic({
+            apiKey: config.anthropicApiKey,
+            maxRetries: 1,
+            timeout: 60_000,
+          }) as unknown as AnthropicLike)
+        : null;
+  await app.register(assistantRoutes(ctx, assistantClient));
   await app.register(costRoutes(ctx));
   await app.register(orgChartRoutes(ctx));
 

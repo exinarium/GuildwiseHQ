@@ -35,6 +35,14 @@ const EnvSchema = z.object({
   AOM_SUPPORT_EMAIL: z.string().optional(),
   /** From address of the support mails to the customer (acknowledgement, replies), e.g. `Guildwise HQ Support <support@guildwisehq.com>`. Unset: AOM_MAIL_FROM. */
   AOM_SUPPORT_FROM: z.string().optional(),
+  /** Anthropic API key for the public landing-page assistant (a secret: never sent to the browser, never logged). */
+  ANTHROPIC_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(8).optional()),
+  /** Kill switch of the assistant: `off` or `public` (landing page). Unset: `public` when a key is set, else `off`. */
+  AOM_ASSISTANT: z.preprocess((v) => (v === '' ? undefined : v), z.enum(['off', 'public']).optional()),
+  /** Spend ceiling per UTC day for the public assistant, in US dollars. */
+  AOM_ASSISTANT_PUBLIC_DAILY_USD: z.coerce.number().min(0).max(10_000).default(10),
+  /** Model of the public assistant. */
+  AOM_ASSISTANT_MODEL_PUBLIC: z.string().min(1).default('claude-haiku-4-5'),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -74,6 +82,12 @@ export interface Config {
   supportEmail: string | undefined;
   /** From address for support mails to customers; undefined: the normal `mailFrom`. */
   supportFrom: string | undefined;
+  /** Key of the Anthropic API (the public assistant); undefined: the assistant is off. */
+  anthropicApiKey: string | undefined;
+  /** The assistant kill switch (`AOM_ASSISTANT`): `public` only when a key is set and it is not switched off. */
+  assistantMode: 'off' | 'public';
+  assistantPublicDailyUsd: number;
+  assistantModelPublic: string;
   logLevel: string;
   /** Cookie `Secure` flag: true when the public origin is https. */
   secureCookies: boolean;
@@ -106,6 +120,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     runnerReleaseDir: e.AOM_RUNNER_RELEASE_DIR || undefined,
     supportEmail: e.AOM_SUPPORT_EMAIL || undefined,
     supportFrom: e.AOM_SUPPORT_FROM?.trim() || undefined,
+    anthropicApiKey: e.ANTHROPIC_API_KEY,
+    // Off without a key, whatever the switch says; with a key it is on unless switched off.
+    assistantMode: e.ANTHROPIC_API_KEY ? (e.AOM_ASSISTANT ?? 'public') : 'off',
+    assistantPublicDailyUsd: e.AOM_ASSISTANT_PUBLIC_DAILY_USD,
+    assistantModelPublic: e.AOM_ASSISTANT_MODEL_PUBLIC,
     logLevel: e.LOG_LEVEL,
     secureCookies: publicOrigin.startsWith('https://'),
   };

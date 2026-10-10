@@ -16,10 +16,12 @@
     "restructure:migrate": "tsx scripts/restructure-migrate.ts",
     "ranking:migrate": "tsx scripts/ranking-migrate.ts",
     "legacy-feeds-fixture": "tsx test/fixtures/run-legacy-feeds.ts",
+    "assistant:pack": "tsx scripts/build-assistant-pack.ts",
     "mails:render": "tsx scripts/render-mails.ts",
     "projections:rebuild": "tsx scripts/projections-rebuild.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.132.1",
     "@aom/shared": "workspace:*",
     "@fastify/cookie": "^11.0.0",
     "@fastify/rate-limit": "^10.0.0",
