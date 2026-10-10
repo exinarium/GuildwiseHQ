@@ -3,6 +3,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
 import { useLogin, useLogin2fa, useMe } from '../api/queries/auth.ts';
+import { useResendVerification } from '../api/queries/billing.ts';
 import { AuthFrame } from '../components/auth/AuthFrame.tsx';
 import { PasswordInput } from '../components/auth/PasswordInput.tsx';
 import { Button, Callout, TextInput } from '../components/ui.tsx';
@@ -32,6 +33,7 @@ export function Login() {
   const me = useMe();
   const login = useLogin();
   const login2fa = useLogin2fa();
+  const resendVerification = useResendVerification();
   const [challenge, setChallenge] = useState<string | null>(null);
   const [recovery, setRecovery] = useState(false);
   const [code, setCode] = useState('');
@@ -210,6 +212,19 @@ export function Login() {
         {failure && (
           <Callout tone="danger" role="alert">
             {failure}
+            {login.error instanceof ApiError && login.error.code === 'email_not_verified' && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className="font-medium underline"
+                  data-testid="resend-verification"
+                  onClick={() => resendVerification.mutate(email)}
+                >
+                  {resendVerification.isSuccess ? 'Sent: check your inbox' : 'Send the link again'}
+                </button>
+              </>
+            )}
           </Callout>
         )}
         <Button type="submit" variant="primary" size="lg" loading={login.isPending} className="w-full">
