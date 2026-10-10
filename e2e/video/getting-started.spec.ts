@@ -7,7 +7,7 @@ import { ADMIN, BASE_URL, E2E_DIR, paths, ROOT } from '../support/env.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
 import { caption, click, installOverlays, sleep, type } from './captions.ts';
 import { allCues, BA_ANSWER, BA_QUESTION, CHAPTERS } from './narration.ts';
-import { mux, speak, VOICE, vtt } from './voice.ts';
+import { mux, speak, toMp4, VOICE, vtt } from './voice.ts';
 
 /**
  * The "Getting started" help video: a spoken tutorial. A female voice (Piper, offline) tells you how to create your
@@ -267,6 +267,9 @@ test('record the getting-started video', async ({ browser }) => {
   }
   const bytes = statSync(dest).size;
   expect(bytes, 'the video must stay under 20 MB').toBeLessThan(20 * 1024 * 1024);
+  const mp4 = join(OUT_DIR, 'getting-started.mp4');
+  toMp4(dest, mp4);
+  expect(statSync(mp4).size, 'the MP4 must stay under 20 MB').toBeLessThan(20 * 1024 * 1024);
   writeFileSync(join(OUT_DIR, 'getting-started.vtt'), vtt(timeline));
   writeFileSync(
     join(OUT_DIR, 'getting-started.json'),
@@ -275,6 +278,10 @@ test('record the getting-started video', async ({ browser }) => {
         title: 'Getting started with Guildwise HQ',
         src: '/videos/getting-started.webm',
         type: 'video/webm',
+        sources: [
+          { src: '/videos/getting-started.mp4', type: 'video/mp4' },
+          { src: '/videos/getting-started.webm', type: 'video/webm' },
+        ],
         captions: '/videos/getting-started.vtt',
         voice: `Piper ${VOICE}`,
         duration,

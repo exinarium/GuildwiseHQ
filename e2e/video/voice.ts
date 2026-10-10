@@ -89,13 +89,13 @@ export function findFfmpeg(): string {
   for (const bin of found) {
     try {
       const enc = execFileSync(bin, ['-hide_banner', '-encoders'], { encoding: 'utf8' });
-      if (enc.includes('libopus') && enc.includes('libvpx-vp9')) return bin;
+      if (enc.includes('libopus') && enc.includes('libvpx-vp9') && enc.includes('libx264')) return bin;
     } catch {
       /* next */
     }
   }
   throw new Error(
-    'no ffmpeg with libopus and libvpx-vp9 found (run e2e/video/setup-voice.sh, or set AOM_FFMPEG)',
+    'no ffmpeg with libopus, libvpx-vp9 and libx264 found (run e2e/video/setup-voice.sh, or set AOM_FFMPEG)',
   );
 }
 
@@ -151,4 +151,40 @@ export function mux(
     dest,
   );
   execFileSync(ff, args, { stdio: 'ignore' });
+}
+
+/** An MP4 copy (H.264 + AAC, fast start) of the finished WebM: plays on iPhone, Android and in-app browsers. */
+export function toMp4(src: string, dest: string): void {
+  execFileSync(
+    findFfmpeg(),
+    [
+      '-loglevel',
+      'error',
+      '-y',
+      '-i',
+      src,
+      '-c:v',
+      'libx264',
+      '-profile:v',
+      'high',
+      '-level',
+      '4.0',
+      '-pix_fmt',
+      'yuv420p',
+      '-preset',
+      'slow',
+      '-crf',
+      '23',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
+      '-ac',
+      '2',
+      '-movflags',
+      '+faststart',
+      dest,
+    ],
+    { stdio: 'inherit' },
+  );
 }

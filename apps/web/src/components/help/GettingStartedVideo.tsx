@@ -6,6 +6,8 @@ export interface VideoInfo {
   title: string;
   src: string;
   type: string;
+  /** Every encoding, best-supported first (MP4 plays on phones and in apps; WebM is the fallback). */
+  sources?: Array<{ src: string; type: string }>;
   /** WebVTT captions with the narration (optional). */
   captions?: string;
   duration: number;
@@ -82,7 +84,14 @@ export function GettingStartedVideo() {
             className="aspect-video w-full rounded-control bg-black"
             onError={() => setBroken(true)}
           >
-            <source src={info.src} type={info.type} onError={() => setBroken(true)} />
+            {(info.sources?.length ? info.sources : [{ src: info.src, type: info.type }]).map((s, i, all) => (
+              <source
+                key={s.src}
+                src={s.src}
+                type={s.type}
+                {...(i === all.length - 1 ? { onError: () => setBroken(true) } : {})}
+              />
+            ))}
             {/* the narration as captions (on by default; the CC button turns them off) */}
             <track
               kind="captions"

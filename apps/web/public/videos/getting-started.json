@@ -26,5 +26,15 @@
       "t": 134,
       "title": "Test your running project"
     }
+  ],
+  "sources": [
+    {
+      "src": "/videos/getting-started.mp4",
+      "type": "video/mp4"
+    },
+    {
+      "src": "/videos/getting-started.webm",
+      "type": "video/webm"
+    }
   ]
 }
