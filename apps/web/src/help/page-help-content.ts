@@ -1004,7 +1004,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Getting started video',
-        text: 'A spoken tutorial of about three minutes in five steps, with captions (CC). Each step under the video jumps to that part.',
+        text: 'A spoken tutorial of about three minutes in five steps, with captions (CC). Each step under the video jumps to that part. The same video is the first step of the guided tour.',
       },
       {
         name: 'Get started checklist',
@@ -1036,7 +1036,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Tour replay',
-        text: 'Watch the guided tour again to remember key features.',
+        text: 'Watch the guided tour again to remember key features. It starts with the getting-started video, then walks through the sidebar.',
       },
     ],
     article: 'getting-started#page-help',

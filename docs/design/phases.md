@@ -993,3 +993,7 @@ Flag, banner, billing exemption, `[Simulation]` mail prefix, server-hosted simul
 ## Built: blog launch articles (overnight, 2026-10-10, track t13)
 
 Four owner-approved launch articles (`apps/server/src/blog/launch/*.md`) and the one-time data migration `blog-launch-2026-10` (published when the blog is on, drafts when it is off, skipped per existing slug, `launch` flag so no social share, no digest and no review-period start). Migration `1560_blog_launch.sql`, `parseBlogArticle` in `@aom/shared`. See `docs/BLOG-API.md` Launch articles, `docs/DEPLOY.md`. Tests: server `blog-launch`.
+
+## Built: gated onboarding until the card is saved, and the tour starts with the video (2026-10-10)
+
+An Owner of an organization paused for `billing:setup` (new sign-up), `billing:payment_failed` or `billing:cancelled` sees only a full-page "Start your 7-day free trial" / "Resubscribe" screen (`me.activeOrg.gate`, web `pages/BillingGate.tsx`, route guard in `components/Layout.tsx`); no shell, tour, Get started checklist or What's new until the card is saved, then the app opens and the tour starts. Verified sign-ups that never saved a card are removed after 14 days (`billing/abandoned.ts`). The first step of the Owner, Admin and Member tours is the getting-started video (`components/tour/TourVideo.tsx`). See `docs/SPEC.md` Billing, `docs/ARCHITECTURE.md` section 32, `docs/DEPLOY.md`. No migration. Tests: server `billing-gate`, `billing-abandoned-signup`; web `billing-gate`, `tour`.

@@ -23,10 +23,10 @@ The captions show everything the voice says and are on by default; use the **CC*
 
 There are two ways in:
 
-- **Start your own organization.** On the website click **Start free trial**, pick a plan and fill in your organization name, your name, email and a password (12 or more characters). Open the link in the confirmation email, sign in and add a card on the **Billing** page to start the 7-day free trial. See [Plans and billing](/help/billing-and-plans#trial).
+- **Start your own organization.** On the website click **Start free trial**, pick a plan and fill in your organization name, your name, email and a password (12 or more characters). Open the link in the confirmation email: you are signed in and see one page, **Start your 7-day free trial**, where you add a card to start the trial. Nothing else opens until the card is saved, and nothing is charged until the trial ends. See [Plans and billing](/help/billing-and-plans#trial).
 - **Join with an invitation.** Open the invitation email. It comes from the Owner or an Admin of the organization you join (or from the platform administrator for a new organization). Click the link and choose your name and a password. If you already have an account, sign in instead and confirm.
 
-After you sign in you land in the app, and the guided tour starts.
+After you sign in you land in the app, and the guided tour starts. For a new sign-up that is right after the card is saved: until then the tour, the Get started checklist and What's new wait.
 
 ## Forgot your password {#forgot-password}
 
@@ -36,9 +36,9 @@ Every account belongs to an organization. There are no standalone accounts excep
 
 ## The tour {#the-tour}
 
-The first time you sign in, Guildwise HQ starts a guided tour of the main pages: the board where your cards live, the desk where you answer questions, intake from external systems, **Ask DevOps** for help with your workstation, and more. The tour takes you to each area, shows you what is there and what you can do.
+The first time you sign in, Guildwise HQ starts a guided tour. Its **first step is the getting-started video** described above, right in the tour card, with captions and the chapter buttons; press **Next: take the tour** (or **Skip tour**) when you are done, and the video pauses. If the video is not available the step shows a short text instead. The rest of the tour covers the main pages: the board where your cards live, the desk where you answer questions, intake from external systems, **Ask DevOps** for help with your workstation, and more. The tour takes you to each area, shows you what is there and what you can do.
 
-You can play the tour again any time: open **Help** in the sidebar and click **Replay the tour** (or press Ctrl K and choose **Take the tour**). The tour is shown once. If you close it half way it does not come back by itself; **Help** offers to resume it where you stopped. After an update, the [What's new](/help/whats-new) window tells you what changed; it never opens on top of the tour.
+You can play the tour again any time: open **Help** in the sidebar and click **Replay the tour** (or press Ctrl K and choose **Take the tour**). The tour is shown once, and you can watch the video again any time from **Help**. If you close it half way it does not come back by itself; **Help** offers to resume it where you stopped. After an update, the [What's new](/help/whats-new) window tells you what changed; it never opens on top of the tour.
 
 ## The Get started checklist {#get-started}
 

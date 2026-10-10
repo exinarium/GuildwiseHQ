@@ -199,7 +199,7 @@ By the end of this chapter you have: a working login with two-factor protection,
 
 If the link says the invitation is no longer valid, it has expired, was used already, or was withdrawn. Ask the person who invited you to send a new one.
 
-**No invitation? Sign up yourself.** On the website click **Start free trial** (or a plan's button under **Pricing**), choose a plan and enter your organization name, your name, email and a password. Open the link in the confirmation email, sign in, and add a card on the **Billing** page: your **7-day free trial** starts and nothing is charged until it ends (4.17). You are the Owner of the new organization.
+**No invitation? Sign up yourself.** On the website click **Start free trial** (or a plan's button under **Pricing**), choose a plan and enter your organization name, your name, email and a password. Open the link in the confirmation email: you are signed in and see one page, **Start your 7-day free trial**, with your plan, its price (US dollars, VAT included, and the rand amount at today's rate) and the trial's start and end dates. Add a card there: your **7-day free trial** starts and the app opens, with the tour and the Get started checklist; nothing is charged until the trial ends (4.17). Until the card is saved nothing else in the app opens, and coming back later shows the same page. A sign-up that never adds a card is removed after 14 days. You are the Owner of the new organization.
 
 ![An invitation link that no longer works](guide/assets/invite-invalid.jpg)
 
@@ -237,7 +237,7 @@ Two-factor login means that after your password you also type a six-digit code f
 
 The first time you sign in, a short guided tour highlights the main areas and tells you what each is for. The tour is different for each role. You can skip it and replay it any time from **Help**; a tour you closed half way does not come back by itself, but **Help** offers to resume it.
 
-Prefer to watch? The **Help** page has **Getting started in five steps**, a spoken training video of about three minutes with captions: create a project, hire your agents, create cards, talk to the business analyst, and test the result.
+The tour starts with the training video: its first step is **Watch the 3-minute getting-started video**, with the player (captions and chapter buttons) in the tour card; press **Next: take the tour** to carry on (the video pauses). The same video is on the **Help** page as **Getting started in five steps**, a spoken tutorial of about three minutes: create a project, hire your agents, create cards, talk to the business analyst, and test the result. If the video file is missing, the first step shows a short text instead.
 
 ![The first step of the tour](guide/assets/tour-1.jpg)
 
@@ -735,7 +735,7 @@ Only the **Owner** sees **Organization, Billing**. Plans differ only in limits (
 | Team | $49.00 | 5 | 3 | 10 |
 | Business | $149.00 | 20 | 10 | Unlimited |
 
-- **Signing up.** Choose a plan at **Start free trial**, confirm your email (required), then add a card on the Billing page. The **7-day free trial** starts; the first invoice is charged when it ends, then monthly. A reminder is emailed two days before.
+- **Signing up.** Choose a plan at **Start free trial**, confirm your email (required), then add a card on the full-page **Start your 7-day free trial** screen that replaces the app until a card is saved (Sign out and Contact us stay available; a sign-up without a card is removed after 14 days). The **7-day free trial** starts; the first invoice is charged when it ends, then monthly. A reminder is emailed two days before.
 - **Company name.** Guildwise HQ is sold to businesses, so sign-up asks for your company name.
 - **Charged in rand, VAT included.** The price is a fixed dollar amount that includes 15% VAT. Each charge converts it at the day's exchange rate. Every invoice shows the dollar price, the VAT it contains (in dollars and rand) and "charged as R x at R y / USD on <date>". We never see or keep the card number: you enter it on Paystack's secure page and we keep a secure token with the brand, last four digits and expiry (we email you before it expires). **Update card** replaces it.
 - **Billing profile.** Under Billing the Owner edits the company name, address, country and VAT number (optional). They are printed on your invoices; paid invoices keep the details they were issued with.
@@ -743,7 +743,7 @@ Only the **Owner** sees **Organization, Billing**. Plans differ only in limits (
 - **Change plan.** Takes effect at once and is prorated for the rest of the month: you pay the difference now, or get a credit on the next invoice. A plan too small for what you use is refused.
 - **Business add-ons.** Add members, workstations or projects (priced per unit). They start with the next billing cycle and never go below the Business base.
 - **Cancel.** The organization stays active until the end of the paid term (or trial), then is paused. **Keep my subscription** takes it back before then.
-- **Failed payments.** Three attempts (now, after 1 day, after 3 days); you are emailed each time and can update the card. After the third failure the organization is **paused**: agents stop picking up work and only the Owner can sign in, to a banner and the Billing page, where **Resubscribe now** charges a new month and resumes everything.
+- **Failed payments.** Three attempts (now, after 1 day, after 3 days); you are emailed each time and can update the card. After the third failure the organization is **paused**: agents stop picking up work and only the Owner can sign in. The Owner sees a full-page **Resubscribe to continue** screen (reason, plan, amount due, **Update card**, **Resubscribe now**, Sign out, Contact us) instead of the app, and **Resubscribe now** charges a new month and resumes everything. The same screen appears when the subscription was cancelled and its term ended. Members see a banner asking them to contact their Owner.
 - **Platform administrators** see the active payment provider and its sandbox or live mode, and edit prices (VAT included), limits, add-on prices, the VAT rate, the invoice details (company name, address, VAT number printed on tax invoices) and the exchange-rate override under **Platform, Billing**, and can pause, unpause or assign **Unlimited** from an organization's page (each with a reason, audited).
 
 See the help article *Plans and billing*.

@@ -25,10 +25,10 @@ The plan pays for Guildwise HQ itself. The AI work is billed to you by Claude (y
 
 1. Click **Start free trial** on the website (or a plan's button under **Pricing**), choose a plan and enter your company name (Guildwise HQ is sold to businesses), your name, email and a password.
 2. Open the link in the email we send you. Signing in needs the confirmed email.
-3. Add a card on the **Billing** page. Your **7-day free trial** starts and nothing is charged.
+3. After you confirm your email you are signed in and see a single page, **Start your 7-day free trial**. It shows your plan, its price in US dollars (VAT included) with the approximate rand amount at today's rate, and the day the trial starts and ends. Press **Add card**: with Paystack you enter the card on Paystack's secure page and come back here; in test mode a small form takes a test card. Your **7-day free trial** starts as soon as the card is saved, nothing is charged, and the app opens with the tour.
 4. When the trial ends, the first invoice is charged to your card, and then once a month.
 
-Until a card is saved your organization is paused: only you can sign in and the page asks you to add a card. We send a reminder two days before the trial ends. You can cancel during the trial and pay nothing.
+Until a card is saved your organization is paused and that page is all you see (there is also **Sign out** and **Contact us**). If you close the browser and come back later, you land on the same page. A sign-up that never adds a card is removed after **14 days** (7 days if the email was never confirmed), so the same address can sign up again. We send a reminder two days before the trial ends. You can cancel during the trial and pay nothing.
 
 ## Cards and invoices {#cards}
 
@@ -58,7 +58,7 @@ On **Business** you can add **members**, **workstations** and **projects** on to
 
 If a charge fails we try again after one day and again after three days (three attempts in all) and email you each time. Update your card on the **Billing** page to fix it. If the third attempt fails, the organization is **paused**.
 
-A paused organization keeps all its data. Agents stop picking up work and only the Owner can sign in, to a banner and the **Billing** page. Add a card if needed and press **Resubscribe now**: you are charged for a new month and everything continues where it stopped.
+A paused organization keeps all its data. Agents stop picking up work and only the Owner can sign in. The Owner sees one page, **Resubscribe to continue**, with the reason, the plan and the amount due, and the buttons **Update card** and **Resubscribe now** (plus **Sign out** and **Contact us**); Members see a notice to ask the Owner. Add a card if needed and press **Resubscribe now**: you are charged for a new month and everything continues where it stopped.
 
 ## When payments are not available yet {#not-available}
 
