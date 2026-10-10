@@ -59,10 +59,11 @@ async function sendNewOrgMail(
   terms: string,
   invitedBy: string,
   expiresAt: Date,
+  simulation = false,
 ) {
   try {
-    await ctx.mailer.send(
-      newOrgInvitationMail({
+    await ctx.mailer.send({
+      ...newOrgInvitationMail({
         to,
         link: invitationLink(ctx, token),
         orgName,
@@ -71,7 +72,8 @@ async function sendNewOrgMail(
         expiresAt,
         origin: ctx.config.publicOrigin,
       }),
-    );
+      ...(simulation ? { simulation: true } : {}),
+    });
   } catch (err) {
     ctx.log.error({ err, to }, 'failed to send invitation mail');
   }
@@ -140,7 +142,16 @@ export async function inviteNewOrg(
       { tx },
     );
   });
-  await sendNewOrgMail(ctx, input.email, token, input.proposedOrgName, describeTerms(terms), TEAM, expiresAt);
+  await sendNewOrgMail(
+    ctx,
+    input.email,
+    token,
+    input.proposedOrgName,
+    describeTerms(terms),
+    TEAM,
+    expiresAt,
+    sim,
+  );
   return invitationId;
 }
 
@@ -215,6 +226,7 @@ export async function resendNewOrgInvitation(
     describeTerms((inv.org_terms ?? {}) as Parameters<typeof describeTerms>[0]),
     TEAM,
     expiresAt,
+    (inv.org_terms as { simulation?: boolean } | null)?.simulation === true,
   );
 }
 
@@ -453,7 +465,7 @@ export async function acceptInvitation(
     if (await one(tx, 'SELECT 1 FROM users WHERE lower(email)=lower($1)', [inv.email])) {
       throw conflict('user_exists', 'an account with this email already exists: sign in to accept');
     }
-    const { events } = await acceptEvents(ctx, tx, {
+    const { events, orgId } = await acceptEvents(ctx, tx, {
       inv,
       userId,
       displayName: input.displayName,
@@ -462,6 +474,7 @@ export async function acceptInvitation(
     });
     await ctx.store.append(events, { tx });
     return {
+      orgId,
       kind: inv.kind as string,
       orgName: (input.orgName || inv.proposed_org_name || inv.org_name || null) as string | null,
     };
@@ -471,6 +484,7 @@ export async function acceptInvitation(
     email: (await one(ctx.pool, 'SELECT email FROM users WHERE id=$1', [userId]))?.email ?? '',
     displayName: input.displayName,
     orgName: accepted.orgName,
+    orgId: accepted.orgId,
   });
   return userId;
 }
@@ -521,6 +535,7 @@ export async function acceptInvitationExisting(
     email: session.user.email,
     displayName: session.user.displayName,
     orgName: r.orgName,
+    orgId: r.orgId,
   });
   return r.orgId;
 }

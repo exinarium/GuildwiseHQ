@@ -11,7 +11,12 @@ export interface MailMessage {
   from?: string;
   /** Extra headers (`List-Unsubscribe` on the digest). */
   headers?: Record<string, string>;
-  /** Force the "[Simulation] " subject prefix (set by the sender when it knows the organization is a simulation). */
+  /**
+   * The organization this mail is about. When it is a simulation organization the subject gets "[Simulation] ",
+   * whoever the recipient is. Mails not tied to an organization leave it out and are never prefixed.
+   */
+  orgId?: string;
+  /** Force the "[Simulation] " prefix when the sender knows the subject organization is a simulation but it has no id yet. */
   simulation?: boolean;
 }
 

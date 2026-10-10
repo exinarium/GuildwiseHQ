@@ -15,13 +15,19 @@ const MAX_PER_TICK = 20;
 
 async function notify(
   ctx: Ctx,
-  n: { subject: string; heading: string; facts: Array<[string, string]>; path: string; linkLabel: string },
+  n: {
+    subject: string;
+    heading: string;
+    facts: Array<[string, string]>;
+    path: string;
+    linkLabel: string;
+    orgId?: string | null;
+  },
 ): Promise<void> {
   const origin = ctx.config.publicOrigin;
   for (const to of await supportAddresses(ctx))
-    await sendQuietly(
-      ctx,
-      platformNoticeMail({
+    await sendQuietly(ctx, {
+      ...platformNoticeMail({
         to,
         subject: n.subject,
         heading: n.heading,
@@ -30,13 +36,14 @@ async function notify(
         linkLabel: n.linkLabel,
         origin,
       }),
-    );
+      ...(n.orgId ? { orgId: n.orgId } : {}),
+    });
 }
 
 /** An invitation was accepted: a new organization (and its Owner) or a person joining one. One mail per acceptance. */
 export async function notifySignup(
   ctx: Ctx,
-  s: { kind: string; email: string; displayName: string; orgName: string | null },
+  s: { kind: string; email: string; displayName: string; orgName: string | null; orgId?: string | null },
 ): Promise<void> {
   try {
     if (!(await flagSetting(ctx, NOTIFY_KEYS.notifyNewOrgs))) return;
@@ -52,6 +59,7 @@ export async function notifySignup(
       ],
       path: '/platform/organizations',
       linkLabel: 'Open the organizations',
+      orgId: s.orgId ?? null,
     });
   } catch (err) {
     ctx.log.warn({ err }, 'sign-up notification failed');
@@ -79,7 +87,7 @@ export async function auditMailTick(ctx: Ctx): Promise<number> {
   }
   const entries = await rows(
     ctx.pool,
-    `SELECT a.seq::text AS seq, a.at, a.action, a.summary, a.actor_kind, u.display_name AS actor, o.name AS org_name
+    `SELECT a.seq::text AS seq, a.at, a.action, a.summary, a.actor_kind, u.display_name AS actor, o.name AS org_name, a.org_id
        FROM platform_audit_log a LEFT JOIN users u ON u.id = a.actor_user_id LEFT JOIN organizations o ON o.id = a.org_id
       WHERE a.seq > $1::bigint ORDER BY a.seq LIMIT ${MAX_PER_TICK}`,
     [c.value],
@@ -101,6 +109,7 @@ export async function auditMailTick(ctx: Ctx): Promise<number> {
       ],
       path: '/platform/audit',
       linkLabel: 'Open the audit log',
+      orgId: e.org_id ?? null,
     });
   }
   return entries.length;

@@ -133,13 +133,18 @@ async function postWebhook(
   }
 }
 
-async function sendMail(ctx: Ctx, d: Extract<ScheduleDelivery, { kind: 'email' }>): Promise<AttemptResult> {
+async function sendMail(
+  ctx: Ctx,
+  d: Extract<ScheduleDelivery, { kind: 'email' }>,
+  orgId: string | null,
+): Promise<AttemptResult> {
   const started = Date.now();
   try {
     for (const to of d.to)
-      await ctx.mailer.send(
-        scheduledReportMail({ to, subject: d.subject, text: d.text, origin: ctx.config.publicOrigin }),
-      );
+      await ctx.mailer.send({
+        ...scheduledReportMail({ to, subject: d.subject, text: d.text, origin: ctx.config.publicOrigin }),
+        ...(orgId ? { orgId } : {}),
+      });
     return { ok: true, retryable: false, durationMs: Date.now() - started };
   } catch (err) {
     return {
@@ -168,7 +173,9 @@ export async function attemptDelivery(
   if (!s) return null;
   const attempt = Number(run.attempts) + 1;
   const result =
-    delivery.kind === 'webhook' ? await postWebhook(ctx, s, runId, delivery) : await sendMail(ctx, delivery);
+    delivery.kind === 'webhook'
+      ? await postWebhook(ctx, s, runId, delivery)
+      : await sendMail(ctx, delivery, (s.org_id as string | null) ?? null);
   const now = ctx.clock.now();
   const retry = !result.ok && result.retryable && !opts.single && attempt < WEBHOOK_MAX_ATTEMPTS;
   const nextAttemptAt = retry ? new Date(now.getTime() + webhookBackoffMs(attempt)) : null;

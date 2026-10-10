@@ -624,9 +624,16 @@ export async function notifyProblem(ctx: Ctx, r: Row, kind: string, text: string
   const u = await one(ctx.pool, `SELECT email FROM users WHERE id=$1 AND status='active'`, [r.user_id]);
   if (u?.email) {
     try {
-      await ctx.mailer.send(
-        cloudProblemMail({ to: u.email, name: r.name, title, text: body, origin: ctx.config.publicOrigin }),
-      );
+      await ctx.mailer.send({
+        ...cloudProblemMail({
+          to: u.email,
+          name: r.name,
+          title,
+          text: body,
+          origin: ctx.config.publicOrigin,
+        }),
+        orgId: r.org_id,
+      });
     } catch (err) {
       ctx.log.warn({ err: String((err as Error)?.message ?? err) }, 'cloud workstation mail failed');
     }

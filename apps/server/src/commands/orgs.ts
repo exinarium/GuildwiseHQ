@@ -514,10 +514,11 @@ async function sendOrgInvitationMail(
   role: OrgRole,
   invitedBy: string,
   expiresAt: Date,
+  orgId: string,
 ) {
   try {
-    await ctx.mailer.send(
-      orgInvitationMail({
+    await ctx.mailer.send({
+      ...orgInvitationMail({
         to,
         link: invitationLink(ctx, token),
         orgName,
@@ -526,7 +527,8 @@ async function sendOrgInvitationMail(
         expiresAt,
         origin: ctx.config.publicOrigin,
       }),
-    );
+      orgId,
+    });
   } catch (err) {
     // The invitation exists; resend once mail is healthy.
     ctx.log.error({ err, to }, 'failed to send organization invitation mail');
@@ -608,6 +610,7 @@ export async function inviteOrgMember(
     // The inviter's display name; the mail names the organization separately.
     senderName({ displayName: a.session.user.displayName, email: a.session.user.email }),
     expiresAt,
+    a.orgId,
   );
   return invitationId;
 }
@@ -656,6 +659,7 @@ export async function resendOrgInvitation(ctx: Ctx, a: OrgAccess, invitationId: 
     // The inviter's display name; the mail names the organization separately.
     senderName({ displayName: a.session.user.displayName, email: a.session.user.email }),
     expiresAt,
+    a.orgId,
   );
 }
 
