@@ -1723,7 +1723,7 @@ Enforcement: every route calls a guard from `apps/server/src/auth/guards.ts` (`r
 - **Untrusted owner-controlled strings**: branch prefix, working branches, vault folder and repository/vault URLs are validated in `packages/shared/src/safe.ts` at the API (git ref rules, no leading `-`, no `..`; `https://`, `ssh://`, `git@host:path` only, no userinfo password and no http(s) user name; `file://`/path remotes only with `AOM_ALLOW_LOCAL_REMOTES`) and again by the runner, which also confines every path to its own directories. Migration `1100_scrub_url_credentials.sql` and the projectors scrub credentials from URLs stored before the rule (the append-only guard on `events` is lifted for that one redaction). Feed and citation URLs must be http(s) and the web app renders only http(s) hrefs.
 - **Access logs**: invitation tokens (`/api/invitations/<t>`, `/invite/<t>`) and `token=`/`code=` query values are redacted from logged URLs.
 - **Headers** (set in the app's `onSend` hook; the behaviour of `@fastify/helmet` without the dependency): `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' <ws(s) origin>; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'` (+ `upgrade-insecure-requests` on https), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Cross-Origin-Opener-Policy`, `Permissions-Policy`, and `Strict-Transport-Security` when `AOM_PUBLIC_ORIGIN` is https (Caddy adds it for real domains too). `style-src 'unsafe-inline'` is needed for React's inline `style` attributes only; there are no inline scripts. All input validated with zod at the route boundary (`fastify-type-provider-zod`).
-- **Secrets on the site**: only `DATABASE_URL`, SMTP credentials and `ANTHROPIC_API_KEY` (the landing-page assistant; section 29) in env. Session, runner and invitation tokens are random values looked up by hash, so no signing secret exists to leak.
+- **Secrets on the site**: only `DATABASE_URL`, SMTP credentials and `ANTHROPIC_API_KEY` (the landing-page assistant; section 30) in env. Session, runner and invitation tokens are random values looked up by hash, so no signing secret exists to leak.
 
 ---
 
@@ -1817,7 +1817,7 @@ Server env (`apps/server/src/config.ts`, zod-validated):
 | `AOM_SMTP_URL` | `smtp://127.0.0.1:1025` | Mailpit in dev |
 | `AOM_MAIL_FROM` | `Guildwise <noreply@aom.local>` | |
 | `AOM_SUPPORT_FROM` | unset | From of the support autoresponder and the super admin's replies (`MailMessage.from`); unset: `AOM_MAIL_FROM` |
-| `ANTHROPIC_API_KEY` | unset | **Secret.** Key of the Anthropic API for the public landing-page assistant (section 29). Server environment only; never in the web bundle, a response, an event or a log. Unset: the assistant is off |
+| `ANTHROPIC_API_KEY` | unset | **Secret.** Key of the Anthropic API for the public landing-page assistant (section 30). Server environment only; never in the web bundle, a response, an event or a log. Unset: the assistant is off |
 | `AOM_ASSISTANT` | `public` with a key, else `off` | Kill switch of the assistant (`off` or `public`) |
 | `AOM_ASSISTANT_PUBLIC_DAILY_USD` / `AOM_ASSISTANT_MODEL_PUBLIC` | `10` / `claude-haiku-4-5` | Daily spend ceiling in US dollars; model id |
 | `AOM_MIGRATE_ON_BOOT` | `true` | |

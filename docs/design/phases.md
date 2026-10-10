@@ -927,5 +927,5 @@ Decisions taken: SSH credentials are used for the one install login and never st
 
 - **Get started checklist.** Five steps computed from live state per organization (project, repository, workstation, team of ba/builder/reviewer/tester, talk to the BA), sidebar button and dialog, hide per user, reopen from Help, deep links with forms opened. Members see the progress; project and repository steps are Owner/Admin. The tour's last step points at it.
 - **Card notices (T1).** The board card carries `blockedReason`, `hygiene` and `budget`; each shows as a `CardNotice` banner with a fix link.
-- **Landing-page assistant (I1).** Public Q&A helper on Haiku 4.5 with a committed knowledge pack, SSE, per-IP limits, proof of work, daily spend cap ($10), env kill switch and a super admin switch. No in-app assistant. See ARCHITECTURE section 29 and DEPLOY.
+- **Landing-page assistant (I1).** Public Q&A helper on Haiku 4.5 with a committed knowledge pack, SSE, per-IP limits, proof of work, daily spend cap ($10), env kill switch and a super admin switch. No in-app assistant. See ARCHITECTURE section 30 and DEPLOY.
 
