@@ -20,6 +20,15 @@ export const userProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'UserTourStateChanged'>).payload;
     await exec(tx, 'UPDATE users SET tour_status=$2, tour_step=$3 WHERE id=$1', [p.userId, p.status, p.step]);
   },
+  UserWhatsNewSeen: async (tx, e) => {
+    const p = (e.event as EventOf<'UserWhatsNewSeen'>).payload;
+    await exec(
+      tx,
+      `UPDATE users SET whats_new_seen = ARRAY(SELECT DISTINCT x FROM unnest(whats_new_seen || $2::text[]) x ORDER BY x)
+        WHERE id=$1`,
+      [p.userId, p.entryIds],
+    );
+  },
   UserAvatarSet: async (tx, e) => {
     const p = (e.event as EventOf<'UserAvatarSet'>).payload;
     await exec(

@@ -18,6 +18,14 @@ export const UpdateTourRequestSchema = z.object({
 });
 export type UpdateTourRequest = z.infer<typeof UpdateTourRequestSchema>;
 
+export const WhatsNewSeenRequestSchema = z.object({
+  entryIds: z
+    .array(z.string().regex(/^[A-Za-z0-9._-]{1,200}$/))
+    .min(1)
+    .max(200),
+});
+export type WhatsNewSeenRequest = z.infer<typeof WhatsNewSeenRequestSchema>;
+
 export const UserDtoSchema = z.object({
   id: z.uuid(),
   email: z.string(),
@@ -34,6 +42,8 @@ export const UserDtoSchema = z.object({
   twoFactorEnabled: z.boolean().default(false),
   /** Only on `me`. Kept per user on the server, so the tour does not come back on another device. */
   tour: TourStateSchema.optional(),
+  /** Only on `me`. Ids of the "What's new" entries the user has seen (server-side, so it follows them across devices). */
+  whatsNewSeen: z.array(z.string()).optional(),
 });
 export type UserDto = z.infer<typeof UserDtoSchema>;
 

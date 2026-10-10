@@ -76,6 +76,21 @@ export async function setTourState(
   ]);
 }
 
+export async function markWhatsNewSeen(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  entryIds: string[],
+): Promise<void> {
+  await ctx.store.append([
+    {
+      streamId: streamId.user(user.id),
+      event: { type: 'UserWhatsNewSeen', payload: { userId: user.id, entryIds: [...new Set(entryIds)] } },
+      actor: userActor(user.id),
+      scope: userScope(user.id),
+    },
+  ]);
+}
+
 export async function setTimezone(ctx: Ctx, user: AuthSession['user'], timezone: string): Promise<void> {
   if (!isValidTimeZone(timezone)) throw badRequest('invalid_timezone', `${timezone} is not a time zone`);
   await ctx.store.append([

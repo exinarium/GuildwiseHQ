@@ -2,11 +2,12 @@ import {
   UpdateReportingRequestSchema,
   UpdateTimezoneRequestSchema,
   UpdateTourRequestSchema,
+  WhatsNewSeenRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireOrg, requireUser } from '../auth/guards.ts';
+import { requireOrg, requireSession, requireUser } from '../auth/guards.ts';
 import { requestedOrgId } from '../auth/org-context.ts';
-import { getReporting, setTimezone, setTourState, updateReporting } from '../commands/reporting.ts';
+import { getReporting, markWhatsNewSeen, setTimezone, setTourState, updateReporting } from '../commands/reporting.ts';
 import type { Ctx } from '../context.ts';
 import { meResponse } from './auth.ts';
 import { typed } from './util.ts';
@@ -35,6 +36,12 @@ export function reportingRoutes(ctx: Ctx) {
     app.put('/api/auth/tour', { schema: { body: UpdateTourRequestSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
       await setTourState(ctx, s.user, req.body.status, req.body.step);
+      return meResponse(ctx, s.user.id, requestedOrgId(req));
+    });
+
+    app.put('/api/auth/whats-new-seen', { schema: { body: WhatsNewSeenRequestSchema } }, async (req) => {
+      const s = await requireSession(ctx, req); // platform administrators have release notes too
+      await markWhatsNewSeen(ctx, s.user, req.body.entryIds);
       return meResponse(ctx, s.user.id, requestedOrgId(req));
     });
   };

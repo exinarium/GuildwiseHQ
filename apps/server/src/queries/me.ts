@@ -85,6 +85,7 @@ export async function buildMe(
     user: {
       ...toUserDto(u as Record<string, any>),
       tour: tourOf(ctx, u as Record<string, any>),
+      whatsNewSeen: ((u as Record<string, any>).whats_new_seen as string[] | null) ?? [],
     },
     account: { kind: session.user.kind },
     isAdmin: activeOrg ? activeOrg.role === 'owner' || activeOrg.role === 'admin' : false,

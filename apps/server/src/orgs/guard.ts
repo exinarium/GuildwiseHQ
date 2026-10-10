@@ -14,11 +14,11 @@ const ALLOWED_WHEN_SUSPENDED = [
   /^Invitation/,
   /^TwoFactor/,
   /^PlatformOrg/,
-  /^(ProjectMemberRemoved|ClaimReleased|CardRehomed|AgentRetired|PasswordChanged|UserAvatarSet|UserTimezoneChanged|UserTourStateChanged)$/,
+  /^(ProjectMemberRemoved|ClaimReleased|CardRehomed|AgentRetired|PasswordChanged|UserAvatarSet|UserTimezoneChanged|UserTourStateChanged|UserWhatsNewSeen)$/,
 ];
 const ALLOWED_WHEN_CANCELLED = [
   /^TwoFactor/,
-  /^(PasswordChanged|UserAvatarSet|UserTimezoneChanged|UserTourStateChanged)$/,
+  /^(PasswordChanged|UserAvatarSet|UserTimezoneChanged|UserTourStateChanged|UserWhatsNewSeen)$/,
 ];
 
 /**
