@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { useSetTimezone } from '../api/queries/reporting.ts';
 import { browserTimeZone } from '../lib/timezone.ts';
+import { ChangePasswordRequired } from '../pages/ChangePasswordRequired.tsx';
 import { SecuritySetup } from '../pages/SecuritySetup.tsx';
 import { getSocket, useSocketState } from '../ws/socket.ts';
 import { AppShell } from './shell/AppShell.tsx';
@@ -21,7 +22,8 @@ export function RequireAuth({ platform = false }: { platform?: boolean } = {}) {
   }, [setupRequired]);
   useEffect(() => {
     // No live socket while two-factor setup is pending (the server refuses it) or for a platform account's login page.
-    if (me.data && !me.data.twoFactor.setupRequired && !holdSetup) getSocket()?.start();
+    if (me.data && !me.data.twoFactor.setupRequired && !me.data.mustChangePassword && !holdSetup)
+      getSocket()?.start();
     else getSocket()?.stop();
   }, [me.data, holdSetup]);
   // First login: take the manager's time zone from the browser (the daily BA report is posted on their clock).
@@ -43,6 +45,8 @@ export function RequireAuth({ platform = false }: { platform?: boolean } = {}) {
     return <Navigate to={`/login${next === '/' ? '' : `?next=${encodeURIComponent(next)}`}`} replace />;
   }
   // An account that must have two-factor login sets it up first; a platform account never reaches the work shell.
+  // After an Owner set a temporary password nothing else is reachable until the member has chosen their own.
+  if (me.data.mustChangePassword) return <ChangePasswordRequired />;
   if (me.data.twoFactor.setupRequired || holdSetup)
     return <SecuritySetup me={me.data} onDone={() => setHoldSetup(false)} />;
   const isPlatform = me.data.account.kind === 'super_admin';

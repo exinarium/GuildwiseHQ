@@ -45,6 +45,10 @@ export async function requireUser(ctx: Ctx, req: FastifyRequest): Promise<AuthSe
 }
 
 function assertTwoFactorSetUp(s: AuthSession, req: FastifyRequest): void {
+  if (s.mustChangePassword && !path(req).startsWith('/api/auth/'))
+    throw new HttpError(403, 'password_change_required', 'choose a new password to continue', {
+      required: true,
+    });
   if (s.twoFactor.setupRequired && !path(req).startsWith('/api/auth/'))
     throw new HttpError(403, 'two_factor_setup_required', 'set up two-factor login to continue', {
       required: true,

@@ -49,6 +49,7 @@ const me = (timezone: string | null): MeResponse => ({
   guestProjectIds: [],
   pendingInvitations: 0,
   twoFactor: { enabled: false, required: false, setupRequired: false },
+  mustChangePassword: false,
   visibleProjectIds: [],
   features: { mockUi: false },
 });

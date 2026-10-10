@@ -266,6 +266,62 @@ describe('two-factor policy of an organization', () => {
   });
 });
 
+describe('the Owner resets a member’s password to a temporary one', () => {
+  it('shows the temporary password once, ends sessions, forces a change at next sign-in and keeps it out of the log', async () => {
+    const { owner, admin, member, as } = await acme();
+    // only the Owner may; not oneself
+    expect((await as(admin, 'POST', `/api/org/members/${member.id}/reset-password`)).status).toBe(403);
+    expect((await as(owner, 'POST', `/api/org/members/${owner.id}/reset-password`)).status).toBe(409);
+    expect(
+      (await as(owner, 'POST', '/api/org/members/00000000-0000-4000-8000-000000000000/reset-password'))
+        .status,
+    ).toBe(404);
+
+    const r = await as(owner, 'POST', `/api/org/members/${member.id}/reset-password`);
+    expect(r.status).toBe(200);
+    const temp = r.body.temporaryPassword as string;
+    expect(temp).toHaveLength(20);
+    expect(r.headers['cache-control']).toBe('no-store');
+    // the member's sessions ended; the old password no longer works
+    expect((await t.req('GET', '/api/auth/me', { cookie: member.cookie })).status).toBe(401);
+    expect(
+      (await t.req('POST', '/api/auth/login', { body: { email: member.email, password: PASSWORD } })).status,
+    ).toBe(401);
+    // nothing in the event log or the database carries the clear text
+    const events = await q(`SELECT payload::text AS p FROM events WHERE type='MemberPasswordReset'`);
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.some((e) => (e.p as string).includes(temp))).toBe(false);
+
+    // the temporary password signs in, but only the change-password step is reachable
+    const login = await t.req('POST', '/api/auth/login', { body: { email: member.email, password: temp } });
+    expect(login.status).toBe(200);
+    expect(login.body.mustChangePassword).toBe(true);
+    const cookie = login.cookie as string;
+    const blocked = await t.req('GET', '/api/projects', { cookie, headers: { 'x-aom-org': 'x' } });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.code).toBe('password_change_required');
+    expect((await t.req('GET', '/api/auth/me', { cookie })).body.mustChangePassword).toBe(true);
+    const NEXT = 'my-own-new-password-123';
+    expect(
+      (await t.req('POST', '/api/auth/password', { cookie, body: { current: temp, new: NEXT } })).status,
+    ).toBe(200);
+    const me = await t.req('GET', '/api/auth/me', { cookie });
+    expect(me.body.mustChangePassword).toBe(false);
+    expect(
+      (await t.req('POST', '/api/auth/login', { body: { email: member.email, password: NEXT } })).status,
+    ).toBe(200);
+  });
+
+  it('still asks for the second factor', async () => {
+    const { owner, member, as } = await acme();
+    await t.enableTwoFactor(member.id);
+    const temp = (await ok<any>(as(owner, 'POST', `/api/org/members/${member.id}/reset-password`)))
+      .temporaryPassword as string;
+    const login = await t.req('POST', '/api/auth/login', { body: { email: member.email, password: temp } });
+    expect(login.body).toMatchObject({ twoFactorRequired: true });
+  });
+});
+
 describe('a DevOps request belongs to the organization of the engineer that works it', () => {
   it('a request on a workstation whose user is not the organization id is stored under the organization', async () => {
     const { owner, org, as } = await acme();

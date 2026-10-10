@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import {
   type AssignableOrgRole,
   canAddPeople,
@@ -16,7 +16,7 @@ import {
   streamId,
 } from '@aom/shared';
 import { type OrgAccess, orgRoleOf } from '../auth/org-context.ts';
-import { verifyPassword } from '../auth/password.ts';
+import { hashPassword, verifyPassword } from '../auth/password.ts';
 import { disableTwoFactorIn } from '../auth/two-factor.ts';
 import type { Ctx } from '../context.ts';
 import { randomToken, sha256Hex } from '../crypto.ts';
@@ -418,6 +418,64 @@ export async function resetMemberTwoFactor(ctx: Ctx, a: OrgAccess, userId: strin
     await tx.query('DELETE FROM auth_sessions WHERE user_id=$1', [userId]);
   });
   ctx.services.browser.closeUser(userId);
+}
+
+/** Letters and digits without look-alikes (no 0/O, 1/l/I), so a password read out or typed by hand is not misread. */
+const TEMP_ALPHABET = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/** A strong random temporary password: 20 characters, about 114 bits. */
+export function generateTemporaryPassword(): string {
+  const out: string[] = [];
+  while (out.length < 20) {
+    for (const b of randomBytes(32)) {
+      if (b < 256 - (256 % TEMP_ALPHABET.length) && out.length < 20)
+        out.push(TEMP_ALPHABET[b % TEMP_ALPHABET.length] as string);
+    }
+  }
+  return out.join('');
+}
+
+/**
+ * An Owner sets a temporary password for a member (they lost their password and the reset mail does not reach them).
+ * The server makes it, returns it ONCE for the Owner to pass on, and never logs it: only its hash is stored, in an
+ * event that carries no clear text. Every session of the member ends, and at next sign-in they must choose their
+ * own password before anything else (two-factor still applies). The account is global: if the member belongs to other
+ * organizations, their password changes there too.
+ */
+export async function resetMemberPassword(
+  ctx: Ctx,
+  a: OrgAccess,
+  userId: string,
+): Promise<{ temporaryPassword: string }> {
+  if (a.role !== 'owner') throw forbidden('only the Owner can reset a member’s password');
+  if (userId === a.session.user.id)
+    throw conflict('use_change_password', 'change your own password under Account, Security');
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await hashPassword(temporaryPassword);
+  await withAppendTx(ctx.pool, async (tx) => {
+    await activeMember(tx, a.orgId, userId);
+    const u = await one(tx, 'SELECT kind, status FROM users WHERE id=$1 FOR UPDATE', [userId]);
+    if (u?.kind === 'super_admin') throw forbidden('platform accounts are managed on the server');
+    if (u?.status !== 'active') throw conflict('user_deactivated', 'this account is deactivated');
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.user(userId),
+          event: {
+            type: 'MemberPasswordReset',
+            payload: { userId, orgId: a.orgId, by: a.session.user.id, passwordHash },
+          },
+          actor: userActor(a.session.user.id),
+          scope: orgScope(a.orgId),
+        },
+      ],
+      { tx },
+    );
+    await tx.query('DELETE FROM login_challenges WHERE user_id=$1', [userId]);
+    await tx.query('DELETE FROM auth_sessions WHERE user_id=$1', [userId]);
+  });
+  ctx.services.browser.closeUser(userId);
+  return { temporaryPassword };
 }
 
 // ----------------------------------------------------------------------------------------- invitations

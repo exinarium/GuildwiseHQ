@@ -231,6 +231,15 @@ export function useResetLinkValid(token: string) {
   });
 }
 
+/** The signed-in user changes their own password (also the forced change after an Owner's temporary password). */
+export function useChangePassword() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { current: string; new: string }) => post('/auth/password', v),
+    onSuccess: () => qc.invalidateQueries({ queryKey: meKey }),
+  });
+}
+
 export function useConfirmPasswordReset() {
   return useMutation({
     mutationFn: (v: { token: string; password: string }) => post('/auth/password-reset/confirm', v),

@@ -126,6 +126,14 @@ export const userEvents = [
     z.object({ userId: Id, entryIds: z.array(z.string().min(1).max(200)).min(1).max(200) }),
   ),
   defineEvent('PasswordChanged', z.object({ userId: Id, passwordHash: z.string().min(1) })),
+  /**
+   * An organization Owner set a temporary password for a member (the temporary password itself is never in the log).
+   * The member must choose a new password at next sign-in (`must_change_password`, cleared by `PasswordChanged`).
+   */
+  defineEvent(
+    'MemberPasswordReset',
+    z.object({ userId: Id, orgId: Id, by: Id, passwordHash: z.string().min(1) }),
+  ),
   /** A super admin sent the user a password reset link (the platform audit log shows it). The link itself is not in the log. */
   defineEvent('PasswordResetLinkSent', z.object({ userId: Id, by: Id, meta: EventMetaSchema })),
 ] as const;

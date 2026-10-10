@@ -122,7 +122,7 @@ export class BrowserGateway {
       return null;
     }
     // Platform accounts see the `admin` audience only; two-factor setup pending: nothing.
-    if (session.twoFactor.setupRequired) {
+    if (session.twoFactor.setupRequired || session.mustChangePassword) {
       socket.close(4403, 'two-factor setup required');
       return null;
     }

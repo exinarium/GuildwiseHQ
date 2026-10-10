@@ -113,6 +113,14 @@ export function useResetMemberTwoFactor() {
   });
 }
 
+/** The temporary password comes back in this response only: show it once, never store it. */
+export function useResetMemberPassword() {
+  return useMutation({
+    mutationFn: (userId: string) =>
+      post<{ temporaryPassword: string }>(`/org/members/${userId}/reset-password`, {}),
+  });
+}
+
 export function useOrgInvitations() {
   return useQuery({
     queryKey: ['org-invitations'],

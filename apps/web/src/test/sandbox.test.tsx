@@ -169,6 +169,7 @@ beforeEach(() => {
         visibleProjectIds: [],
         pendingInvitations: 0,
         twoFactor: { enabled: false, required: false, setupRequired: false },
+        mustChangePassword: false,
         features: { mockUi: false },
       });
     if (path === '/api/agents/name-suggestions') return json({ names: [] });

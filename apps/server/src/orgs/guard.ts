@@ -12,6 +12,7 @@ import type { Interceptor } from '../eventstore/pg-event-store.ts';
 const ALLOWED_WHEN_SUSPENDED = [
   /^Org/,
   /^Invitation/,
+  /^MemberPasswordReset$/,
   /^TwoFactor/,
   /^PlatformOrg/,
   /^(ProjectMemberRemoved|ClaimReleased|CardRehomed|AgentRetired|PasswordChanged|UserAvatarSet|UserTimezoneChanged|UserTourStateChanged|UserWhatsNewSeen)$/,

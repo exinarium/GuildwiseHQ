@@ -37,6 +37,8 @@ export interface AuthSession {
   /** The organization remembered for this session (the request header wins). */
   activeOrgId: string | null;
   twoFactor: SessionTwoFactor;
+  /** An Owner set a temporary password: until the user chooses their own, the session reaches `/api/auth/*` only. */
+  mustChangePassword: boolean;
 }
 
 export async function createSession(
@@ -77,7 +79,7 @@ export async function lookupSession(ctx: Ctx, token: string | undefined): Promis
   const r = await one(
     ctx.pool,
     `SELECT s.id AS sid, s.last_seen_at, s.expires_at, s.active_org_id, u.id, u.email, u.display_name, u.legacy_role,
-            u.kind, u.status, u.created_at, u.last_login_at, u.last_org_id, u.two_factor_enabled,
+            u.kind, u.status, u.created_at, u.last_login_at, u.last_org_id, u.two_factor_enabled, u.must_change_password,
             ${TWO_FACTOR_REQUIRED_SQL} AS two_factor_required
        FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.id = $1`,
     [id],
@@ -110,6 +112,7 @@ function toSession(r: Record<string, any>, sessionId: string): AuthSession {
     sessionId,
     activeOrgId: r.active_org_id ?? null,
     twoFactor: { enabled, required, setupRequired: required && !enabled },
+    mustChangePassword: Boolean(r.must_change_password),
     user: {
       id: r.id,
       email: r.email,
@@ -129,7 +132,7 @@ export async function sessionOfUser(ctx: Ctx, userId: string): Promise<AuthSessi
   const r = await one(
     ctx.pool,
     `SELECT NULL::text AS active_org_id, u.id, u.email, u.display_name, u.legacy_role, u.kind, u.status, u.created_at,
-            u.last_login_at, u.last_org_id, u.two_factor_enabled, ${TWO_FACTOR_REQUIRED_SQL} AS two_factor_required
+            u.last_login_at, u.last_org_id, u.two_factor_enabled, u.must_change_password, ${TWO_FACTOR_REQUIRED_SQL} AS two_factor_required
        FROM users u WHERE u.id = $1`,
     [userId],
   );

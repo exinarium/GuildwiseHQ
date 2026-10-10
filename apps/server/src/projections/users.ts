@@ -150,6 +150,16 @@ export const userProjectors: Record<string, Projector> = {
   },
   PasswordChanged: async (tx, e) => {
     const p = (e.event as EventOf<'PasswordChanged'>).payload;
-    await exec(tx, 'UPDATE users SET password_hash=$2 WHERE id=$1', [p.userId, p.passwordHash]);
+    await exec(tx, 'UPDATE users SET password_hash=$2, must_change_password=false WHERE id=$1', [
+      p.userId,
+      p.passwordHash,
+    ]);
+  },
+  MemberPasswordReset: async (tx, e) => {
+    const p = (e.event as EventOf<'MemberPasswordReset'>).payload;
+    await exec(tx, 'UPDATE users SET password_hash=$2, must_change_password=true WHERE id=$1', [
+      p.userId,
+      p.passwordHash,
+    ]);
   },
 };

@@ -1,5 +1,5 @@
 import { ORG_ROLE_LABEL, type OrgMemberDto } from '@aom/shared';
-import { ShieldCheck, UserPlus, Users } from 'lucide-react';
+import { Copy, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { useState } from 'react';
 import {
   useChangeMemberRole,
@@ -7,6 +7,7 @@ import {
   useOrgMembers,
   useRemovalPreview,
   useRemoveMember,
+  useResetMemberPassword,
   useResetMemberTwoFactor,
   useSetMemberProjects,
 } from '../../api/queries/orgs.ts';
@@ -39,9 +40,13 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
   const toast = useToast();
   const role = useChangeMemberRole();
   const reset = useResetMemberTwoFactor();
+  const resetPassword = useResetMemberPassword();
   const remove = useRemoveMember();
   const setProjects = useSetMemberProjects();
   const [inviting, setInviting] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState<OrgMemberDto | null>(null);
+  // The temporary password lives in this state only while its dialog is open (shown once, never stored).
+  const [temporary, setTemporary] = useState<{ name: string; password: string } | null>(null);
   const [removing, setRemoving] = useState<OrgMemberDto | null>(null);
   const [assigning, setAssigning] = useState<OrgMemberDto | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
@@ -163,6 +168,14 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
                         Reset two-factor login
                       </MenuItem>
                     )}
+                    {me.role === 'owner' && m.userId !== me.userId && (
+                      <MenuItem
+                        description="Give them a temporary password to pass on"
+                        onSelect={() => setResettingPassword(m)}
+                      >
+                        Reset password
+                      </MenuItem>
+                    )}
                     {canTouch(m) && <MenuSeparator />}
                     {canTouch(m) && (
                       <MenuItem danger onSelect={() => setRemoving(m)}>
@@ -177,7 +190,7 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
         ))}
       </ul>
       <div className="px-4 pb-3 empty:hidden">
-        <ErrorBox error={role.error ?? reset.error ?? remove.error} />
+        <ErrorBox error={role.error ?? reset.error ?? remove.error ?? resetPassword.error} />
       </div>
       <InviteDialog
         open={inviting}
@@ -187,6 +200,61 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
         used={used}
         max={max ?? null}
       />
+
+      <ConfirmDialog
+        open={!!resettingPassword}
+        onOpenChange={(o) => !o && setResettingPassword(null)}
+        title={`Reset the password of ${resettingPassword?.displayName ?? ''}?`}
+        description="You get a temporary password to pass on yourself (no email is sent). They are signed out everywhere, and must choose their own password the next time they sign in."
+        confirmLabel="Reset password"
+        pending={resetPassword.isPending}
+        onConfirm={() =>
+          resettingPassword &&
+          resetPassword.mutate(resettingPassword.userId, {
+            onSuccess: (r) => {
+              setTemporary({ name: resettingPassword.displayName, password: r.temporaryPassword });
+              setResettingPassword(null);
+            },
+            onError: () => setResettingPassword(null),
+          })
+        }
+      >
+        <p className="text-sm text-muted" data-testid="reset-password-global-note">
+          A Guildwise HQ account is one account for every organization. If {resettingPassword?.displayName}{' '}
+          also belongs to other organizations, this new password applies there too.
+        </p>
+      </ConfirmDialog>
+
+      <Dialog
+        open={!!temporary}
+        onOpenChange={(o) => !o && setTemporary(null)}
+        title={`Temporary password for ${temporary?.name ?? ''}`}
+        description="This is shown once. Copy it and send it to them yourself, in a message only they can read. We do not keep it."
+        footer={
+          <Button variant="primary" onClick={() => setTemporary(null)}>
+            Done
+          </Button>
+        }
+      >
+        <div className="flex items-center gap-2">
+          <code
+            className="flex-1 rounded-[8px] bg-neutral-soft px-3 py-2 font-mono text-base break-all select-all"
+            data-testid="temporary-password"
+          >
+            {temporary?.password}
+          </code>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              void navigator.clipboard?.writeText(temporary?.password ?? '');
+              toast.success('Copied');
+            }}
+          >
+            <Copy aria-hidden="true" className="size-4" />
+            Copy
+          </Button>
+        </div>
+      </Dialog>
 
       <ConfirmDialog
         open={!!removing}

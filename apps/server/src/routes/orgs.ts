@@ -24,6 +24,7 @@ import {
   removeOrgMember,
   renameOrg,
   resendOrgInvitation,
+  resetMemberPassword,
   resetMemberTwoFactor,
   revokeOrgInvitation,
   setMemberProjects,
@@ -158,6 +159,20 @@ export function orgRoutes(ctx: Ctx) {
         const a = await requireOrg(ctx, req, { min: 'owner' });
         await resetMemberTwoFactor(ctx, a, req.params.userId);
         return { ok: true };
+      },
+    );
+
+    // The temporary password is in this response only; it is not stored, logged or mailed.
+    app.post(
+      '/api/org/members/:userId/reset-password',
+      {
+        schema: { params: OrgMemberParamsSchema },
+        config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+      },
+      async (req, reply) => {
+        const a = await requireOrg(ctx, req, { min: 'owner' });
+        reply.header('Cache-Control', 'no-store');
+        return resetMemberPassword(ctx, a, req.params.userId);
       },
     );
 

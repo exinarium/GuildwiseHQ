@@ -73,6 +73,8 @@ export const MeResponseSchema = z.object({
   visibleProjectIds: z.array(z.uuid()),
   /** Org member invitations to this email plus pending project shares. */
   pendingInvitations: z.number().int().default(0),
+  /** An Owner set a temporary password: the app shows only the "choose a new password" page until it is done. */
+  mustChangePassword: z.boolean().default(false),
   twoFactor: TwoFactorStateSchema.default({ enabled: false, required: false, setupRequired: false }),
   /** Server feature flags the UI follows. `mockUi`: show the mock-runtime card fields (dev and e2e only). */
   /** `whatsNew`: the "What's new" popup is on (off together with the tour auto-start, AOM_TOUR_AUTOSTART=false, as in the e2e suite). */
