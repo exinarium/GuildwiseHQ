@@ -75,9 +75,11 @@ describe('completion: merge on a protected working branch (owner decision C9)', 
     const before = sh(repo.origin, 'git', ['rev-parse', 'main']);
     const pr = new FakePr({ url: 'https://host/acme/web/pull/3' });
     const res = await run(repo, payload(repo, path), pr, blocked);
+    // Reported as a pull request (with protectedBranch), so the server records a PR and switches the project default.
     expect(res).toMatchObject({
       ok: true,
-      action: 'merge',
+      action: 'pr',
+      protectedBranch: true,
       pushedBranch: BRANCH,
       prUrl: 'https://host/acme/web/pull/3',
     });
@@ -96,7 +98,7 @@ describe('completion: merge on a protected working branch (owner decision C9)', 
       new FakePr({ unavailable: 'plain git has no pull requests' }),
       blocked,
     );
-    expect(res.ok).toBe(true);
+    expect(res).toMatchObject({ ok: true, action: 'pr', protectedBranch: true });
     expect(res.notice).toMatch(/open the pull request by hand/);
     expect(sh(repo.origin, 'git', ['branch', '--list'])).toContain(BRANCH);
   });
@@ -124,7 +126,12 @@ describe('completion: merge on a protected working branch (owner decision C9)', 
       new FakePr({ url: 'https://host/pull/1' }),
       async () => null,
     );
-    expect(res).toMatchObject({ ok: true, action: 'merge', prUrl: 'https://host/pull/1' });
+    expect(res).toMatchObject({
+      ok: true,
+      action: 'pr',
+      protectedBranch: true,
+      prUrl: 'https://host/pull/1',
+    });
     expect(res.mergeCommit).toBeUndefined();
     expect(res.notice).toMatch(/refused a direct push/);
   });

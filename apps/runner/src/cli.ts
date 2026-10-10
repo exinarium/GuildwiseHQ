@@ -40,8 +40,8 @@ import {
 import { resolveDataDir, runnerPaths } from './paths.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
-import { preparePairing } from './up.ts';
 import { realExecutor } from './toolchain/exec.ts';
+import { preparePairing } from './up.ts';
 import { RUNNER_VERSION } from './version.ts';
 
 const dataDirOpt = [

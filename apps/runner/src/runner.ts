@@ -22,7 +22,6 @@ import { Outbox } from './connection/outbox.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ExternalAdapters } from './external/index.ts';
 import { OutboundExecutor } from './external/outbound.ts';
-import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import { recheckFile } from './forge/connect.ts';
 import {
   branchRulesFor,
@@ -33,7 +32,7 @@ import {
   gitConnections,
 } from './forge/index.ts';
 import type { ForgeEnv } from './forge/types.ts';
-import { executeCompletion } from './git/completion.ts';
+import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { scanRepos } from './git/repo-scan.ts';
