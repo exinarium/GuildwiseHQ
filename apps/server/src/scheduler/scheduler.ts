@@ -1,5 +1,4 @@
 import { evaluateAllBudgets } from '../commands/budgets.ts';
-import { deskMailTick } from '../commands/desk-mail.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
@@ -66,8 +65,6 @@ export class Scheduler {
       await evaluateAllBudgets(this.ctx).catch((err) => this.ctx.log.error({ err }, 'budget check failed'));
       await this.interests();
       await this.triggers();
-      // Mail for new desk items goes to the support address, after the fact and outside any event transaction.
-      await deskMailTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'desk mail failed'));
       return fired;
     });
     this.chain = next.catch(() => {});

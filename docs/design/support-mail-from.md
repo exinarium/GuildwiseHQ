@@ -6,7 +6,7 @@ Owner's request: "If the email is support@guildwisehq.com that sends the auto re
 
 - One transport, one From: `createMailer(AOM_SMTP_URL, AOM_MAIL_FROM)` (`mail/mailer.ts`). Default `Guildwise HQ <noreply@aom.local>`; production sets it to a `noreply@` address. There is no envelope-sender override: nodemailer derives the SMTP envelope sender (MAIL FROM / Return-Path) from the From address.
 - The autoresponder (`supportReceivedMail`) and the super admin's ticket reply (`supportReplyMail`, `replyToTicket`) both go out From `AOM_MAIL_FROM` with `Reply-To` = the first address of the platform setting `support_email` (else `AOM_SUPPORT_EMAIL`). So the customer sees `noreply@...` as sender and a reply lands in the support mailbox, not in the ticket.
-- The notifications to staff (`supportNewMail`, `supportFollowUpMail`, desk mail) go From `AOM_MAIL_FROM` with Reply-To = the customer.
+- The notifications to staff (`supportNewMail`, `supportFollowUpMail`,) go From `AOM_MAIL_FROM` with Reply-To = the customer.
 - No Message-ID, In-Reply-To or References are set (nodemailer generates a random Message-ID), so mail programs thread only by subject (`Re: [SUP-123] ...`). There is no inbound mail: the ticket only learns of the customer's answer through the web form (signed-in users) or not at all (visitors).
 
 ## Built (small, safe)
