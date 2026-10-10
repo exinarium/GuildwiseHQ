@@ -29,6 +29,10 @@ export interface TourStep {
   body: string;
   /** Where to read more: `slug#anchor` of a help article (shown as "Read more"). */
   more?: string;
+  /** The getting-started video player is shown inside the card (text only when there is no video file). */
+  video?: boolean;
+  /** The label of the Next button, when it is not "Next". */
+  nextLabel?: string;
 }
 
 /** The sidebar entries of the app, in order, with what each is for. `nav` is the entry's id in nav-config. */
@@ -103,6 +107,16 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
 const navStep = (nav: keyof typeof NAV_STEPS & string): TourStep => {
   const s = NAV_STEPS[nav] as { title: string; body: string; more?: string };
   return { id: nav, target: `nav-${nav}`, drawer: true, ...s };
+};
+
+/** The first step of the work tour: the 3-minute training video, then the tour itself. */
+const VIDEO: TourStep = {
+  id: 'video',
+  title: 'Watch the 3-minute getting-started video',
+  body: 'A short voice-over shows the five steps to get going: create a project, hire agents, create cards, talk to the business analyst and test what they build. Watch it now, or any time from Help, then take the tour.',
+  more: 'getting-started#training-video',
+  video: true,
+  nextLabel: 'Next: take the tour',
 };
 
 const WELCOME: TourStep = {
@@ -230,6 +244,7 @@ export function tourSteps(role: TourRole, nav: ReadonlySet<string>): TourStep[] 
   switch (role) {
     case 'manager':
       return [
+        VIDEO,
         WELCOME,
         ...only(
           'board',
@@ -251,6 +266,7 @@ export function tourSteps(role: TourRole, nav: ReadonlySet<string>): TourStep[] 
       ];
     case 'member':
       return [
+        VIDEO,
         WELCOME,
         ...only(
           'board',

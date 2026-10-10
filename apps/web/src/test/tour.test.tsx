@@ -35,6 +35,7 @@ describe('the tour steps', () => {
   it('Owner and Admin see every sidebar area, from the board to settings, then the palette and Help', () => {
     const steps = ids('manager', ALL_NAV);
     expect(steps).toEqual([
+      'video',
       'welcome',
       'board',
       'desk',
@@ -55,6 +56,16 @@ describe('the tour steps', () => {
       'help',
       'done',
     ]);
+  });
+
+  it('the first step of the Owner, Admin and Member tours is the training video; Guests and the platform tour have none', () => {
+    for (const role of ['manager', 'member'] as const) {
+      const first = tourSteps(role, new Set(ALL_NAV))[0];
+      expect(first).toMatchObject({ id: 'video', video: true, nextLabel: 'Next: take the tour' });
+      expect(first?.title).toBe('Watch the 3-minute getting-started video');
+    }
+    expect(tourSteps('guest', new Set(ALL_NAV)).some((s) => s.video)).toBe(false);
+    expect(tourSteps('platform', new Set()).some((s) => s.video)).toBe(false);
   });
 
   it('a Member has no Intake, Costs or Vaults step', () => {
@@ -148,6 +159,7 @@ const makeMe = (tour: unknown, over: Record<string, unknown> = {}) =>
 
 beforeEach(() => {
   puts.length = 0;
+  videoInfo = null;
   workstations = [{ id: U, status: 'active' }];
   vi.stubGlobal(
     'fetch',
@@ -160,12 +172,15 @@ beforeEach(() => {
         return json(me);
       }
       if (url === '/api/workstations') return json({ workstations });
+      if (url === '/videos/getting-started.json')
+        return videoInfo ? json(videoInfo) : new Response('<html></html>', { status: 200 });
       return json({});
     }),
   );
 });
 afterEach(() => vi.unstubAllGlobals());
 
+let videoInfo: unknown = null;
 const NAV = new Set(['board', 'desk', 'workstations', 'settings', 'help']);
 
 function Where() {
@@ -212,19 +227,22 @@ describe('the first-login tour', () => {
     const user = userEvent.setup();
     mount();
     const dlg = await screen.findByRole('dialog');
-    expect(screen.getByTestId('tour-title')).toHaveTextContent('Welcome to Guildwise HQ');
+    expect(screen.getByTestId('tour-title')).toHaveTextContent('Watch the 3-minute getting-started video');
     expect(screen.getByTestId('tour-progress')).toHaveTextContent(/Step 1 of \d+/);
-    expect(dlg).toHaveAccessibleName('Welcome to Guildwise HQ');
+    expect(dlg).toHaveAccessibleName('Watch the 3-minute getting-started video');
+    expect(screen.getByTestId('tour-next')).toHaveTextContent('Next: take the tour');
     expect(screen.queryByTestId('tour-back')).toBeNull();
     await waitFor(() => expect(puts[0]).toEqual({ status: 'in_progress', step: 0 }));
 
     await user.click(screen.getByTestId('tour-next'));
+    expect(screen.getByTestId('tour-title')).toHaveTextContent('Welcome to Guildwise HQ');
+    await user.click(screen.getByTestId('tour-next'));
     expect(screen.getByTestId('tour-title')).toHaveTextContent('Board');
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2');
-    expect(puts.at(-1)).toEqual({ status: 'in_progress', step: 1 });
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '3');
+    expect(puts.at(-1)).toEqual({ status: 'in_progress', step: 2 });
     await user.click(screen.getByTestId('tour-back'));
     expect(screen.getByTestId('tour-title')).toHaveTextContent('Welcome');
-    expect(puts.at(-1)).toEqual({ status: 'in_progress', step: 0 });
+    expect(puts.at(-1)).toEqual({ status: 'in_progress', step: 1 });
   });
 
   it('Skip dismisses it for good and Esc does the same; Resume carries on from the saved step', async () => {
@@ -306,6 +324,7 @@ describe('the first-login tour', () => {
     mount({ mobile: true, onDrawer });
     await screen.findByRole('dialog');
     await user.click(screen.getByTestId('tour-next'));
+    await user.click(screen.getByTestId('tour-next'));
     await waitFor(() => expect(onDrawer).toHaveBeenLastCalledWith(true));
     await user.click(screen.getByTestId('tour-skip'));
     await waitFor(() => expect(onDrawer).toHaveBeenLastCalledWith(false));
@@ -315,5 +334,55 @@ describe('the first-login tour', () => {
     me = makeMe({ status: 'new', step: 0 }, { activeOrg: null });
     mount();
     expect(await screen.findByRole('dialog')).toHaveTextContent(/invited to work on someone else/);
+  });
+
+  it('the first step shows the training video with captions and chapters, and pauses it when moving on', async () => {
+    videoInfo = {
+      title: 'Getting started with Guildwise HQ',
+      src: '/videos/getting-started.mp4',
+      type: 'video/mp4',
+      captions: '/videos/getting-started.vtt',
+      duration: 180,
+      chapters: [
+        { t: 0, title: 'Create your first project' },
+        { t: 30, title: 'Hire your agents' },
+      ],
+    };
+    me = makeMe({ status: 'new', step: 0 });
+    const user = userEvent.setup();
+    mount();
+    const player = (await screen.findByTestId('getting-started-player')) as HTMLVideoElement;
+    expect(screen.getByTestId('tour-video')).toContainElement(player);
+    expect(player.querySelector('track')).toHaveAttribute('kind', 'captions');
+    expect(screen.getByTestId('video-chapter-2')).toBeInTheDocument();
+    const pause = vi.fn();
+    player.pause = pause;
+    await user.click(screen.getByTestId('tour-next'));
+    expect(pause).toHaveBeenCalled();
+    expect(screen.queryByTestId('getting-started-player')).toBeNull();
+    expect(screen.getByTestId('tour-title')).toHaveTextContent('Welcome to Guildwise HQ');
+  });
+
+  it('shows the text intro only when the video file is missing, and the tour carries on', async () => {
+    videoInfo = null; // an HTML fallback page instead of the JSON
+    me = makeMe({ status: 'new', step: 0 });
+    const user = userEvent.setup();
+    mount();
+    await screen.findByRole('dialog');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByTestId('getting-started-player')).toBeNull();
+    expect(screen.getByRole('dialog')).toHaveTextContent(/five steps to get going/);
+    await user.click(screen.getByTestId('tour-next'));
+    expect(screen.getByTestId('tour-title')).toHaveTextContent('Welcome to Guildwise HQ');
+  });
+
+  it('Skip tour on the video step closes the tour as skipped', async () => {
+    me = makeMe({ status: 'new', step: 0 });
+    const user = userEvent.setup();
+    mount();
+    await screen.findByRole('dialog');
+    await user.click(screen.getByTestId('tour-skip'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(puts.at(-1)).toEqual({ status: 'dismissed', step: 0 });
   });
 });

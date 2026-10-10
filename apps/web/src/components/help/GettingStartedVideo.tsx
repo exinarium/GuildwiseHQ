@@ -23,15 +23,9 @@ function isInfo(v: unknown): v is VideoInfo {
   return !!i && typeof i.src === 'string' && Array.isArray(i.chapters);
 }
 
-/**
- * The "Getting started" video with its chapters (create a project, hire agents, create cards, talk to the BA, test your
- * project). The video is a static file recorded by `pnpm --filter @aom/e2e video`; until it exists, or when it cannot be
- * loaded, a short "coming soon" note takes its place (the written article below says the same).
- */
-export function GettingStartedVideo() {
+/** Loads the video's description once per mounting; `null` while loading, `'none'` when there is no video yet. */
+export function useVideoInfo(): VideoInfo | null | 'none' {
   const [info, setInfo] = useState<VideoInfo | null | 'none'>(null);
-  const [broken, setBroken] = useState(false);
-  const video = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     let live = true;
     fetch(VIDEO_INFO_URL, { headers: { accept: 'application/json' } })
@@ -42,13 +36,82 @@ export function GettingStartedVideo() {
       live = false;
     };
   }, []);
-  if (info === null) return null;
+  return info;
+}
+
+/**
+ * The player with its captions and one button per chapter. `onBroken` is told when no encoding can be loaded. The video
+ * is paused when the player goes away (the tour moves to its next step).
+ */
+export function VideoPlayer({ info, onBroken }: { info: VideoInfo; onBroken: () => void }) {
+  const video = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const v = video.current;
+    return () => v?.pause?.();
+  }, []);
   const seek = (t: number) => {
     const v = video.current;
     if (!v) return;
     v.currentTime = t;
     void v.play?.()?.catch?.(() => undefined);
   };
+  return (
+    <>
+      <video
+        ref={video}
+        controls
+        preload="metadata"
+        playsInline
+        data-testid="getting-started-player"
+        aria-label={info.title}
+        className="aspect-video w-full rounded-control bg-black"
+        onError={onBroken}
+      >
+        {(info.sources?.length ? info.sources : [{ src: info.src, type: info.type }]).map((s, i, all) => (
+          <source
+            key={s.src}
+            src={s.src}
+            type={s.type}
+            {...(i === all.length - 1 ? { onError: onBroken } : {})}
+          />
+        ))}
+        {/* the narration as captions (on by default; the CC button turns them off) */}
+        <track
+          kind="captions"
+          src={info.captions ?? '/videos/getting-started.vtt'}
+          srcLang="en"
+          label="English"
+          default
+        />
+      </video>
+      <ol className="mt-3 flex flex-wrap gap-2" aria-label="Chapters">
+        {info.chapters.map((c, i) => (
+          <li key={c.title}>
+            <button
+              type="button"
+              onClick={() => seek(c.t)}
+              data-testid={`video-chapter-${i + 1}`}
+              className="inline-flex min-h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm text-fg hover:bg-sunken"
+            >
+              <span className="tnum text-xs text-subtle">{clock(c.t)}</span>
+              {i + 1}. {c.title}
+            </button>
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
+/**
+ * The "Getting started" video with its chapters (create a project, hire agents, create cards, talk to the BA, test your
+ * project). The video is a static file recorded by `pnpm --filter @aom/e2e video`; until it exists, or when it cannot be
+ * loaded, a short "coming soon" note takes its place (the written article below says the same).
+ */
+export function GettingStartedVideo() {
+  const info = useVideoInfo();
+  const [broken, setBroken] = useState(false);
+  if (info === null) return null;
   return (
     <section
       aria-labelledby="gs-video-h"
@@ -73,50 +136,7 @@ export function GettingStartedVideo() {
           The getting-started video is coming soon. The steps are written out in the Getting started article.
         </p>
       ) : (
-        <>
-          <video
-            ref={video}
-            controls
-            preload="metadata"
-            playsInline
-            data-testid="getting-started-player"
-            aria-label={info.title}
-            className="aspect-video w-full rounded-control bg-black"
-            onError={() => setBroken(true)}
-          >
-            {(info.sources?.length ? info.sources : [{ src: info.src, type: info.type }]).map((s, i, all) => (
-              <source
-                key={s.src}
-                src={s.src}
-                type={s.type}
-                {...(i === all.length - 1 ? { onError: () => setBroken(true) } : {})}
-              />
-            ))}
-            {/* the narration as captions (on by default; the CC button turns them off) */}
-            <track
-              kind="captions"
-              src={info.captions ?? '/videos/getting-started.vtt'}
-              srcLang="en"
-              label="English"
-              default
-            />
-          </video>
-          <ol className="mt-3 flex flex-wrap gap-2" aria-label="Chapters">
-            {info.chapters.map((c, i) => (
-              <li key={c.title}>
-                <button
-                  type="button"
-                  onClick={() => seek(c.t)}
-                  data-testid={`video-chapter-${i + 1}`}
-                  className="inline-flex min-h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm text-fg hover:bg-sunken"
-                >
-                  <span className="tnum text-xs text-subtle">{clock(c.t)}</span>
-                  {i + 1}. {c.title}
-                </button>
-              </li>
-            ))}
-          </ol>
-        </>
+        <VideoPlayer info={info} onBroken={() => setBroken(true)} />
       )}
     </section>
   );

@@ -7,6 +7,7 @@ import { useWorkstations } from '../../api/queries/workstations.ts';
 import { helpBase, helpPath } from '../../help/articles.ts';
 import { type TourStep, tourRoleOf, tourSteps, WORKSTATION_OFFER } from '../../lib/tour.ts';
 import { Button } from '../ui.tsx';
+import { TourVideo } from './TourVideo.tsx';
 import { type TourApi, TourContext } from './TourContext.tsx';
 
 /** How far the lit-up area reaches past the element, and the gap between it and the card. */
@@ -113,6 +114,7 @@ function Card({
   const ref = useRef<HTMLDivElement>(null);
   const base = helpBase(useLocation().pathname);
   const [size, setSize] = useState({ w: CARD_W, h: 220 });
+  const [videoShown, setVideoShown] = useState(false);
   const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight });
   useEffect(() => {
     const on = () => setVp({ w: window.innerWidth, h: window.innerHeight });
@@ -123,7 +125,7 @@ function Card({
   useLayoutEffect(() => {
     const el = ref.current;
     if (el) setSize((s) => (s.h === el.offsetHeight ? s : { w: el.offsetWidth, h: el.offsetHeight }));
-  }, [step.id, vp.w, offer]);
+  }, [step.id, vp.w, offer, videoShown]);
   const last = index === total - 1;
   const at = place(found ? box : null, size, vp.w, vp.h);
   const pct = Math.round(((index + 1) / total) * 100);
@@ -144,7 +146,7 @@ function Card({
         onSkip();
       }}
       style={{ left: at.left, top: at.top, width: at.width }}
-      className="fixed z-[81] flex flex-col gap-3 rounded-dialog border border-line bg-surface p-4 text-fg shadow-lg outline-none transition-[left,top] duration-200 ease-out motion-reduce:transition-none sm:p-5"
+      className="fixed z-[81] flex max-h-[calc(100dvh-24px)] flex-col gap-3 overflow-y-auto rounded-dialog border border-line bg-surface p-4 text-fg shadow-lg outline-none transition-[left,top] duration-200 ease-out motion-reduce:transition-none sm:p-5"
     >
       <div className="flex items-center justify-between gap-3">
         <p
@@ -184,6 +186,7 @@ function Card({
           {step.body}
           {last && offer && ` ${WORKSTATION_OFFER.text}`}
         </RadixDialog.Description>
+        {step.video && <TourVideo onShown={setVideoShown} />}
         {step.more && (
           <Link
             to={helpPath(step.more, base)}
@@ -224,7 +227,7 @@ function Card({
             data-testid="tour-next"
             className="max-sm:w-full"
           >
-            {last ? 'Finish' : 'Next'}
+            {last ? 'Finish' : (step.nextLabel ?? 'Next')}
           </Button>
         )}
       </div>

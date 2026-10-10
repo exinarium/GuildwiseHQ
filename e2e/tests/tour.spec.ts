@@ -47,9 +47,11 @@ test('a new user is shown the tour on the first login, and Skip keeps it away on
 
   const tour = page.getByTestId('tour');
   await expect(tour).toBeVisible();
-  await expect(page.getByTestId('tour-title')).toHaveText('Welcome to Guildwise HQ');
+  await expect(page.getByTestId('tour-title')).toHaveText('Watch the 3-minute getting-started video');
   await expect(page.getByTestId('tour-progress')).toHaveText(/Step 1 of \d+/);
   await expect(page.getByTestId('tour-back')).toHaveCount(0);
+  await page.getByTestId('tour-next').click();
+  await expect(page.getByTestId('tour-title')).toHaveText('Welcome to Guildwise HQ');
 
   // the next step lights up the Board entry of the real sidebar
   await page.getByTestId('tour-next').click();
@@ -62,7 +64,7 @@ test('a new user is shown the tour on the first login, and Skip keeps it away on
   await expect(page.getByTestId('tour-title')).toHaveText('Desk');
   await page.getByTestId('tour-back').click();
   await expect(page.getByTestId('tour-title')).toHaveText('Board');
-  await expect.poll(async () => (await tourRow())?.tour_step).toBe(1);
+  await expect.poll(async () => (await tourRow())?.tour_step).toBe(2);
 
   // accessible: a named dialog with its text, and nothing serious for axe
   await expect(tour).toHaveAttribute('role', 'dialog');
@@ -229,6 +231,7 @@ test('on a phone the tour opens the menu for the sidebar steps', async ({ browse
   await page.goto('/');
   const tour = page.getByTestId('tour');
   await expect(tour).toBeVisible();
+  await page.getByTestId('tour-next').click();
   await page.getByTestId('tour-next').click();
   await expect(page.getByTestId('tour-title')).toHaveText('Board');
   await expect(page.getByRole('dialog', { name: 'Main menu' })).toBeVisible();
