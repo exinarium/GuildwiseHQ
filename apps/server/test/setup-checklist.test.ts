@@ -89,7 +89,7 @@ describe('setup checklist', () => {
     expect(step(c, 'project')).toMatchObject({ done: true, actionable: false, link: null });
     expect(step(c, 'repository')).toMatchObject({ actionable: false, link: null });
     expect(step(c, 'team')).toMatchObject({ actionable: true, link: '/agents?hire=ba' });
-    expect(step(c, 'ba')).toMatchObject({ actionable: true, link: '/intake' });
+    expect(step(c, 'ba')).toMatchObject({ actionable: true, link: '/desk' });
   });
 
   it('hiding and reopening is kept per user and does not change the steps', async () => {

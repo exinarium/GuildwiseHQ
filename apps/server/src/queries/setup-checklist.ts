@@ -81,7 +81,7 @@ export async function getSetupChecklist(
     {
       id: 'repository',
       title: 'Add its repository',
-      hint: 'Tell Guildwise HQ which git repository the agents work in.',
+      hint: 'Tell Guildwise HQ where the code lives: GitHub, GitLab, Bitbucket, Azure DevOps or any git server.',
       done: !!withRepo,
       actionable: manager,
       link:
@@ -94,7 +94,7 @@ export async function getSetupChecklist(
     {
       id: 'workstation',
       title: 'Pair a workstation',
-      hint: 'The computer that runs your agents. A DevOps engineer for it is hired automatically.',
+      hint: 'The machine that runs your agents: your own computer, a VPS or a GitHub Codespace. A DevOps engineer for it is hired automatically.',
       done: !!ws,
       actionable: true,
       link: ws ? null : '/workstations?add=1',
@@ -111,10 +111,11 @@ export async function getSetupChecklist(
     {
       id: 'ba',
       title: 'Talk to the business analyst',
-      hint: 'Describe something you need; the analyst turns it into cards.',
+      hint: 'Describe something you need, in a chat or an intake; the analyst turns it into cards.',
       done: !!talked,
       actionable: true,
-      link: talked ? null : '/intake',
+      // Intake is for Owners and Admins; everyone else reaches the analyst from Chat (top bar, or on the desk).
+      link: talked ? null : manager ? '/intake' : '/desk',
     },
   ];
   const doneCount = steps.filter((s) => s.done).length;
