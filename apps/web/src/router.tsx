@@ -8,6 +8,7 @@ import { PageSkeleton } from './components/ui.tsx';
 import { getLastProjectKey } from './lib/lastProject.ts';
 import { AcceptInvite } from './pages/AcceptInvite.tsx';
 import { Agents } from './pages/Agents.tsx';
+import { BILLING_GATE_PATH } from './pages/BillingGate.tsx';
 import { Board } from './pages/Board.tsx';
 import { CardDetail } from './pages/CardDetail.tsx';
 import { CardNew } from './pages/CardNew.tsx';
@@ -85,6 +86,7 @@ export const routes = [
     errorElement: <RouteError />,
     children: [
       { path: '/', element: <Home /> },
+      { path: BILLING_GATE_PATH, element: null },
       { path: '/p/:projectKey/board', element: <Board /> },
       { path: '/p/:projectKey/feed', element: <InterestRedirect tab="digest" /> },
       { path: '/p/:projectKey/research', element: <ResearchTab /> },

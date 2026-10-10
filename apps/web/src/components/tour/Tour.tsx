@@ -7,8 +7,8 @@ import { useWorkstations } from '../../api/queries/workstations.ts';
 import { helpBase, helpPath } from '../../help/articles.ts';
 import { type TourStep, tourRoleOf, tourSteps, WORKSTATION_OFFER } from '../../lib/tour.ts';
 import { Button } from '../ui.tsx';
-import { TourVideo } from './TourVideo.tsx';
 import { type TourApi, TourContext } from './TourContext.tsx';
+import { TourVideo } from './TourVideo.tsx';
 
 /** How far the lit-up area reaches past the element, and the gap between it and the card. */
 const PAD = 6;

@@ -3,10 +3,12 @@ import { Navigate, Outlet, useLocation } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { useSetTimezone } from '../api/queries/reporting.ts';
 import { browserTimeZone } from '../lib/timezone.ts';
+import { BILLING_GATE_PATH, BillingGate } from '../pages/BillingGate.tsx';
 import { ChangePasswordRequired } from '../pages/ChangePasswordRequired.tsx';
 import { SecuritySetup } from '../pages/SecuritySetup.tsx';
 import { getSocket, useSocketState } from '../ws/socket.ts';
 import { AppShell } from './shell/AppShell.tsx';
+import { ContactProvider } from './support/ContactDialog.tsx';
 import { PageSkeleton } from './ui.tsx';
 
 /** The signed-in frame. `platform` is the platform administrator's area; everyone else gets the work shell. */
@@ -22,7 +24,13 @@ export function RequireAuth({ platform = false }: { platform?: boolean } = {}) {
   }, [setupRequired]);
   useEffect(() => {
     // No live socket while two-factor setup is pending (the server refuses it) or for a platform account's login page.
-    if (me.data && !me.data.twoFactor.setupRequired && !me.data.mustChangePassword && !holdSetup)
+    if (
+      me.data &&
+      !me.data.twoFactor.setupRequired &&
+      !me.data.mustChangePassword &&
+      !holdSetup &&
+      !me.data.activeOrg?.gate
+    )
       getSocket()?.start();
     else getSocket()?.stop();
   }, [me.data, holdSetup]);
@@ -52,5 +60,18 @@ export function RequireAuth({ platform = false }: { platform?: boolean } = {}) {
   const isPlatform = me.data.account.kind === 'super_admin';
   if (platform) return isPlatform ? <Outlet /> : <Navigate to="/" replace />;
   if (isPlatform) return <Navigate to="/platform" replace />;
+  // An Owner whose organization waits on a card (new sign-up) or was paused for payment sees one billing screen and
+  // nothing else: every other address leads there, and there is no shell, tour, checklist or What's new.
+  const gate = me.data.activeOrg?.gate ?? null;
+  if (gate) {
+    if (loc.pathname !== BILLING_GATE_PATH)
+      return <Navigate to={`${BILLING_GATE_PATH}${loc.search}`} replace />;
+    return (
+      <ContactProvider>
+        <BillingGate gate={gate} orgName={me.data.activeOrg?.name ?? ''} />
+      </ContactProvider>
+    );
+  }
+  if (loc.pathname === BILLING_GATE_PATH) return <Navigate to="/" replace />;
   return <AppShell name={me.data.user.displayName} live={socketState} />;
 }
