@@ -902,6 +902,15 @@ Where the build differs from the text above (decisions of the task win):
 
 Decisions: platform (super admin) accounts are excluded from self-service reset and from the admin-sent link (they are managed on the server, as for deactivation); organization Owners/Admins cannot send reset links (accounts are global, and the Owner can already reset 2FA); the reset never signs in; a reset spends pending two-factor challenges; response time is "within 24 to 48 hours" (owner decision); the logo is the existing PNG mark (apple-touch-icon) because SVG is not safe in mail.
 
+## Built: console notifications, password resets, sender names (2026-10-10, track t1)
+
+- Desk-email removed (`85d99e5` reverted; migration 1400 drops `desk_mail_log` and the `desk_mail_*` settings; `AOM_SUPPORT_FROM` stays).
+- Console notifications: tickets, Contact us and user replies always mail the support address(es); switches (off) for new organizations/sign-ups and platform audit events on the Support page (`commands/platform-notify.ts`).
+- Autoresponder says "within 24 to 48 hours". Super admin invitations and replies come from "The Guildwise HQ team"; org invitations name the inviter and the organization.
+- Super admins may use Forgot password and the super admin's Send reset link (also for other super admins).
+- Owner resets a member's password to a temporary one (`migrations/1401_must_change_password.sql`, `MemberPasswordReset`, forced change page). Owner only; Admins are not offered it.
+- 2x PNG mail logo (`public/brand/logo-mark-mail@2x.png`). Legal: liability cap, jurisdiction (Western Cape), sub-processors (Namecheap, SendGrid). RUNNER.md: DevOps keeps `git push`.
+
 ## Built: installer fixes and several pairings per runner (overnight, 2026-10-09)
 
 - **Windows installer.** The generated PowerShell piped text to `wsl.exe`, which makes Windows PowerShell append CR LF: the user-setup script then ended in `fi` + CR (a bash syntax error) and the chosen Ubuntu password gained a CR. All text for bash now travels as base64 on the command line, as does the line that launches the Linux installer (Windows PowerShell 5.1 also strips embedded double quotes, which split paths with spaces). Non-ASCII text (a smart quote in the workstation name is a quote character to PowerShell) is emitted as `[char]` code units, so the script stays pure ASCII. The one-line command asks for TLS 1.2 first. The elevated copy refuses to run as a different user than the one who started it. After a restart the saved copy is reused (the one-time link may be gone). `.wslconfig` is read and written as UTF-8 without BOM. `scripts/lint-installers.sh` parses the script with the PowerShell image when `pwsh` is not installed.

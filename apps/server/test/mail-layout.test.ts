@@ -20,7 +20,7 @@ describe('brandedMail', () => {
   it('produces themed, escaped, absolute-URL HTML and a text twin', () => {
     expect(m.html).toContain('#3446d9'); // brand token
     expect(m.html).toContain('prefers-color-scheme: dark');
-    expect(m.html).toContain(`${origin}/apple-touch-icon.png`);
+    expect(m.html).toContain(`${origin}/brand/logo-mark-mail@2x.png`);
     expect(m.html).toContain('Heading &amp; more');
     expect(m.html).toContain('Para &lt;b&gt;one&lt;/b&gt;');
     expect(m.html).toContain('a=1&amp;b=2');

@@ -831,7 +831,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Members tab',
-        text: 'Everyone in the organization with their role, projects and 2FA state. Owner and Admins can Invite member, change projects or remove people; only the Owner changes roles or resets two-factor login.',
+        text: 'Everyone in the organization with their role, projects and 2FA state. Owner and Admins can Invite member, change projects or remove people; only the Owner changes roles, resets two-factor login or resets a password (a temporary one, shown once).',
       },
       {
         name: 'Invitations tab',
@@ -1269,7 +1269,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'Support address',
-        text: 'The mailbox that also receives every new request and follow-up.',
+        text: 'The mailbox that also receives every new request, Contact us message and follow-up.',
+      },
+      {
+        name: 'Also email me about',
+        text: 'Two optional switches, off until you turn them on: new organizations and sign-ups, and platform audit events.',
       },
       {
         name: 'Status chips',

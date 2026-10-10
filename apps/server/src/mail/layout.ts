@@ -4,7 +4,7 @@ import type { MailMessage } from './mailer.ts';
  * The one branded layout every mail goes through (docs/ARCHITECTURE.md, "Mail"). A template builds its content as
  * data (`body` blocks, a call-to-action, a note) and `brandedMail` produces the HTML part (table layout, inline CSS
  * for clients that strip <style>, a <style> block with dark-mode overrides for those that honour it) and the plain-
- * text part. Colours are the product tokens of apps/web/src/tokens.css; the logo is the PNG mark served from the
+ * text part. Colours are the product tokens of apps/web/src/tokens.css; the logo is the 2x PNG mark (apps/web/public/brand/logo-mark-mail@2x.png, 72 px shown at 36 px, rendered from logo-mark.svg) served from the
  * public origin (SVG is not safe in mail clients).
  *
  * Mail never carries a login name or a personal email address: whoever is named in it is a display name, an
@@ -124,7 +124,7 @@ function blockText(b: MailBlock): string {
 /** The finished message: styled HTML plus a plain-text part with the same content. */
 export function brandedMail(o: BrandedMailOptions): MailMessage {
   const origin = o.origin.replace(/\/+$/, '');
-  const logo = `${origin}/apple-touch-icon.png`;
+  const logo = `${origin}/brand/logo-mark-mail@2x.png`;
   const subject = oneLine(o.subject);
   const button = o.cta
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 20px"><tr><td class="btn" style="border-radius:8px;background:${C.brand}"><a href="${esc(o.cta.url)}" class="btn" style="display:inline-block;padding:13px 26px;font-size:16px;font-weight:600;line-height:1.2;color:${C.brandFg};text-decoration:none;border-radius:8px;background:${C.brand}">${esc(o.cta.label)}</a></td></tr></table><p class="muted" style="margin:0 0 20px;font-size:13px;line-height:1.5;color:${C.muted}">Button not working? Copy this link into your browser:<br><a href="${esc(o.cta.url)}" class="link" style="color:${C.brand};word-break:break-all">${esc(o.cta.url)}</a></p>`

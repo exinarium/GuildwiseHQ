@@ -59,4 +59,4 @@ If you cannot sign in:
 2. Give your name and email.
 3. Write your message.
 
-We answer by email and can help you access your account. To reset a forgotten password yourself, use **Forgot your password?** on the sign-in page.
+We answer by email and can help you access your account. To reset a forgotten password yourself, use **Forgot your password?** on the sign-in page, or ask your Owner for a temporary password.

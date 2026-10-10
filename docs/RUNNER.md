@@ -774,8 +774,8 @@ repositories: local path, remote and working branch (the active phase's, else th
 It never force-pushes, resets or discards anything. What it cannot resolve (a conflict, a branch that is not there, an
 authentication failure, a missing clone, uncommitted changes on the wrong branch) is reported and becomes a signal in the
 BA's daily report; it closes when a later run finds the repository in order. The commands that changed something are
-logged in the request's record (`aom devops-done`). The DevOps permission set denies `git push` to the agent's own shell;
-the push in `aom hygiene run` is done by the runner, not by the model.
+logged in the request's record (`aom devops-done`). The DevOps agent may `git push` from its own shell (owner decision: it is the workstation-management agent);
+the push in `aom hygiene run` is still done by the runner, not by the model.
 
 ### DevOps shifts are unsandboxed
 
@@ -785,10 +785,10 @@ every agent, DevOps included, because the runtime is reported unavailable as a w
 
 - allow: `Bash`, `Read`, `Glob`, `Grep`, `Edit` (covers Write), `WebFetch`, `WebSearch`, anywhere on the machine; no
   `blockReadsOutsideWorkingDirectories`; `defaultMode` stays `dontAsk` (no human at the terminal);
-- deny: the session tools (`ListAgents`, `SendMessage`, ...), `git push`, the role's shell patterns (`rm -rf /*`), Read and
+- deny: the session tools (`ListAgents`, `SendMessage`, ...), the role's shell patterns (`rm -rf /*`), Read and
   Edit of the runner's private files (`config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`,
   `logs`, `mock-state`), Read of the user's `~/.claude` and `~/.claude.json`, and Edit of the agent's own Claude config dir.
-  The credential-store read denies (`~/.ssh`, `~/.docker`, `~/.kube`, ...) are dropped: it needs them.
+  `git push` is not denied for DevOps (it is for the other roles). The credential-store read denies (`~/.ssh`, `~/.docker`, `~/.kube`, ...) are dropped: it needs them.
 - environment: `HOME` is the user's real home (docker, ssh and kube configs work); `CLAUDE_CONFIG_DIR` and `TMPDIR` stay the
   agent's own; `SSH_AUTH_SOCK`, `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `KUBECONFIG` and `XDG_RUNTIME_DIR` are
   passed through when set; `scrubSubprocessEnv` is not applied. Chat sessions of the same agent stay sandboxed.

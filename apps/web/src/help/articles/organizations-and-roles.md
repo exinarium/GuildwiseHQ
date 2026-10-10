@@ -37,6 +37,8 @@ The **Invitations** tab shows pending and past invitations. You can **Resend** o
 3. Pick which **Projects** they start on (Members only; you can change this later with **Change projects** on their row).
 4. Click **Send invitation**. They receive an email with a link; people without an account create one.
 
+If a member cannot get the reset email, the Owner can open the actions menu on their row and choose **Reset password**. You get a temporary password to copy and pass on yourself (it is shown once and no email is sent). The member is signed out everywhere and chooses their own password at the next sign-in. Their account is one account for every organization, so the new password applies in their other organizations too.
+
 The Owner can change an Admin or Member's role from the role selector on their row. Your plan may limit how many members you can have; the **Plan & limits** tab shows it.
 
 ## Guests {#guests}
