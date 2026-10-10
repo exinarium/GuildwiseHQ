@@ -30,6 +30,8 @@ export const orgEvents = [
       features: Features.default({}),
       createdVia: z.enum(['legacy_migration', 'invitation', 'cli', 'signup']),
       invitationId: Id.optional(),
+      /** Created as a simulation organization by a super admin (mock workstation, never billed). */
+      simulation: z.boolean().optional(),
     }),
   ),
   defineEvent(
@@ -138,6 +140,38 @@ export const orgEvents = [
   ),
   /** Owner decision 7: the Owner can require two-factor login of every member of the organization. */
   defineEvent('OrgTwoFactorPolicySet', z.object({ orgId: Id, required: z.boolean(), by: Id })),
+  /**
+   * A super admin turned simulation mode on or off for an organization (also: changed its pace). A simulation
+   * organization runs on the server's simulated workstation, is never billed and can be wiped completely.
+   */
+  defineEvent(
+    'OrgSimulationSet',
+    z.object({
+      orgId: Id,
+      enabled: z.boolean(),
+      pace: z.enum(['fast', 'normal', 'slow']).optional(),
+      by: Id.optional(),
+      note: z.string().max(1000).optional(),
+      meta: EventMetaSchema,
+    }),
+  ),
+  /**
+   * A simulation organization was wiped with all its data. The only event kept of it: the organization's other events
+   * are deleted (the single exception to the append-only log, restricted to simulation organizations). Scope: no org.
+   */
+  defineEvent(
+    'SimulationOrgWiped',
+    z.object({
+      orgId: Id,
+      orgName: z.string().min(1),
+      by: Id,
+      memberEmails: z.array(z.string()),
+      deletedUserEmails: z.array(z.string()),
+      counts: z.record(z.string(), z.number().int()),
+      backupNote: z.string().max(500).optional(),
+      meta: EventMetaSchema,
+    }),
+  ),
   defineEvent('PlatformOrgViewed', z.object({ orgId: Id, meta: EventMetaSchema })),
   /** The super admin edited the plan catalogue or the billing settings (add-on prices, VAT, exchange-rate override). */
   defineEvent(

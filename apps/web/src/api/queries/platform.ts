@@ -9,10 +9,13 @@ import {
   type PlatformOrgSummary,
   PlatformOrgsResponseSchema,
   PlatformUsersResponseSchema,
+  type SetSimulationRequest,
+  type WipeSimulationRequest,
+  type WipeSimulationResponse,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { z } from 'zod';
-import { get, patch, post, qs } from '../client.ts';
+import { get, patch, post, put, qs } from '../client.ts';
 
 export type PlatformAuditResponse = z.infer<typeof PlatformAuditResponseSchema>;
 
@@ -58,6 +61,26 @@ export function usePlatformTransfer(id: string) {
     mutationFn: (b: { toUserId: string; reason: string }) =>
       post<PlatformOrgDetail>(`/platform/orgs/${id}/transfer-ownership`, b),
     onSuccess: () => refresh(qc),
+  });
+}
+
+export function useSetSimulation(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: SetSimulationRequest) => put<PlatformOrgDetail>(`/platform/orgs/${id}/simulation`, b),
+    onSuccess: () => refresh(qc),
+  });
+}
+
+export function useWipeSimulation(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: WipeSimulationRequest) =>
+      post<WipeSimulationResponse>(`/platform/orgs/${id}/wipe-simulation`, b),
+    onSuccess: () => {
+      qc.removeQueries({ queryKey: ['platform', 'org', id] });
+      refresh(qc);
+    },
   });
 }
 

@@ -152,6 +152,7 @@ export async function activeOrgDto(ctx: Ctx, org: OrgRow, role: OrgRole): Promis
         }
       : {}),
     requireTwoFactor: Boolean(org.require_two_factor),
+    simulation: Boolean(org.simulation),
     // Members see "suspended" and "cancelled" only.
     banners: banners.filter((b) => manager || b.audience === 'all'),
   };

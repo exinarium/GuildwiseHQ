@@ -87,6 +87,11 @@ export function PlatformOrgs() {
                       <Link to={`/platform/orgs/${o.id}`} className="font-medium text-brand hover:underline">
                         {o.name}
                       </Link>
+                      {o.simulation && (
+                        <Badge tone="amber" data-testid="simulation-badge">
+                          Simulation
+                        </Badge>
+                      )}
                       {o.requireTwoFactor && <span className="ml-2 text-xs text-subtle">2FA required</span>}
                     </td>
                     <td className="px-4 py-2.5 text-fg">

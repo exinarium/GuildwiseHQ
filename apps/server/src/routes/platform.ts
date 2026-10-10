@@ -8,6 +8,9 @@ import {
   PlatformAuditQuerySchema,
   PlatformOrgsQuerySchema,
   PlatformTransferOwnershipRequestSchema,
+  SetSimulationRequestSchema,
+  WipeSimulationRequestSchema,
+  WipeSimulationResponseSchema,
 } from '@aom/shared';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -31,6 +34,7 @@ import {
   resetUserTwoFactor,
   setOrgStatus,
 } from '../commands/platform.ts';
+import { setOrgSimulation, wipeSimulationOrg } from '../commands/simulation.ts';
 import type { Ctx } from '../context.ts';
 import { typed } from './util.ts';
 
@@ -78,6 +82,28 @@ export function platformRoutes(ctx: Ctx) {
         },
       );
     }
+
+    app.put(
+      '/api/platform/orgs/:id/simulation',
+      { schema: { params: IdParamsSchema, body: SetSimulationRequestSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        await setOrgSimulation(ctx, s, req.params.id, req.body, meta(req));
+        return getPlatformOrg(ctx, s, req.params.id, meta(req));
+      },
+    );
+
+    // Wipes a simulation organization with all its data (events included); the name must be typed back.
+    app.post(
+      '/api/platform/orgs/:id/wipe-simulation',
+      { schema: { params: IdParamsSchema, body: WipeSimulationRequestSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return WipeSimulationResponseSchema.parse(
+          await wipeSimulationOrg(ctx, s, req.params.id, req.body, meta(req)),
+        );
+      },
+    );
 
     app.post(
       '/api/platform/orgs/:id/transfer-ownership',

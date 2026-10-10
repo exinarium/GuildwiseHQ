@@ -26,15 +26,23 @@ export function PlatformInvitations() {
   const toast = useToast();
   const [email, setEmail] = useState('');
   const [orgName, setOrgName] = useState('');
+  const [simulation, setSimulation] = useState(false);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     invite.mutate(
-      { email: email.trim(), proposedOrgName: orgName.trim(), plan: 'founding', status: 'active' },
+      {
+        email: email.trim(),
+        proposedOrgName: orgName.trim(),
+        plan: 'founding',
+        status: 'active',
+        ...(simulation ? { simulation: true } : {}),
+      },
       {
         onSuccess: () => {
           toast.success(`Invitation sent to ${email.trim()}`);
           setEmail('');
           setOrgName('');
+          setSimulation(false);
         },
       },
     );
@@ -68,6 +76,22 @@ export function PlatformInvitations() {
           <Button type="submit" disabled={invite.isPending || !email || !orgName.trim()}>
             Send invitation
           </Button>
+          <label className="flex items-start gap-2 text-sm text-fg sm:col-span-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4"
+              data-testid="new-org-simulation"
+              checked={simulation}
+              onChange={(e) => setSimulation(e.target.checked)}
+            />
+            <span>
+              Simulation organization
+              <span className="block text-xs text-subtle">
+                For testing and demos: agents run on a simulated workstation, nothing real is built and it is
+                never billed. You can wipe it completely later.
+              </span>
+            </span>
+          </label>
         </form>
         {invite.isError && (
           <div className="mt-3">

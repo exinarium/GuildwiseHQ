@@ -39,6 +39,8 @@ export const ActiveOrgSchema = z.object({
   graceDays: z.number().int().optional(),
   /** The Owner requires two-factor login of every member. */
   requireTwoFactor: z.boolean().default(false),
+  /** A simulation organization: shown with an always-visible banner; mock workstation, never billed. */
+  simulation: z.boolean().default(false),
   banners: z.array(BannerSchema),
 });
 export type ActiveOrg = z.infer<typeof ActiveOrgSchema>;

@@ -119,6 +119,34 @@ export const platformAuditProjectors: Record<string, Projector> = {
       details: { plan: p.plan, status: p.status, createdVia: p.createdVia },
     };
   }),
+  OrgSimulationSet: byPlatform(async (tx, e) => {
+    const p = ev<'OrgSimulationSet'>(e).payload;
+    return {
+      action: e.event.type,
+      orgId: p.orgId,
+      summary: `${p.enabled ? 'Turned simulation on for' : 'Turned simulation off for'} ${await orgName(tx, p.orgId)}${p.pace ? ` (pace ${p.pace})` : ''}${p.note ? `: ${p.note}` : ''}`,
+      details: { enabled: p.enabled, pace: p.pace ?? null, note: p.note ?? null },
+      meta: p.meta,
+    };
+  }),
+  // Kept forever (the wiped organization's own events are gone): org_id stays empty so nothing links back to it.
+  SimulationOrgWiped: always(async (_tx, e) => {
+    const p = ev<'SimulationOrgWiped'>(e).payload;
+    return {
+      action: e.event.type,
+      orgId: null,
+      summary: `Wiped the simulation organization ${p.orgName} with all its data (${p.memberEmails.length} member${p.memberEmails.length === 1 ? '' : 's'}, ${p.deletedUserEmails.length} account${p.deletedUserEmails.length === 1 ? '' : 's'} deleted)`,
+      details: {
+        orgId: p.orgId,
+        orgName: p.orgName,
+        memberEmails: p.memberEmails,
+        deletedUserEmails: p.deletedUserEmails,
+        counts: p.counts,
+        backupNote: p.backupNote ?? null,
+      },
+      meta: p.meta,
+    };
+  }),
   OrgOwnershipTransferred: always(async (tx, e) => {
     const p = ev<'OrgOwnershipTransferred'>(e).payload;
     const viaPlatform = await isSuperAdmin(tx, e);

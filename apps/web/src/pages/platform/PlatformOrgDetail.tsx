@@ -1,11 +1,13 @@
 import { ORG_FEATURES, type OrgFeature } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import {
   useOrgStatusAction,
   usePatchPlatformOrg,
   usePlatformOrg,
   usePlatformTransfer,
+  useSetSimulation,
+  useWipeSimulation,
 } from '../../api/queries/platform.ts';
 import { OrgBillingPanel } from '../../components/platform/OrgBillingPanel.tsx';
 import {
@@ -49,6 +51,11 @@ export function PlatformOrgDetail() {
   const patch = usePatchPlatformOrg(id);
   const status = useOrgStatusAction(id);
   const transfer = usePlatformTransfer(id);
+  const simulate = useSetSimulation(id);
+  const wipe = useWipeSimulation(id);
+  const navigate = useNavigate();
+  const [wipeOpen, setWipeOpen] = useState(false);
+  const [wipeName, setWipeName] = useState('');
   const toast = useToast();
   const [dialog, setDialog] = useState<Pending>(null);
   const [reason, setReason] = useState('');
@@ -123,6 +130,7 @@ export function PlatformOrgDetail() {
         sub={
           <span className="flex flex-wrap items-center gap-2">
             <Badge tone={STATUS_TONE[o.status] ?? 'neutral'}>{o.status}</Badge>
+            {o.simulation && <Badge tone="amber">Simulation</Badge>}
             <span>{o.planName}</span>
             {o.statusReason && <span className="text-sm text-subtle">({o.statusReason})</span>}
           </span>
@@ -194,6 +202,118 @@ export function PlatformOrgDetail() {
           )}
         </div>
       </Panel>
+
+      <Panel title="Simulation" data-testid="platform-org-simulation">
+        <p className="mb-3 text-sm text-muted">
+          A simulation organization is for testing and demos: its agents run on a simulated workstation hosted
+          by this server (nothing real is built), it is never billed, and its emails are marked [Simulation].
+        </p>
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="flex items-center gap-2.5 text-sm font-medium text-fg">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-checked={o.simulation}
+              data-testid="simulation-toggle"
+              className="size-5"
+              checked={o.simulation}
+              disabled={simulate.isPending}
+              onChange={(e) =>
+                simulate.mutate(
+                  { enabled: e.target.checked },
+                  {
+                    onSuccess: () =>
+                      toast.success(e.target.checked ? 'Simulation is on' : 'Simulation is off'),
+                  },
+                )
+              }
+            />
+            {o.simulation ? 'Simulation on' : 'Simulation off'}
+          </label>
+          {o.simulation && (
+            <>
+              <Select
+                label="Pace of the simulated workstation"
+                value={o.simulationPace}
+                data-testid="simulation-pace"
+                onChange={(e) =>
+                  simulate.mutate(
+                    { enabled: true, pace: e.target.value as 'fast' | 'normal' | 'slow' },
+                    { onSuccess: () => toast.success('Pace updated') },
+                  )
+                }
+              >
+                <option value="fast">Fast (good for tests)</option>
+                <option value="normal">Normal</option>
+                <option value="slow">Slow (good for demos)</option>
+              </Select>
+              <Button
+                variant="danger"
+                data-testid="simulation-wipe"
+                onClick={() => {
+                  setWipeName('');
+                  setWipeOpen(true);
+                }}
+              >
+                Delete simulation organization
+              </Button>
+            </>
+          )}
+        </div>
+        {simulate.isError && (
+          <div className="mt-3">
+            <ErrorBox error={simulate.error} />
+          </div>
+        )}
+      </Panel>
+
+      <Dialog
+        open={wipeOpen}
+        onOpenChange={(v) => !v && setWipeOpen(false)}
+        title={`Delete ${o.name}`}
+        description="This removes the organization and ALL its data for good: projects, cards, chats, events, and every account that belongs only to it (their email addresses become free again). It cannot be undone."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setWipeOpen(false)}>
+              Back
+            </Button>
+            <Button
+              variant="danger"
+              data-testid="simulation-wipe-confirm"
+              disabled={wipeName !== o.name || wipe.isPending}
+              onClick={() =>
+                wipe.mutate(
+                  { confirmName: wipeName },
+                  {
+                    onSuccess: (r) => {
+                      toast.success(
+                        `${r.orgName} deleted (${r.deletedUsers.length} account${r.deletedUsers.length === 1 ? '' : 's'} removed)`,
+                      );
+                      setWipeOpen(false);
+                      navigate('/platform');
+                    },
+                  },
+                )
+              }
+            >
+              Delete everything
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-muted">
+            The server does not back up the database for you. On a production database, take a backup first.
+          </p>
+          <TextInput
+            label={`Type the organization name (${o.name}) to confirm`}
+            value={wipeName}
+            onChange={(e) => setWipeName(e.target.value)}
+            data-testid="simulation-wipe-name"
+          />
+          {wipe.isError && <ErrorBox error={wipe.error} />}
+        </div>
+      </Dialog>
 
       <form onSubmit={save} data-testid="platform-org-licence">
         <Panel title="Plan, limits and features">

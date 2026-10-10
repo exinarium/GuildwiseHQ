@@ -40,6 +40,7 @@ import { PgEventStore } from './eventstore/pg-event-store.ts';
 import { ConcurrencyError } from './eventstore/types.ts';
 import { registerHrHook } from './hr/hr.ts';
 import { createMailer, type Mailer } from './mail/mailer.ts';
+import { withSimulationPrefix } from './mail/simulation.ts';
 import { createOrgStatusInterceptor } from './orgs/guard.ts';
 import { buildProjectors } from './projections/index.ts';
 import { Reporter } from './reporter/reporter.ts';
@@ -195,7 +196,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const pool = createPool(config.databaseUrl);
   const store = new PgEventStore(pool, buildProjectors(), clock);
   const notifier = new Notifier(config.databaseUrl, store, (err) => app.log.error({ err }, 'notifier error'));
-  const mailer = opts.mailer ?? createMailer(config.smtpUrl, config.mailFrom);
+  const mailer = withSimulationPrefix(opts.mailer ?? createMailer(config.smtpUrl, config.mailFrom), pool);
   const ctx: Ctx = {
     config,
     clock,

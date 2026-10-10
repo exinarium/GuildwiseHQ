@@ -42,8 +42,8 @@ export const orgProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO organizations (id, name, owner_user_id, status, status_reason, status_changed_at, plan,
          max_members, max_workstations, max_agents, max_projects, trial_ends_at, license_expires_at, features,
-         created_via, created_at)
-       VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$5)`,
+         created_via, created_at, simulation)
+       VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$5,$15)`,
       [
         p.orgId,
         p.name,
@@ -59,6 +59,7 @@ export const orgProjectors: Record<string, Projector> = {
         p.licenseExpiresAt ?? null,
         JSON.stringify(p.features ?? {}),
         p.createdVia,
+        p.simulation === true,
       ],
     );
   },
@@ -193,6 +194,14 @@ export const orgProjectors: Record<string, Projector> = {
       else next[k] = v;
     }
     await exec(tx, 'UPDATE organizations SET features=$2 WHERE id=$1', [p.orgId, JSON.stringify(next)]);
+  },
+  OrgSimulationSet: async (tx, e) => {
+    const p = ev<EventOf<'OrgSimulationSet'>>(e).payload;
+    await exec(
+      tx,
+      `UPDATE organizations SET simulation=$2, simulation_pace=COALESCE($3, simulation_pace) WHERE id=$1`,
+      [p.orgId, p.enabled, p.pace ?? null],
+    );
   },
   OrgTwoFactorPolicySet: async (tx, e) => {
     const p = ev<EventOf<'OrgTwoFactorPolicySet'>>(e).payload;

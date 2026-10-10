@@ -64,6 +64,8 @@ async function toSummary(db: Queryable, o: Row): Promise<PlatformOrgSummary> {
     trialEndsAt: iso(o.trial_ends_at),
     licenseExpiresAt: iso(o.license_expires_at),
     requireTwoFactor: Boolean(o.require_two_factor),
+    simulation: Boolean(o.simulation),
+    simulationPace: (o.simulation_pace ?? 'normal') as 'fast' | 'normal' | 'slow',
     createdAt: iso(o.created_at) as string,
     lastActiveAt: iso(o.last_active_at),
   };

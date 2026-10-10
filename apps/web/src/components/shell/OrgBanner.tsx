@@ -16,9 +16,16 @@ export function OrgBanner({ me, project }: { me: MeResponse; project: ProjectDto
         'another organization')
       : null;
   const banners = active?.banners ?? [];
-  if (banners.length === 0 && !guestOf) return null;
+  const simulation = active?.simulation === true;
+  if (banners.length === 0 && !guestOf && !simulation) return null;
   return (
     <div className="mx-auto w-full space-y-2 px-4 pt-4 sm:px-6 lg:px-8" data-testid="org-banners">
+      {simulation && (
+        <Callout tone="warning" role="status" title="Simulation" data-testid="simulation-banner">
+          This is a simulation organization. Your agents work on a simulated workstation, so nothing real is
+          built, nothing is billed, and emails are marked [Simulation].
+        </Callout>
+      )}
       {banners.map((b) => (
         <Callout key={b.kind} tone={b.severity} role={b.severity === 'danger' ? 'alert' : 'status'}>
           {b.message}

@@ -32,7 +32,16 @@ export interface Ctx {
   services: Services;
 }
 
+/** The simulated workstation of simulation organizations (src/simulation). Absent when simulation hosting is off. */
+export interface SimulationHost {
+  /** Starts or stops the org's simulated workstation to match its simulation flag (fire and forget). */
+  reconcile(orgId: string): void;
+  /** Stops the org's simulated runner and deletes its files (the wipe). */
+  dispose(orgId: string): Promise<void>;
+}
+
 export interface Services {
+  simulation?: SimulationHost;
   runners: RunnerRegistry;
   gateway: RunnerGateway;
   dispatcher: Dispatcher;

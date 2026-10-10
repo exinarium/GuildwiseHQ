@@ -88,13 +88,16 @@ export async function inviteNewOrg(
   const invitationId = randomUUID();
   const expiresAt = new Date(ctx.clock.now().getTime() + INVITE_TTL_MS);
   const plan = planDefinition(input.plan);
+  // A simulation organization is never billed: Unlimited, active, no dates.
+  const sim = input.simulation === true;
   const terms = {
-    plan: input.plan,
-    status: input.status,
-    limits: input.limits ?? plan.limits,
-    trialEndsAt: input.status === 'trial' ? (input.trialEndsAt ?? null) : null,
-    licenseExpiresAt: input.licenseExpiresAt ?? null,
+    plan: sim ? 'unlimited' : input.plan,
+    status: sim ? ('active' as const) : input.status,
+    limits: sim ? planDefinition('unlimited').limits : (input.limits ?? plan.limits),
+    trialEndsAt: !sim && input.status === 'trial' ? (input.trialEndsAt ?? null) : null,
+    licenseExpiresAt: sim ? null : (input.licenseExpiresAt ?? null),
     features: Object.fromEntries(Object.entries(input.features ?? {}).filter(([, v]) => v !== null)),
+    ...(input.simulation ? { simulation: true } : {}),
   };
   if (terms.status === 'trial' && !terms.trialEndsAt)
     throw conflict('trial_needs_end', 'a trial needs an end date');
@@ -381,6 +384,7 @@ async function acceptEvents(
       trialEndsAt?: string | null;
       licenseExpiresAt?: string | null;
       features?: Record<string, boolean>;
+      simulation?: boolean;
     };
     const name = clean(a.orgName) || clean(inv.proposed_org_name) || `${a.displayName}'s organization`;
     events.push({
@@ -399,6 +403,7 @@ async function acceptEvents(
           features: terms.features ?? {},
           createdVia: 'invitation',
           invitationId: inv.id,
+          ...(terms.simulation ? { simulation: true } : {}),
         },
       },
       actor: { kind: 'user', id: userId },

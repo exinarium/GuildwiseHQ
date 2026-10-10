@@ -20,6 +20,9 @@ export const PlatformOrgSummarySchema = z.object({
   trialEndsAt: IsoTime.nullable(),
   licenseExpiresAt: IsoTime.nullable(),
   requireTwoFactor: z.boolean(),
+  /** A simulation organization: mock workstation, never billed, can be wiped. */
+  simulation: z.boolean().default(false),
+  simulationPace: z.enum(['fast', 'normal', 'slow']).default('normal'),
   createdAt: IsoTime,
   lastActiveAt: IsoTime.nullable(),
 });
@@ -89,6 +92,26 @@ export const PatchPlatformOrgRequestSchema = z
   .refine((v) => Object.keys(v).some((k) => k !== 'note'), 'nothing to change');
 export type PatchPlatformOrgRequest = z.infer<typeof PatchPlatformOrgRequestSchema>;
 
+export const SimulationPaceSchema = z.enum(['fast', 'normal', 'slow']);
+export type SimulationPace = z.infer<typeof SimulationPaceSchema>;
+export const SetSimulationRequestSchema = z.object({
+  enabled: z.boolean(),
+  pace: SimulationPaceSchema.optional(),
+  note: z.string().trim().max(1000).optional(),
+});
+export type SetSimulationRequest = z.infer<typeof SetSimulationRequestSchema>;
+/** The organization's name must be typed back; the wipe is refused for anything but a simulation organization. */
+export const WipeSimulationRequestSchema = z.object({ confirmName: z.string().min(1).max(120) });
+export type WipeSimulationRequest = z.infer<typeof WipeSimulationRequestSchema>;
+export const WipeSimulationResponseSchema = z.object({
+  orgName: z.string(),
+  deletedUsers: z.array(z.string()),
+  keptUsers: z.array(z.string()),
+  counts: z.record(z.string(), z.number().int()),
+  backupNote: z.string(),
+});
+export type WipeSimulationResponse = z.infer<typeof WipeSimulationResponseSchema>;
+
 export const OrgStatusActionRequestSchema = z.object({
   reason: z.string().trim().min(1).max(200),
   note: z.string().trim().max(1000).optional(),
@@ -109,6 +132,8 @@ export const NewOrgInvitationRequestSchema = z.object({
   trialEndsAt: z.iso.datetime().optional(),
   licenseExpiresAt: z.iso.datetime().optional(),
   features: z.partialRecord(OrgFeatureSchema, z.boolean().nullable()).optional(),
+  /** Create the organization as a simulation organization (the new owner's organization is a mock). */
+  simulation: z.boolean().optional(),
 });
 export type NewOrgInvitationRequest = z.infer<typeof NewOrgInvitationRequestSchema>;
 

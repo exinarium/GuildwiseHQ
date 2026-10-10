@@ -11,6 +11,8 @@ export interface MailMessage {
   from?: string;
   /** Extra headers (`List-Unsubscribe` on the digest). */
   headers?: Record<string, string>;
+  /** Force the "[Simulation] " subject prefix (set by the sender when it knows the organization is a simulation). */
+  simulation?: boolean;
 }
 
 export interface Mailer {

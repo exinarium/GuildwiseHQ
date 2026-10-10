@@ -12,6 +12,7 @@ const ID = (n: number) => `0192f3a0-0000-7000-8000-${String(n).padStart(12, '0')
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const T = '2026-10-06T10:00:00.000Z';
+let sim = false;
 const org = (status: 'active' | 'suspended' = 'active') => ({
   id: ID(10),
   name: 'Acme',
@@ -26,6 +27,8 @@ const org = (status: 'active' | 'suspended' = 'active') => ({
   trialEndsAt: null,
   licenseExpiresAt: null,
   requireTwoFactor: false,
+  simulation: sim,
+  simulationPace: 'normal',
   createdAt: T,
   lastActiveAt: null,
 });
@@ -45,12 +48,25 @@ let current: 'active' | 'suspended' = 'active';
 beforeEach(() => {
   calls.length = 0;
   current = 'active';
+  sim = false;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init: RequestInit = {}) => {
       const method = init.method ?? 'GET';
       calls.push({ method, url, body: init.body ? JSON.parse(String(init.body)) : undefined });
       if (url.startsWith('/api/platform/orgs?')) return json({ orgs: [org(current)] });
+      if (method === 'PUT' && url.endsWith('/simulation')) {
+        sim = (init.body ? JSON.parse(String(init.body)) : {}).enabled;
+        return json(detail(current));
+      }
+      if (method === 'POST' && url.endsWith('/wipe-simulation'))
+        return json({
+          orgName: 'Acme',
+          deletedUsers: ['olga@acme.test'],
+          keptUsers: [],
+          counts: {},
+          backupNote: '',
+        });
       if (method === 'POST' && url.endsWith('/suspend')) {
         current = 'suspended';
         return json(detail('suspended'));
@@ -119,6 +135,57 @@ describe('platform area', () => {
     await waitFor(() => {
       const c = calls.find((x) => x.method === 'POST' && x.url === '/api/platform/invitations');
       expect(c?.body).toMatchObject({ email: 'new@acme.test', proposedOrgName: 'Newco', plan: 'founding' });
+    });
+  });
+
+  it('switches simulation on and asks for the typed name before deleting a simulation organization', async () => {
+    const user = userEvent.setup();
+    wrap(`/platform/orgs/${ID(10)}`);
+    // off: no delete button
+    const toggle = await screen.findByTestId('simulation-toggle');
+    expect(screen.queryByTestId('simulation-wipe')).toBeNull();
+    await user.click(toggle);
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'PUT' && (c.body as { enabled: boolean }).enabled === true)).toBe(
+        true,
+      ),
+    );
+    // on: the delete button opens a dialog that needs the name
+    expect(await screen.findByTestId('simulation-wipe')).toBeTruthy();
+    await user.click(screen.getByTestId('simulation-wipe'));
+    const confirm = (await screen.findByTestId('simulation-wipe-confirm')) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    await user.type(screen.getByTestId('simulation-wipe-name'), 'Acm');
+    expect(confirm.disabled).toBe(true);
+    await user.type(screen.getByTestId('simulation-wipe-name'), 'e');
+    expect(confirm.disabled).toBe(false);
+    await user.click(confirm);
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.method === 'POST' &&
+            c.url.endsWith('/wipe-simulation') &&
+            (c.body as { confirmName: string }).confirmName === 'Acme',
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('marks simulation organizations in the list and can invite one', async () => {
+    const user = userEvent.setup();
+    sim = true;
+    const { unmount } = wrap('/platform');
+    expect(await screen.findByTestId('simulation-badge')).toBeTruthy();
+    unmount();
+    wrap('/platform/invitations');
+    await user.type(await screen.findByLabelText('Owner email'), 'wife@acme.test');
+    await user.type(screen.getByLabelText('Organization name'), 'Test Co');
+    await user.click(screen.getByTestId('new-org-simulation'));
+    await user.click(screen.getByRole('button', { name: 'Send invitation' }));
+    await waitFor(() => {
+      const c = calls.find((x) => x.method === 'POST' && x.url === '/api/platform/invitations');
+      expect(c?.body).toMatchObject({ proposedOrgName: 'Test Co', simulation: true });
     });
   });
 });
