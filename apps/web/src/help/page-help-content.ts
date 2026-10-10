@@ -971,6 +971,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'All your support tickets and responses. Check here for answers from the support team.',
       },
       {
+        name: 'What’s new',
+        text: 'Opens the list of recent changes for your role, newest first, including the ones you have already seen.',
+      },
+      {
         name: 'Articles',
         text: 'Read about features, workflows, troubleshooting and best practices.',
       },

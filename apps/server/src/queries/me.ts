@@ -96,6 +96,6 @@ export async function buildMe(
     visibleProjectIds: visible.map((v) => v.project_id),
     pendingInvitations: pending?.n ?? 0,
     twoFactor: session.twoFactor,
-    features: { mockUi: ctx.config.mockUi },
+    features: { mockUi: ctx.config.mockUi, whatsNew: ctx.config.tourAutostart },
   };
 }

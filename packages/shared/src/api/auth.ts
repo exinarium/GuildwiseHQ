@@ -75,7 +75,8 @@ export const MeResponseSchema = z.object({
   pendingInvitations: z.number().int().default(0),
   twoFactor: TwoFactorStateSchema.default({ enabled: false, required: false, setupRequired: false }),
   /** Server feature flags the UI follows. `mockUi`: show the mock-runtime card fields (dev and e2e only). */
-  features: z.object({ mockUi: z.boolean() }).default({ mockUi: false }),
+  /** `whatsNew`: the "What's new" popup is on (off together with the tour auto-start, AOM_TOUR_AUTOSTART=false, as in the e2e suite). */
+  features: z.object({ mockUi: z.boolean(), whatsNew: z.boolean().optional() }).default({ mockUi: false }),
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
 

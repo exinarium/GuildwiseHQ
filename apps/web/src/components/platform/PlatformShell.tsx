@@ -7,6 +7,7 @@ import { Logo } from '../Logo.tsx';
 import { TourProvider } from '../tour/Tour.tsx';
 import { cx } from '../ui/cx.ts';
 import { Button } from '../ui.tsx';
+import { WhatsNewHost } from '../whatsnew/WhatsNew.tsx';
 
 const NAV = [
   { to: '/platform', label: 'Organizations', icon: Building2, end: true },
@@ -88,6 +89,7 @@ export function PlatformShell() {
           <Outlet />
         </main>
         <PageHelpPanel open={pageHelp} onOpenChange={setPageHelp} />
+        <WhatsNewHost />
       </div>
     </TourProvider>
   );

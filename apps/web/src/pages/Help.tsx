@@ -1,6 +1,6 @@
 import { SUPPORT_KIND_LABELS } from '@aom/shared';
-import { ArrowLeft, BookOpen, GraduationCap, Play, Search } from 'lucide-react';
-import { useEffect, useMemo } from 'react';
+import { ArrowLeft, BookOpen, GraduationCap, Play, Search, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMyTickets } from '../api/queries/support.ts';
 import { GettingStartedVideo } from '../components/help/GettingStartedVideo.tsx';
@@ -10,6 +10,7 @@ import { StatusBadge } from '../components/support/StatusBadge.tsx';
 import { useTour } from '../components/tour/TourContext.tsx';
 import { panelId, Tabs, tabId } from '../components/ui/Tabs.tsx';
 import { Badge, Button, EmptyState, ErrorBox, ListSkeleton, PageHeader, Panel } from '../components/ui.tsx';
+import { useAllWhatsNew, WhatsNewDialog } from '../components/whatsnew/WhatsNew.tsx';
 import { ARTICLES, articleBySlug, glossaryId, helpBase, helpPath, searchHelp } from '../help/articles.ts';
 import { GLOSSARY } from '../help/glossary.ts';
 import { Markdown } from '../help/Markdown.tsx';
@@ -106,6 +107,30 @@ function TourCard() {
           </Button>
         </div>
       </div>
+    </Panel>
+  );
+}
+
+/** "What's new in Guildwise HQ": the release notes for this user, reopened here at any time. */
+function WhatsNewCard() {
+  const entries = useAllWhatsNew();
+  const [open, setOpen] = useState(false);
+  if (entries.length === 0) return null;
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3" data-testid="help-whats-new">
+        <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand-soft-fg">
+          <Sparkles aria-hidden="true" className="size-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold text-fg">What’s new</h2>
+          <p className="text-sm text-muted">The latest changes to Guildwise HQ, newest first.</p>
+        </div>
+        <Button variant="secondary" onClick={() => setOpen(true)} data-testid="help-open-whats-new">
+          See what’s new
+        </Button>
+      </div>
+      <WhatsNewDialog open={open} entries={entries} onClose={() => setOpen(false)} confirmLabel="Close" />
     </Panel>
   );
 }
@@ -233,6 +258,7 @@ function Home({ base }: { base: string }) {
     <>
       <GettingStartedVideo />
       <TourCard />
+      <WhatsNewCard />
       <section aria-labelledby="help-articles-h">
         <h2 id="help-articles-h" className="mb-2 text-sm font-semibold tracking-wide text-subtle uppercase">
           Articles

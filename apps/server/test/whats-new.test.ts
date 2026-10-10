@@ -33,7 +33,9 @@ describe("what's new seen state", () => {
     const a = await w.t.userSession('wn-bad@example.test');
     expect((await mark(a.cookie, { entryIds: [] })).status).toBe(400);
     expect((await mark(a.cookie, { entryIds: ['has space'] })).status).toBe(400);
-    expect((await w.t.req('PUT', '/api/auth/whats-new-seen', { body: { entryIds: ['a'] } })).status).toBe(401);
+    expect((await w.t.req('PUT', '/api/auth/whats-new-seen', { body: { entryIds: ['a'] } })).status).toBe(
+      401,
+    );
   });
 
   it('survives a rebuild of the projections', async () => {

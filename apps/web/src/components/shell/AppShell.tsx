@@ -19,6 +19,7 @@ import { ContactProvider, useContact } from '../support/ContactDialog.tsx';
 import { TourProvider } from '../tour/Tour.tsx';
 import { useTour } from '../tour/TourContext.tsx';
 import { cx } from '../ui/cx.ts';
+import { WhatsNewHost } from '../whatsnew/WhatsNew.tsx';
 import { Breadcrumbs, crumbsFor } from './Breadcrumbs.tsx';
 import { buildNav } from './nav-config.ts';
 import { OrgBanner } from './OrgBanner.tsx';
@@ -340,6 +341,7 @@ function Shell({ name, live }: { name: string; live: string }) {
           }}
         />
         <PageHelpPanel open={pageHelp} onOpenChange={setPageHelp} />
+        <WhatsNewHost />
         <ShortcutsDialog open={help} onOpenChange={setHelp} />
         <ChatDrawer open={chat} onOpenChange={setChat} {...(project ? { projectId: project.id } : {})} />
       </Tooltip.Provider>

@@ -234,6 +234,8 @@ The first time you sign in, a short guided tour highlights the main areas and te
 
 ![The first step of the tour](guide/assets/tour-1.jpg)
 
+After an update, a window called **What's new in Guildwise HQ** opens the next time you sign in and lists the changes meant for your role, newest first. Click **Got it** to close it; it is remembered for your account, so it does not come back on another device. It never opens on top of the tour, and a brand-new account does not see changes from before it existed. To read the list again, open **Help** and choose **See what's new**.
+
 Three things worth knowing from the start:
 
 - **Search and jump anywhere:** press **Ctrl+K** (on a Mac **Cmd+K**) to open the command palette. Type a project, card, page or action ("contact", "new card") and press Enter.
