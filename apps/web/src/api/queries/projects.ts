@@ -87,7 +87,7 @@ export function useProject(id: string | undefined) {
     refetchInterval: (query) => {
       const d = query.state.data;
       const busy =
-        d?.repos.some((r) => r.setup?.some((s) => s.state === 'cloning')) ||
+        d?.repos?.some((r) => r.setup?.some((s) => s.state === 'cloning')) ||
         d?.environments?.some((e) => e.state === 'preparing');
       return busy ? 3000 : false;
     },

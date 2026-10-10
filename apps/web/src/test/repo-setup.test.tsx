@@ -62,7 +62,7 @@ describe('repository setup status', () => {
   });
 
   it('no retry for a member who is not the owner, and nothing when there is no setup', () => {
-    const { container } = wrap(
+    const first = wrap(
       <RepoSetupStatus
         projectId={`${ID}02`}
         canRetry={false}
@@ -79,7 +79,7 @@ describe('repository setup status', () => {
       />,
     );
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
-    container.innerHTML = '';
+    first.unmount();
     const empty = wrap(<RepoSetupStatus projectId={`${ID}02`} canRetry repo={repo([])} />);
     expect(empty.container.querySelector('[data-testid]')).toBeNull();
   });
