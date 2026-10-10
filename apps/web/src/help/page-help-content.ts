@@ -1392,7 +1392,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Auto-publish starts on and Hold',
-        text: 'Until the date you review every post. After it, a post without warnings publishes by itself once it has waited the hold (hours).',
+        text: 'Until the date you review every post. After it, a post without warnings publishes by itself once it has waited the hold (hours); posts already waiting on that date are released too, with the hold counted from the date.',
       },
       {
         name: 'Status chips',

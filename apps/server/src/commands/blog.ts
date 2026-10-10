@@ -24,7 +24,9 @@ import { SYSTEM_ACTOR, userActor } from './common.ts';
  *
  * Moderation: every post enters `in_review`. For the first two weeks (until `autoPublishFrom`) the owner reviews each
  * one; afterwards a post that raised no content warning publishes by itself once it has waited `holdHours` in review
- * (`blogTick`). The kill switch (`enabled = false`) stops creating (the API answers 503 `blog_disabled`) and
+ * (`blogTick`). Reaching `autoPublishFrom` also releases the backlog: a queued post WITHOUT warnings that was
+ * submitted before that date is scheduled like a new one, its hold counted from the switch date (owner decision BL2);
+ * posts with warnings keep waiting for the owner. The kill switch (`enabled = false`) stops creating (the API answers 503 `blog_disabled`) and
  * publishing (manual, auto, digest and social) alike; reading what is already published and unpublishing still work.
  */
 
@@ -217,10 +219,13 @@ export function postDto(r: Row, settings: BlogSettings, shares: BlogShare[] = []
     settings.enabled &&
     settings.autoPublishFrom &&
     (r.warnings as string[]).length === 0 &&
-    r.review_since &&
-    new Date(r.review_since) >= new Date(settings.autoPublishFrom)
+    r.review_since
   )
-    autoPublishAt = new Date(new Date(r.review_since).getTime() + settings.holdHours * HOUR).toISOString();
+    // A post queued before the switch date is released with it: the hold counts from the later of the two.
+    autoPublishAt = new Date(
+      Math.max(new Date(r.review_since).getTime(), new Date(settings.autoPublishFrom).getTime()) +
+        settings.holdHours * HOUR,
+    ).toISOString();
   return {
     ...content,
     id: r.id,
@@ -529,7 +534,7 @@ export async function autoPublishDue(ctx: Ctx): Promise<number> {
   const due = await rows(
     ctx.pool,
     `SELECT id FROM blog_posts WHERE status='in_review' AND warnings = '[]'::jsonb
-        AND review_since >= $1 AND review_since <= $2 ORDER BY review_since`,
+        AND review_since IS NOT NULL AND GREATEST(review_since, $1::timestamptz) <= $2 ORDER BY review_since`,
     [new Date(s.autoPublishFrom), new Date(now.getTime() - s.holdHours * HOUR)],
   );
   let n = 0;

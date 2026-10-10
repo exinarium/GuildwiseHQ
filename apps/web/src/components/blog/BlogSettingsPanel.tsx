@@ -69,7 +69,7 @@ export function BlogSettingsPanel({ settings }: { settings: BlogSettings }) {
             hint={
               settings.reviewAll
                 ? 'Until this date you review every post. Empty: never auto-publish. Default: two weeks after the first post.'
-                : 'From this date a clean post publishes by itself after the hold.'
+                : 'From this date a clean post publishes by itself after the hold, and clean posts already waiting are released too.'
             }
             data-testid="auto-from"
           />
