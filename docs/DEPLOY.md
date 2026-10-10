@@ -378,9 +378,13 @@ A super admin can flag an organization as a simulation (Platform, organization p
 | Variable | Default | Meaning |
 |---|---|---|
 | `AOM_SIMULATION_HOST` | `true` | Host simulated workstations. `false` switches the feature's runner off (the flag, billing exemption and wipe still work). |
-| `AOM_SIMULATION_DIR` | `<temp dir>/aom-simulation` | Where each simulation keeps its runner data and repositories. In Docker set it to `/data/simulation` (the image creates it, owned by the app user) and mount a volume there, or it is rebuilt after a restart (the organization's data in the database is unaffected). |
+| `AOM_SIMULATION_DIR` | `<temp dir>/aom-simulation` | Where each simulation keeps its runner data and repositories. `docker-compose.prod.yml` sets it to `/data/simulation` (the image creates it, owned by the app user) and mounts the named volume `simulation` there, so demos and their local repositories survive redeploys. Without a volume the folder is rebuilt after a restart (the organization's data in the database is unaffected, but cloned work in progress is lost). |
 | `AOM_SIMULATION_RUNNER_BIN` | unpacked from the runner release | Path of `aom-runner.mjs`. |
 | `AOM_SIMULATION_SERVER_URL` | `http://127.0.0.1:<AOM_PORT>` | How the simulated runner reaches the server. |
+
+The `simulation` volume is not part of the database backup; it holds only throwaway files. Repository requests in a simulation organization create local repositories in this folder, never on a git host.
+
+A real organization can be switched to simulation only while it is empty (no projects, not even archived ones, and no active billing subscription), and a simulation organization cannot be switched back: it stays one until it is deleted.
 
 The image needs `git` (the Dockerfile installs it) and the packaged runner (`AOM_RUNNER_RELEASE_DIR`, already set in the image).
 

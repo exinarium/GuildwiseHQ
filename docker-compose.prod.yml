@@ -32,6 +32,10 @@ services:
       # Encrypts two-factor seeds at rest; set it in .env (see docs/DEPLOY.md).
       AOM_SECRET_KEY: ${AOM_SECRET_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Simulation organizations keep their runner data and local repositories here (see docs/DEPLOY.md).
+      AOM_SIMULATION_DIR: /data/simulation
+    volumes:
+      - simulation:/data/simulation
     expose:
       - "4600"
 
@@ -61,5 +65,6 @@ services:
 
 volumes:
   pgdata:
+  simulation:
   caddy_data:
   caddy_config:
