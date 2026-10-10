@@ -170,10 +170,8 @@ async function installDependencies(
         const blocker = (step.after ?? [])
           .map((a) => done.get(a))
           .find((r) => r && r.status !== 'ok' && r.status !== 'installed');
-        if (blocker) {
-          out.push({ ...base, status: 'skipped', detail: `waiting for ${blocker.tool}` });
-          break;
-        }
+        // A tool that is not fine already says so in the report; its dependency steps just do not run.
+        if (blocker) break;
         if (!access.allowInstall) {
           out.push({
             ...base,

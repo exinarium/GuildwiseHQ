@@ -393,7 +393,7 @@ describe('env.ensure', () => {
     noTool.m.managers = [];
     const r2 = await ensureEnvironment(noTool.payload(access()), noTool.deps);
     expect(noTool.m.calls).not.toContain('go mod download');
-    expect(r2.tools.find((t) => t.tool === 'go mod download')?.status).toBe('skipped');
+    expect(r2.tools.find((t) => t.tool === 'go mod download')).toBeUndefined();
   });
 
   it('D6: python installs into the project venv, never the system python', async () => {

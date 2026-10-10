@@ -160,16 +160,7 @@ function PaletteBody({ ctx, close }: { ctx: PaletteContext; close: () => void })
           </Item>
           <Item
             value="action ask devops"
-            keywords={[
-              'install',
-              'docker',
-              'sudo',
-              'fix',
-              'environment',
-              'deploy',
-              'build',
-              'command',
-            ]}
+            keywords={['install', 'docker', 'sudo', 'fix', 'environment', 'deploy', 'build', 'command']}
             icon={Wrench}
             onSelect={run(() => ctx.onAskDevOps?.())}
           >

@@ -100,11 +100,16 @@ describe('the toolchain is prepared before build work', () => {
     expect(detail.environments[0].report.tools[0].fix).toContain('Install packages');
     // D5: one desk notice for the environment that needs access (a repeated finding adds none)
     const notices = () =>
-      q(`SELECT status, kind, title FROM desk_items WHERE subkind='environment_attention' AND project_id=$1`, [
-        w.projectId,
-      ]);
+      q(
+        `SELECT status, kind, title FROM desk_items WHERE subkind='environment_attention' AND project_id=$1`,
+        [w.projectId],
+      );
     expect(await notices()).toEqual([
-      expect.objectContaining({ status: 'open', kind: 'alert', title: expect.stringContaining('needs your help') }),
+      expect.objectContaining({
+        status: 'open',
+        kind: 'alert',
+        title: expect.stringContaining('needs your help'),
+      }),
     ]);
     const again = (await ok<any>(owner('GET', `/api/cards/${card.id}`))).workability;
     expect(again.reason).toContain('Needs access: .NET SDK');
@@ -127,8 +132,11 @@ describe('the toolchain is prepared before build work', () => {
     expect(start.agent.name).toBe('Bea');
     // ...and the notice is cleared once the environment is ready
     expect(
-      (await q(`SELECT status FROM desk_items WHERE subkind='environment_attention' AND project_id=$1`, [w.projectId]))
-        .map((x) => x.status),
+      (
+        await q(`SELECT status FROM desk_items WHERE subkind='environment_attention' AND project_id=$1`, [
+          w.projectId,
+        ])
+      ).map((x) => x.status),
     ).toEqual(['answered']);
   });
 

@@ -29,7 +29,11 @@ vi.mock('../api/queries/workstations.ts', () => ({
   }),
 }));
 vi.mock('../components/shell/useCurrentProject.ts', () => ({
-  useCurrentProject: () => ({ project: { id: ID(5), key: 'TOY', name: 'Toy' }, projects: [], isPending: false }),
+  useCurrentProject: () => ({
+    project: { id: ID(5), key: 'TOY', name: 'Toy' },
+    projects: [],
+    isPending: false,
+  }),
 }));
 
 const calls: Array<{ method: string; url: string; body: unknown }> = [];

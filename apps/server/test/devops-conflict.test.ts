@@ -57,17 +57,17 @@ async function finishDevopsRequest(summary: string) {
   await r.waitFor('shift.report.result', (f) => f.reportId === reportId);
   r.ended(start.shiftId, 'reported');
   await until(
-    async () =>
-      (await q(`SELECT 1 FROM shifts WHERE id=$1 AND status='ended'`, [start.shiftId]))[0],
+    async () => (await q(`SELECT 1 FROM shifts WHERE id=$1 AND status='ended'`, [start.shiftId]))[0],
     3000,
     'devops ended',
   );
   return start;
 }
 const conflictRequests = (cardId: string) =>
-  q(`SELECT id, status, summary FROM devops_requests WHERE card_id=$1 AND origin='conflict' ORDER BY created_at`, [
-    cardId,
-  ]);
+  q(
+    `SELECT id, status, summary FROM devops_requests WHERE card_id=$1 AND origin='conflict' ORDER BY created_at`,
+    [cardId],
+  );
 const deskOf = (subkind: string, cardId: string) =>
   q(`SELECT status, kind FROM desk_items WHERE subkind=$1 AND card_id=$2`, [subkind, cardId]);
 
@@ -86,7 +86,9 @@ describe('DevOps tries to resolve a rebase conflict first (G-Q2)', () => {
     expect(first[0]!.summary).toContain('attempt 1 of 2');
     expect(first[0]!.summary).toContain('src/a.ts');
     expect(await deskOf('conflict_attempt', card.id)).toEqual([{ status: 'open', kind: 'alert' }]);
-    const thread = await q(`SELECT body FROM thread_messages WHERE thread_id=$1 ORDER BY created_at`, [card.id]);
+    const thread = await q(`SELECT body FROM thread_messages WHERE thread_id=$1 ORDER BY created_at`, [
+      card.id,
+    ]);
     expect(thread.map((m) => m.body).join('\n')).toContain('DevOps is trying to resolve the conflict');
 
     // DevOps finishes: the card goes on to Rework (review and test run again afterwards)
@@ -94,7 +96,9 @@ describe('DevOps tries to resolve a rebase conflict first (G-Q2)', () => {
     await dispatcher().run();
     await until(async () => (await cardRow(card.id)).parked_request_id === null, 5000, 'unparked');
     expect(await cardRow(card.id)).toMatchObject({ stage: 'build', status: 'queued' });
-    const after = await q(`SELECT body FROM thread_messages WHERE thread_id=$1 ORDER BY created_at`, [card.id]);
+    const after = await q(`SELECT body FROM thread_messages WHERE thread_id=$1 ORDER BY created_at`, [
+      card.id,
+    ]);
     expect(after.map((m) => m.body).join('\n')).toContain('DevOps finished its conflict attempt');
 
     // attempt 2 after the same conflict again

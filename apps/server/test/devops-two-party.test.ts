@@ -71,14 +71,20 @@ describe('DevOps approvals on a member workstation (G-Q8)', () => {
   it('an Admin approving is not enough: the workstation user must agree too', async () => {
     const a = await acme();
     const id = await waitingRequest(a);
-    const first = await ok<any>(a.as(a.admin, 'POST', `/api/devops/requests/${id}/resolve`, { resolution: 'approved' }));
+    const first = await ok<any>(
+      a.as(a.admin, 'POST', `/api/devops/requests/${id}/resolve`, { resolution: 'approved' }),
+    );
     expect(first.request.status).toBe('needs_approval');
     expect(first.request.approval).toMatchObject({ resolution: null, managerApproved: true });
     expect(first.messages.at(-1).body).toContain("workstation's user");
     // the same person cannot approve twice
-    expect((await a.as(a.admin, 'POST', `/api/devops/requests/${id}/resolve`, { resolution: 'approved' })).status).toBe(409);
+    expect(
+      (await a.as(a.admin, 'POST', `/api/devops/requests/${id}/resolve`, { resolution: 'approved' })).status,
+    ).toBe(409);
     // the workstation's user agrees: now it runs
-    const second = await ok<any>(a.as(a.member, 'POST', `/api/devops/requests/${id}/resolve`, { resolution: 'approved' }));
+    const second = await ok<any>(
+      a.as(a.member, 'POST', `/api/devops/requests/${id}/resolve`, { resolution: 'approved' }),
+    );
     expect(second.request.approval.resolution).toBe('approved');
     expect(await statusOf(id)).toBe('queued');
   });
@@ -86,7 +92,9 @@ describe('DevOps approvals on a member workstation (G-Q8)', () => {
   it('the workstation user alone cannot approve; an Owner/Admin must as well', async () => {
     const a = await acme();
     const id = await waitingRequest(a);
-    const first = await ok<any>(a.as(a.member, 'POST', `/api/devops/requests/${id}/resolve`, { resolution: 'approved' }));
+    const first = await ok<any>(
+      a.as(a.member, 'POST', `/api/devops/requests/${id}/resolve`, { resolution: 'approved' }),
+    );
     expect(first.request.status).toBe('needs_approval');
     expect(first.request.approval).toMatchObject({ workstationUserAgreed: true, resolution: null });
     await ok(a.as(a.owner, 'POST', `/api/devops/requests/${id}/resolve`, { resolution: 'approved' }));
@@ -99,12 +107,21 @@ describe('DevOps approvals on a member workstation (G-Q8)', () => {
     const stranger = await t.userSession(uniqueEmail('stranger'));
     await t.addOrgMember(a.org, stranger.id, 'member');
     expect(
-      (await a.as(stranger as Person, 'POST', `/api/devops/requests/${id}/resolve`, { resolution: 'approved' })).status,
+      (
+        await a.as(stranger as Person, 'POST', `/api/devops/requests/${id}/resolve`, {
+          resolution: 'approved',
+        })
+      ).status,
     ).toBe(404);
     expect((await a.as(stranger as Person, 'GET', `/api/devops/requests/${id}`)).status).toBe(404);
     // an Admin can see the member's request
     expect((await a.as(a.admin, 'GET', `/api/devops/requests/${id}`)).status).toBe(200);
-    await ok(a.as(a.member, 'POST', `/api/devops/requests/${id}/resolve`, { resolution: 'rejected', note: 'not now' }));
+    await ok(
+      a.as(a.member, 'POST', `/api/devops/requests/${id}/resolve`, {
+        resolution: 'rejected',
+        note: 'not now',
+      }),
+    );
     expect(await statusOf(id)).toBe('failed');
   });
 
