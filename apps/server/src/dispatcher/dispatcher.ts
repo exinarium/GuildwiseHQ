@@ -4,6 +4,7 @@ import { type Row, rows } from '../db/sql.ts';
 import { DISPATCH_LOCK_ID } from '../db/tx.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
+import { wsServesOrgSql } from '../simulation/fit.ts';
 import { baTaskPass } from './ba-tasks.ts';
 import { testingPass } from './bottleneck.ts';
 import { agentView, candidateCards, isCandidate, ONLINE_WINDOW_MS } from './candidates.ts';
@@ -149,6 +150,7 @@ export class Dispatcher {
          FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
                  JOIN users wu ON wu.id = ws.user_id AND wu.status = 'active'
         WHERE a.status='active' AND NOT a.is_devops AND ws.status='active' AND ws.connected AND ws.last_seen_at > $1
+          AND ${wsServesOrgSql('ws', 'a.org_id')}
         ORDER BY a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
       [onlineSince],
     );

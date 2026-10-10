@@ -1267,6 +1267,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Its subscription, card and invoices. Pause or Unpause the organization, or Assign Unlimited (no billing, no limits). Each asks for a reason and is audited.',
       },
       {
+        name: 'Simulation',
+        text: 'Switch simulation on for testing and demos (agents run on a simulated workstation, nothing is built or billed), set its pace, load the demo scenario, or delete the whole simulation organization with all its data (you type its name to confirm).',
+      },
+      {
         name: 'Recent activity',
         text: 'The latest audit entries for this organization.',
       },
@@ -1279,7 +1283,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'Invite a new organization',
-        text: "Enter the Owner's email and an organization name to send the invitation.",
+        text: "Enter the Owner's email and an organization name to send the invitation. Tick Simulation organization to create it as a sandbox for testing or demos.",
       },
       {
         name: 'All invitations',

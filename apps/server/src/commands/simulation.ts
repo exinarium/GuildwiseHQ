@@ -82,7 +82,15 @@ async function eventFootprint(
       [orgId, deletedUserIds],
     )
   ).map((r) => streamId.invitation(r.id));
-  return { projectIds, invitationStreams, userStreams: deletedUserIds.map((u) => streamId.user(u)) };
+  // The simulated workstation belongs to the organization even when its owner lives on in another one.
+  const workstationStreams = (
+    await rows<{ id: string }>(tx, 'SELECT id FROM workstations WHERE simulation_org_id=$1', [orgId])
+  ).map((r) => streamId.workstation(r.id));
+  return {
+    projectIds,
+    invitationStreams,
+    userStreams: [...deletedUserIds.map((u) => streamId.user(u)), ...workstationStreams],
+  };
 }
 
 /**

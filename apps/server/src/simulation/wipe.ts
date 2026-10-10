@@ -67,6 +67,7 @@ export async function deleteOrgRows(
     if (table === 'users') parts.push('id = ANY($2::uuid[])');
     if (own.has('org_id')) parts.push('org_id = $1::uuid');
     if (own.has('user_id')) parts.push('user_id = ANY($2::uuid[])');
+    if (own.has('simulation_org_id')) parts.push('simulation_org_id = $1::uuid');
     for (const fk of fks) {
       if (fk.table !== table) continue;
       const parent = pred(fk.refTable);

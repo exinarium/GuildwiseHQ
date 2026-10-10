@@ -5,6 +5,7 @@ import { orgScope, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Queryable } from '../db/sql.ts';
 import { one, rows } from '../db/sql.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { wsServesOrgSql } from '../simulation/fit.ts';
 
 const ONLINE_WINDOW_MS = 45_000;
 
@@ -24,6 +25,7 @@ export async function baAvailable(
     `SELECT a.runtime, ws.runtimes FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
       WHERE a.org_id = $1 AND a.role_key = 'ba' AND a.status = 'active' AND NOT a.is_devops
         AND ws.status = 'active' AND ws.connected AND ws.last_seen_at > $2
+        AND ${wsServesOrgSql('ws', 'a.org_id')}
         AND ($3::uuid IS NULL OR ((a.allowed_project_ids IS NULL OR $3::uuid = ANY (a.allowed_project_ids))
              AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = $3::uuid AND pm.user_id = ws.user_id
                           AND pm.status = 'active')))`,

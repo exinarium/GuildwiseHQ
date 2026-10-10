@@ -17,6 +17,7 @@ import { one } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
+import { workstationServesOrg } from '../simulation/fit.ts';
 
 const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
@@ -94,6 +95,9 @@ export class ChatRelay {
     // Nothing is queued: an offline workstation is reported immediately and the message is not saved.
     if (row.status !== 'active' || !row.workstation_id || !ctx.services.runners.isOnline(row.workstation_id))
       return this.fail(userId, msg.threadId, CHAT_ERROR.workstationOffline);
+    // A simulation organization's agents only run on its simulated workstation, a real one never answers for it.
+    if (!(await workstationServesOrg(ctx.pool, row.workstation_id, row.org_id)))
+      return this.fail(userId, msg.threadId, CHAT_ERROR.simulationWorkstation);
 
     const prior = await one(
       ctx.pool,

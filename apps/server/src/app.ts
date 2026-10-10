@@ -88,6 +88,7 @@ import { workstationRoutes } from './routes/workstations.ts';
 import { RunnerGateway } from './runner-gateway/gateway.ts';
 import { RunnerRegistry } from './runner-gateway/registry.ts';
 import { Scheduler } from './scheduler/scheduler.ts';
+import { SimulationHostImpl } from './simulation/host.ts';
 
 export interface BuildOptions {
   /** Start dispatcher/reaper timers (production). Tests drive them explicitly. */
@@ -415,6 +416,10 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const unhookDefinitions = registerDefinitionHook(ctx);
   const unhookDevops = registerDevopsMembershipHook(ctx);
   await notifier.start();
+  // Simulation organizations: the simulated workstations come up with the server (not under tests unless asked for).
+  const simulation = config.simulationHost ? new SimulationHostImpl(ctx) : undefined;
+  if (simulation) ctx.services.simulation = simulation;
+  if (simulation && opts.background) await simulation.start();
   if (opts.background) {
     dispatcher.start();
     reaper.start();
@@ -429,6 +434,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     unhookHr();
     unhookDefinitions();
     unhookDevops();
+    await simulation?.stop();
     await reporter.stop();
     await scheduler.stop();
     await dispatcher.stop();

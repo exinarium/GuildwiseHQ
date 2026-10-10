@@ -60,7 +60,15 @@ export class PairingError extends HttpError {
 
 export async function pairRunner(
   ctx: Ctx,
-  input: { code: string; name: string; platform: string; hostname: string; runnerVersion: string },
+  input: {
+    code: string;
+    name: string;
+    platform: string;
+    hostname: string;
+    runnerVersion: string;
+    /** Server-internal pairing of a simulation organization's simulated workstation. */
+    simulationOrgId?: string;
+  },
 ) {
   const now = ctx.clock.now();
   const runnerToken = `aomr_${randomToken(32)}`;
@@ -88,7 +96,7 @@ export async function pairRunner(
     ]);
     // Every workstation gets its own DevOps engineer, hired in the same append (docs/ARCHITECTURE.md section 16.2).
     // One DevOps engineer per organization the user belongs to (owner decision 15), hired in the same append.
-    const devopsHires = await devopsHireEventsNew(tx, c.user_id, workstationId);
+    const devopsHires = await devopsHireEventsNew(tx, c.user_id, workstationId, input.simulationOrgId);
     await ctx.store.append(
       [
         {
@@ -103,6 +111,7 @@ export async function pairRunner(
               hostname: input.hostname,
               runnerVersion: input.runnerVersion,
               tokenHash: sha256Hex(runnerToken),
+              ...(input.simulationOrgId ? { simulationOrgId: input.simulationOrgId } : {}),
             },
           },
           actor: SYSTEM_ACTOR,

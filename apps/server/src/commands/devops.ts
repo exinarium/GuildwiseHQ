@@ -31,6 +31,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { wsServesOrgSql } from '../simulation/fit.ts';
 import { agentActor, orgScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { hygieneReportEvents } from './hygiene.ts';
 import type { ReportResult, WsRef } from './shifts.ts';
@@ -128,12 +129,15 @@ export async function devopsHireEvents(
   tx: Tx,
   userId: string,
   workstationId: string,
+  simulationOrgId?: string,
 ): Promise<AppendInput[]> {
+  // A simulated workstation serves its simulation organization only; a real one never serves a simulation organization.
   const orgs = await rows<{ org_id: string }>(
     tx,
     `SELECT om.org_id FROM org_members om JOIN organizations o ON o.id = om.org_id
-      WHERE om.user_id=$1 AND om.status='active' AND o.status IN ('trial','active') ORDER BY om.joined_at`,
-    [userId],
+      WHERE om.user_id=$1 AND om.status='active' AND o.status IN ('trial','active')
+        AND ($2::uuid IS NULL AND NOT o.simulation OR om.org_id = $2::uuid) ORDER BY om.joined_at`,
+    [userId, simulationOrgId ?? null],
   );
   const out: AppendInput[] = [];
   for (const o of orgs) {
@@ -147,8 +151,9 @@ export async function devopsHireEvents(
 export async function hireDevopsForOrgIn(ctx: Ctx, tx: Tx, userId: string, orgId: string): Promise<void> {
   const stations = await rows<{ id: string }>(
     tx,
-    `SELECT id FROM workstations WHERE user_id=$1 AND status='active' ORDER BY paired_at`,
-    [userId],
+    `SELECT w.id FROM workstations w WHERE w.user_id=$1 AND w.status='active'
+        AND ${wsServesOrgSql('w', '$2::uuid')} ORDER BY w.paired_at`,
+    [userId, orgId],
   );
   const events: AppendInput[] = [];
   for (const w of stations) {

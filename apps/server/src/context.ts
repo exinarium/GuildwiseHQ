@@ -38,6 +38,10 @@ export interface SimulationHost {
   reconcile(orgId: string): void;
   /** Stops the org's simulated runner and deletes its files (the wipe). */
   dispose(orgId: string): Promise<void>;
+  /** A local throwaway origin for a repository added in a simulation organization; resolves to its path. */
+  createOrigin(orgId: string, name: string): Promise<string>;
+  /** The state of the org's simulated runner process. */
+  status(orgId: string): { state: 'running' | 'starting' | 'stopped' | 'unavailable'; detail: string };
 }
 
 export interface Services {

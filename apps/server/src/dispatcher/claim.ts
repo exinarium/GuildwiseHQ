@@ -5,6 +5,7 @@ import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
+import { wsServesOrgSql } from '../simulation/fit.ts';
 import { type AgentView, agentView, isCandidate } from './candidates.ts';
 
 export interface WorktreeClaim {
@@ -49,7 +50,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
       tx,
       `SELECT a.*, ws.runtimes, ws.connected FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
                  JOIN users wu ON wu.id = ws.user_id AND wu.status = 'active'
-        WHERE a.id=$1 AND a.status='active' AND ws.status='active'`,
+        WHERE a.id=$1 AND a.status='active' AND ws.status='active' AND ${wsServesOrgSql('ws', 'a.org_id')}`,
       [args.agentId],
     );
     if (!a) return null;

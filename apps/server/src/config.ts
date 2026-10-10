@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 
 const bool = (def: boolean) =>
@@ -72,6 +74,20 @@ const EnvSchema = z.object({
   AOM_FX_URL: z.string().default('https://open.er-api.com/v6/latest/USD'),
   /** Used when the rate source is down and no daily rate is cached. */
   AOM_FX_FALLBACK_ZAR: z.coerce.number().positive().default(18.5),
+  /**
+   * Simulation organizations: host their simulated workstation (a mock runner the server starts and supervises).
+   * Unset: on, except under tests.
+   */
+  AOM_SIMULATION_HOST: z.preprocess(
+    (v) => (v === '' || v === undefined ? (process.env.NODE_ENV === 'test' ? 'false' : 'true') : v),
+    bool(true),
+  ),
+  /** Where simulated workstations keep their files (runner data, local repositories). Default: a folder in the temp dir. */
+  AOM_SIMULATION_DIR: z.string().optional(),
+  /** The runner entry file the server starts for a simulation (`aom-runner.mjs`). Unset: unpacked from the runner release, or found in the repo. */
+  AOM_SIMULATION_RUNNER_BIN: z.string().optional(),
+  /** How the simulated runner reaches this server. Unset: `http://127.0.0.1:<AOM_PORT>`. */
+  AOM_SIMULATION_SERVER_URL: z.string().optional(),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -137,6 +153,11 @@ export interface Config {
   fxUrl: string;
   fxFallbackZar: number;
   logLevel: string;
+  /** Host the simulated workstations of simulation organizations (see src/simulation). */
+  simulationHost: boolean;
+  simulationDir: string;
+  simulationRunnerBin: string | undefined;
+  simulationServerUrl: string | undefined;
   /** Cookie `Secure` flag: true when the public origin is https. */
   secureCookies: boolean;
 }
@@ -195,6 +216,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     fxUrl: e.AOM_FX_URL,
     fxFallbackZar: e.AOM_FX_FALLBACK_ZAR,
     logLevel: e.LOG_LEVEL,
+    simulationHost: e.AOM_SIMULATION_HOST,
+    simulationDir: e.AOM_SIMULATION_DIR?.trim() || join(tmpdir(), 'aom-simulation'),
+    simulationRunnerBin: e.AOM_SIMULATION_RUNNER_BIN?.trim() || undefined,
+    simulationServerUrl: e.AOM_SIMULATION_SERVER_URL?.trim() || undefined,
     secureCookies: publicOrigin.startsWith('https://'),
   };
 }

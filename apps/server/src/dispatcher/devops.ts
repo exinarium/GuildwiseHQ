@@ -5,6 +5,7 @@ import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { buildDevopsShiftStart } from '../runner-gateway/brief.ts';
+import { wsServesOrgSql } from '../simulation/fit.ts';
 
 const ONLINE_WINDOW_MS = 45_000;
 
@@ -33,7 +34,7 @@ export async function devopsPass(
        JOIN workstations w ON w.id = r.workstation_id AND w.status = 'active' AND w.connected AND w.last_seen_at > $1
        JOIN users wu ON wu.id = w.user_id AND wu.status = 'active'
        JOIN organizations po ON po.id = r.org_id AND po.status IN ('trial','active')
-      WHERE r.status = 'queued'
+      WHERE r.status = 'queued' AND ${wsServesOrgSql('w', 'r.org_id')}
       ORDER BY r.created_at, r.id`,
     [onlineSince],
   );

@@ -15,7 +15,7 @@ import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import { resolveWorkflow } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
-import { one, type Row, rows } from '../db/sql.ts';
+import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -246,16 +246,16 @@ export async function setConcurrencyCap(
   });
 }
 
+async function isSimulationOrg(db: Queryable, orgId: string): Promise<boolean> {
+  return (await one(db, 'SELECT 1 FROM organizations WHERE id=$1 AND simulation', [orgId])) !== undefined;
+}
+
 export async function addRepo(
   ctx: Ctx,
   user: AuthSession['user'],
   projectId: string,
   input: AddRepoRequest,
 ): Promise<string> {
-  assertRemoteUrl(ctx, input.remoteUrl);
-  const normalized = normalizeRemoteUrl(input.remoteUrl);
-  if (!normalized.includes('/'))
-    throw badRequest('invalid_remote_url', 'remote URL must include a host and a path');
   let stations: string[] = [];
   const id = await withAppendTx(ctx.pool, async (tx) => {
     const p = await ownedProject(tx, user.id, projectId);
@@ -267,7 +267,12 @@ export async function addRepo(
     const repoId = await addRepoIn(ctx, tx, p, input, userActor(user.id));
     // The DevOps engineers put the repository on the project's workstations (clone it, or create it first).
     const repo = (await one(tx, 'SELECT * FROM project_repos WHERE id=$1', [repoId])) as Row;
-    const events = await repoSetupEvents(tx, p, repo, { create: input.create, requestedBy: user.id });
+    // A simulation organization's repository is a local throwaway one that already exists: nothing to create.
+    const sim = await isSimulationOrg(tx, p.org_id);
+    const events = await repoSetupEvents(tx, p, repo, {
+      create: sim ? undefined : input.create,
+      requestedBy: user.id,
+    });
     if (events.length) await ctx.store.append(events, { tx });
     stations = (await projectWorkstations(tx, projectId)).map((w) => w.id);
     return repoId;
@@ -287,7 +292,13 @@ export async function repoAddedEvent(
   input: AddRepoRequest,
   actor: Parameters<typeof ctx.store.append>[0][number]['actor'],
 ): Promise<{ repoId: string; event: AppendInput }> {
-  assertRemoteUrl(ctx, input.remoteUrl);
+  // In a simulation organization the repository is a local throwaway origin on the server, whatever URL was typed:
+  // nothing ever contacts GitHub or another host.
+  if (await isSimulationOrg(tx, project.org_id)) {
+    if (!ctx.services.simulation)
+      throw conflict('simulation_unavailable', 'simulation hosting is switched off on this server');
+    input = { ...input, remoteUrl: await ctx.services.simulation.createOrigin(project.org_id, input.name) };
+  } else assertRemoteUrl(ctx, input.remoteUrl);
   const normalized = normalizeRemoteUrl(input.remoteUrl);
   if (!normalized.includes('/'))
     throw badRequest('invalid_remote_url', 'remote URL must include a host and a path');

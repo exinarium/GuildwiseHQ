@@ -6,6 +6,7 @@ import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { buildQuestionShiftStart, QUESTION_MAX_SHIFT_MINUTES } from '../runner-gateway/question-brief.ts';
+import { wsServesOrgSql } from '../simulation/fit.ts';
 
 const ONLINE_WINDOW_MS = 45_000;
 const MAX_ATTEMPTS = 2;
@@ -40,6 +41,7 @@ export async function questionPass(
        FROM desk_items d JOIN agents a ON a.id = d.routed_agent_id LEFT JOIN workstations ws ON ws.id = a.workstation_id
        JOIN organizations po ON po.id = d.org_id AND po.status IN ('trial','active')
       WHERE d.status = 'open' AND d.routed_to = 'agent'
+        AND (ws.id IS NULL OR ${wsServesOrgSql('ws', 'd.org_id')})
         AND NOT EXISTS (SELECT 1 FROM shifts s WHERE s.desk_item_id = d.id AND s.status <> 'ended')
       ORDER BY d.blocking DESC, d.created_at, d.id`,
   );

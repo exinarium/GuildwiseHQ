@@ -12,6 +12,8 @@ export const workstationEvents = [
       hostname: z.string().nullable(),
       runnerVersion: z.string().nullable(),
       tokenHash: z.string().min(1),
+      /** The simulated workstation of this simulation organization (hosted by the server); absent for real ones. */
+      simulationOrgId: Id.optional(),
     }),
   ),
   defineEvent('WorkstationRenamed', z.object({ workstationId: Id, name: z.string().min(1) })),

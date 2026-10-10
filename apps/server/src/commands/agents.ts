@@ -227,10 +227,12 @@ export async function hireAgent(
 ): Promise<string> {
   const agentId = randomUUID();
   await withAppendTx(ctx.pool, async (tx) => {
-    const ws = await one(tx, `SELECT id FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`, [
-      req.workstationId,
-      user.id,
-    ]);
+    // Own workstation; or the organization's simulated workstation (a simulation organization's agents run there).
+    const ws = await one(
+      tx,
+      `SELECT id FROM workstations WHERE id=$1 AND status='active' AND (user_id=$2 OR simulation_org_id=$3)`,
+      [req.workstationId, user.id, org.id],
+    );
     if (!ws) throw notFound('workstation not found');
     let orgId = org.id;
     let role: Awaited<ReturnType<typeof projectRole>> = null;

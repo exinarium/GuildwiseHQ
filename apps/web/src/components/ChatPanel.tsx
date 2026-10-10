@@ -14,6 +14,8 @@ export function chatErrorText(reason: string): string {
   switch (reason) {
     case 'workstation_offline':
       return OFFLINE_TEXT;
+    case 'simulation_workstation':
+      return 'This is a simulation organization: this agent is not on its simulated workstation, and real workstations do not answer here. Hire the agent again on the simulated workstation.';
     case 'busy':
       return 'The agent is still answering your previous message.';
     case 'unknown_thread':

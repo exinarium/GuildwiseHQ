@@ -194,18 +194,42 @@ export class MockAdapter implements RuntimeAdapter {
 }
 
 /**
- * Recording only: `AOM_MOCK_REPLIES_FILE` names a JSON map `{ "<message>": "<reply>" }` (matched ignoring case and
- * surrounding space; `{name}` in a reply becomes the agent's name). It lets the getting-started video show a real-looking
- * answer. Unset (always, outside the video recording), nothing changes.
+ * `AOM_MOCK_REPLIES_FILE` names a JSON map of scripted chat replies. It is set for the getting-started video recording
+ * and for the simulated workstation of a simulation organization (the server ships its own map). Unset (every real
+ * workstation), nothing changes. Keys, tried in this order:
+ * - the message itself (matched ignoring case and surrounding space);
+ * - `/pattern/` or `/pattern/i`: a regular expression tested against the message (the first match in file order wins);
+ * - `*`: the answer for anything else.
+ * A value is a reply or a list of replies (one is picked by the message, so the same question always gets the same
+ * answer). `{name}` becomes the agent's name and `{message}` the user's message.
  */
-function scriptedReply(message: string, agentName: string): string | null {
-  const file = process.env.AOM_MOCK_REPLIES_FILE;
+export function scriptedReply(
+  message: string,
+  agentName: string,
+  file = process.env.AOM_MOCK_REPLIES_FILE,
+): string | null {
   if (!file) return null;
   try {
-    const map = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>;
-    const key = message.trim().toLowerCase();
-    for (const [k, v] of Object.entries(map))
-      if (k.trim().toLowerCase() === key) return v.replaceAll('{name}', agentName);
+    const map = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string | string[]>;
+    const text = message.trim();
+    const key = text.toLowerCase();
+    const fill = (v: string | string[]): string => {
+      const list = Array.isArray(v) ? v : [v];
+      let h = 0;
+      for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+      return (list[h % list.length] ?? '').replaceAll('{name}', agentName).replaceAll('{message}', text);
+    };
+    for (const [k, v] of Object.entries(map)) if (k.trim().toLowerCase() === key) return fill(v);
+    for (const [k, v] of Object.entries(map)) {
+      const m = /^\/(.+)\/([a-z]*)$/.exec(k.trim());
+      if (!m) continue;
+      try {
+        if (new RegExp(m[1] as string, m[2]).test(text)) return fill(v);
+      } catch {
+        /* a broken pattern is skipped */
+      }
+    }
+    if (map['*'] !== undefined) return fill(map['*']);
   } catch {
     /* an unreadable map is ignored */
   }

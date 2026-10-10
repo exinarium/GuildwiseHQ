@@ -12,6 +12,7 @@ export const RESYNC_THRESHOLD = 500;
 /** `chat.error.reason` values the server sends. */
 export const CHAT_ERROR = {
   workstationOffline: 'workstation_offline',
+  simulationWorkstation: 'simulation_workstation',
   unknownThread: 'unknown_thread',
   busy: 'busy',
   cancelled: 'cancelled',
