@@ -47,17 +47,73 @@ const post = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const writerRun = (over: Record<string, unknown> = {}) => ({
+  id: '22222222-2222-4222-8222-222222222222',
+  kind: 'scheduled',
+  status: 'ok',
+  slot: 's:2026-10-10T06',
+  topic: 'How to give an AI agent a narrow job',
+  model: 'claude-haiku-4-5',
+  startedAt: '2026-10-10T06:00:00.000Z',
+  finishedAt: '2026-10-10T06:01:30.000Z',
+  inputTokens: 20000,
+  outputTokens: 5000,
+  searches: 3,
+  costUsd: 0.075,
+  postId: '11111111-1111-4111-8111-111111111111',
+  slug: 'first-post',
+  error: null,
+  ...over,
+});
+let writer: Record<string, any> = {};
+const freshWriter = () => ({
+  enabled: false,
+  postsPerDay: 1,
+  topics: ['Topic one about agents', 'Topic two about automation'],
+  model: 'claude-haiku-4-5',
+  models: ['claude-haiku-4-5', 'claude-haiku-5-5'],
+  prices: {
+    'claude-haiku-4-5': { inputPerMTok: 1, outputPerMTok: 5 },
+    'claude-haiku-5-5': null,
+  },
+  priceOverrides: {},
+  searchUsd: 0.01,
+  capUsd: 10,
+  spentMonthUsd: 0.075,
+  runsMonth: 1,
+  postsMonth: 1,
+  month: '2026-10',
+  estimateRunUsd: 0.11,
+  keyConfigured: true,
+  blogEnabled: true,
+  blockedReason: null,
+  nextSlot: null,
+  lastRun: writerRun(),
+  runs: [writerRun()],
+});
+
 let settings = { enabled: true, autoPublishFrom: null, holdHours: 3, digestEnabled: true, reviewAll: true };
 let calls: Array<{ url: string; method: string; body?: string }> = [];
 
 beforeEach(() => {
   calls = [];
+  writer = freshWriter();
   settings = { enabled: true, autoPublishFrom: null, holdHours: 3, digestEnabled: true, reviewAll: true };
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       calls.push({ url, method: init?.method ?? 'GET', ...(init?.body ? { body: String(init.body) } : {}) });
+      if (url.startsWith('/api/platform/blog/writer/run'))
+        return json({ run: writerRun({ kind: 'manual' }), post: post() });
+      if (url.startsWith('/api/platform/blog/writer')) {
+        if (init?.method === 'PATCH') {
+          const b = JSON.parse(String(init.body ?? '{}'));
+          if (b.price) writer.prices = { ...writer.prices, [b.price.model]: b.price.value };
+          else writer = { ...writer, ...b };
+        }
+        return json(writer);
+      }
       if (url.startsWith('/api/platform/blog/summary'))
         return json({ pending: 1, enabled: settings.enabled });
       if (url.startsWith('/api/platform/blog/settings')) {
@@ -191,6 +247,66 @@ describe('Help > Blog', () => {
     expect(within(article).getByTestId('blog-public-link')).toHaveAttribute('href', '/blog/first-post');
     expect(article.querySelector('script')).toBeNull();
     void user;
+  });
+});
+
+describe('blog writer panel', () => {
+  it('is off by default, switches on, and shows spend, topics and the last run', async () => {
+    const user = userEvent.setup();
+    wrap(<PlatformBlog />, '/platform/blog');
+    const panel = await screen.findByTestId('writer-body');
+    expect(within(panel).getByTestId('writer-state')).toHaveTextContent('Off');
+    expect(within(panel).getByTestId('writer-spend')).toHaveTextContent('$0.075 of $10.00');
+    expect(within(panel).getByTestId('writer-last')).toHaveTextContent('Written');
+    expect(within(panel).getByTestId('writer-topics')).toHaveValue(
+      'Topic one about agents\nTopic two about automation',
+    );
+    await user.click(within(panel).getByTestId('writer-toggle'));
+    await vi.waitFor(() =>
+      expect(
+        calls.some(
+          (c) => c.method === 'PATCH' && c.url.endsWith('/writer') && c.body?.includes('"enabled":true'),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('asks for a price when the model has none, and saves it', async () => {
+    const user = userEvent.setup();
+    wrap(<PlatformBlog />, '/platform/blog');
+    const panel = await screen.findByTestId('writer-body');
+    await user.selectOptions(within(panel).getByTestId('writer-model'), 'claude-haiku-5-5');
+    expect(within(panel).getByTestId('writer-prices')).toHaveTextContent('not known');
+    await user.type(within(panel).getByTestId('writer-price-in'), '2');
+    await user.type(within(panel).getByTestId('writer-price-out'), '10');
+    await user.click(within(panel).getByTestId('writer-price-save'));
+    await vi.waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.method === 'PATCH' &&
+            c.body?.includes('"model":"claude-haiku-5-5"') &&
+            c.body.includes('"outputPerMTok":10'),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('Write one now posts and links to the queued article; it is disabled while blocked', async () => {
+    const user = userEvent.setup();
+    wrap(<PlatformBlog />, '/platform/blog');
+    const panel = await screen.findByTestId('writer-body');
+    await user.click(within(panel).getByTestId('writer-now'));
+    const done = await screen.findByTestId('writer-now-result');
+    expect(done).toHaveTextContent('A first article about agents');
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/platform/blog/writer/run')).toBe(true);
+  });
+
+  it('explains why it will not run', async () => {
+    writer = { ...writer, blockedReason: 'The monthly cap is reached' };
+    wrap(<PlatformBlog />, '/platform/blog');
+    expect(await screen.findByTestId('writer-blocked')).toHaveTextContent('monthly cap is reached');
+    expect(screen.getByTestId('writer-now')).toBeDisabled();
   });
 });
 

@@ -350,7 +350,7 @@ function Editor({ post }: { post: BlogPost }) {
         open={rejecting}
         onOpenChange={setRejecting}
         title="Reject this post?"
-        description="The writer agent sees your reason the next time it lists its posts, and can revise and resubmit."
+        description="The reason is kept with the post. An outside tool that sent it can read the reason, revise and resubmit."
         footer={
           <>
             <Button variant="ghost" onClick={() => setRejecting(false)}>

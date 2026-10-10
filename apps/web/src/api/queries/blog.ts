@@ -6,10 +6,14 @@ import {
   BlogPostSchema,
   type BlogSettings,
   BlogSettingsSchema,
+  type BlogWriter,
+  BlogWriterRunResultSchema,
+  BlogWriterSchema,
   type CreateApiKeyRequestSchema,
   CreatedApiKeySchema,
   DigestPreferenceSchema,
   type PatchBlogSettingsRequestSchema,
+  type PatchBlogWriterRequest,
   PlatformBlogListSchema,
   PublicBlogListSchema,
   PublicBlogPostFullSchema,
@@ -172,3 +176,20 @@ export const useConnectChannel = () =>
   );
 export const useDisconnectChannel = () =>
   useBlogMutation((network: string) => del(`/platform/social/channels/${network}`));
+
+// ---- the server-side blog writer (platform job)
+
+export function useBlogWriter() {
+  return useQuery({
+    queryKey: ['platform', 'blog', 'writer'],
+    queryFn: () => get('/platform/blog/writer', BlogWriterSchema),
+    refetchInterval: 20_000,
+  });
+}
+export const usePatchBlogWriter = () =>
+  useBlogMutation((v: PatchBlogWriterRequest) =>
+    patch<BlogWriter>('/platform/blog/writer', v, BlogWriterSchema),
+  );
+/** Waits for the run (a minute or two) and answers with the run and the queued post. */
+export const useWriteNow = () =>
+  useBlogMutation(() => post('/platform/blog/writer/run', undefined, BlogWriterRunResultSchema));

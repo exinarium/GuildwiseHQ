@@ -210,7 +210,7 @@ const PLATFORM_STEPS: TourStep[] = [
     id: 'platform-blog',
     target: 'platform-nav-blog',
     title: 'Blog',
-    body: 'The review queue for the blog posts the writer agent sends, the weekly digest, social sharing and the switch that turns the blog off. API keys for the writer agent sit next to it.',
+    body: 'The blog writer (switch it on, set topics and a monthly cap), the review queue for its articles, the weekly digest, social sharing and the switch that turns the blog off. API keys for outside tools sit next to it.',
     more: 'blog-and-digest#platform-blog',
   },
   {

@@ -3,6 +3,7 @@ import { Newspaper } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { usePlatformBlog } from '../../api/queries/blog.ts';
 import { BlogSettingsPanel } from '../../components/blog/BlogSettingsPanel.tsx';
+import { BlogWriterPanel } from '../../components/blog/BlogWriterPanel.tsx';
 import { SocialPanel } from '../../components/blog/SocialPanel.tsx';
 import {
   Badge,
@@ -47,10 +48,11 @@ export function PlatformBlog() {
     <div>
       <PageHeader
         title="Blog"
-        sub="The Guildwise HQ blog: posts from the writer agents wait here for your review."
+        sub="The Guildwise HQ blog: articles from the blog writer (or an outside tool) wait here for your review."
       />
       {list.isError && <ErrorBox error={list.error} onRetry={() => list.refetch()} />}
       {d && <BlogSettingsPanel settings={d.settings} />}
+      <BlogWriterPanel />
       <div className="mb-3 flex flex-wrap items-center gap-2" role="group" aria-label="Status">
         <FilterChip pressed={!status} onClick={() => set(undefined)}>
           All
@@ -72,7 +74,7 @@ export function PlatformBlog() {
         <EmptyState
           icon={Newspaper}
           title="No posts here"
-          description="Posts arrive through the agent API. Create an API key under API keys and set up the writer agent (see BLOG-API.md)."
+          description="Switch the blog writer on under Writer above, or press Write one now. Outside tools can post through the blog API (see API keys)."
         />
       )}
       {d && d.posts.length > 0 && (

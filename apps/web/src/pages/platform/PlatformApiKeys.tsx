@@ -25,7 +25,7 @@ const SCOPE_HELP: Record<BlogApiScope, string> = {
   'social:write': 'Ask for a social share and read share status',
 };
 
-/** `/platform/api-keys`: the Bearer keys of the writer agents. A key is shown once, at creation. */
+/** `/platform/api-keys`: the Bearer keys of outside tools that use the blog API (the built-in blog writer needs none). A key is shown once, at creation. */
 export function PlatformApiKeys() {
   const keys = useApiKeys();
   const audit = useApiKeyAudit();
@@ -74,7 +74,7 @@ export function PlatformApiKeys() {
             label="Name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Blog writer agent"
+            placeholder="Outside writing tool"
             required
             data-testid="key-name"
           />
@@ -245,8 +245,8 @@ export function PlatformApiKeys() {
         }
       >
         <Callout tone="warning" className="mb-3">
-          Store it in the environment of the writer agent. It cannot be shown again; if it is lost, revoke it
-          and create another.
+          Store it in the environment of the tool that will use it. It cannot be shown again; if it is lost,
+          revoke it and create another.
         </Callout>
         <p className="mb-1 text-sm font-medium text-fg">{secret?.name}</p>
         <code
