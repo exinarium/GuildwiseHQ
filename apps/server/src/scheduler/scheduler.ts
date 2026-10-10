@@ -1,3 +1,4 @@
+import { cloudTick } from '../cloud/tick.ts';
 import { evaluateAllBudgets } from '../commands/budgets.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
@@ -49,6 +50,14 @@ export class Scheduler {
     return next;
   }
 
+  /** Cloud workstations: wake for queued cards, stop when idle (every 15 seconds with the main pass). */
+  runCloud(): Promise<{ woke: string[]; stopped: string[] }> {
+    if (this.stopped) return Promise.resolve({ woke: [], stopped: [] });
+    const next = this.chain.then(() => cloudTick(this.ctx));
+    this.chain = next.catch(() => ({ woke: [], stopped: [] }));
+    return next;
+  }
+
   /** Trial and licence ends suspend organizations; warnings go to their desks (every 5 minutes). */
   runLicensing(): Promise<{ suspended: number; warned: number }> {
     if (this.stopped) return Promise.resolve({ suspended: 0, warned: 0 });
@@ -67,6 +76,7 @@ export class Scheduler {
       await this.interests();
       await this.triggers();
       await auditMailTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'audit mail failed'));
+      await cloudTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'cloud workstations failed'));
       return fired;
     });
     this.chain = next.catch(() => {});

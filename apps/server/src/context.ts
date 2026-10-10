@@ -12,6 +12,7 @@ import type { Mailer } from './mail/mailer.ts';
 import type { Reporter } from './reporter/reporter.ts';
 import type { RunnerGateway } from './runner-gateway/gateway.ts';
 import type { RunnerRegistry } from './runner-gateway/registry.ts';
+import type { CloudServices } from './cloud/service.ts';
 import type { Scheduler } from './scheduler/scheduler.ts';
 
 /** Everything a command, route or gateway needs. Built once in `createApp` (app.ts). */
@@ -36,4 +37,5 @@ export interface Services {
   reporter: Reporter;
   browser: BrowserGateway;
   chat: ChatRelay;
+  cloud: CloudServices;
 }

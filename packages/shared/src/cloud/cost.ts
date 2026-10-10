@@ -17,10 +17,38 @@ export interface CodespacesMachine {
 
 /** GitHub Codespaces list prices (compute per hour). */
 export const CODESPACES_MACHINES: readonly CodespacesMachine[] = [
-  { name: 'basicLinux32gb', label: '2 cores, 8 GB RAM, 32 GB disk', cores: 2, memoryGb: 8, storageGb: 32, hourlyUsd: 0.18 },
-  { name: 'standardLinux32gb', label: '4 cores, 16 GB RAM, 32 GB disk', cores: 4, memoryGb: 16, storageGb: 32, hourlyUsd: 0.36 },
-  { name: 'premiumLinux', label: '8 cores, 32 GB RAM, 64 GB disk', cores: 8, memoryGb: 32, storageGb: 64, hourlyUsd: 0.72 },
-  { name: 'largePremiumLinux', label: '16 cores, 64 GB RAM, 128 GB disk', cores: 16, memoryGb: 64, storageGb: 128, hourlyUsd: 1.44 },
+  {
+    name: 'basicLinux32gb',
+    label: '2 cores, 8 GB RAM, 32 GB disk',
+    cores: 2,
+    memoryGb: 8,
+    storageGb: 32,
+    hourlyUsd: 0.18,
+  },
+  {
+    name: 'standardLinux32gb',
+    label: '4 cores, 16 GB RAM, 32 GB disk',
+    cores: 4,
+    memoryGb: 16,
+    storageGb: 32,
+    hourlyUsd: 0.36,
+  },
+  {
+    name: 'premiumLinux',
+    label: '8 cores, 32 GB RAM, 64 GB disk',
+    cores: 8,
+    memoryGb: 32,
+    storageGb: 64,
+    hourlyUsd: 0.72,
+  },
+  {
+    name: 'largePremiumLinux',
+    label: '16 cores, 64 GB RAM, 128 GB disk',
+    cores: 16,
+    memoryGb: 64,
+    storageGb: 128,
+    hourlyUsd: 1.44,
+  },
 ];
 
 /** Storage is charged while the codespace exists, stopped or not. */

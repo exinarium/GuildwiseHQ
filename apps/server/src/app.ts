@@ -17,6 +17,8 @@ import { SESSION_COOKIE } from './auth/sessions.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
 import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
+import { realSshConnector } from './cloud/ssh.ts';
+import { createGithubApi } from './cloud/github.ts';
 import { registerBudgetHook } from './commands/budgets.ts';
 import { registerDecisionHook } from './commands/decisions.ts';
 import { registerDefinitionHook } from './commands/designer.ts';
@@ -41,6 +43,7 @@ import { createRoutingInterceptor } from './reporter/routing.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { agentRoutes } from './routes/agents.ts';
 import { authRoutes } from './routes/auth.ts';
+import { cloudRoutes } from './routes/cloud.ts';
 import { cardRoutes } from './routes/cards.ts';
 import { catalogueRoutes } from './routes/catalogue.ts';
 import { chatRoutes } from './routes/chats.ts';
@@ -276,6 +279,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(platformRoutes(ctx));
   await app.register(workstationRoutes(ctx));
   await app.register(installerRoutes(ctx));
+  await app.register(cloudRoutes(ctx));
   await app.register(supportRoutes(ctx));
   await app.register(projectRoutes(ctx));
   await app.register(cardRoutes(ctx));
@@ -312,6 +316,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   const scheduler = new Scheduler(ctx);
   const reporter = new Reporter(ctx);
   Object.assign(ctx.services, { runners, gateway, browser, dispatcher, reaper, scheduler, reporter });
+  ctx.services.cloud = { ssh: realSshConnector, github: createGithubApi(), pending: new Set() };
   ctx.services.chat = new ChatRelay(ctx);
   await app.register(websocket, {
     options: {

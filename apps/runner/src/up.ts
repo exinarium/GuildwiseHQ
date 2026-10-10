@@ -1,9 +1,5 @@
 import { hostname, platform } from 'node:os';
-import {
-  RunnerEnrollRequestSchema,
-  RunnerPairRequestSchema,
-  RunnerPairResponseSchema,
-} from '@aom/shared';
+import { RunnerEnrollRequestSchema, RunnerPairRequestSchema, RunnerPairResponseSchema } from '@aom/shared';
 import { loadConfig, saveConfig } from './config.ts';
 import { addPairing, entryConfigPath, loadIndex, normalizeServerUrl } from './pairings.ts';
 import { resolveDataDir } from './paths.ts';
@@ -56,7 +52,9 @@ export async function preparePairing(opts: UpOptions): Promise<UpResult> {
 
   if (!entry) {
     if (!server)
-      throw new Error('Not paired yet: give the server with --server or GUILDWISE_SERVER (and a pairing code).');
+      throw new Error(
+        'Not paired yet: give the server with --server or GUILDWISE_SERVER (and a pairing code).',
+      );
     let paired: { workstationId: string; runnerToken: string };
     if (code) {
       const body = RunnerPairRequestSchema.parse({

@@ -72,7 +72,12 @@ export const CreateVpsRequestSchema = z
     name: z.string().trim().min(1).max(80),
     host: HostSchema,
     port: z.number().int().min(1).max(65535).default(22),
-    username: z.string().trim().min(1).max(64).regex(/^[a-z_][a-z0-9_-]*$/i, 'a Linux user name'),
+    username: z
+      .string()
+      .trim()
+      .min(1)
+      .max(64)
+      .regex(/^[a-z_][a-z0-9_-]*$/i, 'a Linux user name'),
     /** Sent once to install, never stored. */
     password: z.string().min(1).max(512).optional(),
     privateKey: z.string().min(1).max(20000).optional(),
@@ -109,7 +114,10 @@ export type GithubConnection = z.infer<typeof GithubConnectionSchema>;
 export const CreateCodespaceRequestSchema = z.object({
   name: z.string().trim().min(1).max(80),
   /** `owner/name`. */
-  repo: z.string().trim().regex(/^[\w.-]+\/[\w.-]+$/),
+  repo: z
+    .string()
+    .trim()
+    .regex(/^[\w.-]+\/[\w.-]+$/),
   machine: z.string().min(1).max(64),
   ref: z.string().trim().max(200).optional(),
   devcontainerPath: z.string().trim().max(200).default('.devcontainer/guildwise/devcontainer.json'),

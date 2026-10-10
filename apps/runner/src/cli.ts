@@ -118,6 +118,32 @@ async function up(opts: {
   await start(opts);
 }
 
+/** Stores the customer's own Claude credential (read from stdin so it never lands in shell history). */
+async function authSet(
+  kind: 'api-key' | 'oauth-token',
+  opts: { dataDir?: string; pairing?: string },
+): Promise<void> {
+  let value = '';
+  for await (const chunk of process.stdin) value += String(chunk);
+  value = value.trim();
+  if (!value)
+    throw new Error(`Pipe the ${kind} in: \`read -rs K; printf %s "$K" | aom-runner auth ${kind}\``);
+  const { root, entries } = selectPairings(opts);
+  for (const e of entries) {
+    const file = entryConfigPath(root, e);
+    const config = loadConfig(file);
+    const cc = config.runtimes['claude-code'];
+    config.runtimes['claude-code'] =
+      kind === 'api-key'
+        ? { ...cc, authMode: 'api_key', apiKey: value }
+        : { ...cc, authMode: 'oauth', oauthToken: value };
+    saveConfig(file, config);
+  }
+  console.log(
+    `Saved on this machine only (mode 0600). Restart the runner to use it: systemctl --user restart aom-runner`,
+  );
+}
+
 /** Prints a devcontainer.json for a repository, from the toolchain detection. */
 function devcontainer(path: string | undefined, opts: { server: string; name?: string }): void {
   const dir = resolve(path ?? '.');
@@ -436,9 +462,24 @@ export function buildProgram(): Command {
     .option('--mock', 'enable the mock runtime (CI and development)')
     .option(...dataDirOpt)
     .action(up);
+  const auth = program
+    .command('auth')
+    .description('store your own Claude credential on this machine (the server never sees it)');
+  for (const [name, text] of [
+    ['api-key', 'your Anthropic API key (recommended for cloud workstations), read from stdin'],
+    ['oauth-token', 'a subscription token from `claude setup-token` (individual use only), read from stdin'],
+  ] as const)
+    auth
+      .command(name)
+      .description(text)
+      .option(...pairingOpt)
+      .option(...dataDirOpt)
+      .action((opts) => authSet(name, opts));
   program
     .command('devcontainer [path]')
-    .description('print a devcontainer.json for the repository at path (default .) from its detected toolchain')
+    .description(
+      'print a devcontainer.json for the repository at path (default .) from its detected toolchain',
+    )
     .requiredOption('--server <url>', 'server URL, e.g. https://aom.example.com')
     .option('--name <name>', 'name for the dev container')
     .action(devcontainer);
