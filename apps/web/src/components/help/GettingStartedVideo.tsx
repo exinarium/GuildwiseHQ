@@ -1,4 +1,4 @@
-import { Clapperboard } from 'lucide-react';
+import { Clapperboard, Download } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 /** What `e2e/video/getting-started.spec.ts` writes next to the video (seconds from the start). */
@@ -116,6 +116,25 @@ export function GettingStartedVideo() {
               </li>
             ))}
           </ol>
+          {(() => {
+            // A file to keep or send on (MP4 plays everywhere, including iPhone and WhatsApp).
+            const file =
+              info.sources?.find((s) => s.type === 'video/mp4') ??
+              (info.type === 'video/mp4' ? { src: info.src, type: info.type } : null);
+            return file ? (
+              <p className="mt-3">
+                <a
+                  href={file.src}
+                  download="Guildwise-HQ-getting-started.mp4"
+                  data-testid="video-download"
+                  className="inline-flex min-h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
+                >
+                  <Download aria-hidden="true" className="size-4" />
+                  Download video (MP4)
+                </a>
+              </p>
+            ) : null;
+          })()}
         </>
       )}
     </section>
