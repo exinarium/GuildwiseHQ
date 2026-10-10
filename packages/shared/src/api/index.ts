@@ -3,6 +3,7 @@ export * from './admin.ts';
 export * from './agents.ts';
 export * from './assistant.ts';
 export * from './auth.ts';
+export * from './blog.ts';
 export * from './board.ts';
 export * from './cards.ts';
 export * from './catalogue.ts';

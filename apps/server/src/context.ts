@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from 'fastify';
+import type { SocialClient } from './blog/social-client.ts';
 import type { BrowserGateway } from './browser-gateway/gateway.ts';
 import type { ChatRelay } from './chat/relay.ts';
 import type { Clock } from './clock.ts';
@@ -23,6 +24,8 @@ export interface Ctx {
   store: PgEventStore;
   notifier: Notifier;
   mailer: Mailer;
+  /** Facebook and LinkedIn (a fake in tests; nothing else reaches those networks). */
+  social: SocialClient;
   log: FastifyBaseLogger;
   /** Late-bound long-lived services (assigned by createApp before any request is served). */
   services: Services;

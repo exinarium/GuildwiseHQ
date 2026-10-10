@@ -1,4 +1,6 @@
 import { cloudTick } from '../cloud/tick.ts';
+import { autoPublishDue } from '../commands/blog.ts';
+import { blogDigestTick } from '../commands/blog-digest.ts';
 import { evaluateAllBudgets } from '../commands/budgets.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
@@ -6,6 +8,7 @@ import { auditMailTick } from '../commands/platform-notify.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
 import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
+import { socialTick } from '../commands/social.ts';
 import type { Ctx } from '../context.ts';
 import { licensingTick } from '../orgs/licensing.ts';
 
@@ -77,10 +80,18 @@ export class Scheduler {
       await this.triggers();
       await auditMailTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'audit mail failed'));
       await cloudTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'cloud workstations failed'));
+      await this.blog();
       return fired;
     });
     this.chain = next.catch(() => {});
     return next;
+  }
+
+  /** The blog: posts whose hold has passed publish, new posts are shared to the social networks, the weekly digest goes out. */
+  private async blog(): Promise<void> {
+    await autoPublishDue(this.ctx).catch((err) => this.ctx.log.error({ err }, 'blog auto-publish failed'));
+    await socialTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'blog social sharing failed'));
+    await blogDigestTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'blog digest failed'));
   }
 
   /** The interests' run schedules, then their delivery schedules (digests to the desk within the quiet cap). */

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { agentEvents } from './agent.ts';
+import { blogEvents } from './blog.ts';
 import { cardEvents } from './card.ts';
 import { catalogueEvents } from './catalogue.ts';
 import { chatEvents } from './chat.ts';
@@ -58,6 +59,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...hygieneEvents,
   ...interestEvents,
   ...costEvents,
+  ...blogEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -65,6 +67,7 @@ export type EventOf<T extends EventType> = Extract<DomainEvent, { type: T }>;
 export type EventPayload<T extends EventType> = EventOf<T>['payload'];
 
 export * from './agent.ts';
+export * from './blog.ts';
 export * from './card.ts';
 export * from './catalogue.ts';
 export * from './chat.ts';

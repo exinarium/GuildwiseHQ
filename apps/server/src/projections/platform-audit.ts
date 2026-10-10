@@ -301,6 +301,82 @@ export const platformAuditProjectors: Record<string, Projector> = {
       meta: p.meta,
     };
   }),
+  // ---- blog (docs/design/blog-prd.md): every write is audited, API writes with the key as the actor
+  BlogPostSubmitted: always(async (_tx, e) => {
+    const p = ev<'BlogPostSubmitted'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Blog post submitted${p.origin.apiKeyId ? ' by an API key' : ''}: ${p.content.title}`,
+      details: { postId: p.postId, slug: p.content.slug, origin: p.origin, warnings: p.warnings },
+    };
+  }),
+  BlogPostRevised: always(async (_tx, e) => {
+    const p = ev<'BlogPostRevised'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Blog post revised: ${p.content.title}`,
+      details: { postId: p.postId, slug: p.content.slug, by: p.by },
+    };
+  }),
+  BlogPostPublished: always(async (tx, e) => {
+    const p = ev<'BlogPostPublished'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM blog_posts WHERE id=$1', [p.postId]);
+    return {
+      action: e.event.type,
+      summary: `Blog post ${p.auto ? 'auto-published' : 'published'}: ${post?.title ?? p.postId}`,
+      details: { postId: p.postId, auto: p.auto },
+    };
+  }),
+  BlogPostRejected: always(async (tx, e) => {
+    const p = ev<'BlogPostRejected'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM blog_posts WHERE id=$1', [p.postId]);
+    return {
+      action: e.event.type,
+      summary: `Blog post rejected: ${post?.title ?? p.postId}`,
+      details: { postId: p.postId, reason: p.reason },
+    };
+  }),
+  BlogPostUnpublished: always(async (tx, e) => {
+    const p = ev<'BlogPostUnpublished'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM blog_posts WHERE id=$1', [p.postId]);
+    return {
+      action: e.event.type,
+      summary: `Blog post unpublished: ${post?.title ?? p.postId}`,
+      details: { postId: p.postId },
+    };
+  }),
+  BlogSettingsChanged: always(async (_tx, e) => {
+    const p = ev<'BlogSettingsChanged'>(e).payload;
+    const c = p.change;
+    const parts: string[] = [];
+    if (c.enabled !== undefined)
+      parts.push(c.enabled ? 'blog switched ON' : 'blog switched OFF (kill switch)');
+    if (c.autoPublishFrom !== undefined)
+      parts.push(`auto-publish from ${c.autoPublishFrom?.slice(0, 10) ?? 'never'}`);
+    if (c.holdHours !== undefined) parts.push(`hold ${c.holdHours} h`);
+    if (c.digestEnabled !== undefined) parts.push(`digest ${c.digestEnabled ? 'on' : 'off'}`);
+    return { action: e.event.type, summary: `Blog settings: ${parts.join(', ')}`, details: { change: c } };
+  }),
+  ApiKeyCreated: always(async (_tx, e) => {
+    const p = ev<'ApiKeyCreated'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `API key created: ${p.name} (${p.prefix}...) with ${p.scopes.join(', ')}`,
+      details: { keyId: p.keyId, scopes: p.scopes, expiresAt: p.expiresAt ?? null },
+    };
+  }),
+  ApiKeyRevoked: always(async (_tx, e) => {
+    const p = ev<'ApiKeyRevoked'>(e).payload;
+    return { action: e.event.type, summary: 'API key revoked', details: { keyId: p.keyId } };
+  }),
+  SocialChannelConnected: always(async (_tx, e) => {
+    const p = ev<'SocialChannelConnected'>(e).payload;
+    return { action: e.event.type, summary: `Connected ${p.network}: ${p.accountName}` };
+  }),
+  SocialChannelDisconnected: always(async (_tx, e) => {
+    const p = ev<'SocialChannelDisconnected'>(e).payload;
+    return { action: e.event.type, summary: `Disconnected ${p.network}` };
+  }),
   SuperAdminCreated: always(async (_tx, e) => {
     const p = ev<'SuperAdminCreated'>(e).payload;
     return { action: e.event.type, targetUserId: p.userId, summary: `Super admin ${p.email} created` };

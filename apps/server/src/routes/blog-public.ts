@@ -1,0 +1,258 @@
+import { createHash } from 'node:crypto';
+import {
+  BLOG_TAG_KEYS,
+  type BlogContent,
+  DigestPreferenceSchema,
+  SetDigestPreferenceRequestSchema,
+} from '@aom/shared';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import { requireSession, requireUser } from '../auth/guards.ts';
+import { listPage, messagePage, postPage, rssFeed, sitemap } from '../blog/render.ts';
+import {
+  getPublished,
+  lastPublishedChange,
+  listPublished,
+  postsCount,
+  publishedTags,
+} from '../commands/blog.ts';
+import { digestPreference, setDigestPreference, userOfUnsubscribeToken } from '../commands/blog-digest.ts';
+import type { Ctx } from '../context.ts';
+import { one } from '../db/sql.ts';
+import { notFound } from '../errors.ts';
+import { typed } from './util.ts';
+
+const PER_PAGE = 12;
+const CACHE_CONTROL = 'public, max-age=300';
+
+/**
+ * The public blog (docs/design/blog-prd.md section 6): `/blog`, `/blog/:slug`, `/blog/tag/:tag`, the RSS feed, the
+ * sitemap and robots.txt, rendered by the server per request and cached in memory. The cache key carries a version
+ * (post count and latest change), so a publish or an unpublish shows at once without an invalidation hook.
+ */
+export function blogPublicRoutes(ctx: Ctx) {
+  return async (fastify: FastifyInstance) => {
+    const app = typed(fastify);
+    const origin = ctx.config.publicOrigin;
+    const cache = new Map<string, { version: string; body: string }>();
+
+    async function version(): Promise<string> {
+      const t = await lastPublishedChange(ctx);
+      const n = await postsCount(ctx);
+      return `${n}:${t?.getTime() ?? 0}`;
+    }
+
+    /** Renders through the cache and answers with the validators a browser or crawler can reuse. */
+    async function serve(
+      req: FastifyRequest,
+      reply: FastifyReply,
+      key: string,
+      type: string,
+      render: () => Promise<string>,
+      status = 200,
+    ) {
+      const v = await version();
+      let hit = cache.get(key);
+      if (!hit || hit.version !== v) {
+        hit = { version: v, body: await render() };
+        if (status === 200) cache.set(key, hit);
+        if (cache.size > 500) cache.delete(cache.keys().next().value as string);
+      }
+      const etag = `"${createHash('sha1').update(hit.body).digest('base64url')}"`;
+      void reply
+        .header('content-type', type)
+        .header('cache-control', status === 200 ? CACHE_CONTROL : 'no-cache');
+      if (status === 200) {
+        void reply.header('etag', etag);
+        if (req.headers['if-none-match'] === etag) return reply.code(304).send();
+      }
+      return reply.code(status).send(hit.body);
+    }
+
+    const HTML = 'text/html; charset=utf-8';
+
+    app.get(
+      '/blog',
+      { schema: { querystring: z.object({ page: z.coerce.number().int().min(1).max(500).default(1) }) } },
+      async (req, reply) => {
+        const page = req.query.page;
+        return serve(req, reply, `list:${page}`, HTML, async () => {
+          const r = await listPublished(ctx, { limit: PER_PAGE, offset: (page - 1) * PER_PAGE });
+          return listPage(origin, { ...r, page, perPage: PER_PAGE });
+        });
+      },
+    );
+
+    app.get(
+      '/blog/tag/:tag',
+      {
+        schema: {
+          params: z.object({ tag: z.string().max(40) }),
+          querystring: z.object({ page: z.coerce.number().int().min(1).max(500).default(1) }),
+        },
+      },
+      async (req, reply) => {
+        const { tag } = req.params;
+        if (!BLOG_TAG_KEYS.includes(tag))
+          return reply
+            .code(404)
+            .type(HTML)
+            .send(messagePage(origin, 'Not found', 'There is no such topic.'));
+        const page = req.query.page;
+        return serve(req, reply, `tag:${tag}:${page}`, HTML, async () => {
+          const r = await listPublished(ctx, { tag, limit: PER_PAGE, offset: (page - 1) * PER_PAGE });
+          return listPage(origin, { ...r, page, perPage: PER_PAGE, tag });
+        });
+      },
+    );
+
+    app.get('/blog/rss.xml', async (req, reply) =>
+      serve(req, reply, 'rss', 'application/rss+xml; charset=utf-8', async () =>
+        rssFeed(origin, (await listPublished(ctx, { limit: 30 })).posts),
+      ),
+    );
+
+    app.get('/sitemap.xml', async (req, reply) =>
+      serve(req, reply, 'sitemap', 'application/xml; charset=utf-8', async () => {
+        const posts = (await listPublished(ctx, { limit: 5000 })).posts;
+        return sitemap(
+          origin,
+          posts,
+          (await publishedTags(ctx)).map((t) => t.tag),
+        );
+      }),
+    );
+
+    app.get('/robots.txt', async (_req, reply) => {
+      void reply.header('content-type', 'text/plain; charset=utf-8').header('cache-control', CACHE_CONTROL);
+      return `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /platform\n\nSitemap: ${origin}/sitemap.xml\n`;
+    });
+
+    app.get(
+      '/blog/:slug',
+      { schema: { params: z.object({ slug: z.string().max(100) }) } },
+      async (req, reply) => {
+        const { slug } = req.params;
+        const found = await getPublished(ctx, slug);
+        if (found === 'gone')
+          return reply
+            .code(410)
+            .type(HTML)
+            .send(
+              messagePage(
+                origin,
+                'This article was removed',
+                'The article you are looking for is no longer available.',
+              ),
+            );
+        if (!found)
+          return reply
+            .code(404)
+            .type(HTML)
+            .send(messagePage(origin, 'Not found', 'We could not find that article.'));
+        return serve(req, reply, `post:${slug}`, HTML, async () => {
+          const again = await getPublished(ctx, slug);
+          if (!again || again === 'gone')
+            return messagePage(origin, 'Not found', 'We could not find that article.');
+          const c = again.row.content as BlogContent;
+          return postPage(origin, again.post, c.seo, c.aiDisclosure);
+        });
+      },
+    );
+
+    // ---- JSON for Help > Blog (any signed-in person, platform accounts included)
+    app.get(
+      '/api/blog/posts',
+      {
+        schema: {
+          querystring: z.object({
+            q: z.string().max(100).optional(),
+            limit: z.coerce.number().int().min(1).max(100).default(50),
+          }),
+        },
+      },
+      async (req) => {
+        await requireSession(ctx, req);
+        return listPublished(ctx, { limit: req.query.limit, q: req.query.q });
+      },
+    );
+    app.get(
+      '/api/blog/posts/:slug',
+      { schema: { params: z.object({ slug: z.string().max(100) }) } },
+      async (req) => {
+        await requireSession(ctx, req);
+        const found = await getPublished(ctx, req.params.slug);
+        if (!found || found === 'gone') throw notFound('article not found');
+        return found.post;
+      },
+    );
+
+    // ---- the digest preference of the signed-in person (Settings)
+    app.get('/api/me/blog-digest', { schema: { response: { 200: DigestPreferenceSchema } } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return digestPreference(ctx, s.user.id);
+    });
+    app.put(
+      '/api/me/blog-digest',
+      { schema: { body: SetDigestPreferenceRequestSchema, response: { 200: DigestPreferenceSchema } } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setDigestPreference(ctx, s.user.id, req.body.optedIn, 'settings');
+        return digestPreference(ctx, s.user.id);
+      },
+    );
+
+    // ---- one-click unsubscribe (signed token, no sign-in); mail programs POST here (RFC 8058)
+    const tokenParams = z.object({ token: z.string().min(10).max(300) });
+    const limit = ctx.config.rateLimit ? { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } } : {};
+    const resubscribeForm = (token: string) =>
+      `<form class="inline" method="post" action="/blog/unsubscribe/${encodeURIComponent(token)}/resubscribe"><button type="submit">Subscribe again</button></form>`;
+
+    app.get('/blog/unsubscribe/:token', { schema: { params: tokenParams }, ...limit }, async (req, reply) => {
+      const userId = await userOfUnsubscribeToken(ctx, req.params.token);
+      if (!userId || !(await one(ctx.pool, 'SELECT 1 FROM users WHERE id=$1', [userId])))
+        return reply
+          .code(400)
+          .type(HTML)
+          .send(messagePage(origin, 'Link not valid', 'This unsubscribe link is not valid.'));
+      await setDigestPreference(ctx, userId, false, 'link');
+      void reply.header('cache-control', 'no-store');
+      return reply
+        .type(HTML)
+        .send(
+          messagePage(
+            origin,
+            'You are unsubscribed',
+            'You will not get the weekly blog digest any more. You can change this any time in your settings.',
+            resubscribeForm(req.params.token),
+          ),
+        );
+    });
+    app.post(
+      '/blog/unsubscribe/:token',
+      { schema: { params: tokenParams }, ...limit },
+      async (req, reply) => {
+        const userId = await userOfUnsubscribeToken(ctx, req.params.token);
+        if (!userId) return reply.code(400).type('text/plain').send('invalid link');
+        await setDigestPreference(ctx, userId, false, 'link');
+        return reply.type('text/plain').send('unsubscribed');
+      },
+    );
+    app.post(
+      '/blog/unsubscribe/:token/resubscribe',
+      { schema: { params: tokenParams }, ...limit },
+      async (req, reply) => {
+        const userId = await userOfUnsubscribeToken(ctx, req.params.token);
+        if (!userId)
+          return reply
+            .code(400)
+            .type(HTML)
+            .send(messagePage(origin, 'Link not valid', 'This link is not valid.'));
+        await setDigestPreference(ctx, userId, true, 'link');
+        return reply
+          .type(HTML)
+          .send(messagePage(origin, 'Welcome back', 'You will get the weekly blog digest again.'));
+      },
+    );
+  };
+}

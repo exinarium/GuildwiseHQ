@@ -16,6 +16,7 @@ import {
 import type { AnthropicLike } from './assistant/service.ts';
 import { checkContentType, checkOrigin } from './auth/origin-check.ts';
 import { SESSION_COOKIE } from './auth/sessions.ts';
+import { createSocialClient, type SocialClient } from './blog/social-client.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
 import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
@@ -46,6 +47,9 @@ import { adminRoutes } from './routes/admin.ts';
 import { agentRoutes } from './routes/agents.ts';
 import { assistantRoutes } from './routes/assistant.ts';
 import { authRoutes } from './routes/auth.ts';
+import { blogApiRoutes } from './routes/blog-api.ts';
+import { blogPlatformRoutes } from './routes/blog-platform.ts';
+import { blogPublicRoutes } from './routes/blog-public.ts';
 import { cardRoutes } from './routes/cards.ts';
 import { catalogueRoutes } from './routes/catalogue.ts';
 import { chatRoutes } from './routes/chats.ts';
@@ -88,6 +92,8 @@ export interface BuildOptions {
   mailer?: Mailer;
   /** The Anthropic client of the landing-page assistant (tests pass a fake; default: the real SDK when a key is set). */
   assistantClient?: AnthropicLike | null;
+  /** Facebook and LinkedIn; tests pass a fake, nothing else reaches those networks. */
+  social?: SocialClient;
   clock?: Clock;
   /** Fastify logger: `false` silences it. Defaults to config.logLevel. */
   logger?: boolean;
@@ -194,6 +200,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     store,
     notifier,
     mailer,
+    social: opts.social ?? createSocialClient(),
     log: app.log,
     services: {} as Ctx['services'],
   };
@@ -247,6 +254,11 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
       done(e, undefined);
     }
   });
+
+  // The one-click unsubscribe of the weekly digest is posted by mail programs as a form (RFC 8058); nothing else reads forms.
+  app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) =>
+    done(null, body),
+  );
 
   await app.register(cookie);
   if (config.rateLimit) await app.register(rateLimit, { global: false, hook: 'preHandler' });
@@ -324,6 +336,9 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(assistantRoutes(ctx, assistantClient));
   await app.register(costRoutes(ctx));
   await app.register(orgChartRoutes(ctx));
+  await app.register(blogPlatformRoutes(ctx));
+  await app.register(blogApiRoutes(ctx));
+  await app.register(blogPublicRoutes(ctx));
 
   // Gateways: runner WS (/api/runner/ws) and browser WS (/api/ws).
   const runners = new RunnerRegistry();

@@ -1,5 +1,6 @@
 import type { Projector, ProjectorMap } from '../eventstore/types.ts';
 import { agentProjectors } from './agents.ts';
+import { blogProjectors } from './blog.ts';
 import { cardProjectors } from './cards.ts';
 import { catalogueProjectors } from './catalogue.ts';
 import { chatProjectors } from './chats.ts';
@@ -39,6 +40,7 @@ const domains: Array<Record<string, Projector>> = [
   userProjectors,
   orgProjectors,
   platformAuditProjectors,
+  blogProjectors,
   catalogueProjectors,
   workstationProjectors,
   projectProjectors,
@@ -91,6 +93,7 @@ export const PROJECTION_TABLES = [
   'org_members',
   'platform_audit_log',
   'invitations',
+  'blog_posts',
   'workstations',
   'projects',
   'project_repos',

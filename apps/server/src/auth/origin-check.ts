@@ -4,7 +4,12 @@ import { HttpError } from '../errors.ts';
 
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
 /** Unauthenticated machine endpoints that are called by the runner CLI, which sends no Origin. */
-const EXEMPT_PREFIXES = ['/api/runner/pair', '/api/test/'];
+const EXEMPT_PREFIXES = [
+  '/api/runner/pair',
+  '/api/test/',
+  // The agent API is authenticated by a Bearer key only and ignores session cookies, so there is nothing to forge.
+  '/api/v1/',
+];
 
 /**
  * CSRF defence (docs/ARCHITECTURE.md section 18): strict Origin check on every non-GET request, and mutating
@@ -20,8 +25,12 @@ export function checkOrigin(config: Config, req: FastifyRequest): void {
   }
 }
 
+/** Mail programs POST the one-click unsubscribe as a form (RFC 8058); it carries a signed token and changes nothing else. */
+const isUnsubscribePost = (url: string): boolean => /^\/blog\/unsubscribe\//.test(url.split('?')[0] ?? '');
+
 export function checkContentType(req: FastifyRequest): void {
   if (SAFE.has(req.method)) return;
+  if (isUnsubscribePost(req.url)) return;
   const ct = req.headers['content-type'];
   const hasBody = req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0';
   const chunked = req.headers['transfer-encoding'] !== undefined;

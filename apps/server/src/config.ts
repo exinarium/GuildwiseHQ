@@ -43,6 +43,11 @@ const EnvSchema = z.object({
   AOM_ASSISTANT_PUBLIC_DAILY_USD: z.coerce.number().min(0).max(10_000).default(10),
   /** Model of the public assistant. */
   AOM_ASSISTANT_MODEL_PUBLIC: z.string().min(1).default('claude-haiku-4-5'),
+  /** Weekly blog digest mail (Monday 08:00 Africa/Johannesburg). Switch off with AOM_BLOG_DIGEST=false (the platform setting can also stop it). */
+  AOM_BLOG_DIGEST: bool(true),
+  /** LinkedIn app credentials, only needed to renew the organization token with its refresh token. */
+  AOM_LINKEDIN_CLIENT_ID: z.string().optional(),
+  AOM_LINKEDIN_CLIENT_SECRET: z.string().optional(),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -88,6 +93,10 @@ export interface Config {
   assistantMode: 'off' | 'public';
   assistantPublicDailyUsd: number;
   assistantModelPublic: string;
+  /** Send the weekly blog digest (env switch; the super admin's blog settings are a second switch). */
+  blogDigest: boolean;
+  linkedinClientId: string | undefined;
+  linkedinClientSecret: string | undefined;
   logLevel: string;
   /** Cookie `Secure` flag: true when the public origin is https. */
   secureCookies: boolean;
@@ -125,6 +134,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     assistantMode: e.ANTHROPIC_API_KEY ? (e.AOM_ASSISTANT ?? 'public') : 'off',
     assistantPublicDailyUsd: e.AOM_ASSISTANT_PUBLIC_DAILY_USD,
     assistantModelPublic: e.AOM_ASSISTANT_MODEL_PUBLIC,
+    blogDigest: e.AOM_BLOG_DIGEST,
+    linkedinClientId: e.AOM_LINKEDIN_CLIENT_ID || undefined,
+    linkedinClientSecret: e.AOM_LINKEDIN_CLIENT_SECRET || undefined,
     logLevel: e.LOG_LEVEL,
     secureCookies: publicOrigin.startsWith('https://'),
   };

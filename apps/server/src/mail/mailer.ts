@@ -9,6 +9,8 @@ export interface MailMessage {
   replyTo?: string;
   /** Overrides the mailer's From (support mails to customers: `AOM_SUPPORT_FROM`). */
   from?: string;
+  /** Extra headers (`List-Unsubscribe` on the digest). */
+  headers?: Record<string, string>;
 }
 
 export interface Mailer {

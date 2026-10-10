@@ -1,4 +1,11 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from 'node:crypto';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 
@@ -39,4 +46,22 @@ export async function decryptSecret(ctx: Ctx, blob: string): Promise<string> {
   const d = createDecipheriv('aes-256-gcm', await key(ctx), Buffer.from(iv, 'base64url'));
   d.setAuthTag(Buffer.from(tag, 'base64url'));
   return Buffer.concat([d.update(Buffer.from(enc, 'base64url')), d.final()]).toString('utf8');
+}
+
+/** `<value>.<signature>`: a value that anyone can read but only this server can have made (unsubscribe links). */
+export async function signValue(ctx: Ctx, purpose: string, value: string): Promise<string> {
+  const sig = createHmac('sha256', await key(ctx))
+    .update(`${purpose}:${value}`)
+    .digest('base64url');
+  return `${value}.${sig}`;
+}
+
+/** The value of a token made by `signValue`, or null when it was not. */
+export async function verifySigned(ctx: Ctx, purpose: string, token: string): Promise<string | null> {
+  const i = token.lastIndexOf('.');
+  if (i < 1) return null;
+  const value = token.slice(0, i);
+  const want = Buffer.from((await signValue(ctx, purpose, value)).slice(i + 1));
+  const got = Buffer.from(token.slice(i + 1));
+  return want.length === got.length && timingSafeEqual(want, got) ? value : null;
 }
