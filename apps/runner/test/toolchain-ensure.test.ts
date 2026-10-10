@@ -4,6 +4,7 @@ import type { DevOpsAccess, EnvEnsurePayload } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { type EnsureDeps, ensureEnvironment, type RootRunner } from '../src/toolchain/ensure.ts';
 import type { ExecResult, Executor } from '../src/toolchain/exec.ts';
+import { androidHome, cmdlineToolsScript } from '../src/toolchain/stacks.ts';
 import type { Platform } from '../src/toolchain/types.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 
@@ -67,6 +68,8 @@ function setup(
   opts: {
     platform?: Platform;
     root?: Awaited<ReturnType<RootRunner['mode']>>['mode'];
+    /** D6: run the dependency installs too (off in most tests: the pretend machine knows nothing of them). */
+    dependencies?: boolean;
   } = {},
 ) {
   const m = new Machine();
@@ -85,6 +88,7 @@ function setup(
     platform: opts.platform ?? 'linux',
     root,
     findRepo: async () => ({ localPath: repoDir }),
+    installDependencies: opts.dependencies ?? false,
   };
   const payload = (a: DevOpsAccess): EnvEnsurePayload => ({
     requestId: '0190aaaa-0000-7000-8000-00000000ffff',
@@ -93,6 +97,29 @@ function setup(
     access: a,
   });
   return { m, rootCalls, deps, payload, repoDir };
+}
+
+/** The pretend Android SDK: the command-line tools appear after the script, then each package after its install. */
+function androidSdkInstalls(m: Machine, api = '34', buildTools = '34.0.0') {
+  const home = androidHome('linux');
+  const sdkmanager = `${home}/cmdline-tools/latest/bin/sdkmanager`;
+  const listed = (...names: string[]) =>
+    ok(
+      `Installed packages:\n  Path | Version\n  ---- | ----\n${names.map((n) => `  ${n} | 1 | x`).join('\n')}\n`,
+    );
+  m.installs.set(`bash -c ${cmdlineToolsScript('linux')}`, {
+    effect: { [`${sdkmanager} --version`]: ok('12.0') },
+  });
+  const list = `${sdkmanager} --sdk_root=${home} --list_installed`;
+  m.installs.set(`${sdkmanager} --sdk_root=${home} platform-tools`, {
+    effect: { [list]: listed('platform-tools') },
+  });
+  m.installs.set(`${sdkmanager} --sdk_root=${home} platforms;android-${api}`, {
+    effect: { [list]: listed('platform-tools', `platforms;android-${api}`) },
+  });
+  m.installs.set(`${sdkmanager} --sdk_root=${home} build-tools;${buildTools}`, {
+    effect: { [list]: listed('platform-tools', `platforms;android-${api}`, `build-tools;${buildTools}`) },
+  });
 }
 
 describe('env.ensure', () => {
@@ -120,6 +147,7 @@ describe('env.ensure', () => {
     m.installs.set('apt-get install -y openjdk-17-jdk', {
       effect: { 'javac -version': ok('javac 17.0.12') },
     });
+    androidSdkInstalls(m);
     const r = await ensureEnvironment(payload(access()), deps);
     expect(r.state).toBe('ready');
     expect(r.stacks).toEqual([{ id: 'dotnet-maui', name: '.NET MAUI', repo: 'app' }]);
@@ -127,6 +155,10 @@ describe('env.ensure', () => {
       ['.NET SDK', 'installed'],
       ['.NET workload maui-android', 'installed'],
       ['JDK', 'installed'],
+      ['Android SDK command-line tools', 'installed'],
+      ['Android platform-tools', 'installed'],
+      ['Android SDK platform', 'installed'],
+      ['Android build-tools', 'installed'],
     ]);
     // the apt installs ran as root, the workload did not
     expect(rootCalls).toEqual(['apt-get install -y dotnet-sdk-8.0', 'apt-get install -y openjdk-17-jdk']);
@@ -298,5 +330,105 @@ describe('env.ensure', () => {
     );
     const r = await ensureEnvironment(payload(access({ sudo: false })), deps);
     expect(r.state).toBe('ready');
+  });
+
+  it('D6: a native Android project gets the SDK pieces it targets (compileSdk 35), within the install access', async () => {
+    const files = {
+      'build.gradle': "plugins { id 'com.android.application' }\nandroid { compileSdk 35 }\n",
+      gradlew: '',
+    };
+    const denied = setup(files);
+    denied.m.managers = ['apt-get'];
+    denied.m.answers.set('javac -version', ok('javac 17.0.12'));
+    const r0 = await ensureEnvironment(denied.payload(access({ allowInstall: false })), denied.deps);
+    expect(r0.state).toBe('needs_access');
+    expect(r0.tools.find((t) => t.tool === 'Android SDK command-line tools')?.status).toBe('needs_access');
+
+    const { m, deps, payload } = setup(files);
+    m.managers = ['apt-get'];
+    m.answers.set('javac -version', ok('javac 17.0.12'));
+    androidSdkInstalls(m, '35', '35.0.0');
+    const r = await ensureEnvironment(payload(access()), deps);
+    expect(r.state).toBe('ready');
+    expect(r.stacks.map((s) => s.id)).toContain('android');
+    expect(m.calls.some((c) => c.endsWith('platforms;android-35'))).toBe(true);
+    expect(m.calls.some((c) => c.endsWith('build-tools;35.0.0'))).toBe(true);
+  });
+
+  it('D6: after the tools, the project dependencies are installed (pnpm install)', async () => {
+    const { m, deps, payload } = setup(
+      { 'package.json': '{}', 'pnpm-lock.yaml': '', '.nvmrc': '20' },
+      { dependencies: true },
+    );
+    m.answers.set('node --version', ok('v22.1.0'));
+    m.answers.set('pnpm --version', ok('9.12.0'));
+    m.answers.set('pnpm install', ok('Done in 3s'));
+    const r = await ensureEnvironment(payload(access()), deps);
+    expect(r.state).toBe('ready');
+    expect(r.tools.map((t) => [t.tool, t.status])).toContainEqual(['pnpm install', 'installed']);
+    expect(r.logTail.join('\n')).toContain('pnpm install');
+  });
+
+  it('D6: a failing dependency install makes the environment failed, with the log tail and the command to run', async () => {
+    const { m, deps, payload } = setup({ 'go.mod': 'module x\ngo 1.22\n' }, { dependencies: true });
+    m.answers.set('go version', ok('go version go1.22.3 linux/amd64'));
+    m.answers.set('go mod download', fail('dial tcp: lookup proxy.golang.org: no such host', 1));
+    const r = await ensureEnvironment(payload(access()), deps);
+    expect(r.state).toBe('failed');
+    const t = r.tools.find((x) => x.tool === 'go mod download');
+    expect(t?.status).toBe('failed');
+    expect(t?.detail).toContain('no such host');
+    expect(t?.fix).toContain('go mod download');
+  });
+
+  it('D6: dependencies are not installed without install access, and wait for a tool that is not fine', async () => {
+    const off = setup({ 'go.mod': 'go 1.22\n' }, { dependencies: true });
+    off.m.answers.set('go version', ok('go version go1.22.3 linux/amd64'));
+    const r = await ensureEnvironment(off.payload(access({ allowInstall: false })), off.deps);
+    expect(r.state).toBe('ready');
+    expect(off.m.calls).not.toContain('go mod download');
+    expect(r.tools.find((t) => t.tool === 'go mod download')?.status).toBe('skipped');
+
+    const noTool = setup({ 'go.mod': 'go 1.22\n' }, { dependencies: true });
+    noTool.m.managers = [];
+    const r2 = await ensureEnvironment(noTool.payload(access()), noTool.deps);
+    expect(noTool.m.calls).not.toContain('go mod download');
+    expect(r2.tools.find((t) => t.tool === 'go mod download')?.status).toBe('skipped');
+  });
+
+  it('D6: python installs into the project venv, never the system python', async () => {
+    const { m, deps, payload } = setup(
+      { 'requirements.txt': 'flask\n', 'pyproject.toml': '[project]\nname="x"\n' },
+      { dependencies: true },
+    );
+    m.answers.set('python3 --version', ok('Python 3.12.1'));
+    m.answers.set('python3 -m venv --help', ok('usage'));
+    m.answers.set('python3 -m venv .venv', ok());
+    m.answers.set('.venv/bin/pip install -r requirements.txt', ok());
+    m.answers.set('.venv/bin/pip install -e .', ok());
+    const r = await ensureEnvironment(payload(access()), deps);
+    expect(r.state).toBe('ready');
+    const ran = m.calls.filter((c) => c.includes('pip install') || c.endsWith('-m venv .venv'));
+    expect(ran).toEqual([
+      'python3 -m venv .venv',
+      '.venv/bin/pip install -r requirements.txt',
+      '.venv/bin/pip install -e .',
+    ]);
+  });
+
+  it('D6: .NET restores the solution at the root', async () => {
+    const { m, deps, payload } = setup(
+      {
+        'App.sln': '',
+        'src/Api/Api.csproj':
+          '<Project><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>',
+      },
+      { dependencies: true },
+    );
+    m.answers.set('dotnet --version', ok('8.0.404'));
+    m.answers.set('dotnet restore App.sln', ok());
+    const r = await ensureEnvironment(payload(access()), deps);
+    expect(r.state).toBe('ready');
+    expect(m.calls).toContain('dotnet restore App.sln');
   });
 });

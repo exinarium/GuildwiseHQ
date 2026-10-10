@@ -60,7 +60,13 @@ describe('toolchain: stack detection', () => {
 
   it('asks for the right workloads per platform: maui-android on Linux, maui + android + ios on macOS', () => {
     const files = { 'App.csproj': MAUI_CSPROJ };
-    expect(toolsOf(files, 'linux')).toEqual(['dotnet-sdk', 'dotnet-workload-maui-android', 'jdk']);
+    const sdk = [
+      'android-cmdline-tools',
+      'android-platform-tools',
+      'android-platform',
+      'android-build-tools',
+    ];
+    expect(toolsOf(files, 'linux')).toEqual(['dotnet-sdk', 'dotnet-workload-maui-android', 'jdk', ...sdk]);
     expect(toolsOf(files, 'darwin')).toEqual([
       'dotnet-sdk',
       'dotnet-workload-maui',
@@ -68,12 +74,14 @@ describe('toolchain: stack detection', () => {
       'dotnet-workload-ios',
       'dotnet-workload-maccatalyst',
       'jdk',
+      ...sdk,
     ]);
     expect(toolsOf(files, 'win32')).toEqual([
       'dotnet-sdk',
       'dotnet-workload-maui',
       'dotnet-workload-android',
       'jdk',
+      ...sdk,
     ]);
   });
 

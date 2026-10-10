@@ -65,6 +65,19 @@ export interface ToolSpec {
   manual?: (p: Params, platform: Platform) => string;
 }
 
+/**
+ * D6: a project dependency install that runs in the repository folder once the tools are ready (`pnpm install`,
+ * `dotnet restore`, `pip install` into the venv, `go mod download`, ...). Data, like the tool recipes.
+ */
+export interface DepStep {
+  /** Shown in the report (`pnpm install`). */
+  name: string;
+  cmd: string;
+  args: string[];
+  /** Tool ids (of this stack) that must be fine first. */
+  after?: string[];
+}
+
 export interface StackSpec {
   id: string;
   name: string;
@@ -72,4 +85,6 @@ export interface StackSpec {
   detect: (repo: RepoView) => Detection | null;
   /** Tool ids, in install order (resolved against `TOOLS`). */
   tools: (d: Detection, platform: Platform) => string[];
+  /** The project's own dependency installs, in order, run in the repository folder (D6). */
+  deps?: (d: Detection, platform: Platform) => DepStep[];
 }

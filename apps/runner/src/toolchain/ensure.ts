@@ -1,5 +1,5 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import type { DevOpsAccess, EnvEnsurePayload, EnvironmentReport, ToolReport } from '@aom/shared';
 import { redact } from '../secrets/redact.ts';
 import { detectStacks, viewOf } from './detect.ts';
@@ -35,6 +35,8 @@ export interface EnsureDeps {
   logFile?: string;
   /** Test hook: stack/tool tables (default: the real ones). */
   tables?: { stacks: typeof STACKS; tools: Record<string, ToolSpec> };
+  /** D6: run the project's dependency installs once the tools are ready (default true). */
+  installDependencies?: boolean;
 }
 
 const MANAGERS: Record<Platform, Array<{ id: Manager; probe: [string, string[]] }>> = {
@@ -76,6 +78,7 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
   const reports: ToolReport[] = [];
   const stackList: EnvironmentReport['stacks'] = [];
   const need = new Map<string, { spec: ToolSpec; params: Params; stack: string }>();
+  const runs: Array<{ name: string; localPath: string; detections: Detection[] }> = [];
 
   // 1. What the repositories use.
   for (const r of p.repos) {
@@ -95,6 +98,7 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
       tables.stacks.some((s) => s.id === d.id),
     );
     log(`${r.name}: ${detections.map((d) => d.name).join(', ') || 'no known stack'}`);
+    runs.push({ name: r.name, localPath: repo.localPath, detections });
     for (const d of detections) {
       stackList.push({ id: d.id, name: d.name, repo: r.name });
       const stack = tables.stacks.find((s) => s.id === d.id);
@@ -119,7 +123,11 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
     reports.push(report);
   }
 
-  // 3. The verdict.
+  // 3. D6: the project's own dependencies (pnpm/pip/dotnet restore ...), once its tools are in place.
+  if (deps.installDependencies !== false)
+    reports.push(...(await installDependencies(runs, tables, p.access, done, deps, log)));
+
+  // 4. The verdict.
   const state: EnvironmentReport['state'] = reports.some((r) => r.status === 'needs_access')
     ? 'needs_access'
     : reports.some((r) => r.status === 'failed' || r.status === 'missing')
@@ -137,6 +145,68 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
           .map((r) => `${r.tool}${r.detail ? ` (${r.detail})` : ''}`)
           .join('; ')}`.slice(0, 1900);
   return { state, stacks: stackList, tools: reports, summary, logTail };
+}
+
+/**
+ * D6: runs each detected stack's dependency steps in the repository folder (`pnpm install`, `dotnet restore`, pip into
+ * `.venv`, `go mod download`, `cargo fetch`, ...). A step waits for its tools; nothing runs unless the manager allowed
+ * installing. A failing install makes the environment "failed" with the log tail, like a failing tool install.
+ */
+async function installDependencies(
+  runs: Array<{ name: string; localPath: string; detections: Detection[] }>,
+  tables: { stacks: typeof STACKS; tools: Record<string, ToolSpec> },
+  access: DevOpsAccess,
+  done: Map<string, ToolReport>,
+  deps: EnsureDeps,
+  log: (l: string) => void,
+): Promise<ToolReport[]> {
+  const out: ToolReport[] = [];
+  for (const run of runs) {
+    for (const d of run.detections) {
+      const stack = tables.stacks.find((s) => s.id === d.id);
+      for (const step of stack?.deps?.(d, deps.platform) ?? []) {
+        const tool = runs.length > 1 ? `${step.name} (${run.name})` : step.name;
+        const base = { stack: d.id, tool };
+        const blocker = (step.after ?? [])
+          .map((a) => done.get(a))
+          .find((r) => r && r.status !== 'ok' && r.status !== 'installed');
+        if (blocker) {
+          out.push({ ...base, status: 'skipped', detail: `waiting for ${blocker.tool}` });
+          break;
+        }
+        if (!access.allowInstall) {
+          out.push({
+            ...base,
+            status: 'skipped',
+            detail: 'dependencies are installed only when "Install packages and tools" is allowed',
+          });
+          break;
+        }
+        const cmd =
+          step.cmd.startsWith('./') || step.cmd.includes('\\') ? join(run.localPath, step.cmd) : step.cmd;
+        log(`$ (${run.name}) ${step.cmd} ${step.args.join(' ')}`);
+        const r = await deps.exec.run(isAbsolute(cmd) ? cmd : step.cmd, step.args, {
+          cwd: run.localPath,
+          timeoutMs: 30 * 60_000,
+        });
+        for (const line of `${r.stdout}\n${r.stderr}`.split('\n').slice(-8))
+          if (line.trim()) log(`  ${line.trim()}`);
+        if (r.exitCode === 0) {
+          out.push({ ...base, status: 'installed', detail: `ran in ${run.name}` });
+          continue;
+        }
+        log(`  exit ${r.exitCode}`);
+        out.push({
+          ...base,
+          status: 'failed',
+          detail: tail(r.stderr || r.stdout) || `exit code ${r.exitCode}`,
+          fix: `Run "${step.cmd} ${step.args.join(' ')}" in ${run.localPath}, then check again.`,
+        });
+        break; // later steps of this stack depend on this one
+      }
+    }
+  }
+  return out;
 }
 
 function mergeParams(a: Params, b: Params): Params {

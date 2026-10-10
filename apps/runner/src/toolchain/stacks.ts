@@ -1,5 +1,8 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type {
   Check,
+  DepStep,
   Detection,
   Manager,
   Params,
@@ -52,6 +55,36 @@ function dotnetSdkMajor(repo: RepoView, tfms: string[]): string | undefined {
   return majors.length ? String(Math.max(...majors)) : undefined;
 }
 
+/** What `dotnet restore` is pointed at: the solution at the root, else the single root project, else the first project. */
+function dotnetRestoreTarget(repo: RepoView): string | undefined {
+  const root = (re: RegExp) => repo.files.filter((f) => !f.includes('/') && re.test(f));
+  return (
+    root(/\.slnx?$/i)[0] ??
+    root(/\.(cs|fs|vb)proj$/i)[0] ??
+    findFiles(repo, /\.slnx?$/i)[0] ??
+    findFiles(repo, /\.(cs|fs|vb)proj$/i)[0]
+  );
+}
+
+const dotnetDeps = (d: Detection): DepStep[] => [
+  {
+    name: 'dotnet restore',
+    cmd: 'dotnet',
+    args: ['restore', ...(d.params.restore ? [d.params.restore] : [])],
+    after: ['dotnet-sdk'],
+  },
+];
+
+/** The Android API level a `net8.0-android` / `net8.0-android34.0` target framework asks for. */
+function androidApiOfTfm(tfm: string): string | undefined {
+  const explicit = /-android(\d+)(?:\.\d+)?$/i.exec(tfm)?.[1];
+  if (explicit) return explicit;
+  if (!/-android$/i.test(tfm)) return undefined;
+  const major = majorOfTfm(tfm);
+  // The default Android API level of each .NET release.
+  return major === 8 ? '34' : major === 9 ? '35' : major && major >= 10 ? '36' : undefined;
+}
+
 // ------------------------------------------------------------------------------------------------ stacks
 
 const dotnet: StackSpec = {
@@ -63,14 +96,16 @@ const dotnet: StackSpec = {
     const slns = findFiles(repo, /\.slnx?$/i);
     if (!projects.length && !global.length && !slns.length) return null;
     const sdk = dotnetSdkMajor(repo, tfms);
+    const restore = dotnetRestoreTarget(repo);
     return {
       id: 'dotnet',
       name: '.NET',
       evidence: projects[0] ?? global[0] ?? (slns[0] as string),
-      params: sdk ? { sdkMajor: sdk } : {},
+      params: { ...(sdk ? { sdkMajor: sdk } : {}), ...(restore ? { restore } : {}) },
     };
   },
   tools: () => ['dotnet-sdk'],
+  deps: (d) => dotnetDeps(d),
 };
 
 /** MAUI: `<UseMaui>`, a Microsoft.Maui package, or a MAUI platform target framework. */
@@ -85,12 +120,16 @@ const dotnetMaui: StackSpec = {
     if (!useMaui && !(platformTfm && /maui/i.test(text))) return null;
     const has = (re: RegExp) => tfms.some((t) => re.test(t));
     const sdk = dotnetSdkMajor(repo, tfms);
+    const restore = dotnetRestoreTarget(repo);
+    const api = tfms.map(androidApiOfTfm).find((a) => a !== undefined);
     return {
       id: 'dotnet-maui',
       name: '.NET MAUI',
       evidence: projects.find((p) => /UseMaui/i.test(repo.read(p) ?? '')) ?? (projects[0] as string),
       params: {
         ...(sdk ? { sdkMajor: sdk } : {}),
+        ...(restore ? { restore } : {}),
+        ...(api ? { androidApi: api } : {}),
         // Which platform workloads the target frameworks ask for; `tfms` lists nothing when they come from a property.
         ...(has(/-android/i) || tfms.length === 0 ? { android: '1' } : {}),
         ...(has(/-ios/i) ? { ios: '1' } : {}),
@@ -106,8 +145,39 @@ const dotnetMaui: StackSpec = {
     ...(d.params.android && platform !== 'linux' ? ['dotnet-workload-android'] : []),
     ...(d.params.ios && platform === 'darwin' ? ['dotnet-workload-ios'] : []),
     ...(d.params.maccatalyst && platform === 'darwin' ? ['dotnet-workload-maccatalyst'] : []),
-    ...(d.params.android ? ['jdk'] : []),
+    ...(d.params.android ? ['jdk', ...ANDROID_SDK_TOOLS] : []),
   ],
+  deps: (d) => dotnetDeps(d),
+};
+
+/** Tool ids of the Android SDK pieces (D6), in install order. */
+const ANDROID_SDK_TOOLS = [
+  'android-cmdline-tools',
+  'android-platform-tools',
+  'android-platform',
+  'android-build-tools',
+];
+
+/** A native Android project (Gradle with the Android plugin, or an AndroidManifest). */
+const android: StackSpec = {
+  id: 'android',
+  name: 'Android',
+  detect: (repo) => {
+    const manifest = findFiles(repo, /(^|\/)AndroidManifest\.xml$/i)[0];
+    const gradleFiles = findFiles(repo, /(^|\/)build\.gradle(\.kts)?$/i);
+    const text = readAll(repo, gradleFiles);
+    const isAndroid = /com\.android\.(application|library)|id\(["']com\.android/.test(text);
+    if (!isAndroid && !(manifest && gradleFiles.length)) return null;
+    const api = /compileSdk(?:Version)?\s*(?:=\s*)?(\d+)/.exec(text)?.[1];
+    const bt = /buildToolsVersion\s*(?:=\s*)?["']([\d.]+)["']/.exec(text)?.[1];
+    return {
+      id: 'android',
+      name: 'Android',
+      evidence: gradleFiles[0] ?? (manifest as string),
+      params: { ...(api ? { androidApi: api } : {}), ...(bt ? { buildTools: bt } : {}) },
+    };
+  },
+  tools: () => ['jdk', ...ANDROID_SDK_TOOLS],
 };
 
 const NODE_LOCKS: Array<[string, string]> = [
@@ -145,6 +215,17 @@ const node: StackSpec = {
     return { id: 'node', name: 'Node.js', evidence: 'package.json', params };
   },
   tools: (d) => ['node', ...(d.params.pm === 'npm' ? [] : [`node-${d.params.pm}`])],
+  deps: (d) => {
+    const pm = d.params.pm ?? 'npm';
+    return [
+      {
+        name: `${pm} install`,
+        cmd: pm,
+        args: ['install'],
+        after: ['node', ...(pm === 'npm' ? [] : [`node-${pm}`])],
+      },
+    ];
+  },
 };
 
 const python: StackSpec = {
@@ -165,9 +246,43 @@ const python: StackSpec = {
     const pv = /^(?:python-)?(\d+\.\d+)/m.exec(repo.read('.python-version') ?? '')?.[1];
     const v = pv ?? req;
     if (v) params.pythonVersion = v;
+    const reqFile = findFiles(repo, /^requirements[^/]*\.txt$/i).sort((a, b) => a.length - b.length)[0];
+    if (reqFile) params.requirements = reqFile;
+    if (rootFile(repo, 'pyproject.toml') || rootFile(repo, 'setup.py')) params.installable = '1';
     return { id: 'python', name: 'Python', evidence: marker, params };
   },
   tools: (d) => ['python', 'python-venv', ...(d.params.manager ? [`python-${d.params.manager}`] : [])],
+  deps: (d, platform) => {
+    const m = d.params.manager;
+    if (m === 'uv') return [{ name: 'uv sync', cmd: 'uv', args: ['sync'], after: ['python-uv'] }];
+    if (m === 'poetry')
+      return [{ name: 'poetry install', cmd: 'poetry', args: ['install'], after: ['python-poetry'] }];
+    if (m === 'pipenv')
+      return [
+        { name: 'pipenv install', cmd: 'pipenv', args: ['install', '--dev'], after: ['python-pipenv'] },
+      ];
+    // Plain pip: into the project's own virtual environment, never into the system Python.
+    const py = platform === 'win32' ? 'python' : 'python3';
+    const venvPip = platform === 'win32' ? '.venv\\Scripts\\pip.exe' : '.venv/bin/pip';
+    const steps: DepStep[] = [];
+    if (!d.params.requirements && !d.params.installable) return steps;
+    steps.push({
+      name: 'create .venv',
+      cmd: py,
+      args: ['-m', 'venv', '.venv'],
+      after: ['python', 'python-venv'],
+    });
+    if (d.params.requirements)
+      steps.push({
+        name: `pip install -r ${d.params.requirements}`,
+        cmd: venvPip,
+        args: ['install', '-r', d.params.requirements],
+        after: ['python'],
+      });
+    if (d.params.installable)
+      steps.push({ name: 'pip install -e .', cmd: venvPip, args: ['install', '-e', '.'], after: ['python'] });
+    return steps;
+  },
 };
 
 const docker: StackSpec = {
@@ -192,6 +307,7 @@ const go: StackSpec = {
     return { id: 'go', name: 'Go', evidence: 'go.mod', params: v ? { goVersion: v } : {} };
   },
   tools: () => ['go'],
+  deps: () => [{ name: 'go mod download', cmd: 'go', args: ['mod', 'download'], after: ['go'] }],
 };
 
 const rust: StackSpec = {
@@ -200,6 +316,7 @@ const rust: StackSpec = {
   detect: (repo) =>
     rootFile(repo, 'Cargo.toml') ? { id: 'rust', name: 'Rust', evidence: 'Cargo.toml', params: {} } : null,
   tools: () => ['rust'],
+  deps: () => [{ name: 'cargo fetch', cmd: 'cargo', args: ['fetch'], after: ['rust'] }],
 };
 
 function javaMajor(text: string): string | undefined {
@@ -224,6 +341,21 @@ const maven: StackSpec = {
     };
   },
   tools: (d) => ['jdk', ...(d.params.wrapper ? [] : ['maven'])],
+  deps: (d, platform) => [
+    d.params.wrapper
+      ? {
+          name: 'mvnw dependency:resolve',
+          cmd: platform === 'win32' ? 'mvnw.cmd' : './mvnw',
+          args: ['-B', '-q', 'dependency:resolve'],
+          after: ['jdk'],
+        }
+      : {
+          name: 'mvn dependency:resolve',
+          cmd: 'mvn',
+          args: ['-B', '-q', 'dependency:resolve'],
+          after: ['maven'],
+        },
+  ],
 };
 
 const gradle: StackSpec = {
@@ -251,6 +383,7 @@ const ruby: StackSpec = {
   detect: (repo) =>
     rootFile(repo, 'Gemfile') ? { id: 'ruby', name: 'Ruby', evidence: 'Gemfile', params: {} } : null,
   tools: () => ['ruby', 'bundler'],
+  deps: () => [{ name: 'bundle install', cmd: 'bundle', args: ['install'], after: ['bundler'] }],
 };
 
 const php: StackSpec = {
@@ -261,12 +394,14 @@ const php: StackSpec = {
       ? { id: 'php', name: 'PHP', evidence: 'composer.json', params: {} }
       : null,
   tools: () => ['php', 'composer'],
+  deps: () => [{ name: 'composer install', cmd: 'composer', args: ['install'], after: ['composer'] }],
 };
 
 /** The stacks the DevOps engineer recognizes. Order = order of the report. Add a stack by adding an object. */
 export const STACKS: StackSpec[] = [
   dotnetMaui,
   dotnet,
+  android,
   node,
   python,
   docker,
@@ -332,6 +467,102 @@ const workload = (id: string, extra?: Partial<ToolSpec>): ToolSpec => ({
 
 const DOTNET_INSTALL_SH = (channel: string) =>
   `curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh && bash /tmp/dotnet-install.sh --channel ${channel}`;
+
+// ---------------------------------------------------------------------------------------------- Android SDK
+
+/** Where the Android SDK lives: the user's own setting, else the default folder every Android tool looks in. */
+export function androidHome(platform: Platform, env: NodeJS.ProcessEnv = process.env): string {
+  const set = env.ANDROID_HOME || env.ANDROID_SDK_ROOT;
+  if (set) return set;
+  if (platform === 'darwin') return join(homedir(), 'Library', 'Android', 'sdk');
+  if (platform === 'win32')
+    return join(env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Android', 'Sdk');
+  return join(homedir(), 'Android', 'Sdk');
+}
+
+const sdkmanagerPath = (platform: Platform): string =>
+  join(
+    androidHome(platform),
+    'cmdline-tools',
+    'latest',
+    'bin',
+    platform === 'win32' ? 'sdkmanager.bat' : 'sdkmanager',
+  );
+
+/** Google's command-line tools bundle (the build number changes rarely; sdkmanager updates itself afterwards). */
+const CMDLINE_TOOLS_BUILD = '11076708';
+
+/** Installs the command-line tools into `<sdk>/cmdline-tools/latest` and accepts the licences. User level, no root. */
+export const cmdlineToolsScript = (platform: Platform): string => {
+  const sdk = androidHome(platform);
+  const os = platform === 'darwin' ? 'mac' : 'linux';
+  return [
+    'set -e',
+    `mkdir -p "${sdk}/cmdline-tools"`,
+    `curl -fsSL -o "${sdk}/clt.zip" https://dl.google.com/android/repository/commandlinetools-${os}-${CMDLINE_TOOLS_BUILD}_latest.zip`,
+    `rm -rf "${sdk}/cmdline-tools/tmp" "${sdk}/cmdline-tools/latest"`,
+    `unzip -q -o "${sdk}/clt.zip" -d "${sdk}/cmdline-tools/tmp"`,
+    `mv "${sdk}/cmdline-tools/tmp/cmdline-tools" "${sdk}/cmdline-tools/latest"`,
+    `rm -rf "${sdk}/cmdline-tools/tmp" "${sdk}/clt.zip"`,
+    `yes | "${sdk}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${sdk}" --licenses > /dev/null || true`,
+  ].join('\n');
+};
+
+/** `sdkmanager --install <package>` for the SDK folder of this machine. */
+const sdkInstall = (platform: Platform, pkgName: string): Step[] => [
+  { cmd: sdkmanagerPath(platform), args: [`--sdk_root=${androidHome(platform)}`, pkgName] },
+];
+
+/** An installed-package check: `sdkmanager --list_installed` names the package at the start of a line. */
+const sdkHas = (platform: Platform, pkgName: string): Check[] => [
+  one(
+    sdkmanagerPath(platform),
+    [`--sdk_root=${androidHome(platform)}`, '--list_installed'],
+    undefined,
+    pkgName,
+  ),
+];
+
+/** The API level the project targets (its own setting, else a current default) and the build-tools that go with it. */
+const androidApi = (p: Params): string => p.androidApi ?? '34';
+const androidBuildTools = (p: Params): string => p.buildTools ?? `${androidApi(p)}.0.0`;
+
+const ANDROID_TOOLS: ToolSpec[] = [
+  {
+    id: 'android-cmdline-tools',
+    name: 'Android SDK command-line tools',
+    after: ['jdk'],
+    checks: (_p, platform) => [one(sdkmanagerPath(platform), ['--version'], VER)],
+    recipes: (_p, platform) =>
+      platform === 'win32' ? {} : { any: [{ cmd: 'bash', args: ['-c', cmdlineToolsScript(platform)] }] },
+    manual: (_p, platform) =>
+      `Install the Android command-line tools into ${join(androidHome(platform), 'cmdline-tools', 'latest')} (https://developer.android.com/studio#command-line-tools-only; curl and unzip are needed)`,
+  },
+  {
+    id: 'android-platform-tools',
+    name: 'Android platform-tools',
+    after: ['android-cmdline-tools'],
+    checks: (_p, platform) => sdkHas(platform, 'platform-tools'),
+    recipes: (_p, platform) => ({ any: sdkInstall(platform, 'platform-tools') }),
+    manual: () => 'sdkmanager "platform-tools"',
+  },
+  {
+    id: 'android-platform',
+    name: 'Android SDK platform',
+    after: ['android-cmdline-tools'],
+    checks: (p, platform) => sdkHas(platform, `platforms;android-${androidApi(p)}`),
+    recipes: (p, platform) => ({ any: sdkInstall(platform, `platforms;android-${androidApi(p)}`) }),
+    manual: (p) => `sdkmanager "platforms;android-${androidApi(p)}"`,
+  },
+  {
+    id: 'android-build-tools',
+    name: 'Android build-tools',
+    after: ['android-cmdline-tools'],
+    checks: (p, platform) => sdkHas(platform, `build-tools;${androidBuildTools(p)}`),
+    recipes: (p, platform) => ({ any: sdkInstall(platform, `build-tools;${androidBuildTools(p)}`) }),
+    manual: (p) => `sdkmanager "build-tools;${androidBuildTools(p)}"`,
+  },
+];
 
 export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
   (
@@ -627,7 +858,9 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
         manual: () => 'Install Composer (https://getcomposer.org)',
       },
     ] satisfies ToolSpec[]
-  ).map((t) => [t.id, t]),
+  )
+    .concat(ANDROID_TOOLS)
+    .map((t) => [t.id, t]),
 );
 
 export type { Detection, Platform, RepoView };
