@@ -67,6 +67,8 @@ export const ProjectDtoSchema = z.object({
   mergeLargeWithoutApproval: z.boolean().optional(),
   /** Who last changed the setting and when (null: never). */
   mergeLargeChanged: z.object({ byName: z.string(), at: IsoTime }).nullable().optional(),
+  /** Whether finishing a card automatically starts a full end-to-end test run card (default true). */
+  fullSuiteAfterFinalize: z.boolean().optional(),
   /** Optional cap on shifts running at once on this project; null: no cap (the default). */
   maxConcurrentShifts: z.number().int().nullable().optional(),
   /** The monthly budget and this month's spend (amounts hidden from guests); absent in lists that do not compute it. */
@@ -152,6 +154,7 @@ export const CreateProjectRequestSchema = z.object({
 export type CreateProjectRequest = z.infer<typeof CreateProjectRequestSchema>;
 
 /** `PUT /api/projects/:id/merge-policy` (owner only). */
+export const SetFullSuiteRequestSchema = z.object({ enabled: z.boolean() });
 export const SetMergePolicyRequestSchema = z.object({ mergeLargeWithoutApproval: z.boolean() });
 export type SetMergePolicyRequest = z.infer<typeof SetMergePolicyRequestSchema>;
 

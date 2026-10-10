@@ -50,6 +50,7 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
       ? { byName: p.merge_large_changed_by_name ?? 'unknown', at: iso(p.merge_large_changed_at) as string }
       : null,
     maxConcurrentShifts: p.max_concurrent_shifts ?? null,
+    fullSuiteAfterFinalize: p.full_suite_after_finalize ?? true,
     createdAt: iso(p.created_at) as string,
     startedAs: p.started_as ?? p.workflow_key,
     convertedAt: iso(p.converted_at),

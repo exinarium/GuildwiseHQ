@@ -399,6 +399,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Let large changes merge without your approval (project owner only, off by default).',
       },
       {
+        name: 'Full test run',
+        text: 'Tick or untick "Run the full end-to-end test suite after each finished card". On by default; Owners and Admins can switch it off if they do not want the extra "Full E2E suite" cards.',
+      },
+      {
         name: 'Budget',
         text: 'Set a monthly budget for what the agents cost. At 80% you are warned; at 100% new work pauses until you raise it or override it.',
       },

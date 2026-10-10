@@ -179,6 +179,17 @@ export function usePatchProject(id: string) {
   });
 }
 
+export function useSetFullSuite(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => put(`/projects/${id}/full-suite`, { enabled }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
 export function useSetMergePolicy(id: string) {
   const qc = useQueryClient();
   return useMutation({

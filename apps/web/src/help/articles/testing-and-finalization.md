@@ -5,7 +5,7 @@ keywords: [test, finalize, merge, PR, pull request, how finished work lands, pro
 order: 11
 ---
 
-After a card is reviewed and approved, it moves to the Test stage where a tester runs E2E tests. Once tests pass, the card moves to Finalize where its work lands the way the project says: straight into main, or as a pull request for you to approve. A full test suite runs after each finalized card.
+After a card is reviewed and approved, it moves to the Test stage where a tester runs E2E tests. Once tests pass, the card moves to Finalize where its work lands the way the project says: straight into main, or as a pull request for you to approve. A full test suite runs after each finalized card, unless you switch that off in the project settings.
 
 ## Test stage {#test-stage}
 
@@ -53,5 +53,7 @@ If you know git and want the details, open **Settings** and tick **Show me branc
 ## Full suite and regression {#full-suite}
 
 After finalization, a **full suite** card is created for testers to run the entire E2E suite once. A test-side failure (a flaky test, data or environment) is fixed by the tester; a genuine bug becomes a new bug card and you get a notice. These failures do not block merges.
+
+If you do not want these extra cards, open the project's **Settings**, find **Full test run after each card** and untick **Run the full end-to-end test suite after each finished card**. It is on by default. The project Owner and the organization's Owners and Admins can change it; everyone else sees it read-only. Turning it off only stops new suite cards; the normal testing of every card stays as it is.
 
 To run a regression suite, open the project's board and click **Run regression**, pick the **Platform** (Web, Mobile or Both) and click **Run**. One regression card per platform is queued for the testers. The button only appears on projects with a test stage.

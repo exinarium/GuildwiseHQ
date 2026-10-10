@@ -11,6 +11,7 @@ import {
   RankProjectsRequestSchema,
   RepoParamsSchema,
   SetConcurrencyCapRequestSchema,
+  SetFullSuiteRequestSchema,
   SetMergePolicyRequestSchema,
   SetWorkingBranchRequestSchema,
 } from '@aom/shared';
@@ -31,6 +32,7 @@ import {
   restoreProject,
   retryRepoClone,
   setConcurrencyCap,
+  setFullSuite,
   setMergePolicy,
   updateProject,
 } from '../commands/projects.ts';
@@ -139,6 +141,22 @@ export function projectRoutes(ctx: Ctx) {
         const s = await requireUser(ctx, req);
         await setMergePolicy(ctx, s.user, req.params.id, req.body.mergeLargeWithoutApproval);
         return getProjectDetail(ctx, s.user.id, req.params.id);
+      },
+    );
+
+    app.put(
+      '/api/projects/:id/full-suite',
+      { schema: { params: IdParamsSchema, body: SetFullSuiteRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setFullSuite(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.enabled,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
       },
     );
 

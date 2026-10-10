@@ -346,32 +346,40 @@ export async function applyFinalizeResult(
           scope,
         });
       }
-      // Full E2E suite on the resulting branch, for a tester (never blocks anything).
-      const branch =
-        action === 'merge' ? (card.base_branch ?? 'main') : (result.pushedBranch ?? card.branch_name);
-      const suite = await spawnCardEvent(tx, {
-        from: card,
-        title: `Full E2E suite after ${card.ref}: ${card.title}`,
-        cardType: 'regression',
-        origin: 'full_suite',
-        stage: 'test',
-        status: 'queued',
-        scheduled: true,
-        parentCardId: card.id,
-        fields: {
-          context: `Run the full E2E suite on ${branch} after ${card.ref} was finalized (${action}).`,
-          platform: 'web',
-          suiteBranch: branch,
-          // Mock runtime only: the parent's `mock.suite` script drives the suite card's tester shift.
-          ...(card.fields?.mock?.suite ? { mock: { test: card.fields.mock.suite } } : {}),
-        },
-      });
-      events.push(suite.event, {
-        streamId: streamId.card(card.id),
-        event: { type: 'FullSuiteStarted', payload: { cardId: card.id, branch, suiteCardId: suite.cardId } },
-        actor: SYSTEM_ACTOR,
-        scope,
-      });
+      // Full E2E suite on the resulting branch, for a tester (never blocks anything). The project can switch it off.
+      const suiteOn = (
+        await one(tx, 'SELECT full_suite_after_finalize AS on FROM projects WHERE id=$1', [card.project_id])
+      )?.on;
+      if (suiteOn !== false) {
+        const branch =
+          action === 'merge' ? (card.base_branch ?? 'main') : (result.pushedBranch ?? card.branch_name);
+        const suite = await spawnCardEvent(tx, {
+          from: card,
+          title: `Full E2E suite after ${card.ref}: ${card.title}`,
+          cardType: 'regression',
+          origin: 'full_suite',
+          stage: 'test',
+          status: 'queued',
+          scheduled: true,
+          parentCardId: card.id,
+          fields: {
+            context: `Run the full E2E suite on ${branch} after ${card.ref} was finalized (${action}).`,
+            platform: 'web',
+            suiteBranch: branch,
+            // Mock runtime only: the parent's `mock.suite` script drives the suite card's tester shift.
+            ...(card.fields?.mock?.suite ? { mock: { test: card.fields.mock.suite } } : {}),
+          },
+        });
+        events.push(suite.event, {
+          streamId: streamId.card(card.id),
+          event: {
+            type: 'FullSuiteStarted',
+            payload: { cardId: card.id, branch, suiteCardId: suite.cardId },
+          },
+          actor: SYSTEM_ACTOR,
+          scope,
+        });
+      }
       if (card.worktree_path)
         await enqueueRunnerCommand(tx, workstationId, 'worktree.remove', {
           repoId: card.repo_id ?? undefined,

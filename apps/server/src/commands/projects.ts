@@ -189,6 +189,37 @@ export async function setMergePolicy(
 }
 
 /**
+ * "Run the full end-to-end test suite after each finished card": the project's Owner or an organization Owner/Admin
+ * turns the automatic regression card spawned by finalize off or on (default on).
+ */
+export async function setFullSuite(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  org: { id: string; role: OrgRole | null },
+  projectId: string,
+  enabled: boolean,
+) {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    const orgAdmin = isOrgManager({ orgRole: org.role }) && org.id === p.org_id;
+    if (p.my_role !== 'owner' && !orgAdmin)
+      throw forbidden('only the project Owner or an organization Owner or Admin can do this');
+    if ((p.full_suite_after_finalize ?? true) === enabled) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: { type: 'ProjectFullSuiteSet', payload: { projectId, enabled, by: user.id } },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
+/**
  * Sets (or clears, with null) the cap on shifts running at once on the project, whatever the number of agents. Any
  * project member may change it (docs/design/restructure.md decision 11). Off by default.
  */

@@ -177,6 +177,11 @@ export const projectEvents = [
     z.object({ projectId: Id, mergeLargeWithoutApproval: z.boolean(), changedBy: Id }),
   ),
   /**
+   * The project's Owner or an organization Owner/Admin turned the automatic "Full E2E suite after <card>" regression
+   * card (spawned when a card is finalized) off or on. On by default.
+   */
+  defineEvent('ProjectFullSuiteSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
+  /**
    * A project member set (or cleared, with null) the cap on shifts that may run at once on this project, whatever the
    * number of agents. Off by default (restructure.md decision 11).
    */

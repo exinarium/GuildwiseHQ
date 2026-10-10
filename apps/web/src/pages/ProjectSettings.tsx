@@ -7,6 +7,7 @@ import { BudgetPanel } from '../components/BudgetPanel.tsx';
 import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { ConvertPanel } from '../components/ConvertPanel.tsx';
 import { DeployTargetsPanel } from '../components/DeployTargetsPanel.tsx';
+import { FullSuitePanel } from '../components/FullSuitePanel.tsx';
 import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
 import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
@@ -268,6 +269,15 @@ export function ProjectSettings() {
       {project && traits.usesRepos && (
         <div id="merge" className="scroll-mt-20">
           <MergePolicyPanel projectId={id} project={project} history={q.data.mergePolicyHistory ?? []} />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="full-suite" className="scroll-mt-20">
+          <FullSuitePanel
+            projectId={id}
+            project={project}
+            canChange={project.myRole === 'owner' || canConvert}
+          />
         </div>
       )}
       {project && (
