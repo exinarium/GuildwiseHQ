@@ -146,11 +146,23 @@ describe('platform area', () => {
     // off: no delete button
     const toggle = await screen.findByTestId('simulation-toggle');
     expect(screen.queryByTestId('simulation-wipe')).toBeNull();
+    // switching is permanent: the admin is asked first
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValue(true);
+    await user.click(toggle);
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false);
     await user.click(toggle);
     await waitFor(() =>
       expect(calls.some((c) => c.method === 'PUT' && (c.body as { enabled: boolean }).enabled === true)).toBe(
         true,
       ),
+    );
+    confirmSpy.mockRestore();
+    // on: the switch is locked and the page points to deleting
+    await waitFor(() =>
+      expect((screen.getByTestId('simulation-toggle') as HTMLInputElement).disabled).toBe(true),
+    );
+    expect(screen.getByTestId('platform-org-simulation').textContent).toMatch(
+      /stays one until it is deleted/,
     );
     // on: the demo scenario can be loaded
     await user.click(await screen.findByTestId('simulation-demo'));

@@ -180,7 +180,7 @@ describe.skipIf(!hasRunner)('the simulated workstation', () => {
   it('loads the demo scenario into a simulation organization with AOM_MOCK_UI off, and a second run changes nothing', async () => {
     expect(t.app.ctx.config.mockUi).toBe(false);
     const demoOwner = await t.userSession(uniqueEmail('demo'));
-    const orgId = demoOwner.id;
+    let orgId = demoOwner.id;
     const refuseReal = await t.req('POST', `/api/platform/orgs/${orgId}/demo-scenario`, {
       cookie: root.cookie,
     });
@@ -203,6 +203,15 @@ describe.skipIf(!hasRunner)('the simulated workstation', () => {
     });
     expect(refused.status).toBe(422);
     expect(refused.body.error.code).toBe('mock_fields_disabled');
+    // A real organization with a project cannot be switched; the demo runs in a fresh, empty one.
+    const switchRefused = await t.req('PUT', `/api/platform/orgs/${orgId}/simulation`, {
+      cookie: root.cookie,
+      body: { enabled: true, pace: 'fast' },
+    });
+    expect(switchRefused.status).toBe(409);
+    expect(switchRefused.body.error.code).toBe('simulation_not_empty');
+    const simOwner = await t.userSession(uniqueEmail('demosim'));
+    orgId = simOwner.id;
     await t.req('PUT', `/api/platform/orgs/${orgId}/simulation`, {
       cookie: root.cookie,
       body: { enabled: true, pace: 'fast' },

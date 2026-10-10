@@ -208,7 +208,11 @@ export function PlatformOrgDetail() {
       <Panel title="Simulation" data-testid="platform-org-simulation">
         <p className="mb-3 text-sm text-muted">
           A simulation organization is for testing and demos: its agents run on a simulated workstation hosted
-          by this server (nothing real is built), it is never billed, and its emails are marked [Simulation].
+          by this server (nothing real is built), its repositories are simulated, it is never billed, and its
+          emails are marked [Simulation].{' '}
+          {o.simulation
+            ? 'A simulation organization stays one until it is deleted: it cannot be switched back to a real organization. Use "Delete simulation organization" to remove it and all its data.'
+            : 'Only an empty organization (no projects, not even archived ones, and no active billing subscription) can be switched, and it cannot be switched back. To test with a populated setup, invite a new simulation organization instead.'}
         </p>
         <div className="flex flex-wrap items-end gap-4">
           <label className="flex items-center gap-2.5 text-sm font-medium text-fg">
@@ -219,18 +223,19 @@ export function PlatformOrgDetail() {
               data-testid="simulation-toggle"
               className="size-5"
               checked={o.simulation}
-              disabled={simulate.isPending}
-              onChange={(e) =>
-                simulate.mutate(
-                  { enabled: e.target.checked },
-                  {
-                    onSuccess: () =>
-                      toast.success(e.target.checked ? 'Simulation is on' : 'Simulation is off'),
-                  },
+              disabled={o.simulation || simulate.isPending}
+              onChange={(e) => {
+                if (
+                  !e.target.checked ||
+                  !window.confirm(
+                    'Switch this organization to simulation? This cannot be undone: a simulation organization stays one until it is deleted.',
+                  )
                 )
-              }
+                  return;
+                simulate.mutate({ enabled: true }, { onSuccess: () => toast.success('Simulation is on') });
+              }}
             />
-            {o.simulation ? 'Simulation on' : 'Simulation off'}
+            {o.simulation ? 'Simulation on (permanent)' : 'Simulation off'}
           </label>
           {o.simulation && (
             <>
@@ -274,6 +279,11 @@ export function PlatformOrgDetail() {
             </>
           )}
         </div>
+        {simulate.isError && (
+          <div className="mt-3" data-testid="simulation-error">
+            <ErrorBox error={simulate.error} />
+          </div>
+        )}
         {demo.isError && (
           <div className="mt-3">
             <ErrorBox error={demo.error} />

@@ -34,11 +34,9 @@ describe('real workstations in a simulation organization', () => {
       [card.id],
     );
 
-    const on = await w.t.req('PUT', `/api/platform/orgs/${orgId}/simulation`, {
-      cookie: root.cookie,
-      body: { enabled: true },
-    });
-    expect(on.status, JSON.stringify(on.body)).toBe(200);
+    // This organization already has projects, so the API would refuse the switch (only empty organizations can be
+    // switched); the flag is set directly, as it would be on an organization created as a simulation.
+    await q('UPDATE organizations SET simulation=true WHERE id=$1', [orgId]);
     const after = await w.t.app.ctx.services.dispatcher.runPass();
     expect(after.map((c) => c.agentId)).not.toContain(real.agent?.id ?? real.id);
     expect(after).toEqual([]);

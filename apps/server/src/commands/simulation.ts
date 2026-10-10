@@ -22,7 +22,10 @@ const metaOf = (m?: Meta) => (m && (m.ip || m.userAgent) ? { meta: { ...m } } : 
 export const WIPE_BACKUP_NOTE =
   'The server has no built-in database backup. Take one (pg_dump) before wiping a simulation organization on a production database.';
 
-/** Turns simulation mode on or off for an organization (audited; an event like any other org setting). */
+/**
+ * Turns simulation mode on for an empty organization, or changes the pace of a simulation one (audited; an event like
+ * any other org setting). Turning it off is refused.
+ */
 export async function setOrgSimulation(
   ctx: Ctx,
   admin: AuthSession,
@@ -34,8 +37,34 @@ export async function setOrgSimulation(
     const o = await one(tx, 'SELECT * FROM organizations WHERE id=$1 FOR UPDATE', [orgId]);
     if (!o) throw notFound('organization not found');
     const pace = req.pace ?? (o.simulation_pace as 'fast' | 'normal' | 'slow');
-    if (Boolean(o.simulation) === req.enabled && pace === o.simulation_pace)
-      throw conflict('no_change', `simulation is already ${req.enabled ? 'on' : 'off'}`);
+    // A simulation organization stays one until it is deleted: test data must never turn into a real organization.
+    if (!req.enabled)
+      throw conflict(
+        'simulation_permanent',
+        'A simulation organization stays one until it is deleted. Use "Delete simulation organization" to remove it.',
+      );
+    if (o.simulation && pace === o.simulation_pace) throw conflict('no_change', 'simulation is already on');
+    // A real organization can become a simulation only while it is empty: no project (archived ones count) and no
+    // live billing subscription.
+    if (!o.simulation) {
+      const project = await one(tx, 'SELECT 1 FROM projects WHERE org_id=$1 LIMIT 1', [orgId]);
+      const sub = await one(
+        tx,
+        `SELECT 1 FROM billing_subscriptions WHERE org_id=$1 AND status <> 'cancelled'`,
+        [orgId],
+      );
+      if (project || sub)
+        throw conflict(
+          'simulation_not_empty',
+          `Only an empty organization can be switched to simulation: this one ${
+            project && sub
+              ? 'has projects (archived ones count) and a billing subscription'
+              : project
+                ? 'has projects (archived ones count)'
+                : 'has a billing subscription'
+          }. Create a new simulation organization instead.`,
+        );
+    }
     await ctx.store.append(
       [
         {
