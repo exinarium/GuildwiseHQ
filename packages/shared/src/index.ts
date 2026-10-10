@@ -2,6 +2,7 @@ export * from './api/index.ts';
 export * from './authz/index.ts';
 export * from './avatars/index.ts';
 export * from './cards/index.ts';
+export * from './cloud/index.ts';
 export * from './costs/index.ts';
 export * from './definitions/index.ts';
 export * from './devops/index.ts';

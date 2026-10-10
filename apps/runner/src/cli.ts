@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { hostname, platform } from 'node:os';
 import { join, resolve } from 'node:path';
-import { RunnerPairRequestSchema, RunnerPairResponseSchema } from '@aom/shared';
+import { devcontainerText, RunnerPairRequestSchema, RunnerPairResponseSchema } from '@aom/shared';
 import { Command } from 'commander';
 import { execa } from 'execa';
 import { sandboxDoctorLines, sandboxState } from './adapters/claude-policy.ts';
@@ -24,6 +24,8 @@ import {
 } from './pairings.ts';
 import { resolveDataDir, runnerPaths } from './paths.ts';
 import { RunnerKeys } from './secrets/keys.ts';
+import { detectStacks, viewOf } from './toolchain/detect.ts';
+import { preparePairing } from './up.ts';
 import { RUNNER_VERSION } from './version.ts';
 
 const dataDirOpt = [
@@ -95,6 +97,34 @@ async function pair(opts: {
       `${r.replaced ? 'Replaced the earlier pairing for' : 'Added next to the existing pairings:'} ${r.entry.id} (${r.count} pairing${r.count === 1 ? '' : 's'} on this machine; the others are untouched). A running runner starts it within a few seconds.`,
     );
   console.log('Next: `aom-runner repos add <path>` for your code folders, then `aom-runner start`.');
+}
+
+/** Pair if needed (idempotent), then run. For servers and containers nobody sits at. */
+async function up(opts: {
+  server?: string;
+  code?: string;
+  name?: string;
+  dataDir?: string;
+  mock?: boolean;
+}): Promise<void> {
+  const r = await preparePairing(opts);
+  console.log(
+    r.paired === 'already'
+      ? `Already paired (workstation ${r.workstationId}); starting.`
+      : `Paired as workstation ${r.workstationId} (${r.paired}); starting.`,
+  );
+  if (r.authApplied)
+    console.log(`Claude credential from the environment stored in this machine's config (${r.authApplied}).`);
+  await start(opts);
+}
+
+/** Prints a devcontainer.json for a repository, from the toolchain detection. */
+function devcontainer(path: string | undefined, opts: { server: string; name?: string }): void {
+  const dir = resolve(path ?? '.');
+  const stacks = detectStacks(viewOf(dir)).map((d) => ({ id: d.id, params: d.params }));
+  process.stdout.write(
+    devcontainerText({ name: opts.name ?? 'Guildwise workstation', serverUrl: opts.server, stacks }),
+  );
 }
 
 async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> {
@@ -395,6 +425,23 @@ export function buildProgram(): Command {
     .option('--mock', 'enable the mock runtime (CI and development)')
     .option(...dataDirOpt)
     .action(pair);
+  program
+    .command('up')
+    .description(
+      'pair if this machine is not paired yet (GUILDWISE_PAIR_CODE, or a Codespace), then connect and run; safe to run at every boot',
+    )
+    .option('--server <url>', 'server URL (or GUILDWISE_SERVER)')
+    .option('--code <code>', 'pairing code (or GUILDWISE_PAIR_CODE); ignored when already paired')
+    .option('--name <name>', 'workstation name (or GUILDWISE_NAME; default: hostname)')
+    .option('--mock', 'enable the mock runtime (CI and development)')
+    .option(...dataDirOpt)
+    .action(up);
+  program
+    .command('devcontainer [path]')
+    .description('print a devcontainer.json for the repository at path (default .) from its detected toolchain')
+    .requiredOption('--server <url>', 'server URL, e.g. https://aom.example.com')
+    .option('--name <name>', 'name for the dev container')
+    .action(devcontainer);
   program
     .command('start')
     .description('connect to the server and run shifts (foreground)')
