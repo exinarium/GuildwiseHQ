@@ -4,7 +4,13 @@ import { formatMoney } from '@aom/shared';
 export const money = (micros: number | null | undefined, currency = 'USD'): string =>
   micros === null || micros === undefined ? '–' : formatMoney(micros, currency);
 
-/** Billing prices are USD cents (VAT-exclusive): `$19` or `$19.50`. */
+/** A price with cents, always: `$49.00` (billing prices are USD and VAT included). */
+export const usdPrice = (cents: number | null | undefined): string =>
+  cents === null || cents === undefined
+    ? '–'
+    : `${cents < 0 ? '-' : ''}$${(Math.abs(cents) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Billing prices are USD cents (VAT included): `$19` or `$19.50`. */
 export const usdCents = (cents: number | null | undefined): string => {
   if (cents === null || cents === undefined) return '–';
   const whole = cents % 100 === 0;

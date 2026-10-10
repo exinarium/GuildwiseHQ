@@ -132,18 +132,21 @@ The app is a hosted website; code, credentials and agent sessions stay on each u
 
 ## Billing
 
-Billing (gateway: PayFast; owner decisions of 2026-10-10) turns the plan fields into a paid subscription.
+Billing (gateway: Paystack, with PayFast as a fallback; owner decisions of 2026-10-10, "Payment decision") turns the plan fields into a paid subscription.
 
 - **Plans.** A catalogue the super admin edits (USD prices, limits on members, workstations and projects; **no agent limits**; the same features everywhere): Starter $19 (2/1/3), Team $49 (5/3/10), Business $149 (20/10/unlimited). **Unlimited** is assigned only by the super admin: no billing cycle, no limits. A subscription keeps the price it started at.
 - **Business add-ons.** Extra members, workstations and projects at super-admin prices (placeholders $5, $10, $2). They apply from the next billing cycle and never go below the Business base.
 - **Sign-up.** Self-service, with a verified email (sign-in is refused until then) and a card: a 7-day trial, the first invoice at the trial end, then monthly. Until a card is saved the new organization is paused. Invited organizations stay free until the Owner subscribes or the super admin assigns Unlimited.
-- **Currency.** Prices are USD, excluding VAT (a VAT percentage setting exists, 0 by default). The card is charged in ZAR at the day's exchange rate (pluggable source, cached per day, super-admin override); invoices show USD, rate and ZAR.
+- **Currency.** Prices are USD everywhere (pricing page, sign-up, Billing page, invoices): "$49.00 / month, VAT included". Each charge converts the fixed USD amount to ZAR at that day's exchange rate (pluggable source, cached per day, super-admin override) and charges the rand amount; the invoice lists the USD amount as the billed price and "charged as R x at R y / USD on <date>".
+- **VAT included.** The company is VAT-registered: prices are VAT-inclusive. VAT at a configurable rate (setting, default 15%) is computed out of the inclusive price (`gross x p / (100 + p)`) and shown on every invoice, local or foreign, in USD and in ZAR ("Includes 15% VAT: $6.39 (R117.28)"). Proration amounts follow the same rule. If the accountant later confirms zero-rating for foreign customers, that is a setting change.
+- **Business customers only.** Sign-up requires a company name. The Owner keeps a billing profile (company name, address, country, optional VAT number) in the Billing tab; it is printed on invoices, and a paid invoice keeps the details it was issued with.
+- **Tax invoice.** Every invoice has a printable HTML page ("Tax invoice", sequential number, date, supplier name, address and VAT number from platform settings, customer details, line items, VAT in rand). The exact SARS tax-invoice format must be confirmed by the accountant. The supplier name (Example Company (Pty) Ltd, trading as Guildwise HQ) appears only on invoices and the legal pages.
 - **Plan changes** are prorated for the rest of the period: a charge now, or a credit on the next invoice. A plan too small for current usage is refused.
 - **Cancellation.** Active until the end of the paid term, then paused.
 - **Pause.** An organization paused for billing is `suspended` with the reason `billing:setup`, `billing:payment_failed`, `billing:cancelled` or `billing:admin`: only the Owner signs in, a banner links to the Billing page, nothing is dispatched.
 - **Failed payments.** Three attempts (day 0, +1, +3), an Owner mail each time, then the pause. Card-expiry notices and a trial-ending reminder are mailed once each.
-- **Payment provider.** A `PaymentProvider` interface with PayFast (tokenised card, ad hoc charges, ITN webhook) and a `fake` provider when no PayFast keys are set. Only a token, the brand, the last four digits and the expiry are stored.
-- **UI.** Owner: Organization > Billing. Super admin: Platform > Billing (catalogue and settings) and a Billing panel on each organization (pause, unpause, assign Unlimited), all audited.
+- **Payment provider.** A `PaymentProvider` interface with **Paystack** (hosted checkout for the card, `charge_authorization` for merchant-initiated charges, signed webhooks; chosen by `AOM_PAYMENT_PROVIDER`), PayFast as a fallback (tokenised card, ad hoc charges, ITN webhook) and a `fake` provider when no keys are set (local and UAT). Only a token, the brand, the last four digits and the expiry are stored. Updating the card runs the same flow and the new authorization replaces the old one.
+- **UI.** Owner: Organization > Billing (plan, card, billing profile, invoices with a printable tax invoice). Super admin: Platform > Billing (provider status and sandbox/live mode, catalogue, VAT rate, invoice details, exchange-rate override) and a Billing panel on each organization (pause, unpause, assign Unlimited), all audited.
 
 ## Card lifecycle
 

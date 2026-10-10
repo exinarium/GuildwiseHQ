@@ -879,7 +879,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Billing tab',
-        text: 'Owner only. Your plan, status, next charge, card and invoices; change plan, add members, workstations or projects on Business, cancel, or resubscribe when paused.',
+        text: 'Owner only. Your plan (US dollars, VAT included), status, next charge, card and invoices; edit the billing profile printed on invoices, open a printable tax invoice, change plan, add members, workstations or projects on Business, cancel, or resubscribe when paused.',
       },
       {
         name: 'Your role',
@@ -1489,15 +1489,23 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'Plans',
-        text: 'Edit each plan price (US dollars per month) and its member, workstation and project limits. Empty means unlimited. Existing subscriptions keep their price. Unlimited is only assigned from an organization page.',
+        text: 'Edit each plan price (US dollars per month, VAT included) and its member, workstation and project limits. Empty means unlimited. Existing subscriptions keep their price. Unlimited is only assigned from an organization page.',
       },
       {
         name: 'Add-on prices',
         text: 'What a Business organization pays per extra member, workstation or project each month.',
       },
       {
+        name: 'Payment provider',
+        text: 'Which gateway is active (Paystack, PayFast or simulated) and whether it runs on test keys (sandbox) or live. The keys are set on the server, not here.',
+      },
+      {
+        name: 'Invoice details',
+        text: 'The company name, address and VAT number printed on every tax invoice. Placeholders until you enter the real ones.',
+      },
+      {
         name: 'VAT percent',
-        text: 'Leave at 0 until the company is VAT registered; then it is added to every charge.',
+        text: 'The VAT contained in every price (15 for South Africa). It is taken out of the price, never added on top, and shown on every invoice.',
       },
       {
         name: 'Exchange rate override',

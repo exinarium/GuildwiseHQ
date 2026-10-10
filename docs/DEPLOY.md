@@ -204,11 +204,14 @@ are rendered by the server, so a reverse proxy must pass those paths to it, not 
 
 ### Billing
 
-Billing runs on the fake provider (simulated payments, a "Test mode" notice in the UI) until PayFast keys are set, so local and UAT need nothing. **Never leave production on the fake provider**: it takes no money.
+Billing runs on the fake provider (simulated payments, a "Test mode" notice in the UI) until payment keys are set, so local and UAT need nothing. **Never leave production on the fake provider**: it takes no money. Paystack is the payment provider; PayFast stays in the code as a fallback.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `AOM_BILLING_PROVIDER` | `auto` | `auto` (PayFast when merchant id and key are set, else fake), `fake` or `payfast` (refuses to start without keys) |
+| `AOM_PAYMENT_PROVIDER` | unset | `paystack`, `payfast` or `fake`. Unset: Paystack when `AOM_PAYSTACK_SECRET_KEY` is set, else PayFast when its keys are set, else fake. Naming a provider without its keys refuses to start. (`AOM_BILLING_PROVIDER` is a deprecated alias.) |
+| `AOM_PAYSTACK_SECRET_KEY` | unset | Paystack secret key (`sk_test_...` runs in test mode, `sk_live_...` is live). Also signs and verifies webhooks |
+| `AOM_PAYSTACK_PUBLIC_KEY` | unset | Paystack public key (`pk_...`). Kept for the hosted checkout; the current flow redirects to Paystack and does not need it in the browser |
+| `AOM_PAYSTACK_CARD_CHECK_ZAR` | `5` | Rand charged and refunded to save a card. `UNVERIFIED`: Paystack's minimum amount for ZAR |
 | `AOM_PAYFAST_MERCHANT_ID` / `AOM_PAYFAST_MERCHANT_KEY` | unset | Your PayFast merchant credentials |
 | `AOM_PAYFAST_PASSPHRASE` | unset | The salt passphrase set in PayFast; must match exactly, or every signature fails |
 | `AOM_PAYFAST_SANDBOX` | `true` | Use PayFast's sandbox (hosted page and API with `testing=true`). Set `false` for live payments |
@@ -217,7 +220,19 @@ Billing runs on the fake provider (simulated payments, a "Test mode" notice in t
 | `AOM_FX_FALLBACK_ZAR` | `18.5` | Rate used when the source is down and no earlier rate exists |
 | `AOM_BILLING_JOBS` | `true` | Run renewals, retries, pauses and notices on the scheduler (idempotent). Run it on one instance only |
 
-PayFast set-up: PayFast is told the notification URL `https://<your public origin>/api/billing/payfast/itn` with each card capture, so keep `AOM_PUBLIC_ORIGIN` exact, and make sure the proxy forwards the real client address (the ITN source check compares it with PayFast's hosts; Fastify runs with `trustProxy`). Enable tokenization on the merchant account. Before going live, run a full sandbox pass: sign-up, card capture and refund of the card check, an ad hoc charge, a decline, and the ITN. The adapter was written from PayFast's public documentation without a merchant account; the signature rules, the ad hoc response shape and refunds are marked `UNVERIFIED` in `apps/server/src/billing/payfast.ts`. Mail uses the normal `AOM_SMTP_URL` and `AOM_MAIL_FROM`. The USD prices, limits and add-on prices live in the database and are edited under Platform > Billing; the VAT percentage stays 0 until the company is VAT registered.
+**Paystack set-up (primary).**
+
+1. **Account.** Create a Paystack account for the South African business (paystack.com/za). Paystack is owned by Stripe; Stripe itself is not available to a South African company.
+2. **Business verification.** Submit the company documents Paystack asks for (typically the CIPC registration, SARS tax number, director ID, bank confirmation letter and proof of address). Review is quoted at about 48 hours; the live keys are only issued after approval.
+3. **International cards.** Customers pay in rand, but many pay with foreign cards. Ask Paystack (Settings > Preferences or support) to enable **international payments**; approval is separate and can take a few working days. Without it foreign cards are declined.
+4. **Keys.** Settings > API Keys & Webhooks. Put the **test** secret key in `AOM_PAYSTACK_SECRET_KEY` (and the public key in `AOM_PAYSTACK_PUBLIC_KEY`) for UAT; switch to the **live** keys for production. The key decides the mode, shown on Platform > Billing as Sandbox or Live.
+5. **Webhook URL.** In the same settings page set the webhook URL (one for test mode, one for live) to `https://<your public origin>/api/billing/paystack/webhook`. Paystack signs each call with `x-paystack-signature` (HMAC-SHA512 of the raw body with the secret key); anything with a bad signature is rejected with 400. The reverse proxy must pass the request body through unchanged.
+6. **Sandbox pass before live.** With test keys and Paystack's test cards: sign-up, card capture on Paystack's checkout (the webhook and the return both save the card and refund the check), a merchant-initiated charge (let a trial end, or use the test clock), a decline, a webhook replay (harmless), the card update, and a plan change with proration. Then repeat one real payment with a real card on the live keys and check that the settlement arrives.
+7. **Invoices.** Platform > Billing > Invoice details: enter the company's registered address, VAT number and registration number (placeholders are printed until you do), and confirm the VAT rate (15%). Have the accountant confirm the printed tax-invoice layout against SARS requirements before the first live invoice.
+
+The Paystack adapter was written from Paystack's public documentation without a merchant account, so these points are `UNVERIFIED` (also marked in `apps/server/src/billing/paystack.ts`) and must be checked in the sandbox: the minimum transaction amount in ZAR for the card check; that `channels: ['card']` and the `authorization.reusable` flag behave as documented for South African cards; the exact `charge_authorization` response for a decline and for a charge that needs further action (anything other than `success` or `failed` is left in `charging` for the webhook or a human); whether Paystack sends `charge.failed` for card charges (it is handled but only reconciles an unknown outcome); that the refund endpoint accepts the numeric transaction id and the `refund.processed` and `refund.failed` event names; the card brand strings in the `authorization` object; and Paystack's own fee for international cards (2.9% or 3.1% + R1: the two official pages disagree).
+
+PayFast set-up (fallback): PayFast is told the notification URL `https://<your public origin>/api/billing/payfast/itn` with each card capture, so keep `AOM_PUBLIC_ORIGIN` exact, and make sure the proxy forwards the real client address (the ITN source check compares it with PayFast's hosts; Fastify runs with `trustProxy`). Enable tokenization on the merchant account. Before going live, run a full sandbox pass: sign-up, card capture and refund of the card check, an ad hoc charge, a decline, and the ITN. The adapter was written from PayFast's public documentation without a merchant account; the signature rules, the ad hoc response shape and refunds are marked `UNVERIFIED` in `apps/server/src/billing/payfast.ts`. Mail uses the normal `AOM_SMTP_URL` and `AOM_MAIL_FROM`. The USD prices (VAT included), limits and add-on prices live in the database and are edited under Platform > Billing, together with the VAT rate (15% by default, taken out of the price), the invoice details and the exchange-rate override. Migration 1490 adds the invoice VAT columns and the billing profiles.
 
 ### Features
 

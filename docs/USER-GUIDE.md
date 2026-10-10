@@ -729,19 +729,22 @@ If a member loses their phone and their recovery codes, you reset their two-fact
 
 Only the **Owner** sees **Organization, Billing**. Plans differ only in limits (members, workstations, projects); every plan has every feature and **no limit on agents**.
 
-| Plan | Per month (US dollars, excluding VAT) | Members | Workstations | Projects |
+| Plan | Per month (US dollars, VAT included) | Members | Workstations | Projects |
 |---|---|---|---|---|
-| Starter | $19 | 2 | 1 | 3 |
-| Team | $49 | 5 | 3 | 10 |
-| Business | $149 | 20 | 10 | Unlimited |
+| Starter | $19.00 | 2 | 1 | 3 |
+| Team | $49.00 | 5 | 3 | 10 |
+| Business | $149.00 | 20 | 10 | Unlimited |
 
 - **Signing up.** Choose a plan at **Start free trial**, confirm your email (required), then add a card on the Billing page. The **7-day free trial** starts; the first invoice is charged when it ends, then monthly. A reminder is emailed two days before.
-- **Charged in rand.** The dollar price is converted at the day's exchange rate. Every invoice shows the dollar amount, the rate and the rand charged. We never see or keep the card number, only a secure token from PayFast (the page shows the card simply as *Card*).
+- **Company name.** Guildwise HQ is sold to businesses, so sign-up asks for your company name.
+- **Charged in rand, VAT included.** The price is a fixed dollar amount that includes 15% VAT. Each charge converts it at the day's exchange rate. Every invoice shows the dollar price, the VAT it contains (in dollars and rand) and "charged as R x at R y / USD on <date>". We never see or keep the card number: you enter it on Paystack's secure page and we keep a secure token with the brand, last four digits and expiry (we email you before it expires). **Update card** replaces it.
+- **Billing profile.** Under Billing the Owner edits the company name, address, country and VAT number (optional). They are printed on your invoices; paid invoices keep the details they were issued with.
+- **Tax invoice.** **View / print tax invoice** next to an invoice opens a printable page (use Print, then Save as PDF).
 - **Change plan.** Takes effect at once and is prorated for the rest of the month: you pay the difference now, or get a credit on the next invoice. A plan too small for what you use is refused.
 - **Business add-ons.** Add members, workstations or projects (priced per unit). They start with the next billing cycle and never go below the Business base.
 - **Cancel.** The organization stays active until the end of the paid term (or trial), then is paused. **Keep my subscription** takes it back before then.
 - **Failed payments.** Three attempts (now, after 1 day, after 3 days); you are emailed each time and can update the card. After the third failure the organization is **paused**: agents stop picking up work and only the Owner can sign in, to a banner and the Billing page, where **Resubscribe now** charges a new month and resumes everything.
-- **Platform administrators** edit prices, limits, add-on prices, VAT and the exchange-rate override under **Platform, Billing**, and can pause, unpause or assign **Unlimited** from an organization's page (each with a reason, audited).
+- **Platform administrators** see the active payment provider and its sandbox or live mode, and edit prices (VAT included), limits, add-on prices, the VAT rate, the invoice details (company name, address, VAT number printed on tax invoices) and the exchange-rate override under **Platform, Billing**, and can pause, unpause or assign **Unlimited** from an organization's page (each with a reason, audited).
 
 See the help article *Plans and billing*.
 
@@ -1076,7 +1079,7 @@ On your workstations and in your git remotes, exactly as before. The Guildwise H
 Only after review and test, and only if the project's **How finished work lands** is *straight into main* (the default). Choose *as a pull request I approve* to merge everything yourself. Large changes wait for your approval either way, unless you turned that off in the project settings. If main is protected on your git host, a pull request is opened instead.
 
 **What does it cost?**
-Guildwise HQ is $19 (Starter), $49 (Team) or $149 (Business) a month with a 7-day free trial, in US dollars excluding VAT, charged in rand (4.17). The AI work is billed by Claude: through your subscription or your API key. The app estimates the spend (4.6) and you set budgets.
+Guildwise HQ is $19 (Starter), $49 (Team) or $149 (Business) a month with a 7-day free trial, in US dollars including VAT, charged in rand (4.17). The AI work is billed by Claude: through your subscription or your API key. The app estimates the spend (4.6) and you set budgets.
 
 **How many agents do I need?**
 Start with a builder, a reviewer, a tester and a BA (3.5). Add more when cards queue up.
