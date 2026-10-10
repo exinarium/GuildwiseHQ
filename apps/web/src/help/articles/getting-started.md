@@ -1,7 +1,7 @@
 ---
 title: Getting started
-summary: The training video, first login, the guided tour, sidebar areas, command palette and keyboard shortcuts.
-keywords: [video, tutorial, training, login, tour, sidebar, command palette, keyboard shortcuts, help panel]
+summary: The training video, first login, the guided tour, the Get started checklist, sidebar areas, command palette and keyboard shortcuts.
+keywords: [video, tutorial, training, login, tour, get started, checklist, setup, sidebar, command palette, keyboard shortcuts, help panel]
 order: 1
 ---
 
@@ -36,6 +36,22 @@ Every account belongs to an organization. There are no standalone accounts excep
 The first time you sign in, Guildwise HQ starts a guided tour of the main pages: the board where your cards live, the desk where you answer questions, intake from external systems, and more. The tour takes you to each area, shows you what is there and what you can do.
 
 You can play the tour again any time: open **Help** in the sidebar and click **Replay the tour** (or press Ctrl K and choose **Take the tour**). The tour is shown once. If you close it half way it does not come back by itself; **Help** offers to resume it where you stopped.
+
+## The Get started checklist {#get-started}
+
+Until your organization is set up, the sidebar shows a **Get started** button with your progress (for example 2/5). Click it for the list:
+
+1. **Create your first project.**
+2. **Add its repository** (the code repository the agents work in).
+3. **Pair a workstation**, the computer that runs your agents. Its DevOps engineer is hired for you.
+4. **Hire your team**: a business analyst, a builder, a reviewer and a tester.
+5. **Talk to the business analyst**: describe something you need and it turns it into cards.
+
+Each step has a button that opens the right page, with the form already open where there is one. You never tick anything yourself: a step shows as done as soon as it is true, whoever did it and wherever. When all five are done the button disappears.
+
+Everyone in the organization sees the same progress. Members cannot create projects or add repositories, so those two steps show "An Owner or Admin does this step" for them. Click **Hide this checklist** to put it away; it stays hidden for you on every device. To bring it back, open **Help** and click **Show the checklist**.
+
+The guided tour mentions the checklist at its last step, so the two do not compete: the tour shows you around, the checklist tells you what is still left to set up.
 
 ## The sidebar {#the-sidebar}
 

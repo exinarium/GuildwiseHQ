@@ -244,6 +244,8 @@ Three things worth knowing from the start:
 
 ![The command palette](guide/assets/palette.jpg)
 
+> **Your checklist.** The **Get started** button at the bottom of the sidebar lists the five things this chapter walks through (project, repository, workstation, team, talking to the business analyst) and ticks each one by itself as it becomes true. Each step opens the right page. Hide it with **Hide this checklist**; bring it back from **Help**.
+
 ### 3.4 Add a workstation (5 minutes)
 
 A workstation is the computer where your agents will work. The guided installer sets everything up for you.

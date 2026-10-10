@@ -110,6 +110,8 @@ export const userEvents = [
       imageId: Id.optional(),
     }),
   ),
+  /** The user hid (or reopened) their "Get started" checklist. Kept per user, so it stays hidden on other devices. */
+  defineEvent('UserSetupChecklistChanged', z.object({ userId: Id, dismissed: z.boolean() })),
   defineEvent('UserTimezoneChanged', z.object({ userId: Id, timezone: z.string().min(1).max(64) })),
   /** The first-login tour: where the user is in it (`step`, 0-based) and whether they finished or skipped it. Replaying sets `in_progress` at step 0. */
   defineEvent(

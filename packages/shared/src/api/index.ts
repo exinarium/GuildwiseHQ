@@ -29,6 +29,7 @@ export * from './platform.ts';
 export * from './projects.ts';
 export * from './research.ts';
 export * from './schedules.ts';
+export * from './setup.ts';
 export * from './shifts.ts';
 export * from './support.ts';
 export * from './testing.ts';

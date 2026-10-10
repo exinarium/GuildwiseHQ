@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMyTickets } from '../api/queries/support.ts';
 import { GettingStartedVideo } from '../components/help/GettingStartedVideo.tsx';
+import { SetupHelpCard, useSetupChecklistUi } from '../components/setup/SetupChecklist.tsx';
 import { ContactForm, prefillFor } from '../components/support/ContactForm.tsx';
 import { MyRequest } from '../components/support/MyRequest.tsx';
 import { StatusBadge } from '../components/support/StatusBadge.tsx';
@@ -71,6 +72,16 @@ export function PlatformHelp() {
       <PageHeader title="Help" sub="Articles, the glossary and the tour." />
       <HelpCentre />
     </div>
+  );
+}
+
+function SetupCard() {
+  const { data } = useSetupChecklistUi();
+  if (!data || data.steps.length === 0) return null;
+  return (
+    <Panel>
+      <SetupHelpCard />
+    </Panel>
   );
 }
 
@@ -257,6 +268,7 @@ function Home({ base }: { base: string }) {
   return (
     <>
       <GettingStartedVideo />
+      <SetupCard />
       <TourCard />
       <WhatsNewCard />
       <section aria-labelledby="help-articles-h">

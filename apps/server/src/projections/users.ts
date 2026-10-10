@@ -29,6 +29,10 @@ export const userProjectors: Record<string, Projector> = {
       [p.userId, p.entryIds],
     );
   },
+  UserSetupChecklistChanged: async (tx, e) => {
+    const p = (e.event as EventOf<'UserSetupChecklistChanged'>).payload;
+    await exec(tx, 'UPDATE users SET setup_checklist_dismissed=$2 WHERE id=$1', [p.userId, p.dismissed]);
+  },
   UserAvatarSet: async (tx, e) => {
     const p = (e.event as EventOf<'UserAvatarSet'>).payload;
     await exec(

@@ -140,7 +140,7 @@ const HELP: TourStep = {
 const DONE: TourStep = {
   id: 'done',
   title: 'You are set',
-  body: 'That is the tour. Everything starts with a workstation to run your agents, then a project and an agent. Press ? at any time for the shortcuts, or open Help to replay this.',
+  body: 'That is the tour. The Get started button at the bottom of the sidebar lists what is left to set up (project, repository, workstation, team, business analyst) and ticks each step off by itself. Press ? at any time for the shortcuts, or open Help to replay this.',
 };
 
 const PLATFORM_STEPS: TourStep[] = [

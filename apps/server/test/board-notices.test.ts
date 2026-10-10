@@ -13,10 +13,13 @@ afterAll(async () => {
 });
 
 const tileOf = async (cardId: string) => {
-  const board = await ok<any>(w.t.req('GET', `/api/board?projectId=${w.projectId}`, { cookie: w.owner.cookie }));
+  const board = await ok<any>(
+    w.t.req('GET', `/api/board?projectId=${w.projectId}`, { cookie: w.owner.cookie }),
+  );
   return board.columns.flatMap((c: any) => c.cards).find((c: any) => c.id === cardId);
 };
-const orgId = async () => (await q('SELECT org_id FROM projects WHERE id=$1', [w.projectId]))[0]?.org_id as string;
+const orgId = async () =>
+  (await q('SELECT org_id FROM projects WHERE id=$1', [w.projectId]))[0]?.org_id as string;
 
 describe('board card notices (T1)', () => {
   it('a plain card carries none of the new fields', async () => {
@@ -61,7 +64,9 @@ describe('board card notices (T1)', () => {
     expect((await tileOf(card.id)).hygiene).toEqual([
       { kind: 'conflict', repoName: 'toy', detail: 'merge conflict in a.ts' },
     ]);
-    await q(`UPDATE hygiene_findings SET status='resolved', resolved_at=now() WHERE project_id=$1`, [w.projectId]);
+    await q(`UPDATE hygiene_findings SET status='resolved', resolved_at=now() WHERE project_id=$1`, [
+      w.projectId,
+    ]);
     expect((await tileOf(card.id)).hygiene).toBeUndefined();
   });
 

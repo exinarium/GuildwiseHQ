@@ -1,11 +1,11 @@
 import {
-  type BoardResponse,
   type BlockedReason,
-  type CardBudget,
-  type CardHygiene,
+  type BoardResponse,
   boardColumnsWith,
+  type CardBudget,
   type CardDetailResponse,
   type CardDto,
+  type CardHygiene,
   type CardSearchResponse,
   canCommentOnCard,
   canManageCard,
@@ -294,7 +294,9 @@ export async function boardNotices(
     }
   }
   const hygiene = new Map<string, CardHygiene[]>();
-  const repoIds = [...new Set(cards.filter((c) => c.repo_id && c.status !== 'done').map((c) => c.repo_id as string))];
+  const repoIds = [
+    ...new Set(cards.filter((c) => c.repo_id && c.status !== 'done').map((c) => c.repo_id as string)),
+  ];
   if (repoIds.length > 0) {
     const found = await rows(
       ctx.pool,
@@ -308,7 +310,11 @@ export async function boardNotices(
       if (mine.length > 0)
         hygiene.set(
           c.id,
-          mine.map((f) => ({ kind: f.kind, repoName: f.subject_name, detail: String(f.detail ?? '').slice(0, 300) })),
+          mine.map((f) => ({
+            kind: f.kind,
+            repoName: f.subject_name,
+            detail: String(f.detail ?? '').slice(0, 300),
+          })),
         );
     }
   }

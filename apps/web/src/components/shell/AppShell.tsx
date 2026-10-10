@@ -15,6 +15,7 @@ import { ChatDrawer } from '../ChatDrawer.tsx';
 import { PageHelpPanel } from '../help/PageHelpPanel.tsx';
 import { CommandPalette } from '../palette/CommandPalette.tsx';
 import { ShortcutsDialog } from '../palette/ShortcutsDialog.tsx';
+import { SetupChecklistProvider, SetupWidget } from '../setup/SetupChecklist.tsx';
 import { ContactProvider, useContact } from '../support/ContactDialog.tsx';
 import { TourProvider } from '../tour/Tour.tsx';
 import { useTour } from '../tour/TourContext.tsx';
@@ -162,190 +163,198 @@ function Shell({ name, live }: { name: string; live: string }) {
   const pageName = crumbs.at(-1)?.label ?? BRAND.name;
 
   return (
-    <TourProvider navIds={navIds} mobile={!isTabletUp} onDrawer={setDrawer} onActive={setTourOn}>
-      <Tooltip.Provider delayDuration={300} skipDelayDuration={100}>
-        <a
-          href="#main"
-          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-90 focus:rounded-control focus:bg-brand focus:px-4 focus:py-2 focus:text-brand-fg"
-        >
-          Skip to content
-        </a>
-        <div
-          className="min-h-dvh md:grid md:grid-cols-[var(--sidebar-w)_1fr] md:transition-[grid-template-columns] md:duration-200"
-          style={{ ['--sidebar-w' as string]: isTabletUp ? (collapsed ? '4rem' : '16rem') : '0px' }}
-        >
-          {isTabletUp && (
-            <aside className="sticky top-0 z-30 h-dvh overflow-hidden bg-side">
-              <SidebarBody
-                sections={sections}
-                footer={footer}
-                collapsed={collapsed}
-                counts={counts}
-                project={project}
-                projects={projects}
-                user={user}
-                onSignOut={signOut}
-                orgSlot={collapsed ? orgSlotCollapsed : orgSlot}
-                headerSlot={
-                  isDesktop && !collapsed ? <CollapseButton collapsed={false} onToggle={toggle} /> : undefined
-                }
-              />
-            </aside>
-          )}
-
-          <div className="flex min-h-dvh min-w-0 flex-col">
-            {isTabletUp ? (
-              <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-line bg-canvas/85 px-6 backdrop-blur lg:px-8">
-                <div className="flex min-w-0 items-center gap-3">
-                  {isDesktop && collapsed && <CollapseButtonLight onToggle={toggle} />}
-                  <Breadcrumbs projects={projects} />
-                </div>
-                <div className="flex shrink-0 items-center gap-4">
-                  <LiveIndicator live={live} />
-                  <button
-                    type="button"
-                    onClick={() => setPalette(true)}
-                    aria-label="Search and jump to (Ctrl K)"
-                    data-testid="palette-button"
-                    data-tour="palette"
-                    className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm text-muted hover:bg-sunken"
-                  >
-                    <Search aria-hidden="true" className="size-4" />
-                    <span className="hidden xl:inline">Search</span>
-                    <kbd className="hidden rounded-[6px] border border-control bg-sunken px-1.5 font-mono text-xs text-subtle lg:inline">
-                      Ctrl K
-                    </kbd>
-                  </button>
-                  <PageHelpButton onClick={() => setPageHelp(true)} />
-                  <button
-                    type="button"
-                    onClick={() => setChat(true)}
-                    aria-label="Chat with an agent"
-                    className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
-                  >
-                    <MessageSquare aria-hidden="true" className="size-4" />
-                    Chat
-                  </button>
-                </div>
-              </header>
-            ) : (
-              <header className="sticky top-0 z-20 flex min-h-14 items-center gap-1 border-b border-line bg-canvas/90 px-2 pt-[env(safe-area-inset-top)] backdrop-blur">
-                <button
-                  type="button"
-                  onClick={() => setDrawer(true)}
-                  aria-label="Open menu"
-                  aria-expanded={drawer}
-                  aria-haspopup="dialog"
-                  className="relative inline-flex size-11 shrink-0 items-center justify-center rounded-control text-fg hover:bg-sunken"
-                >
-                  <Menu aria-hidden="true" className="size-5" />
-                  {counts.blocking > 0 && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute top-2.5 right-2.5 size-2 rounded-full bg-danger-fill"
-                    />
-                  )}
-                </button>
-                <div className="min-w-0 flex-1 px-1">
-                  <p className="truncate text-base font-semibold text-fg">{pageName}</p>
-                  {project && <p className="truncate text-xs text-subtle">{project.name}</p>}
-                </div>
-                <Link
-                  to={project ? `/cards/new?project=${project.key}` : '/cards/new'}
-                  aria-label="New card"
-                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-control text-fg hover:bg-sunken"
-                >
-                  <Plus aria-hidden="true" className="size-5" />
-                </Link>
-                <Link
-                  to="/desk"
-                  aria-label="Desk"
-                  className="relative inline-flex size-11 shrink-0 items-center justify-center rounded-control text-fg hover:bg-sunken"
-                >
-                  <Inbox aria-hidden="true" className="size-5" />
-                  {counts.open > 0 && (
-                    <span
-                      data-testid="desk-badge"
-                      title={`${counts.blocking} blocking, ${counts.open} open`}
-                      className={cx(
-                        'tnum absolute top-1 right-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-xs font-semibold',
-                        counts.blocking > 0 ? 'bg-danger-solid text-white' : 'bg-accent text-accent-fg',
-                      )}
-                    >
-                      {counts.open}
-                    </span>
-                  )}
-                </Link>
-                <PageHelpButton onClick={() => setPageHelp(true)} mobile />
-                <span className="pr-2 pl-1">
-                  <LiveIndicator live={live} compact />
-                </span>
-              </header>
-            )}
-            <main id="main" ref={main} tabIndex={-1} className="mx-auto w-full min-w-0 flex-1 outline-none">
-              {me.data && <OrgBanner me={me.data} project={project} />}
-              <div className="px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
-                <Outlet />
-              </div>
-            </main>
-          </div>
-        </div>
-
-        {!isTabletUp && (
-          <RadixDialog.Root open={drawer} onOpenChange={setDrawer} modal={!tourOn}>
-            <RadixDialog.Portal>
-              <RadixDialog.Overlay className="fixed inset-0 z-40 animate-fade bg-overlay" />
-              <RadixDialog.Content
-                aria-label="Main menu"
-                aria-describedby={undefined}
-                onInteractOutside={tourOn ? (e) => e.preventDefault() : undefined}
-                className="fixed inset-y-0 left-0 z-50 w-[min(86vw,20rem)] animate-drawer bg-side pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] shadow-lg"
-              >
-                <RadixDialog.Title className="sr-only">Main menu</RadixDialog.Title>
+    <SetupChecklistProvider>
+      <TourProvider navIds={navIds} mobile={!isTabletUp} onDrawer={setDrawer} onActive={setTourOn}>
+        <Tooltip.Provider delayDuration={300} skipDelayDuration={100}>
+          <a
+            href="#main"
+            className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-90 focus:rounded-control focus:bg-brand focus:px-4 focus:py-2 focus:text-brand-fg"
+          >
+            Skip to content
+          </a>
+          <div
+            className="min-h-dvh md:grid md:grid-cols-[var(--sidebar-w)_1fr] md:transition-[grid-template-columns] md:duration-200"
+            style={{ ['--sidebar-w' as string]: isTabletUp ? (collapsed ? '4rem' : '16rem') : '0px' }}
+          >
+            {isTabletUp && (
+              <aside className="sticky top-0 z-30 h-dvh overflow-hidden bg-side">
                 <SidebarBody
                   sections={sections}
                   footer={footer}
+                  collapsed={collapsed}
                   counts={counts}
                   project={project}
                   projects={projects}
                   user={user}
                   onSignOut={signOut}
-                  onNavigate={() => setDrawer(false)}
-                  orgSlot={me.data ? <OrgSwitcher me={me.data} onNavigate={() => setDrawer(false)} /> : null}
+                  orgSlot={collapsed ? orgSlotCollapsed : orgSlot}
+                  setupSlot={<SetupWidget collapsed={collapsed} />}
                   headerSlot={
-                    <RadixDialog.Close
-                      aria-label="Close menu"
-                      className="inline-flex size-10 items-center justify-center rounded-control text-side-fg hover:bg-side-hover hover:text-side-strong"
-                    >
-                      <X aria-hidden="true" className="size-5" />
-                    </RadixDialog.Close>
+                    isDesktop && !collapsed ? (
+                      <CollapseButton collapsed={false} onToggle={toggle} />
+                    ) : undefined
                   }
                 />
-              </RadixDialog.Content>
-            </RadixDialog.Portal>
-          </RadixDialog.Root>
-        )}
-        <AgentFacesSync />
-        <CommandPalette
-          open={palette}
-          onOpenChange={setPalette}
-          ctx={{
-            sections,
-            footer,
-            projects,
-            projectKey: project?.key ?? null,
-            onChat: () => setChat(true),
-            onHelp: () => setHelp(true),
-            onContact: () => contact.open(),
-            onPageHelp: () => setPageHelp(true),
-          }}
-        />
-        <PageHelpPanel open={pageHelp} onOpenChange={setPageHelp} />
-        <WhatsNewHost />
-        <ShortcutsDialog open={help} onOpenChange={setHelp} />
-        <ChatDrawer open={chat} onOpenChange={setChat} {...(project ? { projectId: project.id } : {})} />
-      </Tooltip.Provider>
-    </TourProvider>
+              </aside>
+            )}
+
+            <div className="flex min-h-dvh min-w-0 flex-col">
+              {isTabletUp ? (
+                <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-line bg-canvas/85 px-6 backdrop-blur lg:px-8">
+                  <div className="flex min-w-0 items-center gap-3">
+                    {isDesktop && collapsed && <CollapseButtonLight onToggle={toggle} />}
+                    <Breadcrumbs projects={projects} />
+                  </div>
+                  <div className="flex shrink-0 items-center gap-4">
+                    <LiveIndicator live={live} />
+                    <button
+                      type="button"
+                      onClick={() => setPalette(true)}
+                      aria-label="Search and jump to (Ctrl K)"
+                      data-testid="palette-button"
+                      data-tour="palette"
+                      className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm text-muted hover:bg-sunken"
+                    >
+                      <Search aria-hidden="true" className="size-4" />
+                      <span className="hidden xl:inline">Search</span>
+                      <kbd className="hidden rounded-[6px] border border-control bg-sunken px-1.5 font-mono text-xs text-subtle lg:inline">
+                        Ctrl K
+                      </kbd>
+                    </button>
+                    <PageHelpButton onClick={() => setPageHelp(true)} />
+                    <button
+                      type="button"
+                      onClick={() => setChat(true)}
+                      aria-label="Chat with an agent"
+                      className="inline-flex h-9 items-center gap-2 rounded-control border border-control bg-surface px-3 text-sm font-medium text-fg hover:bg-sunken"
+                    >
+                      <MessageSquare aria-hidden="true" className="size-4" />
+                      Chat
+                    </button>
+                  </div>
+                </header>
+              ) : (
+                <header className="sticky top-0 z-20 flex min-h-14 items-center gap-1 border-b border-line bg-canvas/90 px-2 pt-[env(safe-area-inset-top)] backdrop-blur">
+                  <button
+                    type="button"
+                    onClick={() => setDrawer(true)}
+                    aria-label="Open menu"
+                    aria-expanded={drawer}
+                    aria-haspopup="dialog"
+                    className="relative inline-flex size-11 shrink-0 items-center justify-center rounded-control text-fg hover:bg-sunken"
+                  >
+                    <Menu aria-hidden="true" className="size-5" />
+                    {counts.blocking > 0 && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute top-2.5 right-2.5 size-2 rounded-full bg-danger-fill"
+                      />
+                    )}
+                  </button>
+                  <div className="min-w-0 flex-1 px-1">
+                    <p className="truncate text-base font-semibold text-fg">{pageName}</p>
+                    {project && <p className="truncate text-xs text-subtle">{project.name}</p>}
+                  </div>
+                  <Link
+                    to={project ? `/cards/new?project=${project.key}` : '/cards/new'}
+                    aria-label="New card"
+                    className="inline-flex size-11 shrink-0 items-center justify-center rounded-control text-fg hover:bg-sunken"
+                  >
+                    <Plus aria-hidden="true" className="size-5" />
+                  </Link>
+                  <Link
+                    to="/desk"
+                    aria-label="Desk"
+                    className="relative inline-flex size-11 shrink-0 items-center justify-center rounded-control text-fg hover:bg-sunken"
+                  >
+                    <Inbox aria-hidden="true" className="size-5" />
+                    {counts.open > 0 && (
+                      <span
+                        data-testid="desk-badge"
+                        title={`${counts.blocking} blocking, ${counts.open} open`}
+                        className={cx(
+                          'tnum absolute top-1 right-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-xs font-semibold',
+                          counts.blocking > 0 ? 'bg-danger-solid text-white' : 'bg-accent text-accent-fg',
+                        )}
+                      >
+                        {counts.open}
+                      </span>
+                    )}
+                  </Link>
+                  <PageHelpButton onClick={() => setPageHelp(true)} mobile />
+                  <span className="pr-2 pl-1">
+                    <LiveIndicator live={live} compact />
+                  </span>
+                </header>
+              )}
+              <main id="main" ref={main} tabIndex={-1} className="mx-auto w-full min-w-0 flex-1 outline-none">
+                {me.data && <OrgBanner me={me.data} project={project} />}
+                <div className="px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
+                  <Outlet />
+                </div>
+              </main>
+            </div>
+          </div>
+
+          {!isTabletUp && (
+            <RadixDialog.Root open={drawer} onOpenChange={setDrawer} modal={!tourOn}>
+              <RadixDialog.Portal>
+                <RadixDialog.Overlay className="fixed inset-0 z-40 animate-fade bg-overlay" />
+                <RadixDialog.Content
+                  aria-label="Main menu"
+                  aria-describedby={undefined}
+                  onInteractOutside={tourOn ? (e) => e.preventDefault() : undefined}
+                  className="fixed inset-y-0 left-0 z-50 w-[min(86vw,20rem)] animate-drawer bg-side pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] shadow-lg"
+                >
+                  <RadixDialog.Title className="sr-only">Main menu</RadixDialog.Title>
+                  <SidebarBody
+                    sections={sections}
+                    footer={footer}
+                    counts={counts}
+                    project={project}
+                    projects={projects}
+                    user={user}
+                    onSignOut={signOut}
+                    onNavigate={() => setDrawer(false)}
+                    orgSlot={
+                      me.data ? <OrgSwitcher me={me.data} onNavigate={() => setDrawer(false)} /> : null
+                    }
+                    setupSlot={<SetupWidget />}
+                    headerSlot={
+                      <RadixDialog.Close
+                        aria-label="Close menu"
+                        className="inline-flex size-10 items-center justify-center rounded-control text-side-fg hover:bg-side-hover hover:text-side-strong"
+                      >
+                        <X aria-hidden="true" className="size-5" />
+                      </RadixDialog.Close>
+                    }
+                  />
+                </RadixDialog.Content>
+              </RadixDialog.Portal>
+            </RadixDialog.Root>
+          )}
+          <AgentFacesSync />
+          <CommandPalette
+            open={palette}
+            onOpenChange={setPalette}
+            ctx={{
+              sections,
+              footer,
+              projects,
+              projectKey: project?.key ?? null,
+              onChat: () => setChat(true),
+              onHelp: () => setHelp(true),
+              onContact: () => contact.open(),
+              onPageHelp: () => setPageHelp(true),
+            }}
+          />
+          <PageHelpPanel open={pageHelp} onOpenChange={setPageHelp} />
+          <WhatsNewHost />
+          <ShortcutsDialog open={help} onOpenChange={setHelp} />
+          <ChatDrawer open={chat} onOpenChange={setChat} {...(project ? { projectId: project.id } : {})} />
+        </Tooltip.Provider>
+      </TourProvider>
+    </SetupChecklistProvider>
   );
 }
 

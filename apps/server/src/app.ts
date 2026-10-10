@@ -67,6 +67,7 @@ import { projectRoutes } from './routes/projects.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
 import { scheduleRoutes } from './routes/schedules.ts';
+import { setupChecklistRoutes } from './routes/setup-checklist.ts';
 import { sharingRoutes } from './routes/sharing.ts';
 import { shiftRoutes } from './routes/shifts.ts';
 import { supportRoutes } from './routes/support.ts';
@@ -304,6 +305,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(outboundRoutes(ctx));
   await app.register(phaseRoutes(ctx));
   await app.register(reportingRoutes(ctx));
+  await app.register(setupChecklistRoutes(ctx));
   await app.register(costRoutes(ctx));
   await app.register(orgChartRoutes(ctx));
 

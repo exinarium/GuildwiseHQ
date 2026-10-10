@@ -7,8 +7,8 @@ import { DEFAULT_PRIORITY, priorityLabel, priorityLevel } from '../lib/priority.
 import { stageStyle } from '../lib/stages.ts';
 import { ageLabel } from '../lib/time.ts';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
-import { BlockedReasonNotice, BudgetNotice, HygieneNotice } from './BoardCardNotices.tsx';
 import { BackoffBadge } from './BackoffBadge.tsx';
+import { BlockedReasonNotice, BudgetNotice, HygieneNotice } from './BoardCardNotices.tsx';
 import { AgentAvatar } from './Face.tsx';
 import { cx } from './ui/cx.ts';
 import { Avatar, Badge, FilterChip } from './ui.tsx';

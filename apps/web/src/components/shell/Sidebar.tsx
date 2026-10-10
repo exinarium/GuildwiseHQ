@@ -97,6 +97,7 @@ export function SidebarBody({
   onNavigate,
   headerSlot,
   orgSlot,
+  setupSlot,
 }: {
   sections: NavSection[];
   footer: NavEntry[];
@@ -110,6 +111,8 @@ export function SidebarBody({
   headerSlot?: React.ReactNode;
   /** The organization switcher, above the project switcher. */
   orgSlot?: React.ReactNode;
+  /** The "Get started" checklist button, above the footer links. */
+  setupSlot?: React.ReactNode;
 }) {
   return (
     <div className="on-side flex h-full min-h-0 flex-col text-side-fg">
@@ -170,6 +173,7 @@ export function SidebarBody({
         ))}
       </nav>
       <div className="shrink-0 space-y-1 border-t border-side-line p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        {setupSlot}
         <ul className={cx('space-y-0.5', collapsed && 'flex flex-col items-center')}>
           {footer.map((e) => (
             <li key={e.id} className="relative">

@@ -2,7 +2,7 @@ import type { ProjectDto } from '@aom/shared';
 import { CreateProjectRequestSchema, workflowUsesRepos } from '@aom/shared';
 import { Archive, Code2, FlaskConical, FolderKanban, Rss, Settings } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { errorMessage } from '../api/client.ts';
 import { useWorkflows } from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
@@ -90,7 +90,9 @@ export function Projects() {
   const projects = useProjects();
   const archived = useArchivedProjects();
   const [showArchived, setShowArchived] = useState(false);
-  const [open, setOpen] = useState(false);
+  // `/projects?new=1` (the Get started checklist) opens the New project form.
+  const [params] = useSearchParams();
+  const [open, setOpen] = useState(() => params.get('new') === '1' && canCreate);
   const [department, setDepartment] = useState('');
   const departments = departmentsOf(projects.data ?? []);
   const shown = inDepartment(projects.data ?? [], department);

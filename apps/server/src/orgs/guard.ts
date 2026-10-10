@@ -15,11 +15,11 @@ const ALLOWED_WHEN_SUSPENDED = [
   /^MemberPasswordReset$/,
   /^TwoFactor/,
   /^PlatformOrg/,
-  /^(ProjectMemberRemoved|ClaimReleased|CardRehomed|AgentRetired|PasswordChanged|UserAvatarSet|UserTimezoneChanged|UserTourStateChanged|UserWhatsNewSeen)$/,
+  /^(ProjectMemberRemoved|ClaimReleased|CardRehomed|AgentRetired|PasswordChanged|UserAvatarSet|UserTimezoneChanged|UserTourStateChanged|UserWhatsNewSeen|UserSetupChecklistChanged)$/,
 ];
 const ALLOWED_WHEN_CANCELLED = [
   /^TwoFactor/,
-  /^(PasswordChanged|UserAvatarSet|UserTimezoneChanged|UserTourStateChanged|UserWhatsNewSeen)$/,
+  /^(PasswordChanged|UserAvatarSet|UserTimezoneChanged|UserTourStateChanged|UserWhatsNewSeen|UserSetupChecklistChanged)$/,
 ];
 
 /**
