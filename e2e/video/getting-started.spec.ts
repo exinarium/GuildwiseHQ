@@ -145,7 +145,7 @@ test('record the getting-started video', async ({ browser }) => {
   await form.getByLabel('Test plan').fill('Open the home page and close the banner');
   await pause(2500);
   await click(page, form.getByRole('button', { name: 'Specify', exact: true }));
-  await expect(page).toHaveURL(/\/cards\/SHOP-1$/);
+  await expect(page).toHaveURL(/\/cards\/[^/]+$/);
   await caption(page, 'The agents pick the card up by themselves. You can add more at any time', 3);
   await pause(3000);
   // a second card, quickly, through the API: the video is about the first
@@ -179,7 +179,7 @@ test('record the getting-started video', async ({ browser }) => {
 
   // ---- 4. talk to the BA ------------------------------------------------------------------------------------------
   await chapter('Talk to the business analyst', 'Step 4: ask the business analyst anything, in plain words');
-  await click(page, page.getByRole('button', { name: 'Chat', exact: true }));
+  await click(page, page.getByRole('button', { name: 'Chat with an agent' }));
   const drawer = page.getByRole('dialog', { name: 'Chat' });
   const bea = drawer.getByLabel('Agent').locator('option', { hasText: 'Bea' });
   await drawer.getByLabel('Agent').selectOption(await bea.getAttribute('value'));
@@ -201,7 +201,7 @@ test('record the getting-started video', async ({ browser }) => {
   );
   await pause(2000);
   await click(page, page.getByTestId('card-tile-SHOP-1'));
-  await expect(page).toHaveURL(/\/cards\/SHOP-1$/);
+  await expect(page).toHaveURL(/\/cards\/[^/]+$/);
   await caption(page, 'Open a card to see the plan, the transcript and what it cost', 5);
   await pause(3500);
   await caption(

@@ -1,0 +1,28 @@
+{
+  "title": "Getting started with Guildwise HQ",
+  "src": "/videos/getting-started.webm",
+  "type": "video/webm",
+  "duration": 59.1,
+  "chapters": [
+    {
+      "t": 1.4,
+      "title": "Create your first project"
+    },
+    {
+      "t": 15.1,
+      "title": "Hire your agents"
+    },
+    {
+      "t": 35.5,
+      "title": "Create cards"
+    },
+    {
+      "t": 43.4,
+      "title": "Talk to the business analyst"
+    },
+    {
+      "t": 53,
+      "title": "Test your running project"
+    }
+  ]
+}
