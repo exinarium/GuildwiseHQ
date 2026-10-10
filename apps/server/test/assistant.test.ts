@@ -145,7 +145,7 @@ describe('a conversation', () => {
     expect(call?.system).toHaveLength(1);
     expect(call?.system[0].cache_control).toEqual({ type: 'ephemeral' });
     expect(call?.system[0].text).toContain('<product_facts>');
-    expect(call?.system[0].text).toContain('Pricing is not published yet');
+    expect(call?.system[0].text).toContain('Starter: $19');
     expect(call?.messages).toEqual([
       {
         role: 'user',

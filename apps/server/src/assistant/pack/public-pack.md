@@ -7,7 +7,7 @@ Tagline: "You manage. They work." The landing page also says "Many hands, one ma
 
 ## Who it is for
 
-The person who manages the agents: the one who sets the standard, answers the hard questions and signs off the result. It does not replace developers. You need to be comfortable with code repositories and with the idea of agents working in them. A guided installer sets up a workstation and the user guide walks through the first project.
+The person who manages the agents: the one who sets the standard, answers the hard questions and signs off the result. It does not replace developers. You need a code repository for the agents to work in, but you do not need to know git: by default cards speak in plain results ("Your change is live on main") and Guildwise HQ takes care of branches. Each person can turn on an expert mode in Settings to see branch names and the git controls. A guided installer sets up a workstation, and a Get started checklist, a guided tour and a three-minute training video walk through the first project.
 
 ## How it works
 
@@ -17,38 +17,68 @@ The person who manages the agents: the one who sets the standard, answers the ha
 
 ## Where the agents run
 
-Agents run on your own computers, called workstations (Linux, macOS or Windows). Code, secrets and files stay on the workstation. The Guildwise HQ server holds the board, the desk and the records. A small helper program, the runner, connects each workstation to the server. A guided installer sets it up. The agent runtime is Claude Code, using your own Claude subscription or API key, so the agents' model usage is billed by Claude to you. You choose the model per agent. A mock runtime exists for testing without spending tokens.
+Guildwise HQ is a hosted service: you sign up on the website and use it in the browser. The agents run on a workstation you choose, one of:
+
+- your own computer (Linux, macOS or Windows; Windows uses WSL2), set up by a guided installer;
+- a Linux server you rent (a VPS) that you can log in to over SSH: Guildwise HQ logs in once, installs the runner and pairs it; the password or key is not stored;
+- a GitHub Codespace, which pairs itself, stops after 30 minutes without work, wakes when a card is queued and can keep office hours. A Codespace cannot run Docker, so Docker deploys need your own computer or a VPS.
+
+You pay the VPS company or GitHub directly; Guildwise HQ adds no charge for them. Every cloud workstation shows an estimated monthly cost.
+
+Code, secrets and files stay on the workstation and in your own git repositories. The Guildwise HQ server holds the board, the desk, the ledger and the records. A small helper program, the runner, connects each workstation to the server. The agent runtime is Claude Code, using your own Claude subscription or Anthropic API key, so the agents' model usage is billed by Claude to you (for a team, an API key is recommended). You choose the model per agent. Guildwise HQ never receives or stores a Claude key or token.
+
+## Git hosts
+
+Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a plain git server, and one project can mix them. The login for each host stays on the workstation (a one-line connect command, or the DevOps engineer helps in a chat). Finished work goes straight into the main line after review and test by default, or arrives as a pull request if the project prefers that or the main line is protected (a plain git server gets a pushed branch instead of a pull request).
 
 ## What you get
 
 - A board with every card and its stage, and a desk for decisions.
 - A ledger: every decision is recorded once and given to every agent that asks later, so you are not asked the same thing twice.
 - Review and test gates. Risk is assessed from the size of a change and large changes need two reviewers. Nothing merges without the gates you configure.
-- Phases: group cards into a milestone; when the last card is done, follow-ups such as deploys or regression runs can start by themselves.
+- Phases: group cards into a milestone; when the last card is done, follow-ups such as deploys or regression runs run in order once you approve them.
 - Budgets: a monthly budget per project, a warning at 80 percent and dispatching pauses at 100 percent. Running shifts finish.
 - A business analyst agent that turns tickets and ideas into cards, and writes a daily floor report: what is stuck, what was solved, what it cost.
 - Intake from Jira and GitHub: the BA maps incoming tickets to projects and drafts cards with specs and test plans.
 - Outbox: posts to Jira, GitHub or email wait for your approval before they go out.
 - Org design: roles, departments and workflows, designed in a chat with the BA and approved by the Owner.
 - Standing orders and schedules: recurring instructions and work that starts by itself.
-- Vaults: private knowledge repositories per person and per project that sync to your workstations and do not leave your machines.
+- Vaults: knowledge repositories (git) for the organization and per project that sync to your workstations.
+- A DevOps engineer agent on every workstation, free: it installs tools and the project's packages, keeps repositories tidy (unsaved edits are kept on a separate saved-work branch, never pushed to main), tries to fix conflicting changes itself, and runs commands, Docker builds and deploys you ask for in a chat. It works as you, outside the sandbox the other agents use; privileged actions on a team member's machine need an Owner or Admin and the machine's user to agree.
+- Cards explain themselves on the board: why they are blocked, a repository problem, or a budget that is nearly used up, each with a link to fix it.
+- A What's new window after updates, and in-app help with articles, a glossary and a page-by-page help panel.
 - Shared projects: invite people as additional managers on a single project.
 - Organizations with roles Owner, Admin and Member. Two-factor login with authenticator codes and recovery codes; Owners can require it for everyone.
 - An append-only audit trail: state is a log of events that is only appended to, so you can see what happened, in order, and who approved it.
 
 ## Security and hosting (say only this)
 
-- Self-hosted: you run Guildwise HQ on your own server. There is no hosted version today.
-- Agents talk to the model provider you configure. Posts to Jira, GitHub or email leave only after approval in the outbox. Vaults and the ledger stay on your side.
+- Guildwise HQ is a hosted service you sign up for. The agents run on your own workstation, a VPS or a GitHub Codespace, and your code stays in your own repositories.
+- Agents talk to the model provider you configure and to your git host. Posts to Jira, GitHub or email leave only after approval in the outbox. Vaults are git repositories on your side; the Guildwise HQ server keeps the board, the desk, the ledger and the audit trail.
+- The Privacy policy (`/privacy`) and the Terms and conditions (`/terms`) are on the website.
 - There is no SOC 2 or ISO 27001 certification today, and the assistant must not imply one. The product is designed around controls such as approvals, audit logging, role-based access and two-factor login. A customer's own review decides whether it fits.
 
-## Pricing and trial
+## Pricing and trial (say only this)
 
-Pricing is not published yet. The assistant must not state, estimate or promise any price, discount, trial length or date. For pricing, a trial, a demo or access, point to the Contact us page (`/contact`) or the "Put your agents to work" button, which asks for access.
+Three plans, per month, in US dollars:
+
+- Starter: $19. Up to 2 members, 1 workstation and 3 projects.
+- Team: $49. Up to 5 members, 3 workstations and 10 projects.
+- Business: $149. Up to 20 members, 10 workstations and unlimited projects. On Business you can add extra members, workstations and projects as add-ons, priced per unit (the prices are shown on the Billing page); add-on changes start with the next billing cycle, and you cannot go below the Business base.
+
+Every plan has every feature and no limit on agents; plans differ only in members, workstations and projects. Prices exclude VAT. They are shown in US dollars and charged to your card in South African rand at that day's exchange rate, shown on each invoice. Payments go through PayFast; Guildwise HQ never sees or stores the card number.
+
+There is a 7-day free trial: sign up, confirm your email and add a card; nothing is charged until the trial ends, then monthly. You can cancel at any time: the organization stays active until the end of the paid term (or the trial), then it is paused, and nothing more is charged. A plan change takes effect at once and the difference for the rest of the month is charged or credited. The AI usage itself is billed by Claude, and a VPS or Codespace by its provider.
+
+Do not give discounts, custom prices, other currencies' amounts or dates beyond this. For anything else about pricing or a contract, point to the Contact us page (`/contact`).
 
 ## How to get access
 
-The landing page buttons lead to a request-access form (Contact us). The team replies by email. Existing users sign in at `/login`.
+Click "Start free trial" on the landing page (or a plan's button under Pricing) to sign up at `/signup`. Existing users sign in at `/login`. Questions, a demo or sales go to the Contact us page (`/contact`).
+
+## The blog
+
+The Guildwise HQ blog at `/blog` has practical articles on AI agents and automation, written by an AI agent and reviewed before they go public; the author is always "The Guildwise HQ team". It has an RSS feed at `/blog/rss.xml`, and signed-in users can get a weekly digest by email (Owners get it unless they opt out).
 
 ## What the assistant does not do
 
@@ -62,25 +92,26 @@ The landing page buttons lead to a request-access form (Contact us). The team re
 An outline of the in-app help articles, to answer how things work. Do not quote it as a manual.
 
 ### Getting started
-The training video, first login, the guided tour, the Get started checklist, sidebar areas, command palette and keyboard shortcuts.
+The training video, signing up or in, the guided tour, the Get started checklist, the sidebar, the command palette and keyboard shortcuts.
 - The training video: On the Help page, the Getting started in five steps video is a spoken tutorial of about three minutes. A friendly voice walks you through the five steps while you watch them happen on screen:
-- First login: 1. Check your email for an invitation link. It comes either from the platform administrator if you are starting a new organization, or from the Owner or an Admin if you are joining an existing one. 2. Click the link, choose your name and a password (12 or more characters).…
+- First login: There are two ways in:
 - Forgot your password: On the sign-in page click Forgot your password? and type your email. We send a link that works once and expires after an hour. Choose a new password (12 or more characters); you are signed out everywhere else, then sign in with the new one. If you use two-factor login you still enter your code.…
-- The tour: The first time you sign in, Guildwise HQ starts a guided tour of the main pages: the board where your cards live, the desk where you answer questions, intake from external systems, and more. The tour takes you to each area, shows you what is there and what you can do.
+- The tour: The first time you sign in, Guildwise HQ starts a guided tour of the main pages: the board where your cards live, the desk where you answer questions, intake from external systems, Ask DevOps for help with your workstation, and more. The tour takes you to each area, shows you what is there and what you can do.
 - The Get started checklist: Until your organization is set up, the sidebar shows a Get started button with your progress (for example 2/5). Click it for the list:
 - The sidebar: The left side of the app is split into areas. Each area groups related pages. From the top:
 - Command palette: Press Ctrl K (Windows, Linux) or Cmd K (macOS) anywhere in the app to open the command palette: a search box that finds pages, actions and help topics.
 - Keyboard shortcuts: Press ? anywhere (when you are not typing in a field) to see a list of all keyboard shortcuts. A few essential ones:
 - What's on this page: Many pages in Guildwise HQ have a What's on this page panel. Open it with the ? button in the top bar (or choose What is on this page in the command palette). The panel lists every control and area of the page and what it does: useful when you first visit a page or need a reminder about a button.
+- Privacy and terms: The Privacy policy (/privacy) says what data Guildwise HQ keeps and how it is handled. The Terms and conditions (/terms) cover using the service, the free trial and billing. Both are linked from the footer of the website and from the sign-in, sign-up and invitation pages;…
 
 ### Organizations and roles
-Four roles, what each can do, members, invitations, guests, and switching organizations.
+Four roles, what each can do, members, invitations, guests, temporary passwords, suspension and the platform area.
 - Roles: Each role has different permissions. Here is what each can do:
 - Switching organizations: You can belong to several organizations. Each browser tab can work in a different organization.
-- Members and invitations: To manage people in your organization, open Organization at the bottom of the sidebar, then the Members tab (Members see the list but cannot change it; the Invitations, Guests and Plan & limits tabs are for Owner and Admins).
+- Members and invitations: To manage people in your organization, open Organization at the bottom of the sidebar, then the Members tab (Members see the list but cannot change it; the Invitations, Guests and Plan & limits tabs are for Owner and Admins, and the Billing tab is for the Owner).
 - Guests: Guests are people from other organizations who have access to one or more of your projects. You invite a guest by sharing a project with them. To do this:
-- Suspension: A platform administrator can suspend your organization (for example if a trial ended or a payment was missed). Running shifts finish and nothing new starts. Scheduled actions are skipped and recorded. A banner at the top explains the suspension.
-- Platform area: Platform administrators sign in at the same address but see only the Platform area instead of organizations. They can view and manage all organizations, accounts, invitations, the audit log and support requests. They never see a specific organization's cards, desk or vaults.…
+- Suspension: A platform administrator can suspend your organization. Running shifts finish and nothing new starts. Scheduled actions are skipped and recorded. A banner at the top explains the suspension.
+- Platform area: Platform administrators sign in at the same address but see only the Platform area instead of organizations. They can view and manage all organizations, accounts, invitations, billing, the blog, the audit log and support requests. They never see a specific organization's cards, desk or vaults.…
 
 ### Two-factor login
 Setting up two-factor authentication, recovery codes, enforcement and owner reset.
@@ -100,7 +131,7 @@ Creating projects, the priority order, project types and workflows, research car
 - Decision policy: Each card has its own decision policy, shown on the card page under Who answers its questions. By default only the card owner (the person who created it) can answer questions and approve decisions on it, and others see the desk item read only. To let any manager of the project answer:
 
 ### Board and cards
-Reading the board, creating and editing cards, moving cards, backing off, risk tiers and search.
+Reading the board and its warning banners, creating and editing cards, moving cards, backing off, risk tiers and search.
 - Reading the board: The board shows one column per stage (for a Code project: Spec, To do, Rework, In progress, Blocked, Review, Test, Docs, Finalize and Done). Empty columns fold into a small strip; click one to open it. At the top you can search cards, filter by Blocked, Rework or Unassigned, and filter by priority.…
 - Why a card does not move: If a queued card has a warning icon, no agent can pick it up right now. Hover the icon, focus it with the keyboard or click or tap it to see why (Esc closes the explanation):
 - Creating a card: To create a card:
@@ -120,14 +151,14 @@ Hiring agents, seniority, runtime and model, allowed projects, focus, firing and
 - HR board: The HR board is the Agents page. It shows at a glance:
 
 ### DevOps and repository hygiene
-The DevOps engineer, repository hygiene, the working branch and creating new repositories.
+The DevOps engineer and Ask DevOps, approvals, conflicts, repository hygiene and saved work, the toolchain, the working branch and new repositories.
 - The DevOps engineer: You get one DevOps engineer per workstation automatically. It cannot be fired, only reset (which clears its sandbox but keeps it assigned). It does not take cards from the queue.
 - When two branches conflict: If a card's branch conflicts with the working branch (before testing or when finishing), or hygiene cannot combine your working branch with its remote, the DevOps engineer tries to fix it first, on a temporary branch, and runs the build and tests before it moves anything.…
 - Repository hygiene: Once a day per workstation by default, the DevOps engineer tidies the repositories on that machine. On the Workstations page, open the workstation and find Repository hygiene: Run sets how often (off, every hour, every 6 hours, every 12 hours, daily or weekly) and Run hygiene now starts a run at once.…
 - New repositories and the toolchain: When you add a repository in Project settings, Repositories, the DevOps engineer of each workstation of the project puts it there. Pick An existing repository and it is cloned into the workstation's first repository folder (aom-runner repos add); a folder that already holds something else is never overwritten.…
 - Rights and the sudo password: A ticked right is checked on the machine itself. On the Workstations page each ticked right shows verified or failed with the reason and how to fix it (for Docker: add the runner user to the docker group, start the daemon; for sudo: enter the password or allow passwordless sudo). Verify now checks again.
 - The working branch: The working branch is the main line where finished work goes: the repository's default branch (usually main). Guildwise confirms it for you automatically the first time it sees the repository, so you are not asked.…
-- Creating a new repository: Agents cannot create GitHub repositories themselves: their sandbox has no GitHub login. When a project needs a new repository:
+- Creating a new repository: Agents cannot create repositories themselves: their sandbox has no login for your git host. You can create one on any host yourself from the project settings (see above). When an agent needs a new repository, it asks, and today that works for GitHub only:
 
 ### The Decision desk
 Desk items and kinds, blocking, answering questions, standing orders and adding to the ledger.
@@ -154,9 +185,10 @@ Intake from Jira and GitHub, unmapped tickets, credentials, the outbox and guard
 - Guardrails: Before posting, your runner checks the text against your organization's agent names and internal terms. A draft that mentions an agent by name, or gives away internal process details (review scores, rework reasons and similar), is refused even if you approved it. The agent can revise and resubmit.
 
 ### Testing and finalization
-Test stage, finalization with pull requests and merging, full suite and regression.
+The test stage, how finished work lands (main or a pull request), simple and expert mode, the full suite and regression runs.
 - Test stage: When a card reaches Test, a tester runs the E2E tests from the test plan. If tests pass:
 - Finalization: At the Finalize stage, your BA ships the work the way the project says. In each project's settings, How finished work lands is either Straight into main after review and test (the default) or As a pull request I approve.…
+- Simple mode and expert mode: You do not need to know git to use Guildwise HQ. By default (simple mode) cards and the desk speak in results: *"Goes into main after review and test"*, *"Your change is live on main"*, *"Waiting for you to merge the pull request"*.…
 - Full suite and regression: After finalization, a full suite card is created for testers to run the entire E2E suite once. A test-side failure (a flaky test, data or environment) is fixed by the tester; a genuine bug becomes a new bug card and you get a notice. These failures do not block merges.
 
 ### Phases and follow-ups
@@ -208,9 +240,9 @@ The org chart, custom roles, custom workflows and departments.
 - Departments: A department groups the roles and workflows of one function (the built-in ones are Delivery and Research; you can add your own, such as Support or Marketing), so the Agents and Projects pages can be filtered by department. Departments are optional.
 
 ### Workstations and the installer
-What a workstation is, the Add a workstation wizard, installing by hand, Claude credentials and Windows.
+What a workstation is, the Add a workstation wizard, installing by hand, Claude sign-in, Windows and connecting git hosts.
 - What is a workstation: A workstation is your own machine: a laptop, desktop or server. It holds your git repositories and is where agents run their work. You can have one workstation or many. Each agent is assigned to one workstation and only that one.
-- Add a workstation: First choose where your agents should run: My computer (below), A VPS (SSH) or GitHub Codespaces. The last two are explained in "Cloud workstations (VPS and Codespaces)".
+- Add a workstation: First choose where your agents should run: My computer (below), A VPS (SSH) or GitHub Codespaces. The last two are explained in Cloud workstations.
 - Claude sign-in: The installer asks how agents should use Claude:
 - Installing by hand: Only needed when the guided setup is not an option:
 - Health checks: While the installer runs, this page lists the health checks as they finish: Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories and server connectivity. Each shows ok, warn or fail. A fail means something is missing or broken and the line says what. A warn (Docker, yt-dlp) is optional.
@@ -222,7 +254,7 @@ What a workstation is, the Add a workstation wizard, installing by hand, Claude 
 Run your agents on a server (VPS over SSH) or a GitHub Codespace instead of your own computer, with automatic pairing, sleeping when idle and a cost estimate.
 - A VPS over SSH: 1. Click Add a workstation and choose A VPS (SSH). 2. Enter the server's address, the SSH port (usually 22), the user, and either a password or an SSH key. Give it a name, and optionally what it costs a month so the page can show an estimate. 3. Click Install and pair.…
 - GitHub Codespaces: 1. Click Add a workstation and choose GitHub Codespaces. 2. Connect GitHub: create a token on GitHub with the codespace scope and paste it. Guildwise keeps it encrypted, only to wake and stop your codespace. 3. Enter the repository (owner/name), choose a machine type and see the estimated monthly cost. 4.…
-- Sleeping and waking: - A Codespace stops after 30 minutes with no agent working (you can choose 15 minutes to 2 hours in Settings). - It wakes by itself when a card is queued that its agents can take. - Optional office hours (days, hours and time zone) keep it asleep outside working time. - Wake and Stop buttons are always there for you.
+- Sleeping and waking: - A Codespace stops after 30 minutes with no agent working (choose 15 minutes to 2 hours with Settings on its card on the Workstations page). - It wakes by itself when a card is queued that its agents can take. - Optional office hours (days, hours and time zone) keep it asleep outside working time.…
 - What it costs: Every cloud workstation shows an estimated monthly cost. For a VPS it is the price you entered. For a Codespace it is the running hours (your office hours, or about 8 hours on working days) times GitHub's hourly rate, plus disk. It is an estimate, not a bill.
 - Signing in to Claude: The recommended way is your own Anthropic API key. It stays on the cloud machine; Guildwise never receives or stores it.
 
@@ -235,10 +267,10 @@ Installer troubleshooting: expired links, restart, permissions, git version, san
 - It says systemd is not running: The runner starts by itself from a systemd service. On Windows the installer switches systemd on in Ubuntu (it writes systemd=true to /etc/wsl.conf); if you see this message, run wsl --shutdown in PowerShell and run the install command again.…
 - It says I need administrator rights: Installing git, bubblewrap and socat uses your administrator (sudo) password once. Ask whoever manages your computer to install them, or to add you to the sudoers, and run the command again.
 - git is too old: The runner needs git 2.40 or newer. The installer upgrades it on Ubuntu (from the official git PPA) and on Debian (it builds a recent git into your home folder, which takes a few minutes). On other systems install a newer git yourself and run the command again.
-- The health check "sandbox" is not "enforced": Agents run inside a sandbox so they cannot read your SSH keys or other projects. On Linux and WSL2 it needs bubblewrap and socat; on Ubuntu 24.04 and newer an AppArmor setting can block bubblewrap (the Claude Code sandboxing documentation shows the one-line fix). macOS needs nothing.…
+- The health check "sandbox" is not "enforced": Agents (all except the DevOps engineer) run inside a sandbox so they cannot read your SSH keys or other projects. On Linux and WSL2 it needs bubblewrap and socat; on Ubuntu 24.04 and newer an AppArmor setting can block bubblewrap (the Claude Code sandboxing documentation shows the one-line fix). macOS needs nothing.…
 - Which Claude sign-in should I choose?: A Claude subscription (Pro, Max, Team or Enterprise): you sign in with your Claude account in a browser and the agents' work counts against your plan, with no per-use bill. An Anthropic API key: you pay for exactly what the agents use. Use whatever your organization gave you.…
 - Docker or yt-dlp show a warning: Both are optional. Docker is only needed if your testers run containers; yt-dlp lets agents read video transcripts. Run the command again and say yes when it asks, or ignore the warning.
-- I still need help: Use Contact us and say which system you use and which step stopped. The form attaches the details we need.
+- I still need help: If the workstation is already paired, Ask DevOps on it can often fix the problem for you. Otherwise use Contact us and say which system you use and which step stopped. The form attaches the details we need. For a server or Codespace, see Cloud workstations.
 
 ### Converting a project
 Converting from research to code or another workflow, what is kept, and the conversion process.
@@ -261,19 +293,21 @@ How to contact us, where to see your requests, what we receive with your message
 - Cannot sign in: If you cannot sign in:
 
 ### Troubleshooting
-Day-to-day problems: disconnected workstations, missing handoffs, vault conflicts, mismatched agents.
+Day-to-day problems: offline workstations, missing handoffs, vault conflicts, mismatched agents, waiting projects and cloud workstations.
 - A workstation shows "Offline": The runner process stopped or the connection timed out. On that computer, check the state:
 - An agent finished but I do not see a handoff: The shift may have run past its time limit (an hour by default; the server stops it) or the runner crashed. Check:
 - "The runner is running: stop it first": When rotating the runner's token to refresh the connection:
 - Vault sync is paused with a conflict: Vault sync stops if a local change conflicts with a remote change. Open Vaults in the sidebar, find the vault (it shows Sync paused: conflict and the conflicting files), and resolve it:
 - Card does not match available agents: The repository must be listed under the workstation, and the agent must have the role and workstation assigned. Check:
+- Every card of a project is waiting: Before agents build on a workstation, its DevOps engineer installs the tools and packages the project needs. Until that is done, every agent card of the project waits and says why.…
+- A cloud workstation needs attention: A Codespace that cannot start (credits or spending limit used up on GitHub) shows Needs attention and leaves a notice on your desk. Fix it on GitHub and press Wake. See Cloud workstations.
 - An agent says the work is out of scope: The agent reported work outside the scope of its role. Check:
 
 ### Plans and billing
 Plans and limits, the 7-day free trial, cards and invoices, changing plan, Business add-ons, cancelling and what happens when a payment fails.
 - Plans: Every plan has every feature and no limit on agents. Plans differ only in how many members, workstations and projects you can have.
-- Signing up and the free trial: 1. Choose a plan on the sign-up page and enter your organization name, your name, email and a password. 2. Open the link in the email we send you. Signing in needs the confirmed email. 3. Add a card on the Billing page. Your 7-day free trial starts and nothing is charged. 4.…
-- Cards and invoices: We never see or keep your card number. With PayFast you enter your card on PayFast's secure page; a small amount is charged to check the card and refunded straight away. Only a secure token, the card type, the last four digits and the expiry are kept.
+- Signing up and the free trial: 1. Click Start free trial on the website (or a plan's button under Pricing), choose a plan and enter your organization name, your name, email and a password. 2. Open the link in the email we send you. Signing in needs the confirmed email. 3. Add a card on the Billing page.…
+- Cards and invoices: We never see or keep your card number. With PayFast you enter your card on PayFast's secure page; a small amount is charged to check the card and refunded straight away. Only a secure token is kept. PayFast does not share the card number with us, so the Billing page shows the card simply as *Card*.
 - Changing plan: Pick another plan under Change plan. The change takes effect at once. If the new plan costs more you pay the difference for the rest of the month now; if it costs less the difference is kept as a credit on your next invoice. During the trial a change costs nothing.…
 - Business add-ons: On Business you can add members, workstations and projects on top of the plan, each at a small monthly price shown on the page. Changes apply from your next billing cycle, and you can never go below the Business base. To go lower, change plan.
 - Cancelling: Cancel subscription keeps your organization active until the end of what you have paid for (or the end of the trial), then pauses it. Nothing more is charged. Changed your mind before then? Use Keep my subscription.

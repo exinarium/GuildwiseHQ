@@ -17,7 +17,7 @@ describe('the assistant knowledge pack', () => {
   it('carries the curated facts and an outline of the help articles, and no private company name', () => {
     const pack = buildPublicPack();
     expect(pack).toContain('<product_facts>');
-    expect(pack).toContain('Pricing is not published yet');
+    expect(pack).toContain('Starter: $19');
     expect(pack).toContain('### The Decision desk');
     expect(pack).not.toMatch(/ExampleCo/i);
     expect(pack).not.toContain('Maintainer'); // the notes above the first section stay out
