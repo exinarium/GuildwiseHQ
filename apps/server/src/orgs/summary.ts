@@ -175,7 +175,12 @@ export async function activeOrgDto(ctx: Ctx, org: OrgRow, role: OrgRole): Promis
     // Members see "suspended" and "cancelled" only.
     banners: banners.filter((b) => manager || b.audience === 'all'),
     gate: billingGate(
-      { status: org.status, status_reason: org.status_reason ?? null, plan: org.plan, simulation: org.simulation },
+      {
+        status: org.status,
+        status_reason: org.status_reason ?? null,
+        plan: org.plan,
+        simulation: org.simulation,
+      },
       role,
     ),
   };

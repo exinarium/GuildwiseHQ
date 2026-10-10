@@ -15,6 +15,7 @@ export const NO_PAGE_HELP = [
   '/contact',
   '/signup',
   '/verify-email/:token',
+  '/billing-required',
 ];
 
 /** Routes that show another route's page (the Help centre's articles and glossary): they use its help. */

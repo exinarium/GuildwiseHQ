@@ -48,7 +48,10 @@ export const ActiveOrgSchema = z.object({
    * `resubscribe`: paused after a failed payment (`payment_failed`) or a cancellation (`cancelled`).
    */
   gate: z
-    .object({ kind: z.enum(['setup', 'resubscribe']), reason: z.enum(['setup', 'payment_failed', 'cancelled']) })
+    .object({
+      kind: z.enum(['setup', 'resubscribe']),
+      reason: z.enum(['setup', 'payment_failed', 'cancelled']),
+    })
     .nullable()
     .default(null),
 });
