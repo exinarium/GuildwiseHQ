@@ -1,4 +1,5 @@
 import { createApp } from './app.ts';
+import { paymentProviderRefusal } from './billing/guard.ts';
 import { registerBuiltins } from './catalogue/boot.ts';
 import { createClock } from './clock.ts';
 import { loadConfig } from './config.ts';
@@ -9,6 +10,13 @@ import { PgEventStore } from './eventstore/pg-event-store.ts';
 import { buildProjectors } from './projections/index.ts';
 
 const config = loadConfig();
+
+// Refuse to take no money on the production domain (the fake provider is the default without keys).
+const refusal = paymentProviderRefusal(config);
+if (refusal) {
+  console.error(`FATAL: ${refusal}`);
+  process.exit(1);
+}
 
 if (config.migrateOnBoot) {
   const applied = await migrate(config.databaseUrl);

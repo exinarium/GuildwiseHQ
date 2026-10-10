@@ -273,6 +273,16 @@ export const platformAuditProjectors: Record<string, Projector> = {
       meta: p.meta,
     };
   }),
+  SignupAbandoned: always(async (_tx, e) => {
+    const p = ev<'SignupAbandoned'>(e).payload;
+    return {
+      action: e.event.type,
+      orgId: p.orgId,
+      targetUserId: p.userId,
+      summary: `Removed the unverified sign-up ${p.displayName} <${p.email}> and its empty organization ${p.orgName}`,
+      details: { registeredAt: p.registeredAt },
+    };
+  }),
   UserReactivated: byPlatform(async (tx, e) => {
     const p = ev<'UserReactivated'>(e).payload;
     return {

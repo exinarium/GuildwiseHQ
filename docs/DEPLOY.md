@@ -206,9 +206,14 @@ are rendered by the server, so a reverse proxy must pass those paths to it, not 
 
 Billing runs on the fake provider (simulated payments, a "Test mode" notice in the UI) until payment keys are set, so local and UAT need nothing. **Never leave production on the fake provider**: it takes no money. Paystack is the payment provider; PayFast stays in the code as a fallback.
 
+**Boot check.** With billing active (`AOM_BILLING_JOBS` not `false`), the server refuses to start (fatal error naming the variables to set, exit code 1) when the effective provider is `fake` and `AOM_PUBLIC_ORIGIN` is an `https` origin that is not `localhost`, a loopback address or a private LAN address (10.x, 172.16-31.x, 192.168.x). `http` origins and LAN addresses (for example the local UAT stack on `http://192.168.1.10:4700`) keep starting with the fake provider. A staging server on a public https domain that should use fake payments on purpose sets `AOM_ALLOW_FAKE_PAYMENTS=true`.
+
+**Unverified sign-ups.** A self-service sign-up whose email was never verified blocks that address. The billing job (same switch, `AOM_BILLING_JOBS`) removes such accounts 7 days after sign-up together with the empty organization created for them, so the address can sign up again. Only organizations created by sign-up with no other members, no projects, no paid invoices and no stored card are touched. Each removal is one `SignupAbandoned` event and shows in the platform audit log (system actor).
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `AOM_PAYMENT_PROVIDER` | unset | `paystack`, `payfast` or `fake`. Unset: Paystack when `AOM_PAYSTACK_SECRET_KEY` is set, else PayFast when its keys are set, else fake. Naming a provider without its keys refuses to start. (`AOM_BILLING_PROVIDER` is a deprecated alias.) |
+| `AOM_ALLOW_FAKE_PAYMENTS` | `false` | Staging only: allow the fake provider on a public https `AOM_PUBLIC_ORIGIN` (otherwise boot refuses, see above) |
 | `AOM_PAYSTACK_SECRET_KEY` | unset | Paystack secret key (`sk_test_...` runs in test mode, `sk_live_...` is live). Also signs and verifies webhooks |
 | `AOM_PAYSTACK_PUBLIC_KEY` | unset | Paystack public key (`pk_...`). Kept for the hosted checkout; the current flow redirects to Paystack and does not need it in the browser |
 | `AOM_PAYSTACK_CARD_CHECK_ZAR` | `5` | Rand charged and refunded to save a card. `UNVERIFIED`: Paystack's minimum amount for ZAR |

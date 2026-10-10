@@ -78,7 +78,15 @@ export class Scheduler {
 
   /** Renewals, retries, pauses, expiry notices and trial reminders (idempotent; AOM_BILLING_JOBS switches the timer off). */
   runBilling(): Promise<BillingTickResult> {
-    const none: BillingTickResult = { invoices: 0, charged: 0, failed: 0, paused: 0, ended: 0, notices: 0 };
+    const none: BillingTickResult = {
+      invoices: 0,
+      charged: 0,
+      failed: 0,
+      paused: 0,
+      ended: 0,
+      notices: 0,
+      signupsRemoved: 0,
+    };
     if (this.stopped) return Promise.resolve(none);
     const next = this.chain.then(() => billingTick(this.ctx));
     this.chain = next.catch(() => {});

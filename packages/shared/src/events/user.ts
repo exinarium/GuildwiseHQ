@@ -55,6 +55,22 @@ export const userEvents = [
     }),
   ),
   defineEvent('UserEmailVerified', z.object({ userId: Id })),
+  /**
+   * A self-service sign-up whose email was never verified within the grace period: the account and the empty organization
+   * created for it are removed so the address can sign up again. The only event that deletes a user; the email, names
+   * and dates are kept here because the projection rows are gone (the platform audit reads them from the event).
+   */
+  defineEvent(
+    'SignupAbandoned',
+    z.object({
+      userId: Id,
+      orgId: Id,
+      email: z.string().min(1),
+      displayName: z.string().min(1),
+      orgName: z.string().min(1),
+      registeredAt: IsoDate,
+    }),
+  ),
   /** The platform account: no organization, platform routes only. Created by the CLI only. */
   defineEvent(
     'SuperAdminCreated',
