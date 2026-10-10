@@ -56,6 +56,8 @@ export async function listMemberWorkstations(
        JOIN project_members pm ON pm.user_id = w.user_id AND pm.project_id = $1 AND pm.status = 'active'
        JOIN users u ON u.id = w.user_id AND u.status = 'active'
       WHERE w.status = 'active'
+        AND NOT EXISTS (SELECT 1 FROM cloud_workstations cw WHERE cw.workstation_id = w.id
+                         AND cw.provider = 'codespaces' AND cw.removed_at IS NULL)
       ORDER BY (w.user_id = $2) DESC, lower(u.display_name), lower(w.name), w.id`,
     [projectId, viewerId],
   );
@@ -85,13 +87,15 @@ async function assertMemberWorkstation(tx: Queryable, projectId: string, worksta
   const ok = await one(
     tx,
     `SELECT 1 FROM workstations w JOIN project_members pm ON pm.user_id = w.user_id AND pm.project_id = $1 AND pm.status = 'active'
-      WHERE w.id = $2 AND w.status = 'active'`,
+      WHERE w.id = $2 AND w.status = 'active'
+        AND NOT EXISTS (SELECT 1 FROM cloud_workstations cw WHERE cw.workstation_id = w.id
+                         AND cw.provider = 'codespaces' AND cw.removed_at IS NULL)`,
     [projectId, workstationId],
   );
   if (!ok)
     throw unprocessable(
       'workstation_not_member',
-      "the workstation must be an active workstation of one of the project's members",
+      "the workstation must be an active workstation of one of the project's members (a Codespace cannot deploy Docker images: use a workstation or a VPS)",
     );
 }
 

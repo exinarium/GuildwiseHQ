@@ -137,7 +137,7 @@ describe('VPS over SSH', () => {
     // nothing secret stored: the row has the host key fingerprint but no password
     const rows = await q('SELECT * FROM cloud_workstations');
     expect(JSON.stringify(rows)).not.toContain('hunter2');
-    expect((rows[0]?.config as any).hostFingerprint).toBe('SHA256:abc123');
+    expect((rows[0] as any).config.hostFingerprint).toBe('SHA256:abc123');
     // the paired workstation exists and belongs to the user
     const ws = await q('SELECT user_id FROM workstations WHERE id=$1', [done.workstationId]);
     expect(ws[0]?.user_id).toBe(w.owner.id);

@@ -21,6 +21,8 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { AddWorkstationWizard } from '../components/workstations/AddWorkstationWizard.tsx';
+import { CloudWorkstations } from '../components/workstations/CloudWorkstations.tsx';
+import { useCanManageOrg } from '../lib/orgRole.ts';
 import { unavailableRuntimes, unsandboxedConsequence, unsandboxedRuntimes } from '../lib/sandbox.ts';
 import { copyText } from '../lib/secure.ts';
 import { formatDateTime } from '../lib/time.ts';
@@ -65,6 +67,7 @@ export function pairCommand(code: string, origin: string = location.origin): str
 export function Workstations() {
   const q = useWorkstations();
   const me = useMe();
+  const canManageCloud = useCanManageOrg();
   const [open, setOpen] = useOpenRows(me.data?.user.id);
   const [pairOpen, setPairOpen] = useState(false);
   const [params] = useSearchParams();
@@ -105,6 +108,7 @@ export function Workstations() {
           }
         />
       )}
+      <CloudWorkstations canManage={canManageCloud} />
       <ul className="flex flex-col gap-3">
         {q.data
           ?.filter((w) => w.status === 'active')

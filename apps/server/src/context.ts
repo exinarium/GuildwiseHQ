@@ -2,6 +2,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { BrowserGateway } from './browser-gateway/gateway.ts';
 import type { ChatRelay } from './chat/relay.ts';
 import type { Clock } from './clock.ts';
+import type { CloudServices } from './cloud/service.ts';
 import type { Config } from './config.ts';
 import type { Pool } from './db/pool.ts';
 import type { Dispatcher } from './dispatcher/dispatcher.ts';
@@ -12,7 +13,6 @@ import type { Mailer } from './mail/mailer.ts';
 import type { Reporter } from './reporter/reporter.ts';
 import type { RunnerGateway } from './runner-gateway/gateway.ts';
 import type { RunnerRegistry } from './runner-gateway/registry.ts';
-import type { CloudServices } from './cloud/service.ts';
 import type { Scheduler } from './scheduler/scheduler.ts';
 
 /** Everything a command, route or gateway needs. Built once in `createApp` (app.ts). */

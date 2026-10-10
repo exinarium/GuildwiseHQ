@@ -24,7 +24,15 @@ import {
   TextInput,
   useToast,
 } from '../ui.tsx';
+import { AddCodespaceForm, AddVpsForm } from './AddCloudWorkstation.tsx';
 import { InstallArt } from './InstallArt.tsx';
+
+type Where = 'local' | 'vps' | 'codespaces';
+const WHERE: Array<{ value: Where; label: string; sub: string }> = [
+  { value: 'local', label: 'My computer', sub: 'Windows, Mac or Linux, with the installer' },
+  { value: 'vps', label: 'A VPS (SSH)', sub: 'Any Linux server you can log in to' },
+  { value: 'codespaces', label: 'GitHub Codespaces', sub: 'A cloud machine from GitHub' },
+];
 
 /**
  * "Add a workstation" (docs/design/open-questions.md, "Runner installer with a guided setup"): pick the system, read
@@ -41,6 +49,7 @@ export function AddWorkstationWizard({
   /** The "I already have the runner" path: the one-time code dialog. */
   onPairWithCode: () => void;
 }) {
+  const [where, setWhere] = useState<Where>('local');
   const [os, setOs] = useState<InstallerOs>(() => detectOs(navigator));
   const [flavour, setFlavour] = useState<LinuxFlavour>('ubuntu');
   const [name, setName] = useState('');
@@ -52,13 +61,13 @@ export function AddWorkstationWizard({
   const made = useRef<string>('');
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new session only when the system changes or the dialog opens
   useEffect(() => {
-    if (!open) return;
+    if (!open || where !== 'local') return;
     const key = `${os}`;
     if (made.current === key && session) return;
     made.current = key;
     setSession(null);
     create.mutate({ os, ...(name.trim() ? { name: name.trim() } : {}) }, { onSuccess: (s) => setSession(s) });
-  }, [open, os]);
+  }, [open, os, where]);
 
   const close = (o: boolean) => {
     onOpenChange(o);
@@ -80,21 +89,19 @@ export function AddWorkstationWizard({
     >
       <div className="flex flex-col gap-5" data-testid="add-workstation">
         <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1 text-sm font-semibold text-fg">
-            1. Which computer will run your agents?
-          </legend>
-          <div role="radiogroup" aria-label="Operating system" className="grid gap-2 sm:grid-cols-3">
-            {OS_OPTIONS.map((o) => (
+          <legend className="mb-1 text-sm font-semibold text-fg">Where should your agents run?</legend>
+          <div role="radiogroup" aria-label="Where agents run" className="grid gap-2 sm:grid-cols-3">
+            {WHERE.map((o) => (
               <button
                 key={o.value}
                 type="button"
                 role="radio"
-                aria-checked={os === o.value}
-                data-testid={`os-${o.value}`}
-                onClick={() => setOs(o.value)}
+                aria-checked={where === o.value}
+                data-testid={`where-${o.value}`}
+                onClick={() => setWhere(o.value)}
                 className={cx(
                   'rounded-card border p-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none',
-                  os === o.value
+                  where === o.value
                     ? 'border-brand bg-brand-soft text-brand-soft-fg'
                     : 'border-control bg-surface text-fg hover:bg-sunken',
                 )}
@@ -104,120 +111,152 @@ export function AddWorkstationWizard({
               </button>
             ))}
           </div>
-          {os === 'linux' && (
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm" data-testid="linux-flavours">
-              {LINUX_FLAVOURS.map((f) => (
-                <button
-                  key={f.value}
-                  type="button"
-                  aria-pressed={flavour === f.value}
-                  onClick={() => setFlavour(f.value)}
-                  className={cx(
-                    'rounded-full border px-3 py-1',
-                    flavour === f.value
-                      ? 'border-brand bg-brand-soft text-brand-soft-fg'
-                      : 'border-control text-muted hover:bg-sunken',
-                  )}
-                >
-                  {f.label}
-                </button>
-              ))}
-              <span className="text-subtle">{LINUX_FLAVOURS.find((f) => f.value === flavour)?.note}</span>
-            </div>
-          )}
-          {os === 'windows' && (
-            <p className="text-sm text-muted">
-              Windows runs the agents inside <strong>WSL2</strong>, Microsoft's built-in Linux. It keeps them
-              safely fenced in. The installer sets it up for you.
-            </p>
-          )}
         </fieldset>
-
-        <div className="max-w-sm">
-          <TextInput
-            label="Name for this workstation (optional)"
-            id="workstation-name"
-            value={name}
-            maxLength={80}
-            placeholder="Defaults to the computer's name"
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => {
-              // a new name goes into a new script: ask for a fresh session
-              made.current = '';
-              if (session)
-                create.mutate(
-                  { os, ...(name.trim() ? { name: name.trim() } : {}) },
-                  { onSuccess: (s) => setSession(s) },
-                );
-            }}
-          />
-        </div>
-
-        {create.isPending && !session && <Spinner label="Preparing your install command" />}
-        <ErrorBox error={create.error} onRetry={() => create.mutate({ os })} />
-
-        {session && (
+        {where === 'vps' && <AddVpsForm onDone={() => close(false)} />}
+        {where === 'codespaces' && <AddCodespaceForm onDone={() => close(false)} />}
+        {where === 'local' && (
           <>
-            <section aria-labelledby="install-steps" className="flex flex-col gap-3">
-              <h3 id="install-steps" className="text-sm font-semibold text-fg">
-                2. Run the installer on that computer
-              </h3>
-              <ol className="flex flex-col gap-2" data-testid="install-steps">
-                {guideSteps(os).map((s, i) => (
-                  <li
-                    key={s.id}
-                    className="flex items-start gap-3 rounded-card border border-line bg-surface p-3"
+            <fieldset className="flex flex-col gap-2">
+              <legend className="mb-1 text-sm font-semibold text-fg">
+                1. Which computer will run your agents?
+              </legend>
+              <div role="radiogroup" aria-label="Operating system" className="grid gap-2 sm:grid-cols-3">
+                {OS_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={os === o.value}
+                    data-testid={`os-${o.value}`}
+                    onClick={() => setOs(o.value)}
+                    className={cx(
+                      'rounded-card border p-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none',
+                      os === o.value
+                        ? 'border-brand bg-brand-soft text-brand-soft-fg'
+                        : 'border-control bg-surface text-fg hover:bg-sunken',
+                    )}
                   >
-                    <InstallArt kind={s.art} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-base font-semibold text-fg">
-                        <span className="mr-1.5 text-subtle">{i + 1}.</span>
-                        {s.title}
-                      </p>
-                      <p className="mt-0.5 text-sm text-muted">{s.body}</p>
-                      {s.command && <CommandBox session={session} />}
-                    </div>
-                  </li>
+                    <span className="block text-base font-semibold">{o.label}</span>
+                    <span className="block text-sm opacity-80">{o.sub}</span>
+                  </button>
                 ))}
-              </ol>
-              <Disclosure summary="What will this change on my computer?" data-testid="what-it-does">
-                <ul className="list-disc space-y-1 pl-6 text-sm text-muted">
-                  {whatItDoes(os).map((l) => (
-                    <li key={l}>{l}</li>
+              </div>
+              {os === 'linux' && (
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm" data-testid="linux-flavours">
+                  {LINUX_FLAVOURS.map((f) => (
+                    <button
+                      key={f.value}
+                      type="button"
+                      aria-pressed={flavour === f.value}
+                      onClick={() => setFlavour(f.value)}
+                      className={cx(
+                        'rounded-full border px-3 py-1',
+                        flavour === f.value
+                          ? 'border-brand bg-brand-soft text-brand-soft-fg'
+                          : 'border-control text-muted hover:bg-sunken',
+                      )}
+                    >
+                      {f.label}
+                    </button>
                   ))}
-                </ul>
-                <p className="mt-2 text-sm text-muted">
-                  You can read the whole script before you run it: use <strong>Download the script</strong>.
-                  It contains a one-time pairing code and this server's address, and no password or long-lived
-                  key.
+                  <span className="text-subtle">{LINUX_FLAVOURS.find((f) => f.value === flavour)?.note}</span>
+                </div>
+              )}
+              {os === 'windows' && (
+                <p className="text-sm text-muted">
+                  Windows runs the agents inside <strong>WSL2</strong>, Microsoft's built-in Linux. It keeps
+                  them safely fenced in. The installer sets it up for you.
                 </p>
-              </Disclosure>
-            </section>
+              )}
+            </fieldset>
 
-            <section aria-labelledby="install-progress" className="flex flex-col gap-3">
-              <h3 id="install-progress" className="text-sm font-semibold text-fg">
-                3. Watch it connect
-              </h3>
-              <Progress session={session} status={st} onClose={() => close(false)} />
-            </section>
+            <div className="max-w-sm">
+              <TextInput
+                label="Name for this workstation (optional)"
+                id="workstation-name"
+                value={name}
+                maxLength={80}
+                placeholder="Defaults to the computer's name"
+                onChange={(e) => setName(e.target.value)}
+                onBlur={() => {
+                  // a new name goes into a new script: ask for a fresh session
+                  made.current = '';
+                  if (session)
+                    create.mutate(
+                      { os, ...(name.trim() ? { name: name.trim() } : {}) },
+                      { onSuccess: (s) => setSession(s) },
+                    );
+                }}
+              />
+            </div>
+
+            {create.isPending && !session && <Spinner label="Preparing your install command" />}
+            <ErrorBox error={create.error} onRetry={() => create.mutate({ os })} />
+
+            {session && (
+              <>
+                <section aria-labelledby="install-steps" className="flex flex-col gap-3">
+                  <h3 id="install-steps" className="text-sm font-semibold text-fg">
+                    2. Run the installer on that computer
+                  </h3>
+                  <ol className="flex flex-col gap-2" data-testid="install-steps">
+                    {guideSteps(os).map((s, i) => (
+                      <li
+                        key={s.id}
+                        className="flex items-start gap-3 rounded-card border border-line bg-surface p-3"
+                      >
+                        <InstallArt kind={s.art} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-base font-semibold text-fg">
+                            <span className="mr-1.5 text-subtle">{i + 1}.</span>
+                            {s.title}
+                          </p>
+                          <p className="mt-0.5 text-sm text-muted">{s.body}</p>
+                          {s.command && <CommandBox session={session} />}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                  <Disclosure summary="What will this change on my computer?" data-testid="what-it-does">
+                    <ul className="list-disc space-y-1 pl-6 text-sm text-muted">
+                      {whatItDoes(os).map((l) => (
+                        <li key={l}>{l}</li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 text-sm text-muted">
+                      You can read the whole script before you run it: use{' '}
+                      <strong>Download the script</strong>. It contains a one-time pairing code and this
+                      server's address, and no password or long-lived key.
+                    </p>
+                  </Disclosure>
+                </section>
+
+                <section aria-labelledby="install-progress" className="flex flex-col gap-3">
+                  <h3 id="install-progress" className="text-sm font-semibold text-fg">
+                    3. Watch it connect
+                  </h3>
+                  <Progress session={session} status={st} onClose={() => close(false)} />
+                </section>
+              </>
+            )}
+
+            <p className="border-t border-line pt-3 text-sm text-muted">
+              Already have the runner on this computer?{' '}
+              <button
+                type="button"
+                data-testid="pair-with-code"
+                className="font-medium text-brand-text underline-offset-2 hover:underline"
+                onClick={() => {
+                  close(false);
+                  onPairWithCode();
+                }}
+              >
+                Pair it with a code instead
+              </button>
+              .
+            </p>
           </>
         )}
-
-        <p className="border-t border-line pt-3 text-sm text-muted">
-          Already have the runner on this computer?{' '}
-          <button
-            type="button"
-            data-testid="pair-with-code"
-            className="font-medium text-brand-text underline-offset-2 hover:underline"
-            onClick={() => {
-              close(false);
-              onPairWithCode();
-            }}
-          >
-            Pair it with a code instead
-          </button>
-          .
-        </p>
       </div>
     </Dialog>
   );
