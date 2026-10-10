@@ -105,6 +105,8 @@ export interface SupervisorDeps {
   transcript?: TranscriptDeps;
   /** `aom sudo`: runs a command with administrator rights for the DevOps engineer (the stored sudo password stays here). */
   sudoRun?: (cmd: string, args: string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  /** `aom git status|connect` for the DevOps engineer (the runner drives the login on this workstation). */
+  git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
 }
 
 /** The server's answer to a `shift.report`: what the agent is told (and any ledger matches for a question). */
@@ -588,6 +590,11 @@ export class ShiftSupervisor {
           return { ok: true, result: cardPayload({ ...s.msg, brief: s.brief ?? s.msg.brief }) };
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
         if (req.method === 'sudo.run') return this.sudoRun(s, req.params);
+        if (req.method === 'git.status' || req.method === 'git.connect') {
+          if (s.msg.kind !== 'devops' || !s.msg.agent.isDevops || !this.deps.git)
+            return { ok: false, error: 'only the DevOps engineer can use `aom git`' } as IpcRpcResponse;
+          return this.deps.git.handle(req.method, req.params);
+        }
         return this.deps.rpc(s.msg.shiftId, req.method, req.params);
       },
     };

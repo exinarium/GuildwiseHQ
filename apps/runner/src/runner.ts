@@ -22,6 +22,7 @@ import { Outbox } from './connection/outbox.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ExternalAdapters } from './external/index.ts';
 import { OutboundExecutor } from './external/outbound.ts';
+import { AgentGit } from './forge/agent-git.ts';
 import { recheckFile } from './forge/connect.ts';
 import {
   branchRulesFor,
@@ -129,6 +130,7 @@ export class Runner {
   private timers: NodeJS.Timeout[] = [];
   /** The machine seam of the git-host adapters (GitHub via gh, GitLab/Azure/Bitbucket over REST). */
   readonly forgeEnv: ForgeEnv;
+  private readonly agentGit: AgentGit;
   private lastGit: string | undefined;
   private lastRecheck = 0;
   private fatalResolve?: (code: number) => void;
@@ -150,6 +152,7 @@ export class Runner {
       tokens: new FileTokenStore(join(this.paths.secrets, 'git-tokens.json')),
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
     };
+    this.agentGit = new AgentGit({ env: this.forgeEnv, secretsDir: this.paths.secrets });
     this.keys = new RunnerKeys(join(this.paths.secrets, 'runner-key.pem'));
     this.sudo = new SudoVault({
       file: join(this.paths.secrets, 'sudo.enc'),
@@ -195,6 +198,7 @@ export class Runner {
       exitGraceMs: opts.exitGraceMs,
       envChecker: opts.envChecker,
       sudoRun: (cmd, args) => this.sudo.run(cmd, args),
+      git: this.agentGit,
     });
     this.external =
       opts.external ??
@@ -210,6 +214,7 @@ export class Runner {
       send: (type, payload) => void this.client.send(type, payload),
       rpc: (chatId, method, params) => this.rpc(chatId, method, params),
       external: this.external,
+      git: this.agentGit,
     });
     this.outbound = new OutboundExecutor({ dir: this.paths.outbound, adapters: this.external });
     this.repoCreator = new RepoCreator({

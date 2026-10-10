@@ -33,6 +33,8 @@ export interface ChatDeps {
   external?: ExternalAdapters;
   /** RPC to the server under the chat's id (the server treats a chat as a shift of kind `chat`). */
   rpc(chatId: string, method: string, params: Record<string, unknown>): Promise<IpcRpcResponse>;
+  /** `aom git status|connect` in the DevOps engineer's chat. */
+  git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
 }
 
 interface ActiveChat {
@@ -146,6 +148,10 @@ export class ChatManager {
       },
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
         if (req.method === 'source.read') return this.readSource(req.params);
+        if (req.method === 'git.status' || req.method === 'git.connect')
+          return chat.msg.agent.isDevops && this.deps.git
+            ? this.deps.git.handle(req.method, req.params)
+            : { ok: false, error: 'only the DevOps engineer can use `aom git`' };
         return CHAT_RPC.has(req.method) || (chat.msg.agent.isDevops && DEVOPS_CHAT_RPC.has(req.method))
           ? this.deps.rpc(chatId, req.method, req.params)
           : { ok: false, error: `${req.method} is not available in a chat conversation` };

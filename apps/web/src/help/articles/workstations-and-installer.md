@@ -73,10 +73,19 @@ Open the workstation card on the **Workstations** page: **Git hosts** shows Conn
 - `aom-runner git-connect github` opens a browser to sign in (GitHub CLI).
 - `aom-runner git-connect gitlab` signs in with the GitLab CLI or asks for a personal access token.
 - `aom-runner git-connect bitbucket-cloud` asks for your Atlassian e-mail and an API token (old app passwords no longer work).
-- `aom-runner git-connect azure-devops --organization <name>` asks for a personal access token, or uses your Azure sign-in (`az login`). Use a token for one organization: global tokens stop working on 1 December 2026.
+- `aom-runner git-connect azure-devops` uses a **Microsoft Entra service principal** if the workstation has one (the best way for a team; see below), or your Azure sign-in (`az login`). As a fallback, add `--organization <name>` to paste a personal access token. Use a token for one organization: global tokens stop working on 1 December 2026.
 - Add `--ssh-key` to any of them to create an SSH key and see where to upload it.
 
-Then click **Check again**. The DevOps engineer can walk you through any of these in a chat (**Ask DevOps** on the workstation).
+Then click **Check again**. The DevOps engineer can walk you through any of these in a chat (**Ask DevOps** on the workstation). It can start a browser sign-in for you and show you the web address and code to enter; it never asks for or types a token. When a token is needed it tells you to run the command above yourself or to use the **Connect** helper.
+
+**Azure DevOps: use a Microsoft Entra service principal.** Personal access tokens that are not limited to one organization stop working on 1 December 2026, so for Azure DevOps use a service principal (an app identity in Microsoft Entra) or workload identity:
+
+1. In Microsoft Entra register an application and create a client secret (or a federated credential for workload identity).
+2. In Azure DevOps, under Organization settings, Users, add the application with Basic access, and give it Contributor on the project's repositories.
+3. On the workstation set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` for the runner (with workload identity, `AZURE_FEDERATED_TOKEN_FILE` instead of the secret), and optionally `AZURE_DEVOPS_ORGANIZATION`.
+4. Restart the runner and click **Check again**: Azure DevOps shows Connected.
+
+A personal access token for one organization and `az login` (also `az login --service-principal`) keep working as fallbacks.
 
 A **plain git** server needs no connection, but no pull request is opened: the branch is pushed and the desk tells you to open the request yourself. If a project's main line is protected on the host, finished work arrives as a pull request instead of going straight in (see [Testing and finalization](/help/testing-and-finalization#finalization)).
 

@@ -145,7 +145,7 @@ You are the manager's eyes and ears on the floor, and their one consolidated voi
 When routing is on, a non-blocking question reaches you before any colleague; answer it from the ledger when you can, otherwise escalate it with the context the manager needs.
 
 ## New repositories
-You cannot create a GitHub repository yourself (no GitHub login in your sandbox, \`git push\` is denied). When work needs a new repository, ask for it: \`aom repo create --name <owner/repo> --private|--public --project <KEY> [--description "<text>"]\`. The project owner approves on the desk, their own runner creates it, clones it and adds it to the project, and you are told the result in the conversation. Then use the repository in your cards (\`repo\` field). Never try \`gh repo create\` or \`git push\` yourself.`;
+You cannot create a repository yourself (no git host login in your sandbox, \`git push\` is denied). When work needs a new repository, ask for it: \`aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] --name <name> --private|--public --project <KEY> [--description "<text>"]\`. The name has the git host's shape: \`owner/repo\` (GitHub, the default), \`group/subgroup/project\` (GitLab), \`organization/project/repo\` (Azure DevOps), \`workspace/repo\` (Bitbucket Cloud). Use the host the project already uses, or ask the manager which one. The project owner approves on the desk, their own runner creates it, clones it and adds it to the project, and you are told the result in the conversation. Then use the repository in your cards (\`repo\` field). Never try \`gh repo create\` or \`git push\` yourself.`;
 
 const DEVOPS_INSTRUCTIONS = `You are the DevOps engineer for one workstation: the manager's hands on this machine. Anything that has to happen in the real environment is your job: deploy to the local Docker stack or a remote host, fetch or move a file, install or update tools and the system, start, stop or fix services, keep repositories and vaults in sync. Other agents and the manager send you requests; you work one request per shift.
 
@@ -154,7 +154,8 @@ You run directly on the workstation, outside the agent sandbox, with the account
 1. Read the request and the workstation's granted access (installs, Docker, sudo, writable paths).
 2. Check the current state first; do the least that satisfies the request.
 3. Anything destructive, or anything outside the granted access, is not yours to run even though nothing technically stops you: stop and ask with \`aom devops-approval\`. After the manager approves, the request resumes with the approval attached.
-4. You may fetch, pull and push with the user's git credentials (for example to keep the vaults in sync). A new GitHub repository is still not yours to create: ask the project owner with \`aom repo create --name <owner/repo> --private|--public --project <KEY> [--description "<text>"]\`; they approve on the desk and their runner creates it, clones it and adds it to the project. Do not try \`gh repo create\` yourself.
+4. You may fetch, pull and push with the user's git credentials (for example to keep the vaults in sync). A new repository is still not yours to create, on any git host: ask the project owner with \`aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] [--host <host>] --name <name> --private|--public --project <KEY> [--description "<text>"]\` (the name has the host's shape: \`owner/repo\`, \`group/subgroup/project\`, \`organization/project/repo\` or \`workspace/repo\`); they approve on the desk and their runner creates it, clones it and adds it to the project. Do not try \`gh repo create\` or any other host tool yourself.
+4a. Connecting this workstation to a git host: check with \`aom git status [<provider>]\`. To connect, run \`aom git connect <github|gitlab|azure-devops|bitbucket-cloud>\`. A browser or device-code sign-in prints a URL and a code: show them to the user exactly as printed, ask them to finish it in their browser, then check again with \`aom git status\`. When a token or secret is needed, the command says so and does not start: you NEVER ask for, type, paste or handle a token or password. Tell the user to run \`aom-runner git-connect <provider>\` in a terminal on this workstation (it asks for the token and keeps it on the machine) or to use the Connect helper under Workstations in the app. For Azure DevOps the best sign-in is a Microsoft Entra service principal (the user sets AZURE_TENANT_ID, AZURE_CLIENT_ID and a client secret or federated token file in the runner's environment); personal access tokens stop working for global tokens on 2026-12-01 and \`az login\` remains a fallback.
 5. When done, log every command that changed the machine with \`aom devops-done\`; that record is the audit trail.
 
 The runner syncs the vaults automatically every few minutes. When a sync fails (a rebase conflict, a rejected push) or you are asked to, sort it out yourself.
@@ -213,7 +214,7 @@ const role = (r: Omit<RoleDefinition, 'version' | 'builtIn'> & { version?: numbe
 export const BUILTIN_ROLES: RoleDefinition[] = [
   role({
     key: 'ba',
-    version: 7,
+    version: 8,
     name: 'Business analyst',
     purpose: 'Specifies cards, runs intake and finalizes finished work.',
     department: 'delivery',
@@ -300,7 +301,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'devops',
-    version: 4,
+    version: 5,
     name: 'DevOps engineer',
     purpose:
       'Does any task in the real environment of its workstation: deploys, files, installs, system updates, services, git sync. One per user per workstation.',

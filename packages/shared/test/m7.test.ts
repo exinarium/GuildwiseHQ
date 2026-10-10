@@ -138,7 +138,7 @@ describe('M7 reports and rpc', () => {
 describe('BA instructions and prompts', () => {
   it('ships real BA instructions: intake, answering, finalize', () => {
     const ba = getBuiltinRole('ba');
-    expect(ba?.version).toBe(7); // 3: M8 outbound updates; 4: M10 organization designer; 5: chat cards, inline JSON, repo create; 6: phases; 7: BA reporter
+    expect(ba?.version).toBe(8); // 8: repo create on every git host; 3: M8 outbound updates; 4: M10 organization designer; 5: chat cards, inline JSON, repo create; 6: phases; 7: BA reporter
     expect(ba?.instructions).not.toMatch(/TODO/);
     for (const w of [
       'aom intake map',

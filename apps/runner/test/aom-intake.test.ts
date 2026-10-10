@@ -138,6 +138,53 @@ describe('aom intake and card drafting', () => {
     expect(await t.run('card', 'create', '--json', '[1]')).toBe(1);
   });
 
+  it('aom repo create takes a provider and host, and aom git status|connect call the runner', async () => {
+    const t = await cli({}, () => ({ requestId: 'r1', message: 'ok' }));
+    expect(
+      await t.run(
+        'repo',
+        'create',
+        '--provider',
+        'azure-devops',
+        '--name',
+        'acme/Shop/web',
+        '--private',
+        '--project',
+        'TOY',
+      ),
+    ).toBe(0);
+    expect(
+      await t.run(
+        'repo',
+        'create',
+        '--provider',
+        'gitlab',
+        '--host',
+        'git.example.com',
+        '--name',
+        'team/tools',
+        '--public',
+        '--project',
+        'TOY',
+      ),
+    ).toBe(0);
+    expect(await t.run('git', 'connect', 'gitlab', '--host', 'git.example.com')).toBe(0);
+    expect(await t.run('git', 'status')).toBe(0);
+    expect(await t.run('git', 'status', 'github')).toBe(0);
+    expect(await t.run('git', 'connect')).toBe(1);
+    expect(await t.run('git', 'nope')).toBe(1);
+    expect(t.rpcs.map((r) => [r.method, r.params])).toEqual([
+      ['repo.create', { name: 'acme/Shop/web', project: 'TOY', provider: 'azure-devops', visibility: 'private' }],
+      [
+        'repo.create',
+        { name: 'team/tools', project: 'TOY', provider: 'gitlab', host: 'git.example.com', visibility: 'public' },
+      ],
+      ['git.connect', { provider: 'gitlab', host: 'git.example.com' }],
+      ['git.status', {}],
+      ['git.status', { provider: 'github' }],
+    ]);
+  });
+
   it('asks for a repository (aom repo create) and validates its flags', async () => {
     const t = await cli({}, () => ({ requestId: 'r1', message: 'Asked the project owner.' }));
     expect(

@@ -79,16 +79,16 @@ You can also set or change it any time in **Project settings**, under **Repos**:
 
 ## Creating a new repository {#new-repository}
 
-Agents cannot create repositories themselves: their sandbox has no login for your git host. You can create one on any host yourself from the project settings (see above). When an agent needs a new repository, it asks, and today that works for GitHub only:
+Agents cannot create repositories themselves: their sandbox has no login for your git host. You can create one on any host yourself from the project settings (see above). When an agent needs a new repository, it asks, on GitHub, GitLab, Azure DevOps or Bitbucket Cloud:
 
-1. The BA or DevOps engineer asks with `aom repo create`.
-2. The request appears on your desk as **Create repository `<owner/repo>`**.
+1. The BA or DevOps engineer asks with `aom repo create`, naming the git host and the repository the way that host does: `owner/repo` (GitHub), `group/subgroup/project` (GitLab), `organization/project/repo` (Azure DevOps) or `workspace/repo` (Bitbucket Cloud).
+2. The request appears on your desk as **Create repository `<name>`**, with the git host shown.
 3. You review it and click **Create repository** (or **Reject**).
 
-On approval, your runner creates the repository using your GitHub login, pushes an initial commit to `main`, clones it on the workstation, and tells the server. The project gains the repository with `main` as the working branch. Agents are then told so they can continue.
+On approval, your runner creates the repository using your own login for that git host (the one saved under Connect on the Workstations page), pushes an initial commit to `main`, clones it on the workstation, and tells the server. The project gains the repository with `main` as the working branch. Agents are then told so they can continue.
 
-Only the organization's Owner and Admins can approve. Your workstation must be connected and `gh` (the GitHub CLI) must be installed and logged in.
+Only the organization's Owner and Admins can approve. Your workstation must be connected to that git host (for GitHub, `gh` must be installed and logged in). The DevOps engineer can help with the connection: it starts a browser sign-in and shows you the address and code, but it never asks for or types a token; if one is needed it tells you what to run.
 
-If something goes wrong (for example you have not run `gh auth login` yet), an alert lands on your desk. Fix the cause and click **Retry**: the same request tries again, and if a repository of that name was already created but left empty, it will be used.
+If something goes wrong (for example the workstation is not connected to that git host yet), an alert lands on your desk. Fix the cause and click **Retry**: the same request tries again, and if a repository of that name was already created but left empty, it will be used.
 
 **Dismiss** closes the alert and leaves the request failed; the agent can ask again.

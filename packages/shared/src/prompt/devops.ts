@@ -36,7 +36,7 @@ export function renderDevopsInstructions(brief: ShiftBrief, devops: DevopsShift)
       ...accessLines(devops.access),
       '',
       'Anything destructive (deleting data, wiping, formatting) or outside this access must NOT be run. Ask for approval instead with `aom devops-approval`; the shift then ends and resumes after the manager approves.',
-      "A new GitHub repository is created by the owner's runner after they approve it on the desk: ask with `aom repo create --name <owner/repo> --private|--public --project <KEY>` (never `gh repo create` yourself). You may fetch, pull and push with the user's git credentials.",
+      "A new repository (GitHub, GitLab, Azure DevOps or Bitbucket Cloud) is created by the owner's runner after they approve it on the desk: ask with `aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] --name <name> --private|--public --project <KEY>` (the name has the host's shape: owner/repo, group/subgroup/project, organization/project/repo, workspace/repo; never `gh repo create` yourself). You may fetch, pull and push with the user's git credentials. To check or set up this workstation's login to a git host use `aom git status` and `aom git connect <provider>`: show the user any URL and code it prints; never ask for or type a token, tell the user to run `aom-runner git-connect <provider>` or use the app's Connect helper.",
     ].join('\n'),
   );
   out.push('# How to report');

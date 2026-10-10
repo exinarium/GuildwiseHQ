@@ -641,19 +641,43 @@ const VERBS: Record<string, Verb> = {
   },
   repo: async (ctx, p) => {
     const usage =
-      'usage: aom repo create --name <owner/repo> --private|--public --project <KEY> [--description "<text>"]';
+      'usage: aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] [--host <host>] --name <name> --private|--public --project <KEY> [--description "<text>"]\n  name: owner/repo (github) | group[/subgroup]/project (gitlab) | organization/project/repo (azure-devops) | workspace/repo (bitbucket-cloud)';
     if (p.positionals[0] !== 'create') throw new UsageError(usage);
     const name = one(p, 'name');
     const project = one(p, 'project');
     if (!name || !project || has(p, 'private') === has(p, 'public')) throw new UsageError(usage);
     const description = one(p, 'description');
+    const provider = one(p, 'provider');
+    const host = one(p, 'host');
     const r = (await rpc(ctx, 'repo.create', {
       name,
       project,
+      ...(provider ? { provider } : {}),
+      ...(host ? { host } : {}),
       visibility: has(p, 'public') ? 'public' : 'private',
       ...(description ? { description } : {}),
     })) as { message?: string; requestId?: string };
     ctx.io.out(`${r.message ?? 'Asked the project owner to approve creating the repository.'}\n`);
+    return 0;
+  },
+  /**
+   * `aom git status [<provider>]` / `aom git connect <provider> [--host <h>]` (the DevOps engineer): the runner checks or
+   * starts this workstation's login to a git host. A browser login prints a URL and code for the user; a login that
+   * needs a secret is never typed by the agent (it tells the user to run `aom-runner git-connect`).
+   */
+  git: async (ctx, p) => {
+    const usage =
+      'usage: aom git status [<provider>] [--host <host>] | aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <host>]';
+    const sub = p.positionals[0];
+    const host = one(p, 'host');
+    if (sub !== 'status' && sub !== 'connect') throw new UsageError(usage);
+    const provider = p.positionals[1];
+    if (sub === 'connect' && !provider) throw new UsageError(usage);
+    const r = (await rpc(ctx, `git.${sub}`, {
+      ...(provider ? { provider } : {}),
+      ...(host ? { host } : {}),
+    })) as { message?: string };
+    ctx.io.out(`${r.message ?? 'Done.'}\n`);
     return 0;
   },
   'devops-approval': async (ctx, p) => {
@@ -818,7 +842,8 @@ export const USAGE = `usage: aom <verb> [options]
   answer --item <id> --text "<answer>" [--option <id>]   answer a colleague's question (question shifts)
   escalate --item <id> --note "<what must be decided>"   pass the question on (peer -> BA -> manager's desk)
   finalize --action <pr|push_branch|merge> [--note "<why>"]   BA: run the completion action (revise it with a different action)
-  repo create --name <owner/repo> --private|--public --project <KEY> [--description "<t>"]   BA chat / DevOps: ask the project owner to create a GitHub repository (they approve on the desk; the runner creates it)
+  repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] [--host <h>] --name <owner/repo | group/project | org/project/repo | workspace/repo> --private|--public --project <KEY> [--description "<t>"]   BA chat / DevOps: ask the project owner to create a repository on a git host (they approve on the desk; the runner creates it)
+  git status [<provider>] | git connect <provider> [--host <h>]   DevOps: check or start this workstation's git host login (a browser login prints a URL and code for the user; a token is never typed by the agent)
   intake map --project <KEY> | intake unmapped --note "<why>"   BA intake: map the ticket, or ask the manager
   card create --json '<json>' | --file <draft.json|-> | card update <REF> --json '<json>' | --file <patch.json> | card specify <REF>   BA intake: draft cards
   outbound draft --kind <comment|resolution|decision> --body "<text>"   BA: draft the update for the card's ticket (the manager approves it)

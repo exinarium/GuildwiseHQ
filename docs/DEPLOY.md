@@ -348,6 +348,10 @@ aom-runner start
 
 Workstations connect outbound over WebSocket (no inbound ports needed). Code, credentials and work stay local.
 
+### Azure DevOps sign-in on workstations
+
+Azure DevOps personal access tokens that are not scoped to one organization stop working on **2026-12-01**. For workstations (especially cloud ones, which have no browser) use a **Microsoft Entra service principal** or workload identity as the main sign-in: put `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` (or `AZURE_FEDERATED_TOKEN_FILE`, plus optionally `AZURE_DEVOPS_ORGANIZATION`) in the runner's environment (service unit, Codespaces secret, VPS env file). The runner exchanges them for an Entra token itself; nothing is sent to the server. The step-by-step setup is in `docs/RUNNER.md` (Git hosts). A PAT scoped to one organization and `az login` stay supported as fallbacks.
+
 ### Cloud workstations (VPS over SSH, Codespaces)
 
 Users can run agents on a server of their own (any VPS reached over SSH) or on a GitHub Codespace (`docs/RUNNER.md` "Cloud workstations", `docs/BYO-VPS.md`). What this means for the server:
