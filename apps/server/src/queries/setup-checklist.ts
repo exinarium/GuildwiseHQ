@@ -1,4 +1,5 @@
 import {
+  effectiveFeatures,
   isOrgManager,
   type OrgRole,
   SETUP_TEAM_ROLES,
@@ -34,6 +35,13 @@ export async function getSetupChecklist(
     )?.d === true;
   if (role === null) return { steps: [], doneCount: 0, complete: false, dismissed };
   const manager = isOrgManager({ orgRole: role });
+  const org = await one<{ plan: string; features: unknown }>(
+    ctx.pool,
+    'SELECT plan, features FROM organizations WHERE id=$1',
+    [orgId],
+  );
+  // The intake page is part of the integrations feature; when it is off, everyone chats from the desk.
+  const intakeOn = org ? effectiveFeatures(org.plan, org.features as never).integrations : true;
 
   const project = await one<{ id: string }>(
     ctx.pool,
@@ -114,8 +122,8 @@ export async function getSetupChecklist(
       hint: 'Describe something you need, in a chat or an intake; the analyst turns it into cards.',
       done: !!talked,
       actionable: true,
-      // Intake is for Owners and Admins; everyone else reaches the analyst from Chat (top bar, or on the desk).
-      link: talked ? null : manager ? '/intake' : '/desk',
+      // Intake is for Owners and Admins (when the feature is on); everyone else reaches the analyst from Chat (top bar, or on the desk).
+      link: talked ? null : manager && intakeOn ? '/intake' : '/desk',
     },
   ];
   const doneCount = steps.filter((s) => s.done).length;

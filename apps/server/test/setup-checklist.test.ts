@@ -92,6 +92,19 @@ describe('setup checklist', () => {
     expect(step(c, 'ba')).toMatchObject({ actionable: true, link: '/desk' });
   });
 
+  it('links Owners to the desk chat when the integrations (intake) feature is off', async () => {
+    await freshState();
+    expect(step(await get(), 'ba').link).toBe('/intake');
+    await q(`UPDATE organizations SET features = features || '{"integrations": false}'::jsonb WHERE id=$1`, [
+      orgId,
+    ]);
+    try {
+      expect(step(await get(), 'ba')).toMatchObject({ actionable: true, link: '/desk' });
+    } finally {
+      await q(`UPDATE organizations SET features = features - 'integrations' WHERE id=$1`, [orgId]);
+    }
+  });
+
   it('hiding and reopening is kept per user and does not change the steps', async () => {
     await freshState();
     const put = (cookie: string, dismissed: boolean) =>
