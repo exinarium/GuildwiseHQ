@@ -1,7 +1,7 @@
 ---
-title: DevOps tries to fix merge conflicts first
+title: DevOps fixes clashing changes first
 date: 2026-10-10
 audience: all
-help: /help/devops-and-hygiene
+help: /help/devops-and-hygiene#conflicts
 ---
-When a card's branch or your working branch conflicts, DevOps tries to fix it on a separate branch and runs the tests first. You see a note on the card and a notice on the desk, and after two failed attempts it comes to you.
+When a card's changes clash with other work, the DevOps engineer now tries to combine them itself and runs the tests before anything moves. You see a note on the card and a notice on the desk, and only after two failed attempts does it come to you.

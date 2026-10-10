@@ -1,7 +1,7 @@
 ---
-title: Start a 7-day free trial
+title: Sign-up, plans and a 7-day free trial
 date: 2026-10-10
-audience: all
-help: /help/billing-and-plans
+audience: owner
+help: /help/billing-and-plans#trial
 ---
-You can now sign up yourself: pick a plan, confirm your email and add a card to start seven days free. The first payment is only taken when the trial ends, and you can cancel before then.
+New teams can now sign up on the website, pick a plan and try Guildwise HQ free for seven days. Your organization, set up by invitation, stays free until you choose a plan on the Billing page.
