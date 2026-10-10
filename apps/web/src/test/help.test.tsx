@@ -277,7 +277,7 @@ describe('the Help centre', () => {
     const user = userEvent.setup();
     wrap(<Help />, '/help');
     const list = await screen.findByTestId('help-article-list');
-    expect(within(list).getAllByRole('link').length).toBe(ARTICLES.length + 1);
+    expect(within(list).getAllByRole('link').length).toBe(ARTICLES.length + 2); // the articles, the blog and the glossary
     await user.type(screen.getByTestId('help-search'), 'allow-list');
     const results = await screen.findByTestId('help-results');
     expect(

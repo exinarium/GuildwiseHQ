@@ -807,6 +807,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         name: 'Daily floor report at',
         text: 'The time of day the BA posts its floor report (default 08:00). Click Save time.',
       },
+      {
+        name: 'Weekly blog digest',
+        text: 'One email on Monday mornings with the new blog articles. On by default for Owners, off for everyone else until you tick it.',
+      },
     ],
     article: 'getting-started#the-tour',
     tips: [
@@ -981,6 +985,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'Get started checklist',
         text: 'Shows how far your organization is set up (project, repository, workstation, team, business analyst). Open it, or bring it back if you hid it.',
+      },
+      {
+        name: 'Blog tab',
+        text: 'The Guildwise HQ blog, read inside the app. The search box also finds blog articles.',
       },
       {
         name: 'Contact us tab',
@@ -1344,6 +1352,88 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
     article: 'writing-to-us#my-requests',
+  },
+  '/platform/blog': {
+    title: 'Blog',
+    intro:
+      'The Guildwise HQ blog: the review queue, the kill switch, moderation, the weekly digest and social sharing.',
+    controls: [
+      {
+        name: 'Switch the blog off',
+        text: 'The kill switch. Agents are refused when they create posts, and nothing is published, mailed or shared until you switch it on again.',
+      },
+      {
+        name: 'Auto-publish starts on and Hold',
+        text: 'Until the date you review every post. After it, a post without warnings publishes by itself once it has waited the hold (hours).',
+      },
+      {
+        name: 'Status chips',
+        text: 'Filter the posts by In review, Drafts, Published, Rejected or Unpublished. The number is how many are waiting for you.',
+      },
+      {
+        name: 'Post list',
+        text: 'Each post with its status, warnings, who sent it and when. Click one to review it.',
+      },
+      {
+        name: 'Weekly digest',
+        text: 'Switch the Monday email on or off, send a test to yourself and see what each week did.',
+      },
+      {
+        name: 'Social sharing',
+        text: 'Connect the Facebook Page and the LinkedIn organization. A banner shows when a token needs replacing.',
+      },
+    ],
+    article: 'blog-and-digest#platform-blog',
+  },
+  '/platform/blog/:id': {
+    title: 'Blog post',
+    intro: 'One post: edit it, see it as it will look, then approve or reject it.',
+    controls: [
+      {
+        name: 'Approve and publish',
+        text: 'Make the post public now. It then appears on the blog, in the feed and in Help.',
+      },
+      {
+        name: 'Reject',
+        text: 'Send it back with a reason. The writer agent sees the reason and can revise it.',
+      },
+      {
+        name: 'Unpublish',
+        text: 'Take a published post down (its address then says it was removed). Social posts that were already made stay.',
+      },
+      {
+        name: 'Edit and Preview',
+        text: 'Change the text, tags, cover, sources, search texts and the social captions, with the result next to it.',
+      },
+      {
+        name: 'Social shares',
+        text: 'Whether the post reached each network, with a link, and a button to try again for failed ones.',
+      },
+    ],
+    article: 'blog-and-digest#platform-blog',
+  },
+  '/platform/api-keys': {
+    title: 'API keys',
+    intro: 'Keys that let an agent post to the blog through the agent API.',
+    controls: [
+      {
+        name: 'New key',
+        text: 'Give it a name and the scopes it needs. You can add an expiry date and limit it to certain IP addresses. The key is shown once.',
+      },
+      {
+        name: 'Key list',
+        text: 'Each key with its scopes, when it was last used, how much it did in the last 24 hours and its state.',
+      },
+      {
+        name: 'Revoke',
+        text: 'Stops a key on its next request. It cannot be undone.',
+      },
+      {
+        name: 'Recent requests',
+        text: 'The audit trail of what the keys did.',
+      },
+    ],
+    article: 'blog-and-digest#platform-blog',
   },
   '/platform/audit': {
     title: 'Audit log',

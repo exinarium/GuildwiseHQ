@@ -144,6 +144,10 @@ export default defineConfig({
     proxy: {
       '/api': { target, changeOrigin: false, ws: true, ...(headers ? { headers } : {}) },
       '/ws': { target, changeOrigin: false, ws: true, ...(headers ? { headers } : {}) },
+      // The public blog is rendered by the server (it changes every few hours; the landing page is prerendered).
+      '^/blog(/|$)': { target, changeOrigin: false },
+      '/sitemap.xml': { target, changeOrigin: false },
+      '/robots.txt': { target, changeOrigin: false },
     },
   },
   test: {

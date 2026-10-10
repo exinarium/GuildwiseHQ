@@ -76,6 +76,14 @@ describe('public pages', () => {
     expect((await get('/blog/alpha-agents')).statusCode).toBe(200);
   });
 
+  it('serves the default covers as PNG', async () => {
+    const r = await get('/blog/cover/ai-agents.png');
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['content-type']).toBe('image/png');
+    expect(r.rawPayload.subarray(1, 4).toString()).toBe('PNG');
+    expect((await get('/blog/cover/nope.png')).statusCode).toBe(404);
+  });
+
   it('answers a repeat request from the cache with an ETag', async () => {
     const first = await get('/blog');
     const etag = first.headers.etag as string;

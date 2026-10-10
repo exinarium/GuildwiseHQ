@@ -3,6 +3,7 @@ import { ArrowLeft, BookOpen, GraduationCap, Play, Search, Sparkles } from 'luci
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMyTickets } from '../api/queries/support.ts';
+import { BlogSearchHits, HelpBlog } from '../components/blog/HelpBlog.tsx';
 import { GettingStartedVideo } from '../components/help/GettingStartedVideo.tsx';
 import { SetupHelpCard, useSetupChecklistUi } from '../components/setup/SetupChecklist.tsx';
 import { ContactForm, prefillFor } from '../components/support/ContactForm.tsx';
@@ -18,9 +19,10 @@ import { Markdown } from '../help/Markdown.tsx';
 import { formatDateTime } from '../lib/time.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 
-type Tab = 'help' | 'contact' | 'requests';
+type Tab = 'help' | 'blog' | 'contact' | 'requests';
 
 function tabOf(pathname: string): Tab {
+  if (pathname.startsWith('/help/blog')) return 'blog';
   if (pathname.startsWith('/help/contact')) return 'contact';
   if (pathname.startsWith('/help/requests')) return 'requests';
   return 'help';
@@ -45,6 +47,7 @@ export function Help() {
         onChange={(id) => nav(id === 'help' ? '/help' : `/help/${id}`)}
         tabs={[
           { id: 'help', label: 'Help centre', testId: 'help-tab-help' },
+          { id: 'blog', label: 'Blog', testId: 'help-tab-blog' },
           { id: 'contact', label: 'Contact us', testId: 'help-tab-contact' },
           {
             id: 'requests',
@@ -57,6 +60,7 @@ export function Help() {
       />
       <div role="tabpanel" id={panelId('help', tab)} aria-labelledby={tabId('help', tab)}>
         {tab === 'help' && <HelpCentre />}
+        {tab === 'blog' && <HelpBlog slug={pathname.split('/')[3]} />}
         {tab === 'contact' && <ContactTab />}
         {tab === 'requests' && <RequestsTab />}
       </div>
@@ -67,10 +71,12 @@ export function Help() {
 /** The help centre of a platform administrator: the same articles and glossary, without Contact us. */
 export function PlatformHelp() {
   usePageTitle('Help');
+  const { pathname } = useLocation();
+  const blog = pathname.startsWith('/platform/help/blog');
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader title="Help" sub="Articles, the glossary and the tour." />
-      <HelpCentre />
+      <PageHeader title="Help" sub="Articles, the glossary, the blog and the tour." />
+      {blog ? <HelpBlog slug={pathname.split('/')[4]} /> : <HelpCentre />}
     </div>
   );
 }
@@ -260,6 +266,7 @@ function Results({ q, base }: { q: string; base: string }) {
           </li>
         ))}
       </ul>
+      <BlogSearchHits q={q} />
     </section>
   );
 }
@@ -288,6 +295,18 @@ function Home({ base }: { base: string }) {
               </Link>
             </li>
           ))}
+          <li>
+            <Link
+              to={`${base}/blog`}
+              data-testid="help-blog-link"
+              className="flex h-full flex-col rounded-card border border-line bg-surface p-4 hover:bg-sunken"
+            >
+              <span className="text-base font-semibold text-fg">Blog</span>
+              <span className="mt-1 text-sm text-muted">
+                Articles from the Guildwise HQ team on AI agents and automation.
+              </span>
+            </Link>
+          </li>
           <li>
             <Link
               to={`${base}/glossary`}

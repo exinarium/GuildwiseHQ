@@ -19,7 +19,11 @@ export const NO_PAGE_HELP = [
 export const PAGE_HELP_ALIAS: Record<string, string> = {
   '/help/glossary': '/help',
   '/help/:slug': '/help',
+  '/help/blog': '/help',
+  '/help/blog/:slug': '/help',
   '/platform/help/glossary': '/platform/help',
+  '/platform/help/blog': '/platform/help',
+  '/platform/help/blog/:slug': '/platform/help',
   '/platform/help/:slug': '/platform/help',
 };
 

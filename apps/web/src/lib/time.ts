@@ -12,3 +12,9 @@ export function ageLabel(iso: string | null | undefined, now: number = Date.now(
 export function formatDateTime(iso: string | null | undefined): string {
   return iso ? new Date(iso).toLocaleString() : '';
 }
+
+export function formatDate(iso: string | null | undefined): string {
+  return iso
+    ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+    : '';
+}

@@ -119,8 +119,8 @@ describe('sharing on publish', () => {
     const failed = (await shares(post.id)).find((r) => r.status === 'pending');
     expect(failed?.attempts).toBe(1);
     const due = new Date(failed?.next_attempt_at).getTime() - Date.now();
-    expect(due).toBeGreaterThan(SHARE_BACKOFF_MS[0] - 5000);
-    expect(due).toBeLessThan(SHARE_BACKOFF_MS[0] + 5000);
+    expect(due).toBeGreaterThan((SHARE_BACKOFF_MS[0] as number) - 5000);
+    expect(due).toBeLessThan((SHARE_BACKOFF_MS[0] as number) + 5000);
     const calls = fake.calls.length;
     await socialTick(t.app.ctx);
     expect(fake.calls).toHaveLength(calls); // not due yet

@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   BLOG_TAG_KEYS,
   type BlogContent,
@@ -159,6 +162,26 @@ export function blogPublicRoutes(ctx: Ctx) {
         });
       },
     );
+
+    // The default covers. With the web build served (production) the static plugin serves them from dist/blog/cover;
+    // otherwise (dev, tests) they come straight from apps/web/public.
+    if (!ctx.config.serveWeb) {
+      const here = dirname(fileURLToPath(import.meta.url));
+      const dir = [
+        join(here, '../../../web/public/blog/cover'),
+        join(here, '../../web/public/blog/cover'),
+      ].find((d) => existsSync(d));
+      app.get(
+        '/blog/cover/:file',
+        { schema: { params: z.object({ file: z.string().regex(/^[a-z-]+\.png$/) }) } },
+        async (req, reply) => {
+          const file = dir ? join(dir, req.params.file) : null;
+          if (!file || !existsSync(file)) return reply.code(404).send();
+          void reply.header('cache-control', 'public, max-age=86400');
+          return reply.type('image/png').send(readFileSync(file));
+        },
+      );
+    }
 
     // ---- JSON for Help > Blog (any signed-in person, platform accounts included)
     app.get(

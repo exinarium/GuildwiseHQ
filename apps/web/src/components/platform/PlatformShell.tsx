@@ -1,7 +1,18 @@
-import { Building2, CircleHelp, LifeBuoy, LogOut, MailPlus, ScrollText, Users } from 'lucide-react';
+import {
+  Building2,
+  CircleHelp,
+  KeyRound,
+  LifeBuoy,
+  LogOut,
+  MailPlus,
+  Newspaper,
+  ScrollText,
+  Users,
+} from 'lucide-react';
 import { useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router';
 import { useLogout, useMe } from '../../api/queries/auth.ts';
+import { useBlogSummary } from '../../api/queries/blog.ts';
 import { PageHelpPanel } from '../help/PageHelpPanel.tsx';
 import { Logo } from '../Logo.tsx';
 import { TourProvider } from '../tour/Tour.tsx';
@@ -14,6 +25,8 @@ const NAV = [
   { to: '/platform/invitations', label: 'Invitations', icon: MailPlus, end: false },
   { to: '/platform/users', label: 'Accounts', icon: Users, end: false },
   { to: '/platform/support', label: 'Support', icon: LifeBuoy, end: false },
+  { to: '/platform/blog', label: 'Blog', icon: Newspaper, end: false },
+  { to: '/platform/api-keys', label: 'API keys', icon: KeyRound, end: false },
   { to: '/platform/audit', label: 'Audit log', icon: ScrollText, end: false },
 ];
 
@@ -24,6 +37,7 @@ export function PlatformShell() {
   const me = useMe();
   const logout = useLogout();
   const [pageHelp, setPageHelp] = useState(false);
+  const blog = useBlogSummary();
   return (
     <TourProvider navIds={NO_NAV} mobile={false}>
       <div className="flex min-h-dvh flex-col bg-canvas" data-testid="platform-shell">
@@ -55,6 +69,15 @@ export function PlatformShell() {
                 >
                   <n.icon aria-hidden="true" className="size-4" />
                   {n.label}
+                  {n.to === '/platform/blog' && (blog.data?.pending ?? 0) > 0 && (
+                    <span
+                      data-testid="blog-pending-badge"
+                      className="rounded-full bg-accent px-1.5 text-xs font-semibold text-accent-fg"
+                      title="Posts waiting for review"
+                    >
+                      {blog.data?.pending}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             </nav>

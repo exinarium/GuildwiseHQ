@@ -12,6 +12,7 @@ import {
 import { BRAND } from '../brand.ts';
 import { AuthFrame } from '../components/auth/AuthFrame.tsx';
 import { PasswordInput } from '../components/auth/PasswordInput.tsx';
+import { DigestCheckbox } from '../components/blog/DigestCheckbox.tsx';
 import { Button, ButtonLink, Callout, EmptyState, ErrorBox, Skeleton, TextInput } from '../components/ui.tsx';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 
@@ -79,6 +80,7 @@ export function AcceptInvite() {
   const nav = useNavigate();
   const [displayName, setDisplayName] = useState('');
   const [orgName, setOrgName] = useState('');
+  const [digest, setDigest] = useState<boolean | null>(null);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -98,6 +100,8 @@ export function AcceptInvite() {
   if (info.isError || !info.data) return <InvalidInvitation />;
   const inv = info.data;
   const startsOrg = inv.kind !== 'org_member';
+  // Owners are in by default (they can untick it); everyone else opts in.
+  const digestOn = digest ?? startsOrg;
   const name = startsOrg ? orgName || inv.proposedOrgName || '' : (inv.orgName ?? '');
   const signedIn = me.data ?? null;
   const sameAccount = !!signedIn && signedIn.user.email.toLowerCase() === inv.email.toLowerCase();
@@ -145,6 +149,7 @@ export function AcceptInvite() {
         </div>
         <div className="flex flex-col gap-4">
           {orgField}
+          <DigestCheckbox checked={digestOn} onChange={setDigest} owner={startsOrg} />
           <ErrorBox error={acceptExisting.error} />
           <div className="flex flex-wrap gap-2">
             <Button
@@ -152,9 +157,12 @@ export function AcceptInvite() {
               size="lg"
               loading={acceptExisting.isPending}
               onClick={() =>
-                acceptExisting.mutate(startsOrg ? { orgName: name.trim() } : {}, {
-                  onSuccess: () => nav('/', { replace: true }),
-                })
+                acceptExisting.mutate(
+                  startsOrg ? { orgName: name.trim(), blogDigest: digestOn } : { blogDigest: digestOn },
+                  {
+                    onSuccess: () => nav('/', { replace: true }),
+                  },
+                )
               }
             >
               {startsOrg ? `Create ${name || 'organization'}` : `Join ${inv.orgName}`}
@@ -197,6 +205,7 @@ export function AcceptInvite() {
       displayName: displayName.trim(),
       password,
       ...(startsOrg && name.trim() ? { orgName: name.trim() } : {}),
+      blogDigest: digestOn,
     });
     if (!parsed.success) {
       for (const i of parsed.error.issues) {
@@ -290,6 +299,7 @@ export function AcceptInvite() {
           onChange={(e) => setConfirm(e.target.value)}
           error={errors.confirm}
         />
+        <DigestCheckbox checked={digestOn} onChange={setDigest} owner={startsOrg} />
         <ErrorBox error={accept.error} />
         <Button type="submit" variant="primary" size="lg" loading={accept.isPending} className="w-full">
           {startsOrg

@@ -19,7 +19,7 @@ export interface Article extends Frontmatter {
 }
 
 /** Reserved by the help routes: an article may not use these slugs. */
-export const RESERVED_SLUGS = ['contact', 'requests', 'glossary'];
+export const RESERVED_SLUGS = ['contact', 'requests', 'glossary', 'blog'];
 
 // Bundled at build time: no request leaves the app (the CSP allows none).
 const FILES = import.meta.glob('./articles/*.md', {

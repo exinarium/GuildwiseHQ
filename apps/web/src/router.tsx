@@ -29,7 +29,10 @@ import { OrgSettings } from './pages/OrgSettings.tsx';
 import { Phase } from './pages/Phase.tsx';
 import { ProjectSettings } from './pages/ProjectSettings.tsx';
 import { Projects } from './pages/Projects.tsx';
+import { PlatformApiKeys } from './pages/platform/PlatformApiKeys.tsx';
 import { PlatformAudit } from './pages/platform/PlatformAudit.tsx';
+import { PlatformBlog } from './pages/platform/PlatformBlog.tsx';
+import { PlatformBlogPost } from './pages/platform/PlatformBlogPost.tsx';
 import { PlatformInvitations } from './pages/platform/PlatformInvitations.tsx';
 import { PlatformOrgDetail } from './pages/platform/PlatformOrgDetail.tsx';
 import { PlatformOrgs } from './pages/platform/PlatformOrgs.tsx';
@@ -105,6 +108,8 @@ export const routes = [
       { path: '/help/contact', element: <Help /> },
       { path: '/help/requests', element: <Help /> },
       { path: '/help/requests/:id', element: <Help /> },
+      { path: '/help/blog', element: <Help /> },
+      { path: '/help/blog/:slug', element: <Help /> },
       { path: '/help/:slug', element: <Help /> },
       { path: '/ledger', element: <Ledger /> },
       { path: '/chat/:threadId', element: <Chat /> },
@@ -125,9 +130,14 @@ export const routes = [
           { path: '/platform/users', element: <PlatformUsers /> },
           { path: '/platform/support', element: <PlatformSupport /> },
           { path: '/platform/support/:id', element: <PlatformSupportTicket /> },
+          { path: '/platform/blog', element: <PlatformBlog /> },
+          { path: '/platform/blog/:id', element: <PlatformBlogPost /> },
+          { path: '/platform/api-keys', element: <PlatformApiKeys /> },
           { path: '/platform/audit', element: <PlatformAudit /> },
           { path: '/platform/help', element: <PlatformHelp /> },
           { path: '/platform/help/glossary', element: <PlatformHelp /> },
+          { path: '/platform/help/blog', element: <PlatformHelp /> },
+          { path: '/platform/help/blog/:slug', element: <PlatformHelp /> },
           { path: '/platform/help/:slug', element: <PlatformHelp /> },
         ],
       },

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMe } from '../api/queries/auth.ts';
+import { useDigestPreference, useSetDigestPreference } from '../api/queries/blog.ts';
 import {
   useReporting,
   useSetExpertMode,
@@ -29,6 +30,8 @@ export function Settings() {
   const setExpert = useSetExpertMode();
   const update = useUpdateReporting();
   const toast = useToast();
+  const digest = useDigestPreference();
+  const setDigest = useSetDigestPreference();
   const [picking, setPicking] = useState(false);
   const zone = reporting.data?.timezone ?? me.data?.user.timezone ?? null;
   const [dailyAt, setDailyAt] = useState('08:00');
@@ -102,6 +105,38 @@ export function Settings() {
           />
           <span>Show me branches and git controls</span>
         </label>
+      </Panel>
+
+      <Panel>
+        <h2 className="text-lg font-semibold text-fg">Weekly blog digest</h2>
+        <p className="mt-1 text-sm text-muted">
+          One email on Monday mornings with the new articles from the Guildwise HQ blog. Nothing is sent in a
+          week without new articles.
+        </p>
+        <label className="mt-4 flex items-start gap-3 text-base text-fg">
+          <input
+            type="checkbox"
+            data-testid="blog-digest"
+            className="mt-0.5 size-5"
+            checked={digest.data?.optedIn ?? false}
+            disabled={digest.isPending || setDigest.isPending}
+            onChange={(e) =>
+              setDigest.mutate(e.target.checked, {
+                onSuccess: () =>
+                  toast.success(e.target.checked ? 'You will get the weekly digest' : 'You are unsubscribed'),
+              })
+            }
+          />
+          <span>
+            Email me the weekly blog digest
+            <span className="block text-sm text-muted">
+              {digest.data?.isOwner
+                ? 'Owners get it unless they turn it off here.'
+                : 'Off unless you turn it on. Every mail also has a one-click unsubscribe link.'}
+            </span>
+          </span>
+        </label>
+        <ErrorBox error={digest.error ?? setDigest.error} />
       </Panel>
 
       <Panel>

@@ -113,9 +113,8 @@ describe('weekly digest', () => {
   });
 
   it('one-click unsubscribe works without signing in (link and RFC 8058 POST) and can be undone', async () => {
-    const token = (mail.to(ownerIn.email)[0]?.headers?.['List-Unsubscribe'] as string)
-      .replace(/^<.*\/unsubscribe\//, '')
-      .replace(/>$/, '');
+    const header = String(mail.to(ownerIn.email)[0]?.headers?.['List-Unsubscribe']);
+    const token = header.replace(/^<.*\/unsubscribe\//, '').replace(/>$/, '');
     expect(await userOfUnsubscribeToken(t.app.ctx, token)).toBe(ownerIn.id);
     expect(await userOfUnsubscribeToken(t.app.ctx, `${token}x`)).toBeNull();
     const bad = await t.app.inject({ method: 'GET', url: '/blog/unsubscribe/not-a-real-token-at-all' });
