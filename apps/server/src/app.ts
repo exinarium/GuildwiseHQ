@@ -174,7 +174,8 @@ export function contentSecurityPolicy(config: { publicOrigin: string; secureCook
     `connect-src 'self'${ws ? ` ${ws}` : ''}`,
     "object-src 'none'",
     "base-uri 'self'",
-    "form-action 'self'",
+    // the card capture posts a form to PayFast's hosted page
+    "form-action 'self' https://www.payfast.co.za https://sandbox.payfast.co.za",
     "frame-ancestors 'none'",
     ...(config.secureCookies ? ['upgrade-insecure-requests'] : []),
   ].join('; ');

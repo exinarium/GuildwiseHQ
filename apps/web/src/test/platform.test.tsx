@@ -55,6 +55,8 @@ beforeEach(() => {
         current = 'suspended';
         return json(detail('suspended'));
       }
+      if (url === `/api/platform/orgs/${ID(10)}/billing`)
+        return json({ orgId: ID(10), mode: 'free', subscription: null, invoices: [], plans: [] });
       if (url === `/api/platform/orgs/${ID(10)}`) return json(detail(current));
       if (method === 'POST' && url === '/api/platform/invitations') return json({ id: ID(30) }, 201);
       if (url === '/api/platform/invitations') return json({ invitations: [] });

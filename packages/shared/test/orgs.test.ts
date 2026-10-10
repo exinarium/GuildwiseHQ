@@ -34,8 +34,13 @@ describe('ranks', () => {
 });
 
 describe('plans', () => {
-  it('has the single Founding plan without limits and with every feature on', () => {
-    expect(Object.keys(PLANS)).toEqual(['founding']);
+  it('has the free Founding plan without limits and the billed plans, all with every feature on', () => {
+    expect(Object.keys(PLANS)).toEqual(['founding', 'starter', 'team', 'business', 'unlimited']);
+    // billed plans never limit agents (the editable limits live in billing_plans)
+    for (const k of ['starter', 'team', 'business', 'unlimited'] as const) {
+      expect(PLANS[k].limits.maxAgents).toBeNull();
+      for (const f of ORG_FEATURES) expect(PLANS[k].features[f]).toBe(true);
+    }
     expect(DEFAULT_PLAN).toBe('founding');
     expect(PLANS.founding.limits).toEqual({
       maxMembers: null,
