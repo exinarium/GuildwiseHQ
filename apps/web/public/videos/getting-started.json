@@ -3,27 +3,27 @@
   "src": "/videos/getting-started.webm",
   "type": "video/webm",
   "captions": "/videos/getting-started.vtt",
-  "voice": "Piper en_GB-jenny_dioco-medium",
-  "duration": 164.2,
+  "voice": "Piper en_GB-cori-high",
+  "duration": 171.7,
   "chapters": [
     {
-      "t": 16.9,
+      "t": 16.7,
       "title": "Create your first project"
     },
     {
-      "t": 44.2,
+      "t": 46.3,
       "title": "Hire your agents"
     },
     {
-      "t": 78.8,
+      "t": 83.4,
       "title": "Create cards"
     },
     {
-      "t": 105.6,
+      "t": 111.2,
       "title": "Talk to the business analyst"
     },
     {
-      "t": 128.2,
+      "t": 134,
       "title": "Test your running project"
     }
   ]

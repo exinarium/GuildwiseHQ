@@ -46,7 +46,7 @@ test('record the getting-started video', async ({ browser }) => {
   const api = await apiAs(ADMIN.email, ADMIN.password);
   const code = (await (await api.post('/api/workstations/pairing-codes', { data: {} })).json())
     .code as string;
-  pairRunner(BASE_URL, code, 'My laptop', HOME);
+  pairRunner(BASE_URL, code, "Alex's laptop", HOME);
   addRepoRoot(paths.repoRoot, HOME);
   startRunner({}, HOME);
   await waitFor(
@@ -63,6 +63,21 @@ test('record the getting-started video', async ({ browser }) => {
     recordVideo: { dir: RAW_DIR, size: { width: 1280, height: 720 } },
   });
   await installOverlays(ctx);
+  // The server follows every finished card with a "Full E2E suite after ..." card (always on, no setting). It is
+  // noise for a first-time viewer, so the camera never sees it: hide those tiles in the recorded page only.
+  await ctx.addInitScript(`(() => {
+    const hide = () => {
+      const walker = document.createTreeWalker(document.body || document, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (!(n.nodeValue || '').includes('Full E2E suite')) continue;
+        // a board tile, else the short "spawned card" row on the card page (never anything bigger)
+        const el = n.parentElement && (n.parentElement.closest('[data-testid^="card-tile-"]') || n.parentElement);
+        if (el && el !== document.body && (el.textContent || '').length < 160) el.style.display = 'none';
+      }
+    };
+    new MutationObserver(hide).observe(document, { childList: true, subtree: true, characterData: true });
+    setInterval(hide, 200);
+  })();`);
   const t0 = Date.now();
   const page = await ctx.newPage();
   const now = () => (Date.now() - t0) / 1000;

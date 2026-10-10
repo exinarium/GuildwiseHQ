@@ -1,81 +1,81 @@
 WEBVTT
 
 1
-00:00:00.286 --> 00:00:11.198
+00:00:00.289 --> 00:00:10.968
 Hello, and welcome to Guildwise HQ. In the next few minutes I will show you how to run a small team of AI agents, from your very first project to a result you can try.
 
 2
-00:00:11.897 --> 00:00:16.214
+00:00:11.668 --> 00:00:16.008
 There are five steps. You can follow along in your own account as we go.
 
 3
-00:00:16.918 --> 00:00:21.409
+00:00:16.712 --> 00:00:22.167
 Step one: your first project. Open Projects, and choose New project.
 
 4
-00:00:22.110 --> 00:00:29.074
+00:00:22.866 --> 00:00:30.666
 Give it a short key, like SHOP, and a name, like Web shop. The key is what you will see in front of every card number.
 
 5
-00:00:29.773 --> 00:00:43.504
+00:00:31.366 --> 00:00:45.561
 Now tell the project where its code lives. Add a repository, give it a name, and paste in its address. Your agents work on their own copy, and a change only reaches your main code after it has been reviewed and tested.
 
 6
-00:00:44.207 --> 00:00:52.541
+00:00:46.264 --> 00:00:55.318
 Step two: hire your agents. Every agent has a role and a seniority, and the seniority decides how much they are trusted with.
 
 7
-00:00:53.241 --> 00:00:57.767
+00:00:56.016 --> 00:01:01.181
 Start with a business analyst. Bea will turn your ideas into clear, written work.
 
 8
-00:00:58.467 --> 00:01:06.799
+00:01:01.880 --> 00:01:10.711
 Then a builder, Ada, who writes the code. A senior reviewer, Linus, who checks it. And a tester, Tess, who tries it out.
 
 9
-00:01:12.713 --> 00:01:18.052
+00:01:16.058 --> 00:01:22.709
 That is a small, complete team. You can hire more at any time, or change their roles later.
 
 10
-00:01:18.765 --> 00:01:23.686
+00:01:23.410 --> 00:01:28.377
 Step three: describe the work as a card. A card is one thing you would like done.
 
 11
-00:01:24.386 --> 00:01:32.383
+00:01:29.077 --> 00:01:37.249
 Give it a title, say what you need and why, and list how you will know it is finished. The clearer the card, the better the result.
 
 12
-00:01:33.082 --> 00:01:39.003
+00:01:37.948 --> 00:01:44.484
 When you choose Specify, the card joins the team queue, and the agents pick it up by themselves.
 
 13
-00:01:39.704 --> 00:01:44.857
+00:01:45.184 --> 00:01:50.465
 Add as many cards as you like. Here is a second one, and now the board shows both.
 
 14
-00:01:45.560 --> 00:01:53.788
+00:01:51.168 --> 00:01:59.396
 Step four: talk to your business analyst. You do not need a form for everything. Open the chat, pick Bea, and ask in plain words.
 
 15
-00:01:54.487 --> 00:01:57.099
+00:02:00.096 --> 00:02:02.685
 Let us ask what she would add to the shop next.
 
 16
-00:01:59.642 --> 00:02:07.500
+00:02:05.249 --> 00:02:13.281
 And there is her answer. She suggests ideas, asks good questions, and can turn a whole conversation into cards for you.
 
 17
-00:02:08.220 --> 00:02:16.972
+00:02:13.997 --> 00:02:23.121
 Step five: watch the work, and test your running project. Cards move across the board as the agents plan, build, review and test.
 
 18
-00:02:17.672 --> 00:02:21.735
+00:02:23.819 --> 00:02:28.242
 Open a card to see the plan, the conversation, and what it cost.
 
 19
-00:02:22.435 --> 00:02:32.267
+00:02:28.943 --> 00:02:38.763
 When the tester runs your project, she reports what she found, and every bug becomes a new card. Your part is to try the result, and tell the team what you think.
 
 20
-00:02:32.969 --> 00:02:43.517
+00:02:39.465 --> 00:02:51.000
 And that is all there is to it. Hire your team, describe the work, and watch it happen. You will find more guides in Help. Thank you for watching, and good luck with your first project.
