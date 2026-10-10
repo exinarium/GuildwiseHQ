@@ -1,13 +1,40 @@
 import type { Pool } from '../db/pool.ts';
-import { exec } from '../db/sql.ts';
+import { exec, type Queryable, rows } from '../db/sql.ts';
 import { withTx } from '../db/tx.ts';
 import type { PgEventStore } from '../eventstore/pg-event-store.ts';
 import { PROJECTION_TABLES } from './index.ts';
 
 /** Operational tables that reference projection tables: saved before the truncate, restored after the replay. */
-const SAVED: Array<{ table: string; restoreWhere: string }> = [
+export const SAVED: Array<{ table: string; restoreWhere: string }> = [
   { table: 'auth_sessions', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'pairing_codes', restoreWhere: 'user_id IN (SELECT id FROM users)' },
+  {
+    table: 'installer_sessions',
+    restoreWhere:
+      'user_id IN (SELECT id FROM users) AND (pairing_code_id IS NULL OR pairing_code_id IN (SELECT id FROM pairing_codes))',
+  },
+  // Billing state (migrations 1440 and 1490) is operational: payments and invoices cannot be rebuilt from events.
+  { table: 'billing_subscriptions', restoreWhere: 'org_id IN (SELECT id FROM organizations)' },
+  { table: 'billing_invoices', restoreWhere: 'org_id IN (SELECT id FROM organizations)' },
+  { table: 'billing_profiles', restoreWhere: 'org_id IN (SELECT id FROM organizations)' },
+  { table: 'email_verifications', restoreWhere: 'user_id IN (SELECT id FROM users)' },
+  {
+    table: 'password_resets',
+    restoreWhere:
+      'user_id IN (SELECT id FROM users) AND (requested_by IS NULL OR requested_by IN (SELECT id FROM users))',
+  },
+  // Support (migration 1320): parents before children.
+  { table: 'support_tickets', restoreWhere: '(user_id IS NULL OR user_id IN (SELECT id FROM users))' },
+  { table: 'support_messages', restoreWhere: 'ticket_id IN (SELECT id FROM support_tickets)' },
+  {
+    table: 'support_attachments',
+    restoreWhere:
+      'ticket_id IN (SELECT id FROM support_tickets) AND message_id IN (SELECT id FROM support_messages)',
+  },
+  {
+    table: 'forge_repo_lists',
+    restoreWhere: 'user_id IN (SELECT id FROM users) AND workstation_id IN (SELECT id FROM workstations)',
+  },
   // Two-factor secrets and recovery codes are operational (they never enter the event log).
   { table: 'user_totp', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'user_recovery_codes', restoreWhere: 'user_id IN (SELECT id FROM users)' },
@@ -30,9 +57,28 @@ const SAVED: Array<{ table: string; restoreWhere: string }> = [
 ];
 
 /**
+ * Tables that `TRUNCATE ... CASCADE` of the projection tables would empty (direct or indirect foreign keys) and that
+ * neither are projections nor are saved in `SAVED`. Must be empty: a table listed here would lose its rows on a rebuild.
+ */
+export async function unsavedCascadeTargets(db: Queryable): Promise<string[]> {
+  const known = [...PROJECTION_TABLES, ...SAVED.map((s) => s.table)];
+  const found = await rows<{ t: string }>(
+    db,
+    `WITH RECURSIVE dep(oid) AS (
+       SELECT c.oid FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relname = ANY($1)
+       UNION
+       SELECT k.conrelid FROM pg_constraint k JOIN dep ON k.confrelid = dep.oid WHERE k.contype = 'f'
+     )
+     SELECT oid::regclass::text AS t FROM dep WHERE NOT (oid::regclass::text = ANY($2)) ORDER BY 1`,
+    [PROJECTION_TABLES, known],
+  );
+  return found.map((r) => r.t);
+}
+
+/**
  * Truncates every projection table and replays all events in seq order (batches of 1000) inside one transaction
  * (docs/ARCHITECTURE.md section 3.3). Operational data (sessions, pairing codes, runner command queue, presence,
- * heartbeats, shift progress) is preserved; live leases are carried over (a claim unknown before the rebuild gets `now + 1h`).
+ * heartbeats, shift progress, billing, support, password resets and email verifications) is preserved; live leases are carried over (a claim unknown before the rebuild gets `now + 1h`).
  */
 export async function rebuildProjections(
   pool: Pool,
@@ -41,6 +87,12 @@ export async function rebuildProjections(
 ): Promise<{ events: number }> {
   return withTx(pool, async (tx) => {
     await tx.query('SELECT pg_advisory_xact_lock(7311)'); // no appends while rebuilding
+    // Refuse before anything is lost: CASCADE would silently empty an operational table nobody thought to save.
+    const unsaved = await unsavedCascadeTargets(tx);
+    if (unsaved.length > 0)
+      throw new Error(
+        `projection rebuild would empty operational tables that are not saved: ${unsaved.join(', ')} (add them to SAVED in projections/rebuild.ts)`,
+      );
     for (const s of SAVED)
       await exec(tx, `CREATE TEMP TABLE _save_${s.table} ON COMMIT DROP AS SELECT * FROM ${s.table}`);
     await exec(
