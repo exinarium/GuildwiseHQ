@@ -39,7 +39,7 @@ export function AuthFrame({ children }: { children: ReactNode }) {
       <main className="flex flex-1 flex-col items-center justify-center px-6 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] max-lg:-mt-2">
         <div className="w-full max-w-sm">{children}</div>
         <p className="mt-10 text-xs text-subtle">
-          Self-hosted · your data stays on your machines ·{' '}
+          Your code stays in your repositories ·{' '}
           <Link
             to="/contact"
             data-testid="footer-contact"
