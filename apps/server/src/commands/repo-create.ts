@@ -22,6 +22,7 @@ import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { agentActor, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { settleConversionIn } from './convert.ts';
 import { addRepoIn } from './projects.ts';
+import { projectWorkstations, repoSetupEvents } from './workstation-setup.ts';
 
 /**
  * Approved repository setup (docs/SPEC.md "External systems boundary"). Agents cannot create repositories: the sandbox
@@ -35,6 +36,14 @@ type RpcReply = [boolean, unknown?, string?];
 
 /** The repository name inside a `owner/repo`, `group/sub/project` or `org/project/repo` full name. */
 const lastSegment = (fullName: string): string => String(fullName).split('/').pop() as string;
+
+/** A simulation organization never talks to a forge: its repositories are local throwaway ones on the server. */
+async function isSimulationOrg(db: Queryable, orgId: string): Promise<boolean> {
+  return (await one(db, 'SELECT 1 FROM organizations WHERE id=$1 AND simulation', [orgId])) !== undefined;
+}
+
+const simulatedApprovalText = (projectKey: string): string =>
+  `This is a simulation organization, so approving creates a simulated repository (README.md and one commit on main) on the Guildwise server only and adds it to project ${projectKey}. Nothing is created on GitHub or any other git host, and no workstation of yours is needed.`;
 
 const approvalText = (provider: RepoProvider, projectKey: string): string => {
   const how =
@@ -152,7 +161,8 @@ export async function repoCreateRpc(
       undefined,
       `project ${project.key} is still in the research stage: repositories come with the conversion to a delivery project. Ask the manager to convert it.`,
     ];
-  if (!(await managerWorkstation(ctx.pool, project.org_id)))
+  const sim = await isSimulationOrg(ctx.pool, project.org_id);
+  if (!sim && !(await managerWorkstation(ctx.pool, project.org_id)))
     return [
       false,
       undefined,
@@ -184,17 +194,17 @@ export async function repoCreateRpc(
 
   const requestId = randomUUID();
   const deskItemId = randomUUID();
-  const ws = await managerWorkstation(ctx.pool, project.org_id);
+  const ws = sim ? undefined : await managerWorkstation(ctx.pool, project.org_id);
   const body = [
     `Repository: ${p.data.name}`,
-    `Git host: ${FORGE_LABELS[p.data.provider]}${p.data.host ? ` (${p.data.host})` : ''}`,
+    ...(sim ? [] : [`Git host: ${FORGE_LABELS[p.data.provider]}${p.data.host ? ` (${p.data.host})` : ''}`]),
     `Visibility: ${p.data.visibility}`,
     `Project: ${project.key} (${project.name})`,
     ...(p.data.description ? [`Description: ${p.data.description}`] : []),
     `Requested by: ${agent.name}`,
-    `Runs on: ${ws?.name ?? 'your connected workstation'} (your workstation)`,
+    ...(sim ? [] : [`Runs on: ${ws?.name ?? 'your connected workstation'} (your workstation)`]),
     '',
-    approvalText(p.data.provider, project.key),
+    sim ? simulatedApprovalText(project.key) : approvalText(p.data.provider, project.key),
   ].join('\n');
   const scope = projectScope(project.org_id, project.id);
   try {
@@ -288,16 +298,17 @@ export async function repoCreateRequestEvents(
     throw conflict('repo_request_exists', `a request for ${spec.name} already exists for this project`);
   const requestId = randomUUID();
   const deskItemId = randomUUID();
-  const ws = await managerWorkstation(tx, project.org_id);
+  const sim = await isSimulationOrg(tx, project.org_id);
+  const ws = sim ? undefined : await managerWorkstation(tx, project.org_id);
   const body = [
     `Repository: ${spec.name}`,
     `Visibility: ${spec.visibility}`,
     `Project: ${project.key} (${project.name})`,
     ...(spec.description ? [`Description: ${spec.description}`] : []),
     `Requested by: ${user.displayName ?? 'a manager'}, ${context}`,
-    `Runs on: ${ws?.name ?? 'your connected workstation'} (your workstation)`,
+    ...(sim ? [] : [`Runs on: ${ws?.name ?? 'your connected workstation'} (your workstation)`]),
     '',
-    approvalText('github', project.key),
+    sim ? simulatedApprovalText(project.key) : approvalText('github', project.key),
   ].join('\n');
   const scope = projectScope(project.org_id, project.id);
   const actor = userActor(user.id);
@@ -400,6 +411,7 @@ export async function resolveRepoCreateIn(
     await settleConversionIn(ctx, tx, req.project_id);
     return null;
   }
+  if (await isSimulationOrg(tx, req.org_id)) return completeSimulatedRepoIn(ctx, tx, req);
   const ws = await connectedWorkstation(tx, user.id);
   if (!ws)
     throw conflict(
@@ -428,6 +440,101 @@ export async function resolveRepoCreateIn(
   );
   await enqueueRunnerCommand(tx, ws.id, 'repo.create', repoCreatePayload(req) as never);
   return ws.id;
+}
+
+/**
+ * Approval in a simulation organization: instead of queueing `repo.create` for a workstation, a local throwaway origin
+ * is created on the server (the same mechanism as adding a repository by URL) and added to the project at once, so
+ * the demo flows without a forge or a connected workstation. The simulated workstation then clones it. Returns a
+ * workstation of the project to deliver the clone command to, if any.
+ */
+async function completeSimulatedRepoIn(ctx: Ctx, tx: Tx, req: Row): Promise<string | null> {
+  // Adding a repository to a simulation project always makes its local origin (whatever URL is given): this is the
+  // same mechanism as adding one by URL, so the address below is only a placeholder.
+  await completeCreatedRepoIn(ctx, tx, req, `https://simulation.invalid/${req.name}.git`, {
+    existing: false,
+  });
+  const repoId = (await one(tx, 'SELECT project_repo_id FROM repo_requests WHERE id=$1', [req.id]))
+    ?.project_repo_id;
+  const repo = repoId ? await one(tx, 'SELECT * FROM project_repos WHERE id=$1', [repoId]) : undefined;
+  const project = await one(tx, 'SELECT * FROM projects WHERE id=$1', [req.project_id]);
+  if (repo && project) {
+    const setup = await repoSetupEvents(tx, project, repo, {
+      requestedBy: req.requested_by_user_id ?? undefined,
+    });
+    if (setup.length) await ctx.store.append(setup, { tx });
+  }
+  return (await projectWorkstations(tx, req.project_id))[0]?.id ?? null;
+}
+
+/**
+ * The repository exists at `remoteUrl`: add it to the project (unless it is already there), record the completion,
+ * tell the thread, and let a waiting conversion continue. Shared by the runner's answer and the simulated path.
+ */
+async function completeCreatedRepoIn(
+  ctx: Ctx,
+  tx: Tx,
+  req: Row,
+  remoteUrl: string,
+  extra: { localPath?: string | undefined; existing: boolean },
+): Promise<void> {
+  const scope = projectScope(req.org_id, req.project_id);
+  const normalizedExisting = await one(
+    tx,
+    `SELECT id FROM project_repos WHERE project_id=$1 AND removed_at IS NULL AND remote_url_normalized = $2`,
+    [req.project_id, normalizeRemoteUrl(remoteUrl)],
+  );
+  const repoId =
+    normalizedExisting?.id ??
+    (await addRepoIn(
+      ctx,
+      tx,
+      { id: req.project_id, org_id: req.org_id },
+      {
+        name: lastSegment(req.name),
+        remoteUrl,
+        workingBranch: 'main',
+        ...(req.provider && req.provider !== 'github' ? { forge: req.provider } : {}),
+      },
+      req.requested_by_agent_id
+        ? agentActor(req.requested_by_agent_id)
+        : req.requested_by_user_id
+          ? userActor(req.requested_by_user_id)
+          : SYSTEM_ACTOR,
+    ));
+  // The address the project really has (a simulation organization's is a local origin, not the one passed in).
+  remoteUrl =
+    ((await one(tx, 'SELECT remote_url FROM project_repos WHERE id=$1', [repoId]))?.remote_url as
+      | string
+      | undefined) ?? remoteUrl;
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.repo(req.id),
+        event: {
+          type: 'RepoCreateCompleted',
+          payload: {
+            requestId: req.id,
+            remoteUrl,
+            ...(extra.localPath ? { localPath: extra.localPath } : {}),
+            projectRepoId: repoId,
+            existing: extra.existing,
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope,
+      },
+      ...(await threadNote(
+        tx,
+        req.thread_id,
+        `Repository ${req.name} is ready (${remoteUrl}) and was added to project ${req.project_key} as repo '${lastSegment(req.name)}'. You can create cards on it now.`,
+        { repoRequestId: req.id, remoteUrl },
+      )),
+    ],
+    { tx },
+  );
+  // A conversion waiting for this repository can complete now.
+  await settleConversionIn(ctx, tx, req.project_id);
 }
 
 function repoCreatePayload(req: Row): RepoCreatePayload {
@@ -523,57 +630,10 @@ export async function applyRepoCreateResult(
     const scope = projectScope(req.org_id, req.project_id);
     if (ok && r.ok && r.remoteUrl) {
       try {
-        const normalizedExisting = await one(
-          tx,
-          `SELECT id FROM project_repos WHERE project_id=$1 AND removed_at IS NULL AND remote_url_normalized = $2`,
-          [req.project_id, normalizeRemoteUrl(r.remoteUrl)],
-        );
-        const repoId =
-          normalizedExisting?.id ??
-          (await addRepoIn(
-            ctx,
-            tx,
-            { id: req.project_id, org_id: req.org_id },
-            {
-              name: lastSegment(req.name),
-              remoteUrl: r.remoteUrl,
-              workingBranch: 'main',
-              ...(req.provider && req.provider !== 'github' ? { forge: req.provider } : {}),
-            },
-            req.requested_by_agent_id
-              ? agentActor(req.requested_by_agent_id)
-              : req.requested_by_user_id
-                ? userActor(req.requested_by_user_id)
-                : SYSTEM_ACTOR,
-          ));
-        await ctx.store.append(
-          [
-            {
-              streamId: streamId.repo(req.id),
-              event: {
-                type: 'RepoCreateCompleted',
-                payload: {
-                  requestId: req.id,
-                  remoteUrl: r.remoteUrl,
-                  ...(r.localPath ? { localPath: r.localPath } : {}),
-                  projectRepoId: repoId,
-                  existing: !!r.existing,
-                },
-              },
-              actor: SYSTEM_ACTOR,
-              scope,
-            },
-            ...(await threadNote(
-              tx,
-              req.thread_id,
-              `Repository ${req.name} is ready (${r.remoteUrl}) and was added to project ${req.project_key} as repo '${lastSegment(req.name)}'. You can create cards on it now.`,
-              { repoRequestId: req.id, remoteUrl: r.remoteUrl },
-            )),
-          ],
-          { tx },
-        );
-        // A conversion waiting for this repository can complete now.
-        await settleConversionIn(ctx, tx, req.project_id);
+        await completeCreatedRepoIn(ctx, tx, req, r.remoteUrl, {
+          localPath: r.localPath,
+          existing: !!r.existing,
+        });
         return;
       } catch (err) {
         failure = `the repository was created but could not be added to the project: ${err instanceof Error ? err.message : String(err)}`;
