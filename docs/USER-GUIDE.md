@@ -51,7 +51,8 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.15 Security and two-factor login](#415-security-and-two-factor-login)
   - [4.16 Plan and limits](#416-plan-and-limits)
   - [4.17 Billing](#417-billing)
-  - [4.17 Chatting with agents](#417-chatting-with-agents)
+  - [4.18 Chatting with agents](#418-chatting-with-agents)
+  - [4.19 Cloud workstations: a VPS or a Codespace](#419-cloud-workstations-a-vps-or-a-codespace)
 - [5. For Members](#5-for-members)
   - [5.1 What you can do](#51-what-you-can-do)
   - [5.2 Your first day](#52-your-first-day)
@@ -123,7 +124,7 @@ Guildwise HQ is that team, made of AI agents. It gives you:
 
 ### 1.3 Where the agents run
 
-The agents do their work on a computer of yours, called a **workstation**: your own PC, a Mac, or a Linux machine. Your code, your passwords and your files stay on that computer. The Guildwise HQ website only holds the board, the desk and the records. A small helper program called the **runner** (installed in the next chapters with a guided installer) connects the workstation to the website.
+Guildwise HQ itself is a website you sign up for. The agents do their work on a machine you choose, called a **workstation**: your own PC, a Mac or a Linux machine, a server you rent (a VPS), or a GitHub Codespace (4.19). Your code, your passwords and your files stay on that machine and in your own repositories. The Guildwise HQ website only holds the board, the desk and the records. A small helper program called the **runner** (installed in the next chapters with a guided installer) connects the workstation to the website.
 
 > **Good to know:** the AI itself is Claude. You sign in to Claude once on your workstation, either with your own Claude subscription or with an API key. The agents' work is billed by Claude to you (a subscription uses your plan, an API key is pay-as-you-go). Guildwise HQ estimates and limits that spend for you (see chapter 4.6).
 
@@ -167,7 +168,7 @@ A card in a code project goes through the same stages every time. You do not hav
 2. **To do and Build**: a builder takes the card and works on a branch of your repository.
 3. **Review**: a reviewer reads the change and either approves or sends it back (rework).
 4. **Test**: a tester runs the tests in the test plan. A failure creates a bug card, and the original waits for the fix.
-5. **Finalize**: the BA completes the card in the way you chose: open a pull request, push the branch, or merge.
+5. **Finalize**: the BA completes the card the way the project says: straight into your main line, or as a pull request for you to approve (4.4, *How finished work lands*).
 6. **Done**.
 
 If anyone gets stuck or needs a decision, the card turns to **Blocked** and a question appears on your desk.
@@ -186,7 +187,7 @@ In short: **Owners and Admins manage**, **Members work** in the projects they we
 
 By the end of this chapter you have: a working login with two-factor protection, a workstation connected, a small team hired, a project and your first card moving across the board.
 
-> **Before you start:** you need an invitation email, a computer to use as a workstation (it can be the one you are on now), and a Claude account. A Claude subscription (Pro, Max, Team or Enterprise) is the easiest. An API key works too.
+> **Before you start:** you need an invitation email or your own sign-up (below), a computer to use as a workstation (it can be the one you are on now; a VPS or a GitHub Codespace works too), and a Claude account. A Claude subscription (Pro, Max, Team or Enterprise) is the easiest. An API key works too.
 
 ### 3.1 Accept the invitation and sign in (2 minutes)
 
@@ -198,11 +199,13 @@ By the end of this chapter you have: a working login with two-factor protection,
 
 If the link says the invitation is no longer valid, it has expired, was used already, or was withdrawn. Ask the person who invited you to send a new one.
 
+**No invitation? Sign up yourself.** On the website click **Start free trial** (or a plan's button under **Pricing**), choose a plan and enter your organization name, your name, email and a password. Open the link in the confirmation email, sign in, and add a card on the **Billing** page: your **7-day free trial** starts and nothing is charged until it ends (4.17). You are the Owner of the new organization.
+
 ![An invitation link that no longer works](guide/assets/invite-invalid.jpg)
 
 **Forgot your password?** On the sign-in page click **Forgot your password?**, type your email and we send a link (it works once and expires after an hour). We answer the same way whether or not the email has an account, so nobody can find out who is registered. Choose a new password (at least 12 characters); every other place you were signed in is signed out. Then sign in as usual: if you use two-factor login you still enter your code. A platform administrator can also send you this link (7.4). Platform administrators may use it too (their two-factor code is still asked at the next sign-in). If the email never reaches you, your organization's Owner can give you a temporary password instead (4.15).
 
-Visitors who are not signed in see the landing page, with a **Sign in** button.
+Visitors who are not signed in see the landing page, with **Log in** and **Start free trial** buttons, the plans and prices, a link to the blog, and a small **Ask Guildwise** chat that answers questions about the product.
 
 ![The landing page](guide/assets/landing.jpg)
 
@@ -232,7 +235,9 @@ Two-factor login means that after your password you also type a six-digit code f
 
 ### 3.3 Take the tour (1 minute)
 
-The first time you sign in, a short guided tour highlights the main areas and tells you what each is for. The tour is different for each role. You can skip it and replay it any time from **Help**.
+The first time you sign in, a short guided tour highlights the main areas and tells you what each is for. The tour is different for each role. You can skip it and replay it any time from **Help**; a tour you closed half way does not come back by itself, but **Help** offers to resume it.
+
+Prefer to watch? The **Help** page has **Getting started in five steps**, a spoken training video of about three minutes with captions: create a project, hire your agents, create cards, talk to the business analyst, and test the result.
 
 ![The first step of the tour](guide/assets/tour-1.jpg)
 
@@ -253,7 +258,7 @@ Three things worth knowing from the start:
 A workstation is the computer where your agents will work. The guided installer sets everything up for you.
 
 1. Open **Workstations** in the sidebar and click **Add a workstation**.
-2. **Choose where your agents run**: **My computer** (the rest of this section), **A VPS (SSH)** or **GitHub Codespaces** (section 4.18). For your own computer, **pick the system**. The page guesses from your browser (Windows, Linux or macOS). Change it if the machine that will run the agents is a different one. Windows runs the agents inside WSL2, Microsoft's built-in Linux, and the installer turns it on for you. You may also type a name for it ("Office PC").
+2. **Choose where your agents run**: **My computer** (the rest of this section), **A VPS (SSH)** or **GitHub Codespaces** (section 4.19). For your own computer, **pick the system**. The page guesses from your browser (Windows, Linux or macOS). Change it if the machine that will run the agents is a different one. Windows runs the agents inside WSL2, Microsoft's built-in Linux, and the installer turns it on for you. You may also type a name for it ("Office PC").
 3. **Copy the command** with the copy button, or choose **Download the script** if you would like to read it first. The command contains a link that is valid for 30 minutes and a one-time pairing code. It never contains a password.
 4. **Run it on that computer.** Open a terminal (on Windows, PowerShell), paste the command and press Enter. Say yes when it asks for permission. Windows may ask to restart once. The installer carries on by itself when you sign in again.
 5. **Watch the page.** It shows the installer starting, the computer pairing, and then health checks one by one (Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories, the server), ending with **Ready**.
@@ -324,7 +329,7 @@ Within a minute the card moves to **Build**. A builder works on it, then a revie
 
 ![A card in the middle of a shift](guide/assets/card-live.jpg)
 
-When an agent needs a decision, the card turns **Blocked** and the question appears on your **Desk**. Answer it and work continues. When the card is done, you will find the change on the branch (or pull request) you chose.
+When an agent needs a decision, the card turns **Blocked** and the question appears on your **Desk**. Answer it and work continues. When the card is done, the card says where the change went: *"Your change is live on main"*, or *"Waiting for you to merge the pull request"* if the project works with pull requests.
 
 ![A question waiting on the desk](guide/assets/desk-question.jpg)
 
@@ -394,7 +399,8 @@ Owners and Admins change the order by **dragging** a project by its grip (the do
 
 What you will find there:
 
-- **Repos:** the code the agents work on, and its **working branch**, the branch finished work lands on. Research projects need none.
+- **Repos:** the code the agents work on, with its git host. With expert mode on you also see its **working branch**, the branch finished work lands on. Research projects need none.
+- **How finished work lands:** straight into main after review and test (the default), or as a pull request you approve (4.4).
 - **Team:** who works in the project (see below).
 - **Merging:** the setting **Merge large changes without my approval** (off by default). Read chapter 4.12 before turning it on.
 - **Simultaneous shifts:** an optional cap on how many shifts may run at once in this project.
@@ -437,7 +443,7 @@ Agents belong to the organization, not to a single project. For each agent you d
 
 ![Recommendations on the Agents page](guide/assets/hr-recs.jpg)
 
-**Safety.** Agents run inside a sandbox on the workstation, so they cannot read your whole disk. Some computers cannot offer a sandbox (for example plain Windows). The app then shows an amber warning on the workstation, on each affected agent and in the Hire form, and hiring onto that machine needs an explicit confirmation. Prefer a workstation with a sandbox (Linux, macOS, or Windows with WSL2).
+**Safety.** Agents run inside a sandbox on the workstation, so they cannot read your whole disk. The DevOps engineer is the exception: it works as you (below). Some computers cannot offer a sandbox (for example plain Windows). The app then shows an amber warning on the workstation, on each affected agent and in the Hire form, and hiring onto that machine needs an explicit confirmation. Prefer a workstation with a sandbox (Linux, macOS, or Windows with WSL2).
 
 ![The unsandboxed warning when hiring](guide/assets/dlg-hire-unsandboxed.jpg)
 
@@ -451,7 +457,7 @@ Agents belong to the organization, not to a single project. For each agent you d
 
 Guildwise keeps version control out of your way. In each project's settings, **How finished work lands** has two choices: **Straight into main after review and test** (the default) or **As a pull request I approve**. If the main line is protected on the code host (it refuses direct changes), Guildwise notices, opens a pull request instead, and switches the project to pull requests with a note on the card. The repository's default branch is used as the main line without asking you.
 
-You see plain outcomes instead of branch names: *"Your change is live on main"*, *"Waiting for you to merge the pull request"*, *"Two changes clashed; the DevOps engineer is fixing it"*.
+You see plain outcomes instead of branch names: *"Goes into main after review and test"*, *"Your change is live on main"*, *"Waiting for you to merge the pull request"*. When two changes clash, the DevOps engineer tries to fix it first and leaves a note on the card.
 
 If you know git and want the details, turn on **Expert mode for code changes** in **Settings** (it is per person and off by default; it only changes what you see). It brings back the working-branch fields, the per-card completion action (pull request, push the branch, or merge), branch names and commit hashes, **Mark merged** on the phase page, and the questions about keeping or changing the working branch for a new intake or phase.
 
@@ -664,7 +670,7 @@ Once a reviewer approves, the card moves to **Test**. A tester runs the tests of
 
 ![Setting the risk tier](guide/assets/dlg-risk.jpg)
 
-**Finalize.** The BA completes the card in the way you chose: **PR** (push the branch and open a pull request), **Push branch**, or **Merge** to the working branch (small cards). **A large merge waits for your approval** on the desk, and the card stays in the Finalize column with an "Awaiting your approval" badge.
+**Finalize.** The BA completes the card the way the project's **How finished work lands** says (4.4): straight into main, or as a pull request for you. In expert mode a card can have its own completion action: **PR** (push the branch and open a pull request), **Push branch**, or **Merge** to the working branch. **A large change that would go straight into main waits for your approval** on the desk, and the card stays in the Finalize column with an "Awaiting your approval" badge.
 
 ![A large merge waiting for approval](guide/assets/desk-large-merge.jpg)
 
@@ -681,7 +687,7 @@ After a merge, a **full suite** card runs the entire end-to-end suite once. If i
 **Converting a project.** A project that started as research converts to a delivery project when the questions are answered. Owners and Admins do it in **Project settings, Stage, Convert project** (or the **Convert to project** button on a research project's board). A short dialog asks:
 
 1. **Workflow:** the target, usually Code.
-2. **Repositories:** a workflow that works in code needs at least one. Add one, or **request a new repository** on GitHub, GitLab, Bitbucket or Azure DevOps. The request lands on your desk and your own workstation creates it with your GitHub login when you approve.
+2. **Repositories:** a workflow that works in code needs at least one. Add one, or **request a new GitHub repository**. The request lands on your desk and your own workstation creates it with your GitHub login when you approve. (A new repository on GitLab, Bitbucket or Azure DevOps is created from the project settings instead, 3.6.)
 3. **Open cards:** for cards that run on another workflow, choose **Keep** (they finish on their own workflow) or **Cancel**.
 4. **Hand-over:** the published notes are listed in the project's `PROJECT.md` so every agent that works there reads them.
 
@@ -730,7 +736,7 @@ Only the **Owner** sees **Organization, Billing**. Plans differ only in limits (
 | Business | $149 | 20 | 10 | Unlimited |
 
 - **Signing up.** Choose a plan at **Start free trial**, confirm your email (required), then add a card on the Billing page. The **7-day free trial** starts; the first invoice is charged when it ends, then monthly. A reminder is emailed two days before.
-- **Charged in rand.** The dollar price is converted at the day's exchange rate. Every invoice shows the dollar amount, the rate and the rand charged. We never keep the card number, only a token, the card type, the last four digits and the expiry.
+- **Charged in rand.** The dollar price is converted at the day's exchange rate. Every invoice shows the dollar amount, the rate and the rand charged. We never see or keep the card number, only a secure token from PayFast (the page shows the card simply as *Card*).
 - **Change plan.** Takes effect at once and is prorated for the rest of the month: you pay the difference now, or get a credit on the next invoice. A plan too small for what you use is refused.
 - **Business add-ons.** Add members, workstations or projects (priced per unit). They start with the next billing cycle and never go below the Business base.
 - **Cancel.** The organization stays active until the end of the paid term (or trial), then is paused. **Keep my subscription** takes it back before then.
@@ -739,7 +745,7 @@ Only the **Owner** sees **Organization, Billing**. Plans differ only in limits (
 
 See the help article *Plans and billing*.
 
-### 4.17 Chatting with agents
+### 4.18 Chatting with agents
 
 Click **Chat** in the top bar (or on the Desk), pick an agent and choose **Start chat**. Ask about a card, discuss a blocker, or ask the BA to draft cards. The BA works with your rights, so it can only use projects you are a member of. Conversations are saved, and a chat tied to a project is marked as visible to that project's managers.
 
@@ -749,7 +755,7 @@ Click **Chat** in the top bar (or on the Desk), pick an agent and choose **Start
 
 > **In the app:** Help, "Chat with agents" (`/help/chat-with-agents`).
 
-### 4.18 Cloud workstations: a VPS or a Codespace
+### 4.19 Cloud workstations: a VPS or a Codespace
 
 You do not have to leave a computer switched on. In **Workstations**, **Add a workstation**, choose where the agents run:
 
@@ -841,7 +847,7 @@ The **platform administrator** (also called the **super admin**) runs the Guildw
 
 ### 7.1 First sign-in and two-factor login
 
-A platform account is created on the server with a command (see `docs/DEPLOY.md`). At your first sign-in the app holds you at the two-factor setup: type your password, scan the QR code, type the first code and **save the ten recovery codes**. Two-factor login is mandatory for platform accounts. If you lose your password, an operator resets it on the server (`superadmin-reset-password`, with `--reset-two-factor` if the second factor is lost too).
+A platform account is created on the server with a command (see `docs/DEPLOY.md`). At your first sign-in the app holds you at the two-factor setup: type your password, scan the QR code, type the first code and **save the ten recovery codes**. Two-factor login is mandatory for platform accounts. If you lose your password, use **Forgot your password?** on the sign-in page like everyone else (your two-factor code is still asked), or another platform administrator can send you a reset link (7.4). If the second factor is lost too, an operator resets it on the server (`superadmin-reset-password --reset-two-factor`).
 
 ![The platform area, Organizations](guide/assets/platform-orgs.jpg)
 
@@ -855,12 +861,12 @@ On the detail page you can:
 
 - **Suspend** an organization (unpaid, trial over, licence date passed). Running shifts finish and nothing new starts. Scheduled runs are skipped and recorded. A banner explains it. Only the Owner can still sign in, with read access plus organization settings and members. **Reactivate** it and everything resumes where it stopped.
 - **Cancel** an organization.
-- Change the **plan, limits, licence date, grace period and feature switches** (Interests, Integrations and intake, Outbound updates, Research, Phases, Browser tools, Custom roles and workflows). Every change needs a **reason**, and it goes into the audit log. Today there is one plan, **Founding**, with no limits.
+- Change the **plan, limits, licence date, grace period and feature switches** (Interests, Integrations and intake, Outbound updates, Research, Phases, Browser tools, Custom roles and workflows). Every change needs a **reason**, and it goes into the audit log. Organizations you invite start on **Founding** (free, no limits) until their Owner chooses a paid plan; self-service sign-ups use **Starter**, **Team** or **Business** (4.17); **Unlimited** is assigned from the organization's **Billing** panel.
 - **Transfer ownership** to one of the organization's Admins, for example when the Owner left the company. This needs a written reason and is audited.
 
 ### 7.3 Invitations: starting a new organization
 
-**Invitations** is where a new customer begins. Type the **Owner's email** and the **organization name** and click **Send invitation**. The invitee receives a link, chooses a name and password, and becomes the Owner of the new organization (they may rename it). Invitations can be resent or revoked from the **All invitations** list.
+Most new customers sign up themselves on the website (3.1). **Invitations** is for starting an organization for someone yourself. Type the **Owner's email** and the **organization name** and click **Send invitation**. The invitee receives a link, chooses a name and password, and becomes the Owner of the new organization (they may rename it). Invitations can be resent or revoked from the **All invitations** list.
 
 ![Inviting a new organization](guide/assets/platform-invitations.jpg)
 
@@ -877,6 +883,8 @@ On the detail page you can:
 **Everything that lands on this console is emailed** to the support address(es): new requests, Contact us messages and a person's reply or reopening on a request, always. Two more notifications are switches under the addresses, off until you turn them on: **New organizations and sign-ups** (an organization is created or an invitation is accepted) and **Platform audit events** (one mail per audit entry; switching it on starts from now, the history is not mailed). Each event sends one mail.
 
 At the top, set the **notification addresses** (one address or several, separated by commas). The **support address** receives new requests from signed-in users and every follow-up; the **Contact us address** receives the messages visitors send from the public Contact us page, and falls back to the support address when empty. Both are emailed with the writer's address as Reply-To, so your team can work from its own mailbox as well. The person who wrote in gets an acknowledgement with their reference, what happens next and when to expect an answer (within 24 to 48 hours).
+
+The **Landing-page assistant** panel on the same page turns the public **Ask Guildwise** chat on or off and shows today's messages and spend against the daily budget. It is paid by Guildwise, answers in English from the reviewed product facts (`docs/assistant/product-facts.md`) and an outline of the help articles, and keeps no conversations.
 
 ![The Support inbox](guide/assets/platform-support.jpg)
 
@@ -914,9 +922,9 @@ Four situations you will meet again and again, start to finish.
 2. **Check the card.** Open it. If the draft is not quite right, **Edit** it (possible while it is a draft or queued and not yet claimed). Click **Specify** when it reads well.
 3. **Let the team work.** The builder builds, the reviewer reviews (sending the work back with comments if needed, which shows as *rework*), the tester tests. Open **Timeline** and **Handoffs** any time to see why.
 4. **Answer questions.** If the builder asks "should the CSV include cancelled orders?", the question reaches your desk with options and a recommendation. Pick one and add it to the ledger as a **decision**, and nobody will ask again.
-5. **Finalize.** For a small card the BA pushes the branch or opens a pull request as you chose. A large change waits on your desk for **Approve merge**.
+5. **Finalize.** The change goes into main (or arrives as a pull request, if the project works that way). A large change waits on your desk for **Approve merge**.
 6. **Group it into a phase** if several cards ship together. When they are all merged, the **Phase done** item arrives with a report. Approve the **Deploy** and **Regression run** follow-ups and watch **Phase results**.
-7. **Done.** The card is in the Done column and the change is in your working branch (and, after the phase, deployed and tested).
+7. **Done.** The card is in the Done column and says *"Your change is live on main"* (and, after the phase, it is deployed and tested).
 
 ![A finished card with its timeline](guide/assets/card-detail.jpg)
 
@@ -1008,7 +1016,7 @@ A banner "This project has used its monthly budget" and a desk item mean the pro
 
 ### 9.5 A missing working branch
 
-Symptom: the DevOps engineer does not commit or pull in a repository, and the desk asks "Which branch is the working branch?" (or the project settings show *not confirmed*). Answer the question on the desk, or set the branch in **Project settings, Repositories, Change**. The DevOps engineer commits and pushes right away. If the branch you named does not exist yet, the runner creates it from the repository's default branch and pushes it when the next card starts (the card shows "Created working branch X from Y"); you only get this question when it cannot tell the default branch or the push is refused. See 4.4.
+Guildwise uses the repository's default branch by itself, so you rarely see this. Symptom: the DevOps engineer does not commit or pull in a repository, and the desk asks "Which branch is the working branch?" (or the project settings show *not confirmed*). Answer the question on the desk, or set the branch in **Project settings, Repositories, Change**. The DevOps engineer commits and pushes right away. If the branch you named does not exist yet, the runner creates it from the repository's default branch and pushes it when the next card starts (the card shows "Created working branch X from Y"); you only get this question when it cannot tell the default branch or the push is refused. See 4.4.
 
 **Git hosts.** Every repository has a git host, detected from its address and changeable by the project owner (Project settings, Repositories, Change). One project can mix hosts. For pull requests, listing your repositories and creating new ones, the workstation must be connected to that host: the Workstations page shows Connected or Not connected per host, and **Connect** gives the one command to run on that workstation (`aom-runner git-connect github`, `gitlab`, `bitbucket-cloud` or `azure-devops`); your login or token stays on that computer and the server only learns whether it works. The DevOps engineer can walk you through it. A plain git server needs no connection but gets no pull requests: the branch is pushed and the desk tells you to open the request yourself. If the working branch is protected on the host, finishing a card opens a pull request instead, says so on the card, and the project switches to pull requests for new work.
 
@@ -1055,14 +1063,17 @@ We answer by email, and the answer also appears under **Help, My requests**, whe
 
 ## 11. Frequently asked questions
 
+**Is Guildwise HQ hosted, or do I install it?**
+It is a hosted service: you sign up on the website (3.1). Only the runner goes on your workstation, your own computer, a VPS or a GitHub Codespace, and your code stays in your own repositories.
+
 **Do the agents see my whole computer?**
-No. They run inside a sandbox on the workstation, with access to the repositories and folders they need. Warnings appear if a workstation cannot provide a sandbox.
+No. They run inside a sandbox on the workstation, with access to the repositories and folders they need. Warnings appear if a workstation cannot provide a sandbox. The DevOps engineer is the exception: it works as you, so only give it a machine you are happy to hand it (4.4).
 
 **Where is my code stored?**
-On your workstations and in your git remotes, exactly as before. The Guildwise HQ website holds the board, cards, desk, ledger, and records of what the agents did. Passwords and tokens for Jira, GitHub and Claude stay on your workstation.
+On your workstations and in your git remotes, exactly as before. The Guildwise HQ website holds the board, cards, desk, ledger, and records of what the agents did. Passwords and tokens for Jira, your git hosts and Claude stay on your workstation.
 
 **Can an agent change my main branch by itself?**
-Only for small cards you chose to **merge**, and only into the working branch you confirmed. Large merges wait for your approval, unless you turned that off in the project settings.
+Only after review and test, and only if the project's **How finished work lands** is *straight into main* (the default). Choose *as a pull request I approve* to merge everything yourself. Large changes wait for your approval either way, unless you turned that off in the project settings. If main is protected on your git host, a pull request is opened instead.
 
 **What does it cost?**
 Guildwise HQ is $19 (Starter), $49 (Team) or $149 (Business) a month with a 7-day free trial, in US dollars excluding VAT, charged in rand (4.17). The AI work is billed by Claude: through your subscription or your API key. The app estimates the spend (4.6) and you set budgets.
@@ -1111,11 +1122,11 @@ Press **?** (when not typing in a field) for the list of shortcuts. **Ctrl+K** o
 | Hire or change agents | **Agents** (Organization) |
 | See who answers whom | **Org chart** |
 | Design roles and workflows | **Roles & workflows** |
-| Add a computer | **Workstations** |
+| Add a computer, a VPS or a Codespace | **Workstations** |
 | See how the team performs | **Metrics** |
 | See and control spend | **Costs** (Owners and Admins) |
 | Time zone, picture, two-factor, BA reporting, expert mode for code changes, weekly blog digest | **Settings** (your avatar menu, Your settings) |
-| Members, invitations, plan | **Organization** (bottom of the sidebar) |
+| Members, invitations, plan, billing | **Organization** (bottom of the sidebar) |
 | Help, glossary, contact us | **Help** |
 
 ## Appendix B. More documentation
