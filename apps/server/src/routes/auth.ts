@@ -61,7 +61,7 @@ export function setSessionCookie(ctx: Ctx, reply: { setCookie: Function }, token
 }
 
 /** A password (and second factor) accepted: the session cookie, the audit entry of a super admin, and `me`. */
-async function startSession(
+export async function startSession(
   ctx: Ctx,
   reply: { setCookie: Function },
   userId: string,

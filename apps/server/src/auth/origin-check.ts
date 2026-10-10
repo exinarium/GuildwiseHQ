@@ -9,6 +9,7 @@ const EXEMPT_PREFIXES = [
   '/api/test/',
   // The agent API is authenticated by a Bearer key only and ignores session cookies, so there is nothing to forge.
   '/api/v1/',
+  '/api/billing/payfast/itn',
 ];
 
 /**
@@ -31,6 +32,8 @@ const isUnsubscribePost = (url: string): boolean => /^\/blog\/unsubscribe\//.tes
 export function checkContentType(req: FastifyRequest): void {
   if (SAFE.has(req.method)) return;
   if (isUnsubscribePost(req.url)) return;
+  // PayFast's notification is a form post.
+  if ((req.url.split('?')[0] ?? '') === '/api/billing/payfast/itn') return;
   const ct = req.headers['content-type'];
   const hasBody = req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0';
   const chunked = req.headers['transfer-encoding'] !== undefined;

@@ -51,6 +51,32 @@ export const PLANS = {
     limits: NO_LIMITS,
     features: allOn(),
   },
+  // Billed plans (docs/design/open-questions-2026-10-09.md, Billing). The DB table `billing_plans` holds the
+  // editable prices and limits and wins over `limits` here; these entries give the name and the (identical) features.
+  starter: {
+    name: 'Starter',
+    description: 'For one person or a very small team.',
+    limits: { maxMembers: 2, maxWorkstations: 1, maxAgents: null, maxProjects: 3 },
+    features: allOn(),
+  },
+  team: {
+    name: 'Team',
+    description: 'For a small team with several workstations.',
+    limits: { maxMembers: 5, maxWorkstations: 3, maxAgents: null, maxProjects: 10 },
+    features: allOn(),
+  },
+  business: {
+    name: 'Business',
+    description: 'For a larger team; members, workstations and projects can be added.',
+    limits: { maxMembers: 20, maxWorkstations: 10, maxAgents: null, maxProjects: null },
+    features: allOn(),
+  },
+  unlimited: {
+    name: 'Unlimited',
+    description: 'Assigned by the platform administrator: no billing, no limits.',
+    limits: NO_LIMITS,
+    features: allOn(),
+  },
 } as const satisfies Record<string, PlanDefinition>;
 
 export type PlanKey = keyof typeof PLANS;

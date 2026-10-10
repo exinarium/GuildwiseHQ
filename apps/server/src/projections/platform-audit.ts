@@ -385,6 +385,15 @@ export const platformAuditProjectors: Record<string, Projector> = {
     const p = ev<'SuperAdminSignedIn'>(e).payload;
     return { action: e.event.type, targetUserId: p.userId, summary: 'Signed in', meta: p.meta };
   }),
+  PlatformBillingChanged: always(async (_tx, e) => {
+    const p = ev<'PlatformBillingChanged'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: p.what === 'plan' ? `Edited the ${p.key ?? ''} plan: ${p.note}` : `Edited the billing settings: ${p.note}`,
+      details: { before: p.before, after: p.after, note: p.note },
+      meta: p.meta,
+    };
+  }),
   PlatformOrgViewed: always(async (tx, e) => {
     const p = ev<'PlatformOrgViewed'>(e).payload;
     return {

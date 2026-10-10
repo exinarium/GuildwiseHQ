@@ -7,12 +7,13 @@ const insertUser = (
   u: { userId: string; email: string; displayName: string; passwordHash: string; role?: string },
   at: Date,
   kind: 'user' | 'super_admin' = 'user',
+  verified = true,
 ) =>
   exec(
     tx,
-    `INSERT INTO users (id, email, display_name, password_hash, legacy_role, kind, status, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,'active',$7)`,
-    [u.userId, u.email, u.displayName, u.passwordHash, u.role ?? null, kind, at],
+    `INSERT INTO users (id, email, display_name, password_hash, legacy_role, kind, status, created_at, email_verified_at)
+     VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8)`,
+    [u.userId, u.email, u.displayName, u.passwordHash, u.role ?? null, kind, at, verified ? at : null],
   );
 
 export const userProjectors: Record<string, Projector> = {
@@ -79,7 +80,11 @@ export const userProjectors: Record<string, Projector> = {
   /** An account created by accepting a new-organization or organization-member invitation. */
   UserRegistered: async (tx, e) => {
     const p = (e.event as EventOf<'UserRegistered'>).payload;
-    await insertUser(tx, p, e.createdAt);
+    await insertUser(tx, p, e.createdAt, 'user', p.unverified !== true);
+  },
+  UserEmailVerified: async (tx, e) => {
+    const p = (e.event as EventOf<'UserEmailVerified'>).payload;
+    await exec(tx, 'UPDATE users SET email_verified_at = COALESCE(email_verified_at, $2) WHERE id=$1', [p.userId, e.createdAt]);
   },
   SuperAdminCreated: async (tx, e) => {
     const p = (e.event as EventOf<'SuperAdminCreated'>).payload;

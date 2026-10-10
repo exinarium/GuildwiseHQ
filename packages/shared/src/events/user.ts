@@ -50,8 +50,11 @@ export const userEvents = [
       displayName: z.string().min(1),
       passwordHash: z.string().min(1),
       invitationId: Id.optional(),
+      /** Self-service sign-up: the email counts as verified only after `UserEmailVerified`. */
+      unverified: z.boolean().optional(),
     }),
   ),
+  defineEvent('UserEmailVerified', z.object({ userId: Id })),
   /** The platform account: no organization, platform routes only. Created by the CLI only. */
   defineEvent(
     'SuperAdminCreated',

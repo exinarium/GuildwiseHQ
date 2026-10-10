@@ -28,7 +28,7 @@ export const orgEvents = [
       trialEndsAt: IsoDate.optional(),
       licenseExpiresAt: IsoDate.optional(),
       features: Features.default({}),
-      createdVia: z.enum(['legacy_migration', 'invitation', 'cli']),
+      createdVia: z.enum(['legacy_migration', 'invitation', 'cli', 'signup']),
       invitationId: Id.optional(),
     }),
   ),
@@ -139,4 +139,16 @@ export const orgEvents = [
   /** Owner decision 7: the Owner can require two-factor login of every member of the organization. */
   defineEvent('OrgTwoFactorPolicySet', z.object({ orgId: Id, required: z.boolean(), by: Id })),
   defineEvent('PlatformOrgViewed', z.object({ orgId: Id, meta: EventMetaSchema })),
+  /** The super admin edited the plan catalogue or the billing settings (add-on prices, VAT, exchange-rate override). */
+  defineEvent(
+    'PlatformBillingChanged',
+    z.object({
+      what: z.enum(['plan', 'settings']),
+      key: z.string().max(60).optional(),
+      before: z.record(z.string(), z.unknown()),
+      after: z.record(z.string(), z.unknown()),
+      note: z.string().max(500),
+      meta: EventMetaSchema,
+    }),
+  ),
 ] as const;

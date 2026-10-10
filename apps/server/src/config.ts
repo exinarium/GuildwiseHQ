@@ -48,6 +48,20 @@ const EnvSchema = z.object({
   /** LinkedIn app credentials, only needed to renew the organization token with its refresh token. */
   AOM_LINKEDIN_CLIENT_ID: z.string().optional(),
   AOM_LINKEDIN_CLIENT_SECRET: z.string().optional(),
+  /** Billing: renewals, retries, expiry notices and trial reminders run on the scheduler. */
+  AOM_BILLING_JOBS: bool(true),
+  /** `auto`: PayFast when the merchant id and key are set, else the fake provider (local and UAT). */
+  AOM_BILLING_PROVIDER: z.enum(['auto', 'fake', 'payfast']).default('auto'),
+  AOM_PAYFAST_MERCHANT_ID: z.string().optional(),
+  AOM_PAYFAST_MERCHANT_KEY: z.string().optional(),
+  AOM_PAYFAST_PASSPHRASE: z.string().optional(),
+  AOM_PAYFAST_SANDBOX: bool(true),
+  /** The ZAR amount charged (and refunded) to save a card with PayFast tokenization. PayFast's minimum is R5.00. */
+  AOM_PAYFAST_CARD_CHECK_ZAR: z.coerce.number().min(5).max(1000).default(5),
+  /** Exchange rate source: a URL returning `{ rates: { ZAR } }` (default open.er-api.com); `off` uses only the fallback. */
+  AOM_FX_URL: z.string().default('https://open.er-api.com/v6/latest/USD'),
+  /** Used when the rate source is down and no daily rate is cached. */
+  AOM_FX_FALLBACK_ZAR: z.coerce.number().positive().default(18.5),
   LOG_LEVEL: z.string().default('info'),
 });
 
@@ -97,6 +111,17 @@ export interface Config {
   blogDigest: boolean;
   linkedinClientId: string | undefined;
   linkedinClientSecret: string | undefined;
+  billingJobs: boolean;
+  billingProvider: 'auto' | 'fake' | 'payfast';
+  payfast: {
+    merchantId: string | undefined;
+    merchantKey: string | undefined;
+    passphrase: string | undefined;
+    sandbox: boolean;
+    cardCheckZar: number;
+  };
+  fxUrl: string;
+  fxFallbackZar: number;
   logLevel: string;
   /** Cookie `Secure` flag: true when the public origin is https. */
   secureCookies: boolean;
@@ -137,6 +162,17 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     blogDigest: e.AOM_BLOG_DIGEST,
     linkedinClientId: e.AOM_LINKEDIN_CLIENT_ID || undefined,
     linkedinClientSecret: e.AOM_LINKEDIN_CLIENT_SECRET || undefined,
+    billingJobs: e.AOM_BILLING_JOBS,
+    billingProvider: e.AOM_BILLING_PROVIDER,
+    payfast: {
+      merchantId: e.AOM_PAYFAST_MERCHANT_ID?.trim() || undefined,
+      merchantKey: e.AOM_PAYFAST_MERCHANT_KEY?.trim() || undefined,
+      passphrase: e.AOM_PAYFAST_PASSPHRASE?.trim() || undefined,
+      sandbox: e.AOM_PAYFAST_SANDBOX,
+      cardCheckZar: e.AOM_PAYFAST_CARD_CHECK_ZAR,
+    },
+    fxUrl: e.AOM_FX_URL,
+    fxFallbackZar: e.AOM_FX_FALLBACK_ZAR,
     logLevel: e.LOG_LEVEL,
     secureCookies: publicOrigin.startsWith('https://'),
   };

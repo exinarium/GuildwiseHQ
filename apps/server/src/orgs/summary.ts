@@ -2,6 +2,7 @@ import {
   type ActiveOrg,
   type Banner,
   effectiveFeatures,
+  isBillingReason,
   isOrgManager,
   type OrgLimits,
   type OrgRole,
@@ -11,7 +12,7 @@ import {
 } from '@aom/shared';
 import type { OrgRow } from '../auth/org-context.ts';
 import type { Ctx } from '../context.ts';
-import { iso } from '../db/sql.ts';
+import { iso, one } from '../db/sql.ts';
 import { limitState, orgLimits, orgUsage } from './limits.ts';
 
 const DAY = 24 * 3600_000;
@@ -35,7 +36,23 @@ export function orgBanners(
   usage: OrgUsage,
 ): Banner[] {
   const out: Banner[] = [];
-  if (org.status === 'suspended') {
+  if (org.status === 'suspended' && isBillingReason(org.status_reason)) {
+    const owner = role === 'owner';
+    const what = org.status_reason?.slice('billing:'.length);
+    const text: Record<string, string> = {
+      setup: `Add a card to start the 7-day free trial of ${org.name}.`,
+      payment_failed: `${org.name} is paused because the last payment failed.`,
+      cancelled: `${org.name} is paused because the subscription was cancelled.`,
+      admin: `${org.name} is paused by the platform administrator.`,
+    };
+    out.push({
+      kind: 'suspended',
+      severity: 'danger',
+      audience: 'all',
+      message: `${text[what ?? ''] ?? `${org.name} is paused.`} Agents are not picking up work and only the Owner can sign in. ${owner ? 'Open Billing to resubscribe.' : 'Ask the Owner to resubscribe.'}`,
+      ...(owner ? { link: '/settings/org?tab=billing' } : {}),
+    });
+  } else if (org.status === 'suspended') {
     const why =
       org.status_reason === 'trial_ended'
         ? 'the trial ended'
@@ -121,7 +138,7 @@ export async function activeOrgDto(ctx: Ctx, org: OrgRow, role: OrgRole): Promis
     role,
     status: org.status,
     plan: org.plan,
-    planName: planDefinition(org.plan).name,
+    planName: (await one(ctx.pool, 'SELECT name FROM billing_plans WHERE key=$1', [org.plan]))?.name ?? planDefinition(org.plan).name,
     features: effectiveFeatures(org.plan, org.features),
     ...(manager
       ? {

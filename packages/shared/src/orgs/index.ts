@@ -30,7 +30,7 @@ export type OrgStatus = z.infer<typeof OrgStatusSchema>;
 export const isOrgOperational = (status: OrgStatus | string): boolean =>
   status === 'trial' || status === 'active';
 
-export const ORG_CREATED_VIA = ['legacy_migration', 'invitation', 'cli'] as const;
+export const ORG_CREATED_VIA = ['legacy_migration', 'invitation', 'cli', 'signup'] as const;
 
 export const ORG_STATUS_LABEL: Record<OrgStatus, string> = {
   trial: 'Trial',
@@ -46,12 +46,17 @@ export const ORG_ROLE_LABEL: Record<OrgRole | 'guest', string> = {
 };
 
 /** Why an organization is in its status; free text is allowed for manual changes. */
-export const STATUS_REASONS = ['manual', 'trial_ended', 'license_expired', 'billing'] as const;
+export const STATUS_REASONS = ['manual', 'trial_ended', 'license_expired', 'billing'] as const
+
+/** Billing pauses use `billing` or `billing:<why>` as the status reason (see apps/server/src/billing). */
+export const isBillingReason = (r: string | null | undefined): boolean => r === 'billing' || !!r?.startsWith('billing:');
 
 export const BannerSchema = z.object({
-  kind: z.enum(['suspended', 'cancelled', 'trial_ending', 'license_ending', 'over_limit', 'guest_view']),
+  kind: z.enum(['suspended', 'cancelled', 'trial_ending', 'license_ending', 'over_limit', 'guest_view', 'billing']),
   severity: z.enum(['danger', 'warning', 'info']),
   message: z.string(),
+  /** An in-app path the banner links to (the Owner's billing page for a paused organization). */
+  link: z.string().optional(),
   /** Banners marked `managers` are only returned to the Owner and Admins. */
   audience: z.enum(['all', 'managers']).default('all'),
 });

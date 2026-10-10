@@ -10,6 +10,7 @@ import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
 import { socialTick } from '../commands/social.ts';
 import type { Ctx } from '../context.ts';
+import { type BillingTickResult, billingTick } from '../billing/engine.ts';
 import { licensingTick } from '../orgs/licensing.ts';
 
 const TICK_MS = 15_000;
@@ -23,6 +24,7 @@ const LICENSING_MS = 5 * 60_000;
 export class Scheduler {
   private timer: NodeJS.Timeout | null = null;
   private licensingTimer: NodeJS.Timeout | null = null;
+  private billingTimer: NodeJS.Timeout | null = null;
   private chain: Promise<unknown> = Promise.resolve();
   private stopped = false;
   private kicked: NodeJS.Timeout | null = null;
@@ -38,6 +40,11 @@ export class Scheduler {
     this.timer.unref();
     this.licensingTimer = setInterval(() => void this.runLicensing().catch(() => {}), LICENSING_MS);
     this.licensingTimer.unref();
+    if (this.ctx.config.billingJobs) {
+      this.billingTimer = setInterval(() => void this.runBilling().catch(() => {}), LICENSING_MS);
+      this.billingTimer.unref();
+      void this.runBilling().catch((err) => this.ctx.log.error({ err }, 'billing tick failed'));
+    }
     this.unsubscribe = this.ctx.store.subscribe(() => this.kickTriggers());
     void this.runLicensing().catch((err) => this.ctx.log.error({ err }, 'licensing tick failed'));
     void this.run().catch((err) => this.ctx.log.error({ err }, 'scheduler failed'));
@@ -65,6 +72,15 @@ export class Scheduler {
   runLicensing(): Promise<{ suspended: number; warned: number }> {
     if (this.stopped) return Promise.resolve({ suspended: 0, warned: 0 });
     const next = this.chain.then(() => licensingTick(this.ctx));
+    this.chain = next.catch(() => {});
+    return next;
+  }
+
+  /** Renewals, retries, pauses, expiry notices and trial reminders (idempotent; AOM_BILLING_JOBS switches the timer off). */
+  runBilling(): Promise<BillingTickResult> {
+    const none: BillingTickResult = { invoices: 0, charged: 0, failed: 0, paused: 0, ended: 0, notices: 0 };
+    if (this.stopped) return Promise.resolve(none);
+    const next = this.chain.then(() => billingTick(this.ctx));
     this.chain = next.catch(() => {});
     return next;
   }
@@ -123,6 +139,7 @@ export class Scheduler {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     if (this.licensingTimer) clearInterval(this.licensingTimer);
+    if (this.billingTimer) clearInterval(this.billingTimer);
     if (this.kicked) clearTimeout(this.kicked);
     this.unsubscribe?.();
     await this.chain.catch(() => {});

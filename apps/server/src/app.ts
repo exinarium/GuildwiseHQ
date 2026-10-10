@@ -84,6 +84,8 @@ import { vaultRoutes } from './routes/vaults.ts';
 import { workstationRoutes } from './routes/workstations.ts';
 import { RunnerGateway } from './runner-gateway/gateway.ts';
 import { RunnerRegistry } from './runner-gateway/registry.ts';
+import { createBillingRuntime } from './billing/runtime.ts';
+import { billingRoutes } from './routes/billing.ts';
 import { Scheduler } from './scheduler/scheduler.ts';
 
 export interface BuildOptions {
@@ -339,6 +341,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(blogPlatformRoutes(ctx));
   await app.register(blogApiRoutes(ctx));
   await app.register(blogPublicRoutes(ctx));
+  await app.register(billingRoutes(ctx));
 
   // Gateways: runner WS (/api/runner/ws) and browser WS (/api/ws).
   const runners = new RunnerRegistry();
@@ -351,6 +354,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   Object.assign(ctx.services, { runners, gateway, browser, dispatcher, reaper, scheduler, reporter });
   ctx.services.cloud = { ssh: realSshConnector, github: createGithubApi(), pending: new Set() };
   ctx.services.chat = new ChatRelay(ctx);
+  ctx.services.billing = createBillingRuntime(config);
   await app.register(websocket, {
     options: {
       maxPayload: 8 * 1024 * 1024,
@@ -372,6 +376,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
       await ctx.services.reaper.run();
       await ctx.services.scheduler.run();
       await ctx.services.scheduler.runLicensing();
+      await ctx.services.scheduler.runBilling();
       await ctx.services.reporter.run();
       ctx.services.dispatcher.trigger();
       return { now: clock.now().toISOString(), offsetMs: clock.offsetMs };
