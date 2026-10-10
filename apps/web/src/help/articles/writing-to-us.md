@@ -26,7 +26,7 @@ To send a message:
 
 Your name, email and organization are included so we can answer and look at your account.
 
-Right after you send it you get a confirmation email with your reference (for example SUP-1001), what happens next and when to expect an answer (within two working days).
+Right after you send it you get a confirmation email with your reference (for example SUP-1001), what happens next and when to expect an answer (within 24 to 48 hours).
 
 ## What we send with your message {#what-we-receive}
 

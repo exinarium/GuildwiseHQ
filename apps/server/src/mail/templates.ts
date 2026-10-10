@@ -1,4 +1,4 @@
-import { brandedMail, esc, type MailBlock, oneLine, PRODUCT, SLOGAN } from './layout.ts';
+import { brandedMail, esc, type MailBlock, oneLine, PRODUCT, SLOGAN, TEAM } from './layout.ts';
 import type { MailMessage } from './mailer.ts';
 
 // Every template builds its content as data and hands it to `brandedMail` (layout.ts), which owns the look, the
@@ -6,7 +6,7 @@ import type { MailMessage } from './mailer.ts';
 // Whoever a mail names is a display name, an organization or the team: pass `senderName(...)`, never a login.
 
 /** How soon the team answers; stated in the acknowledgement mail. */
-export const SUPPORT_RESPONSE_TIME = 'within two working days';
+export const SUPPORT_RESPONSE_TIME = 'within 24 to 48 hours';
 
 const expiry = (d: Date) => d.toUTCString();
 
@@ -250,7 +250,7 @@ export function supportReceivedMail(opts: {
     origin: opts.origin,
     body: [
       `Hello ${opts.name},`,
-      `Thank you for contacting ${PRODUCT} support. Your message is with us.`,
+      `Thank you for contacting ${PRODUCT} support. We have received your request and you should get a response ${SUPPORT_RESPONSE_TIME}.`,
       {
         facts: [
           ['Reference', opts.ref],
@@ -289,8 +289,31 @@ export function supportReplyMail(opts: {
       { quote: opts.body },
       ...(opts.closed ? ['We have closed this request. Write to us again if you need anything else.'] : []),
       ...(opts.link ? [] : ['Reply to this email to answer.']),
+      TEAM,
     ],
     ...(opts.link ? { cta: { label: 'Answer in Help, My requests', url: opts.link } } : {}),
     note: `${PRODUCT} support. ${SLOGAN}`,
+  });
+}
+
+/** A notice for the platform (support) address about something that landed on the super admin console. */
+export function platformNoticeMail(opts: {
+  to: string;
+  subject: string;
+  heading: string;
+  facts: Array<[string, string]>;
+  link: string;
+  linkLabel: string;
+  origin: string;
+}): MailMessage {
+  return brandedMail({
+    to: opts.to,
+    subject: oneLine(opts.subject),
+    preheader: oneLine(opts.facts.map(([k, v]) => `${k}: ${v}`).join(', ')).slice(0, 110),
+    heading: opts.heading,
+    origin: opts.origin,
+    body: [{ facts: opts.facts.map(([k, v]) => [k, oneLine(v)] as [string, string]) }],
+    cta: { label: opts.linkLabel, url: opts.link },
+    note: 'You get this because notifications for the super admin console are switched on (Support page).',
   });
 }

@@ -17,11 +17,12 @@ import { iso, one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { senderName } from '../mail/layout.ts';
+import { senderName, TEAM } from '../mail/layout.ts';
 import { newOrgInvitationMail } from '../mail/templates.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { orgScope, userScope } from './common.ts';
 import { hireDevopsForOrgIn } from './devops.ts';
+import { notifySignup } from './platform-notify.ts';
 
 const INVITE_TTL_MS = 7 * 24 * 3600_000;
 const ADMIN_SCOPE = { orgId: null, projectId: null, audience: 'admin' } as const;
@@ -136,15 +137,7 @@ export async function inviteNewOrg(
       { tx },
     );
   });
-  await sendNewOrgMail(
-    ctx,
-    input.email,
-    token,
-    input.proposedOrgName,
-    describeTerms(terms),
-    senderName({ displayName: admin.user.displayName, email: admin.user.email }),
-    expiresAt,
-  );
+  await sendNewOrgMail(ctx, input.email, token, input.proposedOrgName, describeTerms(terms), TEAM, expiresAt);
   return invitationId;
 }
 
@@ -217,7 +210,7 @@ export async function resendNewOrgInvitation(
     token,
     inv.proposed_org_name,
     describeTerms((inv.org_terms ?? {}) as Parameters<typeof describeTerms>[0]),
-    senderName({ displayName: admin.user.displayName, email: admin.user.email }),
+    TEAM,
     expiresAt,
   );
 }
@@ -448,7 +441,7 @@ export async function acceptInvitation(
 ): Promise<string> {
   const passwordHash = await hashPassword(input.password);
   const userId = randomUUID();
-  await withAppendTx(ctx.pool, async (tx) => {
+  const accepted = await withAppendTx(ctx.pool, async (tx) => {
     // Single use: the status flip happens in this transaction, guarded by the row lock.
     const inv = await lockPending(tx, ctx, token);
     if (!inv) throw notFound('invitation is invalid or expired');
@@ -463,6 +456,16 @@ export async function acceptInvitation(
       newUser: { email: inv.email, passwordHash },
     });
     await ctx.store.append(events, { tx });
+    return {
+      kind: inv.kind as string,
+      orgName: (input.orgName || inv.proposed_org_name || inv.org_name || null) as string | null,
+    };
+  });
+  await notifySignup(ctx, {
+    kind: accepted.kind,
+    email: (await one(ctx.pool, 'SELECT email FROM users WHERE id=$1', [userId]))?.email ?? '',
+    displayName: input.displayName,
+    orgName: accepted.orgName,
   });
   return userId;
 }
@@ -474,7 +477,7 @@ export async function acceptInvitationExisting(
   token: string,
   input: { orgName?: string | undefined },
 ): Promise<string> {
-  return withAppendTx(ctx.pool, async (tx) => {
+  const r = await withAppendTx(ctx.pool, async (tx) => {
     const inv = await lockPending(tx, ctx, token);
     if (!inv) throw notFound('invitation is invalid or expired');
     if (inv.kind === 'legacy')
@@ -502,6 +505,17 @@ export async function acceptInvitationExisting(
     await ctx.store.append(events, { tx });
     // Their workstations get this organization's DevOps engineer.
     await hireDevopsForOrgIn(ctx, tx, session.user.id, orgId);
-    return orgId;
+    return {
+      orgId,
+      kind: inv.kind as string,
+      orgName: (input.orgName || inv.proposed_org_name || inv.org_name || null) as string | null,
+    };
   });
+  await notifySignup(ctx, {
+    kind: r.kind,
+    email: session.user.email,
+    displayName: session.user.displayName,
+    orgName: r.orgName,
+  });
+  return r.orgId;
 }

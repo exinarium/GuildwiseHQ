@@ -900,7 +900,7 @@ Where the build differs from the text above (decisions of the task win):
 | Support From | `AOM_SUPPORT_FROM`: the autoresponder and the super admin's replies come from the support address (unset: unchanged); findings and DNS checklist in `docs/design/support-mail-from.md` |
 | Tests | server `password-reset`, `mail-layout`, `support`; web `password-reset`, `support` |
 
-Decisions: platform (super admin) accounts are excluded from self-service reset and from the admin-sent link (they are managed on the server, as for deactivation); organization Owners/Admins cannot send reset links (accounts are global, and the Owner can already reset 2FA); the reset never signs in; a reset spends pending two-factor challenges; response time is "within two working days"; the logo is the existing PNG mark (apple-touch-icon) because SVG is not safe in mail.
+Decisions: platform (super admin) accounts are excluded from self-service reset and from the admin-sent link (they are managed on the server, as for deactivation); organization Owners/Admins cannot send reset links (accounts are global, and the Owner can already reset 2FA); the reset never signs in; a reset spends pending two-factor challenges; response time is "within 24 to 48 hours" (owner decision); the logo is the existing PNG mark (apple-touch-icon) because SVG is not safe in mail.
 
 ## Built: installer fixes and several pairings per runner (overnight, 2026-10-09)
 

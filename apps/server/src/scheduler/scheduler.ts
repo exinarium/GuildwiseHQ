@@ -1,6 +1,7 @@
 import { evaluateAllBudgets } from '../commands/budgets.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
+import { auditMailTick } from '../commands/platform-notify.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
 import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
@@ -65,6 +66,7 @@ export class Scheduler {
       await evaluateAllBudgets(this.ctx).catch((err) => this.ctx.log.error({ err }, 'budget check failed'));
       await this.interests();
       await this.triggers();
+      await auditMailTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'audit mail failed'));
       return fired;
     });
     this.chain = next.catch(() => {});

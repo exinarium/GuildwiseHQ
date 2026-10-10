@@ -543,11 +543,8 @@ export async function inviteOrgMember(
     token,
     a.org.name,
     input.role,
-    senderName({
-      displayName: a.session.user.displayName,
-      email: a.session.user.email,
-      orgName: a.org.name,
-    }),
+    // The inviter's display name; the mail names the organization separately.
+    senderName({ displayName: a.session.user.displayName, email: a.session.user.email }),
     expiresAt,
   );
   return invitationId;
@@ -594,11 +591,8 @@ export async function resendOrgInvitation(ctx: Ctx, a: OrgAccess, invitationId: 
     token,
     a.org.name,
     inv.org_role,
-    senderName({
-      displayName: a.session.user.displayName,
-      email: a.session.user.email,
-      orgName: a.org.name,
-    }),
+    // The inviter's display name; the mail names the organization separately.
+    senderName({ displayName: a.session.user.displayName, email: a.session.user.email }),
     expiresAt,
   );
 }
