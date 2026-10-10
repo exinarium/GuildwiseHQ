@@ -33,6 +33,7 @@ import { PlatformApiKeys } from './pages/platform/PlatformApiKeys.tsx';
 import { PlatformAudit } from './pages/platform/PlatformAudit.tsx';
 import { PlatformBlog } from './pages/platform/PlatformBlog.tsx';
 import { PlatformBlogPost } from './pages/platform/PlatformBlogPost.tsx';
+import { PlatformBilling } from './pages/platform/PlatformBilling.tsx';
 import { PlatformInvitations } from './pages/platform/PlatformInvitations.tsx';
 import { PlatformOrgDetail } from './pages/platform/PlatformOrgDetail.tsx';
 import { PlatformOrgs } from './pages/platform/PlatformOrgs.tsx';
@@ -43,7 +44,9 @@ import { ResearchTab } from './pages/ResearchTab.tsx';
 import { ResetPassword } from './pages/ResetPassword.tsx';
 import { Schedules } from './pages/Schedules.tsx';
 import { Settings } from './pages/Settings.tsx';
+import { Signup } from './pages/Signup.tsx';
 import { Vaults } from './pages/Vaults.tsx';
+import { VerifyEmail } from './pages/VerifyEmail.tsx';
 import { Workstations } from './pages/Workstations.tsx';
 
 function Home() {
@@ -73,6 +76,8 @@ export const routes = [
   { path: '/login', element: <Login />, errorElement: <RouteError /> },
   { path: '/forgot-password', element: <ForgotPassword />, errorElement: <RouteError /> },
   { path: '/reset-password/:token', element: <ResetPassword />, errorElement: <RouteError /> },
+  { path: '/signup', element: <Signup />, errorElement: <RouteError /> },
+  { path: '/verify-email/:token', element: <VerifyEmail />, errorElement: <RouteError /> },
   { path: '/contact', element: <ContactPublic />, errorElement: <RouteError /> },
   { path: '/invite/:token', element: <AcceptInvite />, errorElement: <RouteError /> },
   {
@@ -128,6 +133,7 @@ export const routes = [
           { path: '/platform/orgs/:id', element: <PlatformOrgDetail /> },
           { path: '/platform/invitations', element: <PlatformInvitations /> },
           { path: '/platform/users', element: <PlatformUsers /> },
+          { path: '/platform/billing', element: <PlatformBilling /> },
           { path: '/platform/support', element: <PlatformSupport /> },
           { path: '/platform/support/:id', element: <PlatformSupportTicket /> },
           { path: '/platform/blog', element: <PlatformBlog /> },

@@ -17,6 +17,7 @@ import type { AnthropicLike } from './assistant/service.ts';
 import { checkContentType, checkOrigin } from './auth/origin-check.ts';
 import { SESSION_COOKIE } from './auth/sessions.ts';
 import { createSocialClient, type SocialClient } from './blog/social-client.ts';
+import { createBillingRuntime } from './billing/runtime.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
 import { ChatRelay } from './chat/relay.ts';
 import { type Clock, createClock } from './clock.ts';
@@ -50,6 +51,7 @@ import { authRoutes } from './routes/auth.ts';
 import { blogApiRoutes } from './routes/blog-api.ts';
 import { blogPlatformRoutes } from './routes/blog-platform.ts';
 import { blogPublicRoutes } from './routes/blog-public.ts';
+import { billingRoutes } from './routes/billing.ts';
 import { cardRoutes } from './routes/cards.ts';
 import { catalogueRoutes } from './routes/catalogue.ts';
 import { chatRoutes } from './routes/chats.ts';
@@ -84,8 +86,6 @@ import { vaultRoutes } from './routes/vaults.ts';
 import { workstationRoutes } from './routes/workstations.ts';
 import { RunnerGateway } from './runner-gateway/gateway.ts';
 import { RunnerRegistry } from './runner-gateway/registry.ts';
-import { createBillingRuntime } from './billing/runtime.ts';
-import { billingRoutes } from './routes/billing.ts';
 import { Scheduler } from './scheduler/scheduler.ts';
 
 export interface BuildOptions {

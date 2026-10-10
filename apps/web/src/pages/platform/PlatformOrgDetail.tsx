@@ -7,6 +7,7 @@ import {
   usePlatformOrg,
   usePlatformTransfer,
 } from '../../api/queries/platform.ts';
+import { OrgBillingPanel } from '../../components/platform/OrgBillingPanel.tsx';
 import {
   Badge,
   Button,
@@ -267,6 +268,8 @@ export function PlatformOrgDetail() {
           )}
         </Panel>
       </form>
+
+      <OrgBillingPanel orgId={id} />
 
       <Panel title="Recent activity" padding="none">
         {o.recentAudit.length === 0 ? (

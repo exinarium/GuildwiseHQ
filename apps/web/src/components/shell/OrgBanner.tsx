@@ -1,4 +1,5 @@
 import type { MeResponse, ProjectDto } from '@aom/shared';
+import { Link } from 'react-router';
 import { Callout } from '../ui/Callout.tsx';
 
 /**
@@ -21,6 +22,14 @@ export function OrgBanner({ me, project }: { me: MeResponse; project: ProjectDto
       {banners.map((b) => (
         <Callout key={b.kind} tone={b.severity} role={b.severity === 'danger' ? 'alert' : 'status'}>
           {b.message}
+          {b.link && (
+            <>
+              {' '}
+              <Link to={b.link} className="font-medium underline" data-testid="banner-link">
+                Open Billing
+              </Link>
+            </>
+          )}
         </Callout>
       ))}
       {guestOf && (

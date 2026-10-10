@@ -4,6 +4,19 @@ import { formatMoney } from '@aom/shared';
 export const money = (micros: number | null | undefined, currency = 'USD'): string =>
   micros === null || micros === undefined ? '–' : formatMoney(micros, currency);
 
+/** Billing prices are USD cents (VAT-exclusive): `$19` or `$19.50`. */
+export const usdCents = (cents: number | null | undefined): string => {
+  if (cents === null || cents === undefined) return '–';
+  const whole = cents % 100 === 0;
+  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 })}`;
+};
+
+/** Rand from cents: `R342.00`. */
+export const zarCents = (cents: number | null | undefined): string =>
+  cents === null || cents === undefined
+    ? '–'
+    : `R${(cents / 100).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 /** `82%` (whole percent) or an en dash. */
 export const percentText = (p: number | null | undefined): string =>
   p === null || p === undefined ? '–' : `${Math.floor(p)}%`;

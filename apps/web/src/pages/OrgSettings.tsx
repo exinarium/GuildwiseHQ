@@ -1,6 +1,7 @@
 import { useSearchParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
 import { useOrg } from '../api/queries/orgs.ts';
+import { BillingTab } from '../components/orgsettings/BillingTab.tsx';
 import { GeneralTab } from '../components/orgsettings/GeneralTab.tsx';
 import { GuestsTab } from '../components/orgsettings/GuestsTab.tsx';
 import { InvitationsTab } from '../components/orgsettings/InvitationsTab.tsx';
@@ -9,7 +10,7 @@ import { PlanTab } from '../components/orgsettings/PlanTab.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import { EmptyState, ErrorBox, PageHeader, PageSkeleton, Tabs } from '../components/ui.tsx';
 
-type TabId = 'general' | 'members' | 'invitations' | 'guests' | 'plan';
+type TabId = 'general' | 'members' | 'invitations' | 'guests' | 'plan' | 'billing';
 
 /** `/settings/org`: General, Members, Invitations, Guests, Plan & limits (docs/design/organizations.md section 11.2). */
 export function OrgSettings() {
@@ -28,6 +29,7 @@ export function OrgSettings() {
           { id: 'plan', label: 'Plan & limits' },
         ]
       : []),
+    ...(role === 'owner' ? [{ id: 'billing', label: 'Billing' }] : []),
   ];
   const wanted = (params.get('tab') ?? 'general') as TabId;
   const tab = tabs.some((t) => t.id === wanted) ? wanted : 'general';
@@ -63,6 +65,7 @@ export function OrgSettings() {
         )}
         {tab === 'guests' && manager && <GuestsTab />}
         {tab === 'plan' && manager && <PlanTab org={org.data} />}
+        {tab === 'billing' && role === 'owner' && <BillingTab />}
       </div>
     </div>
   );

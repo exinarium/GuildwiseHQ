@@ -1,5 +1,6 @@
 import {
   Building2,
+  CircleDollarSign,
   CircleHelp,
   KeyRound,
   LifeBuoy,
@@ -24,6 +25,7 @@ const NAV = [
   { to: '/platform', label: 'Organizations', icon: Building2, end: true },
   { to: '/platform/invitations', label: 'Invitations', icon: MailPlus, end: false },
   { to: '/platform/users', label: 'Accounts', icon: Users, end: false },
+  { to: '/platform/billing', label: 'Billing', icon: CircleDollarSign, end: false },
   { to: '/platform/support', label: 'Support', icon: LifeBuoy, end: false },
   { to: '/platform/blog', label: 'Blog', icon: Newspaper, end: false },
   { to: '/platform/api-keys', label: 'API keys', icon: KeyRound, end: false },

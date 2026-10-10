@@ -84,7 +84,10 @@ export const userProjectors: Record<string, Projector> = {
   },
   UserEmailVerified: async (tx, e) => {
     const p = (e.event as EventOf<'UserEmailVerified'>).payload;
-    await exec(tx, 'UPDATE users SET email_verified_at = COALESCE(email_verified_at, $2) WHERE id=$1', [p.userId, e.createdAt]);
+    await exec(tx, 'UPDATE users SET email_verified_at = COALESCE(email_verified_at, $2) WHERE id=$1', [
+      p.userId,
+      e.createdAt,
+    ]);
   },
   SuperAdminCreated: async (tx, e) => {
     const p = (e.event as EventOf<'SuperAdminCreated'>).payload;

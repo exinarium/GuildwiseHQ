@@ -19,7 +19,8 @@ function failureText(err: unknown): string | null {
     if (err.status === 401 || err.status === 400)
       return 'That email and password do not match. Check them and try again.';
     if (err.status === 429) return 'Too many attempts. Wait a minute and try again.';
-    if (err.status === 403 && err.code === 'org_suspended') return err.message;
+    if (err.status === 403 && (err.code === 'org_suspended' || err.code === 'email_not_verified'))
+      return err.message;
     if (err.status === 403) return 'This account is deactivated. Ask your admin.';
     if (err.status >= 500) return 'Cannot reach the server. Check your connection and try again.';
   }
@@ -218,6 +219,16 @@ export function Login() {
       <p className="mt-6 text-sm text-subtle">
         <Link to="/forgot-password" className="text-brand-text underline-offset-2 hover:underline">
           Forgot your password?
+        </Link>
+      </p>
+      <p className="mt-3 text-sm text-subtle">
+        New here?{' '}
+        <Link
+          to="/signup"
+          className="text-brand-text underline-offset-2 hover:underline"
+          data-testid="login-signup"
+        >
+          Start a 7-day free trial
         </Link>
       </p>
       <p className="mt-6 text-sm text-subtle">

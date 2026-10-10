@@ -389,7 +389,10 @@ export const platformAuditProjectors: Record<string, Projector> = {
     const p = ev<'PlatformBillingChanged'>(e).payload;
     return {
       action: e.event.type,
-      summary: p.what === 'plan' ? `Edited the ${p.key ?? ''} plan: ${p.note}` : `Edited the billing settings: ${p.note}`,
+      summary:
+        p.what === 'plan'
+          ? `Edited the ${p.key ?? ''} plan: ${p.note}`
+          : `Edited the billing settings: ${p.note}`,
       details: { before: p.before, after: p.after, note: p.note },
       meta: p.meta,
     };

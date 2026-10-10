@@ -138,7 +138,9 @@ export async function activeOrgDto(ctx: Ctx, org: OrgRow, role: OrgRole): Promis
     role,
     status: org.status,
     plan: org.plan,
-    planName: (await one(ctx.pool, 'SELECT name FROM billing_plans WHERE key=$1', [org.plan]))?.name ?? planDefinition(org.plan).name,
+    planName:
+      (await one(ctx.pool, 'SELECT name FROM billing_plans WHERE key=$1', [org.plan]))?.name ??
+      planDefinition(org.plan).name,
     features: effectiveFeatures(org.plan, org.features),
     ...(manager
       ? {

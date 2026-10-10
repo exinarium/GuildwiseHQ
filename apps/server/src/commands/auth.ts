@@ -19,7 +19,11 @@ export async function verifyLogin(ctx: Ctx, email: string, password: string): Pr
   const ok = await verifyPassword(u?.password_hash ?? (await dummyHash()), password);
   if (!u || !ok || u.status !== 'active') throw unauthorized('invalid email or password');
   if (!u.email_verified_at)
-    throw new HttpError(403, 'email_not_verified', 'Confirm your email first: open the link in the mail we sent you.');
+    throw new HttpError(
+      403,
+      'email_not_verified',
+      'Confirm your email first: open the link in the mail we sent you.',
+    );
   if (u.kind !== 'super_admin') await assertMayLogin(ctx, u.id);
   return u.id as string;
 }
