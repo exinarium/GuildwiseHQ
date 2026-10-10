@@ -6,6 +6,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { requireSession } from '../auth/guards.ts';
 import { createSession } from '../auth/sessions.ts';
+import { setDigestPreference } from '../commands/blog-digest.ts';
 import { acceptInvitation, acceptInvitationExisting, invitationInfo } from '../commands/invitations.ts';
 import type { Ctx } from '../context.ts';
 import { meResponse, setSessionCookie } from './auth.ts';
@@ -29,6 +30,8 @@ export function invitationRoutes(ctx: Ctx) {
       },
       async (req, reply) => {
         const userId = await acceptInvitation(ctx, req.params.token, req.body);
+        if (req.body.blogDigest !== undefined)
+          await setDigestPreference(ctx, userId, req.body.blogDigest, 'invite');
         const s = await createSession(ctx, userId, { userAgent: req.headers['user-agent'], ip: req.ip });
         setSessionCookie(ctx, reply, s.token, s.maxAgeSec);
         reply.code(201);
@@ -46,6 +49,8 @@ export function invitationRoutes(ctx: Ctx) {
       async (req, reply) => {
         const s = await requireSession(ctx, req);
         const orgId = await acceptInvitationExisting(ctx, s, req.params.token, req.body);
+        if (req.body.blogDigest !== undefined)
+          await setDigestPreference(ctx, s.user.id, req.body.blogDigest, 'invite');
         reply.code(201);
         return meResponse(ctx, s.user.id, orgId);
       },

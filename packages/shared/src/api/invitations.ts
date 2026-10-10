@@ -27,11 +27,14 @@ export const AcceptInvitationRequestSchema = z.object({
   password: PasswordSchema,
   /** new_org: the invitee may rename the organization. */
   orgName: z.string().trim().min(1).max(120).optional(),
+  /** The "send me the weekly blog digest" checkbox (the choice is kept as the consent record). */
+  blogDigest: z.boolean().optional(),
 });
 export type AcceptInvitationRequest = z.infer<typeof AcceptInvitationRequestSchema>;
 /** `POST /api/invitations/:token/accept-existing`: signed in with the invited email. */
 export const AcceptExistingInvitationRequestSchema = z.object({
   orgName: z.string().trim().min(1).max(120).optional(),
+  blogDigest: z.boolean().optional(),
 });
 export type AcceptExistingInvitationRequest = z.infer<typeof AcceptExistingInvitationRequestSchema>;
 export const InvitationTokenParamsSchema = z.object({ token: z.string().min(16) });

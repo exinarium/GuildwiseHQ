@@ -119,6 +119,8 @@ export async function blogDigestTick(ctx: Ctx): Promise<DigestResult> {
   const now = ctx.clock.now();
   const due = lastDigestDue(now);
   const digestId = digestIdFor(due);
+  // A digest is due on Monday morning; a server that was down then still sends it for two days, never later.
+  if (now.getTime() - due.getTime() > 2 * DAY) return { digestId, state: 'none', sent: 0 };
   if (!ctx.config.blogDigest || !settings.enabled || !settings.digestEnabled)
     return { digestId, state: 'none', sent: 0 };
 
@@ -182,6 +184,8 @@ export async function blogDigestTick(ctx: Ctx): Promise<DigestResult> {
   }
 
   let sent = 0;
+  // a failed send is retried on a later pass (the next tick), not in a tight loop
+  const failedNow: string[] = [];
   for (;;) {
     const claimed = await one(
       ctx.pool,
@@ -189,9 +193,10 @@ export async function blogDigestTick(ctx: Ctx): Promise<DigestResult> {
         WHERE (x.digest_id, x.user_id) = (
           SELECT digest_id, user_id FROM blog_digest_deliveries
            WHERE digest_id=$1 AND state IN ('pending','failed') AND attempts < ${MAX_ATTEMPTS}
+             AND user_id <> ALL($3::uuid[])
            ORDER BY user_id LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING x.user_id, x.email`,
-      [digestId, now],
+      [digestId, now, failedNow],
     );
     if (!claimed) break;
     const u = await one(ctx.pool, 'SELECT display_name, status FROM users WHERE id=$1', [claimed.user_id]);
@@ -219,6 +224,7 @@ export async function blogDigestTick(ctx: Ctx): Promise<DigestResult> {
       sent++;
     } catch (err) {
       ctx.log.error({ err, userId: claimed.user_id }, 'digest mail failed');
+      failedNow.push(claimed.user_id);
       await exec(
         ctx.pool,
         `UPDATE blog_digest_deliveries SET state='failed' WHERE digest_id=$1 AND user_id=$2`,

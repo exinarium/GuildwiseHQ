@@ -224,11 +224,17 @@ async function runShare(ctx: Ctx, share: Record<string, any>): Promise<void> {
   const post = await one(ctx.pool, 'SELECT * FROM blog_posts WHERE id=$1', [share.post_id]);
   const ch = await one(ctx.pool, 'SELECT * FROM social_channels WHERE network=$1', [network]);
   const now = ctx.clock.now();
-  if (!post || post.status !== 'published' || !ch) {
+  const tooOld = post?.published_at && new Date(post.published_at).getTime() < now.getTime() - FRESH_MS;
+  if (!post || post.status !== 'published' || !ch || tooOld) {
     await exec(
       ctx.pool,
       `UPDATE social_shares SET status='skipped', error=$3, updated_at=$4 WHERE post_id=$1 AND network=$2`,
-      [share.post_id, network, !ch ? 'channel disconnected' : 'post is not published', now],
+      [
+        share.post_id,
+        network,
+        !ch ? 'channel disconnected' : tooOld ? 'older than 48 hours' : 'post is not published',
+        now,
+      ],
     );
     return;
   }
@@ -380,7 +386,7 @@ export async function socialTick(ctx: Ctx): Promise<number> {
            WHERE s2.status='pending' AND (s2.next_attempt_at IS NULL OR s2.next_attempt_at <= $1)
            ORDER BY s2.created_at LIMIT 1 FOR UPDATE OF s2 SKIP LOCKED)
         RETURNING s.*`,
-      [now],
+      [ctx.clock.now()],
     );
     if (!claimed) break;
     await runShare(ctx, claimed);

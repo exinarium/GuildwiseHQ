@@ -83,7 +83,7 @@ const splitRow = (line: string): string[] =>
     .replace(/\|$/, '')
     .split('|')
     .map((x) => x.trim());
-const isSep = (line: string): boolean => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line);
+const isSep = (line: string): boolean => /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line);
 
 export function parseMarkdown(body: string): MdBlock[] {
   const lines = body.replace(/\r\n/g, '\n').split('\n');
