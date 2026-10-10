@@ -46,7 +46,7 @@ async function issue(
 
 /**
  * "Forgot password?": always succeeds, whether or not the email belongs to an account (nobody can probe which emails
- * exist). Platform accounts are left out (they are managed on the server). The mail is sent after the answer is
+ * exist). Platform accounts may use it too (their two-factor code is still asked at the next sign-in). The mail is sent after the answer is
  * decided and its failure is only logged, so timing and errors do not tell either.
  */
 export async function requestPasswordReset(ctx: Ctx, email: string, ip: string | null): Promise<void> {
@@ -55,7 +55,7 @@ export async function requestPasswordReset(ctx: Ctx, email: string, ip: string |
     `SELECT id, display_name, email, status, kind FROM users WHERE lower(email)=lower($1)`,
     [email.trim()],
   );
-  if (!u || u.status !== 'active' || u.kind === 'super_admin') return;
+  if (!u || u.status !== 'active') return;
   const recent = await one(
     ctx.pool,
     `SELECT 1 FROM password_resets WHERE user_id=$1 AND used_at IS NULL AND created_at > $2`,
@@ -80,7 +80,7 @@ export async function requestPasswordReset(ctx: Ctx, email: string, ip: string |
 
 /**
  * A super admin sends the link to any account. Unlike the self-service request this answers truthfully (the admin
- * needs to know it went out): 404 for an unknown account, 409 for a platform or deactivated account, 502 when the
+ * needs to know it went out): 404 for an unknown account, 409 for a deactivated account, 502 when the
  * mail could not be sent. The send is an audit entry (`PasswordResetLinkSent`).
  */
 export async function sendPasswordResetAsAdmin(
@@ -93,8 +93,6 @@ export async function sendPasswordResetAsAdmin(
     userId,
   ]);
   if (!u) throw notFound('user not found');
-  if (u.kind === 'super_admin')
-    throw conflict('super_admin_protected', 'platform accounts are managed on the server');
   if (u.status !== 'active') throw conflict('user_deactivated', 'this account is deactivated');
   const { token, expiresAt, id } = await issue(ctx, u.id, admin.user.id, meta.ip ?? null);
   try {

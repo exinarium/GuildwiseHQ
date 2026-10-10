@@ -66,6 +66,16 @@ export function PlatformUsers() {
                       : ''}
                   </span>
                 </span>
+                {u.kind === 'super_admin' && u.status === 'active' && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Send a password reset link to ${u.displayName}`}
+                    onClick={() => setMailing({ id: u.id, name: u.displayName, email: u.email })}
+                  >
+                    Send reset link
+                  </Button>
+                )}
                 {u.kind === 'user' && (
                   <span className="flex gap-1">
                     {u.status === 'active' && (

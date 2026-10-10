@@ -83,15 +83,18 @@ describe('forgot password', () => {
     expect(login.cookie).toBeUndefined();
   });
 
-  it('does nothing for a platform account', async () => {
+  it('works for a platform account, which still needs its second factor at the next sign-in', async () => {
     const sa = await t.superAdminSession();
     await request(sa.email);
-    expect(await messagesTo(sa.email)).toHaveLength(0);
+    const token = await tokenFrom(sa.email);
+    expect((await confirm(token)).status).toBe(200);
+    const login = await t.req('POST', '/api/auth/login', { body: { email: sa.email, password: NEW_PW } });
+    expect(login.body).toMatchObject({ twoFactorRequired: true });
   });
 });
 
 describe('a super admin sends a reset link', () => {
-  it('mails the user, records it in the platform audit log, and refuses non-admins and platform accounts', async () => {
+  it('mails the user, records it in the platform audit log, and refuses non-admins', async () => {
     const sa = await t.superAdminSession();
     const email = uniqueEmail('target');
     const u = await t.userSession(email);
@@ -120,9 +123,11 @@ describe('a super admin sends a reset link', () => {
     expect((await confirm(token)).status).toBe(200);
     expect((await t.req('POST', '/api/auth/login', { body: { email, password: NEW_PW } })).status).toBe(200);
 
+    const other2 = await t.superAdminSession(uniqueEmail('sa2'));
     expect(
-      (await t.req('POST', `/api/platform/users/${sa.id}/send-password-reset`, { cookie: sa.cookie })).status,
-    ).toBe(409);
+      (await t.req('POST', `/api/platform/users/${other2.id}/send-password-reset`, { cookie: sa.cookie }))
+        .status,
+    ).toBe(200);
     expect(
       (
         await t.req('POST', '/api/platform/users/00000000-0000-4000-8000-000000000000/send-password-reset', {
