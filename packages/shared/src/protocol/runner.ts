@@ -14,6 +14,7 @@ import { TestEnvProblem } from '../events/testing.ts';
 import { VaultEventKind } from '../events/vault.ts';
 import { OutboundPostPayloadSchema } from '../external/index.ts';
 import { FeedItemInputSchema } from '../feed/index.ts';
+import { ForgeReposPayloadSchema, GitConnectionsSchema } from '../forge/index.ts';
 import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
@@ -264,6 +265,8 @@ export const RunnerCommandNameSchema = z.enum([
   'rights.verify',
   'sudo.set',
   'sudo.clear',
+  'git.status',
+  'forge.repos',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -301,6 +304,8 @@ export const CommandPayloadSchemas = {
   'rights.verify': RightsVerifyPayloadSchema,
   'sudo.set': SudoSetPayloadSchema,
   'sudo.clear': z.object({}),
+  'git.status': z.object({}),
+  'forge.repos': ForgeReposPayloadSchema,
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([
@@ -359,6 +364,11 @@ export const HeartbeatSchema = msg('heartbeat', {
 });
 /** The runtimes' probe result changed (sandbox state, availability): sent after a re-probe, not only in `hello`. */
 export const RuntimesReportSchema = msg('runtimes.report', { runtimes: z.array(RuntimeInfoSchema) });
+/**
+ * Which git providers this workstation is connected to (facts only, never a token). Sent after `hello`, after
+ * `aom-runner git-connect` and on the `git.status` command.
+ */
+export const GitReportSchema = msg('git.report', { connections: GitConnectionsSchema });
 export const ReposReportSchema = msg('repos.report', { repos: z.array(RepoReportSchema) });
 export const ShiftAcceptedSchema = msg('shift.accepted', { shiftId: z.uuid() });
 export const ShiftRejectedSchema = msg('shift.rejected', {
@@ -537,6 +547,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   HeartbeatSchema,
   ReposReportSchema,
   RuntimesReportSchema,
+  GitReportSchema,
   ShiftAcceptedSchema,
   ShiftRejectedSchema,
   ShiftStartedSchema,

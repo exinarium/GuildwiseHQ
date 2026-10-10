@@ -1,7 +1,8 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { type FinalizeExecutePayload, type FinalizeResult, isSafeGitRef } from '@aom/shared';
-import { type BranchProtectionChecker, isProtectedBranchRejection, type PrCreator } from './gh.ts';
+import type { BranchRules } from '../forge/types.ts';
+import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { git, gitOk, hasRemote, revParse } from './git.ts';
 import { baseTarget, RebaseConflictError, rebaseOntoBase } from './rebase.ts';
 import { ensureWorktree, removeWorktree } from './worktrees.ts';
@@ -17,8 +18,14 @@ export interface CompletionInput {
   /** Directory for the throwaway integration worktree of a merge. */
   integrationDir: string;
   pr: PrCreator;
-  /** Asks the code host whether the working branch is protected (a merge then becomes a pull request). */
-  protection?: BranchProtectionChecker;
+  /** Credentials for git against the repository's host (clone, push). Absent in tests: the user's own git setup is used. */
+  auth?: (url: string, forge?: FinalizeExecutePayload['forge']) => Promise<{ args: string[]; env: Record<string, string> }>;
+  /**
+   * Branch protection of the working branch, read through the repository's forge adapter (GitHub, GitLab, Azure
+   * DevOps, Bitbucket). Null: unknown (not connected, no permission, plain git); the merge is then tried and a
+   * rejected push still falls back to a pull request.
+   */
+  rules?: (cwd: string, branch: string, forge?: FinalizeExecutePayload['forge']) => Promise<BranchRules | null>;
   /** Identity for the merge commit (the runner has no agent behind it). */
   identity?: { name: string; email: string };
 }
@@ -40,8 +47,7 @@ const fail = (action: FinalizeResult['action'], error: string): FinalizeResult =
  */
 export async function executeCompletion(input: CompletionInput): Promise<FinalizeResult> {
   const { payload: p } = input;
-  let action = p.action;
-  let protectedBranch = false;
+  const action = p.action;
   // Owner-controlled refs: refuse anything git could parse as an option or an odd refspec.
   for (const ref of [p.branchName, p.baseBranch, `aom-integration/${p.ref.toLowerCase()}`])
     if (!isSafeGitRef(ref)) return fail(action, `refusing unsafe branch name ${JSON.stringify(ref)}`);
@@ -76,25 +82,14 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
     return fail(action, `rebase failed: ${errMsg(err)}`);
   }
 
-  if (action === 'merge') {
-    // Known to be protected (the host says so): go straight to a pull request. Unknown: try, and fall back on a rejected push.
-    if ((await input.protection?.check({ cwd: wt, branch: p.baseBranch })) === 'protected') {
-      protectedBranch = true;
-    } else {
-      const merged = await merge(input, wt);
-      if (!merged.protectedBranch) return merged;
-      protectedBranch = true;
-    }
-    action = 'pr';
-  }
-  const flag = protectedBranch ? { protectedBranch: true } : {};
+  if (action === 'merge') return merge(input, wt);
   const remote = await hasRemote(wt);
   if (!remote)
     return fail(
       action,
       `cannot ${action === 'pr' ? 'open a PR' : 'push'}: the repository has no origin remote`,
     );
-  const push = await git(wt, ['push', '-u', 'origin', '--', p.branchName]);
+  const push = await pushBranch(input, wt);
   if (push.exitCode !== 0) return fail(action, `git push failed: ${(push.stderr || push.stdout).trim()}`);
   if (action === 'push_branch') return { ok: true, action, pushedBranch: p.branchName };
 
@@ -105,25 +100,38 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
       branch: p.branchName,
       title: p.prTitle ?? `${p.ref}: ${p.title}`,
       body: p.prBody ?? p.title,
+      forge: p.forge ?? null,
     });
     if ('unavailable' in r)
       return {
         ok: true,
         action,
-        ...flag,
         pushedBranch: p.branchName,
         notice: `${r.unavailable}: the branch ${p.branchName} was pushed, open the pull request by hand`,
       };
-    return { ok: true, action, ...flag, pushedBranch: p.branchName, ...(r.url ? { prUrl: r.url } : {}) };
+    return { ok: true, action, pushedBranch: p.branchName, ...(r.url ? { prUrl: r.url } : {}) };
   } catch (err) {
     return fail(action, errMsg(err));
   }
+}
+
+/** `git push -u origin <branch>` with the host's credentials when the runner has any. */
+async function pushBranch(input: CompletionInput, wt: string) {
+  const { payload: p } = input;
+  const url = (await git(wt, ['remote', 'get-url', 'origin'])).stdout.trim();
+  const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
+  return git(wt, [...a.args, 'push', '-u', 'origin', '--', p.branchName], { env: a.env });
 }
 
 async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult> {
   const { payload: p, repoPath } = input;
   const base = p.baseBranch;
   const remote = await hasRemote(repoPath);
+  // A protected working branch refuses direct pushes: open a change instead of failing on the push (C9).
+  if (remote && input.rules) {
+    const rules = await input.rules(repoPath, base, p.forge).catch(() => null);
+    if (rules && !rules.directPushAllowed) return viaChange(input, wt, base);
+  }
   if (remote) await git(repoPath, ['fetch', '--', 'origin', base]);
   const startPoint = await baseTarget(repoPath, base);
   if (!(await revParse(repoPath, startPoint))) return fail('merge', `base branch ${base} not found`);
@@ -173,12 +181,15 @@ async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult
     }
     const mergeCommit = await gitOk(integration, ['rev-parse', 'HEAD']);
     if (remote) {
-      const push = await git(integration, ['push', 'origin', `HEAD:refs/heads/${base}`]);
+      const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
+      const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
+      const push = await git(integration, [...a.args, 'push', 'origin', `HEAD:refs/heads/${base}`], {
+        env: a.env,
+      });
       if (push.exitCode !== 0) {
         const why = (push.stderr || push.stdout).trim();
-        // A protected branch refuses the push: the caller opens a pull request instead (nothing was changed on the host).
-        if (isProtectedBranchRejection(why))
-          return { ok: false, action: 'merge', protectedBranch: true, error: why };
+        // The host refused (branch policy we could not read beforehand): fall back to a change.
+        if (isProtectedBranchRejection(why)) return viaChange(input, wt, base, why);
         return fail('merge', `pushing ${base} failed: ${why}`);
       }
     }
@@ -191,6 +202,52 @@ async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult
       deleteBranch: true,
       roots: [input.integrationDir],
     });
+  }
+}
+
+/**
+ * The working branch is protected (or refused the push): push the card branch and open a pull/merge request through
+ * the repository's forge instead. Reported as `action: 'pr'` with `protectedBranch: true`: the server records the card
+ * as a pull request, switches the project's default completion to PR and posts a card message. Nothing changed on
+ * the working branch.
+ */
+async function viaChange(
+  input: CompletionInput,
+  wt: string,
+  base: string,
+  reason?: string,
+): Promise<FinalizeResult> {
+  const { payload: p } = input;
+  const push = await pushBranch(input, wt);
+  if (push.exitCode !== 0) return fail('pr', `git push failed: ${(push.stderr || push.stdout).trim()}`);
+  const why = reason ? `${base} refused a direct push` : `${base} is protected on the git host`;
+  try {
+    const r = await input.pr.create({
+      cwd: wt,
+      base,
+      branch: p.branchName,
+      title: p.prTitle ?? `${p.ref}: ${p.title}`,
+      body: p.prBody ?? p.title,
+      forge: p.forge ?? null,
+    });
+    if ('unavailable' in r)
+      return {
+        ok: true,
+        action: 'pr',
+        protectedBranch: true,
+        pushedBranch: p.branchName,
+        notice: `${why}, and a pull request could not be opened (${r.unavailable}): the branch ${p.branchName} was pushed, open the pull request by hand`,
+      };
+    return {
+      ok: true,
+      action: 'pr',
+      protectedBranch: true,
+      pushedBranch: p.branchName,
+      ...(r.url ? { prUrl: r.url } : {}),
+      notice: `${why}: opened a pull request instead of merging directly${r.url ? ` (${r.url})` : ''}`,
+    };
+  } catch (err) {
+    return fail('pr', errMsg(err));
   }
 }
 

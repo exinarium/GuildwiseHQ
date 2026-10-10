@@ -75,17 +75,61 @@ export function branchName(prefix: string, ref: string, title: string): string {
  */
 export function normalizeRemoteUrl(url: string): string {
   let s = url.trim();
+  let sshPort: string | undefined;
   const scp = /^[^@/\s]+@([^:/\s]+):(?!\/\/)(.+)$/.exec(s);
   if (scp) {
     s = `${scp[1]}/${scp[2]}`;
   } else {
+    const isSsh = /^ssh:\/\//i.test(s);
     s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
     s = s.replace(/^[^@/]+@/, '');
+    if (isSsh) sshPort = /^[^/:]+:(\d+)\//.exec(s)?.[1];
     s = s.replace(/^([^/:]+):\d+\//, '$1/');
   }
   s = s
     .replace(/\/+$/, '')
     .replace(/\.git$/i, '')
     .replace(/\/+$/, '');
-  return s.toLowerCase();
+  return canonicalHostPath(s, sshPort).toLowerCase();
+}
+
+const KNOWN_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org']);
+
+/**
+ * Forms of one repository that differ per transport: Azure DevOps (`dev.azure.com/o/p/_git/r`, the older
+ * `o.visualstudio.com/p/_git/r`, and ssh `ssh.dev.azure.com/v3/o/p/r`) and Bitbucket Data Center (`host/scm/proj/repo`
+ * over https, `host:7999/proj/repo` over ssh) are mapped to the https shape.
+ */
+function canonicalHostPath(s: string, sshPort: string | undefined): string {
+  const slash = s.indexOf('/');
+  if (slash < 0) return s;
+  const host = s.slice(0, slash).toLowerCase();
+  const path = s.slice(slash + 1);
+  const dec = (x: string | undefined): string => {
+    try {
+      return decodeURIComponent(x ?? '');
+    } catch {
+      return x ?? '';
+    }
+  };
+  if (host === 'ssh.dev.azure.com' || host === 'vs-ssh.visualstudio.com') {
+    const m = /^v3\/([^/]+)\/([^/]+)\/(.+)$/i.exec(path);
+    if (m) return `dev.azure.com/${dec(m[1])}/${dec(m[2])}/_git/${dec(m[3])}`;
+  }
+  if (host === 'dev.azure.com') {
+    // A project-less form (dev.azure.com/org/_git/repo) means the project has the repository's name.
+    const m = /^([^/]+)\/(?:([^/]+)\/)?_git\/(.+)$/i.exec(path);
+    if (m) return `dev.azure.com/${dec(m[1])}/${dec(m[2] ?? m[3])}/_git/${dec(m[3])}`;
+  }
+  const vs = /^([^.]+)\.visualstudio\.com$/i.exec(host);
+  if (vs) {
+    const m = /^(?:defaultcollection\/)?(?:([^/]+)\/)?_git\/(.+)$/i.exec(path);
+    if (m) return `dev.azure.com/${vs[1]}/${dec(m[1] ?? m[2])}/_git/${dec(m[2])}`;
+  }
+  if (!KNOWN_HOSTS.has(host)) {
+    const scm = /(?:^|\/)scm\/([^/]+\/[^/]+)$/i.exec(path);
+    if (scm) return `${host}/scm/${scm[1]}`;
+    if (sshPort === '7999' && /^[^/]+\/[^/]+$/.test(path)) return `${host}/scm/${path}`;
+  }
+  return s;
 }

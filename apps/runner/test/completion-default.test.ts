@@ -3,12 +3,8 @@ import { join } from 'node:path';
 import type { FinalizeExecutePayload } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { executeCompletion } from '../src/git/completion.ts';
-import {
-  type BranchProtection,
-  isProtectedBranchRejection,
-  type PrCreator,
-  type PrInput,
-} from '../src/git/gh.ts';
+import type { BranchRules } from '../src/forge/types.ts';
+import { isProtectedBranchRejection, type PrCreator, type PrInput } from '../src/git/gh.ts';
 import { ensureWorktree } from '../src/git/worktrees.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
 
@@ -60,11 +56,19 @@ class FakePr implements PrCreator {
   }
 }
 
+/** What the repository's forge says about the working branch (`unknown`: the rules cannot be read). */
+type Protection = 'protected' | 'open' | 'unknown';
+const RULES: Record<Protection, BranchRules | null> = {
+  protected: { directPushAllowed: false, requiresChange: true },
+  open: { directPushAllowed: true, requiresChange: false },
+  unknown: null,
+};
+
 const run = (
   repo: { clone: string; remoteNormalized: string },
   path: string,
   pr: PrCreator,
-  protection?: BranchProtection,
+  protection?: Protection,
 ) =>
   executeCompletion({
     payload: payload(repo, path),
@@ -73,13 +77,13 @@ const run = (
     worktreesDir: '/',
     integrationDir: join(tmp(), 'integration'),
     pr,
-    ...(protection ? { protection: { check: async () => protection } } : {}),
+    ...(protection ? { rules: async () => RULES[protection] } : {}),
   });
 
 const HOOK =
   '#!/bin/sh\nwhile read old new ref; do\n  if [ "$ref" = "refs/heads/main" ]; then echo "remote: error: GH006: Protected branch update failed for refs/heads/main." >&2; exit 1; fi\ndone\n';
 
-describe('completion: a protected working branch turns the merge into a pull request', () => {
+describe('completion (project default merge): a protected working branch turns the merge into a pull request', () => {
   it('the host says it is protected: no merge is attempted, a PR is opened', async () => {
     const { repo, path } = await cardWorktree();
     const pr = new FakePr('https://example.test/pr/1');

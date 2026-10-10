@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { statSync, writeFileSync } from 'node:fs';
 import { hostname, platform } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -22,8 +22,18 @@ import { Outbox } from './connection/outbox.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ExternalAdapters } from './external/index.ts';
 import { OutboundExecutor } from './external/outbound.ts';
-import { executeCompletion } from './git/completion.ts';
-import { type BranchProtectionChecker, ghBranchProtection, ghPrCreator, type PrCreator } from './git/gh.ts';
+import { type CompletionInput, executeCompletion } from './git/completion.ts';
+import {
+  branchRulesFor,
+  FileTokenStore,
+  forgeForUrl,
+  forgePrCreator,
+  gitAuthFor,
+  gitConnections,
+} from './forge/index.ts';
+import { recheckFile } from './forge/connect.ts';
+import type { ForgeEnv } from './forge/types.ts';
+import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { sweepWorktrees } from './git/sweep.ts';
@@ -61,8 +71,8 @@ export interface RunnerOptions {
   vaultSecondMs?: number;
   /** Opens pull requests for the `pr` completion action; default shells out to `gh` (tests inject a fake). */
   prCreator?: PrCreator;
-  /** Asks the code host whether a branch is protected (tests inject a fake). */
-  branchProtection?: BranchProtectionChecker;
+  /** Branch rules of the working branch (default: the repository's forge adapter; tests inject a fake). */
+  branchRules?: CompletionInput['rules'];
   /** Ticket systems for `aom source read` (default: `gh` for GitHub, the agent's skill for Jira). Tests inject fakes. */
   external?: ExternalAdapters;
   /** Test hook: replaces the tester environment check (docker, deployed app). */
@@ -78,6 +88,11 @@ export interface RunnerOptions {
   sharedCap?: () => number;
   /** Test hook: runs the commands of toolchain installs, rights checks and sudo (default: real processes). */
   executor?: Executor;
+  /**
+   * Report the git-host connections (`git.report`). Default on, off with the mock runtime and under tests so nothing
+   * reaches a real forge from them.
+   */
+  gitReport?: boolean;
   /** Test hook: platform for the toolchain table (default: this machine). */
   platform?: Platform;
 }
@@ -112,6 +127,10 @@ export class Runner {
   private startupSweepDone = false;
   private sweeping: Promise<WorktreeSweepResult> | null = null;
   private timers: NodeJS.Timeout[] = [];
+  /** The machine seam of the git-host adapters (GitHub via gh, GitLab/Azure/Bitbucket over REST). */
+  readonly forgeEnv: ForgeEnv;
+  private lastGit: string | undefined;
+  private lastRecheck = 0;
   private fatalResolve?: (code: number) => void;
   /** The server said the workstation was unpaired: the runner stops cleanly. */
   unpaired = false;
@@ -125,6 +144,12 @@ export class Runner {
     this.paths = runnerPaths(opts.dataDir);
     this.outbox = new Outbox(this.paths.outbox);
     this.exec = opts.executor ?? realExecutor;
+    this.forgeEnv = {
+      exec: this.exec,
+      fetch: globalThis.fetch,
+      tokens: new FileTokenStore(join(this.paths.secrets, 'git-tokens.json')),
+      ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
+    };
     this.keys = new RunnerKeys(join(this.paths.secrets, 'runner-key.pem'));
     this.sudo = new SudoVault({
       file: join(this.paths.secrets, 'sudo.enc'),
@@ -190,6 +215,7 @@ export class Runner {
     this.repoCreator = new RepoCreator({
       dir: this.paths.outbound,
       repoRoots: () => this.opts.config.repoRoots,
+      forge: () => this.forgeEnv,
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
     });
     this.repoCloner = new RepoCloner({
@@ -197,6 +223,7 @@ export class Runner {
       exec: this.exec,
       findExisting: (n) => this.findRepo(n),
       creator: this.repoCreator,
+      forge: () => this.forgeEnv,
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
       afterClone: () => this.rescan(),
     });
@@ -207,6 +234,7 @@ export class Runner {
     });
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
+      void this.reportGit(true);
       this.maxConcurrent = Math.min(w.limits.maxConcurrentShifts, opts.config.maxConcurrentShifts);
       this.writeStatus(true);
       this.scheduleStartupSweep();
@@ -235,6 +263,20 @@ export class Runner {
     const t = setInterval(() => void this.rescan(), this.opts.rescanMs ?? 600_000);
     t.unref();
     this.timers.push(t);
+    // `aom-runner git-connect` touches a marker file: report the new git status without waiting for the rescan.
+    const g = setInterval(() => {
+      try {
+        const m = statSync(recheckFile(this.paths.secrets)).mtimeMs;
+        if (m > this.lastRecheck) {
+          this.lastRecheck = m;
+          void this.reportGit(false);
+        }
+      } catch {
+        // no marker yet
+      }
+    }, 10_000);
+    g.unref();
+    this.timers.push(g);
     this.writeStatus(false);
   }
 
@@ -309,6 +351,42 @@ export class Runner {
     if (this.lastRuntimes !== undefined && key !== this.lastRuntimes)
       this.client.send('runtimes.report', { runtimes });
     this.lastRuntimes = key;
+    await this.reportGit(false);
+  }
+
+  /** Tells the server which git providers this workstation is connected to (facts only, never a token). */
+  private async reportGit(force: boolean): Promise<void> {
+    if (!(this.opts.gitReport ?? !(this.opts.config.runtimes.mock?.enabled || process.env.VITEST))) return;
+    try {
+      const hosts: Partial<Record<'github' | 'gitlab', string[]>> = {};
+      for (const r of this.repos) {
+        const p = forgeForUrl(this.forgeEnv, r.remoteUrl);
+        if (p && (p.repo.kind === 'github' || p.repo.kind === 'gitlab')) {
+          const list = hosts[p.repo.kind] ?? [];
+          if (!list.includes(p.repo.host)) list.push(p.repo.host);
+          hosts[p.repo.kind] = list;
+        }
+      }
+      const connections = await gitConnections(this.forgeEnv, hosts);
+      const key = JSON.stringify(connections.map(({ checkedAt: _c, ...c }) => c));
+      if (!force && key === this.lastGit) return;
+      this.lastGit = key;
+      this.client.send('git.report', { connections });
+    } catch (err) {
+      this.log.warn(`git status check failed: ${String(err)}`);
+    }
+  }
+
+  /** The repository picker: the user's repositories on a connected provider (the answer holds no credential). */
+  private async listForgeRepos(p: { provider: import('@aom/shared').ConnectableForge; search?: string | undefined }) {
+    const { forgeOfKind } = await import('./forge/index.ts');
+    const forge = forgeOfKind(this.forgeEnv, p.provider);
+    if (!forge.listRepos) return { ok: false, repos: [], error: `${p.provider} cannot list repositories` };
+    try {
+      return { ok: true, repos: await forge.listRepos({ search: p.search }) };
+    } catch (err) {
+      return { ok: false, repos: [], error: (err instanceof Error ? err.message : String(err)).slice(0, 400) };
+    }
   }
 
   /** Once per process, shortly after the first connection: the stale-worktree sweep (owner decision 4). */
@@ -504,8 +582,11 @@ export class Runner {
               worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
               worktreesDir: this.paths.worktrees,
               integrationDir: this.paths.integration,
-              pr: this.opts.prCreator ?? ghPrCreator,
-              protection: this.opts.branchProtection ?? ghBranchProtection,
+              pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
+              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              rules:
+                this.opts.branchRules ??
+                ((cwd, branch, forge) => branchRulesFor(this.forgeEnv, cwd, branch, forge)),
             }),
           );
         }
@@ -547,6 +628,11 @@ export class Runner {
       } else if (command === 'sudo.set') {
         // The payload is ciphertext; the answer never contains the password.
         done(true, await this.sudo.set(CommandPayloadSchemas['sudo.set'].parse(payload)));
+      } else if (command === 'git.status') {
+        await this.reportGit(true);
+        done(true, { reported: true });
+      } else if (command === 'forge.repos') {
+        done(true, await this.listForgeRepos(CommandPayloadSchemas['forge.repos'].parse(payload)));
       } else if (command === 'sudo.clear') {
         this.sudo.clear();
         done(true, { cleared: true });

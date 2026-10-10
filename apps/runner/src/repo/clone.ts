@@ -7,6 +7,8 @@ import {
   type RepoCreatePayload,
   type RepoCreateResult,
 } from '@aom/shared';
+import { forgeForUrl } from '../forge/index.ts';
+import type { ForgeEnv, GitAuth } from '../forge/types.ts';
 import type { Executor } from '../toolchain/exec.ts';
 
 /** `https://github.com/acme/My-App.git` -> `My-App`; null when nothing safe is left. */
@@ -45,6 +47,8 @@ export class RepoCloner {
       findExisting: (normalized: string) => Promise<{ localPath: string } | undefined>;
       creator: { run(p: RepoCreatePayload): Promise<RepoCreateResult> };
       ghBin?: string;
+      /** The machine seam of the forge adapters: credentials for GitLab, Azure DevOps and Bitbucket. Without it only gh's login is tried. */
+      forge?: () => ForgeEnv;
       /** Reread the repositories after a clone, so cards can be claimed at once. */
       afterClone?: () => Promise<void>;
     },
@@ -70,35 +74,50 @@ export class RepoCloner {
     return job;
   }
 
-  private authArgs(url: string): string[] {
-    if (!/^https?:\/\//.test(url)) return [];
+  /** The credential for the repository's host: its forge adapter's (gh login, saved token), else gh's login for https. */
+  private async authFor(url: string, forge?: RepoClonePayload['forge']): Promise<GitAuth | null> {
+    const env = this.deps.forge?.();
+    if (env) {
+      const hit = forgeForUrl(env, url, forge);
+      if (hit && hit.forge.kind !== 'git') {
+        const a = await hit.forge.gitAuth(url);
+        return a.args.length || Object.keys(a.env).length ? a : null;
+      }
+    }
+    if (!/^https?:\/\//.test(url)) return null;
     const host = new URL(url).host;
-    return [
-      '-c',
-      `credential.https://${host}.helper=`,
-      '-c',
-      `credential.https://${host}.helper=!${this.deps.ghBin ?? 'gh'} auth git-credential`,
-    ];
+    return {
+      args: [
+        '-c',
+        `credential.https://${host}.helper=`,
+        '-c',
+        `credential.https://${host}.helper=!${this.deps.ghBin ?? 'gh'} auth git-credential`,
+      ],
+      env: {},
+    };
   }
 
-  private git(args: string[], cwd?: string, timeoutMs = 600_000) {
+  private git(args: string[], cwd?: string, timeoutMs = 600_000, env: Record<string, string> = {}) {
     return this.deps.exec.run('git', args, {
       ...(cwd ? { cwd } : {}),
       timeoutMs,
-      env: { GIT_TERMINAL_PROMPT: '0' },
+      env: { GIT_TERMINAL_PROMPT: '0', ...env },
     });
   }
 
-  /** `exists` plus whether gh's login was needed. */
-  private async probe(url: string): Promise<{ exists: boolean; viaGh: boolean; error: string }> {
+  /** `exists` plus the credential that was needed (null: none). */
+  private async probe(
+    url: string,
+    forge?: RepoClonePayload['forge'],
+  ): Promise<{ exists: boolean; auth: GitAuth | null; error: string }> {
     const plain = await this.git(['ls-remote', '--', url], undefined, 60_000);
-    if (plain.exitCode === 0) return { exists: true, viaGh: false, error: '' };
-    const auth = this.authArgs(url);
-    if (auth.length) {
-      const viaGh = await this.git([...auth, 'ls-remote', '--', url], undefined, 60_000);
-      if (viaGh.exitCode === 0) return { exists: true, viaGh: true, error: '' };
+    if (plain.exitCode === 0) return { exists: true, auth: null, error: '' };
+    const auth = await this.authFor(url, forge);
+    if (auth) {
+      const viaAuth = await this.git([...auth.args, 'ls-remote', '--', url], undefined, 60_000, auth.env);
+      if (viaAuth.exitCode === 0) return { exists: true, auth, error: '' };
     }
-    return { exists: false, viaGh: false, error: (plain.stderr || plain.stdout).trim().slice(0, 400) };
+    return { exists: false, auth: null, error: (plain.stderr || plain.stdout).trim().slice(0, 400) };
   }
 
   private async clone(p: RepoClonePayload): Promise<RepoCloneResult> {
@@ -140,19 +159,19 @@ export class RepoCloner {
       // an empty folder is fine to clone into
     }
 
-    const probe = await this.probe(p.remoteUrl);
+    const probe = await this.probe(p.remoteUrl, p.forge);
     if (probe.exists) {
-      const auth = probe.viaGh ? this.authArgs(p.remoteUrl) : [];
-      const r = await this.git([...auth, 'clone', '--', p.remoteUrl, target], root);
+      const auth = probe.auth?.args ?? [];
+      const r = await this.git([...auth, 'clone', '--', p.remoteUrl, target], root, 600_000, probe.auth?.env);
       if (r.exitCode !== 0)
         return {
           ok: false,
           state: 'failed',
           error: `git clone failed: ${(r.stderr || r.stdout).trim().slice(0, 500)}`,
         };
-      if (probe.viaGh && /^https?:\/\//.test(p.remoteUrl)) {
+      if (probe.auth && !Object.keys(probe.auth.env).length && /^https?:\/\//.test(p.remoteUrl)) {
         const host = new URL(p.remoteUrl).host;
-        // Later fetches and pushes in this clone keep using gh's login.
+        // Later fetches and pushes in this clone keep using gh's login (token-based hosts pass theirs per command).
         await this.git(
           ['config', `credential.https://${host}.helper`, `!${this.deps.ghBin ?? 'gh'} auth git-credential`],
           target,
@@ -166,6 +185,8 @@ export class RepoCloner {
       const made = await this.deps.creator.run({
         requestId: p.requestId,
         name: p.create.name,
+        ...(p.create.provider ? { provider: p.create.provider } : {}),
+        ...(p.create.host ? { host: p.create.host } : {}),
         visibility: p.create.visibility,
         ...(p.create.description ? { description: p.create.description } : {}),
         projectKey: p.projectKey,

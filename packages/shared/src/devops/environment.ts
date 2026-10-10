@@ -1,3 +1,4 @@
+import { ForgeKindSchema } from '../forge/index.ts';
 import { z } from 'zod';
 import { DevOpsAccessSchema } from '../events/devops.ts';
 
@@ -26,11 +27,16 @@ export const RepoClonePayloadSchema = z.object({
   remoteUrl: z.string().min(1).max(2000),
   /** The project's working branch when the manager named one; used for the initial commit of a created repository. */
   workingBranch: z.string().optional(),
+  /** The git provider chosen on the repository (absent: detected from the URL). */
+  forge: ForgeKindSchema.optional(),
   /** Set when the manager chose "create new": the repository is created (with `gh`) if it does not exist. */
   create: z
     .object({
-      /** `owner/repo` */
+      /** `owner/repo`, or the provider's own shape (see `CREATE_FIELDS`). */
       name: z.string(),
+      /** The git provider to create it on (absent: GitHub). */
+      provider: ForgeKindSchema.optional(),
+      host: z.string().max(200).optional(),
       visibility: z.enum(['private', 'public']).default('private'),
       description: z.string().max(350).optional(),
     })

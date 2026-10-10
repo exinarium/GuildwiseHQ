@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ForgeKindSchema } from '../forge/index.ts';
 import { WorkingBranchReason } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { BranchPrefixSchema, GitRefSchema, VaultFolderSchema } from '../safe.ts';
@@ -99,7 +100,14 @@ export const projectEvents = [
       remoteUrl: z.string().min(1),
       remoteUrlNormalized: z.string().min(1),
       workingBranch: z.string().optional(),
+      /** The git provider chosen for the repository (absent: detected from the URL). */
+      forge: ForgeKindSchema.optional(),
     }),
+  ),
+  /** The manager changed (or cleared, `forge: null`) the git provider of a repository. */
+  defineEvent(
+    'ProjectRepoForgeSet',
+    z.object({ projectId: Id, repoId: Id, forge: ForgeKindSchema.nullable() }),
   ),
   defineEvent('ProjectRepoRemoved', z.object({ projectId: Id, repoId: Id })),
   /**

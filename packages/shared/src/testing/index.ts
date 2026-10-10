@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CompletionAction, TestEvidence } from '../cards/types.ts';
+import { ForgeKindSchema } from '../forge/index.ts';
 
 /**
  * M4 contract shared by the server and the runner: the `finalize.execute` runner command, the tester environment
@@ -53,6 +54,8 @@ export const FinalizeExecutePayloadSchema = z.object({
   worktreePath: z.string().nullable(),
   prTitle: z.string().optional(),
   prBody: z.string().optional(),
+  /** The git provider chosen on the repository (absent: detected from the remote URL). */
+  forge: ForgeKindSchema.optional(),
 });
 export type FinalizeExecutePayload = z.infer<typeof FinalizeExecutePayloadSchema>;
 

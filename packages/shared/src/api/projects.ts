@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { EnvironmentReportSchema, EnvStateSchema, RepoCloneStateSchema } from '../devops/environment.ts';
 import { ConvertCardDecision, ProjectChangesSchema } from '../events/project.ts';
 import { ProjectKeySchema } from '../ids.ts';
-import { RepoDescriptionSchema, RepoNameSchema, RepoVisibilitySchema } from '../repo/index.ts';
+import { createFullNameError, detectForgeKind, ForgeKindSchema } from '../forge/index.ts';
+import { RepoNameSchema, repoNameError, RepoDescriptionSchema, RepoVisibilitySchema } from '../repo/index.ts';
 import { BranchPrefixSchema, GitRefSchema, RemoteUrlSchema, VaultFolderSchema } from '../safe.ts';
 import { IsoTime } from './common.ts';
 import { BudgetDtoSchema } from './costs.ts';
@@ -16,6 +17,10 @@ export const ProjectRepoDtoSchema = z.object({
   /** The confirmed working branch; null until the manager named one (hygiene commits nothing then). */
   workingBranch: z.string().nullable(),
   removedAt: IsoTime.nullable(),
+  /** The git provider in force: the manual choice, else detected from the URL. */
+  forge: ForgeKindSchema,
+  /** The manual choice (null: detected). */
+  forgeOverride: ForgeKindSchema.nullable(),
   /** Branches of the clone, as the last hygiene run saw them (the options of the working-branch question). */
   knownBranches: z.array(z.string()).optional(),
   workingBranchSetAt: IsoTime.nullable().optional(),
@@ -164,17 +169,24 @@ export const AddRepoRequestSchema = z.object({
   name: z.string().min(1).max(120),
   remoteUrl: RemoteUrlSchema,
   workingBranch: GitRefSchema.optional(),
+  /** The git provider, when it cannot be detected from the URL (the manual override). */
+  forge: ForgeKindSchema.optional(),
   /**
    * "Create new": the repository does not exist yet. `remoteUrl` is where it will live; the DevOps engineer creates it
-   * on the code host (gh) and clones it. Without this the repository is cloned (it must exist).
+   * on the code host (its CLI or API) and clones it. Without this the repository is cloned (it must exist).
    */
   create: z
     .object({
-      name: RepoNameSchema,
+      name: z.string().min(3).max(400),
       visibility: RepoVisibilitySchema.default('private'),
       description: RepoDescriptionSchema.optional(),
     })
     .optional(),
+}).superRefine((v, ctx) => {
+  if (!v.create) return;
+  const kind = v.forge ?? detectForgeKind(v.remoteUrl);
+  const err = kind === 'github' || kind === 'git' ? repoNameError(v.create.name) : createFullNameError(kind, v.create.name);
+  if (err) ctx.addIssue({ code: 'custom', path: ['create', 'name'], message: err });
 });
 export type AddRepoRequest = z.infer<typeof AddRepoRequestSchema>;
 export const RepoParamsSchema = z.object({ id: z.uuid(), repoId: z.uuid() });

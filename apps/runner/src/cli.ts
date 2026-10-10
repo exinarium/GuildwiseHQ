@@ -2,10 +2,26 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { hostname, platform } from 'node:os';
 import { join, resolve } from 'node:path';
-import { devcontainerText, RunnerPairRequestSchema, RunnerPairResponseSchema } from '@aom/shared';
+import {
+  CONNECTABLE_FORGES,
+  type ConnectableForge,
+  devcontainerText,
+  RunnerPairRequestSchema,
+  RunnerPairResponseSchema,
+} from '@aom/shared';
 import { Command } from 'commander';
 import { execa } from 'execa';
 import { sandboxDoctorLines, sandboxState } from './adapters/claude-policy.ts';
+import {
+  connectSteps,
+  describeConnection,
+  ensureSshKey,
+  saveAndVerify,
+  sshUploadHelp,
+  touchRecheck,
+} from './forge/connect.ts';
+import { defaultHost, FileTokenStore, gitConnections } from './forge/index.ts';
+import { realExecutor } from './toolchain/exec.ts';
 import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
 import { toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { requestRotatedToken } from './connection/rotate.ts';
@@ -438,6 +454,153 @@ async function reposList(opts: { dataDir?: string; pairing?: string }): Promise<
   for (const r of repos) console.log(`${r.localPath}\t${r.remoteUrl}\t${r.headBranch ?? '(detached)'}`);
 }
 
+/** Reads one line from the terminal without echoing it (a token); from a pipe when stdin is not a terminal. */
+async function promptSecret(question: string): Promise<string> {
+  const { createInterface } = await import('node:readline');
+  const out = process.stdout;
+  if (!process.stdin.isTTY) {
+    const rl = createInterface({ input: process.stdin });
+    for await (const line of rl) return line.trim();
+    return '';
+  }
+  out.write(question);
+  return new Promise((done) => {
+    let buf = '';
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+    const onData = (ch: string) => {
+      for (const c of ch) {
+        if (c === '\r' || c === '\n') {
+          process.stdin.setRawMode(false);
+          process.stdin.pause();
+          process.stdin.off('data', onData);
+          out.write('\n');
+          done(buf.trim());
+          return;
+        }
+        if (c === '\u0003') process.exit(130);
+        if (c === '\u007f') buf = buf.slice(0, -1);
+        else buf += c;
+      }
+    };
+    process.stdin.on('data', onData);
+  });
+}
+
+async function promptLine(question: string): Promise<string> {
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await rl.question(question)).trim();
+  } finally {
+    rl.close();
+  }
+}
+
+interface GitConnectOpts {
+  dataDir?: string;
+  pairing?: string;
+  host?: string;
+  user?: string;
+  organization?: string;
+  sshKey?: boolean;
+  status?: boolean;
+  disconnect?: boolean;
+}
+
+/**
+ * `aom-runner git-connect <provider>`: sets up (or checks) this workstation's login to a git host. Credentials stay on
+ * this machine: `gh`/`glab` hold their own logins, tokens go to secrets/git-tokens.json (mode 0600). The server only
+ * ever learns "connected / not connected" (`git.report`).
+ */
+async function gitConnect(providerArg: string, opts: GitConnectOpts): Promise<void> {
+  if (!(CONNECTABLE_FORGES as readonly string[]).includes(providerArg))
+    throw new Error(`unknown provider "${providerArg}": use one of ${CONNECTABLE_FORGES.join(', ')}`);
+  const provider = providerArg as ConnectableForge;
+  const host = opts.host ?? defaultHost(provider);
+  const { root, entries } = selectPairings(opts);
+  const stores = entries.map((e) => {
+    const paths = runnerPaths(entryDir(root, e));
+    return { paths, store: new FileTokenStore(`${paths.secrets}/git-tokens.json`) };
+  });
+  const first = stores[0] as (typeof stores)[number];
+  const env = { exec: realExecutor, fetch, tokens: first.store };
+  const show = async () => {
+    for (const c of (await gitConnections(env, { [provider]: [host] })).filter((c) => c.provider === provider))
+      console.log(describeConnection(c));
+  };
+  const done = () => {
+    for (const s of stores) touchRecheck(s.paths.secrets);
+    console.log('A running runner reports the new status to the server within a minute.');
+  };
+  if (opts.disconnect) {
+    for (const s of stores) s.store.remove(provider, host);
+    console.log('Saved token removed. (Logins held by gh or glab are removed with `gh auth logout` / `glab auth logout`.)');
+    return done();
+  }
+  if (opts.status) return show();
+
+  console.log(`Connecting this workstation to ${provider} (${host}). Nothing leaves this machine.\n`);
+  for (const l of connectSteps(provider, host)) console.log(l);
+  console.log('');
+  if (opts.sshKey) {
+    const k = await ensureSshKey(realExecutor, provider);
+    console.log(`${k.created ? 'Created' : 'Using the existing'} SSH key ${k.path}. Add this public key:\n\n${k.publicKey}\n\n${sshUploadHelp(provider, host)}`);
+    console.log(`Then add to ~/.ssh/config:\n  Host ${host}\n    IdentityFile ${k.path}\n    IdentitiesOnly yes`);
+    return;
+  }
+  if (provider === 'github') {
+    const r = await realExecutor.run('gh', ['--version']);
+    if (r.exitCode === 127) throw new Error('the GitHub CLI (gh) is not installed: https://cli.github.com');
+    const { execa: ex } = await import('execa');
+    await ex('gh', ['auth', 'login', '--web', '--hostname', host, '--git-protocol', 'https'], { stdio: 'inherit', reject: false });
+    await ex('gh', ['auth', 'setup-git', '--hostname', host], { stdio: 'inherit', reject: false });
+    await show();
+    return done();
+  }
+  if (provider === 'gitlab') {
+    const g = await realExecutor.run('glab', ['--version']);
+    if (g.exitCode === 0) {
+      const { execa: ex } = await import('execa');
+      await ex('glab', ['auth', 'login', '--hostname', host], { stdio: 'inherit', reject: false });
+      await show();
+      return done();
+    }
+  }
+  if (provider === 'azure-devops' && !opts.organization) {
+    const az = await realExecutor.run('az', ['account', 'show', '--query', 'user.name', '-o', 'tsv']);
+    if (az.exitCode === 0) {
+      console.log(`Signed in to the Azure CLI as ${az.stdout.trim()}; using that sign-in.`);
+      await show();
+      return done();
+    }
+  }
+  let user = opts.user;
+  if (provider === 'bitbucket-cloud' && !user) user = await promptLine('Atlassian e-mail address: ');
+  let organization = opts.organization;
+  if (provider === 'azure-devops' && !organization) organization = await promptLine('Azure DevOps organization: ');
+  const token = await promptSecret('Paste the token (it is not shown): ');
+  if (!token) throw new Error('no token entered');
+  let st: Awaited<ReturnType<typeof saveAndVerify>> | undefined;
+  for (const s of stores) {
+    st = await saveAndVerify({ exec: realExecutor, fetch, tokens: s.store }, {
+      provider,
+      host,
+      token,
+      ...(user ? { user } : {}),
+      ...(organization ? { organization } : {}),
+    });
+  }
+  if (!st || st.state !== 'connected') {
+    console.error(`The token was not accepted${st?.detail ? `: ${st.detail}` : ''}. Nothing was saved.`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(describeConnection(st));
+  done();
+}
+
 export function buildProgram(): Command {
   const program = new Command('aom-runner').description('Guildwise HQ runner').version(RUNNER_VERSION);
   program
@@ -518,6 +681,20 @@ export function buildProgram(): Command {
     .option('--purge', "also delete that pairing's data directory (worktrees, clones, logs)")
     .option(...dataDirOpt)
     .action(unpair);
+  program
+    .command('git-connect <provider>')
+    .description(
+      `set up this workstation's login to a git host (${CONNECTABLE_FORGES.join(', ')}); the credential stays on this machine`,
+    )
+    .option('--host <host>', 'a self-managed host (GitHub Enterprise, GitLab)')
+    .option('--user <email>', 'Bitbucket Cloud: your Atlassian e-mail address')
+    .option('--organization <name>', 'Azure DevOps organization')
+    .option('--ssh-key', 'create an SSH key and print what to upload instead of using a token')
+    .option('--status', 'only show whether it is connected')
+    .option('--disconnect', 'remove the token saved by this command')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(gitConnect);
   const repos = program.command('repos').description('manage the folders scanned for git repositories');
   repos
     .command('add <path>')
