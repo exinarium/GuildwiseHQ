@@ -17,6 +17,9 @@ describe('which page serves /', () => {
   it('hands the app to anyone who has a session cookie (it redirects to their workspace)', () => {
     expect(landingFor({ aom_sid: 'abc' }, dir)).toBe('index.html');
   });
+  it('hands the landing page to a visitor whose session cookie is stale', () => {
+    expect(landingFor({ aom_sid: 'abc' }, dir, false)).toBe('landing.html');
+  });
   it('falls back to the app when the build has no landing page', () => {
     expect(landingFor({}, bare)).toBe('index.html');
   });

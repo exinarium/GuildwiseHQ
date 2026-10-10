@@ -15,7 +15,7 @@ import {
 } from 'fastify-type-provider-zod';
 import type { AnthropicLike } from './assistant/service.ts';
 import { checkContentType, checkOrigin } from './auth/origin-check.ts';
-import { SESSION_COOKIE } from './auth/sessions.ts';
+import { lookupSession, SESSION_COOKIE } from './auth/sessions.ts';
 import { createBillingRuntime } from './billing/runtime.ts';
 import { createSocialClient, type SocialClient } from './blog/social-client.ts';
 import { BrowserGateway } from './browser-gateway/gateway.ts';
@@ -114,11 +114,18 @@ declare module 'fastify' {
 }
 
 /** Which built page `/` serves: the landing page when nobody has a session cookie (and the build has one), else the app. */
+/**
+ * The page `/` serves: the app for a visitor whose session cookie is still valid, the landing page for everyone else
+ * (no cookie, or a stale one left after a sign-out elsewhere, a password reset or an expiry).
+ */
 export function landingFor(
   cookies: Record<string, string | undefined>,
   root: string,
+  sessionValid = !!cookies[SESSION_COOKIE],
 ): 'landing.html' | 'index.html' {
-  return !cookies[SESSION_COOKIE] && existsSync(join(root, 'landing.html')) ? 'landing.html' : 'index.html';
+  return !(cookies[SESSION_COOKIE] && sessionValid) && existsSync(join(root, 'landing.html'))
+    ? 'landing.html'
+    : 'index.html';
 }
 
 function webDistDir(config: Config): string | null {
@@ -393,12 +400,16 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   if (config.serveWeb) {
     const root = webDistDir(config);
     if (root) {
-      // `/` is the landing page for visitors without a session cookie and the app for everyone else (the app then sends
-      // a signed-in person to their workspace and a stale cookie to /login). The page differs by cookie: never share it.
+      // `/` is the app for a visitor with a valid session and the landing page for everyone else. A stale cookie (the
+      // session ended by a sign-out elsewhere, a password reset or an expiry) gets the landing page and is cleared, so
+      // nobody is bounced to /login just for opening the site. The page differs by cookie: never share it.
       await app.register(fastifyStatic, { root, wildcard: false, index: false });
-      app.get('/', (req, reply) => {
+      app.get('/', async (req, reply) => {
         void reply.header('cache-control', 'no-cache').header('vary', 'Cookie');
-        return reply.sendFile(landingFor(req.cookies, root));
+        const token = req.cookies[SESSION_COOKIE];
+        const valid = token ? !!(await lookupSession(ctx, token).catch(() => null)) : false;
+        if (token && !valid) void reply.clearCookie(SESSION_COOKIE, { path: '/' });
+        return reply.sendFile(landingFor(req.cookies, root, valid));
       });
       // The public legal pages: prerendered from apps/web/src/legal/*.md at build time, for everyone (signed in or not).
       for (const doc of ['privacy', 'terms'] as const)
