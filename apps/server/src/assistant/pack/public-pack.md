@@ -62,7 +62,8 @@ The landing page buttons lead to a request-access form (Contact us). The team re
 An outline of the in-app help articles, to answer how things work. Do not quote it as a manual.
 
 ### Getting started
-First login, the guided tour, sidebar areas, command palette and keyboard shortcuts.
+The training video, first login, the guided tour, the Get started checklist, sidebar areas, command palette and keyboard shortcuts.
+- The training video: On the Help page, the Getting started in five steps video is a spoken tutorial of about three minutes. A friendly voice walks you through the five steps while you watch them happen on screen:
 - First login: 1. Check your email for an invitation link. It comes either from the platform administrator if you are starting a new organization, or from the Owner or an Admin if you are joining an existing one. 2. Click the link, choose your name and a password (12 or more characters).…
 - Forgot your password: On the sign-in page click Forgot your password? and type your email. We send a link that works once and expires after an hour. Choose a new password (12 or more characters); you are signed out everywhere else, then sign in with the new one. If you use two-factor login you still enter your code.…
 - The tour: The first time you sign in, Guildwise HQ starts a guided tour of the main pages: the board where your cards live, the desk where you answer questions, intake from external systems, and more. The tour takes you to each area, shows you what is there and what you can do.
@@ -121,10 +122,11 @@ Hiring agents, seniority, runtime and model, allowed projects, focus, firing and
 ### DevOps and repository hygiene
 The DevOps engineer, repository hygiene, the working branch and creating new repositories.
 - The DevOps engineer: You get one DevOps engineer per workstation automatically. It cannot be fired, only reset (which clears its sandbox but keeps it assigned). It does not take cards from the queue.
+- When two branches conflict: If a card's branch conflicts with the working branch (before testing or when finishing), or hygiene cannot combine your working branch with its remote, the DevOps engineer tries to fix it first, on a temporary branch, and runs the build and tests before it moves anything.…
 - Repository hygiene: Once a day per workstation by default, the DevOps engineer tidies the repositories on that machine. On the Workstations page, open the workstation and find Repository hygiene: Run sets how often (off, every hour, every 6 hours, every 12 hours, daily or weekly) and Run hygiene now starts a run at once.…
 - New repositories and the toolchain: When you add a repository in Project settings, Repositories, the DevOps engineer of each workstation of the project puts it there. Pick An existing repository and it is cloned into the workstation's first repository folder (aom-runner repos add); a folder that already holds something else is never overwritten.…
 - Rights and the sudo password: A ticked right is checked on the machine itself. On the Workstations page each ticked right shows verified or failed with the reason and how to fix it (for Docker: add the runner user to the docker group, start the daemon; for sudo: enter the password or allow passwordless sudo). Verify now checks again.
-- The working branch: The working branch is the main branch where agents commit their finished work. It is something you confirm: it is never guessed.
+- The working branch: The working branch is the main line where finished work goes: the repository's default branch (usually main). Guildwise confirms it for you automatically the first time it sees the repository, so you are not asked.…
 - Creating a new repository: Agents cannot create GitHub repositories themselves: their sandbox has no GitHub login. When a project needs a new repository:
 
 ### The Decision desk
@@ -154,7 +156,7 @@ Intake from Jira and GitHub, unmapped tickets, credentials, the outbox and guard
 ### Testing and finalization
 Test stage, finalization with pull requests and merging, full suite and regression.
 - Test stage: When a card reaches Test, a tester runs the E2E tests from the test plan. If tests pass:
-- Finalization: At the Finalize stage, your BA carries out the card's completion action, the way to ship the work that was set on the card (the BA may revise it):
+- Finalization: At the Finalize stage, your BA ships the work the way the project says. In each project's settings, How finished work lands is either Straight into main after review and test (the default) or As a pull request I approve.…
 - Full suite and regression: After finalization, a full suite card is created for testers to run the entire E2E suite once. A test-side failure (a flaky test, data or environment) is fixed by the tester; a genuine bug becomes a new bug card and you get a notice. These failures do not block merges.
 
 ### Phases and follow-ups
@@ -208,12 +210,21 @@ The org chart, custom roles, custom workflows and departments.
 ### Workstations and the installer
 What a workstation is, the Add a workstation wizard, installing by hand, Claude credentials and Windows.
 - What is a workstation: A workstation is your own machine: a laptop, desktop or server. It holds your git repositories and is where agents run their work. You can have one workstation or many. Each agent is assigned to one workstation and only that one.
-- Add a workstation: 1. Go to Workstations (sidebar: Organization) and click Add a workstation (or the button in the middle if the list is empty). 2. Pick the system: Windows, Linux or macOS. The page guesses from your browser; change it if needed. Optionally type a name for the workstation. 3.…
+- Add a workstation: First choose where your agents should run: My computer (below), A VPS (SSH) or GitHub Codespaces. The last two are explained in "Cloud workstations (VPS and Codespaces)".
 - Claude sign-in: The installer asks how agents should use Claude:
 - Installing by hand: Only needed when the guided setup is not an option:
 - Health checks: While the installer runs, this page lists the health checks as they finish: Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories and server connectivity. Each shows ok, warn or fail. A fail means something is missing or broken and the line says what. A warn (Docker, yt-dlp) is optional.
 - Windows: Default: WSL2 (recommended). Install the runner inside a WSL2 Ubuntu distribution and follow the Linux instructions. The installer turns on WSL2 for you; you just follow the steps. Agents run sandboxed inside WSL2 just like on Linux.
+- Git hosts: Each repository of a project has a git host: GitHub, GitLab, Bitbucket Cloud, Azure DevOps, or a plain git server. For pull requests, the repository list and creating new repositories, the workstation must be connected to that host. Your login or token stays on the workstation;…
 - Unpairing: If a workstation goes away (you sold the computer, decommissioned a server), go to Workstations and click Unpair on its card, then confirm. Its runner token stops working and the runner shuts down, cards claimed there go back to the queue, and its agents wait until you re-home them.…
+
+### Cloud workstations (VPS and Codespaces)
+Run your agents on a server (VPS over SSH) or a GitHub Codespace instead of your own computer, with automatic pairing, sleeping when idle and a cost estimate.
+- A VPS over SSH: 1. Click Add a workstation and choose A VPS (SSH). 2. Enter the server's address, the SSH port (usually 22), the user, and either a password or an SSH key. Give it a name, and optionally what it costs a month so the page can show an estimate. 3. Click Install and pair.…
+- GitHub Codespaces: 1. Click Add a workstation and choose GitHub Codespaces. 2. Connect GitHub: create a token on GitHub with the codespace scope and paste it. Guildwise keeps it encrypted, only to wake and stop your codespace. 3. Enter the repository (owner/name), choose a machine type and see the estimated monthly cost. 4.…
+- Sleeping and waking: - A Codespace stops after 30 minutes with no agent working (you can choose 15 minutes to 2 hours in Settings). - It wakes by itself when a card is queued that its agents can take. - Optional office hours (days, hours and time zone) keep it asleep outside working time. - Wake and Stop buttons are always there for you.
+- What it costs: Every cloud workstation shows an estimated monthly cost. For a VPS it is the price you entered. For a Codespace it is the running hours (your office hours, or about 8 hours on working days) times GitHub's hourly rate, plus disk. It is an estimate, not a bill.
+- Signing in to Claude: The recommended way is your own Anthropic API key. It stays on the cloud machine; Guildwise never receives or stores it.
 
 ### Installing a workstation: if something goes wrong
 Installer troubleshooting: expired links, restart, permissions, git version, sandbox.
@@ -257,4 +268,27 @@ Day-to-day problems: disconnected workstations, missing handoffs, vault conflict
 - Vault sync is paused with a conflict: Vault sync stops if a local change conflicts with a remote change. Open Vaults in the sidebar, find the vault (it shows Sync paused: conflict and the conflicting files), and resolve it:
 - Card does not match available agents: The repository must be listed under the workstation, and the agent must have the role and workstation assigned. Check:
 - An agent says the work is out of scope: The agent reported work outside the scope of its role. Check:
+
+### Plans and billing
+Plans and limits, the 7-day free trial, cards and invoices, changing plan, Business add-ons, cancelling and what happens when a payment fails.
+- Plans: Every plan has every feature and no limit on agents. Plans differ only in how many members, workstations and projects you can have.
+- Signing up and the free trial: 1. Choose a plan on the sign-up page and enter your organization name, your name, email and a password. 2. Open the link in the email we send you. Signing in needs the confirmed email. 3. Add a card on the Billing page. Your 7-day free trial starts and nothing is charged. 4.…
+- Cards and invoices: We never see or keep your card number. With PayFast you enter your card on PayFast's secure page; a small amount is charged to check the card and refunded straight away. Only a secure token, the card type, the last four digits and the expiry are kept.
+- Changing plan: Pick another plan under Change plan. The change takes effect at once. If the new plan costs more you pay the difference for the rest of the month now; if it costs less the difference is kept as a credit on your next invoice. During the trial a change costs nothing.…
+- Business add-ons: On Business you can add members, workstations and projects on top of the plan, each at a small monthly price shown on the page. Changes apply from your next billing cycle, and you can never go below the Business base. To go lower, change plan.
+- Cancelling: Cancel subscription keeps your organization active until the end of what you have paid for (or the end of the trial), then pauses it. Nothing more is charged. Changed your mind before then? Use Keep my subscription.
+- When a payment fails: If a charge fails we try again after one day and again after three days (three attempts in all) and email you each time. Update your card on the Billing page to fix it. If the third attempt fails, the organization is paused.
+- For platform administrators: Under Platform > Billing you edit the plan prices and limits, the add-on prices, the VAT percentage (0 until the company is VAT registered) and an exchange-rate override. On an organization's page the Billing panel shows its subscription, card and invoices, and lets you Pause, Unpause or Assign Unlimited.…
+
+### The blog and the weekly digest
+Where to read the Guildwise HQ blog, how to get (or stop) the weekly digest, and how the platform administrator runs the blog.
+- Reading the blog: - Inside the app, open Help and choose the Blog tab. You read the articles without leaving your work, and the search box on the Help centre also finds them under From the blog. - On the public site, go to /blog. You can follow the RSS feed at /blog/rss.xml, and every article has a share link.
+- The weekly digest: Once a week, on Monday at 08:00 (Johannesburg time), you can get one email with the new articles. In a week with nothing new, nothing is sent.
+- Running the blog (platform administrator): This part is for the platform administrator. The blog is managed under Blog and API keys in the platform area.
+
+### What's new
+The popup that tells you about new features after an update, and how to read the list again.
+- Closing the window: Click Got it (or close the window) and the changes you were shown are marked as seen. They are remembered for your account, not for your browser, so they do not come back on your phone or another computer.
+- Who sees what: You only see changes that matter for your role in the organization you are working in. Some changes are for everyone, some only for Owners, some for Owners and Admins. Platform administrators see the changes for the platform area.…
+- Read the list again: Open Help and choose See what's new on the What's new card. The list shows every change for your role, including the ones you have already seen. Closing it there does not change anything.
 </help_outline>
