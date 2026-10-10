@@ -1,5 +1,6 @@
 import {
   type BudgetDto,
+  detectForgeKind,
   isOrgOperational,
   type ProjectDetailResponse,
   type ProjectDto,
@@ -176,6 +177,8 @@ export async function getProjectDetail(
       remoteUrlNormalized: r.remote_url_normalized,
       workingBranch: r.working_branch,
       removedAt: iso(r.removed_at),
+      forge: r.forge_kind ?? detectForgeKind(r.remote_url),
+      forgeOverride: r.forge_kind ?? null,
       knownBranches: r.known_branches ?? [],
       workingBranchSetAt: iso(r.working_branch_set_at),
       branchQuestionId: questions.find((q) => q.repo_id === r.id)?.id ?? null,
@@ -279,6 +282,7 @@ export async function workstationDtos(
       running: running.find((r) => r.workstation_id === w.id)?.n ?? 0,
       limit: ctx.services.runners.isOnline(w.id) ? (ctx.services.runners.get(w.id)?.maxShifts ?? null) : null,
     },
+    git: { connections: w.git_connections ?? [], checkedAt: iso(w.git_checked_at) },
     ownerEmail: w.owner_email,
   }));
 }

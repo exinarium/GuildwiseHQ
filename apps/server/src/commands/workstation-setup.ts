@@ -3,6 +3,7 @@ import {
   DESK_SUBKIND,
   DevOpsAccessSchema,
   EnvironmentReportSchema,
+  parseRemote,
   type RepoCloneResult,
   RepoCloneResultSchema,
   RightsReportSchema,
@@ -45,6 +46,8 @@ export async function projectWorkstations(db: Queryable, projectId: string): Pro
 }
 
 // ----------------------------------------------------------------------------------------- repository clone
+
+const DEFAULT_HOSTS = ['github.com', 'gitlab.com'];
 
 /** What the manager chose when adding the repository ("create new"), kept for the retry button. */
 export interface CreateChoice {
@@ -111,6 +114,7 @@ export async function repoSetupEvents(
     const creates = !!opts.create && !creatorGiven;
     if (opts.create && creatorGiven) continue;
     if (creates) creatorGiven = true;
+    const parsed = parseRemote(repo.remote_url, repo.forge_kind);
     await enqueueRunnerCommand(tx, w.id, 'repo.clone', {
       ...base,
       projectKey: project.key,
@@ -118,7 +122,19 @@ export async function repoSetupEvents(
       name: repo.name,
       remoteUrl: repo.remote_url,
       ...(repo.working_branch ? { workingBranch: repo.working_branch } : {}),
-      ...(creates && opts.create ? { create: opts.create } : {}),
+      ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
+      ...(creates && opts.create
+        ? {
+            create: {
+              ...opts.create,
+              // The provider (and a self-managed host) the repository is made on, from the repository's own URL.
+              ...(parsed && parsed.kind !== 'git' ? { provider: parsed.kind } : {}),
+              ...(parsed && (parsed.kind === 'gitlab' || parsed.kind === 'github') && !DEFAULT_HOSTS.includes(parsed.host)
+                ? { host: parsed.host }
+                : {}),
+            },
+          }
+        : {}),
     });
     events.push({
       streamId: streamId.project(project.id),

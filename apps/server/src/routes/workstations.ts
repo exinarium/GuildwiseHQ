@@ -1,11 +1,14 @@
 import {
+  ForgeRepoListRequestSchema,
   IdParamsSchema,
   PairingCodeResponseSchema,
   PatchWorkstationRequestSchema,
   RunnerPairRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { requireAdmin, requireUser } from '../auth/guards.ts';
+import { readRepoList, requestGitRecheck, requestRepoList } from '../commands/forges.ts';
 import {
   createPairingCode,
   pairRunner,
@@ -56,6 +59,33 @@ export function workstationRoutes(ctx: Ctx) {
       await unlinkWorkstation(ctx, s.user, req.params.id);
       return { ok: true };
     });
+
+    /** Ask the runner to re-read its git logins and report them (the "Check again" button). */
+    app.post('/api/workstations/:id/git/recheck', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await requestGitRecheck(ctx, s.user, req.params.id);
+      return { ok: true };
+    });
+
+    /** The repository picker: ask the workstation for the user's repositories on a connected provider. */
+    app.post(
+      '/api/workstations/:id/git/repos',
+      { schema: { params: IdParamsSchema, body: ForgeRepoListRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        reply.code(202);
+        return requestRepoList(ctx, s.user, req.params.id, req.body);
+      },
+    );
+
+    app.get(
+      '/api/workstations/:id/git/repos/:requestId',
+      { schema: { params: z.object({ id: z.uuid(), requestId: z.uuid() }) } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return readRepoList(ctx, s.user, req.params.id, req.params.requestId);
+      },
+    );
 
     // Unauthenticated: the pairing code is the credential. Called by the runner CLI (no Origin header).
     app.post(

@@ -6,6 +6,7 @@ import {
   DeleteProjectRequestSchema,
   IdParamsSchema,
   PatchProjectRequestSchema,
+  PatchRepoRequestSchema,
   ProjectsQuerySchema,
   RankProjectsRequestSchema,
   RepoParamsSchema,
@@ -16,6 +17,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { requireOrg, requireUser } from '../auth/guards.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
+import { setRepoForge } from '../commands/forges.ts';
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import {
   addRepo,
@@ -168,6 +170,17 @@ export function projectRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         await setRepoWorkingBranch(ctx, s.user, req.params.id, req.params.repoId, req.body.branch);
+        return getProjectDetail(ctx, s.user.id, req.params.id);
+      },
+    );
+
+    /** The git provider of a repository: the manual choice, or `null` to detect it from the URL again. */
+    app.patch(
+      '/api/projects/:id/repos/:repoId',
+      { schema: { params: RepoParamsSchema, body: PatchRepoRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setRepoForge(ctx, s.user, req.params.id, req.params.repoId, req.body.forge);
         return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );

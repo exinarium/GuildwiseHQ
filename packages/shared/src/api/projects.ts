@@ -280,3 +280,7 @@ export const ConvertResultSchema = z.object({
   repoRequests: z.array(z.object({ requestId: z.uuid(), name: z.string(), deskItemId: z.uuid() })),
 });
 export type ConvertResult = z.infer<typeof ConvertResultSchema>;
+
+/** `PATCH /api/projects/:id/repos/:repoId`: the git provider of a repository (null: detect it from the URL again). */
+export const PatchRepoRequestSchema = z.object({ forge: ForgeKindSchema.nullable() });
+export type PatchRepoRequest = z.infer<typeof PatchRepoRequestSchema>;

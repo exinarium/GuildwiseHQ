@@ -293,11 +293,11 @@ export const projectProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ProjectRepoAdded'>).payload;
     await exec(
       tx,
-      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, working_branch)
-       VALUES ($1,$2,$3,$4,$5,$6)
+      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, working_branch, forge_kind)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (project_id, remote_url_normalized) DO UPDATE
          SET removed_at = NULL, name = EXCLUDED.name, remote_url = EXCLUDED.remote_url,
-             working_branch = EXCLUDED.working_branch`,
+             working_branch = EXCLUDED.working_branch, forge_kind = EXCLUDED.forge_kind`,
       [
         p.repoId,
         p.projectId,
@@ -305,8 +305,13 @@ export const projectProjectors: Record<string, Projector> = {
         scrubRemoteUrl(p.remoteUrl),
         p.remoteUrlNormalized,
         p.workingBranch ?? null,
+        p.forge ?? null,
       ],
     );
+  },
+  ProjectRepoForgeSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectRepoForgeSet'>).payload;
+    await exec(tx, 'UPDATE project_repos SET forge_kind=$2 WHERE id=$1', [p.repoId, p.forge]);
   },
   ProjectRepoRemoved: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectRepoRemoved'>).payload;

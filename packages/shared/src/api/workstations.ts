@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { RightsReportSchema } from '../devops/environment.ts';
 import { DevOpsAccessSchema } from '../events/devops.ts';
+import { ConnectableForgeSchema, GitConnectionSchema, RepoRefSchema } from '../forge/index.ts';
 import { RuntimeInfoSchema } from '../protocol/runner.ts';
 import { IsoTime } from './common.ts';
 
@@ -49,6 +50,8 @@ export const WorkstationDtoSchema = z.object({
       works: z.boolean().nullable(),
     })
     .optional(),
+  /** Which git providers this workstation is connected to (facts reported by the runner; never a credential). */
+  git: z.object({ connections: z.array(GitConnectionSchema), checkedAt: IsoTime.nullable() }).optional(),
   /** Shifts running now and how many this workstation takes at once (`limit` is null while it is offline). */
   shifts: z
     .object({ running: z.number().int().nonnegative(), limit: z.number().int().positive().nullable() })
@@ -89,3 +92,20 @@ export const RunnerPairResponseSchema = z.object({
   runnerToken: z.string().startsWith('aomr_'),
 });
 export type RunnerPairResponse = z.infer<typeof RunnerPairResponseSchema>;
+
+/** `POST /api/workstations/:id/git/repos`: ask the workstation for the user's repositories on a connected provider. */
+export const ForgeRepoListRequestSchema = z.object({
+  provider: ConnectableForgeSchema,
+  search: z.string().max(100).optional(),
+});
+export type ForgeRepoListRequest = z.infer<typeof ForgeRepoListRequestSchema>;
+
+/** The picker's answer (poll `GET /api/workstations/:id/git/repos/:requestId` until `state` is not `pending`). */
+export const ForgeRepoListSchema = z.object({
+  requestId: z.uuid(),
+  provider: ConnectableForgeSchema,
+  state: z.enum(['pending', 'done', 'failed']),
+  repos: z.array(RepoRefSchema),
+  error: z.string().nullable(),
+});
+export type ForgeRepoList = z.infer<typeof ForgeRepoListSchema>;

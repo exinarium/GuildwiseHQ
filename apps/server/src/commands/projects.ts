@@ -281,6 +281,7 @@ export async function repoAddedEvent(
           remoteUrl: input.remoteUrl,
           remoteUrlNormalized: normalized,
           workingBranch: input.workingBranch,
+          ...(input.forge ? { forge: input.forge } : {}),
         },
       },
       actor,

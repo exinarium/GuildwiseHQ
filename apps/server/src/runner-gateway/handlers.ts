@@ -14,6 +14,7 @@ import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../co
 import { outboundDraftRpc } from '../commands/drafts.ts';
 import { endQuestionShift } from '../commands/escalation.ts';
 import { applyFinalizeResult } from '../commands/finalize.ts';
+import { applyForgeReposResult, applyGitReport } from '../commands/forges.ts';
 import { applyWorktreeSweepResult } from '../commands/hygiene.ts';
 import { intakeRpc } from '../commands/intake.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
@@ -136,6 +137,9 @@ export class RunnerHandlers {
         return;
       case 'runtimes.report':
         await this.runtimesReport(conn, msg.runtimes);
+        return;
+      case 'git.report':
+        await applyGitReport(this.ctx, conn.workstationId, msg.connections);
         return;
       case 'shift.accepted':
         await markShiftAccepted(this.ctx, ws, msg.shiftId);
@@ -269,6 +273,10 @@ export class RunnerHandlers {
             msg.result,
             msg.error,
           );
+        } else if (cmd?.type === 'forge.repos') {
+          // Terminal: the picker polls the stored answer.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyForgeReposResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
         } else if (cmd?.type === 'rights.verify') {
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
           await applyRightsResult(this.ctx, conn.workstationId, msg.ok, msg.result);
