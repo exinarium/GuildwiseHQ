@@ -294,3 +294,69 @@ export function supportReplyMail(opts: {
     note: `${PRODUCT} support. ${SLOGAN}`,
   });
 }
+
+// ------------------------------------------------------------------------------------------------ desk mail (support address)
+
+export interface DeskMailItem {
+  kindLabel: string;
+  title: string;
+  org: string;
+  project: string | null;
+  priorityLabel: string;
+  summary: string;
+  link: string;
+}
+
+const DESK_MAIL_NOTE = 'You receive this because desk mail is on in the platform settings (Support page).';
+
+/** One new desk item, to the support address(es): what it is, where, how urgent, and a button to the item. */
+export function deskItemMail(opts: { to: string; item: DeskMailItem; origin: string }): MailMessage {
+  const i = opts.item;
+  const facts: Array<[string, string]> = [
+    ['Kind', i.kindLabel],
+    ['Organization', i.org],
+    ...(i.project ? ([['Project', i.project]] as Array<[string, string]>) : []),
+    ['Priority', i.priorityLabel],
+  ];
+  return brandedMail({
+    to: opts.to,
+    subject: `[Desk] ${i.kindLabel}: ${oneLine(i.title)}`.slice(0, 200),
+    preheader: oneLine(i.summary || i.title).slice(0, 110),
+    heading: oneLine(i.title).slice(0, 200),
+    origin: opts.origin,
+    body: [{ facts }, ...(i.summary ? [{ quote: i.summary }] : [])],
+    cta: { label: 'Open on the desk', url: i.link },
+    note: DESK_MAIL_NOTE,
+  });
+}
+
+/** More new desk items than the burst limit: one mail that lists them (the throttle). */
+export function deskDigestMail(opts: {
+  to: string;
+  items: DeskMailItem[];
+  more: number;
+  origin: string;
+}): MailMessage {
+  const n = opts.items.length + opts.more;
+  return brandedMail({
+    to: opts.to,
+    subject: `[Desk] ${n} new desk items`,
+    preheader: oneLine(opts.items.map((i) => i.title).join('; ')).slice(0, 110),
+    heading: `${n} new desk items`,
+    origin: opts.origin,
+    body: [
+      'Several items arrived at once, so they are listed in one mail.',
+      {
+        list: [
+          ...opts.items.map(
+            (i) =>
+              `${i.kindLabel}, ${i.org}${i.project ? ` / ${i.project}` : ''} (${i.priorityLabel}): ${oneLine(i.title)}`,
+          ),
+          ...(opts.more > 0 ? [`and ${opts.more} more`] : []),
+        ],
+      },
+    ],
+    cta: { label: 'Open the desk', url: `${opts.origin.replace(/\/+$/, '')}/desk` },
+    note: DESK_MAIL_NOTE,
+  });
+}

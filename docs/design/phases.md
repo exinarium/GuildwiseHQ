@@ -897,7 +897,8 @@ Where the build differs from the text above (decisions of the task win):
 | Branded mail | `mail/layout.ts` (`brandedMail`, `senderName`), all templates moved onto it, scheduled-report mail wrapped, `scripts/render-mails.ts` (`mails:render`) |
 | Autoresponder | `supportReceivedMail`: reference, what happens next, response time (`SUPPORT_RESPONSE_TIME`) |
 | Notification addresses | platform settings `support_email` and `contact_email` (comma-separated lists), Support page form |
-| Tests | server `password-reset`, `mail-layout`, `support`; web `password-reset`, `support` |
+| Desk mail | every new desk item mailed once to the support address(es): `migrations/1390_desk_mail.sql`, `commands/desk-mail.ts`, platform settings `desk_mail_*`, Support page form; design `docs/design/desk-mail.md` |
+| Tests | server `password-reset`, `mail-layout`, `support`, `desk-mail`; web `password-reset`, `support` |
 
 Decisions: platform (super admin) accounts are excluded from self-service reset and from the admin-sent link (they are managed on the server, as for deactivation); organization Owners/Admins cannot send reset links (accounts are global, and the Owner can already reset 2FA); the reset never signs in; a reset spends pending two-factor challenges; response time is "within two working days"; the logo is the existing PNG mark (apple-touch-icon) because SVG is not safe in mail.
 

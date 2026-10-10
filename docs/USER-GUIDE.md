@@ -823,6 +823,8 @@ On the detail page you can:
 
 At the top, set the **notification addresses** (one address or several, separated by commas). The **support address** receives new requests from signed-in users and every follow-up; the **Contact us address** receives the messages visitors send from the public Contact us page, and falls back to the support address when empty. Both are emailed with the writer's address as Reply-To, so your team can work from its own mailbox as well. The person who wrote in gets an acknowledgement with their reference, what happens next and when to expect an answer (within two working days).
 
+**Desk mail.** Next to the addresses, three settings send the support address a mail for every **new desk item** (a question, approval, alert, report or rating that lands on a desk), with its kind, title, organization, project, priority, a short summary and a button that opens it. **Desk mail** is on by default as soon as a support address is set. **Minimum priority** limits it to urgent (pinned) and blocking items, or to blocking only. **Desks** chooses whose items: *My organizations* (the organizations whose Owner or Admin signs in with one of the support addresses, so your own work) or *All organizations* (every customer's items; mail then carries their titles, so use it deliberately). A platform account has no desk of its own, which is why the support address is the notification channel. Each item is mailed once (not on edits, restarts or a rebuild); more than three new items in one minute arrive as one digest, and at most 20 mails go out per hour.
+
 ![The Support inbox](guide/assets/platform-support.jpg)
 
 ![One support request](guide/assets/platform-ticket.jpg)

@@ -1268,6 +1268,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'The mailbox that also receives every new request and follow-up.',
       },
       {
+        name: 'Desk mail',
+        text: 'Mail the support address once for every new desk item. Choose the minimum priority (all, pinned and blocking, or blocking only) and whose desks: your organizations or all of them.',
+      },
+      {
         name: 'Status chips',
         text: 'Filter by All, Open, Answered or Closed, with counts.',
       },
