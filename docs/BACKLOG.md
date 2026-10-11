@@ -20,17 +20,22 @@ commission on that subscription for as long as it keeps running (recurring, life
   subscriptions, payments received, commission earned, held, payable, already paid), to monitor and pay them; mark a
   payout as paid (date, reference); export to CSV.
 
+- **Commission:** **20%** of each payment (excluding VAT), the same default for every affiliate, for as long as the
+  subscription runs.
+- **Hold (refund) period:** **30 days**; a commission becomes payable 30 days after the payment it came from (reversed if
+  refunded within that time).
+- **Payout window:** payouts are made **between the 25th and 30th of every month**, covering everything that became
+  payable by then; the payout report is ready for the super admin before the 25th (e.g. on the 24th, with an email).
+- **Minimum payout:** **$100**; a smaller balance rolls over to the next month.
+- **Discount timing:** the 10% applies to the **first paid month after the trial**.
+
 **Still to decide when we pick it up.**
-- Commission rate (one default, adjustable per affiliate?) and the hold period before commission is payable (e.g. 30
-  days, to cover refunds).
-- Minimum payout amount and payout currency (USD like the prices, or ZAR); payment method (EFT/PayPal/Wise).
-- Does the 10% apply to the first month only after the trial (first paid month)? Assumed yes.
+- How affiliates are paid (bank transfer, PayPal, Wise) and whether payouts are in USD or converted.
 
 **Design notes.**
 - **Codes:** one per approved affiliate (more later), entered at sign-up or checkout, or via link
   `guildwisehq.com/?ref=CODE` (cookie for N days). One code per organization, locked once the first payment succeeds.
-- **Commission:** percentage of each successful payment **excluding VAT** (VAT is on every invoice), for as long as the
-  subscription runs; stops on cancellation; reversed on refunds/chargebacks.
+- **Commission mechanics:** stops on cancellation; reversed on refunds/chargebacks within the hold period.
 - **Affiliate dashboard:** referred sign-ups, active subscriptions, commission earned, held, payable and paid; their own
   monthly statement.
 - **Rules:** no self-referral (same email/domain/card as the affiliate); audit trail of approvals, code and rate
