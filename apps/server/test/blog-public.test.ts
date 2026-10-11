@@ -64,6 +64,7 @@ describe('public pages', () => {
     const map = await get('/sitemap.xml');
     expect(map.body).toContain('<loc>http://aom.test/blog/beta-automation</loc>');
     expect(map.body).toContain('<loc>http://aom.test/blog</loc>');
+    expect(map.body).toContain('<loc>http://aom.test/contact</loc>');
     expect((await get('/robots.txt')).body).toContain('Sitemap: http://aom.test/sitemap.xml');
 
     expect((await get('/blog/does-not-exist')).statusCode).toBe(404);

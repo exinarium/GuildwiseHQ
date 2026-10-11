@@ -11,7 +11,7 @@ seo:
   metaDescription: "Approvals, a decision desk, budgets and audit trails: practical governance for small teams running AI agents."
 social:
   facebookText: "New on the blog: how a small team keeps people in charge of AI agents with approvals, one place for decisions, budgets and an audit trail."
-  linkedinText: "You do not need a compliance department to govern AI agents. Five habits go a long way: least privilege, approvals for high-impact actions, budgets, and a record of what happened. A practical guide for small teams."
+  linkedinText: "You do not need a compliance department to govern AI agents. Five habits go a long way: least privilege, approvals for high-impact actions, one place for decisions, budgets, and a record of what happened. A practical guide for small teams."
 sources:
   - title: "OWASP GenAI Security Project: LLM06:2025 Excessive Agency"
     url: https://genai.owasp.org/llmrisk/llm062025-excessive-agency/
