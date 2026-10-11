@@ -2,6 +2,31 @@
 
 Logged fixes to pick up when development resumes. Newest first.
 
+## 2026-10-11
+
+### 3. Affiliate programme for influencers
+
+**Idea (owner).** Influencers get a personal code. A customer enters it at sign-up/checkout, and the influencer earns
+commission on that subscription for as long as it keeps running (recurring, lifetime of the subscription).
+
+**To design when we pick it up.**
+- **Affiliates:** who can become one (invite-only by the super admin vs. an application form), their own login/dashboard
+  showing referred sign-ups, active subscriptions, commission earned, paid and pending.
+- **Codes:** one or more per affiliate, entered at sign-up or in billing; optional customer discount attached to the code
+  (e.g. first month off) or commission only. Code also usable as a link (`guildwisehq.com/?ref=CODE`, cookie for N days).
+  One code per organization, locked once the first payment succeeds.
+- **Commission:** percentage of each successful payment (excluding VAT, since VAT is on every invoice), per affiliate or
+  default rate; stops when the subscription is cancelled, and is reversed on refunds/chargebacks. Hold period (e.g. 30
+  days) before a commission becomes payable.
+- **Payouts:** monthly statement per affiliate; paid manually (EFT) at first, with a minimum payout; Paystack transfers
+  later. Affiliates outside South Africa and their tax details (who invoices whom) need the accountant's view.
+- **Rules:** no self-referral (same email/domain/card as the affiliate), audit trail of code changes, super admin can
+  suspend an affiliate and their codes; terms for affiliates (a short Affiliate Terms page).
+- **Where it touches:** billing (Paystack charge webhooks already drive invoices: hook commission on each paid invoice),
+  sign-up flow and checkout, Platform > Billing (affiliates, codes, rates, payouts), events/projections, emails
+  (monthly statement), legal pages.
+- **Depends on:** Paystack live (no real payments until then).
+
 ## 2026-10-10
 
 ### 1. Runners update themselves once a day
