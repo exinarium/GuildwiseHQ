@@ -29,8 +29,15 @@ commission on that subscription for as long as it keeps running (recurring, life
 - **Minimum payout:** **$100**; a smaller balance rolls over to the next month.
 - **Discount timing:** the 10% applies to the **first paid month after the trial**.
 
-**Still to decide when we pick it up.**
-- How affiliates are paid (bank transfer, PayPal, Wise) and whether payouts are in USD or converted.
+- **Payout method:** **USD to the affiliate's PayPal account** (PayPal email collected on the application form).
+  **South African affiliates may request a direct bank transfer (EFT)** instead; bank details collected and stored
+  encrypted, shown only to the super admin in the payout report. Assumed: EFT payouts in ZAR at the exchange rate on the
+  payout day (shown on the statement).
+- **Fees:** **Guildwise HQ pays the sending fee** (PayPal payout fee, ~2% capped at $20; or the EFT fee), so the
+  affiliate receives the full commission. Fees the affiliate's own PayPal/bank charges for receiving, converting or
+  withdrawing, and their taxes, are the affiliate's responsibility (Affiliate Terms). Keep a USD balance in PayPal to
+  avoid double conversion. Wise as an extra method only if affiliates ask for it.
+- **Later:** PayPal Payouts API to pay all PayPal affiliates in one batch from the payout report.
 
 **Design notes.**
 - **Codes:** one per approved affiliate (more later), entered at sign-up or checkout, or via link
