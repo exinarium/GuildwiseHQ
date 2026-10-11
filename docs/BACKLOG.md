@@ -31,8 +31,10 @@ commission on that subscription for as long as it keeps running (recurring, life
 
 - **Payout method:** **USD to the affiliate's PayPal account** (PayPal email collected on the application form).
   **South African affiliates may request a direct bank transfer (EFT)** instead; bank details collected and stored
-  encrypted, shown only to the super admin in the payout report. Assumed: EFT payouts in ZAR at the exchange rate on the
-  payout day (shown on the statement).
+  encrypted, shown only to the super admin in the payout report. **EFT payouts are in ZAR, fixed from the client's
+  invoice:** each commission is 20% of the invoice's rand amount excluding VAT (invoices already store `zar_cents` and
+  `fx_rate`), so there is no exchange-rate risk at payout time. The $100 minimum is checked on the USD value; the
+  statement shows both.
 - **Fees:** **Guildwise HQ pays the sending fee** (PayPal payout fee, ~2% capped at $20; or the EFT fee), so the
   affiliate receives the full commission. Fees the affiliate's own PayPal/bank charges for receiving, converting or
   withdrawing, and their taxes, are the affiliate's responsibility (Affiliate Terms). Keep a USD balance in PayPal to
