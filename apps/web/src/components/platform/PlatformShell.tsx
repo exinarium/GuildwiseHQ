@@ -7,6 +7,7 @@ import {
   LifeBuoy,
   LogOut,
   MailPlus,
+  MailQuestion,
   Newspaper,
   ScrollText,
   Users,
@@ -32,6 +33,7 @@ const NAV = [
   { to: '/platform/blog', label: 'Blog', icon: Newspaper, end: false },
   { to: '/platform/api-keys', label: 'API keys', icon: KeyRound, end: false },
   { to: '/platform/runners', label: 'Runners', icon: Download, end: false },
+  { to: '/platform/inbound', label: 'Inbound mail', icon: MailQuestion, end: false },
   { to: '/platform/audit', label: 'Audit log', icon: ScrollText, end: false },
 ];
 

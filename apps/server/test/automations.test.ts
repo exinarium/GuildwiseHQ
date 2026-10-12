@@ -335,17 +335,15 @@ describe('who may create what, and what is refused', () => {
     expect(s.id).toBeTruthy();
   });
 
-  it('refuses e-mail and incoming-webhook triggers with a clear message', async () => {
+  it('refuses incoming-webhook triggers and an intake from e-mail with a clear message', async () => {
     for (const trigger of [
-      { kind: 'email_received', inboxId: '00000000-0000-4000-8000-000000000001' },
-      { kind: 'email_reply', inboxId: '00000000-0000-4000-8000-000000000001' },
       { kind: 'webhook_in', secretHash: 'x' },
       { kind: 'intake_ticket', source: 'email' },
     ]) {
       const res = await make(trigger);
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('trigger_not_available');
-      expect(res.body.error.message).toMatch(/not available yet/);
+      expect(res.body.error.message).toMatch(/not available yet|does not start from e-mail/);
     }
   });
 

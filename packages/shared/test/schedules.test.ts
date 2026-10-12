@@ -209,20 +209,18 @@ describe('automation triggers', () => {
     ]);
   });
 
-  it('the server fires internal events and intake tickets; mail and incoming webhooks stay refused', () => {
+  it('the server fires internal events, intake tickets and inbound mail; incoming webhooks stay refused', () => {
     const inbox = '0192f3a0-0000-7000-8000-000000000001';
     for (const t of [
       { kind: 'event', event: 'card_stage_reached', workflowKey: 'code', stageId: 'review' },
       { kind: 'event', event: 'card_done' },
       { kind: 'event', event: 'investigation_reported' },
       { kind: 'intake_ticket', source: 'issues' },
-    ] as const)
-      expect(isTriggerImplemented(ScheduleTriggerSchema.parse(t)), t.kind).toBe(true);
-    for (const t of [
       { kind: 'email_received', inboxId: inbox },
       { kind: 'email_reply', inboxId: inbox },
-      { kind: 'webhook_in', secretHash: 'x' },
     ] as const)
+      expect(isTriggerImplemented(ScheduleTriggerSchema.parse(t)), t.kind).toBe(true);
+    for (const t of [{ kind: 'webhook_in', secretHash: 'x' }] as const)
       expect(isTriggerImplemented(ScheduleTriggerSchema.parse(t)), t.kind).toBe(false);
   });
 });

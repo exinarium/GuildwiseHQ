@@ -13,6 +13,7 @@ import { fireDueSchedules } from '../commands/schedules.ts';
 import { socialTick } from '../commands/social.ts';
 import { sweepSubworkflows } from '../commands/subworkflows.ts';
 import type { Ctx } from '../context.ts';
+import { pruneMail } from '../mail/inbound/prune.ts';
 import { licensingTick } from '../orgs/licensing.ts';
 
 const TICK_MS = 15_000;
@@ -75,7 +76,11 @@ export class Scheduler {
   /** Trial and licence ends suspend organizations; warnings go to their desks (every 5 minutes). */
   runLicensing(): Promise<{ suspended: number; warned: number }> {
     if (this.stopped) return Promise.resolve({ suspended: 0, warned: 0 });
-    const next = this.chain.then(() => licensingTick(this.ctx));
+    const next = this.chain.then(async () => {
+      // The text of old inbound mail goes after its retention period (mail/inbound/prune.ts).
+      await pruneMail(this.ctx).catch((err) => this.ctx.log.error({ err }, 'mail retention failed'));
+      return licensingTick(this.ctx);
+    });
     this.chain = next.catch(() => {});
     return next;
   }

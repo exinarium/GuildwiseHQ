@@ -918,6 +918,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'People from other organizations who have access to your projects, and which ones. Owner and Admins only.',
       },
       {
+        name: 'E-mail inbox tab',
+        text: 'Addresses that turn incoming mail into draft cards, with Copy, New address, an allow-list of senders (Owner only) and the recent messages with what became of each. Owner and Admins only.',
+      },
+      {
         name: 'Plan & limits tab',
         text: 'Your plan and status, usage against the limits and the features switched on. Plans limit members, projects and workstations, never agents. Owner and Admins only.',
       },
@@ -1535,6 +1539,22 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
     article: 'workstations-and-installer#runner-updates',
+  },
+  '/platform/inbound': {
+    title: 'Inbound mail',
+    intro:
+      "Whether the mail provider that delivers organizations' e-mail is set up, and what has been arriving. Metadata only: no organization's mail is shown here.",
+    controls: [
+      {
+        name: 'Provider',
+        text: 'The provider, the receiving domain, whether the webhook secret is set, and the limits. Not ready means one of the three settings is missing; the steps are in docs/DEPLOY.md, Inbound e-mail.',
+      },
+      {
+        name: 'Last 24 hours',
+        text: 'Messages accepted and skipped (with the reasons), mail sent to an address nobody owns, and webhook calls refused for bad credentials.',
+      },
+    ],
+    article: 'automations-and-integrations#email-inbox',
   },
   '/platform/audit': {
     title: 'Audit log',

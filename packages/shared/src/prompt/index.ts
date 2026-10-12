@@ -8,3 +8,4 @@ export * from './question.ts';
 export * from './readable.ts';
 export * from './reporter-task.ts';
 export * from './shift-prompt.ts';
+export * from './untrusted.ts';

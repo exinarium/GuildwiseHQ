@@ -10,16 +10,18 @@ import {
   type ScheduleEventName,
   type ScheduleTrigger,
   scheduleEventLabel,
+  senderAllowed,
   streamId,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { SYSTEM_ACTOR } from './common.ts';
+import { cardMessage, SYSTEM_ACTOR } from './common.ts';
 import { startIntakeIn } from './intake.ts';
 import {
   executeAction,
   failedRun,
+  type MailRunInfo,
   type RunOutcome,
   type RunSpec,
   runRecordedEvent,
@@ -36,17 +38,24 @@ import { afterRun, assertOwnerStillAllowed } from './schedules.ts';
  * (`schedule_runs (schedule_id, source_key)`) makes a replayed event run its schedule once.
  */
 
-/** The triggers the sweep serves: the internal events of `SCHEDULE_EVENT_TRIGGERS` and `intake_ticket`. */
-type TriggerName = ScheduleEventName | 'intake_ticket';
+/** The triggers the sweep serves: the internal events of `SCHEDULE_EVENT_TRIGGERS`, `intake_ticket` and inbound mail. */
+type TriggerName = ScheduleEventName | 'intake_ticket' | 'email_received' | 'email_reply';
 
 /** Domain event type -> the triggers read from it (`CardFinalized` feeds both `card_finalized` and `card_done`). */
 const EVENT_TYPES = new Map<string, TriggerName[]>();
 for (const t of SCHEDULE_EVENT_TRIGGERS)
   for (const type of eventTypesOf(t.id)) EVENT_TYPES.set(type, [...(EVENT_TYPES.get(type) ?? []), t.id]);
 EVENT_TYPES.set('IntakeStarted', ['intake_ticket']);
+EVENT_TYPES.set('MailReceived', ['email_received', 'email_reply']);
 
 const TRIGGER_LABEL = (n: TriggerName): string =>
-  n === 'intake_ticket' ? 'An intake ticket is created' : scheduleEventLabel(n);
+  n === 'intake_ticket'
+    ? 'An intake ticket is created'
+    : n === 'email_received'
+      ? 'An e-mail arrives'
+      : n === 'email_reply'
+        ? 'A reply to an e-mail arrives'
+        : scheduleEventLabel(n);
 
 interface EventContext {
   name: TriggerName;
@@ -69,6 +78,8 @@ interface EventContext {
   };
   /** `intake_ticket`: where the ticket came from. */
   intakeSource?: 'issues' | 'web';
+  /** `email_received`, `email_reply`: the message. */
+  mail?: MailRunInfo;
   /** Values for the `{tokens}` of a field mapping. */
   tokens: Record<string, string | undefined>;
 }
@@ -85,6 +96,7 @@ async function contextOf(db: Queryable, e: Row, name: TriggerName): Promise<Even
   let sourceId: string | null = null;
   let card: EventContext['card'];
   let intakeSource: EventContext['intakeSource'];
+  let mail: MailRunInfo | undefined;
   const tokens: Record<string, string | undefined> = {};
   const details: Record<string, unknown> = {};
   if (name === 'phase_completed') {
@@ -95,6 +107,36 @@ async function contextOf(db: Queryable, e: Row, name: TriggerName): Promise<Even
     what = `phase ${ph.ref} (${ph.name}) completed`;
     details.phase = { ref: ph.ref, name: ph.name };
     sourceId = p.phaseId;
+  } else if (name === 'email_received' || name === 'email_reply') {
+    // A reply to a thread that has a card is an `email_reply`; every other message is `email_received`.
+    if ((name === 'email_reply') !== Boolean(p.replyToCardId) || p.status !== 'received') return null;
+    const m = await one(
+      db,
+      `SELECT m.*, i.allow_list FROM mail_messages m JOIN mail_inboxes i ON i.id = m.inbox_id
+        WHERE m.id=$1 AND m.org_id=$2`,
+      [p.messageId, e.org_id],
+    );
+    if (!m) return null;
+    mail = {
+      messageId: m.id,
+      threadId: m.thread_id,
+      inboxId: m.inbox_id,
+      from: m.from_address,
+      subject: m.subject,
+      allowListed: senderAllowed(m.from_address, m.allow_list ?? []),
+      auth: m.auth,
+    };
+    projectId = null;
+    sourceId = m.thread_id;
+    ref = String(m.subject).slice(0, 80);
+    what = `${name === 'email_reply' ? 'reply' : 'e-mail'} from ${m.from_address}: ${String(m.subject).slice(0, 120)}`;
+    tokens['email.subject'] = m.subject;
+    tokens['email.body'] = m.body_text;
+    tokens['email.from'] = m.from_address;
+    tokens['email.date'] = new Date(m.received_at).toISOString();
+    tokens['email.thread'] = m.thread_id;
+    // The text of the message is not put in the webhook/summary details: only who and what it was about.
+    details.email = { from: m.from_address, subject: m.subject, thread: m.thread_id };
   } else if (name === 'intake_ticket') {
     ref = (p.externalKey as string | undefined) ?? '';
     const note = String(p.note ?? '').trim();
@@ -179,16 +221,25 @@ async function contextOf(db: Queryable, e: Row, name: TriggerName): Promise<Even
     sourceId,
     ...(card ? { card } : {}),
     ...(intakeSource ? { intakeSource } : {}),
+    ...(mail ? { mail } : {}),
     tokens,
   };
 }
 
 /** The conditions of the trigger that SQL does not check: workflow, stage and the filter on the card. */
 function matches(
-  t: Extract<ScheduleTrigger, { kind: 'event' | 'intake_ticket' }>,
+  t: Extract<ScheduleTrigger, { kind: 'event' | 'intake_ticket' | 'email_received' | 'email_reply' }>,
   ec: EventContext,
 ): boolean {
   if (t.kind === 'intake_ticket') return !t.source || t.source === ec.intakeSource;
+  if (t.kind === 'email_reply') return ec.mail?.inboxId === t.inboxId;
+  if (t.kind === 'email_received') {
+    if (!ec.mail || ec.mail.inboxId !== t.inboxId) return false;
+    if (t.from?.length && !senderAllowed(ec.mail.from, t.from)) return false;
+    if (t.subjectContains && !ec.mail.subject.toLowerCase().includes(t.subjectContains.toLowerCase()))
+      return false;
+    return true;
+  }
   const card = ec.card;
   if (!card) return !t.workflowKey && !t.stageId && !t.filter;
   if (t.workflowKey && t.workflowKey !== card.workflowKey) return false;
@@ -223,25 +274,25 @@ export async function sweepEventTriggers(ctx: Ctx): Promise<number> {
     ctx.pool,
     `SELECT 1 FROM schedules WHERE enabled AND trigger->>'kind' IN ('event','intake_ticket') LIMIT 1`,
   );
+  // Mail is always read: a reply to a thread that has a card becomes a card comment whether or not an automation exists.
+  const types = any ? [...EVENT_TYPES.keys()] : ['MailReceived'];
   let started = 0;
   let at = cursor;
-  if (any) {
-    for (;;) {
-      const batch = await rows(
-        ctx.pool,
-        `SELECT seq, type, payload, org_id, project_id, created_at FROM events
+  for (;;) {
+    const batch = await rows(
+      ctx.pool,
+      `SELECT seq, type, payload, org_id, project_id, created_at FROM events
           WHERE seq > $1 AND seq <= $2 AND type = ANY($3::text[]) ORDER BY seq LIMIT 100`,
-        [at.toString(), head.toString(), [...EVENT_TYPES.keys()]],
-      );
-      for (const e of batch) {
-        started += await handleEvent(ctx, e).catch((err) => {
-          ctx.log.error({ err, seq: e.seq }, 'event trigger failed');
-          return 0;
-        });
-        at = BigInt(e.seq);
-      }
-      if (batch.length < 100) break;
+      [at.toString(), head.toString(), types],
+    );
+    for (const e of batch) {
+      started += await handleEvent(ctx, e).catch((err) => {
+        ctx.log.error({ err, seq: e.seq }, 'event trigger failed');
+        return 0;
+      });
+      at = BigInt(e.seq);
     }
+    if (batch.length < 100) break;
   }
   await ctx.pool.query('UPDATE schedule_trigger_cursor SET last_seq=$1 WHERE id=1 AND last_seq < $1', [
     head.toString(),
@@ -251,6 +302,7 @@ export async function sweepEventTriggers(ctx: Ctx): Promise<number> {
 
 async function handleEvent(ctx: Ctx, e: Row): Promise<number> {
   let n = 0;
+  if (e.type === 'MailReceived') await addReplyComment(ctx, e);
   for (const name of EVENT_TYPES.get(e.type as string) ?? []) {
     const ec = await contextOf(ctx.pool, e, name);
     if (!ec) continue;
@@ -259,7 +311,9 @@ async function handleEvent(ctx: Ctx, e: Row): Promise<number> {
       `SELECT s.* FROM schedules s
         WHERE s.enabled AND s.org_id = $2 AND s.created_at <= $3
           AND (($6::text = 'intake_ticket' AND s.trigger->>'kind' = 'intake_ticket')
-            OR ($6::text <> 'intake_ticket' AND s.trigger->>'kind' = 'event' AND s.trigger->>'event' = $1::text))
+            OR ($6::text IN ('email_received','email_reply') AND s.trigger->>'kind' = $6::text)
+            OR ($6::text NOT IN ('intake_ticket','email_received','email_reply')
+                AND s.trigger->>'kind' = 'event' AND s.trigger->>'event' = $1::text))
           AND (s.trigger->>'projectId' IS NULL OR s.trigger->>'projectId' = $4::text)
           AND (s.trigger->>'interestId' IS NULL OR s.trigger->>'interestId' = $5::text)
         ORDER BY s.created_at, s.id`,
@@ -271,8 +325,61 @@ async function handleEvent(ctx: Ctx, e: Row): Promise<number> {
       if (ec.card?.scheduleId && ec.card.scheduleId === s.id) continue;
       if (await runForEvent(ctx, s, e, ec)) n++;
     }
+    // No automation took the message: the inbox page says so (the text stays stored).
+    if (ec.mail)
+      await ctx.pool.query(
+        `UPDATE mail_messages SET status='skipped', reason='no_automation' WHERE id=$1 AND status='received'`,
+        [ec.mail.messageId],
+      );
   }
   return n;
+}
+
+/**
+ * A reply in a thread that belongs to a card becomes a comment on the card (once: the message leaves `received`).
+ * Its text is outside content: the comment is marked `source: 'email'` and briefs render it as untrusted.
+ */
+async function addReplyComment(ctx: Ctx, e: Row): Promise<void> {
+  const p = e.payload as Record<string, any>;
+  if (!p.replyToCardId || p.status !== 'received') return;
+  await withAppendTx(ctx.pool, async (tx) => {
+    const m = await one(
+      tx,
+      `UPDATE mail_messages SET status='comment_added', card_id=$2
+        WHERE id=$1 AND status='received' RETURNING from_address, body_text, subject`,
+      [p.messageId, p.replyToCardId],
+    );
+    if (!m) return;
+    const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 AND org_id=$2', [p.replyToCardId, e.org_id]);
+    if (!card) return;
+    await ctx.store.append(
+      [
+        cardMessage(
+          card,
+          { kind: 'system' },
+          'comment',
+          `E-mail reply from ${m.from_address}:\n\n${String(m.body_text).slice(0, 8000)}`,
+          { source: 'email', messageId: p.messageId, from: m.from_address },
+        ),
+      ],
+      { tx },
+    );
+  });
+}
+
+/** Records what became of a message after an automation handled it (the first automation to act on it decides). */
+async function finishMail(tx: Queryable, mail: MailRunInfo, o: RunOutcome): Promise<void> {
+  if ((o.result?.cardIds ?? []).length) return; // create_card recorded card_created / draft_created itself
+  if (o.summary.startsWith('Skipped')) {
+    const reason = o.summary.includes('already created') ? 'duplicate' : 'rate_limited';
+    await tx.query(`UPDATE mail_messages SET status='skipped', reason=$2 WHERE id=$1 AND status='received'`, [
+      mail.messageId,
+      reason,
+    ]);
+  } else if (o.status !== 'failed')
+    await tx.query(`UPDATE mail_messages SET status='processed' WHERE id=$1 AND status='received'`, [
+      mail.messageId,
+    ]);
 }
 
 async function runForEvent(ctx: Ctx, s: Row, e: Row, ec: EventContext): Promise<boolean> {
@@ -289,6 +396,7 @@ async function runForEvent(ctx: Ctx, s: Row, e: Row, ec: EventContext): Promise<
     },
     tokens: ec.tokens,
     ...(ec.sourceId ? { sourceId: ec.sourceId } : {}),
+    ...(ec.mail ? { mail: ec.mail } : {}),
     details: { event: ec.name, ...ec.details },
   };
   let outcome: RunOutcome | null = null;
@@ -317,12 +425,20 @@ async function runForEvent(ctx: Ctx, s: Row, e: Row, ec: EventContext): Promise<
         if (!m) return null;
       }
       const o = await executeAction(ctx, tx, cur, spec);
+      if (spec.mail) await finishMail(tx, spec.mail, o);
       await ctx.store.append([...o.events, runRecordedEvent(cur, o, spec, ctx.clock.now())], { tx });
       return o;
     });
   } catch (err) {
     // Record the failure so the event is not retried on every sweep, and the history says why nothing happened.
     const msg = err instanceof Error ? err.message : String(err);
+    if (spec.mail)
+      await ctx.pool
+        .query(
+          `UPDATE mail_messages SET status='skipped', reason='trigger_failed' WHERE id=$1 AND status='received'`,
+          [spec.mail.messageId],
+        )
+        .catch(() => {});
     await withAppendTx(ctx.pool, async (tx) => {
       if (
         await one(tx, 'SELECT 1 FROM schedule_runs WHERE schedule_id=$1 AND source_key=$2', [s.id, sourceKey])

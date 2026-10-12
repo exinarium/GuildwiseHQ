@@ -144,6 +144,13 @@ export function CardTile({
               </Badge>
             </span>
           )}
+          {card.origin === 'email' && (
+            <span data-testid="email-badge">
+              <Badge tone="neutral" title="Made from an e-mail. Its text is outside content.">
+                from e-mail
+              </Badge>
+            </span>
+          )}
           {(card.origin === 'full_suite' || card.origin === 'regression') && (
             <span data-testid="suite-badge">
               <Badge tone="blue">{card.origin === 'full_suite' ? 'full suite' : 'regression'}</Badge>

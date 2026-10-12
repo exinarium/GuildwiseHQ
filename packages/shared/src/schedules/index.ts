@@ -247,7 +247,7 @@ export function describeEventTrigger(t: Extract<ScheduleTrigger, { kind: 'event'
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const isEmailAddress = (s: string): boolean => EMAIL_RE.test(s);
 
-/** Triggers the server fires today. E-mail triggers (inbound mail, later) and incoming webhooks parse but are refused on save. */
+/** Triggers the server fires today. Incoming webhooks parse but are refused on save (later). */
 export function isTriggerImplemented(t: ScheduleTrigger): boolean {
   switch (t.kind) {
     case 'cron':
@@ -256,8 +256,11 @@ export function isTriggerImplemented(t: ScheduleTrigger): boolean {
       return true;
     case 'event':
       return SCHEDULE_EVENT_TRIGGERS.some((e) => e.id === t.event);
+    case 'email_received':
+    case 'email_reply':
+      return true;
     case 'intake_ticket':
-      // Intakes from e-mail arrive with inbound mail (later).
+      // Mail makes cards through `email_received`; it does not start an intake.
       return t.source !== 'email';
     default:
       return false;
@@ -269,6 +272,8 @@ export const MAPPING_TOKENS = [
   'email.subject',
   'email.body',
   'email.from',
+  'email.date',
+  'email.thread',
   'card.ref',
   'card.title',
   'issue.title',
@@ -303,3 +308,9 @@ export function unknownMappingTokens(mapping: Record<string, string> | undefined
 export function expandMapping(text: string, values: Readonly<Record<string, string | undefined>>): string {
   return text.replace(TOKEN, (whole, name: string) => (isMappingToken(name) ? (values[name] ?? '') : whole));
 }
+
+/** The two triggers that read inbound e-mail. */
+export const isMailTrigger = (
+  t: ScheduleTrigger,
+): t is Extract<ScheduleTrigger, { kind: 'email_received' | 'email_reply' }> =>
+  t.kind === 'email_received' || t.kind === 'email_reply';
