@@ -54,6 +54,33 @@ describe('the runner release', () => {
     expect(sum.body).toBe(`${info.sha256}  aom-runner-0.10.2.tgz\n`);
   });
 
+  it('carries the auto-update kill switch that a super admin controls', async () => {
+    const root = await t.superAdminSession();
+    expect((await ok<any>(t.req('GET', '/api/runner/release'))).autoUpdatePaused).toBe(false);
+    // not for anyone else
+    expect(
+      (await t.req('PUT', '/api/platform/runner-updates', { cookie: user.cookie, body: { paused: true } }))
+        .status,
+    ).toBe(404);
+    expect((await t.req('GET', '/api/platform/runner-updates')).status).toBe(404);
+
+    const paused = await ok<any>(
+      t.req('PUT', '/api/platform/runner-updates', { cookie: root.cookie, body: { paused: true } }),
+    );
+    expect(paused).toMatchObject({ paused: true, latestVersion: '0.10.2' });
+    expect((await ok<any>(t.req('GET', '/api/runner/release'))).autoUpdatePaused).toBe(true);
+    // the download itself stays available (the installer still works)
+    expect(
+      (await t.app.inject({ method: 'GET', url: '/api/runner/release/aom-runner-0.10.2.tgz' })).statusCode,
+    ).toBe(200);
+
+    await ok(t.req('PUT', '/api/platform/runner-updates', { cookie: root.cookie, body: { paused: false } }));
+    expect((await ok<any>(t.req('GET', '/api/runner/release'))).autoUpdatePaused).toBe(false);
+    expect(
+      (await ok<any>(t.req('GET', '/api/platform/runner-updates', { cookie: root.cookie }))).paused,
+    ).toBe(false);
+  });
+
   it('404s an unknown version and anything that is not a release name', async () => {
     expect((await t.req('GET', '/api/runner/release/aom-runner-9.9.9.tgz')).status).toBe(404);
     expect((await t.req('GET', '/api/runner/release/..%2Fsecret')).status).toBe(404);

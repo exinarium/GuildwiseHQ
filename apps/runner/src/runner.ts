@@ -8,6 +8,7 @@ import {
   normalizeRemoteUrl,
   type RepoReport,
   type RunnerCommandName,
+  type RunnerUpdateState,
   type RuntimeInfo,
   type ServerToRunner,
   uuidv7,
@@ -96,6 +97,15 @@ export interface RunnerOptions {
   gitReport?: boolean;
   /** Test hook: platform for the toolchain table (default: this machine). */
   platform?: Platform;
+  /** The process-wide self-update status, sent to the server after each welcome (see `update/updater.ts`). */
+  updateStatus?: () => {
+    state: RunnerUpdateState;
+    latestVersion: string | null;
+    lastCheckedAt: string | null;
+    detail: string | null;
+  } | null;
+  /** Called once per welcome: a freshly updated version uses it to prove it can connect. */
+  onConnected?: () => void;
 }
 
 /** The long-running runner process: connection, IPC server, supervisor and command handlers. */
@@ -240,6 +250,8 @@ export class Runner {
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
       void this.reportGit(true);
+      this.reportUpdate();
+      opts.onConnected?.();
       this.maxConcurrent = Math.min(w.limits.maxConcurrentShifts, opts.config.maxConcurrentShifts);
       this.writeStatus(true);
       this.scheduleStartupSweep();
@@ -255,6 +267,17 @@ export class Runner {
       // Unpaired is a normal end (exit 0, so a service manager does not restart a runner that cannot work).
       this.fatalResolve?.(this.unpaired ? 0 : code === 4409 ? 3 : 2);
     });
+  }
+
+  /** True when no agent job and no chat is running: the moment it is safe to restart into a new version. */
+  isIdle(): boolean {
+    return this.supervisor.size === 0 && this.chat.size === 0;
+  }
+
+  /** Tells the server how this runner's self-update stands (best effort: dropped while offline, resent on welcome). */
+  reportUpdate(): void {
+    const u = this.opts.updateStatus?.();
+    if (u) this.client.send('runner.update', u);
   }
 
   async start(): Promise<void> {

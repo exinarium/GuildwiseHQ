@@ -12,6 +12,7 @@ import {
 } from './pairings.ts';
 import { runnerPaths } from './paths.ts';
 import { Runner, type RunnerOptions } from './runner.ts';
+import type { UpdateStatus } from './update/updater.ts';
 
 export interface HostOptions {
   root: string;
@@ -22,6 +23,8 @@ export interface HostOptions {
   reloadMs?: number;
   /** Test hook: extra options for every Runner. */
   runnerOptions?: Partial<RunnerOptions>;
+  /** Called when a pairing connects (the self-updater uses it to confirm a freshly installed version). */
+  onConnected?: () => void;
 }
 
 interface Running {
@@ -30,6 +33,7 @@ interface Running {
   /** `workstationId:token` the runner started with, to notice a re-pair. */
   signature: string;
   log: Logger;
+  serverUrl: string;
 }
 
 const signatureOf = (c: RunnerConfig): string => `${c.workstationId}:${c.runnerToken}`;
@@ -52,6 +56,8 @@ export class RunnerHost {
   /** Set when the last pairing ended because the server unpaired it. */
   unpaired = false;
   private reloading: Promise<void> = Promise.resolve();
+  /** What the self-updater last said; every pairing reports it to its server. */
+  private updateStatus: UpdateStatus | null = null;
 
   constructor(private readonly opts: HostOptions) {
     this.fatal = new Promise<number>((r) => {
@@ -84,6 +90,22 @@ export class RunnerHost {
     await this.reloading;
     await Promise.all([...this.running.values()].map((r) => r.runner.stop().catch(() => undefined)));
     this.running.clear();
+  }
+
+  /** True when no pairing runs an agent job or a chat: the runner may restart into a new version. */
+  isIdle(): boolean {
+    return [...this.running.values()].every((r) => r.runner.isIdle());
+  }
+
+  /** The server the self-updater asks for releases: the first running pairing's. */
+  serverUrl(): string | null {
+    return [...this.running.values()][0]?.serverUrl ?? null;
+  }
+
+  /** Records the self-update status and sends it to every pairing's server. */
+  setUpdateStatus(s: UpdateStatus): void {
+    this.updateStatus = s;
+    for (const r of this.running.values()) r.runner.reportUpdate();
   }
 
   /** The machine-wide shift limit: the index value, else the largest limit of the configured pairings. */
@@ -167,9 +189,11 @@ export class RunnerHost {
       log,
       maxShiftMsOverride: this.opts.maxShiftMsOverride,
       sharedCap: () => this.capFor(entry.id),
+      updateStatus: () => this.updateStatus,
+      onConnected: () => this.opts.onConnected?.(),
       ...this.opts.runnerOptions,
     });
-    this.running.set(entry.id, { entry, runner, signature, log });
+    this.running.set(entry.id, { entry, runner, signature, log, serverUrl: config.serverUrl });
     try {
       await runner.start();
     } catch (err) {

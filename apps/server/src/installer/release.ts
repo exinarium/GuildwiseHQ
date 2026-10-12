@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { RunnerUpdateSettings } from '@aom/shared';
 import type { Config } from '../config.ts';
+import type { Ctx } from '../context.ts';
+import { exec, iso, one, type Queryable } from '../db/sql.ts';
 
 /**
  * The runner release the app serves (`aom-runner-<version>.tgz`, built by `pnpm package:runner`), with its sha256.
@@ -71,6 +74,35 @@ export async function listReleases(config: Pick<Config, 'runnerReleaseDir'>): Pr
 
 export async function latestRelease(config: Pick<Config, 'runnerReleaseDir'>): Promise<RunnerRelease | null> {
   return (await listReleases(config))[0] ?? null;
+}
+
+/** The kill switch for runner auto-updates (a super admin sets it on the platform Runners page). */
+export const RUNNER_UPDATES_PAUSED_KEY = 'runners.auto_update_paused';
+
+export async function runnerUpdatesPaused(db: Queryable): Promise<boolean> {
+  const r = await one(db, 'SELECT value FROM platform_settings WHERE key=$1', [RUNNER_UPDATES_PAUSED_KEY]);
+  return r?.value === true;
+}
+
+export async function setRunnerUpdatesPaused(ctx: Ctx, paused: boolean, by: string): Promise<void> {
+  await exec(
+    ctx.pool,
+    `INSERT INTO platform_settings (key, value, updated_by, updated_at) VALUES ($1,$2::jsonb,$3,$4)
+     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_by=EXCLUDED.updated_by, updated_at=EXCLUDED.updated_at`,
+    [RUNNER_UPDATES_PAUSED_KEY, JSON.stringify(paused), by, ctx.clock.now()],
+  );
+  ctx.log.info({ paused, by }, 'runner auto-updates switch changed');
+}
+
+export async function runnerUpdateSettings(ctx: Ctx): Promise<RunnerUpdateSettings> {
+  const row = await one(ctx.pool, 'SELECT value, updated_at FROM platform_settings WHERE key=$1', [
+    RUNNER_UPDATES_PAUSED_KEY,
+  ]);
+  return {
+    paused: row?.value === true,
+    updatedAt: iso(row?.updated_at ?? null),
+    latestVersion: (await latestRelease(ctx.config))?.version ?? null,
+  };
 }
 
 export async function findRelease(

@@ -10,6 +10,8 @@ import {
   type PlatformOrgSummary,
   PlatformOrgsResponseSchema,
   PlatformUsersResponseSchema,
+  type RunnerUpdateSettings,
+  RunnerUpdateSettingsSchema,
   type SetSimulationRequest,
   type WipeSimulationRequest,
   type WipeSimulationResponse,
@@ -19,6 +21,21 @@ import type { z } from 'zod';
 import { get, patch, post, put, qs } from '../client.ts';
 
 export type PlatformAuditResponse = z.infer<typeof PlatformAuditResponseSchema>;
+
+export function useRunnerUpdateSettings() {
+  return useQuery({
+    queryKey: ['platform', 'runner-updates'],
+    queryFn: () => get<RunnerUpdateSettings>('/platform/runner-updates', RunnerUpdateSettingsSchema),
+  });
+}
+
+export function useSetRunnerUpdatesPaused() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (paused: boolean) => put<RunnerUpdateSettings>('/platform/runner-updates', { paused }),
+    onSuccess: () => refresh(qc),
+  });
+}
 
 export function usePlatformOrgs(filter: { status?: string; q?: string; sort?: string }) {
   return useQuery({

@@ -1476,6 +1476,26 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'blog-and-digest#platform-blog',
   },
+  '/platform/runners': {
+    title: 'Runners',
+    intro:
+      'The runner version this server offers, and the switch that pauses automatic runner updates. Runners check once a day and update themselves when a newer version is offered.',
+    controls: [
+      {
+        name: 'Version offered to runners',
+        text: 'The newest runner release published on this server.',
+      },
+      {
+        name: 'Pause automatic updates',
+        text: 'Runners stay on the version they have, and a runner that already downloaded an update drops it before restarting. Use it when a release turns out to be bad. The installer still works.',
+      },
+      {
+        name: 'Resume automatic updates',
+        text: 'Runners pick the current version up at their next daily check.',
+      },
+    ],
+    article: 'workstations-and-installer#runner-updates',
+  },
   '/platform/audit': {
     title: 'Audit log',
     intro: 'Every platform administrator action and every licensing action by the system. Kept forever.',

@@ -89,6 +89,21 @@ A personal access token for one organization and `az login` (also `az login --se
 
 A **plain git** server needs no connection, but no pull request is opened: the branch is pushed and the desk tells you to open the request yourself. If a project's main line is protected on the host, finished work arrives as a pull request instead of going straight in (see [Testing and finalization](/help/testing-and-finalization#finalization)).
 
+## Runner updates {#runner-updates}
+
+The runner on a workstation keeps itself up to date. A few minutes after it starts, and then once a day, it asks the server which runner version is current. When a newer one exists it downloads it, checks that the file is intact, and waits until no agent is working on that workstation before it restarts into the new version. It never cuts a running job short. If the workstation stays busy for a very long time (about six hours) it updates anyway.
+
+The runner version is shown under the workstation's name. When there is something to know, a small label appears next to it:
+
+- **Update to 0.2.0 pending**: downloaded, waiting for the agents to finish.
+- **Updating**: restarting into the new version (a few seconds).
+- **Update failed**: it could not install the new version (the tip on the label says why). It keeps running the old one and tries again at the next daily check.
+- **Update rolled back**: the new version did not connect within a few minutes, so the runner went back to the previous version by itself. It will not try that version again on this machine.
+- **Updates paused**: the platform administrator paused automatic updates. Runners stay on their version until they resume.
+- **Updates by hand**: this runner was started by hand and not by the installer's service, so it cannot restart itself. Run the install command again to update it.
+
+You do not need to do anything. Running the install command again still upgrades a runner at any time. To switch automatic updates off on one computer, set `AOM_RUNNER_AUTO_UPDATE=0` for the runner.
+
 ## Unpairing {#unpairing}
 
 If a workstation goes away (you sold the computer, decommissioned a server), go to **Workstations** and click **Unpair** on its card, then confirm. Its runner token stops working and the runner shuts down, cards claimed there go back to the queue, and its agents wait until you re-home them. To use the machine again, pair it with a new code.

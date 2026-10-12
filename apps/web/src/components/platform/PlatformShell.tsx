@@ -2,6 +2,7 @@ import {
   Building2,
   CircleDollarSign,
   CircleHelp,
+  Download,
   KeyRound,
   LifeBuoy,
   LogOut,
@@ -30,6 +31,7 @@ const NAV = [
   { to: '/platform/support', label: 'Support', icon: LifeBuoy, end: false },
   { to: '/platform/blog', label: 'Blog', icon: Newspaper, end: false },
   { to: '/platform/api-keys', label: 'API keys', icon: KeyRound, end: false },
+  { to: '/platform/runners', label: 'Runners', icon: Download, end: false },
   { to: '/platform/audit', label: 'Audit log', icon: ScrollText, end: false },
 ];
 

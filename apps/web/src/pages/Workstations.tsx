@@ -24,6 +24,7 @@ import {
 } from '../components/ui.tsx';
 import { AddWorkstationWizard } from '../components/workstations/AddWorkstationWizard.tsx';
 import { CloudWorkstations } from '../components/workstations/CloudWorkstations.tsx';
+import { RunnerUpdateBadge } from '../components/workstations/RunnerUpdateBadge.tsx';
 import { useCanManageOrg } from '../lib/orgRole.ts';
 import { unavailableRuntimes, unsandboxedConsequence, unsandboxedRuntimes } from '../lib/sandbox.ts';
 import { copyText } from '../lib/secure.ts';
@@ -189,6 +190,7 @@ export function WorkstationCard({
             </span>
           </button>
           <div className="flex items-center gap-3">
+            <RunnerUpdateBadge update={w.runnerUpdate} />
             {!expanded && warnings > 0 && (
               <Badge
                 tone="amber"

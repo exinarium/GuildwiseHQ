@@ -219,6 +219,49 @@ launchctl list | grep aom.runner      # check status
 5. Actions tab: set program to `C:\Users\you\aom-runner\aom-runner.cmd` and arguments to `start --data-dir %LOCALAPPDATA%\aom-runner`
 6. Click OK
 
+## Updates
+
+A runner installed by the guided installer updates itself. The updater lives in `apps/runner/src/update/` and is owned by the `start` process (one per machine, however many pairings it holds).
+
+**The cycle.** A random 1 to 10 minutes after start, then every 24 hours (plus or minus 10%), the runner reads `GET /api/runner/release` of the first pairing's server: `{ version, sha256, size, url, autoUpdatePaused }`. The archive is one portable `.tgz` for every platform and architecture, so there is no per-platform URL. Versions are compared with semver rules (`0.1.10` is newer than `0.1.9`; a pre-release is older than its release). When the server's version is newer:
+
+1. **Download and verify.** The archive is streamed to `<root>/.update-<version>/`, its sha256 is compared with the server's value, and only then unpacked. A mismatch (or a bad archive) discards everything, reports `failed` and leaves the running version untouched. The unpacked folder gets its final name `<root>/<version>/` only when complete.
+2. **Wait for idle.** The runner is idle when no shift and no chat is running on any pairing. It polls every 30 seconds. After `maxIdleWait` (6 hours) of never being idle it updates anyway (running shifts are resumed after the restart like after any restart). The download happens before the wait, so the wait ends in an instant switch.
+3. **Last look at the kill switch**, then write the probation marker, switch the `current` link and restart.
+
+**Layout on disk** (same for a fresh install and for an upgrade of a 0.1.0 install, which already had the `<version>/aom-runner` folders and the `current` link):
+
+```
+~/.local/share/guildwise/runner/          (the "root")
+  0.1.1/aom-runner/                       one unpacked release each (dist/, node_modules/, aom-runner launcher)
+  0.1.0/aom-runner/
+  current  -> 0.1.1/aom-runner            what the service starts
+  previous -> 0.1.0/aom-runner            what a rollback goes back to
+  service-mode                            systemd | launchd | background (written by the installer)
+  start-runner.sh                         the background fallback (no service manager)
+  update-pending                          key=value (from, to, deadline) while a new version is on probation
+  update-failed                           key=value (version, at, reason) after a rollback
+```
+
+The `current` switch is atomic: a new symlink is created next to it and renamed over it. After the new version has connected, every version except `current` and `previous` is deleted. The installer (`switch_current` in `common.sh`) keeps the same invariants, clears the two marker files (an explicit install may try a rolled-back version again) and records the service mode.
+
+**Restart.** The runner exits cleanly (exit code 0) and the service manager starts the new version: the systemd user unit has `Restart=always`, the launchd agent `KeepAlive`. In the background fallback (`start-runner.sh`, no service manager, e.g. WSL without systemd) the runner starts a detached helper that runs `start-runner.sh` five seconds after it has gone. The mode comes from `<root>/service-mode`; for a 0.1.0 install without that file it is inferred from the environment (`INVOCATION_ID`+`JOURNAL_STREAM` for systemd, `XPC_SERVICE_NAME` for launchd, the presence of `start-runner.sh`). On Windows the runner runs inside WSL2, so it follows the Linux rules; the Windows scheduled task only keeps WSL itself alive.
+
+**Rollback.** The marker `update-pending` holds a 5 minute deadline. The new version deletes it (and prunes old versions) the first time any pairing completes the handshake with the server. Two things can roll back:
+
+- *The new version runs but does not connect.* When the deadline passes, the in-process watchdog first checks that the server answers HTTP at all; if it does, `current` is switched back to `previous`, `update-failed` is written and the runner restarts. If the server is down it keeps waiting (an outage is not the update's fault).
+- *The new version cannot even start (crash loop).* The `aom-runner` launcher script of the new version checks, on `aom-runner start`, whether it is the version named in `update-pending` and the deadline has passed; if so it switches `current` back, writes `update-failed` and runs the previous version instead.
+
+After a rollback the failed version is not tried again on this machine (`update-failed`); a newer release is. The Workstations page then shows "Update rolled back".
+
+**Kill switch.** A super admin can pause automatic updates under Platform, Runners (`GET/PUT /api/platform/runner-updates`; stored in `platform_settings` as `runners.auto_update_paused`). While paused, `/api/runner/release` returns `autoUpdatePaused: true`; runners that see it do not download, and one that already downloaded and is waiting for idle checks again right before the switch and drops the update. The tarball itself stays downloadable, so the installer still works. `AOM_RUNNER_AUTO_UPDATE=0` switches updating off on one machine.
+
+**Not managed.** The runner does not update itself when it is not running from `<root>/<version>/aom-runner` with `<root>/current` pointing at it (a source checkout, a hand-copied folder), when it was not started by a service manager (nothing would restart it) or under `--mock`. It then reports `unmanaged`.
+
+**Reporting.** The runner sends `runner.update` `{ state, latestVersion, lastCheckedAt, detail }` after each `welcome` and whenever the state changes; the server stores it on the workstation (`runner_update`) and the Workstations page shows it next to the runner version. States: `up_to_date`, `pending`, `updating`, `failed`, `rolled_back`, `paused`, `unmanaged`.
+
+**Releasing.** The version is `RUNNER_VERSION` in `apps/runner/src/version.ts`, and nothing is "newer" until it is raised: bump it, run `pnpm package:runner`, publish `release/aom-runner-<version>.tgz` to the server's release directory (`AOM_RUNNER_RELEASE_DIR`). Runners pick it up within a day. Pause updates first if you are unsure about a release.
+
 ## Cloud workstations (VPS over SSH, GitHub Codespaces)
 
 The user chooses where agents run (**Add a workstation**: My computer, A VPS (SSH), GitHub Codespaces). The runner makes outbound connections only, so a cloud machine needs no open port. Guide for a server you rent: `docs/BYO-VPS.md`. Design and server side: `docs/ARCHITECTURE.md` 11.4.
@@ -496,6 +539,7 @@ The runner respects these environment variables:
 | `AOM_RUNNER_MOCK` | Set to `1` to enable mock runtime (alternative to `--mock` flag) |
 | `AOM_RUNNER_MAX_SHIFT_MS` | Override `maxShiftMinutes` for testing (milliseconds, e.g., 5000 for 5 seconds) |
 | `AOM_MOCK_STEP_MS` | Speed up mock adapter progress steps (default 100 ms) |
+| `AOM_RUNNER_AUTO_UPDATE` | Set to `0` to switch the runner's self-update off on this machine (see Updates) |
 | `AOM_GH_BIN` | Path to `gh` binary (default `gh`; for GitHub API integration) |
 
 | `AOM_ALLOW_LOCAL_REMOTES` | Set to `1` to accept `file://` and path git remotes (tests only; production refuses them) |

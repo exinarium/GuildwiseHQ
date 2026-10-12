@@ -255,7 +255,7 @@ install_service() {
     good "Service enabled and started (systemd user service \"aom-runner\")"
     if enable_linger; then good "Lingering is on: the runner keeps running when you log out and starts at boot"
     else step_warn "Could not turn on lingering. Run \`sudo loginctl enable-linger $(id -un)\` so the runner survives logging out."; fi
-    SERVICE_MODE=systemd
+    SERVICE_MODE=systemd; record_service_mode systemd
     report "Service" ok "systemd user service running"
   else
     write_fallback_launcher
@@ -265,7 +265,7 @@ install_service() {
       step_warn "systemd is not running here, so no service was installed. The service file is ready in ~/.config/systemd/user; the runner was started in the background."
     fi
     "${FALLBACK_LAUNCHER}"
-    SERVICE_MODE=background
+    SERVICE_MODE=background; record_service_mode background
     report "Service" warn "systemd unavailable; started in the background"
   fi
 }

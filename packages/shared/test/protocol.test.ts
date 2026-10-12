@@ -47,6 +47,13 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
   'outbox.flushed': { ...env('outbox.flushed') },
   heartbeat: { ...env('heartbeat'), activeShifts: [U.a], load: { runningShifts: 1 } },
   'repos.report': { ...env('repos.report'), repos },
+  'runner.update': {
+    ...env('runner.update'),
+    state: 'pending',
+    latestVersion: '0.1.1',
+    lastCheckedAt: TS,
+    detail: '0.1.1 is downloaded and installs as soon as this runner is idle',
+  },
   'git.report': {
     ...env('git.report'),
     connections: [

@@ -38,6 +38,7 @@ import { PlatformBlogPost } from './pages/platform/PlatformBlogPost.tsx';
 import { PlatformInvitations } from './pages/platform/PlatformInvitations.tsx';
 import { PlatformOrgDetail } from './pages/platform/PlatformOrgDetail.tsx';
 import { PlatformOrgs } from './pages/platform/PlatformOrgs.tsx';
+import { PlatformRunners } from './pages/platform/PlatformRunners.tsx';
 import { PlatformSupport } from './pages/platform/PlatformSupport.tsx';
 import { PlatformSupportTicket } from './pages/platform/PlatformSupportTicket.tsx';
 import { PlatformUsers } from './pages/platform/PlatformUsers.tsx';
@@ -141,6 +142,7 @@ export const routes = [
           { path: '/platform/blog', element: <PlatformBlog /> },
           { path: '/platform/blog/:id', element: <PlatformBlogPost /> },
           { path: '/platform/api-keys', element: <PlatformApiKeys /> },
+          { path: '/platform/runners', element: <PlatformRunners /> },
           { path: '/platform/audit', element: <PlatformAudit /> },
           { path: '/platform/help', element: <PlatformHelp /> },
           { path: '/platform/help/glossary', element: <PlatformHelp /> },

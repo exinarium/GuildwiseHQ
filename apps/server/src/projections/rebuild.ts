@@ -101,7 +101,7 @@ export async function rebuildProjections(
     );
     await exec(
       tx,
-      'CREATE TEMP TABLE _save_ws ON COMMIT DROP AS SELECT id, connected, last_seen_at, runtimes, hostname, platform, runner_version FROM workstations',
+      'CREATE TEMP TABLE _save_ws ON COMMIT DROP AS SELECT id, connected, last_seen_at, runtimes, hostname, platform, runner_version, runner_update FROM workstations',
     );
     // Live claims keep the lease the heartbeats extended: replay alone would reset it to `claimed_at + 1h`, which
     // for a long shift is already in the past and would make the reaper release a claim that is still working.
@@ -144,7 +144,7 @@ export async function rebuildProjections(
     await exec(
       tx,
       `UPDATE workstations w SET connected = s.connected, last_seen_at = s.last_seen_at, runtimes = s.runtimes,
-            hostname = s.hostname, platform = s.platform, runner_version = s.runner_version
+            hostname = s.hostname, platform = s.platform, runner_version = s.runner_version, runner_update = s.runner_update
          FROM _save_ws s WHERE w.id = s.id`,
     );
     await exec(

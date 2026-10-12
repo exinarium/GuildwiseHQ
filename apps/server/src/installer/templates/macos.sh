@@ -108,7 +108,7 @@ PLIST
   launchctl bootstrap "${domain}" "${PLIST}" || die "The launch agent could not be loaded." "Run \`launchctl bootstrap ${domain} ${PLIST}\` to see why, then run the command again."
   launchctl kickstart -k "${domain}/${LABEL}" >/dev/null 2>&1 || true
   good "The runner starts at login and restarts if it stops (launchd agent ${LABEL})"
-  SERVICE_MODE=launchd
+  SERVICE_MODE=launchd; record_service_mode launchd
   report "Service" ok "launchd agent running"
 }
 
