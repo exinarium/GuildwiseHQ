@@ -33,6 +33,7 @@ import { InvestigationPanel, MainSyncNote } from '../components/InvestigationPan
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
 import { ShiftLog } from '../components/ShiftLog.tsx';
+import { StartedByLine, SubworkflowsPanel, SubworkflowWaitLine } from '../components/SubworkflowsPanel.tsx';
 import {
   Avatar,
   Badge,
@@ -342,7 +343,15 @@ export function CardDetailView({
         </Callout>
       )}
 
-      {data.testing && <TestingLinks testing={data.testing} status={card.status} />}
+      <SubworkflowWaitLine data={data.subworkflows} />
+      <StartedByLine data={data.subworkflows} />
+      {data.testing && (
+        <TestingLinks
+          testing={data.testing}
+          status={card.status}
+          hideWaiting={data.subworkflows?.children.some((c) => c.state === 'open') ?? false}
+        />
+      )}
       <MainSyncNote card={card} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
@@ -377,6 +386,7 @@ export function CardDetailView({
               </dl>
             </Panel>
           )}
+          <SubworkflowsPanel data={data.subworkflows} />
           <ThreadPanel cardId={card.id} thread={thread} canComment={permissions.canComment} />
           {data.testing && (
             <FinalizePanel

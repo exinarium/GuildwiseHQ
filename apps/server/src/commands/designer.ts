@@ -32,6 +32,7 @@ import {
 import { loadOrg, orgRoleOf, requireFeature } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
+import { subworkflowLookupFor } from '../catalogue/subworkflow-lookup.ts';
 import { variantIssues } from '../catalogue/variants.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -129,11 +130,16 @@ export async function roleCatalogue(
   return list.map((r) => RoleDefinitionSchema.parse(r.definition));
 }
 
-async function validationContexts(db: Queryable, orgId: string) {
+async function validationContexts(db: Queryable, orgId: string, workflowDef?: unknown) {
   const departments = await departmentNames(db, orgId);
   return {
     role: { builtinRoleKeys: BUILTIN_ROLE_KEYS, builtinWorkflowKeys: BUILTIN_WORKFLOW_KEYS, departments },
-    workflow: { builtinWorkflowKeys: BUILTIN_WORKFLOW_KEYS, departments },
+    workflow: {
+      builtinWorkflowKeys: BUILTIN_WORKFLOW_KEYS,
+      departments,
+      // Sub-workflow stages are checked against the registry (approved, enabled, no cycle, depth).
+      subworkflowLookup: await subworkflowLookupFor(db, orgId, workflowDef),
+    },
   };
 }
 
@@ -319,7 +325,7 @@ export async function saveWorkflowDraft(
       { ...input, version, builtIn: false },
       'workflow',
     ) as WorkflowDefinition;
-    const ctxs = await validationContexts(tx, orgId);
+    const ctxs = await validationContexts(tx, orgId, def);
     const issues = validateCustomWorkflow(def, await roleCatalogue(tx, orgId, true), ctxs.workflow).map(
       issueOfWorkflow,
     );
@@ -376,7 +382,7 @@ async function issuesFor(db: Queryable, kind: DefinitionKind, row: Row, withDraf
   // A project variant is validated from its insertions on its base (it is not a custom workflow).
   if (kind === 'workflow' && row.project_id)
     return variantIssues(db, row, await roleCatalogue(db, row.org_id, withDrafts), BUILTIN_WORKFLOW_KEYS);
-  const ctxs = await validationContexts(db, row.org_id);
+  const ctxs = await validationContexts(db, row.org_id, kind === 'workflow' ? row.definition : undefined);
   if (kind === 'role')
     return validateRoleDefinition(row.definition, ctxs.role).map((i): DefinitionIssue => ({ ...i }));
   return validateCustomWorkflow(

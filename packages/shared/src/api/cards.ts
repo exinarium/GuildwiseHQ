@@ -140,6 +140,54 @@ export const ThreadMessageDtoSchema = z.object({
 });
 export type ThreadMessageDto = z.infer<typeof ThreadMessageDtoSchema>;
 
+/** A child card a sub-workflow step of this card started (card detail "Sub-workflows" panel). */
+export const SubworkflowChildDtoSchema = z.object({
+  stageId: z.string(),
+  stageLabel: z.string(),
+  mode: z.enum(['wait', 'continue']),
+  /** open = the card waits; continued = it moved on at once; done / cancelled = the child ended. */
+  state: z.enum(['open', 'continued', 'done', 'cancelled']),
+  workflowKey: z.string(),
+  workflowVersion: z.number().int(),
+  startedAt: IsoTime,
+  resolvedAt: IsoTime.nullable(),
+  /** Fields copied back from the child when it finished. */
+  fieldsBack: z.record(z.string(), z.unknown()),
+  child: z.object({
+    id: z.uuid(),
+    ref: z.string(),
+    title: z.string(),
+    status: CardStatus,
+    stage: z.string(),
+    column: z.string().nullable(),
+    projectId: z.uuid(),
+    projectKey: z.string(),
+    projectName: z.string(),
+    /** The viewer is a member of the child's project: title, column and the link are shown. */
+    visible: z.boolean(),
+    /** The fields the parent mapped into the child (values at the child now). */
+    fields: z.record(z.string(), z.unknown()),
+  }),
+});
+export type SubworkflowChildDto = z.infer<typeof SubworkflowChildDtoSchema>;
+
+export const SubworkflowsPanelSchema = z.object({
+  /** The children this card's sub-workflow steps started (oldest first). */
+  children: z.array(SubworkflowChildDtoSchema),
+  /** The card that started this one (null: it is not a sub-workflow child). */
+  startedBy: z
+    .object({
+      id: z.uuid(),
+      ref: z.string(),
+      title: z.string(),
+      stageLabel: z.string(),
+      projectKey: z.string(),
+      visible: z.boolean(),
+    })
+    .nullable(),
+});
+export type SubworkflowsPanel = z.infer<typeof SubworkflowsPanelSchema>;
+
 /** `GET /api/cards/:id` (also by ref, `WEB-12`): card + handoffs + transitions + thread + current shift. */
 export const CardDetailResponseSchema = z.object({
   card: CardDtoSchema,
@@ -172,6 +220,8 @@ export const CardDetailResponseSchema = z.object({
   blockers: z.array(z.object({ deskItemId: z.uuid(), title: z.string() })).default([]),
   /** M4: test runs (evidence), bug child / parent links and the finalize state. */
   testing: CardTestingSchema.optional(),
+  /** Sub-workflows: children this card started and the parent that started it (absent: neither). */
+  subworkflows: SubworkflowsPanelSchema.optional(),
   /** M6: the published research note of a research card. */
   publication: PublicationDtoSchema.nullable().optional(),
   /** Cost tracking: what the card's shifts cost so far (organization members only). */

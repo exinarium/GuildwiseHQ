@@ -8,6 +8,7 @@ import {
 } from '@aom/shared';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import type { WorkflowVersionRow } from './loader.ts';
+import { subworkflowLookupFor } from './subworkflow-lookup.ts';
 
 /**
  * The exact base version a variant was authored on: an active or superseded, non-variant version of the key, from the
@@ -69,7 +70,10 @@ export async function variantIssues(
     spec.data,
     base.definition,
     roles,
-    { builtinWorkflowKeys },
+    {
+      builtinWorkflowKeys,
+      subworkflowLookup: await subworkflowLookupFor(db, row.org_id, base.definition, row.project_id),
+    },
     { version: row.version, stored: row.definition as WorkflowDefinition },
   );
   return v.issues.map((i) => ({ ...i }));

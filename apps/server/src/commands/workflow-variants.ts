@@ -8,6 +8,7 @@ import {
   WorkflowVariantSpecSchema,
 } from '@aom/shared';
 import { resolveWorkflow } from '../catalogue/loader.ts';
+import { subworkflowLookupFor } from '../catalogue/subworkflow-lookup.ts';
 import { loadBaseVersion } from '../catalogue/variants.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
@@ -109,7 +110,10 @@ export async function saveVariantDraft(
       spec,
       base.definition,
       roles,
-      { builtinWorkflowKeys: BUILTIN_WORKFLOW_KEYS },
+      {
+        builtinWorkflowKeys: BUILTIN_WORKFLOW_KEYS,
+        subworkflowLookup: await subworkflowLookupFor(tx, orgId, base.definition, spec.projectId),
+      },
       { version },
     );
     const issues: DefinitionIssue[] = v.issues.map((i) => ({ ...i }));

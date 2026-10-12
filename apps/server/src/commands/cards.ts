@@ -152,6 +152,8 @@ async function assertDependencies(tx: Tx, projectId: string, deps: string[], sel
 export interface CardActing {
   origin?: CardOrigin;
   actor?: AppendInput['actor'];
+  /** The card that causes this one (a sub-workflow child): `parent_card_id`. */
+  parentCardId?: string;
 }
 
 /**
@@ -288,6 +290,7 @@ export async function createCardIn(
           ownerUserId: user.id,
           ...(req.interestId ? { interestId: req.interestId } : {}),
           origin: acting.origin ?? 'manual',
+          ...(acting.parentCardId ? { parentCardId: acting.parentCardId } : {}),
           scheduled: false,
           repoId,
           priority: req.priority ?? DEFAULT_CARD_PRIORITY,

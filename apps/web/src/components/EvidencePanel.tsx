@@ -65,12 +65,22 @@ export function EvidencePanel({
 }
 
 /** Status lines and links: waiting on a bug, parked on DevOps, parent and child cards. */
-export function TestingLinks({ testing, status }: { testing: Testing; status: string }) {
+export function TestingLinks({
+  testing,
+  status,
+  hideWaiting = false,
+}: {
+  testing: Testing;
+  status: string;
+  /** The card waits for a sub-workflow child (shown by its own line), not for a bug fix. */
+  hideWaiting?: boolean;
+}) {
   const { parent, children, waitingOn, parkedOn } = testing;
-  if (!parent && children.length === 0 && !waitingOn && !parkedOn && status !== 'waiting') return null;
+  const waits = status === 'waiting' && !hideWaiting;
+  if (!parent && children.length === 0 && !waitingOn && !parkedOn && !waits) return null;
   return (
     <div className="mb-3 flex flex-col gap-1.5 text-sm" data-testid="testing-links">
-      {status === 'waiting' && (
+      {waits && (
         <p data-testid="waiting-line">
           Waiting on{' '}
           {waitingOn ? (

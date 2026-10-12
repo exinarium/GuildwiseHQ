@@ -75,6 +75,18 @@ The builder works with the keyboard alone (every action is a button or a field, 
 
 Once approved, a custom workflow can be picked as the workflow of a new project on the Projects page, or enabled next to a project's own workflow in the project's settings under **Workflows** (see [Workflows of a project](/help/projects#workflows)).
 
+### A step that starts another workflow {#sub-workflows}
+
+A step of a custom workflow does not have to be worked by an agent: it can **start a card in another workflow** (a sub-workflow). Use it when part of the job is a flow of its own, for example "Translate" or "Legal review", that other cards use too. Ask the BA in a design chat to draft it; the step says:
+
+- **Which workflow** to start, in the **same project** or in **another project of your organization**. The other workflow must be approved and enabled in that project, and the owner of the card must be a member of both projects.
+- **What to pass on**: which fields of this card fill which fields of the new card (a field, a fixed value, or a text with placeholders such as `{card.title}`), and whether the new card starts **queued** or as a **draft**. Without a choice it starts queued when everything it needs is filled in, otherwise as a draft.
+- **Wait or carry on.** *Wait*: this card is **waiting** until the new card finishes, then takes the step's **done** route (and the fields you chose are copied back), or its **failed** route when the new card is cancelled (or carries on as done, if you chose that). *Carry on*: this card moves on at once and the new card runs alongside.
+
+The server runs these steps itself; no agent ever picks one up. While a card waits, its tile on the board says what it waits for and where that card is now, and the card's page has a **Sub-workflows** panel. The new card says "Started by" the card that made it. Cancelling the waiting card does not cancel the new one.
+
+Limits and checks: sub-workflows can be nested **three levels** deep, a workflow can never (directly or through others) start itself, and both are checked when you save the workflow. If a step cannot start its card (nested too deep, the workflow is not enabled in that project, you are not a member of it, a field no longer exists), the card turns **Blocked** and a notice lands on your desk saying why; fix it, then acknowledge the notice and the step is tried again.
+
 ### A project's own steps in a built-in workflow {#variants}
 
 You cannot edit the built-in Code workflow, but one project can have its own version of it with extra steps: in the project's settings, **Workflows**, click **Customise** and use **Insert step after ...** to add a step after any existing one. The base steps stay as they are. The new version goes to your desk for approval; running cards keep the version they started on, and a newer version of the base workflow can be applied with **Rebase**. In a design chat you can ask the BA to draft it (`aom org workflow variant`).

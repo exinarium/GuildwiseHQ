@@ -8,6 +8,7 @@ import {
   type WorkflowDefinition,
   WorkflowDefinitionSchema,
 } from './schema.ts';
+import { type SubworkflowLookup, validateSubworkflowTargets } from './subworkflow.ts';
 import { type ValidationIssue, validateWorkflow } from './validate.ts';
 
 /**
@@ -208,6 +209,8 @@ export function investigateInsertion(after: string): StageInsertionInput {
 
 export interface VariantContext {
   builtinWorkflowKeys: readonly string[];
+  /** Resolves the targets of the base's `subworkflow` stages (cycle, depth, approval, enabled). Absent: not checked. */
+  subworkflowLookup?: SubworkflowLookup;
 }
 
 export interface VariantValidation {
@@ -311,6 +314,7 @@ export function validateVariant(
   }
 
   issues.push(...validateWorkflow(def, roles));
+  if (ctx.subworkflowLookup) issues.push(...validateSubworkflowTargets(def, ctx.subworkflowLookup));
 
   // jsonb does not keep key order: compare the schema-normalised forms.
   const stored = opts.stored === undefined ? undefined : WorkflowDefinitionSchema.safeParse(opts.stored);
