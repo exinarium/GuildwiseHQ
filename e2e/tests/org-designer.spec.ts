@@ -305,7 +305,10 @@ test('the workflow builder: template, edit, send for approval, approved on the d
   await expect(page.getByTestId('issues-ok')).toBeVisible();
   // Try a card: the path is listed and marked on the diagram.
   await expect(page.getByTestId('try-path')).toContainText('Review');
-  await expect(page.getByTestId('node-review')).toHaveAttribute('data-path-step', '3');
+  await expect(page.getByTestId('workflow-builder').getByTestId('node-review')).toHaveAttribute(
+    'data-path-step',
+    '3',
+  );
   await page.screenshot({ path: shot('builder'), fullPage: true });
   await page.getByRole('button', { name: 'Save and send for approval' }).click();
   await waitFor(

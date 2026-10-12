@@ -117,6 +117,8 @@ test('AC3: hire two builders and a reviewer (mock runtime); the hire form has no
 });
 
 test('AC4: create TOY-1 with all required fields and a mock script, then specify it', async () => {
+  // the completion action is an expert-mode control (simple mode hides it): switch expert mode on for this form only
+  expect((await api.put('/api/auth/git-expert', { data: { enabled: true } })).ok()).toBe(true);
   await page.goto('/cards/new');
   const form = page.getByRole('form', { name: 'New card' });
   await form.getByLabel('Title', { exact: true }).fill('Add the thing');
@@ -131,6 +133,7 @@ test('AC4: create TOY-1 with all required fields and a mock script, then specify
   await form.getByLabel('Mock script').fill('{"review":["changes","ok"]}');
   await form.getByRole('button', { name: 'Specify', exact: true }).click();
   await expect(page).toHaveURL(/\/cards\/TOY-1$/);
+  expect((await api.put('/api/auth/git-expert', { data: { enabled: false } })).ok()).toBe(true);
   const row = (await q('SELECT status, stage, fields FROM cards WHERE ref=$1', ['TOY-1']))[0];
   expect(['queued', 'claimed']).toContain(row?.status);
   expect(row?.fields).toMatchObject({ mock: { review: ['changes', 'ok'] } });
@@ -250,7 +253,11 @@ test('AC5: TOY-1 goes In progress -> Review -> Rework -> Review -> Test with two
     )
   )[0];
   expect(card?.branch_name).toMatch(/^aom\/toy-1-/);
+  // the card's branch is shown in expert mode only
+  expect((await api.put('/api/auth/git-expert', { data: { enabled: true } })).ok()).toBe(true);
+  await page.reload();
   await expect(page.getByText(card?.branch_name ?? '').first()).toBeVisible();
+  expect((await api.put('/api/auth/git-expert', { data: { enabled: false } })).ok()).toBe(true);
   expect(existsSync(card?.worktree_path ?? '/nonexistent')).toBeTruthy();
   const log = execFileSync('git', ['-C', card?.worktree_path ?? '', 'log', '--format=%s', 'main..HEAD'], {
     encoding: 'utf8',

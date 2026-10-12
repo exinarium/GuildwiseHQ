@@ -128,7 +128,7 @@ test('Help replays the tour, which walks the whole sidebar and ends by offering 
     'Intake',
     'Projects and phases',
     'Interests',
-    'Schedules',
+    'Automations',
     'Agents',
     'Org chart',
     'Workstations',

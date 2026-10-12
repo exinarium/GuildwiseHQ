@@ -29,7 +29,7 @@ const git = (cwd: string, ...a: string[]) =>
     cwd,
     encoding: 'utf8',
   }).trim();
-const originHead = (branch = 'main') => git(ORIGIN, 'rev-parse', branch);
+const originHead = (branch = 'trunk') => git(ORIGIN, 'rev-parse', branch);
 const repoRow = async () =>
   (
     await q<{ working_branch: string | null; known_branches: string[] }>(
@@ -84,13 +84,14 @@ test.afterAll(async () => {
 test('setup: a runner holding notes-app, whose working branch is not confirmed, and project HYG', async () => {
   mkdirSync(join(DIR, 'origin'), { recursive: true });
   mkdirSync(ROOT, { recursive: true });
-  git(DIR, 'init', '--bare', '-b', 'main', ORIGIN);
+  // no main or master: in simple mode a repository with one of them has its working branch confirmed without asking
+  git(DIR, 'init', '--bare', '-b', 'trunk', ORIGIN);
   git(DIR, 'clone', ORIGIN, CLONE);
-  git(CLONE, 'checkout', '-b', 'main');
+  git(CLONE, 'checkout', '-b', 'trunk');
   writeFileSync(join(CLONE, 'README.md'), '# Notes\n');
   git(CLONE, 'add', '.');
   git(CLONE, 'commit', '-m', 'Initial commit');
-  git(CLONE, 'push', '-u', 'origin', 'main');
+  git(CLONE, 'push', '-u', 'origin', 'trunk');
   git(CLONE, 'branch', 'develop');
   git(CLONE, 'push', 'origin', 'develop');
 
@@ -151,9 +152,9 @@ test('AC1: while the working branch is unset, hygiene reports the uncommitted ch
   const [q1] = await waitFor('the working-branch question', questions, (r) => r.length === 1);
   // the missing branch holds back a commit: blocking, so it reaches the manager at once
   expect(q1).toMatchObject({ blocking: true, pinned: true });
-  expect(q1?.options.map((o) => o.label)).toEqual(['develop', 'main', 'Another branch']);
+  expect(q1?.options.map((o) => o.label)).toEqual(['develop', 'trunk', 'Another branch']);
   expect(q1?.data).toMatchObject({ repoId, reason: 'unconfirmed' });
-  expect((await repoRow())?.known_branches).toEqual(['develop', 'main']);
+  expect((await repoRow())?.known_branches).toEqual(['develop', 'trunk']);
 
   await page.goto('/desk');
   const art = page.getByRole('article', {
@@ -170,43 +171,42 @@ test('AC1: while the working branch is unset, hygiene reports the uncommitted ch
   expect(await questions()).toHaveLength(1);
 });
 
-test('AC2: answering sets the branch on the repository with a ledger entry; hygiene then commits and pushes to it', async () => {
+test('AC2: answering sets the branch on the repository with a ledger entry; hygiene then saves the work on a saved-work branch', async () => {
   const head = originHead();
   await page.goto('/desk');
   const art = page.getByRole('article', { name: /Which branch is the working branch of notes-app/ });
-  await art.getByRole('radio', { name: /^main/ }).check();
+  await art.getByRole('radio', { name: /^trunk/ }).check();
   await art.getByRole('button', { name: 'Set working branch' }).click();
-  await waitFor('the branch is stored', repoRow, (r) => r?.working_branch === 'main', 30_000);
+  await waitFor('the branch is stored', repoRow, (r) => r?.working_branch === 'trunk', 30_000);
   expect((await questions('open')).length).toBe(0);
   const ledger = await q<{ body: string; scope: string }>(
     `SELECT body, scope FROM ledger_entries WHERE source_desk_item_id IN (SELECT id FROM desk_items WHERE subkind='working_branch' AND project_id=$1)`,
     [projectId],
   );
   expect(ledger).toHaveLength(1);
-  expect(ledger[0]?.body).toContain('main');
+  expect(ledger[0]?.body).toContain('trunk');
   const ev = await q<{ payload: any }>(
     `SELECT payload FROM events WHERE type='ProjectRepoWorkingBranchSet' ORDER BY seq DESC LIMIT 1`,
   );
   expect(ev[0]?.payload).toMatchObject({
-    workingBranch: 'main',
+    workingBranch: 'trunk',
     previousBranch: null,
     reason: 'unconfirmed',
   });
 
-  // the held-back work is committed and pushed by the run the answer started
-  await waitFor(
-    'origin main moved',
-    async () => originHead(),
-    (h) => h !== head,
+  // the held-back work is stored on a saved-work branch and pushed by the run the answer started: nothing lands on the
+  // working branch and the manager's checkout is left as it was
+  const saved = await waitFor(
+    'the saved-work branch reached origin',
+    async () => git(ORIGIN, 'branch', '--list', 'guildwise/saved-work/*'),
+    (b) => b.trim() !== '',
     90_000,
   );
-  expect(git(ORIGIN, 'log', '-1', '--format=%s', 'main')).toContain('save work in progress');
-  expect(git(ORIGIN, 'show', 'main:todo.md')).toContain('unsaved work');
-  await waitFor(
-    'the clone is clean',
-    async () => git(CLONE, 'status', '--porcelain'),
-    (s) => s === '',
-  );
+  const savedBranch = saved.trim().replace(/^[*+]?\s*/, '');
+  expect(git(ORIGIN, 'log', '-1', '--format=%s', savedBranch)).toContain('saved work');
+  expect(git(ORIGIN, 'show', `${savedBranch}:todo.md`)).toContain('unsaved work');
+  expect(originHead()).toBe(head);
+  expect(git(CLONE, 'status', '--porcelain')).toContain('todo.md');
   const requestsNow = await requests();
   expect(requestsNow.at(-1)?.hygiene.trigger).toBe('branch_confirmed');
 
@@ -215,62 +215,42 @@ test('AC2: answering sets the branch on the repository with a ledger entry; hygi
   expect(await questions()).toHaveLength(0);
 });
 
-test('AC3: uncommitted changes on a branch that is not the working branch are reported (a BA signal), not committed', async () => {
+test('AC3: uncommitted changes on a branch that is not the working branch are saved on a saved-work branch, not committed there', async () => {
   git(CLONE, 'checkout', 'develop');
   writeFileSync(join(CLONE, 'scratch.txt'), 'on the wrong branch\n');
   const head = originHead('develop');
+  const savedBefore = git(ORIGIN, 'branch', '--list', 'guildwise/saved-work/*').split('\n').length;
   await runHygiene();
+  // the checkout and the branch it is on are left alone; the edits go to a new saved-work branch (no finding is raised)
   expect(originHead('develop')).toBe(head);
   expect(git(CLONE, 'status', '--porcelain')).toContain('scratch.txt');
-  const f = await waitFor(
-    'a finding',
-    () =>
-      q<{ kind: string; subject: string }>(`SELECT kind, subject FROM hygiene_findings WHERE status='open'`),
-    (r) => r.length === 1,
+  await waitFor(
+    'a new saved-work branch holding scratch.txt',
+    async () => git(ORIGIN, 'branch', '--list', 'guildwise/saved-work/*').split('\n').length,
+    (n) => n > savedBefore,
+    30_000,
   );
-  expect(f[0]).toMatchObject({ kind: 'dirty_other_branch', subject: repoId });
-  const sig = await waitFor(
-    'the reporter signal',
-    () =>
-      q<{ urgency: string; subject: { title: string } }>(
-        `SELECT urgency, subject FROM ba_signals WHERE kind='repo_hygiene' AND status <> 'resolved' AND project_id=$1`,
-        [projectId],
-      ),
-    (r) => r.length === 1,
-    60_000,
-  );
-  expect(sig[0]?.urgency).toBe('normal');
-  expect(sig[0]?.subject.title).toContain('Uncommitted changes on another branch: notes-app');
+  expect(
+    await q(`SELECT 1 FROM hygiene_findings WHERE kind='dirty_other_branch' AND project_id=$1`, [projectId]),
+  ).toHaveLength(0);
   await page.goto('/workstations');
   await expandWorkstation(page.getByTestId('workstation-Hygiene Box'));
-  await expect(page.getByTestId('hygiene-status')).toContainText('1 open finding');
   await page.screenshot({ path: join(paths.vaults, 'hygiene-workstation.png'), fullPage: true });
 
-  // tidied by hand: the next run finds it in order and the finding and the signal close
+  // tidied by hand: back on the working branch
   rmSync(join(CLONE, 'scratch.txt'));
-  git(CLONE, 'checkout', 'main');
+  git(CLONE, 'checkout', 'trunk');
   await runHygiene();
-  await waitFor(
-    'findings resolved',
-    () => q(`SELECT 1 FROM hygiene_findings WHERE status='open' AND project_id=$1`, [projectId]),
-    (r) => r.length === 0,
-  );
-  await waitFor(
-    'signal resolved',
-    () =>
-      q(`SELECT 1 FROM ba_signals WHERE kind='repo_hygiene' AND status <> 'resolved' AND project_id=$1`, [
-        projectId,
-      ]),
-    (r) => r.length === 0,
-    60_000,
-  );
+  expect(
+    await q(`SELECT 1 FROM hygiene_findings WHERE status='open' AND project_id=$1`, [projectId]),
+  ).toHaveLength(0);
 });
 
 test('AC4: the runner sweep removes the worktree of a dead card and keeps a dirty one, which becomes a finding', async () => {
   const wt = join(HOME, 'worktrees', 'HYG-deadbeef');
   mkdirSync(wt, { recursive: true });
-  git(CLONE, 'worktree', 'add', '-b', 'aom/hyg-1-gone', join(wt, 'HYG-1'), 'main');
-  git(CLONE, 'worktree', 'add', '-b', 'aom/hyg-2-dirty', join(wt, 'HYG-2'), 'main');
+  git(CLONE, 'worktree', 'add', '-b', 'aom/hyg-1-gone', join(wt, 'HYG-1'), 'trunk');
+  git(CLONE, 'worktree', 'add', '-b', 'aom/hyg-2-dirty', join(wt, 'HYG-2'), 'trunk');
   writeFileSync(join(wt, 'HYG-2', 'forgotten.txt'), 'uncommitted\n');
   await runHygiene();
   await waitFor(
@@ -299,35 +279,40 @@ test('AC4: the runner sweep removes the worktree of a dead card and keeps a dirt
 test('AC5: the project settings show the working branch with a Change action', async () => {
   await page.goto(`/projects/${projectId}/settings`);
   const row = page.getByTestId('working-branch-notes-app');
-  await expect(row).toContainText('main');
+  await expect(row).toContainText('trunk');
   await row.getByRole('button', { name: 'Change working branch of notes-app' }).click();
   await row.getByLabel('Branch', { exact: true }).selectOption('develop');
   await row.getByRole('button', { name: 'Save branch' }).click();
   await waitFor('the branch changed', repoRow, (r) => r?.working_branch === 'develop', 30_000);
   await expect(row).toContainText('develop');
   await page.screenshot({ path: join(paths.vaults, 'hygiene-project-settings.png'), fullPage: true });
-  // back to main for the next steps
+  // back to trunk for the next steps
   await row.getByRole('button', { name: 'Change working branch of notes-app' }).click();
-  await row.getByLabel('Branch', { exact: true }).selectOption('main');
+  await row.getByLabel('Branch', { exact: true }).selectOption('trunk');
   await row.getByRole('button', { name: 'Save branch' }).click();
-  await waitFor('the branch is main again', repoRow, (r) => r?.working_branch === 'main', 30_000);
+  await waitFor('the branch is trunk again', repoRow, (r) => r?.working_branch === 'trunk', 30_000);
   await q(`UPDATE project_repos SET working_branch_set_at = now() - interval '5 hours' WHERE id=$1`, [
     repoId,
   ]);
 });
 
 test('AC6: a new phase asks the manager to keep the working branch or name another (non-urgent)', async () => {
+  // "Keep it?" questions go only to managers who turned expert mode on (simple mode confirms without asking)
+  expect((await api.put('/api/auth/git-expert', { data: { enabled: true } })).ok()).toBe(true);
   const res = await api.post(`/api/projects/${projectId}/phases`, {
     data: { name: 'Autosave', description: 'Notes save themselves.' },
   });
   expect(res.status(), await res.text()).toBe(201);
   const [q2] = await waitFor('the re-confirmation', questions, (r) => r.length === 1, 30_000);
-  expect(q2?.title).toContain('Keep main as the working branch of notes-app (HYG)');
+  expect(q2?.title).toContain('Keep trunk as the working branch of notes-app (HYG)');
   expect(q2).toMatchObject({ blocking: false, pinned: false });
-  expect(q2?.options.map((o) => o.id)).toEqual(['keep', 'branch:develop', 'other']);
+  // the saved-work branches hygiene pushed earlier are offered as well; they are not what this spec is about
+  expect(q2?.options.map((o) => o.id).filter((id) => !id.startsWith('branch:guildwise/saved-work/'))).toEqual(
+    ['keep', 'branch:develop', 'other'],
+  );
   await page.goto('/desk');
-  const art = page.getByRole('article', { name: /Keep main as the working branch of notes-app/ });
-  await expect(art.getByRole('radio', { name: /Keep main/ })).toBeChecked();
+  const art = page.getByRole('article', { name: /Keep trunk as the working branch of notes-app/ });
+  await expect(art.getByRole('radio', { name: /Keep trunk/ })).toBeChecked();
   // name another branch
   await art.getByRole('radio', { name: /Another branch/ }).check();
   await art.getByRole('button', { name: 'Set working branch' }).click();
@@ -343,7 +328,7 @@ test('AC6: a new phase asks the manager to keep the working branch or name anoth
     (r) => r[0]?.working_branch === 'release/2026',
     30_000,
   );
-  expect((await repoRow())?.working_branch).toBe('main');
+  expect((await repoRow())?.working_branch).toBe('trunk');
   expect(
     (
       await q(
@@ -359,7 +344,7 @@ test('AC6: a new phase asks the manager to keep the working branch or name anoth
     (r) => r.length === 1,
   );
   expect(f[0]?.kind).toBe('branch_missing');
-  await q(`UPDATE project_repos SET working_branch='main' WHERE id=$1`, [repoId]);
+  await q(`UPDATE project_repos SET working_branch='trunk' WHERE id=$1`, [repoId]);
   await q(`UPDATE phases SET working_branch=NULL WHERE name='Autosave'`);
 });
 

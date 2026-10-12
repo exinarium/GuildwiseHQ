@@ -104,7 +104,7 @@ test('AC2: with the workstation offline the chat says so and nothing is queued',
   expect((await q<any>(`SELECT count(*)::int AS n FROM thread_messages`))[0].n).toBe(before);
   expect(
     await q(
-      `SELECT 1 FROM runner_commands WHERE type NOT IN ('agent.wipe','worktree.remove','repos.rescan','vault.configure')`,
+      `SELECT 1 FROM runner_commands WHERE type NOT IN ('agent.wipe','worktree.remove','repos.rescan','vault.configure','env.ensure','repo.clone')`,
     ),
   ).toHaveLength(0);
 

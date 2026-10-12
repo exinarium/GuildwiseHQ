@@ -432,7 +432,7 @@ test('AC7: a pushed branch counts once it is merged into the working branch; the
   await new Promise((r) => setTimeout(r, 15_000));
   expect((await phase(p.ref))!.status).toBe('open');
   await page.goto('/p/PHS/phases/4');
-  await expect(page.getByTestId(`member-${c.ref}`)).toContainText('waiting to be merged');
+  await expect(page.getByTestId(`member-${c.ref}`)).toContainText(/waiting (to be merged|for you to merge)/);
 
   // somebody merges it into main (as a reviewed pull request would)
   const clone = join(paths.vaults, 'phase-merge-clone');
