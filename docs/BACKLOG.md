@@ -4,6 +4,131 @@ Logged fixes to pick up when development resumes. Newest first.
 
 ## 2026-10-12
 
+Owner's list of 2026-10-12. Item 8 of that list (reference repositories per project) is #4 below. The affiliate
+programme (#3) waits until these are done.
+
+### 5. Bitbucket shows "not available" although it is connected
+
+**Problem.** The connection check reports Bitbucket as not available on a workstation where Bitbucket was connected.
+`BitbucketCloudForge.status()` (`apps/runner/src/forge/bitbucket.ts:52`) only checks that a token is saved, then calls
+`GET /user`. Any failure there, including a 401/403 for a missing scope, a network error, or a saved token without the
+account e-mail (`call()` needs `t.user`; git itself only needs the token, so clones keep working), is reported as
+`not_connected`. Pull requests then fall back to "unavailable" (`forge/index.ts:72`).
+
+**Wanted.**
+- Reproduce on the owner's workstation (where it shows, the exact detail text) and fix the actual cause.
+- Separate states: no token / token refused (with the HTTP status and the missing scope) / API unreachable / connected.
+  Do not call it "not available" when git access works.
+- If the check needs a scope the documented token does not have, either drop that need (check with a repository call
+  instead of `/user`) or document the scope in the connect helper.
+- Tests for each state.
+
+### 6. SSH as an alternative to API tokens for repository access
+
+**Problem.** Clones, fetches and pushes use HTTPS with the forge's token or CLI login (`GitAuth`, `forge/*.ts`). Some
+owners already have SSH keys set up and do not want to create API tokens. `ensureSshKey()` (`forge/connect.ts:30`) and
+`RepoRef.sshUrl` exist but nothing uses them for git.
+
+**Wanted.**
+- Per repository (default per workstation): access method **API token** or **SSH**. SSH uses a key the runner generates
+  (`~/.ssh/aom_<provider>`, shown so the owner can add it to the host) or a key the owner points to.
+- Git commands get `GIT_SSH_COMMAND` with that key and a pinned `known_hosts`; agents never read the key (the sandbox still
+  denies `~/.ssh`; the runner runs git for them, or the key path is allowed for the git process only).
+- The REST features (pull requests, branch rules, repository list) still need the token or CLI. With SSH only, the
+  completion falls back to push and the manager opens the PR, and the UI says so.
+- Tests: URL rewriting https to ssh, the env the runner passes, and the fallback.
+
+### 7. The development environment check ignores a project in a sub directory
+
+**Problem.** The environment check (`apps/runner/src/toolchain/ensure.ts:62`) scans each repository from its root
+(depth 3), and the install steps assume the root (e.g. `dotnetRestoreTarget()` in `stacks.ts:59` only looks at root
+files). A project whose code lives in a sub directory of the repository (monorepo, `src/app/`) is detected badly or fails
+to install. There is no field for the project's path in the repository.
+
+**Wanted.**
+- A **project path** per project repository (`ProjectRepoAdded` / `ProjectRepoDto` / `EnvEnsurePayload.repos[]`), set in the
+  project settings, default the repository root.
+- Detection and install steps run from that path; card agents get it in their brief (where to build and test).
+- Optional: detect several stacks in a monorepo and let the owner pick.
+- Tests with a fixture repository whose app is in a sub directory.
+
+### 8. Commit and push to the working branch, without a pull request
+
+**Problem.** Card work always happens on a card branch, then the completion action is merge, pull request or push the card
+branch (`CompletionAction`, `packages/shared/src/cards/types.ts:18`). The difference between the branch a pull request
+targets and the branch the work lands on is not clear in the UI, and there is no "just commit and push" option.
+
+**Wanted.**
+- Two named branches per project repository, explained in the settings: the **main branch** (where pull requests go, e.g.
+  `main`) and the **working branch** (where card work is integrated, e.g. `develop`). When the working branch does not exist it
+  is created from the main branch and pushed (today `createWorkingBranch()` in `git/worktrees.ts:138` already does this
+  for the base; make it the documented behaviour and show it).
+- A completion action **Commit and push to the working branch**: no pull request; the card's commits land on the working
+  branch and are pushed. The pull request (when used) goes from the working branch to the main branch, on request.
+- Project default and per-card override; the user guide explains the three options.
+
+### 9. Architect role and an investigation and design step
+
+**Problem.** Investigation is a paragraph of the BA's instructions; a "code researcher" role was drafted to read code,
+compare and investigate. The owner prefers an architect.
+
+**Wanted.**
+- A built-in **Architect** role (default model Opus). It investigates and designs: reads the code, writes a summary and design
+  for the card, then hands off to the builders. It writes no product code but **may commit and push** (its documents) and
+  **merge** (e.g. the main branch into the card or working branch, conflict resolution).
+- An **investigation and design** stage in the code workflow between spec and build, claimed by the architect. It can also be
+  placed after other work in a workflow. Scope includes comparisons (between repositories, against best practice), design
+  and merging from main.
+- **Merge latest main first:** a project setting (on by default) under which the BA always instructs the architect to merge the
+  latest main branch before card work starts.
+- **Investigation-only cards:** a card flag. The card ends after the investigation; the BA writes the result to the ledger
+  and the project context. The report goes to the project docs by default, or to a location set on the card or project.
+- **Read access:** the architect may read every repository under the organization's source folder on the workstation
+  (read-only except its own card/working branch). Ties in with #4.
+
+### 10. More than one workflow per project; custom steps in existing workflows
+
+**Problem.** A project has exactly one workflow (`projects.workflow_key`); custom stages cannot be added to a built-in or
+existing workflow.
+
+**Wanted.**
+- A project can enable several workflows; each card picks one (default by card type).
+- Add custom steps to an existing project workflow (a project-level copy of a built-in workflow with extra stages, versioned);
+  running cards keep their version.
+
+### 11. "Fix" button that sends the DevOps engineer to fix an environment problem
+
+**Problem.** Failed environment checks show "Check again" (project settings) or "Try again" (workstation repositories);
+the owner has to write the DevOps request by hand.
+
+**Wanted.**
+- A **Fix** button next to every failed or missing item (environment check, verify rights, clone failures, tool reports with a
+  `fix`). It files a `DevOpsRequested` with the error text, workstation, project and repository as context, and shows the
+  request's progress; the check reruns when DevOps reports done.
+
+### 12. DevOps cannot read or update the card it is working for
+
+**Problem.** A DevOps request from a card carries only the card id/title (`DevOpsRequestContext`,
+`packages/shared/src/events/devops.ts:40`). The DevOps shift has no card brief and no command to read card fields,
+comments or attachments, or to update the card.
+
+**Wanted.**
+- When a request has a card, the DevOps brief includes the card (fields, context, latest comments, attachments).
+- DevOps can read the card (`aom card show`) and comment on it / update the fields its task needs, scoped to that card.
+- Tests: brief contents and the permission scope.
+
+### 13. Workflow and role builder; sub-workflows and event triggers
+
+**Problem.** Custom roles and workflows can only be made by asking the BA, who writes JSON in the Org Designer chat. This
+is hard to use. Workflows cannot call other workflows, and nothing starts a workflow from an event.
+
+**Wanted (design first).**
+- A visual builder for workflows (stages, roles, transitions, fields) and roles (purpose, instructions, tools, model), with
+  the BA as an optional helper instead of the only way in. Templates to start from.
+- **Sub-workflows:** a stage can start another workflow (a child card) and wait for or continue past its result.
+- **Triggers:** start a workflow from an event: e-mail received or replied to, ticket logged (intake), card done, schedule.
+- Design doc and UI design before building.
+
 ### 4. Agents cannot read code outside their card worktree (chats, comparing repositories)
 
 **Problem.** Sandboxed agents only read their card's worktree (`<runner>/worktrees/...`), their scratch dir and the
