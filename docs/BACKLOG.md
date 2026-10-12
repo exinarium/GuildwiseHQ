@@ -7,6 +7,10 @@ Logged fixes to pick up when development resumes. Newest first.
 Owner's list of 2026-10-12. Item 8 of that list (reference repositories per project) is #4 below. The affiliate
 programme (#3) waits until these are done.
 
+**Build order (owner, 2026-10-12):** fixes first (#5, #7, #2, #12, #11), then repository access (#4, #6, #8), then the
+architect (#9) and multiple workflows (#10), then design and build the workflow builder (#13). Runner self-update (#1)
+alongside.
+
 ### 5. Bitbucket shows "not available" although it is connected
 
 **Problem.** The connection check reports Bitbucket as not available on a workstation where Bitbucket was connected.
@@ -16,6 +20,7 @@ account e-mail (`call()` needs `t.user`; git itself only needs the token, so clo
 `not_connected`. Pull requests then fall back to "unavailable" (`forge/index.ts:72`).
 
 **Wanted.**
+- Seen in the **project settings** (owner, 2026-10-12).
 - Reproduce on the owner's workstation (where it shows, the exact detail text) and fix the actual cause.
 - Separate states: no token / token refused (with the HTTP status and the missing scope) / API unreachable / connected.
   Do not call it "not available" when git access works.
@@ -63,6 +68,8 @@ targets and the branch the work lands on is not clear in the UI, and there is no
   `main`) and the **working branch** (where card work is integrated, e.g. `develop`). When the working branch does not exist it
   is created from the main branch and pushed (today `createWorkingBranch()` in `git/worktrees.ts:138` already does this
   for the base; make it the documented behaviour and show it).
+- **Decided (owner, 2026-10-12):** agents keep working on a card branch; this option merges it into the working branch
+  and pushes, with no pull request (today's `merge` action, renamed and made explicit).
 - A completion action **Commit and push to the working branch**: no pull request; the card's commits land on the working
   branch and are pushed. The pull request (when used) goes from the working branch to the main branch, on request.
 - Project default and per-card override; the user guide explains the three options.
@@ -76,6 +83,7 @@ compare and investigate. The owner prefers an architect.
 - A built-in **Architect** role (default model Opus). It investigates and designs: reads the code, writes a summary and design
   for the card, then hands off to the builders. It writes no product code but **may commit and push** (its documents) and
   **merge** (e.g. the main branch into the card or working branch, conflict resolution).
+- **Decided (owner, 2026-10-12):** the BA keeps intake and the spec; the architect's stage follows the spec.
 - An **investigation and design** stage in the code workflow between spec and build, claimed by the architect. It can also be
   placed after other work in a workflow. Scope includes comparisons (between repositories, against best practice), design
   and merging from main.
