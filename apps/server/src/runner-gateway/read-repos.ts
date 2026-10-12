@@ -1,4 +1,5 @@
 import { type ReadRepo, type ReferenceRepoDto, scrubRemoteUrl } from '@aom/shared';
+import { orgRoleOf } from '../auth/org-context.ts';
 import { type Queryable, rows } from '../db/sql.ts';
 
 /**
@@ -61,22 +62,45 @@ export async function referenceRepoDtos(db: Queryable, projectId: string): Promi
   ).map(toDto);
 }
 
-/** What the user could pick: repositories of the organization's other active projects they are an active member of. */
-export async function referenceRepoCandidates(
+/**
+ * Who sees every repository of the organization's projects: the Owner and Admins. Everyone else only the projects they
+ * are an active member of. The picker and the validation of `PUT .../reference-repos` both go through
+ * `eligibleProjectRepos`, so they cannot disagree.
+ */
+export async function seesAllOrgRepos(db: Queryable, userId: string, orgId: string): Promise<boolean> {
+  const role = await orgRoleOf(db, userId, orgId);
+  return role === 'owner' || role === 'admin';
+}
+
+/**
+ * Repositories of the organization's other active projects (not interest projects) that `userId` may pick as a
+ * reference repository of `projectId`; `onlyIds` narrows it (validation).
+ */
+export async function eligibleProjectRepos(
   db: Queryable,
-  userId: string,
-  orgId: string,
-  projectId: string,
+  a: { userId: string; orgId: string; projectId: string; onlyIds?: string[] },
 ): Promise<ReferenceRepoDto[]> {
+  const all = await seesAllOrgRepos(db, a.userId, a.orgId);
   return (
     await rows(
       db,
       `SELECT r.id, r.name, r.remote_url, r.project_id, rp.name AS project_name FROM project_repos r
          JOIN projects rp ON rp.id = r.project_id
-         JOIN project_members pm ON pm.project_id = rp.id AND pm.user_id = $1 AND pm.status = 'active'
         WHERE rp.org_id = $2 AND rp.id <> $3 AND rp.status = 'active' AND rp.kind <> 'interest'
-          AND r.removed_at IS NULL ORDER BY rp.name, r.name`,
-      [userId, orgId, projectId],
+          AND r.removed_at IS NULL
+          AND ($4::uuid[] IS NULL OR r.id = ANY($4::uuid[]))
+          AND ($5::boolean OR EXISTS (SELECT 1 FROM project_members pm
+                                       WHERE pm.project_id = rp.id AND pm.user_id = $1 AND pm.status = 'active'))
+        ORDER BY rp.name, r.name`,
+      [a.userId, a.orgId, a.projectId, a.onlyIds ?? null, all],
     )
   ).map(toDto);
 }
+
+/** What the user could pick among the organization's projects' repositories. */
+export const referenceRepoCandidates = (
+  db: Queryable,
+  userId: string,
+  orgId: string,
+  projectId: string,
+): Promise<ReferenceRepoDto[]> => eligibleProjectRepos(db, { userId, orgId, projectId });

@@ -87,6 +87,8 @@ export interface SupervisorDeps {
   log?: Logger;
   /** Finds the local clone for a normalized remote URL. */
   findRepo: (remoteUrlNormalized: string) => Promise<RepoReport | undefined>;
+  /** This workstation's clone by catalog key (path relative to a repoRoot): reference repositories picked on this workstation. */
+  findLocal?: (localKey: string) => Promise<{ localPath: string } | undefined>;
   /** Forwards an rpc to the server (`rpc.request`). */
   rpc: (shiftId: string, method: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>;
   /** Writes (and commits, pushes) a file into a vault clone: `aom publish` puts research notes there (M6). */
@@ -404,7 +406,15 @@ export class ShiftSupervisor {
     // The project's reference repositories (read-only), for a card shift only; only clones this runner found itself.
     const readFolders =
       msg.kind === 'card'
-        ? await resolveReadRepos(msg.readRepos, { findRepo: this.deps.findRepo, runnerRoot: paths.root })
+        ? await resolveReadRepos(
+            msg.readRepos,
+            {
+              findRepo: this.deps.findRepo,
+              ...(this.deps.findLocal ? { findLocal: this.deps.findLocal } : {}),
+              runnerRoot: paths.root,
+            },
+            msg.localReadRepos,
+          )
         : [];
     if (msg.kind === 'card')
       texts.instructions += `\n${renderReadableFolders(readFolders, { workingDir: cwd })}\n`;

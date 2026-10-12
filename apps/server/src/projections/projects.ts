@@ -296,6 +296,12 @@ export const projectProjectors: Record<string, Projector> = {
   ProjectReferenceReposSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectReferenceReposSet'>).payload;
     await exec(tx, 'UPDATE projects SET reference_repo_ids=$2::uuid[] WHERE id=$1', [p.projectId, p.repoIds]);
+    // events from before workstation clones could be picked carry no list: it stays as it was ([])
+    if (p.workstationRepos)
+      await exec(tx, 'UPDATE projects SET reference_workstation_repos=$2::jsonb WHERE id=$1', [
+        p.projectId,
+        JSON.stringify(p.workstationRepos),
+      ]);
   },
   ProjectRepoAdded: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectRepoAdded'>).payload;

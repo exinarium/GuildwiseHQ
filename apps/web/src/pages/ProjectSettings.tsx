@@ -278,6 +278,8 @@ export function ProjectSettings() {
             projectId={id}
             referenceRepos={q.data.referenceRepos ?? []}
             candidates={q.data.referenceRepoCandidates ?? []}
+            workstationRepos={q.data.referenceWorkstationRepos ?? []}
+            workstationCandidates={q.data.workstationRepoCandidates ?? []}
             isOwner={project.myRole === 'owner'}
           />
         </div>

@@ -61,11 +61,33 @@ export const ReferenceRepoDtoSchema = z.object({
 });
 export type ReferenceRepoDto = z.infer<typeof ReferenceRepoDtoSchema>;
 
-/** `PUT /api/projects/:id/reference-repos` (project owner): the whole list of reference repositories. */
-export const MAX_REFERENCE_REPOS = 20;
-export const SetReferenceReposRequestSchema = z.object({
-  repoIds: z.array(z.uuid()).max(MAX_REFERENCE_REPOS),
+/** A repository cloned on a workstation (any clone under its repoRoots) that is, or could be, a reference repository. */
+export const WorkstationRepoDtoSchema = z.object({
+  workstationId: z.uuid(),
+  workstationName: z.string(),
+  localKey: z.string(),
+  name: z.string(),
+  /** Normalized remote (no credentials); null: the clone has no remote. */
+  remoteUrl: z.string().nullable(),
 });
+export type WorkstationRepoDto = z.infer<typeof WorkstationRepoDtoSchema>;
+
+/**
+ * `PUT /api/projects/:id/reference-repos` (project owner): the whole list of reference repositories. `workstationRepos`
+ * absent: the workstation clones already picked stay as they are.
+ */
+export const MAX_REFERENCE_REPOS = 20;
+export const SetReferenceReposRequestSchema = z
+  .object({
+    repoIds: z.array(z.uuid()).max(MAX_REFERENCE_REPOS),
+    workstationRepos: z
+      .array(z.object({ workstationId: z.uuid(), localKey: z.string().min(1).max(500) }))
+      .max(MAX_REFERENCE_REPOS)
+      .optional(),
+  })
+  .refine((v) => v.repoIds.length + (v.workstationRepos?.length ?? 0) <= MAX_REFERENCE_REPOS, {
+    message: `at most ${MAX_REFERENCE_REPOS} reference repositories`,
+  });
 export type SetReferenceReposRequest = z.infer<typeof SetReferenceReposRequestSchema>;
 
 export const ProjectDtoSchema = z.object({
@@ -163,8 +185,12 @@ export const ProjectDetailResponseSchema = z.object({
   members: z.array(ProjectMemberDtoSchema),
   /** Reference repositories: other projects' repositories this project's agents may read (read-only). */
   referenceRepos: z.array(ReferenceRepoDtoSchema).default([]),
-  /** What the owner could still pick: repositories of the organization's other active projects the caller is a member of ([] for non-owners). */
+  /** What the owner could still pick: repositories of the organization's other active projects (all of them for org owners and admins, else those the caller is an active member of; [] for non-owners). */
   referenceRepoCandidates: z.array(ReferenceRepoDtoSchema).default([]),
+  /** Clones on workstations picked as reference repositories. */
+  referenceWorkstationRepos: z.array(WorkstationRepoDtoSchema).default([]),
+  /** Clones on the caller's own workstations they could pick ([] for non-owners). */
+  workstationRepoCandidates: z.array(WorkstationRepoDtoSchema).default([]),
   /** The setting's change history, newest first (who turned it on or off, when). */
   mergePolicyHistory: z
     .array(z.object({ enabled: z.boolean(), byName: z.string(), at: IsoTime }))

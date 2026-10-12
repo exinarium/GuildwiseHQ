@@ -1,4 +1,4 @@
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES, renderChatInstructions, renderReadableFolders, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -12,10 +12,13 @@ import {
 } from '../src/adapters/read-only-dirs.ts';
 import type { ChatStartInput } from '../src/adapters/types.ts';
 import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
+import { scanAllRepos, withRemote } from '../src/git/repo-scan.ts';
 import { resolveReadRepos } from '../src/read-repos.ts';
+import { Runner } from '../src/runner.ts';
+import { FakeServer } from './fake-server.ts';
 import { makeShiftStart } from './fixtures.ts';
 import { type Harness, startHarness } from './harness.ts';
-import { cleanupTmp, tmp } from './helpers.ts';
+import { cleanupTmp, makeConfig, makeRepo, sh, tmp, waitUntil } from './helpers.ts';
 import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
 
 cleanupTmp();
@@ -386,7 +389,11 @@ describe('card shift: reference repositories', () => {
       ],
     };
     h.server.send('shift.start', msg);
-    await h.server.waitFor('shift.ended', (m) => m.shiftId === (msg as Record<string, unknown>).shiftId, 60_000);
+    await h.server.waitFor(
+      'shift.ended',
+      (m) => m.shiftId === (msg as Record<string, unknown>).shiftId,
+      60_000,
+    );
     expect(seen.readDirs).toHaveLength(1);
     expect(seen.instructions).toContain('# Folders you can read');
     expect(seen.instructions).toContain('reference repository "toy", read-only');
@@ -400,5 +407,128 @@ describe('card shift: reference repositories', () => {
     await h.runShift({});
     expect(seen.readDirs).toEqual([]);
     expect(seen.instructions).toContain('No other repository is open for reading');
+  });
+});
+
+describe('workstation repositories (any clone under a repoRoot)', () => {
+  /** A repoRoot with a clone with a remote, one without a remote, and one in a sub folder. */
+  function root() {
+    const repo = makeRepo();
+    const notes = join(repo.scanRoot, 'notes');
+    mkdirSync(notes, { recursive: true });
+    sh(notes, 'git', ['init', '-b', 'main']);
+    writeFileSync(join(notes, 'ideas.md'), 'ideas\n');
+    const deep = join(repo.scanRoot, 'clients', 'acme');
+    mkdirSync(deep, { recursive: true });
+    sh(deep, 'git', ['init', '-b', 'main']);
+    return { repo, notes, deep };
+  }
+
+  it('scans repositories without a remote too, keyed by their path relative to the repoRoot', async () => {
+    const { repo } = root();
+    const all = await scanAllRepos([repo.scanRoot]);
+    expect(all.map((r) => [r.localKey, r.remoteUrl === null])).toEqual([
+      ['clients/acme', true],
+      ['notes', true],
+      ['toy', false],
+    ]);
+    // project matching still sees only what has a remote
+    expect(withRemote(all).map((r) => r.localPath)).toEqual([repo.clone]);
+    // excluded folders are not offered
+    expect((await scanAllRepos([repo.scanRoot], (p) => p.endsWith('notes'))).map((r) => r.localKey)).toEqual([
+      'clients/acme',
+      'toy',
+    ]);
+  });
+
+  it('reports the catalog in hello and repos.report without absolute paths, minus the data dir', async () => {
+    const { repo } = root();
+    // a repository inside the runner data dir is never offered
+    const dataDir = tmp('aom-data-');
+    const own = join(dataDir, 'inner');
+    mkdirSync(own, { recursive: true });
+    sh(own, 'git', ['init', '-b', 'main']);
+    const server = await FakeServer.start();
+    const config = makeConfig(server.url, { repoRoots: [repo.scanRoot, dataDir] });
+    const runner = new Runner({ config, dataDir, exitGraceMs: 5000, rescanMs: 200 });
+    await runner.start();
+    try {
+      await waitUntil(() => server.helloCount > 0, 10_000, 'hello');
+      const hello = server.of('hello')[0];
+      expect(hello?.repoCatalog).toEqual([
+        { name: 'acme', localKey: 'clients/acme', remoteUrlNormalized: null },
+        { name: 'notes', localKey: 'notes', remoteUrlNormalized: null },
+        { name: 'toy', localKey: 'toy', remoteUrlNormalized: repo.remoteNormalized },
+      ]);
+      expect(JSON.stringify(hello?.repoCatalog)).not.toContain(repo.scanRoot);
+      await waitUntil(() => server.of('repos.report').length > 0, 10_000, 'repos.report');
+      expect(server.of('repos.report')[0]?.repoCatalog).toHaveLength(3);
+    } finally {
+      await runner.stop();
+      await server.close();
+    }
+  });
+
+  it('opens a clone picked on this workstation by key, a clone with a remote by remote, once each', async () => {
+    const { repo, notes } = root();
+    const deps = {
+      findRepo: async (n: string) => (n === repo.remoteNormalized ? { localPath: repo.clone } : undefined),
+      findLocal: async (k: string) =>
+        ({ notes: { localPath: notes }, toy: { localPath: repo.clone } })[k as 'notes'],
+      runnerRoot: '/runner-data',
+      realHome: '/home/me',
+    };
+    const out = await resolveReadRepos(undefined, deps, [
+      { name: 'notes', localKey: 'notes' }, // no remote: by key, on its workstation
+      { name: 'toy', remoteUrlNormalized: repo.remoteNormalized }, // another workstation: by remote
+      { name: 'toy again', localKey: 'toy', remoteUrlNormalized: repo.remoteNormalized }, // same clone: once
+      { name: 'gone', localKey: 'missing' },
+      { name: 'elsewhere', remoteUrlNormalized: 'example.com/elsewhere' },
+    ]);
+    expect(out.map((r) => [r.name, r.kind])).toEqual([
+      ['notes', 'reference'],
+      ['toy', 'reference'],
+    ]);
+  });
+
+  it('a key never opens a folder that holds credentials or the runner state', async () => {
+    const home = tmp('aom-home-');
+    mkdirSync(join(home, '.ssh'), { recursive: true });
+    const out = await resolveReadRepos(
+      undefined,
+      {
+        findRepo: async () => undefined,
+        findLocal: async () => ({ localPath: join(home, '.ssh') }),
+        runnerRoot: join(home, '.aom-runner'),
+        realHome: home,
+      },
+      [{ name: 'ssh', localKey: '.ssh' }],
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('a card shift opens a clone without a remote named by key', async () => {
+    const { repo, notes } = root();
+    h = await startHarness({}, {}, repo);
+    const adapter = h.runner.chat.deps.adapters.get('mock') as unknown as {
+      start(i: { readDirs?: string[] }): Promise<unknown>;
+    };
+    const seen: string[] = [];
+    const start = adapter.start.bind(adapter);
+    adapter.start = async (i) => {
+      seen.push(...(i.readDirs ?? []));
+      return start(i);
+    };
+    const msg = {
+      ...makeShiftStart({ remoteNormalized: repo.remoteNormalized }),
+      localReadRepos: [{ name: 'notes', localKey: 'notes' }],
+    };
+    h.server.send('shift.start', msg);
+    await h.server.waitFor(
+      'shift.ended',
+      (m) => m.shiftId === (msg as Record<string, unknown>).shiftId,
+      60_000,
+    );
+    expect(seen.map((p) => realpathSync(p))).toEqual([realpathSync(notes)]);
   });
 });

@@ -64,7 +64,7 @@ describe('reference repositories panel', () => {
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'PUT')).toMatchObject({
         url: `/api/projects/${ID(2)}/reference-repos`,
-        body: { repoIds: [ID(50), ID(51)] },
+        body: { repoIds: [ID(50), ID(51)], workstationRepos: [] },
       }),
     );
   });
@@ -75,7 +75,12 @@ describe('reference repositories panel', () => {
       <ReferenceReposPanel projectId={ID(2)} referenceRepos={[lib, api]} candidates={[lib, api]} isOwner />,
     );
     await user.click(screen.getByRole('button', { name: 'Remove Library / lib' }));
-    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ repoIds: [ID(51)] }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
+        repoIds: [ID(51)],
+        workstationRepos: [],
+      }),
+    );
     expect(screen.getByTestId('reference-repos-none-left')).toHaveTextContent('already a reference');
   });
 
@@ -90,5 +95,81 @@ describe('reference repositories panel', () => {
     expect(screen.getByText('Library / lib')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull();
     expect(screen.queryByLabelText('Add a reference repository')).toBeNull();
+  });
+
+  const desk = (localKey: string, remoteUrl: string | null = null) => ({
+    workstationId: ID(70),
+    workstationName: 'Desk',
+    localKey,
+    name: localKey.split('/').pop() as string,
+    remoteUrl,
+  });
+  const acme = () => desk('clients/acme', 'github.com/acme/acme');
+
+  it('offers "Projects" and "On <workstation>" sections, and saves a picked workstation clone', async () => {
+    const user = userEvent.setup();
+    wrap(
+      <ReferenceReposPanel
+        projectId={ID(2)}
+        referenceRepos={[lib]}
+        candidates={[lib, api]}
+        workstationCandidates={[desk('notes'), acme()]}
+        isOwner
+      />,
+    );
+    const select = screen.getByLabelText('Add a reference repository');
+    expect(within(select).getByRole('group', { name: 'Projects' })).toBeInTheDocument();
+    const onDesk = within(select).getByRole('group', { name: 'On Desk' });
+    expect(
+      within(onDesk)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['notes (no remote)', 'clients/acme']);
+    await user.selectOptions(select, `w:${ID(70)}:notes`);
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
+        repoIds: [ID(50)],
+        workstationRepos: [{ workstationId: ID(70), localKey: 'notes' }],
+      }),
+    );
+  });
+
+  it('lists picked workstation clones and removes one while keeping the rest', async () => {
+    const user = userEvent.setup();
+    wrap(
+      <ReferenceReposPanel
+        projectId={ID(2)}
+        referenceRepos={[lib]}
+        candidates={[lib]}
+        workstationRepos={[desk('notes'), acme()]}
+        workstationCandidates={[desk('notes'), acme()]}
+        isOwner
+      />,
+    );
+    const list = screen.getByTestId('reference-repos');
+    expect(within(list).getByText('Desk / notes')).toBeInTheDocument();
+    expect(within(list).getByText('no remote')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Remove Desk / notes' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
+        repoIds: [ID(50)],
+        workstationRepos: [{ workstationId: ID(70), localKey: 'clients/acme' }],
+      }),
+    );
+  });
+
+  it('a non-owner sees the picked clones but cannot change them', () => {
+    wrap(
+      <ReferenceReposPanel
+        projectId={ID(2)}
+        referenceRepos={[]}
+        candidates={[]}
+        workstationRepos={[desk('notes')]}
+        isOwner={false}
+      />,
+    );
+    expect(screen.getByText('Desk / notes')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull();
   });
 });

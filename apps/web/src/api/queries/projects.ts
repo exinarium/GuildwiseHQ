@@ -208,7 +208,10 @@ export function useSetMergePolicy(id: string) {
 export function useSetReferenceRepos(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (repoIds: string[]) => put(`/projects/${id}/reference-repos`, { repoIds }),
+    mutationFn: (list: {
+      repoIds: string[];
+      workstationRepos: Array<{ workstationId: string; localKey: string }>;
+    }) => put(`/projects/${id}/reference-repos`, list),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', id] }),
   });
 }
