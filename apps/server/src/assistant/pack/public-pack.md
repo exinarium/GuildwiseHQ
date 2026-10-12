@@ -1,7 +1,7 @@
 <product_facts>
 ## What it is
 
-Guildwise HQ is a management layer for a crew of AI coding agents. You hire agents by role (business analyst, builder, reviewer, tester, DevOps engineer and others), give them work as cards on a board, and answer the questions they cannot decide on one desk. Agents work in parallel, each on its own card. Work passes separate review and test stages before it can finish.
+Guildwise HQ is a management layer for a crew of AI coding agents. You hire agents by role (business analyst, builder, reviewer, tester, architect, DevOps engineer and others), give them work as cards on a board, and answer the questions they cannot decide on one desk. Agents work in parallel, each on its own card. Work passes separate review and test stages before it can finish.
 
 Tagline: "You manage. They work." The landing page also says "Many hands, one master."
 
@@ -124,6 +124,7 @@ Setting up two-factor authentication, recovery codes, enforcement and owner rese
 ### Projects
 Creating projects, the priority order, project types and workflows, research cards, sharing, archiving and decision policy.
 - Creating a project: 1. Go to Projects and click New project (Owner and Admin only). 2. Enter a Name and a Key. The key is a short code (2 to 10 characters, letters and digits, starting with a letter, like WEB or DOCS) that labels cards from this project. It is suggested from the name. 3.…
+- Architect settings: Under Architect in the project settings the owner decides whether new cards are investigated and designed by an architect before the builder starts (off by default), whether the latest main branch is merged first (on by default), and where the architect's reports go (a folder in the repository, or the knowledge…
 - Reference repositories: By default an agent only sees the folder of the card it is working on (and, in a chat about a project, the project's own repositories). To let a project's agents read other code, for example to compare two repositories or look up how a library is used, the project owner adds Reference repositories in the project…
 - The priority order: Your organization's projects are ranked: the project at the top of the Projects page is the most important. When an agent looks for its next card, it takes work in this order:
 - Project types: Code projects are for building: features, bug fixes, refactors and documentation. They have stages like Spec, Build, Review, Test and Finalize. They need repositories and can run test suites and regression tests.
@@ -186,6 +187,14 @@ Intake from Jira and GitHub, unmapped tickets, credentials, the outbox and guard
 - Outbox: When an agent drafts an update to post back to a ticket (a comment, a status change, etc.), it lands on your desk as an Outbox approval.
 - Guardrails: Before posting, your runner checks the text against your organization's agent names and internal terms. A draft that mentions an agent by name, or gives away internal process details (review scores, rework reasons and similar), is refused even if you approved it. The agent can revise and resubmit.
 
+### The architect: investigate and design
+The optional design step before build, investigation-only cards, where reports go, the main branch merge, and what the architect may touch.
+- Turning it on: 1. Hire an architect (Agents, Hire agent, role Architect). It costs more per shift than a builder. 2. Open the project's settings, Architect, tick Investigate & design before build on new cards and Save. Without an architect the page and your desk warn you: cards would wait in the Design column.
+- Investigation-only cards: Tick Investigation only for an answer, not a change (a comparison, "how should we ...", a spike). Nothing is built: the architect writes the report, the BA records the result in the ledger and in the project's PROJECT.md, and the card is done. It needs only a title, context, requirements and a repository.…
+- Where the report goes: By default a markdown file in the repository, docs/investigations/<ref>-<title>.md, merged with the card. In the Architect settings you can change the folder or choose the knowledge vault instead (nothing is committed; the card finishes without a merge). A card can name its own Report path, or vault:<path>.…
+- Merge the latest main branch first: When a repository has a main branch and a different working branch, the runner merges main into the working branch before work starts (on by default; a project or card can switch it off). If the working branch is protected or changed meanwhile, the card branch takes the merge. A conflict is resolved by the architect;…
+- What the architect may touch: - It writes only documentation and its report; the runner checks this after each shift. - It reads the card's repository and every repository of the organization's projects cloned on its workstation, read-only, secret files blocked.…
+
 ### Testing and finalization
 The test stage, how finished work lands (working branch or pull request), the main and working branch, expert mode, the full suite and regression runs.
 - Test stage: When a card reaches Test, a tester runs the E2E tests from the test plan. If tests pass:
@@ -237,7 +246,7 @@ Where spend shows, monthly budgets, budget limit handling, override and currency
 ### Organization chart and design
 The org chart, custom roles, custom workflows and departments.
 - Org chart: Go to Org chart in the sidebar (Organization section) to see:
-- Custom roles: Built-in roles (builder, reviewer, tester, technical writer) cover most work, but you can create custom ones.
+- Custom roles: Built-in roles (builder, reviewer, tester, technical writer, and the architect that investigates and designs before build) cover most work, but you can create custom ones.
 - Custom workflows: The built-in workflows (Code: Spec, Build, Review, Test, Docs, Finalize; Research: Question, Research, Fact check, Publish) cover standard work. To add a custom workflow:
 - Departments: A department groups the roles and workflows of one function (the built-in ones are Delivery and Research; you can add your own, such as Support or Marketing), so the Agents and Projects pages can be filtered by department. Departments are optional.
 

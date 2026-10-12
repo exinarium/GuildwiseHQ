@@ -16,6 +16,7 @@ import {
   type WorktreeSpec,
 } from '@aom/shared';
 import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
+import { workflowView } from '../commands/cards.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
@@ -107,11 +108,12 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       stageLabel: stage.label,
       doneCriteria: stage.doneCriteria,
       // Outcomes guarded by a card flag (handoff vs report) are offered only when they apply to this card.
-      outcomes: allowedOutcomes(
-        wf.definition,
-        { ...card, docsNeeded: card.docs_needed, fields: card.fields },
-        stage.id,
-      ).map((o) => ({ id: o.id, label: o.label, kind: o.kind, data: o.data })),
+      outcomes: allowedOutcomes(wf.definition, workflowView(card), stage.id).map((o) => ({
+        id: o.id,
+        label: o.label,
+        kind: o.kind,
+        data: o.data,
+      })),
       maxShiftMinutes: stage.maxShiftMinutes,
     },
     agent: { id: agent.id, name: agent.name, seniority: agent.seniority },

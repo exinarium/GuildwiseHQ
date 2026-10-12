@@ -21,6 +21,8 @@ import {
   streamId,
   type WorkflowCardView,
   type WorkflowDefinition,
+  workflowHasDesignStage,
+  workflowSupportsInvestigationOnly,
   workflowUsesRepos,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -72,15 +74,16 @@ export function specifyTarget(
   return { from: initial.id, to, stage: getStage(def, to) as Stage };
 }
 
-/** Does the workflow have an Investigate & design stage that a card can switch on or off (`when designNeeded`)? */
-export const workflowHasDesignStage = (def: WorkflowDefinition): boolean =>
-  def.stages.some((s) => s.when?.field === 'designNeeded');
-/** Does the workflow end an investigation-only card at Finalize (an outcome guarded by `investigationOnly`)? */
-export const workflowSupportsInvestigationOnly = (def: WorkflowDefinition): boolean =>
-  def.stages.some((s) => s.outcomes.some((o) => o.when?.field === 'investigationOnly'));
-
 /** A card as the workflow engine and the required-field checks see it. */
 export type CardView = FillableCard & WorkflowCardView;
+
+/**
+ * A card row as the workflow engine reads it (`when` on stages and outcomes): the raw columns plus the camelCase names
+ * the workflows use (`docsNeeded`, `designNeeded`, `investigationOnly`, `riskTier`, ...), then `fields`.
+ */
+export function workflowView(c: Row): WorkflowCardView {
+  return { ...c, ...cardView(c) };
+}
 
 export function cardView(c: Row): CardView {
   return {

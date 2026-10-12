@@ -38,6 +38,7 @@ An agent is a persistent profile; a session is a disposable shift run under that
 Roles:
 
 - **BA/architect** (senior): intake with the manager, investigation, specs, dependency graph, answers builder questions, finalization. One identity, two queues: interactive intake and background finalize.
+- **Architect** (senior, optional): investigates and designs a card before it is built, or answers a question in a written report (an investigation-only card). Reads the card's repository and every repository of the organization (read-only, secrets blocked), writes only documentation and its report, and never pushes by itself: the runner publishes the card branch and merges the latest main branch on its behalf. The design step is off by default and switched on per project or per card (docs/design/architect-and-workflows.md).
 - **Builder**: claims To do and Rework cards, works in the card's worktree, writes unit tests for its work, confirms the project builds and all unit tests pass, and writes a handoff.
 - **Reviewer** (senior): reviews against the card spec, bounces with comments or approves to test.
 - **Tester**: writes and runs Playwright E2E tests for new features on the card branch, runs full suites after finalize and regression runs, and may change E2E tests only.

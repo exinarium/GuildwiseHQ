@@ -27,7 +27,7 @@ import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { baFinalizeEvents } from './ba-finalize.ts';
 import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
-import { cardView } from './cards.ts';
+import { cardView, workflowView } from './cards.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
@@ -215,7 +215,7 @@ export async function applyShiftReport(
     };
   }
   const payloadData = data.data as Record<string, any>;
-  const workflowCard = { ...card, docsNeeded: card.docs_needed, fields: card.fields };
+  const workflowCard = workflowView(card);
   let resolved: ReturnType<typeof resolveOutcome>;
   try {
     resolved = resolveOutcome(wf.definition, workflowCard, card.stage, outcome.id);

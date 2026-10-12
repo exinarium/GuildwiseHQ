@@ -107,3 +107,11 @@ export function resolveOutcome(
   const toStage = skipInactive(def, card, outcome.to);
   return { event: outcome.event, toStage };
 }
+
+/** Does the workflow have an Investigate & design stage that a card can switch on or off (`when designNeeded`)? */
+export const workflowHasDesignStage = (def: Pick<WorkflowDefinition, 'stages'>): boolean =>
+  def.stages.some((s) => s.when?.field === 'designNeeded');
+
+/** Does the workflow end an investigation-only card at Finalize (an outcome guarded by `investigationOnly`)? */
+export const workflowSupportsInvestigationOnly = (def: Pick<WorkflowDefinition, 'stages'>): boolean =>
+  def.stages.some((s) => s.outcomes.some((o) => o.when?.field === 'investigationOnly'));

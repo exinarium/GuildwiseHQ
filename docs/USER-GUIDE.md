@@ -53,6 +53,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.17 Billing](#417-billing)
   - [4.18 Chatting with agents](#418-chatting-with-agents)
   - [4.19 Cloud workstations: a VPS or a Codespace](#419-cloud-workstations-a-vps-or-a-codespace)
+  - [4.20 The architect: investigate and design](#420-the-architect-investigate-and-design)
 - [5. For Members](#5-for-members)
   - [5.1 What you can do](#51-what-you-can-do)
   - [5.2 Your first day](#52-your-first-day)
@@ -142,6 +143,7 @@ Read this chapter once. Everything else builds on these words.
 | **Ledger** | The shared memory: decisions, standing orders and requirements, searchable. |
 | **Standing order** | A rule every agent reads at the start of every shift, such as "write a unit test for every change". |
 | **BA** | The business analyst agent. It drafts cards from your requests and tickets, answers what it can from the ledger, and writes your daily floor report. |
+| **Architect** | An optional senior agent that investigates and designs a card before the builder starts, or answers a question in a written report. Off until a project turns the design step on (4.20). |
 | **DevOps engineer** | A free agent that looks after one workstation: installs tools, keeps your repositories tidy, starts and stops things. |
 | **Vault** | A folder of notes (a git repository) that is synced to your workstations: your organization's knowledge base, or one project's own notes. |
 | **Priority order** | The order of your projects on the Projects page, most important first. Agents serve the project higher up first. |
@@ -157,11 +159,12 @@ The in-app glossary is at **Help, Glossary**.
 A card in a code project goes through the same stages every time. You do not have to push it along. The agents do.
 
 1. **Spec**: the card is written down: context, requirements, acceptance criteria. You (or the BA) write it. Until it is specified it is a draft.
-2. **To do and Build**: a builder takes the card and works on a branch of your repository.
-3. **Review**: a reviewer reads the change and either approves or sends it back (rework).
-4. **Test**: a tester runs the tests in the test plan. A failure creates a bug card, and the original waits for the fix.
-5. **Finalize**: the BA completes the card the way the project says: committed and pushed to the working branch with no pull request, or as a pull request for you to approve (4.4, *How finished work lands*).
-6. **Done**.
+2. **Design (optional)**: when the project (or the card) asks for it, an architect investigates the code and writes a design first (4.20). Off by default.
+3. **To do and Build**: a builder takes the card and works on a branch of your repository.
+4. **Review**: a reviewer reads the change and either approves or sends it back (rework).
+5. **Test**: a tester runs the tests in the test plan. A failure creates a bug card, and the original waits for the fix.
+6. **Finalize**: the BA completes the card the way the project says: committed and pushed to the working branch with no pull request, or as a pull request for you to approve (4.4, *How finished work lands*).
+7. **Done**.
 
 If anyone gets stuck or needs a decision, the card turns to **Blocked** and a question appears on your desk.
 
@@ -276,7 +279,7 @@ If something goes wrong, the installer says what happened and links to the insta
 You need at least a builder, a reviewer and a tester to get a card from idea to done. The BA is also strongly recommended.
 
 1. Open **Agents** and click **Hire agent**.
-2. Choose a **Role**: *Builder* writes the change, *Reviewer* checks it, *Tester* runs the tests, *BA* writes cards and reports, *Writer* documents. Choose **Seniority**: seniors take larger and riskier work and may review large changes. Pick the **Workstation** where the agent runs.
+2. Choose a **Role**: *Builder* writes the change, *Reviewer* checks it, *Tester* runs the tests, *BA* writes cards and reports, *Writer* documents. A senior *Architect* is optional (4.20). Choose **Seniority**: seniors take larger and riskier work and may review large changes. Pick the **Workstation** where the agent runs.
 3. Choose where the agent may work: **Any project**, or **Selected projects** (the allow-list). For now keep the project you will create next, or any project.
 4. Choose the **Model** (a bigger model is smarter and costs more; a smaller one is fast and cheap). A good start is a stronger model for builders and BAs and a lighter one for reviewers and testers. Give the agent a **Name**. The name generator suggests unused names; pick a theme or type your own.
 5. Click **Hire**. Repeat for each role.
@@ -395,6 +398,7 @@ What you will find there:
 
 - **Repos:** the code the agents work on, with its git host, its **Main branch** and **Working branch** (4.4) and its **Project path**: the folder of the repository the app lives in (empty: the repository root). The owner can change the path with **Change**, and how the repository is reached (**Access**: the workstation default, an API token / CLI login, or an SSH key); the development environment check, the package installs and the agents' build and test commands then run from that folder. After changing it, click **Check again** under the development environment. Research projects need none.
 - **Reference repositories:** other repositories your agents may **read**, in card work and in chats, so they can compare code or look up how something is done elsewhere. The owner picks them under **Add a reference repository**: the repositories of the organization's other projects (organization Owners and Admins see every project's repositories, everyone else the projects they belong to, listed under **Projects**), or **any repository cloned on one of your workstations**, even one that is not in a project (listed under **On <workstation name>**; a clone without a remote shows as "no remote"). **Remove** takes one away. Nothing is added on its own: only what you pick is opened. The agents get them read-only on every workstation that has them cloned: they cannot change them, and secret files inside (`.env` files, keys, certificates) stay blocked. Every repository you do not pick stays blocked, and so does everything else on the workstation, including this platform's own code.
+- **Architect:** whether new cards are investigated and designed before they are built (off by default), whether the latest main branch is merged first (on by default) and where the architect's reports go (4.20).
 - **How finished work lands:** **Commit and push to the working branch** (the default; no pull request) or **Pull request I approve** (4.4).
 - **Team:** who works in the project (see below).
 - **Merging:** the setting **Merge large changes without my approval** (off by default). Read chapter 4.12 before turning it on.
@@ -542,7 +546,7 @@ Setting a budget below what was already spent pauses the project at once. Member
 
 **Roles & workflows** (sidebar, Organization) lets you extend the team beyond the built-in roles.
 
-- **Roles.** Built-in roles (builder, reviewer, tester, writer and others) cannot be removed, but you can extend them with extra instructions, skills and standing orders (**Extend**). You can also design **custom roles**: a name and purpose, instructions, permissions, skills, a default model and which workflow stages the role may claim.
+- **Roles.** Built-in roles (builder, reviewer, tester, writer, architect and others) cannot be removed, but you can extend them with extra instructions, skills and standing orders (**Extend**). You can also design **custom roles**: a name and purpose, instructions, permissions, skills, a default model and which workflow stages the role may claim.
 - **Workflows.** A workflow is a set of stages with a role for each and a route for success and failure. Design your own, for example a support-triage flow. The BA checks that every stage can be reached and every failure ends somewhere.
 - **Departments** group roles by function so you can filter the board and the Agents page.
 - **Design chat.** Click **Start a design chat** and the BA interviews you and drafts the role or workflow.
@@ -786,6 +790,24 @@ By default an organization has one cloud workstation, shared by all its projects
 **Claude sign-in.** Use your own Anthropic API key (the default): on a VPS run `read -rs K; printf %s "$K" | aom-runner auth api-key`, in a Codespace add the Codespaces secret `ANTHROPIC_API_KEY`. A Claude subscription also works but is for one person's own use, so the page warns about "individual use". Guildwise never receives or stores a Claude key or token.
 
 > **In the app:** Help, "Cloud workstations (VPS and Codespaces)" (`/help/cloud-workstations`).
+
+### 4.20 The architect: investigate and design
+
+The **architect** is a senior agent on the most capable model (Opus, high effort). Before a builder starts, it reads the card's code and the organization's other repositories, compares options, searches the web for best practice and writes a report. For a card that will be built the report is the **design**: the files to change, the data model, the risks and how each acceptance criterion maps to the design; the builder reads it first. It never builds the change itself, and it costs more per shift than a builder, so the step is **off by default**.
+
+**Turn it on.** Hire an *Architect* (4.4), then open the project's settings, **Architect**, tick **Investigate & design before build on new cards** and **Save**. If no architect is hired the page warns you and a notice goes to your desk, because cards would wait in the new **Design** column. On a single card, **Investigate & design before build** in the New card or Edit form overrides the project (switch it off for a typo, on for an uncertain approach).
+
+**Investigation-only cards.** Tick **Investigation only** for a comparison, a "how should we ..." or a spike: nothing is built. The architect writes the report; the BA records the result as a ledger entry (a decision when it is one) and adds it to the **Investigations** list in the project's `PROJECT.md`, which every later shift reads; then the card is done. Such a card needs only a title, context, requirements and a repository. The card page shows the report (summary and a link to the file on GitHub, GitLab, Bitbucket Cloud or Azure DevOps).
+
+**Where the report goes.** By default a markdown file in the repository, `docs/investigations/<ref>-<title>.md`, committed on the card branch and merged with the card. In the project settings you can change the folder, or choose the **knowledge vault** (nothing is committed; the BA then finishes the card without a merge). One card can name its own **Report path**, or `vault:<path>`.
+
+**Merge the latest main branch first.** When a repository has a main branch and a different working branch, the runner merges the main branch into the working branch and pushes it before work on a card starts, so the card branch is cut from up-to-date code. If the working branch is protected or changed meanwhile the card branch takes the merge instead; a **conflict** is resolved by the architect (conflict files only, no behaviour change), and on a card without an architect the merge is skipped with a note on the card and on your desk. On by default; the project setting or a card (**Merge the latest main branch first**: Project default / Yes / No) can switch it off.
+
+**What the architect may do.** It writes only documentation (`docs/**`, `*.md`) and its report; the runner checks this after the shift. It reads every repository of the organization's projects that is cloned on its workstation, read-only, with secret files blocked, plus every git repository under an **organization source folder** if the workstation's owner sets one (`aom-runner org-folder set`, see the runner guide). It cannot push, fetch or pull from its own shell: the runner publishes the card branch for it on request. A card waits for the architect while its dependencies are unfinished.
+
+> **Good to know:** a card already in Build cannot get a design step afterwards, and switching the step on for a project does not touch cards that are already past Spec.
+
+> **In the app:** Help, "The architect: investigate and design" (`/help/architect`).
 
 ## 5. For Members
 

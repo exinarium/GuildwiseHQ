@@ -197,3 +197,10 @@ export const SUPPORT_ADMIN = {
   name: 'E2E Support Admin',
   password: 'support-admin-password-12345',
 };
+
+/** Architect spec: own user, own runner (mock), project ARC on the toy repo, the organization vault, a full team with an architect. */
+export const ARCHITECT = {
+  email: 'architect@e2e.test',
+  name: 'E2E Architect',
+  password: 'architect-password-12345',
+};
