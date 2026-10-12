@@ -2,6 +2,34 @@
 
 Logged fixes to pick up when development resumes. Newest first.
 
+## 2026-10-12
+
+### 4. Agents cannot read code outside their card worktree (chats, comparing repositories)
+
+**Problem.** Sandboxed agents only read their card's worktree (`<runner>/worktrees/...`), their scratch dir and the
+vault (Claude Code `blockReadsOutsideWorkingDirectories` plus the sandbox `denyRead`; `apps/runner/src/adapters/claude-policy.ts`).
+`repoRoots` in the runner's `config.json` only says where repositories are discovered and cloned; it grants no read
+access, and there is no setting that does. Consequences seen on 2026-10-12:
+- **Chats** run in the agent's empty scratch dir unless they are about a card whose worktree exists on this
+  workstation (`apps/runner/src/chat/chat.ts`, `chatWorktree`): a chat with an agent about a project, or about a card not
+  started here yet, sees no code at all. Agents then guessed at a non-existent `config.json` setting.
+- Agents cannot **compare repositories** (the owner needs this).
+- Harmless noise: card agents' Read/Grep on the main repo's git metadata (`<repo>/.git/worktrees/<card>/HEAD`) is refused.
+- Workaround today: chat with the workstation's DevOps engineer (unsandboxed, reads anywhere; also writes anywhere, so
+  ask for read-only work).
+
+**Wanted.**
+- **Reference repositories per project:** in the project settings pick other repositories on the workstation that the
+  project's agents may **read** (read-only: `--add-dir` + sandbox `allowRead`, `Edit`/`Write` denied, `denyWrite` in the
+  sandbox), in card shifts and chats. Every other repo stays blocked; never open all of `repoRoots` (other projects,
+  `.env` files, this platform's own code).
+- **Chats with project context:** read-only access to the project's own repository (and its reference repos) when the
+  repository is on this workstation; same fallback for a card whose worktree is not here yet.
+- Allow Read on the card's own git metadata dir (the worktree's `gitdir`), read-only.
+- Agent instructions: say which folders are readable and that the owner manages reference repos in the project settings
+  (stop agents inventing config keys).
+- Tests in the runner (policy builder, chat cwd/add-dirs) and the server/web (project settings, protocol field).
+
 ## 2026-10-11
 
 ### 3. Affiliate programme for influencers
