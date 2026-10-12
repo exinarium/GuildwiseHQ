@@ -25,7 +25,8 @@ const investigator: RoleDefinition = {
   key: 'architect',
   claimableStages: [{ workflowKey: '*', stageId: 'investigate*' }],
 };
-const ROLES = [...BUILTIN_ROLES, investigator];
+const OTHER_BUILTINS = BUILTIN_ROLES.filter((r) => r.key !== 'architect');
+const ROLES = [...OTHER_BUILTINS, investigator];
 
 const spec = (insertions: StageInsertionInput[], over: Record<string, unknown> = {}): WorkflowVariantSpec =>
   WorkflowVariantSpecSchema.parse({
@@ -211,7 +212,7 @@ describe('validateVariant', () => {
 
   it('a senior-only step needs a role with a senior level', () => {
     const junior: RoleDefinition = { ...investigator, seniorityLevels: ['junior'] };
-    const v = check(spec([investigateInsertion('test')]), codeWorkflowV1, [...BUILTIN_ROLES, junior]);
+    const v = check(spec([investigateInsertion('test')]), codeWorkflowV1, [...OTHER_BUILTINS, junior]);
     expect(codes(v.issues)).toContain('role_not_senior');
   });
 
