@@ -35,6 +35,36 @@ export const CardDtoSchema = z.object({
   riskTier: RiskTier.nullable(),
   riskTierOverridden: z.boolean(),
   docsNeeded: z.boolean(),
+  /** Architect: run Investigate & design before build. */
+  designNeeded: z.boolean().optional(),
+  /** Architect: the card only investigates (no build). */
+  investigationOnly: z.boolean().optional(),
+  /** Merge the latest main branch first: null follows the project setting. */
+  mergeMainFirst: z.boolean().nullable().optional(),
+  /** The architect's report once the investigate stage is done (null before). */
+  investigation: z
+    .object({
+      reportPath: z.string(),
+      location: z.enum(['repo', 'vault']),
+      summary: z.string(),
+      commit: z.string().nullable(),
+      /** The file on the card branch's forge page when the remote is a known forge (else null). */
+      url: z.string().nullable(),
+      at: IsoTime,
+    })
+    .nullable()
+    .optional(),
+  /** What the runner did with the latest main branch before work started (null: nothing recorded). */
+  mainSync: z
+    .object({
+      result: z.string(),
+      mainBranch: z.string().nullable(),
+      workingBranch: z.string().nullable(),
+      files: z.array(z.string()),
+      at: IsoTime,
+    })
+    .nullable()
+    .optional(),
   completionAction: CompletionAction.nullable(),
   repoId: z.uuid().nullable(),
   baseBranch: z.string().nullable(),
@@ -169,6 +199,12 @@ export const CreateCardRequestSchema = z.object({
   repoId: z.uuid().optional(),
   completionAction: CompletionAction.optional(),
   docsNeeded: z.boolean().optional(),
+  /** Run Investigate & design before build; absent: the project's design step setting. */
+  designNeeded: z.boolean().optional(),
+  /** Investigate only: no build follows; implies `designNeeded` (false is refused). */
+  investigationOnly: z.boolean().optional(),
+  /** Merge the latest main branch first: absent/null follows the project setting. */
+  mergeMainFirst: z.boolean().nullable().optional(),
   priority: z.number().int().min(1).max(9).optional(),
   dependencies: z.array(z.uuid()).optional(),
   /** Specify immediately; if required fields are missing the card stays draft and the response lists them. */

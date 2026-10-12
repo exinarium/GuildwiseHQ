@@ -1,18 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import {
+  allowedOutcomes,
   type ClaimReleaseReason,
+  DESK_SUBKIND,
   type DiffStats,
   type DigestData,
   getOutcome,
   getStage,
+  type InvestigationData,
   isSuiteOrigin,
+  isValidReportPath,
   type LedgerMatch,
   outcomeDataSchema,
   type RunnerToServerOf,
+  requiredMissing,
   resolveOutcome,
   type ShiftEndOutcome,
   streamId,
   type TestEvidence,
+  WorkflowResolveError,
 } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
@@ -21,6 +27,7 @@ import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { baFinalizeEvents } from './ba-finalize.ts';
 import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
+import { cardView } from './cards.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
@@ -208,12 +215,32 @@ export async function applyShiftReport(
     };
   }
   const payloadData = data.data as Record<string, any>;
-  const resolved = resolveOutcome(
-    wf.definition,
-    { ...card, docsNeeded: card.docs_needed, fields: card.fields },
-    card.stage,
-    outcome.id,
-  );
+  const workflowCard = { ...card, docsNeeded: card.docs_needed, fields: card.fields };
+  let resolved: ReturnType<typeof resolveOutcome>;
+  try {
+    resolved = resolveOutcome(wf.definition, workflowCard, card.stage, outcome.id);
+  } catch (err) {
+    if (err instanceof WorkflowResolveError && err.code === 'outcome_not_allowed') {
+      const allowed = allowedOutcomes(wf.definition, workflowCard, card.stage)
+        .map((o) => o.id)
+        .join(', ');
+      return {
+        accepted: false,
+        error: `outcome '${outcome.id}' does not apply to ${card.ref}${card.investigation_only ? ' (an investigation-only card ends with its report)' : ''}; allowed outcomes: ${allowed || 'none'}`,
+      };
+    }
+    throw err;
+  }
+  // The stage the card moves to must be enterable: refuse a report that would leave the next stage without what it needs.
+  if (outcome.kind === 'success') {
+    const next = getStage(wf.definition, resolved.toStage);
+    const missing = next?.kind === 'agent' ? requiredMissing(cardView(card), next) : [];
+    if (missing.length)
+      return {
+        accepted: false,
+        error: `${card.ref} cannot move to ${next?.label ?? resolved.toStage}: required fields are missing (${missing.join(', ')}); ask the manager or update the card`,
+      };
+  }
 
   const scope = projectScope(card.org_id, card.project_id);
   const actor = agentActor(agent.id);
@@ -329,6 +356,41 @@ export async function applyShiftReport(
       break;
     }
     case 'StageCompleted':
+      if (outcome.data === 'investigation') {
+        const inv = payloadData as InvestigationData;
+        if (!isValidReportPath(inv.reportPath))
+          return {
+            accepted: false,
+            error: `the report path '${inv.reportPath}' is not a valid relative path`,
+          };
+        followUps.push(
+          {
+            streamId: streamId.card(cardId),
+            event: {
+              type: 'InvestigationReported',
+              payload: {
+                cardId,
+                reportPath: inv.reportPath,
+                location: inv.location,
+                summary: inv.summary,
+                ...(inv.commit ? { commit: inv.commit } : {}),
+                investigationOnly: !!card.investigation_only,
+              },
+            },
+            actor,
+            scope,
+          },
+          cardMessage(
+            card,
+            { kind: 'agent', agentId: agent.id },
+            'comment',
+            `Investigation report ${inv.location === 'vault' ? 'in the vault' : 'on the card branch'}: ${inv.reportPath}\n\n${inv.summary}`,
+          ),
+        );
+        acceptMessage = card.investigation_only
+          ? 'Recorded. The BA records the result next. Finish now.'
+          : 'Recorded. The card goes to the builder with your design. Finish now.';
+      }
       main = mk({
         type: 'StageCompleted',
         payload: {
@@ -474,6 +536,7 @@ export async function applyShiftStarted(ctx: Ctx, tx: Tx, ws: WsRef, msg: Runner
   const created = msg.branchCreated;
   await ctx.store.append(
     [
+      ...(card && msg.syncMain ? await mainSyncEvents(tx, ws, card, msg.syncMain) : []),
       ...(card && created
         ? [
             cardMessage(
@@ -528,6 +591,83 @@ export async function applyShiftStarted(ctx: Ctx, tx: Tx, ws: WsRef, msg: Runner
     ],
     { tx },
   );
+}
+
+const SYNC_NOTES: Record<NonNullable<RunnerToServerOf<'shift.started'>['syncMain']>['result'], string> = {
+  merged_into_working:
+    'The latest main branch was merged into the working branch and pushed before work started.',
+  merged_into_card:
+    'The working branch could not take the main branch directly (protected or moved), so the latest main branch was merged into the card branch.',
+  conflict_in_card:
+    'Merging the latest main branch conflicts: the merge is left in the card worktree for the architect to resolve.',
+  skipped_conflict:
+    'The latest main branch conflicts with the working branch and no architect is on this card: it was not merged, the work goes ahead on the working branch as it is.',
+};
+
+/** `shift.started.syncMain`: records what the "merge latest main first" step did, as a thread note and, when skipped, a desk notice. */
+async function mainSyncEvents(
+  tx: Tx,
+  ws: WsRef,
+  card: Row,
+  sync: NonNullable<RunnerToServerOf<'shift.started'>['syncMain']>,
+): Promise<AppendInput[]> {
+  if (!card.repo_id) return [];
+  const repo = await one(tx, 'SELECT name, main_branch, working_branch FROM project_repos WHERE id=$1', [
+    card.repo_id,
+  ]);
+  const project = await one(tx, 'SELECT working_branch FROM projects WHERE id=$1', [card.project_id]);
+  const files = sync.files ?? [];
+  const events: AppendInput[] = [
+    {
+      streamId: streamId.card(card.id),
+      event: {
+        type: 'CardMainSynced',
+        payload: {
+          cardId: card.id,
+          repoId: card.repo_id,
+          result: sync.result,
+          ...(repo?.main_branch ? { mainBranch: repo.main_branch } : {}),
+          workingBranch: repo?.working_branch ?? project?.working_branch,
+          ...(sync.commit ? { commit: sync.commit } : {}),
+          ...(files.length ? { files } : {}),
+        },
+      },
+      actor: runnerActor(ws.id),
+      scope: projectScope(card.org_id, card.project_id),
+    },
+    cardMessage(
+      card,
+      { kind: 'system' },
+      'system',
+      `${SYNC_NOTES[sync.result]}${files.length ? ` Files: ${files.slice(0, 10).join(', ')}.` : ''}`,
+    ),
+  ];
+  if (sync.result === 'skipped_conflict') {
+    const deskItemId = randomUUID();
+    events.push({
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemCreated',
+        payload: {
+          deskItemId,
+          kind: 'alert',
+          subkind: DESK_SUBKIND.mainMergeSkipped,
+          title: `${card.ref}: main could not be merged into the working branch`,
+          body: `The latest main branch conflicts with the working branch${repo?.name ? ` of ${repo.name}` : ''}${files.length ? ` in ${files.slice(0, 10).join(', ')}` : ''}. ${card.ref} was built on the working branch without it; merge main into the working branch by hand or switch on Investigate & design so the architect can resolve it.`,
+          options: [],
+          blocking: false,
+          pinned: false,
+          cardId: card.id,
+          projectId: card.project_id,
+          affectedCardIds: [],
+          askedBy: { kind: 'system' },
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(card.org_id, card.project_id),
+    });
+  }
+  return events;
 }
 
 export async function applyShiftRejected(

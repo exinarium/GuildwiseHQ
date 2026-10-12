@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isValidReportPath } from '../cards/fields.ts';
 import { EnvironmentReportSchema, EnvStateSchema, RepoCloneStateSchema } from '../devops/environment.ts';
 import { ConvertCardDecision, ProjectChangesSchema } from '../events/project.ts';
 import {
@@ -141,6 +142,13 @@ export const ProjectDtoSchema = z.object({
   mergeLargeChanged: z.object({ byName: z.string(), at: IsoTime }).nullable().optional(),
   /** Whether finishing a card automatically starts a full end-to-end test run card (default true). */
   fullSuiteAfterFinalize: z.boolean().optional(),
+  /** Architect settings: run Investigate & design before build by default (off unless the project opts in). */
+  designStep: z.boolean().optional(),
+  /** Merge the latest main branch into the working branch before work starts (default on). */
+  mergeMainFirst: z.boolean().optional(),
+  /** Where the architect's reports go: a folder in the repository (`repo`) or in the project vault (`vault`). */
+  investigationPath: z.string().optional(),
+  investigationLocation: z.enum(['repo', 'vault']).optional(),
   /** Optional cap on shifts running at once on this project; null: no cap (the default). */
   maxConcurrentShifts: z.number().int().nullable().optional(),
   /** The monthly budget and this month's spend (amounts hidden from guests); absent in lists that do not compute it. */
@@ -235,6 +243,17 @@ export type CreateProjectRequest = z.infer<typeof CreateProjectRequestSchema>;
 
 /** `PUT /api/projects/:id/merge-policy` (owner only). */
 export const SetFullSuiteRequestSchema = z.object({ enabled: z.boolean() });
+/** `PUT /api/projects/:id/architect-settings` (organization Owner, Admins and the project owner). */
+export const SetArchitectSettingsRequestSchema = z.object({
+  designStep: z.boolean(),
+  mergeMainFirst: z.boolean(),
+  investigationPath: z
+    .string()
+    .trim()
+    .refine((p) => !p.startsWith('vault:') && isValidReportPath(p), 'a relative folder without ..'),
+  investigationLocation: z.enum(['repo', 'vault']),
+});
+export type SetArchitectSettingsRequest = z.infer<typeof SetArchitectSettingsRequestSchema>;
 export const SetMergePolicyRequestSchema = z.object({ mergeLargeWithoutApproval: z.boolean() });
 export type SetMergePolicyRequest = z.infer<typeof SetMergePolicyRequestSchema>;
 

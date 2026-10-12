@@ -1,8 +1,9 @@
 import { realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join, relative, resolve, sep } from 'node:path';
 import type { LocalReadRepo, ReadableFolder, ReadRepo } from '@aom/shared';
 import { HOME_SECRETS, inside } from './adapters/claude-policy.ts';
+import { scanAllRepos } from './git/repo-scan.ts';
 
 export interface ResolvedReadRepo extends ReadableFolder {
   repoId: string;
@@ -82,4 +83,82 @@ export async function resolveReadRepos(
     add(`local:${r.localKey ?? r.remoteUrlNormalized ?? r.name}`, r.name, 'reference', found);
   }
   return out;
+}
+
+// ------------------------------------------------------------------------- organization source folder
+
+export type OrgFolderCheck = { ok: true; path: string } | { ok: false; error: string };
+
+/**
+ * Is `folder` acceptable as the organization source folder of this workstation? It must exist, sit strictly inside one
+ * of the runner's `repoRoots` (not be a root itself), and never be (or contain) the home directory, the runner's data
+ * dir or a credential folder. Real paths are compared, so a symlink cannot lead out of the roots.
+ */
+export function checkOrgSourceFolder(
+  folder: string,
+  repoRoots: readonly string[],
+  runnerRoot: string,
+  realHome?: string,
+): OrgFolderCheck {
+  let real: string;
+  try {
+    real = realpathSync(resolve(folder));
+    if (!statSync(real).isDirectory()) return { ok: false, error: `${folder} is not a folder` };
+  } catch {
+    return { ok: false, error: `${folder} does not exist` };
+  }
+  if (forbiddenReadPath(real, runnerRoot, realHome))
+    return {
+      ok: false,
+      error: `${folder} cannot be opened: it is, contains or sits in the home directory, the runner's data directory or a credentials folder`,
+    };
+  const roots = repoRoots.flatMap((r) => {
+    try {
+      return [realpathSync(resolve(r))];
+    } catch {
+      return [];
+    }
+  });
+  if (!roots.some((r) => inside(real, r) && real !== r))
+    return {
+      ok: false,
+      error: `${folder} must be a folder inside one of the runner's repoRoots (${repoRoots.join(', ') || 'none configured'}), not a root itself`,
+    };
+  return { ok: true, path: real };
+}
+
+/**
+ * The git repositories under the organization's source folder, as read-only folders (`kind: 'org'`): found by the same
+ * scan the runner uses for its clones (depth 3, `.git` folders only), each one confined to the folder after symlinks are
+ * resolved. A folder that no longer passes `checkOrgSourceFolder` opens nothing.
+ */
+export async function resolveOrgFolderRepos(
+  folder: string | undefined,
+  deps: { repoRoots: readonly string[]; runnerRoot: string; realHome?: string },
+): Promise<ResolvedReadRepo[]> {
+  if (!folder) return [];
+  const checked = checkOrgSourceFolder(folder, deps.repoRoots, deps.runnerRoot, deps.realHome);
+  if (!checked.ok) return [];
+  const root = checked.path;
+  const repos = await scanAllRepos([root], (p) => forbiddenReadPath(p, deps.runnerRoot, deps.realHome));
+  const out: ResolvedReadRepo[] = [];
+  for (const r of repos) {
+    let real: string;
+    try {
+      real = realpathSync(r.localPath);
+    } catch {
+      continue;
+    }
+    if (!inside(real, root) || real === root || forbiddenReadPath(real, deps.runnerRoot, deps.realHome))
+      continue;
+    const key = relative(root, real).split(sep).join('/');
+    out.push({ repoId: `orgfolder:${key}`, name: basename(real), kind: 'org', path: real });
+  }
+  return out;
+}
+
+/** Adds `extra` folders after `base`; a path that is already open (as the project's own or a reference) stays as it was. */
+export function mergeReadFolders<T extends { path: string }>(base: T[], extra: T[]): T[] {
+  const seen = new Set(base.map((f) => f.path));
+  return [...base, ...extra.filter((f) => !seen.has(f.path))];
 }

@@ -71,6 +71,13 @@ export const RunnerConfigSchema = z.object({
   workstationId: z.string().min(1),
   runnerToken: z.string().min(1),
   repoRoots: z.array(z.string()).default([]),
+  /**
+   * Organization source folders: `{ [organizationId]: folder }`. Agents whose role may read the organization's code (the
+   * architect) can read every git repository under the folder of their organization, read-only, secret files blocked.
+   * Set with `aom-runner org-folder set`; the folder must sit inside one of `repoRoots` (never the home or data dir).
+   * The server never learns the path.
+   */
+  orgSourceFolders: z.record(z.string(), z.string()).default({}),
   runtimes: z
     .object({
       'claude-code': ClaudeRuntimeConfigSchema.default(ClaudeRuntimeConfigSchema.parse({})),

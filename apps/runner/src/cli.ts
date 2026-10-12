@@ -39,6 +39,7 @@ import {
   removePairing,
 } from './pairings.ts';
 import { resolveDataDir, runnerPaths } from './paths.ts';
+import { checkOrgSourceFolder } from './read-repos.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
 import { realExecutor } from './toolchain/exec.ts';
@@ -479,6 +480,52 @@ function reposAdd(path: string, opts: { dataDir?: string; pairing?: string }): v
   console.log(`Added ${abs}. Restart is not needed: repos are re-scanned on connect and every 10 minutes.`);
 }
 
+const ORG_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `aom-runner org-folder set <organization-id> <path>`: the architect of that organization may read every git
+ * repository under the folder (read-only, secret files blocked). The folder must sit inside one of the repo roots; the
+ * server never learns the path.
+ */
+function orgFolderSet(orgId: string, path: string, opts: { dataDir?: string; pairing?: string }): void {
+  if (!ORG_ID_RE.test(orgId)) throw new Error(`'${orgId}' is not an organization id (a UUID)`);
+  const { root, entries } = selectPairings(opts);
+  for (const e of entries) {
+    const file = entryConfigPath(root, e);
+    const config = loadConfig(file);
+    const checked = checkOrgSourceFolder(path, config.repoRoots, root);
+    if (!checked.ok) throw new Error(checked.error);
+    saveConfig(file, {
+      ...config,
+      orgSourceFolders: { ...config.orgSourceFolders, [orgId.toLowerCase()]: checked.path },
+    });
+    console.log(
+      `Organization ${orgId}: ${checked.path} (read-only for its architect). Restart the runner to apply.`,
+    );
+  }
+}
+
+function orgFolderClear(orgId: string, opts: { dataDir?: string; pairing?: string }): void {
+  const { root, entries } = selectPairings(opts);
+  for (const e of entries) {
+    const file = entryConfigPath(root, e);
+    const config = loadConfig(file);
+    const { [orgId.toLowerCase()]: _gone, ...rest } = config.orgSourceFolders;
+    saveConfig(file, { ...config, orgSourceFolders: rest });
+  }
+  console.log(`Organization ${orgId}: source folder cleared. Restart the runner to apply.`);
+}
+
+function orgFolderList(opts: { dataDir?: string; pairing?: string }): void {
+  const config = loadConfig(pairingPaths(opts).config);
+  const list = Object.entries(config.orgSourceFolders);
+  if (list.length === 0)
+    console.log(
+      'No organization source folder is set. Use `aom-runner org-folder set <organization-id> <path>`.',
+    );
+  for (const [org, folder] of list) console.log(`${org}\t${folder}`);
+}
+
 async function reposList(opts: { dataDir?: string; pairing?: string }): Promise<void> {
   const config = loadConfig(pairingPaths(opts).config);
   const repos = await scanRepos(config.repoRoots);
@@ -852,6 +899,24 @@ export function buildProgram(): Command {
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(reposList);
+  const orgFolder = program
+    .command('org-folder')
+    .description("the folder whose git repositories an organization's architect may read (read-only)");
+  orgFolder
+    .command('set <organization-id> <path>')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(orgFolderSet);
+  orgFolder
+    .command('clear <organization-id>')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(orgFolderClear);
+  orgFolder
+    .command('list')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(orgFolderList);
   return program;
 }
 

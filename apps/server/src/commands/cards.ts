@@ -12,11 +12,14 @@ import {
   type FillableCard,
   getStage,
   isMockField,
+  missingForSpecify,
   type PatchCardRequest,
   parseCardFields,
   requiredMissing,
+  resolveOutcome,
   type Stage,
   streamId,
+  type WorkflowCardView,
   type WorkflowDefinition,
   workflowUsesRepos,
 } from '@aom/shared';
@@ -51,23 +54,43 @@ export async function resolveCardWorkflow(
   return wf?.definition.cardTypes.includes(cardType as never) ? wf : null;
 }
 
-/** The stage a `CardSpecified` moves the card into, and the outcome's resolved stage. */
-export function specifyTarget(def: WorkflowDefinition): { from: string; to: string; stage: Stage } {
+/**
+ * The stage a `CardSpecified` moves the card into, and the outcome's resolved stage. With the card (its flags) a target
+ * stage whose `when` does not hold is skipped, like every other outcome (`resolveOutcome`): a card without
+ * "Investigate & design" goes from Spec straight to Build. Without a card the raw target of the outcome is returned.
+ */
+export function specifyTarget(
+  def: WorkflowDefinition,
+  card?: CardView,
+): { from: string; to: string; stage: Stage } {
   const initial = getStage(def, def.initialStage) as Stage;
   const o =
     initial.outcomes.find((x) => x.event === 'CardSpecified') ??
     initial.outcomes.find((x) => x.kind === 'success');
-  const to = initial.kind === 'manual' && o ? o.to : initial.id;
+  let to = initial.id;
+  if (initial.kind === 'manual' && o) to = card ? resolveOutcome(def, card, initial.id, o.id).toStage : o.to;
   return { from: initial.id, to, stage: getStage(def, to) as Stage };
 }
 
-export function cardView(c: Row): FillableCard {
+/** Does the workflow have an Investigate & design stage that a card can switch on or off (`when designNeeded`)? */
+export const workflowHasDesignStage = (def: WorkflowDefinition): boolean =>
+  def.stages.some((s) => s.when?.field === 'designNeeded');
+/** Does the workflow end an investigation-only card at Finalize (an outcome guarded by `investigationOnly`)? */
+export const workflowSupportsInvestigationOnly = (def: WorkflowDefinition): boolean =>
+  def.stages.some((s) => s.outcomes.some((o) => o.when?.field === 'investigationOnly'));
+
+/** A card as the workflow engine and the required-field checks see it. */
+export type CardView = FillableCard & WorkflowCardView;
+
+export function cardView(c: Row): CardView {
   return {
     title: c.title,
     cardType: c.card_type,
     repoId: c.repo_id,
     completionAction: c.completion_action,
     docsNeeded: c.docs_needed,
+    designNeeded: c.design_needed ?? false,
+    investigationOnly: c.investigation_only ?? false,
     riskTier: c.risk_tier,
     priority: c.priority,
     fields: c.fields,
@@ -129,6 +152,38 @@ async function assertDependencies(tx: Tx, projectId: string, deps: string[], sel
 export interface CardActing {
   origin?: CardOrigin;
   actor?: AppendInput['actor'];
+}
+
+/**
+ * The Investigate & design flags of a new card: `designNeeded` defaults to the project's design step setting (off unless
+ * the project opted in) and only exists in a workflow that has the stage; `investigationOnly` forces `designNeeded`.
+ */
+export function architectFlags(
+  def: WorkflowDefinition,
+  project: Row,
+  req: { designNeeded?: boolean; investigationOnly?: boolean },
+): { designNeeded: boolean; investigationOnly: boolean } {
+  const hasStage = workflowHasDesignStage(def);
+  const investigationOnly = req.investigationOnly ?? false;
+  if (investigationOnly) {
+    if (!hasStage || !workflowSupportsInvestigationOnly(def))
+      throw badRequest(
+        'investigation_not_supported',
+        `workflow '${def.key}' has no Investigate & design stage, so a card cannot be investigation-only`,
+      );
+    if (req.designNeeded === false)
+      throw badRequest(
+        'investigation_needs_design',
+        'an investigation-only card always runs Investigate & design: designNeeded cannot be false',
+      );
+    return { designNeeded: true, investigationOnly: true };
+  }
+  if (req.designNeeded === true && !hasStage)
+    throw badRequest('design_not_supported', `workflow '${def.key}' has no Investigate & design stage`);
+  return {
+    designNeeded: hasStage ? (req.designNeeded ?? project.design_step === true) : false,
+    investigationOnly: false,
+  };
 }
 
 export async function createCard(
@@ -199,17 +254,20 @@ export async function createCardIn(
       ?.next_card_number,
   );
   const cardId = randomUUID();
-  const target = specifyTarget(def);
-  const view: FillableCard = {
+  const { designNeeded, investigationOnly } = architectFlags(def, project, req);
+  const view: CardView = {
     title: req.title,
     cardType: req.cardType,
     repoId: repoId ?? null,
     completionAction: completionAction ?? null,
     docsNeeded: req.docsNeeded ?? false,
+    designNeeded,
+    investigationOnly,
     riskTier: null,
     priority: req.priority ?? DEFAULT_CARD_PRIORITY,
     fields: parsed.data,
   };
+  const target = specifyTarget(def, view);
   const scope = projectScope(project.org_id, project.id);
   const events: AppendInput[] = [
     {
@@ -234,6 +292,11 @@ export async function createCardIn(
           repoId,
           priority: req.priority ?? DEFAULT_CARD_PRIORITY,
           docsNeeded: req.docsNeeded ?? false,
+          designNeeded,
+          investigationOnly,
+          ...(req.mergeMainFirst !== undefined && req.mergeMainFirst !== null
+            ? { mergeMainFirst: req.mergeMainFirst }
+            : {}),
           completionAction,
           dependencies,
           requiredCapabilities: [],
@@ -245,7 +308,7 @@ export async function createCardIn(
   ];
   let missing: string[] | undefined;
   if (req.specify) {
-    missing = requiredMissing(view, target.stage);
+    missing = missingForSpecify(def, view);
     if (missing.length === 0) {
       missing = undefined;
       events.push({
@@ -294,6 +357,47 @@ export function editRefusal(card: Row, patch: PatchCardRequest): { code: string;
   return null;
 }
 
+/**
+ * Changes to the Investigate & design flags of an existing card: only until the investigation has happened (the card is
+ * still in its first stage or in the investigate stage), and `investigationOnly` always implies `designNeeded`.
+ */
+function patchArchitectFlags(
+  card: Row,
+  def: WorkflowDefinition | undefined,
+  patch: PatchCardRequest,
+): Pick<CardChanges, 'designNeeded' | 'investigationOnly' | 'mergeMainFirst'> {
+  const out: Pick<CardChanges, 'designNeeded' | 'investigationOnly' | 'mergeMainFirst'> = {};
+  if (patch.mergeMainFirst !== undefined && patch.mergeMainFirst !== (card.merge_main_first ?? null))
+    out.mergeMainFirst = patch.mergeMainFirst;
+  if (patch.designNeeded === undefined && patch.investigationOnly === undefined) return out;
+  if (!def || !workflowHasDesignStage(def))
+    throw badRequest('design_not_supported', "this card's workflow has no Investigate & design stage");
+  const wf0 = getStage(def, def.initialStage);
+  if (card.stage !== wf0?.id && !String(card.stage).startsWith('investigate'))
+    throw conflict(
+      'design_locked',
+      `${card.ref} is past the Investigate & design stage: it can no longer be switched`,
+    );
+  let design: boolean = patch.designNeeded ?? card.design_needed;
+  const only: boolean = patch.investigationOnly ?? card.investigation_only;
+  if (only) {
+    if (!workflowSupportsInvestigationOnly(def))
+      throw badRequest(
+        'investigation_not_supported',
+        "this card's workflow cannot hold investigation-only cards",
+      );
+    if (patch.designNeeded === false)
+      throw badRequest(
+        'investigation_needs_design',
+        'an investigation-only card always runs Investigate & design: designNeeded cannot be false',
+      );
+    design = true;
+  }
+  if (design !== card.design_needed) out.designNeeded = design;
+  if (only !== card.investigation_only) out.investigationOnly = only;
+  return out;
+}
+
 export async function patchCard(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -329,6 +433,14 @@ export async function patchCardIn(
     changes.docsNeeded = patch.docsNeeded;
   if (patch.completionAction !== undefined && patch.completionAction !== card.completion_action) {
     changes.completionAction = patch.completionAction;
+  }
+  if (
+    patch.designNeeded !== undefined ||
+    patch.investigationOnly !== undefined ||
+    patch.mergeMainFirst !== undefined
+  ) {
+    const flags = patchArchitectFlags(card, wf?.definition, patch);
+    Object.assign(changes, flags);
   }
   if (patch.repoId !== undefined && patch.repoId !== card.repo_id) {
     if (patch.repoId) await assertRepoInProject(tx, card.project_id, patch.repoId);
@@ -395,8 +507,8 @@ export async function specifyCardIn(
   if (card.status !== 'draft') throw conflict('not_draft', 'only draft cards can be specified');
   const wf = await loadWorkflowById(tx, card.workflow_version_id);
   if (!wf) throw conflict('unknown_workflow', 'card workflow is missing');
-  const target = specifyTarget(wf.definition);
-  const missing = requiredMissing(cardView(card), target.stage);
+  const target = specifyTarget(wf.definition, cardView(card));
+  const missing = missingForSpecify(wf.definition, cardView(card));
   if (missing.length) {
     throw unprocessable('missing_fields', `missing required fields: ${missing.join(', ')}`, { missing });
   }

@@ -10,6 +10,7 @@ import {
   ProjectsQuerySchema,
   RankProjectsRequestSchema,
   RepoParamsSchema,
+  SetArchitectSettingsRequestSchema,
   SetConcurrencyCapRequestSchema,
   SetFullSuiteRequestSchema,
   SetMergePolicyRequestSchema,
@@ -18,6 +19,7 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireOrg, requireUser } from '../auth/guards.ts';
+import { setArchitectSettings } from '../commands/architect.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
 import { setRepoForge, setRepoMainBranch, setRepoProjectPath } from '../commands/forges.ts';
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
@@ -159,6 +161,23 @@ export function projectRoutes(ctx: Ctx) {
           { id: a.orgId, role: a.role },
           req.params.id,
           req.body.enabled,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    /** Investigate & design before build, merging the latest main first, the architect's report location. */
+    app.put(
+      '/api/projects/:id/architect-settings',
+      { schema: { params: IdParamsSchema, body: SetArchitectSettingsRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setArchitectSettings(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body,
         );
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
       },

@@ -59,6 +59,33 @@ function feedContext(brief: ShiftBrief): string {
   return lines.join('\n');
 }
 
+/** Investigate & design: where the architect writes, what was recorded, the investigation-only note for the BA. */
+function investigationContext(brief: ShiftBrief): string {
+  const inv = brief.investigation;
+  if (!inv) return '';
+  const lines: string[] = [];
+  if (brief.card.investigationOnly)
+    lines.push('- This is an investigation-only card: the result is the report; nothing is built.');
+  if (brief.shift.stage.startsWith('investigate')) {
+    lines.push(
+      inv.location === 'vault'
+        ? `- Write your report to the file \`${inv.reportPath}\` under your scratch directory (the runner copies it into the project's knowledge vault when you report). It is not committed to the repository.`
+        : `- Write your report to \`${inv.reportPath}\` in your worktree and commit it on the card branch.`,
+    );
+    if (inv.mergeMainFirst)
+      lines.push('- The latest main branch is merged first (see the note on a waiting merge below, if any).');
+  }
+  if (inv.report) {
+    lines.push(
+      `- Recorded report: \`${inv.report.reportPath}\` (${inv.report.location === 'vault' ? 'in the project vault' : `on the card branch${inv.report.commit ? `, commit ${inv.report.commit.slice(0, 10)}` : ''}`})`,
+      `- Summary of the report: ${inv.report.summary.replace(/\s+/g, ' ')}`,
+    );
+    if (inv.report.location === 'repo' && !brief.shift.stage.startsWith('investigate'))
+      lines.push('- Read the report before you start; it is on your branch.');
+  }
+  return lines.join('\n');
+}
+
 /**
  * Renders the card as a markdown prompt (`-p`): ref, title, type, risk tier, rework round; the card fields;
  * dependencies; all prior handoffs; latest review comments; last thread messages; then the job for this shift
@@ -94,6 +121,7 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
   parts.push(
     section('Dependencies', card.dependencies.map((d) => `- ${d.ref} ${d.title} (${d.status})`).join('\n')),
   );
+  if (brief.investigation) parts.push(section('Investigation', investigationContext(brief)));
   parts.push(
     section(
       'Previous handoffs',

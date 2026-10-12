@@ -150,6 +150,10 @@ export const ShiftBriefSchema = z.object({
     reworkRound: z.number().int().nonnegative(),
     completionAction: z.enum(['pr', 'push_branch', 'merge']).nullable(),
     docsNeeded: z.boolean(),
+    /** Run the Investigate & design stage before build (absent: older servers). */
+    designNeeded: z.boolean().optional(),
+    /** The card only investigates: investigate -> finalize, no build. */
+    investigationOnly: z.boolean().optional(),
     dependencies: z.array(z.object({ ref: z.string(), title: z.string(), status: z.string() })),
     parent: z.object({ ref: z.string(), title: z.string() }).optional(),
   }),
@@ -176,6 +180,31 @@ export const ShiftBriefSchema = z.object({
     extensions: z.string().optional(),
     skills: z.array(z.string()),
   }),
+  /**
+   * Investigate & design (docs/design/architect-and-workflows.md): where the architect writes its report and, once it
+   * was recorded, what the next stages read. Absent on cards that never investigate.
+   */
+  investigation: z
+    .object({
+      /** `repo`: a path inside the worktree; `vault`: a file name (the runner writes it into the project vault). */
+      reportPath: z.string(),
+      location: z.enum(['repo', 'vault']),
+      /** The folder the architect may write documents in (`repo`); the runner adds it to the writable globs. */
+      folder: z.string().optional(),
+      investigationOnly: z.boolean(),
+      /** Merge the latest main branch first applies to this card (the architect resolves a conflict). */
+      mergeMainFirst: z.boolean().default(false),
+      /** The report that was recorded by the investigate stage (later stages read it). */
+      report: z
+        .object({
+          reportPath: z.string(),
+          location: z.enum(['repo', 'vault']),
+          summary: z.string(),
+          commit: z.string().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
   /** All handoffs, oldest first. */
   handoffs: z.array(
     z.object({
@@ -225,13 +254,14 @@ export type ShiftBrief = z.infer<typeof ShiftBriefSchema>;
 
 /**
  * A repository an agent may read (read-only) on this workstation, named by its remote: the runner resolves it to the
- * local clone. `project`: a repository of the chat's own project; `reference`: one of the project's reference repositories.
+ * local clone. `project`: a repository of the chat's own project; `reference`: one of the project's reference repositories;
+ * `org`: a repository of another project of the organization (agents whose role has `readOrgRepos`, the architect).
  */
 export const ReadRepoSchema = z.object({
   repoId: z.uuid(),
   name: z.string(),
   remoteUrlNormalized: z.string(),
-  kind: z.enum(['project', 'reference']),
+  kind: z.enum(['project', 'reference', 'org']),
 });
 export type ReadRepo = z.infer<typeof ReadRepoSchema>;
 
@@ -249,6 +279,8 @@ export const LocalReadRepoSchema = z.object({
 export type LocalReadRepo = z.infer<typeof LocalReadRepoSchema>;
 
 export const ChatContextSchema = z.object({
+  /** The organization of the chat (the runner resolves the organization source folder with it). */
+  orgId: z.uuid().optional(),
   projectId: z.uuid().optional(),
   cardId: z.uuid().optional(),
   projectKey: z.string().optional(),
@@ -520,6 +552,14 @@ export const ShiftStartedSchema = msg('shift.started', {
     .optional(),
   /** The working branch did not exist: the runner created it from `from` (the default branch) and pushed it. */
   branchCreated: z.object({ base: z.string(), from: z.string(), pushed: z.boolean() }).optional(),
+  /** What the "merge latest main first" step did (absent: it did not run). */
+  syncMain: z
+    .object({
+      result: z.enum(['merged_into_working', 'merged_into_card', 'conflict_in_card', 'skipped_conflict']),
+      commit: z.string().optional(),
+      files: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 export const ShiftProgressSchema = msg('shift.progress', {
   shiftId: z.uuid(),
@@ -607,7 +647,16 @@ export const ShiftStartSchema = msg('shift.start', {
   agent: AgentRuntimeSpecSchema,
   brief: ShiftBriefSchema,
   worktree: WorktreeSpecSchema.nullable(),
-  prepare: z.object({ rebase: z.boolean() }),
+  prepare: z.object({
+    rebase: z.boolean(),
+    /**
+     * Merge the latest main branch first: before the card's worktree is created the runner merges `origin/<main>` into the
+     * working branch and pushes it (falling back to the card branch on a conflict or a protected working branch).
+     */
+    syncMain: z.object({ mainBranch: z.string().optional(), workingBranch: z.string() }).optional(),
+  }),
+  /** The organization the shift belongs to (the runner resolves the organization source folder with it). */
+  orgId: z.uuid().optional(),
   maxShiftMinutes: z.number().int().positive(),
   /** M3: for `kind: 'devops'` the request being worked (the brief then carries a placeholder card). */
   devops: DevopsShiftSchema.optional(),

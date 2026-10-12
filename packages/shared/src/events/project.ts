@@ -245,6 +245,21 @@ export const projectEvents = [
    */
   defineEvent('ProjectFullSuiteSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
   /**
+   * The project's architect settings (docs/design/architect-and-workflows.md): whether new cards run the Investigate &
+   * design step by default, whether the latest main branch is merged first, and where the architect's reports go.
+   */
+  defineEvent(
+    'ProjectArchitectSettingsSet',
+    z.object({
+      projectId: Id,
+      designStep: z.boolean(),
+      mergeMainFirst: z.boolean(),
+      investigationPath: z.string().min(1).max(300),
+      investigationLocation: z.enum(['repo', 'vault']),
+      by: Id,
+    }),
+  ),
+  /**
    * A project member set (or cleared, with null) the cap on shifts that may run at once on this project, whatever the
    * number of agents. Off by default (restructure.md decision 11).
    */

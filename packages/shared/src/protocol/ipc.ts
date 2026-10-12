@@ -120,6 +120,15 @@ export const LedgerMatchSchema = z.object({
 });
 export type LedgerMatch = z.infer<typeof LedgerMatchSchema>;
 
+/** Params of `investigation.record` (`aom investigation record`). */
+export const InvestigationRecordParamsSchema = z.object({
+  title: z.string().trim().min(1).max(300),
+  summary: z.string().trim().min(1).max(20000),
+  /** Record it as a decision (scope `decision`) instead of a feature entry. */
+  decision: z.boolean().default(false),
+});
+export type InvestigationRecordParams = z.infer<typeof InvestigationRecordParamsSchema>;
+
 export const LedgerSearchParamsSchema = z.object({
   query: z.string().min(1).max(500),
   scope: z.enum(['all', 'feature', 'decision', 'standing_order']).default('all'),
@@ -194,6 +203,13 @@ export const RpcMethodSchema = z.enum([
   'phase.submit',
   /** Phases, a `followups_brief` BA task: delegate one follow-up. */
   'phase.followup.brief',
+  /** Architect, runner-mediated git: push the card branch, fetch origin, merge the latest main, verify a conflict resolution. Answered by the runner itself. */
+  'git.push',
+  'git.fetch',
+  'git.merge_main',
+  'git.verify_merge',
+  /** The BA's finalize shift on an investigation-only card: record the result in the ledger and PROJECT.md. */
+  'investigation.record',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

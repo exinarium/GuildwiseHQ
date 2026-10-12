@@ -30,6 +30,10 @@ export const DESK_SUBKIND = {
   conflictAttempt: 'conflict_attempt',
   /** G-Q2: two DevOps attempts failed; the conflict needs a person. */
   conflictUnresolved: 'conflict_unresolved',
+  /** The latest main branch could not be merged into the working branch before a build (a notice). */
+  mainMergeSkipped: 'main_merge_skipped',
+  /** Investigate & design is switched on for a project but no architect is hired (a notice). */
+  noArchitect: 'no_architect',
 } as const;
 
 /** Card origins whose card is a suite (full E2E suite or regression run) rather than a feature under test. */

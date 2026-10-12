@@ -17,6 +17,9 @@ const CARD_CHANGE_COLUMNS: Record<string, string> = {
   priority: 'priority',
   repoId: 'repo_id',
   docsNeeded: 'docs_needed',
+  designNeeded: 'design_needed',
+  investigationOnly: 'investigation_only',
+  mergeMainFirst: 'merge_main_first',
   completionAction: 'completion_action',
   riskTier: 'risk_tier',
   riskTierOverridden: 'risk_tier_overridden',
@@ -28,6 +31,9 @@ const EDIT_LABELS: Record<string, string> = {
   priority: 'priority',
   repoId: 'repository',
   docsNeeded: 'docs needed',
+  designNeeded: 'investigate & design',
+  investigationOnly: 'investigation only',
+  mergeMainFirst: 'merge main first',
   completionAction: 'completion action',
   dependencies: 'dependencies',
 };
@@ -100,8 +106,8 @@ export const cardProjectors: Record<string, Projector> = {
       `INSERT INTO cards (id, org_id, project_id, number, ref, title, card_type, workflow_version_id, stage, status, fields,
          owner_user_id, risk_tier, docs_needed, completion_action, repo_id, parent_card_id, origin, scheduled,
          schedule_id, priority, required_capabilities, worktree_card_id, queued_at, created_at, updated_at, interest_id,
-         interest_run_id, preferred_agents)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$25,$26,$27,$28)`,
+         interest_run_id, preferred_agents, design_needed, investigation_only, merge_main_first)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$25,$26,$27,$28,$29,$30,$31)`,
       [
         p.cardId,
         proj?.org_id,
@@ -131,6 +137,9 @@ export const cardProjectors: Record<string, Projector> = {
         p.interestId ?? null,
         p.interestRunId ?? null,
         p.preferredAgents ? JSON.stringify(p.preferredAgents) : null,
+        p.designNeeded,
+        p.investigationOnly,
+        p.mergeMainFirst ?? null,
       ],
     );
     for (const dep of p.dependencies) {
@@ -171,6 +180,35 @@ export const cardProjectors: Record<string, Projector> = {
         ]);
       }
     }
+  },
+
+  InvestigationReported: async (tx, e) => {
+    const p = ev<'InvestigationReported'>(e).payload;
+    await exec(tx, 'UPDATE cards SET investigation=$2, updated_at=$3 WHERE id=$1', [
+      p.cardId,
+      JSON.stringify({
+        reportPath: p.reportPath,
+        location: p.location,
+        summary: p.summary,
+        commit: p.commit ?? null,
+        at: e.createdAt,
+      }),
+      e.createdAt,
+    ]);
+  },
+
+  CardMainSynced: async (tx, e) => {
+    const p = ev<'CardMainSynced'>(e).payload;
+    await exec(tx, 'UPDATE cards SET main_sync=$2 WHERE id=$1', [
+      p.cardId,
+      JSON.stringify({
+        result: p.result,
+        mainBranch: p.mainBranch ?? null,
+        workingBranch: p.workingBranch ?? null,
+        files: p.files ?? [],
+        at: e.createdAt,
+      }),
+    ]);
   },
 
   CardSpecified: async (tx, e) => {

@@ -4,7 +4,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 type Action =
   | 'ok'
@@ -20,7 +20,9 @@ type Action =
   | 'fabricate'
   | 'uncited'
   | 'answer'
-  | 'escalate';
+  | 'escalate'
+  /** Architect: the first report contains a (fake) secret, the runner refuses it, the report is rewritten clean. */
+  | 'secret';
 
 interface FeedItem {
   kind: string;
@@ -49,10 +51,18 @@ interface Brief {
     title: string;
     cardType: string;
     reworkRound: number;
+    investigationOnly?: boolean;
     completionAction?: string | null;
     fields: Record<string, unknown>;
   };
   handoffs?: Array<{ stage: string; outcome?: string; note?: string }>;
+  /** Architect and BA: where the report goes / was recorded (Investigate & design). */
+  investigation?: {
+    reportPath: string;
+    location: string;
+    investigationOnly?: boolean;
+    report?: { reportPath: string; location: string; summary: string };
+  };
 }
 
 const emit = (ev: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(ev)}\n`);
@@ -118,6 +128,7 @@ async function report(brief: Brief, action: Action): Promise<{ code: number; out
   }
   if (brief.shift.outcomes.some((o) => o.data === 'candidates' || o.data === 'digest'))
     return feedWork(brief, action);
+  if (brief.shift.outcomes.some((o) => o.data === 'investigation')) return architectWork(brief, action);
   const failing = action === 'changes' || action === 'fail';
   const outcomes = brief.shift.outcomes;
   const has = (id: string) => outcomes.some((o) => o.id === id);
@@ -147,6 +158,30 @@ async function report(brief: Brief, action: Action): Promise<{ code: number; out
   }
   // M7: the BA claims Finalize and runs the card's completion action (a different `--action` would revise it).
   if (has('finalized')) {
+    // An investigation-only card: record the architect's result first (ledger + PROJECT.md), then finalize; a report in
+    // the vault needs no git step.
+    if (brief.card.investigationOnly === true) {
+      const rec = aom([
+        'investigation',
+        'record',
+        '--title',
+        `Investigation ${brief.card.ref}: ${brief.card.title}`,
+        '--summary-file',
+        tmpText('summary.md', `${brief.investigation?.report?.summary ?? 'Investigated.'}\n`),
+        ...(brief.card.fields.mockDecision === true ? ['--decision'] : []),
+      ]);
+      emit({
+        kind: 'progress',
+        text: `mock BA: investigation record: ${(rec.code === 0 ? rec.out : rec.err).trim()}`.slice(0, 300),
+      });
+      return aom([
+        'finalize',
+        '--action',
+        brief.investigation?.report?.location === 'vault' ? 'none' : (brief.card.completionAction ?? 'merge'),
+        '--note',
+        `mock BA: ${brief.card.ref} investigated`,
+      ]);
+    }
     // M8: a card that came from a ticket gets its outside update drafted first (`fields.mockOutbound` overrides the text;
     // a blocked draft is rewritten once, as the real BA would).
     if (typeof brief.card.fields.externalRef === 'string' && brief.card.fields.externalRef.trim()) {
@@ -168,6 +203,84 @@ async function report(brief: Brief, action: Action): Promise<{ code: number; out
   if (!wanted) return { code: 1, out: '', err: `no outcomes for stage ${stage}` };
   const args = ['outcome', wanted.id, '--note', `mock ${stage} ${wanted.id}`];
   return aom(args);
+}
+
+/** A conflicted file with both sides kept (the mock architect never changes behaviour while resolving a merge). */
+const keepBothSides = (text: string): string =>
+  text
+    .split('\n')
+    .filter((l) => !/^(<{7} |={7}$|>{7} )/.test(l))
+    .join('\n');
+
+/**
+ * Scripted architect (Investigate & design). Resolves a main-branch merge that is waiting in the worktree (keeping both
+ * sides), writes the report at the path the brief names (committed in the repository, or in the scratch directory for
+ * the vault location) and reports with `aom design` (handoff to build) or `aom investigate` (investigation-only).
+ * Action `secret`: the first report holds a fake token, the runner refuses it, the report is rewritten and reported again.
+ */
+async function architectWork(
+  brief: Brief,
+  action: Action,
+): Promise<{ code: number; out: string; err: string }> {
+  const waiting = spawnSync('git', ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { encoding: 'utf8' });
+  if (waiting.status === 0) {
+    const files = (
+      spawnSync('git', ['diff', '--name-only', '--diff-filter=U'], { encoding: 'utf8' }).stdout ?? ''
+    )
+      .split('\n')
+      .filter(Boolean);
+    for (const f of files) {
+      writeFileSync(f, keepBothSides(readFileSync(f, 'utf8')));
+      sh('git', ['add', f]);
+    }
+    sh('git', ['commit', '--no-edit', '--no-verify']);
+    const v = aom(['git', 'verify-merge']);
+    emit({
+      kind: 'progress',
+      text: `mock architect: resolved the main merge (${files.length} file(s)): ${v.out.trim()}`.slice(
+        0,
+        300,
+      ),
+    });
+  }
+  const inv = brief.investigation;
+  const path = inv?.reportPath ?? `docs/investigations/${brief.card.ref}.md`;
+  const vault = inv?.location === 'vault';
+  const body = (leak: boolean) =>
+    [
+      `# ${brief.card.ref}: ${brief.card.title}`,
+      '',
+      '## Findings',
+      'Mock findings from reading the code and the other repositories.',
+      '',
+      '## Design',
+      'Change the module the card names; keep the acceptance criteria mapped to tests.',
+      ...(leak ? ['', `token = ghp_${'a1B2c3D4e5F6g7H8i9J0'.repeat(2)}`] : []),
+      '',
+    ].join('\n');
+  const file = vault ? join(process.env.TMPDIR ?? tmpdir(), basename(path)) : path;
+  const write = (leak: boolean) => {
+    if (!vault) mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(file, body(leak));
+    if (!vault) {
+      sh('git', ['add', '-A']);
+      sh('git', ['commit', '--no-verify', '-m', `mock investigation: ${brief.card.ref}`]);
+    }
+  };
+  const verb = brief.shift.outcomes.some((o) => o.id === 'report') ? 'investigate' : 'design';
+  const summary = `Mock ${verb} summary for ${brief.card.ref}: follow ${path}.`;
+  const send = () => aom([verb, '--report', file, '--summary', summary]);
+  write(action === 'secret');
+  const first = send();
+  if (action === 'secret' && first.code !== 0) {
+    emit({
+      kind: 'progress',
+      text: `mock architect: first report refused: ${first.err.trim()}`.slice(0, 300),
+    });
+    write(false);
+    return send();
+  }
+  return first;
 }
 
 const DEFAULT_ITEMS: FeedItem[] = [

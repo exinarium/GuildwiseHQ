@@ -115,8 +115,11 @@ describe('backward compatibility', () => {
       const parsed = WorkflowDefinitionSchema.parse(def);
       expect(parsed.extends).toBeUndefined();
       for (const s of parsed.stages) {
-        expect(s.syncMainBefore).toBe(false);
-        for (const o of s.outcomes) expect(o.when).toBeUndefined();
+        // Only the code v2 stages that create a worktree sync main; guards only exist on its investigate stage.
+        if (!(def.key === 'code' && def.version === 2)) {
+          expect(s.syncMainBefore).toBe(false);
+          for (const o of s.outcomes) expect(o.when).toBeUndefined();
+        }
       }
     }
   });

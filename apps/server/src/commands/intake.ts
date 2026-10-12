@@ -12,10 +12,10 @@ import {
   IntakeMapParamsSchema,
   IntakeUnmappedParamsSchema,
   isOrgManager,
+  missingForSpecify,
   type OrgRole,
   type PatchCardRequest,
   parseExternalRef,
-  requiredMissing,
   streamId,
   UNMAPPED_TICKET_SUBKIND,
 } from '@aom/shared';
@@ -27,7 +27,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { dedupMatches } from '../queries/ledger.ts';
-import { cardView, createCardIn, patchCardIn, specifyCardIn, specifyTarget } from './cards.ts';
+import { cardView, createCardIn, patchCardIn, specifyCardIn } from './cards.ts';
 import { agentActor, cardMessage, orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { phaseChatRpc, proposeCardPhaseIn } from './phases.ts';
 
@@ -289,7 +289,7 @@ export async function dependencyCycle(tx: Queryable, cardId: string): Promise<st
 async function missingFor(tx: Queryable, cardId: string): Promise<string[]> {
   const card = await one(tx, 'SELECT * FROM cards WHERE id=$1', [cardId]);
   const wf = card ? await loadWorkflowById(tx, card.workflow_version_id) : undefined;
-  return card && wf ? requiredMissing(cardView(card), specifyTarget(wf.definition).stage) : [];
+  return card && wf ? missingForSpecify(wf.definition, cardView(card)) : [];
 }
 
 export interface Responder {
@@ -549,6 +549,9 @@ async function createDraft(
       ...(draft.repo ? { repoId: await resolveRepo(tx, project.id, draft.repo) } : {}),
       ...(draft.completionAction ? { completionAction: draft.completionAction } : {}),
       ...(draft.docsNeeded !== undefined ? { docsNeeded: draft.docsNeeded } : {}),
+      ...(draft.designNeeded !== undefined ? { designNeeded: draft.designNeeded } : {}),
+      ...(draft.investigationOnly !== undefined ? { investigationOnly: draft.investigationOnly } : {}),
+      ...(draft.mergeMainFirst !== undefined ? { mergeMainFirst: draft.mergeMainFirst } : {}),
       ...(draft.priority !== undefined ? { priority: draft.priority } : {}),
       ...(draft.dependencies
         ? { dependencies: await resolveDependencies(tx, project.id, draft.dependencies) }
@@ -627,6 +630,9 @@ async function updateDraft(
     if (patch.title !== undefined) changes.title = patch.title;
     if (patch.priority !== undefined) changes.priority = patch.priority;
     if (patch.docsNeeded !== undefined) changes.docsNeeded = patch.docsNeeded;
+    if (patch.designNeeded !== undefined) changes.designNeeded = patch.designNeeded;
+    if (patch.investigationOnly !== undefined) changes.investigationOnly = patch.investigationOnly;
+    if (patch.mergeMainFirst !== undefined) changes.mergeMainFirst = patch.mergeMainFirst;
     if (patch.completionAction !== undefined) changes.completionAction = patch.completionAction;
     if (patch.riskTier !== undefined) changes.riskTier = patch.riskTier;
     if (patch.repo !== undefined) changes.repoId = await resolveRepo(tx, card.project_id, patch.repo);

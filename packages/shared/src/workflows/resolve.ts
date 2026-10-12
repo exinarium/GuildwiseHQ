@@ -2,8 +2,8 @@ import { getStage, type Outcome, type OutcomeEvent, type Stage, type WorkflowDef
 
 /** The slice of a card the workflow engine looks at. `when.field` is read from the card, then from `card.fields`. */
 export interface WorkflowCardView {
-  docsNeeded?: boolean;
-  fields?: Record<string, unknown>;
+  docsNeeded?: boolean | null;
+  fields?: Record<string, unknown> | null;
   [key: string]: unknown;
 }
 

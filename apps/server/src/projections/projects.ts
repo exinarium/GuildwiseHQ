@@ -286,6 +286,16 @@ export const projectProjectors: Record<string, Projector> = {
       [p.projectId, p.mergeLargeWithoutApproval, p.changedBy, e.createdAt],
     );
   },
+  ProjectArchitectSettingsSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectArchitectSettingsSet'>).payload;
+    await exec(
+      tx,
+      `UPDATE projects SET design_step=$2, merge_main_first=$3, investigation_path=$4, investigation_location=$5
+        WHERE id=$1`,
+      [p.projectId, p.designStep, p.mergeMainFirst, p.investigationPath, p.investigationLocation],
+    );
+  },
+
   ProjectFullSuiteSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectFullSuiteSet'>).payload;
     await exec(tx, 'UPDATE projects SET full_suite_after_finalize=$2 WHERE id=$1', [p.projectId, p.enabled]);

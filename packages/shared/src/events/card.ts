@@ -8,6 +8,7 @@ import {
   DEFAULT_CARD_PRIORITY,
   DecisionPolicy,
   DiffStats,
+  FinalizeAction,
   ReworkReason,
   RiskTier,
   TestEvidence,
@@ -29,6 +30,12 @@ export const CardChangesSchema = z
     riskTierOverridden: z.boolean(),
     dependencies: z.array(Id),
     ownerUserId: Id,
+    /** Run the investigate & design stage (architect) before build. */
+    designNeeded: z.boolean(),
+    /** The card only investigates (investigate -> finalize, no build). */
+    investigationOnly: z.boolean(),
+    /** Merge the latest main branch first: true/false overrides the project setting, null follows it. */
+    mergeMainFirst: z.boolean().nullable(),
   })
   .partial();
 export type CardChanges = z.infer<typeof CardChangesSchema>;
@@ -62,6 +69,12 @@ export const cardEvents = [
       repoId: Id.optional(),
       priority: z.number().int().min(1).max(9).default(DEFAULT_CARD_PRIORITY),
       docsNeeded: z.boolean().default(false),
+      /** Run the investigate & design stage before build (default: the project's design step setting). */
+      designNeeded: z.boolean().default(false),
+      /** The card only investigates and ends in Finalize with a recorded result; implies `designNeeded`. */
+      investigationOnly: z.boolean().default(false),
+      /** Merge the latest main branch before work starts: null/absent follows the project setting. */
+      mergeMainFirst: z.boolean().nullable().optional(),
       completionAction: CompletionAction.optional(),
       riskTier: RiskTier.optional(),
       dependencies: z.array(Id).default([]),
@@ -228,7 +241,7 @@ export const cardEvents = [
     'FinalizeRequested',
     z.object({
       cardId: Id,
-      action: CompletionAction,
+      action: FinalizeAction,
       requestedBy: Id,
       /** A large-tier merge that skipped the desk approval because the project setting allows it. */
       withoutApproval: z.boolean().optional(),
@@ -238,7 +251,7 @@ export const cardEvents = [
     'CardFinalized',
     z.object({
       cardId: Id,
-      action: CompletionAction,
+      action: FinalizeAction,
       resultRef: z.object({
         mergeCommit: z.string().optional(),
         prUrl: z.string().optional(),
@@ -254,6 +267,38 @@ export const cardEvents = [
       cardId: Id,
       reason: z.string(),
       cause: z.enum(['project_archived', 'project_converted']).optional(),
+    }),
+  ),
+  /**
+   * The architect's report (investigation or design) was recorded with the outcome of the investigate stage. `location`
+   * `repo`: `reportPath` is a file on the card branch (`commit`); `vault`: it is a path in the project vault.
+   */
+  defineEvent(
+    'InvestigationReported',
+    z.object({
+      cardId: Id,
+      reportPath: z.string().min(1),
+      location: z.enum(['repo', 'vault']),
+      summary: z.string(),
+      commit: z.string().optional(),
+      /** The card only investigated (no build follows). */
+      investigationOnly: z.boolean().default(false),
+    }),
+  ),
+  /**
+   * The runner merged the latest main branch before the card's worktree was created (`mergeMainFirst`): into the working
+   * branch, into the card branch, left as a conflict for the architect, or skipped because it conflicted.
+   */
+  defineEvent(
+    'CardMainSynced',
+    z.object({
+      cardId: Id,
+      repoId: Id,
+      result: z.enum(['merged_into_working', 'merged_into_card', 'conflict_in_card', 'skipped_conflict']),
+      mainBranch: z.string().optional(),
+      workingBranch: z.string().optional(),
+      commit: z.string().optional(),
+      files: z.array(z.string()).optional(),
     }),
   ),
   defineEvent(

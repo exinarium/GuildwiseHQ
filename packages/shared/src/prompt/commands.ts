@@ -6,9 +6,15 @@ type BriefOutcome = ShiftBrief['shift']['outcomes'][number];
 export function commandForOutcome(outcome: BriefOutcome): string {
   switch (outcome.id) {
     case 'handoff':
+      if (outcome.data === 'investigation')
+        return 'aom design --report <report path> --summary "<3-6 lines for the builder: what to build and where>"';
       if (outcome.data === 'candidates')
         return 'aom handoff --note "<what you searched>" --data-file <candidates.json>   # { "items": [ { kind, url, title, source, publishedAt, summary } ] }';
       return 'aom handoff --note "<what you did, what to look at, anything risky>"';
+    case 'report':
+      if (outcome.data === 'investigation')
+        return 'aom investigate --report <report path> --summary "<what you found and recommend>"';
+      return `aom outcome report --note "<summary>"`;
     case 'approve':
       return 'aom review approve --score <1-5> --note "<why this meets the card>"';
     case 'changes':
