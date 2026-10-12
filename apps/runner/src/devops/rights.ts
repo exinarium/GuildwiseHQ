@@ -2,6 +2,7 @@ import { accessSync, constants, statSync } from 'node:fs';
 import type { DevOpsAccess, RightCheck, RightsReport } from '@aom/shared';
 import type { RootRunner } from '../toolchain/ensure.ts';
 import type { Executor } from '../toolchain/exec.ts';
+import { detectManagers, managerCommands, noManagerAdvice } from '../toolchain/managers.ts';
 import type { Platform } from '../toolchain/types.ts';
 
 export interface RightsDeps {
@@ -61,29 +62,12 @@ export async function checkSudo(deps: RightsDeps): Promise<RightCheck> {
   );
 }
 
-const PACKAGE_MANAGERS: Record<Platform, Array<{ id: string; cmd: string; needsRoot: boolean }>> = {
-  linux: [
-    { id: 'apt', cmd: 'apt-get', needsRoot: true },
-    { id: 'dnf', cmd: 'dnf', needsRoot: true },
-  ],
-  darwin: [{ id: 'brew', cmd: 'brew', needsRoot: false }],
-  win32: [
-    { id: 'winget', cmd: 'winget', needsRoot: false },
-    { id: 'choco', cmd: 'choco', needsRoot: true },
-  ],
-};
-
 export async function checkInstall(deps: RightsDeps, access: DevOpsAccess): Promise<RightCheck> {
-  const found: Array<{ id: string; needsRoot: boolean }> = [];
-  for (const m of PACKAGE_MANAGERS[deps.platform]) {
-    if ((await deps.exec.run(m.cmd, ['--version'], { timeoutMs: 15_000 })).exitCode === 0) found.push(m);
-  }
+  const found = await detectManagers(deps.exec, deps.platform);
   if (!found.length)
     return bad(
-      `no package manager found (looked for ${PACKAGE_MANAGERS[deps.platform].map((m) => m.id).join(', ')})`,
-      deps.platform === 'darwin'
-        ? 'Install Homebrew (https://brew.sh); the official installers of .NET, Rust and Bun also work without it.'
-        : 'Install a package manager; tool installers without one (dotnet-install, rustup) still work for those stacks.',
+      `no package manager found (looked for ${managerCommands(deps.platform).join(', ')})`,
+      noManagerAdvice(deps.platform),
     );
   const mode = (await deps.root.mode()).mode;
   const rootUsable = mode === 'root' || (access.sudo && (mode === 'passwordless' || mode === 'password'));

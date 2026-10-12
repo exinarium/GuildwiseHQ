@@ -427,7 +427,17 @@ const pkg = (m: Manager, ...names: string[]): Partial<Record<Manager, Step[]>> =
     case 'apt':
       return { apt: [{ cmd: 'apt-get', args: ['install', '-y', ...names], root: true }] };
     case 'dnf':
-      return { dnf: [{ cmd: 'dnf', args: ['install', '-y', ...names], root: true }] };
+      // yum (older RHEL/CentOS) takes the same package names
+      return {
+        dnf: [{ cmd: 'dnf', args: ['install', '-y', ...names], root: true }],
+        yum: [{ cmd: 'yum', args: ['install', '-y', ...names], root: true }],
+      };
+    case 'pacman':
+      return { pacman: [{ cmd: 'pacman', args: ['-S', '--noconfirm', '--needed', ...names], root: true }] };
+    case 'zypper':
+      return { zypper: [{ cmd: 'zypper', args: ['--non-interactive', 'install', ...names], root: true }] };
+    case 'apk':
+      return { apk: [{ cmd: 'apk', args: ['add', ...names], root: true }] };
     case 'brew':
       return { brew: [{ cmd: 'brew', args: ['install', ...names] }] };
     case 'winget':
@@ -577,6 +587,9 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
           return merge(
             pkg('apt', `dotnet-sdk-${v}.0`),
             pkg('dnf', `dotnet-sdk-${v}.0`),
+            pkg('pacman', `dotnet-sdk-${v}.0`),
+            pkg('zypper', `dotnet-sdk-${v}.0`),
+            pkg('apk', `dotnet${v}-sdk`),
             pkg('brew', `dotnet@${v}`),
             pkg('winget', `Microsoft.DotNet.SDK.${v}`),
             // The official installer script: user level, no administrator rights (Linux and macOS).
@@ -601,6 +614,9 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
           return merge(
             pkg('apt', `openjdk-${v}-jdk`),
             pkg('dnf', `java-${v}-openjdk-devel`),
+            pkg('pacman', `jdk${v}-openjdk`),
+            pkg('zypper', `java-${v}-openjdk-devel`),
+            pkg('apk', `openjdk${v}`),
             pkg('brew', `openjdk@${v}`),
             pkg('winget', `Microsoft.OpenJDK.${v}`),
           );
@@ -616,6 +632,9 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
           merge(
             pkg('apt', 'nodejs', 'npm'),
             pkg('dnf', 'nodejs', 'npm'),
+            pkg('pacman', 'nodejs', 'npm'),
+            pkg('zypper', 'nodejs-default', 'npm-default'),
+            pkg('apk', 'nodejs', 'npm'),
             pkg('brew', p.nodeMajor ? `node@${p.nodeMajor}` : 'node'),
             pkg('winget', p.nodeMajor ? `OpenJS.NodeJS.${p.nodeMajor}` : 'OpenJS.NodeJS.LTS'),
           ),
@@ -665,6 +684,9 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
           merge(
             pkg('apt', 'python3', 'python3-pip'),
             pkg('dnf', 'python3', 'python3-pip'),
+            pkg('pacman', 'python', 'python-pip'),
+            pkg('zypper', 'python3', 'python3-pip'),
+            pkg('apk', 'python3', 'py3-pip'),
             pkg('brew', p.pythonVersion ? `python@${p.pythonVersion}` : 'python'),
             pkg(
               'winget',
@@ -680,7 +702,7 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
         checks: (_p, platform) => [
           one(platform === 'win32' ? 'python' : 'python3', ['-m', 'venv', '--help']),
         ],
-        recipes: () => merge(pkg('apt', 'python3-venv'), pkg('dnf', 'python3')),
+        recipes: () => merge(pkg('apt', 'python3-venv'), pkg('dnf', 'python3'), pkg('pacman', 'python')),
         manual: () => 'Install the venv module of your Python (Debian: apt install python3-venv)',
       },
       {
@@ -736,6 +758,9 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
           merge(
             pkg('apt', 'docker.io', 'docker-compose-v2'),
             pkg('dnf', 'docker', 'docker-compose'),
+            pkg('pacman', 'docker', 'docker-compose'),
+            pkg('zypper', 'docker', 'docker-compose'),
+            pkg('apk', 'docker', 'docker-cli-compose'),
             pkg('brew', 'docker', 'docker-compose'),
             pkg('winget', 'Docker.DockerDesktop'),
           ),
@@ -762,7 +787,15 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
         checks: () => [one('go', ['version'], /go(\d+\.\d+(?:\.\d+)?)/)],
         minVersion: (p) => p.goVersion,
         recipes: () =>
-          merge(pkg('apt', 'golang-go'), pkg('dnf', 'golang'), pkg('brew', 'go'), pkg('winget', 'GoLang.Go')),
+          merge(
+            pkg('apt', 'golang-go'),
+            pkg('dnf', 'golang'),
+            pkg('pacman', 'go'),
+            pkg('zypper', 'go'),
+            pkg('apk', 'go'),
+            pkg('brew', 'go'),
+            pkg('winget', 'GoLang.Go'),
+          ),
         manual: () => 'Install Go (https://go.dev/dl/)',
       },
       {
@@ -795,6 +828,9 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
           merge(
             pkg('apt', 'maven'),
             pkg('dnf', 'maven'),
+            pkg('pacman', 'maven'),
+            pkg('zypper', 'maven'),
+            pkg('apk', 'maven'),
             pkg('brew', 'maven'),
             pkg('winget', 'Apache.Maven'),
           ),
@@ -809,6 +845,9 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
           merge(
             pkg('apt', 'gradle'),
             pkg('dnf', 'gradle'),
+            pkg('pacman', 'gradle'),
+            pkg('zypper', 'gradle'),
+            pkg('apk', 'gradle'),
             pkg('brew', 'gradle'),
             pkg('winget', 'Gradle.Gradle'),
           ),
@@ -822,6 +861,9 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
           merge(
             pkg('apt', 'ruby-full'),
             pkg('dnf', 'ruby'),
+            pkg('pacman', 'ruby'),
+            pkg('zypper', 'ruby'),
+            pkg('apk', 'ruby'),
             pkg('brew', 'ruby'),
             pkg('winget', 'RubyInstallerTeam.Ruby.3.3'),
           ),
@@ -840,7 +882,14 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
         name: 'PHP',
         checks: () => [one('php', ['--version'], VER)],
         recipes: () =>
-          merge(pkg('apt', 'php-cli'), pkg('dnf', 'php-cli'), pkg('brew', 'php'), pkg('winget', 'PHP.PHP')),
+          merge(
+            pkg('apt', 'php-cli'),
+            pkg('dnf', 'php-cli'),
+            pkg('pacman', 'php'),
+            pkg('zypper', 'php8-cli'),
+            pkg('brew', 'php'),
+            pkg('winget', 'PHP.PHP'),
+          ),
         manual: () => 'Install PHP (https://php.net)',
       },
       {
@@ -852,6 +901,9 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
           merge(
             pkg('apt', 'composer'),
             pkg('dnf', 'composer'),
+            pkg('pacman', 'composer'),
+            pkg('zypper', 'php-composer2'),
+            pkg('apk', 'composer'),
             pkg('brew', 'composer'),
             pkg('winget', 'Composer.Composer'),
           ),
