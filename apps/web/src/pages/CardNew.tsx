@@ -5,6 +5,7 @@ import { ApiError } from '../api/client.ts';
 import { useWorkflows } from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
 import { missingFromError, useCreateCard } from '../api/queries/cards.ts';
+import { useProjectWorkflows } from '../api/queries/project-workflows.ts';
 import { useProject, useProjects } from '../api/queries/projects.ts';
 import { CardFormFields } from '../components/CardFormFields.tsx';
 import {
@@ -32,6 +33,7 @@ export function CardNew() {
   // The workflow of a shared project is its owner's (custom ones included).
   const workflows = useWorkflows(project?.id);
   const detail = useProject(project?.id);
+  const enabledWorkflows = useProjectWorkflows(project?.id);
   const mockUi = useMe().data?.features?.mockUi ?? false;
   const workflow = useMemo(
     () =>
@@ -72,6 +74,22 @@ export function CardNew() {
         ?.filter((w) => w.definition.key === 'research')
         .sort((a, b) => b.definition.version - a.definition.version)[0]?.definition;
 
+  // Other workflows the project enabled (#10): a variant is run with its base's fields and its own card types.
+  const enabledExtra: Workflow[] = [];
+  const defaults: Record<string, string> = {};
+  for (const e of enabledWorkflows.data?.enabled ?? []) {
+    for (const t of e.defaultCardTypes) defaults[t] = e.workflowKey;
+    if (e.isPrimary || e.workflowKey === workflow.key) continue;
+    const def = workflows.data
+      ?.filter((w) => w.definition.key === (e.variantOf?.key ?? e.workflowKey))
+      .sort((a, b) => b.definition.version - a.definition.version)[0]?.definition;
+    if (def) enabledExtra.push({ ...def, key: e.workflowKey, name: e.name, cardTypes: e.cardTypes });
+  }
+  const extras = [
+    ...enabledExtra,
+    ...(research && !enabledExtra.some((w) => w.key === research.key) ? [research] : []),
+  ];
+
   return (
     <CardNewForm
       key={project.id}
@@ -80,7 +98,8 @@ export function CardNew() {
       projectKeys={projects.data.map((p) => p.key)}
       onProject={setChosen}
       workflow={workflow}
-      extraWorkflows={research ? [research] : []}
+      extraWorkflows={extras}
+      defaultWorkflowFor={defaults}
       repos={(detail.data?.repos ?? []).filter((r) => !r.removedAt)}
       mockUi={mockUi}
     />
@@ -96,6 +115,7 @@ export function CardNewForm({
   onProject,
   workflow: projectWorkflow,
   extraWorkflows = [],
+  defaultWorkflowFor = {},
   repos,
   mockUi = false,
 }: {
@@ -106,6 +126,8 @@ export function CardNewForm({
   workflow: Workflow;
   /** Workflows that run card types the project's own does not (research), offered in the type select. */
   extraWorkflows?: Workflow[];
+  /** Per card type, the key of the workflow that is the project's default for it (project settings, Workflows). */
+  defaultWorkflowFor?: Record<string, string>;
   repos: Array<{ id: string; name: string }>;
   /** Show the mock-runtime fields (server `AOM_MOCK_UI`); off for real users. */
   mockUi?: boolean;
@@ -114,10 +136,15 @@ export function CardNewForm({
   const create = useCreateCard();
   const toast = useToast();
   const [v, setV] = useState<CardFormValues>(() => emptyForm(projectWorkflow.cardTypes[0] ?? ''));
+  const [picked, setPicked] = useState<{ type: string; key: string } | null>(null);
   // The workflow of the chosen type decides the fields (a research card in a code project asks for the question).
-  const workflow =
-    [projectWorkflow, ...extraWorkflows].find((w) => w.cardTypes.includes(v.cardType as never)) ??
-    projectWorkflow;
+  // When the project enabled more than one workflow for the type, the default (or the user's pick) decides.
+  const choices = [projectWorkflow, ...extraWorkflows].filter((w) =>
+    w.cardTypes.includes(v.cardType as never),
+  );
+  const wanted = picked?.type === v.cardType ? picked.key : defaultWorkflowFor[v.cardType];
+  const workflow = choices.find((w) => w.key === wanted) ?? choices[0] ?? projectWorkflow;
+  const chooseWorkflow = choices.length > 1;
   const cardTypes = [
     ...new Set([...projectWorkflow.cardTypes, ...extraWorkflows.flatMap((w) => w.cardTypes)]),
   ];
@@ -135,7 +162,7 @@ export function CardNewForm({
     }
     const { errors: _e, ...body } = r;
     create.mutate(
-      { projectId, ...body, specify },
+      { projectId, ...body, ...(chooseWorkflow ? { workflowKey: workflow.key } : {}), specify },
       {
         onSuccess: (res) => {
           if (specify && res.missing?.length) {
@@ -199,6 +226,21 @@ export function CardNewForm({
                 ))}
               </Select>
             </div>
+            {chooseWorkflow && (
+              <Select
+                label="Workflow"
+                data-testid="card-workflow"
+                hint="This project runs more than one workflow for this card type."
+                value={workflow.key}
+                onChange={(e) => setPicked({ type: v.cardType, key: e.target.value })}
+              >
+                {choices.map((w) => (
+                  <option key={w.key} value={w.key}>
+                    {w.name}
+                  </option>
+                ))}
+              </Select>
+            )}
             <CardFormFields
               workflow={workflow}
               values={v}

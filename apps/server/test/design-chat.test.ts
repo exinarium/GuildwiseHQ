@@ -135,6 +135,47 @@ describe('the BA designs with the manager', () => {
     ).toContain('support');
   });
 
+  it("drafts a project's own variant of the Code workflow (steps inserted after existing ones)", async () => {
+    const role = await rpc(chatId, 'org.role.draft', {
+      definition: roleInput('auditor', [['code-toy', 'audit']], { department: 'delivery' }),
+    });
+    expect(role.ok).toBe(true);
+    const spec = {
+      key: 'code-toy',
+      name: 'Code (Toy)',
+      project: 'toy',
+      base: { key: 'code', version: 1 },
+      insertions: [
+        {
+          after: 'review',
+          stage: { id: 'audit', label: 'Audit', claimRole: 'auditor', doneCriteria: 'Audited.' },
+        },
+      ],
+    };
+    const bad = await rpc(chatId, 'org.workflowVariant', {
+      definition: { ...spec, insertions: [{ ...spec.insertions[0], after: 'nowhere' }] },
+    });
+    expect(bad.ok).toBe(false);
+    expect(bad.error).toMatch(/no stage 'nowhere'/);
+    const gone = await rpc(chatId, 'org.workflowVariant', { definition: { ...spec, project: 'NOPE' } });
+    expect(gone.ok).toBe(false);
+    const res = await rpc(chatId, 'org.workflowVariant', { definition: spec });
+    expect(res.ok).toBe(true);
+    expect(res.result.message).toMatch(/Saved variant draft code-toy v1 \(.*review > audit > test/);
+    const row = (
+      await q(`SELECT project_id, base_key, status FROM workflow_versions WHERE key='code-toy'`)
+    )[0]!;
+    expect(row).toMatchObject({ project_id: w.projectId, base_key: 'code', status: 'draft' });
+    // The BA submits it like any workflow; the owner approves on the desk.
+    await rpc(chatId, 'org.submit', { key: 'auditor', kind: 'role' });
+    const sub = await rpc(chatId, 'org.submit', { key: 'code-toy', kind: 'workflow' });
+    expect(sub.ok, sub.error).toBe(true);
+    const item = (
+      (await ok<any>(w.t.req('GET', '/api/desk', { cookie: w.owner.cookie }))).items as any[]
+    ).find((i) => i.title === 'Approve workflow "Code (Toy)" (v1)');
+    expect(item.body).toMatch(/Project variant of code v1/);
+  });
+
   it('refuses a department that does not exist and a role that claims built-in stages', async () => {
     const res = await rpc(chatId, 'org.role.draft', {
       definition: roleInput('sneaky', [['code', 'review']], { department: 'nowhere' }),

@@ -125,6 +125,7 @@ Setting up two-factor authentication, recovery codes, enforcement and owner rese
 Creating projects, the priority order, project types and workflows, research cards, sharing, archiving and decision policy.
 - Creating a project: 1. Go to Projects and click New project (Owner and Admin only). 2. Enter a Name and a Key. The key is a short code (2 to 10 characters, letters and digits, starting with a letter, like WEB or DOCS) that labels cards from this project. It is suggested from the name. 3.…
 - Reference repositories: By default an agent only sees the folder of the card it is working on (and, in a chat about a project, the project's own repositories). To let a project's agents read other code, for example to compare two repositories or look up how a library is used, the project owner adds Reference repositories in the project…
+- Workflows of a project: A project has one primary workflow (its type) and can enable more. Open the project's settings, Workflows (organization Owners and Admins can change it; everyone on the project can see it).
 - The priority order: Your organization's projects are ranked: the project at the top of the Projects page is the most important. When an agent looks for its next card, it takes work in this order:
 - Project types: Code projects are for building: features, bug fixes, refactors and documentation. They have stages like Spec, Build, Review, Test and Finalize. They need repositories and can run test suites and regression tests.
 - Sharing a project: To let people from other organizations access a project:

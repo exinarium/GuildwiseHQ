@@ -107,6 +107,7 @@ export function renderDesignSection(): string {
       '- `aom org department --name "<name>"`: create a department for a function.',
       "- `aom org role draft --json '<json>'` (or `--file <role.json>`, `--file -`): save a custom role (name, purpose, instructions, permissions, skills, default model, seniority levels, claimable stages). Prints every issue.",
       "- `aom org workflow draft --json '<json>'` (or `--file <workflow.json>`): save a custom workflow (stages with claiming role, required fields, done criteria, outcomes and failure routes). Prints every issue: unreachable stages, failure paths that never end, stages no role may claim.",
+      "- `aom org workflow variant --file <spec.json>`: a PROJECT's own version of a workflow: steps inserted after existing ones (the base steps cannot change). Spec: `{key, name, projectId (or project: KEY), base: {key, version}, insertions: [{after: <stage id>, stage: {id, label, claimRole, doneCriteria, requiredFields?, worktree: 'reuse'|'create', data?: 'none'|'investigation'}, redirect?: [outcome ids]}]}`. Prints every issue. Submit it like any workflow; the owner approves it on the desk, then an Owner or Admin enables it in the project's settings.",
       '- `aom org validate <key>`: check a draft again.',
       "- `aom org submit <key> --role|--workflow`: put a valid draft on the owner's desk. Nothing is available until they approve it; submit roles before the workflow that uses them.",
     ].join('\n'),

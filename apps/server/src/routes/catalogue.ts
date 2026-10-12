@@ -53,7 +53,7 @@ export function catalogueRoutes(ctx: Ctx) {
       const list = await rows(
         ctx.pool,
         `SELECT DISTINCT ON (org_id, key) id, org_id, status, definition FROM workflow_versions
-          WHERE (org_id IS NULL OR org_id = $1) AND status = 'active'
+          WHERE (org_id IS NULL OR org_id = $1) AND status = 'active' AND project_id IS NULL
           ORDER BY org_id NULLS FIRST, key, version DESC`,
         [orgId],
       );

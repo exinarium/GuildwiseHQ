@@ -248,7 +248,7 @@ export async function checkTemplate(tx: Queryable, project: Row, kind: string, t
     return;
   }
   const cardType = template.cardType ?? wf.definition.cardTypes[0];
-  const cardWf = cardType ? await resolveCardWorkflow(tx, project, cardType) : null;
+  const cardWf = cardType ? await resolveCardWorkflow(tx, project, cardType, template.workflowKey) : null;
   if (!cardType || !cardWf)
     throw badRequest(
       'invalid_card_type',

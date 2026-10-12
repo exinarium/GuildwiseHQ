@@ -1,7 +1,7 @@
 ---
 title: Projects
 summary: Creating projects, the priority order, project types and workflows, research cards, sharing, archiving and decision policy.
-keywords: [project, priority, ranking, order, code, research, workflow, card, sharing, archiving, repository, git host, github, gitlab, bitbucket, azure devops, pull request, how finished work lands, reference repositories, read other repositories, compare repositories]
+keywords: [project, priority, ranking, order, code, research, workflow, card, sharing, archiving, repository, git host, github, gitlab, bitbucket, azure devops, pull request, how finished work lands, reference repositories, read other repositories, compare repositories, several workflows, enable workflow, default workflow, project variant, customise workflow, insert step]
 order: 4
 ---
 
@@ -30,6 +30,16 @@ By default an agent only sees the folder of the card it is working on (and, in a
 2. Under **Add a reference repository** pick a repository and click **Add**. The list has a **Projects** section (the repositories of the organization's other projects: organization Owners and Admins see all of them, everyone else the projects they belong to) and an **On <workstation>** section for each of your workstations, which lists any repository cloned there, even one that belongs to no project. Use **Remove** to take one away again.
 
 The agents then get those repositories **read-only**, in card work and in chats, on every workstation that has them cloned. They cannot change them, and secret files inside (`.env` files, keys, certificates) stay blocked. Every repository you do not pick stays blocked, as does everything else on the workstation (other projects, this platform's own code). A repository you pick from a workstation is opened on that workstation; if it has a remote, also on your other workstations that have a clone of the same remote. Nothing is added on its own. Only the project owner can change the list; other managers can see it. The agents are told which folders they can read, so they ask you to add a repository instead of searching for a setting.
+
+## Workflows of a project {#workflows}
+
+A project has one **primary** workflow (its type) and can enable more. Open the project's settings, **Workflows** (organization Owners and Admins can change it; everyone on the project can see it).
+
+- **Enable** another workflow from the list, and tick **Default for** under the card types it should handle. A card type can be the default of one workflow only; with no default the primary workflow runs it. When a type has more than one workflow, **New card** shows a **Workflow** list.
+- **Customise** (Code and approved custom workflows) opens the step editor: the base steps are read only and **Insert step after ...** adds your own. The result is a **project variant**: it needs the owner's approval on the desk before any card uses it, running cards keep the version they started on, and a new version affects new cards only. When the base workflow has a newer version the row says so and **Rebase** applies your steps to it as a new draft.
+- **Disable** removes a workflow from the project's choices; its open cards finish as planned. The primary workflow always stays.
+
+The board shows the columns of every enabled workflow, a step you inserted appears where you put it, and a card on a workflow other than the primary shows the workflow's name on its tile.
 
 ## The priority order {#ranking}
 

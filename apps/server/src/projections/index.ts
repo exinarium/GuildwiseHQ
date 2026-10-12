@@ -18,6 +18,7 @@ import { orgProjectors } from './orgs.ts';
 import { outboundProjectors } from './outbound.ts';
 import { phaseProjectors } from './phases.ts';
 import { platformAuditProjectors } from './platform-audit.ts';
+import { projectWorkflowProjectors } from './project-workflows.ts';
 import { projectProjectors } from './projects.ts';
 import { repoProjectors } from './repo.ts';
 import { reporterProjectors } from './reporter.ts';
@@ -44,6 +45,7 @@ const domains: Array<Record<string, Projector>> = [
   catalogueProjectors,
   workstationProjectors,
   projectProjectors,
+  projectWorkflowProjectors,
   agentProjectors,
   cardProjectors,
   shiftProjectors,
@@ -98,6 +100,7 @@ export const PROJECTION_TABLES = [
   'projects',
   'project_repos',
   'project_members',
+  'project_workflows',
   'workflow_versions',
   'workflow_stages',
   'role_definitions',

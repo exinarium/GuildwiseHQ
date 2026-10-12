@@ -69,7 +69,7 @@ export async function scheduledCard(
   if (!projectWf) throw badRequest('unknown_workflow', `workflow '${project.workflow_key}' is not available`);
   const cardType = template.cardType ?? projectWf.definition.cardTypes[0];
   if (!cardType) throw badRequest('invalid_card_type', 'the workflow has no card types');
-  const wf = await resolveCardWorkflow(tx, project, cardType);
+  const wf = await resolveCardWorkflow(tx, project, cardType, template.workflowKey);
   if (!wf)
     throw badRequest(
       'invalid_card_type',

@@ -555,7 +555,15 @@ Everything you design is **submitted to the desk for your approval** before it c
 
 ![Designing a workflow](guide/assets/org-workflows.jpg)
 
-> **In the app:** Help, "Organization chart and design" (`/help/org-chart-and-design`).
+**More than one workflow per project, and your own steps in a built-in workflow.** A project runs on one workflow by default (its type). In the project's settings, **Workflows** (organization Owners and Admins) you can:
+
+- **Enable more workflows** next to the project's own, for example a support workflow in a code project. Tick **Default for** a card type to make that workflow the one new cards of that type use. When a card type has two choices, the **New card** form shows a **Workflow** list so you can pick; cards that are already running always finish on the version they started on. Disabling a workflow does not touch its open cards.
+- **Customise a workflow for this project.** Click **Customise** on Code (or on an approved custom workflow). The steps of the base workflow are listed and cannot be changed; use **Insert step after ...** between them to add your own, for example a security check after Build, or an **Investigate and design** step (done by the architect) after Test. Each new step has a label, the role that works it, what done means and, optionally, the fields it needs. The editor checks the steps as you add them and shows every problem. **Send for approval** puts the new version on your desk; **nothing changes for any card until the owner approves it**. A new version affects new cards only. When the base workflow gets a newer version, the project shows "code v2 available" and **Rebase** re-applies your steps on it as a new draft.
+- Ask the **BA in a design chat** to do the same: it drafts a project variant with `aom org workflow variant`, you approve it on the desk, then enable it in the project's settings.
+
+A role that works an inserted step must be allowed to claim it: the roles that already work a base step (the builder on Build, and so on) keep working it, while a step you add needs a role that claims it (a custom role naming the step, or the architect for steps named `investigate...`).
+
+> **In the app:** Help, "Organization chart and design" (`/help/org-chart-and-design`) and "Projects" (`/help/projects#workflows`).
 
 ### 4.8 Schedules and integrations
 

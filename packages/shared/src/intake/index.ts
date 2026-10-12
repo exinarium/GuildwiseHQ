@@ -38,6 +38,8 @@ export const CardDraftSchema = z.object({
   project: z.string().optional(),
   title: z.string().min(1).max(300),
   cardType: CardType.default('feature'),
+  /** One of the project's enabled workflows; absent: the project's default for the card type. */
+  workflowKey: z.string().min(1).optional(),
   completionAction: CompletionAction.optional(),
   docsNeeded: z.boolean().optional(),
   priority: z.number().int().min(1).max(9).optional(),
@@ -55,7 +57,7 @@ export const CardDraftSchema = z.object({
 export type CardDraft = z.infer<typeof CardDraftSchema>;
 
 /** `aom card update <ref> --file patch.json`: any subset of a draft. */
-export const CardDraftPatchSchema = CardDraftSchema.partial().extend({
+export const CardDraftPatchSchema = CardDraftSchema.omit({ workflowKey: true }).partial().extend({
   fields: CardDraftFieldsSchema.optional(),
 });
 export type CardDraftPatch = z.infer<typeof CardDraftPatchSchema>;

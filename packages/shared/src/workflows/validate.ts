@@ -43,6 +43,11 @@ export type IssueCode =
   | 'manual_stage_not_initial'
   | 'role_not_claimable'
   | 'unsupported_custom_event'
+  // project variants only
+  | 'variant_base_not_allowed'
+  | 'variant_base_mismatch'
+  | 'variant_invalid_insertion'
+  | 'variant_definition_mismatch'
   // warnings
   | 'missing_done_criteria'
   | 'too_many_stages';
@@ -131,7 +136,11 @@ export function validateWorkflow(
       err(3, 'unknown_role', `stage '${s.id}' names unknown role '${s.claimRole}'`, s.id);
       continue;
     }
-    if (!roleClaimsStage(role, def.key, s.id)) {
+    // A project variant's inherited stages accept the roles that claim the base workflow's stage.
+    if (
+      !roleClaimsStage(role, def.key, s.id) &&
+      !(def.extends && roleClaimsStage(role, def.extends.key, s.id))
+    ) {
       err(3, 'role_cannot_claim_stage', `role '${role.key}' cannot claim stage '${def.key}.${s.id}'`, s.id);
     }
     if (s.seniorOnly && !role.seniorityLevels.includes('senior')) {

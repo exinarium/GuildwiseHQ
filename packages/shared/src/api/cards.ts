@@ -175,6 +175,8 @@ export const CreateCardRequestSchema = z.object({
   specify: z.boolean().optional(),
   /** "Research this": the interest the card belongs to (its research or feed project must be `projectId`). */
   interestId: z.uuid().optional(),
+  /** One of the project's enabled workflows (project settings); absent: the default for the card type. */
+  workflowKey: z.string().min(1).optional(),
 });
 export type CreateCardRequest = z.infer<typeof CreateCardRequestSchema>;
 

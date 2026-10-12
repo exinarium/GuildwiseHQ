@@ -62,17 +62,25 @@ export function columnFor(card: ColumnCard, stage: Pick<Stage, 'id' | 'column'>)
  */
 export function boardColumnsWith(
   def: Pick<WorkflowDefinition, 'stages'>,
-  others: ReadonlyArray<Pick<WorkflowDefinition, 'stages'>>,
+  others: ReadonlyArray<Pick<WorkflowDefinition, 'stages' | 'extends'>>,
 ): string[] {
   const own = boardColumns(def);
   const last = own[own.length - 1];
   const terminal = def.stages.some((s) => s.kind === 'terminal' && s.column === last) ? last : undefined;
   const head = terminal ? own.slice(0, -1) : [...own];
   for (const o of others) {
-    for (const c of boardColumns(o)) {
+    const cols = boardColumns(o);
+    for (const [i, c] of cols.entries()) {
       if (own.includes(c) || head.includes(c)) continue;
+      // A column the project's workflow lacks goes right after the column that precedes it in the other workflow
+      // (a variant's inserted step sits where it was inserted); with no known predecessor it goes last.
       // The other workflow's terminal column is the same "Done" in practice; any other terminal label stays last.
-      head.push(c);
+      const prev = cols
+        .slice(0, i)
+        .reverse()
+        .find((p) => head.includes(p));
+      if (prev && o.extends) head.splice(head.indexOf(prev) + 1, 0, c);
+      else head.push(c);
     }
   }
   return terminal ? [...head, terminal] : head;
