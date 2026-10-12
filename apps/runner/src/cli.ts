@@ -42,6 +42,9 @@ import { RunnerKeys } from './secrets/keys.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
 import { realExecutor } from './toolchain/exec.ts';
 import { preparePairing } from './up.ts';
+import { detectServiceMode } from './update/apply.ts';
+import { detectLayout } from './update/layout.ts';
+import { Updater } from './update/updater.ts';
 import { RUNNER_VERSION } from './version.ts';
 
 const dataDirOpt = [
@@ -175,26 +178,55 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
   const override = process.env.AOM_RUNNER_MAX_SHIFT_MS
     ? Number(process.env.AOM_RUNNER_MAX_SHIFT_MS)
     : undefined;
+  const mock = mockEnabled(opts.mock);
+  let updater: Updater | undefined;
   const host = new RunnerHost({
     root: paths.root,
     log,
-    mock: mockEnabled(opts.mock),
+    mock,
     maxShiftMsOverride: override,
+    onConnected: () => updater?.noteConnected(),
   });
   await host.start();
   log.info(
     `aom-runner ${RUNNER_VERSION} started (${host.running.size} pairing(s): ${[...host.running.keys()].join(', ')})`,
   );
 
-  const code = await new Promise<number>((done) => {
-    const shutdown = (sig: string) => {
-      log.info(`${sig} received, shutting down`);
-      done(0);
-    };
-    process.once('SIGINT', () => shutdown('SIGINT'));
-    process.once('SIGTERM', () => shutdown('SIGTERM'));
-    void host.fatal.then(done);
+  let finish: (code: number) => void = () => undefined;
+  const ended = new Promise<number>((done) => {
+    finish = done;
   });
+  // Self-update (docs/RUNNER.md "Updates"): never with the mock runtime (tests, demos) or with no pairing to ask.
+  if (!mock && host.running.size > 0) {
+    const layout = detectLayout(process.argv[1]);
+    updater = new Updater({
+      layout,
+      version: RUNNER_VERSION,
+      serverUrl: () => host.serverUrl(),
+      isIdle: () => host.isIdle(),
+      restart: () => {
+        log.info('restarting to finish the update');
+        finish(0);
+      },
+      report: (s) => host.setUpdateStatus(s),
+      log,
+      mode: layout ? detectServiceMode(layout) : null,
+      disabled: process.env.AOM_RUNNER_AUTO_UPDATE === '0',
+    });
+    host.setUpdateStatus(updater.current);
+    updater.start();
+  }
+  process.once('SIGINT', () => {
+    log.info('SIGINT received, shutting down');
+    finish(0);
+  });
+  process.once('SIGTERM', () => {
+    log.info('SIGTERM received, shutting down');
+    finish(0);
+  });
+  void host.fatal.then(finish);
+  const code = await ended;
+  updater?.stop();
   await host.stop();
   if (host.unpaired) console.log(`aom-runner: ${UNPAIRED_MESSAGE}`);
   process.exit(code);
