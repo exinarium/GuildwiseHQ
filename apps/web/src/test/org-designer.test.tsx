@@ -321,7 +321,7 @@ describe('the organization page', () => {
     expect(screen.queryByRole('button', { name: 'Extend builder' })).toBeNull();
   });
 
-  it('workflows: versions with cards in flight, graph view, and the editor with inline validation', async () => {
+  it('workflows: versions with cards in flight, graph view, links to the builder and step-level comparison', async () => {
     const user = userEvent.setup();
     mountPage(catalogue(true), '/org?tab=workflows');
     const card = await screen.findByTestId('workflow-support');
@@ -329,9 +329,20 @@ describe('the organization page', () => {
     expect(within(card).getByText('Replaced by a newer version')).toBeInTheDocument();
     await user.click(within(card).getByRole('button', { name: 'View support v1' }));
     expect(within(screen.getByTestId('view-support-v1')).getByTestId('workflow-graph')).toBeInTheDocument();
-    await user.click(within(card).getByRole('button', { name: 'New version of support v2' }));
-    expect(await screen.findByTestId('workflow-editor')).toBeInTheDocument();
-    expect(screen.getByTestId('stage-table')).toBeInTheDocument();
+    // Editing happens in the workflow builder page.
+    expect(within(card).getByRole('link', { name: 'New version of support v2' })).toHaveAttribute(
+      'href',
+      `/org/workflows/new?from=${ID(3)}`,
+    );
+    expect(screen.getByRole('link', { name: 'New custom workflow' })).toHaveAttribute(
+      'href',
+      '/org/workflows/new',
+    );
+    // Step-level comparison with the previous version.
+    await user.click(within(card).getByRole('button', { name: 'Compare support v2 with previous' }));
+    expect(
+      within(screen.getByTestId('compare-support-v2')).getByText(/No difference from v1/),
+    ).toBeInTheDocument();
   });
 
   it('departments: lists them with their roles and workflows and creates one', async () => {

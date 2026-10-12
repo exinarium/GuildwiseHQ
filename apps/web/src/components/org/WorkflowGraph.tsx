@@ -29,11 +29,18 @@ function edgePath(e: GraphEdge, a: GraphNode, b: GraphNode): string {
 export function WorkflowGraph({
   def,
   flagged = new Set<string>(),
+  path = [],
 }: {
   def: Pick<WorkflowDefinition, 'initialStage' | 'stages'>;
   /** Stage ids that have validation errors. */
   flagged?: ReadonlySet<string>;
+  /** Stage ids in the order a "Try a card" walk visited them: drawn thicker and numbered. */
+  path?: readonly string[];
 }) {
+  const onPath = new Map<string, number>();
+  path.forEach((id, i) => {
+    if (!onPath.has(id)) onPath.set(id, i + 1);
+  });
   const g = layoutWorkflow(def);
   const node = new Map(g.nodes.map((n) => [n.id, n]));
   return (
@@ -91,6 +98,7 @@ export function WorkflowGraph({
             key={n.id}
             data-testid={`node-${n.id}`}
             data-unreachable={n.unreachable ? 'true' : undefined}
+            data-path-step={onPath.get(n.id)}
             transform={`translate(${n.x} ${n.y})`}
           >
             <rect
@@ -98,8 +106,10 @@ export function WorkflowGraph({
               height={NODE_H}
               rx={8}
               fill={FILL[n.kind]}
-              stroke={flagged.has(n.id) || n.unreachable ? '#dc2626' : '#71717a'}
-              strokeWidth={flagged.has(n.id) || n.unreachable ? 2 : 1}
+              stroke={
+                flagged.has(n.id) || n.unreachable ? '#dc2626' : onPath.has(n.id) ? '#4f46e5' : '#71717a'
+              }
+              strokeWidth={flagged.has(n.id) || n.unreachable || onPath.has(n.id) ? 2.5 : 1}
               strokeDasharray={n.unreachable ? '4 3' : undefined}
             />
             <text x={NODE_W / 2} y={19} textAnchor="middle" fontSize={12} fontWeight={600} fill="#18181b">
@@ -108,6 +118,14 @@ export function WorkflowGraph({
             <text x={NODE_W / 2} y={35} textAnchor="middle" fontSize={10.5} fill="#52525b">
               {n.kind === 'agent' ? (n.role ?? 'no role yet') : n.kind}
             </text>
+            {onPath.has(n.id) && (
+              <g>
+                <circle cx={4} cy={4} r={9} fill="#4f46e5" />
+                <text x={4} y={8} textAnchor="middle" fontSize={11} fontWeight={700} fill="#ffffff">
+                  {onPath.get(n.id)}
+                </text>
+              </g>
+            )}
           </g>
         ))}
       </svg>

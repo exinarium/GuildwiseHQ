@@ -1,13 +1,12 @@
-import type {
-  DefinitionIssue,
-  OrgCatalogueResponse,
-  RoleDefinition,
-  RoleDraftInput,
-  WorkflowDraftInput,
+import {
+  type DefinitionIssue,
+  describeDiff,
+  diffDefinitions,
+  type OrgCatalogueResponse,
+  type RoleDraftInput,
 } from '@aom/shared';
-import { type FormEvent, useMemo, useState } from 'react';
+import { type FormEvent, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { ApiError } from '../api/client.ts';
 import { useAgents } from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
 import { useCreateChat } from '../api/queries/chats.ts';
@@ -17,18 +16,17 @@ import {
   useExtendRole,
   useOrgCatalogue,
   useSaveRoleDraft,
-  useSaveWorkflowDraft,
   useSubmitDraft,
 } from '../api/queries/org.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { ChatPanel } from '../components/ChatPanel.tsx';
 import { RoleEditor } from '../components/org/RoleEditor.tsx';
-import { WorkflowEditor } from '../components/org/WorkflowEditor.tsx';
 import { WorkflowGraph } from '../components/org/WorkflowGraph.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import {
   Badge,
   Button,
+  ButtonLink,
   Callout,
   Dialog,
   ErrorBox,
@@ -40,14 +38,7 @@ import {
   TextArea,
   TextInput,
 } from '../components/ui.tsx';
-import {
-  blankRole,
-  blankWorkflow,
-  errorCount,
-  roleToInput,
-  splitList,
-  workflowToInput,
-} from '../lib/designer.ts';
+import { blankRole, errorCount, roleToInput, splitList } from '../lib/designer.ts';
 
 type Tab = 'roles' | 'workflows' | 'departments' | 'design';
 const TABS: Array<[Tab, string]> = [
@@ -144,25 +135,6 @@ export function OrgDesigner() {
 }
 
 // -------------------------------------------------------------------------------------- shared bits
-
-/** What the editors validate against: active roles plus the owner's drafts, newest definition per key. */
-function catalogueRoles(cat: OrgCatalogueResponse): RoleDefinition[] {
-  return cat.roles
-    .map(
-      (r) =>
-        (
-          r.versions.find((v) => v.status === 'active') ??
-          r.versions.find((v) => v.status === 'draft' || v.status === 'pending_approval')
-        )?.definition,
-    )
-    .filter((d): d is RoleDefinition => !!d && d.key !== 'devops');
-}
-
-function apiIssues(e: unknown): DefinitionIssue[] | undefined {
-  return e instanceof ApiError
-    ? (e.details as { issues?: DefinitionIssue[] } | undefined)?.issues
-    : undefined;
-}
 
 function VersionRow({
   version,
@@ -491,33 +463,21 @@ function ExtendDialog({
 
 // ---------------------------------------------------------------------------------------- workflows
 
-type WorkflowEdit = { id?: string; input: WorkflowDraftInput; issues?: DefinitionIssue[] };
-
 function WorkflowsTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: string }) {
-  const [edit, setEdit] = useState<WorkflowEdit | null>(null);
   const submit = useSubmitDraft();
   const discard = useDiscardDraft();
-  const departments = cat.departments.map((d) => d.name);
-  const roles = useMemo(() => catalogueRoles(cat), [cat]);
   const [viewing, setViewing] = useState<string | null>(null);
+  const [comparing, setComparing] = useState<string | null>(null);
+  const proj = projectId ? `?project=${projectId}` : '';
+  const projAnd = projectId ? `&project=${projectId}` : '';
   return (
     <div className="flex flex-col gap-4">
-      {cat.canEdit && !edit && (
+      {cat.canEdit && (
         <div>
-          <Button variant="primary" onClick={() => setEdit({ input: blankWorkflow() })}>
+          <ButtonLink variant="primary" to={`/org/workflows/new${proj}`}>
             New custom workflow
-          </Button>
+          </ButtonLink>
         </div>
-      )}
-      {edit && (
-        <WorkflowEditPanel
-          edit={edit}
-          setEdit={setEdit}
-          roles={roles}
-          departments={departments}
-          projectId={projectId}
-          onClose={() => setEdit(null)}
-        />
       )}
       <ErrorBox error={submit.error ?? discard.error} />
       <ul className="grid gap-3 lg:grid-cols-2" data-testid="workflows">
@@ -533,63 +493,97 @@ function WorkflowsTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId
                   {latest?.department && <Badge>{latest.department}</Badge>}
                 </div>
                 <ul className="mt-2 flex flex-col gap-1">
-                  {w.versions.map((v) => (
-                    <VersionRow
-                      key={v.id}
-                      {...v}
-                      extra={
-                        v.cardsInFlight > 0
-                          ? `${v.cardsInFlight} card(s) in flight on this version`
-                          : undefined
-                      }
-                      actions={
-                        <>
-                          <Button
-                            aria-label={`View ${w.key} v${v.version}`}
-                            onClick={() => setViewing(viewing === v.id ? null : v.id)}
-                          >
-                            {viewing === v.id ? 'Hide' : 'View'}
-                          </Button>
-                          {cat.canEdit && !w.builtIn && (
+                  {w.versions.map((v, i) => {
+                    const prev = w.versions[i + 1];
+                    return (
+                      <div key={v.id} className="contents">
+                        <VersionRow
+                          {...v}
+                          extra={
+                            v.cardsInFlight > 0
+                              ? `${v.cardsInFlight} card(s) in flight on this version`
+                              : undefined
+                          }
+                          actions={
                             <>
-                              {(v.status === 'draft' || v.status === 'active' || v.status === 'rejected') && (
+                              <Button
+                                aria-label={`View ${w.key} v${v.version}`}
+                                onClick={() => setViewing(viewing === v.id ? null : v.id)}
+                              >
+                                {viewing === v.id ? 'Hide' : 'View'}
+                              </Button>
+                              {prev && (
                                 <Button
-                                  aria-label={`${v.status === 'draft' ? 'Edit' : 'New version of'} ${w.key} v${v.version}`}
-                                  onClick={() =>
-                                    setEdit({
-                                      id: v.status === 'draft' ? v.id : undefined,
-                                      input: workflowToInput(v.definition),
-                                    })
-                                  }
+                                  aria-label={`Compare ${w.key} v${v.version} with previous`}
+                                  aria-expanded={comparing === v.id}
+                                  onClick={() => setComparing(comparing === v.id ? null : v.id)}
                                 >
-                                  {v.status === 'draft' ? 'Edit' : 'New version'}
+                                  Compare with previous
                                 </Button>
                               )}
-                              {v.status === 'draft' && (
-                                <Button
-                                  variant="primary"
-                                  aria-label={`Submit ${w.key} v${v.version}`}
-                                  disabled={submit.isPending}
-                                  onClick={() => submit.mutate({ kind: 'workflows', id: v.id, projectId })}
-                                >
-                                  Submit for approval
-                                </Button>
-                              )}
-                              {(v.status === 'draft' || v.status === 'rejected') && (
-                                <Button
-                                  variant="ghost"
-                                  aria-label={`Discard ${w.key} v${v.version}`}
-                                  onClick={() => discard.mutate({ kind: 'workflows', id: v.id, projectId })}
-                                >
-                                  Discard
-                                </Button>
+                              {cat.canEdit && !w.builtIn && (
+                                <>
+                                  {(v.status === 'draft' ||
+                                    v.status === 'active' ||
+                                    v.status === 'rejected') && (
+                                    <ButtonLink
+                                      aria-label={`${v.status === 'draft' ? 'Edit' : 'New version of'} ${w.key} v${v.version}`}
+                                      to={
+                                        v.status === 'draft'
+                                          ? `/org/workflows/${v.id}${proj}`
+                                          : `/org/workflows/new?from=${v.id}${projAnd}`
+                                      }
+                                    >
+                                      {v.status === 'draft' ? 'Edit' : 'New version'}
+                                    </ButtonLink>
+                                  )}
+                                  {v.status === 'draft' && (
+                                    <Button
+                                      variant="primary"
+                                      aria-label={`Submit ${w.key} v${v.version}`}
+                                      disabled={submit.isPending}
+                                      onClick={() =>
+                                        submit.mutate({ kind: 'workflows', id: v.id, projectId })
+                                      }
+                                    >
+                                      Submit for approval
+                                    </Button>
+                                  )}
+                                  {(v.status === 'draft' || v.status === 'rejected') && (
+                                    <Button
+                                      variant="ghost"
+                                      aria-label={`Discard ${w.key} v${v.version}`}
+                                      onClick={() =>
+                                        discard.mutate({ kind: 'workflows', id: v.id, projectId })
+                                      }
+                                    >
+                                      Discard
+                                    </Button>
+                                  )}
+                                </>
                               )}
                             </>
-                          )}
-                        </>
-                      }
-                    />
-                  ))}
+                          }
+                        />
+                        {prev && comparing === v.id && (
+                          <li className="pl-4" data-testid={`compare-${w.key}-v${v.version}`}>
+                            {(() => {
+                              const lines = describeDiff(diffDefinitions(prev.definition, v.definition));
+                              return lines.length === 0 ? (
+                                <p className="text-xs text-subtle">No difference from v{prev.version}.</p>
+                              ) : (
+                                <ul className="list-disc pl-5 text-xs text-muted">
+                                  {lines.map((l) => (
+                                    <li key={l}>{l}</li>
+                                  ))}
+                                </ul>
+                              );
+                            })()}
+                          </li>
+                        )}
+                      </div>
+                    );
+                  })}
                 </ul>
                 {w.versions
                   .filter((v) => v.id === viewing)
@@ -616,62 +610,6 @@ function WorkflowsTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId
         })}
       </ul>
     </div>
-  );
-}
-
-function WorkflowEditPanel({
-  edit,
-  setEdit,
-  roles,
-  departments,
-  projectId,
-  onClose,
-}: {
-  edit: WorkflowEdit;
-  setEdit: (e: WorkflowEdit) => void;
-  roles: RoleDefinition[];
-  departments: string[];
-  projectId?: string;
-  onClose: () => void;
-}) {
-  const save = useSaveWorkflowDraft();
-  const submit = useSubmitDraft();
-  const run = async (andSubmit: boolean) => {
-    try {
-      const r = await save.mutateAsync({ id: edit.id, input: edit.input, projectId });
-      setEdit({ ...edit, id: r.id, issues: r.issues });
-      if (andSubmit && errorCount(r.issues) === 0) {
-        await submit.mutateAsync({ kind: 'workflows', id: r.id, projectId });
-        onClose();
-      }
-    } catch (e) {
-      const issues = apiIssues(e);
-      if (issues) setEdit({ ...edit, issues });
-    }
-  };
-  return (
-    <Panel>
-      <h2 className="mb-3 text-lg font-semibold text-fg">
-        {edit.id ? 'Edit workflow draft' : 'New custom workflow'}
-      </h2>
-      <WorkflowEditor
-        value={edit.input}
-        onChange={(input) => setEdit({ ...edit, input, issues: undefined })}
-        roles={roles}
-        departments={departments}
-        serverIssues={edit.issues}
-      />
-      <ErrorBox error={save.error ?? submit.error} />
-      <div className="mt-3 flex justify-end gap-2">
-        <Button onClick={onClose}>Close</Button>
-        <Button disabled={save.isPending} onClick={() => run(false)}>
-          Save draft
-        </Button>
-        <Button variant="primary" disabled={save.isPending || submit.isPending} onClick={() => run(true)}>
-          Save and submit for approval
-        </Button>
-      </div>
-    </Panel>
   );
 }
 

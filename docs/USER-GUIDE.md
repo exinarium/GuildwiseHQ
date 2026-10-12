@@ -547,11 +547,20 @@ Setting a budget below what was already spent pauses the project at once. Member
 **Roles & workflows** (sidebar, Organization) lets you extend the team beyond the built-in roles.
 
 - **Roles.** Built-in roles (builder, reviewer, tester, writer, architect and others) cannot be removed, but you can extend them with extra instructions, skills and standing orders (**Extend**). You can also design **custom roles**: a name and purpose, instructions, permissions, skills, a default model and which workflow stages the role may claim.
-- **Workflows.** A workflow is a set of stages with a role for each and a route for success and failure. Design your own, for example a support-triage flow. The BA checks that every stage can be reached and every failure ends somewhere.
+- **Workflows.** A workflow is a list of steps with a role for each, and a route for success and for sending work back. Design your own, for example a support-triage flow, in the **workflow builder** (below). The BA checks that every step can be reached and every failure ends somewhere.
 - **Departments** group roles by function so you can filter the board and the Agents page.
 - **Design chat.** Click **Start a design chat** and the BA interviews you and drafts the role or workflow.
 
 Everything you design is **submitted to the desk for your approval** before it can be used.
+
+**The workflow builder.** **New custom workflow** (Workflows tab) opens a template gallery: Blank, Simple review, Request, do, check, Content (draft, edit, publish), Support reply, or a **copy of a built-in** workflow (Code or Research; the copy does not keep the built-in's special behaviour, such as tests opening bug cards, and the builder lists what it left out). Then you work on the page:
+
+- **Steps** (left): for each step a name, what to do and what "done" looks like, **who does it** (a role), the information it needs first, **When finished, go to**, **If it is not good enough, send back to**, and **Only when** a yes-or-no answer applies. Add, move up or down, and remove steps with buttons (no dragging). **Information the card carries** defines the fields of the card.
+- **Diagram and Try a card** (right): the diagram redraws as you edit, and **Try a card** walks a card through the steps with the answers you tick and marks the path on the diagram. It also warns when no agent with a step's role is hired.
+- **Things to fix**: every problem in plain words, pinned to its step; problems block **Save and send for approval**, tips do not. A role must list a step among the steps it may take before it can work it.
+- **Ask the BA**: a chat beside the builder that gets an outline of your current draft.
+- **Versions**: each save is a draft of the next version; **Compare with previous** shows what changed step by step. After a version is approved its steps keep their internal names for good, so renaming a step never breaks roles or running cards; **Edit as new version** starts the next one.
+- **Advanced: table editor** keeps the original table with ids and events.
 
 ![The design chat: the BA asks what it needs to know](guide/assets/org-design-chat.jpg)
 
