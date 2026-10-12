@@ -68,3 +68,15 @@ The agent reported work outside the scope of its role. Check:
 - **Shift log**: look in `~/.aom-runner/logs/shifts/<shiftId>.jsonl` to see what the agent tried to do.
 - **Card thread**: read the card's comments to see what went wrong.
 - **Fix it**: adjust the card spec or agent skills and try again.
+
+## Git host says "Token refused" {#token-refused}
+
+The badge on the Workstations page shows **Token refused** for a git host where you expected to be connected.
+
+On the **Git hosts** panel, hover over the badge to see the HTTP status and the likely missing scope. Run the connect command shown in the **Connect** helper, usually with different credentials or a token with broader permissions. For Bitbucket, the documented token needs **repository** and **pull request** read/write scopes; if you only have the repository scope, git access still works but pull requests are unavailable.
+
+## Runner update rolled back {#update-rolled-back}
+
+The runner tried to update to a new version but rolled back automatically because the new version did not connect within a few minutes. The label on the runner shows **Update rolled back**.
+
+This usually means the new version has a bug or incompatibility with your machine's setup. Check the runner log (`~/.aom-runner/logs/runner.log`) for errors, then contact support with the log. The runner keeps running on the old version and will not try that version again on this machine.
