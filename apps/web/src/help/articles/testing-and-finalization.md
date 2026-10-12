@@ -47,7 +47,7 @@ A change that is committed to the working branch is large when the card's risk t
 
 ## Simple mode and expert mode {#expert-mode}
 
-You do not need to know git to use Guildwise HQ. By default (simple mode) cards and the desk speak in results: *"Goes into main after review and test"*, *"Your change is live on main"*, *"Waiting for you to merge the pull request"*. Guildwise picks the repository's default branch as the main line, keeps branch names out of sight, and only asks you about branches when it cannot work them out itself.
+You do not need to know git to use Guildwise HQ. By default (simple mode) cards and the desk speak in results: *"Goes into the working branch after review and test"*, *"Your change is live on the working branch"*, *"Waiting for you to merge the pull request"*. Guildwise picks the repository's default branch as the main branch and working branch, keeps branch names out of sight, and only asks you about branches when it cannot work them out itself.
 
 If you know git and want the details, open **Settings** and tick **Show me branches and git controls** under **Expert mode for code changes**. It is per person, off by default, and only changes what you see. With it on you also get:
 

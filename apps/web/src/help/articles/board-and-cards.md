@@ -94,7 +94,7 @@ Moving the card to another stage also clears the back-off.
 
 ## Risk tier {#risk-tier}
 
-Risk is computed when the builder hands off. A card is **large** when 200 or more lines changed, when the change touches the project's architectural paths (set in **Project settings > Basics** as architectural globs), or when it is a refactor; otherwise it is small. Small cards need one reviewer's approval, large cards two, and a large change that would go straight into main waits for your approval on the desk (unless you turned that off in the project's merging settings).
+Risk is computed when the builder hands off. A card is **large** when 200 or more lines changed, when the change touches the project's architectural paths (set in **Project settings > Basics** as architectural globs), or when it is a refactor; otherwise it is small. Small cards need one reviewer's approval, large cards two, and a large change that would be committed and pushed to the working branch waits for your approval on the desk (unless you turned that off in the project's merging settings).
 
 You can override it:
 

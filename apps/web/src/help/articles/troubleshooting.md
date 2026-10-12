@@ -92,3 +92,33 @@ If SSH works but pull requests are not opened, that is expected: pull requests n
 The runner tried to update to a new version but rolled back automatically because the new version did not connect within a few minutes. The label on the runner shows **Update rolled back**.
 
 This usually means the new version has a bug or incompatibility with your machine's setup. Check the runner log (`~/.aom-runner/logs/runner.log`) for errors, then contact support with the log. The runner keeps running on the old version and will not try that version again on this machine.
+
+## Working branch could not be created or pushed {#working-branch-push-failed}
+
+A card shows **Last attempt failed: working branch 'X' could not be created or pushed** or names a reason like "protected repository".
+
+The working branch is where finished card work is combined after review and test (see [Projects](/help/projects#reference-repos) and [Testing and finalization](/help/testing-and-finalization#finalization)). If it does not exist, Guildwise tries to create it from the main branch and push it. If the push is refused (a protected repository, no access, or an uncommitted conflict), a question waits on your desk: **Which branch is the working branch of `<repository>`?**
+
+To fix it:
+
+1. **On the Workstations page**, open the workstation and look under **Repositories** for the problematic repository.
+2. If the error says the branch is protected, go to **Project settings > Repositories** and read the error under the repository. You may need to change **How finished work lands** to **Pull request** if the branch rules block direct commits.
+3. If the error says no access, check the repository's **Access** setting: it must be the workstation's default or an SSH key / API token the runner can use.
+4. Answer the question on your desk to set which branch to use going forward. The card will then retry.
+
+See [DevOps and repository hygiene](/help/devops-and-hygiene#working-branch) for more detail.
+
+## An agent says it cannot read a repository {#reference-repositories-needed}
+
+In a chat or on a card, the agent says it cannot find or read a code repository (for example to compare two or look up how something is used elsewhere).
+
+Agents can only read the folder they are working on (their card's branch) and, in a chat about a project, the project's own repositories. To let agents read other code, the project owner adds **Reference repositories** in the project settings so they can compare or look things up. Every repository you do not pick stays blocked, along with everything else on the workstation.
+
+To fix it:
+
+1. Open **Projects** and click the gear on the project.
+2. Go to **Reference repos**.
+3. Under **Add a reference repository** pick the repository the agent needs (the repositories of other projects, listed under **Projects**, or any repository cloned on a workstation, listed under **On <workstation>**).
+4. Click **Add**.
+
+Secret files like `.env` and keys stay blocked even in reference repositories. Agents are told which folders they can read, so they may ask you to add a repository instead of searching for a setting. See [Projects](/help/projects#reference-repos) for the full explanation.

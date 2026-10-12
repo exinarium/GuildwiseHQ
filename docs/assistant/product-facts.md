@@ -32,7 +32,7 @@ Code, secrets and files stay on the workstation and in your own git repositories
 
 ## Git hosts
 
-Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a plain git server, and one project can mix them. The login for each host stays on the workstation (a one-line connect command, or the DevOps engineer helps in a chat). Finished work goes straight into the main line after review and test by default, or arrives as a pull request if the project prefers that or the main line is protected (a plain git server gets a pushed branch instead of a pull request).
+Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a plain git server, and one project can mix them. The login for each host stays on the workstation (a one-line connect command, or the DevOps engineer helps in a chat). Finished work is committed and pushed to the working branch after review and test by default, or arrives as a pull request if the project prefers that or the working branch is protected (a plain git server gets a pushed branch instead of a pull request).
 
 ## What you get
 

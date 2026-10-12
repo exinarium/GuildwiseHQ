@@ -97,7 +97,7 @@ SSH only covers git itself. Pull requests, branch rules and the repository list 
 
 A personal access token for one organization and `az login` (also `az login --service-principal`) keep working as fallbacks.
 
-A **plain git** server needs no connection, but no pull request is opened: the branch is pushed and the desk tells you to open the request yourself. If a project's main line is protected on the host, finished work arrives as a pull request instead of going straight in (see [Testing and finalization](/help/testing-and-finalization#finalization)).
+A **plain git** server needs no connection, but no pull request is opened: the branch is pushed and the desk tells you to open the request yourself. If a project's main or working branch is protected on the host, finished work arrives as a pull request instead of being pushed directly (see [Testing and finalization](/help/testing-and-finalization#finalization)).
 
 ## Runner updates {#runner-updates}
 

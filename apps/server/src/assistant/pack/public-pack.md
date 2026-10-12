@@ -29,7 +29,7 @@ Code, secrets and files stay on the workstation and in your own git repositories
 
 ## Git hosts
 
-Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a plain git server, and one project can mix them. The login for each host stays on the workstation (a one-line connect command, or the DevOps engineer helps in a chat). Finished work goes straight into the main line after review and test by default, or arrives as a pull request if the project prefers that or the main line is protected (a plain git server gets a pushed branch instead of a pull request).
+Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a plain git server, and one project can mix them. The login for each host stays on the workstation (a one-line connect command, or the DevOps engineer helps in a chat). Finished work is committed and pushed to the working branch after review and test by default, or arrives as a pull request if the project prefers that or the working branch is protected (a plain git server gets a pushed branch instead of a pull request).
 
 ## What you get
 
@@ -190,7 +190,7 @@ Intake from Jira and GitHub, unmapped tickets, credentials, the outbox and guard
 The test stage, how finished work lands (working branch or pull request), the main and working branch, expert mode, the full suite and regression runs.
 - Test stage: When a card reaches Test, a tester runs the E2E tests from the test plan. If tests pass:
 - Finalization: At the Finalize stage, your BA ships the work the way the project says. Every project repository has two branches, named in the project's repository settings:
-- Simple mode and expert mode: You do not need to know git to use Guildwise HQ. By default (simple mode) cards and the desk speak in results: *"Goes into main after review and test"*, *"Your change is live on main"*, *"Waiting for you to merge the pull request"*.…
+- Simple mode and expert mode: You do not need to know git to use Guildwise HQ. By default (simple mode) cards and the desk speak in results: *"Goes into the working branch after review and test"*, *"Your change is live on the working branch"*, *"Waiting for you to merge the pull request"*.…
 - Full suite and regression: After finalization, a full suite card is created for testers to run the entire E2E suite once. A test-side failure (a flaky test, data or environment) is fixed by the tester; a genuine bug becomes a new bug card and you get a notice. These failures do not block merges.
 
 ### Phases and follow-ups
@@ -309,6 +309,8 @@ Day-to-day problems: offline workstations, missing handoffs, vault conflicts, mi
 - Git host says "Token refused": The badge on the Workstations page shows Token refused for a git host where you expected to be connected.
 - SSH says "refused the key", "host key changed" or "not reachable": On Workstations, open the workstation, click SSH on the git host and press Check SSH. The state tells you what to do:
 - Runner update rolled back: The runner tried to update to a new version but rolled back automatically because the new version did not connect within a few minutes. The label on the runner shows Update rolled back.
+- Working branch could not be created or pushed: A card shows Last attempt failed: working branch 'X' could not be created or pushed or names a reason like "protected repository".
+- An agent says it cannot read a repository: In a chat or on a card, the agent says it cannot find or read a code repository (for example to compare two or look up how something is used elsewhere).
 
 ### Plans and billing
 Plans and limits, the 7-day free trial, cards and invoices, changing plan, Business add-ons, cancelling and what happens when a payment fails.
