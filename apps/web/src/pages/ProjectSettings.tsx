@@ -13,6 +13,7 @@ import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
 import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
 import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
+import { ProjectWorkflows } from '../components/ProjectWorkflows.tsx';
 import { ReferenceReposPanel } from '../components/ReferenceReposPanel.tsx';
 import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
@@ -101,6 +102,7 @@ export function ProjectSettings() {
   const sections = [
     { id: 'general', label: 'Basics' },
     { id: 'stage', label: 'Stage' },
+    ...(project && traits.usesRepos ? [{ id: 'workflows', label: 'Workflows' }] : []),
     ...(traits.usesRepos || activeRepos.length > 0 ? [{ id: 'repos', label: 'Repos' }] : []),
     ...(project && traits.usesRepos
       ? [
@@ -214,6 +216,11 @@ export function ProjectSettings() {
       {project && (
         <div id="stage" className="scroll-mt-20">
           <ConvertPanel project={project} repos={repos} canConvert={canConvert} />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="workflows" className="scroll-mt-20">
+          <ProjectWorkflows projectId={id} projectKey={project.key} />
         </div>
       )}
       {(traits.usesRepos || activeRepos.length > 0) && (

@@ -52,7 +52,11 @@ The built-in workflows (Code: Spec, Build, Review, Test, Docs, Finalize; Researc
 3. Validation checks that there are no unreachable stages, failure paths end somewhere and every stage has a claimable role.
 4. Click **Save and submit for approval**, then approve it on the desk.
 
-Once approved, a custom workflow can be picked as the workflow of a new project on the Projects page.
+Once approved, a custom workflow can be picked as the workflow of a new project on the Projects page, or enabled next to a project's own workflow in the project's settings under **Workflows** (see [Workflows of a project](/help/projects#workflows)).
+
+### A project's own steps in a built-in workflow {#variants}
+
+You cannot edit the built-in Code workflow, but one project can have its own version of it with extra steps: in the project's settings, **Workflows**, click **Customise** and use **Insert step after ...** to add a step after any existing one. The base steps stay as they are. The new version goes to your desk for approval; running cards keep the version they started on, and a newer version of the base workflow can be applied with **Rebase**. In a design chat you can ask the BA to draft it (`aom org workflow variant`).
 
 ## Departments {#departments}
 

@@ -43,6 +43,10 @@ export const extraHandlers = [
     return HttpResponse.json(reportingBody());
   }),
 
+  // #10 more than one workflow per project: the mock server has the primary workflow only.
+  http.get(`${A}/projects/:id/workflows`, () =>
+    HttpResponse.json({ enabled: [], available: [], canEdit: false }),
+  ),
   // M10 organization designer: built-in departments only; drafting needs the real server.
   http.get(`${A}/departments`, empty({ departments: [] })),
   http.post(`${A}/departments`, unavailable),

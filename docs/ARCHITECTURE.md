@@ -805,7 +805,8 @@ Heartbeats are not events.
 
 | Event | Payload | Projection effect |
 | --- | --- | --- |
-| `WorkflowVersionRegistered` | `{workflowVersionId, orgId|null, key, version, name, department?, definition, status}` | workflow_versions + workflow_stages (built-ins registered at boot if missing) |
+| `WorkflowVersionRegistered` | `{workflowVersionId, orgId|null, key, version, name, department?, definition, status, projectId?, variantSpec?}` | workflow_versions + workflow_stages (built-ins registered at boot if missing); `projectId` + `variantSpec` mark a project variant (insertions on a base, `definition.extends`) |
+| `ProjectWorkflowsSet` | `{projectId, enabled: [{workflowKey, defaultCardTypes}], by}` | project_workflows (the project's enabled workflows; the primary row follows `ProjectCreated` / `ProjectConverted`) |
 | `WorkflowVersionApproved` / `WorkflowVersionRejected` | `{workflowVersionId}` | status active (previous active → superseded) |
 | `RoleVersionRegistered` / `RoleVersionApproved` / `RoleVersionRejected` | analogous for roles | role_definitions |
 | `RoleExtended` | `{orgId, roleKey, baseVersion, extensions}` | role_extensions |
