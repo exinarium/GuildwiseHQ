@@ -8,6 +8,29 @@ export const ENVIRONMENT_HELP_SECTION = `# Environment help
 Need the app started, a tool installed or the environment fixed? Run \`aom devops "<request>"\`: it asks this workstation's DevOps engineer and does not end your shift. Do not change the machine yourself.
 `;
 
+/** The card a DevOps request was filed for, as plain text for the prompt. */
+function cardSection(card: NonNullable<DevopsShift['card']>): string {
+  const lines = [`${card.ref}: ${card.title}`];
+  const meta = [
+    card.cardType ? `type ${card.cardType}` : '',
+    card.stage ? `stage ${card.stage}` : '',
+    card.status ? `status ${card.status}` : '',
+    card.project ? `project ${card.project.name} (${card.project.key})` : '',
+    card.repo ? `repository ${card.repo}` : '',
+  ].filter(Boolean);
+  if (meta.length) lines.push(meta.join(', '));
+  const fields = JSON.stringify(card.fields ?? {}, null, 2);
+  if (fields !== '{}')
+    lines.push(
+      `Fields:\n${fields.length > 6000 ? `${fields.slice(0, 6000)}\n... (cut; \`aom card show\` has all)` : fields}`,
+    );
+  if (card.comments?.length)
+    lines.push(
+      `Latest comments:\n${card.comments.map((m) => `- ${m.authorName} (${m.kind}, ${m.at}): ${m.body.slice(0, 1000)}`).join('\n')}`,
+    );
+  return lines.join('\n');
+}
+
 const accessLines = (a: DevopsShift['access']): string[] => [
   `- Install packages and tools: ${a.allowInstall ? 'allowed' : 'NOT allowed (needs approval)'}`,
   `- Docker (install, run, manage containers): ${a.allowDocker ? 'allowed' : 'NOT allowed (needs approval)'}`,
@@ -48,6 +71,20 @@ export function renderDevopsInstructions(brief: ShiftBrief, devops: DevopsShift)
       'Log every command that changed the environment with --command so the record is complete.',
     ].join('\n'),
   );
+  if (devops.card) {
+    out.push('# The card of this request');
+    out.push(
+      [
+        `This request was filed for card ${devops.card.ref}. You can read and update that one card (no other card):`,
+        '- `aom card show` prints the card with its fields and latest comments.',
+        '- `aom card comment --note "<text>"` comments on it (what you found or changed, for the card\'s people and agents).',
+        '- `aom card update ' +
+          devops.card.ref +
+          ' --json \'{"fields":{"<name>":"<value>"}}\'` sets the card fields your task needs (a field set to null is removed). Only fields: title, stage and status stay as they are.',
+        'Report the outcome of the request with `aom devops-done` as usual; use the card commands for what the card needs to know.',
+      ].join('\n'),
+    );
+  }
   out.push('# Boundaries');
   out.push(
     [
@@ -69,6 +106,10 @@ export function renderDevopsPrompt(devops: DevopsShift): string {
   );
   out.push('## Request');
   out.push(devops.summary.trim());
+  if (devops.card) {
+    out.push('## Card');
+    out.push(cardSection(devops.card));
+  }
   if (devops.approval) {
     out.push('## Approved by the manager');
     out.push(

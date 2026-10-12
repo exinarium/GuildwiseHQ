@@ -228,6 +228,36 @@ describe('DevOps prompts and instructions', () => {
     expect(md).toContain('install docker');
     expect(renderDevopsPrompt(devops)).not.toContain('Approved by the manager');
   });
+  it('a request filed for a card carries the card and tells DevOps how to use it', () => {
+    const withCard = {
+      ...devops,
+      card: {
+        ref: 'WEB-12',
+        title: 'Add login page',
+        cardType: 'feature',
+        stage: 'build',
+        status: 'queued',
+        fields: { context: 'Login needs the dev stack on :3000' },
+        project: { key: 'WEB', name: 'Website' },
+        repo: 'acme/web',
+        comments: [{ authorName: 'Ada', kind: 'comment', body: 'Start the stack first', at: TS }],
+      },
+    };
+    const prompt = renderDevopsPrompt(withCard);
+    expect(prompt).toContain('## Card');
+    expect(prompt).toContain('WEB-12: Add login page');
+    expect(prompt).toContain('project Website (WEB)');
+    expect(prompt).toContain('repository acme/web');
+    expect(prompt).toContain('Login needs the dev stack on :3000');
+    expect(prompt).toContain('Ada (comment');
+    expect(prompt).toContain('Start the stack first');
+    const md = renderDevopsInstructions(brief, withCard);
+    expect(md).toContain('aom card show');
+    expect(md).toContain('aom card comment --note');
+    expect(md).toContain('aom card update WEB-12');
+    expect(renderDevopsInstructions(brief, { ...devops, card: undefined })).not.toContain('aom card show');
+    expect(renderDevopsPrompt({ ...devops, card: undefined })).not.toContain('## Card');
+  });
   it('card instructions render PROJECT.md only when present', () => {
     const b = buildBrief();
     expect(renderInstructions(b)).not.toContain('PROJECT.md');

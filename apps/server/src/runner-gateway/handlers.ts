@@ -11,6 +11,7 @@ import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
 import { cardMessage, SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { designRpc } from '../commands/design-rpc.ts';
 import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
+import { devopsCardRpc } from '../commands/devops-card.ts';
 import { outboundDraftRpc } from '../commands/drafts.ts';
 import { endQuestionShift } from '../commands/escalation.ts';
 import { applyFinalizeResult } from '../commands/finalize.ts';
@@ -64,6 +65,8 @@ const INTAKE_METHODS = new Set([
   'phase.assign',
   'phase.submit',
 ]);
+/** What a DevOps shift may do with the card of its request. */
+const DEVOPS_CARD_METHODS = new Set(['card.get', 'card.comment', 'card.update']);
 /** M10: what the BA does in a design chat. */
 const DESIGN_METHODS = new Set([
   'org.catalogue',
@@ -743,6 +746,9 @@ export class RunnerHandlers {
       if (msg.method === 'ledger.search') return reply(true, await ledgerSearchRpc(ctx, shift, msg.params));
       // A BA task shift is read-only and has no card: only the phase verbs and reading are available.
       if (shift.kind === 'ba_task') return reply(...(await baTaskRpc(ctx, shift, msg.method, msg.params)));
+      // A DevOps shift reaches only the card its request was filed for (`aom card show|comment|update`).
+      if (shift.kind === 'devops' && DEVOPS_CARD_METHODS.has(msg.method))
+        return reply(...(await devopsCardRpc(ctx, shift, msg.method, msg.params)));
       if (msg.method === 'devops.request')
         return reply(...(await this.devopsRequest(conn, shift, msg.params)));
       if (msg.method === 'outbound.draft') return reply(...(await outboundDraftRpc(ctx, shift, msg.params)));

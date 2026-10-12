@@ -137,6 +137,39 @@ describe('DevOps shifts (mock agent, real aom CLI)', () => {
   });
 });
 
+describe('a DevOps shift filed for a card', () => {
+  it('reads its card through the server and does not answer card.get locally', async () => {
+    const seen: any = {};
+    const adapter = new ScriptedAdapter(async (_i, ctl) => {
+      seen.local = await ctl.post('/v1/rpc', { method: 'card.get' });
+      seen.linked = await ctl.post('/v1/rpc', { method: 'card.get', params: { linked: true } });
+      seen.comment = await ctl.post('/v1/rpc', { method: 'card.comment', params: { note: 'up' } });
+      await ctl.post('/v1/report', {
+        report: {
+          kind: 'outcome',
+          outcomeId: 'devops_done',
+          note: 'n',
+          data: { summary: 's', commands: [] },
+        },
+      });
+    });
+    h = await startHarness(
+      {
+        rpc: (m) =>
+          m.method === 'card.get' || m.method === 'card.comment'
+            ? { ok: true, result: { ref: 'TOY-1', method: m.method } }
+            : { ok: false },
+      },
+      { adapters: new Map([['mock', adapter]]) },
+    );
+    await run(makeDevopsStart({ summary: 'start the stack' }));
+    expect(seen.local.json.result.devops.summary).toBe('start the stack');
+    expect(seen.linked.json.result).toEqual({ ref: 'TOY-1', method: 'card.get' });
+    expect(seen.comment.json.result).toEqual({ ref: 'TOY-1', method: 'card.comment' });
+    expect(h.server.of('rpc.request').map((r) => r.method)).toEqual(['card.get', 'card.comment']);
+  });
+});
+
 describe('`aom devops` from a card shift', () => {
   it('forwards the request to the server and does not end the shift', async () => {
     const seen: any = {};

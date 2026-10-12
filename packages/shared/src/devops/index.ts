@@ -31,7 +31,27 @@ export const DevopsShiftSchema = z.object({
   threadId: z.uuid(),
   summary: z.string(),
   requestedBy: DevOpsRequester,
-  card: z.object({ ref: z.string(), title: z.string() }).optional(),
+  /**
+   * The card the request was filed for (a card shift's `aom devops`, or "Ask DevOps" on a card). Besides the ref and
+   * title it carries what the DevOps engineer needs to work for the card; `aom card show|comment|update` reach this one
+   * card (the server only ever serves the request's own card). All but ref/title are additive.
+   */
+  card: z
+    .object({
+      ref: z.string(),
+      title: z.string(),
+      cardType: z.string().optional(),
+      stage: z.string().optional(),
+      status: z.string().optional(),
+      fields: z.record(z.string(), z.unknown()).optional(),
+      project: z.object({ key: z.string(), name: z.string() }).optional(),
+      repo: z.string().optional(),
+      /** Latest comments, oldest first. */
+      comments: z
+        .array(z.object({ authorName: z.string(), kind: z.string(), body: z.string(), at: z.iso.datetime() }))
+        .optional(),
+    })
+    .optional(),
   workstationName: z.string(),
   access: DevOpsAccessSchema,
   /** Set when the manager already approved the out-of-access action this request is resumed for. */

@@ -24,6 +24,8 @@ You can ask it directly from anywhere: click **Ask DevOps** in the top bar, choo
 
 The DevOps engineer works **as you, on your machine**, outside the safety box that other agents work in. In a chat with it, a command, a Docker build or a deploy you ask for runs right away. The tick boxes in the workstation's panel (install packages and tools, use Docker, use elevated privileges (sudo), write to extra paths) are instructions to it and decide what the automatic tool setup may do, but they do not physically stop it: only give this agent to a machine you are happy to hand it. Anything it decides is outside its instructions waits for approval on the desk.
 
+**Requests about a card.** When a request is filed for a card (the **Ask DevOps** button on the card, or the agent working on it asks), the DevOps engineer gets that card in its brief: title, type, fields, project, repository and the latest comments. It can read the card, comment on it and set the card fields it needs, for example how to start the stack. It cannot change the card's title, stage or status, and it cannot read or change any other card.
+
 **Who approves.** On a workstation that belongs to a team member, an Owner or Admin approves, and the person whose machine it is must agree as well. If you are an Owner approving on your own machine, one click is enough. When two people are needed, the desk item stays open after the first answer, and either of them can say no.
 
 Because it is free, you cannot extend it with extra instructions, skills or custom permissions. Only its model, effort and runtime can change.
