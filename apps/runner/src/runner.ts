@@ -1,6 +1,6 @@
 import { statSync, writeFileSync } from 'node:fs';
 import { hostname, platform } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   CommandPayloadSchemas,
   defaultHost,
@@ -40,13 +40,14 @@ import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { openReleasePr } from './git/release-pr.ts';
-import { scanRepos } from './git/repo-scan.ts';
+import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { sweepWorktrees } from './git/sweep.ts';
 import { removeWorktree } from './git/worktrees.ts';
 import { IntegrationPoller } from './integrations/poll.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
+import { forbiddenReadPath } from './read-repos.ts';
 import { RepoAccessUpdater } from './repo/access.ts';
 import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
@@ -135,6 +136,8 @@ export class Runner {
   private readonly adapters: Map<string, RuntimeAdapter>;
   private readonly external: ExternalAdapters;
   private repos: RepoReport[] = [];
+  /** Every clone under the repoRoots (with or without a remote) minus the folders that are never offered. */
+  private catalog: ScannedRepo[] = [];
   /** The runtimes last reported (hello or runtimes.report), to send a new report only on change. */
   private lastRuntimes: string | undefined;
   private maxConcurrent: number;
@@ -208,6 +211,7 @@ export class Runner {
       log: this.log,
       transport: { send: (type, payload) => this.client.send(type as never, payload) },
       findRepo: (norm) => this.findRepo(norm),
+      findLocal: (k) => this.findLocal(k),
       writeVault: (cmd) => this.vaults.write(cmd),
       rpc: (shiftId, method, params) => this.rpc(shiftId, method, params),
       maxConcurrentShifts: () =>
@@ -235,6 +239,7 @@ export class Runner {
       rpc: (chatId, method, params) => this.rpc(chatId, method, params),
       external: this.external,
       findRepo: (n) => this.findRepo(n),
+      findLocal: (k) => this.findLocal(k),
       git: this.agentGit,
     });
     this.outbound = new OutboundExecutor({ dir: this.paths.outbound, adapters: this.external });
@@ -301,7 +306,7 @@ export class Runner {
     await writeShims(this.paths.bin);
     await this.ipc.start();
     await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
-    this.repos = await scanRepos(this.opts.config.repoRoots);
+    await this.scan();
     this.supervisor.resumePersisted();
     this.vaults.start();
     this.client.start();
@@ -369,7 +374,7 @@ export class Runner {
   }
 
   private async buildHello(): Promise<Record<string, unknown>> {
-    this.repos = await scanRepos(this.opts.config.repoRoots);
+    await this.scan();
     return {
       runnerVersion: RUNNER_VERSION,
       protocol: 1,
@@ -380,6 +385,7 @@ export class Runner {
         return r;
       }),
       repos: this.repos,
+      repoCatalog: this.repoCatalog(),
       vaults: await this.vaults.report(),
       activeShifts: this.supervisor.activeShifts(),
       maxConcurrentShifts: this.opts.config.maxConcurrentShifts,
@@ -388,8 +394,8 @@ export class Runner {
   }
 
   private async rescan(): Promise<void> {
-    this.repos = await scanRepos(this.opts.config.repoRoots);
-    this.client.send('repos.report', { repos: this.repos });
+    await this.scan();
+    this.client.send('repos.report', { repos: this.repos, repoCatalog: this.repoCatalog() });
     // A re-probe may change a runtime (bubblewrap installed, claude upgraded): tell the server when it did.
     const runtimes = await this.runtimeInfos();
     const key = JSON.stringify(runtimes);
@@ -509,11 +515,38 @@ export class Runner {
     });
   }
 
+  /** Scans the repoRoots once: project matching sees every clone with a remote, the picker catalog only what may be opened. */
+  private async scan(): Promise<void> {
+    const all = await scanAllRepos(this.opts.config.repoRoots);
+    this.repos = withRemote(all);
+    this.catalog = all.filter((r) => !forbiddenReadPath(r.localPath, this.paths.root));
+  }
+
+  /** What the server may offer in the reference repositories picker: names, normalized remotes, relative keys; no paths. */
+  private repoCatalog(): Array<{ name: string; localKey: string; remoteUrlNormalized: string | null }> {
+    return this.catalog.slice(0, 2000).map((r) => ({
+      name: basename(r.localPath),
+      localKey: r.localKey,
+      remoteUrlNormalized: r.remoteUrl ? normalizeRemoteUrl(r.remoteUrl) : null,
+    }));
+  }
+
+  /** The clone with this catalog key (a path relative to a repoRoot), as last scanned. */
+  private async findLocal(localKey: string): Promise<{ localPath: string } | undefined> {
+    const match = (r: ScannedRepo) => r.localKey === localKey;
+    let found = this.catalog.find(match);
+    if (!found) {
+      await this.scan();
+      found = this.catalog.find(match);
+    }
+    return found;
+  }
+
   private async findRepo(normalized: string): Promise<RepoReport | undefined> {
     const match = (r: RepoReport) => normalizeRemoteUrl(r.remoteUrl) === normalized;
     let found = this.repos.find(match);
     if (!found) {
-      this.repos = await scanRepos(this.opts.config.repoRoots);
+      await this.scan();
       found = this.repos.find(match);
     }
     return found;

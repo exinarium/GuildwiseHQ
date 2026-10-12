@@ -19,6 +19,7 @@ import { iso, one, type Row, rows } from '../db/sql.ts';
 import type { ClaimResult } from '../dispatcher/claim.ts';
 import { cardLedgerEntries, standingOrdersFor } from '../queries/ledger.ts';
 import { referenceReadRepos } from './read-repos.ts';
+import { localReadRepos } from './workstation-repos.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
 
@@ -215,6 +216,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     readRepos: (await referenceReadRepos(ctx.pool, brief.project.id)).filter(
       (r) => r.repoId !== claim.worktree?.repoId,
     ),
+    localReadRepos: await localReadRepos(ctx.pool, brief.project.id, claim.workstationId),
   };
 }
 

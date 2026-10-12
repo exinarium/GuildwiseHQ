@@ -23,6 +23,8 @@ import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { eligibleProjectRepos } from '../runner-gateway/read-repos.ts';
+import { type StoredWorkstationRepo, validateWorkstationRepos } from '../runner-gateway/workstation-repos.ts';
 import { createLocalOrigin } from '../simulation/repos.ts';
 import { releaseEvents } from './cards.ts';
 import { assertRemoteUrl, cardMessage, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
@@ -259,38 +261,59 @@ export async function setReferenceRepos(
   user: AuthSession['user'],
   projectId: string,
   repoIds: string[],
+  workstationRepos?: Array<{ workstationId: string; localKey: string }>,
 ): Promise<void> {
   const wanted = [...new Set(repoIds)];
   await withAppendTx(ctx.pool, async (tx) => {
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.my_role !== 'owner') throw forbidden('only the project owner can do this');
     if (wanted.length > 0) {
-      const ok = await rows(
-        tx,
-        `SELECT r.id FROM project_repos r JOIN projects rp ON rp.id = r.project_id
-           JOIN project_members pm ON pm.project_id = rp.id AND pm.user_id = $2 AND pm.status = 'active'
-          WHERE r.id = ANY($1::uuid[]) AND r.removed_at IS NULL AND rp.org_id = $3 AND rp.id <> $4
-            AND rp.status = 'active' AND rp.kind <> 'interest'`,
-        [wanted, user.id, p.org_id, projectId],
-      );
-      const good = new Set(ok.map((r) => r.id as string));
+      // the same rule as the picker: org owners and admins any project of the organization, others their own projects
+      const ok = await eligibleProjectRepos(tx, {
+        userId: user.id,
+        orgId: p.org_id,
+        projectId,
+        onlyIds: wanted,
+      });
+      const good = new Set(ok.map((r) => r.repoId));
       const bad = wanted.filter((id) => !good.has(id));
       if (bad.length > 0)
         throw badRequest(
           'invalid_reference_repo',
-          'a reference repository must be a repository of another active project of this organization that you belong to',
+          'a reference repository must be a repository of another active project of this organization that you can see',
           { repoIds: bad },
         );
     }
+    // Clones on workstations: omitted keeps what the project has.
+    const storedWs = (p.reference_workstation_repos ?? []) as StoredWorkstationRepo[];
+    let wsRepos = storedWs;
+    if (workstationRepos) {
+      const v = await validateWorkstationRepos(tx, {
+        userId: user.id,
+        orgId: p.org_id,
+        wanted: workstationRepos,
+        current: storedWs,
+      });
+      if (v.bad.length > 0)
+        throw badRequest(
+          'invalid_reference_repo',
+          'a reference repository on a workstation must be a clone reported by one of your own workstations',
+          { workstationRepos: v.bad },
+        );
+      wsRepos = v.ok;
+    }
     const current = [...((p.reference_repo_ids ?? []) as string[])].sort();
-    if (JSON.stringify(current) === JSON.stringify([...wanted].sort())) return;
+    const key = (l: StoredWorkstationRepo[]) =>
+      JSON.stringify(l.map((r) => `${r.workstationId}|${r.localKey}`).sort());
+    if (JSON.stringify(current) === JSON.stringify([...wanted].sort()) && key(storedWs) === key(wsRepos))
+      return;
     await ctx.store.append(
       [
         {
           streamId: streamId.project(projectId),
           event: {
             type: 'ProjectReferenceReposSet',
-            payload: { projectId, repoIds: wanted, by: user.id },
+            payload: { projectId, repoIds: wanted, workstationRepos: wsRepos, by: user.id },
           },
           actor: userActor(user.id),
           scope: projectScope(p.org_id, projectId),

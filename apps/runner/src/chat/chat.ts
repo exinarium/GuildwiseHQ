@@ -36,6 +36,8 @@ export interface ChatDeps {
   rpc(chatId: string, method: string, params: Record<string, unknown>): Promise<IpcRpcResponse>;
   /** This workstation's clone of a repository by normalized remote (its repository scan): the project's read-only repositories. */
   findRepo?(remoteUrlNormalized: string): Promise<{ localPath: string } | undefined>;
+  /** This workstation's clone by catalog key (path relative to a repoRoot): reference repositories picked on this workstation. */
+  findLocal?(localKey: string): Promise<{ localPath: string } | undefined>;
   /** `aom git status|connect` in the DevOps engineer's chat. */
   git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
 }
@@ -208,10 +210,15 @@ export class ChatManager {
       devops || !this.deps.findRepo
         ? []
         : (
-            await resolveReadRepos(msg.context.readRepos, {
-              findRepo: this.deps.findRepo,
-              runnerRoot: paths.root,
-            })
+            await resolveReadRepos(
+              msg.context.readRepos,
+              {
+                findRepo: this.deps.findRepo,
+                ...(this.deps.findLocal ? { findLocal: this.deps.findLocal } : {}),
+                runnerRoot: paths.root,
+              },
+              msg.context.localReadRepos,
+            )
           ).filter((r) => !readOnly || r.kind === 'reference');
 
     await adapter.writeInstructions(

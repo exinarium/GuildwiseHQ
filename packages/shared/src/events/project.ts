@@ -150,7 +150,29 @@ export const projectEvents = [
    * agents may read, read-only, in card work and in chats on the workstations that have them. `repoIds` is the whole
    * list (empty clears it). Nothing else on the workstation is ever opened.
    */
-  defineEvent('ProjectReferenceReposSet', z.object({ projectId: Id, repoIds: z.array(Id), by: Id })),
+  defineEvent(
+    'ProjectReferenceReposSet',
+    z.object({
+      projectId: Id,
+      repoIds: z.array(Id),
+      /**
+       * Clones picked from a workstation (any repository under its repoRoots, not only project repositories), whole
+       * list. Absent in events before this field existed: the list is then left as it was. `remoteUrlNormalized` null:
+       * no remote, only that workstation can open it (by `localKey`, a path relative to its repoRoot).
+       */
+      workstationRepos: z
+        .array(
+          z.object({
+            workstationId: Id,
+            localKey: z.string(),
+            name: z.string(),
+            remoteUrlNormalized: z.string().nullable(),
+          }),
+        )
+        .optional(),
+      by: Id,
+    }),
+  ),
   /**
    * The Owner or an Admin converted the project to another workflow (docs/design/restructure.md section 8, any to any).
    * One append with the repositories it adds (`ProjectRepoAdded`) and, for each open card the new workflow cannot place,

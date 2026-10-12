@@ -87,6 +87,18 @@ export const RepoReportSchema = z.object({
 });
 export type RepoReport = z.infer<typeof RepoReportSchema>;
 
+/**
+ * A repository found on the workstation under a repoRoot, for the "reference repositories" picker: any clone, with or
+ * without a remote. Never an absolute path: `localKey` is the path relative to the repoRoot it was found under (forward
+ * slashes), the stable identifier of a repository without a remote.
+ */
+export const CatalogRepoSchema = z.object({
+  name: z.string().max(200),
+  localKey: z.string().max(500),
+  remoteUrlNormalized: z.string().max(500).nullable(),
+});
+export type CatalogRepo = z.infer<typeof CatalogRepoSchema>;
+
 export const AgentRuntimeSpecSchema = z.object({
   agentId: z.uuid(),
   name: z.string(),
@@ -223,6 +235,19 @@ export const ReadRepoSchema = z.object({
 });
 export type ReadRepo = z.infer<typeof ReadRepoSchema>;
 
+/**
+ * A reference repository picked from a workstation's clones (not a project repository): `localKey` (present only when
+ * sent to the workstation it was picked on) names the clone in that runner's catalog; `remoteUrlNormalized` (when the
+ * repository has a remote) lets any workstation that has a clone of the same remote open it. A separate field from
+ * `readRepos` so older runners ignore it.
+ */
+export const LocalReadRepoSchema = z.object({
+  name: z.string(),
+  localKey: z.string().optional(),
+  remoteUrlNormalized: z.string().optional(),
+});
+export type LocalReadRepo = z.infer<typeof LocalReadRepoSchema>;
+
 export const ChatContextSchema = z.object({
   projectId: z.uuid().optional(),
   cardId: z.uuid().optional(),
@@ -232,6 +257,8 @@ export const ChatContextSchema = z.object({
   cardWorktreePath: z.string().optional(),
   /** Repositories the chat may read here: the project's own and its reference repositories (absent: none). */
   readRepos: z.array(ReadRepoSchema).optional(),
+  /** Reference repositories picked from workstation clones (see `LocalReadRepoSchema`). */
+  localReadRepos: z.array(LocalReadRepoSchema).optional(),
   /** M7: set for the BA's intake chat (project list, mapping state, cards created so far). */
   intake: IntakeContextSchema.optional(),
 });
@@ -402,6 +429,8 @@ export const HelloSchema = msg('hello', {
   hostname: z.string(),
   runtimes: z.array(RuntimeInfoSchema),
   repos: z.array(RepoReportSchema),
+  /** Every repository under the repoRoots (with or without a remote), for the reference repositories picker. Absent from older runners. */
+  repoCatalog: z.array(CatalogRepoSchema).max(2000).optional(),
   vaults: z.array(z.object({ vaultId: z.string(), localPath: z.string(), clean: z.boolean() })).default([]),
   activeShifts: z.array(
     z.object({
@@ -453,7 +482,10 @@ export const RunnerUpdateReportSchema = msg('runner.update', {
   lastCheckedAt: z.iso.datetime().nullable(),
   detail: z.string().max(300).nullable(),
 });
-export const ReposReportSchema = msg('repos.report', { repos: z.array(RepoReportSchema) });
+export const ReposReportSchema = msg('repos.report', {
+  repos: z.array(RepoReportSchema),
+  repoCatalog: z.array(CatalogRepoSchema).max(2000).optional(),
+});
 export const ShiftAcceptedSchema = msg('shift.accepted', { shiftId: z.uuid() });
 export const ShiftRejectedSchema = msg('shift.rejected', {
   shiftId: z.uuid(),
@@ -587,6 +619,7 @@ export const ShiftStartSchema = msg('shift.start', {
   vault: ShiftVaultSchema.nullable().optional(),
   /** The project's reference repositories: read-only for this shift when the workstation has a clone. */
   readRepos: z.array(ReadRepoSchema).optional(),
+  localReadRepos: z.array(LocalReadRepoSchema).optional(),
 });
 export const ShiftStopSchema = msg('shift.stop', { shiftId: z.uuid(), reason: ShiftStopReasonSchema });
 export const ShiftReportResultSchema = msg('shift.report.result', {

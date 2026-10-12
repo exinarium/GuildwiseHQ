@@ -52,6 +52,7 @@ import { claimPendingCommands, completeCommand, requeueSentCommands } from './co
 import { ledgerSearchRpc } from './ledger-rpc.ts';
 import type { RunnerConn } from './registry.ts';
 import { issueRotatedToken } from './rotation.ts';
+import { recordRepoCatalog } from './workstation-repos.ts';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** M7: what the BA does in its intake chat. */
@@ -138,6 +139,7 @@ export class RunnerHandlers {
       case 'repos.report':
         conn.lastRepos = msg.repos;
         await this.matchRepos(conn);
+        await recordRepoCatalog(this.ctx.pool, conn.workstationId, msg.repoCatalog, this.ctx.clock.now());
         return;
       case 'runtimes.report':
         await this.runtimesReport(conn, msg.runtimes);
@@ -412,6 +414,7 @@ export class RunnerHandlers {
     // Whatever the previous connection was sent may not have arrived: it is due again on this one.
     await requeueSentCommands(ctx.pool, conn.workstationId);
     await this.matchRepos(conn);
+    await recordRepoCatalog(ctx.pool, conn.workstationId, msg.repoCatalog, now);
     await this.recordVaults(conn, msg.vaults);
     await alignDevopsRuntime(ctx, conn.workstationId, msg.runtimes);
     await ctx.store.append([

@@ -16,6 +16,11 @@ import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts 
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { conflict, notFound } from '../errors.ts';
 import { referenceRepoCandidates, referenceRepoDtos } from '../runner-gateway/read-repos.ts';
+import {
+  referenceWorkstationRepoDtos,
+  type StoredWorkstationRepo,
+  workstationRepoCandidates,
+} from '../runner-gateway/workstation-repos.ts';
 
 /** The department of a project's workflow (its type): the owner's own workflow first, else the built-in. */
 export const PROJECT_DEPARTMENT_SQL = `(SELECT w.department FROM workflow_versions w
@@ -240,6 +245,12 @@ export async function getProjectDetail(
     referenceRepos: await referenceRepoDtos(ctx.pool, projectId),
     referenceRepoCandidates:
       p.my_role === 'owner' ? await referenceRepoCandidates(ctx.pool, userId, p.org_id, projectId) : [],
+    referenceWorkstationRepos: await referenceWorkstationRepoDtos(
+      ctx.pool,
+      (p.reference_workstation_repos ?? []) as StoredWorkstationRepo[],
+    ),
+    workstationRepoCandidates:
+      p.my_role === 'owner' ? await workstationRepoCandidates(ctx.pool, userId, p.org_id) : [],
     mergePolicyHistory: history.map((h) => ({
       enabled: h.payload.mergeLargeWithoutApproval === true,
       byName: h.by_name ?? 'unknown',

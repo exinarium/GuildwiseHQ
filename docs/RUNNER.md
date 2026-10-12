@@ -856,13 +856,33 @@ never committed. Ignore them in `.gitignore` too.
 is no config key that does: what an agent may read beyond its own work folder comes from the server, per project.
 
 - **Reference repositories** are set by the project owner in the project settings (event `ProjectReferenceReposSet`, by
-  repository id; the picker offers repositories of the organization's other active projects the owner belongs to).
+  repository id; the picker offers repositories of the organization's other active projects: all of them to organization Owners and
+  Admins, else those the owner belongs to).
   `shift.start` (card shifts) and the `chat.start` context carry them as `readRepos` (`{ repoId, name,
   remoteUrlNormalized, kind: 'project' | 'reference' }`), never as paths. The runner resolves each to the clone **its own
   repository scan found** (`repoRoots`); a repository that is not cloned on this workstation is skipped. A resolved folder
   that is the runner data dir (or contains or lies inside it), the home directory (or a parent), `/` or a credential
   store (`~/.ssh`, ...) is refused. Nothing else under `repoRoots` is opened: not the other projects' clones, not
   this platform's own checkout unless the owner picked it.
+- **Clones picked on a workstation.** Any repository under `repoRoots` can be picked, not only project repositories. The
+  runner reports every clone it finds (with or without an `origin` remote) as `repoCatalog` in `hello` and `repos.report`:
+  `{ name, localKey, remoteUrlNormalized | null }` (optional field, absent from older runners). `localKey` is the path
+  **relative to the repoRoot** (never an absolute path), the stable identifier of a clone without a remote. The runner's
+  data dir, the home directory (or a parent), `/` and credential stores are left out of the catalog. The server keeps it
+  per workstation (`workstation_repo_catalog`, replaced on each report) for the picker. A pick is stored in
+  `ProjectReferenceReposSet.workstationRepos` (`{ workstationId, localKey, name, remoteUrlNormalized | null }`, optional,
+  backward compatible: an event without it leaves the list as it was) and goes to runners as `localReadRepos`
+  (`{ name, localKey?, remoteUrlNormalized? }`) on `shift.start` and in the `chat.start` context, a separate field so older
+  runners ignore it. Resolution: on the workstation it was picked on the runner opens the clone with that `localKey` (the
+  only way for a clone without a remote); a clone **with** a remote is also opened on any other workstation where its own
+  scan finds a clone of the same remote (the same repository, so it is not a wider grant); a clone without a remote is
+  never sent to another workstation. The same refusals apply as for project repositories (data dir, home, credential
+  stores). A pick is validated on the server: the workstation must be one of the picker's own active workstations that
+  serves the organization and the clone must be in its reported catalog (a pick made earlier by another owner stays while
+  its workstation is active and its user is still in the organization).
+- **Who can pick what.** Organization Owners and Admins see every active project's repositories of the organization;
+  other users the projects they are an active member of. The picker and the validation of `PUT
+  /api/projects/:id/reference-repos` share one query (`eligibleProjectRepos`). Only the project owner changes the list.
 - **Card shifts** get the reference repositories. **Chats** get the reference repositories plus, when there is no card
   worktree on this workstation (a chat about a project, or about a card not started here), the project's own clones
   (`kind: 'project'`). A chat about a card whose worktree is here keeps its read-only worktree as working directory. The

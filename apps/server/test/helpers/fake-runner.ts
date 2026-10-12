@@ -14,6 +14,7 @@ export interface HelloOptions {
   repos?: Array<{ remoteUrl: string; localPath: string; headBranch: string | null }>;
   runtimes?: Array<{ id: string; version: string; available: boolean; capabilities: string[] }>;
   activeShifts?: Array<{ shiftId: string; cardId?: string; agentId: string; startedAt: string }>;
+  repoCatalog?: Array<{ name: string; localKey: string; remoteUrlNormalized: string | null }>;
   outboxPending?: number;
   maxConcurrentShifts?: number;
   sudoKey?: { keyId: string; publicKey: string };
@@ -89,6 +90,7 @@ export class FakeRunner {
         { id: 'mock', version: '1', available: true, capabilities: ['shell', 'edit', 'web'] },
       ],
       repos: o.repos ?? [],
+      ...(o.repoCatalog ? { repoCatalog: o.repoCatalog } : {}),
       vaults: [],
       activeShifts: o.activeShifts ?? [],
       outboxPending: o.outboxPending ?? 0,

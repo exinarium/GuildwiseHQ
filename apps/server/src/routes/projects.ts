@@ -170,7 +170,7 @@ export function projectRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: SetReferenceReposRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        await setReferenceRepos(ctx, s.user, req.params.id, req.body.repoIds);
+        await setReferenceRepos(ctx, s.user, req.params.id, req.body.repoIds, req.body.workstationRepos);
         return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );

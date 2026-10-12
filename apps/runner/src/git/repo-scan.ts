@@ -1,5 +1,5 @@
 import { readdir, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { basename, join, relative, resolve, sep } from 'node:path';
 import type { RepoReport } from '@aom/shared';
 import { currentBranch, git } from './git.ts';
 
@@ -31,19 +31,53 @@ async function walk(dir: string, depth: number, out: string[]): Promise<void> {
   }
 }
 
+export interface ScannedRepo {
+  localPath: string;
+  /** Path relative to the repoRoot it was found under (forward slashes): the stable identifier, never absolute. */
+  localKey: string;
+  remoteUrl: string | null;
+  headBranch: string | null;
+}
+
+/**
+ * Scans each root to depth 3 for `.git` directories; reports every repo, with or without an `origin` remote.
+ * `exclude` drops folders that must never be offered (the runner's data dir, the user's credential folders).
+ */
+export async function scanAllRepos(
+  roots: string[],
+  exclude: (path: string) => boolean = () => false,
+): Promise<ScannedRepo[]> {
+  const found = new Map<string, string>(); // path -> key
+  for (const root of roots) {
+    const base = resolve(root);
+    const dirs: string[] = [];
+    await walk(base, 0, dirs);
+    for (const d of dirs) {
+      if (found.has(d) || exclude(d)) continue;
+      found.set(d, relative(base, d).split(sep).join('/') || basename(base));
+    }
+  }
+  const out: ScannedRepo[] = [];
+  for (const localPath of [...found.keys()].sort()) {
+    const r = await git(localPath, ['remote', 'get-url', 'origin']);
+    out.push({
+      localPath,
+      localKey: found.get(localPath) as string,
+      remoteUrl: r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : null,
+      headBranch: await currentBranch(localPath),
+    });
+  }
+  return out;
+}
+
+/** The repositories that have an `origin` remote (what projects match against). */
+export function withRemote(all: ScannedRepo[]): RepoReport[] {
+  return all.flatMap((r) =>
+    r.remoteUrl ? [{ remoteUrl: r.remoteUrl, localPath: r.localPath, headBranch: r.headBranch }] : [],
+  );
+}
+
 /** Scans each root to depth 3 for `.git` directories; reports repos that have an `origin` remote. */
 export async function scanRepos(roots: string[]): Promise<RepoReport[]> {
-  const found = new Set<string>();
-  for (const root of roots) {
-    const dirs: string[] = [];
-    await walk(resolve(root), 0, dirs);
-    for (const d of dirs) found.add(d);
-  }
-  const reports: RepoReport[] = [];
-  for (const localPath of [...found].sort()) {
-    const r = await git(localPath, ['remote', 'get-url', 'origin']);
-    if (r.exitCode !== 0 || !r.stdout.trim()) continue;
-    reports.push({ remoteUrl: r.stdout.trim(), localPath, headBranch: await currentBranch(localPath) });
-  }
-  return reports;
+  return withRemote(await scanAllRepos(roots));
 }
