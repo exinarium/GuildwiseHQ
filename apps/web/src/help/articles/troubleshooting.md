@@ -61,6 +61,39 @@ Before agents build on a workstation, its DevOps engineer installs the tools and
 
 A Codespace that cannot start (credits or spending limit used up on GitHub) shows **Needs attention** and leaves a notice on your desk. Fix it on GitHub and press **Wake**. See [Cloud workstations](/help/cloud-workstations#codespaces).
 
+## Cards wait in Design with no architect hired {#design-no-architect}
+
+A project has **Investigate & design before build** turned on in the **Architect** settings, but you haven't hired an architect yet. Cards move into the **Design** stage and wait because nobody can claim it.
+
+To fix it:
+
+1. Go to **Agents** and hire an **Architect** (senior only).
+2. Or, turn off **Investigate & design before build** in the project's **Architect** settings if you don't need design for now. You can turn it back on anytime.
+
+See [The architect](/help/architect).
+
+## Main branch merge was skipped or conflicted {#merge-main-skipped-conflicted}
+
+When your repository has a main branch and a different working branch, the runner tries to merge the latest main into the working branch before a card's work starts (on by default). In the project's **Architect** settings, **Merge the latest main branch first** controls this.
+
+**Skipped** appears on the card when the architect role is not hired (the merge happens before the card's first work, so there is nobody to resolve a conflict). Answer the question on your desk to set the branch or hire an architect.
+
+**Conflicted** means the merge went into the card branch instead (the working branch is protected or moved before the runner could finish). The architect resolves the conflict by editing the conflicted files, then `aom git merge-main` or let the runner finish the merge when the shift ends. On a card without an architect the conflict is left unresolved and the desk asks you what to do.
+
+See [The architect > Merge the latest main branch first](/help/architect#merge-main).
+
+## A workflow variant is waiting for approval {#variant-awaiting-approval}
+
+You submitted a project variant (custom steps added to Code or another workflow for one project) and it is waiting on your desk.
+
+To approve and use it:
+
+1. Open the **Desk** and find the item about the variant.
+2. Review the variant and decide: **Approve** to let new cards use it (running cards keep the version they started on), or **Reject** to discard it.
+3. Once approved, go to **Project settings, Workflows** and you will see the new version listed as pending. Enable it if it is not marked as primary.
+
+See [Workflows of a project](/help/projects#workflows) and [Organization chart and design](/help/org-chart-and-design#variants).
+
 ## An agent says the work is out of scope {#out-of-scope}
 
 The agent reported work outside the scope of its role. Check:

@@ -29,6 +29,6 @@ When a repository has a main branch and a different working branch, the runner m
 ## What the architect may touch {#access}
 
 - It **writes** only documentation and its report; the runner checks this after each shift.
-- It **reads** the card's repository and every repository of the organization's projects cloned on its workstation, read-only, secret files blocked. The workstation's owner can also set an **organization source folder** (see the runner guide): every git repository under it is readable too.
+- It **reads** the card's repository and every repository of the organization's projects cloned on its workstation, read-only, secret files blocked. The workstation's owner can also set an **organization source folder** (`aom-runner org-folder set`, see the runner guide `docs/RUNNER.md`): every git repository under it is readable too.
 - It **never pushes** itself: the runner publishes the card branch for it.
 - A card's investigation waits for the cards it depends on.

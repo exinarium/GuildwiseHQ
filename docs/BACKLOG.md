@@ -227,8 +227,8 @@ commission on that subscription for as long as it keeps running (recurring, life
 - #11: "Fix" button that sends the DevOps engineer to fix an environment problem. Done 2026-10-12.
 - #4: Agents cannot read code outside their card worktree (chats, comparing repositories). Done 2026-10-12.
 - #12: DevOps cannot read or update the card it is working for. Done 2026-10-12.
-- #10: More than one workflow per project; custom steps in existing workflows. Done 2026-10-12.
 - #9: Architect role and an investigation and design step. Done 2026-10-12.
+- #10: More than one workflow per project; custom steps in existing workflows. Done 2026-10-12.
 
 ## 2026-10-10
 
