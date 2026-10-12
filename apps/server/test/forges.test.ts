@@ -254,3 +254,116 @@ describe('the repository picker', () => {
     expect([401, 403, 404]).toContain(res.status);
   });
 });
+
+describe('SSH as an alternative to API tokens', () => {
+  it('a repository is added with an access method and the clone command carries it', async () => {
+    const from = r.received.length;
+    const added = await ok<any>(
+      owner('POST', `/api/projects/${w.projectId}/repos`, {
+        name: 'sshrepo',
+        remoteUrl: 'https://bitbucket.org/acme/sshrepo.git',
+        accessMethod: 'ssh',
+      }),
+      201,
+    );
+    expect(added.repos.find((x: any) => x.name === 'sshrepo')).toMatchObject({ accessMethod: 'ssh' });
+    const cmd = await nextCommand('repo.clone', from);
+    expect(cmd.payload).toMatchObject({
+      remoteUrl: 'https://bitbucket.org/acme/sshrepo.git',
+      accessMethod: 'ssh',
+    });
+    const bad = await owner('POST', `/api/projects/${w.projectId}/repos`, {
+      name: 'x',
+      remoteUrl: 'https://github.com/a/x',
+      accessMethod: 'ftp',
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it('changing the method tells the workstations holding a clone; clearing falls back to the host default', async () => {
+    const repo = (await project()).repos.find((x: any) => x.name === 'toy');
+    expect(repo.accessMethod).toBeNull();
+    let from = r.received.length;
+    const set = await ok<any>(
+      owner('PATCH', `/api/projects/${w.projectId}/repos/${repo.id}`, { accessMethod: 'ssh' }),
+    );
+    expect(set.repos.find((x: any) => x.id === repo.id)).toMatchObject({ accessMethod: 'ssh' });
+    const cmd = await nextCommand('repo.access', from);
+    expect(cmd.payload).toMatchObject({ repoId: repo.id, accessMethod: 'ssh', remoteUrl: repo.remoteUrl });
+
+    from = r.received.length;
+    const cleared = await ok<any>(
+      owner('PATCH', `/api/projects/${w.projectId}/repos/${repo.id}`, { accessMethod: null }),
+    );
+    expect(cleared.repos.find((x: any) => x.id === repo.id).accessMethod).toBeNull();
+    const back = await nextCommand('repo.access', from);
+    expect(back.payload.accessMethod).toBeUndefined();
+  });
+
+  it('only the project owner can change it, and only ssh or https are accepted', async () => {
+    const repo = (await project()).repos.find((x: any) => x.name === 'toy');
+    const res = await w.t.req('PATCH', `/api/projects/${w.projectId}/repos/${repo.id}`, {
+      body: { accessMethod: 'ssh' },
+    });
+    expect([401, 403]).toContain(res.status);
+    const bad = await owner('PATCH', `/api/projects/${w.projectId}/repos/${repo.id}`, {
+      accessMethod: 'telnet',
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it('the Git hosts section queues git.ssh; the answer is the next report with the public key and the check', async () => {
+    const from = r.received.length;
+    await ok(
+      owner('POST', `/api/workstations/${w.workstationId}/git/ssh`, {
+        provider: 'bitbucket-cloud',
+        action: 'prepare',
+        defaultMethod: 'ssh',
+      }),
+      202,
+    );
+    const cmd = await nextCommand('git.ssh', from);
+    expect(cmd.payload).toMatchObject({
+      provider: 'bitbucket-cloud',
+      action: 'prepare',
+      defaultMethod: 'ssh',
+    });
+
+    r.send('git.report', {
+      connections: [
+        {
+          provider: 'bitbucket-cloud',
+          host: 'bitbucket.org',
+          state: 'not_connected',
+          ssh: {
+            defaultMethod: 'ssh',
+            key: 'generated',
+            keyPath: '/home/u/.ssh/aom_bitbucket_cloud',
+            publicKey: 'ssh-ed25519 AAAA guildwise-bitbucket-cloud',
+            check: { state: 'not_authorized', detail: 'refused', checkedAt: new Date().toISOString() },
+          },
+          checkedAt: new Date().toISOString(),
+        },
+      ],
+    });
+    await settle();
+    const ws = await workstation();
+    expect(ws.git.connections[0].ssh).toMatchObject({
+      defaultMethod: 'ssh',
+      publicKey: 'ssh-ed25519 AAAA guildwise-bitbucket-cloud',
+      check: { state: 'not_authorized' },
+    });
+  });
+
+  it('rejects a bad request and a workstation that is not yours', async () => {
+    const bad = await owner('POST', `/api/workstations/${w.workstationId}/git/ssh`, {
+      provider: 'github',
+      action: 'wipe',
+    });
+    expect(bad.status).toBe(400);
+    const res = await w.t.req('POST', `/api/workstations/${w.workstationId}/git/ssh`, {
+      body: { provider: 'github', action: 'check' },
+    });
+    expect([401, 403, 404]).toContain(res.status);
+  });
+});

@@ -1,13 +1,17 @@
 import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import {
+  isSshRemote,
   normalizeRemoteUrl,
+  parseRemote,
   type RepoClonePayload,
   type RepoCloneResult,
   type RepoCreatePayload,
   type RepoCreateResult,
+  remoteUrlForMethod,
 } from '@aom/shared';
 import { forgeForUrl } from '../forge/index.ts';
+import { defaultMethodFor, sshGitAuth } from '../forge/ssh.ts';
 import type { ForgeEnv, GitAuth } from '../forge/types.ts';
 import type { Executor } from '../toolchain/exec.ts';
 
@@ -77,6 +81,10 @@ export class RepoCloner {
   /** The credential for the repository's host: its forge adapter's (gh login, saved token), else gh's login for https. */
   private async authFor(url: string, forge?: RepoClonePayload['forge']): Promise<GitAuth | null> {
     const env = this.deps.forge?.();
+    // An ssh remote uses this workstation's key (GIT_SSH_COMMAND), never a token.
+    const viaSsh = sshGitAuth(env?.ssh, url);
+    if (viaSsh) return viaSsh;
+    if (isSshRemote(url)) return null;
     if (env) {
       const hit = forgeForUrl(env, url, forge);
       if (hit && hit.forge.kind !== 'git') {
@@ -110,6 +118,14 @@ export class RepoCloner {
     url: string,
     forge?: RepoClonePayload['forge'],
   ): Promise<{ exists: boolean; auth: GitAuth | null; error: string }> {
+    if (isSshRemote(url)) {
+      // ssh would ask about an unknown host key on a terminal there is none of: always go through the pinned known_hosts.
+      const a = await this.authFor(url, forge);
+      const r = await this.git([...(a?.args ?? []), 'ls-remote', '--', url], undefined, 60_000, a?.env);
+      return r.exitCode === 0
+        ? { exists: true, auth: a, error: '' }
+        : { exists: false, auth: null, error: (r.stderr || r.stdout).trim().slice(0, 400) };
+    }
     const plain = await this.git(['ls-remote', '--', url], undefined, 60_000);
     if (plain.exitCode === 0) return { exists: true, auth: null, error: '' };
     const auth = await this.authFor(url, forge);
@@ -141,6 +157,19 @@ export class RepoCloner {
       };
     mkdirSync(rootDir, { recursive: true });
     const root = realpathSync(rootDir);
+    // How git reaches the repository: the owner's choice for it, else the workstation default of its host.
+    const host = parseRemote(p.remoteUrl, p.forge)?.host;
+    const method =
+      p.accessMethod ??
+      (isSshRemote(p.remoteUrl) ? 'ssh' : host ? defaultMethodFor(this.deps.forge?.().ssh, host) : 'https');
+    const converted = p.create ? p.remoteUrl : remoteUrlForMethod(p.remoteUrl, method);
+    const remoteUrl = converted ?? (method === 'https' ? p.remoteUrl : null);
+    if (!remoteUrl)
+      return {
+        ok: false,
+        state: 'needs_manager',
+        error: `cannot derive the ssh address of ${p.remoteUrl}: add the repository with its ssh URL (for example git@host:path.git)`,
+      };
     const dir = dirNameFromUrl(p.remoteUrl) ?? dirNameFromUrl(p.create?.name ?? '') ?? null;
     if (!dir) return { ok: false, state: 'failed', error: `cannot derive a folder name from ${p.remoteUrl}` };
     const target = resolve(root, dir);
@@ -159,23 +188,32 @@ export class RepoCloner {
       // an empty folder is fine to clone into
     }
 
-    const probe = await this.probe(p.remoteUrl, p.forge);
+    const probe = await this.probe(remoteUrl, p.forge);
     if (probe.exists) {
       const auth = probe.auth?.args ?? [];
-      const r = await this.git([...auth, 'clone', '--', p.remoteUrl, target], root, 600_000, probe.auth?.env);
+      const r = await this.git([...auth, 'clone', '--', remoteUrl, target], root, 600_000, probe.auth?.env);
       if (r.exitCode !== 0)
         return {
           ok: false,
           state: 'failed',
           error: `git clone failed: ${(r.stderr || r.stdout).trim().slice(0, 500)}`,
         };
-      if (probe.auth && !Object.keys(probe.auth.env).length && /^https?:\/\//.test(p.remoteUrl)) {
-        const host = new URL(p.remoteUrl).host;
+      if (probe.auth && !Object.keys(probe.auth.env).length && /^https?:\/\//.test(remoteUrl)) {
+        const host = new URL(remoteUrl).host;
         // Later fetches and pushes in this clone keep using gh's login (token-based hosts pass theirs per command).
         await this.git(
           ['config', `credential.https://${host}.helper`, `!${this.deps.ghBin ?? 'gh'} auth git-credential`],
           target,
         );
+      }
+      if (isSshRemote(remoteUrl)) {
+        const ssh = this.deps.forge?.().ssh;
+        // Later fetches, rebases and pushes in this clone (and its worktrees) use the same key.
+        if (ssh) {
+          const a = sshGitAuth(ssh, remoteUrl);
+          if (a?.env.GIT_SSH_COMMAND)
+            await this.git(['config', 'core.sshCommand', a.env.GIT_SSH_COMMAND], target);
+        }
       }
       await this.deps.afterClone?.();
       return { ok: true, state: 'cloned', localPath: realpathSync(target), detail: `Cloned to ${target}` };

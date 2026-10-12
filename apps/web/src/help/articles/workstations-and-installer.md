@@ -1,7 +1,7 @@
 ---
 title: Workstations and the installer
 summary: What a workstation is, the Add a workstation wizard, installing by hand, Claude sign-in, Windows and connecting git hosts.
-keywords: [workstation, installer, runner, WSL2, setup, wizard, credentials, src folder, windows task, git host, git-connect, github, gitlab, bitbucket, azure devops, plain git, connect]
+keywords: [workstation, installer, runner, WSL2, setup, wizard, credentials, src folder, windows task, git host, git-connect, ssh, ssh key, github, gitlab, bitbucket, azure devops, plain git, connect]
 order: 18
 ---
 
@@ -74,9 +74,19 @@ Open the workstation card on the **Workstations** page: **Git hosts** shows Conn
 - `aom-runner git-connect gitlab` signs in with the GitLab CLI or asks for a personal access token.
 - `aom-runner git-connect bitbucket-cloud` asks for your Atlassian e-mail and an API token (old app passwords no longer work).
 - `aom-runner git-connect azure-devops` uses a **Microsoft Entra service principal** if the workstation has one (the best way for a team; see below), or your Azure sign-in (`az login`). As a fallback, add `--organization <name>` to paste a personal access token. Use a token for one organization: global tokens stop working on 1 December 2026.
-- Add `--ssh-key` to any of them to create an SSH key and see where to upload it.
+- Add `--ssh` to any of them to use an SSH key instead of a token (see below).
 
 Then click **Check again**. The DevOps engineer can walk you through any of these in a chat (**Ask DevOps** on the workstation). It can start a browser sign-in for you and show you the web address and code to enter; it never asks for or types a token. When a token is needed it tells you to run the command above yourself or to use the **Connect** helper.
+
+**SSH instead of an API token.** If you already have SSH keys, you do not need a token for clone, fetch and push. On the workstation card, click **SSH** next to the git host:
+
+1. Choose the **default for new clones**: API token / CLI login, or SSH key.
+2. Choose the key: **a key made by the runner** (click **Save and create key**; the public key appears with the place to add it: GitHub *Settings, SSH and GPG keys*, GitLab *User settings, SSH keys*, Bitbucket *Personal settings, SSH keys*, Azure DevOps *User settings, SSH public keys*), **a key file I already have** (its full path on the workstation; it is not copied), or **my ssh-agent**.
+3. Click **Check SSH**. Optionally paste a repository address to test with the real thing. You get one state: *SSH works*, *The host refused the key* (add the public key on the host), *Host key changed*, *Host not reachable* (a firewall may block port 22), *No key yet* or *ssh is not installed*.
+
+In a terminal, the same is `aom-runner git-connect github --ssh` (add `--key-file <path>` or `--agent`; `--check` tests it). A repository can use the other method: the owner picks **Access** under the repository in the project settings, and the workstation switches that clone between https and ssh by itself. The private key never leaves the workstation and agents never read it.
+
+SSH only covers git itself. Pull requests, branch rules and the repository list still need the token or CLI login: with SSH only, finishing a card pushes the branch and you or the manager open the pull request by hand, and Project settings says so under the repository.
 
 **Azure DevOps: use a Microsoft Entra service principal.** Personal access tokens that are not limited to one organization stop working on 1 December 2026, so for Azure DevOps use a service principal (an app identity in Microsoft Entra) or workload identity:
 

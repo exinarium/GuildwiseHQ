@@ -72,6 +72,90 @@ export function parseRemote(url: string, override?: ForgeKind | null): ParsedRem
 
 // ------------------------------------------------------------------ connections (status only, never a secret)
 
+/**
+ * How git reaches a repository: `https` with the host's token or CLI login, or `ssh` with a key on the workstation.
+ * Chosen per workstation and git host (the default) and per repository (the override).
+ */
+export const GIT_ACCESS_METHODS = ['https', 'ssh'] as const;
+export const GitAccessMethodSchema = z.enum(GIT_ACCESS_METHODS);
+
+export const GIT_ACCESS_LABELS: Record<(typeof GIT_ACCESS_METHODS)[number], string> = {
+  https: 'API token / CLI login (https)',
+  ssh: 'SSH key',
+};
+
+/** Which key the runner uses: one it generated (`~/.ssh/aom_<provider>`), a key file the owner named, or the ssh-agent. */
+export const SSH_KEY_MODES = ['generated', 'path', 'agent'] as const;
+export const SshKeyModeSchema = z.enum(SSH_KEY_MODES);
+export type SshKeyMode = z.infer<typeof SshKeyModeSchema>;
+
+/** The result of the SSH check (`ssh -T` or `git ls-remote` against a repository). */
+export const SSH_CHECK_STATES = [
+  'ok',
+  'no_key',
+  'not_authorized',
+  'host_key',
+  'unreachable',
+  'tool_missing',
+  'unknown',
+] as const;
+export const SshCheckStateSchema = z.enum(SSH_CHECK_STATES);
+export type SshCheckState = z.infer<typeof SshCheckStateSchema>;
+
+export const SSH_CHECK_LABELS: Record<SshCheckState, string> = {
+  ok: 'SSH works',
+  no_key: 'No key yet',
+  not_authorized: 'The host refused the key',
+  host_key: 'Host key changed',
+  unreachable: 'Host not reachable',
+  tool_missing: 'ssh is not installed',
+  unknown: 'Not checked',
+};
+
+/** SSH facts of one git host on a workstation. Paths and the PUBLIC key only: the private key never leaves the machine. */
+export const GitSshSchema = z.object({
+  /** The workstation default for new clones of repositories on this host. */
+  defaultMethod: GitAccessMethodSchema,
+  key: SshKeyModeSchema,
+  /** The private key file in use (a path, never its content); absent for the ssh-agent. */
+  keyPath: z.string().max(400).optional(),
+  /** The public key to add to the git host; absent while no key exists. */
+  publicKey: z.string().max(1000).optional(),
+  check: z
+    .object({
+      state: SshCheckStateSchema,
+      detail: z.string().max(400).optional(),
+      checkedAt: z.iso.datetime(),
+    })
+    .optional(),
+});
+export type GitSsh = z.infer<typeof GitSshSchema>;
+
+/** `git.ssh` runner command: prepare a key, record the choice, or check that SSH works. Carries no secret. */
+export const GitSshPayloadSchema = z.object({
+  provider: ConnectableForgeSchema,
+  host: z.string().max(200).optional(),
+  action: z.enum(['prepare', 'check', 'save']),
+  /** `save`: the workstation default and the key to use. */
+  defaultMethod: GitAccessMethodSchema.optional(),
+  key: SshKeyModeSchema.optional(),
+  /** `save` with `key: 'path'`: the private key file on the workstation. */
+  keyPath: z.string().max(400).optional(),
+  /** `check`: a repository on the host to test with `git ls-remote` (otherwise `ssh -T`). */
+  repoUrl: z.string().max(2000).optional(),
+});
+export type GitSshPayload = z.infer<typeof GitSshPayloadSchema>;
+
+/** `repo.access` runner command: a repository's access method changed; the clone's `origin` follows. */
+export const RepoAccessPayloadSchema = z.object({
+  repoId: z.uuid(),
+  remoteUrl: z.string().min(1).max(2000),
+  /** The owner's choice for this repository; absent: the workstation default of the host applies. */
+  accessMethod: GitAccessMethodSchema.optional(),
+  forge: ForgeKindSchema.optional(),
+});
+export type RepoAccessPayload = z.infer<typeof RepoAccessPayloadSchema>;
+
 export const GitConnectionStateSchema = z.enum(['connected', 'not_connected', 'unavailable']);
 export type GitConnectionState = z.infer<typeof GitConnectionStateSchema>;
 
@@ -89,6 +173,8 @@ export const GitConnectionSchema = z.object({
   detail: z.string().max(400).optional(),
   /** Why a login is not usable: no token saved, the host refused the token, or the host could not be reached. */
   problem: z.enum(['no_token', 'token_refused', 'unreachable']).optional(),
+  /** SSH facts for this host (workstation default, key, last check); absent from runners without SSH support. */
+  ssh: GitSshSchema.optional(),
   checkedAt: z.iso.datetime(),
 });
 export type GitConnection = z.infer<typeof GitConnectionSchema>;
@@ -270,6 +356,20 @@ export function connectSteps(provider: ConnectableForge, host = defaultHost(prov
         '2. Fallback: a personal access token for your organization (dev.azure.com, User settings, Personal access tokens, scope "Code: Read & write" and "Project and Team: Read"). Use an organization-scoped token: global tokens stop working on 2026-12-01. Run this command with --organization <name> and paste the token when asked.',
         '3. Or sign in with the Azure CLI (`az login`): it works without a token.',
       ];
+  }
+}
+
+/** Where to add the public SSH key on each git host (the CLI prints it, the Git hosts section shows it). */
+export function sshUploadHelp(provider: ConnectableForge, host = defaultHost(provider)): string {
+  switch (provider) {
+    case 'github':
+      return `https://${host}/settings/keys: New SSH key, paste the public key.`;
+    case 'gitlab':
+      return `https://${host}/-/user_settings/ssh_keys: paste the public key, Add key.`;
+    case 'bitbucket-cloud':
+      return 'bitbucket.org: Personal settings, SSH keys, Add key, paste the public key.';
+    case 'azure-devops':
+      return 'dev.azure.com: User settings, SSH public keys, New Key, paste the public key.';
   }
 }
 

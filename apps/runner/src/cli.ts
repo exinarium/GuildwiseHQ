@@ -6,6 +6,7 @@ import {
   CONNECTABLE_FORGES,
   type ConnectableForge,
   devcontainerText,
+  FORGE_LABELS,
   RunnerPairRequestSchema,
   RunnerPairResponseSchema,
 } from '@aom/shared';
@@ -18,12 +19,12 @@ import { requestRotatedToken } from './connection/rotate.ts';
 import {
   connectSteps,
   describeConnection,
-  ensureSshKey,
   saveAndVerify,
   sshUploadHelp,
   touchRecheck,
 } from './forge/connect.ts';
 import { AzureDevOpsForge, defaultHost, FileTokenStore, gitConnections } from './forge/index.ts';
+import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { RunnerHost } from './host.ts';
@@ -537,6 +538,11 @@ interface GitConnectOpts {
   user?: string;
   organization?: string;
   sshKey?: boolean;
+  ssh?: boolean;
+  keyFile?: string;
+  agent?: boolean;
+  default?: string;
+  check?: string | boolean;
   status?: boolean;
   disconnect?: boolean;
 }
@@ -577,19 +583,14 @@ async function gitConnect(providerArg: string, opts: GitConnectOpts): Promise<vo
   }
   if (opts.status) return show();
 
+  if (opts.ssh || opts.sshKey || opts.check !== undefined || opts.keyFile || opts.agent || opts.default) {
+    process.exitCode = await gitConnectSsh(provider, host, opts, stores, done);
+    return;
+  }
+
   console.log(`Connecting this workstation to ${provider} (${host}). Nothing leaves this machine.\n`);
   for (const l of connectSteps(provider, host)) console.log(l);
   console.log('');
-  if (opts.sshKey) {
-    const k = await ensureSshKey(realExecutor, provider);
-    console.log(
-      `${k.created ? 'Created' : 'Using the existing'} SSH key ${k.path}. Add this public key:\n\n${k.publicKey}\n\n${sshUploadHelp(provider, host)}`,
-    );
-    console.log(
-      `Then add to ~/.ssh/config:\n  Host ${host}\n    IdentityFile ${k.path}\n    IdentitiesOnly yes`,
-    );
-    return;
-  }
   if (provider === 'github') {
     const r = await realExecutor.run('gh', ['--version']);
     if (r.exitCode === 127) throw new Error('the GitHub CLI (gh) is not installed: https://cli.github.com');
@@ -654,6 +655,85 @@ async function gitConnect(providerArg: string, opts: GitConnectOpts): Promise<vo
   }
   console.log(describeConnection(st));
   done();
+}
+
+/**
+ * `aom-runner git-connect <provider> --ssh [--key-file <path> | --agent] [--default https|ssh] [--check [repo-url]]`:
+ * SSH instead of an API token. Creates (or reuses) the key `~/.ssh/aom_<provider>` and prints the PUBLIC key with where
+ * to add it, or records a key of your own / the ssh-agent; records ssh as this workstation's default for the host
+ * (`--default https` keeps tokens as the default); `--check` verifies that ssh works and says why when it does not.
+ * Returns the exit code.
+ */
+async function gitConnectSsh(
+  provider: ConnectableForge,
+  host: string,
+  opts: GitConnectOpts,
+  stores: Array<{ paths: ReturnType<typeof runnerPaths> }>,
+  done: () => void,
+): Promise<number> {
+  const envs = stores.map((s) => ({
+    settings: new SshSettingsStore(`${s.paths.secrets}/git-ssh.json`),
+    knownHosts: `${s.paths.secrets}/known_hosts`,
+  }));
+  const first = envs[0] as (typeof envs)[number];
+  const checking = opts.check !== undefined && !opts.ssh && !opts.sshKey && !opts.keyFile && !opts.agent;
+  let code = 0;
+  if (!checking) {
+    const defaultMethod =
+      opts.default === 'https'
+        ? 'https'
+        : opts.default === 'ssh' || opts.ssh || opts.sshKey
+          ? 'ssh'
+          : undefined;
+    if (opts.default && opts.default !== 'https' && opts.default !== 'ssh')
+      throw new Error('--default is https or ssh');
+    const key = opts.agent ? 'agent' : opts.keyFile ? 'path' : 'generated';
+    for (const e of envs) {
+      const r = await runSshAction(realExecutor, e, {
+        provider,
+        host,
+        action: key === 'generated' ? 'prepare' : 'save',
+        key,
+        ...(opts.keyFile ? { keyPath: opts.keyFile } : {}),
+        ...(defaultMethod ? { defaultMethod } : {}),
+      });
+      if (e !== first) continue;
+      if (key === 'generated')
+        console.log(
+          `${r.detail}. Add this public key to your ${FORGE_LABELS[provider]} account:\n\n${r.publicKey}\n\n${sshUploadHelp(provider, host)}`,
+        );
+      else
+        console.log(
+          key === 'agent'
+            ? 'Using your ssh-agent (SSH_AUTH_SOCK) for this host.'
+            : `Using the key ${opts.keyFile}.`,
+        );
+    }
+    if (defaultMethod)
+      console.log(
+        `\nNew repositories on ${host} are cloned over ${defaultMethod === 'ssh' ? 'SSH' : 'https'} on this workstation. A repository can override this in its project settings.`,
+      );
+    console.log(
+      'SSH covers git (clone, fetch, push). Pull requests, branch rules and the repository list still need the API token or CLI login (aom-runner git-connect ' +
+        provider +
+        ').',
+    );
+  }
+  if (opts.check !== undefined || opts.ssh || opts.sshKey) {
+    if (!checking) console.log('\nChecking ssh ...');
+    for (const e of envs) {
+      const r = await runSshAction(realExecutor, e, {
+        provider,
+        host,
+        action: 'check',
+        ...(typeof opts.check === 'string' ? { repoUrl: opts.check } : {}),
+      });
+      if (e === first) console.log(`${r.state === 'ok' ? 'OK' : `Not working (${r.state})`}: ${r.detail}`);
+      if (r.state !== 'ok' && e === first) code = opts.check !== undefined ? 1 : 0;
+    }
+  }
+  done();
+  return code;
 }
 
 export function buildProgram(): Command {
@@ -744,7 +824,18 @@ export function buildProgram(): Command {
     .option('--host <host>', 'a self-managed host (GitHub Enterprise, GitLab)')
     .option('--user <email>', 'Bitbucket Cloud: your Atlassian e-mail address')
     .option('--organization <name>', 'Azure DevOps organization')
-    .option('--ssh-key', 'create an SSH key and print what to upload instead of using a token')
+    .option(
+      '--ssh',
+      'use SSH instead of a token: create (or reuse) a key, print the public key to add, make SSH the default',
+    )
+    .option('--ssh-key', 'alias of --ssh')
+    .option('--key-file <path>', 'with --ssh: use this private key file instead of generating one')
+    .option('--agent', 'with --ssh: use your ssh-agent / ~/.ssh/config instead of a key file')
+    .option('--default <method>', 'the default for new clones on this host: https or ssh')
+    .option(
+      '--check [repo-url]',
+      'check that ssh works (git ls-remote on the repository when given, else ssh -T)',
+    )
     .option('--status', 'only show whether it is connected')
     .option('--disconnect', 'remove the token saved by this command')
     .option(...pairingOpt)

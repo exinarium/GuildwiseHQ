@@ -12,6 +12,7 @@ import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
 import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
 import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
+import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
@@ -234,6 +235,9 @@ export function ProjectSettings() {
                   </div>
                   {traits.usesRepos && (
                     <RepoProviderControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
+                  )}
+                  {traits.usesRepos && (
+                    <RepoAccessControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
                   )}
                   {traits.usesRepos && (
                     <RepoProjectPathControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />

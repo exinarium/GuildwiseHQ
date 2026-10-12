@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { DevOpsAccessSchema } from '../events/devops.ts';
-import { ForgeKindSchema } from '../forge/index.ts';
+import { ForgeKindSchema, GitAccessMethodSchema } from '../forge/index.ts';
 
 /**
  * Workstation preparation by the DevOps engineer (docs/RUNNER.md "Repository setup, toolchain and rights"):
@@ -29,6 +29,8 @@ export const RepoClonePayloadSchema = z.object({
   workingBranch: z.string().optional(),
   /** The git provider chosen on the repository (absent: detected from the URL). */
   forge: ForgeKindSchema.optional(),
+  /** The owner's access method for this repository; absent: the workstation default of the host applies. */
+  accessMethod: GitAccessMethodSchema.optional(),
   /** Set when the manager chose "create new": the repository is created (with `gh`) if it does not exist. */
   create: z
     .object({

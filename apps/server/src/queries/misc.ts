@@ -179,6 +179,7 @@ export async function getProjectDetail(
       workingBranch: r.working_branch,
       removedAt: iso(r.removed_at),
       projectPath: r.project_path ?? null,
+      accessMethod: r.access_method ?? null,
       forge: r.forge_kind ?? detectForgeKind(r.remote_url),
       forgeOverride: r.forge_kind ?? null,
       knownBranches: r.known_branches ?? [],

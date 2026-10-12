@@ -1,5 +1,6 @@
 import type { ForgeKind, GitConnection, RepoRef } from '@aom/shared';
 import type { Executor } from '../toolchain/exec.ts';
+import type { SshEnv } from './ssh.ts';
 import type { TokenStore } from './tokens.ts';
 
 /** Everything an adapter needs from the machine. Tests inject fakes: nothing talks to a real forge from tests. */
@@ -12,6 +13,8 @@ export interface ForgeEnv {
   azBin?: string;
   /** The process environment (`AZURE_*` service principal settings); defaults to `process.env`. */
   processEnv?: Record<string, string | undefined>;
+  /** SSH access (key choice, known_hosts). Absent: ssh remotes use the user's own ssh setup. */
+  ssh?: SshEnv;
   now?: () => Date;
 }
 

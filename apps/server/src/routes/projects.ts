@@ -36,6 +36,7 @@ import {
   setMergePolicy,
   updateProject,
 } from '../commands/projects.ts';
+import { setRepoAccessMethod } from '../commands/repo-access.ts';
 import type { Ctx } from '../context.ts';
 import { getProjectDetail, listProjects } from '../queries/misc.ts';
 import { typed } from './util.ts';
@@ -200,6 +201,8 @@ export function projectRoutes(ctx: Ctx) {
         const s = await requireUser(ctx, req);
         if (req.body.forge !== undefined)
           await setRepoForge(ctx, s.user, req.params.id, req.params.repoId, req.body.forge);
+        if (req.body.accessMethod !== undefined)
+          await setRepoAccessMethod(ctx, s.user, req.params.id, req.params.repoId, req.body.accessMethod);
         if (req.body.projectPath !== undefined)
           await setRepoProjectPath(ctx, s.user, req.params.id, req.params.repoId, req.body.projectPath);
         return getProjectDetail(ctx, s.user.id, req.params.id);

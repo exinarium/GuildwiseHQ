@@ -4,6 +4,7 @@ import {
   defaultHost,
   type ForgeKind,
   type GitConnection,
+  isSshRemote,
   parseRemote,
 } from '@aom/shared';
 import type { PrCreator } from '../git/gh.ts';
@@ -14,6 +15,7 @@ import { GitHubForge } from './github.ts';
 import { GitLabForge } from './gitlab.ts';
 import { ForgeUnavailableError } from './http.ts';
 import { PlainGitForge } from './plain.ts';
+import { sshGitAuth, sshInfo } from './ssh.ts';
 import type { BranchRules, Forge, ForgeEnv, RemoteRepo } from './types.ts';
 
 export { defaultHost } from '@aom/shared';
@@ -89,7 +91,12 @@ export function forgePrCreator(env: ForgeEnv): PrCreator {
         });
         return { url: c.url };
       } catch (err) {
-        if (err instanceof ForgeUnavailableError) return { unavailable: err.message };
+        if (err instanceof ForgeUnavailableError)
+          return {
+            unavailable: isSshRemote(url as string)
+              ? `${err.message} (this repository uses SSH, which only pushes: pull requests need the API token or CLI login)`
+              : err.message,
+          };
         throw err;
       }
     },
@@ -115,6 +122,9 @@ export async function branchRulesFor(
 
 /** The git auth (args + env) for talking to a remote with git: clone, ls-remote, push. */
 export async function gitAuthFor(env: ForgeEnv, url: string, override?: ForgeKind | null) {
+  // An ssh remote never uses a token: the key of this workstation (GIT_SSH_COMMAND), or the user's own ssh setup.
+  const viaSsh = sshGitAuth(env.ssh, url);
+  if (viaSsh) return viaSsh;
   const hit = forgeForUrl(env, url, override);
   return hit ? hit.forge.gitAuth(url) : { args: [] as string[], env: {} as Record<string, string> };
 }
@@ -130,10 +140,14 @@ export async function gitConnections(
     const list = new Set<string>(hosts[provider] ?? []);
     list.add(defaultHost(provider));
     for (const t of known) if (t.provider === provider) list.add(t.host);
+    for (const [h, s] of env.ssh?.settings.all() ?? []) if (s.provider === provider) list.add(h);
     for (const host of list) {
       const forge =
         provider === 'azure-devops' ? new AzureDevOpsForge(env, host) : forgeOfKind(env, provider, host);
-      if (forge.status) out.push(await forge.status());
+      if (!forge.status) continue;
+      const conn = await forge.status();
+      const ssh = sshInfo(env.ssh, provider, host);
+      out.push(ssh ? { ...conn, ssh } : conn);
     }
   }
   return out;
