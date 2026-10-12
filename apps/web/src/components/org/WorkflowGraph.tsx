@@ -4,6 +4,7 @@ import { type GraphEdge, type GraphNode, layoutWorkflow, NODE_H, NODE_W } from '
 const FILL: Record<GraphNode['kind'], string> = {
   agent: '#eef2ff',
   manual: '#fef9c3',
+  subworkflow: '#fae8ff',
   terminal: '#dcfce7',
 };
 

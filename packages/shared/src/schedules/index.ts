@@ -214,3 +214,57 @@ export function describeEventTrigger(t: Extract<ScheduleTrigger, { kind: 'event'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const isEmailAddress = (s: string): boolean => EMAIL_RE.test(s);
+
+/** Triggers the server fires today. The builder's newer kinds parse, but are refused on save until they are wired (WP6/WP7). */
+export function isTriggerImplemented(t: ScheduleTrigger): boolean {
+  switch (t.kind) {
+    case 'cron':
+    case 'manual':
+    case 'issue_labelled':
+      return true;
+    case 'event':
+      return SCHEDULE_EVENT_TRIGGERS.some((e) => e.id === t.event);
+    default:
+      return false;
+  }
+}
+
+/** Sources a card field mapping may read (`{token}` in `CardTemplate.mapping`); `card.fields.<key>` is also valid. */
+export const MAPPING_TOKENS = [
+  'email.subject',
+  'email.body',
+  'email.from',
+  'card.ref',
+  'card.title',
+  'issue.title',
+  'issue.key',
+  'event',
+  'date',
+] as const;
+
+const TOKEN = /\{([a-zA-Z][a-zA-Z0-9_.]*)\}/g;
+const CARD_FIELD_TOKEN = /^card\.fields\.[a-zA-Z][a-zA-Z0-9_]*$/;
+
+export const isMappingToken = (name: string): boolean =>
+  (MAPPING_TOKENS as readonly string[]).includes(name) || CARD_FIELD_TOKEN.test(name);
+
+/** The `{tokens}` a mapping text uses (in order, with repeats). */
+export function mappingTokens(text: string): string[] {
+  return [...text.matchAll(TOKEN)].map((m) => m[1] as string);
+}
+
+/** Mapping tokens a template uses that are not known (the schedule form shows them as errors). */
+export function unknownMappingTokens(mapping: Record<string, string> | undefined): string[] {
+  const bad = new Set<string>();
+  for (const text of Object.values(mapping ?? {}))
+    for (const t of mappingTokens(text)) if (!isMappingToken(t)) bad.add(t);
+  return [...bad];
+}
+
+/**
+ * Replaces known `{tokens}` with their values (missing value: empty). Unknown braces stay as written. Values are
+ * inserted verbatim and never re-expanded, so mail text containing `{card.ref}` stays text.
+ */
+export function expandMapping(text: string, values: Readonly<Record<string, string | undefined>>): string {
+  return text.replace(TOKEN, (whole, name: string) => (isMappingToken(name) ? (values[name] ?? '') : whole));
+}

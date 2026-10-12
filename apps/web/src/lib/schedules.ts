@@ -142,6 +142,14 @@ export function describeTrigger(t: ScheduleTrigger): string {
     }
     case 'issue_labelled':
       return `When a ${t.provider === 'github' ? 'GitHub' : 'Jira'} issue in ${t.query} gets the label "${t.label}"`;
+    case 'email_received':
+      return 'When an e-mail arrives';
+    case 'email_reply':
+      return 'When a reply to a card e-mail arrives';
+    case 'intake_ticket':
+      return 'When an intake ticket is created';
+    case 'webhook_in':
+      return 'When an incoming webhook is called';
   }
 }
 
@@ -253,7 +261,8 @@ export const isEventName = (s: string): s is ScheduleEventName => EVENT_NAMES.ha
 export function stateFromSchedule(s: ScheduleDto, workflow?: WorkflowDefinition): WizardState {
   const st = emptyWizard({ name: s.name, enabled: s.enabled, tile: actionTileOf(s.action) });
   const t = s.trigger;
-  st.triggerKind = t.kind;
+  // The newer trigger kinds are refused on save until the automations page supports them (workflow builder WP6).
+  st.triggerKind = t.kind === 'cron' || t.kind === 'event' || t.kind === 'issue_labelled' ? t.kind : 'manual';
   if (t.kind === 'cron') {
     st.cron = t.cron;
     st.timezone = t.timezone;

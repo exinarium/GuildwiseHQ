@@ -52,13 +52,52 @@ export const OutcomeSchema = z.object({
 });
 export type Outcome = z.infer<typeof OutcomeSchema>;
 
+/** Where a sub-workflow's child card gets one of its fields from. */
+export const SubworkflowSourceSchema = z.union([
+  z.object({ field: z.string().min(1) }),
+  z.object({ value: z.unknown() }),
+  z.object({ template: z.string().max(2000) }),
+]);
+export type SubworkflowSource = z.infer<typeof SubworkflowSourceSchema>;
+
+/**
+ * Configuration of a `subworkflow` stage (docs/design/workflow-builder.md section 4). The server, never an agent, runs
+ * the stage: entering it creates a child card in `workflowKey`. Wait mode: the parent is `waiting` until the child ends,
+ * then takes the `done` outcome (child finished) or the `failed` outcome (child cancelled; `onFailure: 'fail'`).
+ */
+export const SubworkflowConfigSchema = z.object({
+  workflowKey: z.string().min(1),
+  /** 'same' project as the parent card, or another project of the same organisation. */
+  project: z.union([z.literal('same'), z.object({ projectId: z.string().min(1) })]).default('same'),
+  cardType: z.string().optional(),
+  mode: z.enum(['wait', 'continue']).default('wait'),
+  /** Absent: queued when every required field of the child is mapped, else draft (`effectiveSubworkflowStart`). */
+  start: z.enum(['draft', 'queued']).optional(),
+  /** Parent card -> child card: `to` is a child field key, `from` a parent field, a literal or a `{...}` template. */
+  fieldsIn: z.array(z.object({ to: z.string().min(1), from: SubworkflowSourceSchema })).default([]),
+  /** Wait mode, child finished: child field (`from`) -> parent field (`to`). */
+  fieldsOut: z.array(z.object({ to: z.string().min(1), from: z.string().min(1) })).default([]),
+  /** Wait mode, child cancelled: the parent takes its `failed` outcome, or carries on with `done`. */
+  onFailure: z.enum(['fail', 'continue']).default('fail'),
+});
+export type SubworkflowConfig = z.infer<typeof SubworkflowConfigSchema>;
+export type SubworkflowConfigInput = z.input<typeof SubworkflowConfigSchema>;
+
+/** Deepest chain of sub-workflows allowed (a workflow starting a workflow starting a workflow = 3). */
+export const MAX_SUBWORKFLOW_DEPTH = 3;
+
 export const StageSchema = z.object({
   id: z.string().regex(IdPattern),
   label: z.string(),
   /** Board column label. */
   column: z.string(),
-  /** manual = moved by a user/BA command, never dispatched. */
-  kind: z.enum(['agent', 'manual', 'terminal']),
+  /**
+   * manual = moved by a user/BA command, never dispatched. subworkflow = run by the server: starts a child card
+   * (`subworkflow` holds the details); never dispatched to an agent.
+   */
+  kind: z.enum(['agent', 'manual', 'terminal', 'subworkflow']),
+  /** Required for kind 'subworkflow', absent otherwise. */
+  subworkflow: SubworkflowConfigSchema.optional(),
   /** Required for kind 'agent'. */
   claimRole: z.string().nullable(),
   seniorOnly: z.boolean().default(false),
@@ -119,6 +158,16 @@ export function getOutcome(
   outcomeId: string,
 ): Outcome | undefined {
   return getStage(def, stageId)?.outcomes.find((o) => o.id === outcomeId);
+}
+
+/** Effective start state of a sub-workflow child: explicit, else queued only when every required child field is mapped. */
+export function effectiveSubworkflowStart(
+  cfg: Pick<SubworkflowConfig, 'start' | 'fieldsIn'>,
+  requiredChildFields: readonly string[],
+): 'draft' | 'queued' {
+  if (cfg.start) return cfg.start;
+  const mapped = new Set(cfg.fieldsIn.map((f) => f.to));
+  return requiredChildFields.every((f) => mapped.has(f)) ? 'queued' : 'draft';
 }
 
 /** First stage a card enters when it is created in the 'draft'/'queued' states for this workflow. */

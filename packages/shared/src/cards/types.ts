@@ -58,6 +58,12 @@ export const CardOrigin = z.enum([
   'full_suite',
   'regression',
   'interest',
+  /** Started by a `subworkflow` stage of a parent card. */
+  'subworkflow',
+  /** Started by an automation trigger (a card stage, an intake ticket, ...). */
+  'trigger',
+  /** Started by an inbound e-mail. */
+  'email',
 ]);
 export type CardOrigin = z.infer<typeof CardOrigin>;
 

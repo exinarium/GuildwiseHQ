@@ -11,7 +11,7 @@ import {
 export interface EditorStage {
   id: string;
   label: string;
-  kind: 'agent' | 'manual' | 'terminal';
+  kind: 'agent' | 'manual' | 'terminal' | 'subworkflow';
   claimRole: string | null;
   inserted: boolean;
 }

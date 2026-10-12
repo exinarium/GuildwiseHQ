@@ -204,6 +204,55 @@ export const cardEvents = [
     z.object({ cardId: Id, testerAgentId: Id, bugCardId: Id, evidence: TestEvidence, summary: z.string() }),
   ),
   defineEvent('ChildCardResolved', z.object({ cardId: Id, childCardId: Id, toStage: z.literal('test') })),
+  /**
+   * A `subworkflow` stage started a child card (docs/design/workflow-builder.md section 4). Appended with the child's
+   * `CardCreated{origin:'subworkflow', parentCardId: cardId}`. `workflowVersion` is the version the child is pinned to.
+   */
+  defineEvent(
+    'SubworkflowStarted',
+    z.object({
+      cardId: Id,
+      stageId: Stage,
+      childCardId: Id,
+      childProjectId: Id,
+      workflowKey: z.string().min(1),
+      workflowVersion: z.number().int().min(1),
+      mode: z.enum(['wait', 'continue']),
+      /** Rework round of the parent when the stage was entered: part of the dedupe key (parent, stage, round). */
+      reworkRound: z.number().int().min(0).default(0),
+    }),
+  ),
+  /** The child of a waiting `subworkflow` stage ended: the parent takes its `done` or `failed` outcome. */
+  defineEvent(
+    'SubworkflowResolved',
+    z.object({
+      cardId: Id,
+      stageId: Stage,
+      childCardId: Id,
+      result: z.enum(['done', 'cancelled']),
+      /** Parent field values copied back from the child (`fieldsOut`), applied with this event. */
+      fields: Fields.default({}),
+    }),
+  ),
+  /** The server declined to start a sub-workflow (a desk notice is raised). */
+  defineEvent(
+    'SubworkflowRefused',
+    z.object({
+      cardId: Id,
+      stageId: Stage,
+      workflowKey: z.string().min(1),
+      reason: z.enum([
+        'depth',
+        'cycle',
+        'not_found',
+        'not_approved',
+        'not_enabled',
+        'not_member',
+        'invalid_mapping',
+      ]),
+      detail: z.string().max(1000).default(''),
+    }),
+  ),
   defineEvent(
     'RebaseConflict',
     z.object({ cardId: Id, stage: Stage, baseBranch: z.string(), conflictedFiles: z.array(z.string()) }),

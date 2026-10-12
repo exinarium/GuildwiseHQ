@@ -33,6 +33,23 @@ export type IssueCode =
   | 'invalid_effect'
   // rule 9
   | 'when_field_not_boolean'
+  // rule 10 (sub-workflow stages; target-dependent checks live in subworkflow.ts)
+  | 'subworkflow_missing_config'
+  | 'subworkflow_config_misplaced'
+  | 'subworkflow_has_role'
+  | 'subworkflow_no_failed_route'
+  | 'subworkflow_duplicate_mapping'
+  | 'subworkflow_unknown_field'
+  | 'subworkflow_field_out_in_continue'
+  | 'subworkflow_unknown_target'
+  | 'subworkflow_target_not_approved'
+  | 'subworkflow_target_not_enabled'
+  | 'subworkflow_cross_org'
+  | 'subworkflow_cycle'
+  | 'subworkflow_too_deep'
+  | 'subworkflow_unknown_card_type'
+  | 'subworkflow_field_type'
+  | 'subworkflow_required_unmapped'
   // custom workflows only
   | 'not_custom'
   | 'invalid_key'
@@ -294,6 +311,78 @@ export function validateWorkflow(
         );
       }
     }
+  }
+
+  // Rule 10: sub-workflow stages (target-independent part; see validateSubworkflowTargets for the rest).
+  for (const s of def.stages) {
+    const cfg = s.subworkflow;
+    if (s.kind !== 'subworkflow') {
+      if (cfg)
+        err(
+          10,
+          'subworkflow_config_misplaced',
+          `stage '${s.id}' is not a sub-workflow stage but has a subworkflow block`,
+          s.id,
+        );
+      continue;
+    }
+    if (!cfg) {
+      err(10, 'subworkflow_missing_config', `sub-workflow stage '${s.id}' needs a subworkflow block`, s.id);
+      continue;
+    }
+    if (s.claimRole)
+      err(
+        10,
+        'subworkflow_has_role',
+        `sub-workflow stage '${s.id}' is run by the server: it takes no claimRole`,
+        s.id,
+      );
+    const seenTo = new Set<string>();
+    for (const m of cfg.fieldsIn) {
+      if (seenTo.has(m.to))
+        err(
+          10,
+          'subworkflow_duplicate_mapping',
+          `stage '${s.id}' fills child field '${m.to}' more than once`,
+          s.id,
+        );
+      seenTo.add(m.to);
+      if ('field' in m.from && !catalogue[m.from.field])
+        err(
+          10,
+          'subworkflow_unknown_field',
+          `stage '${s.id}' reads unknown field '${m.from.field}' of this card`,
+          s.id,
+        );
+    }
+    if (cfg.mode === 'continue' && cfg.fieldsOut.length > 0)
+      err(
+        10,
+        'subworkflow_field_out_in_continue',
+        `stage '${s.id}' continues at once: it cannot copy fields back from the child`,
+        s.id,
+      );
+    for (const m of cfg.fieldsOut) {
+      if (!catalogue[m.to])
+        err(
+          10,
+          'subworkflow_unknown_field',
+          `stage '${s.id}' writes unknown field '${m.to}' of this card`,
+          s.id,
+        );
+    }
+    if (
+      cfg.mode === 'wait' &&
+      cfg.onFailure === 'fail' &&
+      s.outcomes.length > 0 &&
+      !s.outcomes.some((o) => o.kind === 'failure')
+    )
+      err(
+        10,
+        'subworkflow_no_failed_route',
+        `sub-workflow stage '${s.id}' needs a failure route for a cancelled child`,
+        s.id,
+      );
   }
 
   // Warnings.

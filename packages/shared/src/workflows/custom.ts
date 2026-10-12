@@ -1,11 +1,17 @@
 import { CardType } from '../cards/types.ts';
 import type { RoleDefinition } from '../roles/schema.ts';
 import { WorkflowDefinitionSchema } from './schema.ts';
+import { type SubworkflowLookup, validateSubworkflowTargets } from './subworkflow.ts';
 import { type ValidationIssue, validateWorkflow } from './validate.ts';
 
 export interface CustomWorkflowContext {
   builtinWorkflowKeys: readonly string[];
   departments: readonly string[];
+  /**
+   * Resolves the targets of `subworkflow` stages (cycle, depth, approval, field checks). Absent: only the
+   * target-independent checks run.
+   */
+  subworkflowLookup?: SubworkflowLookup;
 }
 
 /** Events a custom workflow may use: it moves cards with generic stage moves only. */
@@ -47,6 +53,7 @@ export function validateCustomWorkflow(
   if (def.cardTypes.length === 0) err('invalid_card_type', 'the workflow needs at least one card type');
   if (def.department && !ctx.departments.includes(def.department))
     err('unknown_department', `department '${def.department}' does not exist: create it first`);
+  if (ctx.subworkflowLookup) issues.push(...validateSubworkflowTargets(input, ctx.subworkflowLookup));
   for (const s of def.stages) {
     if (s.kind === 'manual' && s.id !== def.initialStage)
       err(

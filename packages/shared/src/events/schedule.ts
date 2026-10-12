@@ -24,6 +24,17 @@ export const CardTemplateSchema = z.object({
   workflowKey: z.string().min(1).optional(),
   fields: z.record(z.string(), z.unknown()).default({}),
   priority: z.number().int().min(1).max(9).optional(),
+  /**
+   * Field mapping (docs/design/workflow-builder.md section 5): target -> text with `{token}`s. The target is `title`,
+   * `context` or a card field key; tokens are listed in `MAPPING_TOKENS` (schedules/index.ts). Absent: `title` and
+   * `fields` are used as written. Applied after `fields`, so a mapped key wins.
+   */
+  mapping: z.record(z.string().min(1).max(100), z.string().max(2000)).optional(),
+  /**
+   * State the created card starts in. Absent: as today (queued when ready, draft otherwise). Cards made from outside
+   * content (e-mail, webhooks) are drafts unless the owner allows them to be queued.
+   */
+  start: z.enum(['draft', 'queued']).optional(),
 });
 export type CardTemplate = z.infer<typeof CardTemplateSchema>;
 
@@ -33,9 +44,25 @@ export const SCHEDULE_EVENT_NAMES = [
   'card_finalized',
   'interest_run_done',
   'project_converted',
+  // Workflow-builder triggers (docs/design/workflow-builder.md section 5): accepted by the schema, fired by the server
+  // once `SCHEDULE_EVENT_TRIGGERS` lists them (WP6).
+  'card_stage_reached',
+  'card_done',
+  'investigation_reported',
 ] as const;
 export const ScheduleEventName = z.enum(SCHEDULE_EVENT_NAMES);
 export type ScheduleEventName = z.infer<typeof ScheduleEventName>;
+
+/** Narrows which events of an `event` trigger fire a schedule. Every given condition must hold. */
+export const TriggerFilterSchema = z.object({
+  cardType: z.string().min(1).max(60).optional(),
+  /** Card field (or column) equals a value, e.g. `{field: 'urgent', equals: true}`. */
+  fieldEquals: z
+    .array(z.object({ field: z.string().min(1).max(100), equals: z.unknown() }))
+    .max(10)
+    .optional(),
+});
+export type TriggerFilter = z.infer<typeof TriggerFilterSchema>;
 
 /**
  * When a schedule runs. `cron` and `issue_labelled` carry a 5-field cron expression and an IANA zone (for
@@ -55,6 +82,10 @@ export const ScheduleTriggerSchema = z.discriminatedUnion('kind', [
     /** Only events of this project (phase, card, conversion), or of this interest. Null: any in the organization. */
     projectId: Id.nullish(),
     interestId: Id.nullish(),
+    /** `card_stage_reached`, `card_done`: only cards of this workflow; `card_stage_reached`: only this stage. */
+    workflowKey: z.string().min(1).max(100).optional(),
+    stageId: z.string().min(1).max(100).optional(),
+    filter: TriggerFilterSchema.optional(),
   }),
   z.object({
     kind: z.literal('issue_labelled'),
@@ -66,6 +97,24 @@ export const ScheduleTriggerSchema = z.discriminatedUnion('kind', [
     cron: z.string().min(1).max(100),
     timezone: z.string().min(1).max(60),
   }),
+  /** A message arrived at one of the organisation's inbound addresses (docs/design/workflow-builder.md D9). */
+  z.object({
+    kind: z.literal('email_received'),
+    inboxId: Id,
+    /** Sender allow-list: full addresses or `@domain`. Absent: any sender (cards then start as drafts). */
+    from: z.array(z.string().min(1).max(254)).max(50).optional(),
+    subjectContains: z.string().min(1).max(200).optional(),
+  }),
+  /** A reply arrived in a mail thread that belongs to a card. */
+  z.object({ kind: z.literal('email_reply'), inboxId: Id }),
+  /** An intake was created (issues poll, mail, web form). */
+  z.object({
+    kind: z.literal('intake_ticket'),
+    source: z.enum(['issues', 'email', 'web']).optional(),
+    projectId: Id.nullish(),
+  }),
+  /** `POST /api/hooks/:scheduleId`, signed with an HMAC of `secretHash`'s secret (later; docs Q5). */
+  z.object({ kind: z.literal('webhook_in'), secretHash: z.string().min(1).max(200) }),
 ]);
 export type ScheduleTrigger = z.infer<typeof ScheduleTriggerSchema>;
 
@@ -80,7 +129,15 @@ export type DigestKind = z.infer<typeof DigestKind>;
 
 /** One action per schedule. `{date}`, `{week}`, `{event}`, `{ref}` and `{issue}` in titles and texts are expanded at fire time. */
 export const ScheduleActionSchema = z.union([
-  z.object({ kind: z.literal('create_card'), projectId: Id, template: CardTemplateSchema }),
+  z.object({
+    kind: z.literal('create_card'),
+    projectId: Id,
+    template: CardTemplateSchema,
+    /** Event-triggered schedules: cards created per hour at most (default 20); more are skipped with one desk notice. */
+    ratePerHour: z.number().int().min(1).max(1000).optional(),
+    /** Do not create a second card for the same mail thread, subject and sender, or at all. Absent: `none`. */
+    dedupe: z.enum(['thread', 'subject_from', 'none']).optional(),
+  }),
   z.object({ kind: z.literal('regression_run'), projectId: Id, template: CardTemplateSchema }),
   z.object({
     kind: z.literal('devops_request'),
@@ -277,7 +334,7 @@ export const scheduleEvents = [
       scheduleId: Id,
       firedFor: IsoDate,
       nextFireAt: IsoDate.nullable(),
-      reason: z.enum(['org_suspended', 'feature_disabled']),
+      reason: z.enum(['org_suspended', 'feature_disabled', 'rate_limited']),
     }),
   ),
   /** The manager ran a feed (or schedule) right now; same card path as `ScheduleFired`. */

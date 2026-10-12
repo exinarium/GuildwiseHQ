@@ -15,6 +15,7 @@ import {
   isOrgManager,
   isOrgOperational,
   isPollAction,
+  isTriggerImplemented,
   isWebhookAction,
   type OrgRole,
   type PatchScheduleRequest,
@@ -354,6 +355,8 @@ async function validate(
   isManager: boolean,
 ): Promise<void> {
   const t = n.trigger;
+  if (!isTriggerImplemented(t))
+    throw badRequest('trigger_not_available', 'this kind of trigger is not available yet');
   if (t.kind === 'cron' || t.kind === 'issue_labelled') assertCronAndZone(t.cron, t.timezone);
   if (t.kind === 'issue_labelled') {
     if (t.provider === 'github' && !GITHUB_REPO.test(t.query.trim()))

@@ -40,7 +40,7 @@ export const ProjectWorkflowDtoSchema = z.object({
     z.object({
       id: z.string(),
       label: z.string(),
-      kind: z.enum(['agent', 'manual', 'terminal']),
+      kind: z.enum(['agent', 'manual', 'terminal', 'subworkflow']),
       claimRole: z.string().nullable(),
       inherited: z.boolean(),
     }),
