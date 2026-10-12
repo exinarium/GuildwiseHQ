@@ -87,6 +87,8 @@ export const GitConnectionSchema = z.object({
   method: z.enum(['cli', 'token', 'ssh', 'service-principal']).optional(),
   /** Why it is not connected / what to do next, in a sentence. */
   detail: z.string().max(400).optional(),
+  /** Why a login is not usable: no token saved, the host refused the token, or the host could not be reached. */
+  problem: z.enum(['no_token', 'token_refused', 'unreachable']).optional(),
   checkedAt: z.iso.datetime(),
 });
 export type GitConnection = z.infer<typeof GitConnectionSchema>;

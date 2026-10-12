@@ -417,6 +417,77 @@ describe('Bitbucket Cloud adapter (REST stubbed)', () => {
     expect(f.calls[0]?.auth).toBe(`Basic ${Buffer.from('me@example.com:ATAT-SECRET').toString('base64')}`);
   });
 
+  describe('status', () => {
+    const BB = 'https://api.bitbucket.org/2.0';
+    const deny = (status: number, message = 'nope') =>
+      new Response(JSON.stringify({ error: { message } }), { status });
+    const run = (handlers: Parameters<typeof fakeFetch>[0], store: MemoryTokenStore = tokens()) =>
+      new BitbucketCloudForge(env({ fetch: fakeFetch(handlers).fetch, tokens: store })).status();
+
+    it('no token: not connected, problem no_token', async () => {
+      expect(await run([], new MemoryTokenStore())).toMatchObject({
+        state: 'not_connected',
+        problem: 'no_token',
+      });
+    });
+
+    it('/user answers: connected with the account', async () => {
+      expect(await run([[`GET ${BB}/user`, { nickname: 'me' }]])).toMatchObject({
+        state: 'connected',
+        account: 'me',
+      });
+    });
+
+    it('/user refused for lack of the account scope but repositories work: connected, not "not available"', async () => {
+      const st = await run([
+        [`GET ${BB}/user`, deny(403, 'Your credentials lack one or more required privilege scopes')],
+        [`GET ${BB}/repositories?`, { values: [] }],
+      ]);
+      expect(st).toMatchObject({ state: 'connected', method: 'token', account: 'me@example.com' });
+      expect(st.problem).toBeUndefined();
+    });
+
+    it('both calls refused: token_refused with the HTTP status and a scope hint (403) or e-mail hint (401)', async () => {
+      const r403 = await run([
+        [`GET ${BB}/user`, deny(403)],
+        [`GET ${BB}/repositories?`, deny(403)],
+      ]);
+      expect(r403).toMatchObject({ state: 'not_connected', problem: 'token_refused' });
+      expect(r403.detail).toMatch(/HTTP 403/);
+      expect(r403.detail).toMatch(/scope/);
+      const r401 = await run([
+        [`GET ${BB}/user`, deny(401)],
+        [`GET ${BB}/repositories?`, deny(401)],
+      ]);
+      expect(r401.detail).toMatch(/HTTP 401/);
+      expect(r401.detail).toMatch(/e-mail/);
+    });
+
+    it('API unreachable or erroring: unavailable/unreachable, never "not connected"', async () => {
+      const down = new BitbucketCloudForge(
+        env({
+          fetch: (async () => {
+            throw new Error('getaddrinfo ENOTFOUND api.bitbucket.org');
+          }) as typeof fetch,
+          tokens: tokens(),
+        }),
+      );
+      expect(await down.status()).toMatchObject({ state: 'unavailable', problem: 'unreachable' });
+      expect(await run([[`GET ${BB}/user`, deny(503, 'busy')]])).toMatchObject({
+        state: 'unavailable',
+        problem: 'unreachable',
+      });
+    });
+
+    it('a token without an e-mail still pushes: connected, with a note that pull requests need the e-mail', async () => {
+      const t = new MemoryTokenStore();
+      t.set({ provider: 'bitbucket-cloud', host: 'bitbucket.org', token: 'ATAT' });
+      const st = await run([], t);
+      expect(st).toMatchObject({ state: 'connected', method: 'token' });
+      expect(st.detail).toMatch(/e-mail/);
+    });
+  });
+
   it('git over https uses the API-token user name', async () => {
     const bb = new BitbucketCloudForge(env({ tokens: tokens() }));
     const a = await bb.gitAuth('https://bitbucket.org/ws/app.git');

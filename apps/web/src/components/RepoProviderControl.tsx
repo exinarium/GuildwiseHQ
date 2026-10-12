@@ -81,6 +81,11 @@ export function RepoProviderControl({
           </select>
         </div>
       )}
+      {connectable && ws && conn && conn.state !== 'connected' && conn.detail && (
+        <p className="mt-1 text-xs text-subtle" data-testid={`repo-provider-detail-${repo.name}`}>
+          {conn.detail}
+        </p>
+      )}
       <ErrorBox error={set.error} />
       {open && connectable && ws && (
         <ConnectHelper

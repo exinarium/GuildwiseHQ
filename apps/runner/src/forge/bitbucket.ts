@@ -1,5 +1,5 @@
 import type { GitConnection, RepoRef } from '@aom/shared';
-import { errText, ForgeUnavailableError, isHttps, jsonCall, tokenHelperEnv } from './http.ts';
+import { errText, ForgeHttpError, ForgeUnavailableError, isHttps, jsonCall, tokenHelperEnv } from './http.ts';
 import type {
   BranchRules,
   ChangeState,
@@ -53,13 +53,27 @@ export class BitbucketCloudForge implements Forge {
   async status(): Promise<GitConnection> {
     const checkedAt = (this.env.now?.() ?? new Date()).toISOString();
     const base = { provider: 'bitbucket-cloud' as const, host: this.host, checkedAt };
-    if (!this.cred())
+    const t = this.cred();
+    if (!t)
       return {
         ...base,
         state: 'not_connected',
+        problem: 'no_token',
         detail:
-          'Run `aom-runner git-connect bitbucket-cloud` and paste an Atlassian API token (scopes: repository read/write, pull request read/write).',
+          'No token saved. Run `aom-runner git-connect bitbucket-cloud` and paste an Atlassian API token (scopes: repository read/write, pull request read/write).',
       };
+    if (!t.user)
+      // Pushing over https only needs the token; pull requests and the repository list also need the e-mail.
+      return {
+        ...base,
+        state: 'connected',
+        method: 'token',
+        detail:
+          'Pushing works. No Atlassian e-mail is saved, so pull requests cannot be opened: run `aom-runner git-connect bitbucket-cloud` again.',
+      };
+    // `/user` needs the account scope, which the documented token (repository and pull request scopes) may lack, so a
+    // refusal there is re-checked with a call those scopes allow before the token is called bad.
+    let first: unknown;
     try {
       const u = await this.call<{ display_name?: string; nickname?: string }>('/user');
       return {
@@ -69,10 +83,27 @@ export class BitbucketCloudForge implements Forge {
         ...(u.nickname || u.display_name ? { account: u.nickname ?? u.display_name } : {}),
       };
     } catch (err) {
+      first = err;
+    }
+    if (!isRefusal(first)) return unreachable(base, first);
+    try {
+      await this.call('/repositories?role=member&pagelen=1');
+      return { ...base, state: 'connected', method: 'token', account: t.user };
+    } catch (err) {
+      if (!isRefusal(err)) return unreachable(base, err);
+      const hint =
+        err.status === 401
+          ? 'Check the Atlassian e-mail and that the token has not expired.'
+          : 'The token is probably missing the repository read scope.';
       return {
         ...base,
         state: 'not_connected',
-        detail: `Bitbucket refused the saved token (${errText(err)}).`,
+        problem: 'token_refused',
+        detail:
+          `Bitbucket refused the saved token (${errText(err)}). ${hint} Run \`aom-runner git-connect bitbucket-cloud\` again (scopes: repository read/write, pull request read/write).`.slice(
+            0,
+            400,
+          ),
       };
     }
   }
@@ -170,6 +201,25 @@ export class BitbucketCloudForge implements Forge {
       return null;
     }
   }
+}
+
+const isRefusal = (e: unknown): e is ForgeHttpError =>
+  e instanceof ForgeHttpError && (e.status === 401 || e.status === 403);
+
+function unreachable(
+  base: { provider: 'bitbucket-cloud'; host: string; checkedAt: string },
+  err: unknown,
+): GitConnection {
+  return {
+    ...base,
+    state: 'unavailable',
+    problem: 'unreachable',
+    detail:
+      `Could not check the token with Bitbucket (${errText(err)}). Git itself may still work; this is checked again in a minute.`.slice(
+        0,
+        400,
+      ),
+  };
 }
 
 function globMatch(pattern: string, s: string): boolean {

@@ -166,6 +166,33 @@ describe('repository provider control', () => {
     );
   });
 
+  it('Bitbucket: a refused token and an unreachable host are told apart from "not connected", with the reason', async () => {
+    const bb = (extra: Record<string, unknown>) => ({
+      connections: [{ provider: 'bitbucket-cloud', host: 'bitbucket.org', checkedAt: AT, ...extra }],
+      checkedAt: AT,
+    });
+    const repo = repoDto({ forge: 'bitbucket-cloud', remoteUrl: 'https://bitbucket.org/ws/shop.git' });
+    gitState = bb({
+      state: 'not_connected',
+      problem: 'token_refused',
+      detail: 'Bitbucket refused the saved token (HTTP 403: missing scope).',
+    });
+    const first = wrap(<RepoProviderControl projectId={ID(2)} repo={repo as never} isOwner />);
+    await screen.findByText('Token refused');
+    expect(screen.getByTestId('repo-provider-detail-shop')).toHaveTextContent('HTTP 403');
+    first.unmount();
+
+    gitState = bb({ state: 'unavailable', problem: 'unreachable', detail: 'Could not check the token.' });
+    const second = wrap(<RepoProviderControl projectId={ID(2)} repo={repo as never} isOwner />);
+    await screen.findByText('Could not check');
+    second.unmount();
+
+    gitState = bb({ state: 'connected', method: 'token', account: 'me@example.com' });
+    wrap(<RepoProviderControl projectId={ID(2)} repo={repo as never} isOwner />);
+    await screen.findByText('Connected as me@example.com');
+    expect(screen.queryByTestId('repo-provider-detail-shop')).toBeNull();
+  });
+
   it('plain git says no pull request is opened; a non-owner cannot change it', async () => {
     wrap(
       <RepoProviderControl
