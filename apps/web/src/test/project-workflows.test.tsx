@@ -1,4 +1,9 @@
-import { codeWorkflowV1, type ProjectWorkflowDto, type ProjectWorkflowsResponse } from '@aom/shared';
+import {
+  BUILTIN_ROLES,
+  codeWorkflowV1,
+  type ProjectWorkflowDto,
+  type ProjectWorkflowsResponse,
+} from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -63,27 +68,23 @@ const variant = (over: Partial<ProjectWorkflowDto> = {}): ProjectWorkflowDto =>
     ...over,
   });
 
+const entry = (definition: unknown, orgId: string | null = null) => ({
+  definition,
+  orgId,
+  status: 'active',
+  extensions: null,
+});
 const roles = [
-  {
-    definition: {
+  ...BUILTIN_ROLES.map((r) => entry(r)),
+  entry(
+    {
+      ...(BUILTIN_ROLES.find((r) => r.key === 'reviewer') as object),
       key: 'securer',
       name: 'Securer',
       claimableStages: [{ workflowKey: 'code-toy', stageId: '*' }],
     },
-    orgId: ID(2),
-    status: 'active',
-    extensions: null,
-  },
-  {
-    definition: {
-      key: 'writer',
-      name: 'Writer',
-      claimableStages: [{ workflowKey: 'code', stageId: 'docs' }],
-    },
-    orgId: null,
-    status: 'active',
-    extensions: null,
-  },
+    ID(2),
+  ),
 ];
 
 const calls: Array<{ method: string; url: string; body?: any }> = [];
@@ -133,6 +134,8 @@ beforeEach(() => {
       }
       if (url.endsWith('/cards') && method === 'POST')
         return json({ card: { id: ID(40), ref: 'TOY-1' } }, 201);
+      if (url.includes('/org/catalogue'))
+        return json({ orgId: ID(2), canEdit: true, roles: [], workflows: [], departments: [] });
       if (url.includes('/roles')) return json({ roles });
       return json({});
     }),
@@ -260,17 +263,38 @@ describe('project settings: Workflows section', () => {
   });
 });
 
-describe('the insert-step editor', () => {
-  const open = async () => {
+describe('the variant editor (workflow builder, project-variant scope)', () => {
+  const open = async (view_?: ProjectWorkflowsResponse, button = 'Customise') => {
+    if (view_) view = view_;
     const user = userEvent.setup();
     wrap(<ProjectWorkflows projectId={PROJECT} projectKey="TOY" />);
-    await user.click(await screen.findByRole('button', { name: 'Customise' }));
-    return user;
+    await user.click(await screen.findByRole('button', { name: button }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByTestId('variant-stages');
+    return { user, dialog };
+  };
+  const postBody = () => calls.find((c) => c.method === 'POST' && c.url.endsWith('/workflow-variants'))?.body;
+  const labels = (dialog: HTMLElement) =>
+    within(within(dialog).getByTestId('variant-stages'))
+      .getAllByRole('heading', { level: 3 })
+      .map((h) => h.textContent);
+  const insertCustom = async (
+    user: ReturnType<typeof userEvent.setup>,
+    dialog: HTMLElement,
+    after: string,
+    label: string,
+    role = 'securer',
+  ) => {
+    await user.click(within(dialog).getByRole('button', { name: `Insert step after ${after}` }));
+    await user.selectOptions(within(dialog).getByLabelText('Template'), 'custom');
+    await user.type(within(dialog).getByLabelText('Label'), label);
+    await user.selectOptions(within(dialog).getByLabelText('Role'), role);
+    await user.type(within(dialog).getByLabelText('Done when'), 'Checked.');
+    await user.click(within(dialog).getByRole('button', { name: 'Add step' }));
   };
 
-  it('lists the base steps read only with an insert button between them', async () => {
-    await open();
-    const dialog = await screen.findByRole('dialog');
+  it('lists the base steps locked with an insert button between them, plus the diagram and Try a card', async () => {
+    const { dialog } = await open();
     const list = within(dialog).getByTestId('variant-stages');
     expect(
       within(list)
@@ -279,25 +303,32 @@ describe('the insert-step editor', () => {
     ).toEqual(expect.arrayContaining([expect.stringContaining('Build'), expect.stringContaining('Review')]));
     expect(within(list).queryAllByTestId('inserted-stage')).toHaveLength(0);
     expect(within(list).getAllByText(/cannot be changed/).length).toBeGreaterThan(5);
+    // Base steps have no edit controls.
+    expect(within(list).queryByRole('button', { name: /^Remove step/ })).toBeNull();
+    expect(within(list).queryByLabelText('Step name')).toBeNull();
     // The final stage has nothing to insert after.
     expect(within(list).queryByRole('button', { name: 'Insert step after Done' })).toBeNull();
     expect(within(dialog).getByLabelText('Key')).toHaveValue('code-toy');
     expect(within(dialog).getByRole('button', { name: 'Send for approval' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Save draft' })).toBeDisabled();
+    expect(within(dialog).getByRole('heading', { name: 'Diagram' })).toBeInTheDocument();
+    expect(within(dialog).getByTestId('try-a-card')).toBeInTheDocument();
+    expect(within(dialog).getByTestId('issues-ok')).toBeInTheDocument();
   });
 
-  it('inserts a custom step after Build, saves the draft with it and enables sending for approval', async () => {
-    const user = await open();
-    const dialog = await screen.findByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'Insert step after Build' }));
-    await user.type(within(dialog).getByLabelText('Label'), 'Security check');
-    await user.selectOptions(within(dialog).getByLabelText('Role'), 'securer');
-    await user.type(within(dialog).getByLabelText('Done when'), 'The change was checked.');
-    await user.click(within(dialog).getByRole('button', { name: 'Add step' }));
-    await waitFor(() =>
-      expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/workflow-variants'))).toBe(true),
-    );
-    const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/workflow-variants'));
-    expect(post?.body).toMatchObject({
+  it('inserts a custom step after Build; Save draft sends insertions only, then it can be sent for approval', async () => {
+    const { user, dialog } = await open();
+    await insertCustom(user, dialog, 'Build', 'Security check');
+    // The new step shows between Build and Review, before anything is saved.
+    const l = labels(dialog);
+    expect(l[l.indexOf('Security check') - 1]).toBe('Build');
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+    expect(within(dialog).getByTestId('variant-unsaved')).toBeInTheDocument();
+    // "Try a card" walks the new step too.
+    expect(within(dialog).getByTestId('try-path')).toHaveTextContent('Security check');
+    await user.click(within(dialog).getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(postBody()).toBeDefined());
+    expect(postBody()).toMatchObject({
       key: 'code-toy',
       name: 'Code (TOY)',
       base: { key: 'code', version: 1 },
@@ -305,11 +336,7 @@ describe('the insert-step editor', () => {
         { after: 'build', stage: { id: 'security_check', label: 'Security check', claimRole: 'securer' } },
       ],
     });
-    // The new step shows between Build and Review.
-    const items = within(within(dialog).getByTestId('variant-stages')).getAllByRole('listitem');
-    const labels = items.map((li) => li.textContent ?? '');
-    const at = labels.findIndex((t) => t.includes('Security check'));
-    expect(labels[at - 1]).toContain('Build');
+    expect(postBody()).not.toHaveProperty('stages');
     expect(await within(dialog).findByTestId('variant-saved')).toBeInTheDocument();
     const send = within(dialog).getByRole('button', { name: 'Send for approval' });
     expect(send).toBeEnabled();
@@ -319,7 +346,79 @@ describe('the insert-step editor', () => {
     );
   });
 
-  it('shows the issues the server reports and keeps sending blocked', async () => {
+  it('Send for approval saves a changed draft first, then submits it', async () => {
+    const { user, dialog } = await open();
+    await insertCustom(user, dialog, 'Build', 'Security check');
+    await user.click(within(dialog).getByRole('button', { name: 'Send for approval' }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/submit'))).toBe(true));
+    const order = calls.filter((c) => c.method !== 'GET' && c.url.includes('/workflow-variants'));
+    expect(order.map((c) => c.method + (c.url.endsWith('/submit') ? ' submit' : ''))).toEqual([
+      'POST',
+      'POST submit',
+    ]);
+  });
+
+  it('the Investigate & design template inserts the architect step with its report data', async () => {
+    const { user, dialog } = await open();
+    await user.click(within(dialog).getByRole('button', { name: 'Insert step after Build' }));
+    // The architect template is the default when the architect role exists.
+    expect(within(dialog).getByLabelText('Template')).toHaveValue('investigate');
+    expect(within(dialog).getByLabelText('Role')).toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: 'Add step' }));
+    expect(labels(dialog)).toContain('Investigate & design');
+    await user.click(within(dialog).getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(postBody()).toBeDefined());
+    expect(postBody().insertions[0]).toMatchObject({
+      after: 'build',
+      stage: {
+        id: 'investigate_after_build',
+        claimRole: 'architect',
+        data: 'investigation',
+        seniorOnly: true,
+      },
+    });
+  });
+
+  it('inserted steps can be renamed, moved and removed; base steps never can', async () => {
+    const { user, dialog } = await open();
+    await insertCustom(user, dialog, 'Build', 'Security check');
+    const start = labels(dialog);
+    const at = start.indexOf('Security check');
+    // Edit the name in place: the id stays.
+    const name = within(dialog).getByLabelText('Step name');
+    await user.clear(name);
+    await user.type(name, 'Security scan');
+    expect(labels(dialog)).toContain('Security scan');
+    // Move it down past the step that follows it, then up again.
+    const next = start[at + 1];
+    await user.click(within(dialog).getByRole('button', { name: 'Move Security scan down' }));
+    expect(labels(dialog).indexOf('Security scan')).toBe(at + 1);
+    expect(labels(dialog)[at]).toBe(next);
+    await user.click(within(dialog).getByRole('button', { name: 'Move Security scan up' }));
+    expect(labels(dialog).indexOf('Security scan')).toBe(at);
+    await user.click(within(dialog).getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(postBody()).toBeDefined());
+    expect(postBody().insertions).toHaveLength(1);
+    expect(postBody().insertions[0].stage).toMatchObject({ id: 'security_check', label: 'Security scan' });
+    // Remove it.
+    await user.click(within(dialog).getByRole('button', { name: 'Remove step Security scan' }));
+    expect(labels(dialog)).toEqual(start.filter((x) => x !== 'Security check'));
+    expect(within(dialog).getByRole('button', { name: 'Save draft' })).toBeDisabled();
+  });
+
+  it('moving a step re-anchors the insertion on the step before it', async () => {
+    const { user, dialog } = await open();
+    await insertCustom(user, dialog, 'Build', 'Security check');
+    const start = labels(dialog);
+    const next = start[start.indexOf('Security check') + 1];
+    await user.click(within(dialog).getByRole('button', { name: 'Move Security check down' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(postBody()).toBeDefined());
+    const nextId = codeWorkflowV1.stages.find((s) => s.label === next)?.id;
+    expect(postBody().insertions[0].after).toBe(nextId);
+  });
+
+  it('shows the issues the server reports on the step and in the issue bar, and keeps sending blocked', async () => {
     draftReply = {
       issues: [
         {
@@ -330,28 +429,99 @@ describe('the insert-step editor', () => {
         },
       ],
     };
-    const user = await open();
-    const dialog = await screen.findByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'Insert step after Docs' }));
-    await user.type(within(dialog).getByLabelText('Label'), 'Docs check');
-    await user.selectOptions(within(dialog).getByLabelText('Role'), 'writer');
-    await user.type(within(dialog).getByLabelText('Done when'), 'Checked.');
-    await user.click(within(dialog).getByRole('button', { name: 'Add step' }));
-    const issues = await within(dialog).findByTestId('variant-issues');
-    expect(issues).toHaveTextContent("role 'writer' cannot claim stage");
+    const { user, dialog } = await open();
+    await insertCustom(user, dialog, 'Docs', 'Docs check', 'writer');
+    await user.click(within(dialog).getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(postBody()).toBeDefined());
+    await waitFor(() => expect(within(dialog).getByTestId('issue-bar')).toHaveAttribute('data-errors', '1'));
+    expect(within(dialog).getByTestId('step-issues-docs_check')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Send for approval' })).toBeDisabled();
   });
 
+  it('validates live in the browser: a role that cannot claim the step blocks sending before any save', async () => {
+    const { user, dialog } = await open();
+    await insertCustom(user, dialog, 'Docs', 'Docs check', 'writer');
+    expect(within(dialog).getByTestId('issue-bar')).toHaveAttribute('data-errors', '1');
+    expect(within(dialog).getByTestId('step-issues-docs_check')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Send for approval' })).toBeDisabled();
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
   it('a step needs a label, a role and a done criterion; a duplicate id is refused', async () => {
-    const user = await open();
-    const dialog = await screen.findByRole('dialog');
+    const { user, dialog } = await open();
     await user.click(within(dialog).getByRole('button', { name: 'Insert step after Build' }));
+    await user.selectOptions(within(dialog).getByLabelText('Template'), 'custom');
     await user.click(within(dialog).getByRole('button', { name: 'Add step' }));
     expect(within(dialog).getByRole('alert')).toHaveTextContent('Give the step a label');
     await user.type(within(dialog).getByLabelText('Label'), 'Review');
     await user.click(within(dialog).getByRole('button', { name: 'Add step' }));
     expect(within(dialog).getByRole('alert')).toHaveTextContent("A step 'review' exists already");
     expect(calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
+  it('continues an existing draft and compares it with the approved variant', async () => {
+    const spec = {
+      key: 'code-toy',
+      name: 'Code (TOY)',
+      projectId: PROJECT,
+      base: { key: 'code', version: 1 },
+      insertions: [
+        {
+          after: 'build',
+          stage: { id: 'security_check', label: 'Security check', claimRole: 'securer', doneCriteria: 'ok' },
+        },
+      ],
+    };
+    const v = variant({
+      variantSpec: { ...spec, insertions: [] as never },
+      pendingVersion: {
+        id: ID(30),
+        version: 2,
+        status: 'draft',
+        deskItemId: null,
+        variantSpec: spec as never,
+      },
+    });
+    const { user, dialog } = await open({ enabled: [wf(), v], available: [], canEdit: true }, 'Edit steps');
+    expect(labels(dialog)).toContain('Security check');
+    await user.click(within(dialog).getByRole('button', { name: 'Compare with previous' }));
+    expect(within(dialog).getByTestId('diff-lines')).toHaveTextContent("Added step 'Security check'");
+  });
+
+  it('rebase: a variant with a newer base offers Rebase in the editor', async () => {
+    const { user, dialog } = await open(
+      { enabled: [wf(), variant({ baseUpdate: { version: 2 } })], available: [], canEdit: true },
+      'Edit steps',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Rebase on v2' }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.endsWith(`/workflow-variants/${ID(11)}/rebase`))).toBe(true),
+    );
+  });
+
+  it('a version waiting for approval is read only', async () => {
+    const { dialog } = await open(
+      {
+        enabled: [
+          wf(),
+          variant({
+            pendingVersion: {
+              id: ID(30),
+              version: 2,
+              status: 'pending_approval',
+              deskItemId: ID(31),
+              variantSpec: null,
+            },
+          }),
+        ],
+        available: [],
+        canEdit: true,
+      },
+      'Edit steps',
+    );
+    expect(within(dialog).getByText(/waits for the owner's approval/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /^Insert step after/ })).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Send for approval' })).toBeDisabled();
   });
 });
 
