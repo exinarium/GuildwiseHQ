@@ -32,6 +32,23 @@ export const ProjectRepoDtoSchema = z.object({
   projectPath: z.string().nullable().optional(),
   /** The owner's access method for this repository (`ssh` or `https`); null: the workstation default of the host. */
   accessMethod: GitAccessMethodSchema.nullable().optional(),
+  /** The main branch (where pull requests go) when the owner named one; null: the repository's default branch. */
+  mainBranch: z.string().nullable().optional(),
+  /** When the runner created the missing working branch, from which branch, and whether it was pushed; null: not (yet). */
+  workingBranchCreated: z
+    .object({ at: IsoTime, from: z.string(), pushed: z.boolean() })
+    .nullable()
+    .optional(),
+  /** The pull request from the working branch to the main branch, the last time one was asked for. */
+  releasePr: z
+    .object({
+      state: z.enum(['pending', 'opened', 'nothing', 'failed']),
+      url: z.string().nullable(),
+      message: z.string().nullable(),
+      at: IsoTime,
+    })
+    .nullable()
+    .optional(),
   /** The git provider in force: the manual choice, else detected from the URL. */
   forge: ForgeKindSchema.optional(),
   /** The manual choice (null: detected). */
@@ -214,6 +231,8 @@ export const AddRepoRequestSchema = z
     projectPath: ProjectPathSchema.optional(),
     /** `ssh` or `https` for this repository; absent: the workstation default of the git host. */
     accessMethod: GitAccessMethodSchema.optional(),
+    /** The main branch (where pull requests go); absent: the repository's default branch. */
+    mainBranch: GitRefSchema.optional(),
     /** The git provider, when it cannot be detected from the URL (the manual override). */
     forge: ForgeKindSchema.optional(),
     /**
@@ -338,8 +357,19 @@ export const PatchRepoRequestSchema = z
     projectPath: ProjectPathSchema.nullable().optional(),
     /** `ssh` or `https` for this repository; null: follow the workstation default of the git host. */
     accessMethod: GitAccessMethodSchema.nullable().optional(),
+    /** The main branch (null: the repository's default branch). */
+    mainBranch: GitRefSchema.nullable().optional(),
   })
-  .refine((b) => b.forge !== undefined || b.projectPath !== undefined || b.accessMethod !== undefined, {
-    message: 'send forge, projectPath or accessMethod',
-  });
+  .refine(
+    (b) =>
+      b.forge !== undefined ||
+      b.projectPath !== undefined ||
+      b.accessMethod !== undefined ||
+      b.mainBranch !== undefined,
+    { message: 'send forge, projectPath, accessMethod or mainBranch' },
+  );
+
+/** `POST /api/projects/:id/repos/:repoId/release-pr` answer: the request was queued for the repository's workstation. */
+export const ReleasePrRequestedSchema = z.object({ requestId: z.uuid() });
+export type ReleasePrRequested = z.infer<typeof ReleasePrRequestedSchema>;
 export type PatchRepoRequest = z.infer<typeof PatchRepoRequestSchema>;

@@ -281,7 +281,7 @@ describe('Add repository form', () => {
     await user.click(within(row.closest('li') as HTMLElement).getByRole('button', { name: 'Use' }));
     expect(screen.getByLabelText('Remote URL')).toHaveValue('https://github.com/acme/barcode-camera.git');
     expect(screen.getByLabelText('Repository name')).toHaveValue('barcode-camera');
-    expect(screen.getByLabelText('Branch (optional)')).toHaveValue('develop');
+    expect(screen.getByLabelText('Working branch (optional)')).toHaveValue('develop');
   });
 });
 

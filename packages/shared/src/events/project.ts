@@ -106,6 +106,27 @@ export const projectEvents = [
       projectPath: ProjectPathSchema.optional(),
       /** `ssh` or `https` for this repository (absent: the workstation default of the git host). */
       accessMethod: GitAccessMethodSchema.optional(),
+      /** The main branch (where pull requests go); absent: the repository's default branch. */
+      mainBranch: GitRefSchema.optional(),
+    }),
+  ),
+  /**
+   * The owner set (or cleared, `mainBranch: null`) the main branch of a repository: the branch pull requests go to and the
+   * working branch is created from. Cleared: the repository's default branch.
+   */
+  defineEvent(
+    'ProjectRepoMainBranchSet',
+    z.object({ projectId: Id, repoId: Id, mainBranch: GitRefSchema.nullable(), setBy: Id.optional() }),
+  ),
+  /** The runner found the working branch missing in the repository and created it from `from` (pushed when `pushed`). */
+  defineEvent(
+    'ProjectRepoWorkingBranchCreated',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      workingBranch: z.string().min(1),
+      from: z.string().min(1),
+      pushed: z.boolean(),
     }),
   ),
   /** The owner chose (or cleared, `accessMethod: null`) how git reaches the repository: SSH key or API token / CLI login. */

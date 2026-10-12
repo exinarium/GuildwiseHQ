@@ -37,6 +37,7 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
   const [repoName, setRepoName] = useState('');
   const [repoUrl, setRepoUrl] = useState('');
   const [repoBranch, setRepoBranch] = useState('');
+  const [repoMain, setRepoMain] = useState('');
   const [projectPath, setProjectPath] = useState('');
   const [accessMethod, setAccessMethod] = useState<'default' | 'https' | 'ssh'>('default');
   const [override, setOverride] = useState<ForgeKind | 'auto'>('auto');
@@ -93,6 +94,7 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
         name,
         remoteUrl: creating ? cloneUrlFor(kind, fullName) : repoUrl.trim(),
         ...(repoBranch.trim() ? { workingBranch: repoBranch.trim() } : {}),
+        ...(repoMain.trim() ? { mainBranch: repoMain.trim() } : {}),
         ...(projectPath.trim() ? { projectPath: projectPath.trim() } : {}),
         ...(accessMethod !== 'default' ? { accessMethod } : {}),
         ...(creating ? { forge: kind } : override !== 'auto' ? { forge: override } : {}),
@@ -108,6 +110,7 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
           setRepoName('');
           setRepoUrl('');
           setRepoBranch('');
+          setRepoMain('');
           setProjectPath('');
           setAccessMethod('default');
           setParts({});
@@ -335,8 +338,16 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
       </Select>
       {expert && (
         <TextInput
-          label="Branch (optional)"
-          hint="Leave empty and the repository's default branch is used."
+          label="Main branch (optional)"
+          hint="Where pull requests go. Leave empty and the repository's default branch is used."
+          value={repoMain}
+          onChange={(e) => setRepoMain(e.target.value)}
+        />
+      )}
+      {expert && (
+        <TextInput
+          label="Working branch (optional)"
+          hint="Where finished card work is combined. Leave empty and the repository's default branch is used; a branch that does not exist is created from the main branch."
           value={repoBranch}
           onChange={(e) => setRepoBranch(e.target.value)}
         />

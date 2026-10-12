@@ -35,6 +35,7 @@ import { git } from '../git/git.ts';
 import {
   BaseBranchMissingError,
   ensureWorktree,
+  type GitAuth,
   RebaseConflictError,
   rebaseOntoBase,
   WorktreeError,
@@ -109,6 +110,8 @@ export interface SupervisorDeps {
   sudoRun?: (cmd: string, args: string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** `aom git status|connect` for the DevOps engineer (the runner drives the login on this workstation). */
   git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
+  /** Credentials for pushing a working branch the runner creates (absent: the user's own git setup). */
+  gitAuth?: GitAuth;
 }
 
 /** The server's answer to a `shift.report`: what the agent is told (and any ledger matches for a question). */
@@ -358,6 +361,7 @@ export class ShiftSupervisor {
           spec: msg.worktree,
           defaultPath: paths.worktreePath(msg.brief.project.key, msg.brief.card.ref, msg.brief.project.id),
           roots: [paths.worktrees],
+          auth: this.deps.gitAuth,
         });
         if (msg.prepare.rebase && !s.resumed) await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch);
       } catch (err) {

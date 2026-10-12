@@ -159,7 +159,7 @@ The DevOps engineer and Ask DevOps, approvals, conflicts, repository hygiene and
 - New repositories and the toolchain: When you add a repository in Project settings, Repositories, the DevOps engineer of each workstation of the project puts it there. Pick An existing repository and it is cloned into the workstation's first repository folder (aom-runner repos add); a folder that already holds something else is never overwritten.…
 - Fix with DevOps: Next to every item that failed or is missing there is a Fix button: a tool of the Development environment (missing, failed or needs access), a ticked right on the Workstations page that failed Verify now, and a repository under Repositories that failed to clone.…
 - Rights and the sudo password: A ticked right is checked on the machine itself. On the Workstations page each ticked right shows verified or failed with the reason and how to fix it (for Docker: add the runner user to the docker group, start the daemon; for sudo: enter the password or allow passwordless sudo). Verify now checks again.
-- The working branch: The working branch is the main line where finished work goes: the repository's default branch (usually main). Guildwise confirms it for you automatically the first time it sees the repository, so you are not asked.…
+- The working branch: The working branch is where finished work is combined: the repository's default branch (usually main) unless you name another such as develop, which is created from the main branch (where pull requests go; default: the repository's default branch) and pushed when it does not exist.…
 - Creating a new repository: Agents cannot create repositories themselves: their sandbox has no login for your git host. You can create one on any host yourself from the project settings (see above). When an agent needs a new repository, it asks, on GitHub, GitLab, Azure DevOps or Bitbucket Cloud:
 
 ### The Decision desk
@@ -187,9 +187,9 @@ Intake from Jira and GitHub, unmapped tickets, credentials, the outbox and guard
 - Guardrails: Before posting, your runner checks the text against your organization's agent names and internal terms. A draft that mentions an agent by name, or gives away internal process details (review scores, rework reasons and similar), is refused even if you approved it. The agent can revise and resubmit.
 
 ### Testing and finalization
-The test stage, how finished work lands (main or a pull request), simple and expert mode, the full suite and regression runs.
+The test stage, how finished work lands (working branch or pull request), the main and working branch, expert mode, the full suite and regression runs.
 - Test stage: When a card reaches Test, a tester runs the E2E tests from the test plan. If tests pass:
-- Finalization: At the Finalize stage, your BA ships the work the way the project says. In each project's settings, How finished work lands is either Straight into main after review and test (the default) or As a pull request I approve.…
+- Finalization: At the Finalize stage, your BA ships the work the way the project says. Every project repository has two branches, named in the project's repository settings:
 - Simple mode and expert mode: You do not need to know git to use Guildwise HQ. By default (simple mode) cards and the desk speak in results: *"Goes into main after review and test"*, *"Your change is live on main"*, *"Waiting for you to merge the pull request"*.…
 - Full suite and regression: After finalization, a full suite card is created for testers to run the entire E2E suite once. A test-side failure (a flaky test, data or environment) is fixed by the tester; a genuine bug becomes a new bug card and you get a notice. These failures do not block merges.
 

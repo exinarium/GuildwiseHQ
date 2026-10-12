@@ -166,6 +166,41 @@ export async function setRepoForge(
   });
 }
 
+/** The project owner names (or clears, `null`: the repository's default branch) the main branch of a repository. */
+export async function setRepoMainBranch(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  repoId: string,
+  mainBranch: string | null,
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    if (p.my_role !== 'owner') throw forbidden('only the project owner can do this');
+    const r = await one(
+      tx,
+      'SELECT id, main_branch FROM project_repos WHERE id=$1 AND project_id=$2 AND removed_at IS NULL',
+      [repoId, projectId],
+    );
+    if (!r) throw notFound('repository not found');
+    if ((r.main_branch ?? null) === mainBranch) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: {
+            type: 'ProjectRepoMainBranchSet',
+            payload: { projectId, repoId, mainBranch, setBy: user.id },
+          },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
 /** The project owner sets (or clears, `null`/empty) the sub directory of a repository the project lives in. */
 export async function setRepoProjectPath(
   ctx: Ctx,

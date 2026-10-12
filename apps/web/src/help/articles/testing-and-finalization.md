@@ -1,11 +1,11 @@
 ---
 title: Testing and finalization
-summary: The test stage, how finished work lands (main or a pull request), simple and expert mode, the full suite and regression runs.
-keywords: [test, finalize, merge, PR, pull request, how finished work lands, protected branch, expert mode, simple mode, git, completion action, mark merged, regression, full suite]
+summary: The test stage, how finished work lands (working branch or pull request), the main and working branch, expert mode, the full suite and regression runs.
+keywords: [test, finalize, merge, commit and push, main branch, working branch, PR, pull request, how finished work lands, protected branch, expert mode, simple mode, git, completion action, mark merged, regression, full suite]
 order: 11
 ---
 
-After a card is reviewed and approved, it moves to the Test stage where a tester runs E2E tests. Once tests pass, the card moves to Finalize where its work lands the way the project says: straight into main, or as a pull request for you to approve. A full test suite runs after each finalized card, unless you switch that off in the project settings.
+After a card is reviewed and approved, it moves to the Test stage where a tester runs E2E tests. Once tests pass, the card moves to Finalize where its work lands the way the project says: committed and pushed to the working branch, or as a pull request for you to approve. A full test suite runs after each finalized card, unless you switch that off in the project settings.
 
 ## Test stage {#test-stage}
 
@@ -26,17 +26,24 @@ Playwright's test output folders (`test-results/`, `playwright-report/`, `blob-r
 
 ## Finalization {#finalization}
 
-At the Finalize stage, your BA ships the work the way the project says. In each project's settings, **How finished work lands** is either **Straight into main after review and test** (the default) or **As a pull request I approve**. If the main line is protected on the code host, Guildwise opens a pull request instead, switches the project to pull requests and tells you on the card. On the card you see plain results: *"Your change is live on main"* or *"Waiting for you to merge the pull request"*.
+At the Finalize stage, your BA ships the work the way the project says. Every project repository has two branches, named in the project's repository settings:
+
+- the **main branch** is where pull requests go (default: the repository's default branch);
+- the **working branch** is where finished card work is combined. It can be the same branch as the main branch. If it does not exist, Guildwise creates it from the main branch and pushes it when the first card starts, and the repository settings say when.
+
+Agents work on a card branch of their own. In each project's settings, **How finished work lands** is either **Commit and push to the working branch (no pull request)** (the default) or **Pull request I approve**. If the working branch is protected on the code host, Guildwise opens a pull request instead, switches the project to pull requests and tells you on the card. On the card you see plain results: *"Your change is live on main"* or *"Waiting for you to merge the pull request"*.
 
 With **expert mode** on (Settings), each card also has its own **completion action**, which the BA may revise:
 
-- **PR**: Push the branch to the git host and open a pull request (when the workstation is connected to the host), or ask the desk if it cannot.
-- **Push branch**: Push the branch to the git host without opening a pull request.
-- **Merge**: Merge the card's branch into the project's working branch. Small cards merge directly; large cards wait for your approval on the desk (**Approve merge**).
+- **Commit and push to the working branch**: no pull request. The card's branch is merged into the working branch and the working branch is pushed. Small cards go straight in; large cards wait for your approval on the desk (**Approve merge**).
+- **Pull request**: push the card branch to the git host and open a pull request into the working branch (the main branch when you use one branch), when the workstation is connected to the host, or ask the desk if it cannot.
+- **Push the card branch only**: push the card branch to the git host without opening a pull request.
+
+When the working branch is not the main branch, the project owner opens the pull request that carries the work to the main branch from the repository's row in the project settings (**Open pull request: develop to main**); a runner on a workstation that has the repository opens it through the git host.
 
 After the action, the branch is removed and the card moves to Done. If the card's changes clash with other work on the way in, the DevOps engineer tries to fix that first (see [When two branches conflict](/help/devops-and-hygiene#conflicts)).
 
-A merge is large when the card's risk tier is large (see Board and cards). The project owner can let large merges through without waiting for you: open the project's settings, go to **Merging**, and click **Merge large changes without my approval** (off by default; you are asked to confirm).
+A change that is committed to the working branch is large when the card's risk tier is large (see Board and cards). The project owner can let large merges through without waiting for you: open the project's settings, go to **Merging**, and click **Merge large changes without my approval** (off by default; you are asked to confirm).
 
 ## Simple mode and expert mode {#expert-mode}
 
@@ -44,7 +51,7 @@ You do not need to know git to use Guildwise HQ. By default (simple mode) cards 
 
 If you know git and want the details, open **Settings** and tick **Show me branches and git controls** under **Expert mode for code changes**. It is per person, off by default, and only changes what you see. With it on you also get:
 
-- the working-branch field in the project's repository settings, and questions about keeping or changing the working branch when a new intake or phase starts;
+- questions about keeping or changing the working branch when a new intake or phase starts (the main and working branch rows in the repository settings are shown to everyone);
 - the **Completion action** per card (see above);
 - branch names and commit details on cards;
 - **Mark merged** on the phase page (see [Phases and follow-ups](/help/phases#phase-done));

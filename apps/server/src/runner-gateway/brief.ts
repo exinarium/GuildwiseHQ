@@ -195,6 +195,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
         baseBranch: claim.worktree.baseBranch,
         branchName: claim.worktree.branchName,
         path: claim.worktree.created ? undefined : claim.worktree.worktreePath,
+        ...(claim.worktree.mainBranch ? { mainBranch: claim.worktree.mainBranch } : {}),
       }
     : null;
   // The one vault this card may read: its project vault (or the organization vault), only if this workstation's user can access it.

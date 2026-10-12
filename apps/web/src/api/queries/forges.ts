@@ -55,6 +55,29 @@ export function useSetRepoForge(projectId: string) {
   });
 }
 
+/** The owner names (or clears, `null`: the repository's default branch) the main branch pull requests go to. */
+export function useSetRepoMainBranch(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { repoId: string; mainBranch: string | null }) =>
+      patch(`/projects/${projectId}/repos/${v.repoId}`, { mainBranch: v.mainBranch }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  });
+}
+
+/** Opens a pull request from the repository's working branch to its main branch (the workstation does it). */
+export function useRequestReleasePr(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (repoId: string) => post(`/projects/${projectId}/repos/${repoId}/release-pr`, {}),
+    onSuccess: () => {
+      // The workstation answers within a moment; refresh a few times.
+      for (const ms of [500, 2000, 5000, 10000, 20000])
+        setTimeout(() => qc.invalidateQueries({ queryKey: ['project', projectId] }), ms);
+    },
+  });
+}
+
 /** The owner sets (or clears, `null`) the folder of a repository the project lives in. */
 export function useSetRepoProjectPath(projectId: string) {
   const qc = useQueryClient();

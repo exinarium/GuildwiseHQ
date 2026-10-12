@@ -1,5 +1,6 @@
 import {
   type CardDetailResponse,
+  COMPLETION_ACTION_LABELS,
   fieldCatalogue,
   isMockField,
   type WorkflowDefinition,
@@ -443,7 +444,14 @@ export function CardDetailView({
               {(!workflow || workflowUsesRepos(workflow)) && (
                 <>
                   {expert ? (
-                    <Meta k="Completion action" v={card.completionAction ?? 'not set'} />
+                    <Meta
+                      k="Completion action"
+                      v={
+                        card.completionAction
+                          ? COMPLETION_ACTION_LABELS[card.completionAction].label
+                          : 'not set'
+                      }
+                    />
                   ) : (
                     <Meta k="Where it lands" v={landingText(card)} />
                   )}

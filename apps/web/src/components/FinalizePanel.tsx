@@ -1,4 +1,4 @@
-import type { CardDetailResponse, CompletionAction } from '@aom/shared';
+import { type CardDetailResponse, COMPLETION_ACTION_LABELS, type CompletionAction } from '@aom/shared';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useFinalizeCard } from '../api/queries/testing.ts';
@@ -7,11 +7,9 @@ import { Button, ErrorBox, Panel, Select } from './ui.tsx';
 
 type Testing = NonNullable<CardDetailResponse['testing']>;
 
-const ACTIONS: ReadonlyArray<{ value: CompletionAction; label: string }> = [
-  { value: 'pr', label: 'Open a pull request' },
-  { value: 'push_branch', label: 'Push the branch' },
-  { value: 'merge', label: 'Merge into the base branch' },
-];
+const ACTIONS: ReadonlyArray<{ value: CompletionAction; label: string }> = (
+  ['merge', 'pr', 'push_branch'] as const
+).map((value) => ({ value, label: COMPLETION_ACTION_LABELS[value].label }));
 
 export function FinalizePanel({
   cardId,
@@ -49,6 +47,7 @@ export function FinalizePanel({
                 value={action}
                 onChange={(e) => setPicked(e.target.value as CompletionAction)}
                 data-testid="finalize-action"
+                hint={COMPLETION_ACTION_LABELS[action].description}
               >
                 {ACTIONS.map((a) => (
                   <option key={a.value} value={a.value}>

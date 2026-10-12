@@ -233,6 +233,40 @@ describe('a working branch the clone does not have', () => {
     expect(sh(clone, 'git', ['branch', '--list', 'main'])).toBe('');
   });
 
+  it("creates a missing working branch from the owner's main branch, not the default branch", async () => {
+    const clone = masterOnly();
+    sh(clone, 'git', ['checkout', '-b', 'release']);
+    writeFileSync(join(clone, 'r.txt'), 'r');
+    sh(clone, 'git', ['add', '-A']);
+    sh(clone, 'git', ['commit', '-m', 'release only']);
+    sh(clone, 'git', ['push', '-u', 'origin', 'release']);
+    sh(clone, 'git', ['checkout', 'master']);
+    const r = await ensureWorktree({
+      repoPath: clone,
+      roots: ['/'],
+      spec: spec({ baseBranch: 'develop', mainBranch: 'release', branchName: 'aom/bc-9-x' }),
+      defaultPath: join(tmp(), 'wt', 'BC-9'),
+    });
+    expect(r.createdBranch).toEqual({ base: 'develop', from: 'release', pushed: true });
+    const origin = sh(clone, 'git', ['remote', 'get-url', 'origin']);
+    expect(sh(origin, 'git', ['rev-parse', 'refs/heads/develop'])).toBe(
+      sh(origin, 'git', ['rev-parse', 'refs/heads/release']),
+    );
+  });
+
+  it('says so, and creates nothing, when the named main branch does not exist', async () => {
+    const clone = masterOnly();
+    const err = await ensureWorktree({
+      repoPath: clone,
+      roots: ['/'],
+      spec: spec({ baseBranch: 'develop', mainBranch: 'nonesuch', branchName: 'aom/bc-9-x' }),
+      defaultPath: join(tmp(), 'wt', 'BC-9'),
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(BaseBranchMissingError);
+    expect(err.createFailed).toContain("the main branch 'nonesuch' does not exist");
+    expect(sh(clone, 'git', ['branch', '--list', 'develop'])).toBe('');
+  });
+
   it('asks, and leaves no local branch behind, when the push is refused', async () => {
     const clone = masterOnly();
     const origin = sh(clone, 'git', ['remote', 'get-url', 'origin']);
@@ -241,7 +275,8 @@ describe('a working branch the clone does not have', () => {
     const err = await ensure(clone, 'main');
     expect(err).toBeInstanceOf(BaseBranchMissingError);
     expect(err).toMatchObject({ base: 'main', defaultBranch: 'master' });
-    expect(err.createFailed).toContain('git push failed');
+    expect(err.createFailed).toContain('could not push the new branch');
+    expect(err.createFailed).toContain('Check that this workstation may push');
     expect(err.message).toContain("its default branch is 'master'; creating it failed");
     expect(sh(clone, 'git', ['branch', '--list', 'main'])).toBe('');
   });

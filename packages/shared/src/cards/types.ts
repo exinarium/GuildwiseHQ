@@ -18,6 +18,28 @@ export type CardStatus = z.infer<typeof CardStatus>;
 export const CompletionAction = z.enum(['pr', 'push_branch', 'merge']);
 export type CompletionAction = z.infer<typeof CompletionAction>;
 
+/**
+ * What each completion action means, in the words of the UI and the docs. Two branches per repository: the **main
+ * branch** (where pull requests go) and the **working branch** (where card work is integrated; may be the same).
+ * The stored values are unchanged: `merge` is "commit and push to the working branch".
+ */
+export const COMPLETION_ACTION_LABELS: Record<CompletionAction, { label: string; description: string }> = {
+  merge: {
+    label: 'Commit and push to the working branch',
+    description:
+      'No pull request. The card branch is merged into the working branch and the working branch is pushed. A missing working branch is created from the main branch first.',
+  },
+  pr: {
+    label: 'Pull request',
+    description:
+      'The card branch is pushed and a pull request is opened for review into the working branch (the main branch when you use one branch). Pull requests from the working branch to the main branch are opened from the project settings.',
+  },
+  push_branch: {
+    label: 'Push the card branch only',
+    description: 'The card branch is pushed and nothing else happens; someone combines it by hand.',
+  },
+};
+
 export const RiskTier = z.enum(['small', 'large']);
 export type RiskTier = z.infer<typeof RiskTier>;
 

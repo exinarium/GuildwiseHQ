@@ -227,7 +227,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Repository',
-        text: "For code work: which repository. How the work lands follows the project's setting; in expert mode you can also pick a completion action (pr, push_branch or merge).",
+        text: "For code work: which repository. How the work lands follows the project's setting; in expert mode you can also pick a completion action: commit and push to the working branch, pull request, or push the card branch only.",
       },
       {
         name: 'Priority',
@@ -376,7 +376,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'Basics',
-        text: 'Project name, how finished work lands (straight into main, or as a pull request), architectural globs (for repos) and E2E test globs. The working branch field appears in expert mode.',
+        text: 'Project name, how finished work lands (commit and push to the working branch, or a pull request), architectural globs (for repos) and E2E test globs. Each repository shows its main branch (where pull requests go) and working branch (where card work is combined).',
       },
       {
         name: 'Stage',

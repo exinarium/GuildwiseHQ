@@ -35,6 +35,11 @@ export const SAVED: Array<{ table: string; restoreWhere: string }> = [
     table: 'forge_repo_lists',
     restoreWhere: 'user_id IN (SELECT id FROM users) AND workstation_id IN (SELECT id FROM workstations)',
   },
+  {
+    table: 'repo_pr_requests',
+    restoreWhere:
+      'repo_id IN (SELECT id FROM project_repos) AND workstation_id IN (SELECT id FROM workstations)',
+  },
   // Two-factor secrets and recovery codes are operational (they never enter the event log).
   { table: 'user_totp', restoreWhere: 'user_id IN (SELECT id FROM users)' },
   { table: 'user_recovery_codes', restoreWhere: 'user_id IN (SELECT id FROM users)' },

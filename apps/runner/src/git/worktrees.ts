@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { WorktreeSpec } from '@aom/shared';
+import type { ForgeKind, WorktreeSpec } from '@aom/shared';
 import { isSafeGitRef } from '@aom/shared';
 import { confineAny } from '../fs-safe.ts';
 import { branchNames, currentBranch, defaultBranchOf, git, gitOk, hasRemote, revParse } from './git.ts';
@@ -46,7 +46,15 @@ export interface EnsureWorktreeInput {
    * confined to them, whatever the server sent; nothing outside is created or deleted.
    */
   roots: string[];
+  /** Credentials for pushing a working branch this creates (absent: the user's own git setup is used). */
+  auth?: GitAuth;
 }
+
+/** Credentials for git against the repository's host (clone, push). */
+export type GitAuth = (
+  url: string,
+  forge?: ForgeKind,
+) => Promise<{ args: string[]; env: Record<string, string> }>;
 
 async function branchExists(repo: string, branch: string): Promise<boolean> {
   return (await revParse(repo, `refs/heads/${branch}`)) !== null;
@@ -120,7 +128,7 @@ export async function ensureWorktree(input: EnsureWorktreeInput): Promise<Worktr
   let createdBranch: WorktreeResult['createdBranch'];
   if (!(await revParse(repoPath, startPoint))) {
     // The working branch exists neither locally nor on origin: create it from the default branch and push it.
-    const made = await createWorkingBranch(repoPath, base);
+    const made = await createWorkingBranch(repoPath, base, { mainBranch: spec.mainBranch, auth: input.auth });
     if (!made.ok) throw new BaseBranchMissingError(base, made.defaultBranch, made.branches, made.error);
     createdBranch = made.created;
     startPoint = base;
@@ -131,32 +139,43 @@ export async function ensureWorktree(input: EnsureWorktreeInput): Promise<Worktr
 }
 
 /**
- * Creates the missing working branch `base` from the repository's default branch (`origin/HEAD`, else the only branch,
- * else main/master) and, when there is an origin, pushes it with upstream. When no default branch can be told or the
- * push is refused it returns `ok: false` and leaves nothing behind; the caller then asks the manager.
+ * Creates the missing working branch `base` from the project's main branch (`opts.mainBranch`; absent: the repository's
+ * default branch: `origin/HEAD`, else the only branch, else main/master) and, when there is an origin, pushes it with
+ * upstream. When the main branch cannot be told, does not exist, or the push is refused it returns `ok: false` with a
+ * message that says which and leaves nothing behind; the caller then asks the manager.
  */
 export async function createWorkingBranch(
   repoPath: string,
   base: string,
+  opts: { mainBranch?: string; auth?: GitAuth } = {},
 ): Promise<
   | { ok: true; created: NonNullable<WorktreeResult['createdBranch']> }
   | { ok: false; defaultBranch: string | null; branches: string[]; error?: string }
 > {
   const branches = await branchNames(repoPath);
-  const def = await defaultBranchOf(repoPath, branches);
+  const def = opts.mainBranch ?? (await defaultBranchOf(repoPath, branches));
   if (!def || !isSafeGitRef(def)) return { ok: false, defaultBranch: null, branches };
   const failed = (error: string) => ({ ok: false as const, defaultBranch: def, branches, error });
   const remote = await hasRemote(repoPath);
   if (remote) await git(repoPath, ['fetch', '--', 'origin', def]);
   const from = (await revParse(repoPath, `refs/remotes/origin/${def}`)) ? `origin/${def}` : def;
-  if (!(await revParse(repoPath, from))) return failed(`the default branch '${def}' has no commits`);
+  if (!(await revParse(repoPath, from)))
+    return failed(
+      opts.mainBranch
+        ? `the main branch '${def}' does not exist in this repository, so '${base}' cannot be created from it`
+        : `the default branch '${def}' has no commits`,
+    );
   const b = await git(repoPath, ['branch', '--no-track', '--', base, from]);
   if (b.exitCode !== 0) return failed(`git branch failed: ${b.stderr.trim()}`);
   if (remote) {
-    const push = await git(repoPath, ['push', '-u', 'origin', `${base}:${base}`]);
+    const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
+    const a = opts.auth && url ? await opts.auth(url) : { args: [], env: {} };
+    const push = await git(repoPath, [...a.args, 'push', '-u', 'origin', `${base}:${base}`], { env: a.env });
     if (push.exitCode !== 0) {
       await git(repoPath, ['branch', '-D', '--', base]);
-      return failed(`git push failed: ${(push.stderr || push.stdout).trim().slice(0, 300)}`);
+      return failed(
+        `could not push the new branch '${base}' to origin (${(push.stderr || push.stdout).trim().slice(0, 300)}). Check that this workstation may push to the repository, or create '${base}' by hand and try again`,
+      );
     }
   }
   return { ok: true, created: { base, from: def, pushed: remote } };

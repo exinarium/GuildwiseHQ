@@ -381,6 +381,7 @@ export async function repoAddedEvent(
           ...(input.forge ? { forge: input.forge } : {}),
           ...(projectPath ? { projectPath } : {}),
           ...(input.accessMethod ? { accessMethod: input.accessMethod } : {}),
+          ...(input.mainBranch ? { mainBranch: input.mainBranch } : {}),
         },
       },
       actor,

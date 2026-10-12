@@ -207,8 +207,15 @@ export const GLOSSARY: GlossaryEntry[] = [
     term: 'Working branch',
     aka: ['default branch', 'main'],
     definition:
-      'The main line of a repository (usually main) that agents start from and finished work goes into. Guildwise uses the repository default without asking, and asks only when it cannot tell.',
+      'The branch where finished card work is combined (usually the repository default, main; it can also be another one such as develop). It is created from the main branch when it does not exist. Guildwise uses the repository default without asking, and asks only when it cannot tell.',
     article: 'devops-and-hygiene#working-branch',
+  },
+  {
+    term: 'Main branch',
+    aka: ['pull request target'],
+    definition:
+      'The branch pull requests go to (default: the repository default branch). It can be the same branch as the working branch. The owner can name another in the repository settings, and a missing working branch is created from it.',
+    article: 'testing-and-finalization#finalization',
   },
   {
     term: 'Cloud workstation',

@@ -1,3 +1,4 @@
+import { COMPLETION_ACTION_LABELS } from '@aom/shared';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
@@ -164,7 +165,12 @@ export function ProjectSettings() {
           <form onSubmit={save} className="flex flex-col gap-4" aria-label="Project settings">
             <TextInput label="Name" value={name} onChange={(e) => setName(e.target.value)} />
             {expert && (
-              <TextInput label="Working branch" value={branch} onChange={(e) => setBranch(e.target.value)} />
+              <TextInput
+                label="Working branch"
+                hint="The project's default working branch. Each repository can have its own below; a branch that does not exist is created from the main branch."
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+              />
             )}
             {traits.usesRepos && (
               <Select
@@ -172,14 +178,14 @@ export function ProjectSettings() {
                 data-testid="default-completion"
                 hint={
                   expert
-                    ? 'The default completion action of new cards. A protected working branch switches this to a pull request on its own.'
-                    : 'Applies to every card in this project. If the main line is protected, Guildwise switches to pull requests by itself.'
+                    ? 'The default completion action of new cards (a card can override it). A protected working branch switches this to a pull request on its own. Pull requests from the working branch to the main branch are opened from the repository below.'
+                    : 'Applies to every card in this project. If the working branch is protected, Guildwise switches to pull requests by itself.'
                 }
                 value={landing}
                 onChange={(e) => setLanding(e.target.value as 'merge' | 'pr')}
               >
-                <option value="merge">Straight into main after review and test</option>
-                <option value="pr">As a pull request I approve</option>
+                <option value="merge">{COMPLETION_ACTION_LABELS.merge.label} (no pull request)</option>
+                <option value="pr">Pull request I approve</option>
               </Select>
             )}
             {traits.usesRepos && (
@@ -247,7 +253,7 @@ export function ProjectSettings() {
                   {traits.usesRepos && (
                     <RepoSetupStatus projectId={id} repo={r} canRetry={project?.myRole === 'owner'} />
                   )}
-                  {traits.usesRepos && expert && (
+                  {traits.usesRepos && (
                     <WorkingBranchControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
                   )}
                 </li>

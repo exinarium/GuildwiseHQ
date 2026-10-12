@@ -111,6 +111,17 @@ export async function budgetsFor(ctx: Ctx, userId: string, projects: Row[]): Pro
   return out;
 }
 
+/** The last "pull request from the working branch to the main branch" asked for a repository, as the settings show it. */
+function releasePrOf(r: Record<string, any> | undefined) {
+  if (!r) return null;
+  return {
+    state: r.state as 'pending' | 'opened' | 'nothing' | 'failed',
+    url: (r.url as string | null) ?? null,
+    message: (r.message as string | null) ?? null,
+    at: iso(r.updated_at) as string,
+  };
+}
+
 export async function getProjectDetail(
   ctx: Ctx,
   userId: string,
@@ -138,6 +149,11 @@ export async function getProjectDetail(
     ctx.pool,
     `SELECT id, data->>'repoId' AS repo_id FROM desk_items
       WHERE project_id=$1 AND subkind='working_branch' AND status='open' AND triage <> 'pending' ORDER BY created_at`,
+    [projectId],
+  );
+  const prRequests = await rows(
+    ctx.pool,
+    `SELECT DISTINCT ON (repo_id) * FROM repo_pr_requests WHERE project_id=$1 ORDER BY repo_id, created_at DESC`,
     [projectId],
   );
   const clones = await rows(
@@ -181,6 +197,15 @@ export async function getProjectDetail(
       removedAt: iso(r.removed_at),
       projectPath: r.project_path ?? null,
       accessMethod: r.access_method ?? null,
+      mainBranch: r.main_branch ?? null,
+      workingBranchCreated: r.working_branch_created_at
+        ? {
+            at: iso(r.working_branch_created_at) as string,
+            from: r.working_branch_created_from ?? '',
+            pushed: r.working_branch_created_pushed ?? false,
+          }
+        : null,
+      releasePr: releasePrOf(prRequests.find((q) => q.repo_id === r.id)),
       forge: r.forge_kind ?? detectForgeKind(r.remote_url),
       forgeOverride: r.forge_kind ?? null,
       knownBranches: r.known_branches ?? [],
