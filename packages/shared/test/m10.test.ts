@@ -47,6 +47,7 @@ const role = (
     writableGlobs: null,
     mayCommit: false,
     browser: false,
+    readOrgRepos: false,
     riskTiers: ['small', 'large'],
     repoIds: null,
   },

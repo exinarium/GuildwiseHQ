@@ -25,6 +25,8 @@ export const OutcomeDataKindSchema = z.enum([
   'candidates',
   'digest',
   'finalize',
+  /** Architect report: `{reportPath, summary, location, commit?}` (protocol/ipc.ts `InvestigationDataSchema`). */
+  'investigation',
 ]);
 export type OutcomeDataKind = z.infer<typeof OutcomeDataKindSchema>;
 
@@ -42,6 +44,11 @@ export const OutcomeSchema = z.object({
   /** Increments rework_round, routes to original builder first. */
   rework: z.boolean().default(false),
   effect: OutcomeEffectSchema.default('none'),
+  /**
+   * Outcome guard: the outcome is offered and accepted only when the card's (boolean) field equals `equals`.
+   * Same lookup as `Stage.when` (card column first, then `card.fields`). Absent: always allowed.
+   */
+  when: z.object({ field: z.string(), equals: z.unknown() }).optional(),
 });
 export type Outcome = z.infer<typeof OutcomeSchema>;
 
@@ -64,6 +71,11 @@ export const StageSchema = z.object({
   when: z.object({ field: z.string(), equals: z.unknown() }).optional(),
   worktree: z.enum(['create', 'reuse', 'none']).default('none'),
   rebaseBefore: z.boolean().default(false),
+  /**
+   * Merge the latest main branch first: on the first worktree creation of a card at this stage the runner merges
+   * `origin/<main>` into the working branch (docs/design/architect-and-workflows.md 2.5). Never on reuse.
+   */
+  syncMainBefore: z.boolean().default(false),
   approvals: z.object({ small: z.number().int().min(1), large: z.number().int().min(1) }).optional(),
   maxShiftMinutes: z.number().int().min(5).max(480).default(60),
   requiredCapabilities: z.array(z.string()).default([]),
@@ -90,6 +102,8 @@ export const WorkflowDefinitionSchema = z.object({
   cardTypes: z.array(z.string()),
   initialStage: z.string(),
   stages: z.array(StageSchema).min(2),
+  /** Project variants only: the base workflow (key and version) this definition was materialised from. */
+  extends: z.object({ key: z.string(), version: z.number().int().min(1) }).optional(),
 });
 export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
 /** Authoring shape (defaults not yet applied). */

@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { FeedItemInputSchema } from '../feed/index.ts';
 import { HttpUrlSchema } from '../safe.ts';
-import type { Stage } from '../workflows/schema.ts';
+import { allowedOutcomes, skipInactive, type WorkflowCardView } from '../workflows/resolve.ts';
+import { getStage, type Stage, type WorkflowDefinition } from '../workflows/schema.ts';
 
 export type FieldKind =
   | 'text'
@@ -25,6 +26,10 @@ export const CARD_COLUMN_FIELDS: Record<string, FieldMeta> = {
   repoId: { label: 'Repository', kind: 'uuid' },
   completionAction: { label: 'Completion action', kind: 'enum' },
   docsNeeded: { label: 'Docs needed', kind: 'boolean' },
+  /** Run the investigate & design stage (architect) before build. */
+  designNeeded: { label: 'Investigate & design', kind: 'boolean' },
+  /** The card only investigates: investigate -> finalize, no build. */
+  investigationOnly: { label: 'Investigation only', kind: 'boolean' },
   riskTier: { label: 'Risk tier', kind: 'enum' },
   priority: { label: 'Priority', kind: 'number' },
 };
@@ -86,6 +91,18 @@ export const isMockField = (key: string): boolean => (MOCK_FIELD_KEYS as readonl
 
 // ------------------------------------------------------------------ code set
 
+/** Relative, no `..` segments, not absolute; or `vault:<relative path>` under the same rules. */
+export function isValidReportPath(value: string): boolean {
+  const path = value.startsWith('vault:') ? value.slice('vault:'.length) : value;
+  if (path.trim() === '' || path.length > 300) return false;
+  if (path.startsWith('/') || path.startsWith('\\') || /^[A-Za-z]:/.test(path) || path.includes('\0'))
+    return false;
+  return !path.split(/[\\/]/).includes('..');
+}
+export const ReportPathSchema = z
+  .string()
+  .refine(isValidReportPath, 'must be a relative path without .. (optionally prefixed vault:)');
+
 /** All keys optional: draft cards may be incomplete. Completeness is checked with `requiredMissing`. */
 export const CodeFieldsSchema = z.object({
   context: z.string().optional(),
@@ -95,6 +112,8 @@ export const CodeFieldsSchema = z.object({
   constraints: z.string().optional(),
   linkedLedgerIds: z.array(z.uuid()).optional(),
   testPlan: z.string().optional(),
+  /** Architect report location override: relative path inside the worktree, or `vault:<path>`. */
+  reportPath: ReportPathSchema.optional(),
   externalRef: z.string().optional(),
   mock: MockScriptSchema.optional(),
   /** Mock runtime: the usage each shift of this card reports. */
@@ -124,6 +143,7 @@ export const CODE_FIELDS: Record<string, FieldMeta> = {
   constraints: { label: 'Constraints', kind: 'markdown' },
   linkedLedgerIds: { label: 'Linked ledger entries', kind: 'list' },
   testPlan: { label: 'Test plan', kind: 'markdown' },
+  reportPath: { label: 'Report path', kind: 'text' },
   externalRef: { label: 'External reference', kind: 'text' },
   mock: { label: 'Mock script', kind: 'json' },
   mockUsage: { label: 'Mock token usage', kind: 'json' },
@@ -300,6 +320,8 @@ export interface FillableCard {
   repoId?: string | null;
   completionAction?: string | null;
   docsNeeded?: boolean | null;
+  designNeeded?: boolean | null;
+  investigationOnly?: boolean | null;
   riskTier?: string | null;
   priority?: number | null;
   fields?: Record<string, unknown> | null;
@@ -320,4 +342,45 @@ export function requiredMissing(card: FillableCard, stage: Pick<Stage, 'required
     if (key in CARD_COLUMN_FIELDS) return !isFilled(top);
     return !isFilled(card.fields?.[key]);
   });
+}
+
+/**
+ * Card keys needed to specify the card: the `requiredFields` of the stage it enters plus those of every stage on its
+ * success path to a terminal (first allowed success outcome of each stage, `when` skips and outcome guards honoured
+ * against `card`). The entered stage is the target of the outcome with event `CardSpecified` (of `fromStageId`, else of
+ * the first stage that has one). Unknown/missing spec outcome: empty. Order is path order, without duplicates.
+ */
+export function requiredForSpecify(
+  def: Pick<WorkflowDefinition, 'stages'>,
+  card: WorkflowCardView,
+  fromStageId?: string,
+): string[] {
+  const from = fromStageId
+    ? getStage(def, fromStageId)
+    : def.stages.find((s) => s.outcomes.some((o) => o.event === 'CardSpecified'));
+  const specified = from?.outcomes.find(
+    (o) => o.event === 'CardSpecified' && allowedOutcomes(def, card, from.id).includes(o),
+  );
+  if (!from || !specified) return [];
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  let current: string | undefined = skipInactive(def, card, specified.to);
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const stage = getStage(def, current);
+    if (!stage || stage.kind === 'terminal') break;
+    for (const k of stage.requiredFields) if (!keys.includes(k)) keys.push(k);
+    const next = allowedOutcomes(def, card, stage.id).find((o) => o.kind === 'success');
+    current = next ? skipInactive(def, card, next.to) : undefined;
+  }
+  return keys;
+}
+
+/** `requiredForSpecify` keys that are not filled on the card (card columns top level, field-set values under `fields`). */
+export function missingForSpecify(
+  def: Pick<WorkflowDefinition, 'stages'>,
+  card: FillableCard & WorkflowCardView,
+  fromStageId?: string,
+): string[] {
+  return requiredMissing(card, { requiredFields: requiredForSpecify(def, card, fromStageId) });
 }

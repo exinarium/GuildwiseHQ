@@ -32,6 +32,8 @@ export function checkPermissions(role: AgentPermissions, proposed: AgentPermissi
       forbidden.push('the writable paths must stay inside the role definition');
   }
   if (proposed.browser && !role.browser) widened.push('browser access (Unix sockets)');
+  if (proposed.readOrgRepos && !role.readOrgRepos)
+    widened.push('read access to every organization repository');
   if (!subset(proposed.riskTiers, role.riskTiers)) widened.push('risk tiers');
   if (role.repoIds !== null && (proposed.repoIds === null || !subset(proposed.repoIds, role.repoIds)))
     widened.push('repositories');

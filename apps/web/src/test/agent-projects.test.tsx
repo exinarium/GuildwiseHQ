@@ -58,6 +58,7 @@ const agent = (over: Partial<AgentDto> = {}): AgentDto => ({
     writableGlobs: null,
     mayCommit: true,
     browser: false,
+    readOrgRepos: false,
     riskTiers: ['small', 'large'],
     repoIds: null,
   },

@@ -28,6 +28,7 @@ const blankStage = (n: number): Stage => ({
   outcomes: [],
   worktree: 'none',
   rebaseBefore: false,
+  syncMainBefore: false,
   maxShiftMinutes: 60,
   requiredCapabilities: [],
 });

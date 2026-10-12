@@ -64,6 +64,16 @@ export const isTerminalReport = (r: ShiftReport): boolean =>
   r.kind === 'escalate' ||
   (r.kind === 'question' && r.blocking);
 
+/** Architect outcome data (`aom design` / `aom investigate`): where the report is and a short summary for the next stage. */
+export const InvestigationDataSchema = z.object({
+  reportPath: z.string().min(1),
+  summary: z.string().max(2000),
+  location: z.enum(['repo', 'vault']),
+  /** Filled by the runner (HEAD of the card branch) for a `repo` report. */
+  commit: z.string().optional(),
+});
+export type InvestigationData = z.infer<typeof InvestigationDataSchema>;
+
 /** Data attached to an outcome report, by the outcome's `data` kind. `diffStats` is attached by the runner, not the agent. */
 export function outcomeDataSchema(kind: string): z.ZodType {
   switch (kind) {
@@ -83,6 +93,8 @@ export function outcomeDataSchema(kind: string): z.ZodType {
       return PublicationOutcomeSchema;
     case 'finalize':
       return FinalizeReportDataSchema;
+    case 'investigation':
+      return InvestigationDataSchema;
     case 'phaseReport':
       return PhaseReportDataSchema;
     case 'phaseReady':

@@ -14,6 +14,7 @@ export type IssueCode =
   | 'terminal_has_outcomes'
   | 'no_outcomes'
   | 'no_success_outcome'
+  | 'outcome_guard_gap'
   // rule 3
   | 'agent_stage_without_role'
   | 'unknown_role'
@@ -112,6 +113,9 @@ export function validateWorkflow(
     if (s.outcomes.length === 0) err(2, 'no_outcomes', `stage '${s.id}' has no outcomes`, s.id);
     else if (!s.outcomes.some((o) => o.kind === 'success')) {
       err(2, 'no_success_outcome', `stage '${s.id}' has no success outcome`, s.id);
+    } else {
+      const gap = guardGap(s);
+      if (gap) err(2, 'outcome_guard_gap', `stage '${s.id}' has no success outcome when ${gap}`, s.id);
     }
   }
 
@@ -169,9 +173,12 @@ export function validateWorkflow(
       const hops = new Set<string>();
       while (t?.when && !hops.has(t.id)) {
         hops.add(t.id);
-        const next = t.outcomes.find((x) => x.kind === 'success');
+        const successes = t.outcomes.filter((x) => x.kind === 'success');
+        // Guarded success outcomes: any of them may be the one followed, so all become edges.
+        const followed = successes.some((x) => x.when) ? successes : successes.slice(0, 1);
+        const next = followed[0];
         if (!next || !byId.has(next.to)) break;
-        addEdge(s.id, next.to);
+        for (const f of followed) if (byId.has(f.to)) addEdge(s.id, f.to);
         t = byId.get(next.to);
       }
     }
@@ -263,6 +270,23 @@ export function validateWorkflow(
     }
   }
 
+  // Rule 9 (cont.): outcome guards (Outcome.when) follow the same rule.
+  for (const s of def.stages) {
+    for (const o of s.outcomes) {
+      if (!o.when) continue;
+      const meta = catalogue[o.when.field];
+      if (meta?.kind !== 'boolean' || typeof o.when.equals !== 'boolean') {
+        err(
+          9,
+          'when_field_not_boolean',
+          `outcome '${s.id}.${o.id}': when.field '${o.when.field}' is not a boolean field compared with true or false`,
+          s.id,
+          o.id,
+        );
+      }
+    }
+  }
+
   // Warnings.
   for (const s of def.stages) {
     if (s.kind !== 'terminal' && s.doneCriteria.trim() === '') {
@@ -274,6 +298,23 @@ export function validateWorkflow(
   }
 
   return issues;
+}
+
+/**
+ * Rule 2 with outcome guards: for every combination of values of the boolean guard fields used by the stage's success
+ * outcomes, at least one success outcome must be allowed. Returns a description of the first uncovered combination,
+ * or null. A stage without guarded success outcomes is covered as soon as it has a success outcome.
+ */
+function guardGap(stage: Stage): string | null {
+  const successes = stage.outcomes.filter((o) => o.kind === 'success');
+  const fields = [...new Set(successes.flatMap((o) => (o.when ? [o.when.field] : [])))];
+  if (fields.length === 0 || fields.length > 8) return null;
+  for (let mask = 0; mask < 1 << fields.length; mask++) {
+    const values = new Map(fields.map((f, i) => [f, Boolean(mask & (1 << i))]));
+    const covered = successes.some((o) => !o.when || values.get(o.when.field) === o.when.equals);
+    if (!covered) return fields.map((f) => `${f}=${values.get(f)}`).join(', ');
+  }
+  return null;
 }
 
 export const hasErrors = (issues: readonly ValidationIssue[]): boolean =>

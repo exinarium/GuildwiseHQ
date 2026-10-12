@@ -17,6 +17,11 @@ export const AgentPermissionsSchema = z.object({
    */
   browser: z.boolean().default(false),
   riskTiers: z.array(z.enum(['small', 'large'])).default(['small', 'large']),
+  /**
+   * Read-only access to every repository of the organization on this workstation (architect). An explicit grant:
+   * the owner approves the role.
+   */
+  readOrgRepos: z.boolean().default(false),
   /** null = all project repos. */
   repoIds: z.array(z.uuid()).nullable(),
 });
@@ -50,6 +55,12 @@ export const RoleExtensionsSchema = z.object({
 });
 export type RoleExtensions = z.infer<typeof RoleExtensionsSchema>;
 
+/** `*` matches any stage; a trailing `*` is a prefix (`investigate*` matches `investigate`, `investigate_after_test`). */
+export function stageIdMatches(pattern: string, stageId: string): boolean {
+  if (pattern === stageId || pattern === '*') return true;
+  return pattern.endsWith('*') && stageId.startsWith(pattern.slice(0, -1));
+}
+
 /** True when `role` may claim `(workflowKey, stageId)`. */
 export function roleClaimsStage(
   role: Pick<RoleDefinition, 'claimableStages'>,
@@ -57,8 +68,6 @@ export function roleClaimsStage(
   stageId: string,
 ): boolean {
   return role.claimableStages.some(
-    (c) =>
-      (c.workflowKey === workflowKey || c.workflowKey === '*') &&
-      (c.stageId === stageId || c.stageId === '*'),
+    (c) => (c.workflowKey === workflowKey || c.workflowKey === '*') && stageIdMatches(c.stageId, stageId),
   );
 }

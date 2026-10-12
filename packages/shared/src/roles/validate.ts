@@ -9,7 +9,8 @@ export type RoleIssueCode =
   | 'claims_builtin_workflow'
   | 'wildcard_workflow'
   | 'unknown_tool'
-  | 'unknown_department';
+  | 'unknown_department'
+  | 'reads_org_repos';
 
 export interface RoleIssue {
   severity: 'error' | 'warning';
@@ -45,6 +46,8 @@ export function validateRoleDefinition(input: unknown, ctx: RoleValidationContex
   const issues: RoleIssue[] = [];
   const err = (code: RoleIssueCode, message: string, field?: string) =>
     issues.push({ severity: 'error', code, message, field });
+  const warn = (code: RoleIssueCode, message: string, field?: string) =>
+    issues.push({ severity: 'warning', code, message, field });
   if (def.builtIn) err('not_custom', 'a custom role cannot be marked built-in', 'builtIn');
   if (ctx.builtinRoleKeys.includes(def.key))
     err('builtin_key', `'${def.key}' is a built-in role: pick another key`, 'key');
@@ -69,6 +72,12 @@ export function validateRoleDefinition(input: unknown, ctx: RoleValidationContex
   for (const t of def.permissions.allowedTools)
     if (!TOOL.test(t))
       err('unknown_tool', `unknown tool '${t}' (read, edit, shell, web or mcp:<name>)`, 'permissions');
+  if (def.permissions.readOrgRepos)
+    warn(
+      'reads_org_repos',
+      'this role can read every repository of the organization on the workstation (read-only)',
+      'permissions',
+    );
   if (def.department && !ctx.departments.includes(def.department))
     err('unknown_department', `department '${def.department}' does not exist: create it first`, 'department');
   return issues;
