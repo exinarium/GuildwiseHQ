@@ -27,10 +27,13 @@ import { FieldList } from './FieldList.tsx';
 import { IssueBar } from './IssueBar.tsx';
 import { StepCard, type SubworkflowSlotContext } from './StepCard.tsx';
 import { TryACard } from './TryACard.tsx';
+import { VariantBuilder, type VariantBuilderProps } from './VariantBuilder.tsx';
 
 const CARD_TYPES = ['feature', 'bug', 'support', 'refactor', 'docs'];
 
 export interface WorkflowBuilderProps {
+  /** Every step editable (a custom workflow of the organization). The default scope. */
+  scope?: 'org';
   model: BuilderModel;
   onChange: (m: BuilderModel) => void;
   roles: readonly RoleDefinition[];
@@ -54,10 +57,20 @@ export interface WorkflowBuilderProps {
 }
 
 /**
+ * The guided workflow builder in its two scopes (docs/design/workflow-builder.md D2): `org` edits a whole custom
+ * workflow; `project-variant` locks the base workflow's steps and edits the insertions of a project's variant.
+ */
+export function WorkflowBuilder(p: VariantBuilderProps): React.JSX.Element;
+export function WorkflowBuilder(p: WorkflowBuilderProps): React.JSX.Element;
+export function WorkflowBuilder(p: WorkflowBuilderProps | VariantBuilderProps): React.JSX.Element {
+  return p.scope === 'project-variant' ? <VariantBuilder {...p} /> : <OrgWorkflowBuilder {...p} />;
+}
+
+/**
  * The guided workflow builder: the step list on the left, the live diagram, "Try a card" and the issues on the right.
  * It edits a `BuilderModel`; the page turns that into a draft with `toDefinition`.
  */
-export function WorkflowBuilder(p: WorkflowBuilderProps) {
+function OrgWorkflowBuilder(p: WorkflowBuilderProps) {
   const { model, readOnly = false } = p;
   const takenKeys = p.takenKeys ?? new Set<string>();
   const change = (m: BuilderModel) => p.onChange(syncKey(m, takenKeys));
