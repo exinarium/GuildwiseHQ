@@ -250,3 +250,15 @@ Order: **WP1 -> (WP2 || WP3 || WP5) -> WP4 -> WP6 -> WP7**.
 - **Q9 Approval step kind** (a step where the owner approves on the desk inside a workflow): add now or later?
   *Recommend:* later, as a follow-up; it fits the same builder.
 - **Q10 Who builds**: members may only create project automations that make draft cards? *Recommend:* yes.
+
+## Owner decisions (2026-10-12)
+
+1. **Builder:** a step list with a live diagram (no drag-and-drop canvas).
+2. **Inbound e-mail:** through a mail provider webhook (Postmark first); IMAP only if asked later.
+3. **Sub-workflows:** may start a card in another project of the same organisation (target workflow enabled there,
+   creator a member of both projects).
+4. **Cards from e-mail or webhooks:** start as drafts; the Owner can allow-list senders whose cards are queued directly.
+5. The remaining questions follow the recommendations unless the owner says otherwise: built-in workflows may be copied as
+   templates (with the notice that special behaviour is lost); incoming webhooks later; custom workflows and roles approved
+   by Owners and Admins, permission widening Owner-only; Schedules renamed to Automations; an "owner approves" step kind
+   later; members may only create project automations that make draft cards.
