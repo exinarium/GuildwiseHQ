@@ -249,6 +249,58 @@ export async function setConcurrencyCap(
   });
 }
 
+/**
+ * The project owner picks the reference repositories: other repositories of the organization's active projects (that
+ * the owner is a member of) whose code this project's agents may read, read-only, in card work and chats. The whole
+ * list is replaced; an empty list clears it. Owner only.
+ */
+export async function setReferenceRepos(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  repoIds: string[],
+): Promise<void> {
+  const wanted = [...new Set(repoIds)];
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    if (p.my_role !== 'owner') throw forbidden('only the project owner can do this');
+    if (wanted.length > 0) {
+      const ok = await rows(
+        tx,
+        `SELECT r.id FROM project_repos r JOIN projects rp ON rp.id = r.project_id
+           JOIN project_members pm ON pm.project_id = rp.id AND pm.user_id = $2 AND pm.status = 'active'
+          WHERE r.id = ANY($1::uuid[]) AND r.removed_at IS NULL AND rp.org_id = $3 AND rp.id <> $4
+            AND rp.status = 'active' AND rp.kind <> 'interest'`,
+        [wanted, user.id, p.org_id, projectId],
+      );
+      const good = new Set(ok.map((r) => r.id as string));
+      const bad = wanted.filter((id) => !good.has(id));
+      if (bad.length > 0)
+        throw badRequest(
+          'invalid_reference_repo',
+          'a reference repository must be a repository of another active project of this organization that you belong to',
+          { repoIds: bad },
+        );
+    }
+    const current = [...((p.reference_repo_ids ?? []) as string[])].sort();
+    if (JSON.stringify(current) === JSON.stringify([...wanted].sort())) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: {
+            type: 'ProjectReferenceReposSet',
+            payload: { projectId, repoIds: wanted, by: user.id },
+          },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
 async function isSimulationOrg(db: Queryable, orgId: string): Promise<boolean> {
   return (await one(db, 'SELECT 1 FROM organizations WHERE id=$1 AND simulation', [orgId])) !== undefined;
 }

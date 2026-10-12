@@ -13,6 +13,7 @@ import {
   SetConcurrencyCapRequestSchema,
   SetFullSuiteRequestSchema,
   SetMergePolicyRequestSchema,
+  SetReferenceReposRequestSchema,
   SetWorkingBranchRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -34,6 +35,7 @@ import {
   setConcurrencyCap,
   setFullSuite,
   setMergePolicy,
+  setReferenceRepos,
   updateProject,
 } from '../commands/projects.ts';
 import type { Ctx } from '../context.ts';
@@ -157,6 +159,17 @@ export function projectRoutes(ctx: Ctx) {
           req.body.enabled,
         );
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    /** Reference repositories: other repositories this project's agents may read, read-only (project owner). */
+    app.put(
+      '/api/projects/:id/reference-repos',
+      { schema: { params: IdParamsSchema, body: SetReferenceReposRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setReferenceRepos(ctx, s.user, req.params.id, req.body.repoIds);
+        return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );
 

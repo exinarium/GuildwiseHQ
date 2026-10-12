@@ -124,6 +124,7 @@ Setting up two-factor authentication, recovery codes, enforcement and owner rese
 ### Projects
 Creating projects, the priority order, project types and workflows, research cards, sharing, archiving and decision policy.
 - Creating a project: 1. Go to Projects and click New project (Owner and Admin only). 2. Enter a Name and a Key. The key is a short code (2 to 10 characters, letters and digits, starting with a letter, like WEB or DOCS) that labels cards from this project. It is suggested from the name. 3.…
+- Reference repositories: By default an agent only sees the folder of the card it is working on (and, in a chat about a project, the project's own repositories). To let a project's agents read other code, for example to compare two repositories or look up how a library is used, the project owner adds Reference repositories in the project…
 - The priority order: Your organization's projects are ranked: the project at the top of the Projects page is the most important. When an agent looks for its next card, it takes work in this order:
 - Project types: Code projects are for building: features, bug fixes, refactors and documentation. They have stages like Spec, Build, Review, Test and Finalize. They need repositories and can run test suites and regression tests.
 - Sharing a project: To let people from other organizations access a project:
@@ -284,6 +285,7 @@ Converting from research to code or another workflow, what is kept, and the conv
 Starting a chat with an agent, threads, asking the BA and archiving chats.
 - Starting a chat: 1. Click Chat in the top bar (or Chat on the Desk page, or choose Chat with an agent in the command palette). 2. Pick an agent you may talk to (the BA, a DevOps engineer, builders and so on) and click Start chat. 3. Type your message. Replies stream in while the agent's workstation is connected;…
 - Threads: Each chat is a thread. You can ask questions, offer suggestions and discuss blockers or decisions. Threads are saved. A thread that is linked to a card also shows in that card's history.
+- What the agent can read: In a chat about a project, the agent can read (never change) the project's own repositories when they are cloned on its workstation, plus the project's reference repositories. In a chat about a card, it reads the card's work folder if that is on the workstation, plus the reference repositories;…
 - Asking the BA: Start a chat with the BA the same way. Ask the BA to:
 - Archiving chats: Click the menu on a thread and choose Close chat to tidy it away. Closed chats move to the Archived view of the chat list, and Restore to the list brings one back. Delete chat removes a conversation for good, but a chat linked to a card cannot be deleted: it stays in the card's history.
 

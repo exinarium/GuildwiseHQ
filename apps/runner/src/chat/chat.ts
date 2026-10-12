@@ -18,6 +18,7 @@ import { confine } from '../fs-safe.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { resolveReadRepos } from '../read-repos.ts';
 import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 
 type ChatStartMsg = ServerToRunnerOf<'chat.start'>;
@@ -33,6 +34,8 @@ export interface ChatDeps {
   external?: ExternalAdapters;
   /** RPC to the server under the chat's id (the server treats a chat as a shift of kind `chat`). */
   rpc(chatId: string, method: string, params: Record<string, unknown>): Promise<IpcRpcResponse>;
+  /** This workstation's clone of a repository by normalized remote (its repository scan): the project's read-only repositories. */
+  findRepo?(remoteUrlNormalized: string): Promise<{ localPath: string } | undefined>;
   /** `aom git status|connect` in the DevOps engineer's chat. */
   git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
 }
@@ -198,10 +201,25 @@ export class ChatManager {
     const devops = msg.agent.isDevops === true; // G-Q1: runs as the user, unsandboxed, like its shifts
     const readOnly = !devops && !!wt && existsSync(wt);
     const cwd = readOnly && wt ? wt : sandbox.scratch;
+    // Repositories this chat may read (read-only): the project's reference repositories, and when there is no card
+    // worktree here also the project's own clones (a chat about the project, or about a card not started here). The
+    // DevOps engineer reads anywhere anyway. Only clones this runner found itself are opened.
+    const folders =
+      devops || !this.deps.findRepo
+        ? []
+        : (
+            await resolveReadRepos(msg.context.readRepos, {
+              findRepo: this.deps.findRepo,
+              runnerRoot: paths.root,
+            })
+          ).filter((r) => !readOnly || r.kind === 'reference');
 
     await adapter.writeInstructions(
       sandbox,
-      renderChatInstructions(msg.agent, msg.context, { jiraSkill: await this.jiraSkill(msg) }),
+      renderChatInstructions(msg.agent, msg.context, {
+        jiraSkill: await this.jiraSkill(msg),
+        readFolders: folders,
+      }),
     );
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
     const env = {
@@ -220,6 +238,7 @@ export class ChatManager {
       agent: msg.agent,
       env,
       readOnly,
+      readDirs: folders.map((f) => f.path),
       context: msg.context,
       ...(msg.context.intake ? { intake: true } : {}),
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),

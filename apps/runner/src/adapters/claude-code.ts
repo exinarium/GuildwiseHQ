@@ -105,7 +105,7 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
     '--mcp-config',
     join(input.sandbox.configDir, 'mcp.json'),
   );
-  for (const d of input.addDirs) args.push('--add-dir', d);
+  for (const d of [...input.addDirs, ...(input.readDirs ?? [])]) args.push('--add-dir', d);
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
   return { bin: cfg.bin, args, env: sessionEnv(input, cfg) };
 }
@@ -132,6 +132,7 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
     '--mcp-config',
     join(input.sandbox.configDir, 'mcp.json'),
   );
+  for (const d of input.readDirs ?? []) args.push('--add-dir', d);
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
   // G-Q1: the DevOps agent's chat works as the user like its shifts (real HOME, no sandbox); other chats stay sandboxed
   return {
@@ -184,8 +185,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   /** What this session may touch (see claude-policy.ts); without runner paths (unit tests) the data dir is unknown. */
   private policy(
-    input: Pick<ShiftStartInput, 'env' | 'sandbox'> & { addDirs?: string[] },
+    input: Pick<ShiftStartInput, 'env' | 'sandbox'> & { addDirs?: string[]; readDirs?: string[] },
     cwd: string,
+    /** A chat never writes: the repository metadata of its worktree is read-only there, not a writable dir. */
+    chat = false,
   ): ClaudePolicyContext {
     const root = this.paths?.root ?? dirname(dirname(input.sandbox.home));
     const script = selfCommand('aom').at(-1);
@@ -194,7 +197,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       agentDir: dirname(input.sandbox.home),
       cwd,
       addDirs: input.addDirs ?? [],
-      gitDirs: gitDirsOf(cwd),
+      gitDirs: chat ? [] : gitDirsOf(cwd),
+      readDirs: input.readDirs ?? [],
       aomReadPaths: [this.paths?.bin ?? join(root, 'bin'), ...(script ? [dirname(script)] : [])],
       ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
       realHome: homedir(),
@@ -252,7 +256,11 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     await writeFile(join(dir, 'mcp.json'), `${JSON.stringify({ mcpServers: {} })}\n`);
     this.linkCredentials(dir);
 
-    const cmd = buildClaudeCommand(input, this.cfg);
+    const cmd = buildClaudeCommand(
+      // the card repository metadata is readable (never through a rule that makes it read-only for the commit)
+      { ...input, readDirs: [...new Set([...(input.readDirs ?? []), ...gitDirsOf(input.cwd)])] },
+      this.cfg,
+    );
     const parser = new ClaudeStreamParser();
     return spawnSession({
       bin: cmd.bin,
@@ -271,6 +279,12 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
     const devops = input.agent.isDevops === true;
     if (!devops) this.assertCanRun();
+    // Read-only folders of the chat, plus the repository metadata of a card worktree it reads (stops the refused
+    // Read/Grep of `<repo>/.git/worktrees/<card>/HEAD`). The DevOps engineer reads anywhere and needs none of it.
+    const chatInput = {
+      ...input,
+      readDirs: devops ? [] : [...new Set([...(input.readDirs ?? []), ...gitDirsOf(input.cwd)])],
+    };
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
     await writeFile(
@@ -281,7 +295,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           : buildChatSettings(
               input.readOnly,
               input.intake ? (this.cfg.intake?.allowedTools ?? []) : [],
-              this.policy(input, input.cwd),
+              this.policy(chatInput, input.cwd, true),
               input.sandbox,
             ),
         null,
@@ -297,7 +311,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         : `${JSON.stringify({ mcpServers: {} })}\n`,
     );
     this.linkCredentials(dir);
-    const cmd = buildClaudeChatCommand(input, this.cfg);
+    const cmd = buildClaudeChatCommand(chatInput, this.cfg);
     const parser = new ClaudeStreamParser();
     return spawnSession({
       bin: cmd.bin,

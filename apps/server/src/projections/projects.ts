@@ -293,6 +293,10 @@ export const projectProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ProjectConcurrencyCapSet'>).payload;
     await exec(tx, 'UPDATE projects SET max_concurrent_shifts=$2 WHERE id=$1', [p.projectId, p.cap]);
   },
+  ProjectReferenceReposSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectReferenceReposSet'>).payload;
+    await exec(tx, 'UPDATE projects SET reference_repo_ids=$2::uuid[] WHERE id=$1', [p.projectId, p.repoIds]);
+  },
   ProjectRepoAdded: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectRepoAdded'>).payload;
     await exec(

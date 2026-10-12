@@ -1,5 +1,6 @@
 import { JIRA_SKILL_MD } from '../external/index.ts';
 import type { AgentRuntimeSpec, ChatContext } from '../protocol/runner.ts';
+import { type ReadableFolder, renderReadableFolders } from './readable.ts';
 
 /**
  * Instructions for a chat session (docs/ARCHITECTURE.md section 14): the manager talks to the agent directly, from any
@@ -8,7 +9,7 @@ import type { AgentRuntimeSpec, ChatContext } from '../protocol/runner.ts';
 export function renderChatInstructions(
   agent: Pick<AgentRuntimeSpec, 'name' | 'roleKey' | 'seniority'>,
   ctx: ChatContext,
-  opts: { jiraSkill?: string } = {},
+  opts: { jiraSkill?: string; readFolders?: ReadableFolder[] } = {},
 ): string {
   const out: string[] = [];
   out.push('# Who you are');
@@ -40,6 +41,8 @@ export function renderChatInstructions(
           ]),
     ].join('\n'),
   );
+  // The DevOps engineer reads anywhere (it runs as the user); everyone else only what the runner opened.
+  if (agent.roleKey !== 'devops' && opts.readFolders) out.push(renderReadableFolders(opts.readFolders));
   const intakeChat = ctx.intake && !ctx.intake.fromChat;
   if (agent.roleKey === 'devops')
     out.push(

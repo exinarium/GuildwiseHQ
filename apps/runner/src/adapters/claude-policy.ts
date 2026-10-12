@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import type { AgentPermissions } from '@aom/shared';
+import { sandboxReadEntries, secretReadDenies } from './read-only-dirs.ts';
 
 /**
  * What an agent session may touch, expressed in Claude Code's own settings (verified against
@@ -31,6 +32,13 @@ export interface ClaudePolicyContext {
   addDirs: string[];
   /** The main repository's git dir(s) a linked worktree commits into. */
   gitDirs: string[];
+  /**
+   * Read-only folders, outside the working directory: a project's reference repositories, the project's own clones
+   * in a chat, the card's repository metadata in a chat, and per-role extras (a future Architect reads every
+   * repository under the organization's source folder: pass that list here). Readable by the built-in tools and the
+   * shell, never writable, and their secret files (`.env`, keys, ...) stay unreadable. See read-only-dirs.ts.
+   */
+  readDirs?: string[];
   /** The runner's `bin/` (the `aom` shim) and where the shim's script lives: readable although inside the data dir. */
   aomReadPaths: string[];
   /** Unix socket of the runner's IPC server (the `aom` CLI talks over it: the sandbox has no loopback route out). */
@@ -81,7 +89,7 @@ export const REGISTRY_DOMAINS = [
 ];
 
 /** Credential stores in the real home that no agent has any business reading. */
-const HOME_SECRETS = [
+export const HOME_SECRETS = [
   '.ssh',
   '.aws',
   '.azure',
@@ -239,6 +247,9 @@ function sandboxBlock(
   // A role that cannot edit and may not commit gets a read-only worktree; its scratch, tmp and home stay writable.
   // (When its cwd is its own scratch dir there is no worktree to protect.)
   const worktreeLocked = profile.readOnlyWorktree && !inside(ctx.cwd, ctx.agentDir);
+  const readDirs = ctx.readDirs ?? [];
+  // A read-only folder is opened to the shell entry by entry so its secret files stay out (allowRead beats denyRead).
+  const readEntries = readDirs.flatMap((d) => sandboxReadEntries(d) ?? []);
   return {
     enabled: true,
     failIfUnavailable: ctx.mode === 'required',
@@ -251,6 +262,7 @@ function sandboxBlock(
       denyWrite: [
         ...ctx.gitDirs.flatMap((g) => [join(g, 'hooks'), join(g, 'config')]),
         ...ctx.addDirs,
+        ...readDirs,
         ...runnerPrivate,
         ...(worktreeLocked ? [ctx.cwd] : []),
       ],
@@ -258,7 +270,13 @@ function sandboxBlock(
       // Never a directory that holds a writable path (the agent's own dir holds home, scratch and tmp): bubblewrap
       // re-opens an allowed read as read-only over the writable binds beneath it, and every Bash call then fails
       // on its first write. Home, scratch and tmp are readable anyway; the Claude config dir stays hidden.
-      allowRead: [ctx.cwd, ...ctx.addDirs, ...ctx.aomReadPaths, ...(ctx.toolchainReadPaths ?? [])],
+      allowRead: [
+        ctx.cwd,
+        ...ctx.addDirs,
+        ...readEntries,
+        ...ctx.aomReadPaths,
+        ...(ctx.toolchainReadPaths ?? []),
+      ],
     },
     // On Linux the sandbox blocks creating any Unix socket (seccomp cannot filter by path), so the `aom` CLI cannot
     // reach the runner's IPC socket from inside it: it runs outside the sandbox, like git does for hooks. It only
@@ -296,6 +314,16 @@ function commonDenies(ctx: ClaudePolicyContext, configDir: string): string[] {
     ]),
     `Edit(${ruleAbs(configDir)}/**)`,
     ...ctx.addDirs.map((d) => `Edit(${ruleAbs(d)}/**)`),
+    ...readOnlyDenies(ctx),
+  ];
+}
+
+/** Read-only folders: no Edit or Write there (a deny wins over every allow), and no secret file is readable. */
+function readOnlyDenies(ctx: Pick<ClaudePolicyContext, 'readDirs'>): string[] {
+  const dirs = ctx.readDirs ?? [];
+  return [
+    ...dirs.flatMap((d) => [`Edit(${ruleAbs(d)}/**)`, `Edit(${ruleAbs(d)})`]),
+    ...secretReadDenies(dirs),
   ];
 }
 
@@ -376,7 +404,7 @@ export function buildShiftSettings(
       deny: [...new Set(deny)],
       defaultMode: 'dontAsk',
       blockReadsOutsideWorkingDirectories: true,
-      additionalDirectories: [paths.scratch],
+      additionalDirectories: [paths.scratch, ...ctx.gitDirs, ...(ctx.readDirs ?? [])],
     },
     includeCoAuthoredBy: false,
   };
@@ -422,7 +450,7 @@ export function buildChatSettings(
       deny: [...new Set(deny)],
       defaultMode: 'dontAsk',
       blockReadsOutsideWorkingDirectories: true,
-      additionalDirectories: [paths.scratch],
+      additionalDirectories: [paths.scratch, ...(ctx.readDirs ?? [])],
     },
     includeCoAuthoredBy: false,
   };
@@ -610,7 +638,7 @@ export function sandboxDoctorLines(
 
 // ------------------------------------------------------------------------------------------- toolchains
 
-const inside = (child: string, parent: string): boolean => {
+export const inside = (child: string, parent: string): boolean => {
   const r = relative(parent, child);
   return r === '' || (!r.startsWith('..') && !r.startsWith(sep) && r !== '..');
 };

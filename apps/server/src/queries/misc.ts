@@ -15,6 +15,7 @@ import type { Ctx } from '../context.ts';
 import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts } from '../costs/index.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { conflict, notFound } from '../errors.ts';
+import { referenceRepoCandidates, referenceRepoDtos } from '../runner-gateway/read-repos.ts';
 
 /** The department of a project's workflow (its type): the owner's own workflow first, else the built-in. */
 export const PROJECT_DEPARTMENT_SQL = `(SELECT w.department FROM workflow_versions w
@@ -210,6 +211,9 @@ export async function getProjectDetail(
       role: m.role,
       status: m.status,
     })),
+    referenceRepos: await referenceRepoDtos(ctx.pool, projectId),
+    referenceRepoCandidates:
+      p.my_role === 'owner' ? await referenceRepoCandidates(ctx.pool, userId, p.org_id, projectId) : [],
     mergePolicyHistory: history.map((h) => ({
       enabled: h.payload.mergeLargeWithoutApproval === true,
       byName: h.by_name ?? 'unknown',

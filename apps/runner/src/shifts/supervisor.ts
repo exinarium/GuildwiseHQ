@@ -15,6 +15,7 @@ import {
   outcomeDataSchema,
   type PublishRequest,
   type RepoReport,
+  renderReadableFolders,
   type ServerToRunnerOf,
   type ShiftBrief,
   type ShiftReport,
@@ -42,6 +43,7 @@ import {
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { resolveReadRepos } from '../read-repos.ts';
 import { preparePublication } from '../research/publish.ts';
 import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
@@ -399,6 +401,13 @@ export class ShiftSupervisor {
       msg.kind === 'card' && msg.vault ? await readVaultContext(paths.vaults, msg.vault) : null;
     s.brief = withVaultContext(msg.brief, vaultCtx);
     const texts = shiftTexts(msg, s.brief);
+    // The project's reference repositories (read-only), for a card shift only; only clones this runner found itself.
+    const readFolders =
+      msg.kind === 'card'
+        ? await resolveReadRepos(msg.readRepos, { findRepo: this.deps.findRepo, runnerRoot: paths.root })
+        : [];
+    if (msg.kind === 'card')
+      texts.instructions += `\n${renderReadableFolders(readFolders, { workingDir: cwd })}\n`;
     await adapter.writeInstructions(sandbox, texts.instructions);
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
     s.env = {
@@ -424,6 +433,7 @@ export class ShiftSupervisor {
         agent: msg.agent as AgentRuntimeSpec,
         env: s.env,
         addDirs: vaultCtx ? [vaultCtx.addDir] : [],
+        readDirs: readFolders.map((f) => f.path),
         maxShiftMinutes: msg.maxShiftMinutes,
         logFile: `${paths.shiftLogs}/${msg.shiftId}.jsonl`,
       });
