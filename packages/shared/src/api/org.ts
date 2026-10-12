@@ -35,8 +35,38 @@ export const DefinitionIssueSchema = z.object({
 });
 export type DefinitionIssue = z.infer<typeof DefinitionIssueSchema>;
 
+/**
+ * `POST /api/roles/preview` and `GET /api/roles/drafts/:id/preview`: the instructions an agent with this role would
+ * get, rendered by the real renderer from a sample brief. No agent runs. `workflowKey` + `stageId` (a step of a
+ * custom workflow) make the sample shift use that step's name, done criteria and routes.
+ */
+export const RolePreviewRequestSchema = z.object({
+  role: RoleDraftInputSchema,
+  workflowKey: z.string().optional(),
+  stageId: z.string().optional(),
+  seniority: z.enum(['junior', 'senior']).optional(),
+});
+export type RolePreviewRequest = z.infer<typeof RolePreviewRequestSchema>;
+
+export const RolePreviewResponseSchema = z.object({
+  /** The rendered instructions file (markdown). */
+  text: z.string(),
+  /** The step the sample shift used; null: the generic sample step. */
+  stage: z.object({ workflowKey: z.string(), stageId: z.string(), stageLabel: z.string() }).nullable(),
+  /** The section titles of the rendered text. */
+  headings: z.array(z.string()),
+});
+export type RolePreviewResponse = z.infer<typeof RolePreviewResponseSchema>;
+
 /** `?projectId=`: act on the catalogue of the organization that owns the project (writes: its owner only). */
 export const OrgContextQuerySchema = z.object({ projectId: z.uuid().optional() });
+
+/** Query of `GET /api/roles/drafts/:id/preview`. */
+export const RolePreviewQuerySchema = OrgContextQuerySchema.extend({
+  workflowKey: z.string().optional(),
+  stageId: z.string().optional(),
+  seniority: z.enum(['junior', 'senior']).optional(),
+});
 
 export const DraftResponseSchema = z.object({
   id: z.uuid(),

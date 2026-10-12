@@ -12,6 +12,7 @@ import {
   definitionVaultPath,
   type ExtendRoleRequest,
   isOrgManager,
+  isOrgOwner,
   type OrgCatalogueResponse,
   type OrgRole,
   type RoleDefinition,
@@ -138,6 +139,24 @@ async function validationContexts(db: Queryable, orgId: string) {
 
 // ----------------------------------------------------------------------------------------- role drafts
 
+/**
+ * Wider-than-default access a role definition can ask for is the Owner's to grant (docs/design/workflow-builder.md
+ * section 3, decision 5): Admins build and submit roles, but a role that reads every repository of the organization
+ * (`readOrgRepos`) is saved, submitted and approved by the Owner only.
+ */
+export async function requireOwnerForWideRole(
+  db: Queryable,
+  userId: string,
+  orgId: string,
+  permissions: { readOrgRepos?: boolean | undefined },
+): Promise<void> {
+  if (!permissions.readOrgRepos) return;
+  if (!isOrgOwner({ orgRole: await orgRoleOf(db, userId, orgId) }))
+    throw forbidden(
+      'only the organization Owner can give a role read access to every repository of the organization',
+    );
+}
+
 const toRoleDef = (input: RoleDraftInput, version: number): RoleDefinition =>
   ({ ...input, version, builtIn: false }) as RoleDefinition;
 
@@ -183,6 +202,8 @@ export async function saveRoleDraft(
   input: RoleDraftInput,
   opts: { id?: string; upsert?: boolean } = {},
 ): Promise<DraftResponse> {
+  if (designer.kind === 'user')
+    await requireOwnerForWideRole(ctx.pool, designer.userId, orgId, input.permissions);
   return withAppendTx(ctx.pool, async (tx) => {
     if (BUILTIN_ROLE_KEYS.includes(input.key))
       throw conflict(
@@ -415,6 +436,8 @@ export async function submitDraft(
   return withAppendTx(ctx.pool, async (tx) => {
     const row = await loadVersion(tx, kind, orgId, id, true);
     if (row.status !== 'draft') throw conflict('not_a_draft', `this ${kind} is ${row.status}, not a draft`);
+    if (kind === 'role' && designer.kind === 'user')
+      await requireOwnerForWideRole(tx, designer.userId, orgId, row.definition.permissions ?? {});
     const issues = await issuesFor(tx, kind, row, true);
     if (issues.some((i) => i.severity === 'error')) {
       const first = issues.find((i) => i.severity === 'error') as DefinitionIssue;
@@ -514,6 +537,8 @@ export async function resolveDefinitionIn(
   const kind: DefinitionKind = role ? 'role' : 'workflow';
   if (row.status !== 'pending_approval')
     throw conflict('already_decided', `this ${kind} is already ${row.status}`);
+  if (role && resolution === 'approved')
+    await requireOwnerForWideRole(tx, user.id, row.org_id, row.definition.permissions ?? {});
   const scope = orgScope(row.org_id);
   const stream =
     kind === 'role' ? streamId.role(row.org_id, row.key) : streamId.workflow(row.org_id, row.key);

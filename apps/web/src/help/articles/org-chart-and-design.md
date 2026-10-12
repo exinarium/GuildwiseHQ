@@ -31,15 +31,20 @@ Custom roles and workflows are designed on the **Roles & workflows** page (sideb
 
 To make a custom role:
 
-1. Open the **Roles** tab and click **New custom role**, or use **Design with the BA** to describe what you need and let the BA draft it for you.
-2. Fill in:
-   - **Key**, **Name**, **Department** and **Purpose**: what they do.
-   - **Instructions** and **Core rules**: behaviour and guardrails.
-   - **Seniority levels**, **Default runtime**, **Default model** and **Effort**.
-   - **Tools** (read, edit, shell, web), **Denied shell patterns** and **Skills**.
-   - **May claim**: which workflow stages the role can take (`workflow.stage`, or `*` for any).
-3. Click **Save and submit for approval** (or **Save draft** to keep working). The definition is validated and lands on your desk.
-4. Approve it on the desk. It then appears in the **Hire agent** form.
+1. Open the **Roles** tab and click **New custom role**. You can also use **Design with the BA** (or **Ask the BA to help** at the top of the form) to describe what you need and let the BA draft it; the form is the way to check and fine-tune the result.
+2. Work through the sections of the form:
+   - **Basics**: **Name**, **Short name (key)** (filled in from the name; it cannot change after the first save), **Department** and **Purpose**.
+   - **How it works**: the **Instructions** (like a briefing for a new colleague) and the **Rules that always apply** (core rules, one per line; you cannot override them later).
+   - **What it may do**: plain-language switches, each with a risk badge and a note: read files (always on), change files, run commands, search the web, save its work (commit), run browsers and read all organization repositories. Below them you can limit the role to some folders and list external (MCP) tools. A summary spells out what the role can and cannot do. Pushing, rebasing and switching branches are blocked for every role.
+   - **Model**: the runtime, the model (cheaper and faster, or stronger and costlier) and the effort.
+   - **Seniority**: which levels you can hire, and the **skills** it has. Skills other roles already use are offered as quick picks.
+   - **Steps it can take**: a checklist of the steps of your custom workflows. Tick the steps (or **Any step of** a workflow). A workflow that is still a draft can be ticked too, so you can make a role and its workflow together.
+   - **Preview what the agent is told**: shows the instructions file an agent with this role would get, using a sample card and, if you like, one of the ticked steps. Nothing runs and it costs nothing. Use it to check your instructions read the way you meant.
+3. Problems are explained in plain words next to the section they belong to, and the bar at the top says how many things are left to fix. **Advanced: all fields** shows every field, including the denied shell patterns.
+4. Click **Save and submit for approval** (or **Save draft** to keep working). The definition lands on your desk.
+5. Approve it on the desk. It then appears in the **Hire agent** form. Changing an approved role makes a new version; agents keep the version they were hired on until you move them.
+
+Owners and Admins can design and submit roles. **Read all organization repositories** is the exception: it lets the role read the code of every project on the workstation (read only), so only the **Owner** can switch it on and approve it. For an Admin the switch is greyed out and says why.
 
 Built-in roles cannot be changed or removed. Use **Extend** on a built-in role to add extra instructions, skills and standing orders; its core rules stay. The DevOps engineer cannot be extended.
 

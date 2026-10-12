@@ -5,7 +5,7 @@ import {
   type OrgCatalogueResponse,
   type RoleDraftInput,
 } from '@aom/shared';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useAgents } from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
@@ -19,8 +19,8 @@ import {
   useSubmitDraft,
 } from '../api/queries/org.ts';
 import { useProjects } from '../api/queries/projects.ts';
+import { RoleBuilder } from '../components/builder/RoleBuilder.tsx';
 import { ChatPanel } from '../components/ChatPanel.tsx';
-import { RoleEditor } from '../components/org/RoleEditor.tsx';
 import { WorkflowGraph } from '../components/org/WorkflowGraph.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import {
@@ -39,6 +39,7 @@ import {
   TextInput,
 } from '../components/ui.tsx';
 import { blankRole, errorCount, roleToInput, splitList } from '../lib/designer.ts';
+import { claimableWorkflows } from '../lib/role-builder.ts';
 
 type Tab = 'roles' | 'workflows' | 'departments' | 'design';
 const TABS: Array<[Tab, string]> = [
@@ -182,7 +183,7 @@ function VersionRow({
 
 // -------------------------------------------------------------------------------------------- roles
 
-type RoleEdit = { id?: string; input: RoleDraftInput; issues?: DefinitionIssue[] };
+type RoleEdit = { id?: string; input: RoleDraftInput; issues?: DefinitionIssue[]; keyLocked?: boolean };
 
 function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: string }) {
   const [edit, setEdit] = useState<RoleEdit | null>(null);
@@ -208,6 +209,7 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
           edit={edit}
           setEdit={setEdit}
           departments={departments}
+          cat={cat}
           projectId={projectId}
           onClose={() => setEdit(null)}
         />
@@ -243,6 +245,7 @@ function RolesTab({ cat, projectId }: { cat: OrgCatalogueResponse; projectId?: s
                                     setEdit({
                                       id: v.status === 'draft' ? v.id : undefined,
                                       input: roleToInput(v.definition),
+                                      keyLocked: true,
                                     })
                                   }
                                 >
@@ -336,17 +339,27 @@ function RoleEditPanel({
   edit,
   setEdit,
   departments,
+  cat,
   projectId,
   onClose,
 }: {
   edit: RoleEdit;
   setEdit: (e: RoleEdit) => void;
   departments: string[];
+  cat: OrgCatalogueResponse;
   projectId?: string;
   onClose: () => void;
 }) {
   const save = useSaveRoleDraft();
   const submit = useSubmitDraft();
+  const me = useMe();
+  // Only the Owner of the organization switches on wide access; in a shared project's organization we are never it.
+  const isOwner = !projectId && me.data?.activeOrg?.role === 'owner';
+  const workflows = useMemo(() => claimableWorkflows(cat.workflows), [cat.workflows]);
+  const knownSkills = useMemo(
+    () => [...new Set(cat.roles.flatMap((r) => r.versions[0]?.definition.skills ?? []))].sort(),
+    [cat.roles],
+  );
   const run = async (andSubmit: boolean) => {
     try {
       const r = await save.mutateAsync({ id: edit.id, input: edit.input, projectId });
@@ -364,11 +377,16 @@ function RoleEditPanel({
       <h2 className="mb-3 text-lg font-semibold text-fg">
         {edit.id ? 'Edit role draft' : 'New custom role'}
       </h2>
-      <RoleEditor
+      <RoleBuilder
         value={edit.input}
         onChange={(input) => setEdit({ ...edit, input, issues: undefined })}
         departments={departments}
+        workflows={workflows}
+        knownSkills={knownSkills}
+        isOwner={isOwner}
+        keyLocked={edit.keyLocked || !!edit.id}
         serverIssues={edit.issues}
+        projectId={projectId}
       />
       <ErrorBox error={save.error ?? submit.error} />
       <div className="mt-3 flex justify-end gap-2">
