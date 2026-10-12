@@ -73,7 +73,7 @@ count to the post cap.
 The author is always **The Guildwise HQ team**; there is no author field.
 
 **Restricted Markdown:** headings `##` to `####`, paragraphs, bullet and numbered lists, `>` quotes, fenced code,
-tables, `**bold**`, `*italic*`, `` `code` `` and `[links](https://...)`. No raw HTML is accepted (it is shown as text).
+tables, `**bold**`, `*italic*`, `` `code` `` and `[links](https://...)`. No raw HTML is accepted (it is shown as text). The one exception is `<cite ...>` tags left by web search citations: they are removed and the cited text is kept.
 A link must be `http(s)` or a path on this site; anything else becomes plain text. External links get
 `rel="nofollow noopener noreferrer"`.
 

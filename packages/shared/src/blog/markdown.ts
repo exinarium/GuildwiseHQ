@@ -85,8 +85,17 @@ const splitRow = (line: string): string[] =>
     .map((x) => x.trim());
 const isSep = (line: string): boolean => /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line);
 
-export function parseMarkdown(body: string): MdBlock[] {
-  const lines = body.replace(/\r\n/g, '\n').split('\n');
+/**
+ * Anthropic's web search wraps cited passages in `<cite index="23-2">...</cite>` in the model's text. That markup is
+ * not Markdown and means nothing to a reader: the tags are removed and the cited text is kept (the sources are listed
+ * under the article). Used by the writer, the data migration and the renderer.
+ */
+export function stripCiteTags(s: string): string {
+  return s.replace(/<\/?\s*cite\b[^>]*>/gi, '');
+}
+
+export function parseMarkdown(rawBody: string): MdBlock[] {
+  const lines = stripCiteTags(rawBody).replace(/\r\n/g, '\n').split('\n');
   const blocks: MdBlock[] = [];
   const used = new Set<string>();
   let i = 0;
