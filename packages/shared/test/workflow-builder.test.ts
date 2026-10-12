@@ -636,7 +636,9 @@ describe('schedule schema extensions', () => {
   it('only the triggers the server fires are marked implemented', () => {
     expect(isTriggerImplemented({ kind: 'manual' })).toBe(true);
     expect(isTriggerImplemented({ kind: 'event', event: 'card_finalized' })).toBe(true);
-    expect(isTriggerImplemented({ kind: 'event', event: 'card_stage_reached' })).toBe(false);
+    expect(isTriggerImplemented({ kind: 'event', event: 'card_stage_reached' })).toBe(true);
+    expect(isTriggerImplemented({ kind: 'intake_ticket' })).toBe(true);
+    expect(isTriggerImplemented({ kind: 'intake_ticket', source: 'email' })).toBe(false);
     expect(isTriggerImplemented({ kind: 'email_reply', inboxId: U })).toBe(false);
   });
 

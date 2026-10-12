@@ -21,13 +21,16 @@ import {
   type PatchScheduleRequest,
   parseCardFields,
   RegressionPlatform,
+  SCHEDULE_EVENT_TRIGGERS,
   type ScheduleAction,
   type ScheduleDto,
   type ScheduleRunDto,
   type ScheduleTrigger,
   type SystemScheduleDto,
   scheduleBackoffMs,
+  scheduleEventLabel,
   streamId,
+  unknownMappingTokens,
 } from '@aom/shared';
 import { CronExpressionParser } from 'cron-parser';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -342,6 +345,39 @@ async function authorize(
   return { orgId, project };
 }
 
+/** Triggers that react to something that happened in the organization (the "Automations" of the UI). */
+const isEventTrigger = (t: ScheduleTrigger): boolean => t.kind === 'event' || t.kind === 'intake_ticket';
+
+/** What can be checked about an event trigger now: which events take which conditions, and that the stage exists. */
+async function validateEventTrigger(tx: Tx, orgId: string, t: ScheduleTrigger): Promise<void> {
+  if (t.kind === 'intake_ticket') {
+    if (t.projectId)
+      throw badRequest(
+        'invalid_trigger',
+        'an intake has no project when it arrives: leave the project out of this trigger',
+      );
+    return;
+  }
+  if (t.kind !== 'event') return;
+  const def = SCHEDULE_EVENT_TRIGGERS.find((e) => e.id === t.event);
+  const conditions = t.workflowKey || t.stageId || t.filter;
+  if (conditions && !def?.cardFilters)
+    throw badRequest(
+      'invalid_trigger',
+      `${scheduleEventLabel(t.event).toLowerCase()} takes no workflow, stage or filter`,
+    );
+  if (t.stageId && def?.cardFilters !== 'stage')
+    throw badRequest('invalid_trigger', 'only "a card reaches a stage" takes a stage');
+  if (t.event === 'card_stage_reached' && (!t.workflowKey || !t.stageId))
+    throw badRequest('invalid_trigger', 'choose the workflow and the stage the card must reach');
+  if (t.workflowKey) {
+    const wf = await resolveWorkflow(tx, orgId, t.workflowKey);
+    if (!wf) throw badRequest('unknown_workflow', `workflow '${t.workflowKey}' is not available`);
+    if (t.stageId && !getStage(wf.definition, t.stageId))
+      throw badRequest('unknown_stage', `workflow '${t.workflowKey}' has no stage '${t.stageId}'`);
+  }
+}
+
 const GITHUB_REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** Everything about the action and trigger that can be checked now rather than at 07:00. */
@@ -356,7 +392,17 @@ async function validate(
 ): Promise<void> {
   const t = n.trigger;
   if (!isTriggerImplemented(t))
-    throw badRequest('trigger_not_available', 'this kind of trigger is not available yet');
+    throw badRequest(
+      'trigger_not_available',
+      t.kind === 'email_received' ||
+        t.kind === 'email_reply' ||
+        (t.kind === 'intake_ticket' && t.source === 'email')
+        ? 'e-mail triggers are not available yet: inbound e-mail is still being built'
+        : t.kind === 'webhook_in'
+          ? 'incoming webhooks are not available yet'
+          : 'this kind of trigger is not available yet',
+    );
+  await validateEventTrigger(tx, orgId, t);
   if (t.kind === 'cron' || t.kind === 'issue_labelled') assertCronAndZone(t.cron, t.timezone);
   if (t.kind === 'issue_labelled') {
     if (t.provider === 'github' && !GITHUB_REPO.test(t.query.trim()))
@@ -371,6 +417,22 @@ async function validate(
   switch (a.kind) {
     case 'create_card':
     case 'regression_run': {
+      if (a.kind === 'create_card') {
+        const bad = unknownMappingTokens(a.template.mapping);
+        if (bad.length)
+          throw badRequest(
+            'unknown_mapping_token',
+            `unknown field mapping token: ${bad.map((x) => `{${x}}`).join(', ')}`,
+          );
+        if (isEventTrigger(t) && !isManager) {
+          // Members may only set up automations that make draft cards: the BA or an Owner takes it from there.
+          if (a.template.start === 'queued')
+            throw forbidden(
+              'members can create automations that make draft cards only; ask an Owner or Admin to queue cards directly',
+            );
+          n.action = { ...a, template: { ...a.template, start: 'draft' } };
+        }
+      }
       const wf = await resolveWorkflow(tx, (project as Row).org_id, (project as Row).workflow_key);
       if (wf?.definition.fieldSet === 'feed')
         throw badRequest('use_interests', 'a feed is an interest now: create it on the Interests page');

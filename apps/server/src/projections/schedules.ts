@@ -148,8 +148,8 @@ export const scheduleProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO schedule_runs (id, schedule_id, org_id, trigger, source_key, label, status, summary, error, result,
-         delivery, next_attempt_at, started_at, finished_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (id) DO NOTHING`,
+         delivery, next_attempt_at, started_at, finished_at, dedupe_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT (id) DO NOTHING`,
       [
         p.runId,
         p.scheduleId,
@@ -165,6 +165,7 @@ export const scheduleProjectors: Record<string, Projector> = {
         p.nextAttemptAt ?? null,
         e.createdAt,
         done && p.status !== 'pending' ? e.createdAt : null,
+        p.dedupeKey ?? null,
       ],
     );
     await markIssues(tx, p.scheduleId, p.runId, p.result?.issueKeys, e.createdAt);

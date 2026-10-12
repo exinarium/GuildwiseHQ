@@ -5,12 +5,15 @@ import {
   actionWorkstationId,
   CreateScheduleRequestSchema,
   DomainEventSchema,
+  eventTypesOf,
   expandText,
   expandTitle,
   isOrgLevelAction,
   isoWeek,
   isRetryableStatus,
+  isTriggerImplemented,
   legacyAction,
+  SCHEDULE_EVENT_TRIGGERS,
   ScheduleActionSchema,
   ScheduleTriggerSchema,
   WEBHOOK_MAX_ATTEMPTS,
@@ -186,5 +189,40 @@ describe('webhook payloads', () => {
     expect([400, 401, 404, 302].some(isRetryableStatus)).toBe(false);
     expect([1, 2, 3, 4, 9].map(webhookBackoffMs)).toEqual([60_000, 300_000, 1_800_000, 7_200_000, 7_200_000]);
     expect(WEBHOOK_MAX_ATTEMPTS).toBe(5);
+  });
+});
+
+describe('automation triggers', () => {
+  it('reads each internal event from its domain events, and a stage from every route into it', () => {
+    expect(eventTypesOf('card_done')).toEqual(['CardFinalized']);
+    expect(eventTypesOf('card_finalized')).toEqual(['CardFinalized']);
+    expect(eventTypesOf('card_stage_reached')).toEqual([
+      'StageCompleted',
+      'CardSpecified',
+      'CardMovedByManager',
+    ]);
+    expect(eventTypesOf('investigation_reported')).toEqual(['InvestigationReported']);
+    expect(SCHEDULE_EVENT_TRIGGERS.filter((e) => e.cardFilters).map((e) => e.id)).toEqual([
+      'card_stage_reached',
+      'card_done',
+      'investigation_reported',
+    ]);
+  });
+
+  it('the server fires internal events and intake tickets; mail and incoming webhooks stay refused', () => {
+    const inbox = '0192f3a0-0000-7000-8000-000000000001';
+    for (const t of [
+      { kind: 'event', event: 'card_stage_reached', workflowKey: 'code', stageId: 'review' },
+      { kind: 'event', event: 'card_done' },
+      { kind: 'event', event: 'investigation_reported' },
+      { kind: 'intake_ticket', source: 'issues' },
+    ] as const)
+      expect(isTriggerImplemented(ScheduleTriggerSchema.parse(t)), t.kind).toBe(true);
+    for (const t of [
+      { kind: 'email_received', inboxId: inbox },
+      { kind: 'email_reply', inboxId: inbox },
+      { kind: 'webhook_in', secretHash: 'x' },
+    ] as const)
+      expect(isTriggerImplemented(ScheduleTriggerSchema.parse(t)), t.kind).toBe(false);
   });
 });
