@@ -148,6 +148,8 @@ The work/personal split is gone: your own organization is where personal work li
 
 On boot, after the schema migration `1560_blog_launch` (adds `blog_posts.launch`), the data migration `blog-launch-2026-10` pre-loads the four owner-approved launch articles from `apps/server/src/blog/launch/*.md` (copied to `dist/blog-launch` by the build), so a fresh production blog is not empty. With the blog switched on (the default) they are created **published** (publishedAt = the boot time); with the blog switched off (kill switch) they are created as **drafts** and the super admin publishes them in Platform > Blog. A slug that already exists (for example on UAT, which has its own seed posts) is skipped; no other post is changed or deleted. The migration is recorded once in `data_migrations`, so a second boot does nothing. Launch posts are never shared to Facebook or LinkedIn and are never in the weekly digest, and they do not start the writer agent's two-week review period. `AOM_DATA_MIGRATIONS=false` skips it.
 
+The data migration `blog-cite-cleanup-2026-10` runs after it: the blog writer used to store the web search's `<cite index="...">...</cite>` markup in article text, which showed up as literal tags on the public blog. The migration removes only those tags (the cited text stays) from every existing post, one `BlogPostRevised` event per changed post (status and dates unchanged), logs how many posts changed and is recorded once in `data_migrations`. The writer and the blog renderer now strip the tags too.
+
 ## Environment variables (server)
 
 Set these in `.env` before starting the server. All have defaults suitable for development or HTTPS deployment.

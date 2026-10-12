@@ -1,8 +1,14 @@
+import { migrateBlogCiteCleanup } from './blog-cite-cleanup.ts';
 import { migrateBlogLaunch } from './blog-launch.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
 import { migrateRestructure } from './restructure.ts';
 
+export {
+  BLOG_CITE_CLEANUP_MIGRATION,
+  type BlogCiteCleanupReport,
+  migrateBlogCiteCleanup,
+} from './blog-cite-cleanup.ts';
 export { BLOG_LAUNCH_MIGRATION, loadLaunchArticles, migrateBlogLaunch } from './blog-launch.ts';
 export {
   formatNoPersonalPlan,
@@ -27,6 +33,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'restructure-2026-10', run: (env) => migrateRestructure(env) },
   { name: 'no-personal-2026-10', run: (env) => migrateNoPersonal(env) },
   { name: 'blog-launch-2026-10', run: (env) => migrateBlogLaunch(env) },
+  { name: 'blog-cite-cleanup-2026-10', run: (env) => migrateBlogCiteCleanup(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {
