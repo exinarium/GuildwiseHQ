@@ -79,7 +79,7 @@ If sudo asks for a password, enter it under the rights. Your browser encrypts it
 
 ## The working branch {#working-branch}
 
-The **working branch** is the main line where finished work goes: the repository's default branch (usually `main`). Guildwise confirms it for you automatically the first time it sees the repository, so you are not asked. The rest of this section describes what you see with **expert mode** on (Settings, Expert mode for code changes); with it off, branch names stay out of sight and you only see plain results such as "Your change is live on main".
+The **working branch** is where finished work is combined: the repository's default branch (usually `main`) unless you name another such as `develop`, which is created from the **main branch** (where pull requests go; default: the repository's default branch) and pushed when it does not exist. Both are shown in the project's repository settings. Guildwise confirms it for you automatically the first time it sees the repository, so you are not asked. The rest of this section describes what you see with **expert mode** on (Settings, Expert mode for code changes); with it off, branch names stay out of sight and you only see plain results such as "Your change is live on main".
 
 When a repository has no confirmed working branch and Guildwise cannot tell the default (project settings show **not confirmed**), the DevOps engineer does not commit, pull or push in it. Instead, it asks you on the desk: **Which branch is the working branch of `<repository>`?**
 

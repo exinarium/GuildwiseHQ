@@ -1,4 +1,4 @@
-import { CompletionAction, ResearchDepth } from '@aom/shared';
+import { COMPLETION_ACTION_LABELS, CompletionAction, ResearchDepth } from '@aom/shared';
 import type { CardFormValues } from '../lib/cardForm.ts';
 import { formFieldList } from '../lib/cardForm.ts';
 import { useExpertMode } from '../lib/expert-mode.ts';
@@ -66,11 +66,16 @@ export function CardFormFields({
                 value={v.completionAction}
                 onChange={(e) => onChange({ ...v, completionAction: e.target.value })}
                 error={errors.completionAction}
+                hint={
+                  v.completionAction
+                    ? COMPLETION_ACTION_LABELS[v.completionAction as CompletionAction].description
+                    : 'How this card lands. Project default: the setting in the project settings.'
+                }
               >
                 <option value="">Project default</option>
                 {CompletionAction.options.map((a) => (
                   <option key={a} value={a}>
-                    {a}
+                    {COMPLETION_ACTION_LABELS[a].label}
                   </option>
                 ))}
               </Select>

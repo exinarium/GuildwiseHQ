@@ -189,6 +189,18 @@ describe('a base branch the runner does not have', () => {
 });
 
 describe('a working branch the runner created', () => {
+  it("tells the runner the repository's main branch, so a missing working branch is created from it", async () => {
+    await reset();
+    await owner('PATCH', `/api/projects/${w.projectId}/repos/${w.repoId}`, { mainBranch: 'release' });
+    await w.hire('Bea', 'builder', 'junior');
+    await w.card({ title: 'Main branch named' });
+    const start = await p.next('Bea');
+    expect(start.worktree).toMatchObject({ baseBranch: 'main', mainBranch: 'release' });
+    r.accepted(start.shiftId);
+    r.ended(start.shiftId, 'stopped');
+    await owner('PATCH', `/api/projects/${w.projectId}/repos/${w.repoId}`, { mainBranch: null });
+  });
+
   it('says so on the card', async () => {
     await reset();
     await w.hire('Bea', 'builder', 'junior');
@@ -206,6 +218,12 @@ describe('a working branch the runner created', () => {
     expect(events.map((e) => e.payload.body)).toContain(
       'Created working branch main from master and pushed it to origin: it did not exist in the repository.',
     );
+    // and the repository remembers it, for the project settings
+    const proj = await ok<any>(owner('GET', `/api/projects/${w.projectId}`));
+    expect(proj.repos.find((x: any) => x.id === w.repoId).workingBranchCreated).toMatchObject({
+      from: 'master',
+      pushed: true,
+    });
     r.ended(start.shiftId, 'stopped');
   });
 

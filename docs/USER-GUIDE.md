@@ -89,14 +89,6 @@ This guide is for people who have never worked with AI agents before. You do not
 
 <!-- /toc -->
 
-
-
-
-
-
-
-
-
 ## 1. What Guildwise HQ is
 
 ### 1.1 The idea in one minute
@@ -168,7 +160,7 @@ A card in a code project goes through the same stages every time. You do not hav
 2. **To do and Build**: a builder takes the card and works on a branch of your repository.
 3. **Review**: a reviewer reads the change and either approves or sends it back (rework).
 4. **Test**: a tester runs the tests in the test plan. A failure creates a bug card, and the original waits for the fix.
-5. **Finalize**: the BA completes the card the way the project says: straight into your main line, or as a pull request for you to approve (4.4, *How finished work lands*).
+5. **Finalize**: the BA completes the card the way the project says: committed and pushed to the working branch with no pull request, or as a pull request for you to approve (4.4, *How finished work lands*).
 6. **Done**.
 
 If anyone gets stuck or needs a decision, the card turns to **Blocked** and a question appears on your desk.
@@ -301,7 +293,7 @@ Each workstation also gets a free **DevOps engineer** automatically. You never h
 
 1. Open **Projects** and click **New project** (Owners and Admins only).
 2. Give it a **Name** and a short **Key** (for example `WEB`; card references look like `WEB-1`). Choose the **Workflow**: **Code** for software, **Research** for investigations, or a custom workflow your organization designed. Click **Create project**.
-3. For a code project, open the project's **Settings** (the gear on the Projects page) and, under **Repositories**, add your repository: a name and the address of your code (or create a new one). The git host (GitHub, GitLab, Bitbucket, Azure DevOps or a plain git server) is detected from the address, and you can pick another one. If the app lives in a folder of the repository (a monorepo, `src/app`), fill in **Project path**; leave it empty when the app is at the top. Finished work goes into the repository's main line automatically after review and test; you can change **How finished work lands** in the same settings (see 4.4). A research project needs no repository.
+3. For a code project, open the project's **Settings** (the gear on the Projects page) and, under **Repositories**, add your repository: a name and the address of your code (or create a new one). The git host (GitHub, GitLab, Bitbucket, Azure DevOps or a plain git server) is detected from the address, and you can pick another one. If the app lives in a folder of the repository (a monorepo, `src/app`), fill in **Project path**; leave it empty when the app is at the top. Each repository has a **Main branch** (where pull requests go) and a **Working branch** (where finished work is combined), both the repository's default branch unless you change them; finished work is committed and pushed to the working branch automatically after review and test, and you can change **How finished work lands** in the same settings (see 4.4). A research project needs no repository.
 
 ![The new project dialog](guide/assets/dlg-new-project.jpg)
 
@@ -316,7 +308,7 @@ Each workstation also gets a free **DevOps engineer** automatically. You never h
    - **Requirements:** what must be done.
    - **Acceptance criteria:** how you will know it is done, one line each.
    - **Affected areas, Constraints, Test plan:** what to touch and not to touch, and how to check it.
-   - **How it lands:** you do not need to choose. Finished work goes where the project's **How finished work lands** setting says (straight into main after review and test, or as a pull request you approve). With expert mode on (see 4.4) the form also offers a per-card **Completion action**.
+   - **How it lands:** you do not need to choose. Finished work goes where the project's **How finished work lands** setting says (committed and pushed to the working branch, or as a pull request you approve). With expert mode on (see 4.4) the form also offers a per-card **Completion action**.
 3. Click **Specify**. The card moves to **To do** and the agents pick it up. If a required field is missing, the form tells you which. Use **Save draft** if you want to finish later.
 
 ![The New card form](guide/assets/card-new.jpg)
@@ -401,8 +393,8 @@ Owners and Admins change the order by **dragging** a project by its grip (the do
 
 What you will find there:
 
-- **Repos:** the code the agents work on, with its git host and its **Project path**: the folder of the repository the app lives in (empty: the repository root). The owner can change the path with **Change**; the development environment check, the package installs and the agents' build and test commands then run from that folder. After changing it, click **Check again** under the development environment. With expert mode on you also see its **working branch**, the branch finished work lands on. Research projects need none.
-- **How finished work lands:** straight into main after review and test (the default), or as a pull request you approve (4.4).
+- **Repos:** the code the agents work on, with its git host, its **Main branch** and **Working branch** (4.4) and its **Project path**: the folder of the repository the app lives in (empty: the repository root). The owner can change the path with **Change**; the development environment check, the package installs and the agents' build and test commands then run from that folder. After changing it, click **Check again** under the development environment. Research projects need none.
+- **How finished work lands:** **Commit and push to the working branch** (the default; no pull request) or **Pull request I approve** (4.4).
 - **Team:** who works in the project (see below).
 - **Merging:** the setting **Merge large changes without my approval** (off by default). Read chapter 4.12 before turning it on.
 - **Simultaneous shifts:** an optional cap on how many shifts may run at once in this project.
@@ -459,11 +451,26 @@ Agents belong to the organization, not to a single project. For each agent you d
 
 #### How finished work lands (and expert mode)
 
-Guildwise keeps version control out of your way. In each project's settings, **How finished work lands** has two choices: **Straight into main after review and test** (the default) or **As a pull request I approve**. If the main line is protected on the code host (it refuses direct changes), Guildwise notices, opens a pull request instead, and switches the project to pull requests with a note on the card. The repository's default branch is used as the main line without asking you.
+Every project repository has two branches, and the settings name both under the repository:
 
-You see plain outcomes instead of branch names: *"Goes into main after review and test"*, *"Your change is live on main"*, *"Waiting for you to merge the pull request"*. When two changes clash, the DevOps engineer tries to fix it first and leaves a note on the card.
+- The **main branch** is where pull requests go. By default it is the repository's default branch (usually `main`); the owner can name another one with **Change**.
+- The **working branch** is where finished card work is combined. It can be the same branch as the main branch (the default, so you can ignore the difference), or another one such as `develop`. If the working branch does not exist yet, Guildwise creates it from the main branch and pushes it when the first card starts; the repository row says when it will be created and, afterwards, when it was and from which branch. If the push is refused, the card says so and the desk asks you, naming the branch, with the reason from the git host.
 
-If you know git and want the details, turn on **Expert mode for code changes** in **Settings** (it is per person and off by default; it only changes what you see). It brings back the working-branch fields, the per-card completion action (pull request, push the branch, or merge), branch names and commit hashes, **Mark merged** on the phase page, and the questions about keeping or changing the working branch for a new intake or phase.
+Agents always work on a card branch of their own. **How finished work lands** (per project, and per card in expert mode) decides what happens to that card branch when the work is reviewed and tested:
+
+| Completion action | What happens | Pull request |
+| --- | --- | --- |
+| **Commit and push to the working branch** (the default; stored as `merge`) | The card branch is merged into the working branch and the working branch is pushed. | None. |
+| **Pull request** (`pr`) | The card branch is pushed and a pull request is opened into the working branch (that is the main branch when you use one branch), for you to review and merge. | Card branch to working branch. |
+| **Push the card branch only** (`push_branch`) | The card branch is pushed and nothing else happens; someone combines it by hand. | None. |
+
+When the working branch is not the main branch, the work reaches the main branch the way you choose: in the repository row of the project settings the owner clicks **Open pull request: develop to main**, and the workstation opens a pull request from the working branch to the main branch through the git host (or reports that there is nothing new to open). This is deliberately a project action and not part of every card, so a release is reviewed once, not per card.
+
+If the working branch is protected on the code host (it refuses direct changes), Guildwise notices, opens a pull request for the card instead, and switches the project to pull requests with a note on the card. A large change that would be committed to the working branch waits for your approval on the desk first (see 4.12).
+
+You see plain outcomes on cards: *"Goes into main after review and test"*, *"Your change is live on main"*, *"Waiting for you to merge the pull request"* (with the working branch's name when it is not main). When two changes clash, the DevOps engineer tries to fix it first and leaves a note on the card.
+
+If you know git and want the details, turn on **Expert mode for code changes** in **Settings** (it is per person and off by default; it only changes what you see). It brings back the per-card completion action (commit and push to the working branch, pull request, or push the card branch only), branch names and commit hashes, **Mark merged** on the phase page, and the questions about keeping or changing the working branch for a new intake or phase. The main and working branch rows in the repository settings are shown to everyone.
 
 #### Repository hygiene and the working branch
 
@@ -471,7 +478,7 @@ Once a day per workstation the DevOps engineer tidies the project repositories o
 
 ![Repository hygiene on the Workstations page](guide/assets/ws-hygiene.jpg)
 
-**The working branch is the repository's default branch**, confirmed automatically the first time Guildwise sees the repository. You are asked on the desk (*Which branch is the working branch of this repository?*) only when the default cannot be told. With expert mode on you can also set it in the project settings (**Change**) and you are asked again when a new intake or phase starts ("keep `main` as the working branch?").
+**The working branch is the repository's default branch** unless you name another, confirmed automatically the first time Guildwise sees the repository. You are asked on the desk (*Which branch is the working branch of this repository?*) only when the default cannot be told. The owner can change it in the project settings (**Change**) and you are asked again when a new intake or phase starts ("keep `main` as the working branch?").
 
 ![The desk asks which branch is the working branch](guide/assets/desk-branch.jpg)
 
@@ -674,7 +681,7 @@ Once a reviewer approves, the card moves to **Test**. A tester runs the tests of
 
 ![Setting the risk tier](guide/assets/dlg-risk.jpg)
 
-**Finalize.** The BA completes the card the way the project's **How finished work lands** says (4.4): straight into main, or as a pull request for you. In expert mode a card can have its own completion action: **PR** (push the branch and open a pull request), **Push branch**, or **Merge** to the working branch. **A large change that would go straight into main waits for your approval** on the desk, and the card stays in the Finalize column with an "Awaiting your approval" badge.
+**Finalize.** The BA completes the card the way the project's **How finished work lands** says (4.4): committed and pushed to the working branch, or as a pull request for you. In expert mode a card can have its own completion action: **Commit and push to the working branch** (no pull request), **Pull request** (push the card branch and open a pull request into the working branch) or **Push the card branch only**. **A large change that would be committed to the working branch waits for your approval** on the desk, and the card stays in the Finalize column with an "Awaiting your approval" badge.
 
 ![A large merge waiting for approval](guide/assets/desk-large-merge.jpg)
 
@@ -940,7 +947,7 @@ Four situations you will meet again and again, start to finish.
 2. **Check the card.** Open it. If the draft is not quite right, **Edit** it (possible while it is a draft or queued and not yet claimed). Click **Specify** when it reads well.
 3. **Let the team work.** The builder builds, the reviewer reviews (sending the work back with comments if needed, which shows as *rework*), the tester tests. Open **Timeline** and **Handoffs** any time to see why.
 4. **Answer questions.** If the builder asks "should the CSV include cancelled orders?", the question reaches your desk with options and a recommendation. Pick one and add it to the ledger as a **decision**, and nobody will ask again.
-5. **Finalize.** The change goes into main (or arrives as a pull request, if the project works that way). A large change waits on your desk for **Approve merge**.
+5. **Finalize.** The change is committed and pushed to the working branch (or arrives as a pull request, if the project works that way). A large change waits on your desk for **Approve merge**.
 6. **Group it into a phase** if several cards ship together. When they are all merged, the **Phase done** item arrives with a report. Approve the **Deploy** and **Regression run** follow-ups and watch **Phase results**.
 7. **Done.** The card is in the Done column and says *"Your change is live on main"* (and, after the phase, it is deployed and tested).
 
@@ -1034,7 +1041,7 @@ A banner "This project has used its monthly budget" and a desk item mean the pro
 
 ### 9.5 A missing working branch
 
-Guildwise uses the repository's default branch by itself, so you rarely see this. Symptom: the DevOps engineer does not commit or pull in a repository, and the desk asks "Which branch is the working branch?" (or the project settings show *not confirmed*). Answer the question on the desk, or set the branch in **Project settings, Repositories, Change**. The DevOps engineer commits and pushes right away. If the branch you named does not exist yet, the runner creates it from the repository's default branch and pushes it when the next card starts (the card shows "Created working branch X from Y"); you only get this question when it cannot tell the default branch or the push is refused. See 4.4.
+Guildwise uses the repository's default branch by itself, so you rarely see this. Symptom: the DevOps engineer does not commit or pull in a repository, and the desk asks "Which branch is the working branch?" (or the project settings show *not confirmed*). Answer the question on the desk, or set the branch in **Project settings, Repositories, Change**. The DevOps engineer commits and pushes right away. If the branch you named does not exist yet, the runner creates it from the repository's **main branch** (default: the repository's default branch) and pushes it when the next card starts (the card shows "Created working branch X from Y", and the repository row in the project settings keeps the date); you only get this question when it cannot tell the main branch, the main branch you named does not exist, or the push is refused (the message names the branch and the host's reason: check that this workstation may push to the repository). See 4.4.
 
 **Git hosts.** Every repository has a git host, detected from its address and changeable by the project owner (Project settings, Repositories, Change). One project can mix hosts. For pull requests, listing your repositories and creating new ones, the workstation must be connected to that host: the Workstations page and the repository's Git host line show, per host, Connected, Not connected (no token saved), Token refused (the host said no; the line below gives the HTTP status and the likely missing scope) or Could not check (the host could not be reached; it clears by itself). For Bitbucket Cloud the token needs the repository and pull request read/write scopes; the account scope is not required, and **Connect** gives the one command to run on that workstation (`aom-runner git-connect github`, `gitlab`, `bitbucket-cloud` or `azure-devops`); your login or token stays on that computer and the server only learns whether it works. The DevOps engineer can walk you through it: it can start a browser sign-in and show you the address and code, but it never asks for or types a token (if one is needed it tells you to run the command yourself or use **Connect**). **Azure DevOps:** personal access tokens that are not limited to one organization stop working on 2026-12-01, so use a **Microsoft Entra service principal** (or workload identity) as the main sign-in: register an app in Entra, add it to your Azure DevOps organization with Basic access and Contributor on the repositories, and set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` (or `AZURE_FEDERATED_TOKEN_FILE`) for the runner on that workstation. A token for one organization and `az login` remain supported fallbacks. Agents can also ask for a new repository on any of these hosts (GitHub, GitLab, Azure DevOps, Bitbucket Cloud); you approve it on the desk and your own login on the workstation creates it. A plain git server needs no connection but gets no pull requests: the branch is pushed and the desk tells you to open the request yourself. If the working branch is protected on the host, finishing a card opens a pull request instead, says so on the card, and the project switches to pull requests for new work.
 
@@ -1093,7 +1100,7 @@ No. They run inside a sandbox on the workstation, with access to the repositorie
 On your workstations and in your git remotes, exactly as before. The Guildwise HQ website holds the board, cards, desk, ledger, and records of what the agents did. Passwords and tokens for Jira, your git hosts and Claude stay on your workstation.
 
 **Can an agent change my main branch by itself?**
-Only after review and test, and only if the project's **How finished work lands** is *straight into main* (the default). Choose *as a pull request I approve* to merge everything yourself. Large changes wait for your approval either way, unless you turned that off in the project settings. If main is protected on your git host, a pull request is opened instead.
+Only after review and test, and only if the project's **How finished work lands** is *Commit and push to the working branch* (the default). Choose *Pull request I approve* to merge everything yourself. Large changes wait for your approval either way, unless you turned that off in the project settings. If the working branch is protected on your git host, a pull request is opened instead.
 
 **What does it cost?**
 Guildwise HQ is $19 (Starter), $49 (Team) or $149 (Business) a month with a 7-day free trial, in US dollars including VAT, charged in rand (4.17). The AI work is billed by Claude: through your subscription or your API key. The app estimates the spend (4.6) and you set budgets.

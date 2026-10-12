@@ -37,6 +37,7 @@ import type { ForgeEnv } from './forge/types.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
 import { checkBranchMerged } from './git/merged.ts';
+import { openReleasePr } from './git/release-pr.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { sweepWorktrees } from './git/sweep.ts';
 import { removeWorktree } from './git/worktrees.ts';
@@ -209,6 +210,7 @@ export class Runner {
       envChecker: opts.envChecker,
       sudoRun: (cmd, args) => this.sudo.run(cmd, args),
       git: this.agentGit,
+      gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
     });
     this.external =
       opts.external ??
@@ -625,6 +627,21 @@ export class Runner {
             }),
           );
         }
+      } else if (command === 'repo.open_pr') {
+        // "No clone here", "nothing to open" and every git host refusal are answers (ok:true, result.ok:false).
+        const p = CommandPayloadSchemas['repo.open_pr'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        done(
+          true,
+          repo
+            ? await openReleasePr({
+                payload: p,
+                repoPath: repo.localPath,
+                pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
+                auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              })
+            : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
+        );
       } else if (command === 'outbound.post') {
         // Failures are answered as `ok:true, result.ok:false`: the server turns them into a desk alert, not a blind retry.
         done(true, await this.outbound.run(CommandPayloadSchemas['outbound.post'].parse(payload), commandId));

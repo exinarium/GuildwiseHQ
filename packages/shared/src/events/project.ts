@@ -104,6 +104,27 @@ export const projectEvents = [
       forge: ForgeKindSchema.optional(),
       /** The sub directory of the repository the project lives in (absent: the repository root). */
       projectPath: ProjectPathSchema.optional(),
+      /** The main branch (where pull requests go); absent: the repository's default branch. */
+      mainBranch: GitRefSchema.optional(),
+    }),
+  ),
+  /**
+   * The owner set (or cleared, `mainBranch: null`) the main branch of a repository: the branch pull requests go to and the
+   * working branch is created from. Cleared: the repository's default branch.
+   */
+  defineEvent(
+    'ProjectRepoMainBranchSet',
+    z.object({ projectId: Id, repoId: Id, mainBranch: GitRefSchema.nullable(), setBy: Id.optional() }),
+  ),
+  /** The runner found the working branch missing in the repository and created it from `from` (pushed when `pushed`). */
+  defineEvent(
+    'ProjectRepoWorkingBranchCreated',
+    z.object({
+      projectId: Id,
+      repoId: Id,
+      workingBranch: z.string().min(1),
+      from: z.string().min(1),
+      pushed: z.boolean(),
     }),
   ),
   /** The owner set (or cleared, `projectPath: null`) the sub directory of the repository the project lives in. */

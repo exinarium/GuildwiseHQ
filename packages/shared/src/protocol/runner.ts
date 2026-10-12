@@ -14,7 +14,7 @@ import { TestEnvProblem } from '../events/testing.ts';
 import { VaultEventKind } from '../events/vault.ts';
 import { OutboundPostPayloadSchema } from '../external/index.ts';
 import { FeedItemInputSchema } from '../feed/index.ts';
-import { ForgeReposPayloadSchema, GitConnectionsSchema } from '../forge/index.ts';
+import { ForgeKindSchema, ForgeReposPayloadSchema, GitConnectionsSchema } from '../forge/index.ts';
 import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
@@ -103,6 +103,8 @@ export const WorktreeSpecSchema = z.object({
   branchName: z.string(),
   /** Set for `reuse`. */
   path: z.string().optional(),
+  /** The repository's main branch: a missing working branch is created from it (absent: the default branch). */
+  mainBranch: z.string().optional(),
 });
 export type WorktreeSpec = z.infer<typeof WorktreeSpecSchema>;
 
@@ -248,6 +250,36 @@ export const IntegrationRunResultSchema = z.object({
 });
 export type IntegrationRunResult = z.infer<typeof IntegrationRunResultSchema>;
 
+/**
+ * `repo.open_pr`: open a pull request from a repository's working branch to its main branch (the project settings
+ * button). `base` is the main branch the owner named; absent: the repository's default branch.
+ */
+export const RepoOpenPrPayloadSchema = z.object({
+  requestId: z.uuid(),
+  projectId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string(),
+  /** The working branch (the head of the pull request). */
+  head: z.string().min(1),
+  base: z.string().min(1).optional(),
+  title: z.string().max(300),
+  body: z.string().max(5000),
+  forge: ForgeKindSchema.optional(),
+});
+export type RepoOpenPrPayload = z.infer<typeof RepoOpenPrPayloadSchema>;
+
+export const RepoOpenPrResultSchema = z.object({
+  ok: z.boolean(),
+  /** The main branch the pull request goes to, as resolved on the workstation. */
+  base: z.string().optional(),
+  url: z.string().optional(),
+  /** `ok` and no pull request: the working branch has nothing the main branch lacks, or it is the main branch. */
+  nothingToDo: z.boolean().optional(),
+  notice: z.string().optional(),
+  error: z.string().optional(),
+});
+export type RepoOpenPrResult = z.infer<typeof RepoOpenPrResultSchema>;
+
 export const RunnerCommandNameSchema = z.enum([
   'agent.wipe',
   'worktree.remove',
@@ -269,6 +301,7 @@ export const RunnerCommandNameSchema = z.enum([
   'sudo.clear',
   'git.status',
   'forge.repos',
+  'repo.open_pr',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -308,6 +341,7 @@ export const CommandPayloadSchemas = {
   'sudo.clear': z.object({}),
   'git.status': z.object({}),
   'forge.repos': ForgeReposPayloadSchema,
+  'repo.open_pr': RepoOpenPrPayloadSchema,
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([

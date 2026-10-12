@@ -18,7 +18,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { requireOrg, requireUser } from '../auth/guards.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
-import { setRepoForge, setRepoProjectPath } from '../commands/forges.ts';
+import { setRepoForge, setRepoMainBranch, setRepoProjectPath } from '../commands/forges.ts';
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import {
   addRepo,
@@ -36,6 +36,7 @@ import {
   setMergePolicy,
   updateProject,
 } from '../commands/projects.ts';
+import { requestReleasePr } from '../commands/release-pr.ts';
 import type { Ctx } from '../context.ts';
 import { getProjectDetail, listProjects } from '../queries/misc.ts';
 import { typed } from './util.ts';
@@ -192,6 +193,21 @@ export function projectRoutes(ctx: Ctx) {
       },
     );
 
+    /**
+     * Opens a pull request from the repository's working branch to its main branch (the runner does it through the
+     * forge). The answer shows up as `releasePr` on the repository in the project detail.
+     */
+    app.post(
+      '/api/projects/:id/repos/:repoId/release-pr',
+      { schema: { params: RepoParamsSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const out = await requestReleasePr(ctx, s.user, req.params.id, req.params.repoId);
+        reply.code(202);
+        return out;
+      },
+    );
+
     /** A repository's git provider (the manual choice, or `null` to detect it again) and/or the project path inside it. */
     app.patch(
       '/api/projects/:id/repos/:repoId',
@@ -202,6 +218,8 @@ export function projectRoutes(ctx: Ctx) {
           await setRepoForge(ctx, s.user, req.params.id, req.params.repoId, req.body.forge);
         if (req.body.projectPath !== undefined)
           await setRepoProjectPath(ctx, s.user, req.params.id, req.params.repoId, req.body.projectPath);
+        if (req.body.mainBranch !== undefined)
+          await setRepoMainBranch(ctx, s.user, req.params.id, req.params.repoId, req.body.mainBranch);
         return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );

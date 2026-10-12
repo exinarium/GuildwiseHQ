@@ -20,6 +20,7 @@ import { applyWorktreeSweepResult } from '../commands/hygiene.ts';
 import { intakeRpc } from '../commands/intake.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
+import { applyReleasePrResult } from '../commands/release-pr.ts';
 import { applyRepoCreateResult, repoCreateRpc } from '../commands/repo-create.ts';
 import { riskTierRpc } from '../commands/risk.ts';
 import { applyIntegrationResult } from '../commands/schedule-triggers.ts';
@@ -292,6 +293,10 @@ export class RunnerHandlers {
           // Terminal: the picker polls the stored answer.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
           await applyForgeReposResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+        } else if (cmd?.type === 'repo.open_pr') {
+          // Terminal: the answer (pull request URL, nothing to do, or why not) is stored for the project settings.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyReleasePrResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
         } else if (cmd?.type === 'rights.verify') {
           // Terminal. A failed or unreadable answer is kept on the command so the Workstations page can show it.
           const problem = await applyRightsResult(

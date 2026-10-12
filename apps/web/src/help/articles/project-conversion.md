@@ -39,4 +39,4 @@ Once you approve, the project converts and takes its new workflow. Each reposito
 
 Deploy and regression follow-ups of a phase need a repository (and regression needs a test stage). They are greyed out until the project has them.
 
-The repository's default branch becomes its main line by itself. With [expert mode](/help/testing-and-finalization#expert-mode) on, the DevOps engineer asks you which branch is the working branch (like for a new intake or phase).
+The repository's default branch becomes its main and working branch by itself. With [expert mode](/help/testing-and-finalization#expert-mode) on, the DevOps engineer asks you which branch is the working branch (like for a new intake or phase).

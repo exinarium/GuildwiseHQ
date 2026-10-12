@@ -130,6 +130,7 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
     'DELETE FROM workstation_repos WHERE project_repo_id IN (SELECT id FROM project_repos WHERE project_id=$1)',
     P,
   );
+  await exec(tx, 'DELETE FROM repo_pr_requests WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM project_repos WHERE project_id=$1', P);
   await exec(
     tx,
@@ -297,12 +298,12 @@ export const projectProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ProjectRepoAdded'>).payload;
     await exec(
       tx,
-      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, working_branch, forge_kind, project_path)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, working_branch, forge_kind, project_path, main_branch)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        ON CONFLICT (project_id, remote_url_normalized) DO UPDATE
          SET removed_at = NULL, name = EXCLUDED.name, remote_url = EXCLUDED.remote_url,
              working_branch = EXCLUDED.working_branch, forge_kind = EXCLUDED.forge_kind,
-             project_path = EXCLUDED.project_path`,
+             project_path = EXCLUDED.project_path, main_branch = EXCLUDED.main_branch`,
       [
         p.repoId,
         p.projectId,
@@ -312,7 +313,21 @@ export const projectProjectors: Record<string, Projector> = {
         p.workingBranch ?? null,
         p.forge ?? null,
         normalizeProjectPath(p.projectPath),
+        p.mainBranch ?? null,
       ],
+    );
+  },
+  ProjectRepoMainBranchSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectRepoMainBranchSet'>).payload;
+    await exec(tx, 'UPDATE project_repos SET main_branch=$2 WHERE id=$1', [p.repoId, p.mainBranch]);
+  },
+  ProjectRepoWorkingBranchCreated: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectRepoWorkingBranchCreated'>).payload;
+    await exec(
+      tx,
+      `UPDATE project_repos SET working_branch_created_at=$2, working_branch_created_from=$3,
+              working_branch_created_pushed=$4 WHERE id=$1`,
+      [p.repoId, e.createdAt, p.from, p.pushed],
     );
   },
   ProjectRepoPathSet: async (tx, e) => {

@@ -16,6 +16,8 @@ export interface WorktreeClaim {
   worktreePath: string;
   homeWorkstationId: string;
   created: boolean;
+  /** The repository's main branch, when the owner named one (a missing working branch is created from it). */
+  mainBranch?: string;
 }
 
 export interface ClaimResult {
@@ -120,6 +122,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
         worktreePath: path ?? '',
         homeWorkstationId: wcard.home_workstation_id ?? a.workstation_id,
         created: path === null,
+        ...(repo.main_branch ? { mainBranch: repo.main_branch } : {}),
       };
     }
 

@@ -483,6 +483,25 @@ export async function applyShiftStarted(ctx: Ctx, tx: Tx, ws: WsRef, msg: Runner
               `Created working branch ${created.base} from ${created.from}${created.pushed ? ' and pushed it to origin' : ''}: it did not exist in the repository.`,
               { branchCreated: created },
             ),
+            ...(card.repo_id
+              ? [
+                  {
+                    streamId: streamId.project(card.project_id),
+                    event: {
+                      type: 'ProjectRepoWorkingBranchCreated' as const,
+                      payload: {
+                        projectId: card.project_id,
+                        repoId: card.repo_id,
+                        workingBranch: created.base,
+                        from: created.from,
+                        pushed: created.pushed,
+                      },
+                    },
+                    actor: runnerActor(ws.id),
+                    scope: projectScope(card.org_id, card.project_id),
+                  },
+                ]
+              : []),
           ]
         : []),
       {
