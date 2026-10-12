@@ -224,6 +224,7 @@ export class Runner {
       send: (type, payload) => void this.client.send(type, payload),
       rpc: (chatId, method, params) => this.rpc(chatId, method, params),
       external: this.external,
+      findRepo: (n) => this.findRepo(n),
       git: this.agentGit,
     });
     this.outbound = new OutboundExecutor({ dir: this.paths.outbound, adapters: this.external });

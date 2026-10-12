@@ -12,6 +12,7 @@ import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
 import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
 import { ProjectDangerZone } from '../components/ProjectDangerZone.tsx';
+import { ReferenceReposPanel } from '../components/ReferenceReposPanel.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
@@ -102,6 +103,7 @@ export function ProjectSettings() {
     ...(project && traits.usesRepos
       ? [
           { id: 'phases', label: 'Phases and deploys' },
+          { id: 'reference-repos', label: 'Reference repos' },
           { id: 'merge', label: 'Merging' },
         ]
       : []),
@@ -268,6 +270,16 @@ export function ProjectSettings() {
           <PhasesPanel projectId={id} />
           <DeployTargetsPanel projectId={id} />
           <FollowupDefaultsPanel projectId={id} />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="reference-repos" className="scroll-mt-20">
+          <ReferenceReposPanel
+            projectId={id}
+            referenceRepos={q.data.referenceRepos ?? []}
+            candidates={q.data.referenceRepoCandidates ?? []}
+            isOwner={project.myRole === 'owner'}
+          />
         </div>
       )}
       {project && traits.usesRepos && (

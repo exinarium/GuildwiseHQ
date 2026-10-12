@@ -26,6 +26,11 @@ export interface ShiftStartInput {
   env: Record<string, string>;
   /** Read access: vault folder of the card's project. */
   addDirs: string[];
+  /**
+   * Read-only folders besides the vault: the project's reference repositories (resolved to local clones). Never
+   * writable; secret files inside stay unreadable (claude-policy.ts).
+   */
+  readDirs?: string[];
   maxShiftMinutes: number;
   /** Chat only. */
   resumeSessionId?: string;
@@ -61,6 +66,8 @@ export interface ChatStartInput {
   env: Record<string, string>;
   /** Previous runtime session of this conversation. */
   resumeSessionId?: string;
+  /** Read-only folders: the project's own clones and its reference repositories on this workstation. */
+  readDirs?: string[];
   /** Tools are limited to reading (and the chat-scoped `aom` verbs). */
   readOnly: boolean;
   /** What the server told the agent about this conversation (card, project, M7: the intake). */

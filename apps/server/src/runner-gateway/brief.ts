@@ -18,6 +18,7 @@ import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import type { ClaimResult } from '../dispatcher/claim.ts';
 import { cardLedgerEntries, standingOrdersFor } from '../queries/ledger.ts';
+import { referenceReadRepos } from './read-repos.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
 
@@ -209,6 +210,10 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     prepare: { rebase: claim.rebase },
     maxShiftMinutes: claim.maxShiftMinutes,
     vault: vault ? { vaultId: vault.id, kind: vault.kind, folder: vault.folder } : null,
+    // The card's own repository is its worktree; only the project's reference repositories are opened besides.
+    readRepos: (await referenceReadRepos(ctx.pool, brief.project.id)).filter(
+      (r) => r.repoId !== claim.worktree?.repoId,
+    ),
   };
 }
 

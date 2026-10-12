@@ -402,6 +402,7 @@ Owners and Admins change the order by **dragging** a project by its grip (the do
 What you will find there:
 
 - **Repos:** the code the agents work on, with its git host and its **Project path**: the folder of the repository the app lives in (empty: the repository root). The owner can change the path with **Change**; the development environment check, the package installs and the agents' build and test commands then run from that folder. After changing it, click **Check again** under the development environment. With expert mode on you also see its **working branch**, the branch finished work lands on. Research projects need none.
+- **Reference repositories:** other repositories your agents may **read**, in card work and in chats, so they can compare code or look up how something is done elsewhere. The owner picks them from the repositories of the organization's other projects they belong to (**Add a reference repository**, **Remove**). The agents get them read-only on every workstation that has them cloned: they cannot change them, and secret files inside (`.env` files, keys, certificates) stay blocked. Every repository you do not pick stays blocked, and so does everything else on the workstation, including this platform's own code.
 - **How finished work lands:** straight into main after review and test (the default), or as a pull request you approve (4.4).
 - **Team:** who works in the project (see below).
 - **Merging:** the setting **Merge large changes without my approval** (off by default). Read chapter 4.12 before turning it on.
@@ -755,6 +756,8 @@ See the help article *Plans and billing*.
 ### 4.18 Chatting with agents
 
 Click **Chat** in the top bar (or on the Desk), pick an agent and choose **Start chat**. Ask about a card, discuss a blocker, or ask the BA to draft cards. The BA works with your rights, so it can only use projects you are a member of. Conversations are saved, and a chat tied to a project is marked as visible to that project's managers.
+
+**What an agent can read in a chat.** A chat about a project can read the project's own repositories (read-only) when they are cloned on the agent's workstation, plus the project's **Reference repositories** (project settings). A chat about a card whose work folder is on that workstation reads that folder, plus the reference repositories; if the card has not been started there, it falls back to the project's repositories. Nothing else on the machine is open to the agent, and it cannot change any of it. To let an agent compare another repository, ask the project owner to add it under **Reference repositories** in the project settings. (The workstation's DevOps engineer is different: it works as you and can read everything.)
 
 ![A chat with the BA](guide/assets/chat-ba.jpg)
 

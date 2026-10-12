@@ -50,6 +50,24 @@ export const ProjectRepoDtoSchema = z.object({
 });
 export type ProjectRepoDto = z.infer<typeof ProjectRepoDtoSchema>;
 
+/** A repository of another project that this project's agents may read (or that could be picked). */
+export const ReferenceRepoDtoSchema = z.object({
+  repoId: z.uuid(),
+  name: z.string(),
+  projectId: z.uuid(),
+  projectName: z.string(),
+  /** Credentials are scrubbed from the URL. */
+  remoteUrl: z.string(),
+});
+export type ReferenceRepoDto = z.infer<typeof ReferenceRepoDtoSchema>;
+
+/** `PUT /api/projects/:id/reference-repos` (project owner): the whole list of reference repositories. */
+export const MAX_REFERENCE_REPOS = 20;
+export const SetReferenceReposRequestSchema = z.object({
+  repoIds: z.array(z.uuid()).max(MAX_REFERENCE_REPOS),
+});
+export type SetReferenceReposRequest = z.infer<typeof SetReferenceReposRequestSchema>;
+
 export const ProjectDtoSchema = z.object({
   id: z.uuid(),
   orgId: z.uuid(),
@@ -143,6 +161,10 @@ export const ProjectDetailResponseSchema = z.object({
     )
     .default([]),
   members: z.array(ProjectMemberDtoSchema),
+  /** Reference repositories: other projects' repositories this project's agents may read (read-only). */
+  referenceRepos: z.array(ReferenceRepoDtoSchema).default([]),
+  /** What the owner could still pick: repositories of the organization's other active projects the caller is a member of ([] for non-owners). */
+  referenceRepoCandidates: z.array(ReferenceRepoDtoSchema).default([]),
   /** The setting's change history, newest first (who turned it on or off, when). */
   mergePolicyHistory: z
     .array(z.object({ enabled: z.boolean(), byName: z.string(), at: IsoTime }))

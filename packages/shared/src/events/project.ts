@@ -118,6 +118,12 @@ export const projectEvents = [
   ),
   defineEvent('ProjectRepoRemoved', z.object({ projectId: Id, repoId: Id })),
   /**
+   * The project owner chose the reference repositories: other repositories (by project repository id) the project's
+   * agents may read, read-only, in card work and in chats on the workstations that have them. `repoIds` is the whole
+   * list (empty clears it). Nothing else on the workstation is ever opened.
+   */
+  defineEvent('ProjectReferenceReposSet', z.object({ projectId: Id, repoIds: z.array(Id), by: Id })),
+  /**
    * The Owner or an Admin converted the project to another workflow (docs/design/restructure.md section 8, any to any).
    * One append with the repositories it adds (`ProjectRepoAdded`) and, for each open card the new workflow cannot place,
    * the decision: kept (it finishes on its own workflow and shows in extra board columns) or cancelled

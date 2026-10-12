@@ -203,6 +203,18 @@ export const ShiftBriefSchema = z.object({
 });
 export type ShiftBrief = z.infer<typeof ShiftBriefSchema>;
 
+/**
+ * A repository an agent may read (read-only) on this workstation, named by its remote: the runner resolves it to the
+ * local clone. `project`: a repository of the chat's own project; `reference`: one of the project's reference repositories.
+ */
+export const ReadRepoSchema = z.object({
+  repoId: z.uuid(),
+  name: z.string(),
+  remoteUrlNormalized: z.string(),
+  kind: z.enum(['project', 'reference']),
+});
+export type ReadRepo = z.infer<typeof ReadRepoSchema>;
+
 export const ChatContextSchema = z.object({
   projectId: z.uuid().optional(),
   cardId: z.uuid().optional(),
@@ -210,6 +222,8 @@ export const ChatContextSchema = z.object({
   cardRef: z.string().optional(),
   /** Where the card's worktree lives on its home workstation (read-only context for the chat). */
   cardWorktreePath: z.string().optional(),
+  /** Repositories the chat may read here: the project's own and its reference repositories (absent: none). */
+  readRepos: z.array(ReadRepoSchema).optional(),
   /** M7: set for the BA's intake chat (project list, mapping state, cards created so far). */
   intake: IntakeContextSchema.optional(),
 });
@@ -527,6 +541,8 @@ export const ShiftStartSchema = msg('shift.start', {
   baTask: BaTaskShiftSchema.optional(),
   /** M3: the card's vault (its project vault or the organization vault); the runner reads only this vault and passes only it as `--add-dir`. */
   vault: ShiftVaultSchema.nullable().optional(),
+  /** The project's reference repositories: read-only for this shift when the workstation has a clone. */
+  readRepos: z.array(ReadRepoSchema).optional(),
 });
 export const ShiftStopSchema = msg('shift.stop', { shiftId: z.uuid(), reason: ShiftStopReasonSchema });
 export const ShiftReportResultSchema = msg('shift.report.result', {

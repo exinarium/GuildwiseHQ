@@ -1,7 +1,7 @@
 ---
 title: Projects
 summary: Creating projects, the priority order, project types and workflows, research cards, sharing, archiving and decision policy.
-keywords: [project, priority, ranking, order, code, research, workflow, card, sharing, archiving, repository, git host, github, gitlab, bitbucket, azure devops, pull request, how finished work lands]
+keywords: [project, priority, ranking, order, code, research, workflow, card, sharing, archiving, repository, git host, github, gitlab, bitbucket, azure devops, pull request, how finished work lands, reference repositories, read other repositories, compare repositories]
 order: 4
 ---
 
@@ -21,6 +21,15 @@ The **git host** (GitHub, GitLab, Bitbucket, Azure DevOps or a plain git server)
 You can also click **Pick from my repositories** to list the repositories of a connected host and use one, or choose **Create a new repository**: the form then asks for what that host needs (owner for GitHub, group for GitLab, workspace for Bitbucket, organization and project for Azure DevOps).
 
 Cards stay as drafts until you are ready to specify them. A new project goes to the bottom of your priority order.
+
+## Reference repositories {#reference-repos}
+
+By default an agent only sees the folder of the card it is working on (and, in a chat about a project, the project's own repositories). To let a project's agents **read** other code, for example to compare two repositories or look up how a library is used, the project owner adds **Reference repositories** in the project settings:
+
+1. Open the project's settings (the gear on its board) and go to **Reference repos**.
+2. Under **Add a reference repository** pick a repository from your other projects and click **Add**. Use **Remove** to take one away again.
+
+The agents then get those repositories **read-only**, in card work and in chats, on every workstation that has them cloned. They cannot change them, and secret files inside (`.env` files, keys, certificates) stay blocked. Every repository you do not pick stays blocked, as does everything else on the workstation (other projects, this platform's own code). Only the project owner can change the list; other managers can see it. The agents are told which folders they can read, so they ask you to add a repository instead of searching for a setting.
 
 ## The priority order {#ranking}
 

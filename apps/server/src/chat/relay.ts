@@ -17,6 +17,7 @@ import { one } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentSpecFor } from '../runner-gateway/brief.ts';
+import { projectReadRepos, referenceReadRepos } from '../runner-gateway/read-repos.ts';
 import { workstationServesOrg } from '../simulation/fit.ts';
 
 const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -162,10 +163,19 @@ export class ChatRelay {
         },
       ]);
       const intake = await intakeContext(ctx, msg.threadId);
+      // A chat about a project may read the project's own clones and its reference repositories (when this workstation has
+      // them); the DevOps engineer reads anywhere anyway.
+      const readRepos = row.thread_project_id
+        ? [
+            ...(await projectReadRepos(ctx.pool, row.thread_project_id)),
+            ...(await referenceReadRepos(ctx.pool, row.thread_project_id)),
+          ]
+        : [];
       const context: ChatContext = {
         ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),
         ...(row.thread_card_id ? { cardId: row.thread_card_id, cardRef: row.card_ref } : {}),
         ...(row.thread_card_id && row.card_worktree_path ? { cardWorktreePath: row.card_worktree_path } : {}),
+        ...(readRepos.length > 0 ? { readRepos } : {}),
         ...(intake ? { intake } : {}),
       };
       const sent = ctx.services.runners.send(
