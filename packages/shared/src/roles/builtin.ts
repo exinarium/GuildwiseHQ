@@ -1,6 +1,7 @@
 import { type AgentPermissions, type RoleDefinition, RoleDefinitionSchema } from './schema.ts';
 
-const COMMON_DENIED_SHELL = [
+/** The shell patterns every role denies (no pushing, rebasing, branch switching, force resets, sudo). */
+export const COMMON_DENIED_SHELL = [
   'git push*',
   'git rebase*',
   'git checkout*',

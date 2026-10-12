@@ -5,6 +5,8 @@ import {
   type ExtendRoleRequest,
   OrgCatalogueResponseSchema,
   type RoleDraftInput,
+  type RolePreviewRequest,
+  RolePreviewResponseSchema,
   type SubmitResponse,
   type ValidateResponse,
   type WorkflowDraftInput,
@@ -76,3 +78,16 @@ export const useExtendRole = () =>
 
 export const useCreateDepartment = () =>
   useOrgMutation((v: Ctx & { body: CreateDepartmentRequest }) => post(`/departments${q(v)}`, v.body));
+
+/**
+ * The prompt preview of a role being built (`POST /api/roles/preview`): the instructions an agent would get on a
+ * sample shift. A query, so typing re-renders after a pause and the last text stays on screen meanwhile.
+ */
+export function useRolePreview(req: RolePreviewRequest | null, projectId?: string) {
+  return useQuery({
+    queryKey: ['org', 'role-preview', projectId ?? 'own', req],
+    enabled: req !== null,
+    placeholderData: (previous) => previous,
+    queryFn: () => post(`/roles/preview${qs({ projectId })}`, req, RolePreviewResponseSchema),
+  });
+}

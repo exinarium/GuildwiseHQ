@@ -6,6 +6,8 @@ import {
   type OrgRole,
   RoleDraftInputSchema,
   RoleExtensionParamsSchema,
+  RolePreviewQuerySchema,
+  RolePreviewRequestSchema,
   WorkflowDraftInputSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -25,6 +27,7 @@ import {
   submitDraft,
   validateDraft,
 } from '../commands/designer.ts';
+import { previewRole, previewRoleDraft } from '../commands/role-preview.ts';
 import type { Ctx } from '../context.ts';
 import { resetRole } from '../hr/hr.ts';
 import { typed } from './util.ts';
@@ -70,6 +73,23 @@ export function designerRoutes(ctx: Ctx) {
         return saveRoleDraft(ctx, { kind: 'user', userId: s.user.id }, orgId, req.body, {
           id: req.params.id,
         });
+      },
+    );
+    // The prompt preview: the real renderer on a sample brief, no agent runs. Same permission as editing roles.
+    app.post('/api/roles/preview', { schema: { ...q, body: RolePreviewRequestSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const { orgId } = await catalogueOrg(ctx.pool, s.user, await reqOrg(req, s), req.query.projectId, true);
+      const { role, ...opts } = req.body;
+      return previewRole(ctx.pool, orgId, role, opts);
+    });
+    app.get(
+      '/api/roles/drafts/:id/preview',
+      { schema: { querystring: RolePreviewQuerySchema, params: IdParamsSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        const { projectId, ...opts } = req.query;
+        const { orgId } = await catalogueOrg(ctx.pool, s.user, await reqOrg(req, s), projectId, true);
+        return previewRoleDraft(ctx.pool, orgId, req.params.id, opts);
       },
     );
     app.post('/api/roles/:id/validate', { schema: { ...q, params: IdParamsSchema } }, async (req) => {
