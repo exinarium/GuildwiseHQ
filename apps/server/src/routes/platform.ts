@@ -9,6 +9,7 @@ import {
   PlatformAuditQuerySchema,
   PlatformOrgsQuerySchema,
   PlatformTransferOwnershipRequestSchema,
+  SetRunnerUpdateSettingsRequestSchema,
   SetSimulationRequestSchema,
   WipeSimulationRequestSchema,
   WipeSimulationResponseSchema,
@@ -37,6 +38,7 @@ import {
 } from '../commands/platform.ts';
 import { setOrgSimulation, wipeSimulationOrg } from '../commands/simulation.ts';
 import type { Ctx } from '../context.ts';
+import { runnerUpdateSettings, setRunnerUpdatesPaused } from '../installer/release.ts';
 import { loadDemoScenario } from '../simulation/demo.ts';
 import { typed } from './util.ts';
 
@@ -188,6 +190,22 @@ export function platformRoutes(ctx: Ctx) {
         return PasswordResetSentSchema.parse(
           await sendPasswordResetAsAdmin(ctx, s, req.params.id, meta(req)),
         );
+      },
+    );
+
+    // The kill switch for runner auto-updates: while paused, `GET /api/runner/release` tells runners to stay put.
+    app.get('/api/platform/runner-updates', async (req) => {
+      await requireSuperAdmin(ctx, req);
+      return runnerUpdateSettings(ctx);
+    });
+
+    app.put(
+      '/api/platform/runner-updates',
+      { schema: { body: SetRunnerUpdateSettingsRequestSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        await setRunnerUpdatesPaused(ctx, req.body.paused, s.user.id);
+        return runnerUpdateSettings(ctx);
       },
     );
 

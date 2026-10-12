@@ -294,6 +294,7 @@ export async function workstationDtos(
     platform: w.platform,
     hostname: w.hostname,
     runnerVersion: w.runner_version,
+    runnerUpdate: w.runner_update ?? null,
     status: w.status,
     connected: w.connected && w.status === 'active',
     lastSeenAt: iso(w.last_seen_at),

@@ -78,5 +78,19 @@ export const InstallerStatusSchema = z.object({
 export type InstallerStatus = z.infer<typeof InstallerStatusSchema>;
 
 /** `GET /api/runner/release` (public): the runner download the server offers. */
-export const RunnerReleaseResponseSchema = InstallerReleaseSchema.extend({ url: z.string() });
+export const RunnerReleaseResponseSchema = InstallerReleaseSchema.extend({
+  url: z.string(),
+  /** A super admin paused runner auto-updates: runners that see `true` keep the version they have. */
+  autoUpdatePaused: z.boolean().default(false),
+});
 export type RunnerReleaseResponse = z.infer<typeof RunnerReleaseResponseSchema>;
+
+/** `GET/PUT /api/platform/runner-updates` (super admin): the kill switch for runner auto-updates. */
+export const RunnerUpdateSettingsSchema = z.object({
+  paused: z.boolean(),
+  updatedAt: z.iso.datetime().nullable(),
+  /** The runner version this server offers (null: none published). */
+  latestVersion: z.string().nullable(),
+});
+export type RunnerUpdateSettings = z.infer<typeof RunnerUpdateSettingsSchema>;
+export const SetRunnerUpdateSettingsRequestSchema = z.object({ paused: z.boolean() });

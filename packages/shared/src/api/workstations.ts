@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { RightsReportSchema } from '../devops/environment.ts';
 import { DevOpsAccessSchema } from '../events/devops.ts';
 import { ConnectableForgeSchema, GitConnectionSchema, RepoRefSchema } from '../forge/index.ts';
-import { RuntimeInfoSchema } from '../protocol/runner.ts';
+import { RunnerUpdateStateSchema, RuntimeInfoSchema } from '../protocol/runner.ts';
 import { IsoTime } from './common.ts';
 
 /** Repository hygiene of a workstation: its cadence and the last run (docs/design/phases.md addendum). */
@@ -23,6 +23,17 @@ export const WorkstationDtoSchema = z.object({
   platform: z.string().nullable(),
   hostname: z.string().nullable(),
   runnerVersion: z.string().nullable(),
+  /** What the runner last said about updating itself (null: an older runner that does not report). */
+  runnerUpdate: z
+    .object({
+      state: RunnerUpdateStateSchema,
+      latestVersion: z.string().nullable(),
+      lastCheckedAt: IsoTime.nullable(),
+      detail: z.string().nullable(),
+      reportedAt: IsoTime,
+    })
+    .nullable()
+    .optional(),
   status: z.enum(['active', 'unlinked']),
   connected: z.boolean(),
   lastSeenAt: IsoTime.nullable(),

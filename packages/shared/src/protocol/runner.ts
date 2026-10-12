@@ -369,6 +369,30 @@ export const RuntimesReportSchema = msg('runtimes.report', { runtimes: z.array(R
  * `aom-runner git-connect` and on the `git.status` command.
  */
 export const GitReportSchema = msg('git.report', { connections: GitConnectionsSchema });
+/** How a runner's self-update stands (docs/RUNNER.md "Updates"). */
+export const RUNNER_UPDATE_STATES = [
+  'up_to_date',
+  'pending',
+  'updating',
+  'failed',
+  'rolled_back',
+  'paused',
+  'unmanaged',
+] as const;
+export const RunnerUpdateStateSchema = z.enum(RUNNER_UPDATE_STATES);
+export type RunnerUpdateState = z.infer<typeof RunnerUpdateStateSchema>;
+/**
+ * The runner's update state, sent after `welcome` and whenever it changes: `pending` a newer version is downloaded and
+ * waits for the runner to be idle, `updating` it is switching and restarting, `failed` the last attempt failed,
+ * `rolled_back` a new version did not connect and the previous one was restored, `paused` a super admin paused
+ * auto-updates, `unmanaged` this install cannot update itself (started by hand, not from the installer's layout).
+ */
+export const RunnerUpdateReportSchema = msg('runner.update', {
+  state: RunnerUpdateStateSchema,
+  latestVersion: z.string().max(40).nullable(),
+  lastCheckedAt: z.iso.datetime().nullable(),
+  detail: z.string().max(300).nullable(),
+});
 export const ReposReportSchema = msg('repos.report', { repos: z.array(RepoReportSchema) });
 export const ShiftAcceptedSchema = msg('shift.accepted', { shiftId: z.uuid() });
 export const ShiftRejectedSchema = msg('shift.rejected', {
@@ -548,6 +572,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   ReposReportSchema,
   RuntimesReportSchema,
   GitReportSchema,
+  RunnerUpdateReportSchema,
   ShiftAcceptedSchema,
   ShiftRejectedSchema,
   ShiftStartedSchema,

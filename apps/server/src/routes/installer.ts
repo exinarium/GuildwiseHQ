@@ -19,7 +19,12 @@ import {
 } from '../commands/installer.ts';
 import type { Ctx } from '../context.ts';
 import { notFound } from '../errors.ts';
-import { findRelease, latestRelease, RELEASE_VERSION_PATTERN } from '../installer/release.ts';
+import {
+  findRelease,
+  latestRelease,
+  RELEASE_VERSION_PATTERN,
+  runnerUpdatesPaused,
+} from '../installer/release.ts';
 import { typed } from './util.ts';
 
 const TokenParams = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/) });
@@ -105,7 +110,9 @@ export function installerRoutes(ctx: Ctx) {
         version: r.version,
         sha256: r.sha256,
         size: r.size,
+        // One portable archive for every platform and architecture (the installer unpacks the same file everywhere).
         url: `${ctx.config.publicOrigin}/api/runner/release/aom-runner-${r.version}.tgz`,
+        autoUpdatePaused: await runnerUpdatesPaused(ctx.pool),
       });
     });
 

@@ -138,6 +138,18 @@ export class RunnerHandlers {
       case 'runtimes.report':
         await this.runtimesReport(conn, msg.runtimes);
         return;
+      case 'runner.update':
+        await exec(this.ctx.pool, `UPDATE workstations SET runner_update=$2::jsonb WHERE id=$1`, [
+          conn.workstationId,
+          JSON.stringify({
+            state: msg.state,
+            latestVersion: msg.latestVersion,
+            lastCheckedAt: msg.lastCheckedAt,
+            detail: msg.detail,
+            reportedAt: this.ctx.clock.now().toISOString(),
+          }),
+        ]);
+        return;
       case 'git.report':
         await applyGitReport(this.ctx, conn.workstationId, msg.connections);
         return;
@@ -376,7 +388,8 @@ export class RunnerHandlers {
     conn.helloShiftIds = msg.activeShifts.map((s) => s.shiftId);
     await exec(
       ctx.pool,
-      `UPDATE workstations SET runtimes=$2, runner_version=$3, hostname=$4, platform=$5, last_seen_at=$6 WHERE id=$1`,
+      // runner_update is cleared: a runner that can update itself reports it again right after `welcome`.
+      `UPDATE workstations SET runtimes=$2, runner_version=$3, hostname=$4, platform=$5, last_seen_at=$6, runner_update=NULL WHERE id=$1`,
       [conn.workstationId, JSON.stringify(msg.runtimes), msg.runnerVersion, msg.hostname, msg.platform, now],
     );
     // The public key the sudo password is encrypted with (the private half stays on the runner).
