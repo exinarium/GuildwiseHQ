@@ -23,6 +23,7 @@ import {
 } from '../../lib/builder.ts';
 import { WorkflowGraph } from '../org/WorkflowGraph.tsx';
 import { Button, Select, TextInput } from '../ui.tsx';
+import { AutoStartSection } from './AutoStartSection.tsx';
 import { FieldList } from './FieldList.tsx';
 import { IssueBar } from './IssueBar.tsx';
 import { StepCard, type SubworkflowSlotContext } from './StepCard.tsx';
@@ -54,6 +55,8 @@ export interface WorkflowBuilderProps {
   onValidation?: (v: BuilderValidation) => void;
   /** Extra content under "Try a card" (the page puts the BA chat there). */
   aside?: React.ReactNode;
+  /** Show "Starts automatically when ..." (the automations of this workflow). The workflow page turns it on. */
+  autoStart?: boolean;
 }
 
 /**
@@ -271,6 +274,7 @@ function OrgWorkflowBuilder(p: WorkflowBuilderProps) {
             readOnly={readOnly}
             onAdded={(uid) => setFocus({ id: `field-${uid}-label` })}
           />
+          {p.autoStart && model.key && <AutoStartSection workflowKey={model.key} readOnly={readOnly} />}
         </div>
 
         <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-4 lg:self-start">

@@ -63,9 +63,9 @@ const NAV_STEPS: Record<string, { title: string; body: string; more?: string }> 
     more: 'interests#run-and-delivery',
   },
   schedules: {
-    title: 'Schedules',
-    body: 'Work that starts by itself: every weekday morning, when a phase finishes, or when a ticket gets a label. Pick a trigger, then an action such as creating a card or sending a webhook.',
-    more: 'schedules-and-integrations#triggers',
+    title: 'Automations',
+    body: 'Work that starts by itself: every weekday morning, when a phase finishes, when a card reaches a stage, or when a ticket gets a label. Pick a trigger, then an action such as creating a card or sending a webhook.',
+    more: 'automations-and-integrations#triggers',
   },
   agents: {
     title: 'Agents',

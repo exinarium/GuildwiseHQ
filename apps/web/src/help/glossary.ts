@@ -150,11 +150,11 @@ export const GLOSSARY: GlossaryEntry[] = [
     article: 'workstations-and-installer#what-is-a-workstation',
   },
   {
-    term: 'Schedule',
-    aka: ['trigger', 'automation'],
+    term: 'Automation',
+    aka: ['trigger', 'schedule'],
     definition:
-      'Work that starts by itself: at a time of day, when something happens (such as a phase finishing), or when an issue gets a label. It has a trigger and an action.',
-    article: 'schedules-and-integrations#schedules',
+      'Work that starts by itself: at a time of day, when something happens (a phase finishing, a card reaching a stage, a ticket arriving in intake), or when an issue gets a label. It has a trigger and an action.',
+    article: 'automations-and-integrations#schedules',
   },
   {
     term: 'Shift',

@@ -417,6 +417,7 @@ function BuilderSession({
           serverIssues={serverIssues}
           readOnly={readOnly}
           showWorktree={showWorktree}
+          autoStart
           onValidation={setValidation}
           aside={<BuilderChat outline={() => describeDraft(model, savedId)} disabled={!cat.canEdit} />}
         />

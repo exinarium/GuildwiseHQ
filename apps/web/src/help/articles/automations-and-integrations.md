@@ -1,38 +1,41 @@
 ---
-title: Schedules and integrations
-summary: Creating schedules, triggers and actions, feeds, how scans work, integrations and webhooks.
-keywords: [schedule, trigger, action, cron, webhook, feed, integration]
+title: Automations and integrations
+summary: Creating automations (formerly schedules), triggers and actions, feeds, how scans work, integrations and webhooks.
+keywords: [automation, schedule, trigger, action, cron, webhook, feed, integration]
 order: 15
 ---
 
-A **schedule** is a trigger (when something happens) and one action (what to do). Schedules automate your work: create a card on a cadence, run tests, deploy, or post to Slack.
+An **automation** (called a schedule before October 2026) is a trigger (when something happens) and one action (what to do). Automations do your routine work: create a card on a cadence or when a card reaches a stage, run tests, deploy, or post to Slack.
 
-## Schedules {#schedules}
+## Automations {#schedules}
 
-To create a schedule:
+To create an automation:
 
-1. Go to **Schedules** and click **New schedule**.
+1. Go to **Automations** and click **New automation**.
 2. Pick a trigger (the **When** step) and click **Next**.
 3. Pick an action (the **What** step) and click **Next**.
 4. Set details (the **Details** step).
-5. Click **Create schedule**.
+5. Click **Create automation**.
 
-Schedules run on your workstation or on the server, never in your browser. Each schedule can be run now, paused or resumed, edited and deleted. You see the history of every run, with logs when something fails. Schedules that act for the whole organization (no project) can only be changed by the Owner and Admins.
+Automations run on your workstation or on the server, never in your browser. Each automation can be run now, paused or resumed, edited and deleted. You see the history of every run, with logs when something fails. Automations that act for the whole organization (no project) can only be changed by the Owner and Admins. Members can set up automations for their projects that make draft cards; an Owner or Admin can also let an automation queue its cards directly.
+
+The old address `/schedules` still opens this page.
 
 ## Triggers {#triggers}
 
-A trigger is when the schedule fires:
+A trigger is when the automation fires:
 
 - **On a schedule**: A cron time with presets ("Weekdays at 07:00", "Every hour") or your own five-field cron, in a time zone you pick. Missed fires (server was down) happen once, not many times.
-- **When something happens**: A phase is completed, a card is finalized, an interest run finishes or a project is converted. The server watches; no agent polls.
+- **When something happens**: A phase is completed, a card is finalized, an interest run finishes or a project is converted, a card **reaches a stage** of a workflow, a card of a workflow is **done**, or an **investigation is reported**. The card events can be narrowed to one workflow, one stage, a card type or a field value. The server watches; no agent polls, and each event runs an automation once.
+- **When an intake ticket arrives**: the BA takes a request into intake, from an issue poll or the intake chat.
 - **When an issue is labelled**: A GitHub or Jira issue gets a label. One of your workstations polls on a cadence you set.
-- **Only when I run it**: No automatic trigger: use **Run now** on the Schedules page.
+- **Only when I run it**: No automatic trigger: use **Run now** on the Automations page.
 
 ## Actions {#actions}
 
 An action is what happens:
 
-- **Create a card** from a template (title, type, fields). Queued ahead of normal work.
+- **Create a card** from a template (title, type, fields). Queued ahead of normal work, or as a **draft** that waits to be specified. An automation that reacts to an event can **fill the card from the event**: each line sets a field (the title, the context, or any card field) to a text with tokens such as `{card.ref}`, `{card.title}`, `{issue.title}`, `{issue.key}`, `{event}`, `{date}` or `{card.fields.<name>}`. Values are copied as they are and never expanded again. Cards made this way are marked as made by an automation. By default at most 20 cards per hour are made; more are skipped, with one notice on your desk. **Repeats** can stop a second card for the same source card or ticket, or with the same title.
 - **Run a regression**: one regression card per platform (web, mobile, or both), queued at Test.
 - **Ask DevOps**: a request to a workstation's DevOps engineer, or a repository hygiene run.
 - **Ask the BA**: free-text instructions for the BA (read-only; it reads ledger, desk, vault, repositories).
@@ -54,13 +57,13 @@ For videos and podcasts, transcripts are fetched (YouTube, podcast feeds). If **
 
 ## Integrations and webhooks {#integrations}
 
-Schedules can integrate with GitHub, Jira, Slack, Microsoft Teams, n8n, Zapier and more.
+Automations can integrate with GitHub, Jira, Slack, Microsoft Teams, n8n, Zapier and more.
 
 **GitHub and Jira polling**: polls for new issues and brings them into intake.
 
 **Webhooks**: send signed JSON to any URL. Every request includes a signature header (`X-AOM-Signature: sha256=<hmac-sha256 of "timestamp.body">`, with the timestamp in `X-AOM-Timestamp`). Failed deliveries (5xx, 429, 408, network error) are retried after 1 minute, 5 minutes, 30 minutes and 2 hours, five tries in all. Other 4xx errors are final.
 
-When creating a webhook, the schedule shows its secret once: the key for the signature. Click **New secret** to replace it.
+When creating a webhook, the automation shows its secret once: the key for the signature. Click **New secret** to replace it.
 
 Use **Send test** to send a test delivery now (logged but never retried, not counted as a run).
 
@@ -68,4 +71,9 @@ Use **Send test** to send a test delivery now (logged but never retried, not cou
 
 ## History {#history}
 
-Click **History** on a schedule to see every run: when, what triggered it, what it did, and the reason if it failed. For webhooks and e-mails, see the **Deliveries** log with every try, HTTP status and duration.
+Click **History** on an automation to see every run: when, what triggered it, what it did, and the reason if it failed. For webhooks and e-mails, see the **Deliveries** log with every try, HTTP status and duration.
+
+
+## Starting a workflow automatically {#starts-automatically}
+
+In the workflow builder, **Starts automatically when** lists the automations that create cards in that workflow and lets you add one. It opens the same automation form with the workflow already chosen.

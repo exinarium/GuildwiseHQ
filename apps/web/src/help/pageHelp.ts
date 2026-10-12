@@ -8,6 +8,7 @@ export const NO_PAGE_HELP = [
   '/',
   '/admin',
   '/p/:projectKey/feed',
+  '/schedules',
   '/login',
   '/invite/:token',
   '/forgot-password',

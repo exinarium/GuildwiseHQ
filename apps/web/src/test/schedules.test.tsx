@@ -11,7 +11,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildScheduleRequest, describeAction, describeTrigger, emptyWizard } from '../lib/schedules.ts';
-import { Schedules } from '../pages/Schedules.tsx';
+import { Automations } from '../pages/Automations.tsx';
 
 const ID = (n: number) => `0192f3a0-0000-7000-8000-${String(n).padStart(12, '0')}`;
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status });
@@ -194,7 +194,7 @@ const wrap = () => {
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <Schedules />
+        <Automations />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -268,7 +268,7 @@ describe('building the request', () => {
   });
 });
 
-describe('Schedules page', () => {
+describe('Automations page', () => {
   it('groups schedules by project and shows the system jobs read-only', async () => {
     wrap();
     const ba = await screen.findByTestId('schedule-Friday review');
@@ -430,6 +430,6 @@ describe('Schedules page', () => {
       }),
     );
     wrap();
-    expect(await screen.findByTestId('schedules-empty')).toHaveTextContent('No schedules yet');
+    expect(await screen.findByTestId('schedules-empty')).toHaveTextContent('No automations yet');
   });
 });
