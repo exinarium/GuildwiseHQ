@@ -7,7 +7,17 @@
 export type Platform = 'linux' | 'darwin' | 'win32';
 
 /** `any`: the same steps whatever the package manager (corepack, rustup, dotnet-install). */
-export type Manager = 'apt' | 'dnf' | 'brew' | 'winget' | 'choco' | 'any';
+export type Manager =
+  | 'apt'
+  | 'dnf'
+  | 'yum'
+  | 'pacman'
+  | 'zypper'
+  | 'apk'
+  | 'brew'
+  | 'winget'
+  | 'choco'
+  | 'any';
 
 /** What a detector can see of a repository: its files (relative paths, depth-limited) and a reader. */
 export interface RepoView {

@@ -33,6 +33,9 @@ export function userBinDirs(home = homedir()): string[] {
   ];
 }
 
+/** Where Homebrew installs (macOS Apple Silicon and Intel, Linux): not on a service's PATH. */
+export const BREW_BIN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/home/linuxbrew/.linuxbrew/bin'];
+
 /** Real executor: output is always run through the secret redaction; a missing binary is exit code 127. */
 export const realExecutor: Executor = {
   async run(cmd, args, opts = {}) {
@@ -46,7 +49,7 @@ export const realExecutor: Executor = {
         env: {
           ...process.env,
           ...opts.env,
-          PATH: [...userBinDirs(), process.env.PATH ?? ''].join(delimiter),
+          PATH: [...userBinDirs(), process.env.PATH ?? '', ...BREW_BIN_DIRS].join(delimiter),
           DEBIAN_FRONTEND: 'noninteractive',
           DOTNET_CLI_TELEMETRY_OPTOUT: '1',
           DOTNET_NOLOGO: '1',

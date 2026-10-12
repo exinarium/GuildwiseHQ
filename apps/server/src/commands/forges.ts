@@ -6,6 +6,7 @@ import {
   ForgeRepoListSchema,
   ForgeReposResultSchema,
   GitConnectionsSchema,
+  normalizeProjectPath,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -156,6 +157,39 @@ export async function setRepoForge(
         {
           streamId: streamId.project(projectId),
           event: { type: 'ProjectRepoForgeSet', payload: { projectId, repoId, forge } },
+          actor: userActor(user.id),
+          scope: projectScope(p.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
+/** The project owner sets (or clears, `null`/empty) the sub directory of a repository the project lives in. */
+export async function setRepoProjectPath(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  repoId: string,
+  projectPath: string | null,
+): Promise<void> {
+  const normalized = normalizeProjectPath(projectPath);
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await loadVisibleProject(tx, user.id, projectId);
+    if (p.my_role !== 'owner') throw forbidden('only the project owner can do this');
+    const r = await one(
+      tx,
+      'SELECT id, project_path FROM project_repos WHERE id=$1 AND project_id=$2 AND removed_at IS NULL',
+      [repoId, projectId],
+    );
+    if (!r) throw notFound('repository not found');
+    if ((r.project_path ?? null) === normalized) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.project(projectId),
+          event: { type: 'ProjectRepoPathSet', payload: { projectId, repoId, projectPath: normalized } },
           actor: userActor(user.id),
           scope: projectScope(p.org_id, projectId),
         },

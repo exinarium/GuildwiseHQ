@@ -87,6 +87,46 @@ describe('projects', () => {
     expect(again.body.repos[0].id).toBe(add.body.repos[0].id);
   });
 
+  it('a repository has a project path: set when adding, edited in settings, validated, and kept by the events', async () => {
+    const p = (await ok<any>(t.req('GET', '/api/projects', { cookie: a.cookie }))).projects[0];
+    const body = { name: 'mono', remoteUrl: 'https://github.com/acme/mono' };
+    const patch = (cookie: string, b: unknown, id: string) =>
+      t.req('PATCH', `/api/projects/${p.id}/repos/${id}`, { cookie, body: b });
+    expect(
+      (
+        await t.req('POST', `/api/projects/${p.id}/repos`, {
+          cookie: a.cookie,
+          body: { ...body, projectPath: '../x' },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await t.req('POST', `/api/projects/${p.id}/repos`, {
+          cookie: a.cookie,
+          body: { ...body, projectPath: '/etc' },
+        })
+      ).status,
+    ).toBe(400);
+    const add = await t.req('POST', `/api/projects/${p.id}/repos`, {
+      cookie: a.cookie,
+      body: { ...body, projectPath: './src/app/' },
+    });
+    expect(add.status).toBe(201);
+    const repo = add.body.repos.find((r: any) => r.name === 'mono');
+    expect(repo.projectPath).toBe('src/app');
+    const set = await patch(a.cookie, { projectPath: 'web' }, repo.id);
+    expect(set.status).toBe(200);
+    expect(set.body.repos.find((r: any) => r.id === repo.id).projectPath).toBe('web');
+    expect((await patch(a.cookie, { projectPath: 'a/../b' }, repo.id)).status).toBe(400);
+    expect((await patch(b.cookie, { projectPath: 'x' }, repo.id)).status).toBeGreaterThanOrEqual(403);
+    const clear = await patch(a.cookie, { projectPath: '' }, repo.id);
+    expect(clear.body.repos.find((r: any) => r.id === repo.id).projectPath).toBeNull();
+    expect((await patch(a.cookie, { forge: 'github' }, repo.id)).status).toBe(200);
+    expect((await patch(a.cookie, {}, repo.id)).status).toBe(400);
+    await t.req('DELETE', `/api/projects/${p.id}/repos/${repo.id}`, { cookie: a.cookie });
+  });
+
   it('patches project settings (owner only) and hides projects from non-members', async () => {
     const p = (await ok<any>(t.req('GET', '/api/projects', { cookie: a.cookie }))).projects[0];
     const patch = await t.req('PATCH', `/api/projects/${p.id}`, {

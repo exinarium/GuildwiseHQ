@@ -278,3 +278,14 @@ describe('commandForOutcome', () => {
     expect(commandForOutcome(o('done'))).toBe('aom outcome done --note "<summary>"');
   });
 });
+
+describe('project path in the brief', () => {
+  it('tells the agent where the project lives, and says nothing when it is the repository root', () => {
+    const brief = buildBrief();
+    expect(renderInstructions(brief)).not.toContain('Project path');
+    const withPath = { ...brief, project: { ...brief.project, projectPath: 'src/app' } };
+    const text = renderInstructions(withPath);
+    expect(text).toContain('Project path: the project lives in `src/app`');
+    expect(text).toContain('build and test there');
+  });
+});

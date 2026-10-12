@@ -47,3 +47,13 @@ export function useSetRepoForge(projectId: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
   });
 }
+
+/** The owner sets (or clears, `null`) the folder of a repository the project lives in. */
+export function useSetRepoProjectPath(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { repoId: string; projectPath: string | null }) =>
+      patch(`/projects/${projectId}/repos/${v.repoId}`, { projectPath: v.projectPath }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  });
+}

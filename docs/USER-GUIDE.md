@@ -301,7 +301,7 @@ Each workstation also gets a free **DevOps engineer** automatically. You never h
 
 1. Open **Projects** and click **New project** (Owners and Admins only).
 2. Give it a **Name** and a short **Key** (for example `WEB`; card references look like `WEB-1`). Choose the **Workflow**: **Code** for software, **Research** for investigations, or a custom workflow your organization designed. Click **Create project**.
-3. For a code project, open the project's **Settings** (the gear on the Projects page) and, under **Repositories**, add your repository: a name and the address of your code (or create a new one). The git host (GitHub, GitLab, Bitbucket, Azure DevOps or a plain git server) is detected from the address, and you can pick another one. Finished work goes into the repository's main line automatically after review and test; you can change **How finished work lands** in the same settings (see 4.4). A research project needs no repository.
+3. For a code project, open the project's **Settings** (the gear on the Projects page) and, under **Repositories**, add your repository: a name and the address of your code (or create a new one). The git host (GitHub, GitLab, Bitbucket, Azure DevOps or a plain git server) is detected from the address, and you can pick another one. If the app lives in a folder of the repository (a monorepo, `src/app`), fill in **Project path**; leave it empty when the app is at the top. Finished work goes into the repository's main line automatically after review and test; you can change **How finished work lands** in the same settings (see 4.4). A research project needs no repository.
 
 ![The new project dialog](guide/assets/dlg-new-project.jpg)
 
@@ -401,7 +401,7 @@ Owners and Admins change the order by **dragging** a project by its grip (the do
 
 What you will find there:
 
-- **Repos:** the code the agents work on, with its git host. With expert mode on you also see its **working branch**, the branch finished work lands on. Research projects need none.
+- **Repos:** the code the agents work on, with its git host and its **Project path**: the folder of the repository the app lives in (empty: the repository root). The owner can change the path with **Change**; the development environment check, the package installs and the agents' build and test commands then run from that folder. After changing it, click **Check again** under the development environment. With expert mode on you also see its **working branch**, the branch finished work lands on. Research projects need none.
 - **How finished work lands:** straight into main after review and test (the default), or as a pull request you approve (4.4).
 - **Team:** who works in the project (see below).
 - **Merging:** the setting **Merge large changes without my approval** (off by default). Read chapter 4.12 before turning it on.

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { ForgeKindSchema } from '../forge/index.ts';
 import { WorkingBranchReason } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
-import { BranchPrefixSchema, GitRefSchema, VaultFolderSchema } from '../safe.ts';
+import { BranchPrefixSchema, GitRefSchema, ProjectPathSchema, VaultFolderSchema } from '../safe.ts';
 import { defineEvent, Id } from './define.ts';
 
 /**
@@ -102,7 +102,14 @@ export const projectEvents = [
       workingBranch: z.string().optional(),
       /** The git provider chosen for the repository (absent: detected from the URL). */
       forge: ForgeKindSchema.optional(),
+      /** The sub directory of the repository the project lives in (absent: the repository root). */
+      projectPath: ProjectPathSchema.optional(),
     }),
+  ),
+  /** The owner set (or cleared, `projectPath: null`) the sub directory of the repository the project lives in. */
+  defineEvent(
+    'ProjectRepoPathSet',
+    z.object({ projectId: Id, repoId: Id, projectPath: ProjectPathSchema.nullable() }),
   ),
   /** The manager changed (or cleared, `forge: null`) the git provider of a repository. */
   defineEvent(

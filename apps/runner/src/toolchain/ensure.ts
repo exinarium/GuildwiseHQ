@@ -1,9 +1,16 @@
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
-import type { DevOpsAccess, EnvEnsurePayload, EnvironmentReport, ToolReport } from '@aom/shared';
+import {
+  type DevOpsAccess,
+  type EnvEnsurePayload,
+  type EnvironmentReport,
+  normalizeProjectPath,
+  type ToolReport,
+} from '@aom/shared';
 import { redact } from '../secrets/redact.ts';
 import { detectStacks, viewOf } from './detect.ts';
 import type { ExecResult, Executor } from './exec.ts';
+import { type DetectedManager, detectManagers, managerCommands, noManagerAdvice } from './managers.ts';
 import { STACKS, TOOLS } from './stacks.ts';
 import type { Check, Detection, Manager, Params, Platform, Step, ToolSpec } from './types.ts';
 
@@ -39,17 +46,13 @@ export interface EnsureDeps {
   installDependencies?: boolean;
 }
 
-const MANAGERS: Record<Platform, Array<{ id: Manager; probe: [string, string[]] }>> = {
-  linux: [
-    { id: 'apt', probe: ['apt-get', ['--version']] },
-    { id: 'dnf', probe: ['dnf', ['--version']] },
-  ],
-  darwin: [{ id: 'brew', probe: ['brew', ['--version']] }],
-  win32: [
-    { id: 'winget', probe: ['winget', ['--version']] },
-    { id: 'choco', probe: ['choco', ['--version']] },
-  ],
-};
+function isDirectory(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 const tail = (s: string, n = 3): string =>
   s.trim().split('\n').filter(Boolean).slice(-n).join(' | ').slice(0, 400);
@@ -93,12 +96,39 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
       });
       continue;
     }
-    const view = viewOf(repo.localPath, deps.platform);
+    // The project may live in a sub directory of the repository: detect and install from there.
+    let projectDir = repo.localPath;
+    try {
+      const sub = normalizeProjectPath(r.projectPath);
+      if (sub) projectDir = join(repo.localPath, sub);
+    } catch {
+      reports.push({
+        stack: 'repository',
+        tool: r.name,
+        status: 'failed',
+        detail: `the project path "${r.projectPath}" is not a relative sub directory`,
+        fix: 'Change the project path in Project settings, Repositories (a folder inside the repository, no "..").',
+      });
+      continue;
+    }
+    if (projectDir !== repo.localPath && !isDirectory(projectDir)) {
+      reports.push({
+        stack: 'repository',
+        tool: r.name,
+        status: 'failed',
+        detail: `the project path "${r.projectPath}" does not exist in the clone of ${r.name}`,
+        fix: 'Correct the project path in Project settings, Repositories (or pull the branch that has it) and check again.',
+      });
+      continue;
+    }
+    const view = viewOf(projectDir, deps.platform);
     const detections: Detection[] = detectStacks(view).filter((d) =>
       tables.stacks.some((s) => s.id === d.id),
     );
-    log(`${r.name}: ${detections.map((d) => d.name).join(', ') || 'no known stack'}`);
-    runs.push({ name: r.name, localPath: repo.localPath, detections });
+    log(
+      `${r.name}${projectDir !== repo.localPath ? ` (${r.projectPath})` : ''}: ${detections.map((d) => d.name).join(', ') || 'no known stack'}`,
+    );
+    runs.push({ name: r.name, localPath: projectDir, detections });
     for (const d of detections) {
       stackList.push({ id: d.id, name: d.name, repo: r.name });
       const stack = tables.stacks.find((s) => s.id === d.id);
@@ -114,7 +144,7 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
   }
 
   // 2. Verify, then install what is missing.
-  const manager = await pickManagers(deps);
+  const manager = await detectManagers(deps.exec, deps.platform);
   const rootInfo = await deps.root.mode();
   const done = new Map<string, ToolReport>();
   for (const [toolId, t] of need) {
@@ -218,15 +248,6 @@ function mergeParams(a: Params, b: Params): Params {
   return out;
 }
 
-async function pickManagers(deps: EnsureDeps): Promise<Manager[]> {
-  const out: Manager[] = [];
-  for (const m of MANAGERS[deps.platform]) {
-    const r = await deps.exec.run(m.probe[0], m.probe[1], { timeoutMs: 15_000 });
-    if (r.exitCode === 0) out.push(m.id);
-  }
-  return out;
-}
-
 /** Runs the tool's checks: the first that works says the version. */
 async function probe(
   spec: ToolSpec,
@@ -257,7 +278,7 @@ async function ensureTool(
   toolId: string,
   t: { spec: ToolSpec; params: Params; stack: string },
   access: DevOpsAccess,
-  managers: Manager[],
+  detected: DetectedManager[],
   rootMode: string,
   deps: EnsureDeps,
   log: (l: string) => void,
@@ -305,6 +326,7 @@ async function ensureTool(
     );
 
   // Pick the first installer whose steps can run with the rights there are.
+  const managers = detected.map((m) => m.id);
   const recipes = spec.recipes(params, deps.platform);
   const candidates: Manager[] = [
     ...managers.filter((m) => recipes[m]),
@@ -314,8 +336,14 @@ async function ensureTool(
     return {
       ...base,
       status: 'failed',
-      detail: `no installer for ${spec.name} on this ${deps.platform} workstation (${managers.join(', ') || 'no package manager found'})`,
-      ...(manual ? { fix: manual } : {}),
+      detail: managers.length
+        ? `no installer for ${spec.name} with the package managers found here (${managers.join(', ')})`
+        : `no installer for ${spec.name}: no package manager found on this ${deps.platform} workstation (looked for ${managerCommands(deps.platform).join(', ')})`,
+      ...(managers.length
+        ? manual
+          ? { fix: manual }
+          : {}
+        : { fix: [noManagerAdvice(deps.platform), manual].filter(Boolean).join(' Or: ') }),
     };
   const rootAllowed =
     rootMode === 'root' || (access.sudo && (rootMode === 'passwordless' || rootMode === 'password'));
@@ -329,8 +357,11 @@ async function ensureTool(
     );
   }
 
+  // Homebrew found by its absolute path (not on the service's PATH) is run by that path.
+  const chosen = detected.find((m) => m.id === runnable);
   let lastErr = '';
-  for (const step of recipes[runnable] as Step[]) {
+  for (const raw of recipes[runnable] as Step[]) {
+    const step: Step = chosen && raw.cmd === chosen.cmd ? { ...raw, cmd: chosen.path } : raw;
     log(`$ ${step.root ? 'sudo ' : ''}${step.cmd} ${step.args.join(' ')}`);
     const r =
       step.root && rootMode !== 'root'

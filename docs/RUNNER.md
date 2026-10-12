@@ -991,7 +991,7 @@ with no row (everything that existed before) are never held back. The runner (`s
 - verifies each tool with its own check (`dotnet --version`, `dotnet workload list`, `node --version`, `docker info`, ...)
   against the version the repository asks for;
 - installs what is missing **only if the manager allowed it** ("Install packages and tools"; Docker also needs "Docker"):
-  with the OS package manager (apt, dnf, brew, winget, choco) or the official installer (`dotnet-install.sh`, rustup, bun,
+  with the OS package manager (apt, dnf, yum, pacman, zypper, apk, brew, winget, choco; Homebrew is also found at /opt/homebrew, /usr/local and on Linux under linuxbrew when PATH lacks it) or the official installer (`dotnet-install.sh`, rustup, bun,
   `npm -g`). Administrator rights come from root, passwordless sudo or the stored sudo password and need "Elevated privileges
   (sudo)" ticked; an installer that needs root is not used without it, and a user-level installer is preferred then.
   Otherwise the report says `needs_access` with what to tick and the manual command;

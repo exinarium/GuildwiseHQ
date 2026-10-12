@@ -94,7 +94,17 @@ export type EnvironmentReport = z.infer<typeof EnvironmentReportSchema>;
 export const EnvEnsurePayloadSchema = z.object({
   requestId: z.uuid(),
   projectId: z.uuid(),
-  repos: z.array(z.object({ repoId: z.uuid(), name: z.string(), remoteUrlNormalized: z.string() })).min(1),
+  repos: z
+    .array(
+      z.object({
+        repoId: z.uuid(),
+        name: z.string(),
+        remoteUrlNormalized: z.string(),
+        /** The sub directory the project lives in (absent: the repository root). Detection and installs run there. */
+        projectPath: z.string().optional(),
+      }),
+    )
+    .min(1),
   access: DevOpsAccessSchema,
 });
 export type EnvEnsurePayload = z.infer<typeof EnvEnsurePayloadSchema>;

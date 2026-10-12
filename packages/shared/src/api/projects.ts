@@ -4,7 +4,13 @@ import { ConvertCardDecision, ProjectChangesSchema } from '../events/project.ts'
 import { createFullNameError, detectForgeKind, ForgeKindSchema } from '../forge/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { RepoDescriptionSchema, RepoNameSchema, RepoVisibilitySchema, repoNameError } from '../repo/index.ts';
-import { BranchPrefixSchema, GitRefSchema, RemoteUrlSchema, VaultFolderSchema } from '../safe.ts';
+import {
+  BranchPrefixSchema,
+  GitRefSchema,
+  ProjectPathSchema,
+  RemoteUrlSchema,
+  VaultFolderSchema,
+} from '../safe.ts';
 import { IsoTime } from './common.ts';
 import { BudgetDtoSchema } from './costs.ts';
 
@@ -17,6 +23,8 @@ export const ProjectRepoDtoSchema = z.object({
   /** The confirmed working branch; null until the manager named one (hygiene commits nothing then). */
   workingBranch: z.string().nullable(),
   removedAt: IsoTime.nullable(),
+  /** The sub directory of the repository the project lives in; null: the repository root. */
+  projectPath: z.string().nullable().optional(),
   /** The git provider in force: the manual choice, else detected from the URL. */
   forge: ForgeKindSchema.optional(),
   /** The manual choice (null: detected). */
@@ -173,6 +181,8 @@ export const AddRepoRequestSchema = z
     name: z.string().min(1).max(120),
     remoteUrl: RemoteUrlSchema,
     workingBranch: GitRefSchema.optional(),
+    /** The sub directory of the repository the project lives in (empty: the repository root). */
+    projectPath: ProjectPathSchema.optional(),
     /** The git provider, when it cannot be detected from the URL (the manual override). */
     forge: ForgeKindSchema.optional(),
     /**
@@ -290,5 +300,13 @@ export const ConvertResultSchema = z.object({
 export type ConvertResult = z.infer<typeof ConvertResultSchema>;
 
 /** `PATCH /api/projects/:id/repos/:repoId`: the git provider of a repository (null: detect it from the URL again). */
-export const PatchRepoRequestSchema = z.object({ forge: ForgeKindSchema.nullable() });
+/** Either field may be sent: the git provider (null: detect), the project path (null or empty: the repository root). */
+export const PatchRepoRequestSchema = z
+  .object({
+    forge: ForgeKindSchema.nullable().optional(),
+    projectPath: ProjectPathSchema.nullable().optional(),
+  })
+  .refine((b) => b.forge !== undefined || b.projectPath !== undefined, {
+    message: 'send forge or projectPath',
+  });
 export type PatchRepoRequest = z.infer<typeof PatchRepoRequestSchema>;

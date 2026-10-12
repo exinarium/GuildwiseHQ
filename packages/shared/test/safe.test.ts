@@ -5,7 +5,9 @@ import {
   isHttpUrl,
   isSafeBranchPrefix,
   isSafeGitRef,
+  isSafeProjectPath,
   isSafeVaultFolder,
+  normalizeProjectPath,
   parseRemoteUrl,
   RegisterVaultRequestSchema,
   remoteUrlError,
@@ -132,5 +134,40 @@ describe('feed and citation URLs are http(s) only (review low)', () => {
       CitationSchema.safeParse({ url: 'javascript:alert(1)', title: 't', accessedAt: '2026-01-01T00:00:00Z' })
         .success,
     ).toBe(false);
+  });
+});
+
+describe('project path', () => {
+  it('accepts relative sub directories and the repository root', () => {
+    for (const ok of ['', '.', './', 'web', 'src/app', './src/app/', 'apps/web-ui'])
+      expect(isSafeProjectPath(ok), ok).toBe(true);
+  });
+  it('rejects absolute paths, parent segments, .git and odd characters', () => {
+    for (const bad of [
+      '/etc',
+      '../x',
+      'a/../b',
+      'a/..',
+      'C:\\x',
+      'C:/x',
+      'a\\b',
+      '~/x',
+      '.git',
+      'a/.git/b',
+      'a//b',
+      'a\u0000b',
+    ])
+      expect(isSafeProjectPath(bad), bad).toBe(false);
+  });
+  it('normalizes to the canonical form, null for the root', () => {
+    expect(normalizeProjectPath('./src/app/')).toBe('src/app');
+    expect(normalizeProjectPath(' web ')).toBe('web');
+    for (const root of ['', '.', './', null, undefined]) expect(normalizeProjectPath(root)).toBeNull();
+    expect(() => normalizeProjectPath('../x')).toThrow();
+  });
+  it('is accepted by the add-repository request', () => {
+    const base = { name: 'm', remoteUrl: 'https://github.com/a/b' };
+    expect(AddRepoRequestSchema.safeParse({ ...base, projectPath: 'src/app' }).success).toBe(true);
+    expect(AddRepoRequestSchema.safeParse({ ...base, projectPath: '../app' }).success).toBe(false);
   });
 });

@@ -56,6 +56,9 @@ describe('the toolchain is prepared before build work', () => {
     await q('DELETE FROM project_environments');
     await w.hire('Bea', 'builder', 'junior');
     const card = await w.card({ title: 'Needs tools' });
+    // the project lives in a sub directory of the repository
+    const toy = (await project()).repos.find((x: any) => x.name === 'toy');
+    await ok(owner('PATCH', `/api/projects/${w.projectId}/repos/${toy.id}`, { projectPath: 'src/app' }));
     const from = r.received.length;
     // The workstation's repository set changes: the toy repo is reported again as new (it was never matched in this test).
     await q('DELETE FROM workstation_repos WHERE workstation_id=$1', [w.workstationId]);
@@ -63,6 +66,7 @@ describe('the toolchain is prepared before build work', () => {
     const env = await nextCommand('env.ensure', from);
     expect(env.payload).toMatchObject({ projectId: w.projectId, access: { allowInstall: false } });
     expect((env.payload as any).repos.map((x: any) => x.name)).toContain('toy');
+    expect((env.payload as any).repos.find((x: any) => x.name === 'toy').projectPath).toBe('src/app');
     const row = (await q('SELECT * FROM project_environments WHERE project_id=$1', [w.projectId]))[0];
     expect(row?.state).toBe('preparing');
 
@@ -130,6 +134,8 @@ describe('the toolchain is prepared before build work', () => {
     await w.t.app.ctx.services.dispatcher.run();
     const start = await r.waitFor('shift.start', (s) => s.brief.card.id === card.id, 5000, before);
     expect(start.agent.name).toBe('Bea');
+    // the agent is told where the project lives
+    expect(start.brief.project.projectPath).toBe('src/app');
     // ...and the notice is cleared once the environment is ready
     expect(
       (
