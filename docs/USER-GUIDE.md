@@ -273,6 +273,8 @@ The installer asks only what it must: your password once to install system tools
 
 > **Good to know:** you can run the same command again at any time. It upgrades the runner, repairs a broken installation and keeps your existing pairing.
 
+**The runner updates itself.** Once installed, the runner checks once a day (and a few minutes after it starts) whether the server offers a newer version. It downloads and checks it, then waits until no agent is working on that workstation before restarting into it, so a running job is never cut short (after about six hours of being busy it updates anyway). The Workstations page shows the runner version and, when there is something to know, a label: *Update pending*, *Updating*, *Update failed*, *Update rolled back* (the new version did not connect within a few minutes, so the runner went back to the previous one by itself), *Updates paused* (a platform administrator paused automatic updates) or *Updates by hand* (this runner was not started by the installer's service). Platform administrators pause and resume automatic updates under **Runners** in the platform area. You can still run the install command again at any time, and set `AOM_RUNNER_AUTO_UPDATE=0` for the runner to switch updating off on one computer.
+
 If something goes wrong, the installer says what happened and links to the install help and to **Contact us**. Chapter 9.1 covers the usual problems.
 
 > **In the app:** Help, "Workstations and the installer" (`/help/workstations-and-installer`) and "Installing a workstation: if something goes wrong" (`/help/install-troubleshooting`).

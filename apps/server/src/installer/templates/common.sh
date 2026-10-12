@@ -119,6 +119,38 @@ version_newer() {
   [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
 }
 
+# The layout the runner updates itself in (docs/RUNNER.md "Updates"), the same for a fresh install and for an upgrade of a
+# 0.1.0 install (which already has <root>/<version>/aom-runner and <root>/current):
+#   <root>/<version>/aom-runner   one unpacked release each
+#   <root>/current  -> <version>/aom-runner   what the service starts
+#   <root>/previous -> <version>/aom-runner   what an automatic rollback goes back to
+# switch_current <new package dir>: points `current` at it, remembers the old one as `previous`, clears the self-update
+# markers (this is a deliberate install, so an earlier rolled-back version may be tried again) and removes every other
+# unpacked version and half-finished download.
+switch_current() {
+  local new="$1" old=""
+  [ -L "${RUNNER_ROOT}/current" ] && old="$(readlink "${RUNNER_ROOT}/current" 2>/dev/null || true)"
+  if [ -n "${old}" ] && [ "${old}" != "${new}" ] && [ -d "${old}" ]; then
+    ln -sfn "${old}" "${RUNNER_ROOT}/previous"
+  fi
+  ln -sfn "${new}" "${RUNNER_ROOT}/current"
+  rm -f "${RUNNER_ROOT}/update-pending" "${RUNNER_ROOT}/update-failed"
+  rm -rf "${RUNNER_ROOT}"/.update-* 2>/dev/null || true
+  local keep_prev="" d
+  [ -L "${RUNNER_ROOT}/previous" ] && keep_prev="$(readlink "${RUNNER_ROOT}/previous" 2>/dev/null || true)"
+  for d in "${RUNNER_ROOT}"/*/aom-runner; do
+    [ -d "${d}" ] || continue
+    [ "${d}" = "${new}" ] && continue
+    [ "${d}" = "${keep_prev}" ] && continue
+    rm -rf "$(dirname "${d}")"
+  done
+}
+
+# Tells the runner how it is kept running, so a self-update knows how to restart it (systemd | launchd | background).
+record_service_mode() {
+  printf '%s\n' "$1" >"${RUNNER_ROOT}/service-mode" 2>/dev/null || true
+}
+
 install_runner_release() {
   local before; before="$(existing_runner_version)"
   if [ -n "${before}" ]; then
@@ -157,7 +189,7 @@ install_runner_release() {
     if [ -n "${before}" ] && [ "${before}" != "${RELEASE_VERSION}" ]; then step_ok "Runner upgraded from ${before} to ${RELEASE_VERSION}"
     else step_ok "Runner ${RELEASE_VERSION} installed"; fi
   fi
-  ln -sfn "${target}/aom-runner" "${RUNNER_ROOT}/current"
+  switch_current "${target}/aom-runner"
   mkdir -p "${BIN_DIR}"
   ln -sfn "${RUNNER_ROOT}/current/aom-runner" "${BIN_DIR}/aom-runner"
   ln -sfn "${RUNNER_ROOT}/current/dist/aom.mjs" "${BIN_DIR}/aom" 2>/dev/null || true
