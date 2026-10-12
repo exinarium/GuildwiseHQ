@@ -242,7 +242,7 @@ export async function environmentRequestEvents(
   if (!project) return [];
   const repos = await rows(
     tx,
-    `SELECT pr.id, pr.name, pr.remote_url_normalized FROM project_repos pr
+    `SELECT pr.id, pr.name, pr.remote_url_normalized, pr.project_path FROM project_repos pr
        JOIN workstation_repos wr ON wr.project_repo_id = pr.id AND wr.workstation_id = $2
       WHERE pr.project_id = $1 AND pr.removed_at IS NULL ORDER BY pr.name`,
     [projectId, workstationId],
@@ -267,7 +267,12 @@ export async function environmentRequestEvents(
   await enqueueRunnerCommand(tx, workstationId, 'env.ensure', {
     requestId,
     projectId,
-    repos: repos.map((r) => ({ repoId: r.id, name: r.name, remoteUrlNormalized: r.remote_url_normalized })),
+    repos: repos.map((r) => ({
+      repoId: r.id,
+      name: r.name,
+      remoteUrlNormalized: r.remote_url_normalized,
+      ...(r.project_path ? { projectPath: r.project_path } : {}),
+    })),
     access,
   });
   return [

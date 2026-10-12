@@ -42,6 +42,10 @@ export function renderInstructions(brief: ShiftBrief): string {
     `- Name: ${brief.project.name}`,
     `- Working branch: ${brief.project.workingBranch}`,
   ];
+  if (brief.project.projectPath)
+    projectLines.push(
+      `- Project path: the project lives in \`${brief.project.projectPath}\` inside the repository; build and test there (run builds, tests and package commands from that folder).`,
+    );
   if (brief.project.architecturalGlobs.length > 0) {
     projectLines.push(
       `- Architectural paths (changes here make a card large): ${brief.project.architecturalGlobs.join(', ')}`,

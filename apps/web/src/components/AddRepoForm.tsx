@@ -8,6 +8,7 @@ import {
   FORGE_KINDS,
   FORGE_LABELS,
   type ForgeKind,
+  isSafeProjectPath,
   type RepoRef,
 } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
@@ -35,6 +36,7 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
   const [repoName, setRepoName] = useState('');
   const [repoUrl, setRepoUrl] = useState('');
   const [repoBranch, setRepoBranch] = useState('');
+  const [projectPath, setProjectPath] = useState('');
   const [override, setOverride] = useState<ForgeKind | 'auto'>('auto');
   const [createKind, setCreateKind] = useState<ForgeKind>('github');
   const [parts, setParts] = useState<Record<string, string>>({});
@@ -80,6 +82,8 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
     const name = repoName.trim() || (creating ? (fullName.split('/').pop() ?? '') : '');
     if (!name && !next.create) next.name = 'Repository name is required';
     if (!creating && !repoUrl.trim()) next.url = 'Remote URL is required';
+    if (!isSafeProjectPath(projectPath))
+      next.path = 'Use a folder inside the repository, like src/app (no "..", no leading "/").';
     setErrs(next);
     if (Object.keys(next).length) return;
     addRepo.mutate(
@@ -87,6 +91,7 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
         name,
         remoteUrl: creating ? cloneUrlFor(kind, fullName) : repoUrl.trim(),
         ...(repoBranch.trim() ? { workingBranch: repoBranch.trim() } : {}),
+        ...(projectPath.trim() ? { projectPath: projectPath.trim() } : {}),
         ...(creating ? { forge: kind } : override !== 'auto' ? { forge: override } : {}),
         ...(creating ? { create: { name: fullName, visibility } } : {}),
       },
@@ -100,6 +105,7 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
           setRepoName('');
           setRepoUrl('');
           setRepoBranch('');
+          setProjectPath('');
           setParts({});
           setOverride('auto');
         },
@@ -306,6 +312,13 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
         </div>
       )}
 
+      <TextInput
+        label="Project path (optional)"
+        hint="The folder inside the repository the app lives in, like src/app. Leave empty when it is at the top."
+        value={projectPath}
+        onChange={(e) => setProjectPath(e.target.value)}
+        error={errs.path}
+      />
       {expert && (
         <TextInput
           label="Branch (optional)"

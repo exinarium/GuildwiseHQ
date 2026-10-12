@@ -143,6 +143,8 @@ export const ShiftBriefSchema = z.object({
     e2eGlobs: z.array(z.string()),
     architecturalGlobs: z.array(z.string()),
     vaultFolder: z.string().optional(),
+    /** The sub directory of the card's repository the project lives in; absent: the repository root. */
+    projectPath: z.string().optional(),
     /** M3: `PROJECT.md` from the card's vault, filled in by the runner (the site holds no vault content). */
     projectDoc: z.string().optional(),
   }),

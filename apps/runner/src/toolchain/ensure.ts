@@ -1,6 +1,12 @@
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
-import type { DevOpsAccess, EnvEnsurePayload, EnvironmentReport, ToolReport } from '@aom/shared';
+import {
+  type DevOpsAccess,
+  type EnvEnsurePayload,
+  type EnvironmentReport,
+  normalizeProjectPath,
+  type ToolReport,
+} from '@aom/shared';
 import { redact } from '../secrets/redact.ts';
 import { detectStacks, viewOf } from './detect.ts';
 import type { ExecResult, Executor } from './exec.ts';
@@ -38,6 +44,14 @@ export interface EnsureDeps {
   tables?: { stacks: typeof STACKS; tools: Record<string, ToolSpec> };
   /** D6: run the project's dependency installs once the tools are ready (default true). */
   installDependencies?: boolean;
+}
+
+function isDirectory(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 const tail = (s: string, n = 3): string =>
@@ -82,12 +96,39 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
       });
       continue;
     }
-    const view = viewOf(repo.localPath, deps.platform);
+    // The project may live in a sub directory of the repository: detect and install from there.
+    let projectDir = repo.localPath;
+    try {
+      const sub = normalizeProjectPath(r.projectPath);
+      if (sub) projectDir = join(repo.localPath, sub);
+    } catch {
+      reports.push({
+        stack: 'repository',
+        tool: r.name,
+        status: 'failed',
+        detail: `the project path "${r.projectPath}" is not a relative sub directory`,
+        fix: 'Change the project path in Project settings, Repositories (a folder inside the repository, no "..").',
+      });
+      continue;
+    }
+    if (projectDir !== repo.localPath && !isDirectory(projectDir)) {
+      reports.push({
+        stack: 'repository',
+        tool: r.name,
+        status: 'failed',
+        detail: `the project path "${r.projectPath}" does not exist in the clone of ${r.name}`,
+        fix: 'Correct the project path in Project settings, Repositories (or pull the branch that has it) and check again.',
+      });
+      continue;
+    }
+    const view = viewOf(projectDir, deps.platform);
     const detections: Detection[] = detectStacks(view).filter((d) =>
       tables.stacks.some((s) => s.id === d.id),
     );
-    log(`${r.name}: ${detections.map((d) => d.name).join(', ') || 'no known stack'}`);
-    runs.push({ name: r.name, localPath: repo.localPath, detections });
+    log(
+      `${r.name}${projectDir !== repo.localPath ? ` (${r.projectPath})` : ''}: ${detections.map((d) => d.name).join(', ') || 'no known stack'}`,
+    );
+    runs.push({ name: r.name, localPath: projectDir, detections });
     for (const d of detections) {
       stackList.push({ id: d.id, name: d.name, repo: r.name });
       const stack = tables.stacks.find((s) => s.id === d.id);

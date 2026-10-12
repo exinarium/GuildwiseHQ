@@ -6,6 +6,7 @@ import {
   canCreateProject,
   isOrgManager,
   isResearchStage,
+  normalizeProjectPath,
   normalizeRemoteUrl,
   type OrgRole,
   type PatchProjectRequest,
@@ -311,6 +312,7 @@ export async function repoAddedEvent(
   if (existing && !existing.removed_at)
     throw conflict('repo_exists', 'this repository is already added to the project');
   const repoId = (existing?.id ?? randomUUID()) as string;
+  const projectPath = normalizeProjectPath(input.projectPath);
   return {
     repoId,
     event: {
@@ -325,6 +327,7 @@ export async function repoAddedEvent(
           remoteUrlNormalized: normalized,
           workingBranch: input.workingBranch,
           ...(input.forge ? { forge: input.forge } : {}),
+          ...(projectPath ? { projectPath } : {}),
         },
       },
       actor,

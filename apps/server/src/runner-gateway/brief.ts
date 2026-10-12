@@ -81,6 +81,9 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
     `SELECT dc.ref, dc.title, dc.status FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id WHERE d.card_id=$1`,
     [card.id],
   );
+  const repo = card.repo_id
+    ? await one(ctx.pool, 'SELECT project_path FROM project_repos WHERE id=$1', [card.repo_id])
+    : undefined;
   const parent = card.parent_card_id
     ? await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1', [card.parent_card_id])
     : undefined;
@@ -121,6 +124,7 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       e2eGlobs: project.e2e_globs,
       architecturalGlobs: project.architectural_globs,
       vaultFolder: project.vault_folder ?? undefined,
+      ...(repo?.project_path ? { projectPath: repo.project_path as string } : {}),
     },
     role: {
       key: role.definition.key,

@@ -1,4 +1,4 @@
-import { type EventOf, scrubRemoteUrl } from '@aom/shared';
+import { type EventOf, normalizeProjectPath, scrubRemoteUrl } from '@aom/shared';
 import { exec } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { Projector } from '../eventstore/types.ts';
@@ -297,11 +297,12 @@ export const projectProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ProjectRepoAdded'>).payload;
     await exec(
       tx,
-      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, working_branch, forge_kind)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
+      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, working_branch, forge_kind, project_path)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        ON CONFLICT (project_id, remote_url_normalized) DO UPDATE
          SET removed_at = NULL, name = EXCLUDED.name, remote_url = EXCLUDED.remote_url,
-             working_branch = EXCLUDED.working_branch, forge_kind = EXCLUDED.forge_kind`,
+             working_branch = EXCLUDED.working_branch, forge_kind = EXCLUDED.forge_kind,
+             project_path = EXCLUDED.project_path`,
       [
         p.repoId,
         p.projectId,
@@ -310,8 +311,16 @@ export const projectProjectors: Record<string, Projector> = {
         p.remoteUrlNormalized,
         p.workingBranch ?? null,
         p.forge ?? null,
+        normalizeProjectPath(p.projectPath),
       ],
     );
+  },
+  ProjectRepoPathSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectRepoPathSet'>).payload;
+    await exec(tx, 'UPDATE project_repos SET project_path=$2 WHERE id=$1', [
+      p.repoId,
+      normalizeProjectPath(p.projectPath),
+    ]);
   },
   ProjectRepoForgeSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectRepoForgeSet'>).payload;

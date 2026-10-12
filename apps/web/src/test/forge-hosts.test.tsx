@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AddRepoForm } from '../components/AddRepoForm.tsx';
+import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { Workstations } from '../pages/Workstations.tsx';
 
@@ -252,5 +253,40 @@ describe('Add repository form', () => {
     expect(screen.getByLabelText('Remote URL')).toHaveValue('https://github.com/acme/barcode-camera.git');
     expect(screen.getByLabelText('Repository name')).toHaveValue('barcode-camera');
     expect(screen.getByLabelText('Branch (optional)')).toHaveValue('develop');
+  });
+});
+
+describe('repository project path', () => {
+  it('shows the repository root by default; the owner saves a sub directory and an invalid one is refused', async () => {
+    const user = userEvent.setup();
+    wrap(<RepoProjectPathControl projectId={ID(2)} repo={repoDto() as never} isOwner />);
+    expect(await screen.findByTestId('repo-path-shop')).toHaveTextContent('repository root');
+    await user.click(screen.getByRole('button', { name: 'Change' }));
+    const field = screen.getByLabelText('Project path in shop');
+    await user.type(field, '../x');
+    await user.click(screen.getByRole('button', { name: 'Save path' }));
+    expect(await screen.findByText(/no "\.\."/)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false);
+    await user.clear(field);
+    await user.type(field, 'src/app');
+    await user.click(screen.getByRole('button', { name: 'Save path' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PATCH')).toMatchObject({
+        url: `/api/projects/${ID(2)}/repos/${ID(50)}`,
+        body: { projectPath: 'src/app' },
+      }),
+    );
+  });
+
+  it('shows the saved path and gives a non-owner no way to change it', async () => {
+    wrap(
+      <RepoProjectPathControl
+        projectId={ID(2)}
+        repo={repoDto({ projectPath: 'web/client' }) as never}
+        isOwner={false}
+      />,
+    );
+    expect(await screen.findByTestId('repo-path-shop')).toHaveTextContent('web/client');
+    expect(screen.queryByRole('button', { name: 'Change' })).toBeNull();
   });
 });

@@ -114,3 +114,35 @@ export function isHttpUrl(value: string): boolean {
   }
 }
 export const HttpUrlSchema = z.string().refine(isHttpUrl, { message: 'must be an http(s) URL' });
+
+/**
+ * A project path: the sub directory of a repository the project lives in (`src/app`). Relative, forward slashes, no
+ * `..`/`.git` segments, not absolute. Empty, `.` and `./` mean the repository root.
+ */
+export function isSafeProjectPath(path: string): boolean {
+  const p = path.trim();
+  if (p === '' || p === '.' || p === './') return true;
+  if (p.length > 200 || CONTROL.test(p) || p.includes('\\') || p.startsWith('/') || /^[a-zA-Z]:/.test(p))
+    return false;
+  if (p.startsWith('~')) return false;
+  return p
+    .replace(/^(\.\/)+/, '')
+    .replace(/\/+$/, '')
+    .split('/')
+    .every((s) => s !== '' && s !== '.' && s !== '..' && s.toLowerCase() !== '.git');
+}
+
+/** The canonical form of a valid project path (`./src/app/` becomes `src/app`); `null` for the repository root. */
+export function normalizeProjectPath(path: string | null | undefined): string | null {
+  const p = (path ?? '').trim();
+  if (!isSafeProjectPath(p)) throw new Error('not a valid project path');
+  const n = p
+    .replace(/^(\.\/)+/, '')
+    .replace(/\/+$/, '')
+    .replace(/^\.$/, '');
+  return n === '' ? null : n;
+}
+
+export const ProjectPathSchema = z.string().refine(isSafeProjectPath, {
+  message: 'must be a relative sub directory without ".." segments (leave empty for the repository root)',
+});

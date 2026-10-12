@@ -18,7 +18,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { requireOrg, requireUser } from '../auth/guards.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
-import { setRepoForge } from '../commands/forges.ts';
+import { setRepoForge, setRepoProjectPath } from '../commands/forges.ts';
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
 import {
   addRepo,
@@ -192,13 +192,16 @@ export function projectRoutes(ctx: Ctx) {
       },
     );
 
-    /** The git provider of a repository: the manual choice, or `null` to detect it from the URL again. */
+    /** A repository's git provider (the manual choice, or `null` to detect it again) and/or the project path inside it. */
     app.patch(
       '/api/projects/:id/repos/:repoId',
       { schema: { params: RepoParamsSchema, body: PatchRepoRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        await setRepoForge(ctx, s.user, req.params.id, req.params.repoId, req.body.forge);
+        if (req.body.forge !== undefined)
+          await setRepoForge(ctx, s.user, req.params.id, req.params.repoId, req.body.forge);
+        if (req.body.projectPath !== undefined)
+          await setRepoProjectPath(ctx, s.user, req.params.id, req.params.repoId, req.body.projectPath);
         return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );

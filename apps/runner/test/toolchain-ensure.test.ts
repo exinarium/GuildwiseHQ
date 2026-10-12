@@ -36,14 +36,17 @@ const fail = (stderr = 'not found', exitCode = 127): ExecResult => ({ exitCode, 
  */
 class Machine implements Executor {
   calls: string[] = [];
+  /** The working folder of each call, by command line. */
+  cwds = new Map<string, string | undefined>();
   /** `cmd args` -> reply, consulted before anything else (mutated by installs). */
   answers = new Map<string, ExecResult>();
   installs = new Map<string, { effect: Record<string, ExecResult>; result?: ExecResult }>();
   managers: string[] = [];
 
-  async run(cmd: string, args: string[]): Promise<ExecResult> {
+  async run(cmd: string, args: string[], opts?: { cwd?: string }): Promise<ExecResult> {
     const line = [cmd, ...args].join(' ');
     this.calls.push(line);
+    this.cwds.set(line, opts?.cwd);
     const install = this.installs.get(line);
     if (install) {
       if (install.result && install.result.exitCode !== 0) return install.result;
@@ -430,5 +433,62 @@ describe('env.ensure', () => {
     const r = await ensureEnvironment(payload(access()), deps);
     expect(r.state).toBe('ready');
     expect(m.calls).toContain('dotnet restore App.sln');
+  });
+});
+
+describe('env.ensure: project path (the project lives in a sub directory)', () => {
+  const withPath = (p: EnvEnsurePayload, projectPath: string | undefined): EnvEnsurePayload => ({
+    ...p,
+    repos: p.repos.map((r) => ({ ...r, ...(projectPath !== undefined ? { projectPath } : {}) })),
+  });
+
+  it('a Node app in web/ is detected from the sub directory and installed there', async () => {
+    const { m, deps, payload, repoDir } = setup(
+      { 'README.md': 'monorepo', 'web/package.json': '{}', 'web/pnpm-lock.yaml': '', 'web/.nvmrc': '20' },
+      { dependencies: true },
+    );
+    m.answers.set('node --version', ok('v22.1.0'));
+    m.answers.set('pnpm --version', ok('9.12.0'));
+    m.answers.set('pnpm install', ok('Done'));
+    // from the root nothing is detected
+    const root = await ensureEnvironment(payload(access()), deps);
+    expect(root.stacks).toEqual([]);
+    m.calls.length = 0;
+    const r = await ensureEnvironment(withPath(payload(access()), 'web'), deps);
+    expect(r.state).toBe('ready');
+    expect(r.stacks.map((s) => s.id)).toEqual(['node']);
+    expect(m.cwds.get('pnpm install')).toBe(join(repoDir, 'web'));
+  });
+
+  it('a .NET project in src/app is restored by its own file, from that folder', async () => {
+    const { m, deps, payload, repoDir } = setup(
+      {
+        'README.md': '',
+        'src/app/App.csproj':
+          '<Project><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>',
+      },
+      { dependencies: true },
+    );
+    m.answers.set('dotnet --version', ok('8.0.404'));
+    m.answers.set('dotnet restore App.csproj', ok());
+    const r = await ensureEnvironment(withPath(payload(access()), './src/app/'), deps);
+    expect(r.state).toBe('ready');
+    expect(m.calls).toContain('dotnet restore App.csproj');
+    expect(m.cwds.get('dotnet restore App.csproj')).toBe(join(repoDir, 'src', 'app'));
+  });
+
+  it('a project path that is not in the clone is a clear failure, not a silent "no stack"', async () => {
+    const { deps, payload } = setup({ 'package.json': '{}' });
+    const r = await ensureEnvironment(withPath(payload(access()), 'nope/here'), deps);
+    expect(r.state).toBe('failed');
+    expect(r.tools[0]?.detail).toContain('does not exist');
+  });
+
+  it('a path that climbs out of the repository is refused', async () => {
+    const { m, deps, payload } = setup({ 'package.json': '{}' });
+    const r = await ensureEnvironment(withPath(payload(access()), '../outside'), deps);
+    expect(r.state).toBe('failed');
+    expect(r.tools[0]?.detail).toContain('not a relative sub directory');
+    expect(m.calls.filter((c) => !c.endsWith('--version'))).toEqual([]);
   });
 });
