@@ -31,7 +31,7 @@ role({
   permissions: perms({
     allowedTools: ['read', 'edit', 'shell', 'web'],
     // push stays denied (the runner pushes); merge/commit/add allowed; checkout/switch/rebase/reset denied
-    deniedShellPatterns: [...COMMON_DENIED_SHELL, 'git merge --abort*', 'git fetch*', 'git pull*', 'git remote*'],
+    deniedShellPatterns: [...COMMON_DENIED_SHELL, 'git fetch*', 'git pull*', 'git remote*'],
     writableGlobs: ['docs/**', '**/*.md'],   // the runner adds the project's investigation path (2.4)
     mayCommit: true,
     readOrgRepos: true,                      // new permission flag, 2.3
@@ -71,7 +71,7 @@ Instructions render the list under the existing "Readable folders" section (`ren
 
 - **Where it writes**: only its card worktree, only `writableGlobs` + the project's investigation path (`projects.investigation_path`, default `docs/investigations`, resolved by the runner like the tester's e2e globs). Enforced by the post-shift guard (`shifts/guard.ts`, `architect_edited_non_docs`), with one exception: paths changed by a merge commit whose second parent is the `origin/<main>` SHA the runner recorded in the shift's prepare step (2.5) are allowed (conflict resolution).
 - **Commit**: `mayCommit: true`; leftovers auto-committed as today.
-- **Push** (`aom git push`): new IPC rpc `git.push`; the runner pushes **the card branch only** (`git push -u origin <branch>` with `GitAuth`, the same code path as `push_branch` completion). Any other ref is refused. Allowed for roles with `mayCommit` and `readOrgRepos`... simpler: allowed when the stage id matches `investigate*` (the runner knows the stage from the brief).
+- **Push** (`aom git push`): new IPC rpc `git.push`; the runner pushes **the card branch only** (`git push -u origin <branch>` with `GitAuth`, the same code path as `push_branch` completion). Any other ref is refused. Allowed only in shifts whose stage id matches `investigate*` (the runner knows the stage from the brief).
 - **Merge**: the architect never merges into the working or main branch itself. Main -> working happens in the runner's prepare step (2.5); card -> working happens in finalize (existing completion code). `aom git merge-main` (rpc `git.merge_main`) lets the architect re-run the card-branch merge of the latest main during its shift (runner fetches, then `git merge --no-ff origin/<main>` in the worktree, leaving conflicts in place).
 - `aom git fetch` (rpc `git.fetch`): the runner fetches `origin` in the clone (worktrees share refs) so the architect can compare `origin/<main>` and `origin/<working>`.
 
@@ -297,3 +297,16 @@ Order: **WP0 -> (WP1 ∥ WP3) -> (WP2 ∥ WP4 ∥ WP5)**. WP1/WP2 are #10, WP3-W
 - **Q5 Who may enable workflows and create variants.** Org Owner and Admins only, with desk approval of variants by the owner? *Recommend:* yes (same as convert and the designer).
 - **Q6 Architect in code-bugfix.** Not added (bug children are small fixes on the parent's branch). *Recommend:* not added.
 - **Q7 Dependencies gate investigation.** Investigation of a card waits for its dependencies (because the branch is cut then)? *Recommend:* yes; a "design ahead" option can come later (investigate without a worktree).
+
+## Owner decisions (2026-10-12)
+
+1. **Design step default:** **off by default** everywhere (new and existing projects); a project opts in with the
+   project setting, and each card can still override. No desk notice needed; the setting is explained in project settings.
+2. **Merge latest main first:** into the **working branch** (runner merges and pushes), falling back to the **card branch**
+   on conflict or a protected working branch; the architect resolves conflicts.
+3. **Architect read access:** all repositories of the organisation's projects **plus** every git repository under an
+   **organisation source folder** set on the runner. Read-only, secret files blocked.
+4. **Who edits workflows:** organisation Owners and Admins enable workflows and create project variants; a variant needs
+   the owner's approval on the desk before cards use it.
+5. Accepted recommendations: report default `docs/investigations/` in the repository with the vault as alternative; the
+   architect is not added to `code-bugfix`; dependencies also hold back the investigate stage.
