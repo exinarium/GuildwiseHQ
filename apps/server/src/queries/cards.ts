@@ -34,6 +34,7 @@ import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 import { cardPhaseRef } from './phases.ts';
 import { publicationOfCard } from './research.ts';
+import { startedByMap, subworkflowsPanel, waitingChildren } from './subworkflows.ts';
 import { cardTesting } from './testing.ts';
 import { cardWorkability } from './workability.ts';
 
@@ -285,6 +286,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     },
     diffStats: lastDiff?.data?.diffStats ?? null,
     testing: await cardTesting(ctx, card, manage),
+    subworkflows: await subworkflowsPanel(ctx, userId, card),
     blockers: (
       await rows(
         ctx.pool,
@@ -424,6 +426,15 @@ export async function getBoard(
   const columns = boardColumnsWith(wf.definition as WorkflowDefinition, others);
   const workability = await cardWorkability(ctx, cards);
   const notices = await boardNotices(ctx, userId, project, cards);
+  const subWaiting = await waitingChildren(
+    ctx,
+    userId,
+    cards.filter((c) => c.status === 'waiting').map((c) => c.id as string),
+  );
+  const subStarted = await startedByMap(
+    ctx,
+    cards.filter((c) => c.origin === 'subworkflow').map((c) => c.id as string),
+  );
   const byColumn = new Map<string, BoardResponse['columns'][number]['cards']>(columns.map((c) => [c, []]));
   for (const c of cards) {
     const { column } = await cardColumn(ctx, c);
@@ -448,14 +459,21 @@ export async function getBoard(
       waitingFor:
         c.status !== 'waiting'
           ? null
-          : c.finalize_state === 'awaiting_approval'
-            ? 'approval'
-            : c.finalize_state === 'running'
-              ? 'finalizing'
-              : c.parked_request_id && !c.waiting_on_id
-                ? 'devops'
-                : 'bug',
-      waitingOn: c.waiting_on_id ? { id: c.waiting_on_id, ref: c.waiting_on_ref } : null,
+          : subWaiting.has(c.id)
+            ? 'subworkflow'
+            : c.finalize_state === 'awaiting_approval'
+              ? 'approval'
+              : c.finalize_state === 'running'
+                ? 'finalizing'
+                : c.parked_request_id && !c.waiting_on_id
+                  ? 'devops'
+                  : 'bug',
+      waitingOn: subWaiting.has(c.id)
+        ? (subWaiting.get(c.id) as NonNullable<ReturnType<typeof subWaiting.get>>)
+        : c.waiting_on_id
+          ? { id: c.waiting_on_id, ref: c.waiting_on_ref }
+          : null,
+      ...(subStarted.has(c.id) ? { startedBy: subStarted.get(c.id) } : {}),
       origin: c.origin,
       backoff: backoffOf(c, ctx.clock.now()),
       phase: c.phase_id ? { id: c.phase_id, ref: c.phase_ref, assignment: c.phase_assignment } : null,

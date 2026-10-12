@@ -41,12 +41,17 @@ export const isFinalizeWait = (card: Pick<ColumnCard, 'status' | 'finalizeState'
 /**
  * Board column of a card (section 6.5). `draft` -> Spec; `blocked` -> Blocked; `waiting` -> Test (waiting on bug);
  * `build` claimed -> In progress; `build` queued with rework or a bug -> Rework; `build` queued -> To do;
- * otherwise the stage's own column. Cancelled cards are not on the board (callers filter them).
+ * otherwise the stage's own column (also for a card waiting in a sub-workflow step). Cancelled cards are not on the board (callers filter them).
  */
-export function columnFor(card: ColumnCard, stage: Pick<Stage, 'id' | 'column'>): string {
+export function columnFor(
+  card: ColumnCard,
+  stage: Pick<Stage, 'id' | 'column'> & { kind?: Stage['kind'] },
+): string {
   if (card.status === 'draft') return COLUMN.spec;
   if (card.status === 'blocked') return COLUMN.blocked;
-  if (card.status === 'waiting' && !isFinalizeWait(card)) return COLUMN.waiting;
+  // A card waiting for the child of its sub-workflow step stays in that step's column (the card shows what it waits for).
+  if (card.status === 'waiting' && !isFinalizeWait(card) && stage.kind !== 'subworkflow')
+    return COLUMN.waiting;
   if (stage.id === 'build') {
     if (card.status === 'claimed') return COLUMN.inProgress;
     if (card.status === 'queued')

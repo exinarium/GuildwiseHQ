@@ -26,6 +26,7 @@ import { researchProjectors } from './research.ts';
 import { scheduleProjectors } from './schedules.ts';
 import { sharingProjectors } from './sharing.ts';
 import { shiftProjectors } from './shifts.ts';
+import { subworkflowProjectors } from './subworkflows.ts';
 import { testingProjectors } from './testing.ts';
 import { threadProjectors } from './threads.ts';
 import { trackRecordProjectors } from './track-record.ts';
@@ -48,6 +49,7 @@ const domains: Array<Record<string, Projector>> = [
   projectWorkflowProjectors,
   agentProjectors,
   cardProjectors,
+  subworkflowProjectors,
   shiftProjectors,
   costProjectors,
   threadProjectors,
@@ -109,6 +111,7 @@ export const PROJECTION_TABLES = [
   'agents',
   'cards',
   'card_dependencies',
+  'subworkflow_runs',
   'card_handoffs',
   'card_transitions',
   'card_activity',

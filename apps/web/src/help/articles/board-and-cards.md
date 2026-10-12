@@ -18,7 +18,7 @@ The board shows one column per stage (for a Code project: Spec, To do, Rework, I
 - **Risk tier**: shown only when it is **large** (a small risk tier is the quiet default).
 - **Rework** badge with the round number: how many times review sent the card back.
 - **Backing off** badge when the card is being held back after failed shifts (see below).
-- **Badges** for the workflow it runs on (for example Research), its phase, **Blocked**, or a waiting reason such as **waiting on bug**, **Awaiting your approval**, **Finalizing** or **waiting on DevOps**.
+- **Badges** for the workflow it runs on (for example Research), its phase, **Blocked**, or a waiting reason such as **waiting on bug**, **Awaiting your approval**, **Finalizing**, **waiting on DevOps** or **waiting for sub-workflow**. A card made by a sub-workflow step of another card says **Started by** that card.
 - **Warning banners** under the card, written out in words, each with a link that fixes it when there is one:
   - **Blocked: the question** that holds the card, with a link to the Decision desk.
   - **Repository problem** (for example a conflict while updating, or a failed login) on the card's repository, linking to the project's repository settings. See [repository hygiene](/help/devops-and-hygiene#hygiene).
@@ -28,6 +28,8 @@ The board shows one column per stage (for a Code project: Spec, To do, Rework, I
 The card type (feature, bug, support, refactor, docs, regression) shows on the card's own page.
 
 A **Blocked** column holds cards that are waiting for your answer from the desk.
+
+**Cards that wait for a sub-workflow.** When a step of a card starts another card (see [a step that starts another workflow](/help/org-chart-and-design#sub-workflows)), the waiting card stays in that step's column and a line under it reads, for example, "Waiting for SUP-12 (Translate) in project Web, now in Review". Click it to open the other card. On the card's page the same sentence sits above the card and a **Sub-workflows** panel lists every card its steps started, with their state, the workflow and project, and the fields that were passed on and copied back. If you are not a member of the other project you see only its card number and project key.
 
 ## Why a card does not move {#why-a-card-does-not-move}
 

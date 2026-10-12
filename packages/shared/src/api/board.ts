@@ -64,9 +64,25 @@ export const BoardCardSchema = z.object({
   reworkRound: z.number().int(),
   priority: z.number().int(),
   /** M4: the open bug card this (waiting) card waits on, for the Test column's "waiting on bug" state. */
-  waitingOn: z.object({ id: z.uuid(), ref: z.string() }).nullable().optional(),
-  /** Why a `waiting` card waits: a bug it spawned, the manager's merge approval, a running merge, or DevOps. */
-  waitingFor: z.enum(['bug', 'approval', 'finalizing', 'devops']).nullable().optional(),
+  waitingOn: z
+    .object({
+      id: z.uuid(),
+      ref: z.string(),
+      /** Sub-workflow child the card waits for: what the chip shows (title and column only when the viewer may see the child). */
+      title: z.string().nullable().optional(),
+      column: z.string().nullable().optional(),
+      projectKey: z.string().nullable().optional(),
+      projectName: z.string().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  /**
+   * Why a `waiting` card waits: a bug it spawned, the manager's merge approval, a running merge, DevOps, or the child
+   * card of its sub-workflow step.
+   */
+  waitingFor: z.enum(['bug', 'approval', 'finalizing', 'devops', 'subworkflow']).nullable().optional(),
+  /** The card was started by a sub-workflow step of this parent card ("Started by APP-41"). */
+  startedBy: z.object({ id: z.uuid(), ref: z.string() }).nullable().optional(),
   /** M4: suite (full E2E / regression) cards are marked on the board. */
   origin: z.string().optional(),
   /** Absent or `ok` for a workable card; see `WorkabilitySchema`. */

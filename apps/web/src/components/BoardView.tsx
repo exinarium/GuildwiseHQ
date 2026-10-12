@@ -19,6 +19,7 @@ const WAITING_LABEL = {
   approval: 'Awaiting your approval',
   finalizing: 'Finalizing',
   devops: 'waiting on DevOps',
+  subworkflow: 'waiting for sub-workflow',
 } as const;
 
 const HIDE_KEY = `${BRAND.storagePrefix}-board-hide-empty`;
@@ -136,6 +137,13 @@ export function CardTile({
               <Badge tone="amber">{WAITING_LABEL[card.waitingFor ?? 'bug']}</Badge>
             </span>
           )}
+          {card.startedBy && (
+            <span data-testid="started-by-chip">
+              <Badge tone="violet" title="A sub-workflow step of this card started this one">
+                Started by {card.startedBy.ref}
+              </Badge>
+            </span>
+          )}
           {(card.origin === 'full_suite' || card.origin === 'regression') && (
             <span data-testid="suite-badge">
               <Badge tone="blue">{card.origin === 'full_suite' ? 'full suite' : 'regression'}</Badge>
@@ -154,7 +162,9 @@ export function CardTile({
           data-testid={`waiting-on-link-${card.waitingOn.ref}`}
           className="block border-t border-line px-3 py-1.5 text-xs text-brand-text underline"
         >
-          waiting on {card.waitingOn.ref}
+          {card.waitingFor === 'subworkflow'
+            ? `Waiting for ${card.waitingOn.ref}${card.waitingOn.title ? ` (${card.waitingOn.title})` : ''} in project ${card.waitingOn.projectName ?? card.waitingOn.projectKey ?? ''}${card.waitingOn.column ? `, now in ${card.waitingOn.column}` : ''}`
+            : `waiting on ${card.waitingOn.ref}`}
         </Link>
       )}
     </li>

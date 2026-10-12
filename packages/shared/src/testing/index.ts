@@ -34,6 +34,8 @@ export const DESK_SUBKIND = {
   mainMergeSkipped: 'main_merge_skipped',
   /** Investigate & design is switched on for a project but no architect is hired (a notice). */
   noArchitect: 'no_architect',
+  /** A sub-workflow stage could not start its child card; the parent card is blocked until the manager looks (an alert). */
+  subworkflowRefused: 'subworkflow_refused',
 } as const;
 
 /** Card origins whose card is a suite (full E2E suite or regression run) rather than a feature under test. */
