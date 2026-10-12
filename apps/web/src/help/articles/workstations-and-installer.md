@@ -68,7 +68,7 @@ For vault SSH keys on Windows, ensure git can find them (OpenSSH or PuTTY with P
 
 Each repository of a project has a git host: GitHub, GitLab, Bitbucket Cloud, Azure DevOps, or a plain git server. For pull requests, the repository list and creating new repositories, the workstation must be **connected** to that host. Your login or token stays on the workstation; Guildwise HQ only learns whether it works.
 
-Open the workstation card on the **Workstations** page: **Git hosts** shows Connected or Not connected for each host. Click **Connect** for the one command to run in a terminal on that workstation:
+Open the workstation card on the **Workstations** page: **Git hosts** shows Connected, Not connected (no token saved), Token refused (hover for the HTTP status and the likely missing scope) or Could not check (the host could not be reached) for each host. Click **Connect** for the one command to run in a terminal on that workstation:
 
 - `aom-runner git-connect github` opens a browser to sign in (GitHub CLI).
 - `aom-runner git-connect gitlab` signs in with the GitLab CLI or asks for a personal access token.

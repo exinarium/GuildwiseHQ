@@ -24,9 +24,29 @@ export function connectionOf(
 export function ConnectionBadge({ c }: { c: GitConnection | undefined }) {
   if (!c) return <Badge title="Not reported yet">Unknown</Badge>;
   if (c.state === 'connected')
-    return <Badge tone="green">{c.account ? `Connected as ${c.account}` : 'Connected'}</Badge>;
+    return (
+      <Badge tone="green" {...(c.detail ? { title: c.detail } : {})}>
+        {c.account ? `Connected as ${c.account}` : 'Connected'}
+      </Badge>
+    );
+  if (c.problem === 'unreachable')
+    return (
+      <Badge tone="amber" {...(c.detail ? { title: c.detail } : {})}>
+        Could not check
+      </Badge>
+    );
   if (c.state === 'unavailable') return <Badge tone="amber">Tool missing</Badge>;
-  return <Badge tone="neutral">Not connected</Badge>;
+  if (c.problem === 'token_refused')
+    return (
+      <Badge tone="amber" {...(c.detail ? { title: c.detail } : {})}>
+        Token refused
+      </Badge>
+    );
+  return (
+    <Badge tone="neutral" {...(c.detail ? { title: c.detail } : {})}>
+      Not connected
+    </Badge>
+  );
 }
 
 /**

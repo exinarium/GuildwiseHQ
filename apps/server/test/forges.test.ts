@@ -150,6 +150,34 @@ describe('git connections reported by the workstation', () => {
     expect(ws.git.checkedAt).toBeTruthy();
   });
 
+  it('keeps the reason a Bitbucket login is not usable (token refused vs host unreachable) for project settings', async () => {
+    const at = new Date().toISOString();
+    r.send('git.report', {
+      connections: [
+        {
+          provider: 'bitbucket-cloud',
+          host: 'bitbucket.org',
+          state: 'not_connected',
+          problem: 'token_refused',
+          detail: 'Bitbucket refused the saved token (HTTP 403: scope).',
+          checkedAt: at,
+        },
+        {
+          provider: 'gitlab',
+          host: 'gitlab.com',
+          state: 'unavailable',
+          problem: 'unreachable',
+          checkedAt: at,
+        },
+      ],
+    });
+    await settle();
+    const ws = await workstation();
+    expect(ws.git.connections[0]).toMatchObject({ problem: 'token_refused' });
+    expect(ws.git.connections[0].detail).toMatch(/HTTP 403/);
+    expect(ws.git.connections[1]).toMatchObject({ state: 'unavailable', problem: 'unreachable' });
+  });
+
   it('"Check again" queues git.status for the runner', async () => {
     const from = r.received.length;
     await ok(owner('POST', `/api/workstations/${w.workstationId}/git/recheck`));
