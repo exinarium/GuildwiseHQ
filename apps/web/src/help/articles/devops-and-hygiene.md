@@ -24,6 +24,8 @@ You can ask it directly from anywhere: click **Ask DevOps** in the top bar, choo
 
 The DevOps engineer works **as you, on your machine**, outside the safety box that other agents work in. In a chat with it, a command, a Docker build or a deploy you ask for runs right away. The tick boxes in the workstation's panel (install packages and tools, use Docker, use elevated privileges (sudo), write to extra paths) are instructions to it and decide what the automatic tool setup may do, but they do not physically stop it: only give this agent to a machine you are happy to hand it. Anything it decides is outside its instructions waits for approval on the desk.
 
+**Requests about a card.** When a request is filed for a card (the **Ask DevOps** button on the card, or the agent working on it asks), the DevOps engineer gets that card in its brief: title, type, fields, project, repository and the latest comments. It can read the card, comment on it and set the card fields it needs, for example how to start the stack. It cannot change the card's title, stage or status, and it cannot read or change any other card.
+
 **Who approves.** On a workstation that belongs to a team member, an Owner or Admin approves, and the person whose machine it is must agree as well. If you are an Owner approving on your own machine, one click is enough. When two people are needed, the desk item stays open after the first answer, and either of them can say no.
 
 Because it is free, you cannot extend it with extra instructions, skills or custom permissions. Only its model, effort and runtime can change.
@@ -53,7 +55,21 @@ If hygiene finds a conflict, an authentication failure, or a missing clone, it d
 
 When you add a repository in **Project settings, Repositories**, the DevOps engineer of each workstation of the project puts it there. Pick **An existing repository** and it is cloned into the workstation's first repository folder (`aom-runner repos add`); a folder that already holds something else is never overwritten. Pick **Create a new repository**, choose the git host and fill in what it asks (for example owner and name, and the visibility), and the DevOps engineer creates it there with that workstation's login for the host, then clones it. The workstation must be connected to the host first (see [Git hosts](/help/workstations-and-installer#git-hosts)). Under each repository you see **Cloning**, **Cloned on <workstation>** or **Failed: <reason>** with **Try again**.
 
-Before the first build work on a new project, the DevOps engineer checks that the tools the repository needs are installed: .NET and the MAUI workloads, Node and its package manager, Python, Docker, Go, Rust, Java and more. It installs what is missing only if you ticked **Install packages and tools** (and **Docker**, **Elevated privileges** where needed). Once the tools are in place it also installs **the project's own packages** (pnpm, yarn, npm or bun install; Python packages into the project's own environment; .NET restore; Go, Rust, Maven, Ruby and PHP packages), and for Android and .NET MAUI projects it installs the **Android SDK** (command-line tools, platform tools, and the Android version and build tools the project needs). Every step is logged where you can read it. Until the workstation is ready, **every agent's card in that project** waits there with the reason on the card, and **Project settings, Development environment** shows each tool, what is missing and how to fix it, with **Check again**. If the setup needs your help or fails, a notice appears on your desk (once), and it disappears when the workstation is ready.
+Before the first build work on a new project, the DevOps engineer checks that the tools the repository needs are installed: .NET and the MAUI workloads, Node and its package manager, Python, Docker, Go, Rust, Java and more. It installs what is missing only if you ticked **Install packages and tools** (and **Docker**, **Elevated privileges** where needed). Once the tools are in place it also installs **the project's own packages** (pnpm, yarn, npm or bun install; Python packages into the project's own environment; .NET restore; Go, Rust, Maven, Ruby and PHP packages), and for Android and .NET MAUI projects it installs the **Android SDK** (command-line tools, platform tools, and the Android version and build tools the project needs). Every step is logged where you can read it. Next to every tool that is missing or blocked, and next to a repository that failed to clone, there is a **Fix** button (see [Fix with DevOps](#fix)). Until the workstation is ready, **every agent's card in that project** waits there with the reason on the card, and **Project settings, Development environment** shows each tool, what is missing and how to fix it, with **Check again**. If the setup needs your help or fails, a notice appears on your desk (once), and it disappears when the workstation is ready.
+
+## Fix with DevOps {#fix}
+
+Next to every item that failed or is missing there is a **Fix** button: a tool of the **Development environment** (missing, failed or needs access), a ticked right on the Workstations page that failed **Verify now**, and a repository under **Repositories** that failed to clone. Click it and the DevOps engineer of that workstation gets a request with the error text, the workstation, the project and the repository, so you do not have to describe the problem yourself.
+
+The status appears next to the item:
+
+- **Requested**: waiting in the DevOps engineer's queue (it works on one request at a time).
+- **DevOps is working on it**.
+- **Needs your approval on the desk**: the fix is outside what you allowed, or destructive. Approve it on the desk and it continues.
+- **Done**: the check runs again by itself (the environment check, the rights check or the clone). **Check again** runs it by hand.
+- **DevOps could not fix it**: read its answer on the Workstations page, then use **Fix again** or fix it yourself with the "How to fix" text.
+
+Only the project owner sees Fix on the project settings. A fix that needs a password or token (for example a sudo password) is never typed by the engineer: it tells you what to do.
 
 ## Rights and the sudo password {#rights}
 

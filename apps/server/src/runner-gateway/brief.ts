@@ -3,6 +3,7 @@ import {
   AgentPermissionsSchema,
   type AgentRuntimeSpec,
   DevOpsAccessSchema,
+  type DevopsShift,
   devopsBriefOutcomes,
   effectiveFeatures,
   getStage,
@@ -209,6 +210,39 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
 
 const DEVOPS_MAX_SHIFT_MINUTES = 30;
 
+/** The card a DevOps request was filed for: fields, project, repository and the latest comments (oldest first). */
+export async function devopsCardBrief(ctx: Ctx, cardId: string): Promise<DevopsShift['card'] | undefined> {
+  const card = await one(ctx.pool, 'SELECT * FROM cards WHERE id=$1', [cardId]);
+  if (!card) return undefined;
+  const project = await one(ctx.pool, 'SELECT key, name FROM projects WHERE id=$1', [card.project_id]);
+  const repo = card.repo_id
+    ? await one(ctx.pool, 'SELECT name FROM project_repos WHERE id=$1', [card.repo_id])
+    : undefined;
+  const comments = await rows(
+    ctx.pool,
+    `SELECT m.kind, m.body, m.created_at, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
+       LEFT JOIN users u ON u.id = m.author_user_id LEFT JOIN agents a ON a.id = m.author_agent_id
+      WHERE m.thread_id=$1 ORDER BY m.created_at DESC, m.event_seq DESC LIMIT 10`,
+    [card.id],
+  );
+  return {
+    ref: card.ref,
+    title: card.title,
+    cardType: card.card_type,
+    stage: card.stage ?? undefined,
+    status: card.status,
+    fields: (card.fields ?? {}) as Record<string, unknown>,
+    project: project ? { key: project.key, name: project.name } : undefined,
+    repo: repo?.name,
+    comments: comments.reverse().map((m) => ({
+      authorName: m.user_name ?? m.agent_name ?? 'system',
+      kind: m.kind,
+      body: m.body,
+      at: iso(m.created_at) as string,
+    })),
+  };
+}
+
 /**
  * "Ask DevOps": the instruction followed by what the user was looking at (page, project, card, repository, workstation,
  * the last error), resolved to names. Plain text, so the runner's brief needs no new field.
@@ -259,9 +293,7 @@ export async function buildDevopsShiftStart(
   if (!agent || !ws) return null;
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
   if (!role) return null;
-  const card = req.card_id
-    ? await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1', [req.card_id])
-    : undefined;
+  const card = req.card_id ? await devopsCardBrief(ctx, req.card_id) : undefined;
   const history = await rows(
     ctx.pool,
     `SELECT m.kind, m.body, m.created_at, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
@@ -339,7 +371,7 @@ export async function buildDevopsShiftStart(
         id: req.requested_by_id,
         name: req.requested_by_name ?? undefined,
       },
-      card: card ? { ref: card.ref, title: card.title } : undefined,
+      card,
       workstationName: ws.name,
       access: DevOpsAccessSchema.parse(ws.devops_access ?? {}),
       hygiene: req.hygiene ?? undefined,

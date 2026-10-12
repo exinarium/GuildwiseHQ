@@ -192,6 +192,18 @@ describe('aom CLI', () => {
     expect(t.err.join('')).toContain('usage: aom devops');
   });
 
+  it('card show / comment reach the one card of a DevOps request through rpc', async () => {
+    const t = await setup();
+    expect(await t.run('card', 'show')).toBe(0);
+    expect(t.rpcs.at(-1)).toEqual({ method: 'card.get', params: { linked: true } });
+    expect(await t.run('card', 'show', 'TOY-1')).toBe(0);
+    expect(t.rpcs.at(-1)).toEqual({ method: 'card.get', params: { ref: 'TOY-1' } });
+    expect(await t.run('card', 'comment', '--note', 'stack is up')).toBe(0);
+    expect(t.rpcs.at(-1)).toEqual({ method: 'card.comment', params: { note: 'stack is up' } });
+    expect(await t.run('card', 'comment')).toBe(1);
+    expect(t.reports).toEqual([]);
+  });
+
   it('devops-done and devops-approval are terminal outcome reports with their data', async () => {
     const t = await setup();
     expect(

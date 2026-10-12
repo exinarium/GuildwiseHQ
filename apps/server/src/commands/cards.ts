@@ -86,7 +86,7 @@ export async function mockFieldsAllowed(ctx: Ctx, db: Queryable, projectId: stri
 }
 
 /** Mock-runtime fields are refused unless the server runs with `AOM_MOCK_UI=true` or the project's org is a simulation. */
-async function assertNoMockFields(
+export async function assertNoMockFields(
   ctx: Ctx,
   db: Queryable,
   projectId: string,

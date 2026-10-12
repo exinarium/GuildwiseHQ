@@ -144,6 +144,8 @@ export const RpcMethodSchema = z.enum([
   'thread.post',
   'thread.read',
   'devops.request',
+  /** A DevOps request filed for a card: comment on that one card (`aom card comment`); read and update use `card.get`/`card.update`. */
+  'card.comment',
   /** M7, BA intake chat: draft and specify cards, map the ticket to a project, ask the manager when it cannot. */
   'card.create',
   'card.update',

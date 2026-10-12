@@ -55,7 +55,7 @@ The warning icon on the card says which of these it is (see [Board and cards](/h
 
 ## Every card of a project is waiting {#toolchain-waiting}
 
-Before agents build on a workstation, its DevOps engineer installs the tools and packages the project needs. Until that is done, every agent card of the project waits and says why. Open **Project settings, Development environment** to see what is missing and press **Check again** after fixing it, or look on your desk for a notice that needs your help (for example a right you did not tick). See [New repositories and the toolchain](/help/devops-and-hygiene#setup).
+Before agents build on a workstation, its DevOps engineer installs the tools and packages the project needs. Until that is done, every agent card of the project waits and says why. Open **Project settings, Development environment** to see what is missing and press **Fix** next to a missing tool to send the DevOps engineer to fix it (then the check runs again by itself), press **Check again** after fixing it yourself, or look on your desk for a notice that needs your help (for example a right you did not tick). See [New repositories and the toolchain](/help/devops-and-hygiene#setup).
 
 ## A cloud workstation needs attention {#cloud-attention}
 

@@ -473,6 +473,24 @@ const VERBS: Record<string, Verb> = {
   card: async (ctx, p) => {
     const sub = p.positionals[0];
     if (sub === 'create' || sub === 'update' || sub === 'specify') return cardDraft(ctx, p, sub);
+    // `aom card show [REF]` / `aom card comment [REF] --note "<t>"` (a DevOps request filed for a card): that one card.
+    if (sub === 'show') {
+      const r = (await rpc(
+        ctx,
+        'card.get',
+        p.positionals[1] ? { ref: p.positionals[1] } : { linked: true },
+      )) as NonNullable<DevopsShift['card']> | undefined;
+      ctx.io.out(`${JSON.stringify(r, null, 2)}\n`);
+      return 0;
+    }
+    if (sub === 'comment') {
+      const r = (await rpc(ctx, 'card.comment', {
+        ...(p.positionals[1] ? { ref: p.positionals[1] } : {}),
+        note: textFlag(ctx, p, 'note', true) as string,
+      })) as { messageId?: string } | undefined;
+      ctx.io.out(`Commented on the card.${r?.messageId ? ` (${r.messageId})` : ''}\n`);
+      return 0;
+    }
     // `aom card <REF>` (a BA task): a member card of the phase, read-only.
     if (sub) {
       ctx.io.out(`${JSON.stringify(await rpc(ctx, 'card.get', { ref: sub }), null, 2)}\n`);
@@ -845,6 +863,7 @@ export const USAGE = `usage: aom <verb> [options]
   repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] [--host <h>] --name <owner/repo | group/project | org/project/repo | workspace/repo> --private|--public --project <KEY> [--description "<t>"]   BA chat / DevOps: ask the project owner to create a repository on a git host (they approve on the desk; the runner creates it)
   git status [<provider>] | git connect <provider> [--host <h>]   DevOps: check or start this workstation's git host login (a browser login prints a URL and code for the user; a token is never typed by the agent)
   intake map --project <KEY> | intake unmapped --note "<why>"   BA intake: map the ticket, or ask the manager
+  card show | card comment --note "<t>" | card update <REF> --json '{"fields":{...}}'   DevOps request filed for a card: read, comment on and update the fields of that one card (no other card)
   card create --json '<json>' | --file <draft.json|-> | card update <REF> --json '<json>' | --file <patch.json> | card specify <REF>   BA intake: draft cards
   outbound draft --kind <comment|resolution|decision> --body "<text>"   BA: draft the update for the card's ticket (the manager approves it)
   risk <small|large> --reason "<why>"      BA: override the card's risk tier (drives the review tier and the merge approval)

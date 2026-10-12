@@ -584,6 +584,9 @@ export class ShiftSupervisor {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
       rpc: async (req: IpcRpcRequest) => {
         // A BA task reads a member card of the phase by ref (`aom card <REF>`): the server answers that.
+        // A DevOps shift reads its request's card (`aom card show`) through the server, which serves only that card.
+        if (req.method === 'card.get' && s.msg.kind === 'devops' && (req.params.ref || req.params.linked))
+          return this.deps.rpc(s.msg.shiftId, req.method, req.params);
         if (req.method === 'card.get' && s.msg.kind === 'ba_task' && req.params.ref)
           return this.deps.rpc(s.msg.shiftId, req.method, req.params);
         if (req.method === 'card.get')
