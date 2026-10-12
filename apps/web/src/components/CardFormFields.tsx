@@ -114,39 +114,41 @@ export function CardFormFields({
           data-testid="architect-fields"
         >
           <legend className="px-1 text-sm font-semibold text-fg">Investigate &amp; design</legend>
-          <label className="flex items-start gap-2.5 text-base text-fg">
-            <input
-              type="checkbox"
-              className="mt-1 size-5"
-              checked={effectiveDesign(v, designDefault)}
-              disabled={v.investigationOnly}
-              onChange={(e) => onChange({ ...v, designNeeded: e.target.checked })}
-            />
-            <span>
-              Investigate &amp; design before build
-              <span className="block text-sm text-subtle">
-                {designDefault
-                  ? 'On for this project. Untick it for a small, well-located change.'
-                  : 'An architect reads the code and writes a design first. Off by default; worth it when the approach is uncertain.'}
-              </span>
-            </span>
-          </label>
-          {workflowSupportsInvestigationOnly(workflow) && (
-            <label className="flex items-start gap-2.5 text-base text-fg">
+          <div className="flex flex-col gap-0.5">
+            <label className="flex items-center gap-2.5 text-base text-fg">
               <input
                 type="checkbox"
-                className="mt-1 size-5"
-                checked={v.investigationOnly}
-                onChange={(e) => onChange({ ...v, investigationOnly: e.target.checked })}
+                className="size-5"
+                checked={effectiveDesign(v, designDefault)}
+                disabled={v.investigationOnly}
+                aria-describedby="design-hint"
+                onChange={(e) => onChange({ ...v, designNeeded: e.target.checked })}
               />
-              <span>
-                Investigation only
-                <span className="block text-sm text-subtle">
-                  Nothing is built: the architect's report is the result, and the BA records it. Needs only a
-                  title, context, requirements and a repository.
-                </span>
-              </span>
+              Investigate &amp; design before build
             </label>
+            <span id="design-hint" className="pl-[1.875rem] text-sm text-subtle">
+              {designDefault
+                ? 'On for this project. Untick it for a small, well-located change.'
+                : 'An architect reads the code and writes a design first. Off by default; worth it when the approach is uncertain.'}
+            </span>
+          </div>
+          {workflowSupportsInvestigationOnly(workflow) && (
+            <div className="flex flex-col gap-0.5">
+              <label className="flex items-center gap-2.5 text-base text-fg">
+                <input
+                  type="checkbox"
+                  className="size-5"
+                  checked={v.investigationOnly}
+                  aria-describedby="investigation-only-hint"
+                  onChange={(e) => onChange({ ...v, investigationOnly: e.target.checked })}
+                />
+                Investigation only
+              </label>
+              <span id="investigation-only-hint" className="pl-[1.875rem] text-sm text-subtle">
+                Nothing is built: the architect's report is the result, and the BA records it. The short field
+                set is enough to specify it.
+              </span>
+            </div>
           )}
           <Select
             label="Merge the latest main branch first"

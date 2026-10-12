@@ -264,7 +264,8 @@ async function architectWork(
     writeFileSync(file, body(leak));
     if (!vault) {
       sh('git', ['add', '-A']);
-      sh('git', ['commit', '--no-verify', '-m', `mock investigation: ${brief.card.ref}`]);
+      // (empty when a retried shift writes the same report again)
+      sh('git', ['commit', '--no-verify', '--allow-empty', '-m', `mock investigation: ${brief.card.ref}`]);
     }
   };
   const verb = brief.shift.outcomes.some((o) => o.id === 'report') ? 'investigate' : 'design';

@@ -170,7 +170,7 @@ test('the design step is off for a new project; the owner turns it on in the pro
     mergeMainFirst: true,
     investigationPath: 'docs/investigations',
   });
-  await page.goto('/p/ARC/settings');
+  await page.goto(`/projects/${projectId}/settings#architect`);
   await expect(page.getByTestId('architect-state')).toHaveText('Investigate & design is off');
   await page.getByTestId('design-step-toggle').check();
   // an architect is hired: no warning
