@@ -5,9 +5,11 @@ import {
   DEFAULT_CARD_PRIORITY,
   type ExpandContext,
   emptyFields,
+  expandMapping,
   expandText,
   expandTitle,
   FEED_FIELD_DEFAULTS,
+  HR_DESK_SUBKIND,
   isEmailAction,
   isoWeek,
   isPollAction,
@@ -62,7 +64,11 @@ export async function scheduledCard(
   extra: {
     interestRunId?: string;
     preferredAgents?: Record<string, string>;
-    origin?: 'schedule' | 'interest';
+    origin?: 'schedule' | 'interest' | 'trigger';
+    /** `draft`: the card waits in Specify for the BA or the owner (drafts are never scheduled to jump the queue). */
+    start?: 'draft' | 'queued';
+    /** Values written over `template.fields` (a field mapping). */
+    fields?: Record<string, unknown>;
   } = {},
 ): Promise<{ cardId: string; ref: string; event: AppendInput }> {
   const projectWf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
@@ -81,6 +87,7 @@ export async function scheduledCard(
     ...emptyFields(def.fieldSet),
     ...defaults,
     ...template.fields,
+    ...extra.fields,
   });
   if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
   const number = Number(
@@ -89,6 +96,7 @@ export async function scheduledCard(
   );
   const cardId = randomUUID();
   const ref = cardRef(project.key, number);
+  const draft = extra.start === 'draft';
   return {
     cardId,
     ref,
@@ -104,12 +112,14 @@ export async function scheduledCard(
           title,
           cardType: cardType as never,
           workflowVersionId: wf.id,
-          stage: specifyTarget(def, { designNeeded: false, investigationOnly: false }).to,
-          status: 'queued',
+          stage: draft
+            ? def.initialStage
+            : specifyTarget(def, { designNeeded: false, investigationOnly: false }).to,
+          status: draft ? 'draft' : 'queued',
           fields: parsed.data,
           ownerUserId: await orgOwnerId(tx, project.org_id),
           origin: extra.origin ?? 'schedule',
-          scheduled: true,
+          scheduled: !draft,
           ...(scheduleId ? { scheduleId } : {}),
           ...(interestId ? { interestId } : {}),
           ...(extra.interestRunId ? { interestRunId: extra.interestRunId } : {}),
@@ -139,6 +149,10 @@ export interface RunSpec {
   byUserId?: string;
   /** Placeholders: the event name, the card or phase ref, the project key, the issue. */
   text?: Partial<ExpandContext>;
+  /** Values of the `{tokens}` of a field mapping (`card.ref`, `issue.title`, `card.fields.x`, ...). */
+  tokens?: Record<string, string | undefined>;
+  /** The thing the run answers (source card or intake id), for `dedupe: 'thread'`. */
+  sourceId?: string;
   /** Structured details the webhook carries. */
   details?: Record<string, unknown>;
 }
@@ -152,6 +166,7 @@ export interface RunOutcome {
   result?: ScheduleRunResult;
   delivery?: ScheduleDelivery;
   error?: string;
+  dedupeKey?: string;
   /** After the transaction commits: wake the dispatcher, deliver runner commands, make a delivery. */
   after: Array<() => Promise<void>>;
 }
@@ -190,20 +205,65 @@ export async function executeAction(ctx: Ctx, tx: Tx, s: Row, spec: RunSpec): Pr
 
   if (action.kind === 'create_card') {
     if (!project) throw conflict('project_gone', 'the project of this schedule is gone');
-    const card = await scheduledCard(
-      tx,
-      project,
-      action.template,
-      s.id,
-      expandTitle(action.template.title, text),
-      s.interest_id,
-    );
+    const t = action.template;
+    const tokens: Record<string, string | undefined> = { event: spec.text?.event, date, ...spec.tokens };
+    const mapped: Record<string, unknown> = {};
+    let title = expandTitle(t.title, text);
+    for (const [target, template] of Object.entries(t.mapping ?? {})) {
+      const value = expandMapping(template, tokens);
+      if (target === 'title') title = value.trim().slice(0, 300) || title;
+      else mapped[target] = value;
+    }
+    // Event-triggered automations: one card per event, within a rate, without repeating a card for the same content.
+    const fromEvent = spec.trigger === 'event' || spec.trigger === 'issue';
+    const dedupeKey =
+      action.dedupe === 'thread' && spec.sourceId
+        ? `thread:${spec.sourceId}`
+        : action.dedupe === 'subject_from'
+          ? `subject_from:${title.toLowerCase()}|${(tokens['email.from'] ?? '').toLowerCase()}`
+          : undefined;
+    if (fromEvent && dedupeKey) {
+      const prior = await one(
+        tx,
+        `SELECT result->'cardIds'->>0 AS card_id FROM schedule_runs
+          WHERE schedule_id=$1 AND dedupe_key=$2 AND result->'cardIds' IS NOT NULL LIMIT 1`,
+        [s.id, dedupeKey],
+      );
+      if (prior)
+        return {
+          ...base,
+          status: 'ok',
+          summary: 'Skipped: a card was already created for this',
+          result: { cardIds: [] },
+        };
+    }
+    if (spec.trigger === 'event') {
+      const limit = action.ratePerHour ?? DEFAULT_RATE_PER_HOUR;
+      const made = Number(
+        (
+          await one(
+            tx,
+            `SELECT count(*) AS n FROM schedule_runs
+              WHERE schedule_id=$1 AND trigger='event' AND started_at > $2
+                AND jsonb_array_length(COALESCE(result->'cardIds', '[]'::jsonb)) > 0`,
+            [s.id, new Date(spec.firedFor.getTime() - 3_600_000)],
+          )
+        )?.n ?? 0,
+      );
+      if (made >= limit) return rateLimited(tx, s, spec, limit, base);
+    }
+    const card = await scheduledCard(tx, project, t, s.id, title, s.interest_id, {
+      ...(fromEvent ? { origin: 'trigger' as const } : {}),
+      ...(t.start ? { start: t.start } : {}),
+      ...(Object.keys(mapped).length ? { fields: mapped } : {}),
+    });
     return {
       ...base,
       events: [card.event],
       status: 'ok',
-      summary: `Created ${card.ref}`,
+      summary: `Created ${card.ref}${t.start === 'draft' ? ' as a draft' : ''}`,
       result: { cardIds: [card.cardId] },
+      ...(dedupeKey ? { dedupeKey } : {}),
       after: [async () => ctx.services.dispatcher.trigger()],
     };
   }
@@ -390,6 +450,73 @@ export async function executeAction(ctx: Ctx, tx: Tx, s: Row, spec: RunSpec): Pr
   };
 }
 
+export const DEFAULT_RATE_PER_HOUR = 20;
+
+/**
+ * More cards than `ratePerHour` in an hour: this one is not created. The run is recorded (so the event is not tried
+ * again), a `ScheduleSkipped` says why, and one desk notice per hour tells the owner.
+ */
+async function rateLimited(
+  tx: Tx,
+  s: Row,
+  spec: RunSpec,
+  limit: number,
+  base: Pick<RunOutcome, 'runId' | 'events' | 'after'>,
+): Promise<RunOutcome> {
+  const events: AppendInput[] = [
+    {
+      streamId: streamId.schedule(s.id),
+      event: {
+        type: 'ScheduleSkipped',
+        payload: {
+          scheduleId: s.id,
+          firedFor: spec.firedFor.toISOString(),
+          nextFireAt: null,
+          reason: 'rate_limited',
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: scheduleScope(s),
+    },
+  ];
+  const recent = await one(
+    tx,
+    `SELECT 1 FROM schedule_runs WHERE schedule_id=$1 AND summary LIKE 'Skipped: rate limit%' AND started_at > $2`,
+    [s.id, new Date(spec.firedFor.getTime() - 3_600_000)],
+  );
+  if (!recent) {
+    const deskItemId = randomUUID();
+    events.push({
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemCreated',
+        payload: {
+          deskItemId,
+          kind: 'alert',
+          subkind: HR_DESK_SUBKIND.scheduleFailed,
+          title: `Automation "${s.name}" is making too many cards`,
+          body: `It reached its limit of ${limit} cards per hour, so further cards are skipped until the hour is over. Raise the limit on the automation, or check what keeps triggering it.`,
+          blocking: false,
+          pinned: false,
+          options: [],
+          ...(s.project_id ? { projectId: s.project_id } : {}),
+          affectedCardIds: [],
+          askedBy: { kind: 'system' },
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: scheduleScope(s),
+    });
+  }
+  return {
+    ...base,
+    events,
+    status: 'ok',
+    summary: `Skipped: rate limit of ${limit} cards per hour reached`,
+    result: { cardIds: [] },
+  };
+}
+
 export const hostOf = (url: string): string => {
   try {
     return new URL(url).host;
@@ -410,6 +537,7 @@ export function runRecordedEvent(s: Row, o: RunOutcome, spec: RunSpec, now: Date
         trigger: spec.trigger,
         ...(spec.sourceKey ? { sourceKey: spec.sourceKey } : {}),
         ...(spec.label ? { label: spec.label } : {}),
+        ...(o.dedupeKey ? { dedupeKey: o.dedupeKey } : {}),
         status: o.status,
         summary: o.summary,
         ...(o.result ? { result: o.result } : {}),

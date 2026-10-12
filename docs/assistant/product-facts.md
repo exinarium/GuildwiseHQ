@@ -45,7 +45,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 - Intake from Jira and GitHub: the BA maps incoming tickets to projects and drafts cards with specs and test plans.
 - Outbox: posts to Jira, GitHub or email wait for your approval before they go out.
 - Org design: roles, departments and workflows, designed in a chat with the BA and approved by the Owner.
-- Standing orders and schedules: recurring instructions and work that starts by itself.
+- Standing orders and automations (formerly schedules): recurring instructions and work that starts by itself, on a time or when something happens in a workflow.
 - Vaults: knowledge repositories (git) for the organization and per project that sync to your workstations.
 - A DevOps engineer agent on every workstation, free: it installs tools and the project's packages, keeps repositories tidy (unsaved edits are kept on a separate saved-work branch, never pushed to main), tries to fix conflicting changes itself, and runs commands, Docker builds and deploys you ask for in a chat. It works as you, outside the sandbox the other agents use; privileged actions on a team member's machine need an Owner or Admin and the machine's user to agree.
 - Cards explain themselves on the board: why they are blocked, a repository problem, or a budget that is nearly used up, each with a link to fix it.

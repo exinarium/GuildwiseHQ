@@ -60,7 +60,7 @@ The guided tour mentions the checklist at its last step, so the two do not compe
 
 The left side of the app is split into areas. Each area groups related pages. From the top:
 
-- **Work**: Board (the current project's cards), Research (only on projects with research notes), Desk (questions waiting for you), Intake (tickets from Jira and GitHub; Owner and Admin), Schedules (automatic actions) and Projects.
+- **Work**: Board (the current project's cards), Research (only on projects with research notes), Desk (questions waiting for you), Intake (tickets from Jira and GitHub; Owner and Admin), Automations (automatic actions) and Projects.
 - **Organization**: Agents, Org chart, Roles & workflows (custom organization design), Workstations (the computers where your agents run), Metrics and Costs (Costs is for Owner and Admin).
 - **Knowledge**: Interests (topics you watch), Ledger (decisions and standing orders) and Vaults (Owner and Admin).
 - **Bottom of the sidebar**: the **Get started** button while your organization is being set up, **Settings** (your own account), **Organization** (members, plan, billing and security of the organization) and **Help**. Your name there opens the user menu with theme, **Your settings**, **Help**, **Contact us**, **My requests** and **Log out**.

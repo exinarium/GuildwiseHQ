@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import {
+  eventTypesOf,
   type IntegrationRunPayload,
   IntegrationRunResultSchema,
   isOrgOperational,
@@ -34,13 +36,20 @@ import { afterRun, assertOwnerStillAllowed } from './schedules.ts';
  * (`schedule_runs (schedule_id, source_key)`) makes a replayed event run its schedule once.
  */
 
-/** The domain events each trigger is read from: the one table in `SCHEDULE_EVENT_TRIGGERS` (shared), by event type. */
-const EVENT_TYPES: Record<string, ScheduleEventName> = Object.fromEntries(
-  SCHEDULE_EVENT_TRIGGERS.map((t) => [t.eventType, t.id]),
-);
+/** The triggers the sweep serves: the internal events of `SCHEDULE_EVENT_TRIGGERS` and `intake_ticket`. */
+type TriggerName = ScheduleEventName | 'intake_ticket';
+
+/** Domain event type -> the triggers read from it (`CardFinalized` feeds both `card_finalized` and `card_done`). */
+const EVENT_TYPES = new Map<string, TriggerName[]>();
+for (const t of SCHEDULE_EVENT_TRIGGERS)
+  for (const type of eventTypesOf(t.id)) EVENT_TYPES.set(type, [...(EVENT_TYPES.get(type) ?? []), t.id]);
+EVENT_TYPES.set('IntakeStarted', ['intake_ticket']);
+
+const TRIGGER_LABEL = (n: TriggerName): string =>
+  n === 'intake_ticket' ? 'An intake ticket is created' : scheduleEventLabel(n);
 
 interface EventContext {
-  name: ScheduleEventName;
+  name: TriggerName;
   orgId: string;
   projectId: string | null;
   interestId: string | null;
@@ -48,16 +57,35 @@ interface EventContext {
   projectKey: string | null;
   label: string;
   details: Record<string, unknown>;
+  /** The card the event is about (card triggers) or the intake. */
+  sourceId: string | null;
+  /** Card triggers: what the filters look at. */
+  card?: {
+    workflowKey: string | null;
+    cardType: string;
+    fields: Record<string, unknown>;
+    scheduleId: string | null;
+    toStage?: string;
+  };
+  /** `intake_ticket`: where the ticket came from. */
+  intakeSource?: 'issues' | 'web';
+  /** Values for the `{tokens}` of a field mapping. */
+  tokens: Record<string, string | undefined>;
 }
 
-async function contextOf(db: Queryable, e: Row): Promise<EventContext | null> {
-  const name = EVENT_TYPES[e.type as string];
-  if (!name) return null;
+const fieldText = (v: unknown): string =>
+  v === null || v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v);
+
+async function contextOf(db: Queryable, e: Row, name: TriggerName): Promise<EventContext | null> {
   const p = e.payload as Record<string, any>;
   let projectId: string | null = e.project_id ?? null;
   let interestId: string | null = null;
   let ref = '';
   let what = '';
+  let sourceId: string | null = null;
+  let card: EventContext['card'];
+  let intakeSource: EventContext['intakeSource'];
+  const tokens: Record<string, string | undefined> = {};
   const details: Record<string, unknown> = {};
   if (name === 'phase_completed') {
     const ph = await one(db, 'SELECT ref, name, project_id FROM phases WHERE id=$1', [p.phaseId]);
@@ -66,41 +94,79 @@ async function contextOf(db: Queryable, e: Row): Promise<EventContext | null> {
     ref = ph.ref;
     what = `phase ${ph.ref} (${ph.name}) completed`;
     details.phase = { ref: ph.ref, name: ph.name };
-  } else if (name === 'card_finalized' || name === 'interest_run_done') {
+    sourceId = p.phaseId;
+  } else if (name === 'intake_ticket') {
+    ref = (p.externalKey as string | undefined) ?? '';
+    const note = String(p.note ?? '').trim();
+    const title = (note.split('\n')[0] || 'Intake').slice(0, 200);
+    intakeSource = p.externalSystem ? 'issues' : 'web';
+    what = `intake ticket ${ref || title} created`;
+    sourceId = p.intakeId;
+    tokens['issue.key'] = ref;
+    tokens['issue.title'] = title;
+    details.intake = { id: p.intakeId, source: intakeSource, key: ref || null };
+    projectId = null;
+  } else if (name === 'interest_run_done') {
     const c = await one(db, 'SELECT ref, title, project_id, interest_id FROM cards WHERE id=$1', [p.cardId]);
     if (!c) return null;
     projectId = c.project_id;
-    interestId =
-      name === 'interest_run_done' ? (p.interestId ?? c.interest_id ?? null) : (c.interest_id ?? null);
+    interestId = p.interestId ?? c.interest_id ?? null;
     ref = c.ref;
-    if (name === 'card_finalized') {
-      what = `card ${c.ref} (${c.title}) finalized`;
-      details.card = {
-        ref: c.ref,
-        title: c.title,
-        action: p.action,
-        ...(p.resultRef ? { result: p.resultRef } : {}),
-      };
-    } else {
-      if (!interestId) return null;
-      const i = await one(db, 'SELECT name FROM interests WHERE id=$1', [interestId]);
-      what = `interest run done: ${i?.name ?? c.ref}`;
-      details.interest = {
-        id: interestId,
-        name: i?.name ?? null,
-        kind: p.kind,
-        status: p.status,
-        newItems: typeof p.published === 'number' ? p.published : 0,
-      };
-    }
-  } else {
+    if (!interestId) return null;
+    const i = await one(db, 'SELECT name FROM interests WHERE id=$1', [interestId]);
+    what = `interest run done: ${i?.name ?? c.ref}`;
+    details.interest = {
+      id: interestId,
+      name: i?.name ?? null,
+      kind: p.kind,
+      status: p.status,
+      newItems: typeof p.published === 'number' ? p.published : 0,
+    };
+    sourceId = p.cardId;
+  } else if (name === 'project_converted') {
     projectId = p.projectId ?? projectId;
     what = 'project converted';
+  } else {
+    // A card trigger: card_finalized, card_done, card_stage_reached, investigation_reported.
+    const c = await one(
+      db,
+      `SELECT c.ref, c.title, c.project_id, c.interest_id, c.card_type, c.fields, c.schedule_id, v.key AS workflow_key
+         FROM cards c LEFT JOIN workflow_versions v ON v.id = c.workflow_version_id WHERE c.id=$1`,
+      [p.cardId],
+    );
+    if (!c) return null;
+    projectId = c.project_id;
+    interestId = c.interest_id ?? null;
+    ref = c.ref;
+    sourceId = p.cardId;
+    card = {
+      workflowKey: c.workflow_key ?? null,
+      cardType: c.card_type,
+      fields: (c.fields ?? {}) as Record<string, unknown>,
+      scheduleId: c.schedule_id ?? null,
+      ...(name === 'card_stage_reached' ? { toStage: p.toStage as string } : {}),
+    };
+    tokens['card.ref'] = c.ref;
+    tokens['card.title'] = c.title;
+    for (const [k, v] of Object.entries(card.fields)) tokens[`card.fields.${k}`] = fieldText(v);
+    const base = { ref: c.ref, title: c.title, workflow: card.workflowKey };
+    if (name === 'card_finalized' || name === 'card_done') {
+      what = `card ${c.ref} (${c.title}) ${name === 'card_done' ? 'done' : 'finalized'}`;
+      details.card = { ...base, action: p.action, ...(p.resultRef ? { result: p.resultRef } : {}) };
+    } else if (name === 'card_stage_reached') {
+      what = `card ${c.ref} (${c.title}) reached ${p.toStage}`;
+      details.card = { ...base, stage: p.toStage };
+    } else {
+      what = `investigation of card ${c.ref} (${c.title}) reported`;
+      details.card = { ...base, report: p.reportPath, investigationOnly: Boolean(p.investigationOnly) };
+    }
   }
   const proj = projectId
     ? await one(db, 'SELECT key, name FROM projects WHERE id=$1', [projectId])
     : undefined;
   if (proj) details.project = { key: proj.key, name: proj.name };
+  const label = `${what.charAt(0).toUpperCase()}${what.slice(1)}`.slice(0, 280);
+  tokens.event = label;
   return {
     name,
     orgId: e.org_id,
@@ -108,9 +174,29 @@ async function contextOf(db: Queryable, e: Row): Promise<EventContext | null> {
     interestId,
     ref,
     projectKey: proj?.key ?? null,
-    label: `${what.charAt(0).toUpperCase()}${what.slice(1)}`.slice(0, 280),
+    label,
     details,
+    sourceId,
+    ...(card ? { card } : {}),
+    ...(intakeSource ? { intakeSource } : {}),
+    tokens,
   };
+}
+
+/** The conditions of the trigger that SQL does not check: workflow, stage and the filter on the card. */
+function matches(
+  t: Extract<ScheduleTrigger, { kind: 'event' | 'intake_ticket' }>,
+  ec: EventContext,
+): boolean {
+  if (t.kind === 'intake_ticket') return !t.source || t.source === ec.intakeSource;
+  const card = ec.card;
+  if (!card) return !t.workflowKey && !t.stageId && !t.filter;
+  if (t.workflowKey && t.workflowKey !== card.workflowKey) return false;
+  if (t.stageId && t.stageId !== card.toStage) return false;
+  if (t.filter?.cardType && t.filter.cardType !== card.cardType) return false;
+  for (const f of t.filter?.fieldEquals ?? [])
+    if (!isDeepStrictEqual(card.fields[f.field], f.equals)) return false;
+  return true;
 }
 
 async function readCursor(ctx: Ctx): Promise<bigint> {
@@ -135,7 +221,7 @@ export async function sweepEventTriggers(ctx: Ctx): Promise<number> {
   // Are there event schedules at all? Most deployments have none: skip the read, still move the cursor.
   const any = await one(
     ctx.pool,
-    `SELECT 1 FROM schedules WHERE enabled AND trigger->>'kind' = 'event' LIMIT 1`,
+    `SELECT 1 FROM schedules WHERE enabled AND trigger->>'kind' IN ('event','intake_ticket') LIMIT 1`,
   );
   let started = 0;
   let at = cursor;
@@ -145,7 +231,7 @@ export async function sweepEventTriggers(ctx: Ctx): Promise<number> {
         ctx.pool,
         `SELECT seq, type, payload, org_id, project_id, created_at FROM events
           WHERE seq > $1 AND seq <= $2 AND type = ANY($3::text[]) ORDER BY seq LIMIT 100`,
-        [at.toString(), head.toString(), Object.keys(EVENT_TYPES)],
+        [at.toString(), head.toString(), [...EVENT_TYPES.keys()]],
       );
       for (const e of batch) {
         started += await handleEvent(ctx, e).catch((err) => {
@@ -164,20 +250,28 @@ export async function sweepEventTriggers(ctx: Ctx): Promise<number> {
 }
 
 async function handleEvent(ctx: Ctx, e: Row): Promise<number> {
-  const ec = await contextOf(ctx.pool, e);
-  if (!ec) return 0;
-  const list = await rows(
-    ctx.pool,
-    `SELECT s.* FROM schedules s
-      WHERE s.enabled AND s.trigger->>'kind' = 'event' AND s.trigger->>'event' = $1 AND s.org_id = $2
-        AND s.created_at <= $3
-        AND (s.trigger->>'projectId' IS NULL OR s.trigger->>'projectId' = $4::text)
-        AND (s.trigger->>'interestId' IS NULL OR s.trigger->>'interestId' = $5::text)
-      ORDER BY s.created_at, s.id`,
-    [ec.name, ec.orgId, e.created_at, ec.projectId, ec.interestId],
-  );
   let n = 0;
-  for (const s of list) if (await runForEvent(ctx, s, e, ec)) n++;
+  for (const name of EVENT_TYPES.get(e.type as string) ?? []) {
+    const ec = await contextOf(ctx.pool, e, name);
+    if (!ec) continue;
+    const list = await rows(
+      ctx.pool,
+      `SELECT s.* FROM schedules s
+        WHERE s.enabled AND s.org_id = $2 AND s.created_at <= $3
+          AND (($6::text = 'intake_ticket' AND s.trigger->>'kind' = 'intake_ticket')
+            OR ($6::text <> 'intake_ticket' AND s.trigger->>'kind' = 'event' AND s.trigger->>'event' = $1::text))
+          AND (s.trigger->>'projectId' IS NULL OR s.trigger->>'projectId' = $4::text)
+          AND (s.trigger->>'interestId' IS NULL OR s.trigger->>'interestId' = $5::text)
+        ORDER BY s.created_at, s.id`,
+      [ec.name, ec.orgId, e.created_at, ec.projectId, ec.interestId, ec.name],
+    );
+    for (const s of list) {
+      if (!matches(s.trigger, ec)) continue;
+      // An automation never answers a card it made itself (a stage trigger that creates cards would loop).
+      if (ec.card?.scheduleId && ec.card.scheduleId === s.id) continue;
+      if (await runForEvent(ctx, s, e, ec)) n++;
+    }
+  }
   return n;
 }
 
@@ -189,10 +283,12 @@ async function runForEvent(ctx: Ctx, s: Row, e: Row, ec: EventContext): Promise<
     label: ec.label,
     firedFor: new Date(e.created_at),
     text: {
-      event: scheduleEventLabel(ec.name).toLowerCase(),
+      event: TRIGGER_LABEL(ec.name).toLowerCase(),
       ref: ec.ref,
       ...(ec.projectKey ? { project: ec.projectKey } : {}),
     },
+    tokens: ec.tokens,
+    ...(ec.sourceId ? { sourceId: ec.sourceId } : {}),
     details: { event: ec.name, ...ec.details },
   };
   let outcome: RunOutcome | null = null;
@@ -374,6 +470,7 @@ export async function applyIntegrationResult(
         ref: i.key,
         issue: { key: i.key, title: i.title, ...(i.url ? { url: i.url } : {}) },
       },
+      tokens: { 'issue.key': i.key, 'issue.title': i.title, event: 'labelled issue' },
       details: { issue: { key: i.key, title: i.title, url: i.url ?? null, labels: i.labels } },
     };
     let outcome: RunOutcome | null = null;

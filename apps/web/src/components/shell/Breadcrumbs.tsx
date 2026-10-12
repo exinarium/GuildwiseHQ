@@ -74,7 +74,7 @@ export function crumbsFor(pathname: string, search: string, projects: ProjectDto
     ['/intake', () => [{ label: 'Work' }, { label: 'Intake' }]],
     ['/chat/:threadId', () => [{ label: 'Desk', to: '/desk' }, { label: 'Chat' }]],
     ['/desk', () => [{ label: 'Desk' }]],
-    ['/schedules', () => [{ label: 'Work' }, { label: 'Schedules' }]],
+    ['/automations', () => [{ label: 'Work' }, { label: 'Automations' }]],
     ['/settings/org', () => [{ label: 'Settings', to: '/settings' }, { label: 'Organization' }]],
   ];
   for (const [pattern, build] of table) {

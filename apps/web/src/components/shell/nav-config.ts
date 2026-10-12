@@ -76,7 +76,7 @@ export function buildNav(opts: {
   if (on('integrations') && canManage)
     work.push({ id: 'intake', label: 'Intake', to: '/intake', icon: BriefcaseBusiness });
   work.push(
-    { id: 'schedules', label: 'Schedules', to: '/schedules', icon: Timer },
+    { id: 'schedules', label: 'Automations', to: '/automations', icon: Timer },
     { id: 'projects', label: 'Projects', to: '/projects', icon: FolderKanban },
   );
   const knowledge: NavEntry[] = [];

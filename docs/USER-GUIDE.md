@@ -41,7 +41,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.5 The desk, the ledger and standing orders](#45-the-desk-the-ledger-and-standing-orders)
   - [4.6 Budgets and costs](#46-budgets-and-costs)
   - [4.7 The org chart, roles and workflows](#47-the-org-chart-roles-and-workflows)
-  - [4.8 Schedules and integrations](#48-schedules-and-integrations)
+  - [4.8 Automations and integrations](#48-automations-and-integrations)
   - [4.9 Interests](#49-interests)
   - [4.10 Phases and follow-ups](#410-phases-and-follow-ups)
   - [4.11 Your BA reports to you](#411-your-ba-reports-to-you)
@@ -147,7 +147,7 @@ Read this chapter once. Everything else builds on these words.
 | **DevOps engineer** | A free agent that looks after one workstation: installs tools, keeps your repositories tidy, starts and stops things. |
 | **Vault** | A folder of notes (a git repository) that is synced to your workstations: your organization's knowledge base, or one project's own notes. |
 | **Priority order** | The order of your projects on the Projects page, most important first. Agents serve the project higher up first. |
-| **Schedule** | A trigger plus one action, for example "every Monday at 07:00, create a card". |
+| **Automation** | A trigger plus one action, for example "every Monday at 07:00, create a card" or "when a card reaches Review, create a follow-up". Called a schedule before October 2026. |
 | **Interest** | A topic you follow, such as "AI news". Agents look for new items on a schedule and deliver them to your desk. |
 | **Phase** | A named slice of a project ("Phase 2: autosave") that you ship and check together, followed by steps such as deploy and regression run. |
 | **Budget** | A monthly spending limit on a project (or an interest). |
@@ -347,7 +347,7 @@ The **Owner** runs the organization: there is exactly one, and the Owner can han
 | Hire, change and fire any agent, widen an agent's permissions | yes | yes |
 | Set budgets, see Costs | yes | yes |
 | Design roles, workflows and departments | yes | yes |
-| Org-wide schedules, interests quiet cap, BA settings | yes | yes |
+| Org-wide automations, interests quiet cap, BA settings | yes | yes |
 | See plan and limits | yes | yes |
 | Require two-factor login for everybody | yes | no |
 | Hand over ownership | yes | no |
@@ -580,24 +580,25 @@ A role that works an inserted step must be allowed to claim it: the roles that a
 
 > **In the app:** Help, "Organization chart and design" (`/help/org-chart-and-design`) and "Projects" (`/help/projects#workflows`).
 
-### 4.8 Schedules and integrations
+### 4.8 Automations and integrations
 
-A **schedule** is *a trigger and one action*. Open **Schedules** in the sidebar and click **New schedule**. A three-step wizard asks **When**, **What** and **Details**.
+An **automation** (called a schedule before October 2026) is *a trigger and one action*. Open **Automations** in the sidebar and click **New automation**. A three-step wizard asks **When**, **What** and **Details**. The old address `/schedules` still opens the page.
 
-![The schedules page](guide/assets/schedules.jpg)
+![The automations page](guide/assets/schedules.jpg)
 
 **When (the trigger):**
 
 | Trigger | What it does |
 | --- | --- |
 | **On a schedule** | A time such as "Weekdays at 07:00" or your own cron expression, in a time zone you choose. If the server was down, a missed run happens once, not many times. |
-| **When something happens** | A phase is completed, a card is finalized, an interest run is done, or a project is converted. |
+| **When something happens** | A phase is completed, a card is finalized, an interest run is done, a project is converted, a card **reaches a stage** of a workflow, a card of a workflow is **done**, or an **investigation is reported**. For the card events you can narrow it to a workflow, a stage, a card type or a field value. Each event runs an automation once. |
+| **When an intake ticket arrives** | The BA took a request into intake, from an issue poll or the intake chat. You can limit it to one source. |
 | **When an issue is labelled** | A GitHub or Jira issue gets a label you choose. One of your workstations checks, using its own login. |
 | **Only when I run it** | No automatic trigger. Use **Run now**. |
 
 **What (the action):**
 
-- **Create a card** from a template, with the date or the issue title in the name if you like.
+- **Create a card** from a template, with the date or the issue title in the name if you like. For automations that react to an event you can also **fill the card from the event**: each line sets the title, the context or any card field to a text with tokens such as `{card.ref}`, `{card.title}`, `{issue.title}`, `{issue.key}`, `{event}` and `{date}` (the editor lists them). What a token stands for is copied as it is and never read as a token again. Choose whether the card **starts as a draft** (it waits for the BA or you to specify it) or **queued** for the agents. Cards made this way are marked as made by an automation. An automation makes at most 20 cards an hour unless you set another limit; more are skipped and one notice on your desk tells you. **Repeats** can prevent a second card for the same source card or ticket, or with the same title.
 - **Run a regression** (a full test run).
 - **Ask DevOps** to do something on a workstation, or run repository hygiene.
 - **Ask the BA** to look at something and write a report on your desk.
@@ -605,11 +606,15 @@ A **schedule** is *a trigger and one action*. Open **Schedules** in the sidebar 
 - **Send a webhook** to Slack, Microsoft Teams, n8n, Zapier or your own code. Every request is signed so the receiver can check it came from you. Failed deliveries are retried a few times.
 - **E-mail a digest**: the floor report, a project summary or an interests digest, at a time you choose.
 
-![The schedule wizard](guide/assets/schedule-wizard.jpg)
+![The automation wizard](guide/assets/schedule-wizard.jpg)
 
-**History** on each schedule lists every run, what triggered it, what it did and why it failed if it did. **Send test** sends one test delivery for webhooks and e-mails.
+**History** on each automation lists every run, what triggered it, what it did and why it failed if it did. **Send test** sends one test delivery for webhooks and e-mails.
 
-**Who may do what.** A schedule inside a project can be made and run by any member of that project. A schedule that acts for the whole organization (BA tasks without a project, hygiene, the floor report digest) is for Owners and Admins. A suspended organization skips its schedules.
+**Who may do what.** An automation inside a project can be made and run by any member of that project; a member's event automations make **draft** cards only, and an Owner or Admin can also let one queue its cards directly. An automation that acts for the whole organization (BA tasks without a project, hygiene, the floor report digest) is for Owners and Admins. A suspended organization skips its automations.
+
+**From a workflow.** In the workflow builder, **Starts automatically when** lists the automations that react to cards of that workflow and opens the same form with the workflow already chosen.
+
+E-mail triggers and incoming webhooks are not available yet.
 
 **Intake and the outbox.** The **Intake** page (sidebar, Owners and Admins) is where you hand the BA a ticket: paste a Jira key or a GitHub issue address and the BA reads it, asks you about anything unclear, maps it to a project and drafts the cards. Updates the agents want to post back to the ticket (a comment, a resolution) wait on your desk as **Outbound update** items. You can edit them, approve or reject. Nothing is posted without your approval, and agent names and internal details are scrubbed from the text. Jira and GitHub logins stay on your workstation.
 
@@ -617,7 +622,7 @@ A **schedule** is *a trigger and one action*. Open **Schedules** in the sidebar 
 
 ![An outbound update waiting for approval](guide/assets/desk-outbound.jpg)
 
-> **In the app:** Help, "Schedules and integrations" (`/help/schedules-and-integrations`) and "Intake and outbox" (`/help/intake-and-outbox`).
+> **In the app:** Help, "Automations and integrations" (`/help/automations-and-integrations`; the old `/help/schedules-and-integrations` still works) and "Intake and outbox" (`/help/intake-and-outbox`).
 
 ### 4.9 Interests
 
@@ -845,7 +850,7 @@ A **Member** works inside the projects an Owner or Admin has added them to. You 
 | Pair **your own** workstation and hire agents on it, for projects you are on | Hire agents on someone else's workstation, or widen an agent's permissions |
 | Change or fire the agents **you** hired | Change other people's agents |
 | Chat with the agents allowed on your projects | See Costs, Intake, Plan and limits or the Invitations tab |
-| Create interests, and schedules inside your projects | Create schedules that act for the whole organization |
+| Create interests, and automations inside your projects (event automations make draft cards) | Create automations that act for the whole organization |
 | Turn on two-factor login, and leave the organization | Change roles or remove people |
 
 The **Members** list under **Organization** is visible to you, read-only.
@@ -1186,7 +1191,7 @@ Press **?** (when not typing in a field) for the list of shortcuts. **Ctrl+K** o
 | See my work | **Board** (sidebar, Work) |
 | Answer questions and approve things | **Desk** |
 | Hand the BA a ticket | **Intake** (Owners and Admins) |
-| Set up recurring jobs and integrations | **Schedules** |
+| Set up recurring jobs, event automations and integrations | **Automations** |
 | Create or change a project, or put the projects in priority order | **Projects** |
 | Follow a topic | **Interests** (Knowledge) |
 | Look up a past decision | **Ledger** (Knowledge) |

@@ -287,6 +287,8 @@ export const scheduleEvents = [
       trigger: ScheduleRunTrigger,
       /** The event the run answers (`<seq>` of the log, or `issue:<provider>:<key>`): a source runs a schedule once. */
       sourceKey: z.string().max(300).optional(),
+      /** Content key for `create_card.dedupe`: a second run with the same key creates no card. */
+      dedupeKey: z.string().max(500).optional(),
       /** Human label of the source: "PhaseCompleted WEB-P2", "issue owner/repo#12". */
       label: z.string().max(300).optional(),
       status: z.enum(['ok', 'failed', 'pending']),

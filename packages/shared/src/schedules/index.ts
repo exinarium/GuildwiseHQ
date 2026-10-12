@@ -13,7 +13,11 @@ export const SCHEDULE_EVENT_TRIGGERS: ReadonlyArray<{
   label: string;
   /** The domain event the server's trigger sweep matches (docs/ARCHITECTURE.md section 10.3). */
   eventType: string;
+  /** More domain events that count as the same trigger (a card reaching a stage by any route). */
+  alsoEventTypes?: string[];
   hint: string;
+  /** Takes the workflow/stage/filter conditions of the card triggers (`workflowKey`, `stageId`, `filter`). */
+  cardFilters?: 'stage' | 'workflow';
 }> = [
   {
     id: 'phase_completed',
@@ -39,7 +43,35 @@ export const SCHEDULE_EVENT_TRIGGERS: ReadonlyArray<{
     eventType: 'ProjectConverted',
     hint: 'A research project became a code project (or another stage).',
   },
+  {
+    id: 'card_stage_reached',
+    label: 'A card reaches a stage',
+    eventType: 'StageCompleted',
+    alsoEventTypes: ['CardSpecified', 'CardMovedByManager'],
+    hint: 'A card of a workflow moves into the stage you choose (by an agent, the BA or a manager).',
+    cardFilters: 'stage',
+  },
+  {
+    id: 'card_done',
+    label: 'A card of a workflow is done',
+    eventType: 'CardFinalized',
+    hint: 'A card of the workflow you choose was finalized and moved to Done.',
+    cardFilters: 'workflow',
+  },
+  {
+    id: 'investigation_reported',
+    label: 'An investigation is reported',
+    eventType: 'InvestigationReported',
+    hint: 'The architect recorded an investigation or design report for a card.',
+    cardFilters: 'workflow',
+  },
 ];
+
+/** Every domain event type a trigger name is read from. */
+export const eventTypesOf = (id: ScheduleEventName): string[] => {
+  const t = SCHEDULE_EVENT_TRIGGERS.find((e) => e.id === id);
+  return t ? [t.eventType, ...(t.alsoEventTypes ?? [])] : [];
+};
 
 export const scheduleEventLabel = (id: ScheduleEventName): string =>
   SCHEDULE_EVENT_TRIGGERS.find((e) => e.id === id)?.label ?? id;
@@ -215,7 +247,7 @@ export function describeEventTrigger(t: Extract<ScheduleTrigger, { kind: 'event'
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const isEmailAddress = (s: string): boolean => EMAIL_RE.test(s);
 
-/** Triggers the server fires today. The builder's newer kinds parse, but are refused on save until they are wired (WP6/WP7). */
+/** Triggers the server fires today. E-mail triggers (inbound mail, later) and incoming webhooks parse but are refused on save. */
 export function isTriggerImplemented(t: ScheduleTrigger): boolean {
   switch (t.kind) {
     case 'cron':
@@ -224,6 +256,9 @@ export function isTriggerImplemented(t: ScheduleTrigger): boolean {
       return true;
     case 'event':
       return SCHEDULE_EVENT_TRIGGERS.some((e) => e.id === t.event);
+    case 'intake_ticket':
+      // Intakes from e-mail arrive with inbound mail (later).
+      return t.source !== 'email';
     default:
       return false;
   }

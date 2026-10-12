@@ -46,11 +46,11 @@ import { actionLabel, describeAction, describeTrigger } from '../lib/schedules.t
 import { formatDateTime } from '../lib/time.ts';
 
 /**
- * Schedules: a trigger (a time, an event, a labelled issue or nothing) and one action (a card, a regression, a DevOps
+ * Automations (formerly Schedules): a trigger (a time, an event, a labelled issue or nothing) and one action (a card, a regression, a DevOps
  * request, a BA task, an integration). Runs, history and the webhook delivery log are on each schedule; the jobs the
  * system runs by itself are listed read-only at the end.
  */
-export function Schedules() {
+export function Automations() {
   const list = useScheduleList();
   const [wizard, setWizard] = useState<{ open: boolean; editing?: ScheduleDto }>({ open: false });
   const [secret, setSecret] = useState<{ name: string; value: string } | null>(null);
@@ -72,22 +72,22 @@ export function Schedules() {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4">
       <PageHeader
-        title="Schedules"
-        sub="Run something on a time, when an event happens, or when an issue gets a label. No agent ever polls: the server does."
+        title="Automations"
+        sub="Run something on a time, when an event happens (a card reaches a stage, a ticket arrives), or when an issue gets a label. No agent ever polls: the server does."
         actions={
           <Button variant="primary" data-testid="new-schedule" onClick={() => setWizard({ open: true })}>
             <Plus aria-hidden="true" className="size-4" />
-            New schedule
+            New automation
           </Button>
         }
       />
       {secret && <SecretNotice name={secret.name} value={secret.value} onClose={() => setSecret(null)} />}
-      {list.isPending && <ListSkeleton label="Loading schedules" rows={2} />}
+      {list.isPending && <ListSkeleton label="Loading automations" rows={2} />}
       <ErrorBox error={list.error} onRetry={() => list.refetch()} />
       {ordered.map(([group, items]) => (
         <section key={group} aria-label={group} className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold tracking-wide text-subtle uppercase">{group}</h2>
-          <ul className="flex flex-col gap-3" aria-label={`Schedules of ${group}`} data-testid="schedules">
+          <ul className="flex flex-col gap-3" aria-label={`Automations of ${group}`} data-testid="schedules">
             {items.map((s) => (
               <li key={s.id} data-testid={`schedule-${s.name}`}>
                 <ScheduleRow
@@ -104,11 +104,11 @@ export function Schedules() {
         <EmptyState
           data-testid="schedules-empty"
           icon={CalendarClock}
-          title="No schedules yet"
-          description="A schedule runs something for you: a weekly regression, a card when a phase is completed, a Slack message when a card is finalized, a morning e-mail digest, or new GitHub issues taken into intake."
+          title="No automations yet"
+          description="An automation runs something for you: a weekly regression, a card when a phase is completed, a Slack message when a card is finalized, a morning e-mail digest, or new GitHub issues taken into intake."
           action={
             <Button variant="primary" onClick={() => setWizard({ open: true })}>
-              Create the first schedule
+              Create the first automation
             </Button>
           }
         />
@@ -320,7 +320,7 @@ function ScheduleRow({
               onClick={() =>
                 patch.mutate(
                   { id: s.id, body: { enabled: !s.enabled } },
-                  { onSuccess: () => toast.success(s.enabled ? 'Schedule paused' : 'Schedule resumed') },
+                  { onSuccess: () => toast.success(s.enabled ? 'Automation paused' : 'Automation resumed') },
                 )
               }
             >
@@ -351,15 +351,15 @@ function ScheduleRow({
             <ConfirmDialog
               open={confirming}
               onOpenChange={setConfirming}
-              title={`Delete the schedule "${s.name}"?`}
+              title={`Delete the automation "${s.name}"?`}
               description="It stops running and its history goes with it. Cards it already emitted are kept."
-              confirmLabel="Delete schedule"
+              confirmLabel="Delete automation"
               pending={del.isPending}
               onConfirm={() =>
                 del.mutate(s.id, {
                   onSuccess: () => {
                     setConfirming(false);
-                    toast.success('Schedule deleted');
+                    toast.success('Automation deleted');
                   },
                   onError: () => setConfirming(false),
                 })

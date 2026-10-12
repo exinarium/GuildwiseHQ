@@ -101,22 +101,22 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'phases#phase-done',
   },
-  '/schedules': {
-    title: 'Schedules',
+  '/automations': {
+    title: 'Automations',
     intro:
-      'Automate work with a trigger and an action: at a time, when something happens, or when an issue gets a label.',
+      'Automate work with a trigger and an action: at a time, when something happens (a card reaches a stage, a ticket arrives), or when an issue gets a label.',
     controls: [
       {
-        name: 'New schedule',
+        name: 'New automation',
         text: 'Open the three-step wizard: When (the trigger), What (the action) and Details.',
       },
       {
-        name: 'Schedule list',
-        text: 'Your schedules grouped by project, with the whole organization first. Each shows its trigger, next run and last run.',
+        name: 'Automation list',
+        text: 'Your automations grouped by project, with the whole organization first. Each shows its trigger, next run and last run.',
       },
       {
         name: 'Run now',
-        text: 'Run a schedule once, straight away.',
+        text: 'Run an automation once, straight away.',
       },
       {
         name: 'Send test',
@@ -128,14 +128,14 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Edit, Pause or Resume, Delete',
-        text: 'Change a schedule, switch it off and on, or remove it. Schedules for the whole organization are changed by the Owner and Admins only.',
+        text: 'Change an automation, switch it off and on, or remove it. Automations for the whole organization are changed by the Owner and Admins only.',
       },
       {
         name: 'New secret',
         text: 'For webhooks: replace the signing secret. The new one is shown once.',
       },
     ],
-    article: 'schedules-and-integrations#triggers',
+    article: 'automations-and-integrations#triggers',
   },
   '/interests': {
     title: 'Interests',

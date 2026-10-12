@@ -17,6 +17,7 @@ import {
   Mail,
   Radio,
   Tag,
+  Ticket,
   Webhook,
   Wrench,
 } from 'lucide-react';
@@ -45,10 +46,12 @@ import { CardFormFields } from '../CardFormFields.tsx';
 import { HelpHint } from '../help/HelpHint.tsx';
 import { cx } from '../ui/cx.ts';
 import { Button, Callout, Dialog, ErrorBox, Select, Stepper, TextArea, TextInput, useToast } from '../ui.tsx';
+import { MappingEditor } from './MappingEditor.tsx';
 
 const TRIGGER_ICON: Record<TriggerKind, LucideIcon> = {
   cron: CalendarClock,
   event: Radio,
+  intake_ticket: Ticket,
   issue_labelled: Tag,
   manual: Hand,
 };
@@ -130,10 +133,13 @@ export function ScheduleWizard({
   onOpenChange,
   editing,
   onCreated,
+  initial,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editing?: ScheduleDto | undefined;
+  /** A new automation starts from these values (the builder's "Starts automatically when" section). */
+  initial?: Partial<WizardState> | undefined;
   /** A new webhook schedule's signing secret, shown once by the caller. */
   onCreated?: (created: CreateScheduleResponse) => void;
 }) {
@@ -144,6 +150,7 @@ export function ScheduleWizard({
       onOpenChange={onOpenChange}
       editing={editing}
       onCreated={onCreated}
+      initial={initial}
     />
   ) : null;
 }
@@ -152,10 +159,12 @@ function WizardDialog({
   onOpenChange,
   editing,
   onCreated,
+  initial,
 }: {
   onOpenChange: (open: boolean) => void;
   editing: ScheduleDto | undefined;
   onCreated: ((c: CreateScheduleResponse) => void) | undefined;
+  initial: Partial<WizardState> | undefined;
 }) {
   const me = useMe().data;
   const projects = useProjects();
@@ -164,7 +173,9 @@ function WizardDialog({
   const patch = usePatchSchedule();
   const toast = useToast();
   const [step, setStep] = useState(editing ? 2 : 0);
-  const [s, setS] = useState<WizardState>(() => (editing ? stateFromSchedule(editing) : emptyWizard()));
+  const [s, setS] = useState<WizardState>(() =>
+    editing ? stateFromSchedule(editing) : emptyWizard(initial),
+  );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const isManager = me?.activeOrg?.role === 'owner' || me?.activeOrg?.role === 'admin';
   const myWorkstations = (workstations.data ?? []).filter((w) => w.status === 'active');
@@ -201,7 +212,16 @@ function WizardDialog({
   /** The trigger step's own fields, checked before moving on. */
   const triggerOk = (): boolean => {
     const r = buildScheduleRequest({ ...s, name: s.name || 'x' }, { workflow, mockUi: false });
-    const mine = ['cron', 'timezone', 'labelQuery', 'label', 'workstationId'];
+    const mine = [
+      'cron',
+      'timezone',
+      'labelQuery',
+      'label',
+      'workstationId',
+      'eventWorkflowKey',
+      'eventStageId',
+      'filterEquals',
+    ];
     const e = Object.fromEntries(Object.entries(r.errors).filter(([k]) => mine.includes(k)));
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -217,7 +237,18 @@ function WizardDialog({
     if (!r.body) {
       // Take the user to the step that holds the first error.
       const first = Object.keys(r.errors)[0] ?? '';
-      if (['cron', 'timezone', 'labelQuery', 'label'].includes(first)) setStep(0);
+      if (
+        [
+          'cron',
+          'timezone',
+          'labelQuery',
+          'label',
+          'eventWorkflowKey',
+          'eventStageId',
+          'filterEquals',
+        ].includes(first)
+      )
+        setStep(0);
       return;
     }
     if (editing) {
@@ -233,7 +264,7 @@ function WizardDialog({
         },
         {
           onSuccess: () => {
-            toast.success('Schedule saved');
+            toast.success('Automation saved');
             onOpenChange(false);
           },
         },
@@ -241,7 +272,7 @@ function WizardDialog({
     } else {
       create.mutate(r.body, {
         onSuccess: (created) => {
-          toast.success('Schedule created');
+          toast.success('Automation created');
           onCreated?.(created);
           onOpenChange(false);
         },
@@ -259,7 +290,7 @@ function WizardDialog({
 
   const header = (
     <div className="mb-4">
-      <Stepper steps={STEPS} currentId={STEPS[step]?.id ?? 'trigger'} label="Schedule steps" />
+      <Stepper steps={STEPS} currentId={STEPS[step]?.id ?? 'trigger'} label="Automation steps" />
     </div>
   );
 
@@ -291,7 +322,7 @@ function WizardDialog({
           disabled={blockedOrgLevel}
           onClick={submit}
         >
-          {editing ? 'Save changes' : 'Create schedule'}
+          {editing ? 'Save changes' : 'Create automation'}
         </Button>
       )}
     </>
@@ -302,7 +333,7 @@ function WizardDialog({
       open
       onOpenChange={onOpenChange}
       size="xl"
-      title={editing ? `Edit "${editing.name}"` : 'New schedule'}
+      title={editing ? `Edit "${editing.name}"` : 'New automation'}
       description="Choose when it runs, what it does, then fill in the details."
       footer={footer}
     >
@@ -312,9 +343,10 @@ function WizardDialog({
           <div className="flex flex-col gap-4">
             <p className="-mb-2 flex items-center gap-1 text-sm font-medium text-fg">
               When should it run?
-              <HelpHint article="schedules-and-integrations#triggers" label="About schedule triggers">
-                The trigger is what starts the schedule: a time of day, something happening in a project, a
-                labelled issue or a button you press. A webhook is an action: it is what a schedule sends.
+              <HelpHint article="automations-and-integrations#triggers" label="About automation triggers">
+                The trigger is what starts the automation: a time of day, something happening in a project, an
+                intake ticket, a labelled issue or a button you press. A webhook is an action: it is what an
+                automation sends.
               </HelpHint>
             </p>
             <TileGrid
@@ -340,7 +372,7 @@ function WizardDialog({
           <div className="flex flex-col gap-3">
             <p className="flex items-center gap-1 text-sm font-medium text-fg">
               What should it do?
-              <HelpHint article="schedules-and-integrations#actions" label="About schedule actions">
+              <HelpHint article="automations-and-integrations#actions" label="About automation actions">
                 The action is the work done each time the schedule fires, for example creating a card or
                 posting an update. Some actions only fit certain triggers.
               </HelpHint>
@@ -389,7 +421,7 @@ function WizardDialog({
             />
             {blockedOrgLevel && (
               <Callout tone="warning" data-testid="org-level-note">
-                This schedule acts for the whole organization, so only the Owner and Admins can save it.
+                This automation acts for the whole organization, so only the Owner and Admins can save it.
                 Choose a project to tie it to one, or ask an Admin.
               </Callout>
             )}
@@ -414,6 +446,7 @@ function TriggerFields({
   workstations: Array<{ id: string; name: string }>;
   projects: Array<{ id: string; key: string; name: string }>;
 }) {
+  const cardFilters = SCHEDULE_EVENT_TRIGGERS.find((x) => x.id === s.event)?.cardFilters;
   if (s.triggerKind === 'manual')
     return <p className="text-sm text-muted">It never runs by itself. Use "Run now" on its card.</p>;
   const cronFields = (
@@ -452,6 +485,21 @@ function TriggerFields({
     </>
   );
   if (s.triggerKind === 'cron') return <div className="grid gap-4 sm:grid-cols-2">{cronFields}</div>;
+  if (s.triggerKind === 'intake_ticket')
+    return (
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Select
+          label="Where from"
+          value={s.intakeSource}
+          onChange={(e) => set({ intakeSource: e.target.value as WizardState['intakeSource'] })}
+          hint="A ticket the BA takes into intake: an issue poll, or a request typed in the intake chat."
+        >
+          <option value="">Any source</option>
+          <option value="issues">Issues (GitHub or Jira)</option>
+          <option value="web">The intake chat</option>
+        </Select>
+      </div>
+    );
   if (s.triggerKind === 'event')
     return (
       <div className="grid gap-4 sm:grid-cols-2">
@@ -480,6 +528,9 @@ function TriggerFields({
             </option>
           ))}
         </Select>
+        {cardFilters && (
+          <CardEventFilters s={s} set={set} errors={errors} withStage={cardFilters === 'stage'} />
+        )}
       </div>
     );
   return (
@@ -520,6 +571,144 @@ function TriggerFields({
         error={errors.label}
       />
       {cronFields}
+    </div>
+  );
+}
+
+/** Workflow, stage and filter of the card events ("a card reaches a stage", "a card is done", "an investigation is reported"). */
+function CardEventFilters({
+  s,
+  set,
+  errors,
+  withStage,
+}: {
+  s: WizardState;
+  set: (p: Partial<WizardState>) => void;
+  errors: Record<string, string>;
+  withStage: boolean;
+}) {
+  const workflows = useWorkflows();
+  const latest = new Map<string, NonNullable<typeof workflows.data>[number]>();
+  for (const w of workflows.data ?? []) {
+    const cur = latest.get(w.definition.key);
+    if (!cur || w.definition.version > cur.definition.version) latest.set(w.definition.key, w);
+  }
+  const chosen = latest.get(s.eventWorkflowKey)?.definition;
+  return (
+    <>
+      <Select
+        label="Workflow"
+        value={s.eventWorkflowKey}
+        onChange={(e) => set({ eventWorkflowKey: e.target.value, eventStageId: '', filterCardType: '' })}
+        error={errors.eventWorkflowKey}
+        hint={withStage ? undefined : 'Leave empty for cards of any workflow.'}
+      >
+        <option value="">{withStage ? 'Choose a workflow' : 'Any workflow'}</option>
+        {[...latest.values()].map((w) => (
+          <option key={w.definition.key} value={w.definition.key}>
+            {w.definition.name ?? w.definition.key}
+          </option>
+        ))}
+      </Select>
+      {withStage && (
+        <Select
+          label="Stage reached"
+          value={s.eventStageId}
+          onChange={(e) => set({ eventStageId: e.target.value })}
+          error={errors.eventStageId}
+          disabled={!chosen}
+        >
+          <option value="">Choose a stage</option>
+          {(chosen?.stages ?? []).map((st) => (
+            <option key={st.id} value={st.id}>
+              {st.label || st.id}
+            </option>
+          ))}
+        </Select>
+      )}
+      <Select
+        label="Only card type"
+        value={s.filterCardType}
+        onChange={(e) => set({ filterCardType: e.target.value })}
+      >
+        <option value="">Any type</option>
+        {(chosen?.cardTypes ?? []).map((t) => (
+          <option key={t} value={t}>
+            {t}
+          </option>
+        ))}
+      </Select>
+      <div className="grid grid-cols-2 gap-2">
+        <TextInput
+          label="Only when field"
+          hint="Optional, e.g. constraints"
+          value={s.filterField}
+          onChange={(e) => set({ filterField: e.target.value })}
+        />
+        <TextInput
+          label="equals"
+          value={s.filterEquals}
+          onChange={(e) => set({ filterEquals: e.target.value })}
+          error={errors.filterEquals}
+        />
+      </div>
+    </>
+  );
+}
+
+/** How an automation's cards are made: the field mapping, the state they start in, and the limits. */
+function AutomationCardOptions({
+  s,
+  set,
+  errors,
+  isManager,
+}: {
+  s: WizardState;
+  set: (p: Partial<WizardState>) => void;
+  errors: Record<string, string>;
+  isManager: boolean;
+}) {
+  return (
+    <div
+      className="flex flex-col gap-4 rounded-panel border border-line p-3"
+      data-testid="automation-card-options"
+    >
+      <MappingEditor rows={s.mapping} onChange={(mapping) => set({ mapping })} error={errors.mapping} />
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Select
+          label="The card starts as"
+          value={isManager ? s.start : 'draft'}
+          disabled={!isManager}
+          onChange={(e) => set({ start: e.target.value as WizardState['start'] })}
+          hint={
+            isManager
+              ? 'A draft waits for the BA or you to specify it. Queued goes straight to the agents.'
+              : 'Members can set up automations that make drafts only.'
+          }
+        >
+          {isManager && <option value="">Queued (the default)</option>}
+          <option value="draft">Draft for specifying</option>
+          {isManager && <option value="queued">Queued for the agents</option>}
+        </Select>
+        <TextInput
+          label="At most per hour"
+          hint="Default 20. More are skipped, with one notice on your desk."
+          inputMode="numeric"
+          value={s.ratePerHour}
+          onChange={(e) => set({ ratePerHour: e.target.value })}
+          error={errors.ratePerHour}
+        />
+        <Select
+          label="Repeats"
+          value={s.dedupe}
+          onChange={(e) => set({ dedupe: e.target.value as WizardState['dedupe'] })}
+          hint="Avoid a second card for the same thing."
+        >
+          <option value="none">Allow</option>
+          <option value="thread">One card per source card or ticket</option>
+          <option value="subject_from">One card per title</option>
+        </Select>
+      </div>
     </div>
   );
 }
@@ -644,6 +833,9 @@ function ActionFields({
               <p className="text-xs text-subtle">
                 Use {'{date}'} or {'{week}'} in the title; without them the date is added.
               </p>
+              {(s.triggerKind === 'event' || s.triggerKind === 'intake_ticket') && (
+                <AutomationCardOptions s={s} set={set} errors={errors} isManager={isManager} />
+              )}
             </div>
           )}
         </>

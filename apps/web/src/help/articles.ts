@@ -50,7 +50,15 @@ export const ARTICLES: Article[] = Object.entries(FILES)
   .map(([path, src]) => buildArticle(/([^/]+)\.md$/.exec(path)?.[1] ?? path, src))
   .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
 
-export const articleBySlug = (slug: string): Article | undefined => ARTICLES.find((a) => a.slug === slug);
+/** Slugs an article had before it was renamed: old links, bookmarks and the guide keep working. */
+export const ARTICLE_ALIASES: Record<string, string> = {
+  'schedules-and-integrations': 'automations-and-integrations',
+};
+
+export const articleBySlug = (slug: string): Article | undefined => {
+  const wanted = ARTICLE_ALIASES[slug] ?? slug;
+  return ARTICLES.find((a) => a.slug === wanted);
+};
 
 /** The Help centre of the current area: platform administrators have their own, outside the work shell. */
 export const helpBase = (pathname: string): string =>

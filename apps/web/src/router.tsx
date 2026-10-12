@@ -8,6 +8,7 @@ import { PageSkeleton } from './components/ui.tsx';
 import { getLastProjectKey } from './lib/lastProject.ts';
 import { AcceptInvite } from './pages/AcceptInvite.tsx';
 import { Agents } from './pages/Agents.tsx';
+import { Automations } from './pages/Automations.tsx';
 import { BILLING_GATE_PATH } from './pages/BillingGate.tsx';
 import { Board } from './pages/Board.tsx';
 import { CardDetail } from './pages/CardDetail.tsx';
@@ -44,7 +45,6 @@ import { PlatformSupportTicket } from './pages/platform/PlatformSupportTicket.ts
 import { PlatformUsers } from './pages/platform/PlatformUsers.tsx';
 import { ResearchTab } from './pages/ResearchTab.tsx';
 import { ResetPassword } from './pages/ResetPassword.tsx';
-import { Schedules } from './pages/Schedules.tsx';
 import { Settings } from './pages/Settings.tsx';
 import { Signup } from './pages/Signup.tsx';
 import { Vaults } from './pages/Vaults.tsx';
@@ -93,7 +93,8 @@ export const routes = [
       { path: '/p/:projectKey/feed', element: <InterestRedirect tab="digest" /> },
       { path: '/p/:projectKey/research', element: <ResearchTab /> },
       { path: '/p/:projectKey/phases/:number', element: <Phase /> },
-      { path: '/schedules', element: <Schedules /> },
+      { path: '/automations', element: <Automations /> },
+      { path: '/schedules', element: <Navigate to="/automations" replace /> },
       { path: '/interests', element: <Interests /> },
       { path: '/interests/:id', element: <InterestDetail /> },
       { path: '/cards/new', element: <CardNew /> },

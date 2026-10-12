@@ -426,6 +426,7 @@ function BuilderSession({
           serverIssues={serverIssues}
           readOnly={readOnly}
           showWorktree={showWorktree}
+          autoStart
           onValidation={setValidation}
           subworkflowLookup={subLookup}
           renderSubworkflowEditor={(ctx) => (

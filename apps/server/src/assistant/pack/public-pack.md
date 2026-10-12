@@ -42,7 +42,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 - Intake from Jira and GitHub: the BA maps incoming tickets to projects and drafts cards with specs and test plans.
 - Outbox: posts to Jira, GitHub or email wait for your approval before they go out.
 - Org design: roles, departments and workflows, designed in a chat with the BA and approved by the Owner.
-- Standing orders and schedules: recurring instructions and work that starts by itself.
+- Standing orders and automations (formerly schedules): recurring instructions and work that starts by itself, on a time or when something happens in a workflow.
 - Vaults: knowledge repositories (git) for the organization and per project that sync to your workstations.
 - A DevOps engineer agent on every workstation, free: it installs tools and the project's packages, keeps repositories tidy (unsaved edits are kept on a separate saved-work branch, never pushed to main), tries to fix conflicting changes itself, and runs commands, Docker builds and deploys you ask for in a chat. It works as you, outside the sandbox the other agents use; privileged actions on a team member's machine need an Owner or Admin and the machine's user to agree.
 - Cards explain themselves on the board: why they are blocked, a repository problem, or a budget that is nearly used up, each with a link to fix it.
@@ -229,14 +229,15 @@ Topics you watch, who can see them, creating and editing, run and delivery sched
 - Taste rules: Besides ratings that grow from your feedback, write explicit rules under Explicit rules on the Taste tab:
 - Archiving: Under More actions, Archive stops the interest's runs and hides it. Restore brings it back with a fresh schedule. Delete permanently (archived interests only) removes its cards, items, ratings and run log. The vault folder is never touched.
 
-### Schedules and integrations
-Creating schedules, triggers and actions, feeds, how scans work, integrations and webhooks.
-- Schedules: To create a schedule:
-- Triggers: A trigger is when the schedule fires:
+### Automations and integrations
+Creating automations (formerly schedules), triggers and actions, feeds, how scans work, integrations and webhooks.
+- Automations: To create an automation:
+- Triggers: A trigger is when the automation fires:
 - Actions: An action is what happens:
 - How a scan works: When an interest runs, a scout agent collects candidates, then a curator picks the best N overall (any mix of articles, videos and podcasts). The server:
-- Integrations and webhooks: Schedules can integrate with GitHub, Jira, Slack, Microsoft Teams, n8n, Zapier and more.
-- History: Click History on a schedule to see every run: when, what triggered it, what it did, and the reason if it failed. For webhooks and e-mails, see the Deliveries log with every try, HTTP status and duration.
+- Integrations and webhooks: Automations can integrate with GitHub, Jira, Slack, Microsoft Teams, n8n, Zapier and more.
+- History: Click History on an automation to see every run: when, what triggered it, what it did, and the reason if it failed. For webhooks and e-mails, see the Deliveries log with every try, HTTP status and duration.
+- Starting a workflow automatically: In the workflow builder, Starts automatically when lists the automations that create cards in that workflow and lets you add one. It opens the same automation form with the workflow already chosen.
 
 ### Budgets and costs
 Where spend shows, monthly budgets, budget limit handling, override and currency.

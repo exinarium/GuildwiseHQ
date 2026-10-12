@@ -11,13 +11,14 @@ import {
   type ScheduleDto,
   type ScheduleEventName,
   type ScheduleTrigger,
+  unknownMappingTokens,
   type WebhookFormat,
   type WorkflowDefinition,
 } from '@aom/shared';
 import { buildCardRequest, type CardFormValues, emptyForm, fieldToText, formFieldList } from './cardForm.ts';
 import { defaultTimezone, describeCron } from './feeds.ts';
 
-export type TriggerKind = 'cron' | 'event' | 'issue_labelled' | 'manual';
+export type TriggerKind = 'cron' | 'event' | 'intake_ticket' | 'issue_labelled' | 'manual';
 export type ActionTile =
   | 'create_card'
   | 'regression_run'
@@ -34,7 +35,12 @@ export const TRIGGER_TILES: Array<{ id: TriggerKind; label: string; description:
     id: 'event',
     label: 'When something happens',
     description:
-      'A phase is completed, a card is finalized, an interest run is done or a project is converted.',
+      'A phase is completed, a card reaches a stage or is done, an investigation is reported, an interest run is done or a project is converted.',
+  },
+  {
+    id: 'intake_ticket',
+    label: 'When an intake ticket arrives',
+    description: 'A request is taken into intake with the BA, from an issue poll or the intake chat.',
   },
   {
     id: 'issue_labelled',
@@ -44,7 +50,7 @@ export const TRIGGER_TILES: Array<{ id: TriggerKind; label: string; description:
   {
     id: 'manual',
     label: 'Only when I run it',
-    description: 'No automatic trigger: use "Run now" on the Schedules page.',
+    description: 'No automatic trigger: use "Run now" on the Automations page.',
   },
 ];
 
@@ -138,7 +144,13 @@ export function describeTrigger(t: ScheduleTrigger): string {
       return 'Only when run by hand';
     case 'event': {
       const e = SCHEDULE_EVENT_TRIGGERS.find((x) => x.id === t.event);
-      return `When ${(e?.label ?? t.event).toLowerCase()}`;
+      const where = [
+        t.workflowKey ? `workflow ${t.workflowKey}` : '',
+        t.stageId ? `stage ${t.stageId}` : '',
+        t.filter?.cardType ? `type ${t.filter.cardType}` : '',
+        ...(t.filter?.fieldEquals ?? []).map((f) => `${f.field} = ${String(f.equals)}`),
+      ].filter(Boolean);
+      return `When ${(e?.label ?? t.event).toLowerCase()}${where.length ? ` (${where.join(', ')})` : ''}`;
     }
     case 'issue_labelled':
       return `When a ${t.provider === 'github' ? 'GitHub' : 'Jira'} issue in ${t.query} gets the label "${t.label}"`;
@@ -147,7 +159,7 @@ export function describeTrigger(t: ScheduleTrigger): string {
     case 'email_reply':
       return 'When a reply to a card e-mail arrives';
     case 'intake_ticket':
-      return 'When an intake ticket is created';
+      return `When an intake ticket is created${t.source ? ` (${t.source === 'issues' ? 'from issues' : 'from the intake chat'})` : ''}`;
     case 'webhook_in':
       return 'When an incoming webhook is called';
   }
@@ -191,6 +203,14 @@ export interface WizardState {
   timezone: string;
   event: ScheduleEventName;
   eventProjectId: string;
+  /** Card events: the workflow (and for "reaches a stage" the stage) the card must be in. */
+  eventWorkflowKey: string;
+  eventStageId: string;
+  filterCardType: string;
+  filterField: string;
+  filterEquals: string;
+  /** `intake_ticket`: '' = any source. */
+  intakeSource: '' | 'issues' | 'web';
   provider: 'github' | 'jira';
   labelQuery: string;
   label: string;
@@ -200,6 +220,12 @@ export interface WizardState {
   workstationId: string;
   // card
   card: CardFormValues;
+  /** Field mapping of an automation's card: target (`title`, `context`, a field key) <- text with {tokens}. */
+  mapping: Array<{ target: string; text: string }>;
+  /** '' = as the server decides (queued, or draft for members). */
+  start: '' | 'draft' | 'queued';
+  ratePerHour: string;
+  dedupe: 'none' | 'thread' | 'subject_from';
   platform: 'web' | 'mobile' | 'both';
   // devops
   devopsText: string;
@@ -231,6 +257,12 @@ export const emptyWizard = (over: Partial<WizardState> = {}): WizardState => ({
   timezone: defaultTimezone(),
   event: 'phase_completed',
   eventProjectId: '',
+  eventWorkflowKey: '',
+  eventStageId: '',
+  filterCardType: '',
+  filterField: '',
+  filterEquals: '',
+  intakeSource: '',
   provider: 'github',
   labelQuery: '',
   label: '',
@@ -238,6 +270,10 @@ export const emptyWizard = (over: Partial<WizardState> = {}): WizardState => ({
   projectId: '',
   workstationId: '',
   card: emptyForm(),
+  mapping: [],
+  start: '',
+  ratePerHour: '',
+  dedupe: 'none',
   platform: 'web',
   devopsText: '',
   hygiene: false,
@@ -262,7 +298,10 @@ export function stateFromSchedule(s: ScheduleDto, workflow?: WorkflowDefinition)
   const st = emptyWizard({ name: s.name, enabled: s.enabled, tile: actionTileOf(s.action) });
   const t = s.trigger;
   // The newer trigger kinds are refused on save until the automations page supports them (workflow builder WP6).
-  st.triggerKind = t.kind === 'cron' || t.kind === 'event' || t.kind === 'issue_labelled' ? t.kind : 'manual';
+  st.triggerKind =
+    t.kind === 'cron' || t.kind === 'event' || t.kind === 'issue_labelled' || t.kind === 'intake_ticket'
+      ? t.kind
+      : 'manual';
   if (t.kind === 'cron') {
     st.cron = t.cron;
     st.timezone = t.timezone;
@@ -270,6 +309,14 @@ export function stateFromSchedule(s: ScheduleDto, workflow?: WorkflowDefinition)
   } else if (t.kind === 'event') {
     st.event = t.event;
     st.eventProjectId = t.projectId ?? '';
+    st.eventWorkflowKey = t.workflowKey ?? '';
+    st.eventStageId = t.stageId ?? '';
+    st.filterCardType = t.filter?.cardType ?? '';
+    const f = t.filter?.fieldEquals?.[0];
+    st.filterField = f?.field ?? '';
+    st.filterEquals = f ? String(f.equals) : '';
+  } else if (t.kind === 'intake_ticket') {
+    st.intakeSource = t.source === 'issues' || t.source === 'web' ? t.source : '';
   } else if (t.kind === 'issue_labelled') {
     st.provider = t.provider;
     st.workstationId = t.workstationId;
@@ -285,6 +332,12 @@ export function stateFromSchedule(s: ScheduleDto, workflow?: WorkflowDefinition)
     if (a.kind === 'regression_run')
       st.platform = (a.template.fields.platform as WizardState['platform']) ?? 'web';
     else st.card = formFromTemplate(a.template, workflow);
+    if (a.kind === 'create_card') {
+      st.mapping = Object.entries(a.template.mapping ?? {}).map(([target, text]) => ({ target, text }));
+      st.start = a.template.start ?? '';
+      st.ratePerHour = a.ratePerHour ? String(a.ratePerHour) : '';
+      st.dedupe = a.dedupe === 'thread' || a.dedupe === 'subject_from' ? a.dedupe : 'none';
+    }
   } else if (a.kind === 'devops_request') {
     st.workstationId = a.workstationId;
     st.devopsText = a.text;
@@ -336,10 +389,24 @@ export interface BuildContext {
   myEmail?: string;
 }
 
+/** `true`/`false` and numbers compare as such; anything else as text. */
+function coerceValue(text: string): unknown {
+  if (text === 'true') return true;
+  if (text === 'false') return false;
+  return text !== '' && Number.isFinite(Number(text)) ? Number(text) : text;
+}
+
+/** The mapping rows as the request's record (blank rows dropped; a repeated target keeps the last). */
+export function mappingOf(rows: WizardState['mapping']): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  for (const r of rows) if (r.target.trim() && r.text.trim()) out[r.target.trim()] = r.text;
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** Validates the wizard and builds the request. Server rules (cron syntax, project access) are the server's to judge. */
 export function buildScheduleRequest(s: WizardState, c: BuildContext): BuildResult {
   const errors: Record<string, string> = {};
-  if (!s.name.trim()) errors.name = 'Give the schedule a name';
+  if (!s.name.trim()) errors.name = 'Give the automation a name';
 
   let trigger: ScheduleTrigger | null = null;
   const expression =
@@ -354,8 +421,34 @@ export function buildScheduleRequest(s: WizardState, c: BuildContext): BuildResu
   if (s.triggerKind === 'cron')
     trigger = { kind: 'cron', cron: expression, timezone: s.timezone.trim() || 'UTC' };
   else if (s.triggerKind === 'manual') trigger = { kind: 'manual' };
-  else if (s.triggerKind === 'event')
-    trigger = { kind: 'event', event: s.event, ...(s.eventProjectId ? { projectId: s.eventProjectId } : {}) };
+  else if (s.triggerKind === 'event') {
+    const def = SCHEDULE_EVENT_TRIGGERS.find((e) => e.id === s.event);
+    const cardEvent = !!def?.cardFilters;
+    if (def?.cardFilters === 'stage') {
+      if (!s.eventWorkflowKey) errors.eventWorkflowKey = 'Choose the workflow';
+      if (!s.eventStageId) errors.eventStageId = 'Choose the stage the card must reach';
+    }
+    if (s.filterField.trim() && !s.filterEquals.trim()) errors.filterEquals = 'Enter the value to compare';
+    const fieldEquals = s.filterField.trim()
+      ? [{ field: s.filterField.trim(), equals: coerceValue(s.filterEquals.trim()) }]
+      : [];
+    const filter =
+      cardEvent && (s.filterCardType || fieldEquals.length)
+        ? {
+            ...(s.filterCardType ? { cardType: s.filterCardType } : {}),
+            ...(fieldEquals.length ? { fieldEquals } : {}),
+          }
+        : undefined;
+    trigger = {
+      kind: 'event',
+      event: s.event,
+      ...(s.eventProjectId ? { projectId: s.eventProjectId } : {}),
+      ...(cardEvent && s.eventWorkflowKey ? { workflowKey: s.eventWorkflowKey } : {}),
+      ...(def?.cardFilters === 'stage' && s.eventStageId ? { stageId: s.eventStageId } : {}),
+      ...(filter ? { filter } : {}),
+    };
+  } else if (s.triggerKind === 'intake_ticket')
+    trigger = { kind: 'intake_ticket', ...(s.intakeSource ? { source: s.intakeSource } : {}) };
   else {
     if (!s.workstationId) errors.workstationId = 'Choose the workstation that polls';
     if (!s.labelQuery.trim())
@@ -381,7 +474,14 @@ export function buildScheduleRequest(s: WizardState, c: BuildContext): BuildResu
       if (c.workflow) {
         const r = buildCardRequest(c.workflow, s.card, false, c.mockUi);
         for (const [k, m] of Object.entries(r.errors)) errors[`card.${k}`] = m;
-        if (projectId && Object.keys(r.errors).length === 0)
+        const mapping = mappingOf(s.mapping);
+        const bad = unknownMappingTokens(mapping);
+        if (bad.length) errors.mapping = `Unknown token ${bad.map((b) => `{${b}}`).join(', ')}`;
+        const rate = s.ratePerHour.trim() ? Number(s.ratePerHour) : undefined;
+        if (rate !== undefined && (!Number.isInteger(rate) || rate < 1 || rate > 1000))
+          errors.ratePerHour = 'A whole number from 1 to 1000';
+        if (projectId && Object.keys(errors).length === 0) {
+          const automation = s.triggerKind === 'event' || s.triggerKind === 'intake_ticket';
           action = {
             kind: 'create_card',
             projectId,
@@ -390,8 +490,13 @@ export function buildScheduleRequest(s: WizardState, c: BuildContext): BuildResu
               cardType: r.cardType,
               fields: r.fields,
               ...(r.priority ? { priority: r.priority } : {}),
+              ...(automation && mapping ? { mapping } : {}),
+              ...(automation && s.start ? { start: s.start } : {}),
             },
+            ...(automation && rate ? { ratePerHour: rate } : {}),
+            ...(automation && s.dedupe !== 'none' ? { dedupe: s.dedupe } : {}),
           };
+        }
       } else if (projectId) errors['card.title'] = 'Loading the project workflow';
       break;
     }
