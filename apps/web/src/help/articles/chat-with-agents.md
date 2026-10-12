@@ -25,6 +25,12 @@ Rights are checked on every message: if you are removed from the project, you ca
 
 **Note**: agents may write notes and drafts in their own scratch folder during a chat. They cannot change your repositories, the vault or their own configuration from a chat.
 
+## What the agent can read {#what-it-can-read}
+
+In a chat about a project, the agent can **read** (never change) the project's own repositories when they are cloned on its workstation, plus the project's **reference repositories**. In a chat about a card, it reads the card's work folder if that is on the workstation, plus the reference repositories; if the card has not been started there, it reads the project's repositories instead. Secret files such as `.env` files and keys stay blocked, and so does everything else on the machine.
+
+To let agents compare or look at another repository, the project owner adds it under **Reference repositories** in the project settings (see [Projects](/help/projects#reference-repos)).
+
 **The DevOps engineer is different.** A chat with the DevOps engineer works on your machine as you: when you ask it to install something, build a Docker image or deploy, it does it. It can also turn a longer instruction into a tracked DevOps task. The quickest way in is **Ask DevOps** in the top bar, which attaches the page you are on. See [DevOps and repository hygiene](/help/devops-and-hygiene#devops-engineer).
 
 ## Asking the BA {#asking-the-ba}

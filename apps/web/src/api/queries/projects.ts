@@ -204,6 +204,15 @@ export function useSetMergePolicy(id: string) {
   });
 }
 
+/** The owner picks the reference repositories (the whole list); the project's agents read them read-only. */
+export function useSetReferenceRepos(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (repoIds: string[]) => put(`/projects/${id}/reference-repos`, { repoIds }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', id] }),
+  });
+}
+
 /** The optional cap on shifts running at once on a project (null removes it). */
 export function useSetConcurrencyCap(id: string) {
   const qc = useQueryClient();

@@ -392,7 +392,7 @@ aom-runner doctor             # checks node, git, claude, docker, yt-dlp, repos,
 - **runnerToken** (required): WebSocket auth token (keep secret, stored mode 0600)
 
 #### Repositories
-- **repoRoots** (array, default `[]`): folders to scan for git repositories (recursively, depth 3)
+- **repoRoots** (array, default `[]`): folders to scan for git repositories (recursively, depth 3). It only says where repositories are found and cloned; it does not let agents read them (see "Reference repositories and other read-only folders")
 
 #### Runtimes
 
@@ -775,7 +775,7 @@ cannot loosen anything.
 | `permissions.defaultMode` | `dontAsk` | anything no allow rule approves is denied (`acceptEdits` approved every edit in the worktree whatever the role) |
 | `permissions.allow` | per `allowedTools`: `Read, Glob, Grep`; `Bash`; `WebFetch, WebSearch`; `Edit(//<worktree>/**)` or one `Edit(//<worktree>/<glob>)` per `writableGlobs` entry | explicit allow |
 | `permissions.deny` | `ListAgents`, `SendMessage`, `RemoteTrigger`, `Cron*`, `ScheduleWakeup`, `PushNotification`, `EnterWorktree`/`ExitWorktree` (tools that reach other Claude sessions on the machine or outside the shift; `dontAsk` would otherwise still run them); `Edit, Write, NotebookEdit` when the role has no `edit` tool; `WebFetch, WebSearch` without `web`; `Bash` without `shell`; the role's `deniedShellPatterns` and `git push/reset --hard` (and, for every role except the builder, `git rebase/checkout/switch`: see "Builders may rebase" below); `Edit` on the vault, the agent's config dir and the worktree `.git`; `Read` on the runner's `config.json`, `outbox`, `outbound`, `active-shifts`, `vaults.json`, `status.json`, `logs` and on `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.claude`, ... | deny wins over allow in every scope |
-| `permissions.blockReadsOutsideWorkingDirectories` | `true` | the Read/Grep/Glob tools only see the worktree (or scratch dir), the agent's scratch dir and the vault (`--add-dir`); other agents' sandboxes and other cards' worktrees are out of reach |
+| `permissions.blockReadsOutsideWorkingDirectories` | `true` | the Read/Grep/Glob tools only see the worktree (or scratch dir), the agent's scratch dir, the vault and the project's read-only folders (`--add-dir`; see "Reference repositories and other read-only folders" below); other agents' sandboxes and other cards' worktrees are out of reach |
 | `sandbox.enabled`, `failIfUnavailable`, `allowUnsandboxedCommands` | `true`, `true` (`sandbox: "required"`), `false` | Bash runs inside bubblewrap (Linux/WSL2) or Seatbelt (macOS); no `dangerouslyDisableSandbox` retry; no silent fallback to unsandboxed |
 | `sandbox.filesystem.denyRead` | the runner data dir, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.config/gh`, `~/.config/gcloud`, `~/.claude`, `~/.claude.json` | runner token, Jira and provider credentials, the linked `.credentials.json` |
 | `sandbox.filesystem.allowRead` | its worktree, the vault, the `aom` shim and script, the Node install the runner runs on, and `runtimes.claude-code.toolchainPaths` | with the read block on, sandboxed commands lose read access to all of `/home`; this re-opens only what the shift needs (toolchains such as `~/.nvm/...` included) |
@@ -839,6 +839,45 @@ below, and keep the host's own agents out of paths the runner user can read.
 Playwright's `test-results/`, `playwright-report/` and `blob-report/` (at the worktree root or in a package folder) are
 treated as artifacts: they are no guard finding, are removed (untracked ones) before the shift-end autocommit, and are
 never committed. Ignore them in `.gitignore` too.
+
+### Reference repositories and other read-only folders
+
+`repoRoots` (see Configuration) only says where repositories are found and cloned. It grants no read access, and there
+is no config key that does: what an agent may read beyond its own work folder comes from the server, per project.
+
+- **Reference repositories** are set by the project owner in the project settings (event `ProjectReferenceReposSet`, by
+  repository id; the picker offers repositories of the organization's other active projects the owner belongs to).
+  `shift.start` (card shifts) and the `chat.start` context carry them as `readRepos` (`{ repoId, name,
+  remoteUrlNormalized, kind: 'project' | 'reference' }`), never as paths. The runner resolves each to the clone **its own
+  repository scan found** (`repoRoots`); a repository that is not cloned on this workstation is skipped. A resolved folder
+  that is the runner data dir (or contains or lies inside it), the home directory (or a parent), `/` or a credential
+  store (`~/.ssh`, ...) is refused. Nothing else under `repoRoots` is opened: not the other projects' clones, not
+  this platform's own checkout unless the owner picked it.
+- **Card shifts** get the reference repositories. **Chats** get the reference repositories plus, when there is no card
+  worktree on this workstation (a chat about a project, or about a card not started here), the project's own clones
+  (`kind: 'project'`). A chat about a card whose worktree is here keeps its read-only worktree as working directory. The
+  DevOps engineer is unsandboxed and reads anywhere, so it gets none of this.
+- **How it is enforced** (`ClaudePolicyContext.readDirs`, `claude-policy.ts`): the folders are passed with `--add-dir` and
+  listed in `permissions.additionalDirectories` (the Read, Grep and Glob tools); `Edit(//<dir>/**)` (which covers Write
+  and NotebookEdit) is denied, and the folder is in the sandbox's `denyWrite`, so a shell cannot write there either; the
+  sandbox `allowRead` re-opens it for the shell. **Secret files stay unreadable inside the folder**: `.env`, `.env.*`,
+  `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `id_rsa*`, `id_dsa*`, `id_ecdsa*`, `id_ed25519*`, `.npmrc`,
+  `.netrc`, `.pypirc` and `.git-credentials` (`SECRET_FILE_GLOBS` in `read-only-dirs.ts`) get `Read(//<dir>/**/<name>)`
+  deny rules for the built-in tools. Because an `allowRead` path wins over `denyRead`, the shell cannot be fenced by adding
+  the secret to `denyRead`; instead the folder is opened to the shell entry by entry, leaving the secret files out
+  (`node_modules`, `.git`, `dist`, `build` and similar folders are opened whole, not scanned). A folder with more than
+  40,000 entries is not opened to the shell at all (the built-in tools still read it, minus the deny rules). The secret
+  list is read when the shift starts: a secret file created later is covered by the tool rules only.
+- **Git metadata.** A card shift or chat may now read the repository's `.git` (the worktree's `gitdir` under
+  `.git/worktrees/<card>` and the main repository's common dir): read-only for chats; for shifts it is the same folder that
+  is already writable in the sandbox so the worktree can commit (`hooks` and `config` stay write-denied). This ends the
+  harmless Read/Grep refusals on `<repo>/.git/worktrees/<card>/HEAD`.
+- **Per-role extras.** `ClaudePolicyContext.readDirs` is a plain list, so a role that needs more (a future Architect that
+  reads every repository under the organization's source folder) only passes a longer list to `buildShiftSettings` and
+  `buildChatSettings`; the write denial and secret rules apply to every entry.
+- **What the agent is told.** The instructions of a card shift and of a chat end with "Folders you can read" (working
+  directory, each read-only folder, and that the owner manages reference repositories in the project settings and that no
+  configuration key exists for it).
 
 ### Read-only roles and path scopes
 
