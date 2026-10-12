@@ -1,7 +1,7 @@
 ---
 title: Automations and integrations
 summary: Creating automations (formerly schedules), triggers and actions, feeds, how scans work, integrations and webhooks.
-keywords: [automation, schedule, trigger, action, cron, webhook, feed, integration]
+keywords: [automation, schedule, trigger, action, cron, webhook, feed, integration, email, e-mail, inbox, forward, forwarding, allow-list]
 order: 15
 ---
 
@@ -28,6 +28,8 @@ A trigger is when the automation fires:
 - **On a schedule**: A cron time with presets ("Weekdays at 07:00", "Every hour") or your own five-field cron, in a time zone you pick. Missed fires (server was down) happen once, not many times.
 - **When something happens**: A phase is completed, a card is finalized, an interest run finishes or a project is converted, a card **reaches a stage** of a workflow, a card of a workflow is **done**, or an **investigation is reported**. The card events can be narrowed to one workflow, one stage, a card type or a field value. The server watches; no agent polls, and each event runs an automation once.
 - **When an intake ticket arrives**: the BA takes a request into intake, from an issue poll or the intake chat.
+- **When an e-mail arrives**: someone writes (or forwards) to your Guildwise inbox address. You can limit it to some senders or a word in the subject. See [E-mail inbox](#email-inbox).
+- **When a reply arrives**: someone replies to a mail that became a card. The reply is added to the card as a comment.
 - **When an issue is labelled**: A GitHub or Jira issue gets a label. One of your workstations polls on a cadence you set.
 - **Only when I run it**: No automatic trigger: use **Run now** on the Automations page.
 
@@ -73,6 +75,18 @@ Use **Send test** to send a test delivery now (logged but never retried, not cou
 
 Click **History** on an automation to see every run: when, what triggered it, what it did, and the reason if it failed. For webhooks and e-mails, see the **Deliveries** log with every try, HTTP status and duration.
 
+
+## E-mail inbox {#email-inbox}
+
+An inbox is an address that turns incoming mail into cards. The Owner or an Admin makes one under **Organization > E-mail inbox**; it looks like `acme-k3x9p2m7qd@in.guildwisehq.com`. **Copy** gives you the address; **New address** replaces it (the old one stops working at once, and mail sent to it is shown as skipped).
+
+**Use your own address by forwarding.** Customers keep writing to support@yourcompany.com. Set that mailbox to forward everything to your Guildwise address: in Gmail, Settings > Forwarding and POP/IMAP > Add a forwarding address; in Outlook, Settings > Mail > Forwarding; or use a forwarding rule or alias at your mail host. Guildwise does not send mail to the customer for you: reply from your own mailbox as usual.
+
+**What happens to a mail.** The page lists the recent messages and what became of each: *Draft card created*, *Card created*, *Added to a card*, or *Skipped* with the reason (looks like spam, the sender failed the DKIM check, an automatic reply or bounce, too large, too many in an hour, or no automation picked it up). Make an automation **When an e-mail arrives**, choose the inbox, and fill the card with `{email.subject}`, `{email.body}`, `{email.from}`, `{email.date}` and `{email.thread}`.
+
+**Safe by default.** Mail from strangers is information, not instructions. The agents see it inside a marked block that tells them to treat it as data; HTML becomes plain text; attachments are listed but not kept; links are never opened. Cards start as **drafts** for the BA or you. The Owner can **allow-list** a sender (`ana@acme.com`) or a domain (`acme.com`): a card from them can go straight to the agents when the automation is set to *Queued for the agents*, but only when their address could be verified.
+
+**Replies.** A reply to a mail that became a card is added to the card as a comment (matched by its reply headers or by the address it was sent to), and runs any **When a reply arrives** automation. **Repeats** can limit an automation to one card per conversation, or per subject and sender.
 
 ## Starting a workflow automatically {#starts-automatically}
 

@@ -14,6 +14,7 @@ import { hygieneEvents } from './hygiene.ts';
 import { intakeEvents } from './intake.ts';
 import { interestEvents } from './interest.ts';
 import { ledgerEvents } from './ledger.ts';
+import { mailEvents } from './mail.ts';
 import { orgEvents } from './org.ts';
 import { outboundEvents } from './outbound.ts';
 import { phaseEvents } from './phase.ts';
@@ -53,6 +54,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...feedEvents,
   ...researchEvents,
   ...intakeEvents,
+  ...mailEvents,
   ...hrEvents,
   ...outboundEvents,
   ...repoEvents,
@@ -85,6 +87,7 @@ export * from './hygiene.ts';
 export * from './intake.ts';
 export * from './interest.ts';
 export * from './ledger.ts';
+export * from './mail.ts';
 export * from './org.ts';
 export * from './outbound.ts';
 export * from './phase.ts';

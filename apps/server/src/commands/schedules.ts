@@ -11,12 +11,14 @@ import {
   HR_DESK_SUBKIND,
   isEmailAction,
   isEmailAddress,
+  isMailTrigger,
   isOrgLevelAction,
   isOrgManager,
   isOrgOperational,
   isPollAction,
   isTriggerImplemented,
   isWebhookAction,
+  normaliseAllowEntry,
   type OrgRole,
   type PatchScheduleRequest,
   parseCardFields,
@@ -346,7 +348,8 @@ async function authorize(
 }
 
 /** Triggers that react to something that happened in the organization (the "Automations" of the UI). */
-const isEventTrigger = (t: ScheduleTrigger): boolean => t.kind === 'event' || t.kind === 'intake_ticket';
+const isEventTrigger = (t: ScheduleTrigger): boolean =>
+  t.kind === 'event' || t.kind === 'intake_ticket' || isMailTrigger(t);
 
 /** What can be checked about an event trigger now: which events take which conditions, and that the stage exists. */
 async function validateEventTrigger(tx: Tx, orgId: string, t: ScheduleTrigger): Promise<void> {
@@ -356,6 +359,15 @@ async function validateEventTrigger(tx: Tx, orgId: string, t: ScheduleTrigger): 
         'invalid_trigger',
         'an intake has no project when it arrives: leave the project out of this trigger',
       );
+    return;
+  }
+  if (isMailTrigger(t)) {
+    const inbox = await one(tx, 'SELECT 1 FROM mail_inboxes WHERE id=$1 AND org_id=$2', [t.inboxId, orgId]);
+    if (!inbox) throw badRequest('unknown_inbox', 'that e-mail inbox does not exist in this organisation');
+    if (t.kind === 'email_received') {
+      const bad = (t.from ?? []).filter((x) => !normaliseAllowEntry(x));
+      if (bad.length) throw badRequest('invalid_trigger', `not an address or a domain: ${bad.join(', ')}`);
+    }
     return;
   }
   if (t.kind !== 'event') return;
@@ -394,10 +406,8 @@ async function validate(
   if (!isTriggerImplemented(t))
     throw badRequest(
       'trigger_not_available',
-      t.kind === 'email_received' ||
-        t.kind === 'email_reply' ||
-        (t.kind === 'intake_ticket' && t.source === 'email')
-        ? 'e-mail triggers are not available yet: inbound e-mail is still being built'
+      t.kind === 'intake_ticket' && t.source === 'email'
+        ? 'an intake does not start from e-mail: use the "an e-mail arrives" trigger'
         : t.kind === 'webhook_in'
           ? 'incoming webhooks are not available yet'
           : 'this kind of trigger is not available yet',

@@ -37,6 +37,21 @@ const EnvSchema = z.object({
   AOM_SUPPORT_EMAIL: z.string().optional(),
   /** From address of the support mails to the customer (acknowledgement, replies), e.g. `Guildwise HQ Support <support@guildwisehq.com>`. Unset: AOM_MAIL_FROM. */
   AOM_SUPPORT_FROM: z.string().optional(),
+  /** Inbound e-mail (docs/DEPLOY.md "Inbound e-mail"): the mail provider that posts to `/api/inbound/mail/<provider>`. Unset: no inbound mail. `fake` is for development and tests. */
+  AOM_INBOUND_PROVIDER: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.enum(['postmark', 'fake']).optional(),
+  ),
+  /** The domain organisation addresses are made on (`<slug>-<random>@<domain>`), e.g. `in.guildwisehq.com`. */
+  AOM_INBOUND_DOMAIN: z.string().optional(),
+  /** Shared secret of the provider webhook: the password of the Basic-auth URL given to Postmark (or the `X-AOM-Inbound-Secret` header). */
+  AOM_INBOUND_SECRET: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(16).optional()),
+  /** Largest message (all parts, attachments included) that is stored; bigger ones are recorded as skipped. */
+  AOM_INBOUND_MAX_BYTES: z.coerce.number().int().min(10_000).max(35_000_000).default(10_000_000),
+  /** Messages one organisation can receive per hour; more are recorded as skipped. */
+  AOM_INBOUND_RATE_PER_HOUR: z.coerce.number().int().min(1).max(100_000).default(60),
+  /** Spam score (SpamAssassin scale) from which a message is skipped as spam. */
+  AOM_INBOUND_SPAM_THRESHOLD: z.coerce.number().min(0).max(100).default(5),
   /** Anthropic API key for the public landing-page assistant (a secret: never sent to the browser, never logged). */
   ANTHROPIC_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(8).optional()),
   /** Kill switch of the assistant: `off` or `public` (landing page). Unset: `public` when a key is set, else `off`. */
@@ -127,6 +142,15 @@ export interface Config {
   supportEmail: string | undefined;
   /** From address for support mails to customers; undefined: the normal `mailFrom`. */
   supportFrom: string | undefined;
+  /** Inbound e-mail by provider webhook; `provider` undefined: switched off. */
+  inbound: {
+    provider: 'postmark' | 'fake' | undefined;
+    domain: string | undefined;
+    secret: string | undefined;
+    maxMessageBytes: number;
+    ratePerHour: number;
+    spamThreshold: number;
+  };
   /** Key of the Anthropic API (the public assistant); undefined: the assistant is off. */
   anthropicApiKey: string | undefined;
   /** The assistant kill switch (`AOM_ASSISTANT`): `public` only when a key is set and it is not switched off. */
@@ -189,6 +213,14 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     runnerReleaseDir: e.AOM_RUNNER_RELEASE_DIR || undefined,
     supportEmail: e.AOM_SUPPORT_EMAIL || undefined,
     supportFrom: e.AOM_SUPPORT_FROM?.trim() || undefined,
+    inbound: {
+      provider: e.AOM_INBOUND_PROVIDER,
+      domain: e.AOM_INBOUND_DOMAIN?.trim().toLowerCase().replace(/^@/, '') || undefined,
+      secret: e.AOM_INBOUND_SECRET,
+      maxMessageBytes: e.AOM_INBOUND_MAX_BYTES,
+      ratePerHour: e.AOM_INBOUND_RATE_PER_HOUR,
+      spamThreshold: e.AOM_INBOUND_SPAM_THRESHOLD,
+    },
     anthropicApiKey: e.ANTHROPIC_API_KEY,
     // Off without a key, whatever the switch says; with a key it is on unless switched off.
     assistantMode: e.ANTHROPIC_API_KEY ? (e.AOM_ASSISTANT ?? 'public') : 'off',

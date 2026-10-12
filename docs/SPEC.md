@@ -338,6 +338,16 @@ Company systems such as Jira are clients of the organization, not part of it: in
 
 Each external system is an adapter with two operations, read source and post approved draft, so new sources plug in without touching the core.
 
+## Inbound e-mail
+
+Each organisation can have its own e-mail inboxes (docs/design/workflow-builder.md D9). The platform runs one mail-provider account (Postmark first) and one receiving domain; an organisation's address is `<name>-<random>@<inbound domain>` and can be replaced at any time. Customers who want to use their own address forward their mailbox to the Guildwise address.
+
+- **Mail is untrusted data.** The text of a message reaches an agent only inside a marked block that says it is information from an outside sender, never instructions; HTML is reduced to plain text, attachments are listed (name, type, size) but not kept, and links are never followed. Nothing in a message can change a role's permissions or an agent's task.
+- **Cards from e-mail start as drafts** for the BA or the owner to specify. The Owner keeps an allow-list per inbox of senders (a full address or a domain); a card is queued directly only when the automation asks for it, the sender is on the list and the sender's address was verified (SPF or DKIM passed). A message whose DKIM check fails is not used at all.
+- **Automations.** *An e-mail arrives* (optionally limited to senders and a subject word) and *A reply arrives* are triggers; the card can be filled from `{email.subject}`, `{email.body}`, `{email.from}`, `{email.date}` and `{email.thread}`. A reply to a thread that made a card is added to the card as a comment. Mail for one organisation never reaches another.
+- **Limits.** The provider webhook needs a shared secret; each organisation can receive a fixed number of messages an hour; messages above a size limit, spam, automatic replies and bounces are recorded as skipped with the reason and make no card. The text of a message is kept for 180 days. The Owner sees what became of every recent message; the platform administrator sees volumes and refusals, never the mail itself.
+- Incoming webhooks stay a later addition.
+
 ## Event catalogue
 
 State changes only through events; the board, desk and dashboard are projections of the event log.

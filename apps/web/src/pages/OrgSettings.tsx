@@ -5,12 +5,13 @@ import { BillingTab } from '../components/orgsettings/BillingTab.tsx';
 import { GeneralTab } from '../components/orgsettings/GeneralTab.tsx';
 import { GuestsTab } from '../components/orgsettings/GuestsTab.tsx';
 import { InvitationsTab } from '../components/orgsettings/InvitationsTab.tsx';
+import { MailInboxTab } from '../components/orgsettings/MailInboxTab.tsx';
 import { MembersTab } from '../components/orgsettings/MembersTab.tsx';
 import { PlanTab } from '../components/orgsettings/PlanTab.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import { EmptyState, ErrorBox, PageHeader, PageSkeleton, Tabs } from '../components/ui.tsx';
 
-type TabId = 'general' | 'members' | 'invitations' | 'guests' | 'plan' | 'billing';
+type TabId = 'general' | 'members' | 'invitations' | 'guests' | 'mail' | 'plan' | 'billing';
 
 /** `/settings/org`: General, Members, Invitations, Guests, Plan & limits (docs/design/organizations.md section 11.2). */
 export function OrgSettings() {
@@ -26,6 +27,7 @@ export function OrgSettings() {
       ? [
           { id: 'invitations', label: 'Invitations' },
           { id: 'guests', label: 'Guests' },
+          { id: 'mail', label: 'E-mail inbox' },
           { id: 'plan', label: 'Plan & limits' },
         ]
       : []),
@@ -64,6 +66,7 @@ export function OrgSettings() {
           <InvitationsTab role={role === 'owner' ? 'owner' : 'admin'} />
         )}
         {tab === 'guests' && manager && <GuestsTab />}
+        {tab === 'mail' && manager && role && <MailInboxTab orgRole={role === 'owner' ? 'owner' : 'admin'} />}
         {tab === 'plan' && manager && <PlanTab org={org.data} />}
         {tab === 'billing' && role === 'owner' && <BillingTab />}
       </div>

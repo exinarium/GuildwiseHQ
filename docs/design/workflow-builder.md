@@ -262,3 +262,7 @@ Order: **WP1 -> (WP2 || WP3 || WP5) -> WP4 -> WP6 -> WP7**.
    templates (with the notice that special behaviour is lost); incoming webhooks later; custom workflows and roles approved
    by Owners and Admins, permission widening Owner-only; Schedules renamed to Automations; an "owner approves" step kind
    later; members may only create project automations that make draft cards.
+
+## WP7 as built (2026-10-12)
+
+Differences from the text above, from the owner decisions: the address is `<org-slug>-<random>@<inbound domain>` (replaceable, with retired addresses kept so mail to them is recorded and goes nowhere), not `<slug>+<token>@in.<domain>`; the plus-part is kept for reply threading (`<address>+<thread token>`). Inboxes, threads and messages are operational tables (like support tickets), the events carry no text. `webhook_in` and an intake from e-mail stay refused. A verified sender (SPF or DKIM pass) is required for a card to skip the draft step, in addition to the allow-list and the automation's own "queued" choice. Provider set-up: `docs/DEPLOY.md`, "Inbound e-mail: one-time platform set-up".

@@ -11,6 +11,8 @@ const EXEMPT_PREFIXES = [
   '/api/v1/',
   '/api/billing/payfast/itn',
   '/api/billing/paystack/webhook',
+  // The mail provider's inbound webhook: no cookie, no Origin; the shared secret is the credential.
+  '/api/inbound/mail/',
 ];
 
 /**

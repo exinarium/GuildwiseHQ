@@ -10,6 +10,7 @@ import {
   getStage,
   type InvestigationLocation,
   type ReadRepo,
+  renderUntrusted,
   resolveReportTarget,
   type ServerToRunnerOf,
   type ShiftBrief,
@@ -95,6 +96,14 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
   const parent = card.parent_card_id
     ? await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1', [card.parent_card_id])
     : undefined;
+  // A card made from an inbound e-mail: the fields filled from the message are outside content (untrusted block).
+  const mailLink = await one(
+    ctx.pool,
+    `SELECT t.untrusted_fields, t.untrusted_title,
+            (SELECT from_address FROM mail_messages WHERE thread_id = t.id ORDER BY received_at LIMIT 1) AS from_address
+       FROM mail_threads t WHERE t.card_id=$1 AND t.org_id=$2`,
+    [card.id, card.org_id],
+  );
   const extension = ext?.extensions as
     | { instructions?: string; skills?: string[]; standingOrders?: string[] }
     | undefined;
@@ -131,6 +140,16 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       investigationOnly: card.investigation_only ?? false,
       dependencies: deps.map((d) => ({ ref: d.ref, title: d.title, status: d.status })),
       parent: parent ? { ref: parent.ref, title: parent.title } : undefined,
+      ...(mailLink
+        ? {
+            untrusted: {
+              source: 'email' as const,
+              fields: (mailLink.untrusted_fields ?? []) as string[],
+              title: Boolean(mailLink.untrusted_title),
+              ...(mailLink.from_address ? { from: mailLink.from_address as string } : {}),
+            },
+          }
+        : {}),
     },
     project: {
       id: project.id,
@@ -171,12 +190,17 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
           },
         ]
       : [],
-    thread: thread.reverse().map((m) => ({
-      authorName: m.user_name ?? m.agent_name ?? 'system',
-      kind: m.kind,
-      body: m.body,
-      at: iso(m.created_at) as string,
-    })),
+    thread: thread.reverse().map((m) => {
+      // Replies that came in by e-mail are outside text: their name is not the sender's to choose either.
+      const outside = m.data?.source === 'email';
+      return {
+        authorName: outside ? 'E-mail sender' : (m.user_name ?? m.agent_name ?? 'system'),
+        kind: m.kind,
+        body: m.body,
+        at: iso(m.created_at) as string,
+        ...(outside ? { untrusted: true } : {}),
+      };
+    }),
     standingOrders: [
       ...(await standingOrdersFor(ctx.pool, card.org_id, card.project_id)),
       ...(extension?.standingOrders ?? []).map((body, i) => ({
@@ -303,24 +327,36 @@ export async function devopsCardBrief(
     : undefined;
   const comments = await rows(
     ctx.pool,
-    `SELECT m.kind, m.body, m.created_at, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
+    `SELECT m.kind, m.body, m.data, m.created_at, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
        LEFT JOIN users u ON u.id = m.author_user_id LEFT JOIN agents a ON a.id = m.author_agent_id
       WHERE m.thread_id=$1 ORDER BY m.created_at DESC, m.event_seq DESC LIMIT 10`,
     [card.id],
   );
+  // Text from an inbound e-mail reaches the agent inside an untrusted block here too.
+  const mail = await one(
+    ctx.pool,
+    'SELECT untrusted_fields, untrusted_title FROM mail_threads WHERE card_id=$1 AND org_id=$2',
+    [card.id, orgId],
+  );
+  const fields = { ...((card.fields ?? {}) as Record<string, unknown>) };
+  for (const key of (mail?.untrusted_fields ?? []) as string[]) {
+    const v = fields[key];
+    if (v !== undefined && v !== null)
+      fields[key] = renderUntrusted(`E-mail: ${key}`, typeof v === 'string' ? v : JSON.stringify(v));
+  }
   return {
     ref: card.ref,
-    title: card.title,
+    title: mail?.untrusted_title ? renderUntrusted('E-mail subject', card.title) : card.title,
     cardType: card.card_type,
     stage: card.stage ?? undefined,
     status: card.status,
-    fields: (card.fields ?? {}) as Record<string, unknown>,
+    fields,
     project: project ? { key: project.key, name: project.name } : undefined,
     repo: repo?.name,
     comments: comments.reverse().map((m) => ({
       authorName: m.user_name ?? m.agent_name ?? 'system',
       kind: m.kind,
-      body: m.body,
+      body: m.data?.source === 'email' ? renderUntrusted('E-mail reply', m.body) : m.body,
       at: iso(m.created_at) as string,
     })),
   };

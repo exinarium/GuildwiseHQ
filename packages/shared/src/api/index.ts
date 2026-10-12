@@ -21,6 +21,7 @@ export * from './intake.ts';
 export * from './interests.ts';
 export * from './invitations.ts';
 export * from './ledger.ts';
+export * from './mail.ts';
 export * from './members.ts';
 export * from './metrics.ts';
 export * from './org.ts';

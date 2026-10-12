@@ -1,6 +1,7 @@
 import { feedMaxItems } from '../cards/fields.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { commandForOutcome } from './commands.ts';
+import { renderUntrusted } from './untrusted.ts';
 
 const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 const list = (v: unknown): string[] =>
@@ -95,8 +96,18 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
   const { card, shift } = brief;
   const f = card.fields;
   const parts: Array<string | null> = [];
+  const mail = card.untrusted;
+  const outside = new Set(mail?.fields ?? []);
+  const from = mail?.from ? ` from ${mail.from}` : '';
+  /** A text field that came from an outside e-mail goes inside the untrusted block. */
+  const guarded = (key: string, title: string, body: string): string | null =>
+    outside.has(key)
+      ? section(title, renderUntrusted(`E-mail${from}: ${title.toLowerCase()}`, body))
+      : section(title, body);
 
-  parts.push(`# ${card.ref}: ${card.title}`);
+  if (mail?.title !== false && mail)
+    parts.push(`# ${card.ref}\n${renderUntrusted(`E-mail subject${from}`, card.title)}`);
+  else parts.push(`# ${card.ref}: ${card.title}`);
   parts.push(
     [
       `- Type: ${card.cardType}`,
@@ -107,16 +118,35 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
   );
 
   if (card.cardType === 'feed') parts.push(section('Feed context', feedContext(brief)));
-  parts.push(section('Context', text(f.context)));
-  parts.push(section('Requirements', text(f.requirements)));
+  parts.push(guarded('context', 'Context', text(f.context)));
+  parts.push(guarded('requirements', 'Requirements', text(f.requirements)));
   const criteria = list(f.acceptanceCriteria);
-  parts.push(section('Acceptance criteria', criteria.map((c) => `- [ ] ${c}`).join('\n')));
-  parts.push(section('Affected areas', text(f.affectedAreas)));
+  parts.push(
+    guarded('acceptanceCriteria', 'Acceptance criteria', criteria.map((c) => `- [ ] ${c}`).join('\n')),
+  );
+  parts.push(guarded('affectedAreas', 'Affected areas', text(f.affectedAreas)));
+  if (outside.has('constraints') && text(f.constraints))
+    parts.push(guarded('constraints', 'Constraints from the sender', text(f.constraints)));
   const constraintLines: string[] = [];
-  if (text(f.constraints)) constraintLines.push(text(f.constraints));
+  if (text(f.constraints) && !outside.has('constraints')) constraintLines.push(text(f.constraints));
   for (const l of brief.ledger) constraintLines.push(`- Ledger (${l.scope}) ${l.title}: ${l.body.trim()}`);
   parts.push(section('Constraints', constraintLines.join('\n')));
-  parts.push(section('Test plan', text(f.testPlan)));
+  parts.push(guarded('testPlan', 'Test plan', text(f.testPlan)));
+  // Any other field that holds mail text (a custom workflow's field) is listed in its own block.
+  const known = new Set([
+    'context',
+    'requirements',
+    'acceptanceCriteria',
+    'affectedAreas',
+    'constraints',
+    'testPlan',
+  ]);
+  for (const key of outside) {
+    if (known.has(key)) continue;
+    const v = f[key];
+    const body = typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v);
+    parts.push(section(`Field: ${key}`, renderUntrusted(`E-mail${from}: ${key}`, body)));
+  }
   parts.push(section('Completion action', card.completionAction ?? ''));
   parts.push(
     section('Dependencies', card.dependencies.map((d) => `- ${d.ref} ${d.title} (${d.status})`).join('\n')),
@@ -150,7 +180,13 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
   parts.push(
     section(
       'Recent thread',
-      brief.thread.map((m) => `- ${m.authorName} (${m.kind}, ${m.at}): ${m.body.trim()}`).join('\n'),
+      brief.thread
+        .map((m) =>
+          m.untrusted
+            ? `- ${m.authorName} (${m.kind}, ${m.at}):\n${renderUntrusted(`E-mail reply from ${m.authorName}`, m.body)}`
+            : `- ${m.authorName} (${m.kind}, ${m.at}): ${m.body.trim()}`,
+        )
+        .join('\n'),
     ),
   );
 

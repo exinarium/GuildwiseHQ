@@ -14,6 +14,7 @@ import {
   isoWeek,
   isPollAction,
   isWebhookAction,
+  normaliseSubject,
   parseCardFields,
   RegressionPlatform,
   type ScheduleAction,
@@ -64,7 +65,7 @@ export async function scheduledCard(
   extra: {
     interestRunId?: string;
     preferredAgents?: Record<string, string>;
-    origin?: 'schedule' | 'interest' | 'trigger';
+    origin?: 'schedule' | 'interest' | 'trigger' | 'email';
     /** `draft`: the card waits in Specify for the BA or the owner (drafts are never scheduled to jump the queue). */
     start?: 'draft' | 'queued';
     /** Values written over `template.fields` (a field mapping). */
@@ -138,8 +139,39 @@ export async function scheduledCard(
   };
 }
 
+/** An inbound message the trigger answers (docs/design/workflow-builder.md D9). */
+export interface MailRunInfo {
+  messageId: string;
+  threadId: string;
+  inboxId: string;
+  from: string;
+  subject: string;
+  allowListed: boolean;
+  auth: 'pass' | 'fail' | 'unknown';
+}
+
+/** Mapping tokens that carry text an outside sender wrote (the date and thread id are ours). */
+const OUTSIDE_TOKEN = /\{email\.(?:subject|body|from)\}/;
+
+/** Which targets of a field mapping are filled from the sender's text: those fields and the title are untrusted. */
+export function untrustedTargets(mapping: Record<string, string> | undefined): {
+  fields: string[];
+  title: boolean;
+} {
+  const fields: string[] = [];
+  let title = false;
+  for (const [target, template] of Object.entries(mapping ?? {})) {
+    if (!OUTSIDE_TOKEN.test(template)) continue;
+    if (target === 'title') title = true;
+    else fields.push(target);
+  }
+  return { fields, title };
+}
+
 /** Where a run came from, for the text expansion and the history. */
 export interface RunSpec {
+  /** Inbound e-mail triggers: the message that started the run. */
+  mail?: MailRunInfo;
   trigger: ScheduleRunTrigger;
   /** A source runs a schedule once (an event's seq, `issue:github:owner/repo#1`). */
   sourceKey?: string;
@@ -220,7 +252,7 @@ export async function executeAction(ctx: Ctx, tx: Tx, s: Row, spec: RunSpec): Pr
       action.dedupe === 'thread' && spec.sourceId
         ? `thread:${spec.sourceId}`
         : action.dedupe === 'subject_from'
-          ? `subject_from:${title.toLowerCase()}|${(tokens['email.from'] ?? '').toLowerCase()}`
+          ? `subject_from:${normaliseSubject(tokens['email.subject'] ?? title)}|${(tokens['email.from'] ?? '').toLowerCase()}`
           : undefined;
     if (fromEvent && dedupeKey) {
       const prior = await one(
@@ -252,16 +284,48 @@ export async function executeAction(ctx: Ctx, tx: Tx, s: Row, spec: RunSpec): Pr
       );
       if (made >= limit) return rateLimited(tx, s, spec, limit, base);
     }
+    // A card made from e-mail is a draft unless the automation asks for it to be queued AND the sender is on the
+    // Owner's allow-list AND the sender could be verified (an address in From can be forged).
+    const mail = spec.mail;
+    const start = mail
+      ? t.start === 'queued' && mail.allowListed && mail.auth === 'pass'
+        ? 'queued'
+        : 'draft'
+      : t.start;
     const card = await scheduledCard(tx, project, t, s.id, title, s.interest_id, {
-      ...(fromEvent ? { origin: 'trigger' as const } : {}),
-      ...(t.start ? { start: t.start } : {}),
+      ...(mail ? { origin: 'email' as const } : fromEvent ? { origin: 'trigger' as const } : {}),
+      ...(start ? { start } : {}),
       ...(Object.keys(mapped).length ? { fields: mapped } : {}),
     });
+    const events: AppendInput[] = [card.event];
+    if (mail) {
+      const untrusted = untrustedTargets(t.mapping);
+      const linked = await tx.query(
+        `UPDATE mail_threads SET card_id=$2, untrusted_fields=$3, untrusted_title=$4
+          WHERE id=$1 AND card_id IS NULL`,
+        [mail.threadId, card.cardId, untrusted.fields, untrusted.title],
+      );
+      await tx.query(`UPDATE mail_messages SET status=$2, card_id=$3 WHERE id=$1 AND status='received'`, [
+        mail.messageId,
+        start === 'draft' ? 'draft_created' : 'card_created',
+        card.cardId,
+      ]);
+      if (linked.rowCount)
+        events.push({
+          streamId: streamId.mailInbox(mail.inboxId),
+          event: {
+            type: 'MailThreadLinked',
+            payload: { threadId: mail.threadId, cardId: card.cardId, messageId: mail.messageId },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: orgScope(s.org_id),
+        });
+    }
     return {
       ...base,
-      events: [card.event],
+      events,
       status: 'ok',
-      summary: `Created ${card.ref}${t.start === 'draft' ? ' as a draft' : ''}`,
+      summary: `Created ${card.ref}${start === 'draft' ? ' as a draft' : ''}${mail ? ' from an e-mail' : ''}`,
       result: { cardIds: [card.cardId] },
       ...(dedupeKey ? { dedupeKey } : {}),
       after: [async () => ctx.services.dispatcher.trigger()],

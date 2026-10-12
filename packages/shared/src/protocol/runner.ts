@@ -156,6 +156,18 @@ export const ShiftBriefSchema = z.object({
     investigationOnly: z.boolean().optional(),
     dependencies: z.array(z.object({ ref: z.string(), title: z.string(), status: z.string() })),
     parent: z.object({ ref: z.string(), title: z.string() }).optional(),
+    /**
+     * The card was made from an inbound e-mail (docs/design/workflow-builder.md D9): these fields (and the title) hold
+     * text from an outside sender and are rendered inside an untrusted block, never as instructions.
+     */
+    untrusted: z
+      .object({
+        source: z.literal('email'),
+        fields: z.array(z.string()),
+        title: z.boolean().default(true),
+        from: z.string().optional(),
+      })
+      .optional(),
   }),
   project: z.object({
     id: z.uuid(),
@@ -227,7 +239,14 @@ export const ShiftBriefSchema = z.object({
   ),
   /** Last 30 thread messages. */
   thread: z.array(
-    z.object({ authorName: z.string(), kind: z.string(), body: z.string(), at: z.iso.datetime() }),
+    z.object({
+      authorName: z.string(),
+      kind: z.string(),
+      body: z.string(),
+      at: z.iso.datetime(),
+      /** The message is e-mail text from an outside sender (rendered as untrusted content). */
+      untrusted: z.boolean().optional(),
+    }),
   ),
   /** Ledger standing orders (M2), org + project. */
   standingOrders: z.array(z.object({ title: z.string(), body: z.string() })).default([]),

@@ -182,6 +182,19 @@ Set these in `.env` before starting the server. All have defaults suitable for d
 | `AOM_MAIL_FROM` | `Guildwise <noreply@aom.local>` | From address in emails |
 | `AOM_SUPPORT_FROM` | unset | From address of the support mails to customers (acknowledgement, replies), e.g. `Guildwise HQ Support <support@guildwisehq.com>`; unset: `AOM_MAIL_FROM`. The mail relay must be allowed to send as this address (SPF/DKIM/DMARC, see `docs/design/support-mail-from.md`) |
 
+### Inbound e-mail
+
+Organisations receive e-mail at their own Guildwise addresses (`<name>-<random>@<inbound domain>`). The mail arrives through one provider webhook; **the provider account, the domain and these variables are a one-time platform set-up** (see "Inbound e-mail: one-time platform set-up" below). The first three variables must all be set for organisations to make an inbox.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AOM_INBOUND_PROVIDER` | unset | `postmark` (production) or `fake` (development and tests: a plain JSON message, same authentication). Unset: inbound e-mail is off and `/api/inbound/mail/*` answers 404 |
+| `AOM_INBOUND_DOMAIN` | unset | The receiving domain organisation addresses are made on, e.g. `in.guildwisehq.com`. Use a sub-domain that carries no other mail |
+| `AOM_INBOUND_SECRET` | unset | Secret (at least 16 characters). The webhook is refused (401) without it: it is the password of the Basic-auth URL given to Postmark (or the `X-AOM-Inbound-Secret` header). Generate with `openssl rand -hex 24` |
+| `AOM_INBOUND_MAX_BYTES` | `10000000` | Largest message (attachments included) that is stored. Bigger ones are recorded as skipped ("too large") with no text. Postmark itself delivers at most 35 MB |
+| `AOM_INBOUND_RATE_PER_HOUR` | `60` | Messages one organisation can receive per hour. Over it, messages are recorded as skipped; at twice the limit they are only counted |
+| `AOM_INBOUND_SPAM_THRESHOLD` | `5` | Spam score (SpamAssassin scale, as Postmark reports it) from which a message is skipped as spam |
+
 ### Landing-page assistant ("Ask Guildwise")
 
 An optional chat widget on the public landing page, paid by Guildwise (Claude Haiku 4.5, no tools, English only). It answers questions about the product from a fixed knowledge pack and keeps no conversations, only counters. It is **off unless `ANTHROPIC_API_KEY` is set**.
@@ -282,6 +295,36 @@ these headers. Access logs redact invitation tokens and pairing codes in URLs.
 ### Development only (never in production)
 
 - `AOM_TEST_CLOCK=1`: exposes test clock endpoints for E2E tests
+
+## Inbound e-mail: one-time platform set-up
+
+> **This is the platform owner's one-time step.** Nothing below is done by organisations: once it is in place, each organisation makes its own address under **Organization > E-mail inbox** and sets up its own allow-list and automations. Until `AOM_INBOUND_PROVIDER`, `AOM_INBOUND_DOMAIN` and `AOM_INBOUND_SECRET` are set, that page says inboxes are not switched on.
+
+How it works: Postmark receives mail for the inbound domain and POSTs each message as JSON to `https://<public host>/api/inbound/mail/postmark`. The server checks the secret, finds the organisation by the recipient address, stores the text (never an attachment's content), and the organisation's automations decide what happens. Mail for one organisation is never visible to another: the address decides, and conversations are matched inside the inbox only.
+
+1. **Postmark.** Create an account at postmarkapp.com and a **Server** (for example "Guildwise inbound"). Inbound processing is on the server's **Default Inbound Stream**. The Postmark server token is not used by Guildwise (outgoing mail keeps using `AOM_SMTP_URL`).
+2. **Choose the inbound domain.** A sub-domain used only for receiving, e.g. `in.guildwisehq.com`. Do not use a domain whose mail you already receive elsewhere.
+3. **DNS.** At your DNS host add one MX record for that sub-domain only:
+
+   | Type | Name | Value | Priority |
+   | --- | --- | --- | --- |
+   | MX | `in.guildwisehq.com` | `inbound.postmarkapp.com` | 10 |
+
+   Check with `dig MX in.guildwisehq.com +short` (expect `10 inbound.postmarkapp.com.`). No SPF or DKIM records are needed for receiving. The MX record of the main domain stays as it is.
+4. **Secret.** Generate one (`openssl rand -hex 24`) and put it in the server environment as `AOM_INBOUND_SECRET`.
+5. **Webhook.** In Postmark open the server's **Default Inbound Stream > Settings**. Set the **Inbound domain** to `in.guildwisehq.com` and the **Webhook URL** to
+
+   ```
+   https://aom:<AOM_INBOUND_SECRET>@<your public host>/api/inbound/mail/postmark
+   ```
+
+   (Postmark sends the user name and password as HTTP Basic auth; the user name can be anything, the password is the secret.) Leave **Include raw email content in JSON payload** off. Optionally set Postmark's own spam threshold; Guildwise also skips messages scoring `AOM_INBOUND_SPAM_THRESHOLD` or more.
+6. **Environment.** Set `AOM_INBOUND_PROVIDER=postmark`, `AOM_INBOUND_DOMAIN=in.guildwisehq.com` and `AOM_INBOUND_SECRET=<the secret>`, then restart the server. If a reverse proxy sits in front, let `POST /api/inbound/mail/*` through with bodies up to 36 MB (the bundled `deploy/Caddyfile` sets no limit) and keep forwarding the real client address.
+7. **Check.** Sign in as the platform administrator and open **Platform > Inbound mail**: it should say *Ready*. As an Owner make an inbox under **Organization > E-mail inbox**, send it a mail, and see it listed (status "Skipped: No automation picked it up" until an automation uses the inbox). Postmark's **Inbound > Activity** shows each webhook attempt; use **Retry** there after fixing a mistake.
+
+What the server does with the traffic: a request without the secret is refused (401) before its body is read; a recipient address that belongs to nobody is dropped with a 200 and counted (Platform > Inbound mail shows the counts); problems with a message (spam, a failed DKIM check, an automatic reply or bounce, too large, too many from one organisation) are also answered 200 and recorded for the organisation as "skipped" with the reason, so Postmark does not retry them. A temporary failure on our side answers 5xx and Postmark retries for several hours; the same Message-ID is never stored twice. Rotating an address in the app retires the old one at once. The text of a message is kept for 180 days (`MAIL_RETENTION_DAYS` in `apps/server/src/mail/inbound/prune.ts`, pruned every five minutes); attachments are never stored.
+
+Local development: set `AOM_INBOUND_PROVIDER=fake`, `AOM_INBOUND_DOMAIN=in.localhost.test` and a secret, then `curl -u x:<secret> -H 'content-type: application/json' -d '{"from":"ana@acme.com","to":"<the inbox address>","subject":"Hi","text":"Hello"}' http://localhost:4600/api/inbound/mail/fake`.
 
 ## Database and backups
 

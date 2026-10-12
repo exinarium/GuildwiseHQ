@@ -16,6 +16,7 @@ import {
   type LucideIcon,
   Mail,
   Radio,
+  Reply,
   Tag,
   Ticket,
   Webhook,
@@ -24,6 +25,7 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useWorkflows } from '../../api/queries/agents.ts';
 import { useMe } from '../../api/queries/auth.ts';
+import { useMailInboxes } from '../../api/queries/mail.ts';
 import { useProjects } from '../../api/queries/projects.ts';
 import { useCreateSchedule, usePatchSchedule } from '../../api/queries/schedules.ts';
 import { useWorkstations } from '../../api/queries/workstations.ts';
@@ -35,6 +37,8 @@ import {
   emptyWizard,
   formFromTemplate,
   isEventName,
+  isMailKind,
+  isReactiveKind,
   stateFromSchedule,
   TRIGGER_TILES,
   type TriggerKind,
@@ -52,6 +56,8 @@ const TRIGGER_ICON: Record<TriggerKind, LucideIcon> = {
   cron: CalendarClock,
   event: Radio,
   intake_ticket: Ticket,
+  email_received: Mail,
+  email_reply: Reply,
   issue_labelled: Tag,
   manual: Hand,
 };
@@ -221,6 +227,8 @@ function WizardDialog({
       'eventWorkflowKey',
       'eventStageId',
       'filterEquals',
+      'inboxId',
+      'mailFrom',
     ];
     const e = Object.fromEntries(Object.entries(r.errors).filter(([k]) => mine.includes(k)));
     setErrors(e);
@@ -246,6 +254,8 @@ function WizardDialog({
           'eventWorkflowKey',
           'eventStageId',
           'filterEquals',
+          'inboxId',
+          'mailFrom',
         ].includes(first)
       )
         setStep(0);
@@ -354,7 +364,21 @@ function WizardDialog({
               value={s.triggerKind}
               onChange={(v) => {
                 const t = ACTION_TILES.find((x) => x.id === s.tile);
-                set({ triggerKind: v, ...(t?.notWith?.includes(v) ? { tile: 'create_card' as const } : {}) });
+                set({
+                  triggerKind: v,
+                  ...(t?.notWith?.includes(v) ? { tile: 'create_card' as const } : {}),
+                  // An automation for mail starts from the usual mapping: the subject is the title, the text the context.
+                  ...(isMailKind(v) && s.mapping.length === 0
+                    ? {
+                        mapping: [
+                          { target: 'title', text: '{email.subject}' },
+                          { target: 'context', text: 'From {email.from}:\n\n{email.body}' },
+                        ],
+                        start: 'draft' as const,
+                        dedupe: 'subject_from' as const,
+                      }
+                    : {}),
+                });
               }}
               tiles={TRIGGER_TILES}
               icons={TRIGGER_ICON}
@@ -485,6 +509,7 @@ function TriggerFields({
     </>
   );
   if (s.triggerKind === 'cron') return <div className="grid gap-4 sm:grid-cols-2">{cronFields}</div>;
+  if (isMailKind(s.triggerKind)) return <MailTriggerFields s={s} set={set} errors={errors} />;
   if (s.triggerKind === 'intake_ticket')
     return (
       <div className="grid gap-4 sm:grid-cols-2">
@@ -656,6 +681,66 @@ function CardEventFilters({
   );
 }
 
+/** The inbox a mail trigger listens to, and (for new mail) the senders and subject it is limited to. */
+function MailTriggerFields({
+  s,
+  set,
+  errors,
+}: {
+  s: WizardState;
+  set: (p: Partial<WizardState>) => void;
+  errors: Record<string, string>;
+}) {
+  const inboxes = useMailInboxes();
+  const list = inboxes.data?.inboxes ?? [];
+  return (
+    <div className="grid gap-4 sm:grid-cols-2" data-testid="mail-trigger-fields">
+      <Select
+        label="Inbox"
+        value={s.inboxId}
+        onChange={(e) => set({ inboxId: e.target.value })}
+        error={errors.inboxId}
+        hint={
+          list.length === 0
+            ? 'No inbox yet. An Owner or Admin makes one under Organization > E-mail inbox.'
+            : 'Mail sent to this inbox address starts the automation.'
+        }
+      >
+        <option value="">Choose an inbox</option>
+        {list.map((i) => (
+          <option key={i.id} value={i.id}>
+            {i.label} ({i.address})
+          </option>
+        ))}
+      </Select>
+      {s.triggerKind === 'email_received' && (
+        <>
+          <TextInput
+            label="Only from (optional)"
+            hint="Addresses or domains, separated by commas: ana@acme.com, acme.org"
+            value={s.mailFrom}
+            onChange={(e) => set({ mailFrom: e.target.value })}
+            error={errors.mailFrom}
+          />
+          <TextInput
+            label="Subject contains (optional)"
+            value={s.mailSubject}
+            onChange={(e) => set({ mailSubject: e.target.value })}
+            maxLength={200}
+          />
+        </>
+      )}
+      {s.triggerKind === 'email_reply' && (
+        <p className="text-sm text-muted sm:col-span-2">
+          A reply to a mail that became a card is added to that card as a comment, whether or not an
+          automation listens. This automation also runs for each reply, for example to ask the BA to look at
+          it.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** How an automation's cards are made: the field mapping, the state they start in, and the limits. */
 function AutomationCardOptions({
   s,
@@ -673,7 +758,12 @@ function AutomationCardOptions({
       className="flex flex-col gap-4 rounded-panel border border-line p-3"
       data-testid="automation-card-options"
     >
-      <MappingEditor rows={s.mapping} onChange={(mapping) => set({ mapping })} error={errors.mapping} />
+      <MappingEditor
+        rows={s.mapping}
+        onChange={(mapping) => set({ mapping })}
+        error={errors.mapping}
+        mail={isMailKind(s.triggerKind)}
+      />
       <div className="grid gap-4 sm:grid-cols-3">
         <Select
           label="The card starts as"
@@ -681,9 +771,11 @@ function AutomationCardOptions({
           disabled={!isManager}
           onChange={(e) => set({ start: e.target.value as WizardState['start'] })}
           hint={
-            isManager
-              ? 'A draft waits for the BA or you to specify it. Queued goes straight to the agents.'
-              : 'Members can set up automations that make drafts only.'
+            !isManager
+              ? 'Members can set up automations that make drafts only.'
+              : isMailKind(s.triggerKind)
+                ? "Mail starts as a draft. Queued applies only to senders on the Owner's allow-list whose address could be verified."
+                : 'A draft waits for the BA or you to specify it. Queued goes straight to the agents.'
           }
         >
           {isManager && <option value="">Queued (the default)</option>}
@@ -705,7 +797,9 @@ function AutomationCardOptions({
           hint="Avoid a second card for the same thing."
         >
           <option value="none">Allow</option>
-          <option value="thread">One card per source card or ticket</option>
+          <option value="thread">
+            {isMailKind(s.triggerKind) ? 'One card per conversation' : 'One card per source card or ticket'}
+          </option>
           <option value="subject_from">One card per title</option>
         </Select>
       </div>
@@ -833,7 +927,7 @@ function ActionFields({
               <p className="text-xs text-subtle">
                 Use {'{date}'} or {'{week}'} in the title; without them the date is added.
               </p>
-              {(s.triggerKind === 'event' || s.triggerKind === 'intake_ticket') && (
+              {isReactiveKind(s.triggerKind) && (
                 <AutomationCardOptions s={s} set={set} errors={errors} isManager={isManager} />
               )}
             </div>

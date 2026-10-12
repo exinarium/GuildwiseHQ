@@ -5,6 +5,7 @@ import {
   isEmailAddress,
   isPollAction,
   isWebhookAction,
+  normaliseAllowEntry,
   SCHEDULE_EVENT_TRIGGERS,
   SCHEDULE_PRESETS,
   type ScheduleAction,
@@ -18,7 +19,19 @@ import {
 import { buildCardRequest, type CardFormValues, emptyForm, fieldToText, formFieldList } from './cardForm.ts';
 import { defaultTimezone, describeCron } from './feeds.ts';
 
-export type TriggerKind = 'cron' | 'event' | 'intake_ticket' | 'issue_labelled' | 'manual';
+export type TriggerKind =
+  | 'cron'
+  | 'event'
+  | 'intake_ticket'
+  | 'issue_labelled'
+  | 'email_received'
+  | 'email_reply'
+  | 'manual';
+
+export const isMailKind = (k: TriggerKind): boolean => k === 'email_received' || k === 'email_reply';
+/** Triggers that react to something that happened (their cards are "made by an automation"). */
+export const isReactiveKind = (k: TriggerKind): boolean =>
+  k === 'event' || k === 'intake_ticket' || isMailKind(k);
 export type ActionTile =
   | 'create_card'
   | 'regression_run'
@@ -41,6 +54,17 @@ export const TRIGGER_TILES: Array<{ id: TriggerKind; label: string; description:
     id: 'intake_ticket',
     label: 'When an intake ticket arrives',
     description: 'A request is taken into intake with the BA, from an issue poll or the intake chat.',
+  },
+  {
+    id: 'email_received',
+    label: 'When an e-mail arrives',
+    description:
+      'Someone writes (or forwards) to your Guildwise inbox address. The card starts as a draft for the BA, unless the sender is on your allow-list.',
+  },
+  {
+    id: 'email_reply',
+    label: 'When a reply arrives',
+    description: 'Someone replies to a mail that became a card. The reply is added to the card as a comment.',
   },
   {
     id: 'issue_labelled',
@@ -72,7 +96,7 @@ export const ACTION_TILES: Array<{
     id: 'regression_run',
     label: 'Run a regression',
     description: 'A regression card per platform, queued at Test.',
-    notWith: ['issue_labelled'],
+    notWith: ['issue_labelled', 'email_received', 'email_reply'],
   },
   {
     id: 'devops_request',
@@ -88,13 +112,13 @@ export const ACTION_TILES: Array<{
     id: 'github',
     label: 'Poll GitHub issues',
     description: 'New issues of a repository go into intake with the BA. Runs on your workstation.',
-    notWith: ['issue_labelled', 'event'],
+    notWith: ['issue_labelled', 'event', 'email_received', 'email_reply'],
   },
   {
     id: 'jira',
     label: 'Poll Jira issues',
     description: 'New issues from a JQL filter go into intake with the BA. Runs on your workstation.',
-    notWith: ['issue_labelled', 'event'],
+    notWith: ['issue_labelled', 'event', 'email_received', 'email_reply'],
   },
   {
     id: 'webhook',
@@ -154,8 +178,13 @@ export function describeTrigger(t: ScheduleTrigger): string {
     }
     case 'issue_labelled':
       return `When a ${t.provider === 'github' ? 'GitHub' : 'Jira'} issue in ${t.query} gets the label "${t.label}"`;
-    case 'email_received':
-      return 'When an e-mail arrives';
+    case 'email_received': {
+      const only = [
+        t.from?.length ? `from ${t.from.join(', ')}` : '',
+        t.subjectContains ? `subject contains "${t.subjectContains}"` : '',
+      ].filter(Boolean);
+      return `When an e-mail arrives${only.length ? ` (${only.join(', ')})` : ''}`;
+    }
     case 'email_reply':
       return 'When a reply to a card e-mail arrives';
     case 'intake_ticket':
@@ -211,6 +240,10 @@ export interface WizardState {
   filterEquals: string;
   /** `intake_ticket`: '' = any source. */
   intakeSource: '' | 'issues' | 'web';
+  /** `email_received`, `email_reply`: the inbox, the senders it is limited to (comma separated) and a subject word. */
+  inboxId: string;
+  mailFrom: string;
+  mailSubject: string;
   provider: 'github' | 'jira';
   labelQuery: string;
   label: string;
@@ -263,6 +296,9 @@ export const emptyWizard = (over: Partial<WizardState> = {}): WizardState => ({
   filterField: '',
   filterEquals: '',
   intakeSource: '',
+  inboxId: '',
+  mailFrom: '',
+  mailSubject: '',
   provider: 'github',
   labelQuery: '',
   label: '',
@@ -299,7 +335,12 @@ export function stateFromSchedule(s: ScheduleDto, workflow?: WorkflowDefinition)
   const t = s.trigger;
   // The newer trigger kinds are refused on save until the automations page supports them (workflow builder WP6).
   st.triggerKind =
-    t.kind === 'cron' || t.kind === 'event' || t.kind === 'issue_labelled' || t.kind === 'intake_ticket'
+    t.kind === 'cron' ||
+    t.kind === 'event' ||
+    t.kind === 'issue_labelled' ||
+    t.kind === 'intake_ticket' ||
+    t.kind === 'email_received' ||
+    t.kind === 'email_reply'
       ? t.kind
       : 'manual';
   if (t.kind === 'cron') {
@@ -315,6 +356,12 @@ export function stateFromSchedule(s: ScheduleDto, workflow?: WorkflowDefinition)
     const f = t.filter?.fieldEquals?.[0];
     st.filterField = f?.field ?? '';
     st.filterEquals = f ? String(f.equals) : '';
+  } else if (t.kind === 'email_received') {
+    st.inboxId = t.inboxId;
+    st.mailFrom = (t.from ?? []).join(', ');
+    st.mailSubject = t.subjectContains ?? '';
+  } else if (t.kind === 'email_reply') {
+    st.inboxId = t.inboxId;
   } else if (t.kind === 'intake_ticket') {
     st.intakeSource = t.source === 'issues' || t.source === 'web' ? t.source : '';
   } else if (t.kind === 'issue_labelled') {
@@ -449,7 +496,24 @@ export function buildScheduleRequest(s: WizardState, c: BuildContext): BuildResu
     };
   } else if (s.triggerKind === 'intake_ticket')
     trigger = { kind: 'intake_ticket', ...(s.intakeSource ? { source: s.intakeSource } : {}) };
-  else {
+  else if (isMailKind(s.triggerKind)) {
+    if (!s.inboxId) errors.inboxId = 'Choose the inbox';
+    const from = s.mailFrom
+      .split(/[\s,;]+/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    if (s.triggerKind === 'email_received' && from.some((x) => !normaliseAllowEntry(x)))
+      errors.mailFrom = 'Addresses (ana@acme.com) or domains (acme.com), separated by commas';
+    trigger =
+      s.triggerKind === 'email_reply'
+        ? { kind: 'email_reply', inboxId: s.inboxId }
+        : {
+            kind: 'email_received',
+            inboxId: s.inboxId,
+            ...(from.length ? { from: from.map((x) => normaliseAllowEntry(x) ?? x) } : {}),
+            ...(s.mailSubject.trim() ? { subjectContains: s.mailSubject.trim() } : {}),
+          };
+  } else {
     if (!s.workstationId) errors.workstationId = 'Choose the workstation that polls';
     if (!s.labelQuery.trim())
       errors.labelQuery =
@@ -481,7 +545,7 @@ export function buildScheduleRequest(s: WizardState, c: BuildContext): BuildResu
         if (rate !== undefined && (!Number.isInteger(rate) || rate < 1 || rate > 1000))
           errors.ratePerHour = 'A whole number from 1 to 1000';
         if (projectId && Object.keys(errors).length === 0) {
-          const automation = s.triggerKind === 'event' || s.triggerKind === 'intake_ticket';
+          const automation = isReactiveKind(s.triggerKind);
           action = {
             kind: 'create_card',
             projectId,

@@ -11,6 +11,11 @@ export interface MailMessage {
   from?: string;
   /** Extra headers (`List-Unsubscribe` on the digest). */
   headers?: Record<string, string>;
+  /** `Message-ID` (with angle brackets). Absent: the mail library makes one. Set it when replies should thread. */
+  messageId?: string;
+  /** The message this one answers, and the earlier messages of the conversation (`mail/threading.ts`). */
+  inReplyTo?: string;
+  references?: string[];
   /**
    * The organization this mail is about. When it is a simulation organization the subject gets "[Simulation] ",
    * whoever the recipient is. Mails not tied to an organization leave it out and are never prefixed.
