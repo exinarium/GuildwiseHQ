@@ -637,8 +637,8 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Define a role: purpose, instructions, core rules, seniority levels, default model, tools and the workflow stages it may claim. Save draft, or Save and submit for approval.',
       },
       {
-        name: 'Workflow editor',
-        text: 'Design a workflow with its stages and where cards go on success and failure. Validation errors and a preview graph show as you edit.',
+        name: 'Workflow builder',
+        text: 'New custom workflow, Edit and New version open the workflow builder: a step list with a live diagram, plain-language problems and a Try a card preview. Compare with previous shows what changed between versions.',
       },
       {
         name: 'Workflow graph',
@@ -650,6 +650,46 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
     article: 'org-chart-and-design#custom-roles',
+  },
+  '/org/workflows/:draftId': {
+    title: 'Workflow builder',
+    intro:
+      'Build a custom workflow as a list of steps with a live diagram. Problems are listed in plain words, Try a card shows the path a card takes, and a finished workflow is sent to the desk for approval.',
+    controls: [
+      {
+        name: 'Steps',
+        text: 'One card per step: its name, what done looks like, who does it, what must be filled in first, where it goes when finished, where it is sent back to, and an optional Only when condition. Add, move and remove steps with the buttons.',
+      },
+      {
+        name: 'Information the card carries',
+        text: 'The extra fields of the cards in this workflow: a name, a kind (text, number, yes or no, list, links) and whether it must be filled in.',
+      },
+      {
+        name: 'Things to fix',
+        text: 'Every problem in plain words. Pick one to jump to its step. Problems block sending for approval; tips do not.',
+      },
+      {
+        name: 'Diagram and Try a card',
+        text: 'The diagram redraws as you edit. Try a card walks a card through the steps with the answers you tick and marks its path on the diagram.',
+      },
+      {
+        name: 'Ask the BA',
+        text: 'A chat about the current draft. The BA reads an outline of it and answers questions; you make the changes here.',
+      },
+      {
+        name: 'Save draft, Save and send for approval',
+        text: 'Save keeps the draft; send for approval puts it on the desk where Owners and Admins approve it.',
+      },
+      {
+        name: 'Versions',
+        text: 'All saved versions, with Compare with previous to see what changed step by step. Edit as new version starts the next one from an approved version.',
+      },
+      {
+        name: 'Advanced: table editor',
+        text: 'The original table with internal ids, events and every route, for workflows the step list shows only in part.',
+      },
+    ],
+    article: 'org-chart-and-design#workflow-builder',
   },
   '/org-chart': {
     title: 'Org chart',

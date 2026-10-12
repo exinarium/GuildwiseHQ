@@ -275,40 +275,100 @@ test('the desk approves: a workflow waits for its roles, then everything becomes
   await expect(page.getByTestId('role-triager')).toContainText('Drafted by the BA');
 });
 
-test('validation: a workflow with an unreachable stage cannot be submitted, and the issue shows inline', async () => {
+test('the workflow builder: template, edit, send for approval, approved on the desk', async () => {
+  // A role that may work every step of the new workflow (roles are approved before the workflow they serve).
+  const role = triager({
+    key: 'drafter',
+    name: 'Drafter',
+    purpose: 'Writes first drafts.',
+    claimableStages: [{ workflowKey: 'press_note', stageId: '*' }],
+  });
+  const created = await api.post('/api/roles', { data: role });
+  expect(created.status(), await created.text()).toBe(201);
+  const roleDraftId = (await created.json()).id as string;
+  expect((await api.post(`/api/roles/${roleDraftId}/submit`, { data: {} })).status()).toBe(200);
+
   await page.goto('/org?tab=workflows');
-  await page.getByRole('button', { name: 'New custom workflow' }).click();
+  await page.getByRole('link', { name: 'New custom workflow' }).click();
+  await page.getByRole('button', { name: 'Use the Simple review template' }).click();
+  await page.getByLabel('Workflow name').fill('Press note');
+  await expect(page.getByText('Internal key: press_note')).toBeVisible();
+  // Two steps have no role yet: the problems are listed in plain words, on the steps and in the issue bar.
+  await expect(page.getByTestId('issue-bar')).toContainText('things to fix');
+  const work = page.getByRole('region', { name: 'Work', exact: true });
+  await expect(work).toContainText('has no role that may work it');
+  await work.getByLabel('Who does it').selectOption('drafter');
+  await page
+    .getByRole('region', { name: 'Review', exact: true })
+    .getByLabel('Who does it')
+    .selectOption('drafter');
+  await expect(page.getByTestId('issues-ok')).toBeVisible();
+  // Try a card: the path is listed and marked on the diagram.
+  await expect(page.getByTestId('try-path')).toContainText('Review');
+  await expect(page.getByTestId('node-review')).toHaveAttribute('data-path-step', '3');
+  await page.screenshot({ path: shot('builder'), fullPage: true });
+  await page.getByRole('button', { name: 'Save and send for approval' }).click();
+  await waitFor(
+    'the workflow is pending approval',
+    () => q<{ status: string }>(`SELECT status FROM workflow_versions WHERE key='press_note'`),
+    (r) => r[0]?.status === 'pending_approval',
+    15_000,
+  );
+  await expect(page.getByTestId('builder-status')).toContainText('Waiting for approval');
+
+  await page.goto('/desk');
+  const roleCard = deskCard(page, 'Approve role "Drafter" (v1)');
+  await roleCard.getByRole('button', { name: 'Approve' }).click();
+  await expect(roleCard).toHaveCount(0);
+  const wfCard = deskCard(page, 'Approve workflow "Press note" (v1)');
+  await wfCard.getByRole('button', { name: 'Approve' }).click();
+  await expect(wfCard).toHaveCount(0);
+  await waitFor(
+    'the workflow is active',
+    () => q<{ status: string }>(`SELECT status FROM workflow_versions WHERE key='press_note'`),
+    (r) => r[0]?.status === 'active',
+    10_000,
+  );
+  await page.goto('/org?tab=workflows');
+  await expect(page.getByTestId('workflow-press_note')).toContainText('Active');
+});
+
+test('validation: a workflow with an unreachable stage cannot be sent, and the problem shows inline', async () => {
+  await page.goto('/org/workflows/new?template=blank');
+  await page.getByLabel('Workflow name').fill('Bad flow');
+  await page
+    .getByRole('region', { name: 'Work', exact: true })
+    .getByLabel('Who does it')
+    .selectOption('triager');
+  // The table editor can add a stage nothing leads to: it is flagged before anything is saved.
+  await page.getByText('Advanced: table editor').click();
   const editor = page.getByTestId('workflow-editor');
-  await editor.getByLabel('Key', { exact: true }).fill('bad-flow');
-  await editor.getByLabel('Name', { exact: true }).fill('Bad flow');
-  await editor.getByLabel('Stage work role').selectOption('triager');
-  await editor.getByLabel('Stage 2 label').fill('Work');
   await editor.getByRole('button', { name: 'Add stage' }).click();
-  // The new stage has no way in: it is flagged inline before anything is saved.
-  const validation = editor.getByTestId('validation');
-  await expect(validation.locator('[data-code="unreachable_stage"]')).toBeVisible();
+  await expect(editor.getByTestId('validation').locator('[data-code="unreachable_stage"]')).toBeVisible();
   await expect(editor.getByTestId('stage-stage_4')).toHaveAttribute('data-invalid', 'true');
+  await expect(page.getByTestId('issue-bar')).toContainText('can never be reached');
+  await expect(page.getByRole('button', { name: 'Save and send for approval' })).toBeDisabled();
   await page.screenshot({ path: shot('invalid-workflow'), fullPage: true });
-  await page.getByRole('button', { name: 'Save and submit for approval' }).click();
+  await page.getByRole('button', { name: 'Save draft' }).click();
   // Saved as a draft (the server shows its issues too) but never submitted.
   await waitFor(
     'the draft is saved',
-    () => q<{ status: string }>(`SELECT status FROM workflow_versions WHERE key='bad-flow'`),
+    () => q<{ status: string }>(`SELECT status FROM workflow_versions WHERE key='bad_flow'`),
     (r) => r.length === 1,
     10_000,
   );
-  await expect(page.getByTestId('validation').locator('[data-code="unreachable_stage"]')).toBeVisible();
+  await expect(page.getByTestId('issue-bar')).toContainText('can never be reached');
   expect(
-    (await q<{ status: string }>(`SELECT status FROM workflow_versions WHERE key='bad-flow'`))[0]?.status,
+    (await q<{ status: string }>(`SELECT status FROM workflow_versions WHERE key='bad_flow'`))[0]?.status,
   ).toBe('draft');
-  const draftId = (await q<{ id: string }>(`SELECT id FROM workflow_versions WHERE key='bad-flow'`))[0]?.id;
+  const draftId = (await q<{ id: string }>(`SELECT id FROM workflow_versions WHERE key='bad_flow'`))[0]?.id;
   const submit = await api.post(`/api/workflows/${draftId}/submit`, { data: {} });
   expect(submit.status()).toBe(422);
   expect(JSON.stringify(await submit.json())).toContain('unreachable_stage');
   expect(await q(`SELECT 1 FROM desk_items WHERE title LIKE '%Bad flow%'`)).toHaveLength(0);
-  await page.getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('button', { name: 'Discard bad-flow v1' }).click();
-  await expect(page.getByTestId('workflow-bad-flow')).toHaveCount(0);
+  await page.goto('/org?tab=workflows');
+  await page.getByRole('button', { name: 'Discard bad_flow v1' }).click();
+  await expect(page.getByTestId('workflow-bad_flow')).toHaveCount(0);
 });
 
 test("a project's type is its workflow: created from the Projects page, filtered by department", async () => {
@@ -416,16 +476,16 @@ test('changing a workflow creates v2; a card in flight finishes on v1, new cards
     (await q<{ version: number }>(`SELECT version FROM workflow_versions WHERE id=$1`, [v1]))[0]?.version,
   ).toBe(1);
 
-  // v2: the Resolve criterion changes. Edited in the workflow editor from the active v1.
+  // v2: the Resolve criterion changes. Edited in the workflow builder from the active v1.
   await page.goto('/org?tab=workflows');
   const card = page.getByTestId('workflow-support');
   await expect(card).toContainText('1 card(s) in flight on this version');
-  await card.getByRole('button', { name: 'New version of support v1' }).click();
-  const editor = page.getByTestId('workflow-editor');
-  await editor
-    .getByLabel('Stage resolve done criteria')
+  await card.getByRole('link', { name: 'New version of support v1' }).click();
+  await page
+    .getByRole('region', { name: 'Resolve', exact: true })
+    .getByLabel('What to do, and what "done" looks like')
     .fill('The customer has an answer and a survey link.');
-  await page.getByRole('button', { name: 'Save and submit for approval' }).click();
+  await page.getByRole('button', { name: 'Save and send for approval' }).click();
   await waitFor(
     'v2 is pending approval',
     () =>

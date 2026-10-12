@@ -49,6 +49,7 @@ import { Settings } from './pages/Settings.tsx';
 import { Signup } from './pages/Signup.tsx';
 import { Vaults } from './pages/Vaults.tsx';
 import { VerifyEmail } from './pages/VerifyEmail.tsx';
+import { WorkflowBuilderPage } from './pages/WorkflowBuilderPage.tsx';
 import { Workstations } from './pages/Workstations.tsx';
 
 function Home() {
@@ -103,6 +104,7 @@ export const routes = [
       { path: '/hr', element: <Agents /> },
       { path: '/metrics', element: <Metrics /> },
       { path: '/org', element: <OrgDesigner /> },
+      { path: '/org/workflows/:draftId', element: <WorkflowBuilderPage /> },
       { path: '/org-chart', element: <OrgChartPage /> },
       { path: '/costs', element: <Costs /> },
       { path: '/workstations', element: <Workstations /> },

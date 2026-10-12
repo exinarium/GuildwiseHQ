@@ -45,12 +45,28 @@ Built-in roles cannot be changed or removed. Use **Extend** on a built-in role t
 
 ## Custom workflows {#custom-workflows}
 
-The built-in workflows (Code: Spec, Build, Review, Test, Docs, Finalize; Research: Question, Research, Fact check, Publish) cover standard work. To add a custom workflow:
+The built-in workflows (Code: Spec, Build, Review, Test, Docs, Finalize; Research: Question, Research, Fact check, Publish) cover standard work. To add a custom workflow, use the **workflow builder**: open the **Workflows** tab and click **New custom workflow** (or use **Design with the BA**). The BA can also draft one, and you open and finish its draft in the same builder.
 
-1. Open the **Workflows** tab and click **New custom workflow** (or use **Design with the BA**).
-2. Define the **stages**: name, which role claims it, required fields, success criteria, and where the card goes on success and on failure.
-3. Validation checks that there are no unreachable stages, failure paths end somewhere and every stage has a claimable role.
-4. Click **Save and submit for approval**, then approve it on the desk.
+### The workflow builder {#workflow-builder}
+
+1. **Pick a starting point.** The gallery offers a few templates (Blank, Simple review, Request, do, check, Content, Support reply). You can also **copy a built-in workflow** (Code or Research). A copy is an ordinary custom workflow: the special behaviour of the built-in one, such as tests that open bug cards or research that gets published, does not carry over, and the builder lists what was left out. To extend Code and keep its behaviour, add steps to it in a project's settings instead.
+2. **Fill in the steps.** A workflow is a list of steps a card goes through. For each step you set:
+   - **Step name**, and **What to do, and what "done" looks like**.
+   - **Who does it**: pick a role. The role must list the step among the steps it may take (see [Custom roles](#custom-roles)); the builder tells you when it does not, and when no agent with that role is hired yet.
+   - **Must be filled in before this step**: pieces of card information the step needs.
+   - **When finished, go to** the next step; **If it is not good enough, send back to** an earlier step (optional); **Only when** a yes-or-no piece of card information says so (otherwise the step is skipped for that card).
+   - Use **Add a step after**, **Move up**, **Move down** and **Remove** to shape the list.
+3. **Say what the card carries** under **Information the card carries**: name, kind (short text, long text, list, number, yes or no, links) and whether it must be filled in.
+4. **Watch the diagram and the problems.** The diagram on the right redraws as you type; red dashed arrows send a card back. The **things to fix** box lists every problem in plain words and jumps to the step; each step shows its own problems. Problems stop you sending the workflow for approval; tips do not.
+5. **Try a card.** The preview walks a card through the steps with the answers you tick, shows who works each step, and lets you choose "sent back" where a step can send work back. The path is also marked on the diagram.
+6. **Ask the BA.** The chat beside the builder sends the BA an outline of your current draft so you can talk it through. It never changes the draft for you.
+7. **Save draft** keeps your work; **Save and send for approval** puts it on your desk. Owners and Admins approve it there.
+
+**Versions.** Every save creates a draft of the next version. **Versions** at the bottom of the builder lists them, and **Compare with previous** shows what changed step by step. Once a version is approved, the steps in it keep their internal names for good: renaming a step never breaks the roles and running cards that refer to it. Running cards finish on the version they started on. To change an approved workflow, choose **Edit as new version**.
+
+The page also keeps the original table editor, under **Advanced: table editor**. It shows the internal ids, events and every route; it opens by itself when a workflow has parts the step list shows only in part. It works for anyone comfortable with that level of detail.
+
+The builder works with the keyboard alone (every action is a button or a field, steps are reordered with buttons) and on a phone.
 
 Once approved, a custom workflow can be picked as the workflow of a new project on the Projects page, or enabled next to a project's own workflow in the project's settings under **Workflows** (see [Workflows of a project](/help/projects#workflows)).
 
