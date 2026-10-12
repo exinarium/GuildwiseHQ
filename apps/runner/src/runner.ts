@@ -18,7 +18,7 @@ import {
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { ChatManager } from './chat/chat.ts';
-import { loadConfig, type RunnerConfig } from './config.ts';
+import { loadConfig, type RunnerConfig, saveConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
 import { verifyRights } from './devops/rights.ts';
@@ -46,6 +46,7 @@ import { removeWorktree } from './git/worktrees.ts';
 import { IntegrationPoller } from './integrations/poll.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
+import { changeOrgFolder, orgFolderCandidates, orgFolderStates } from './org-folder.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
 import { forbiddenReadPath } from './read-repos.ts';
 import { RepoAccessUpdater } from './repo/access.ts';
@@ -275,6 +276,7 @@ export class Runner {
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
       void this.reportGit(true);
+      void this.reportOrgFolders();
       this.reportUpdate();
       opts.onConnected?.();
       this.maxConcurrent = Math.min(w.limits.maxConcurrentShifts, opts.config.maxConcurrentShifts);
@@ -303,6 +305,52 @@ export class Runner {
       // no config file on disk (tests): the in-memory one stands
     }
     return folders[orgId.toLowerCase()];
+  }
+
+  /** The config as it is on disk now (`aom-runner org-folder` edits it without a restart); the in-memory one without a file. */
+  private freshConfig(): RunnerConfig {
+    try {
+      return loadConfig(this.paths.config);
+    } catch {
+      return this.opts.config;
+    }
+  }
+
+  /**
+   * Tells the server which organisation source folders are set here (valid or not, how many repositories) and which
+   * folders it may offer in the picker. Local facts only; sent after `welcome`, after each re-scan and after `org.folder`.
+   */
+  async reportOrgFolders(): Promise<void> {
+    try {
+      const config = this.freshConfig();
+      this.client.send('org.folders', {
+        folders: await orgFolderStates(config, this.paths.root),
+        candidates: orgFolderCandidates(config, this.paths.root),
+      });
+    } catch (err) {
+      this.log.warn(`org folder report failed: ${String(err)}`);
+    }
+  }
+
+  /**
+   * `org.folder`: the app asks to set or clear the folder. The exact validation of `aom-runner org-folder set` decides;
+   * a refusal is an answer (`ok:false` with the reason), the config.json is rewritten atomically (mode 0600) only on
+   * success, then the new state is reported.
+   */
+  private async applyOrgFolder(p: {
+    orgId: string;
+    path: string | null;
+  }): Promise<{ ok: boolean; error?: string }> {
+    const changed = changeOrgFolder(this.freshConfig(), p.orgId, p.path, this.paths.root);
+    if (!changed.ok) return { ok: false, error: changed.error };
+    try {
+      saveConfig(this.paths.config, changed.config);
+    } catch (err) {
+      return { ok: false, error: `could not write the runner config: ${String(err)}` };
+    }
+    this.opts.config.orgSourceFolders = changed.config.orgSourceFolders;
+    await this.reportOrgFolders();
+    return { ok: true };
   }
 
   /** True when no agent job and no chat is running: the moment it is safe to restart into a new version. */
@@ -417,6 +465,7 @@ export class Runner {
       this.client.send('runtimes.report', { runtimes });
     this.lastRuntimes = key;
     await this.reportGit(false);
+    await this.reportOrgFolders();
   }
 
   /** Tells the server which git providers this workstation is connected to (facts only, never a token). */
@@ -771,6 +820,8 @@ export class Runner {
         done(true, result);
       } else if (command === 'forge.repos') {
         done(true, await this.listForgeRepos(CommandPayloadSchemas['forge.repos'].parse(payload)));
+      } else if (command === 'org.folder') {
+        done(true, await this.applyOrgFolder(CommandPayloadSchemas['org.folder'].parse(payload)));
       } else if (command === 'sudo.clear') {
         this.sudo.clear();
         done(true, { cleared: true });

@@ -19,6 +19,7 @@ import { applyForgeReposResult, applyGitReport } from '../commands/forges.ts';
 import { applyWorktreeSweepResult } from '../commands/hygiene.ts';
 import { intakeRpc } from '../commands/intake.ts';
 import { investigationRecordRpc } from '../commands/investigation.ts';
+import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
 import { applyReleasePrResult } from '../commands/release-pr.ts';
@@ -160,6 +161,9 @@ export class RunnerHandlers {
         return;
       case 'git.report':
         await applyGitReport(this.ctx, conn.workstationId, msg.connections);
+        return;
+      case 'org.folders':
+        await applyOrgFoldersReport(this.ctx, conn.workstationId, msg);
         return;
       case 'shift.accepted':
         await markShiftAccepted(this.ctx, ws, msg.shiftId);
@@ -317,6 +321,17 @@ export class RunnerHandlers {
               [msg.commandId, problem.slice(0, 500), this.ctx.clock.now()],
             );
           else await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+        } else if (cmd?.type === 'org.folder') {
+          // Terminal: a refusal is an answer; its reason shows on the Workstations page until the next success.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyOrgFolderResult(
+            this.ctx,
+            conn.workstationId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
         } else if (cmd?.type === 'sudo.set') {
           // The ciphertext is forgotten here (applySudoSetResult empties the payload) whatever the answer was.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

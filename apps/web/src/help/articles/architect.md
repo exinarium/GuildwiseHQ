@@ -29,6 +29,15 @@ When a repository has a main branch and a different working branch, the runner m
 ## What the architect may touch {#access}
 
 - It **writes** only documentation and its report; the runner checks this after each shift.
-- It **reads** the card's repository and every repository of the organization's projects cloned on its workstation, read-only, secret files blocked. The workstation's owner can also set an **organization source folder** (`aom-runner org-folder set`, see the runner guide `docs/RUNNER.md`): every git repository under it is readable too.
+- It **reads** the card's repository and every repository of the organization's projects cloned on its workstation, read-only, secret files blocked. The workstation's owner can also set an **organisation source folder** (see below): every git repository under it is readable too.
 - It **never pushes** itself: the runner publishes the card branch for it.
 - A card's investigation waits for the cards it depends on.
+
+## Organisation source folder {#source-folder}
+
+Open **Workstations**, expand your workstation and find the row **Organisation source folder** (only the workstation's owner sees it; it is set per organization, for the one you are working in). The architect may read every repository in the folder, read-only; secret files stay blocked.
+
+- Pick one of the folders the workstation offers, or type a path, then press **Set folder**. **Clear** removes it.
+- The row shows the folder (or "not set"), how many repositories it holds and whether it is **ok** or **invalid**, with the reason.
+- The workstation checks the folder itself and can refuse it: it must sit inside one of its repository folders (not be that folder), and never be your home folder, the runner's own folder or a credentials folder such as `~/.ssh`.
+- The same can be done on the machine with `aom-runner org-folder set|clear|list`.

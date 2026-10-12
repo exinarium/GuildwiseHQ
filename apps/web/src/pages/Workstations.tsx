@@ -24,6 +24,7 @@ import {
 } from '../components/ui.tsx';
 import { AddWorkstationWizard } from '../components/workstations/AddWorkstationWizard.tsx';
 import { CloudWorkstations } from '../components/workstations/CloudWorkstations.tsx';
+import { OrgSourceFolder } from '../components/workstations/OrgSourceFolder.tsx';
 import { RunnerUpdateBadge } from '../components/workstations/RunnerUpdateBadge.tsx';
 import { useCanManageOrg } from '../lib/orgRole.ts';
 import { unavailableRuntimes, unsandboxedConsequence, unsandboxedRuntimes } from '../lib/sandbox.ts';
@@ -271,6 +272,7 @@ export function WorkstationCard({
             {w.lastSeenAt && (
               <p className="mt-1 text-xs text-subtle">Last seen {formatDateTime(w.lastSeenAt)}</p>
             )}
+            {!admin && <OrgSourceFolder w={w} />}
             {!admin && <GitConnectionsPanel w={w} />}
             {!admin && <DevOpsPanel w={w} />}
             <ErrorBox error={unpair.error} />
