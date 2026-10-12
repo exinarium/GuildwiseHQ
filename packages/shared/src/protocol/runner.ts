@@ -14,7 +14,12 @@ import { TestEnvProblem } from '../events/testing.ts';
 import { VaultEventKind } from '../events/vault.ts';
 import { OutboundPostPayloadSchema } from '../external/index.ts';
 import { FeedItemInputSchema } from '../feed/index.ts';
-import { ForgeReposPayloadSchema, GitConnectionsSchema } from '../forge/index.ts';
+import {
+  ForgeReposPayloadSchema,
+  GitConnectionsSchema,
+  GitSshPayloadSchema,
+  RepoAccessPayloadSchema,
+} from '../forge/index.ts';
 import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
@@ -283,6 +288,8 @@ export const RunnerCommandNameSchema = z.enum([
   'sudo.clear',
   'git.status',
   'forge.repos',
+  'git.ssh',
+  'repo.access',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -322,6 +329,8 @@ export const CommandPayloadSchemas = {
   'sudo.clear': z.object({}),
   'git.status': z.object({}),
   'forge.repos': ForgeReposPayloadSchema,
+  'git.ssh': GitSshPayloadSchema,
+  'repo.access': RepoAccessPayloadSchema,
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([

@@ -307,6 +307,7 @@ Day-to-day problems: offline workstations, missing handoffs, vault conflicts, mi
 - A cloud workstation needs attention: A Codespace that cannot start (credits or spending limit used up on GitHub) shows Needs attention and leaves a notice on your desk. Fix it on GitHub and press Wake. See Cloud workstations.
 - An agent says the work is out of scope: The agent reported work outside the scope of its role. Check:
 - Git host says "Token refused": The badge on the Workstations page shows Token refused for a git host where you expected to be connected.
+- SSH says "refused the key", "host key changed" or "not reachable": On Workstations, open the workstation, click SSH on the git host and press Check SSH. The state tells you what to do:
 - Runner update rolled back: The runner tried to update to a new version but rolled back automatically because the new version did not connect within a few minutes. The label on the runner shows Update rolled back.
 
 ### Plans and billing

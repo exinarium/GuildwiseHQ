@@ -1,4 +1,11 @@
-import { type ConnectableForge, type ForgeKind, type ForgeRepoList, ForgeRepoListSchema } from '@aom/shared';
+import {
+  type ConnectableForge,
+  type ForgeKind,
+  type ForgeRepoList,
+  ForgeRepoListSchema,
+  type GitAccessMethod,
+  type GitSshPayload,
+} from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, patch, post } from '../client.ts';
 
@@ -55,5 +62,33 @@ export function useSetRepoProjectPath(projectId: string) {
     mutationFn: (v: { repoId: string; projectPath: string | null }) =>
       patch(`/projects/${projectId}/repos/${v.repoId}`, { projectPath: v.projectPath }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  });
+}
+
+/** The owner picks how a repository is reached (`ssh`, `https`, or `null`: the workstation default of the host). */
+export function useSetRepoAccessMethod(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { repoId: string; accessMethod: GitAccessMethod | null }) =>
+      patch(`/projects/${projectId}/repos/${v.repoId}`, { accessMethod: v.accessMethod }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  });
+}
+
+/**
+ * SSH on a host (Git hosts section): the workstation prepares a key, records the access default or checks that SSH
+ * works. The answer is its next report, so the Workstations list is refreshed a few times.
+ */
+export function useGitSsh() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { workstationId: string } & GitSshPayload) => {
+      const { workstationId, ...body } = v;
+      return post(`/workstations/${workstationId}/git/ssh`, body);
+    },
+    onSuccess: () => {
+      for (const ms of [1500, 4000, 8000, 15000])
+        setTimeout(() => qc.invalidateQueries({ queryKey: ['workstations'] }), ms);
+    },
   });
 }

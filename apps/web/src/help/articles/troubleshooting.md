@@ -75,6 +75,18 @@ The badge on the Workstations page shows **Token refused** for a git host where 
 
 On the **Git hosts** panel, hover over the badge to see the HTTP status and the likely missing scope. Run the connect command shown in the **Connect** helper, usually with different credentials or a token with broader permissions. For Bitbucket, the documented token needs **repository** and **pull request** read/write scopes; if you only have the repository scope, git access still works but pull requests are unavailable.
 
+## SSH says "refused the key", "host key changed" or "not reachable" {#ssh-problems}
+
+On **Workstations**, open the workstation, click **SSH** on the git host and press **Check SSH**. The state tells you what to do:
+
+- **The host refused the key**: the public key is not on your account at the host. Copy the public key shown there and add it (GitHub *Settings, SSH and GPG keys*; GitLab *User settings, SSH keys*; Bitbucket *Personal settings, SSH keys*; Azure DevOps *User settings, SSH public keys*), then check again. With a key file of your own, make sure the path is the private key and that it has no passphrase (the runner cannot type one; use **my ssh-agent** for a protected key).
+- **No key yet**: the key file does not exist on the workstation. Click **Save and create key**, or fix the path.
+- **Host key changed**: the host identified itself differently than the first time. If you did not expect that (a new server, a re-installed host), stop. Otherwise remove the host's line from `secrets/known_hosts` in the runner's data folder and check again.
+- **Host not reachable**: port 22 may be blocked by a firewall or a VPN. Test from a terminal on the workstation with `ssh -T git@github.com`.
+- **ssh is not installed**: install the OpenSSH client on the workstation.
+
+If SSH works but pull requests are not opened, that is expected: pull requests need the API token or CLI login (**Connect**). The branch is pushed and the manager opens the pull request.
+
 ## Runner update rolled back {#update-rolled-back}
 
 The runner tried to update to a new version but rolled back automatically because the new version did not connect within a few minutes. The label on the runner shows **Update rolled back**.

@@ -8,6 +8,7 @@ import {
   FORGE_KINDS,
   FORGE_LABELS,
   type ForgeKind,
+  GIT_ACCESS_LABELS,
   isSafeProjectPath,
   type RepoRef,
 } from '@aom/shared';
@@ -37,6 +38,7 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
   const [repoUrl, setRepoUrl] = useState('');
   const [repoBranch, setRepoBranch] = useState('');
   const [projectPath, setProjectPath] = useState('');
+  const [accessMethod, setAccessMethod] = useState<'default' | 'https' | 'ssh'>('default');
   const [override, setOverride] = useState<ForgeKind | 'auto'>('auto');
   const [createKind, setCreateKind] = useState<ForgeKind>('github');
   const [parts, setParts] = useState<Record<string, string>>({});
@@ -92,6 +94,7 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
         remoteUrl: creating ? cloneUrlFor(kind, fullName) : repoUrl.trim(),
         ...(repoBranch.trim() ? { workingBranch: repoBranch.trim() } : {}),
         ...(projectPath.trim() ? { projectPath: projectPath.trim() } : {}),
+        ...(accessMethod !== 'default' ? { accessMethod } : {}),
         ...(creating ? { forge: kind } : override !== 'auto' ? { forge: override } : {}),
         ...(creating ? { create: { name: fullName, visibility } } : {}),
       },
@@ -106,6 +109,7 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
           setRepoUrl('');
           setRepoBranch('');
           setProjectPath('');
+          setAccessMethod('default');
           setParts({});
           setOverride('auto');
         },
@@ -319,6 +323,16 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
         onChange={(e) => setProjectPath(e.target.value)}
         error={errs.path}
       />
+      <Select
+        label="Access"
+        value={accessMethod}
+        onChange={(e) => setAccessMethod(e.target.value as 'default' | 'https' | 'ssh')}
+        hint="How the workstation reaches the repository. SSH needs a key set up under Workstations, Git hosts; pull requests still need the API token or CLI login."
+      >
+        <option value="default">Workstation default</option>
+        <option value="https">{GIT_ACCESS_LABELS.https}</option>
+        <option value="ssh">{GIT_ACCESS_LABELS.ssh}</option>
+      </Select>
       {expert && (
         <TextInput
           label="Branch (optional)"

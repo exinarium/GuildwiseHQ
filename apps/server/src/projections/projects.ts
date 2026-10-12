@@ -301,12 +301,12 @@ export const projectProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ProjectRepoAdded'>).payload;
     await exec(
       tx,
-      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, working_branch, forge_kind, project_path)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, working_branch, forge_kind, project_path, access_method)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        ON CONFLICT (project_id, remote_url_normalized) DO UPDATE
          SET removed_at = NULL, name = EXCLUDED.name, remote_url = EXCLUDED.remote_url,
              working_branch = EXCLUDED.working_branch, forge_kind = EXCLUDED.forge_kind,
-             project_path = EXCLUDED.project_path`,
+             project_path = EXCLUDED.project_path, access_method = EXCLUDED.access_method`,
       [
         p.repoId,
         p.projectId,
@@ -316,8 +316,13 @@ export const projectProjectors: Record<string, Projector> = {
         p.workingBranch ?? null,
         p.forge ?? null,
         normalizeProjectPath(p.projectPath),
+        p.accessMethod ?? null,
       ],
     );
+  },
+  ProjectRepoAccessSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectRepoAccessSet'>).payload;
+    await exec(tx, 'UPDATE project_repos SET access_method=$2 WHERE id=$1', [p.repoId, p.accessMethod]);
   },
   ProjectRepoPathSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectRepoPathSet'>).payload;

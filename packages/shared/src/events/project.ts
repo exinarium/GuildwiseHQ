@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ForgeKindSchema } from '../forge/index.ts';
+import { ForgeKindSchema, GitAccessMethodSchema } from '../forge/index.ts';
 import { WorkingBranchReason } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { BranchPrefixSchema, GitRefSchema, ProjectPathSchema, VaultFolderSchema } from '../safe.ts';
@@ -104,7 +104,14 @@ export const projectEvents = [
       forge: ForgeKindSchema.optional(),
       /** The sub directory of the repository the project lives in (absent: the repository root). */
       projectPath: ProjectPathSchema.optional(),
+      /** `ssh` or `https` for this repository (absent: the workstation default of the git host). */
+      accessMethod: GitAccessMethodSchema.optional(),
     }),
+  ),
+  /** The owner chose (or cleared, `accessMethod: null`) how git reaches the repository: SSH key or API token / CLI login. */
+  defineEvent(
+    'ProjectRepoAccessSet',
+    z.object({ projectId: Id, repoId: Id, accessMethod: GitAccessMethodSchema.nullable() }),
   ),
   /** The owner set (or cleared, `projectPath: null`) the sub directory of the repository the project lives in. */
   defineEvent(

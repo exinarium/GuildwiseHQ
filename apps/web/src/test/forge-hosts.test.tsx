@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AddRepoForm } from '../components/AddRepoForm.tsx';
+import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { Workstations } from '../pages/Workstations.tsx';
@@ -75,6 +76,7 @@ beforeEach(() => {
         });
       if (url === '/api/workstations') return json({ workstations: [station(gitState)] });
       if (method === 'POST' && url.endsWith('/git/recheck')) return json({ ok: true });
+      if (method === 'POST' && url.endsWith('/git/ssh')) return json({ ok: true }, 202);
       if (method === 'POST' && url.endsWith('/git/repos'))
         return json(
           { requestId: ID(77), provider: body.provider, state: 'pending', repos: [], error: null },
@@ -315,5 +317,140 @@ describe('repository project path', () => {
     );
     expect(await screen.findByTestId('repo-path-shop')).toHaveTextContent('web/client');
     expect(screen.queryByRole('button', { name: 'Change' })).toBeNull();
+  });
+});
+
+describe('SSH instead of a token', () => {
+  const sshState = (extra: Record<string, unknown> = {}) => ({
+    connections: [
+      {
+        provider: 'bitbucket-cloud',
+        host: 'bitbucket.org',
+        state: 'not_connected',
+        checkedAt: AT,
+        ssh: {
+          defaultMethod: 'ssh',
+          key: 'generated',
+          keyPath: '/home/u/.ssh/aom_bitbucket_cloud',
+          publicKey: 'ssh-ed25519 AAAAC3 guildwise-bitbucket-cloud',
+          ...extra,
+        },
+      },
+    ],
+    checkedAt: AT,
+  });
+
+  it('the Git hosts section shows the public key and where to add it, and asks the workstation to prepare and check', async () => {
+    gitState = sshState({
+      check: { state: 'not_authorized', detail: 'bitbucket.org refused the key.', checkedAt: AT },
+    });
+    const user = userEvent.setup();
+    wrap(<Workstations />);
+    await user.click(await screen.findByTestId('workstation-toggle'));
+    const row = await screen.findByTestId('git-bitbucket-cloud');
+    expect(row).toHaveTextContent('Default: SSH');
+    await user.click(within(row).getByRole('button', { name: 'SSH' }));
+    const panel = await screen.findByTestId('ssh-bitbucket-cloud');
+    expect(within(panel).getByTestId('ssh-public-key-bitbucket-cloud')).toHaveTextContent(
+      'ssh-ed25519 AAAAC3 guildwise-bitbucket-cloud',
+    );
+    expect(panel).toHaveTextContent('Personal settings, SSH keys');
+    expect(within(panel).getByTestId('ssh-detail-bitbucket-cloud')).toHaveTextContent('refused the key');
+    expect(panel).toHaveTextContent('aom-runner git-connect bitbucket-cloud --ssh');
+    // The page never offers a field for the private key itself.
+    expect(within(panel).queryByLabelText(/passphrase|private key content/i)).toBeNull();
+
+    await user.click(within(panel).getByRole('button', { name: 'Save and create key' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.url.endsWith('/git/ssh'))?.body).toMatchObject({
+        provider: 'bitbucket-cloud',
+        action: 'prepare',
+        defaultMethod: 'ssh',
+        key: 'generated',
+      }),
+    );
+    calls.length = 0;
+    await user.type(
+      within(panel).getByLabelText('Check against a repository (optional)'),
+      'https://bitbucket.org/ws/repo.git',
+    );
+    await user.click(within(panel).getByRole('button', { name: 'Check SSH' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/git/ssh'))?.body).toMatchObject({
+        action: 'check',
+        repoUrl: 'https://bitbucket.org/ws/repo.git',
+      }),
+    );
+  });
+
+  it('a key file of your own is sent as a path', async () => {
+    gitState = sshState();
+    const user = userEvent.setup();
+    wrap(<Workstations />);
+    await user.click(await screen.findByTestId('workstation-toggle'));
+    const row = await screen.findByTestId('git-bitbucket-cloud');
+    await user.click(within(row).getByRole('button', { name: 'SSH' }));
+    const panel = await screen.findByTestId('ssh-bitbucket-cloud');
+    await user.selectOptions(within(panel).getByLabelText('SSH key of Bitbucket Cloud'), 'path');
+    await user.type(
+      within(panel).getByLabelText('Private key file on the workstation'),
+      '/home/u/.ssh/id_ed25519',
+    );
+    await user.click(within(panel).getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/git/ssh'))?.body).toMatchObject({
+        action: 'save',
+        key: 'path',
+        keyPath: '/home/u/.ssh/id_ed25519',
+      }),
+    );
+  });
+
+  it('a repository follows the workstation default, can be overridden by the owner, and says what SSH cannot do', async () => {
+    gitState = sshState({ check: { state: 'ok', detail: 'ok', checkedAt: AT } });
+    const user = userEvent.setup();
+    const repo = repoDto({ forge: 'bitbucket-cloud', remoteUrl: 'https://bitbucket.org/ws/shop.git' });
+    wrap(<RepoAccessControl projectId={ID(2)} repo={repo as never} isOwner />);
+    const row = await screen.findByTestId('repo-access-shop');
+    await waitFor(() => expect(row).toHaveTextContent('SSH key'));
+    expect(row).toHaveTextContent('workstation default for bitbucket.org');
+    expect(row).toHaveTextContent('SSH works');
+    expect(await screen.findByTestId('repo-access-rest-shop')).toHaveTextContent(
+      'the branch is pushed and the manager opens the pull request',
+    );
+    await user.click(screen.getByRole('button', { name: 'Change' }));
+    await user.selectOptions(screen.getByLabelText('Access method of shop'), 'https');
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PATCH')).toMatchObject({
+        url: `/api/projects/${ID(2)}/repos/${ID(50)}`,
+        body: { accessMethod: 'https' },
+      }),
+    );
+  });
+
+  it('a non-owner cannot change it; an explicit https choice shows no SSH note', async () => {
+    gitState = sshState();
+    const repo = repoDto({
+      forge: 'bitbucket-cloud',
+      remoteUrl: 'https://bitbucket.org/ws/shop.git',
+      accessMethod: 'https',
+    });
+    wrap(<RepoAccessControl projectId={ID(2)} repo={repo as never} isOwner={false} />);
+    const row = await screen.findByTestId('repo-access-shop');
+    expect(row).toHaveTextContent('API token / CLI login (https)');
+    expect(row).toHaveTextContent('chosen by you');
+    expect(screen.queryByRole('button', { name: 'Change' })).toBeNull();
+    expect(screen.queryByTestId('repo-access-rest-shop')).toBeNull();
+  });
+
+  it('Add repository sends the chosen access method', async () => {
+    const user = userEvent.setup();
+    wrap(<AddRepoForm projectId={ID(2)} />);
+    await user.type(screen.getByLabelText('Remote URL'), 'https://github.com/acme/web.git');
+    await user.type(screen.getByLabelText('Repository name'), 'web');
+    await user.selectOptions(screen.getByLabelText('Access'), 'ssh');
+    await user.click(screen.getByRole('button', { name: 'Add repository' }));
+    await waitFor(() => expect(calls.find((c) => c.url.endsWith('/repos'))).toBeTruthy());
+    expect(calls.find((c) => c.url.endsWith('/repos'))?.body).toMatchObject({ accessMethod: 'ssh' });
   });
 });

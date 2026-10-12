@@ -221,6 +221,7 @@ commission on that subscription for as long as it keeps running (recurring, life
 - #1: Runners update themselves once a day. Done 2026-10-12.
 - #2: Verify rights fails on Arch: package manager not detected. Done 2026-10-12.
 - #5: Bitbucket shows "not available" although it is connected. Done 2026-10-12.
+- #6: SSH as an alternative to API tokens for repository access. Done 2026-10-12.
 - #7: The development environment check ignores a project in a sub directory. Done 2026-10-12.
 - #11: "Fix" button that sends the DevOps engineer to fix an environment problem. Done 2026-10-12.
 - #4: Agents cannot read code outside their card worktree (chats, comparing repositories). Done 2026-10-12.

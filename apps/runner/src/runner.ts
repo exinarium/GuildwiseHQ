@@ -3,6 +3,7 @@ import { hostname, platform } from 'node:os';
 import { join } from 'node:path';
 import {
   CommandPayloadSchemas,
+  defaultHost,
   type EnvEnsurePayload,
   type IpcRpcResponse,
   normalizeRemoteUrl,
@@ -33,6 +34,7 @@ import {
   gitAuthFor,
   gitConnections,
 } from './forge/index.ts';
+import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import type { ForgeEnv } from './forge/types.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
@@ -44,6 +46,7 @@ import { IntegrationPoller } from './integrations/poll.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
+import { RepoAccessUpdater } from './repo/access.ts';
 import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
 import { wipeAgent } from './sandbox/sandbox.ts';
@@ -122,6 +125,7 @@ export class Runner {
   private readonly poller: IntegrationPoller;
   readonly repoCreator: RepoCreator;
   readonly repoCloner: RepoCloner;
+  private readonly repoAccess: RepoAccessUpdater;
   /** The key pair for secrets the manager sends (the sudo password) and the store that holds the password. */
   readonly keys: RunnerKeys;
   readonly sudo: SudoVault;
@@ -160,6 +164,10 @@ export class Runner {
       exec: this.exec,
       fetch: globalThis.fetch,
       tokens: new FileTokenStore(join(this.paths.secrets, 'git-tokens.json')),
+      ssh: {
+        settings: new SshSettingsStore(join(this.paths.secrets, 'git-ssh.json')),
+        knownHosts: join(this.paths.secrets, 'known_hosts'),
+      },
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
     };
     this.agentGit = new AgentGit({ env: this.forgeEnv, secretsDir: this.paths.secrets });
@@ -242,6 +250,12 @@ export class Runner {
       forge: () => this.forgeEnv,
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
       afterClone: () => this.rescan(),
+    });
+    this.repoAccess = new RepoAccessUpdater({
+      exec: this.exec,
+      forge: () => this.forgeEnv,
+      findExisting: (n) => this.findRepo(n),
+      ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
     });
     this.poller = new IntegrationPoller({
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
@@ -667,6 +681,30 @@ export class Runner {
       } else if (command === 'git.status') {
         await this.reportGit(true);
         done(true, { reported: true });
+      } else if (command === 'repo.access') {
+        // The origin of the clone follows the repository's access method; a failure is an answer, not a command error.
+        done(true, await this.repoAccess.run(CommandPayloadSchemas['repo.access'].parse(payload)));
+      } else if (command === 'git.ssh') {
+        const p = CommandPayloadSchemas['git.ssh'].parse(payload);
+        const ssh = this.forgeEnv.ssh;
+        if (!ssh) throw new Error('ssh is not available on this runner');
+        let result: Awaited<ReturnType<typeof runSshAction>>;
+        try {
+          result = await runSshAction(this.exec, ssh, {
+            provider: p.provider,
+            host: p.host ?? defaultHost(p.provider),
+            action: p.action,
+            defaultMethod: p.defaultMethod,
+            key: p.key,
+            keyPath: p.keyPath,
+            repoUrl: p.repoUrl,
+          });
+        } catch (err) {
+          await this.reportGit(true);
+          throw err;
+        }
+        await this.reportGit(true);
+        done(true, result);
       } else if (command === 'forge.repos') {
         done(true, await this.listForgeRepos(CommandPayloadSchemas['forge.repos'].parse(payload)));
       } else if (command === 'sudo.clear') {

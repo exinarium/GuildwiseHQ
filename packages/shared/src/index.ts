@@ -11,6 +11,7 @@ export * from './events/index.ts';
 export * from './external/index.ts';
 export * from './feed/index.ts';
 export * from './forge/index.ts';
+export * from './forge/remote-url.ts';
 export * from './hr/index.ts';
 export * from './hygiene/index.ts';
 export * from './hygiene/secrets.ts';

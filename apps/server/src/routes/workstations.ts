@@ -1,5 +1,6 @@
 import {
   ForgeRepoListRequestSchema,
+  GitSshPayloadSchema,
   IdParamsSchema,
   PairingCodeResponseSchema,
   PatchWorkstationRequestSchema,
@@ -9,6 +10,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAdmin, requireUser } from '../auth/guards.ts';
 import { readRepoList, requestGitRecheck, requestRepoList } from '../commands/forges.ts';
+import { requestGitSsh } from '../commands/repo-access.ts';
 import {
   createPairingCode,
   pairRunner,
@@ -66,6 +68,18 @@ export function workstationRoutes(ctx: Ctx) {
       await requestGitRecheck(ctx, s.user, req.params.id);
       return { ok: true };
     });
+
+    /** SSH on a git host: prepare a key, record the access default or check SSH on the workstation (answered by the next report). */
+    app.post(
+      '/api/workstations/:id/git/ssh',
+      { schema: { params: IdParamsSchema, body: GitSshPayloadSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        await requestGitSsh(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return { ok: true };
+      },
+    );
 
     /** The repository picker: ask the workstation for the user's repositories on a connected provider. */
     app.post(

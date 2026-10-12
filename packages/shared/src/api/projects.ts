@@ -1,7 +1,12 @@
 import { z } from 'zod';
 import { EnvironmentReportSchema, EnvStateSchema, RepoCloneStateSchema } from '../devops/environment.ts';
 import { ConvertCardDecision, ProjectChangesSchema } from '../events/project.ts';
-import { createFullNameError, detectForgeKind, ForgeKindSchema } from '../forge/index.ts';
+import {
+  createFullNameError,
+  detectForgeKind,
+  ForgeKindSchema,
+  GitAccessMethodSchema,
+} from '../forge/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
 import { RepoDescriptionSchema, RepoNameSchema, RepoVisibilitySchema, repoNameError } from '../repo/index.ts';
 import {
@@ -25,6 +30,8 @@ export const ProjectRepoDtoSchema = z.object({
   removedAt: IsoTime.nullable(),
   /** The sub directory of the repository the project lives in; null: the repository root. */
   projectPath: z.string().nullable().optional(),
+  /** The owner's access method for this repository (`ssh` or `https`); null: the workstation default of the host. */
+  accessMethod: GitAccessMethodSchema.nullable().optional(),
   /** The git provider in force: the manual choice, else detected from the URL. */
   forge: ForgeKindSchema.optional(),
   /** The manual choice (null: detected). */
@@ -205,6 +212,8 @@ export const AddRepoRequestSchema = z
     workingBranch: GitRefSchema.optional(),
     /** The sub directory of the repository the project lives in (empty: the repository root). */
     projectPath: ProjectPathSchema.optional(),
+    /** `ssh` or `https` for this repository; absent: the workstation default of the git host. */
+    accessMethod: GitAccessMethodSchema.optional(),
     /** The git provider, when it cannot be detected from the URL (the manual override). */
     forge: ForgeKindSchema.optional(),
     /**
@@ -327,8 +336,10 @@ export const PatchRepoRequestSchema = z
   .object({
     forge: ForgeKindSchema.nullable().optional(),
     projectPath: ProjectPathSchema.nullable().optional(),
+    /** `ssh` or `https` for this repository; null: follow the workstation default of the git host. */
+    accessMethod: GitAccessMethodSchema.nullable().optional(),
   })
-  .refine((b) => b.forge !== undefined || b.projectPath !== undefined, {
-    message: 'send forge or projectPath',
+  .refine((b) => b.forge !== undefined || b.projectPath !== undefined || b.accessMethod !== undefined, {
+    message: 'send forge, projectPath or accessMethod',
   });
 export type PatchRepoRequest = z.infer<typeof PatchRepoRequestSchema>;

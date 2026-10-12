@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { type ConnectableForge, defaultHost, FORGE_LABELS, type GitConnection } from '@aom/shared';
 
-export { connectSteps } from '@aom/shared';
+export { connectSteps, sshUploadHelp } from '@aom/shared';
 
 import type { Executor } from '../toolchain/exec.ts';
 import { forgeOfKind } from './index.ts';
@@ -26,6 +26,11 @@ export interface SshKeyResult {
   created: boolean;
 }
 
+/** `~/.ssh/aom_<provider>`: the private key file the runner generates for a provider. */
+export function sshKeyPathFor(provider: ConnectableForge, home = homedir()): string {
+  return join(home, '.ssh', `aom_${provider.replace(/-/g, '_')}`);
+}
+
 /** Creates `~/.ssh/aom_<provider>` (ed25519, no passphrase) unless it exists; returns the public key to upload. */
 export async function ensureSshKey(
   exec: Executor,
@@ -33,7 +38,7 @@ export async function ensureSshKey(
   home = homedir(),
 ): Promise<SshKeyResult> {
   const dir = join(home, '.ssh');
-  const path = join(dir, `aom_${provider.replace(/-/g, '_')}`);
+  const path = sshKeyPathFor(provider, home);
   let created = false;
   if (!existsSync(path)) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -46,20 +51,6 @@ export async function ensureSshKey(
     created = true;
   }
   return { path, publicKey: readFileSync(`${path}.pub`, 'utf8').trim(), created };
-}
-
-/** Where to paste the public key for each provider. */
-export function sshUploadHelp(provider: ConnectableForge, host = defaultHost(provider)): string {
-  switch (provider) {
-    case 'github':
-      return `github.com/settings/keys (or https://${host}/settings/keys): New SSH key, paste the public key.`;
-    case 'gitlab':
-      return `https://${host}/-/user_settings/ssh_keys: paste the public key, Add key.`;
-    case 'bitbucket-cloud':
-      return 'bitbucket.org: Personal settings, SSH keys, Add key, paste the public key.';
-    case 'azure-devops':
-      return 'dev.azure.com: User settings, SSH public keys, New Key, paste the public key.';
-  }
 }
 
 export function describeConnection(c: GitConnection): string {

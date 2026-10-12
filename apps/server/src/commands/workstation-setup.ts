@@ -123,6 +123,7 @@ export async function repoSetupEvents(
       remoteUrl: repo.remote_url,
       ...(repo.working_branch ? { workingBranch: repo.working_branch } : {}),
       ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
+      ...(repo.access_method ? { accessMethod: repo.access_method } : {}),
       ...(creates && opts.create
         ? {
             create: {
