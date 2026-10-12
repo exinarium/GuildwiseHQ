@@ -30,12 +30,13 @@ export function EditCardDialog({
   const patch = usePatchCard(card.id);
   const project = useProject(card.projectId);
   const repos = (project.data?.repos ?? []).filter((r) => !r.removedAt);
+  const designDefault = project.data?.project.designStep ?? false;
   const [v, setV] = useState<CardFormValues>(() => formValuesFromCard(workflow, card, mockUi));
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const r = buildPatchRequest(workflow, v, card, mockUi);
+    const r = buildPatchRequest(workflow, v, card, mockUi, designDefault);
     setErrors(r.errors);
     if (Object.keys(r.errors).length) return;
     patch.mutate(r.patch, { onSuccess: () => onOpenChange(false) });
@@ -56,6 +57,7 @@ export function EditCardDialog({
           errors={errors}
           repos={repos}
           mockUi={mockUi}
+          designDefault={designDefault}
         />
         {Object.keys(errors).length > 0 && (
           <p role="alert" className="text-sm font-medium text-danger">

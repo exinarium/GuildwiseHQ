@@ -14,6 +14,7 @@ import {
   ProjectsResponseSchema,
   type PublicationDto,
   PublicationsResponseSchema,
+  type SetArchitectSettingsRequest,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
@@ -186,6 +187,18 @@ export function useSetFullSuite(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['project', id] });
       qc.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
+export function useSetArchitectSettings(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: SetArchitectSettingsRequest) => put(`/projects/${id}/architect-settings`, b),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['board'] });
     },
   });
 }

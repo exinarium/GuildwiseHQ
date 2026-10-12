@@ -22,6 +22,10 @@ You can also click **Pick from my repositories** to list the repositories of a c
 
 Cards stay as drafts until you are ready to specify them. A new project goes to the bottom of your priority order.
 
+## Architect settings {#architect-settings}
+
+Under **Architect** in the project settings the owner decides whether new cards are investigated and designed by an architect before the builder starts (off by default), whether the latest main branch is merged first (on by default), and where the architect's reports go (a folder in the repository, or the knowledge vault). See [The architect](/help/architect).
+
 ## Reference repositories {#reference-repos}
 
 By default an agent only sees the folder of the card it is working on (and, in a chat about a project, the project's own repositories). To let a project's agents **read** other code, for example to compare two repositories or look up how a library is used, the project owner adds **Reference repositories** in the project settings:

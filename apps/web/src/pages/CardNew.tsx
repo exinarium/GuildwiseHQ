@@ -83,6 +83,7 @@ export function CardNew() {
       extraWorkflows={research ? [research] : []}
       repos={(detail.data?.repos ?? []).filter((r) => !r.removedAt)}
       mockUi={mockUi}
+      designDefault={detail.data?.project.designStep ?? false}
     />
   );
 }
@@ -98,6 +99,7 @@ export function CardNewForm({
   extraWorkflows = [],
   repos,
   mockUi = false,
+  designDefault = false,
 }: {
   projectId: string;
   projectKey: string;
@@ -109,6 +111,8 @@ export function CardNewForm({
   repos: Array<{ id: string; name: string }>;
   /** Show the mock-runtime fields (server `AOM_MOCK_UI`); off for real users. */
   mockUi?: boolean;
+  /** The project's "Investigate & design before build" setting. */
+  designDefault?: boolean;
 }) {
   const nav = useNavigate();
   const create = useCreateCard();
@@ -124,7 +128,7 @@ export function CardNewForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [note, setNote] = useState<{ id: string; ref: string; missing: string[] } | null>(null);
   const submit = (specify: boolean) => {
-    const r = buildCardRequest(workflow, v, specify, mockUi);
+    const r = buildCardRequest(workflow, v, specify, mockUi, designDefault);
     setErrors(r.errors);
     setNote(null);
     if (Object.keys(r.errors).length) {
@@ -206,6 +210,7 @@ export function CardNewForm({
               errors={errors}
               repos={repos}
               mockUi={mockUi}
+              designDefault={designDefault}
             />
           </div>
         </Panel>

@@ -13,7 +13,7 @@ To hire an agent:
 
 1. Go to **Agents** and click **Hire agent**. (A card that cannot be picked up also offers a **Hire** link that opens this form with the missing role filled in.)
 2. Fill in the form:
-   - **Role**: builder, reviewer, tester, technical writer, BA, or custom roles you designed. DevOps engineers are not hired here: each workstation gets one automatically (see [DevOps and repository hygiene](/help/devops-and-hygiene#devops-engineer)).
+   - **Role**: builder, reviewer, tester, technical writer, BA, architect (senior only; see [The architect](/help/architect)), or custom roles you designed. DevOps engineers are not hired here: each workstation gets one automatically (see [DevOps and repository hygiene](/help/devops-and-hygiene#devops-engineer)).
    - **Seniority**: junior or senior. Some roles come in one seniority only (the reviewer and the BA are senior).
    - **Workstation**: which of your paired workstations it runs on (your own computer, a VPS or a Codespace, see [Workstations and the installer](/help/workstations-and-installer)).
    - **Runtime**, **Model** and **Effort**: which runtime and Claude model to use and how much thinking to allow. Leave them empty for the role's defaults.
