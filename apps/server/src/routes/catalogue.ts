@@ -2,6 +2,7 @@ import { OrgContextQuerySchema, RoleDefinitionSchema, WorkflowDefinitionSchema }
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
 import { requestedOrgId, resolveOrgId } from '../auth/org-context.ts';
+import { subworkflowTargets } from '../catalogue/subworkflow-lookup.ts';
 import { catalogueOrg } from '../commands/designer.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
@@ -39,6 +40,19 @@ export function catalogueRoutes(ctx: Ctx) {
           extensions: r.extensions ?? null,
         })),
       };
+    });
+
+    // The sub-workflow step editor's choices: approved workflows and the caller's own projects with what is enabled.
+    app.get('/api/subworkflow-targets', { schema: { querystring: OrgContextQuerySchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const { orgId } = await catalogueOrg(
+        ctx.pool,
+        s.user,
+        await resolveOrgId(ctx, s, requestedOrgId(req)),
+        req.query.projectId,
+        false,
+      );
+      return subworkflowTargets(ctx.pool, orgId, s.user.id);
     });
 
     app.get('/api/workflows', { schema: { querystring: OrgContextQuerySchema } }, async (req) => {

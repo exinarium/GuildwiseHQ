@@ -202,15 +202,42 @@ export async function enterSubworkflow(ctx: Ctx, cardId: string): Promise<boolea
       ))
     )
       return false;
-    // One open child per step: a card moved back into a stage whose child still runs does not get a second one.
-    if (
-      await one(
-        tx,
-        `SELECT 1 FROM subworkflow_runs WHERE parent_card_id=$1 AND stage_id=$2 AND status='open'`,
-        [card.id, card.stage],
-      )
-    )
-      return false;
+    // One open child per step: a card moved back into a stage whose child still runs waits on that child again
+    // (no second child). When the child ends, the usual resolution takes the parent on.
+    const open = await one(
+      tx,
+      `SELECT r.child_card_id, ch.ref AS child_ref FROM subworkflow_runs r JOIN cards ch ON ch.id = r.child_card_id
+        WHERE r.parent_card_id=$1 AND r.stage_id=$2 AND r.status='open' ORDER BY r.started_at DESC LIMIT 1`,
+      [card.id, card.stage],
+    );
+    if (open) {
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.card(card.id),
+            event: {
+              type: 'SubworkflowAttached',
+              payload: {
+                cardId: card.id,
+                stageId: stage.id,
+                childCardId: open.child_card_id,
+                reworkRound: card.rework_round,
+              },
+            },
+            actor: SYSTEM_ACTOR,
+            scope: projectScope(card.org_id, card.project_id),
+          },
+          cardMessage(
+            card,
+            { kind: 'system' },
+            'system',
+            `Step "${stage.label}" already has ${open.child_ref} running from an earlier visit: this card waits for it instead of starting another.`,
+          ),
+        ],
+        { tx },
+      );
+      return true;
+    }
 
     const started = await startChild(ctx, tx, card, wf.definition, stage, cfg);
     if (isRefusal(started)) await ctx.store.append(refusalEvents(card, stage, cfg, started), { tx });

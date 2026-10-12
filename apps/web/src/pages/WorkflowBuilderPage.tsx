@@ -13,8 +13,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
 import { useAgents } from '../api/queries/agents.ts';
-import { useOrgCatalogue, useSaveWorkflowDraft, useSubmitDraft } from '../api/queries/org.ts';
+import {
+  useOrgCatalogue,
+  useSaveWorkflowDraft,
+  useSubmitDraft,
+  useSubworkflowTargets,
+} from '../api/queries/org.ts';
 import { BuilderChat } from '../components/builder/BuilderChat.tsx';
+import { SubworkflowEditor } from '../components/builder/SubworkflowEditor.tsx';
 import { TemplateGallery } from '../components/builder/TemplateGallery.tsx';
 import { VersionCompare } from '../components/builder/VersionCompare.tsx';
 import { WorkflowBuilder } from '../components/builder/WorkflowBuilder.tsx';
@@ -33,6 +39,7 @@ import {
   takenWorkflowKeys,
   toDefinition,
 } from '../lib/builder.ts';
+import { buildSubworkflowLookup } from '../lib/subworkflowStep.ts';
 
 const STATUS_TONE = {
   active: 'green',
@@ -213,6 +220,8 @@ function BuilderSession({
 
   const save = useSaveWorkflowDraft();
   const submit = useSubmitDraft();
+  const subTargets = useSubworkflowTargets(projectId);
+  const subLookup = useMemo(() => buildSubworkflowLookup(cat, subTargets.data), [cat, subTargets.data]);
   const agents = useAgents();
   const hiredRoleKeys = useMemo(
     () =>
@@ -418,6 +427,16 @@ function BuilderSession({
           readOnly={readOnly}
           showWorktree={showWorktree}
           onValidation={setValidation}
+          subworkflowLookup={subLookup}
+          renderSubworkflowEditor={(ctx) => (
+            <SubworkflowEditor
+              ctx={ctx}
+              targets={subTargets.data}
+              loading={subTargets.isPending}
+              failed={subTargets.isError}
+              selfKey={model.key}
+            />
+          )}
           aside={<BuilderChat outline={() => describeDraft(model, savedId)} disabled={!cat.canEdit} />}
         />
 

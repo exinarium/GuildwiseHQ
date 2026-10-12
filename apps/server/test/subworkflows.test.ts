@@ -221,6 +221,10 @@ beforeAll(async () => {
         'ring-a',
         'ring-b',
         'drafty',
+        'attach-flow',
+        'cancel-flow',
+        'cancel-flow-2',
+        'cancel-flow-3',
       ].map((k) => [k, '*'] as [string, string]),
     ),
   );
@@ -689,6 +693,188 @@ describe('refusals while the stage runs', () => {
     expect(kid).toBeTruthy();
     expect(await cardRow(kid!.id)).toMatchObject({ status: 'blocked' });
     expect((await refusals(kid!.id)).map((x) => x.reason)).toEqual(['cycle']);
+  });
+});
+
+/** intake -> ask (sub-workflow, wait) -> check (agent) -> finished | gave_up. */
+const attachFlow = (key: string) =>
+  base(key, [
+    intake('ask'),
+    {
+      id: 'ask',
+      label: 'Ask',
+      column: 'Ask',
+      kind: 'subworkflow',
+      claimRole: null,
+      doneCriteria: '',
+      subworkflow: sub('answering'),
+      outcomes: [outcome('done', 'check'), outcome('failed', 'gave_up', 'failure')],
+    },
+    agentStage('check', 'finished', { outcomes: [outcome('fine', 'finished')] }),
+    terminal('finished'),
+    terminal('gave_up'),
+  ]);
+const move = (id: string, toStage: string) =>
+  ok(
+    w.t.req('POST', `/api/cards/${id}/move`, {
+      cookie: w.owner.cookie,
+      body: { toStage, reason: 'test' },
+    }),
+  );
+const cancel = (id: string, body: Record<string, unknown>, cookie = w.owner.cookie) =>
+  w.t.req('POST', `/api/cards/${id}/cancel`, { cookie, body });
+
+describe('a manager moves a card back into a sub-workflow step whose child still runs', () => {
+  it('the card waits on the open child again: no second child, a card note, and the child ends it as usual', async () => {
+    await publish(attachFlow('attach-flow'));
+    await enable(w.projectId, 'attach-flow');
+    const card = await newCard('attach-flow');
+    await tick();
+    const [child] = await childrenOf(card.id);
+    expect(await cardRow(card.id)).toMatchObject({ stage: 'ask', status: 'waiting' });
+
+    await move(card.id, 'check');
+    await tick();
+    expect(await cardRow(card.id)).toMatchObject({ stage: 'check', status: 'queued' });
+    await move(card.id, 'ask');
+    await settle();
+
+    expect(await cardRow(card.id)).toMatchObject({ stage: 'ask', status: 'waiting' });
+    expect(await childrenOf(card.id)).toHaveLength(1);
+    expect(await runsOf(card.id)).toHaveLength(1);
+    expect(await count('SubworkflowAttached', card.id)).toBe(1);
+    const notes = await q(
+      `SELECT payload->>'body' AS body FROM events WHERE type='ThreadMessagePosted' AND payload->>'threadId'=$1`,
+      [card.id],
+    );
+    expect(notes.some((n) => /already has .* running from an earlier visit/.test(String(n.body)))).toBe(true);
+    // Another pass (and a replay of the whole log) attaches nothing more.
+    await sweepFromStart();
+    expect(await count('SubworkflowAttached', card.id)).toBe(1);
+
+    // The child ends: the parent leaves the step the usual way, with the fields copied back.
+    await answerChild(child!.id, 'late answer');
+    await settle();
+    expect(await cardRow(card.id)).toMatchObject({
+      stage: 'check',
+      fields: { reply: 'late answer' },
+    });
+    expect((await runsOf(card.id))[0]).toMatchObject({ status: 'done' });
+    // Tidy: nobody is to pick the queued check step up in the tests that follow.
+    await ok(cancel(card.id, { reason: 'tidy' }));
+    await settle();
+  });
+});
+
+describe('cancelling a card that waits on a sub-workflow child', () => {
+  const start = async (key: string, cfg: Record<string, unknown> = {}) => {
+    await publish(parentFlow(key, sub('answering', cfg)));
+    await enable(w.projectId, key);
+    const card = await newCard(key);
+    await tick();
+    const [child] = await childrenOf(card.id);
+    return { card, child: child! };
+  };
+
+  it('by default only the parent is cancelled; the child keeps running', async () => {
+    const { card, child } = await start('cancel-flow');
+    await ok(cancel(card.id, { reason: 'stop' }));
+    await tick();
+    expect(await cardRow(card.id)).toMatchObject({ status: 'cancelled' });
+    expect(await cardRow(child.id)).toMatchObject({ status: 'queued' });
+    // Tidy: the child is cancelled by hand so it does not take the next test's agent.
+    await ok(cancel(child.id, { reason: 'tidy' }));
+    await settle();
+  });
+
+  it('alsoCancelChildren cancels the open child through the normal path, with an audit reason', async () => {
+    const { card, child } = await start('cancel-flow-2');
+    await ok(cancel(card.id, { reason: 'customer left', alsoCancelChildren: true }));
+    expect(await cardRow(card.id)).toMatchObject({ status: 'cancelled' });
+    expect(await cardRow(child.id)).toMatchObject({ status: 'cancelled' });
+    const ev = await q(`SELECT payload FROM events WHERE type='CardCancelled' AND payload->>'cardId'=$1`, [
+      child.id,
+    ]);
+    expect(ev).toHaveLength(1);
+    expect(String(ev[0]!.payload.reason)).toContain(`Cancelled together with ${card.ref}`);
+    expect(String(ev[0]!.payload.reason)).toContain('customer left');
+    await tick();
+    // The run is recorded as cancelled and the cancelled parent is left alone.
+    expect((await runsOf(card.id))[0]).toMatchObject({ status: 'cancelled' });
+    expect(await cardRow(card.id)).toMatchObject({ status: 'cancelled', stage: 'ask' });
+  });
+
+  it('the flag changes nothing for a card that waits on no child', async () => {
+    const card = await newCard('answering');
+    await ok(cancel(card.id, { reason: 'plain', alsoCancelChildren: true }));
+    expect(await cardRow(card.id)).toMatchObject({ status: 'cancelled' });
+    await settle();
+  });
+
+  it('the panel offers the cancel only to a viewer who may cancel the child', async () => {
+    const { card, child } = await start('cancel-flow-3', { project: { projectId: ansProjectId } });
+    const mine = await detail(card.id);
+    expect(mine.subworkflows.children[0]).toMatchObject({ state: 'open', child: { canCancel: true } });
+    // Another manager of the card's project who is not in the child's project has nothing to tick.
+    const outsider = await addMember(w, 'outsider');
+    const theirs = await detail(card.id, outsider.cookie);
+    expect(theirs.subworkflows.children[0].child).toMatchObject({ visible: false, canCancel: false });
+    expect((await cancel(card.id, { reason: 'no' }, outsider.cookie)).status).toBe(403);
+    await ok(cancel(card.id, { reason: 'done here', alsoCancelChildren: true }));
+    expect(await cardRow(child.id)).toMatchObject({ status: 'cancelled', project_id: ansProjectId });
+    const after = await detail(card.id);
+    expect(after.subworkflows.children[0].child.canCancel).toBe(false);
+    await settle();
+  });
+
+  it('the request body is validated (the flag must be a boolean)', async () => {
+    const card = await newCard('answering');
+    expect((await cancel(card.id, { reason: 'x', alsoCancelChildren: 'yes' })).status).toBe(400);
+    await ok(cancel(card.id, { reason: 'x' }));
+    await settle();
+  });
+});
+
+describe('GET /api/subworkflow-targets', () => {
+  it('lists approved workflows with their fields and the projects the caller belongs to, with what is enabled', async () => {
+    await enable(w.projectId, 'answering');
+    const res = await ok<any>(w.t.req('GET', '/api/subworkflow-targets', { cookie: w.owner.cookie }));
+    const answering = res.workflows.find((x: any) => x.key === 'answering');
+    expect(answering).toMatchObject({ name: 'answering', builtIn: false, cardTypes: ['support'] });
+    expect(answering.fields).toEqual(
+      expect.arrayContaining([
+        { key: 'customer', label: 'Customer', kind: 'text', required: true },
+        { key: 'answer', label: 'Answer', kind: 'text', required: false },
+      ]),
+    );
+    // Built-ins are offered, the internal bug-fix flow is not.
+    expect(res.workflows.some((x: any) => x.builtIn)).toBe(true);
+    expect(res.workflows.some((x: any) => x.key === 'code-bugfix')).toBe(false);
+    const ids = res.projects.map((x: any) => x.id);
+    expect(ids).toEqual(expect.arrayContaining([w.projectId, ansProjectId]));
+    expect(res.projects.find((x: any) => x.id === ansProjectId)).toMatchObject({
+      key: 'ANS',
+      enabledWorkflows: ['answering'],
+    });
+    expect(res.projects.find((x: any) => x.id === w.projectId).enabledWorkflows).toContain('answering');
+  });
+
+  it('lists only the projects the caller is a member of', async () => {
+    const other = await addMember(w, 'targets-member');
+    const res = await ok<any>(
+      w.t.req('GET', `/api/subworkflow-targets?projectId=${w.projectId}`, { cookie: other.cookie }),
+    );
+    expect(res.projects.map((x: any) => x.id)).toEqual([w.projectId]);
+    expect(res.workflows.length).toBeGreaterThan(0);
+  });
+
+  it('needs a signed-in user and an organisation the caller belongs to', async () => {
+    expect((await w.t.req('GET', '/api/subworkflow-targets')).status).toBe(401);
+    const stranger = await w.t.userSession(`stranger-${Date.now()}@example.test`);
+    const res = await w.t.req('GET', '/api/subworkflow-targets', { cookie: stranger.cookie });
+    // Either refused, or the stranger's own organisation: never ours.
+    if (res.status === 200) expect(res.body.projects.map((x: any) => x.id)).not.toContain(w.projectId);
+    else expect([403, 404]).toContain(res.status);
   });
 });
 

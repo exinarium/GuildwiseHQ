@@ -1,11 +1,15 @@
 import {
+  fieldCatalogue,
+  requiredChildFields,
   type SubworkflowLookup,
   type SubworkflowTarget,
+  type SubworkflowTargetsResponse,
   subworkflowStages,
   type WorkflowDefinition,
   WorkflowDefinitionSchema,
 } from '@aom/shared';
 import { type Queryable, rows } from '../db/sql.ts';
+import { enabledWorkflows } from './project-workflows.ts';
 
 /** Does this definition start a sub-workflow at all? (Most do not: the lookup is then never built.) */
 export function hasSubworkflowStages(def: unknown): boolean {
@@ -81,5 +85,67 @@ export async function subworkflowLookupFor(
       sameOrg: projectId ? !!known : true,
       enabledInProject: projectId ? !!known?.has(workflowKey) : true,
     };
+  };
+}
+
+/**
+ * What the builder's sub-workflow step offers (`GET /api/subworkflow-targets`): the approved workflows of the
+ * organization (internal bug-fix machinery left out) and the projects `userId` is an active member of, each with the
+ * workflows enabled there. A project the user is not a member of is never listed (a step can only start cards in
+ * projects its owner belongs to).
+ */
+export async function subworkflowTargets(
+  db: Queryable,
+  orgId: string,
+  userId: string,
+): Promise<SubworkflowTargetsResponse> {
+  const versions = await rows(
+    db,
+    `SELECT DISTINCT ON (org_id, key) org_id, definition FROM workflow_versions
+      WHERE (org_id IS NULL OR org_id = $1) AND status = 'active' AND project_id IS NULL
+      ORDER BY org_id NULLS FIRST, key, version DESC`,
+    [orgId],
+  );
+  // An organization workflow shadows a built-in one of the same key.
+  const byKey = new Map<string, { def: WorkflowDefinition; builtIn: boolean }>();
+  for (const r of versions) {
+    const parsed = WorkflowDefinitionSchema.safeParse(r.definition);
+    if (parsed.success) byKey.set(parsed.data.key, { def: parsed.data, builtIn: r.org_id === null });
+  }
+  const workflows = [...byKey.values()]
+    .filter(({ def }) => def.key !== 'code-bugfix')
+    .map(({ def, builtIn }) => {
+      const required = new Set(requiredChildFields(def));
+      return {
+        key: def.key,
+        name: def.name,
+        builtIn,
+        cardTypes: def.cardTypes,
+        fields: Object.entries(fieldCatalogue(def.fieldSet, def.customFields)).map(([key, m]) => ({
+          key,
+          label: m.label,
+          kind: m.kind,
+          required: required.has(key),
+        })),
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const projects = await rows(
+    db,
+    `SELECT p.* FROM projects p JOIN project_members pm ON pm.project_id = p.id
+      WHERE p.org_id = $1 AND pm.user_id = $2 AND pm.status = 'active' AND p.status = 'active' AND p.kind <> 'interest'
+      ORDER BY p.name`,
+    [orgId, userId],
+  );
+  return {
+    workflows,
+    projects: await Promise.all(
+      projects.map(async (p) => ({
+        id: p.id as string,
+        key: p.key as string,
+        name: p.name as string,
+        enabledWorkflows: (await enabledWorkflows(db, p)).map((e) => e.workflowKey),
+      })),
+    ),
   };
 }

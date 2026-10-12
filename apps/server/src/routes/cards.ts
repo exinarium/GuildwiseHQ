@@ -132,7 +132,9 @@ export function cardRoutes(ctx: Ctx) {
       { schema: { params: CardParamsSchema, body: CancelCardRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        const id = await cancelCard(ctx, s.user, req.params.id, req.body.reason);
+        const id = await cancelCard(ctx, s.user, req.params.id, req.body.reason, {
+          alsoCancelChildren: req.body.alsoCancelChildren,
+        });
         return getCardDetail(ctx, s.user.id, id);
       },
     );

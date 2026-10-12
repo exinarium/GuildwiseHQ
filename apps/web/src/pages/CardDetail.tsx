@@ -3,6 +3,7 @@ import {
   COMPLETION_ACTION_LABELS,
   fieldCatalogue,
   isMockField,
+  type SubworkflowChildDto,
   type WorkflowDefinition,
   workflowUsesRepos,
 } from '@aom/shared';
@@ -33,7 +34,12 @@ import { InvestigationPanel, MainSyncNote } from '../components/InvestigationPan
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
 import { ShiftLog } from '../components/ShiftLog.tsx';
-import { StartedByLine, SubworkflowsPanel, SubworkflowWaitLine } from '../components/SubworkflowsPanel.tsx';
+import {
+  cancellableChildren,
+  StartedByLine,
+  SubworkflowsPanel,
+  SubworkflowWaitLine,
+} from '../components/SubworkflowsPanel.tsx';
 import {
   Avatar,
   Badge,
@@ -614,7 +620,12 @@ export function CardDetailView({
       {permissions.canSetRisk && dialog === 'risk' && (
         <RiskTierDialog open onOpenChange={(o) => !o && setDialog(null)} card={card} />
       )}
-      <CancelDialog open={dialog === 'cancel'} onOpenChange={(o) => !o && setDialog(null)} cardId={card.id} />
+      <CancelDialog
+        open={dialog === 'cancel'}
+        onOpenChange={(o) => !o && setDialog(null)}
+        cardId={card.id}
+        waitingOn={cancellableChildren(card.status, data.subworkflows)}
+      />
     </div>
   );
 }
@@ -765,23 +776,30 @@ function MoveDialog({
   );
 }
 
-function CancelDialog({
+export function CancelDialog({
   open,
   onOpenChange,
   cardId,
+  waitingOn = [],
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   cardId: string;
+  /** Open sub-workflow children this card waits on and the viewer may cancel. */
+  waitingOn?: SubworkflowChildDto[];
 }) {
   const cancel = useCancelCard(cardId);
   const [reason, setReason] = useState('');
+  const [alsoChildren, setAlsoChildren] = useState(false);
   const [err, setErr] = useState('');
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!reason.trim()) return setErr('A reason is required');
     setErr('');
-    cancel.mutate(reason.trim(), { onSuccess: () => onOpenChange(false) });
+    cancel.mutate(
+      { reason: reason.trim(), alsoCancelChildren: waitingOn.length > 0 && alsoChildren },
+      { onSuccess: () => onOpenChange(false) },
+    );
   };
   return (
     <Dialog
@@ -792,6 +810,23 @@ function CancelDialog({
     >
       <form onSubmit={submit} className="flex flex-col gap-3" noValidate>
         <TextArea label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} error={err} />
+        {waitingOn.length > 0 && (
+          <label className="inline-flex items-start gap-2 text-sm" data-testid="cancel-children">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={alsoChildren}
+              onChange={(e) => setAlsoChildren(e.target.checked)}
+            />
+            <span>
+              Also cancel the card{waitingOn.length > 1 ? 's' : ''} it is waiting for:{' '}
+              {waitingOn.map((c) => `${c.child.ref}${c.child.title ? ` (${c.child.title})` : ''}`).join(', ')}
+              <span className="block text-xs text-subtle">
+                Left unticked, {waitingOn.length > 1 ? 'they keep' : 'it keeps'} running on its own.
+              </span>
+            </span>
+          </label>
+        )}
         <ErrorBox error={cancel.error} />
         <div className="flex justify-end gap-2">
           <Button onClick={() => onOpenChange(false)}>Keep card</Button>

@@ -3,6 +3,7 @@ import {
   type FrozenIds,
   type RoleDefinition,
   type SimulationResult,
+  type SubworkflowLookup,
   simulatePath,
   WorkflowDefinitionSchema,
 } from '@aom/shared';
@@ -50,6 +51,8 @@ export interface WorkflowBuilderProps {
   showWorktree?: boolean;
   /** Extension point for the sub-workflow step editor (docs/design/workflow-builder.md D7, built with the server side). */
   renderSubworkflowEditor?: (ctx: SubworkflowSlotContext) => React.ReactNode;
+  /** Resolves the targets of sub-workflow steps for the checks (approved, enabled, loops, field types). */
+  subworkflowLookup?: SubworkflowLookup;
   /** Reports the validation after every change (the page enables Submit from it). */
   onValidation?: (v: BuilderValidation) => void;
   /** Extra content under "Try a card" (the page puts the BA chat there). */
@@ -78,10 +81,15 @@ function OrgWorkflowBuilder(p: WorkflowBuilderProps) {
     () =>
       validateBuilder(
         model,
-        { roles: p.roles, departments: p.departments, frozen: p.frozen },
+        {
+          roles: p.roles,
+          departments: p.departments,
+          frozen: p.frozen,
+          subworkflowLookup: p.subworkflowLookup,
+        },
         p.serverIssues,
       ),
-    [model, p.roles, p.departments, p.frozen, p.serverIssues],
+    [model, p.roles, p.departments, p.frozen, p.serverIssues, p.subworkflowLookup],
   );
   const { onValidation } = p;
   useEffect(() => onValidation?.(validation), [validation, onValidation]);
@@ -150,6 +158,13 @@ function OrgWorkflowBuilder(p: WorkflowBuilderProps) {
     const keys = fieldKeys(model, p.frozen);
     return yesNoFields(model).map((f) => ({ key: keys.get(f.uid) ?? f.uid, label: f.label }));
   }, [model, p.frozen]);
+  const subworkflowNote = (stageId: string) => {
+    const cfg = model.steps.find((s) => ids.get(s.uid) === stageId)?.subworkflow;
+    if (!cfg?.workflowKey) return undefined;
+    const name =
+      p.subworkflowLookup?.(cfg.workflowKey, cfg.project ?? 'same')?.definition.name ?? cfg.workflowKey;
+    return `Starts ${name} and ${(cfg.mode ?? 'wait') === 'wait' ? 'waits for it' : 'carries on at once'}`;
+  };
   const roleName = (key: string) => p.roles.find((r) => r.key === key)?.name ?? key;
   const flagged = useMemo(() => {
     const out = new Set<string>();
@@ -301,6 +316,7 @@ function OrgWorkflowBuilder(p: WorkflowBuilderProps) {
             }
             roleName={roleName}
             hiredRoleKeys={p.hiredRoleKeys}
+            subworkflowNote={subworkflowNote}
           />
           {p.aside}
         </div>

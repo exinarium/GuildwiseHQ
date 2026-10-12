@@ -50,6 +50,18 @@ export const subworkflowProjectors: Record<string, Projector> = {
       );
   },
 
+  // A card moved back into a stage whose child still runs waits on that child again: no new run, only the status.
+  SubworkflowAttached: async (tx, e) => {
+    const p = ev<'SubworkflowAttached'>(e).payload;
+    await mutateCard(tx, e, p.cardId, () =>
+      exec(
+        tx,
+        `UPDATE cards SET status='waiting', updated_at=$2 WHERE id=$1 AND status NOT IN ('done','cancelled')`,
+        [p.cardId, e.createdAt],
+      ),
+    );
+  },
+
   SubworkflowResolved: async (tx, e) => {
     const p = ev<'SubworkflowResolved'>(e).payload;
     await exec(

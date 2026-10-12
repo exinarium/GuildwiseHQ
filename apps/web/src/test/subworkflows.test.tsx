@@ -1,11 +1,21 @@
 import type { BoardCard, BoardResponse, CardDetailResponse, SubworkflowsPanel as Panel } from '@aom/shared';
-import { render, screen, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BoardView } from '../components/BoardView.tsx';
 import { TestingLinks } from '../components/EvidencePanel.tsx';
-import { StartedByLine, SubworkflowsPanel, SubworkflowWaitLine } from '../components/SubworkflowsPanel.tsx';
+import {
+  cancellableChildren,
+  StartedByLine,
+  SubworkflowsPanel,
+  SubworkflowWaitLine,
+} from '../components/SubworkflowsPanel.tsx';
+import { CancelDialog } from '../pages/CardDetail.tsx';
+
+afterEach(() => vi.unstubAllGlobals());
 
 const ID = (n: number) => `0192f3a0-0000-7000-8000-${String(n).padStart(12, '0')}`;
 const wrap = (ui: ReactNode) => render(<MemoryRouter>{ui}</MemoryRouter>);
@@ -222,5 +232,72 @@ describe('card detail: sub-workflows', () => {
       </MemoryRouter>,
     );
     expect(screen.queryByTestId('waiting-line')).toBeNull();
+  });
+});
+
+describe('cancelling a card that waits on a sub-workflow child', () => {
+  const panel = (kids: Panel['children']): Panel => ({ children: kids, startedBy: null });
+  const mayCancel = (over: Partial<Panel['children'][number]['child']> = {}) =>
+    run({ child: child({ canCancel: true, ...over }) });
+
+  it('offers only open children the viewer may cancel, and only while the card waits', () => {
+    const data = panel([
+      mayCancel(),
+      run({ child: child({ id: ID(4), ref: 'SUP-13', canCancel: false }) }),
+      run({ state: 'done', child: child({ id: ID(5), ref: 'SUP-14', canCancel: true }) }),
+    ]);
+    expect(cancellableChildren('waiting', data).map((c) => c.child.ref)).toEqual(['SUP-12']);
+    expect(cancellableChildren('queued', data)).toEqual([]);
+    expect(cancellableChildren('waiting', undefined)).toEqual([]);
+  });
+
+  const mount = (waitingOn: Panel['children']) => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, body: init?.body ? JSON.parse(init.body as string) : undefined });
+        return new Response(JSON.stringify({}), { status: 200 });
+      }),
+    );
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
+        <CancelDialog open onOpenChange={() => {}} cardId={ID(1)} waitingOn={waitingOn} />
+      </QueryClientProvider>,
+    );
+    return calls;
+  };
+
+  it('shows no checkbox when there is no child to cancel, and sends only the reason', async () => {
+    const calls = mount([]);
+    expect(screen.queryByTestId('cancel-children')).toBeNull();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Reason'), 'stop');
+    await user.click(screen.getByRole('button', { name: 'Confirm cancel' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toEqual({ url: `/api/cards/${ID(1)}/cancel`, body: { reason: 'stop' } });
+  });
+
+  it('names the child, leaves the box unticked, and sends the flag only when it is ticked', async () => {
+    const calls = mount([mayCancel()]);
+    const box = screen.getByRole('checkbox', {
+      name: /Also cancel the card it is waiting for: SUP-12 \(Translate: Launch page\)/,
+    });
+    expect(box).not.toBeChecked();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Reason'), 'customer left');
+    await user.click(box);
+    await user.click(screen.getByRole('button', { name: 'Confirm cancel' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]?.body).toEqual({ reason: 'customer left', alsoCancelChildren: true });
+  });
+
+  it('unticked, the child is not touched', async () => {
+    const calls = mount([mayCancel()]);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Reason'), 'just this one');
+    await user.click(screen.getByRole('button', { name: 'Confirm cancel' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]?.body).toEqual({ reason: 'just this one' });
   });
 });

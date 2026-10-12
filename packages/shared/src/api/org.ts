@@ -171,6 +171,41 @@ export const OrgCatalogueResponseSchema = z.object({
 });
 export type OrgCatalogueResponse = z.infer<typeof OrgCatalogueResponseSchema>;
 
+/**
+ * `GET /api/subworkflow-targets`: what the sub-workflow step editor offers to start: the approved workflows of the
+ * organization (with the card fields the step can fill) and the projects the caller is a member of (with the workflows
+ * enabled in each).
+ */
+export const SubworkflowTargetsResponseSchema = z.object({
+  workflows: z.array(
+    z.object({
+      key: z.string(),
+      name: z.string(),
+      builtIn: z.boolean(),
+      cardTypes: z.array(z.string()),
+      /** Fields of a card of this workflow (card columns, field set, custom fields). */
+      fields: z.array(
+        z.object({
+          key: z.string(),
+          label: z.string(),
+          kind: z.string(),
+          /** The card must have it before work starts (custom required fields, the first agent step's). */
+          required: z.boolean(),
+        }),
+      ),
+    }),
+  ),
+  projects: z.array(
+    z.object({
+      id: z.uuid(),
+      key: z.string(),
+      name: z.string(),
+      enabledWorkflows: z.array(z.string()),
+    }),
+  ),
+});
+export type SubworkflowTargetsResponse = z.infer<typeof SubworkflowTargetsResponseSchema>;
+
 export const DESK_SUBKIND_DEFINITION = 'definition';
 
 /** `PUT /api/workflows/:id` and `PUT /api/roles/:id` (edit a draft) reuse the draft inputs. */

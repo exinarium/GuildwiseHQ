@@ -11,9 +11,11 @@ import {
   type OrgCatalogueResponse,
   type RoleDefinition,
   type SubworkflowConfigInput,
+  type SubworkflowLookup,
   uniqueId,
   type ValidationIssue,
   validateCustomWorkflow,
+  validateSubworkflowTargets,
   type WorkflowDefinitionInput,
   WorkflowDefinitionSchema,
 } from '@aom/shared';
@@ -125,6 +127,25 @@ export function otherRoutes(step: BuilderStep): Array<{ route: BuilderRoute; ind
   return step.routes.map((route, index) => ({ route, index })).filter(({ index }) => !skip.has(index));
 }
 
+/** Rewrites the parent-card field references of a sub-workflow step (uid in the model, key in the definition). */
+function mapSubworkflowFields(
+  cfg: SubworkflowConfigInput,
+  f: (field: string) => string,
+): SubworkflowConfigInput {
+  const c = structuredClone(cfg);
+  return {
+    ...c,
+    ...(c.fieldsIn
+      ? {
+          fieldsIn: c.fieldsIn.map((m) =>
+            'field' in m.from ? { ...m, from: { field: f(m.from.field) } } : m,
+          ),
+        }
+      : {}),
+    ...(c.fieldsOut ? { fieldsOut: c.fieldsOut.map((m) => ({ ...m, to: f(m.to) })) } : {}),
+  };
+}
+
 export function fromDefinition(
   def: BuilderDef | WorkflowDefinitionInput,
   opts: { /** Keep the stored ids and keys for good (default). */ freeze?: boolean } = {},
@@ -173,7 +194,7 @@ export function fromDefinition(
     ...(s.when ? { when: { field: fieldRef(s.when.field), equals: s.when.equals } } : {}),
     worktree: s.worktree ?? 'none',
     maxShiftMinutes: s.maxShiftMinutes ?? DEFAULT_MAX_SHIFT,
-    ...(s.subworkflow ? { subworkflow: structuredClone(s.subworkflow) } : {}),
+    ...(s.subworkflow ? { subworkflow: mapSubworkflowFields(s.subworkflow, fieldRef) } : {}),
     routes: (s.outcomes ?? []).map((o) => ({
       id: o.id,
       label: o.label,
@@ -263,7 +284,7 @@ export function toDefinition(model: BuilderModel, opts: { frozen?: FrozenIds } =
       label: s.label,
       column: s.column ?? s.label,
       kind: s.kind,
-      ...(s.subworkflow ? { subworkflow: structuredClone(s.subworkflow) } : {}),
+      ...(s.subworkflow ? { subworkflow: mapSubworkflowFields(s.subworkflow, fkey) } : {}),
       claimRole: s.role,
       seniorOnly: s.seniorOnly,
       requiredFields: s.requiredFields.map(fkey),
@@ -538,13 +559,77 @@ export function setStepKind(m: BuilderModel, uid: string, kind: StepKindValue): 
     kind,
     role: kind === 'agent' ? s.role : null,
     routes: kind === 'terminal' ? [] : s.routes,
-    ...(kind === 'subworkflow' ? {} : { subworkflow: undefined }),
+    ...(kind === 'subworkflow'
+      ? { subworkflow: s.subworkflow ?? newSubworkflowConfig() }
+      : { subworkflow: undefined }),
   }));
   if (kind !== 'terminal' && nextIndex(model.steps[i] as BuilderStep) === -1) {
     const next = model.steps[i + 1];
     if (next) model = setNext(model, uid, next.uid);
   }
-  return model;
+  return kind === 'subworkflow' ? ensureFailedRoute(model, uid) : model;
+}
+
+/** A sub-workflow step with nothing chosen yet: waits for the other card, fails the step if that card is cancelled. */
+export const newSubworkflowConfig = (): SubworkflowConfigInput => ({
+  workflowKey: '',
+  project: 'same',
+  mode: 'wait',
+  fieldsIn: [],
+  fieldsOut: [],
+  onFailure: 'fail',
+});
+
+const FAILED_ROUTE_ID = 'failed';
+
+/** Index of the route taken when the other workflow's card is cancelled (a failure route that is not a send-back). */
+export const failedRouteIndex = (step: Pick<BuilderStep, 'routes'>): number => {
+  const byId = step.routes.findIndex((r) => r.kind === 'failure' && r.id === FAILED_ROUTE_ID);
+  return byId !== -1 ? byId : step.routes.findIndex((r) => r.kind === 'failure');
+};
+
+/** Sets (or, with null, removes) where the card goes when the card it started is cancelled. */
+export function setFailedRoute(m: BuilderModel, uid: string, to: string | null): BuilderModel {
+  return patchStep(m, uid, (s) => {
+    const i = failedRouteIndex(s);
+    if (to === null) return { ...s, routes: s.routes.filter((_, j) => j !== i) };
+    if (i === -1)
+      return {
+        ...s,
+        routes: [
+          ...s.routes,
+          {
+            id: takeId(s, FAILED_ROUTE_ID),
+            label: 'The other workflow was cancelled',
+            kind: 'failure',
+            to,
+            event: 'StageCompleted',
+            data: 'none',
+            rework: false,
+            effect: 'none',
+          },
+        ],
+      };
+    return { ...s, routes: s.routes.map((r, j) => (j === i ? { ...r, to } : r)) };
+  });
+}
+
+/**
+ * A waiting sub-workflow step that fails when the other card is cancelled needs a route for that: when it has none,
+ * it gets one back to the step before it (else the first final step), which the owner can change.
+ */
+export function ensureFailedRoute(m: BuilderModel, uid: string): BuilderModel {
+  const i = m.steps.findIndex((s) => s.uid === uid);
+  const step = m.steps[i];
+  const cfg = step?.subworkflow;
+  if (!step || !cfg || (cfg.mode ?? 'wait') !== 'wait' || (cfg.onFailure ?? 'fail') !== 'fail') return m;
+  if (failedRouteIndex(step) !== -1 || step.routes.length === 0) return m;
+  const target =
+    m.steps
+      .slice(0, i)
+      .reverse()
+      .find((s) => s.kind !== 'terminal') ?? m.steps.find((s) => s.kind === 'terminal');
+  return target ? setFailedRoute(m, uid, target.uid) : m;
 }
 
 export function setFirstStep(m: BuilderModel, uid: string): BuilderModel {
@@ -585,6 +670,17 @@ export function removeField(m: BuilderModel, uid: string): BuilderModel {
       requiredFields: s.requiredFields.filter((f) => f !== uid),
       when: s.when?.field === uid ? undefined : s.when,
       routes: s.routes.map((r) => (r.when?.field === uid ? { ...r, when: undefined } : r)),
+      ...(s.subworkflow
+        ? {
+            subworkflow: {
+              ...s.subworkflow,
+              fieldsIn: (s.subworkflow.fieldsIn ?? []).filter(
+                (x) => !('field' in x.from && x.from.field === uid),
+              ),
+              fieldsOut: (s.subworkflow.fieldsOut ?? []).filter((x) => x.to !== uid),
+            },
+          }
+        : {}),
     })),
   };
 }
@@ -611,6 +707,8 @@ export interface BuilderContext {
   roles: readonly RoleDefinition[];
   departments: readonly string[];
   frozen?: FrozenIds;
+  /** Resolves the targets of sub-workflow steps (approved, enabled, cycle, depth, field types). Absent: not checked here. */
+  subworkflowLookup?: SubworkflowLookup;
 }
 
 export interface BuilderValidation {
@@ -631,7 +729,17 @@ export function validateBuilder(
   server?: readonly DefinitionIssue[],
 ): BuilderValidation {
   const def = toDefinition(model, { frozen: ctx.frozen });
-  const full = { ...def, version: 1, builtIn: false };
+  // A sub-workflow step that has not chosen its workflow yet is reported as "does not say which", not as a bad value.
+  const full = {
+    ...def,
+    version: 1,
+    builtIn: false,
+    stages: def.stages.map((s) => {
+      if (s.kind !== 'subworkflow' || s.subworkflow?.workflowKey?.trim()) return s;
+      const { subworkflow: _blank, ...rest } = s;
+      return rest;
+    }),
+  };
   let raw: ValidationIssue[];
   const parsed = WorkflowDefinitionSchema.safeParse(full);
   if (server && server.length > 0) raw = server.map(asValidation);
@@ -642,11 +750,13 @@ export function validateBuilder(
       code: 'invalid_schema' as const,
       message: `${i.path.join('.') || '(root)'}: ${i.message}`,
     }));
-  else
+  else {
     raw = validateCustomWorkflow(parsed.data, ctx.roles, {
       builtinWorkflowKeys: BUILTIN_WORKFLOWS.map((w) => w.key),
       departments: ctx.departments,
     });
+    if (ctx.subworkflowLookup) raw.push(...validateSubworkflowTargets(parsed.data, ctx.subworkflowLookup));
+  }
   const issues: BuilderIssue[] = explainIssues(raw, def as { stages: WorkflowDefinitionInput['stages'] });
   if (ctx.frozen) {
     for (const gone of missingFrozenIds(ctx.frozen, def as { stages: WorkflowDefinitionInput['stages'] })) {
@@ -722,7 +832,7 @@ export function frozenFor(cat: OrgCatalogueResponse, key: string): FrozenIds {
 export const KIND_LABEL: Record<StepKindValue, string> = {
   manual: 'Starts here (someone fills in the card)',
   agent: 'Work done by an agent',
-  subworkflow: 'Starts another workflow',
+  subworkflow: 'Start another workflow',
   terminal: 'Finished',
 };
 
