@@ -93,3 +93,50 @@ describe('Verify now', () => {
     expect(await screen.findByText(/runner is too old/)).toBeInTheDocument();
   });
 });
+
+describe('Fix on a failed right', () => {
+  it('files a DevOps request with the failure as context; verified rights have no Fix', async () => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
+      String(url) === '/api/devops/requests' && init?.method === 'POST'
+        ? json({ request: { id: U }, messages: [], changes: [] }, 201)
+        : String(url).startsWith('/api/devops/requests')
+          ? json({ requests: [] })
+          : json({ queued: true }, 202),
+    );
+    const user = userEvent.setup();
+    wrap(
+      <DevOpsPanel
+        w={ws({
+          devopsAccess: { allowInstall: true, allowDocker: true, allowedPaths: [], sudo: false },
+          rights: {
+            checkedAt: '2026-10-05T10:00:00.000Z',
+            stale: false,
+            platform: 'linux',
+            sudoPasswordStored: false,
+            checks: {
+              install: { status: 'verified', reason: 'ok' },
+              docker: {
+                status: 'failed',
+                reason: 'permission denied on /var/run/docker.sock',
+                fix: 'Add the runner user to the docker group',
+              },
+            },
+          },
+        })}
+      />,
+    );
+    expect(screen.getAllByRole('button', { name: /^Fix/ })).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: /Fix: the right "Docker"/ }));
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(
+        (c) => c[0] === '/api/devops/requests' && c[1]?.method === 'POST',
+      );
+      expect(post).toBeTruthy();
+      expect(JSON.parse(post?.[1].body)).toMatchObject({
+        workstationId: WS_ID,
+        origin: 'workstation',
+        context: { workstationId: WS_ID, errorText: 'permission denied on /var/run/docker.sock' },
+      });
+    });
+  });
+});

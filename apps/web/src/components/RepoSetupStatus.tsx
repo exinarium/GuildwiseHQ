@@ -1,5 +1,6 @@
 import type { ProjectDetailResponse, ProjectRepoDto } from '@aom/shared';
 import { useCheckEnvironment, useRetryRepoSetup } from '../api/queries/projects.ts';
+import { FixWithDevOps } from './devops/FixWithDevOps.tsx';
 import { Badge, Button, ErrorBox, Panel } from './ui.tsx';
 
 type Tone = 'neutral' | 'blue' | 'amber' | 'green' | 'red';
@@ -52,6 +53,17 @@ export function RepoSetupStatus({
                 {r.state === 'failed' ? `Failed: ${r.detail}` : r.detail}
               </span>
             )}
+            {(r.state === 'failed' || r.state === 'needs_manager') && canRetry && (
+              <FixWithDevOps
+                workstationId={r.workstationId}
+                projectId={projectId}
+                repoId={repo.id}
+                problem={`the repository ${repo.name} (${repo.remoteUrl}) could not be ${r.state === 'failed' ? 'cloned' : 'set up'} on ${r.workstationName}`}
+                errorText={r.detail ?? undefined}
+                onDone={() => retry.mutate(repo.id)}
+                doneLabel="Try again"
+              />
+            )}
           </li>
         );
       })}
@@ -76,6 +88,9 @@ const ENV: Record<
   failed: { tone: 'red', label: 'Not ready' },
   needs_access: { tone: 'amber', label: 'Needs access' },
 };
+
+/** Tool statuses the DevOps engineer can be sent to fix. */
+const FIXABLE = new Set(['missing', 'failed', 'needs_access']);
 
 const TOOL_TONE: Record<string, Tone> = {
   ok: 'green',
@@ -126,6 +141,18 @@ export function EnvironmentPanel({
                       {t.version ? ` ${t.version}` : ''}
                       {t.detail ? <span className="text-subtle"> {t.detail}</span> : null}
                       {t.fix && <span className="block pl-1 text-muted">How to fix: {t.fix}</span>}
+                      {canCheck && FIXABLE.has(t.status) && (
+                        <span className="mt-1 block pl-1">
+                          <FixWithDevOps
+                            workstationId={e.workstationId}
+                            projectId={projectId}
+                            problem={`${t.tool} (${t.stack}) is ${t.status.replace('_', ' ')} on ${e.workstationName}`}
+                            errorText={t.detail}
+                            suggestedFix={t.fix}
+                            onDone={() => check.mutate()}
+                          />
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>

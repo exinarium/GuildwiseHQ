@@ -19,6 +19,7 @@ import {
 } from '../api/queries/devops.ts';
 import { formatDateTime } from '../lib/time.ts';
 import { AskDevOpsButton } from './devops/AskDevOps.tsx';
+import { FixWithDevOps } from './devops/FixWithDevOps.tsx';
 import { Badge, Button, ErrorBox, Select, TextArea, TextInput } from './ui.tsx';
 
 const TONE = {
@@ -194,6 +195,18 @@ function RightsStatus({
               </div>
               {c && <p className="ml-1 text-xs text-subtle">{c.reason}</p>}
               {c?.status === 'failed' && c.fix && <p className="ml-1 text-xs">How to fix: {c.fix}</p>}
+              {c?.status === 'failed' && (
+                <p className="ml-1 mt-1">
+                  <FixWithDevOps
+                    workstationId={w.id}
+                    problem={`the right "${RIGHT_LABEL[key]}" failed its check on ${w.name}`}
+                    errorText={c.reason}
+                    suggestedFix={c.fix}
+                    onDone={() => verify.mutate(w.id)}
+                    doneLabel="Verify now"
+                  />
+                </p>
+              )}
             </li>
           );
         })}
