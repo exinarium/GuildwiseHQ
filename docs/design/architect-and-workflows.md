@@ -310,3 +310,5 @@ Order: **WP0 -> (WP1 ∥ WP3) -> (WP2 ∥ WP4 ∥ WP5)**. WP1/WP2 are #10, WP3-W
    the owner's approval on the desk before cards use it.
 5. Accepted recommendations: report default `docs/investigations/` in the repository with the vault as alternative; the
    architect is not added to `code-bugfix`; dependencies also hold back the investigate stage.
+6. **Variant approval:** organisation Owners **and** Admins may approve a project workflow variant on the desk (as built).
+7. **Rework and inserted steps:** a step inserted after build runs again on every rework round (as built).
