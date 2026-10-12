@@ -5,11 +5,13 @@ import {
   PairingCodeResponseSchema,
   PatchWorkstationRequestSchema,
   RunnerPairRequestSchema,
+  SetOrgFolderRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAdmin, requireUser } from '../auth/guards.ts';
 import { readRepoList, requestGitRecheck, requestRepoList } from '../commands/forges.ts';
+import { requestOrgFolder } from '../commands/org-folders.ts';
 import { requestGitSsh } from '../commands/repo-access.ts';
 import {
   createPairingCode,
@@ -69,6 +71,18 @@ export function workstationRoutes(ctx: Ctx) {
       return { ok: true };
     });
 
+    /** Organisation source folder: ask the runner to set or clear the folder the architect of an organisation may read. */
+    app.put(
+      '/api/workstations/:id/org-folder',
+      { schema: { params: IdParamsSchema, body: SetOrgFolderRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        await requestOrgFolder(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return { ok: true };
+      },
+    );
+
     /** SSH on a git host: prepare a key, record the access default or check SSH on the workstation (answered by the next report). */
     app.post(
       '/api/workstations/:id/git/ssh',
@@ -113,7 +127,9 @@ export function workstationRoutes(ctx: Ctx) {
 
     app.get('/api/admin/workstations', async (req) => {
       await requireAdmin(ctx, req);
-      return { workstations: await workstationDtos(ctx, `w.status = 'active'`, []) };
+      // Folder paths are the owner's business: the admin list leaves them out.
+      const list = await workstationDtos(ctx, `w.status = 'active'`, []);
+      return { workstations: list.map(({ orgFolders: _o, ...w }) => w) };
     });
 
     app.post('/api/admin/workstations/:id/unlink', { schema: { params: IdParamsSchema } }, async (req) => {

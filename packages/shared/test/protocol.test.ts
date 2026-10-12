@@ -67,6 +67,19 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
       },
     ],
   },
+  'org.folders': {
+    ...env('org.folders'),
+    folders: [
+      {
+        orgId: '0192f3a0-0000-7000-8000-000000000900',
+        folder: '/home/me/src/acme',
+        valid: true,
+        reason: null,
+        repoCount: 3,
+      },
+    ],
+    candidates: ['/home/me/src/acme'],
+  },
   'runtimes.report': {
     ...env('runtimes.report'),
     runtimes: [

@@ -11,7 +11,21 @@ import {
   WorkstationsResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { get, patch, post } from '../client.ts';
+import { get, patch, post, put } from '../client.ts';
+
+/** Organisation source folder: ask the workstation's runner to set (`path`) or clear (`null`) it; the runner decides. */
+export function useSetOrgFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { workstationId: string; orgId: string; path: string | null }) =>
+      put(`/workstations/${v.workstationId}/org-folder`, { orgId: v.orgId, path: v.path }),
+    onSuccess: () => {
+      // The runner answers within a moment: refresh a few times.
+      for (const ms of [800, 2000, 5000])
+        setTimeout(() => qc.invalidateQueries({ queryKey: ['workstations'] }), ms);
+    },
+  });
+}
 
 export function useWorkstations(opts: { enabled?: boolean } = {}) {
   return useQuery({

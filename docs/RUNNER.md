@@ -392,7 +392,7 @@ aom-runner doctor             # checks node, git, claude, docker, yt-dlp, repos,
 - **runnerToken** (required): WebSocket auth token (keep secret, stored mode 0600)
 
 #### Repositories
-- **orgSourceFolders** (object, default `{}`): `{ "<organization id>": "<folder>" }`. Every git repository under the folder is readable (read-only, secret files blocked) by the architect of that organization, in card shifts and chats. The folder must sit **inside** one of the `repoRoots` (not be a root itself) and may never be, contain or lie in the home directory, the runner's data directory or a credentials folder (`~/.ssh`, ...); real paths are compared, so a symlink cannot lead out. Set it with `aom-runner org-folder set <organization-id> <path>` (also `clear` and `list`); the runner reads it again at every shift, so no restart is needed. The server never learns the path. See "The architect: organization source folder, git and the main merge".
+- **orgSourceFolders** (object, default `{}`): `{ "<organization id>": "<folder>" }`. Every git repository under the folder is readable (read-only, secret files blocked) by the architect of that organization, in card shifts and chats. The folder must sit **inside** one of the `repoRoots` (not be a root itself) and may never be, contain or lie in the home directory, the runner's data directory or a credentials folder (`~/.ssh`, ...); real paths are compared, so a symlink cannot lead out. Set it with `aom-runner org-folder set <organization-id> <path>` (also `clear` and `list`) or, for the workstation's owner, with the **Organisation source folder** row on the Workstations page (the `org.folder` command, below); the runner reads it again at every shift, so no restart is needed. Both go through the same check (`changeOrgFolder` in `org-folder.ts`), so the runner remains the authority. See "The architect: organization source folder, git and the main merge".
 - **repoRoots** (array, default `[]`): folders to scan for git repositories (recursively, depth 3). It only says where repositories are found and cloned; it does not let agents read them (see "Reference repositories and other read-only folders")
 
 #### Runtimes
@@ -930,6 +930,17 @@ The architect (built-in role `architect`, claims every `investigate*` stage) is 
   `Edit(...)` denied, `denyWrite`, and the secret file list above (`SECRET_FILE_GLOBS`) unreadable. A folder that stops
   passing `checkOrgSourceFolder` (moved out of `repoRoots`, now the home directory ...) opens nothing. Other roles never
   get the folder.
+- **Setting it from the app.** The owner of the workstation (and only a member of the organization) presses *Set folder* /
+  *Clear* on the Workstations page: `PUT /api/workstations/:id/org-folder {orgId, path|null}` queues the runner command
+  `org.folder` `{orgId, path|null}`. The runner validates exactly like the CLI (`changeOrgFolder`: strictly inside a
+  `repoRoots` entry, never the home directory, the data directory or a credentials folder, real paths compared), rewrites
+  `config.json` atomically with mode 0600 only on success, and answers `{ok, error?}` (a refusal is an answer, not a
+  command failure). It then sends `org.folders` `{folders: [{orgId, folder, valid, reason, repoCount}], candidates}`; the
+  same message follows `welcome` and every re-scan (10 minutes), so a folder that stops being valid shows up. `candidates`
+  are absolute sub folders (depth 1 and 2) of the repo roots that are not repositories themselves and pass the same check,
+  at most 200. The server stores the latest report and the reason of the last refusal per workstation (migration 1680) and
+  shows them to the workstation's owner only, never in the admin list. The server queues; it never bypasses the runner's
+  validation. An older runner answers the unknown command with an error and the page keeps showing "not reported yet".
 - **Writing.** `writableGlobs: ['docs/**', '**/*.md']` plus the project's investigation folder and the card's report path
   (`brief.investigation.folder` / `reportPath`, repository location). The post-shift guard reports
   `architect_edited_non_docs`, with one exception: what a merge commit whose second parent is an `origin/<main>` SHA the

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { RightsReportSchema } from '../devops/environment.ts';
 import { DevOpsAccessSchema } from '../events/devops.ts';
 import { ConnectableForgeSchema, GitConnectionSchema, RepoRefSchema } from '../forge/index.ts';
-import { RunnerUpdateStateSchema, RuntimeInfoSchema } from '../protocol/runner.ts';
+import { OrgFolderStateSchema, RunnerUpdateStateSchema, RuntimeInfoSchema } from '../protocol/runner.ts';
 import { IsoTime } from './common.ts';
 
 /** Repository hygiene of a workstation: its cadence and the last run (docs/design/phases.md addendum). */
@@ -75,6 +75,19 @@ export const WorkstationDtoSchema = z.object({
     .optional(),
   /** Which git providers this workstation is connected to (facts reported by the runner; never a credential). */
   git: z.object({ connections: z.array(GitConnectionSchema), checkedAt: IsoTime.nullable() }).optional(),
+  /**
+   * The organisation source folders the runner reports (set with the app or `aom-runner org-folder`), by organisation,
+   * with the folders it offers in the picker. Only sent to the workstation's owner (absent in the admin list).
+   */
+  orgFolders: z
+    .object({
+      folders: z.array(OrgFolderStateSchema),
+      /** Organisations whose last "set" the runner refused, with the reason (cleared by the next success). */
+      errors: z.record(z.string(), z.string()),
+      candidates: z.array(z.string()),
+      checkedAt: IsoTime.nullable(),
+    })
+    .optional(),
   /** Shifts running now and how many this workstation takes at once (`limit` is null while it is offline). */
   shifts: z
     .object({ running: z.number().int().nonnegative(), limit: z.number().int().positive().nullable() })
@@ -92,6 +105,13 @@ export const SetSudoPasswordRequestSchema = z.object({
   keyId: z.string().min(1).max(64),
 });
 export type SetSudoPasswordRequest = z.infer<typeof SetSudoPasswordRequestSchema>;
+
+/** `PUT /api/workstations/:id/org-folder`: set (`path`) or clear (`path: null`) the organisation source folder. */
+export const SetOrgFolderRequestSchema = z.object({
+  orgId: z.uuid(),
+  path: z.string().trim().min(1).max(1000).nullable(),
+});
+export type SetOrgFolderRequest = z.infer<typeof SetOrgFolderRequestSchema>;
 
 export const PatchWorkstationRequestSchema = z.object({ name: z.string().min(1).max(80) });
 

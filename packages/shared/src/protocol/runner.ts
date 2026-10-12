@@ -359,6 +359,32 @@ export const RepoOpenPrResultSchema = z.object({
 });
 export type RepoOpenPrResult = z.infer<typeof RepoOpenPrResultSchema>;
 
+/**
+ * Organisation source folder (docs/RUNNER.md): the folder inside a repo root whose repositories the architect of one
+ * organisation may read. `org.folder` sets (`path`) or clears (`path: null`) it; the runner validates exactly like
+ * `aom-runner org-folder set` and answers `{ ok, error? }`. The state is reported in `org.folders`.
+ */
+export const OrgFolderCommandSchema = z.object({
+  orgId: z.uuid(),
+  path: z.string().trim().min(1).max(1000).nullable(),
+});
+export type OrgFolderCommand = z.infer<typeof OrgFolderCommandSchema>;
+export const OrgFolderResultSchema = z.object({ ok: z.boolean(), error: z.string().max(600).optional() });
+export type OrgFolderResult = z.infer<typeof OrgFolderResultSchema>;
+/** One organisation's folder on one workstation, as the runner sees it now. */
+export const OrgFolderStateSchema = z.object({
+  orgId: z.uuid(),
+  folder: z.string().max(1000),
+  valid: z.boolean(),
+  /** Why the folder cannot be opened (when `valid` is false). */
+  reason: z.string().max(600).nullable(),
+  /** Repositories the architect can read in it (0 when invalid). */
+  repoCount: z.number().int().nonnegative(),
+});
+export type OrgFolderState = z.infer<typeof OrgFolderStateSchema>;
+/** Upper bound of the folders the runner offers in the picker. */
+export const MAX_ORG_FOLDER_CANDIDATES = 200;
+
 export const RunnerCommandNameSchema = z.enum([
   'agent.wipe',
   'worktree.remove',
@@ -383,6 +409,7 @@ export const RunnerCommandNameSchema = z.enum([
   'git.ssh',
   'repo.access',
   'repo.open_pr',
+  'org.folder',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -425,6 +452,7 @@ export const CommandPayloadSchemas = {
   'git.ssh': GitSshPayloadSchema,
   'repo.access': RepoAccessPayloadSchema,
   'repo.open_pr': RepoOpenPrPayloadSchema,
+  'org.folder': OrgFolderCommandSchema,
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([
@@ -490,6 +518,14 @@ export const RuntimesReportSchema = msg('runtimes.report', { runtimes: z.array(R
  * `aom-runner git-connect` and on the `git.status` command.
  */
 export const GitReportSchema = msg('git.report', { connections: GitConnectionsSchema });
+/**
+ * The organisation source folders set on this workstation and the folders it offers as candidates (absolute paths,
+ * sub folders of the repo roots, bounded). Sent after `welcome`, after every re-scan and after `org.folder`.
+ */
+export const OrgFoldersReportSchema = msg('org.folders', {
+  folders: z.array(OrgFolderStateSchema).max(100),
+  candidates: z.array(z.string().max(1000)).max(MAX_ORG_FOLDER_CANDIDATES),
+});
 /** How a runner's self-update stands (docs/RUNNER.md "Updates"). */
 export const RUNNER_UPDATE_STATES = [
   'up_to_date',
@@ -716,6 +752,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   ReposReportSchema,
   RuntimesReportSchema,
   GitReportSchema,
+  OrgFoldersReportSchema,
   RunnerUpdateReportSchema,
   ShiftAcceptedSchema,
   ShiftRejectedSchema,
