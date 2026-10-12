@@ -110,6 +110,8 @@ describe('a card waiting in a sub-workflow step', () => {
     expect(columnFor(card('waiting'), step)).toBe('Translation');
     expect(columnFor(card('queued'), step)).toBe('Translation');
     expect(columnFor(card('blocked'), step)).toBe('Blocked');
-    expect(columnFor(card('waiting'), { id: 'translate', column: 'Translation' })).toBe('Test (waiting on bug)');
+    expect(columnFor(card('waiting'), { id: 'translate', column: 'Translation' })).toBe(
+      'Test (waiting on bug)',
+    );
   });
 });
