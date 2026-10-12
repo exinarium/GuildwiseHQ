@@ -2,23 +2,28 @@ import { randomUUID } from 'node:crypto';
 import {
   AgentPermissionsSchema,
   type AgentRuntimeSpec,
+  allowedOutcomes,
   DevOpsAccessSchema,
   type DevopsShift,
   devopsBriefOutcomes,
   effectiveFeatures,
   getStage,
+  type InvestigationLocation,
+  type ReadRepo,
+  resolveReportTarget,
   type ServerToRunnerOf,
   type ShiftBrief,
   type WorktreeSpec,
 } from '@aom/shared';
 import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
+import { workflowView } from '../commands/cards.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import type { ClaimResult } from '../dispatcher/claim.ts';
 import { cardLedgerEntries, standingOrdersFor } from '../queries/ledger.ts';
-import { referenceReadRepos } from './read-repos.ts';
+import { orgReadRepos, referenceReadRepos } from './read-repos.ts';
 import { localReadRepos } from './workstation-repos.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
@@ -102,7 +107,13 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       stage: stage.id,
       stageLabel: stage.label,
       doneCriteria: stage.doneCriteria,
-      outcomes: stage.outcomes.map((o) => ({ id: o.id, label: o.label, kind: o.kind, data: o.data })),
+      // Outcomes guarded by a card flag (handoff vs report) are offered only when they apply to this card.
+      outcomes: allowedOutcomes(wf.definition, workflowView(card), stage.id).map((o) => ({
+        id: o.id,
+        label: o.label,
+        kind: o.kind,
+        data: o.data,
+      })),
       maxShiftMinutes: stage.maxShiftMinutes,
     },
     agent: { id: agent.id, name: agent.name, seniority: agent.seniority },
@@ -116,6 +127,8 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       reworkRound: card.rework_round,
       completionAction: card.completion_action,
       docsNeeded: card.docs_needed,
+      designNeeded: card.design_needed ?? false,
+      investigationOnly: card.investigation_only ?? false,
       dependencies: deps.map((d) => ({ ref: d.ref, title: d.title, status: d.status })),
       parent: parent ? { ref: parent.ref, title: parent.title } : undefined,
     },
@@ -137,6 +150,9 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       extensions: mergedInstr || undefined,
       skills: [...new Set([...(agent.skills as string[]), ...(extension?.skills ?? [])])],
     },
+    ...(card.design_needed || card.investigation_only || card.investigation
+      ? { investigation: investigationBrief(card, project) }
+      : {}),
     handoffs: handoffs.map((h) => ({
       stage: h.stage,
       agentName: h.agent_name ?? 'unknown',
@@ -181,6 +197,40 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
   };
 }
 
+/** Where the architect writes its report, and what was recorded once it did (docs/design/architect-and-workflows.md 3.4). */
+function investigationBrief(card: Row, project: Row): NonNullable<ShiftBrief['investigation']> {
+  const target = resolveReportTarget({
+    cardReportPath: card.fields?.reportPath,
+    projectPath: project.investigation_path,
+    projectLocation: project.investigation_location,
+    ref: card.ref,
+    title: card.title,
+  });
+  const rec = card.investigation as {
+    reportPath: string;
+    location: InvestigationLocation;
+    summary: string;
+    commit: string | null;
+  } | null;
+  return {
+    reportPath: target.reportPath,
+    location: target.location,
+    ...(target.location === 'repo' && target.folder ? { folder: target.folder } : {}),
+    investigationOnly: card.investigation_only ?? false,
+    mergeMainFirst: card.merge_main_first ?? project.merge_main_first ?? true,
+    ...(rec
+      ? {
+          report: {
+            reportPath: rec.reportPath,
+            location: rec.location,
+            summary: rec.summary,
+            ...(rec.commit ? { commit: rec.commit } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 /** The `shift.start` payload for a fresh claim. */
 export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<ShiftStartPayload | null> {
   const shift = await one(ctx.pool, 'SELECT * FROM shifts WHERE id=$1', [claim.shiftId]);
@@ -209,15 +259,32 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     agent: await agentSpecFor(ctx, agent),
     brief,
     worktree,
-    prepare: { rebase: claim.rebase },
+    prepare: { rebase: claim.rebase, ...(claim.syncMain ? { syncMain: claim.syncMain } : {}) },
+    orgId: agent.org_id,
     maxShiftMinutes: claim.maxShiftMinutes,
     vault: vault ? { vaultId: vault.id, kind: vault.kind, folder: vault.folder } : null,
-    // The card's own repository is its worktree; only the project's reference repositories are opened besides.
-    readRepos: (await referenceReadRepos(ctx.pool, brief.project.id)).filter(
-      (r) => r.repoId !== claim.worktree?.repoId,
-    ),
+    // The card's own repository is its worktree; the project's reference repositories are opened besides, and every
+    // repository of the organization for a role with `readOrgRepos` (the architect).
+    readRepos: await shiftReadRepos(ctx, agent, brief.project.id, ws?.user_id, claim.worktree?.repoId),
     localReadRepos: await localReadRepos(ctx.pool, brief.project.id, claim.workstationId),
   };
+}
+
+/** Reference repositories, plus (for a role with `readOrgRepos`) the organization's, without the card's own repository. */
+async function shiftReadRepos(
+  ctx: Ctx,
+  agent: Row,
+  projectId: string,
+  workstationUserId: string | undefined,
+  ownRepoId: string | undefined,
+): Promise<ReadRepo[]> {
+  const out = await referenceReadRepos(ctx.pool, projectId);
+  if (agent.permissions?.readOrgRepos === true && workstationUserId) {
+    const seen = new Set(out.map((r) => r.repoId));
+    for (const r of await orgReadRepos(ctx.pool, agent.org_id, workstationUserId))
+      if (!seen.has(r.repoId)) out.push(r);
+  }
+  return out.filter((r) => r.repoId !== ownRepoId);
 }
 
 const DEVOPS_MAX_SHIFT_MINUTES = 30;

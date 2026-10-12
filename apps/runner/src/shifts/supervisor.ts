@@ -1,15 +1,27 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import {
   type AgentRuntimeSpec,
   type GuardViolation,
   hasTranscript,
+  type InvestigationData,
   type IpcReportRequest,
   type IpcReportResponse,
   type IpcRpcRequest,
   type IpcRpcResponse,
   isPublishRequest,
   isTerminalReport,
+  isValidReportPath,
   type LedgerMatch,
   normalizeUrl,
   outcomeDataSchema,
@@ -20,6 +32,7 @@ import {
   type ShiftBrief,
   type ShiftReport,
   ShiftReportSchema,
+  scanReportForSecrets,
   type TranscriptRef,
   type Usage,
   uuidv7,
@@ -30,8 +43,22 @@ import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
 import { cardPayload, shiftTexts } from '../devops/requests.ts';
 import { checkFeedItemsFetched, FetchedUrls } from '../feeds/validation.ts';
+import {
+  architectFetch,
+  architectMergeMain,
+  architectPush,
+  architectVerifyMerge,
+  type GitReply,
+} from '../git/architect-git.ts';
 import { computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git } from '../git/git.ts';
+import {
+  abortMerge,
+  mergeInProgress,
+  mergeMainIntoCard,
+  type SyncMainOutcome,
+  syncMainIntoWorking,
+} from '../git/sync-main.ts';
 import {
   BaseBranchMissingError,
   ensureWorktree,
@@ -44,9 +71,9 @@ import {
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
-import { resolveReadRepos } from '../read-repos.ts';
+import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../read-repos.ts';
 import { preparePublication } from '../research/publish.ts';
-import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import { ensureSandbox, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
 import type { TranscriptDeps, TranscriptResult } from '../transcript/fetch.ts';
 import {
@@ -64,6 +91,7 @@ import {
   type BranchSnapshot,
   discardOutOfScope,
   discardTestArtifacts,
+  type GuardInput,
   resetReadOnlyWorktree,
   runGuard,
   snapshotBranches,
@@ -114,6 +142,8 @@ export interface SupervisorDeps {
   git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
   /** Credentials for pushing a working branch the runner creates (absent: the user's own git setup). */
   gitAuth?: GitAuth;
+  /** The organization source folder of an organization (the architect reads every repository under it, read-only). */
+  orgSourceFolder?: (orgId: string) => string | undefined;
 }
 
 /** The server's answer to a `shift.report`: what the agent is told (and any ledger matches for a question). */
@@ -149,12 +179,22 @@ interface ActiveShift {
   /** Resumed after a runner restart: the server already holds the claim and has seen accepted/started. */
   resumed?: boolean;
   startedSent?: boolean;
+  sandbox?: Sandbox;
+  /** What the "merge latest main first" step did (reported with `shift.started`). */
+  syncMain?: { result: NonNullable<ShiftStartedSyncMain['result']>; commit?: string; files?: string[] };
+  /** `origin/<main>` SHAs merged into the card branch this shift: the guard exempts what those merges brought in. */
+  mainShas: string[];
 }
+
+type ShiftStartedSyncMain = {
+  result: 'merged_into_working' | 'merged_into_card' | 'conflict_in_card' | 'skipped_conflict';
+};
 
 /** On-disk record of a running shift (`<dataDir>/active-shifts/<shiftId>.json`). */
 interface PersistedShift {
   msg: ShiftStartMsg;
   startedSent: boolean;
+  mainShas?: string[];
 }
 
 const ACCEPTED_MESSAGE = 'Recorded. Finish now; do not make further changes.';
@@ -201,7 +241,10 @@ export class ShiftSupervisor {
   }
 
   /** Resolves when the shift has fully ended (or was rejected). Never throws. */
-  async handleStart(msg: ShiftStartMsg, resume?: { startedSent: boolean }): Promise<void> {
+  async handleStart(
+    msg: ShiftStartMsg,
+    resume?: { startedSent: boolean; mainShas?: string[] },
+  ): Promise<void> {
     if (this.active.has(msg.shiftId)) return; // redelivery
     const max = this.deps.maxConcurrentShifts?.() ?? this.deps.config.maxConcurrentShifts;
     if (this.active.size >= max) {
@@ -219,6 +262,7 @@ export class ShiftSupervisor {
       fetched: new FetchedUrls(),
       transcripts: new Map(),
       env: {},
+      mainShas: resume?.mainShas ? [...resume.mainShas] : [],
       ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
     };
     this.active.set(msg.shiftId, shift);
@@ -252,7 +296,10 @@ export class ShiftSupervisor {
       try {
         const rec = JSON.parse(readFileSync(join(this.deps.paths.activeShifts, f), 'utf8')) as PersistedShift;
         this.log.info(`resuming shift ${rec.msg.shiftId} after runner restart`);
-        void this.handleStart(rec.msg, { startedSent: rec.startedSent });
+        void this.handleStart(rec.msg, {
+          startedSent: rec.startedSent,
+          ...(rec.mainShas ? { mainShas: rec.mainShas } : {}),
+        });
       } catch (err) {
         this.log.warn(`ignoring unreadable persisted shift ${f}: ${String(err)}`);
         rmSync(join(this.deps.paths.activeShifts, f), { force: true });
@@ -264,7 +311,11 @@ export class ShiftSupervisor {
     try {
       mkdirSync(this.deps.paths.activeShifts, { recursive: true });
       const file = join(this.deps.paths.activeShifts, `${s.msg.shiftId}.json`);
-      const rec: PersistedShift = { msg: s.msg, startedSent: !!s.startedSent };
+      const rec: PersistedShift = {
+        msg: s.msg,
+        startedSent: !!s.startedSent,
+        ...(s.mainShas.length ? { mainShas: s.mainShas } : {}),
+      };
       writeFileSync(`${file}.tmp`, JSON.stringify(rec), { mode: 0o600 });
       renameSync(`${file}.tmp`, file);
     } catch (err) {
@@ -349,6 +400,7 @@ export class ShiftSupervisor {
     }
 
     const sandbox = await ensureSandbox(paths, msg.agent.agentId, msg.agent.name);
+    s.sandbox = sandbox;
     let cwd = sandbox.scratch;
 
     if (msg.worktree) {
@@ -356,6 +408,22 @@ export class ShiftSupervisor {
       if (!repo) {
         this.reject(msg.shiftId, 'repo_missing', `no local clone for ${msg.worktree.remoteUrlNormalized}`);
         return;
+      }
+      // Merge the latest main first: into the working branch before the card branch is cut from it (never for a resumed shift).
+      const syncWanted = msg.prepare.syncMain && msg.worktree.mode === 'create' && !s.resumed;
+      let sync: SyncMainOutcome | undefined;
+      if (syncWanted && msg.prepare.syncMain) {
+        sync = await syncMainIntoWorking({
+          repoPath: repo.localPath,
+          ...(msg.prepare.syncMain.mainBranch ? { mainBranch: msg.prepare.syncMain.mainBranch } : {}),
+          workingBranch: msg.prepare.syncMain.workingBranch,
+          ref: msg.brief.card.ref,
+          integrationDir: paths.integration,
+          ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
+        }).catch((err) => {
+          this.log.warn(`merging the latest main failed for ${msg.brief.card.ref}: ${String(err)}`);
+          return undefined;
+        });
       }
       try {
         s.worktree = await ensureWorktree({
@@ -366,6 +434,8 @@ export class ShiftSupervisor {
           auth: this.deps.gitAuth,
         });
         if (msg.prepare.rebase && !s.resumed) await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch);
+        if (sync && s.worktree.created) await this.finishMainSync(s, sync);
+        else await this.resumeMainMerge(s);
       } catch (err) {
         if (err instanceof RebaseConflictError) {
           this.reject(msg.shiftId, 'rebase_conflict', err.message, err.conflictedFiles);
@@ -408,7 +478,7 @@ export class ShiftSupervisor {
     s.brief = withVaultContext(msg.brief, vaultCtx);
     const texts = shiftTexts(msg, s.brief);
     // The project's reference repositories (read-only), for a card shift only; only clones this runner found itself.
-    const readFolders =
+    const registeredFolders =
       msg.kind === 'card'
         ? await resolveReadRepos(
             msg.readRepos,
@@ -420,8 +490,19 @@ export class ShiftSupervisor {
             msg.localReadRepos,
           )
         : [];
+    // A role that reads the organization's code (the architect) also reads every git repository under the organization
+    // source folder configured on this runner: read-only, secret files blocked, never the home or data directory.
+    const folderRepos =
+      msg.kind === 'card' && msg.agent.permissions.readOrgRepos && msg.orgId
+        ? await resolveOrgFolderRepos(this.deps.orgSourceFolder?.(msg.orgId), {
+            repoRoots: this.deps.config.repoRoots,
+            runnerRoot: paths.root,
+          })
+        : [];
+    const readFolders = mergeReadFolders(registeredFolders, folderRepos);
     if (msg.kind === 'card')
       texts.instructions += `\n${renderReadableFolders(readFolders, { workingDir: cwd })}\n`;
+    if (s.syncMain && msg.kind === 'card') texts.prompt += `\n${mainSyncNote(s.syncMain)}\n`;
     await adapter.writeInstructions(sandbox, texts.instructions);
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
     s.env = {
@@ -483,6 +564,7 @@ export class ShiftSupervisor {
             }
           : {}),
         ...(s.worktree?.createdBranch ? { branchCreated: s.worktree.createdBranch } : {}),
+        ...(s.syncMain ? { syncMain: s.syncMain } : {}),
       });
     if (s.worktree?.createdBranch && !s.startedSent) {
       const b = s.worktree.createdBranch;
@@ -534,16 +616,9 @@ export class ShiftSupervisor {
     if (msg.worktree && s.worktree && msg.agent.permissions.mayCommit) {
       // A guard rejection leaves the agent's out-of-scope edits in the worktree: discard them, never commit them.
       await discardTestArtifacts(s.worktree.path);
-      if (s.startSha) {
-        const dropped = await discardOutOfScope({
-          worktree: s.worktree.path,
-          roleKey: msg.agent.roleKey,
-          permissions: msg.agent.permissions,
-          branchName: s.worktree.branchName,
-          startSha: s.startSha,
-          branchesAtStart: s.branchesAtStart,
-          e2eGlobs: msg.brief.project.e2eGlobs,
-        });
+      // (not while a main-branch merge waits for the architect: discarding paths would wreck the merge state)
+      if (s.startSha && !(await mergeInProgress(s.worktree.path))) {
+        const dropped = await discardOutOfScope(this.guardInput(s, s.worktree.path, s.startSha));
         if (dropped.length > 0)
           this.log.warn(`discarded out-of-scope changes of shift ${msg.shiftId}: ${dropped.join(', ')}`);
       }
@@ -617,6 +692,13 @@ export class ShiftSupervisor {
           return { ok: true, result: cardPayload({ ...s.msg, brief: s.brief ?? s.msg.brief }) };
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
         if (req.method === 'sudo.run') return this.sudoRun(s, req.params);
+        if (
+          req.method === 'git.push' ||
+          req.method === 'git.fetch' ||
+          req.method === 'git.merge_main' ||
+          req.method === 'git.verify_merge'
+        )
+          return this.architectGit(s, req.method, req.params);
         if (req.method === 'git.status' || req.method === 'git.connect') {
           if (s.msg.kind !== 'devops' || !s.msg.agent.isDevops || !this.deps.git)
             return { ok: false, error: 'only the DevOps engineer can use `aom git`' } as IpcRpcResponse;
@@ -625,6 +707,221 @@ export class ShiftSupervisor {
         return this.deps.rpc(s.msg.shiftId, req.method, req.params);
       },
     };
+  }
+
+  /** The guard's view of this shift: the role's scope plus what the project and the main-branch merges add. */
+  private guardInput(s: ActiveShift, worktree: string, startSha: string): GuardInput {
+    const { msg } = s;
+    const inv = msg.brief.investigation;
+    // The architect also writes the project's investigation folder and the card's report path (repository location).
+    const extra =
+      msg.agent.roleKey === 'architect' && inv && inv.location === 'repo'
+        ? [...(inv.folder ? [`${inv.folder}/**`] : []), inv.reportPath]
+        : [];
+    return {
+      worktree,
+      roleKey: msg.agent.roleKey,
+      permissions: msg.agent.permissions,
+      branchName: s.worktree?.branchName ?? '',
+      startSha,
+      branchesAtStart: s.branchesAtStart,
+      e2eGlobs: msg.brief.project.e2eGlobs,
+      ...(extra.length ? { extraWritableGlobs: extra } : {}),
+      ...(s.mainShas.length ? { mainMergeShas: s.mainShas } : {}),
+    };
+  }
+
+  /**
+   * After the card worktree exists: the working branch could not take the latest main, so the card branch does. A
+   * conflict is left in the worktree when the architect holds the shift (it resolves it); anyone else gets the merge
+   * aborted and the work goes ahead on the working branch as it is.
+   */
+  private async finishMainSync(s: ActiveShift, sync: SyncMainOutcome): Promise<void> {
+    const { msg } = s;
+    if (!s.worktree) return;
+    if (sync.kind === 'merged_into_working') {
+      s.syncMain = { result: 'merged_into_working', commit: sync.commit };
+      return;
+    }
+    if (sync.kind !== 'needs_card_merge') return;
+    const wt = s.worktree.path;
+    const main = msg.prepare.syncMain?.mainBranch ?? msg.worktree?.mainBranch;
+    const r = await mergeMainIntoCard(wt, {
+      ...(main ? { mainBranch: main } : {}),
+      ref: msg.brief.card.ref,
+    });
+    if ('error' in r) {
+      this.log.warn(`merging the latest main into ${msg.brief.card.ref} failed: ${r.error}`);
+      return;
+    }
+    if (r.result === 'up_to_date') return;
+    if (r.result === 'merged_into_card') {
+      s.mainShas.push(r.main);
+      s.syncMain = { result: 'merged_into_card', commit: r.commit };
+      return;
+    }
+    // A conflict: the architect resolves it in this shift; no one else can.
+    if (msg.agent.roleKey === 'architect' && msg.brief.shift.stage.startsWith('investigate')) {
+      s.mainShas.push(r.main);
+      s.syncMain = { result: 'conflict_in_card', files: r.files };
+      return;
+    }
+    await abortMerge(wt);
+    s.syncMain = { result: 'skipped_conflict', files: r.files };
+  }
+
+  /**
+   * A main-branch merge left unresolved by an earlier architect shift (it ended or timed out before finishing): this shift
+   * inherits it, so it is told about the conflict and the guard still exempts what the merge brought in.
+   */
+  private async resumeMainMerge(s: ActiveShift): Promise<void> {
+    const wt = s.worktree?.path;
+    if (!wt || !(await mergeInProgress(wt))) return;
+    const sha = (await git(wt, ['rev-parse', 'MERGE_HEAD'])).stdout.trim();
+    if (sha && !s.mainShas.includes(sha)) s.mainShas.push(sha);
+    if (s.msg.agent.roleKey === 'architect' && !s.syncMain) {
+      const files = (await git(wt, ['diff', '--name-only', '--diff-filter=U'])).stdout
+        .split('\n')
+        .filter(Boolean);
+      s.syncMain = { result: 'conflict_in_card', files };
+    }
+  }
+
+  /** `aom git push|fetch|merge-main|verify-merge`: the architect's runner-run git (investigate stages only). */
+  private async architectGit(
+    s: ActiveShift,
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<IpcRpcResponse> {
+    const { msg } = s;
+    const denied = (error: string): IpcRpcResponse => ({ ok: false, error });
+    if (msg.kind !== 'card' || !msg.brief.shift.stage.startsWith('investigate'))
+      return denied(
+        '`aom git push|fetch|merge-main|verify-merge` are for the architect in the Investigate & design stage',
+      );
+    if (!s.worktree) return denied('this shift has no card worktree');
+    const main = msg.prepare.syncMain?.mainBranch ?? msg.worktree?.mainBranch;
+    const ctx = {
+      worktree: s.worktree.path,
+      branchName: s.worktree.branchName,
+      ...(main ? { mainBranch: main } : {}),
+      ref: msg.brief.card.ref,
+      ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
+      recordMainSha: (sha: string) => {
+        if (!s.mainShas.includes(sha)) s.mainShas.push(sha);
+        this.persist(s);
+      },
+      startMainSha: () => s.mainShas.at(-1),
+    };
+    let r: GitReply;
+    if (method === 'git.push')
+      r = await architectPush(
+        ctx,
+        typeof params.branch === 'string' && params.branch ? params.branch : undefined,
+      );
+    else if (method === 'git.fetch') r = await architectFetch(ctx);
+    else if (method === 'git.merge_main') r = await architectMergeMain(ctx);
+    else r = await architectVerifyMerge(ctx);
+    this.addProgress(
+      s,
+      'status',
+      `${method.replace('git.', 'aom git ').replace('_', '-')}: ${r.ok ? 'done' : 'refused'}`,
+    );
+    return r.ok ? { ok: true, result: { message: r.message } } : denied(r.error);
+  }
+
+  /**
+   * Checks the architect's report before the card moves on: it exists, has no obvious secret and, in the repository, is
+   * committed on the card branch (the commit is attached); in the vault location it is copied into the project's vault.
+   */
+  private async prepareInvestigation(
+    s: ActiveShift,
+    data: InvestigationData,
+  ): Promise<{ data: InvestigationData } | { error: string }> {
+    const { msg } = s;
+    const wt = s.worktree?.path;
+    if (!wt) return { error: 'this shift has no card worktree' };
+    const inv = msg.brief.investigation;
+    const location = inv?.location ?? 'repo';
+    const asked = data.reportPath.trim();
+    const secretsIn = (text: string): string | null => {
+      const found = scanReportForSecrets(text);
+      return found.length
+        ? `the report seems to contain ${found.join(', ')}: remove it (never put secrets or credentials in a report)`
+        : null;
+    };
+    if (location === 'repo') {
+      const rel = asked.replace(/\\/g, '/').replace(/^\.\//, '');
+      if (!isValidReportPath(rel) || rel.startsWith('vault:'))
+        return { error: `the report path '${asked}' must be a relative path inside the worktree` };
+      const abs = resolve(wt, rel);
+      let real: string;
+      try {
+        real = realpathSync(abs);
+      } catch {
+        return { error: `the report '${rel}' does not exist: write it, commit it and report again` };
+      }
+      if (!real.startsWith(`${realpathSync(wt)}/`) || !statSync(real).isFile())
+        return { error: `the report '${rel}' must be a file inside the worktree` };
+      const leak = secretsIn(readFileSync(real, 'utf8'));
+      if (leak) return { error: leak };
+      if ((await git(wt, ['cat-file', '-e', `HEAD:${rel}`])).exitCode !== 0)
+        return {
+          error: `the report '${rel}' is not committed on the card branch: \`git add\` and commit it, then report again`,
+        };
+      if ((await git(wt, ['status', '--porcelain', '--', rel])).stdout.trim())
+        return { error: `the report '${rel}' has uncommitted changes: commit them, then report again` };
+      const commit = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
+      return { data: { reportPath: rel, summary: data.summary, location: 'repo', commit } };
+    }
+    // Vault location: the architect wrote the file under its scratch or temp directory; the runner copies it.
+    if (!msg.vault || !this.deps.writeVault)
+      return {
+        error:
+          'there is no knowledge vault for this project, so a vault report cannot be saved: ask the manager to use the repository location',
+      };
+    const sb = s.sandbox;
+    const candidates = isAbsolute(asked)
+      ? [asked]
+      : [sb ? join(sb.tmp, asked) : '', sb ? join(sb.scratch, asked) : '', join(wt, asked)].filter(Boolean);
+    const roots = [sb?.tmp, sb?.scratch, wt].flatMap((r) => (r && existsSync(r) ? [realpathSync(r)] : []));
+    let file: string | undefined;
+    for (const c of candidates) {
+      try {
+        const real = realpathSync(c);
+        if (statSync(real).isFile() && roots.some((r) => real === r || real.startsWith(`${r}/`))) {
+          file = real;
+          break;
+        }
+      } catch {
+        // try the next place
+      }
+    }
+    if (!file)
+      return {
+        error: `the report '${asked}' was not found in your scratch directory ($TMPDIR) or the worktree`,
+      };
+    const text = readFileSync(file, 'utf8');
+    const leak = secretsIn(text);
+    if (leak) return { error: leak };
+    const rel = inv?.reportPath ?? `${msg.brief.card.ref}.md`;
+    const vaultPath = `${msg.vault.folder}/${rel}`;
+    try {
+      await this.deps.writeVault({
+        vaultId: msg.vault.vaultId,
+        path: vaultPath,
+        mode: 'replace',
+        content: text,
+        commitMessage: `aom: investigation ${msg.brief.card.ref} ${msg.brief.card.title}`.slice(0, 120),
+        push: true,
+      });
+    } catch (err) {
+      return {
+        error: `could not write the report into the vault: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    this.addProgress(s, 'status', `report saved in the vault: ${vaultPath}`);
+    return { data: { reportPath: vaultPath, summary: data.summary, location: 'vault' } };
   }
 
   /**
@@ -848,15 +1145,7 @@ export class ShiftSupervisor {
       }
 
       if (s.worktree && s.startSha) {
-        const violations = await runGuard({
-          worktree: s.worktree.path,
-          roleKey: msg.agent.roleKey,
-          permissions: msg.agent.permissions,
-          branchName: s.worktree.branchName,
-          startSha: s.startSha,
-          branchesAtStart: s.branchesAtStart,
-          e2eGlobs: msg.brief.project.e2eGlobs,
-        });
+        const violations = await runGuard(this.guardInput(s, s.worktree.path, s.startSha));
         if (violations.length > 0) {
           for (const v of violations) {
             if (!s.guardViolations.some((x) => x.rule === v.rule && x.detail === v.detail))
@@ -868,6 +1157,21 @@ export class ShiftSupervisor {
             error: violations.map((v) => `${v.rule}: ${v.detail}`).join('; '),
             guardViolations: violations,
           };
+        }
+        if (outcome.kind === 'success' && outcome.data === 'investigation') {
+          // The report must be committed on the card branch (or copied into the vault) before the card moves on.
+          if (msg.agent.permissions.mayCommit) {
+            await autoCommit({
+              worktree: s.worktree.path,
+              ref: msg.brief.card.ref,
+              stage: msg.brief.shift.stage,
+              shiftId: msg.shiftId,
+              env: s.env,
+            });
+          }
+          const prepared = await this.prepareInvestigation(s, toSend.data as unknown as InvestigationData);
+          if ('error' in prepared) return rejected(prepared.error);
+          toSend = { ...toSend, data: prepared.data as unknown as Record<string, unknown> };
         }
         if (outcome.kind === 'success' && outcome.data === 'diffStats') {
           if (msg.agent.permissions.mayCommit) {
@@ -925,6 +1229,24 @@ export class ShiftSupervisor {
       message: result.message ?? (terminal ? ACCEPTED_MESSAGE : 'Recorded.'),
       ...(result.matches ? { matches: result.matches } : {}),
     };
+  }
+}
+
+/** The note the architect's prompt gets about the merge of the latest main branch. */
+function mainSyncNote(sync: NonNullable<ActiveShift['syncMain']>): string {
+  switch (sync.result) {
+    case 'conflict_in_card':
+      return [
+        '## A merge of the main branch is waiting in your worktree',
+        `Merging the latest main branch into this card conflicts in: ${(sync.files ?? []).join(', ')}.`,
+        'Resolve it first: fix the conflicted files so both sides keep their intent (no behaviour change), `git add` them, `git commit --no-edit`, then `aom git verify-merge`. Your report is refused while the merge is unfinished.',
+      ].join('\n');
+    case 'merged_into_working':
+      return '## Main branch\nThe latest main branch was merged into the working branch (and pushed) before this card branch was cut from it.';
+    case 'merged_into_card':
+      return '## Main branch\nThe working branch could not take the latest main branch directly, so it was merged into this card branch.';
+    case 'skipped_conflict':
+      return '## Main branch\nThe latest main branch conflicts with the working branch; it was not merged.';
   }
 }
 

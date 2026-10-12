@@ -18,7 +18,7 @@ import { confine } from '../fs-safe.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
-import { resolveReadRepos } from '../read-repos.ts';
+import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../read-repos.ts';
 import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 
 type ChatStartMsg = ServerToRunnerOf<'chat.start'>;
@@ -38,6 +38,9 @@ export interface ChatDeps {
   findRepo?(remoteUrlNormalized: string): Promise<{ localPath: string } | undefined>;
   /** This workstation's clone by catalog key (path relative to a repoRoot): reference repositories picked on this workstation. */
   findLocal?(localKey: string): Promise<{ localPath: string } | undefined>;
+  /** The organization source folder of an organization (architect chats read every repository under it). */
+  orgSourceFolder?(orgId: string): string | undefined;
+  repoRoots?(): string[];
   /** `aom git status|connect` in the DevOps engineer's chat. */
   git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
 }
@@ -207,7 +210,7 @@ export class ChatManager {
     // Repositories this chat may read (read-only): the project's reference repositories, and when there is no card
     // worktree here also the project's own clones (a chat about the project, or about a card not started here). The
     // DevOps engineer reads anywhere anyway. Only clones this runner found itself are opened.
-    const folders =
+    const registered =
       devops || !this.deps.findRepo
         ? []
         : (
@@ -220,7 +223,17 @@ export class ChatManager {
               },
               msg.context.localReadRepos,
             )
-          ).filter((r) => !readOnly || r.kind === 'reference');
+          ).filter((r) => !readOnly || r.kind !== 'project');
+    // A role that reads the organization's code (the architect) also reads the organization source folder, read-only.
+    const orgId = msg.context.orgId;
+    const fromFolder =
+      !devops && msg.agent.permissions.readOrgRepos && orgId
+        ? await resolveOrgFolderRepos(this.deps.orgSourceFolder?.(orgId), {
+            repoRoots: this.deps.repoRoots?.() ?? [],
+            runnerRoot: paths.root,
+          })
+        : [];
+    const folders = mergeReadFolders(registered, fromFolder);
 
     await adapter.writeInstructions(
       sandbox,

@@ -15,8 +15,8 @@ afterAll(async () => {
 describe('catalogue boot', () => {
   it('registers built-in workflow and role versions exactly once', async () => {
     const before = await q('SELECT count(*)::int AS n FROM workflow_versions WHERE org_id IS NULL');
-    expect(before[0]!.n).toBe(4);
-    expect((await q('SELECT count(*)::int AS n FROM role_definitions WHERE org_id IS NULL'))[0]!.n).toBe(10);
+    expect(before[0]!.n).toBe(5); // code v1 and v2, code-bugfix, research, feed
+    expect((await q('SELECT count(*)::int AS n FROM role_definitions WHERE org_id IS NULL'))[0]!.n).toBe(11);
     expect((await q('SELECT count(*)::int AS n FROM workflow_stages'))[0]!.n).toBeGreaterThan(10);
     const again = await registerBuiltins(t.app.ctx);
     expect(again).toEqual({ workflows: 0, roles: 0 });
@@ -28,7 +28,7 @@ describe('catalogue boot', () => {
     ]);
     expect(
       (await q(`SELECT count(*)::int AS n FROM events WHERE type='WorkflowVersionRegistered'`))[0]!.n,
-    ).toBe(4);
+    ).toBe(5);
   });
 });
 

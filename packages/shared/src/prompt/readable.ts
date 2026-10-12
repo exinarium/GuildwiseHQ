@@ -2,8 +2,11 @@
 export interface ReadableFolder {
   name: string;
   path: string;
-  /** `project`: the chat's own project repository; `reference`: a reference repository the owner picked. */
-  kind: 'project' | 'reference';
+  /**
+   * `project`: the chat's own project repository; `reference`: a reference repository the owner picked; `org`: another
+   * repository of the organization (architect), registered or found under the organization source folder.
+   */
+  kind: 'project' | 'reference' | 'org';
 }
 
 /**
@@ -19,7 +22,7 @@ export function renderReadableFolders(folders: ReadableFolder[], opts: { working
   } else {
     for (const f of folders)
       lines.push(
-        `- ${f.path} (${f.kind === 'project' ? 'repository of this project' : 'reference repository'} "${f.name}", read-only)`,
+        `- ${f.path} (${f.kind === 'project' ? 'repository of this project' : f.kind === 'org' ? 'repository of the organization' : 'reference repository'} "${f.name}", read-only)`,
       );
   }
   lines.push(

@@ -114,7 +114,7 @@ function memberDto(c: Row): PhaseMemberDto {
     status: c.status,
     assignment: c.phase_assignment,
     outcome,
-    action: c.finalize_action ?? null,
+    action: c.finalize_action === 'none' ? null : (c.finalize_action ?? null),
     resultRef: c.finalize_result ?? null,
     merged: !!c.merged_into_working_at,
     branchName: c.branch_name ?? null,

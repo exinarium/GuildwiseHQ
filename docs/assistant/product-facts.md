@@ -4,7 +4,7 @@ This file is the curated source of truth for the public "Ask Guildwise" assistan
 
 ## What it is
 
-Guildwise HQ is a management layer for a crew of AI coding agents. You hire agents by role (business analyst, builder, reviewer, tester, DevOps engineer and others), give them work as cards on a board, and answer the questions they cannot decide on one desk. Agents work in parallel, each on its own card. Work passes separate review and test stages before it can finish.
+Guildwise HQ is a management layer for a crew of AI coding agents. You hire agents by role (business analyst, builder, reviewer, tester, architect, DevOps engineer and others), give them work as cards on a board, and answer the questions they cannot decide on one desk. Agents work in parallel, each on its own card. Work passes separate review and test stages before it can finish.
 
 Tagline: "You manage. They work." The landing page also says "Many hands, one master."
 

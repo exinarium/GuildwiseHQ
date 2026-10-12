@@ -57,6 +57,8 @@ export const MockActionSchema = z.enum([
   'answer',
   /** ... or passes it on along the escalation chain (`aom escalate`). */
   'escalate',
+  /** Architect: the first report holds a fake secret, the runner refuses it, the report is rewritten and sent again. */
+  'secret',
 ]);
 export type MockAction = z.infer<typeof MockActionSchema>;
 /** `{ "<stage>": ["<action>", ...] }` consumed by round index. Example: `{ review: ['changes', 'ok'] }`. */

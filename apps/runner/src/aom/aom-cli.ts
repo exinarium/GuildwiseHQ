@@ -50,6 +50,7 @@ const BOOLEAN_FLAGS = new Set([
   'workflow',
   'private',
   'public',
+  'decision',
 ]);
 
 /** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
@@ -472,6 +473,30 @@ async function orgDesign(ctx: AomContext, p: Parsed): Promise<number> {
   }
 }
 
+/** `aom design` / `aom investigate`: the architect's terminal report (the runner checks and commits the report file). */
+async function investigationReport(
+  ctx: AomContext,
+  p: Parsed,
+  outcomeId: 'handoff' | 'report',
+  verb: 'design' | 'investigate',
+): Promise<number> {
+  const reportFile = one(p, 'report');
+  if (!reportFile?.trim())
+    throw new UsageError(
+      `usage: aom ${verb} --report <report path> --summary "<${verb === 'design' ? '3-6 lines for the builder' : 'what you found and recommend'}>" | --summary-file <md>`,
+    );
+  const summary = (textFlag(ctx, p, 'summary', true) as string).trim();
+  // `location` is decided by the runner from the brief; the schema needs a value.
+  return report(
+    ctx,
+    outcome(outcomeId, summary.slice(0, 20000), {
+      reportPath: reportFile.trim(),
+      summary: summary.slice(0, 2000),
+      location: 'repo',
+    }),
+  );
+}
+
 const VERBS: Record<string, Verb> = {
   card: async (ctx, p) => {
     const sub = p.positionals[0];
@@ -688,9 +713,22 @@ const VERBS: Record<string, Verb> = {
    */
   git: async (ctx, p) => {
     const usage =
-      'usage: aom git status [<provider>] [--host <host>] | aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <host>]';
+      'usage: aom git status [<provider>] [--host <host>] | aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <host>]\n       aom git push | fetch | merge-main | verify-merge   (the architect: the runner pushes the card branch, fetches origin, merges the latest main, checks a conflict resolution)';
     const sub = p.positionals[0];
     const host = one(p, 'host');
+    // The architect's git is run by the runner (the agent's own shell cannot push or fetch): the card branch only.
+    if (sub === 'push' || sub === 'fetch' || sub === 'merge-main' || sub === 'verify-merge') {
+      const method = `git.${sub.replace('-', '_')}`;
+      const r = (await rpc(
+        ctx,
+        method,
+        sub === 'push' && p.positionals[1] ? { branch: p.positionals[1] } : {},
+      )) as {
+        message?: string;
+      };
+      ctx.io.out(`${r?.message ?? 'Done.'}\n`);
+      return 0;
+    }
     if (sub !== 'status' && sub !== 'connect') throw new UsageError(usage);
     const provider = p.positionals[1];
     if (sub === 'connect' && !provider) throw new UsageError(usage);
@@ -762,8 +800,10 @@ const VERBS: Record<string, Verb> = {
   },
   finalize: async (ctx, p) => {
     const action = one(p, 'action');
-    if (action !== 'pr' && action !== 'push_branch' && action !== 'merge')
-      throw new UsageError('usage: aom finalize --action <pr|push_branch|merge> --note "<why this action>"');
+    if (action !== 'pr' && action !== 'push_branch' && action !== 'merge' && action !== 'none')
+      throw new UsageError(
+        'usage: aom finalize --action <pr|push_branch|merge|none> --note "<why this action>"   (none: only an investigation-only card whose report is in the vault)',
+      );
     const note = textFlag(ctx, p, 'note', false)?.trim() || `Finalize with ${action}`;
     return report(ctx, outcome('finalized', note, { action }));
   },
@@ -786,6 +826,25 @@ const VERBS: Record<string, Verb> = {
       return 0;
     }
     throw new UsageError('usage: aom intake map --project <KEY> | aom intake unmapped --note "<why>"');
+  },
+  /** Architect: `aom design --report <path> --summary "<text>"` hands a designed card to build. */
+  design: async (ctx, p) => investigationReport(ctx, p, 'handoff', 'design'),
+  /** Architect: `aom investigate --report <path> --summary "<text>"` ends an investigation-only card's investigation. */
+  investigate: async (ctx, p) => investigationReport(ctx, p, 'report', 'investigate'),
+  /** BA: `aom investigation record --title "<t>" --summary-file <md> [--decision]` records an investigation-only card's result. */
+  investigation: async (ctx, p) => {
+    const usage =
+      'usage: aom investigation record --title "<what was investigated>" --summary-file <summary.md> | --summary "<text>" [--decision]';
+    if (p.positionals[0] !== 'record') throw new UsageError(usage);
+    const title = one(p, 'title');
+    if (!title?.trim()) throw new UsageError(usage);
+    const r = (await rpc(ctx, 'investigation.record', {
+      title,
+      summary: textFlag(ctx, p, 'summary', true) as string,
+      decision: has(p, 'decision'),
+    })) as { message?: string } | null;
+    ctx.io.out(`${r?.message ?? 'Recorded.'}\n`);
+    return 0;
   },
   outbound: async (ctx, p) => {
     if (p.positionals[0] !== 'draft')
@@ -862,7 +921,10 @@ export const USAGE = `usage: aom <verb> [options]
   outcome <id> --note "<text>" [--data-file <json>]
   answer --item <id> --text "<answer>" [--option <id>]   answer a colleague's question (question shifts)
   escalate --item <id> --note "<what must be decided>"   pass the question on (peer -> BA -> manager's desk)
-  finalize --action <pr|push_branch|merge> [--note "<why>"]   BA: run the completion action (revise it with a different action)
+  finalize --action <pr|push_branch|merge|none> [--note "<why>"]   BA: run the completion action (revise it with a different action; none: investigation-only card, report in the vault)
+  design --report <path> --summary "<text>" | investigate --report <path> --summary "<text>"   architect: hand the card on with its design (build), or end an investigation-only card (finalize); the runner checks the report is committed
+  investigation record --title "<t>" --summary-file <md> [--decision]   BA: record an investigation-only card's result in the ledger and PROJECT.md (needed before finalize)
+  git push | fetch | merge-main | verify-merge   architect: the runner pushes the card branch, fetches origin, merges the latest main, checks the conflict resolution
   repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] [--host <h>] --name <owner/repo | group/project | org/project/repo | workspace/repo> --private|--public --project <KEY> [--description "<t>"]   BA chat / DevOps: ask the project owner to create a repository on a git host (they approve on the desk; the runner creates it)
   git status [<provider>] | git connect <provider> [--host <h>]   DevOps: check or start this workstation's git host login (a browser login prints a URL and code for the user; a token is never typed by the agent)
   intake map --project <KEY> | intake unmapped --note "<why>"   BA intake: map the ticket, or ask the manager

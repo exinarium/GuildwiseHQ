@@ -1,6 +1,12 @@
-import { COMPLETION_ACTION_LABELS, CompletionAction, ResearchDepth } from '@aom/shared';
+import {
+  COMPLETION_ACTION_LABELS,
+  CompletionAction,
+  ResearchDepth,
+  workflowHasDesignStage,
+  workflowSupportsInvestigationOnly,
+} from '@aom/shared';
 import type { CardFormValues } from '../lib/cardForm.ts';
-import { formFieldList } from '../lib/cardForm.ts';
+import { effectiveDesign, formFieldList } from '../lib/cardForm.ts';
 import { useExpertMode } from '../lib/expert-mode.ts';
 import { DEFAULT_PRIORITY } from '../lib/priority.ts';
 import { PriorityPicker, Select, TextArea, TextInput } from './ui.tsx';
@@ -19,6 +25,7 @@ export function CardFormFields({
   repos,
   mockUi,
   template = false,
+  designDefault = false,
 }: {
   workflow: Workflow;
   values: CardFormValues;
@@ -28,6 +35,8 @@ export function CardFormFields({
   mockUi: boolean;
   /** A template for a scheduled card: no repository, completion action or docs flag (they belong to a real card). */
   template?: boolean;
+  /** The project's "Investigate & design before build" setting: what an unticked-by-default card follows. */
+  designDefault?: boolean;
 }) {
   const expert = useExpertMode();
   const v = values;
@@ -99,6 +108,71 @@ export function CardFormFields({
           </label>
         )}
       </div>
+      {codeCard && workflowHasDesignStage(workflow) && (
+        <fieldset
+          className="flex flex-col gap-2 rounded-card border border-line p-3"
+          data-testid="architect-fields"
+        >
+          <legend className="px-1 text-sm font-semibold text-fg">Investigate &amp; design</legend>
+          <div className="flex flex-col gap-0.5">
+            <label className="flex items-center gap-2.5 text-base text-fg">
+              <input
+                type="checkbox"
+                className="size-5"
+                checked={effectiveDesign(v, designDefault)}
+                disabled={v.investigationOnly}
+                aria-describedby="design-hint"
+                onChange={(e) => onChange({ ...v, designNeeded: e.target.checked })}
+              />
+              Investigate &amp; design before build
+            </label>
+            <span id="design-hint" className="pl-[1.875rem] text-sm text-subtle">
+              {designDefault
+                ? 'On for this project. Untick it for a small, well-located change.'
+                : 'An architect reads the code and writes a design first. Off by default; worth it when the approach is uncertain.'}
+            </span>
+          </div>
+          {workflowSupportsInvestigationOnly(workflow) && (
+            <div className="flex flex-col gap-0.5">
+              <label className="flex items-center gap-2.5 text-base text-fg">
+                <input
+                  type="checkbox"
+                  className="size-5"
+                  checked={v.investigationOnly}
+                  aria-describedby="investigation-only-hint"
+                  onChange={(e) => onChange({ ...v, investigationOnly: e.target.checked })}
+                />
+                Investigation only
+              </label>
+              <span id="investigation-only-hint" className="pl-[1.875rem] text-sm text-subtle">
+                Nothing is built: the architect's report is the result, and the BA records it. The short field
+                set is enough to specify it.
+              </span>
+            </div>
+          )}
+          <Select
+            label="Merge the latest main branch first"
+            value={v.mergeMainFirst}
+            onChange={(e) =>
+              onChange({ ...v, mergeMainFirst: e.target.value as CardFormValues['mergeMainFirst'] })
+            }
+            hint="Project default follows the project settings."
+          >
+            <option value="">Project default</option>
+            <option value="on">Yes</option>
+            <option value="off">No (for example a hotfix on the working branch)</option>
+          </Select>
+          {effectiveDesign(v, designDefault) && (
+            <TextInput
+              label="Report path (optional)"
+              value={v.fields.reportPath ?? ''}
+              error={errors.reportPath}
+              hint="A file or folder in the repository, or vault:<path>. Default: the project's investigation folder."
+              onChange={(e) => setField('reportPath', e.target.value)}
+            />
+          )}
+        </fieldset>
+      )}
       {list.map(([k, meta]) => {
         const common = {
           label: meta.label,

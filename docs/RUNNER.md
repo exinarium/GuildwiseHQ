@@ -392,6 +392,7 @@ aom-runner doctor             # checks node, git, claude, docker, yt-dlp, repos,
 - **runnerToken** (required): WebSocket auth token (keep secret, stored mode 0600)
 
 #### Repositories
+- **orgSourceFolders** (object, default `{}`): `{ "<organization id>": "<folder>" }`. Every git repository under the folder is readable (read-only, secret files blocked) by the architect of that organization, in card shifts and chats. The folder must sit **inside** one of the `repoRoots` (not be a root itself) and may never be, contain or lie in the home directory, the runner's data directory or a credentials folder (`~/.ssh`, ...); real paths are compared, so a symlink cannot lead out. Set it with `aom-runner org-folder set <organization-id> <path>` (also `clear` and `list`); the runner reads it again at every shift, so no restart is needed. The server never learns the path. See "The architect: organization source folder, git and the main merge".
 - **repoRoots** (array, default `[]`): folders to scan for git repositories (recursively, depth 3). It only says where repositories are found and cloned; it does not let agents read them (see "Reference repositories and other read-only folders")
 
 #### Runtimes
@@ -606,6 +607,11 @@ aom intake map --project <KEY> | aom intake unmapped --note "<why>"
 aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] [--host <h>] --name <name> --private|--public --project <KEY> [--description "<text>"]   # BA chat and DevOps: asks the project owner; their runner creates it after approval
 #   name: owner/repo (github) | group[/subgroup]/project (gitlab) | organization/project/repo (azure-devops) | workspace/repo (bitbucket-cloud)
 aom git status [<provider>] | aom git connect <provider> [--host <h>]   # DevOps only: check or start this workstation's git host login
+aom git push | fetch | merge-main | verify-merge   # architect only (investigate stages): the runner pushes the card branch, fetches origin, merges the latest main, checks a conflict resolution
+aom design --report <path> --summary "<text>"           # architect: hand the designed card to build (outcome handoff)
+aom investigate --report <path> --summary "<text>"      # architect: end an investigation-only card (outcome report)
+aom investigation record --title "<t>" --summary-file <md> [--decision]   # BA at Finalize of an investigation-only card
+aom finalize --action none                              # investigation-only card with the report in the vault: no git step
 aom outbound draft --kind <comment|resolution|decision> --body "<text>"
 aom source read --ref <owner/repo#12 | ticket URL>
 aom org ...                                            (design chat: draft roles/workflows; role/workflow drafts take --json, --file or --file - too)
@@ -908,6 +914,48 @@ is no config key that does: what an agent may read beyond its own work folder co
 - **What the agent is told.** The instructions of a card shift and of a chat end with "Folders you can read" (working
   directory, each read-only folder, and that the owner manages reference repositories in the project settings and that no
   configuration key exists for it).
+
+### The architect: organization source folder, git and the main merge
+
+The architect (built-in role `architect`, claims every `investigate*` stage) is the only role with `permissions.readOrgRepos`
+(docs/design/architect-and-workflows.md).
+
+- **Reading the organization.** `shift.start` and the `chat.start` context carry `readRepos` entries of `kind: 'org'`:
+  every repository of an active project of the organization (interest projects and removed repositories excluded) of
+  which the workstation's owner is an active member, named by remote like the reference repositories and resolved to the
+  clones the runner found itself (the same refusals apply). On top of that, `shift.start.orgId` (and `chat.start`
+  `context.orgId`) lets the runner open **every git repository under the organization source folder** of
+  `config.orgSourceFolders[orgId]` (`resolveOrgFolderRepos` in `read-repos.ts`: the scan of `repoRoots`, depth 3, each
+  repository confined to the folder after symlinks are resolved). Both go to the agent as read-only folders: `--add-dir`,
+  `Edit(...)` denied, `denyWrite`, and the secret file list above (`SECRET_FILE_GLOBS`) unreadable. A folder that stops
+  passing `checkOrgSourceFolder` (moved out of `repoRoots`, now the home directory ...) opens nothing. Other roles never
+  get the folder.
+- **Writing.** `writableGlobs: ['docs/**', '**/*.md']` plus the project's investigation folder and the card's report path
+  (`brief.investigation.folder` / `reportPath`, repository location). The post-shift guard reports
+  `architect_edited_non_docs`, with one exception: what a merge commit whose second parent is an `origin/<main>` SHA the
+  runner recorded in this shift changed (the "merge latest main first" step, `aom git merge-main`; kept across a runner
+  restart in the persisted shift record). Edits made to those files after the merge, committed or not, are not exempt.
+  A main merge left unresolved is reported as `merge_unresolved`; it is never committed half done (auto-commit and the
+  out-of-scope discard skip a worktree with `MERGE_HEAD`), and the next architect shift inherits it.
+- **Commit, push, merge, fetch.** The agent keeps `git push*`, `git fetch*`, `git pull*`, `git remote*`, `git rebase*`,
+  `git checkout*`, `git switch*` and `git reset --hard*` denied; it may `git add`, `git commit` and `git merge`.
+  `aom git push` (rpc `git.push`) pushes **the card branch only** (`git push -u origin <branch>` with the runner's
+  `GitAuth`; any other ref is refused); `aom git fetch` (`git.fetch`) fetches origin; `aom git merge-main`
+  (`git.merge_main`) merges the latest `origin/<main>` into the card branch and leaves a conflict in the worktree;
+  `aom git verify-merge` (`git.verify_merge`) checks that a resolution is complete (no merge in progress, no unmerged
+  file, no conflict marker, HEAD is the merge commit). The rpcs work only in `investigate*` stages of card shifts.
+- **Merge latest main first** (`git/sync-main.ts`, `prepare.syncMain`). Before the card worktree is created, under the
+  per-clone lock (shared with the merge completion): fetch `origin/<main>` and `origin/<working>`; when main is not
+  already in the working branch, merge it (`--no-ff`) in a throwaway integration worktree and push the working branch
+  (one retry when it moved). On a conflict, a protected branch (`isProtectedBranchRejection`) or another failed push the
+  card branch is cut normally and takes the merge inside its worktree: clean, or a conflict left for the architect, or
+  aborted (`skipped_conflict`) when the shift is not the architect's. The result is reported in `shift.started.syncMain`.
+  Never on reuse, never for a resumed shift; an absent `mainBranch` is resolved from `origin/HEAD`.
+- **Reports.** `aom design` / `aom investigate` send the outcome with `InvestigationData`. The runner commits leftovers,
+  then checks the report: in the repository it must be a file inside the worktree (no symlink out), committed, and free of
+  obvious secrets (`scanReportForSecrets`); the commit is attached. For the vault location the file is read from the
+  agent's scratch or temp directory (or the worktree), scanned, and written into the project's vault folder with a vault
+  commit; nothing is committed in the repository.
 
 ### Read-only roles and path scopes
 

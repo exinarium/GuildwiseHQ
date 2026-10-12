@@ -18,6 +18,7 @@ import { applyFinalizeResult } from '../commands/finalize.ts';
 import { applyForgeReposResult, applyGitReport } from '../commands/forges.ts';
 import { applyWorktreeSweepResult } from '../commands/hygiene.ts';
 import { intakeRpc } from '../commands/intake.ts';
+import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
 import { applyReleasePrResult } from '../commands/release-pr.ts';
@@ -775,6 +776,8 @@ export class RunnerHandlers {
         return reply(...(await this.devopsRequest(conn, shift, msg.params)));
       if (msg.method === 'outbound.draft') return reply(...(await outboundDraftRpc(ctx, shift, msg.params)));
       if (msg.method === 'card.risk') return reply(...(await riskTierRpc(ctx, shift, msg.params)));
+      if (msg.method === 'investigation.record')
+        return reply(...(await investigationRecordRpc(ctx, shift, msg.params)));
       if (msg.method === 'transcript.store')
         return reply(...(await transcriptStoreRpc(ctx, shift, msg.params)));
       if (msg.method === 'repo.create') return reply(...(await repoCreateRpc(ctx, shift, msg.params)));

@@ -30,6 +30,7 @@ export default defineConfig({
     { name: 'workability', testMatch: 'workability.spec.ts', dependencies: ['intake'] },
     { name: 'sandbox', testMatch: 'sandbox.spec.ts', dependencies: ['intake'] },
     { name: 'outbox', testMatch: 'outbox.spec.ts', dependencies: ['intake'] },
+    { name: 'architect', testMatch: 'architect.spec.ts', dependencies: ['intake'] },
     { name: 'org-designer', testMatch: 'org-designer.spec.ts', dependencies: ['intake'] },
     { name: 'phases', testMatch: 'phases.spec.ts', dependencies: ['intake'] },
     { name: 'reporter', testMatch: 'reporter.spec.ts', dependencies: ['phases'] },

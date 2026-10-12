@@ -75,6 +75,8 @@ export async function spawnCardEvent(
           repoId: from.repo_id ?? undefined,
           priority: from.priority,
           docsNeeded: false,
+          designNeeded: false,
+          investigationOnly: false,
           completionAction: input.completionAction ?? undefined,
           riskTier: input.riskTier ?? undefined,
           dependencies: [],

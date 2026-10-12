@@ -8,11 +8,13 @@ import {
   fieldCatalogue,
   isBuiltinFieldSet,
   isMockField,
+  isValidReportPath,
   MockScriptSchema,
+  missingForSpecify,
   type PatchCardRequest,
-  requiredMissing,
   type Stage,
   type WorkflowDefinition,
+  workflowHasDesignStage,
 } from '@aom/shared';
 import { DEFAULT_PRIORITY } from './priority.ts';
 
@@ -24,6 +26,12 @@ export interface CardFormValues {
   completionAction: string;
   docsNeeded: boolean;
   priority: string;
+  /** Investigate & design before build: `null` follows the project setting. */
+  designNeeded: boolean | null;
+  /** Only investigate (no build); implies `designNeeded`. */
+  investigationOnly: boolean;
+  /** Merge the latest main branch first: '' follows the project setting. */
+  mergeMainFirst: '' | 'on' | 'off';
   fields: Record<string, string>;
 }
 
@@ -34,8 +42,17 @@ export const emptyForm = (cardType = ''): CardFormValues => ({
   completionAction: '',
   docsNeeded: false,
   priority: String(DEFAULT_PRIORITY),
+  designNeeded: null,
+  investigationOnly: false,
+  mergeMainFirst: '',
   fields: {},
 });
+
+/** Does the card get an Investigate & design stage? `designDefault` is the project's setting. */
+export const effectiveDesign = (
+  v: Pick<CardFormValues, 'designNeeded' | 'investigationOnly'>,
+  designDefault = false,
+): boolean => v.investigationOnly || (v.designNeeded ?? designDefault);
 
 /** Stage a card enters when specified: target of the `CardSpecified` outcome of the initial stage. */
 export function specifyTargetStage(def: WorkflowDefinition): Stage | undefined {
@@ -45,7 +62,7 @@ export function specifyTargetStage(def: WorkflowDefinition): Stage | undefined {
 }
 
 /** Not editable in the card form (ledger linking arrives with the ledger in M2). */
-const HIDDEN_FIELDS = new Set(['linkedLedgerIds']);
+const HIDDEN_FIELDS = new Set(['linkedLedgerIds', 'reportPath']);
 
 /**
  * Field-set fields (excluding real card columns), in schema order, with their kinds. The mock-runtime fields (Mock
@@ -105,6 +122,10 @@ export interface CardFormResult {
   completionAction?: CompletionAction;
   docsNeeded: boolean;
   priority?: number;
+  /** Only set when the workflow has an Investigate & design stage and the form says something about it. */
+  designNeeded?: boolean;
+  investigationOnly?: boolean;
+  mergeMainFirst?: boolean;
   /** Field key -> message. Includes parse errors and (for `specify`) missing required fields. */
   errors: Record<string, string>;
 }
@@ -119,8 +140,12 @@ export function buildCardRequest(
   v: CardFormValues,
   specify: boolean,
   mockUi = false,
+  designDefault = false,
 ): CardFormResult {
   const errors: Record<string, string> = {};
+  const architect = workflowHasDesignStage(def);
+  const only = architect && v.investigationOnly;
+  const design = architect && effectiveDesign(v, designDefault);
   const cat = fieldCatalogue(def.fieldSet, def.customFields);
   const fields: Record<string, unknown> = {};
   for (const [key, meta] of formFieldList(def, mockUi)) {
@@ -137,6 +162,11 @@ export function buildCardRequest(
       fields[key] = parsed;
     }
   }
+  const reportPath = (v.fields.reportPath ?? '').trim();
+  if (architect && reportPath) {
+    if (isValidReportPath(reportPath)) fields.reportPath = reportPath;
+    else errors.reportPath = 'Use a relative path without .. (or vault:<path>)';
+  }
   if (!v.title.trim()) errors.title = 'Title is required';
   if (!v.cardType) errors.cardType = 'Card type is required';
   const priority = v.priority.trim() ? Number(v.priority) : undefined;
@@ -145,24 +175,21 @@ export function buildCardRequest(
   }
 
   if (specify) {
-    const stage = specifyTargetStage(def);
-    if (stage) {
-      const missing = requiredMissing(
-        {
-          title: v.title,
-          cardType: v.cardType,
-          repoId: v.repoId || null,
-          // Left empty, the project's "how finished work lands" setting fills it in on the server.
-          completionAction: v.completionAction || 'merge',
-          docsNeeded: v.docsNeeded,
-          priority: priority ?? null,
-          fields,
-        },
-        stage,
-      );
-      for (const key of missing) {
-        errors[key] ??= `${cat[key]?.label ?? key} is required to specify this card`;
-      }
+    // Every field of the stages the card goes through, as the server checks it (an investigation-only card needs fewer).
+    const missing = missingForSpecify(def, {
+      title: v.title,
+      cardType: v.cardType,
+      repoId: v.repoId || null,
+      // Left empty, the project's "how finished work lands" setting fills it in on the server.
+      completionAction: v.completionAction || 'merge',
+      docsNeeded: v.docsNeeded,
+      designNeeded: design,
+      investigationOnly: only,
+      priority: priority ?? null,
+      fields,
+    });
+    for (const key of missing) {
+      errors[key] ??= `${cat[key]?.label ?? key} is required to specify this card`;
     }
   }
 
@@ -174,6 +201,9 @@ export function buildCardRequest(
     ...(v.completionAction ? { completionAction: v.completionAction as CompletionAction } : {}),
     docsNeeded: v.docsNeeded,
     ...(priority !== undefined && !errors.priority ? { priority } : {}),
+    ...(architect && (only || v.designNeeded !== null) ? { designNeeded: design } : {}),
+    ...(only ? { investigationOnly: true } : {}),
+    ...(v.mergeMainFirst ? { mergeMainFirst: v.mergeMainFirst === 'on' } : {}),
     errors,
   };
 }
@@ -201,6 +231,9 @@ export function formValuesFromCard(
     repoId: string | null;
     completionAction: string | null;
     docsNeeded: boolean;
+    designNeeded?: boolean | undefined;
+    investigationOnly?: boolean | undefined;
+    mergeMainFirst?: boolean | null | undefined;
     priority: number;
     fields: Record<string, unknown>;
   },
@@ -209,6 +242,7 @@ export function formValuesFromCard(
   const fields: Record<string, string> = {};
   for (const [key, meta] of formFieldList(def, mockUi))
     fields[key] = fieldToText(meta.kind, card.fields[key]);
+  fields.reportPath = typeof card.fields.reportPath === 'string' ? card.fields.reportPath : '';
   return {
     title: card.title,
     cardType: card.cardType,
@@ -216,6 +250,9 @@ export function formValuesFromCard(
     completionAction: card.completionAction ?? '',
     docsNeeded: card.docsNeeded,
     priority: String(card.priority),
+    designNeeded: card.designNeeded ?? false,
+    investigationOnly: card.investigationOnly ?? false,
+    mergeMainFirst: card.mergeMainFirst === true ? 'on' : card.mergeMainFirst === false ? 'off' : '',
     fields,
   };
 }
@@ -227,14 +264,28 @@ export function formValuesFromCard(
 export function buildPatchRequest(
   def: WorkflowDefinition,
   v: CardFormValues,
-  card: { status: string; fields: Record<string, unknown> },
+  card: {
+    status: string;
+    fields: Record<string, unknown>;
+    designNeeded?: boolean | undefined;
+    investigationOnly?: boolean | undefined;
+    mergeMainFirst?: boolean | null | undefined;
+  },
   mockUi = false,
+  designDefault = false,
 ): { patch: PatchCardRequest; errors: Record<string, string> } {
-  const r = buildCardRequest(def, v, card.status === 'queued', mockUi);
+  const r = buildCardRequest(def, v, card.status === 'queued', mockUi, designDefault);
   const fields: Record<string, unknown> = { ...r.fields };
   for (const [key] of formFieldList(def, mockUi)) {
     if (!(key in fields) && card.fields[key] !== undefined) fields[key] = null;
   }
+  if (workflowHasDesignStage(def) && !('reportPath' in fields) && card.fields.reportPath !== undefined)
+    fields.reportPath = null;
+  // Flags go in the patch only when they changed: the server locks them once the investigation has happened.
+  const architect = workflowHasDesignStage(def);
+  const design = architect && effectiveDesign(v, designDefault);
+  const only = architect && v.investigationOnly;
+  const merge = v.mergeMainFirst === 'on' ? true : v.mergeMainFirst === 'off' ? false : null;
   return {
     errors: r.errors,
     patch: {
@@ -243,6 +294,9 @@ export function buildPatchRequest(
       completionAction: r.completionAction ?? null,
       repoId: r.repoId ?? null,
       ...(r.priority !== undefined ? { priority: r.priority } : {}),
+      ...(architect && design !== (card.designNeeded ?? false) ? { designNeeded: design } : {}),
+      ...(architect && only !== (card.investigationOnly ?? false) ? { investigationOnly: only } : {}),
+      ...(merge !== (card.mergeMainFirst ?? null) ? { mergeMainFirst: merge } : {}),
       fields,
     },
   };

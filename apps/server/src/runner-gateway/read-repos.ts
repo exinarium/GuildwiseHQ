@@ -40,6 +40,30 @@ export async function projectReadRepos(db: Queryable, projectId: string): Promis
   }));
 }
 
+/**
+ * Every repository of the organization's active projects (interest projects excluded) that the workstation owner is an
+ * active member of: what an agent whose role has `readOrgRepos` (the architect) may read, read-only. Named by remote;
+ * the runner opens only the clones it found itself.
+ */
+export async function orgReadRepos(db: Queryable, orgId: string, userId: string): Promise<ReadRepo[]> {
+  const list = await rows(
+    db,
+    `SELECT r.id, r.name, r.remote_url_normalized FROM project_repos r
+       JOIN projects rp ON rp.id = r.project_id
+      WHERE rp.org_id = $1 AND rp.status = 'active' AND rp.kind <> 'interest' AND r.removed_at IS NULL
+        AND EXISTS (SELECT 1 FROM project_members pm
+                     WHERE pm.project_id = rp.id AND pm.user_id = $2 AND pm.status = 'active')
+      ORDER BY rp.name, r.name, r.id`,
+    [orgId, userId],
+  );
+  return list.map((r) => ({
+    repoId: r.id,
+    name: r.name,
+    remoteUrlNormalized: r.remote_url_normalized,
+    kind: 'org' as const,
+  }));
+}
+
 const toDto = (r: Record<string, any>): ReferenceRepoDto => ({
   repoId: r.id,
   name: r.name,

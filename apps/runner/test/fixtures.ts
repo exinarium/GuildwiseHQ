@@ -1,8 +1,11 @@
 import { BUILTIN_ROLES, type ShiftBrief, uuidv7 } from '@aom/shared';
 
-export type Stage = 'build' | 'review' | 'test' | 'finalize';
+export type Stage = 'investigate' | 'build' | 'review' | 'test' | 'finalize';
 
 const OUTCOMES: Record<Stage, ShiftBrief['shift']['outcomes']> = {
+  investigate: [
+    { id: 'handoff', label: 'Hand off the design to build', kind: 'success', data: 'investigation' },
+  ],
   build: [{ id: 'handoff', label: 'Hand off for review', kind: 'success', data: 'diffStats' }],
   review: [
     { id: 'approve', label: 'Approve', kind: 'success', data: 'review' },
@@ -14,7 +17,13 @@ const OUTCOMES: Record<Stage, ShiftBrief['shift']['outcomes']> = {
   ],
   finalize: [{ id: 'finalized', label: 'Finalized', kind: 'success', data: 'finalize' }],
 };
-const ROLE: Record<Stage, string> = { build: 'builder', review: 'reviewer', test: 'tester', finalize: 'ba' };
+const ROLE: Record<Stage, string> = {
+  investigate: 'architect',
+  build: 'builder',
+  review: 'reviewer',
+  test: 'tester',
+  finalize: 'ba',
+};
 
 export interface ShiftOptions {
   stage?: Stage;
@@ -36,6 +45,16 @@ export interface ShiftOptions {
   cardType?: string;
   /** Extra card fields (e.g. `mockEnv`). */
   fields?: Record<string, unknown>;
+  /** Merged into the brief (e.g. `investigation`, a card with `investigationOnly`). */
+  briefExtra?: Partial<ShiftBrief>;
+  /** Replaces the brief's outcomes (e.g. the architect's `report` outcome). */
+  outcomes?: ShiftBrief['shift']['outcomes'];
+  /** Merged into `prepare` (e.g. `syncMain`). */
+  prepare?: Record<string, unknown>;
+  /** Merged into the `shift.start` message (e.g. `orgId`, `vault`, `readRepos`). */
+  startExtra?: Record<string, unknown>;
+  /** Merged into the worktree spec (e.g. `baseBranch`, `mainBranch`). */
+  worktreeExtra?: Record<string, unknown>;
 }
 
 const projectIds = new Map<string, string>();
@@ -72,7 +91,7 @@ export function makeShiftStart(o: ShiftOptions): Record<string, unknown> {
       stage,
       stageLabel: stage[0]?.toUpperCase() + stage.slice(1),
       doneCriteria: 'Done.',
-      outcomes: OUTCOMES[stage],
+      outcomes: o.outcomes ?? OUTCOMES[stage],
       maxShiftMinutes: o.maxShiftMinutes ?? 30,
     },
     agent: { id: agentId, name, seniority: 'senior' },
@@ -113,6 +132,7 @@ export function makeShiftStart(o: ShiftOptions): Record<string, unknown> {
     thread: [],
     standingOrders: [],
     ledger: [],
+    ...(o.briefExtra ?? {}),
   };
   return {
     shiftId,
@@ -131,14 +151,17 @@ export function makeShiftStart(o: ShiftOptions): Record<string, unknown> {
     },
     brief,
     worktree: {
-      mode: o.mode ?? (stage === 'build' && !o.worktreePath ? 'create' : 'reuse'),
+      mode:
+        o.mode ?? ((stage === 'build' || stage === 'investigate') && !o.worktreePath ? 'create' : 'reuse'),
       repoId: uuidv7(),
       remoteUrlNormalized: o.remoteNormalized,
       baseBranch: 'main',
       branchName: branch,
       ...(o.worktreePath ? { path: o.worktreePath } : {}),
+      ...(o.worktreeExtra ?? {}),
     },
-    prepare: { rebase: o.rebase ?? false },
+    prepare: { rebase: o.rebase ?? false, ...(o.prepare ?? {}) },
     maxShiftMinutes: o.maxShiftMinutes ?? 30,
+    ...(o.startExtra ?? {}),
   };
 }

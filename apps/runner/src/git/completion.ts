@@ -1,11 +1,12 @@
-import { mkdir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { type FinalizeExecutePayload, type FinalizeResult, isSafeGitRef } from '@aom/shared';
 import type { BranchRules } from '../forge/types.ts';
 import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { git, gitOk, hasRemote, revParse } from './git.ts';
+import { identityEnv, withIntegrationWorktree } from './integration.ts';
 import { baseTarget, RebaseConflictError, rebaseOntoBase } from './rebase.ts';
-import { ensureWorktree, removeWorktree } from './worktrees.ts';
+import { withRepoLock } from './repo-lock.ts';
+import { ensureWorktree } from './worktrees.ts';
 
 export interface CompletionInput {
   payload: FinalizeExecutePayload;
@@ -131,6 +132,11 @@ async function pushBranch(input: CompletionInput, wt: string) {
 }
 
 async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult> {
+  // One integration into the working branch at a time per clone (the "merge latest main first" step shares the lock).
+  return withRepoLock(input.repoPath, () => mergeLocked(input, wt));
+}
+
+async function mergeLocked(input: CompletionInput, wt: string): Promise<FinalizeResult> {
   const { payload: p, repoPath } = input;
   const base = p.baseBranch;
   const remote = await hasRemote(repoPath);
@@ -148,68 +154,49 @@ async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult
   if (merged.exitCode === 0)
     return { ok: true, action: 'merge', mergeCommit: (await revParse(repoPath, startPoint)) ?? undefined };
 
-  const id = input.identity ?? IDENTITY;
-  const env = {
-    GIT_AUTHOR_NAME: id.name,
-    GIT_AUTHOR_EMAIL: id.email,
-    GIT_COMMITTER_NAME: id.name,
-    GIT_COMMITTER_EMAIL: id.email,
-  };
+  const env = identityEnv(input.identity ?? IDENTITY);
   const integration = join(input.integrationDir, p.ref);
   const tempBranch = `aom-integration/${p.ref.toLowerCase()}`;
-  await removeWorktree({
-    path: integration,
-    branchName: tempBranch,
-    deleteBranch: true,
-    roots: [input.integrationDir],
-  });
-  await mkdir(dirname(integration), { recursive: true });
-  const add = await git(repoPath, ['worktree', 'add', '-B', tempBranch, '--', integration, startPoint]);
-  if (add.exitCode !== 0)
-    return fail('merge', `could not create the integration worktree: ${add.stderr.trim()}`);
-  try {
-    const m = await git(
-      integration,
-      ['merge', '--no-ff', '-m', `Merge ${p.branchName} (${p.ref}: ${p.title})`, p.branchName],
-      { env },
-    );
-    if (m.exitCode !== 0) {
-      const files = (await git(integration, ['diff', '--name-only', '--diff-filter=U'])).stdout
-        .split('\n')
-        .filter(Boolean);
-      await git(integration, ['merge', '--abort']);
-      return {
-        ok: false,
-        action: 'merge',
-        conflict: true,
-        conflictedFiles: files,
-        error: `merge conflict in ${files.join(', ')}`,
-      };
-    }
-    const mergeCommit = await gitOk(integration, ['rev-parse', 'HEAD']);
-    if (remote) {
-      const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
-      const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
-      const push = await git(integration, [...a.args, 'push', 'origin', `HEAD:refs/heads/${base}`], {
-        env: a.env,
-      });
-      if (push.exitCode !== 0) {
-        const why = (push.stderr || push.stdout).trim();
-        // The host refused (branch policy we could not read beforehand): fall back to a change.
-        if (isProtectedBranchRejection(why)) return viaChange(input, wt, base, why);
-        return fail('merge', `pushing ${base} failed: ${why}`);
+  const result = await withIntegrationWorktree(
+    { repoPath, dir: integration, root: input.integrationDir, tempBranch, startPoint },
+    async (): Promise<FinalizeResult> => {
+      const m = await git(
+        integration,
+        ['merge', '--no-ff', '-m', `Merge ${p.branchName} (${p.ref}: ${p.title})`, p.branchName],
+        { env },
+      );
+      if (m.exitCode !== 0) {
+        const files = (await git(integration, ['diff', '--name-only', '--diff-filter=U'])).stdout
+          .split('\n')
+          .filter(Boolean);
+        await git(integration, ['merge', '--abort']);
+        return {
+          ok: false,
+          action: 'merge',
+          conflict: true,
+          conflictedFiles: files,
+          error: `merge conflict in ${files.join(', ')}`,
+        };
       }
-    }
-    await advanceLocalBase(repoPath, base, mergeCommit);
-    return { ok: true, action: 'merge', mergeCommit };
-  } finally {
-    await removeWorktree({
-      path: integration,
-      branchName: tempBranch,
-      deleteBranch: true,
-      roots: [input.integrationDir],
-    });
-  }
+      const mergeCommit = await gitOk(integration, ['rev-parse', 'HEAD']);
+      if (remote) {
+        const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
+        const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
+        const push = await git(integration, [...a.args, 'push', 'origin', `HEAD:refs/heads/${base}`], {
+          env: a.env,
+        });
+        if (push.exitCode !== 0) {
+          const why = (push.stderr || push.stdout).trim();
+          // The host refused (branch policy we could not read beforehand): fall back to a change.
+          if (isProtectedBranchRejection(why)) return viaChange(input, wt, base, why);
+          return fail('merge', `pushing ${base} failed: ${why}`);
+        }
+      }
+      await advanceLocalBase(repoPath, base, mergeCommit);
+      return { ok: true, action: 'merge', mergeCommit };
+    },
+  );
+  return result.ok ? result.value : fail('merge', result.error);
 }
 
 /**

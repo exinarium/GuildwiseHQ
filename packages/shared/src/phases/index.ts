@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MockScriptSchema } from '../cards/fields.ts';
-import { CompletionAction } from '../cards/types.ts';
+import { CompletionAction, FinalizeAction } from '../cards/types.ts';
 import { RegressionPlatform } from '../events/testing.ts';
 import type { ReporterTaskKind } from '../reporter/index.ts';
 import { isReporterTaskKind, ReporterTaskSchema, reporterBriefOutcomes } from '../reporter/index.ts';
@@ -137,7 +137,7 @@ export const PhaseCardOutcome = z.object({
   ref: z.string(),
   title: z.string(),
   outcome: PhaseCardOutcomeKind,
-  action: CompletionAction.optional(),
+  action: FinalizeAction.optional(),
   resultRef: z
     .object({
       mergeCommit: z.string().optional(),
@@ -201,7 +201,8 @@ export function memberOutcome(
   if (c.status !== 'done') return null;
   if (c.published) return 'published';
   if (!c.finalized) return 'closed_manually';
-  if (c.action === 'merge' || c.merged) return 'finalized';
+  // `none`: an investigation finalized without a repository step has no branch to wait for.
+  if (c.action === 'merge' || c.action === 'none' || c.merged) return 'finalized';
   return 'waiting_merge';
 }
 

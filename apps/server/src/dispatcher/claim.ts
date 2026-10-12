@@ -30,6 +30,8 @@ export interface ClaimResult {
   overflow: boolean;
   worktree: WorktreeClaim | null;
   rebase: boolean;
+  /** Merge the latest main branch first (before the worktree is created): see `ShiftStart.prepare.syncMain`. */
+  syncMain?: { mainBranch?: string; workingBranch: string };
   maxShiftMinutes: number;
 }
 
@@ -101,6 +103,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
     >;
 
     let worktree: WorktreeClaim | null = null;
+    let syncMain: ClaimResult['syncMain'];
     if (stage && stage.worktree !== 'none' && card.repo_id) {
       const wcard = card.worktree_card_id
         ? ((await one(tx, 'SELECT * FROM cards WHERE id=$1', [card.worktree_card_id])) as Record<string, any>)
@@ -124,6 +127,20 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
         created: path === null,
         ...(repo.main_branch ? { mainBranch: repo.main_branch } : {}),
       };
+      // Merge the latest main first: only when the card's worktree is created now (never on reuse), never for a card that
+      // works in another card's worktree (bug children), and not when the main branch is the working branch.
+      const mergeMain = card.merge_main_first ?? project.merge_main_first ?? true;
+      if (
+        stage.syncMainBefore &&
+        mergeMain &&
+        worktree.created &&
+        !card.worktree_card_id &&
+        repo.main_branch !== worktree.baseBranch
+      )
+        syncMain = {
+          ...(repo.main_branch ? { mainBranch: repo.main_branch as string } : {}),
+          workingBranch: worktree.baseBranch,
+        };
     }
 
     await ctx.store.append(
@@ -166,6 +183,7 @@ export async function claim(ctx: Ctx, args: ClaimArgs): Promise<ClaimResult | nu
       overflow,
       worktree,
       rebase: stage?.rebaseBefore ?? false,
+      ...(syncMain ? { syncMain } : {}),
       maxShiftMinutes: stage?.maxShiftMinutes ?? 60,
     };
   });

@@ -29,6 +29,7 @@ import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
 import { FinalizePanel } from '../components/FinalizePanel.tsx';
+import { InvestigationPanel, MainSyncNote } from '../components/InvestigationPanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
 import { ShiftLog } from '../components/ShiftLog.tsx';
@@ -342,6 +343,7 @@ export function CardDetailView({
       )}
 
       {data.testing && <TestingLinks testing={data.testing} status={card.status} />}
+      <MainSyncNote card={card} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
@@ -362,6 +364,7 @@ export function CardDetailView({
             </Panel>
           )}
           {data.publication && <PublicationPanel publication={data.publication} />}
+          <InvestigationPanel card={card} />
           {keys.length > 0 && (
             <Panel title="What to build" data-testid="card-spec">
               <dl className="flex flex-col gap-4 text-base">
@@ -456,6 +459,12 @@ export function CardDetailView({
                     <Meta k="Where it lands" v={landingText(card)} />
                   )}
                   <Meta k="Docs needed" v={card.docsNeeded ? 'yes' : 'no'} />
+                  {card.designNeeded && (
+                    <Meta
+                      k="Investigate & design"
+                      v={card.investigationOnly ? 'investigation only' : 'yes'}
+                    />
+                  )}
                 </>
               )}
               {expert && card.branchName && <Meta k="Branch" v={card.branchName} mono />}

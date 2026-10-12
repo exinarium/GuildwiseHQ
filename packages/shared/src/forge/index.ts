@@ -70,6 +70,36 @@ export function parseRemote(url: string, override?: ForgeKind | null): ParsedRem
   return { kind, host, namespace, name, canonical };
 }
 
+/**
+ * The web page of a file on a branch, for the hosts whose URL shape is known (GitHub, GitLab, Bitbucket Cloud, Azure
+ * DevOps). Null for plain git or an unusable remote. Used to link the architect's report from the card.
+ */
+export function repoFileUrl(
+  remoteUrl: string,
+  branch: string,
+  path: string,
+  override?: ForgeKind | null,
+): string | null {
+  const r = parseRemote(remoteUrl, override);
+  if (!r) return null;
+  const file = path.split('/').map(encodeURIComponent).join('/');
+  const ref = branch.split('/').map(encodeURIComponent).join('/');
+  const ns = r.namespace.map(encodeURIComponent).join('/');
+  const name = encodeURIComponent(r.name);
+  switch (r.kind) {
+    case 'github':
+      return `https://${r.host}/${ns}/${name}/blob/${ref}/${file}`;
+    case 'gitlab':
+      return `https://${r.host}/${ns}/${name}/-/blob/${ref}/${file}`;
+    case 'bitbucket-cloud':
+      return `https://${r.host}/${ns}/${name}/src/${ref}/${file}`;
+    case 'azure-devops':
+      return `https://${r.host}/${ns}/_git/${name}?path=/${file}&version=GB${encodeURIComponent(branch)}`;
+    default:
+      return null;
+  }
+}
+
 // ------------------------------------------------------------------ connections (status only, never a secret)
 
 /**

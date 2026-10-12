@@ -42,6 +42,16 @@ export interface GuardInput {
   startSha: string;
   branchesAtStart: BranchSnapshot;
   e2eGlobs: string[];
+  /**
+   * Extra paths the role may write besides its `writableGlobs` (the architect: the project's investigation folder and the
+   * card's report path, resolved by the server and sent in the brief).
+   */
+  extraWritableGlobs?: string[];
+  /**
+   * SHAs of `origin/<main>` the runner merged into this card branch during the shift (the "merge latest main first"
+   * step, `aom git merge-main`). What a merge commit with such a second parent changed is main's work, not the agent's.
+   */
+  mainMergeShas?: string[];
 }
 
 /**
@@ -68,12 +78,42 @@ export async function discardTestArtifacts(worktree: string): Promise<boolean> {
   return dirs.size > 0;
 }
 
+/**
+ * Paths that a merge commit of the recorded main branch brought in and nothing changed afterwards: main's own work (a
+ * conflict resolution included), exempt from the role's write scope. A path edited again after the merge, or edited
+ * without committing, is not exempt. Merge commits whose second parent is not a recorded main SHA never count.
+ */
+export async function mainMergeExemptPaths(
+  worktree: string,
+  startSha: string,
+  mainShas: readonly string[],
+): Promise<Set<string>> {
+  const exempt = new Set<string>();
+  if (mainShas.length === 0) return exempt;
+  const log = await git(worktree, ['rev-list', '--merges', '--parents', `${startSha}..HEAD`]);
+  for (const line of log.stdout.split('\n')) {
+    const [sha, first, ...others] = line.trim().split(' ');
+    if (!sha || !first || !others.some((p) => mainShas.includes(p))) continue;
+    const brought = await git(worktree, ['diff', '--name-only', first, sha]);
+    const after = new Set(
+      (await git(worktree, ['diff', '--name-only', sha, 'HEAD'])).stdout.split('\n').filter(Boolean),
+    );
+    for (const p of brought.stdout.split('\n')) if (p.trim() && !after.has(p.trim())) exempt.add(p.trim());
+  }
+  return exempt;
+}
+
 /** Changed paths: committed since the shift start plus uncommitted (tracked and untracked), minus test output dirs. */
-export async function changedPaths(worktree: string, startSha: string): Promise<string[]> {
+export async function changedPaths(
+  worktree: string,
+  startSha: string,
+  mainMergeShas: readonly string[] = [],
+): Promise<string[]> {
   const committed = await git(worktree, ['diff', '--name-only', `${startSha}..HEAD`]);
   const dirty = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
+  const exempt = await mainMergeExemptPaths(worktree, startSha, mainMergeShas);
   const out = new Set<string>();
-  for (const l of committed.stdout.split('\n')) if (l.trim()) out.add(l.trim());
+  for (const l of committed.stdout.split('\n')) if (l.trim() && !exempt.has(l.trim())) out.add(l.trim());
   for (const l of dirty.stdout.split('\n')) {
     if (l.length > 3) out.add(l.slice(3).replace(/^"|"$/g, '').split(' -> ').pop() as string);
   }
@@ -88,7 +128,8 @@ export function effectiveWritableGlobs(input: GuardInput): string[] | null {
   if (input.roleKey === 'tester') return input.e2eGlobs.length ? input.e2eGlobs : ['!**'];
   const g = input.permissions.writableGlobs;
   if (g === undefined || g === null) return null;
-  return g.length ? g : ['!**'];
+  const all = [...g, ...(input.extraWritableGlobs ?? [])];
+  return all.length ? all : ['!**'];
 }
 
 /**
@@ -128,7 +169,7 @@ export async function resetReadOnlyWorktree(input: {
  * `startSha`) so that the shift-end autocommit never commits them. Returns the discarded paths.
  */
 export async function discardOutOfScope(input: GuardInput): Promise<string[]> {
-  const bad = outOfScope(input, await changedPaths(input.worktree, input.startSha));
+  const bad = outOfScope(input, await changedPaths(input.worktree, input.startSha, input.mainMergeShas));
   for (const p of bad) {
     const atStart = await git(input.worktree, ['cat-file', '-e', `${input.startSha}:${p}`]);
     if (atStart.exitCode === 0) {
@@ -144,8 +185,22 @@ export async function discardOutOfScope(input: GuardInput): Promise<string[]> {
 /** Post-shift guard (docs/ARCHITECTURE.md section 13.7). Returns the violations; empty means the report may go ahead. */
 export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
   const violations: GuardViolation[] = [];
+  // A main-branch merge the architect left half done (conflict markers, no merge commit) must not be handed on. While it
+  // is in progress the files it brought in sit in the index, so no other path check is meaningful: this is the finding.
+  if (
+    input.roleKey === 'architect' &&
+    (await git(input.worktree, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])).exitCode === 0
+  ) {
+    return [
+      {
+        rule: 'merge_unresolved',
+        detail:
+          'A merge of the main branch is still in progress in the worktree: resolve the conflicts, `git add` them, run `git commit --no-edit` and then `aom git verify-merge`',
+      },
+    ];
+  }
   const head = (await git(input.worktree, ['rev-parse', 'HEAD'])).stdout.trim();
-  const changed = await changedPaths(input.worktree, input.startSha);
+  const changed = await changedPaths(input.worktree, input.startSha, input.mainMergeShas);
 
   if (!input.permissions.mayCommit && (head !== input.startSha || changed.length > 0)) {
     violations.push({
@@ -169,8 +224,13 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
     const bad = outOfScope(input, changed);
     if (bad.length > 0) {
       violations.push({
-        rule: input.roleKey === 'writer' ? 'writer_edited_non_docs' : 'edited_outside_writable_globs',
-        detail: `${input.roleKey === 'writer' ? 'Writers may only change documentation' : 'This role may only change paths matching'} (${(input.permissions.writableGlobs ?? []).join(', ') || 'nothing'}); changed: ${bad.slice(0, 10).join(', ')}`,
+        rule:
+          input.roleKey === 'writer'
+            ? 'writer_edited_non_docs'
+            : input.roleKey === 'architect'
+              ? 'architect_edited_non_docs'
+              : 'edited_outside_writable_globs',
+        detail: `${input.roleKey === 'writer' ? 'Writers may only change documentation' : input.roleKey === 'architect' ? 'The architect may only change documentation and its report (never product code or tests, except main-branch merge conflicts)' : 'This role may only change paths matching'} (${effectiveWritableGlobs(input)?.join(', ') || 'nothing'}); changed: ${bad.slice(0, 10).join(', ')}`,
       });
     }
   }

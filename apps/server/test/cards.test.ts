@@ -26,7 +26,7 @@ describe('card creation', () => {
       stage: 'spec',
       column: 'Spec',
       workflowKey: 'code',
-      workflowVersion: 1,
+      workflowVersion: 2,
     });
     expect(r.body.card.repoId).toBe(w.repoId); // single repo defaults
     expect(r.body.missing).toBeUndefined();

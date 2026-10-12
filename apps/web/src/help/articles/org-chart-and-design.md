@@ -25,7 +25,7 @@ The **DevOps engineer** of each workstation is shown separately below, reporting
 
 ## Custom roles {#custom-roles}
 
-Built-in roles (builder, reviewer, tester, technical writer) cover most work, but you can create custom ones.
+Built-in roles (builder, reviewer, tester, technical writer, and the architect that investigates and designs before build) cover most work, but you can create custom ones.
 
 Custom roles and workflows are designed on the **Roles & workflows** page (sidebar, Organization section; the page itself is titled Organization). It has the tabs **Roles**, **Workflows**, **Departments** and **Design with the BA**. Only the Owner and Admins can change things here.
 

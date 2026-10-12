@@ -18,7 +18,7 @@ import {
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { ChatManager } from './chat/chat.ts';
-import type { RunnerConfig } from './config.ts';
+import { loadConfig, type RunnerConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
 import { verifyRights } from './devops/rights.ts';
@@ -222,6 +222,7 @@ export class Runner {
       envChecker: opts.envChecker,
       sudoRun: (cmd, args) => this.sudo.run(cmd, args),
       git: this.agentGit,
+      orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
     });
     this.external =
@@ -241,6 +242,8 @@ export class Runner {
       findRepo: (n) => this.findRepo(n),
       findLocal: (k) => this.findLocal(k),
       git: this.agentGit,
+      orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
+      repoRoots: () => this.opts.config.repoRoots,
     });
     this.outbound = new OutboundExecutor({ dir: this.paths.outbound, adapters: this.external });
     this.repoCreator = new RepoCreator({
@@ -289,6 +292,17 @@ export class Runner {
       // Unpaired is a normal end (exit 0, so a service manager does not restart a runner that cannot work).
       this.fatalResolve?.(this.unpaired ? 0 : code === 4409 ? 3 : 2);
     });
+  }
+
+  /** The organization source folder of an organization (read fresh from config.json, so `org-folder set` needs no restart). */
+  private orgSourceFolder(orgId: string): string | undefined {
+    let folders = this.opts.config.orgSourceFolders;
+    try {
+      folders = loadConfig(this.paths.config).orgSourceFolders;
+    } catch {
+      // no config file on disk (tests): the in-memory one stands
+    }
+    return folders[orgId.toLowerCase()];
   }
 
   /** True when no agent job and no chat is running: the moment it is safe to restart into a new version. */

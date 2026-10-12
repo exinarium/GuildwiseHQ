@@ -11,7 +11,8 @@ describe('the assistant knowledge pack', () => {
     expect(buildPublicPack()).toBe(buildPublicPack());
     const tokens = buildPublicPack().length / 4;
     expect(tokens).toBeGreaterThan(4096); // the model's minimum cacheable prefix
-    expect(tokens).toBeLessThan(12_000);
+    // The budget grows with the help centre (the architect article took it past 12k); still a few cents per cached read.
+    expect(tokens).toBeLessThan(13_000);
   });
 
   it('carries the curated facts and an outline of the help articles, and no private company name', () => {

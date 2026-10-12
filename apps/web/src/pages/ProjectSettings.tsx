@@ -3,6 +3,7 @@ import { type FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
 import { AddRepoForm } from '../components/AddRepoForm.tsx';
+import { ArchitectPanel } from '../components/ArchitectPanel.tsx';
 import { BudgetBanner } from '../components/BudgetBanner.tsx';
 import { BudgetPanel } from '../components/BudgetPanel.tsx';
 import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
@@ -304,6 +305,15 @@ export function ProjectSettings() {
       {project && traits.usesRepos && (
         <div id="merge" className="scroll-mt-20">
           <MergePolicyPanel projectId={id} project={project} history={q.data.mergePolicyHistory ?? []} />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="architect" className="scroll-mt-20">
+          <ArchitectPanel
+            projectId={id}
+            project={project}
+            canChange={project.myRole === 'owner' || canConvert}
+          />
         </div>
       )}
       {project && traits.usesRepos && (

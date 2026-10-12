@@ -11,7 +11,9 @@ import {
   canManageCard,
   columnFor,
   getStage,
+  repoFileUrl,
   type ShiftDto,
+  scrubRemoteUrl,
   type WorkflowDefinition,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
@@ -61,6 +63,34 @@ function backoffOf(c: Row, now: Date): { until: string; failures: number } | nul
   return { until: iso(c.retry_after) as string, failures: Number(c.retry_failures) };
 }
 
+/** The architect's recorded report as the card shows it; a repository report links to its file on the card branch. */
+async function investigationDto(ctx: Ctx, c: Row): Promise<CardDto['investigation']> {
+  const inv = c.investigation as {
+    reportPath: string;
+    location: 'repo' | 'vault';
+    summary: string;
+    commit: string | null;
+    at: string;
+  } | null;
+  if (!inv) return null;
+  let url: string | null = null;
+  if (inv.location === 'repo' && c.repo_id && c.branch_name) {
+    const repo = await one(ctx.pool, 'SELECT remote_url, forge_kind FROM project_repos WHERE id=$1', [
+      c.repo_id,
+    ]);
+    if (repo)
+      url = repoFileUrl(scrubRemoteUrl(repo.remote_url), c.branch_name, inv.reportPath, repo.forge_kind);
+  }
+  return {
+    reportPath: inv.reportPath,
+    location: inv.location,
+    summary: inv.summary,
+    commit: inv.commit ?? null,
+    url,
+    at: iso(inv.at) as string,
+  };
+}
+
 export async function toCardDto(ctx: Ctx, c: Row): Promise<CardDto> {
   const { column, key, version } = await cardColumn(ctx, c);
   const deps = await rows(
@@ -89,6 +119,19 @@ export async function toCardDto(ctx: Ctx, c: Row): Promise<CardDto> {
     riskTier: c.risk_tier,
     riskTierOverridden: c.risk_tier_overridden,
     docsNeeded: c.docs_needed,
+    designNeeded: c.design_needed ?? false,
+    investigationOnly: c.investigation_only ?? false,
+    mergeMainFirst: c.merge_main_first ?? null,
+    investigation: await investigationDto(ctx, c),
+    mainSync: c.main_sync
+      ? {
+          result: c.main_sync.result,
+          mainBranch: c.main_sync.mainBranch ?? null,
+          workingBranch: c.main_sync.workingBranch ?? null,
+          files: c.main_sync.files ?? [],
+          at: iso(c.main_sync.at) as string,
+        }
+      : null,
     completionAction: c.completion_action,
     repoId: c.repo_id,
     baseBranch: c.base_branch,
@@ -428,10 +471,18 @@ export async function getBoard(
       ...(workability.get(c.id)?.ok === false ? { workability: workability.get(c.id) } : {}),
     });
   }
+  // The Investigate & design column shows only for projects that switched the design step on, or while a card is in it.
+  const designColumns = new Set(
+    (wf.definition as WorkflowDefinition).stages
+      .filter((s) => s.when?.field === 'designNeeded')
+      .map((s) => s.column),
+  );
   return {
     projectId,
     workflowKey: wf.key,
-    columns: [...byColumn.entries()].map(([name, cs]) => ({ name, cards: cs })),
+    columns: [...byColumn.entries()]
+      .filter(([name, cs]) => cs.length > 0 || !designColumns.has(name) || project.design_step === true)
+      .map(([name, cs]) => ({ name, cards: cs })),
   };
 }
 

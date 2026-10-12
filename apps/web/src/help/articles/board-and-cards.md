@@ -47,13 +47,14 @@ To create a card:
    - **Title**: what the work is (e.g., "Fix login timeout").
    - **Repository**. You do not choose how the work ships: it follows the project's **How finished work lands** setting (see [Testing and finalization](/help/testing-and-finalization#finalization)). With expert mode on (Settings) you can also choose a **Completion action** per card (`pr`, `push_branch` or `merge`).
    - **Priority**, and **Docs needed** (whether a technical writer should document it).
+   - **Investigate & design before build**, **Investigation only** and **Merge the latest main branch first** (code projects): an architect designs the change first, or only investigates and reports; see [The architect](/help/architect). The first follows the project setting unless you change it on the card.
    - **Context**: why this exists, the current behaviour.
    - **Requirements**: what must be done.
    - **Acceptance criteria**: what done looks like, one per line.
    - **Affected areas**: which files or systems.
    - **Constraints**: limits and linked decisions.
    - **Test plan**: the E2E test scenarios.
-3. Click **Save draft**, or click **Specify** to send it on (this requires every field a build needs; the form tells you what is missing).
+3. Click **Save draft**, or click **Specify** to send it on (this requires every field a build needs; the form tells you what is missing. An investigation-only card needs only the title, context, requirements and repository).
 
 Drafts can stay until you are ready to specify them. A draft saved with missing fields can be finished later on its card page, where **Specify** is also offered.
 

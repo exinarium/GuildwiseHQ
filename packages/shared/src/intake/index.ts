@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CardType, CompletionAction, RiskTier } from '../cards/types.ts';
+import { CardType, CompletionAction, FinalizeAction, RiskTier } from '../cards/types.ts';
 import { ExternalSystem } from '../events/intake.ts';
 
 /**
@@ -13,8 +13,11 @@ export const UNMAPPED_TICKET_SUBKIND = 'unmapped_ticket';
 /** The role that answers and finalizes: one identity, two queues (interactive intake, background finalize). */
 export const BA_ROLE_KEY = 'ba';
 
-/** Data of the `finalized` outcome (`aom finalize --action ...`): the completion action to run, possibly revised. */
-export const FinalizeReportDataSchema = z.object({ action: CompletionAction });
+/**
+ * Data of the `finalized` outcome (`aom finalize --action ...`): the completion action to run, possibly revised. `none` (no git step) is for investigation-only cards whose report lives in the
+ * vault; the server enforces that.
+ */
+export const FinalizeReportDataSchema = z.object({ action: FinalizeAction });
 export type FinalizeReportData = z.infer<typeof FinalizeReportDataSchema>;
 
 // ------------------------------------------------------------------- card drafting (chat-scoped RPCs)
@@ -42,6 +45,12 @@ export const CardDraftSchema = z.object({
   workflowKey: z.string().min(1).optional(),
   completionAction: CompletionAction.optional(),
   docsNeeded: z.boolean().optional(),
+  /** Run Investigate & design (architect) before build; absent: the project's setting. */
+  designNeeded: z.boolean().optional(),
+  /** An investigation-only card (comparison, spike): no build, the report is the result. */
+  investigationOnly: z.boolean().optional(),
+  /** Merge the latest main branch first: only set to false for a reason (e.g. a hotfix on the working branch). */
+  mergeMainFirst: z.boolean().nullable().optional(),
   priority: z.number().int().min(1).max(9).optional(),
   riskTier: RiskTier.optional(),
   /** Repository name or id; optional when the project has exactly one. */

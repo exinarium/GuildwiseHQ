@@ -18,6 +18,10 @@ export type CardStatus = z.infer<typeof CardStatus>;
 export const CompletionAction = z.enum(['pr', 'push_branch', 'merge']);
 export type CompletionAction = z.infer<typeof CompletionAction>;
 
+/** A completion action, or `none`: an investigation-only card whose report lives in the vault ends without any git step. */
+export const FinalizeAction = z.enum(['pr', 'push_branch', 'merge', 'none']);
+export type FinalizeAction = z.infer<typeof FinalizeAction>;
+
 /**
  * What each completion action means, in the words of the UI and the docs. Two branches per repository: the **main
  * branch** (where pull requests go) and the **working branch** (where card work is integrated; may be the same).

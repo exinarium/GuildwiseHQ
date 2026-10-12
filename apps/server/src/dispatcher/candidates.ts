@@ -139,7 +139,11 @@ WHERE c.status = 'queued'
   AND NOT ${budgetPausedSql('p', '$9')}
   AND NOT EXISTS (
         SELECT 1 FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id
-         WHERE d.card_id = c.id AND c.stage = 'build' AND c.rework_round = 0
+         WHERE d.card_id = c.id
+           -- The first stage that creates the card branch waits for the dependencies (build, or investigate when the
+           -- architect's stage creates the worktree), so a branch is never cut before they have landed.
+           AND ((c.stage = 'build' AND c.rework_round = 0)
+                OR (c.repo_id IS NOT NULL AND c.worktree_path IS NULL AND c.worktree_card_id IS NULL))
            AND dc.status NOT IN ('done','cancelled'))
   ${cardFilter}
 ORDER BY

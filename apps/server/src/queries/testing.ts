@@ -26,7 +26,8 @@ export async function cardTesting(ctx: Ctx, card: Row, canManage: boolean): Prom
     card.id,
   ]);
   const open = children.find((c) => c.origin === 'test_failure' && !['done', 'cancelled'].includes(c.status));
-  const action = (card.finalize_action ??
+  // `none` (an investigation finalized without a git step) is no completion action the Finalize panel can offer.
+  const action = ((card.finalize_action === 'none' ? null : card.finalize_action) ??
     card.completion_action ??
     null) as CardTesting['finalize']['action'];
   const open_ = card.stage === 'finalize' && card.status === 'queued' && !card.claim_id;
