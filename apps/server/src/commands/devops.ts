@@ -23,7 +23,7 @@ import {
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
-import { loadVisibleCard } from '../authz/scope.ts';
+import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import { loadRole } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -31,6 +31,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { DESK_VISIBLE } from '../queries/desk.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
 import { agentActor, orgScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { hygieneReportEvents } from './hygiene.ts';
@@ -311,6 +312,45 @@ export async function createDevOpsRequestIn(
   return { requestId, threadId: requestId };
 }
 
+/**
+ * Every id a caller names in the request context must be something this user may see; anything else is a plain 404
+ * (ids of other organizations or projects never leak their existence).
+ */
+async function assertContextVisible(
+  tx: Tx,
+  userId: string,
+  c: DevOpsRequestContext | undefined,
+): Promise<void> {
+  if (!c) return;
+  if (c.workstationId) {
+    const w = await one(tx, `SELECT 1 FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`, [
+      c.workstationId,
+      userId,
+    ]);
+    if (!w) throw notFound('workstation not found');
+  }
+  if (c.projectId) await loadVisibleProject(tx, userId, c.projectId, { allowInterest: true });
+  if (c.cardId) await loadVisibleCard(tx, userId, c.cardId);
+  if (c.repoId) {
+    const r = await one<{ project_id: string }>(tx, 'SELECT project_id FROM project_repos WHERE id=$1', [
+      c.repoId,
+    ]);
+    if (!r) throw notFound('repository not found');
+    try {
+      await loadVisibleProject(tx, userId, r.project_id, { allowInterest: true });
+    } catch {
+      throw notFound('repository not found');
+    }
+  }
+  if (c.deskItemId) {
+    const d = await one(tx, `SELECT 1 FROM desk_items d WHERE d.id=$2 AND ${DESK_VISIBLE}`, [
+      userId,
+      c.deskItemId,
+    ]);
+    if (!d) throw notFound('desk item not found');
+  }
+}
+
 export async function createDevOpsRequest(
   ctx: Ctx,
   user: AuthSession['user'],
@@ -323,6 +363,7 @@ export async function createDevOpsRequest(
     ]);
     if (!ws || ws.user_id !== user.id) throw notFound('workstation not found');
     const card = req.cardId ? (await loadVisibleCard(tx, user.id, req.cardId)).card : undefined;
+    await assertContextVisible(tx, user.id, req.context);
     const { requestId } = await createDevOpsRequestIn(ctx, tx, {
       orgId: card?.org_id ?? org.id,
       workstationId: req.workstationId,

@@ -21,9 +21,14 @@ export async function devopsCardRpc(
   method: string,
   params: Record<string, unknown>,
 ): Promise<RpcReply> {
-  const req = await one(ctx.pool, 'SELECT id, card_id FROM devops_requests WHERE shift_id=$1', [shift.id]);
+  const req = await one(ctx.pool, 'SELECT id, card_id, org_id FROM devops_requests WHERE shift_id=$1', [
+    shift.id,
+  ]);
   if (!req?.card_id) return [false, undefined, 'this DevOps request was not filed for a card'];
-  const card = await one(ctx.pool, 'SELECT * FROM cards WHERE id=$1', [req.card_id]);
+  const card = await one(ctx.pool, 'SELECT * FROM cards WHERE id=$1 AND org_id=$2', [
+    req.card_id,
+    req.org_id,
+  ]);
   if (!card) return [false, undefined, 'the card of this request is gone'];
   const ref = typeof params.ref === 'string' ? params.ref.trim() : '';
   if (ref && ref.toUpperCase() !== String(card.ref).toUpperCase())
@@ -34,7 +39,7 @@ export async function devopsCardRpc(
     ];
   switch (method) {
     case 'card.get': {
-      const view = await devopsCardBrief(ctx, card.id);
+      const view = await devopsCardBrief(ctx, card.id, req.org_id);
       return view ? [true, view] : [false, undefined, 'card unavailable'];
     }
     case 'card.comment': {

@@ -146,3 +146,73 @@ describe('a DevOps request filed for a card', () => {
     await finish(start.shiftId);
   });
 });
+
+describe('a DevOps request may only reference what the caller can see', () => {
+  const post = (body: Record<string, unknown>) =>
+    w.t.req('POST', '/api/devops/requests', {
+      cookie: w.owner.cookie,
+      body: { workstationId: w.workstationId, summary: 'look at this', ...body },
+    });
+
+  /** Another user's own organization, project, repository and card. */
+  async function stranger() {
+    const u = await w.t.userSession(
+      `stranger-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@test.local`,
+    );
+    const proj = await ok<any>(
+      w.t.req('POST', '/api/projects', { cookie: u.cookie, body: { key: 'OTH', name: 'Other' } }),
+      201,
+    );
+    const repos = await ok<any>(
+      w.t.req('POST', `/api/projects/${proj.project.id}/repos`, {
+        cookie: u.cookie,
+        body: { name: 'oth', remoteUrl: 'https://example.com/oth.git' },
+      }),
+      201,
+    );
+    const card = await ok<any>(
+      w.t.req('POST', '/api/cards', {
+        cookie: u.cookie,
+        body: {
+          projectId: proj.project.id,
+          title: 'Secret',
+          cardType: 'feature',
+          fields: fullFields(),
+          completionAction: 'merge',
+          specify: true,
+        },
+      }),
+      201,
+    );
+    return {
+      projectId: proj.project.id as string,
+      repoId: repos.repos[0].id as string,
+      cardId: card.card.id as string,
+    };
+  }
+
+  it('refuses a card, project or repository the caller cannot see with 404', async () => {
+    const o = await stranger();
+    expect((await post({ cardId: o.cardId })).status).toBe(404);
+    expect((await post({ context: { cardId: o.cardId } })).status).toBe(404);
+    expect((await post({ context: { projectId: o.projectId } })).status).toBe(404);
+    expect((await post({ context: { repoId: o.repoId } })).status).toBe(404);
+    expect((await post({ context: { workstationId: '00000000-0000-4000-8000-000000000000' } })).status).toBe(
+      404,
+    );
+    expect((await post({ context: { deskItemId: '00000000-0000-4000-8000-000000000000' } })).status).toBe(
+      404,
+    );
+    const n = await q('SELECT count(*)::int AS n FROM devops_requests WHERE summary=$1', ['look at this']);
+    expect((n[0] as any).n).toBe(0);
+  });
+
+  it("accepts the caller's own card, project and repository", async () => {
+    const card = await w.card({ title: 'Mine' });
+    const res = await post({
+      cardId: card.id,
+      context: { cardId: card.id, projectId: w.projectId, repoId: w.repoId, workstationId: w.workstationId },
+    });
+    expect(res.status).toBe(201);
+  });
+});

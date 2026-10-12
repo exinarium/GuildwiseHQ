@@ -211,8 +211,12 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
 const DEVOPS_MAX_SHIFT_MINUTES = 30;
 
 /** The card a DevOps request was filed for: fields, project, repository and the latest comments (oldest first). */
-export async function devopsCardBrief(ctx: Ctx, cardId: string): Promise<DevopsShift['card'] | undefined> {
-  const card = await one(ctx.pool, 'SELECT * FROM cards WHERE id=$1', [cardId]);
+export async function devopsCardBrief(
+  ctx: Ctx,
+  cardId: string,
+  orgId: string,
+): Promise<DevopsShift['card'] | undefined> {
+  const card = await one(ctx.pool, 'SELECT * FROM cards WHERE id=$1 AND org_id=$2', [cardId, orgId]);
   if (!card) return undefined;
   const project = await one(ctx.pool, 'SELECT key, name FROM projects WHERE id=$1', [card.project_id]);
   const repo = card.repo_id
@@ -250,23 +254,38 @@ export async function devopsCardBrief(ctx: Ctx, cardId: string): Promise<DevopsS
 export async function withRequestContext(ctx: Ctx, req: Record<string, any>): Promise<string> {
   const c = (req.context ?? null) as Record<string, string | undefined> | null;
   if (!c) return req.summary;
+  // Defence in depth: only entities of the request's own organization are ever resolved.
+  const orgId = req.org_id as string;
   const lines: string[] = [];
   if (req.origin) lines.push(`Asked from: ${req.origin}`);
   if (c.route) lines.push(`Page: ${c.route}`);
   if (c.projectId) {
-    const p = await one(ctx.pool, 'SELECT key, name FROM projects WHERE id=$1', [c.projectId]);
+    const p = await one(ctx.pool, 'SELECT key, name FROM projects WHERE id=$1 AND org_id=$2', [
+      c.projectId,
+      orgId,
+    ]);
     if (p) lines.push(`Project: ${p.name} (${p.key})`);
   }
   if (c.cardId) {
-    const k = await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1', [c.cardId]);
+    const k = await one(ctx.pool, 'SELECT ref, title FROM cards WHERE id=$1 AND org_id=$2', [
+      c.cardId,
+      orgId,
+    ]);
     if (k) lines.push(`Card: ${k.ref} ${k.title}`);
   }
   if (c.repoId) {
-    const r = await one(ctx.pool, 'SELECT name FROM project_repos WHERE id=$1', [c.repoId]);
+    const r = await one(
+      ctx.pool,
+      'SELECT r.name FROM project_repos r JOIN projects p ON p.id = r.project_id WHERE r.id=$1 AND p.org_id=$2',
+      [c.repoId, orgId],
+    );
     if (r) lines.push(`Repository: ${r.name}`);
   }
   if (c.deskItemId) {
-    const d = await one(ctx.pool, 'SELECT title FROM desk_items WHERE id=$1', [c.deskItemId]);
+    const d = await one(ctx.pool, 'SELECT title FROM desk_items WHERE id=$1 AND org_id=$2', [
+      c.deskItemId,
+      orgId,
+    ]);
     if (d) lines.push(`Desk item: ${d.title}`);
   }
   if (c.errorText) lines.push(`Last error:\n${c.errorText}`);
@@ -293,7 +312,7 @@ export async function buildDevopsShiftStart(
   if (!agent || !ws) return null;
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
   if (!role) return null;
-  const card = req.card_id ? await devopsCardBrief(ctx, req.card_id) : undefined;
+  const card = req.card_id ? await devopsCardBrief(ctx, req.card_id, req.org_id) : undefined;
   const history = await rows(
     ctx.pool,
     `SELECT m.kind, m.body, m.created_at, u.display_name AS user_name, a.name AS agent_name FROM thread_messages m
