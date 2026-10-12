@@ -144,7 +144,8 @@ export const cardEvents = [
     z.object({
       cardId: Id,
       fromStage: z.literal('build'),
-      toStage: z.literal('review'),
+      /** `review`; the stage a project variant inserted after build when there is one (docs/design/architect-and-workflows.md 4.2). */
+      toStage: Stage,
       riskTier: RiskTier,
       diffStats: DiffStats,
     }),
@@ -171,7 +172,8 @@ export const cardEvents = [
       comments: z.string(),
       approvalsSoFar: z.number().int().min(1),
       approvalsRequired: z.number().int().min(1),
-      toStage: z.enum(['review', 'test']),
+      /** `review` while more approvals are due, else the next stage (`test`, or a step a project variant inserted). */
+      toStage: Stage,
     }),
   ),
   defineEvent(
@@ -180,7 +182,8 @@ export const cardEvents = [
       cardId: Id,
       testerAgentId: Id,
       evidence: TestEvidence,
-      toStage: z.enum(['docs', 'finalize']),
+      /** `docs` or `finalize`, or a step a project variant inserted after test. */
+      toStage: Stage,
     }),
   ),
   defineEvent(

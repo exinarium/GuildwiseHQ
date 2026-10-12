@@ -19,8 +19,9 @@ export const catalogueProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'WorkflowVersionRegistered'>).payload;
     await exec(
       tx,
-      `INSERT INTO workflow_versions (id, org_id, key, version, name, department, definition, status, created_at, drafted_by_kind)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      `INSERT INTO workflow_versions (id, org_id, key, version, name, department, definition, status, created_at, drafted_by_kind,
+         project_id, base_key, base_version, variant_spec)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         p.workflowVersionId,
         p.orgId,
@@ -32,6 +33,10 @@ export const catalogueProjectors: Record<string, Projector> = {
         p.status,
         e.createdAt,
         p.draftedBy?.kind ?? null,
+        p.projectId ?? null,
+        p.definition.extends?.key ?? null,
+        p.definition.extends?.version ?? null,
+        p.variantSpec ? JSON.stringify(p.variantSpec) : null,
       ],
     );
     await insertStages(tx, p.workflowVersionId, p.definition.stages);
@@ -40,8 +45,18 @@ export const catalogueProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'WorkflowDraftUpdated'>).payload;
     await exec(
       tx,
-      `UPDATE workflow_versions SET name=$2, department=$3, definition=$4 WHERE id=$1 AND status='draft'`,
-      [p.workflowVersionId, p.name, p.department ?? null, JSON.stringify(p.definition)],
+      `UPDATE workflow_versions SET name=$2, department=$3, definition=$4,
+              base_key=$5, base_version=$6, variant_spec=COALESCE($7::jsonb, variant_spec)
+        WHERE id=$1 AND status='draft'`,
+      [
+        p.workflowVersionId,
+        p.name,
+        p.department ?? null,
+        JSON.stringify(p.definition),
+        p.definition.extends?.key ?? null,
+        p.definition.extends?.version ?? null,
+        p.variantSpec ? JSON.stringify(p.variantSpec) : null,
+      ],
     );
     await exec(tx, 'DELETE FROM workflow_stages WHERE workflow_version_id=$1', [p.workflowVersionId]);
     await insertStages(tx, p.workflowVersionId, p.definition.stages);
@@ -70,7 +85,7 @@ export const catalogueProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `UPDATE workflow_versions SET status='active',
-              vault_path = CASE WHEN org_id IS NULL THEN NULL ELSE $2 END WHERE id=$1`,
+              vault_path = CASE WHEN org_id IS NULL OR project_id IS NOT NULL THEN NULL ELSE $2 END WHERE id=$1`,
       [p.workflowVersionId, definitionVaultPath('workflow', wf.key, wf.version)],
     );
   },

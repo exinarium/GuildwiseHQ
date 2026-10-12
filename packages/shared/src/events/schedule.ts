@@ -20,6 +20,8 @@ export const CardTemplateSchema = z.object({
   title: z.string().min(1).max(300),
   /** Card type; defaults to the project workflow's first card type. */
   cardType: z.string().min(1).optional(),
+  /** One of the project's enabled workflows; absent: the project's default for the card type. */
+  workflowKey: z.string().min(1).optional(),
   fields: z.record(z.string(), z.unknown()).default({}),
   priority: z.number().int().min(1).max(9).optional(),
 });

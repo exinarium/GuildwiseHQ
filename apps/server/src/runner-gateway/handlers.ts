@@ -74,6 +74,7 @@ const DESIGN_METHODS = new Set([
   'org.catalogue',
   'org.role.draft',
   'org.workflow.draft',
+  'org.workflowVariant',
   'org.validate',
   'org.submit',
   'org.department',

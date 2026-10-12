@@ -17,6 +17,7 @@ import {
 import { orgRoleOf } from '../auth/org-context.ts';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
+import { enabledWorkflows } from '../catalogue/project-workflows.ts';
 import { memberRefusal } from '../commands/phases.ts';
 import type { Ctx } from '../context.ts';
 import {
@@ -370,6 +371,12 @@ export async function getBoard(
       cards.some((o) => o.workflow_version_id === c.workflow_version_id && o.status !== 'done')
     )
       others.push(w.definition);
+  }
+  // Workflows the project enabled besides its primary always show their columns (docs/design/architect-and-workflows.md 4.3).
+  for (const e of await enabledWorkflows(ctx.pool, project)) {
+    if (e.isPrimary || e.workflowKey === wf.key || others.some((o) => o.key === e.workflowKey)) continue;
+    const w = await resolveWorkflow(ctx.pool, project.org_id, e.workflowKey, project.id);
+    if (w) others.push(w.definition);
   }
   const columns = boardColumnsWith(wf.definition as WorkflowDefinition, others);
   const workability = await cardWorkability(ctx, cards);

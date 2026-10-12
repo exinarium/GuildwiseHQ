@@ -31,6 +31,7 @@ import {
 import { loadOrg, orgRoleOf, requireFeature } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
+import { variantIssues } from '../catalogue/variants.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -42,12 +43,12 @@ import { enqueueVaultWrite } from './vaults.ts';
 /** Who designs: the manager (through the Organization page) or the BA in a design chat. */
 export type Designer = { kind: 'user'; userId: string } | { kind: 'agent'; agentId: string };
 
-const authorOf = (d: Designer) =>
+export const authorOf = (d: Designer) =>
   d.kind === 'user' ? ({ kind: 'user', id: d.userId } as const) : ({ kind: 'agent', id: d.agentId } as const);
-const actorOf = (d: Designer) => (d.kind === 'user' ? userActor(d.userId) : agentActor(d.agentId));
+export const actorOf = (d: Designer) => (d.kind === 'user' ? userActor(d.userId) : agentActor(d.agentId));
 
 const BUILTIN_ROLE_KEYS = BUILTIN_ROLES.map((r) => r.key);
-const BUILTIN_WORKFLOW_KEYS = BUILTIN_WORKFLOWS.map((w) => w.key);
+export const BUILTIN_WORKFLOW_KEYS = BUILTIN_WORKFLOWS.map((w) => w.key);
 const BUILTIN_DEPARTMENTS = [
   ...new Set(
     [...BUILTIN_ROLES.map((r) => r.department), ...BUILTIN_WORKFLOWS.map((w) => w.department)].filter(
@@ -157,7 +158,7 @@ function parseOrThrow<T>(
   throw unprocessable('invalid_definition', `the ${what} is not valid: ${issues[0]?.message}`, { issues });
 }
 
-async function nextVersion(
+export async function nextVersion(
   tx: Queryable,
   table: 'role_definitions' | 'workflow_versions',
   orgId: string,
@@ -256,6 +257,17 @@ export async function saveWorkflowDraft(
         'builtin_protected',
         `'${input.key}' is a built-in workflow: it cannot be replaced or removed`,
       );
+    // A project variant is changed through the variant routes (insertions on a base), never as a custom workflow.
+    const variantRow = await one(
+      tx,
+      'SELECT 1 AS x FROM workflow_versions WHERE org_id=$1 AND project_id IS NOT NULL AND (key=$2 OR id=$3::uuid) LIMIT 1',
+      [orgId, input.key, opts.id ?? null],
+    );
+    if (variantRow)
+      throw conflict(
+        'key_taken',
+        `'${input.key}' is a project variant: change it in the project's workflow settings`,
+      );
     let existing = opts.id
       ? await one(tx, 'SELECT * FROM workflow_versions WHERE id=$1 AND org_id=$2 FOR UPDATE', [
           opts.id,
@@ -340,6 +352,9 @@ async function loadVersion(db: Queryable, kind: DefinitionKind, orgId: string, i
 }
 
 async function issuesFor(db: Queryable, kind: DefinitionKind, row: Row, withDrafts: boolean) {
+  // A project variant is validated from its insertions on its base (it is not a custom workflow).
+  if (kind === 'workflow' && row.project_id)
+    return variantIssues(db, row, await roleCatalogue(db, row.org_id, withDrafts), BUILTIN_WORKFLOW_KEYS);
   const ctxs = await validationContexts(db, row.org_id);
   if (kind === 'role')
     return validateRoleDefinition(row.definition, ctxs.role).map((i): DefinitionIssue => ({ ...i }));
@@ -364,6 +379,11 @@ export async function validateDraft(
 const describeWorkflow = (def: WorkflowDefinition): string =>
   [
     `Workflow ${def.name} (${def.key} v${def.version})${def.department ? `, department ${def.department}` : ''}.`,
+    ...(def.extends
+      ? [
+          `Project variant of ${def.extends.key} v${def.extends.version}: base steps are unchanged, steps were inserted.`,
+        ]
+      : []),
     ...def.stages.map(
       (s) =>
         `- ${s.label}: ${s.kind === 'agent' ? `claimed by ${s.claimRole}${s.seniorOnly ? ' (senior)' : ''}` : s.kind}${
@@ -625,7 +645,7 @@ export async function orgCatalogue(
     ctx.pool,
     `SELECT w.*, (SELECT count(*)::int FROM cards c WHERE c.workflow_version_id = w.id
                    AND c.status NOT IN ('done','cancelled')) AS in_flight
-       FROM workflow_versions w WHERE (w.org_id IS NULL OR w.org_id = $1) AND ${visible.replaceAll('status', 'w.status')}
+       FROM workflow_versions w WHERE (w.org_id IS NULL OR w.org_id = $1) AND w.project_id IS NULL AND ${visible.replaceAll('status', 'w.status')}
       ORDER BY (w.org_id IS NULL) DESC, w.key, w.version DESC`,
     [orgId],
   );
@@ -769,7 +789,7 @@ export function registerDefinitionHook(ctx: Ctx): () => void {
         `SELECT * FROM ${kind === 'role' ? 'role_definitions' : 'workflow_versions'} WHERE id=$1`,
         [id],
       );
-      if (!row || row.org_id === null) return;
+      if (!row || row.org_id === null || row.project_id) return;
       const vault = await one(
         ctx.pool,
         `SELECT id FROM vaults WHERE org_id=$1 AND project_id IS NULL ORDER BY (kind='org') DESC, created_at LIMIT 1`,

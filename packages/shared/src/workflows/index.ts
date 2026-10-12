@@ -3,3 +3,4 @@ export * from './custom.ts';
 export * from './resolve.ts';
 export * from './schema.ts';
 export * from './validate.ts';
+export * from './variant.ts';

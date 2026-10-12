@@ -3,7 +3,6 @@ import {
   type CardChanges,
   type CardOrigin,
   type CompletionAction,
-  CROSS_PROJECT_CARD_TYPES,
   type CreateCardRequest,
   canManageCard,
   cardRef,
@@ -23,6 +22,7 @@ import {
 import type { AuthSession } from '../auth/sessions.ts';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import { loadWorkflowById, resolveWorkflow, type WorkflowVersionRow } from '../catalogue/loader.ts';
+import { resolveProjectCardWorkflow } from '../catalogue/project-workflows.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -33,22 +33,19 @@ import { cardMessage, projectScope, userActor } from './common.ts';
 import { openLoopAlerts } from './loop-breaker.ts';
 
 /**
- * The workflow that runs a card of this type in this project (docs/design/restructure.md section 8.1): the project's own
- * when it lists the type, otherwise the one named in `CROSS_PROJECT_CARD_TYPES` (a research card in a code project),
- * otherwise none. The card carries that workflow version from then on, so the board shows its columns next to the
- * project's own.
+ * The workflow that runs a card of this type in this project (docs/design/restructure.md section 8.1, and
+ * docs/design/architect-and-workflows.md 4.1 once a project enables more than one): the explicit `workflowKey` when
+ * given, else the project's default for the type, else the cross-project workflow (a research card in a code
+ * project), otherwise none. The card carries that workflow version from then on, so the board shows its columns
+ * next to the project's own.
  */
 export async function resolveCardWorkflow(
   db: Queryable,
   project: Row,
   cardType: string,
+  workflowKey?: string,
 ): Promise<WorkflowVersionRow | null> {
-  const own = await resolveWorkflow(db, project.org_id, project.workflow_key);
-  if (own?.definition.cardTypes.includes(cardType as never)) return own;
-  const other = CROSS_PROJECT_CARD_TYPES[cardType];
-  if (!other || other === project.workflow_key) return null;
-  const wf = await resolveWorkflow(db, project.org_id, other);
-  return wf?.definition.cardTypes.includes(cardType as never) ? wf : null;
+  return resolveProjectCardWorkflow(db, project, cardType, workflowKey);
 }
 
 /** The stage a `CardSpecified` moves the card into, and the outcome's resolved stage. */
@@ -151,7 +148,7 @@ export async function createCardIn(
   if (project.status !== 'active') throw conflict('project_archived', 'project is archived');
   const projectWf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
   if (!projectWf) throw badRequest('unknown_workflow', `workflow '${project.workflow_key}' is not available`);
-  const wf = await resolveCardWorkflow(tx, project, req.cardType);
+  const wf = await resolveCardWorkflow(tx, project, req.cardType, req.workflowKey);
   if (!wf) {
     throw badRequest(
       'invalid_card_type',

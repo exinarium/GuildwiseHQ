@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { RoleDefinitionSchema, RoleExtensionsSchema } from '../roles/schema.ts';
 import { WorkflowDefinitionSchema } from '../workflows/schema.ts';
+import { WorkflowVariantSpecSchema } from '../workflows/variant.ts';
 import { defineEvent, Id } from './define.ts';
 
 export const CatalogueStatus = z.enum(['draft', 'pending_approval', 'active', 'superseded', 'rejected']);
@@ -23,6 +24,10 @@ export const catalogueEvents = [
       status: CatalogueStatus,
       /** M10: custom drafts only. */
       draftedBy: DefinitionAuthor.optional(),
+      /** #10: a project variant (only that project's cards can use it); `definition.extends` names its base. */
+      projectId: Id.optional(),
+      /** #10: the insertions the variant's definition was materialised from (kept for Rebase and re-validation). */
+      variantSpec: WorkflowVariantSpecSchema.optional(),
     }),
   ),
   defineEvent(
@@ -32,6 +37,7 @@ export const catalogueEvents = [
       name: z.string(),
       department: z.string().optional(),
       definition: WorkflowDefinitionSchema,
+      variantSpec: WorkflowVariantSpecSchema.optional(),
     }),
   ),
   /** The draft passed validation and waits on the owner's desk (`deskItemId`). */

@@ -74,6 +74,7 @@ import { orgRoutes } from './routes/orgs.ts';
 import { outboundRoutes } from './routes/outbound.ts';
 import { phaseRoutes } from './routes/phases.ts';
 import { platformRoutes } from './routes/platform.ts';
+import { projectWorkflowRoutes } from './routes/project-workflows.ts';
 import { projectRoutes } from './routes/projects.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
@@ -330,6 +331,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(cloudRoutes(ctx));
   await app.register(supportRoutes(ctx));
   await app.register(projectRoutes(ctx));
+  await app.register(projectWorkflowRoutes(ctx));
   await app.register(cardRoutes(ctx));
   await app.register(agentRoutes(ctx));
   await app.register(catalogueRoutes(ctx));

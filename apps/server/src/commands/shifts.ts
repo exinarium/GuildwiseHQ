@@ -235,15 +235,13 @@ export async function applyShiftReport(
   let acceptMessage: string | undefined;
   switch (outcome.event) {
     case 'ReviewRequested': {
-      if (resolved.toStage !== 'review')
-        return { accepted: false, error: `unsupported transition to '${resolved.toStage}'` };
       const diffStats = msg.diffStats ?? ZERO_DIFF;
       const riskTier =
         card.risk_tier_overridden && card.risk_tier ? card.risk_tier : (msg.riskTier ?? 'small');
       handoffData = { diffStats, riskTier };
       main = mk({
         type: 'ReviewRequested',
-        payload: { cardId, fromStage: 'build', toStage: 'review', riskTier, diffStats },
+        payload: { cardId, fromStage: 'build', toStage: resolved.toStage, riskTier, diffStats },
       });
       break;
     }
@@ -258,8 +256,6 @@ export async function applyShiftReport(
       const required = stage.approvals?.[tier] ?? 1;
       const soFar = Number(card.review_approvals) + 1;
       const toStage = soFar >= required ? resolved.toStage : card.stage;
-      if (toStage !== 'review' && toStage !== 'test')
-        return { accepted: false, error: `unsupported transition to '${toStage}'` };
       main = mk({
         type: 'ReviewApproved',
         payload: {
@@ -313,9 +309,6 @@ export async function applyShiftReport(
       if (outcome.event === 'TestFailed') {
         mains = await testFailedEvents(tx, card, agent.id, report.note, ev);
         break;
-      }
-      if (resolved.toStage !== 'docs' && resolved.toStage !== 'finalize') {
-        return { accepted: false, error: `unsupported transition to '${resolved.toStage}'` };
       }
       main = mk({
         type: 'TestPassed',

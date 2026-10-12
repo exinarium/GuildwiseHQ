@@ -542,6 +542,7 @@ async function createDraft(
       projectId: project.id,
       title: draft.title,
       cardType: draft.cardType,
+      ...(draft.workflowKey ? { workflowKey: draft.workflowKey } : {}),
       fields: {
         ...draft.fields,
         externalRef: draft.externalRef ?? draft.fields.externalRef ?? intake.external_key ?? undefined,

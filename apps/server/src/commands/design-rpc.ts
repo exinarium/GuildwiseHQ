@@ -4,6 +4,7 @@ import {
   isOrgManager,
   RoleDraftInputSchema,
   WorkflowDraftInputSchema,
+  WorkflowVariantSpecSchema,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { Ctx } from '../context.ts';
@@ -19,6 +20,7 @@ import {
   validateDraft,
 } from './designer.ts';
 import type { RpcReply } from './intake.ts';
+import { saveVariantDraft } from './workflow-variants.ts';
 
 const BA_ROLE_KEY = 'ba';
 
@@ -150,6 +152,34 @@ export async function designRpc(
           {
             id: r.id,
             message: `Saved workflow draft ${r.key} v${r.version}.\n${fmtIssues(r.issues)}\n${r.issues.some((i) => i.severity === 'error') ? 'Fix the errors and draft it again, then submit.' : `Run \`aom org submit ${r.key} --workflow\` when the manager is happy with it.`}`,
+          },
+        ];
+      }
+      case 'org.workflowVariant': {
+        const raw = { ...((params.definition ?? params) as Record<string, unknown>) };
+        // `project` (a key) may stand in for `projectId`.
+        if (!raw.projectId && typeof raw.project === 'string') {
+          const pr = await one(ctx.pool, 'SELECT id FROM projects WHERE org_id=$1 AND key=$2', [
+            who.orgId,
+            raw.project.toUpperCase(),
+          ]);
+          if (!pr) return [false, undefined, `there is no project '${raw.project}' in this organization`];
+          raw.projectId = pr.id;
+        }
+        delete raw.project;
+        const input = WorkflowVariantSpecSchema.safeParse(raw);
+        if (!input.success)
+          return [
+            false,
+            undefined,
+            `the variant is not valid: ${input.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
+          ];
+        const r = await saveVariantDraft(ctx, designer, who.orgId, input.data, { upsert: true });
+        return [
+          true,
+          {
+            id: r.id,
+            message: `Saved variant draft ${r.key} v${r.version} (${r.stages.map((s) => s.id).join(' > ')}).\n${fmtIssues(r.issues)}\n${r.issues.some((i) => i.severity === 'error') ? 'Fix the errors and draft it again, then submit.' : `Run \`aom org submit ${r.key} --workflow\` when the manager is happy with it. After the owner approves, an Owner or Admin enables it in the project settings.`}`,
           },
         ];
       }

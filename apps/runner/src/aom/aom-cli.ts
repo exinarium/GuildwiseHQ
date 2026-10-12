@@ -427,6 +427,7 @@ async function phaseVerb(ctx: AomContext, p: Parsed): Promise<number> {
 const ORG_USAGE = `usage: aom org catalogue
        aom org role draft --json '<json>' | --file <role.json> | --file -
        aom org workflow draft --json '<json>' | --file <workflow.json> | --file -
+       aom org workflow variant --file <variant.json> | --file -
        aom org validate <key> [--role|--workflow]
        aom org submit <key> [--role|--workflow]
        aom org department --name "<name>"`;
@@ -450,6 +451,8 @@ async function orgDesign(ctx: AomContext, p: Parsed): Promise<number> {
       return print(await rpc(ctx, 'org.catalogue'));
     case 'role':
     case 'workflow': {
+      if (sub === 'workflow' && rest[0] === 'variant')
+        return print(await rpc(ctx, 'org.workflowVariant', { definition: readJson() }));
       if (rest[0] !== 'draft') throw new UsageError(ORG_USAGE);
       return print(await rpc(ctx, `org.${sub}.draft`, { definition: readJson() }));
     }
@@ -868,7 +871,7 @@ export const USAGE = `usage: aom <verb> [options]
   outbound draft --kind <comment|resolution|decision> --body "<text>"   BA: draft the update for the card's ticket (the manager approves it)
   risk <small|large> --reason "<why>"      BA: override the card's risk tier (drives the review tier and the merge approval)
   source read --ref <owner/repo#12 | ticket URL>        BA intake: read a GitHub issue (Jira: the Jira skill)
-  org catalogue | org role draft --json '<json>' | --file <json|-> | org workflow draft (same) | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
+  org catalogue | org role draft --json '<json>' | --file <json|-> | org workflow draft (same) | org workflow variant --file <json|-> (a project's own version) | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
   transcript --url <url>                     fetch the transcript of a video or podcast (the runner saves it in the vault; prints a header and the text)
   phase list | propose --name "<n>" [--description "<t>"] [--followups-file <json>] | assign <REF> --phase <ref>|--none | submit <ref>   BA intake: propose a phase, put cards in it, ask the manager to confirm
   phase followup brief <n> --to devops|tester|ba --text "<t>" | phase ready   BA task (follow-ups approved): delegate each follow-up, then say all are briefed (terminal)

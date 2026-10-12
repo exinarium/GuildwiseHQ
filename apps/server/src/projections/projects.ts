@@ -150,6 +150,14 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
      WHERE $1::uuid = ANY(allowed_project_ids) OR $1::uuid = ANY(focus_project_ids)`,
     P,
   );
+  // The enabled workflows and the project's own workflow variants (its cards, which pinned them, are gone above).
+  await exec(tx, 'DELETE FROM project_workflows WHERE project_id=$1', P);
+  await exec(
+    tx,
+    'DELETE FROM workflow_stages WHERE workflow_version_id IN (SELECT id FROM workflow_versions WHERE project_id=$1)',
+    P,
+  );
+  await exec(tx, 'DELETE FROM workflow_versions WHERE project_id=$1', P);
   await exec(tx, 'DELETE FROM projects WHERE id=$1', P);
 }
 
