@@ -20,6 +20,15 @@ export function childLabel(c: SubworkflowChildDto['child']): string {
     : `${c.ref} in project ${c.projectKey}`;
 }
 
+/** The open children a waiting card could take down with it: the viewer may cancel them (offered when cancelling the card). */
+export function cancellableChildren(
+  status: string,
+  data: SubworkflowsData | undefined,
+): SubworkflowChildDto[] {
+  if (status !== 'waiting') return [];
+  return (data?.children ?? []).filter((c) => c.state === 'open' && c.child.canCancel === true);
+}
+
 /** The card is waiting for a sub-workflow child: a line above the card, with the child's current column. */
 export function SubworkflowWaitLine({ data }: { data: SubworkflowsData | undefined }) {
   const open = data?.children.filter((c) => c.state === 'open' && c.mode === 'wait') ?? [];

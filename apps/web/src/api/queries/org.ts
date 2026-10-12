@@ -8,6 +8,7 @@ import {
   type RolePreviewRequest,
   RolePreviewResponseSchema,
   type SubmitResponse,
+  SubworkflowTargetsResponseSchema,
   type ValidateResponse,
   type WorkflowDraftInput,
 } from '@aom/shared';
@@ -19,6 +20,14 @@ export function useOrgCatalogue(projectId?: string) {
   return useQuery({
     queryKey: ['org', 'catalogue', projectId ?? 'own'],
     queryFn: () => get(`/org/catalogue${qs({ projectId })}`, OrgCatalogueResponseSchema),
+  });
+}
+
+/** What the sub-workflow step editor can start and where (`GET /api/subworkflow-targets`). */
+export function useSubworkflowTargets(projectId?: string) {
+  return useQuery({
+    queryKey: ['org', 'subworkflow-targets', projectId ?? 'own'],
+    queryFn: () => get(`/subworkflow-targets${qs({ projectId })}`, SubworkflowTargetsResponseSchema),
   });
 }
 

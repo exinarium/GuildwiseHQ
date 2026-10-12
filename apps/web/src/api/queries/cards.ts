@@ -63,4 +63,6 @@ export const useReleaseCard = (id: string) =>
 export const useReleaseBackoff = (id: string) =>
   useCardAction(id, (reason?: string) => post(`/cards/${id}/release-backoff`, reason ? { reason } : {}));
 export const useCancelCard = (id: string) =>
-  useCardAction(id, (reason: string) => post(`/cards/${id}/cancel`, { reason }));
+  useCardAction(id, (b: { reason: string; alsoCancelChildren?: boolean }) =>
+    post(`/cards/${id}/cancel`, b.alsoCancelChildren ? b : { reason: b.reason }),
+  );

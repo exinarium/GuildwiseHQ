@@ -25,7 +25,7 @@ import {
   workflowUsesRepos,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
-import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
+import { loadVisibleCard, loadVisibleProject, projectRole } from '../authz/scope.ts';
 import { loadWorkflowById, resolveWorkflow, type WorkflowVersionRow } from '../catalogue/loader.ts';
 import { resolveProjectCardWorkflow } from '../catalogue/project-workflows.ts';
 import type { Ctx } from '../context.ts';
@@ -741,15 +741,65 @@ export async function cancelCardIn(
   return undefined;
 }
 
-export async function cancelCard(ctx: Ctx, user: AuthSession['user'], idOrRef: string, reason: string) {
-  let workstation: string | undefined;
+/**
+ * The open sub-workflow children of a waiting card that `user` may cancel (their own project role decides, like any
+ * cancel), nested children included. Children the user may not manage are left alone.
+ */
+async function cancellableChildren(
+  tx: Tx,
+  user: AuthSession['user'],
+  parentId: string,
+  seen = new Set<string>(),
+): Promise<Row[]> {
+  const out: Row[] = [];
+  const kids = await rows(
+    tx,
+    `SELECT ch.* FROM subworkflow_runs r JOIN cards ch ON ch.id = r.child_card_id
+      WHERE r.parent_card_id=$1 AND r.status='open' AND ch.status NOT IN ('done','cancelled')
+      ORDER BY r.started_at FOR UPDATE OF ch`,
+    [parentId],
+  );
+  for (const ch of kids) {
+    if (seen.has(ch.id)) continue;
+    seen.add(ch.id);
+    const role = await projectRole(tx, user.id, ch.project_id);
+    if (!canManageCard({ userId: user.id, projectRole: role, cardOwnerUserId: ch.owner_user_id })) continue;
+    out.push(ch, ...(await cancellableChildren(tx, user, ch.id, seen)));
+  }
+  return out;
+}
+
+export async function cancelCard(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  idOrRef: string,
+  reason: string,
+  opts: { alsoCancelChildren?: boolean } = {},
+) {
+  const workstations = new Set<string>();
   const id = await withAppendTx(ctx.pool, async (tx) => {
     const card = await loadManageable(tx, user, idOrRef);
     if (['done', 'cancelled'].includes(card.status))
       throw conflict('card_closed', `card is already ${card.status}`);
-    workstation = await cancelCardIn(ctx, tx, user, card, reason);
+    // Read the children first: once the parent is cancelled nothing links them to it but the run rows.
+    const children =
+      opts.alsoCancelChildren && card.status === 'waiting'
+        ? await cancellableChildren(tx, user, card.id)
+        : [];
+    const ws = await cancelCardIn(ctx, tx, user, card, reason);
+    if (ws) workstations.add(ws);
+    for (const child of children) {
+      const w = await cancelCardIn(
+        ctx,
+        tx,
+        user,
+        child,
+        `Cancelled together with ${card.ref} (${card.title}): ${reason}`,
+      );
+      if (w) workstations.add(w);
+    }
     return card.id as string;
   });
-  if (workstation) await ctx.services.gateway.deliverPending(workstation);
+  for (const w of workstations) await ctx.services.gateway.deliverPending(w);
   return id;
 }

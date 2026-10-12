@@ -68,7 +68,7 @@ export function RouteEditor({ step, model, onChange, readOnly, describedBy }: Ro
             {next === '' && <option value="">Choose the next step</option>}
             {options(next)}
           </Select>
-          {!isStart && (
+          {!isStart && step.kind !== 'subworkflow' && (
             <Select
               label="If it is not good enough, send back to"
               value={back}

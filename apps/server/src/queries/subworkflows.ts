@@ -1,4 +1,4 @@
-import { columnFor, getStage, type SubworkflowsPanel } from '@aom/shared';
+import { canManageCard, columnFor, getStage, type SubworkflowsPanel } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
 import type { Ctx } from '../context.ts';
 import { iso, type Row, rows } from '../db/sql.ts';
@@ -93,7 +93,9 @@ export async function subworkflowsPanel(
     `SELECT r.stage_id, r.mode, r.status AS run_status, r.workflow_key, r.workflow_version, r.started_at, r.resolved_at,
             r.fields AS fields_back, ch.*, p.key AS project_key, p.name AS project_name,
             EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = ch.project_id AND pm.user_id = $2
-                     AND pm.status = 'active') AS visible
+                     AND pm.status = 'active') AS visible,
+            (SELECT pm.role FROM project_members pm WHERE pm.project_id = ch.project_id AND pm.user_id = $2
+                AND pm.status = 'active') AS my_role
        FROM subworkflow_runs r JOIN cards ch ON ch.id = r.child_card_id JOIN projects p ON p.id = ch.project_id
       WHERE r.parent_card_id = $1 ORDER BY r.started_at, ch.number`,
     [card.id, userId],
@@ -147,6 +149,15 @@ export async function subworkflowsPanel(
           projectKey: r.project_key as string,
           projectName: r.project_name as string,
           visible: !!r.visible,
+          canCancel:
+            r.run_status === 'open' &&
+            r.status !== 'done' &&
+            r.status !== 'cancelled' &&
+            canManageCard({
+              userId,
+              projectRole: (r.my_role as 'owner' | 'manager' | null) ?? null,
+              cardOwnerUserId: r.owner_user_id as string,
+            }),
           fields: r.visible ? ((r.fields ?? {}) as Record<string, unknown>) : {},
         },
       })),

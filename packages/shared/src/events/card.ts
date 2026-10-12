@@ -222,6 +222,19 @@ export const cardEvents = [
       reworkRound: z.number().int().min(0).default(0),
     }),
   ),
+  /**
+   * A card moved back into a `subworkflow` stage whose earlier child is still open: it waits on that child again
+   * instead of starting a second one (no new run row).
+   */
+  defineEvent(
+    'SubworkflowAttached',
+    z.object({
+      cardId: Id,
+      stageId: Stage,
+      childCardId: Id,
+      reworkRound: z.number().int().min(0).default(0),
+    }),
+  ),
   /** The child of a waiting `subworkflow` stage ended: the parent takes its `done` or `failed` outcome. */
   defineEvent(
     'SubworkflowResolved',

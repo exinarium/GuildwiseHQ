@@ -18,6 +18,7 @@ export function TryACard({
   onChoice,
   roleName,
   hiredRoleKeys,
+  subworkflowNote,
 }: {
   /** null: the workflow is not complete enough to walk. */
   sim: SimulationResult | null;
@@ -27,6 +28,8 @@ export function TryACard({
   onChoice: (visit: number, routeId: string | undefined) => void;
   roleName: (key: string) => string;
   hiredRoleKeys?: ReadonlySet<string>;
+  /** What a sub-workflow step does, in words ("Starts Translation and waits for it"). */
+  subworkflowNote?: (stageId: string) => string | undefined;
 }) {
   let visit = -1;
   return (
@@ -79,6 +82,11 @@ export function TryACard({
                     )}
                     {s.kind === 'agent' && !s.role && <Badge tone="amber">No role yet</Badge>}
                     {s.kind === 'manual' && <span className="text-muted">you or the BA</span>}
+                    {s.kind === 'subworkflow' && (
+                      <span className="text-muted" data-testid={`try-subworkflow-${i}`}>
+                        {subworkflowNote?.(s.stageId) ?? 'Starts another workflow'}
+                      </span>
+                    )}
                     {s.kind === 'terminal' && <Badge tone="green">Done</Badge>}
                   </div>
                   {!s.skipped && s.offered.length > 1 && (
@@ -92,7 +100,11 @@ export function TryACard({
                             checked={picked === o.id}
                             onChange={() => onChoice(v, o.id)}
                           />
-                          {o.kind === 'failure' ? 'Sent back: ' : 'Then: '}
+                          {o.kind === 'failure'
+                            ? s.kind === 'subworkflow'
+                              ? 'If cancelled: '
+                              : 'Sent back: '
+                            : 'Then: '}
                           {o.label}
                         </label>
                       ))}

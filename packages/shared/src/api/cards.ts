@@ -165,6 +165,8 @@ export const SubworkflowChildDtoSchema = z.object({
     projectName: z.string(),
     /** The viewer is a member of the child's project: title, column and the link are shown. */
     visible: z.boolean(),
+    /** The child is still open and the viewer may cancel it (offered with "also cancel the child card"). */
+    canCancel: z.boolean().optional(),
     /** The fields the parent mapped into the child (values at the child now). */
     fields: z.record(z.string(), z.unknown()),
   }),
@@ -304,5 +306,13 @@ export const MoveCardRequestSchema = z.object({
   reason: z.string().min(1).max(2000),
 });
 export const ReleaseCardRequestSchema = z.object({ reason: z.string().max(2000).optional() });
-export const CancelCardRequestSchema = z.object({ reason: z.string().min(1).max(2000) });
+export const CancelCardRequestSchema = z.object({
+  reason: z.string().min(1).max(2000),
+  /**
+   * Also cancel the open sub-workflow child card(s) this card waits on (only those the caller may cancel; the others
+   * are left running). Default false: only this card is cancelled.
+   */
+  alsoCancelChildren: z.boolean().default(false),
+});
+export type CancelCardRequest = z.infer<typeof CancelCardRequestSchema>;
 export const CardParamsSchema = z.object({ id: z.string().min(1) });
