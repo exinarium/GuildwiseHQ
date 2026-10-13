@@ -39,6 +39,7 @@ import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput, StoredEvent } from '../eventstore/types.ts';
+import { rebaseAgentsToCurrentRoles } from '../hr/follow-role.ts';
 import { agentActor, orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { enqueueVaultWrite } from './vaults.ts';
 
@@ -570,6 +571,9 @@ export async function resolveDefinitionIn(
         : { type: 'WorkflowVersionRejected', payload: { workflowVersionId: row.id } };
   }
   await ctx.store.append([{ streamId: stream, event, actor: userActor(user.id), scope }], { tx });
+  // Hired agents follow their role: an approved version reaches the agents already working under the role.
+  if (role && resolution === 'approved')
+    await rebaseAgentsToCurrentRoles(ctx, { orgId: row.org_id, roleKey: row.key, tx });
 }
 
 // ------------------------------------------------------------------------------------ extend built-ins

@@ -442,6 +442,8 @@ Agents belong to the organization, not to a single project. For each agent you d
 
 ![Changing an agent's allowed projects](guide/assets/dlg-allowlist.jpg)
 
+**Agents follow their role.** An agent always works with the current version of its role: when a role gets a new version (a built-in update, or a custom role you approve), the agents in that role pick up its new permissions and instructions. What you changed on one agent yourself (extra blocked commands, narrowed tools, external tools) stays. The card shows "Follows role Builder v4" and lists those changes of its own.
+
 **External tools (MCP).** Each agent card has an **External tools (MCP)** section: one switch per plugin MCP server your workstations report, with a plain-language note and the same warning as in the project settings (a server that can write, send or delete lets the agent change data in that service as you; prefer read-only use). This is how a built-in agent such as the business analyst, the builder or the architect gets Jira or Confluence, since built-in roles have no external tools of their own. Everyone who can see the agent reads the switches; only the **organization Owner** can change them (Administrators and the hiring manager get a clear refusal, but may still switch a server off). The server must **also** be granted to the project (project settings, MCP servers), otherwise the agent cannot use it. The DevOps engineer has no such section and cannot be given external tools.
 
 **Each agent card also shows** what the agent costs this month and in total, how many cards it finished, its bounce rate (how often review sent its work back) and its current work.

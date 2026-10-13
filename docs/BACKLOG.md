@@ -70,6 +70,24 @@ used". See `docs/RUNNER.md` "Plugin MCP servers".
 **Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
 the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
 
+### 29. Hired agents keep stale role permissions
+
+**Done (2026-10-13).** Bug: a hire stored a full copy of its role's `permissions` and never followed the role again, so
+builders Ada and Ken still denied `git rebase*`, `git checkout*` and `git switch*` long after builder v2 allowed them
+(and the owner's "allow rebase" desk answers could not help). Fix: agents follow the current version of their role.
+`AgentPermissionsRebased {agentId, roleKey, fromRoleVersion, toRoleVersion, previous, permissions}` re-derives the
+agent's permissions as `newRole + (agent - oldRole)` (`rebasePermissions`, `packages/shared/src/roles/follow.ts`): the
+agent's own deviations (extra denied shell patterns, narrowed tools / write scope / risk tiers, `mcp:<server>` tools an
+Owner added, browser or org-repo changes) are kept, everything the agent merely inherited moves with the role. Values
+any earlier version of the role carried are never deviations, so hires of unknown vintage come out clean. It runs at
+server boot after the built-ins are registered (`rebaseAgentsToCurrentRoles`, `apps/server/src/hr/follow-role.ts`; this is
+the data fix for existing agents, no SQL migration) and when an organization role version is approved. `roleVersion`
+moves with it, so the agent's instructions follow too. Narrowing rules, the Owner-only widening rules and the `mcp:` rule
+in `patchAgent` are unchanged: they now compare against a current baseline. Builder v4 instructions say rebase,
+cherry-pick, checkout and switch are allowed in the worktree and to use `git reset --keep` (not `--hard`) or ask. The
+Agents page shows "Follows role Builder v4" and lists the agent's own changes. The runner is unchanged (it already uses
+the shift's agent permissions).
+
 ### 28. Card branches stay local; hygiene removes finished card branches
 
 **Done (2026-10-13).** Owner decision: no agent card branch (`aom/<ref>-...`) on origin unless the card's completion

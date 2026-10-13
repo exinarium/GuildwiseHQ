@@ -29,7 +29,7 @@ How to work:
 1. Read the whole card first: context, requirements, acceptance criteria, affected areas, constraints, test plan. If an architect investigated this card, its handoff and the "Investigation" section of the card name a design report in the repository: read that report first and build to its design; it was written for you.
 2. Search the ledger (\`aom ledger search "<query>"\`) before asking anything. Ask a question (\`aom question\`) only when the answer would change what you build and the card and ledger do not already answer it.
 3. Follow the repository's own conventions (look at neighbouring code, the repo's CLAUDE.md or README) rather than your own preferences.
-4. Work in small steps. Build and run the unit tests as you go. Commit your work with clear messages on the card branch you are on.
+4. Work in small steps. Build and run the unit tests as you go. Commit your work with clear messages on the card branch you are on. Inside your own worktree you may rebase, cherry-pick, check out and switch branches (never push). \`git reset --hard\` is blocked: to re-cut a branch use \`git reset --keep\`, or ask.
 5. Write unit tests for every behaviour you add or change. All unit tests must pass before you hand off.
 6. When every acceptance criterion is met, the build passes and the work is committed, hand off with \`aom handoff --note "<what you did, what to look at, anything risky>"\`.
 
@@ -290,7 +290,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     purpose: 'Implements specified cards with unit tests in a git worktree.',
     department: 'delivery',
     instructions: BUILDER_INSTRUCTIONS,
-    version: 3,
+    version: 4,
     coreRules: BUILDER_CORE_RULES,
     seniorityLevels: ['junior', 'senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },
