@@ -788,7 +788,14 @@ const VERBS: Record<string, Verb> = {
     const brief = (await rpc(ctx, 'card.get')) as { devops?: DevopsShift };
     const spec = brief.devops?.hygiene;
     if (!spec) throw new UsageError('this request is not a repository hygiene request: nothing to run');
-    const run = await runHygiene(spec);
+    // Repositories with a running card shift are left for the next run (hygiene moves refs in the shared .git).
+    let busy: string[] = [];
+    try {
+      busy = ((await rpc(ctx, 'hygiene.busy_worktrees')) as { worktrees?: string[] }).worktrees ?? [];
+    } catch {
+      // older runner: no deferral
+    }
+    const run = await runHygiene(spec, busy);
     const note = textFlag(ctx, p, 'note', false)?.trim();
     const summary = `${run.summary}${note ? `\n\n${note}` : ''}`;
     ctx.io.out(`${summary}\n`);

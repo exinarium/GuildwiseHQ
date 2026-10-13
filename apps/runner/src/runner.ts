@@ -247,7 +247,11 @@ export class Runner {
       findLocal: (k) => this.findLocal(k),
       writeVault: (cmd) => this.vaults.write(cmd),
       http: this.serverHttp,
-      rpc: (shiftId, method, params) => this.rpc(shiftId, method, params),
+      rpc: (shiftId, method, params) =>
+        // Answered here, not by the server: which worktrees have a running shift (repository hygiene defers those repos).
+        method === 'hygiene.busy_worktrees'
+          ? Promise.resolve({ ok: true, result: { worktrees: this.supervisor.worktreePaths() } })
+          : this.rpc(shiftId, method, params),
       maxConcurrentShifts: () =>
         Math.min(this.maxConcurrent, this.opts.sharedCap?.() ?? Number.POSITIVE_INFINITY),
       maxShiftMsOverride: opts.maxShiftMsOverride,

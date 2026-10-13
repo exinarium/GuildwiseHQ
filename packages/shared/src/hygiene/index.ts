@@ -161,6 +161,19 @@ export const HygieneRepoResultSchema = z.object({
       pushed: z.boolean().default(false),
     })
     .optional(),
+  /**
+   * The remote force-updated the working branch (commits were dropped) and the local branch was realigned to it.
+   * `commits` are local commits that were never on the remote ("<sha> <subject>"), kept on `savedBranch`.
+   */
+  rewritten: z
+    .object({
+      branch: z.string(),
+      realigned: z.boolean().default(true),
+      savedBranch: z.string().optional(),
+      commits: z.array(z.string()).default([]),
+      pushed: z.boolean().default(false),
+    })
+    .optional(),
 });
 export type HygieneRepoResult = z.infer<typeof HygieneRepoResultSchema>;
 
