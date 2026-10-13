@@ -2,6 +2,47 @@
 
 Logged fixes to pick up when development resumes. Newest first.
 
+## 2026-10-13
+
+Follow-ups from the 2026-10-12 release (items #1–#13).
+
+### 14. Incoming webhooks as an automation trigger
+
+**Decided (owner, 2026-10-12): later.** The `webhook_in` trigger kind exists in the schema (`packages/shared/src/schedules`)
+but the server refuses it (`trigger_not_available`). Wanted: a per-automation URL with a secret (stored hashed), payload
+fields as mapping tokens, the payload treated as untrusted (`renderUntrusted`), cards start as drafts unless the Owner
+allows otherwise, rate limits and an audit run per call. See `docs/design/workflow-builder.md`.
+
+### 15. Reply to an e-mail thread from inside Guildwise
+
+`sendInThread` (`apps/server/src/mail/inbound/reply.ts`) sends into an inbox thread with the right Message-ID,
+In-Reply-To and a `Reply-To` of `<address>+<thread token>`, but nothing calls it. Wanted: a "Reply" action on a card that
+came from e-mail (and on the thread view), permissions (who may reply as the organisation), the reply stored on the
+thread and the card, optional agent-drafted reply that a human sends.
+
+### 16. "Owner approves" step kind in workflows
+
+**Decided (owner, 2026-10-12): later.** A workflow step that waits for the Owner (or a named member) to approve on the
+desk, with approve / send back routes, in the workflow builder and the validator.
+
+### 17. Stale figures in the user guide
+
+6 of the 87 figures in `docs/guide` still show old screens (`desk-branch`, the test-stage, conflict and large-merge
+scenes, the phases-in-reporting scenes, desk items with the simple-mode / saved-work hygiene wording). The guide's seed
+steps in the Playwright `guide` project fail on simple mode (phase reporting 409 `phase_not_open`, the hygiene
+working-branch question, test-stage scenes, the edited-card step). Fix the seeds the way the e2e specs were fixed
+(expert mode where needed), re-capture, rebuild `guide.html` and the PDF.
+
+### 18. Working-branch question lists saved-work branches
+
+The hygiene question "Keep trunk as working branch?" also offers the automatic `guildwise/saved-work/<date>` branches as
+choices. Leave them out of the options.
+
+### 19. Per-sender limit for inbound e-mail
+
+Inbound mail has a per-organisation hourly limit (`AOM_INBOUND_RATE_PER_HOUR`). Add an optional per-sender limit so one
+noisy or looping sender cannot use up an organisation's allowance.
+
 ## 2026-10-12
 
 Owner's list of 2026-10-12. Item 8 of that list (reference repositories per project) is #4 below. The affiliate
