@@ -175,12 +175,15 @@ describe('renderInstructions', () => {
 
       If \`aom\` reports an error, read it, fix the cause and run the command again within this shift.
 
+      Never end the shift without one of these commands, and never stop to explain a problem to the user: nobody answers inside the shift. If a shell command is denied ("Permission to use Bash has been denied", "don't ask mode") or keeps failing, do not give up: try a simpler equivalent. Run one plain command per Bash call instead of \`cd x && ...; VAR=1 cmd\` chains, heredocs or inline scripts (a denial is per command; the next, simpler call is allowed), use \`git -C <dir>\` or a path argument instead of \`cd\`, and use the Edit or Write tool for file changes instead of a script. If you are still blocked, commit what you have and run the question command (or the handoff command if the work is done) with a note that says what is finished, what is uncommitted and which command you could not run.
+
       # Boundaries
 
       - Work only inside your current working directory (the card worktree).
       - Do not push, rebase, checkout or switch branches; do not touch other worktrees.
       - Search the ledger with \`aom ledger search\` before asking a question.
       - The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.
+      - .NET: plain \`dotnet build\` and \`dotnet test\` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass \`-m\`/\`-maxcpucount\` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (\`SocketException\` in \`NamedPipeServerStream\`, or a build that hangs).
       - This shift may run for at most 60 minutes.
       "
     `);
@@ -238,15 +241,28 @@ describe('renderInstructions', () => {
 
       If \`aom\` reports an error, read it, fix the cause and run the command again within this shift.
 
+      Never end the shift without one of these commands, and never stop to explain a problem to the user: nobody answers inside the shift. If a shell command is denied ("Permission to use Bash has been denied", "don't ask mode") or keeps failing, do not give up: try a simpler equivalent. Run one plain command per Bash call instead of \`cd x && ...; VAR=1 cmd\` chains, heredocs or inline scripts (a denial is per command; the next, simpler call is allowed), use \`git -C <dir>\` or a path argument instead of \`cd\`, and use the Edit or Write tool for file changes instead of a script. If you are still blocked, commit what you have and run the question command (or the handoff command if the work is done) with a note that says what is finished, what is uncommitted and which command you could not run.
+
       # Boundaries
 
       - Work only inside your current working directory (the card worktree).
       - Do not push, rebase, checkout or switch branches; do not touch other worktrees.
       - Search the ledger with \`aom ledger search\` before asking a question.
       - The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.
+      - .NET: plain \`dotnet build\` and \`dotnet test\` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass \`-m\`/\`-maxcpucount\` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (\`SocketException\` in \`NamedPipeServerStream\`, or a build that hangs).
       - This shift may run for at most 60 minutes.
       "
     `);
+  });
+  // card P4-7: a denied Bash call ("don't ask mode") ended builder shifts without a report
+  it('tells every agent what to do when a command is denied, and never to leave without a report', () => {
+    const out = renderInstructions(buildBrief());
+    expect(out).toContain('Never end the shift without one of these commands');
+    expect(out).toContain('Permission to use Bash has been denied');
+    expect(out).toContain('one plain command per Bash call');
+    expect(out).toContain('Edit or Write tool');
+    expect(out).toContain('commit what you have and run the question command');
+    expect(out).toContain('`-m`/`-maxcpucount`');
   });
   it('sections appear in the documented order', () => {
     const out = renderInstructions(buildBrief());

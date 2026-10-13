@@ -77,6 +77,8 @@ describe('shared package caches (one set per runner)', () => {
       MSBUILDDISABLENODEREUSE: '1',
       DOTNET_CLI_USE_MSBUILD_SERVER: '0',
       UseSharedCompilation: 'false',
+      // no MSBuild worker nodes: their /tmp/MSBuild<pid> pipes cannot be created in the sandbox (card P4-7)
+      DOTNET_PROCESSOR_COUNT: '1',
     });
   });
 
@@ -104,6 +106,7 @@ describe('shared package caches (one set per runner)', () => {
       'npm_config_cache',
       'MAVEN_OPTS',
       'MSBUILDDISABLENODEREUSE',
+      'DOTNET_PROCESSOR_COUNT',
     ])
       expect(devops[k], k).toBeUndefined();
     expect(devops.HOME).toBe(homedir());
@@ -210,7 +213,10 @@ const bwrapWorks =
 describe.skipIf(!bwrapWorks || !dotnet || process.platform !== 'linux')(
   'dotnet in a real bubblewrap sandbox (skipped without bwrap or dotnet)',
   () => {
-    const run = async (withShm: boolean) => {
+    const run = async (
+      withShm: boolean,
+      opts: { script?: string; dropEnv?: string[]; timeoutMs?: number } = {},
+    ) => {
       const root = realpathSync(tmp());
       const paths = runnerPaths(root);
       const sb = await ensureSandbox(paths, A1, 'Ada');
@@ -241,14 +247,44 @@ describe.skipIf(!bwrapWorks || !dotnet || process.platform !== 'linux')(
         DOTNET_ROOT: join(dotnet as string, '..'),
         ...sandboxEnv(sb),
       };
+      for (const k of opts.dropEnv ?? []) delete (env as Record<string, string>)[k];
       const script =
+        opts.script ??
         'dotnet new console -n app --no-restore >/dev/null && cd app && dotnet build 2>&1 | tail -20';
       return spawnSync(bwrap as string, [...args, 'bash', '-c', script], {
         env,
         encoding: 'utf8',
-        timeout: 120_000,
+        timeout: opts.timeoutMs ?? 120_000,
       });
     };
+
+    // card P4-7: a solution of several projects makes MSBuild start one worker node per CPU, and every node binds a
+    // named pipe at the hard-coded `/tmp/MSBuild<pid>`, which the sandbox's read-only /tmp refuses (the real sandbox's
+    // seccomp filter also refuses the socket itself). DOTNET_PROCESSOR_COUNT=1 keeps the build in one process.
+    const multiProject = [
+      'dotnet new sln -n S >/dev/null',
+      'for p in A B C D; do dotnet new classlib -n $p -o $p --no-restore >/dev/null; dotnet sln add $p/$p.csproj >/dev/null; done',
+      'dotnet add B/B.csproj reference A/A.csproj >/dev/null',
+      'dotnet add C/C.csproj reference A/A.csproj >/dev/null',
+      'dotnet add D/D.csproj reference B/B.csproj C/C.csproj >/dev/null',
+      'timeout 60 dotnet build 2>&1 | tail -20',
+    ].join(' && ');
+
+    it('a plain `dotnet build` of a multi-project solution succeeds (no MSBuild worker nodes)', async () => {
+      const r = await run(true, { script: multiProject, timeoutMs: 150_000 });
+      expect(r.stdout, `${r.stdout}${r.stderr}`).toContain('Build succeeded');
+      expect(r.stdout).not.toContain('Build FAILED');
+    }, 180_000);
+
+    it('without DOTNET_PROCESSOR_COUNT the same build fails or hangs in the sandbox (the bug)', async () => {
+      const r = await run(true, {
+        script: multiProject.replace('timeout 60', 'timeout 25'),
+        dropEnv: ['DOTNET_PROCESSOR_COUNT'],
+        timeoutMs: 150_000,
+      });
+      expect(`${r.stdout}${r.stderr}`).not.toContain('not a valid option'); // the setup ran, the build was tried
+      expect(r.stdout).not.toContain('Build succeeded');
+    }, 180_000);
 
     it('without write access to /tmp/.dotnet the build fails on the NuGet-Migrations mutex (the bug)', async () => {
       const r = await run(false);

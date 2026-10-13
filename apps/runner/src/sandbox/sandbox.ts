@@ -92,6 +92,14 @@ export function dotnetEnv(cliHome: string): Record<string, string> {
     MSBUILDDISABLENODEREUSE: '1',
     DOTNET_CLI_USE_MSBUILD_SERVER: '0',
     UseSharedCompilation: 'false',
+    // One MSBuild process, no worker nodes. `dotnet build`/`test` of more than one project starts one node per CPU, and
+    // each node binds a named pipe, which .NET implements as a Unix socket at the HARD-CODED path `/tmp/MSBuild<pid>`
+    // (not under TMPDIR). The sandbox's /tmp is read-only (bind fails: "SocketException: Unknown socket error", the
+    // build hangs) and, before that, the Linux seccomp filter refuses socket(AF_UNIX) ("Permission denied" in
+    // NamedPipeServerStream, the stack seen in card P4-7). MSBuild sizes its node count from Environment.ProcessorCount,
+    // which DOTNET_PROCESSOR_COUNT caps, so a plain `dotnet build`/`test` runs in-process. Verified in the real sandbox.
+    // Side effect: every .NET process of the agent (also the test host) sees one CPU.
+    DOTNET_PROCESSOR_COUNT: '1',
   };
 }
 

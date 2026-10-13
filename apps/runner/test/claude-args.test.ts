@@ -152,6 +152,26 @@ describe('claude settings.json: permissions per role (review M3)', () => {
     expect(s.permissions.deny).not.toContain('Edit');
   });
 
+  // card P4-7: a builder's `cd x && python3 - <<'E' ... E` + `VAR=1 cmd` call was denied "in don't ask mode". Not a
+  // policy gap: Claude Code 2.1.296 forces an ask for some `cd <other dir>` compounds whatever the rules say (verified
+  // with allow `Bash`, `Bash(*)`, a PreToolUse hook and without the sandbox), and dontAsk turns every ask into a
+  // denial. Shell roles must keep the bare `Bash` allow (a pattern list would deny far more); the shared
+  // instructions tell agents to retry with plain one-command calls (see packages/shared/src/prompt/instructions.ts).
+  it('every role with a shell gets the bare Bash allow and no Bash pattern allow list', () => {
+    for (const [key, p] of [
+      ['builder', builder.permissions],
+      ['reviewer', reviewer.permissions],
+      ['tester', tester.permissions],
+    ] as const) {
+      const allow = buildShiftSettings(p, policyCtx(), POLICY_PATHS, key).permissions.allow;
+      expect(allow, key).toContain('Bash');
+      expect(
+        allow.filter((a) => a.startsWith('Bash(')),
+        key,
+      ).toEqual([]);
+    }
+  });
+
   it('roles that may not commit keep the git rebase/checkout/switch deny (G-Q12)', () => {
     const s = settings(reviewer.permissions);
     for (const d of ['Bash(git rebase:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)'])
