@@ -385,6 +385,7 @@ export async function workstationDtos(
       candidates: w.org_folder_candidates ?? [],
       checkedAt: iso(w.org_folders_checked_at),
     },
+    toolchains: { items: w.toolchains ?? [], checkedAt: iso(w.toolchains_checked_at) },
     ownerEmail: w.owner_email,
   }));
 }

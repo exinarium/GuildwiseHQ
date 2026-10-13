@@ -7,6 +7,7 @@ import {
   OrgFolderStateSchema,
   RunnerUpdateStateSchema,
   RuntimeInfoSchema,
+  ToolchainInfoSchema,
 } from '../protocol/runner.ts';
 import { IsoTime } from './common.ts';
 
@@ -95,6 +96,8 @@ export const WorkstationDtoSchema = z.object({
       checkedAt: IsoTime.nullable(),
     })
     .optional(),
+  /** Agent toolchains the runner reports (detected, configured, registered by the DevOps engineer). Owner only. */
+  toolchains: z.object({ items: z.array(ToolchainInfoSchema), checkedAt: IsoTime.nullable() }).optional(),
   /** Shifts running now and how many this workstation takes at once (`limit` is null while it is offline). */
   shifts: z
     .object({ running: z.number().int().nonnegative(), limit: z.number().int().positive().nullable() })
@@ -119,6 +122,10 @@ export const SetOrgFolderRequestSchema = z.object({
   path: z.string().trim().min(1).max(1000).nullable(),
 });
 export type SetOrgFolderRequest = z.infer<typeof SetOrgFolderRequestSchema>;
+
+/** `POST /api/workstations/:id/toolchains/remove`: the owner removes a toolchain the DevOps engineer registered. */
+export const RemoveToolchainRequestSchema = z.object({ name: z.string().trim().min(1).max(80) });
+export type RemoveToolchainRequest = z.infer<typeof RemoveToolchainRequestSchema>;
 
 export const PatchWorkstationRequestSchema = z.object({ name: z.string().min(1).max(80) });
 

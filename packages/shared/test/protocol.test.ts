@@ -71,6 +71,19 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
     ...env('jira.report'),
     status: { state: 'connected', baseUrl: 'https://acme.atlassian.net', account: 'Pieter' },
   },
+  'toolchains.report': {
+    ...env('toolchains.report'),
+    toolchains: [
+      {
+        name: 'dotnet',
+        source: 'detected',
+        version: '8.0.425, 10.0.401 (~/.dotnet)',
+        binDirs: ['/home/me/.dotnet'],
+        readDirs: ['/home/me/.dotnet'],
+        envKeys: ['DOTNET_ROOT'],
+      },
+    ],
+  },
   'mcp.servers': {
     ...env('mcp.servers'),
     servers: [

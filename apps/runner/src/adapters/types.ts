@@ -31,6 +31,8 @@ export interface ShiftStartInput {
    * writable; secret files inside stay unreadable (claude-policy.ts).
    */
   readDirs?: string[];
+  /** Directories of the agent toolchains (bin and read dirs) sandboxed commands may read (registry.ts). */
+  toolchainReadDirs?: string[];
   /**
    * Plugin MCP servers the project's Owner granted (names). The adapter writes the ones the role may call into the
    * agent's MCP config, with the configuration from this workstation's plugins.
@@ -73,6 +75,8 @@ export interface ChatStartInput {
   resumeSessionId?: string;
   /** Read-only folders: the project's own clones and its reference repositories on this workstation. */
   readDirs?: string[];
+  /** Directories of the agent toolchains sandboxed commands may read. */
+  toolchainReadDirs?: string[];
   /** Tools are limited to reading (and the chat-scoped `aom` verbs). */
   readOnly: boolean;
   /** What the server told the agent about this conversation (card, project, M7: the intake). */

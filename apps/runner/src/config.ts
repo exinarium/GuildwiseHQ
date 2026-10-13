@@ -86,6 +86,11 @@ export const RunnerConfigSchema = z.object({
     .default({ 'claude-code': ClaudeRuntimeConfigSchema.parse({}) }),
   /** M8: credentials for posting approved updates to Jira (GitHub uses this machine's `gh` login). */
   jira: JiraConfigSchema.optional(),
+  /**
+   * The .NET install root agents use (`~` allowed). By default the runner picks the root with the most SDK versions
+   * among `$DOTNET_ROOT`, `~/.dotnet`, `/usr/share/dotnet`, ... and the root behind `dotnet` on PATH.
+   */
+  dotnetRoot: z.string().optional(),
   maxConcurrentShifts: z.number().int().positive().default(4),
   vaultSyncIntervalSec: z.number().int().positive().default(300),
 });

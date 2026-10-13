@@ -27,6 +27,19 @@ export function useSetOrgFolder() {
   });
 }
 
+/** Agent toolchains: the owner removes one the DevOps engineer registered (the runner reports the new list). */
+export function useRemoveToolchain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { workstationId: string; name: string }) =>
+      post(`/workstations/${v.workstationId}/toolchains/remove`, { name: v.name }),
+    onSuccess: () => {
+      for (const ms of [800, 2000, 5000])
+        setTimeout(() => qc.invalidateQueries({ queryKey: ['workstations'] }), ms);
+    },
+  });
+}
+
 export function useWorkstations(opts: { enabled?: boolean } = {}) {
   return useQuery({
     enabled: opts.enabled ?? true,

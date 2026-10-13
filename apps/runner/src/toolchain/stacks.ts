@@ -55,6 +55,29 @@ function dotnetSdkMajor(repo: RepoView, tfms: string[]): string | undefined {
   return majors.length ? String(Math.max(...majors)) : undefined;
 }
 
+/** Exact `global.json` SDK version and roll-forward policy (the first global.json), and the target framework majors. */
+function dotnetNeedParams(repo: RepoView, tfms: string[]): Params {
+  const out: Params = {};
+  for (const g of findFiles(repo, /(^|\/)global\.json$/i)) {
+    try {
+      const sdk = (JSON.parse(repo.read(g) ?? '{}') as { sdk?: { version?: string; rollForward?: string } })
+        .sdk;
+      if (sdk?.version && /^\d+\.\d+\.\d+/.test(sdk.version)) {
+        out.globalVersion = sdk.version;
+        if (sdk.rollForward) out.rollForward = sdk.rollForward;
+        break;
+      }
+    } catch {
+      // a broken global.json is the repository's problem
+    }
+  }
+  const majors = [...new Set(tfms.map(majorOfTfm).filter((n): n is number => n !== undefined))].sort(
+    (a, b) => a - b,
+  );
+  if (majors.length) out.tfmMajors = majors.join(',');
+  return out;
+}
+
 /** What `dotnet restore` is pointed at: the solution at the root, else the single root project, else the first project. */
 function dotnetRestoreTarget(repo: RepoView): string | undefined {
   const root = (re: RegExp) => repo.files.filter((f) => !f.includes('/') && re.test(f));
@@ -101,7 +124,11 @@ const dotnet: StackSpec = {
       id: 'dotnet',
       name: '.NET',
       evidence: projects[0] ?? global[0] ?? (slns[0] as string),
-      params: { ...(sdk ? { sdkMajor: sdk } : {}), ...(restore ? { restore } : {}) },
+      params: {
+        ...(sdk ? { sdkMajor: sdk } : {}),
+        ...(restore ? { restore } : {}),
+        ...dotnetNeedParams(repo, tfms),
+      },
     };
   },
   tools: () => ['dotnet-sdk'],
@@ -128,6 +155,7 @@ const dotnetMaui: StackSpec = {
       evidence: projects.find((p) => /UseMaui/i.test(repo.read(p) ?? '')) ?? (projects[0] as string),
       params: {
         ...(sdk ? { sdkMajor: sdk } : {}),
+        ...dotnetNeedParams(repo, tfms),
         ...(restore ? { restore } : {}),
         ...(api ? { androidApi: api } : {}),
         // Which platform workloads the target frameworks ask for; `tfms` lists nothing when they come from a property.
@@ -477,6 +505,18 @@ const workload = (id: string, extra?: Partial<ToolSpec>): ToolSpec => ({
 
 const DOTNET_INSTALL_SH = (channel: string) =>
   `curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh && bash /tmp/dotnet-install.sh --channel ${channel}`;
+
+/** dotnet-install into a given root (user level): one run per SDK channel, then runtime-only channels. */
+export const dotnetInstallInto = (root: string, sdkChannels: string[], runtimeChannels: string[]): string => {
+  const q = `'${root.replace(/'/g, `'\\''`)}'`;
+  const runs = [
+    ...sdkChannels.map((c) => `bash /tmp/dotnet-install.sh --install-dir ${q} --channel ${c}`),
+    ...runtimeChannels.map(
+      (c) => `bash /tmp/dotnet-install.sh --install-dir ${q} --runtime dotnet --channel ${c}`,
+    ),
+  ];
+  return ['curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh', ...runs].join(' && ');
+};
 
 // ---------------------------------------------------------------------------------------------- Android SDK
 

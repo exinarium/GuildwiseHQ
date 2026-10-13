@@ -84,6 +84,13 @@ import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../re
 import { preparePublication } from '../research/publish.ts';
 import { ensureSandbox, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
+import {
+  agentPath,
+  describeToolchains,
+  type ToolchainRegistry,
+  toolchainNote,
+  toolchainRpc,
+} from '../toolchain/registry.ts';
 import type { TranscriptDeps, TranscriptResult } from '../transcript/fetch.ts';
 import {
   defaultTranscriptDeps,
@@ -155,6 +162,8 @@ export interface SupervisorDeps {
   gitAuth?: GitAuth;
   /** The organization source folder of an organization (the architect reads every repository under it, read-only). */
   orgSourceFolder?: (orgId: string) => string | undefined;
+  /** Agent toolchains (PATH, read access, variables of sandboxed agents; `aom toolchain` of the DevOps engineer). */
+  toolchains?: ToolchainRegistry;
 }
 
 /** The server's answer to a `shift.report`: what the agent is told (and any ledger matches for a question). */
@@ -545,10 +554,13 @@ export class ShiftSupervisor {
       mkdirSync(attachDir, { recursive: true });
     }
     if (s.syncMain && msg.kind === 'card') texts.prompt += `\n${mainSyncNote(s.syncMain)}\n`;
+    const tc = this.deps.toolchains?.resolve();
+    if (tc && msg.kind !== 'devops')
+      texts.instructions += `\n${toolchainNote(describeToolchains(tc.entries))}\n`;
     await adapter.writeInstructions(sandbox, texts.instructions);
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
     s.env = {
-      ...sandboxEnv(sandbox),
+      ...sandboxEnv(sandbox, undefined, tc?.env),
       AOM_IPC_URL: this.deps.ipc.url,
       ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
       AOM_SHIFT_TOKEN: s.token,
@@ -557,7 +569,7 @@ export class ShiftSupervisor {
       ...(msg.agent.roleKey === 'tester' && typeof msg.brief.card.fields.targetUrl === 'string'
         ? { AOM_TARGET_URL: msg.brief.card.fields.targetUrl }
         : {}),
-      PATH: `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
+      PATH: tc ? agentPath(tc, paths.bin) : `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
     };
 
     try {
@@ -571,6 +583,7 @@ export class ShiftSupervisor {
         env: s.env,
         addDirs: vaultCtx && msg.kind === 'card' ? [vaultCtx.addDir] : [],
         readDirs: [...readFolders, ...vaultReadFolder].map((f) => f.path),
+        ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
         // plugin MCP servers: card shifts only (the DevOps engineer, questions and BA tasks keep their behaviour)
         ...(msg.kind === 'card' && msg.mcpServers?.length ? { mcpServers: msg.mcpServers } : {}),
         maxShiftMinutes: msg.maxShiftMinutes,
@@ -737,6 +750,13 @@ export class ShiftSupervisor {
         if (req.method === 'card.attachments') return this.cardAttachments(s, req.params);
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
         if (req.method === 'sudo.run') return this.sudoRun(s, req.params);
+        if (req.method.startsWith('toolchain.'))
+          return toolchainRpc(
+            this.deps.toolchains,
+            req.method,
+            req.params,
+            s.msg.kind === 'devops' && s.msg.agent.isDevops === true,
+          );
         if (
           req.method === 'git.push' ||
           req.method === 'git.fetch' ||

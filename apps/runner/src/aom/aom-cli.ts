@@ -902,6 +902,40 @@ const VERBS: Record<string, Verb> = {
     if (r.stderr) ctx.io.err(r.stderr.endsWith('\n') ? r.stderr : `${r.stderr}\n`);
     return r.exitCode === 0 ? 0 : 1;
   },
+  /** `aom toolchain list|add|remove`: tools sandboxed agents may use (the DevOps engineer registers what it installed). */
+  toolchain: async (ctx, p) => {
+    const sub = p.positionals[0] ?? 'list';
+    const usage =
+      'usage: aom toolchain list | add <name> --bin <dir> [--bin <dir>]... [--read <dir>]... [--env KEY=VALUE]... | remove <name>';
+    if (sub === 'list') {
+      const r = (await rpc(ctx, 'toolchain.list')) as { text?: string };
+      ctx.io.out(`${r.text ?? ''}\n`);
+      return 0;
+    }
+    const name = p.positionals[1];
+    if (!name || (sub !== 'add' && sub !== 'remove')) throw new UsageError(usage);
+    if (sub === 'remove') {
+      const r = (await rpc(ctx, 'toolchain.remove', { name })) as { message?: string };
+      ctx.io.out(`${r.message ?? 'Removed.'}\n`);
+      return 0;
+    }
+    const env: Record<string, string> = {};
+    for (const kv of many(p, 'env')) {
+      const i = kv.indexOf('=');
+      if (i < 1) throw new UsageError(`--env needs KEY=VALUE, got "${kv}"`);
+      env[kv.slice(0, i)] = kv.slice(i + 1);
+    }
+    const r = (await rpc(ctx, 'toolchain.add', {
+      name,
+      bin: many(p, 'bin'),
+      read: many(p, 'read'),
+      env,
+    })) as {
+      message?: string;
+    };
+    ctx.io.out(`${r.message ?? 'Registered.'}\n`);
+    return 0;
+  },
   transcript: async (ctx, p) => {
     const url = one(p, 'url');
     if (!url) throw new UsageError('usage: aom transcript --url <video or podcast URL>');
@@ -990,6 +1024,7 @@ export const USAGE = `usage: aom <verb> [options]
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed
   sudo -- <command> [args...]                 DevOps engineer: run a command as administrator (only when the manager granted sudo; the password stays on the runner)
+  toolchain list | add <name> --bin <dir>... [--read <dir>]... [--env KEY=VALUE]... | remove <name>   tools sandboxed agents may use; DevOps engineer: register what you installed so agents get it on PATH
   hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
 `;
 

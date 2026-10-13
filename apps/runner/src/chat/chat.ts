@@ -31,6 +31,7 @@ import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../read-repos.ts';
 import { ensureSandbox, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import { agentPath, type ToolchainRegistry, toolchainRpc } from '../toolchain/registry.ts';
 import { readVaultContext } from '../vaults/context.ts';
 
 type ChatStartMsg = ServerToRunnerOf<'chat.start'>;
@@ -57,6 +58,8 @@ export interface ChatDeps {
   http?: ServerHttp;
   /** `aom git status|connect` in the DevOps engineer's chat. */
   git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
+  /** Agent toolchains (`aom toolchain` in the DevOps engineer's chat; PATH and read access of every chat). */
+  toolchains?: ToolchainRegistry;
 }
 
 interface ActiveChat {
@@ -179,6 +182,8 @@ export class ChatManager {
           req.method === 'card.attach'
         )
           return this.attachments(chat, req.method, req.params);
+        if (req.method.startsWith('toolchain.'))
+          return toolchainRpc(this.deps.toolchains, req.method, req.params, chat.msg.agent.isDevops === true);
         if (req.method === 'git.status' || req.method === 'git.connect')
           return chat.msg.agent.isDevops && this.deps.git
             ? this.deps.git.handle(req.method, req.params)
@@ -362,13 +367,14 @@ export class ChatManager {
       }),
     );
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
+    const tc = this.deps.toolchains?.resolve();
     const env = {
-      ...sandboxEnv(sandbox),
+      ...sandboxEnv(sandbox, undefined, tc?.env),
       AOM_IPC_URL: this.deps.ipc.url,
       ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
       AOM_SHIFT_TOKEN: chat.token,
       AOM_SHIFT_ID: msg.chatId,
-      PATH: `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
+      PATH: tc ? agentPath(tc, paths.bin) : `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
     };
     chat.session = await adapter.startChat({
       chatId: msg.chatId,
@@ -379,6 +385,7 @@ export class ChatManager {
       env,
       readOnly,
       readDirs: folders.map((f) => f.path),
+      ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
       context: msg.context,
       ...(msg.context.intake ? { intake: true } : {}),
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),

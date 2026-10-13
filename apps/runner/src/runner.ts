@@ -60,8 +60,10 @@ import { RunnerKeys } from './secrets/keys.ts';
 import { SudoVault } from './secrets/sudo.ts';
 import { ShiftSupervisor } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
+import { selectDotnet } from './toolchain/dotnet.ts';
 import { ensureEnvironment } from './toolchain/ensure.ts';
 import { type Executor, realExecutor } from './toolchain/exec.ts';
+import { ToolchainRegistry } from './toolchain/registry.ts';
 import type { Platform } from './toolchain/types.ts';
 import { VaultManager } from './vaults/manager.ts';
 import { RUNNER_VERSION } from './version.ts';
@@ -144,6 +146,8 @@ export class Runner {
   /** The key pair for secrets the manager sends (the sudo password) and the store that holds the password. */
   readonly keys: RunnerKeys;
   readonly sudo: SudoVault;
+  /** Tools agents may use: detected, configured and registered by the DevOps engineer (`aom toolchain`). */
+  readonly toolchains: ToolchainRegistry;
   private readonly exec: Executor;
   private readonly log: Logger;
   private readonly adapters: Map<string, RuntimeAdapter>;
@@ -155,6 +159,7 @@ export class Runner {
   private lastRuntimes: string | undefined;
   /** The plugin MCP servers last reported, to send a new report only on change. */
   private lastMcp: string | undefined;
+  private lastToolchains: string | undefined;
   private maxConcurrent: number;
   private readonly rpcs = new Map<string, (r: IpcRpcResponse) => void>();
   private readonly sweepQueries = new Map<string, (live: string[]) => void>();
@@ -225,6 +230,11 @@ export class Runner {
       transport: { send: (type, payload) => void this.client.send(type, payload) },
       secondMs: opts.vaultSecondMs,
     });
+    this.toolchains = new ToolchainRegistry(this.paths.toolchains, this.paths.root, () => ({
+      toolchainPaths: opts.config.runtimes['claude-code'].toolchainPaths,
+      ...(opts.config.dotnetRoot ? { dotnetRoot: opts.config.dotnetRoot } : {}),
+    }));
+    this.toolchains.onChange = () => this.reportToolchains(false);
     this.supervisor = new ShiftSupervisor({
       paths: this.paths,
       config: opts.config,
@@ -246,6 +256,7 @@ export class Runner {
       envChecker: opts.envChecker,
       sudoRun: (cmd, args) => this.sudo.run(cmd, args),
       git: this.agentGit,
+      toolchains: this.toolchains,
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
     });
@@ -267,6 +278,7 @@ export class Runner {
       findRepo: (n) => this.findRepo(n),
       findLocal: (k) => this.findLocal(k),
       git: this.agentGit,
+      toolchains: this.toolchains,
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       repoRoots: () => this.opts.config.repoRoots,
     });
@@ -302,6 +314,7 @@ export class Runner {
       void this.reportGit(true);
       void this.reportOrgFolders();
       this.reportMcpServers(true);
+      this.reportToolchains(true);
       this.reportUpdate();
       opts.onConnected?.();
       this.maxConcurrent = Math.min(w.limits.maxConcurrentShifts, opts.config.maxConcurrentShifts);
@@ -497,6 +510,7 @@ export class Runner {
     await this.reportGit(false);
     await this.reportOrgFolders();
     this.reportMcpServers(false);
+    this.reportToolchains(false);
   }
 
   /**
@@ -513,6 +527,35 @@ export class Runner {
       this.client.send('mcp.servers', { servers: report });
     } catch (err) {
       this.log.warn(`plugin MCP server discovery failed: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Tells the server which toolchains the sandboxed agents have (detected, configured, registered by the DevOps engineer):
+   * names, folders and variable names, never a value. On `welcome`, when it changed and after `aom toolchain add|remove`.
+   */
+  private reportToolchains(force: boolean): void {
+    if (!(this.opts.mcpReport ?? !(this.opts.config.runtimes.mock?.enabled || process.env.VITEST))) return;
+    try {
+      const report = this.toolchains
+        .list()
+        .slice(0, 64)
+        .map((e) => ({
+          name: e.name.slice(0, 80),
+          source: e.source,
+          ...(e.version ? { version: e.version.slice(0, 200) } : {}),
+          binDirs: e.binDirs.slice(0, 8),
+          readDirs: e.readDirs.slice(0, 16),
+          envKeys: Object.keys(e.env).slice(0, 16),
+          ...(e.addedAt ? { addedAt: e.addedAt } : {}),
+          ...(e.addedBy ? { addedBy: e.addedBy } : {}),
+        }));
+      const key = JSON.stringify(report);
+      if (!force && key === this.lastToolchains) return;
+      this.lastToolchains = key;
+      this.client.send('toolchains.report', { toolchains: report });
+    } catch (err) {
+      this.log.warn(`toolchain report failed: ${String(err)}`);
     }
   }
 
@@ -638,6 +681,10 @@ export class Runner {
       root: this.sudo,
       findRepo: (n) => this.findRepo(n),
       logFile: join(this.paths.envLogs, `${p.projectId}.log`),
+      dotnet: () =>
+        selectDotnet({
+          ...(this.opts.config.dotnetRoot ? { override: this.opts.config.dotnetRoot } : {}),
+        }),
     });
   }
 
@@ -885,6 +932,11 @@ export class Runner {
         done(true, await this.listForgeRepos(CommandPayloadSchemas['forge.repos'].parse(payload)));
       } else if (command === 'org.folder') {
         done(true, await this.applyOrgFolder(CommandPayloadSchemas['org.folder'].parse(payload)));
+      } else if (command === 'toolchain.remove') {
+        const { name } = CommandPayloadSchemas['toolchain.remove'].parse(payload);
+        const removed = this.toolchains.remove(name);
+        this.reportToolchains(false);
+        done(true, { removed });
       } else if (command === 'sudo.clear') {
         this.sudo.clear();
         done(true, { cleared: true });

@@ -38,6 +38,7 @@ import {
   type ReportResult,
   releaseClaimEvents,
 } from '../commands/shifts.ts';
+import { applyToolchainsReport } from '../commands/toolchains.ts';
 import { transcriptStoreRpc } from '../commands/transcripts.ts';
 import { applyVaultConflict, markVaultStatus, queueVaultConfigure } from '../commands/vaults.ts';
 import {
@@ -173,6 +174,9 @@ export class RunnerHandlers {
         return;
       case 'mcp.servers':
         await applyMcpServersReport(this.ctx, conn.workstationId, msg);
+        return;
+      case 'toolchains.report':
+        await applyToolchainsReport(this.ctx, conn.workstationId, msg);
         return;
       case 'shift.accepted':
         await markShiftAccepted(this.ctx, ws, msg.shiftId);

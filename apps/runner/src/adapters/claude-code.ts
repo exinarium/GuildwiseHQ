@@ -223,7 +223,11 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   /** What this session may touch (see claude-policy.ts); without runner paths (unit tests) the data dir is unknown. */
   private policy(
-    input: Pick<ShiftStartInput, 'env' | 'sandbox'> & { addDirs?: string[]; readDirs?: string[] },
+    input: Pick<ShiftStartInput, 'env' | 'sandbox'> & {
+      addDirs?: string[];
+      readDirs?: string[];
+      toolchainReadDirs?: string[];
+    },
     cwd: string,
     /** A chat never writes: the repository metadata of its worktree is read-only there, not a writable dir. */
     chat = false,
@@ -243,7 +247,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       realHome: this.realHome(),
       mode: this.cfg.sandbox,
       extraAllowedDomains: this.cfg.extraAllowedDomains,
-      toolchainReadPaths: toolchainReadPaths(this.cfg.toolchainPaths ?? []),
+      toolchainReadPaths: toolchainReadPaths([
+        ...(this.cfg.toolchainPaths ?? []),
+        ...(input.toolchainReadDirs ?? []),
+      ]),
       sharedCacheDir: input.sandbox.cacheRoot ?? join(root, 'cache'),
       ...(nugetFallbackDir ? { nugetFallbackDir } : {}),
       ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR } : {}),

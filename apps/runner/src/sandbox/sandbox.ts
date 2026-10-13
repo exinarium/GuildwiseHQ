@@ -178,9 +178,15 @@ export async function ensureSandbox(
 }
 
 /** Environment that makes every child process (agent, git) use the agent's private home and identity. */
-export function sandboxEnv(sb: Sandbox, realHome: string = homedir()): Record<string, string> {
+export function sandboxEnv(
+  sb: Sandbox,
+  realHome: string = homedir(),
+  /** Variables of the agent toolchains (DOTNET_ROOT, JAVA_HOME, ...), already checked by the registry. */
+  toolchainEnv: Record<string, string> = {},
+): Record<string, string> {
   const nugetFallback = userNugetPackages(realHome);
   return {
+    ...toolchainEnv,
     ...(sb.cacheRoot ? cacheEnv(sb.cacheRoot) : {}),
     ...dotnetEnv(sb.home),
     // read-only: packages already restored for the user are found without a download

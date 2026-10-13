@@ -4,6 +4,7 @@ import {
   IdParamsSchema,
   PairingCodeResponseSchema,
   PatchWorkstationRequestSchema,
+  RemoveToolchainRequestSchema,
   RunnerPairRequestSchema,
   SetOrgFolderRequestSchema,
 } from '@aom/shared';
@@ -13,6 +14,7 @@ import { requireAdmin, requireUser } from '../auth/guards.ts';
 import { readRepoList, requestGitRecheck, requestRepoList } from '../commands/forges.ts';
 import { requestOrgFolder } from '../commands/org-folders.ts';
 import { requestGitSsh } from '../commands/repo-access.ts';
+import { requestToolchainRemove } from '../commands/toolchains.ts';
 import {
   createPairingCode,
   pairRunner,
@@ -83,6 +85,18 @@ export function workstationRoutes(ctx: Ctx) {
       },
     );
 
+    /** Agent toolchains: the owner removes one the DevOps engineer registered (the runner answers with a fresh report). */
+    app.post(
+      '/api/workstations/:id/toolchains/remove',
+      { schema: { params: IdParamsSchema, body: RemoveToolchainRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        await requestToolchainRemove(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return { ok: true };
+      },
+    );
+
     /** SSH on a git host: prepare a key, record the access default or check SSH on the workstation (answered by the next report). */
     app.post(
       '/api/workstations/:id/git/ssh',
@@ -129,7 +143,7 @@ export function workstationRoutes(ctx: Ctx) {
       await requireAdmin(ctx, req);
       // Folder paths are the owner's business: the admin list leaves them out.
       const list = await workstationDtos(ctx, `w.status = 'active'`, []);
-      return { workstations: list.map(({ orgFolders: _o, ...w }) => w) };
+      return { workstations: list.map(({ orgFolders: _o, toolchains: _t, ...w }) => w) };
     });
 
     app.post('/api/admin/workstations/:id/unlink', { schema: { params: IdParamsSchema } }, async (req) => {

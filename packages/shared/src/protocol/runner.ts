@@ -457,6 +457,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.access',
   'repo.open_pr',
   'org.folder',
+  'toolchain.remove',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -491,6 +492,7 @@ export const CommandPayloadSchemas = {
   'repo.access': RepoAccessPayloadSchema,
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'org.folder': OrgFolderCommandSchema,
+  'toolchain.remove': z.object({ name: z.string().min(1).max(80) }),
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([
@@ -584,6 +586,27 @@ export const OrgFoldersReportSchema = msg('org.folders', {
  */
 export const McpServersReportSchema = msg('mcp.servers', {
   servers: z.array(McpServerInfoSchema).max(MAX_MCP_SERVERS),
+});
+/**
+ * One agent toolchain of the workstation (docs/RUNNER.md "Agent toolchains"): a tool sandboxed agents may use. Detected
+ * ones and the ones the DevOps engineer registered are listed; only registered ones can be removed. Folder paths and
+ * the names of the variables it sets, never a value.
+ */
+export const ToolchainInfoSchema = z.object({
+  name: z.string().min(1).max(80),
+  source: z.enum(['detected', 'devops', 'config']),
+  version: z.string().max(200).optional(),
+  binDirs: z.array(z.string().max(1000)).max(8),
+  readDirs: z.array(z.string().max(1000)).max(16),
+  envKeys: z.array(z.string().max(80)).max(16),
+  addedAt: z.string().max(40).optional(),
+  addedBy: z.enum(['devops', 'owner']).optional(),
+});
+export type ToolchainInfo = z.infer<typeof ToolchainInfoSchema>;
+export const MAX_TOOLCHAINS = 64;
+/** Sent after `welcome`, after every re-scan that changed them and after `aom toolchain add|remove`. */
+export const ToolchainsReportSchema = msg('toolchains.report', {
+  toolchains: z.array(ToolchainInfoSchema).max(MAX_TOOLCHAINS),
 });
 /** How a runner's self-update stands (docs/RUNNER.md "Updates"). */
 export const RUNNER_UPDATE_STATES = [
@@ -815,6 +838,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   GitReportSchema,
   OrgFoldersReportSchema,
   McpServersReportSchema,
+  ToolchainsReportSchema,
   JiraReportSchema,
   RunnerUpdateReportSchema,
   ShiftAcceptedSchema,
