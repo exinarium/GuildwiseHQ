@@ -1,4 +1,10 @@
-import { type AgentDto, type HrAgent, NAME_THEMES, type ProjectDto } from '@aom/shared';
+import {
+  type AgentDto,
+  type HrAgent,
+  type McpServerCandidateDto,
+  NAME_THEMES,
+  type ProjectDto,
+} from '@aom/shared';
 import { Dices, Users } from 'lucide-react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
@@ -13,10 +19,12 @@ import {
 import { useMe } from '../api/queries/auth.ts';
 import { useResetAgent } from '../api/queries/devops.ts';
 import { useHrBoard } from '../api/queries/hr.ts';
+import { useMcpServers } from '../api/queries/mcp.ts';
 import { useRehomeAgent } from '../api/queries/members.ts';
 import { useDepartments } from '../api/queries/org.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
+import { AgentMcpSection } from '../components/agents/AgentMcpSection.tsx';
 import {
   type Access,
   AllowedProjectsDialog,
@@ -81,6 +89,7 @@ export function Agents() {
   const me = useMe();
   const projects = useProjects();
   const reset = useResetAgent();
+  const mcp = useMcpServers();
   const reroll = useRerollFace();
   const myId = me.data?.user.id;
   const { hash } = useLocation();
@@ -177,6 +186,8 @@ export function Agents() {
               station={stationName(h.agent.workstationId)}
               projects={projects.data ?? []}
               canManage={canManage(h.agent)}
+              mcpCandidates={mcp.data ?? []}
+              ownerView={orgRole(h.agent) === 'owner'}
               onProjects={() => setAllowing(h.agent)}
               onFire={() => setFiring(h.agent)}
               onRehome={() => setRehoming(h.agent)}
@@ -224,6 +235,8 @@ function AgentCard({
   station,
   projects,
   canManage,
+  mcpCandidates,
+  ownerView,
   onProjects,
   onFire,
   onRehome,
@@ -239,6 +252,9 @@ function AgentCard({
   station: string;
   projects: ProjectDto[];
   canManage: boolean;
+  mcpCandidates: McpServerCandidateDto[];
+  /** The viewer is the Owner of the agent's organization: the only one who changes its external tools. */
+  ownerView: boolean;
   onProjects: () => void;
   onFire: () => void;
   onRehome: () => void;
@@ -352,6 +368,16 @@ function AgentCard({
       </p>
       {!a.isDevops && <AgentStats stats={hr.stats} roleName={roleName.toLowerCase()} />}
       {isBuilder && <WorkQualityPanel quality={hr.quality} />}
+      {!a.isDevops && (
+        <AgentMcpSection
+          agent={a}
+          candidates={mcpCandidates}
+          canEdit={ownerView}
+          {...(a.allowedProjectIds?.[0]
+            ? { projectSettingsTo: `/projects/${a.allowedProjectIds[0]}/settings#mcp-servers` }
+            : {})}
+        />
+      )}
       {a.isDevops ? (
         <div className="mt-auto flex items-center gap-2">
           <Badge tone="violet">DevOps engineer</Badge>

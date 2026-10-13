@@ -1,7 +1,7 @@
 ---
 title: Agents
 summary: Hiring agents, seniority, runtime and model, allowed projects, focus, firing and the HR board.
-keywords: [hire, fire, allow-list, focus, seniority, agent, workstation, model, team]
+keywords: [external tools, mcp, jira, confluence, hire, fire, allow-list, focus, seniority, agent, workstation, model, team]
 order: 6
 ---
 
@@ -65,6 +65,10 @@ What happens:
 - The record stays intact for history.
 
 To hire the same role again, create a new agent with a different name. Retired names are never reused so history stays clear.
+
+## External tools (MCP) {#external-tools}
+
+Each agent card has an **External tools (MCP)** section listing the plugin MCP servers (Jira, Confluence, ...) your workstations report, as switches with a plain-language note. Switch one on to let that agent call its tools. Everyone who can see the agent reads the switches; only the organization **Owner** can change them (an Administrator can switch a server off but not on). The server must also be granted to the agent's project in the project settings ([MCP servers](/help/projects#mcp-servers)), otherwise it still cannot be used. A server whose tools can write, send or delete lets the agent change data in that service as you, so prefer read-only use. The DevOps engineer has no such section.
 
 ## HR board {#hr-board}
 

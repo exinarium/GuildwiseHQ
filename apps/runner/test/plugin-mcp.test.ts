@@ -250,6 +250,19 @@ describe('the agent config dir', () => {
     expect(a.writeMcpConfig(agent, ['mcp:plugin_atlassian_atlassian'], [])).toEqual([]);
   });
 
+  it('a built-in role (no mcp tool of its own) gets the server only with both the agent permission and the project grant', () => {
+    const a = adapter({}, real);
+    const ba = ['read', 'web']; // e.g. a BA as hired: nothing from mcp:
+    const server = 'plugin_atlassian_atlassian';
+    const keys = () => Object.keys(mcpJson().mcpServers);
+    a.writeMcpConfig(agent, ba, [server]);
+    expect(keys()).toEqual([]); // grant without the agent permission
+    a.writeMcpConfig(agent, [...ba, `mcp:${server}`], undefined);
+    expect(keys()).toEqual([]); // agent permission without the grant
+    a.writeMcpConfig(agent, [...ba, `mcp:${server}`], [server]);
+    expect(keys()).toEqual(['plugin:atlassian:atlassian']); // both
+  });
+
   it('writes the full local configuration (secrets included) readable by the runner user only', () => {
     const a = adapter({}, real);
     const used = a.writeMcpConfig(agent, ['read', 'mcp:plugin_files_local'], ['plugin_files_local']);

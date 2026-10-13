@@ -25,6 +25,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { cardMessage, orgScope, projectScope, userActor } from './common.ts';
+import { mcpServerCandidates } from './mcp-servers.ts';
 
 const NAMES: Record<string, string[]> = {
   default: [
@@ -406,6 +407,7 @@ export async function patchAgent(
           `only the organization Owner and Admins can widen permissions (${check.widened.join(', ')})`,
         );
     }
+    if (changes.permissions) await assertMcpAdditions(tx, user, a, role, changes.permissions);
     const unsandboxedAck =
       next.runtime && next.runtime !== a.runtime && a.workstation_id
         ? await sandboxGate(ctx, tx, user.id, a.workstation_id, next.runtime, acknowledgeUnsandboxed)
@@ -425,6 +427,36 @@ export async function patchAgent(
       { tx },
     );
   });
+}
+
+/**
+ * Plugin MCP servers on an agent (`mcp:<server>` in its allowed tools): only the organization Owner may add one, and the
+ * name must be a server the Owner's own workstations report. Entries the agent (or its role) already has are not
+ * additions; removing is allowed for everyone who may change the agent.
+ */
+async function assertMcpAdditions(
+  tx: Tx,
+  user: AuthSession['user'],
+  agent: Row,
+  role: { definition: { permissions: { allowedTools: string[] } } } | null,
+  proposed: { allowedTools: string[] },
+): Promise<void> {
+  const have = new Set<string>([
+    ...((agent.permissions?.allowedTools ?? []) as string[]),
+    ...(role?.definition.permissions.allowedTools ?? []),
+  ]);
+  const added = proposed.allowedTools.filter((t) => t.startsWith('mcp:') && !have.has(t));
+  if (added.length === 0) return;
+  if ((await orgRoleOf(tx, user.id, agent.org_id)) !== 'owner')
+    throw forbidden('only the organization Owner can give an agent external tools (MCP servers)');
+  const known = new Set((await mcpServerCandidates(tx, user.id, agent.org_id)).map((c) => c.name));
+  const bad = added.map((t) => t.slice(4)).filter((n) => !known.has(n));
+  if (bad.length > 0)
+    throw badRequest(
+      'invalid_mcp_server',
+      'an MCP server must be one of the plugin servers reported by one of your own workstations',
+      { servers: bad },
+    );
 }
 
 /** 400 unless every project exists in the organization (a deleted or foreign project cannot be allowed). */

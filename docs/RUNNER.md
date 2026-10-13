@@ -925,7 +925,7 @@ connectors are not covered yet; `discoverPluginMcpServers` is the one source to 
 
 **Three keys, all required.** (1) The server is installed and enabled on this workstation. (2) The organization's
 **Owner** granted it to the project (project settings, MCP servers; server-enforced: Admins and project owners are
-refused). (3) The agent's role has the permission `mcp:<name>` (role builder, "What it may do"). `mcp:*` does not exist
+refused). (3) The hired agent has the permission `mcp:<name>`: from a custom role (role builder, "What it may do") or, for any agent including built-in roles, switched on by the org Owner on the agent's card (Agents page, "External tools (MCP)"; `PATCH /api/agents/:id`, Owner only for additions). The runner gates on the hired agent's effective `allowedTools`. `mcp:*` does not exist
 (the role validator only accepts `mcp:` plus a name of letters, digits, `_`, `.` and `-`), so a role names each server.
 The DevOps engineer, question shifts and BA tasks never get plugin servers; the DevOps chat and shifts behave as before.
 

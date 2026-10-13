@@ -65,6 +65,8 @@ be given `mcp:<name>` permissions, but no server was ever provided.
 (names only), local `mcp.json` and credentials handling, project settings panel, role builder picker, card "External tools
 used". See `docs/RUNNER.md` "Plugin MCP servers".
 
+**Follow-up decided (owner, 2026-10-13): per hired agent, Owner-only.** Built-in roles cannot be edited and have no `mcp:` tool, so built-in agents could not use any server. The Agents page now has, on each agent card, an "External tools (MCP)" section: one switch per reported server (with the write/send warning and a note that the project must also grant it), visible to everyone who sees the agent, editable by the org **Owner** only. Server: `PATCH /api/agents/:id` with `permissions` refuses new `mcp:` entries unless the caller is the org Owner (Admins and the hiring manager get 403), and the name must be reported by one of the Owner's workstations (400 `invalid_mcp_server`); removing stays open to Owner and Admins; DevOps stays fixed (`devops_fixed`). Hiring takes no permissions (they come from the role), so there is nothing to check there. No runner change: it already gates on the hired agent's `allowedTools`.
+
 **Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
 the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
 
