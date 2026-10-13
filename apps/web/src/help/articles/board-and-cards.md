@@ -88,6 +88,8 @@ To move a card to a different stage (for example to fix a stuck card):
 
 The **More actions** menu (the three dots) also has **Release** (put the card back in the queue so another agent can claim it), **Re-home** (forget its workstation and worktree) and **Cancel card** (a reason is required). Only the project owner (Owner and Admins) or the card's creator sees these actions.
 
+**Reopen a finished card.** On a **Done** or **Cancelled** card click **Reopen**, pick the stage (Build by default) and give a reason. The branch and any open pull request are kept, so the next shift continues on them and finalizing again reuses the pull request. Cards that depend on it wait for it again.
+
 **Ask DevOps** on the card opens a request to the DevOps engineer with the card attached, for example when a tool is missing or the card's repository has a problem.
 
 ## Backing off {#backing-off}

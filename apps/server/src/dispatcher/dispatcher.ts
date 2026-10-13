@@ -39,6 +39,7 @@ const TRIGGER_TYPES = new Set([
   'OrgMemberAdded',
   'RebaseConflict',
   'CardMovedByManager',
+  'CardReopened',
   'CardFinalized',
   'DevOpsRequested',
   'DevOpsRequestRequeued',

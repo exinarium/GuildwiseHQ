@@ -157,6 +157,21 @@ export class BitbucketCloudForge implements Forge {
   }
 
   async openChange(repo: RemoteRepo, c: OpenChangeInput) {
+    // A reopened card's branch may already have an open pull request: report it instead of failing.
+    try {
+      const q = `state="OPEN" AND source.branch.name="${c.head.replace(/["\\]/g, '')}" AND destination.branch.name="${c.base.replace(/["\\]/g, '')}"`;
+      const open = await this.call<{
+        values?: Array<{ id: number; links?: { html?: { href?: string } } }>;
+      }>(`/repositories/${repo.fullName}/pullrequests?${new URLSearchParams({ q, pagelen: '1' })}`);
+      const hit = open.values?.[0];
+      if (hit)
+        return {
+          id: String(hit.id),
+          url: hit.links?.html?.href ?? `https://bitbucket.org/${repo.fullName}/pull-requests/${hit.id}`,
+        };
+    } catch (err) {
+      if (err instanceof ForgeUnavailableError) throw err;
+    }
     const pr = await this.call<{ id: number; links?: { html?: { href?: string } } }>(
       `/repositories/${repo.fullName}/pullrequests`,
       {

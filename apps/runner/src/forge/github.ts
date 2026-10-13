@@ -129,7 +129,36 @@ export class GitHubForge implements Forge {
     return v.exitCode === 0 && v.stdout.trim() ? v.stdout.trim() : null;
   }
 
+  /** The open pull request from `head` into `base`, if any (a reopened card's branch already has one). */
+  private async existingChange(repo: RemoteRepo, c: OpenChangeInput) {
+    const found = await this.gh([
+      'pr',
+      'list',
+      '--repo',
+      repo.fullName,
+      '--head',
+      c.head,
+      '--base',
+      c.base,
+      '--state',
+      'open',
+      '--json',
+      'number,url',
+      '--limit',
+      '1',
+    ]);
+    if (found.exitCode !== 0) return null;
+    try {
+      const hit = (JSON.parse(found.stdout) as Array<{ number: number; url: string }>)[0];
+      return hit?.url ? { id: String(hit.number), url: hit.url } : null;
+    } catch {
+      return null;
+    }
+  }
+
   async openChange(repo: RemoteRepo, c: OpenChangeInput) {
+    const existing = await this.existingChange(repo, c);
+    if (existing) return existing;
     const r = await this.gh([
       'pr',
       'create',

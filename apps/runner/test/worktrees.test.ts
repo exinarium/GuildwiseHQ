@@ -96,6 +96,31 @@ describe('worktrees', () => {
     expect(sh(path, 'git', ['branch', '--show-current'])).toBe('aom/toy-1-add-greeting');
   });
 
+  it('a reopened card continues from its pushed branch when the local branch is gone', async () => {
+    const repo = makeRepo();
+    const path = join(tmp(), 'wt');
+    await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec: spec(), defaultPath: path });
+    writeFileSync(join(path, 'kept.txt'), 'k');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'kept']);
+    sh(path, 'git', ['push', 'origin', 'aom/toy-1-add-greeting']);
+    const sha = sh(path, 'git', ['rev-parse', 'HEAD']);
+    await removeWorktree({ roots: ['/'], path, branchName: 'aom/toy-1-add-greeting', deleteBranch: true });
+    for (const mode of ['reuse', 'create'] as const) {
+      const r = await ensureWorktree({
+        repoPath: repo.clone,
+        roots: ['/'],
+        spec: spec({ mode }),
+        defaultPath: path,
+      });
+      expect(r.created).toBe(false);
+      expect(r.headSha).toBe(sha);
+      expect(existsSync(join(path, 'kept.txt'))).toBe(true);
+      sh(repo.clone, 'git', ['worktree', 'remove', '--force', path]);
+      sh(repo.clone, 'git', ['branch', '-D', 'aom/toy-1-add-greeting']);
+    }
+  });
+
   it('rejects with worktree_failed (WorktreeError) when reuse finds neither directory nor branch', async () => {
     const repo = makeRepo();
     await expect(

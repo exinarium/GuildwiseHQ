@@ -285,6 +285,22 @@ export const cardEvents = [
     'CardMovedByManager',
     z.object({ cardId: Id, fromStage: Stage, toStage: Stage, status: CardStatus, reason: z.string() }),
   ),
+  /**
+   * A done or cancelled card goes back to work by a manager. `fromStatus` is what it was (`done` / `cancelled`); the
+   * branch, worktree and any earlier finalize result stay on the card.
+   */
+  defineEvent(
+    'CardReopened',
+    z.object({
+      cardId: Id,
+      fromStage: Stage,
+      fromStatus: z.enum(['done', 'cancelled']),
+      toStage: Stage,
+      status: CardStatus,
+      reason: z.string(),
+      by: Id,
+    }),
+  ),
   defineEvent(
     'CardRetryDeferred',
     z.object({

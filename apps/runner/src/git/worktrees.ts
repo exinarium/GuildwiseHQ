@@ -132,6 +132,16 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
     return result(false);
   }
 
+  // The card branch is gone locally (worktree removed, clone pruned) but was pushed: a reopened card continues from it.
+  if (await hasRemote(repoPath)) {
+    await git(repoPath, ['fetch', '--', 'origin', branch]);
+    if (await revParse(repoPath, `refs/remotes/origin/${branch}`)) {
+      const r = await git(repoPath, ['worktree', 'add', '-b', branch, '--', path, `origin/${branch}`]);
+      if (r.exitCode !== 0) fail(`git worktree add ${branch} from origin failed: ${r.stderr.trim()}`);
+      return result(false);
+    }
+  }
+
   if (spec.mode === 'reuse') fail(`Worktree ${path} and branch ${branch} are both missing`);
 
   let startPoint = base;
@@ -218,7 +228,10 @@ async function createWorkingBranchLocked(
       );
     }
   }
-  return { ok: true, created: { base, from: def, pushed: remote, mainBranchSet: opts.mainBranch !== undefined } };
+  return {
+    ok: true,
+    created: { base, from: def, pushed: remote, mainBranchSet: opts.mainBranch !== undefined },
+  };
 }
 
 /** `worktree.remove` command: idempotent. Deletes the branch only when asked. */
@@ -239,7 +252,9 @@ export async function removeWorktree(input: {
   };
   const clone = await repoOf();
   // Serialized with the other changes to that clone (worktree add, branch create).
-  return clone ? withRepoLock(clone, () => removeWorktreeLocked(input, path)) : removeWorktreeLocked(input, path);
+  return clone
+    ? withRepoLock(clone, () => removeWorktreeLocked(input, path))
+    : removeWorktreeLocked(input, path);
 }
 
 async function removeWorktreeLocked(

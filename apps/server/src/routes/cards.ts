@@ -8,6 +8,7 @@ import {
   MoveCardRequestSchema,
   PatchCardRequestSchema,
   ReleaseCardRequestSchema,
+  ReopenCardRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
@@ -20,6 +21,7 @@ import {
   patchCard,
   releaseBackoff,
   releaseCard,
+  reopenCard,
   specifyCard,
 } from '../commands/cards.ts';
 import type { Ctx } from '../context.ts';
@@ -103,6 +105,16 @@ export function cardRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         const id = await moveCard(ctx, s.user, req.params.id, req.body.toStage, req.body.reason);
+        return getCardDetail(ctx, s.user.id, id);
+      },
+    );
+
+    app.post(
+      '/api/cards/:id/reopen',
+      { schema: { params: CardParamsSchema, body: ReopenCardRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        const id = await reopenCard(ctx, s.user, req.params.id, req.body.toStage, req.body.reason);
         return getCardDetail(ctx, s.user.id, id);
       },
     );

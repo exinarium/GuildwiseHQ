@@ -146,6 +146,15 @@ export class GitLabForge implements Forge {
   }
 
   async openChange(repo: RemoteRepo, c: OpenChangeInput) {
+    // A reopened card's branch may already have an open merge request: reuse it.
+    try {
+      const open = await this.authed<Array<{ iid: number; web_url: string }>>(
+        `/projects/${encodeURIComponent(repo.fullName)}/merge_requests?state=opened&source_branch=${encodeURIComponent(c.head)}&target_branch=${encodeURIComponent(c.base)}`,
+      );
+      if (Array.isArray(open) && open[0]) return { id: String(open[0].iid), url: open[0].web_url };
+    } catch (err) {
+      if (err instanceof ForgeUnavailableError) throw err;
+    }
     const mr = await this.authed<{ iid: number; web_url: string }>(
       `/projects/${encodeURIComponent(repo.fullName)}/merge_requests`,
       { body: { source_branch: c.head, target_branch: c.base, title: c.title, description: c.body } },

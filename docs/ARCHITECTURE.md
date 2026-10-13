@@ -708,6 +708,7 @@ Heartbeats are not events.
 | **`RebaseConflict`** | `{cardId, stage, baseBranch, conflictedFiles[]}` | stage build, rework_round+1, queued |
 | `StageCompleted` | `{cardId, fromStage, toStage, outcome}` | generic move for custom/research/feed workflows and docs stage |
 | `CardMovedByManager` | `{cardId, fromStage, toStage, status, reason}` | manual override (manager) |
+| `CardReopened` | `{cardId, fromStage, fromStatus, toStage, status, reason, by}` | a done or cancelled card goes back to an agent or manual stage (`POST /api/cards/:id/reopen`); branch, worktree and the finalize result stay |
 | `FinalizeRequested` | `{cardId, action, requestedBy, withoutApproval?}` (`withoutApproval`: a large merge that skipped the desk because the project setting allows it; adds a `merge_policy` row to the card timeline) | (M4) status `waiting`; runner command `finalize.execute` queued to the card's home workstation; its `command.result` produces `CardFinalized` (or a desk escalation on failure) |
 | **`CardFinalized`** | `{cardId, action, resultRef: {mergeCommit?, prUrl?, pushedBranch?}, toStage:'done'}` | stage done, status done, finalized_at; queues `worktree.remove` runner command; dependents become claimable |
 | `CardCancelled` | `{cardId, reason}` | status cancelled; claim released first |

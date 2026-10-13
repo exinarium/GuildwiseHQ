@@ -274,6 +274,26 @@ export class AzureDevOpsForge implements Forge {
 
   async openChange(repo: RemoteRepo, c: OpenChangeInput) {
     const b = this.base(repo);
+    // A reopened card's branch may already have an active pull request: reuse it.
+    try {
+      const qs = new URLSearchParams({
+        'searchCriteria.status': 'active',
+        'searchCriteria.sourceRefName': `refs/heads/${c.head}`,
+        'searchCriteria.targetRefName': `refs/heads/${c.base}`,
+        $top: '1',
+      });
+      const open = await this.call<{ value?: Array<{ pullRequestId: number }> }>(
+        `${b.repoPath}/pullrequests?${API}&${qs}`,
+      );
+      const hit = open.value?.[0];
+      if (hit)
+        return {
+          id: String(hit.pullRequestId),
+          url: `${b.root}/_git/${encodeURIComponent(b.name)}/pullrequest/${hit.pullRequestId}`,
+        };
+    } catch (err) {
+      if (err instanceof ForgeUnavailableError) throw err;
+    }
     const pr = await this.call<{ pullRequestId: number }>(`${b.repoPath}/pullrequests?${API}`, {
       body: {
         sourceRefName: `refs/heads/${c.head}`,
