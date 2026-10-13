@@ -10,6 +10,67 @@ const list = (v: unknown): string[] =>
 const section = (title: string, body: string): string | null =>
   body.trim() ? `## ${title}\n${body.trim()}` : null;
 
+type Handoff = ShiftBrief['handoffs'][number];
+
+/** Handoffs kept in full in the prompt; older ones collapse to one line each. */
+export const HANDOFFS_FULL = 4;
+/** Character budget for the whole "Previous handoffs" section. */
+export const HANDOFFS_BUDGET = 12_000;
+const ONE_LINER_NOTE = 160;
+const TRUNCATED = '[… truncated, full note on the card page]';
+
+const handoffHead = (h: Handoff): string => `${h.stage} / ${h.agentName} / ${h.outcome} (${h.at})`;
+
+function handoffOneLine(h: Handoff): string {
+  const first = (h.note.trim().split('\n')[0] ?? '').trim();
+  const cut = first.length > ONE_LINER_NOTE ? `${first.slice(0, ONE_LINER_NOTE - 1)}…` : first;
+  return `- ${handoffHead(h)}: ${cut}`;
+}
+
+/**
+ * Previous handoffs for a shift prompt: the latest few in full, older ones as one line each, the whole section within a
+ * character budget (oldest full notes shortened first; the latest is only truncated, never dropped).
+ */
+export function renderHandoffs(
+  handoffs: Handoff[],
+  opts: { full?: number; budget?: number } = {},
+): string {
+  if (handoffs.length === 0) return '';
+  const full = Math.max(1, opts.full ?? HANDOFFS_FULL);
+  const budget = opts.budget ?? HANDOFFS_BUDGET;
+  const fullFrom = { v: Math.max(0, handoffs.length - full) };
+  const fullBlock = (h: Handoff, max?: number): string => {
+    const note = h.note.trim();
+    const body = max !== undefined && note.length > max ? `${note.slice(0, Math.max(0, max))}\n${TRUNCATED}` : note;
+    return `### ${handoffHead(h)}\n${body}`;
+  };
+  const build = (latestMax?: number): string => {
+    const lines: string[] = [];
+    const shortened = fullFrom.v;
+    if (shortened > 0)
+      lines.push(
+        `${shortened} earlier handoff${shortened === 1 ? '' : 's'} shortened to one line each; the full history is on the card page.`,
+        ...handoffs.slice(0, fullFrom.v).map(handoffOneLine),
+      );
+    const fulls = handoffs.slice(fullFrom.v);
+    const blocks = fulls.map((h, i) => fullBlock(h, i === fulls.length - 1 ? latestMax : undefined));
+    return [...(lines.length ? [lines[0] ?? '', lines.slice(1).join('\n')] : []), ...blocks]
+      .filter((x) => x)
+      .join('\n\n');
+  };
+  let out = build();
+  while (out.length > budget && fullFrom.v < handoffs.length - 1) {
+    fullFrom.v += 1;
+    out = build();
+  }
+  if (out.length > budget) {
+    const over = out.length - budget;
+    const latest = handoffs[handoffs.length - 1] as Handoff;
+    out = build(Math.max(500, latest.note.trim().length - over - TRUNCATED.length - 1));
+  }
+  return out;
+}
+
 /** Feed cards (M5): topic, description, window, preferred sites, maximum number of items, seen-list, candidates and taste rules. */
 function feedContext(brief: ShiftBrief): string {
   const f = brief.card.fields;
@@ -153,14 +214,7 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
     section('Dependencies', card.dependencies.map((d) => `- ${d.ref} ${d.title} (${d.status})`).join('\n')),
   );
   if (brief.investigation) parts.push(section('Investigation', investigationContext(brief)));
-  parts.push(
-    section(
-      'Previous handoffs',
-      brief.handoffs
-        .map((h) => `### ${h.stage} / ${h.agentName} / ${h.outcome} (${h.at})\n${h.note.trim()}`)
-        .join('\n\n'),
-    ),
-  );
+  parts.push(section('Previous handoffs', renderHandoffs(brief.handoffs)));
   if (card.reworkRound > 0) {
     parts.push(
       section(

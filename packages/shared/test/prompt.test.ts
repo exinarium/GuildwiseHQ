@@ -307,3 +307,40 @@ describe('project path in the brief', () => {
     expect(text).toContain('build and test there');
   });
 });
+
+describe('renderHandoffs', () => {
+  const mk = (n: number, note = `note ${n}\nsecond line ${n}`) => ({
+    stage: 'build',
+    agentName: 'Ada',
+    outcome: 'handoff',
+    note,
+    at: `2026-10-03T12:${String(n).padStart(2, '0')}:00.000Z`,
+  });
+  it('keeps everything in full when there are few', async () => {
+    const { renderHandoffs } = await import('../src/prompt/shift-prompt.ts');
+    const out = renderHandoffs([mk(1), mk(2)]);
+    expect(out).toContain('second line 1');
+    expect(out).not.toContain('shortened');
+  });
+  it('collapses older handoffs to one line and keeps the latest four in full', async () => {
+    const { renderHandoffs } = await import('../src/prompt/shift-prompt.ts');
+    const out = renderHandoffs([1, 2, 3, 4, 5, 6].map((n) => mk(n)));
+    expect(out).toContain('2 earlier handoffs shortened');
+    expect(out).toContain('- build / Ada / handoff (2026-10-03T12:01:00.000Z): note 1');
+    expect(out).not.toContain('second line 1');
+    expect(out).not.toContain('second line 2');
+    expect(out).toContain('second line 3');
+    expect(out).toContain('second line 6');
+  });
+  it('trims oldest full notes first to fit the budget and truncates a huge latest note', async () => {
+    const { renderHandoffs } = await import('../src/prompt/shift-prompt.ts');
+    const big = 'x'.repeat(5000);
+    const out = renderHandoffs([1, 2, 3].map((n) => mk(n, `head ${n}\n${big}`)), { budget: 6000 });
+    expect(out.length).toBeLessThanOrEqual(6200);
+    expect(out).toContain('2 earlier handoffs shortened');
+    expect(out).toContain('### build / Ada / handoff (2026-10-03T12:03:00.000Z)');
+    const huge = renderHandoffs([mk(1, 'y'.repeat(30_000))]);
+    expect(huge.length).toBeLessThan(13_000);
+    expect(huge).toContain('[… truncated, full note on the card page]');
+  });
+});
