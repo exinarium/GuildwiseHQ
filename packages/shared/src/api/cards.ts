@@ -67,7 +67,11 @@ export const CardDtoSchema = z.object({
     })
     .nullable()
     .optional(),
+  /** The card's own override; null means it follows the project's default. */
   completionAction: CompletionAction.nullable(),
+  /** How finished work lands now: the card's override, else the project's default. */
+  effectiveCompletionAction: CompletionAction.nullable(),
+  completionActionSource: z.enum(['project', 'card']),
   repoId: z.uuid().nullable(),
   baseBranch: z.string().nullable(),
   branchName: z.string().nullable(),

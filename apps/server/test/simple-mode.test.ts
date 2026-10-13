@@ -69,9 +69,15 @@ describe('how finished work lands (project default)', () => {
       201,
     );
 
-  it('defaults to merge; a card without a completion action takes the project default, an explicit one wins', async () => {
+  it('defaults to merge; a card without a completion action follows the project default, an explicit one wins', async () => {
     expect((await project()).project.defaultCompletion).toBe('merge');
-    expect((await create({})).card.completionAction).toBe('merge');
+    // Nothing is copied onto the card: it follows the project, whatever the project says later.
+    const inheriting = (await create({})).card;
+    expect(inheriting).toMatchObject({
+      completionAction: null,
+      effectiveCompletionAction: 'merge',
+      completionActionSource: 'project',
+    });
 
     await ok(
       w.t.req('PATCH', `/api/projects/${w.projectId}`, {
@@ -80,8 +86,17 @@ describe('how finished work lands (project default)', () => {
       }),
     );
     expect((await project()).project.defaultCompletion).toBe('pr');
-    expect((await create({})).card.completionAction).toBe('pr');
-    expect((await create({ completionAction: 'push_branch' })).card.completionAction).toBe('push_branch');
+    expect((await create({})).card).toMatchObject({
+      completionAction: null,
+      effectiveCompletionAction: 'pr',
+    });
+    const shown = await ok<any>(w.t.req('GET', `/api/cards/${inheriting.id}`, { cookie: w.owner.cookie }));
+    expect(shown.card).toMatchObject({ completionAction: null, effectiveCompletionAction: 'pr' });
+    expect((await create({ completionAction: 'push_branch' })).card).toMatchObject({
+      completionAction: 'push_branch',
+      effectiveCompletionAction: 'push_branch',
+      completionActionSource: 'card',
+    });
 
     await ok(
       w.t.req('PATCH', `/api/projects/${w.projectId}`, {

@@ -106,6 +106,8 @@ export function mkCard(p: Partial<CardDto> & Pick<CardDto, 'projectId' | 'title'
     riskTierOverridden: false,
     docsNeeded: false,
     completionAction: null,
+    effectiveCompletionAction: 'merge',
+    completionActionSource: 'project',
     repoId: null,
     baseBranch: null,
     branchName: null,
@@ -127,6 +129,10 @@ export function mkCard(p: Partial<CardDto> & Pick<CardDto, 'projectId' | 'title'
     ...p,
   };
   card.column = columnOf(card);
+  if (card.completionAction) {
+    card.effectiveCompletionAction = card.completionAction;
+    card.completionActionSource = 'card';
+  }
   db.cards.push(card);
   db.transitions.set(id, [
     {

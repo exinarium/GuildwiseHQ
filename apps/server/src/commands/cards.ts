@@ -244,12 +244,9 @@ export async function createCardIn(
     );
     if (repos.length === 1) repoId = repos[0]?.id;
   }
-  // No completion action named: the project's default decides how finished work lands (simple mode never asks).
-  const completionAction: CompletionAction | undefined =
-    req.completionAction ??
-    (workflowUsesRepos(def) && project.default_completion
-      ? (project.default_completion as CompletionAction)
-      : undefined);
+  // No completion action named: the card inherits the project's default (resolved when it is used), so only a
+  // deliberate override is stored on the card.
+  const completionAction: CompletionAction | undefined = req.completionAction;
   const dependencies = req.dependencies ?? [];
   await assertDependencies(tx, project.id, dependencies);
 

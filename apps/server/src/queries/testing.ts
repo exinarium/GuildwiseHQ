@@ -1,4 +1,5 @@
 import type { CardTesting, RelatedCard } from '@aom/shared';
+import { effectiveCompletionAction } from '../commands/completion.ts';
 import { mergeGate } from '../commands/finalize.ts';
 import type { Ctx } from '../context.ts';
 import { iso, type Row, rows } from '../db/sql.ts';
@@ -28,7 +29,7 @@ export async function cardTesting(ctx: Ctx, card: Row, canManage: boolean): Prom
   const open = children.find((c) => c.origin === 'test_failure' && !['done', 'cancelled'].includes(c.status));
   // `none` (an investigation finalized without a git step) is no completion action the Finalize panel can offer.
   const action = ((card.finalize_action === 'none' ? null : card.finalize_action) ??
-    card.completion_action ??
+    (await effectiveCompletionAction(ctx.pool, card)) ??
     null) as CardTesting['finalize']['action'];
   const open_ = card.stage === 'finalize' && card.status === 'queued' && !card.claim_id;
   return {

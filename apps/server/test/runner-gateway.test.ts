@@ -233,6 +233,30 @@ describe('shift flow with a fake runner', () => {
     r.close();
   });
 
+  it('the brief carries the effective completion action: the card override, else the project default now', async () => {
+    const setDefault = (defaultCompletion: 'merge' | 'pr') =>
+      ok(
+        w.t.req('PATCH', `/api/projects/${w.projectId}`, {
+          cookie: w.owner.cookie,
+          body: { defaultCompletion },
+        }),
+      );
+    try {
+      await freshState();
+      const r = await w.connectRunner();
+      await w.hire('Bea', 'builder', 'junior');
+      const card = await w.card({ title: 'Inherits', completionAction: undefined });
+      expect((await cardRow(card.id)).completion_action).toBeNull();
+      await setDefault('pr');
+      const received = r.received.length;
+      const start = await dispatchTo(r, 'Bea', received);
+      expect(start.brief.card).toMatchObject({ ref: card.ref, completionAction: 'pr' });
+      r.close();
+    } finally {
+      await setDefault('merge');
+    }
+  });
+
   it('rejects bad reports with an error the CLI can print, and accepts exactly one terminal report', async () => {
     await freshState();
     const r = await w.connectRunner();

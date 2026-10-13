@@ -26,6 +26,7 @@ export function CardFormFields({
   mockUi,
   template = false,
   designDefault = false,
+  projectDefault,
 }: {
   workflow: Workflow;
   values: CardFormValues;
@@ -37,6 +38,8 @@ export function CardFormFields({
   template?: boolean;
   /** The project's "Investigate & design before build" setting: what an unticked-by-default card follows. */
   designDefault?: boolean;
+  /** How the project lands finished work: what a card with no completion action of its own follows. */
+  projectDefault?: CompletionAction | undefined;
 }) {
   const expert = useExpertMode();
   const v = values;
@@ -81,7 +84,11 @@ export function CardFormFields({
                     : 'How this card lands. Project default: the setting in the project settings.'
                 }
               >
-                <option value="">Project default</option>
+                <option value="">
+                  {projectDefault
+                    ? `Project default (${COMPLETION_ACTION_LABELS[projectDefault].label})`
+                    : 'Project default'}
+                </option>
                 {CompletionAction.options.map((a) => (
                   <option key={a} value={a}>
                     {COMPLETION_ACTION_LABELS[a].label}

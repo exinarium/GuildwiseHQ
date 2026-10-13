@@ -1,5 +1,6 @@
 import { migrateBlogCiteCleanup } from './blog-cite-cleanup.ts';
 import { migrateBlogLaunch } from './blog-launch.ts';
+import { migrateCardCompletionInherit } from './card-completion-inherit.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
 import { migrateRestructure } from './restructure.ts';
@@ -10,6 +11,11 @@ export {
   migrateBlogCiteCleanup,
 } from './blog-cite-cleanup.ts';
 export { BLOG_LAUNCH_MIGRATION, loadLaunchArticles, migrateBlogLaunch } from './blog-launch.ts';
+export {
+  CARD_COMPLETION_INHERIT_MIGRATION,
+  type CardCompletionInheritReport,
+  migrateCardCompletionInherit,
+} from './card-completion-inherit.ts';
 export {
   formatNoPersonalPlan,
   migrateNoPersonal,
@@ -34,6 +40,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'no-personal-2026-10', run: (env) => migrateNoPersonal(env) },
   { name: 'blog-launch-2026-10', run: (env) => migrateBlogLaunch(env) },
   { name: 'blog-cite-cleanup-2026-10', run: (env) => migrateBlogCiteCleanup(env) },
+  { name: 'card-completion-inherit-2026-10', run: (env) => migrateCardCompletionInherit(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

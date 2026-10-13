@@ -5,11 +5,11 @@ import type { CardDto } from '@aom/shared';
  * jargon (docs/design/git-free-and-devops-instructions.md, 1.3). Expert mode shows the raw completion action instead.
  */
 export function landingText(
-  card: Pick<CardDto, 'status' | 'completionAction' | 'baseBranch' | 'finalizedAt'>,
+  card: Pick<CardDto, 'status' | 'effectiveCompletionAction' | 'baseBranch' | 'finalizedAt'>,
 ): string {
   const main = card.baseBranch ?? 'main';
   const done = card.status === 'done' || card.finalizedAt != null;
-  switch (card.completionAction) {
+  switch (card.effectiveCompletionAction) {
     case 'pr':
       return done
         ? 'Waiting for you to merge the pull request'

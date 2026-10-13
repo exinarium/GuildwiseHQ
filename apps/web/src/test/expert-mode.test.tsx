@@ -59,14 +59,18 @@ describe('useExpertMode', () => {
 describe('plain outcomes', () => {
   it('says what happens to a change without naming branches', () => {
     const base = { status: 'waiting' as const, baseBranch: 'main', finalizedAt: null };
-    expect(landingText({ ...base, completionAction: 'merge' })).toBe('Goes into main after review and test');
-    expect(landingText({ ...base, status: 'done', completionAction: 'merge' })).toBe(
+    expect(landingText({ ...base, effectiveCompletionAction: 'merge' })).toBe(
+      'Goes into main after review and test',
+    );
+    expect(landingText({ ...base, status: 'done', effectiveCompletionAction: 'merge' })).toBe(
       'Your change is live on main',
     );
-    expect(landingText({ ...base, status: 'done', completionAction: 'pr' })).toBe(
+    expect(landingText({ ...base, status: 'done', effectiveCompletionAction: 'pr' })).toBe(
       'Waiting for you to merge the pull request',
     );
-    expect(landingText({ ...base, completionAction: null })).toBe('Goes into main after review and test');
+    expect(landingText({ ...base, effectiveCompletionAction: null })).toBe(
+      'Goes into main after review and test',
+    );
     expect(plainOutcomeLabel('finalized', 'https://x/pr/1', false)).toBe(
       'waiting for you to merge the pull request',
     );

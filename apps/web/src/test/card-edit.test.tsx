@@ -38,6 +38,8 @@ const baseCard: CardDetailResponse['card'] = {
   riskTierOverridden: false,
   docsNeeded: false,
   completionAction: 'merge',
+  effectiveCompletionAction: 'merge',
+  completionActionSource: 'card',
   repoId: ID(3),
   baseBranch: null,
   branchName: null,

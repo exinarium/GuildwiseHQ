@@ -58,6 +58,7 @@ export function EditCardDialog({
           repos={repos}
           mockUi={mockUi}
           designDefault={designDefault}
+          projectDefault={project.data?.project.defaultCompletion}
         />
         {Object.keys(errors).length > 0 && (
           <p role="alert" className="text-sm font-medium text-danger">

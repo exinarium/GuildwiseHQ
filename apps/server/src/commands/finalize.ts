@@ -17,6 +17,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { loadManageable } from './cards.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { effectiveCompletionAction } from './completion.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
 import { rebaseConflictEvents } from './rebase.ts';
 import { spawnCardEvent } from './spawn.ts';
@@ -143,11 +144,13 @@ export async function requestFinalize(
     const card = await loadManageable(tx, user, idOrRef);
     if (card.stage !== 'finalize' || card.status !== 'queued' || card.claim_id)
       throw conflict('not_finalizable', 'only a card waiting in Finalize can be finalized');
-    const action: CompletionAction | null = req.action ?? card.completion_action;
+    const inherited = await effectiveCompletionAction(tx, card);
+    const action: CompletionAction | null = req.action ?? inherited;
     if (!action) throw conflict('no_completion_action', 'the card has no completion action');
     const scope = projectScope(card.org_id, card.project_id);
     const events: AppendInput[] = [];
-    if (action !== card.completion_action)
+    // Choosing what the card would get anyway stores nothing: only a different landing is a card-level override.
+    if (action !== inherited)
       events.push({
         streamId: streamId.card(card.id),
         event: { type: 'CardUpdated', payload: { cardId: card.id, changes: { completionAction: action } } },
@@ -207,7 +210,7 @@ export async function resolveLargeMergeIn(
 ): Promise<string | null> {
   const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [item.card_id]);
   if (!card || card.status !== 'waiting' || card.finalize_state !== 'awaiting_approval') return null;
-  const action = (card.finalize_action ?? card.completion_action) as CompletionAction;
+  const action = (card.finalize_action ?? (await effectiveCompletionAction(tx, card))) as CompletionAction;
   const scope = projectScope(card.org_id, card.project_id);
   if (resolution === 'approved') {
     const ws = await queueExecute(tx, card, action);
@@ -264,7 +267,8 @@ export async function applyFinalizeResult(
   await withAppendTx(ctx.pool, async (tx) => {
     const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [cardId]);
     if (!card || card.status !== 'waiting' || card.finalize_state !== 'running') return;
-    const requested = (card.finalize_action ?? card.completion_action) as CompletionAction;
+    const requested = (card.finalize_action ??
+      (await effectiveCompletionAction(tx, card))) as CompletionAction;
     // A protected branch turns a merge into a pull request: record what actually happened.
     const action: CompletionAction = ok && result?.ok && result.protectedBranch ? result.action : requested;
     const scope = projectScope(card.org_id, card.project_id);

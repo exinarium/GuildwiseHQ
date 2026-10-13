@@ -42,7 +42,7 @@ describe('requiredMissing', () => {
   };
   it('lists every missing key for an empty card, in stage order', () => {
     expect(requiredMissing({ title: '', cardType: null, fields: {} }, build)).toEqual([
-      ...build.requiredFields,
+      ...build.requiredFields.filter((k) => k !== 'completionAction'),
     ]);
   });
   it('returns nothing for a complete card', () => {
@@ -54,10 +54,11 @@ describe('requiredMissing', () => {
     ]);
   });
   it('reads columns from the card and the rest from fields', () => {
-    expect(requiredMissing({ ...full, repoId: null, completionAction: undefined }, build)).toEqual([
-      'completionAction',
-      'repoId',
-    ]);
+    expect(requiredMissing({ ...full, repoId: null }, build)).toEqual(['repoId']);
+  });
+  it('never asks for a completion action: a card without one follows the project default', () => {
+    expect(requiredMissing({ ...full, completionAction: undefined }, build)).toEqual([]);
+    expect(requiredMissing({ ...full, repoId: null, completionAction: null }, build)).toEqual(['repoId']);
   });
   it('spec stage needs only title and cardType', () => {
     const spec = codeWorkflowV1.stages[0]!;
