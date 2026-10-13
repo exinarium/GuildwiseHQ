@@ -102,7 +102,7 @@ import {
   transcriptPath,
 } from '../transcript/service.ts';
 import { readVaultContext, withVaultContext } from '../vaults/context.ts';
-import { autoCommit } from './autocommit.ts';
+import { autoCommit, uncommittedFiles, unreportedWorkNote } from './autocommit.ts';
 import {
   type BranchSnapshot,
   discardOutOfScope,
@@ -683,13 +683,32 @@ export class ShiftSupervisor {
         if (dropped.length > 0)
           this.log.warn(`discarded out-of-scope changes of shift ${msg.shiftId}: ${dropped.join(', ')}`);
       }
-      await autoCommit({
+      // A shift that ends without a report but with work in the worktree says so on the card (a denied tool used to
+      // end shifts silently, with the work only in the worktree).
+      const unreported = s.reportState === 'none' && (!s.stopReason || s.stopReason === 'timeout');
+      const leftovers = unreported ? await uncommittedFiles(s.worktree.path) : [];
+      const committed = await autoCommit({
         worktree: s.worktree.path,
         ref: msg.brief.card.ref,
         stage: msg.brief.shift.stage,
         shiftId: msg.shiftId,
         env: s.env,
       });
+      if (leftovers.length > 0) {
+        const sha = committed
+          ? (await git(s.worktree.path, ['rev-parse', '--short', 'HEAD'])).stdout.trim()
+          : '';
+        const how = s.stopReason === 'timeout' ? 'timeout' : exit.code !== 0 ? 'crashed' : 'no_report';
+        await this.submit(s, {
+          kind: 'comment',
+          note: unreportedWorkNote(leftovers, {
+            outcome: how,
+            committed,
+            ...(sha ? { sha } : {}),
+            branch: s.worktree.branchName,
+          }),
+        });
+      }
     }
 
     // A role that may not commit (reviewer, scout, ...) leaves nothing behind, whatever it did to the worktree.

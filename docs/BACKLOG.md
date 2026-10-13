@@ -70,6 +70,44 @@ used". See `docs/RUNNER.md` "Plugin MCP servers".
 **Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
 the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
 
+### 31. Builders stuck: MSBuild nodes and don't-ask Bash denials
+
+**Done (2026-10-13).** Production evidence (card P4-7, builder shifts on runner 0.1.7 and 0.1.8): every builder shift
+ended `no_report`, 8 times in a row.
+
+1. **`dotnet build`/`test` crashed in the sandbox.** Stack: `NamedPipeServerStream.SharedServer..ctor` /
+   `SocketException (13): Permission denied` in `MSBuildApp.StartLocalNode`. A build of more than one project starts one
+   MSBuild worker node per CPU; .NET implements their named pipes as Unix sockets at the **hard-coded** path
+   `/tmp/MSBuild<pid>` (not under `TMPDIR`). The Linux sandbox refuses `socket(AF_UNIX)` (seccomp) and its `/tmp` is
+   read-only. Reproduced in the real sandbox (Claude Code with the generated builder policy): `-m:1` built, a plain build
+   failed. Opening Unix sockets (`allowAllUnixSockets`) only moves the failure to `bind()` on the read-only `/tmp`
+   (the build then hangs), and `/tmp` cannot be made writable without exposing other sessions' files. Fix:
+   `DOTNET_PROCESSOR_COUNT=1` in the agent env (`dotnetEnv`, `sandbox/sandbox.ts`): MSBuild sizes its node count from the
+   processor count, so a plain `dotnet build`/`test` runs in one process (verified: 4-project solution and two xunit
+   projects built and tested through `claude -p` in the sandbox). `MSBUILDCORELIMIT` does not help. Side effect: .NET
+   processes of the agent (also the test host) see one CPU. An explicit `-m:N` (N above 1) still fails; the shared
+   instructions say so.
+2. **Bash "denied in don't ask mode".** After a successful run the builder's call
+   `cd <subfolder> && python3 - <<'E' ... E` followed on a new line by `VAR=1 VAR2=0 dotnet test ... 2>&1 | grep ... | tail`
+   was denied, and the agent stopped to ask the user. Not a policy gap: builders have the bare `Bash` allow and the deny
+   list only holds `git push`, `git reset --hard`, `sudo`, `rm -rf /*`. Claude Code 2.1.296's own command analysis forces
+   an "ask" for some `cd <other directory>` compounds (reproduced: `cd sub && echo a; FOO=1 ls` is denied, the same
+   without `cd`, with `&&`, or with `cd` into the cwd itself is allowed), and `dontAsk` turns every ask into a denial. No
+   setting overrides it: `Bash(*)`, a `PreToolUse` allow hook, a `PermissionRequest` hook and turning the sandbox off were
+   all tried, the call stayed denied. The denial is per command: the next call in the same session was allowed (verified),
+   so nothing is "poisoned"; the agent simply stopped. Fix: the shared instructions (`# How to report`) now say: never end
+   a shift without a terminal command, and after a denial retry with simpler equivalents (one command per call, no
+   `cd` chains or heredocs, `git -C`, the Edit/Write tools), then `aom question`/`aom handoff` with the state.
+3. **Work was invisible after a silent shift.** A shift that ends without a report (also crashed or timed out) while the
+   worktree has changes now gets a card note from the runner listing the files (and the leftovers commit the runner
+   already makes), so the next shift and the owner see them (`unreportedWorkNote`, `shifts/autocommit.ts`).
+
+Tests: `sandbox-caches.test.ts` (env, and a real bubblewrap multi-project build that fails without the variable),
+`supervisor.test.ts` (note), `claude-args.test.ts` (shell roles keep the bare `Bash` allow), `prompt.test.ts`. The runner
+version is not bumped. **Noticed, not fixed:** in the real sandbox a repository without a `.gitmodules` file made
+`Microsoft.Build.Tasks.Git` (SourceLink) fail with "Access to the path .../.gitmodules is denied" (Claude Code masks that
+protected file); repositories that have one build fine.
+
 ### 30. Cards inherit the project's completion action
 
 **Done (2026-10-13).** Owner requirement: "Cards should inherit their project completion action unless specifically

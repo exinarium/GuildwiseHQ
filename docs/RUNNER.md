@@ -788,10 +788,24 @@ read-only, and NuGet takes a named mutex at startup. The runner creates `/tmp/.d
 puts it in `allowWrite`. Each agent also gets `DOTNET_CLI_HOME` (its own home), `DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1`,
 `DOTNET_NOLOGO=1`, `DOTNET_CLI_TELEMETRY_OPTOUT=1`, `NUGET_CERT_REVOCATION_MODE=offline` (the sandbox does not allow
 the certificate revocation hosts, which only delayed restores) and, so that no build server outlives the shift,
-`MSBUILDDISABLENODEREUSE=1`, `DOTNET_CLI_USE_MSBUILD_SERVER=0` and `UseSharedCompilation=false`. If the `dotnet` install
+`MSBUILDDISABLENODEREUSE=1`, `DOTNET_CLI_USE_MSBUILD_SERVER=0`, `UseSharedCompilation=false` and
+`DOTNET_PROCESSOR_COUNT=1` (see "MSBuild worker nodes" below). If the `dotnet` install
 is under your home (for example `~/.dotnet`) it is found automatically, see "Agent toolchains". Verified in the real
 sandbox (`dotnet new console` and `dotnet build`, with a package from the fallback folder and one downloaded into the
 shared cache); `test/sandbox-caches.test.ts` repeats it under bubblewrap and skips when `bwrap` or `dotnet` is missing.
+
+**MSBuild worker nodes.** A `dotnet build`/`test` of more than one project makes MSBuild start one worker node per CPU.
+The nodes talk to the build over a named pipe, which .NET implements as a Unix socket at the hard-coded path
+`/tmp/MSBuild<pid>` (it ignores `TMPDIR`). In the sandbox that fails twice over: the Linux seccomp filter refuses
+`socket(AF_UNIX)` (`SocketException (13): Permission denied` in `NamedPipeServerStream`, the stack seen in production
+card P4-7), and with Unix sockets opened the `bind()` still fails on the read-only `/tmp` and the build hangs.
+Allowing `/tmp` writes would expose other sessions' files, so the runner avoids the nodes instead: every agent gets
+`DOTNET_PROCESSOR_COUNT=1`, MSBuild sizes its node count from the processor count and builds in one process, and a plain
+`dotnet build`/`dotnet test` works. The trade-off is that every .NET process of the agent (also the test host) sees one
+CPU, so builds are not parallel. An explicit `-m:N` with N above 1 still fails; the agent instructions say not to pass it.
+Verified through `claude -p` in the real sandbox (4-project solution, two xunit projects) and under bubblewrap in
+`test/sandbox-caches.test.ts`, which also shows the same build failing without the variable. The unsandboxed DevOps
+engineer is not affected.
 
 ### Agent toolchains
 
@@ -916,6 +930,24 @@ cannot loosen anything.
 | `sandbox.excludedCommands` | `aom`, `aom *`, `<runner>/bin/aom`, `<runner>/bin/aom *` | entries use `Bash(...)` rule syntax, so a bare `aom` would only match `aom` with no arguments; `aom` must run outside because Linux sandboxes cannot connect Unix sockets |
 | `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + `tmp` + the main repository's `.git` (a linked worktree commits into it) + the runner's shared package caches (`<data dir>/cache`) + `/tmp/.dotnet` on Linux (see "Shared package caches and .NET") / the repository's `.git/hooks` and `.git/config`, the vault, the runner's private files, and the worktree itself for roles with no `edit` tool that may not commit | hooks and git config run outside the sandbox the next time the user uses git |
 | `sandbox.network` | `strictAllowlist: true`; `allowedDomains`: package registries and source hosts for roles with `shell` (npm, yarn, PyPI, crates.io, Go proxy, RubyGems, Maven/Gradle, github.com), nothing for others; `allowUnixSockets`: the runner's IPC socket; `allowAllUnixSockets: true` for browser roles only (see below); `allowLocalBinding` for `shell` roles | scouts and researchers reach the web through `WebFetch`/`WebSearch` (permission rules, not the sandbox); builders reach registries from the shell. Add private mirrors with `runtimes.claude-code.extraAllowedDomains` |
+
+**Bash "denied in don't ask mode".** Roles with a shell get the bare `Bash` allow, so any command is approved except the
+deny list (`git push`, `git reset --hard`, `sudo`, `rm -rf /*`, the role's own patterns). One thing the rules cannot
+fix: Claude Code (2.1.296) runs its own analysis of compound commands and forces an "ask" for some of them, for example
+`cd <subfolder> && <cmd>` followed by a separate statement that starts with `VAR=1` (a heredoc script, then
+`VAR=1 dotnet test ... | grep ...`, was denied in card P4-7). In `dontAsk` mode an ask is a denial. Tried and still
+denied: `Bash(*)`, a `PreToolUse` hook that allows, a `PermissionRequest` hook, and `sandbox` off. A denial is per
+command, not per session: the next call is allowed (verified), so one denial does not block the rest of the shift. What
+protects the shift is the agent: the instructions ("How to report" in the agent's `CLAUDE.md`) tell it to retry with a
+simpler equivalent (one command per call, no `cd` chains or heredocs, `git -C`, the Edit/Write tools) and, if still
+blocked, to end with `aom question`/`aom handoff` and the state, never silently. Should the shift end anyway, the runner
+posts a card note listing the uncommitted files (next paragraph).
+
+**Shifts that end without a report.** When a shift ends without a report (`no_report`, `crashed` or `timeout`) and
+the worktree has changes, the runner posts a card note ("The shift ended without a report (...) with N uncommitted files
+in the worktree", up to 30 files with their `git status` codes, and the leftovers commit it made) before it sends
+`shift.ended`. The work itself was already kept by the shift-end auto-commit; the note makes it visible to the next shift
+and the owner. Read-only roles (reviewer, ...) leave nothing behind and get no note.
 
 Claude Code's sandbox wraps shell commands only; the Read/Edit/Write/WebFetch tools are governed by the permission rules
 above, which is why both exist. Chat sessions get the same layer with only `Read, Glob, Grep, Bash(aom:*)` and `Edit(//<scratch>/**)` (Edit covers Write and NotebookEdit; the agent's scratch dir only, so a card's worktree and the vault stay read-only), and `Edit`

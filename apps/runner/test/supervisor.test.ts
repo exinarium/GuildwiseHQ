@@ -114,6 +114,52 @@ describe('supervisor', () => {
     expect(log[1]).toMatch(/^aom: TOY-1 build leftovers/);
   });
 
+  // card P4-7: builders kept ending shifts without a report (denied Bash) with their work only in the worktree
+  it('a shift that ends without a report and left files behind posts a card note listing them', async () => {
+    let wt = '';
+    await start(async (i) => {
+      wt = i.cwd;
+      writeFileSync(join(wt, 'half-done.ts'), 'x\n');
+      mkdirSync(join(wt, 'src'), { recursive: true });
+      writeFileSync(join(wt, 'src', 'second.ts'), 'y\n');
+    });
+    const { shiftId, ended } = await h!.runShift({ stage: 'build' });
+    expect(ended.outcome).toBe('no_report');
+    const notes = h!.server
+      .of('shift.report')
+      .filter((r) => r.shiftId === shiftId && r.report.kind === 'comment');
+    expect(notes).toHaveLength(1);
+    const note = (notes[0]!.report as { note: string }).note;
+    expect(note).toContain('without a report (no_report)');
+    expect(note).toContain('2 uncommitted files');
+    expect(note).toContain('`?? half-done.ts`');
+    expect(note).toContain('`?? src/second.ts`');
+    expect(note).toMatch(/leftovers commit \([0-9a-f]{7,}\)/);
+    // the work itself is kept, as before
+    expect(sh(wt, 'git', ['status', '--porcelain'])).toBe('');
+  });
+
+  it('no note when a shift without a report left nothing behind', async () => {
+    await start(async () => {});
+    const idle = await h!.runShift({ stage: 'build' });
+    expect(idle.ended.outcome).toBe('no_report');
+    expect(h!.server.of('shift.report').filter((r) => r.shiftId === idle.shiftId)).toHaveLength(0);
+  });
+
+  it('no note when the shift reported', async () => {
+    await start(async (i, ctl) => {
+      writeFileSync(join(i.cwd, 'done.ts'), 'x\n');
+      await ctl.post('/v1/report', outcome('handoff', 'done'));
+    });
+    const reported = await h!.runShift({ stage: 'build' });
+    expect(reported.ended.outcome).toBe('reported');
+    expect(
+      h!.server
+        .of('shift.report')
+        .filter((r) => r.shiftId === reported.shiftId && r.report.kind === 'comment'),
+    ).toHaveLength(0);
+  });
+
   it('guard rejects a reviewer who changed code and records the violation on shift.ended', async () => {
     const seen: any = {};
     await start(async (i, ctl) => {

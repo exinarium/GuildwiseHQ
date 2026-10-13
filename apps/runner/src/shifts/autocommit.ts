@@ -22,3 +22,36 @@ export async function autoCommit(input: AutoCommitInput): Promise<boolean> {
   const c = await git(input.worktree, ['commit', '--no-verify', '-m', msg], { env: input.env });
   return c.exitCode === 0;
 }
+
+/** Files `git status` shows as changed or untracked in the worktree (porcelain lines), empty when clean. */
+export async function uncommittedFiles(worktree: string): Promise<string[]> {
+  const status = await git(worktree, ['status', '--porcelain', '--untracked-files=all']);
+  if (status.exitCode !== 0) return [];
+  return status.stdout
+    .split('\n')
+    .map((l) => l.trimEnd())
+    .filter(Boolean);
+}
+
+const MAX_LISTED = 30;
+
+/**
+ * The card note for a shift that ended without a report but left work in the worktree: it lists the files so the next
+ * shift (and the owner) can see where things stand. `committed` says whether the runner's leftovers commit kept them.
+ */
+export function unreportedWorkNote(
+  files: string[],
+  opts: { outcome: string; committed: boolean; sha?: string; branch?: string },
+): string {
+  const listed = files.slice(0, MAX_LISTED).map((f) => `- \`${f}\``);
+  if (files.length > MAX_LISTED) listed.push(`- ... and ${files.length - MAX_LISTED} more`);
+  const kept = opts.committed
+    ? `The runner committed them as a leftovers commit${opts.sha ? ` (${opts.sha})` : ''}${opts.branch ? ` on ${opts.branch}` : ''}, so nothing is lost; the agent had not reported them as done.`
+    : 'They are still uncommitted in the worktree (a merge of the main branch is waiting to be resolved).';
+  return [
+    `The shift ended without a report (${opts.outcome}) with ${files.length} uncommitted file${files.length === 1 ? '' : 's'} in the worktree:`,
+    ...listed,
+    kept,
+    'The next shift should check these files first: run the build and tests, then finish or fix them and report.',
+  ].join('\n');
+}
