@@ -47,7 +47,16 @@ export interface ClaudeCommand {
   bin: string;
   args: string[];
   env: Record<string, string>;
+  /** The prompt, when it is too big for argv (see `MAX_ARGV_PROMPT_BYTES`): sent on stdin instead. */
+  stdin?: string;
 }
+
+/**
+ * Linux refuses a single argument over 128 KiB (MAX_ARG_STRLEN) and the whole command line over a fraction of the
+ * stack limit: spawn fails with E2BIG. A card with a long history (handoffs, review comments, thread) renders a prompt
+ * that big, so past this size `claude -p` reads the prompt from stdin instead.
+ */
+export const MAX_ARGV_PROMPT_BYTES = 64 * 1024;
 
 /**
  * The complete environment of the agent process (it is spawned without inheriting the runner's own): an allow-list of
@@ -98,9 +107,10 @@ export function sessionEnv(
 
 /** The exact argv/env of docs/ARCHITECTURE.md section 12.2. Pure; unit tested. */
 export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): ClaudeCommand {
+  const viaStdin = Buffer.byteLength(input.prompt) > MAX_ARGV_PROMPT_BYTES;
   const args = [
     '-p',
-    input.prompt,
+    ...(viaStdin ? [] : [input.prompt]),
     '--output-format',
     'stream-json',
     '--verbose',
@@ -121,7 +131,7 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
   );
   for (const d of [...input.addDirs, ...(input.readDirs ?? [])]) args.push('--add-dir', d);
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
-  return { bin: cfg.bin, args, env: sessionEnv(input, cfg) };
+  return { bin: cfg.bin, args, env: sessionEnv(input, cfg), ...(viaStdin ? { stdin: input.prompt } : {}) };
 }
 
 /**
@@ -330,6 +340,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       cwd: input.cwd,
       env: cmd.env,
       inheritEnv: false,
+      ...(cmd.stdin !== undefined ? { input: cmd.stdin } : {}),
       parseLine: (l) => parser.parseLine(l),
       usage: () => parser.usage(),
       logFile: input.logFile,
