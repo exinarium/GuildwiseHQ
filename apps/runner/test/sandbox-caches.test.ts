@@ -79,6 +79,8 @@ describe('shared package caches (one set per runner)', () => {
       UseSharedCompilation: 'false',
       // no MSBuild worker nodes: their /tmp/MSBuild<pid> pipes cannot be created in the sandbox (card P4-7)
       DOTNET_PROCESSOR_COUNT: '1',
+      // no SourceLink probe of <repo>/.gitmodules (#33)
+      EnableSourceControlManagerQueries: 'false',
     });
   });
 
@@ -107,6 +109,7 @@ describe('shared package caches (one set per runner)', () => {
       'MAVEN_OPTS',
       'MSBUILDDISABLENODEREUSE',
       'DOTNET_PROCESSOR_COUNT',
+      'EnableSourceControlManagerQueries',
     ])
       expect(devops[k], k).toBeUndefined();
     expect(devops.HOME).toBe(homedir());
@@ -215,7 +218,7 @@ describe.skipIf(!bwrapWorks || !dotnet || process.platform !== 'linux')(
   () => {
     const run = async (
       withShm: boolean,
-      opts: { script?: string; dropEnv?: string[]; timeoutMs?: number } = {},
+      opts: { script?: string; dropEnv?: string[]; timeoutMs?: number; maskGitmodules?: boolean } = {},
     ) => {
       const root = realpathSync(tmp());
       const paths = runnerPaths(root);
@@ -241,7 +244,10 @@ describe.skipIf(!bwrapWorks || !dotnet || process.platform !== 'linux')(
       const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc'];
       // like the sandbox: everything (also /tmp) is read-only except the policy's writable paths
       for (const w of writable) args.push('--bind', w, w);
-      args.push('--bind', cwd, cwd, '--chdir', cwd);
+      args.push('--bind', cwd, cwd);
+      // the sandbox runtime masks a protected path that does not exist with /dev/null
+      if (opts.maskGitmodules) args.push('--ro-bind', '/dev/null', join(cwd, '.gitmodules'));
+      args.push('--chdir', cwd);
       const env = {
         PATH: `${join(dotnet as string, '..')}:${process.env.PATH}`,
         DOTNET_ROOT: join(dotnet as string, '..'),
@@ -295,6 +301,25 @@ describe.skipIf(!bwrapWorks || !dotnet || process.platform !== 'linux')(
     it('with the policy mounts (/tmp/.dotnet writable, caches shared, DOTNET_CLI_HOME) dotnet build succeeds', async () => {
       const r = await run(true);
       expect(r.stdout, r.stderr).toContain('Build succeeded');
+    }, 150_000);
+  
+    // #33: a repository without .gitmodules, whose path the sandbox masks with /dev/null
+    const gitmodulesScript =
+      'git init -q . && dotnet new classlib -n lib -o lib --no-restore >/dev/null && cd lib && dotnet build -nologo 2>&1 | tail -8';
+
+    it('a build in a repository without .gitmodules succeeds (no SourceLink probe)', async () => {
+      const r = await run(true, { script: gitmodulesScript, maskGitmodules: true });
+      expect(r.stdout, `${r.stdout}${r.stderr}`).toContain('Build succeeded');
+    }, 150_000);
+
+    it('without EnableSourceControlManagerQueries=false the same build fails on .gitmodules (the bug)', async () => {
+      const r = await run(true, {
+        script: gitmodulesScript,
+        maskGitmodules: true,
+        dropEnv: ['EnableSourceControlManagerQueries'],
+      });
+      expect(r.stdout).not.toContain('Build succeeded');
+      expect(`${r.stdout}${r.stderr}`).toContain('.gitmodules');
     }, 150_000);
   },
 );

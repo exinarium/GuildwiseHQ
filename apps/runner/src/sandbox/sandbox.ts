@@ -100,6 +100,11 @@ export function dotnetEnv(cliHome: string): Record<string, string> {
     // which DOTNET_PROCESSOR_COUNT caps, so a plain `dotnet build`/`test` runs in-process. Verified in the real sandbox.
     // Side effect: every .NET process of the agent (also the test host) sees one CPU.
     DOTNET_PROCESSOR_COUNT: '1',
+    // SourceLink (Microsoft.Build.Tasks.Git, built into the SDK) reads `<repo>/.gitmodules` on every build. The sandbox
+    // protects that path (Claude Code's mandatory write-deny list masks it with /dev/null when it does not exist), and
+    // in a repository without the file the build fails with "Access to the path '.../.gitmodules' is denied". Agent
+    // builds have no use for source-control metadata; EnableSourceLink=false alone does not stop the probe.
+    EnableSourceControlManagerQueries: 'false',
   };
 }
 
