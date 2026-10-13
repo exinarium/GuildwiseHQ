@@ -199,13 +199,18 @@ export const HygieneRepoResultSchema = z.object({
       }),
     )
     .default([]),
-  /** The user's uncommitted edits were stored on this branch (and pushed when `pushed`); their checkout is untouched. */
+  /**
+   * The user's uncommitted edits were stored in a local stash entry (`stash` = its message, see `git stash list`); their
+   * checkout is untouched and nothing is pushed. `branch` is empty (older runners used a saved-work branch).
+   */
   savedWork: z
     .object({
-      branch: z.string(),
+      branch: z.string().default(''),
+      stash: z.string().optional(),
       files: z.array(z.string()).default([]),
       /** Left out because they look like secrets (`.env*`, `*.pem`, `*key*` ...). */
       skipped: z.array(z.string()).default([]),
+      /** Always false: saved work is never pushed. */
       pushed: z.boolean().default(false),
     })
     .optional(),
@@ -217,6 +222,8 @@ export const HygieneRepoResultSchema = z.object({
     .object({
       branch: z.string(),
       realigned: z.boolean().default(true),
+      savedStash: z.string().optional(),
+      /** Older runners: a saved-work branch. */
       savedBranch: z.string().optional(),
       commits: z.array(z.string()).default([]),
       pushed: z.boolean().default(false),
@@ -233,7 +240,7 @@ export function renderHygieneRequest(spec: HygieneSpec, workstationName: string)
   const lines = [
     `Repository hygiene on ${workstationName} (${spec.trigger === 'schedule' ? 'scheduled' : spec.trigger === 'branch_confirmed' ? 'the working branch was just confirmed' : 'started by the manager'}).`,
     '',
-    'For each repository below: fetch and pull, store uncommitted edits on a saved-work branch and push that (secret-looking files are skipped; nothing lands on the working branch), push unpushed commits, and remove merged branches of finished cards. Run `aom hygiene run`: it does exactly that, refuses to commit or push to a repository whose working branch is not confirmed, logs what it did and ends this request.',
+    'For each repository below: fetch and pull, store uncommitted edits in a stash entry (never pushed, no branch; secret-looking files are skipped; nothing lands on the working branch), push unpushed commits, and remove merged branches of finished cards. Run `aom hygiene run`: it does exactly that, refuses to commit or push to a repository whose working branch is not confirmed, logs what it did and ends this request.',
     '',
     ...spec.repos.map(
       (r) =>

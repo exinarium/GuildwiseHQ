@@ -1333,23 +1333,28 @@ repositories: local path, remote and working branch (the active phase's, else th
 - **working branch not confirmed** (`project_repos.working_branch` is empty): does nothing else. It does not commit,
   pull or push. The uncommitted files and the branches are reported, and the server asks you on the desk which branch is
   the working branch (the answer is stored on the repository and in the ledger, so it is not asked again);
-- **uncommitted edits in your own checkout** (on the working branch or any other branch): stored on a
-  `guildwise/saved-work/<date>` branch (a suffix `-2`, `-3` ... if the name is taken; the same content is never saved
-  twice) and pushed with `git push -u origin <branch>`. The commit is built from a throwaway index on top of the
-  checkout's current commit (`git commit-tree`), so your files, your index and your branch are untouched and nothing
-  reaches the working branch. Files that look like secrets (`.env*`, `*.pem`, `*.key`, `id_rsa`, names containing
+- **uncommitted edits in your own checkout** (on the working branch or any other branch): stored as a **stash
+  entry** (`saved work <ISO date>: N file(s) not committed`, visible in `git stash list`; the same content is never
+  saved twice in a row). It is never pushed and no branch is made: the repository gets no trace of the product. The
+  entry is built from throwaway indexes (`git commit-tree`, then `git stash store`): a commit W with parents HEAD and
+  the index commit I, plus a third parent for untracked files, so `git stash show/apply` work. Your files, your index
+  and your branch are untouched and nothing reaches the working branch. Files that look like secrets (`.env*`, `*.pem`, `*.key`, `id_rsa`, names containing
   key, secret, token, password or credential, unless they are source or notes) are skipped and named in a desk notice
   (`saved_work`) that tells you where your work is;
 - **a repository with a running card shift** (a worktree of the clone belongs to a running shift) is skipped and
   reported as "deferred": hygiene moves refs in the `.git` the shift shares, so it waits for the next run. The
-  post-shift guard additionally ignores housekeeping refs (`guildwise/saved-work/*`, `conflict/*`, `aom-integration/*`)
+  post-shift guard additionally ignores housekeeping refs (`conflict/*`, `aom-integration/*`, and the `guildwise/saved-work/*` of older runners)
   and branches whose new commits are all on a remote-tracking ref or were there at shift start (a pull); a commit on
   another branch that is on no remote ref is still `commits_on_other_branch`;
 - **a working branch the remote rewrote** (force-push; an earlier value of `origin/<branch>`, read from its reflog,
   was dropped and the local branch is at, behind or on top of it): the local branch follows the remote, it is never
   merged and never pushed. Checked out: `git reset --keep origin/<branch>` (your uncommitted edits stay; if they are in
   the way the realignment waits). Not checked out: `git branch -f`. Local commits that were never on the remote are first
-  kept on `guildwise/saved-work/<date>` (pushed) and listed in a desk notice. A rewrite is not a conflict: no conflict
+  kept in a stash entry (`saved work <date>: N local commit(s) of <branch> ...`, W's first parent is the old tip, so
+  `git branch <name> stash@{n}^1` recovers them; no branch, nothing pushed) and listed in a desk notice. **Older
+  runners' `guildwise/saved-work/*` branches** are migrated by every hygiene run: each local one is stored as a stash and
+  deleted, each one on origin is fetched, kept the same way and deleted from origin (`git push origin --delete`); only
+  that exact prefix is touched. A rewrite is not a conflict: no conflict
   branch, no DevOps request, and DevOps conflict resolution never pushes the working branch;
 - **on the working branch**: pulls (fast-forward; with unsaved edits in the way it waits instead of rebasing over them;
   a clean tree falls back to a rebase that is aborted on conflict), and pushes what is unpushed;

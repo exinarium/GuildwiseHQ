@@ -11,7 +11,7 @@ import {
 import { currentBranch, git, hasRemote, revParse } from '../git/git.ts';
 import { changedFiles } from '../git/sweep.ts';
 import { type ChangeStateLookup, cleanFinishedCards } from './branch-cleanup.ts';
-import { saveCommitsBranch, saveUncommittedWork } from './saved-work.ts';
+import { migrateSavedWorkBranches, saveCommitsStash, saveUncommittedWork } from './saved-work.ts';
 
 /**
  * Repository hygiene of one workstation (docs/design/phases.md, "DevOps repository hygiene and the working branch").
@@ -19,10 +19,10 @@ import { saveCommitsBranch, saveUncommittedWork } from './saved-work.ts';
  *
  * - the working branch must be confirmed: while the repository has none, nothing is committed, pulled or pushed, and
  *   the uncommitted changes are only reported (the server turns that into a question on the desk);
- * - uncommitted edits in the user's checkout are stored on a `guildwise/saved-work/<date>` branch and pushed (files that
+ * - uncommitted edits in the user's checkout are stored in a stash entry, never pushed (files that
  *   look like secrets are skipped); the checkout itself and the working branch are never touched by that;
  * - a working branch the remote REWROTE (force-push dropped commits that the local branch still has) is realigned to
- *   the remote, never merged and never pushed; local commits that were never on the remote go to a saved-work branch;
+ *   the remote, never merged and never pushed; local commits that were never on the remote go to a stash entry (no branch, never pushed);
  * - on the working branch: pull (fast-forward, else rebase when the tree is clean), push what is unpushed;
  * - on any other branch: leave the working tree alone, only move the working branch ref and push it;
  * - merged branches of finished cards are deleted locally, never an unmerged one;
@@ -138,8 +138,12 @@ async function realignRewritten(
     const subjects = await repo.git(['log', '--no-walk=unsorted', '--format=%h %s', ...unique.slice(0, 20)]);
     info.commits = subjects.stdout.split('\n').filter(Boolean);
     const tip = (await repo.git(['rev-parse', `refs/heads/${wb}`])).stdout.trim();
-    const kept = await saveCommitsBranch(repo.path, tip, { remote, log: (c) => repo.commands.push(c) });
-    if (!kept.branch) {
+    const kept = await saveCommitsStash(repo.path, tip, {
+      count: unique.length,
+      branch: wb,
+      log: (c) => repo.commands.push(c),
+    });
+    if (!kept.stash) {
       // Without a safe copy the branch stays as it is.
       mark(
         res,
@@ -149,10 +153,7 @@ async function realignRewritten(
       res.rewritten = info;
       return;
     }
-    info.savedBranch = kept.branch;
-    info.pushed = kept.pushed;
-    if (kept.error)
-      mark(res, /authentication|permission|denied/i.test(kept.error) ? 'auth_failed' : 'error', kept.error);
+    info.savedStash = kept.stash;
   }
   const moved = checkedOutHere
     ? await repo.git(['reset', '--keep', `refs/remotes/origin/${wb}`], true)
@@ -170,16 +171,15 @@ async function realignRewritten(
   res.rewritten = info;
 }
 
-/** The user's own uncommitted edits go to a saved-work branch (pushed), never onto the working branch. */
+/** The user's own uncommitted edits go to a stash entry (local, never pushed), never onto the working branch. */
 async function saveWork(repo: Repo, res: HygieneRepoResult, remote: boolean): Promise<void> {
   const { saved, error } = await saveUncommittedWork(repo.path, {
-    remote,
     log: (c) => repo.commands.push(c),
   });
-  if (saved?.branch) {
+  if (saved?.stash) {
     res.savedWork = saved;
     res.actions.push(
-      `stored ${saved.files.length} unsaved file(s) on ${saved.branch}${saved.pushed ? ' and pushed it' : ''}; your checkout was not changed`,
+      `stored ${saved.files.length} unsaved file(s) in a stash (git stash list: '${saved.stash}'); your checkout was not changed`,
     );
   } else if (saved?.skipped.length) {
     res.savedWork = saved;
@@ -262,6 +262,15 @@ export async function hygieneRepo(
       const why = failText(f);
       mark(res, AUTH_RE.test(f.stderr) ? 'auth_failed' : 'error', `git fetch failed: ${why}`);
     }
+  }
+  // Saved work of older runners sat on `guildwise/saved-work/*` branches (some on origin): move them into stashes.
+  {
+    const mig = await migrateSavedWorkBranches(spec.localPath, {
+      remote: remote && fetched,
+      log: (c) => repo.commands.push(c),
+    });
+    res.actions.push(...mig.actions);
+    for (const e of mig.errors) mark(res, AUTH_RE.test(e) ? 'auth_failed' : 'error', e);
   }
   res.branches = await listBranches(repo, spec.branchPrefix);
   const cur = await currentBranch(spec.localPath);

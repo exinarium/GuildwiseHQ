@@ -69,7 +69,7 @@ describe('merge latest main first: into the working branch', () => {
     // pushed: origin/work has main's file and a merge commit
     expect(originFile(t.repo, 'work', 'main-only.txt')).toBe('from main');
     expect(sh(t.repo.origin, 'git', ['log', '-1', '--format=%s', 'work'])).toBe(
-      'Merge main into work (aom TOY-1)',
+      'Merge main into work',
     );
     expect(out.kind === 'merged_into_working' && out.commit).toBe(
       sh(t.repo.origin, 'git', ['rev-parse', 'work']),
@@ -148,7 +148,7 @@ describe('merge latest main first: into the working branch', () => {
     const r = await mergeMainIntoCard(path, { mainBranch: 'main', ref: 'TOY-1' });
     expect(r).toMatchObject({ result: 'merged_into_card' });
     expect(readFileSync(join(path, 'main-only.txt'), 'utf8')).toBe('from main\n');
-    expect(sh(path, 'git', ['log', '-1', '--format=%s'])).toBe('Merge main into the card branch (aom TOY-1)');
+    expect(sh(path, 'git', ['log', '-1', '--format=%s'])).toBe('Merge main into the card branch');
   });
 
   it('a conflict leaves the working branch alone; the merge is left in the card worktree, or aborted', async () => {

@@ -93,7 +93,7 @@ export const GLOSSARY: GlossaryEntry[] = [
     term: 'Hygiene',
     aka: ['repository hygiene'],
     definition:
-      'Routine tidying of a repository by the DevOps engineer: pulling the latest changes, keeping your unsaved edits on a saved-work branch, and removing the leftovers of finished cards.',
+      'Routine tidying of a repository by the DevOps engineer: pulling the latest changes, keeping your unsaved edits in a git stash, and removing the leftovers of finished cards.',
     article: 'devops-and-hygiene#hygiene',
   },
   {
@@ -253,10 +253,10 @@ export const GLOSSARY: GlossaryEntry[] = [
     article: 'getting-started#get-started',
   },
   {
-    term: 'Saved-work branch',
+    term: 'Saved work',
     aka: ['saved work', 'unsaved edits'],
     definition:
-      'Where hygiene keeps a copy of edits you had not saved in a repository, so nothing is lost and nothing reaches main by surprise.',
+      'A git stash entry where hygiene keeps a copy of edits you had not saved in a repository, so nothing is lost and nothing reaches main by surprise. It is never pushed.',
     article: 'devops-and-hygiene#hygiene',
   },
 ];

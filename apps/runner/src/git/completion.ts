@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { type FinalizeExecutePayload, type FinalizeResult, isSafeGitRef } from '@aom/shared';
 import type { BranchRules } from '../forge/types.ts';
 import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
-import { git, gitOk, hasRemote, revParse } from './git.ts';
+import { git, gitOk, hasRemote, repoIdentity, revParse } from './git.ts';
 import { identityEnv, withIntegrationWorktree } from './integration.ts';
 import { baseTarget, RebaseConflictError, rebaseOntoBase } from './rebase.ts';
 import { withRepoLock } from './repo-lock.ts';
@@ -154,7 +154,7 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
   if (merged.exitCode === 0)
     return { ok: true, action: 'merge', mergeCommit: (await revParse(repoPath, startPoint)) ?? undefined };
 
-  const env = identityEnv(input.identity ?? IDENTITY);
+  const env = identityEnv(input.identity ?? (await repoIdentity(repoPath, IDENTITY)));
   const integration = join(input.integrationDir, p.ref);
   const tempBranch = `aom-integration/${p.ref.toLowerCase()}`;
   const result = await withIntegrationWorktree(
@@ -162,7 +162,7 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
     async (): Promise<FinalizeResult> => {
       const m = await git(
         integration,
-        ['merge', '--no-ff', '-m', `Merge ${p.branchName} (${p.ref}: ${p.title})`, p.branchName],
+        ['merge', '--no-ff', '-m', `Merge ${p.ref}: ${p.title}`, p.branchName],
         { env },
       );
       if (m.exitCode !== 0) {

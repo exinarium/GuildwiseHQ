@@ -44,7 +44,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 - Org design: roles, departments and workflows, designed in a chat with the BA and approved by the Owner.
 - Standing orders and automations (formerly schedules): recurring instructions and work that starts by itself, on a time or when something happens in a workflow.
 - Vaults: knowledge repositories (git) for the organization and per project that sync to your workstations.
-- A DevOps engineer agent on every workstation, free: it installs tools and the project's packages, keeps repositories tidy (unsaved edits are kept on a separate saved-work branch, never pushed to main), tries to fix conflicting changes itself, and runs commands, Docker builds and deploys you ask for in a chat. It works as you, outside the sandbox the other agents use; privileged actions on a team member's machine need an Owner or Admin and the machine's user to agree.
+- A DevOps engineer agent on every workstation, free: it installs tools and the project's packages, keeps repositories tidy (unsaved edits are kept in a local git stash, never pushed), tries to fix conflicting changes itself, and runs commands, Docker builds and deploys you ask for in a chat. It works as you, outside the sandbox the other agents use; privileged actions on a team member's machine need an Owner or Admin and the machine's user to agree.
 - Cards explain themselves on the board: why they are blocked, a repository problem, or a budget that is nearly used up, each with a link to fix it.
 - A What's new window after updates, and in-app help with articles, a glossary and a page-by-page help panel.
 - Shared projects: invite people as additional managers on a single project.

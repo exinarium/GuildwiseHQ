@@ -1,16 +1,21 @@
 import { isSafeGitRef } from '@aom/shared';
-import { git, hasRemote, revParse } from './git.ts';
+import { git, hasRemote, repoIdentity, revParse } from './git.ts';
 
-/** Rebasing rewrites commits, which needs a committer; the author of each commit is kept. */
-export const REBASE_ENV = {
-  GIT_COMMITTER_NAME: 'Guildwise HQ (aom)',
-  GIT_COMMITTER_EMAIL: 'aom@runner.aom.invalid',
-};
+const FALLBACK_IDENTITY = { name: 'Guildwise HQ (aom)', email: 'aom@runner.aom.invalid' };
 
-/** A merge commit needs an author too; the runner's identity, like the committer of a rebase. */
-const authorEnv = () => ({
-  GIT_AUTHOR_NAME: REBASE_ENV.GIT_COMMITTER_NAME,
-  GIT_AUTHOR_EMAIL: REBASE_ENV.GIT_COMMITTER_EMAIL,
+/**
+ * Rebasing rewrites commits, which needs a committer; the author of each commit is kept. The committer is the git
+ * identity configured in the repository (no trace of the product in its history); the runner's own only when none is set.
+ */
+export async function rebaseEnv(worktree: string): Promise<Record<string, string>> {
+  const id = await repoIdentity(worktree, FALLBACK_IDENTITY);
+  return { GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email };
+}
+
+/** A merge commit needs an author too: the same identity as the committer of a rebase. */
+const authorEnv = (env: Record<string, string>) => ({
+  GIT_AUTHOR_NAME: env.GIT_COMMITTER_NAME as string,
+  GIT_AUTHOR_EMAIL: env.GIT_COMMITTER_EMAIL as string,
 });
 
 export class RebaseConflictError extends Error {
@@ -38,6 +43,7 @@ export async function rebaseOntoBase(
   if (!isSafeGitRef(baseBranch)) throw new Error(`refusing unsafe base branch ${JSON.stringify(baseBranch)}`);
   if (await hasRemote(worktree)) await git(worktree, ['fetch', '--', 'origin', baseBranch]);
   const target = await baseTarget(worktree, baseBranch);
+  const renv = await rebaseEnv(worktree);
   // Already contains the base (for example the builder merged it and resolved a conflict there): nothing to do.
   if ((await git(worktree, ['merge-base', '--is-ancestor', target, 'HEAD'])).exitCode === 0)
     return 'up_to_date';
@@ -49,7 +55,7 @@ export async function rebaseOntoBase(
     : '0';
   if (merges !== '' && merges !== '0') {
     const m = await git(worktree, ['merge', '--no-edit', '--', target], {
-      env: { ...REBASE_ENV, ...authorEnv() },
+      env: { ...renv, ...authorEnv(renv) },
     });
     if (m.exitCode === 0) return 'merged';
     const conflictedMerge = (await git(worktree, ['diff', '--name-only', '--diff-filter=U'])).stdout
@@ -60,7 +66,7 @@ export async function rebaseOntoBase(
       throw new Error(`git merge ${target} failed: ${(m.stderr || m.stdout).trim()}`);
     throw new RebaseConflictError(conflictedMerge);
   }
-  const r = await git(worktree, ['rebase', target], { env: REBASE_ENV });
+  const r = await git(worktree, ['rebase', target], { env: renv });
   if (r.exitCode === 0) return 'rebased';
   const conflicted = (await git(worktree, ['diff', '--name-only', '--diff-filter=U'])).stdout
     .split('\n')

@@ -1,8 +1,8 @@
 import { basename, join } from 'node:path';
 import { isSafeGitRef } from '@aom/shared';
 import { isProtectedBranchRejection } from './gh.ts';
-import { ambiguousMainMessage, git, gitOk, hasRemote, resolveDefaultBranch, revParse } from './git.ts';
-import { identityEnv, withIntegrationWorktree } from './integration.ts';
+import { ambiguousMainMessage, git, gitOk, hasRemote, repoIdentity, resolveDefaultBranch, revParse } from './git.ts';
+import { identityEnv, RUNNER_IDENTITY, withIntegrationWorktree } from './integration.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
@@ -66,8 +66,8 @@ export async function syncMainIntoWorking(input: SyncMainInput): Promise<SyncMai
     // Unset: the remote's own default (never a guess between main and master; with two candidates nothing is merged).
     const main = input.mainBranch ?? (await resolveDefaultBranch(repoPath, { auth: input.auth })).branch;
     if (!main || main === working || !isSafeGitRef(main)) return { kind: 'nothing' };
-    const env = identityEnv(input.identity);
-    const message = `Merge ${main} into ${working} (aom ${input.ref})`;
+    const env = identityEnv(input.identity ?? (await repoIdentity(repoPath, RUNNER_IDENTITY)));
+    const message = `Merge ${main} into ${working}`;
 
     const attempt = async (): Promise<SyncMainOutcome | 'retry'> => {
       const fetched = await git(repoPath, ['fetch', '--', 'origin', main, working]);
@@ -154,9 +154,9 @@ export async function mergeMainIntoCard(
     return { result: 'up_to_date', main: mainSha };
   const m = await git(
     worktree,
-    ['merge', '--no-ff', '-m', `Merge ${main} into the card branch (aom ${opts.ref})`, target],
+    ['merge', '--no-ff', '-m', `Merge ${main} into the card branch`, target],
     {
-      env: identityEnv(opts.identity),
+      env: identityEnv(opts.identity ?? (await repoIdentity(worktree, RUNNER_IDENTITY))),
     },
   );
   if (m.exitCode === 0)

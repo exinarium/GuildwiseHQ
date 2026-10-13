@@ -77,7 +77,7 @@ describe('completion: merge', () => {
     const res = await run(repo, payload(repo, path, 'merge'));
     expect(res.ok).toBe(true);
     expect(res.mergeCommit).toBe(sh(repo.origin, 'git', ['rev-parse', 'main']));
-    expect(originLog(repo).split('\n')[0]).toBe('Merge aom/toy-1-add-thing (TOY-1: Add thing)');
+    expect(originLog(repo).split('\n')[0]).toBe('Merge TOY-1: Add thing');
     expect(originLog(repo)).toContain('add thing');
     // a real merge commit (two parents)
     expect(sh(repo.origin, 'git', ['rev-list', '--parents', '-n', '1', 'main']).split(' ')).toHaveLength(3);
@@ -96,7 +96,7 @@ describe('completion: merge', () => {
     const first = await run(repo, payload(repo, path, 'merge'));
     const second = await run(repo, payload(repo, path, 'merge'));
     expect(second).toMatchObject({ ok: true, mergeCommit: first.mergeCommit });
-    expect(originLog(repo).match(/Merge aom/g)).toHaveLength(1);
+    expect(originLog(repo).match(/Merge TOY-1/g)).toHaveLength(1);
   });
 
   it('rebases onto a moved working branch first, so a divergent main still merges', async () => {

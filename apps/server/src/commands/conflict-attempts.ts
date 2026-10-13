@@ -221,7 +221,7 @@ export async function hygieneConflictEvents(
       `1. Create a temporary branch conflict/${wb.replaceAll('/', '-')}-a${attempt} from ${wb} and integrate origin/${wb} into it, resolving conflicts so the intent of both sides is kept.`,
       '2. Run the project build and its unit tests.',
       `3. Only if they pass, fast-forward the local ${wb} to the result, then delete the temporary branch. Do NOT push ${wb}: leave the push to repository hygiene, which pushes only genuinely new local commits.`,
-      `   First check that origin/${wb} was not rewritten: if \`git reflog show origin/${wb}\` shows an earlier origin/${wb} that is not an ancestor of the current one (a force-push removed commits), this is NOT a conflict. Do not merge the old commits back; run \`git reset --keep origin/${wb}\` (or \`git branch -f ${wb} origin/${wb}\` when ${wb} is not checked out) after saving any commit that was never on origin to a guildwise/saved-work/<date> branch, and report that.`,
+      `   First check that origin/${wb} was not rewritten: if \`git reflog show origin/${wb}\` shows an earlier origin/${wb} that is not an ancestor of the current one (a force-push removed commits), this is NOT a conflict. Do not merge the old commits back; run \`git reset --keep origin/${wb}\` (or \`git branch -f ${wb} origin/${wb}\` when ${wb} is not checked out) after running \`aom hygiene run\` once, which keeps any commit that was never on origin in a stash entry (no branch is made, nothing is pushed), and report that.`,
       '4. Otherwise leave everything as it was and say what blocked you.',
       'Finish with `aom devops-done --summary "Resolved: ..."` or `--summary "Not resolved: ..."` in plain language.',
     ].join('\n'),

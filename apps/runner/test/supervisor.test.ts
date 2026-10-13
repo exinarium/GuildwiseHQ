@@ -110,8 +110,8 @@ describe('supervisor', () => {
     expect(rep?.riskTier).toBe('large');
     expect(sh(wt, 'git', ['status', '--porcelain'])).toBe('');
     const log = sh(wt, 'git', ['log', '--format=%s']).split('\n');
-    expect(log[0]).toMatch(/^aom: TOY-1 build leftovers \(shift [0-9a-f]{8}\)$/);
-    expect(log[1]).toMatch(/^aom: TOY-1 build leftovers/);
+    expect(log[0]).toMatch(/^TOY-1 build leftovers \(shift [0-9a-f]{8}\)$/);
+    expect(log[1]).toMatch(/^TOY-1 build leftovers/);
   });
 
   // card P4-7: builders kept ending shifts without a report (denied Bash) with their work only in the worktree

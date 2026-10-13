@@ -177,7 +177,7 @@ describe('autocommit', () => {
     writeFileSync(join(path, 'left.txt'), 'l');
     expect(await autoCommit(input)).toBe(true);
     expect(sh(path, 'git', ['log', '-1', '--format=%s|%an'])).toBe(
-      'aom: TOY-1 build leftovers (shift 019e3f6a)|Ada (aom)',
+      'TOY-1 build leftovers (shift 019e3f6a)|Ada (aom)',
     );
     expect(sh(path, 'git', ['status', '--porcelain'])).toBe('');
   });

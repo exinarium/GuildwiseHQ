@@ -682,13 +682,13 @@ export async function hygieneReportEvents(
   // The user's unsaved edits were stored on a saved-work branch: tell the project's managers (a notice, nothing to decide).
   for (const r of reported) {
     const sw = r.savedWork;
-    if (!sw?.branch && !sw?.skipped.length) continue;
+    if (!sw?.branch && !sw?.stash && !sw?.skipped.length) continue;
     const spec1 = byRepo.get(r.repoId) as HygieneRepoSpec;
     const project = await one(tx, 'SELECT org_id FROM projects WHERE id=$1', [spec1.projectId]);
     if (!project) continue;
     const deskItemId = randomUUID();
-    const stored = sw.branch
-      ? `Unsaved edits in ${spec1.name} (${sw.files.length} file${sw.files.length === 1 ? '' : 's'}) were stored safely on the branch ${sw.branch}${sw.pushed ? ' and uploaded' : ' on that workstation'}. Nothing was changed in your files and nothing reached the working branch.`
+    const stored = sw.branch || sw.stash
+      ? `Unsaved edits in ${spec1.name} (${sw.files.length} file${sw.files.length === 1 ? '' : 's'}) were stored safely on that workstation ${sw.stash ? `in a git stash (git stash list: '${sw.stash}')` : `on the branch ${sw.branch}${sw.pushed ? ' and uploaded' : ''}`}. Nothing was changed in your files and nothing reached the working branch.`
       : `Unsaved edits in ${spec1.name} were left alone.`;
     const skipped = sw.skipped.length
       ? ` ${sw.skipped.length} file${sw.skipped.length === 1 ? ' that looks' : 's that look'} like a password or key (${sw.skipped.slice(0, 5).join(', ')}) ${sw.skipped.length === 1 ? 'was' : 'were'} not copied.`
@@ -701,7 +701,7 @@ export async function hygieneReportEvents(
           deskItemId,
           kind: 'alert',
           subkind: DESK_SUBKIND.savedWork,
-          title: sw.branch
+          title: sw.branch || sw.stash
             ? `Your unsaved work in ${spec1.name} was stored safely`
             : `Secret-looking files in ${spec1.name} were left alone`,
           body: stored + skipped,
@@ -788,7 +788,7 @@ export async function hygieneReportEvents(
   // remote had to be kept aside is there anything to tell the managers about.
   for (const r of reported) {
     const rw = r.rewritten;
-    if (!rw?.savedBranch || rw.commits.length === 0) continue;
+    if ((!rw?.savedStash && !rw?.savedBranch) || rw.commits.length === 0) continue;
     const spec1 = byRepo.get(r.repoId) as HygieneRepoSpec;
     const project = await one(tx, 'SELECT org_id FROM projects WHERE id=$1', [spec1.projectId]);
     if (!project) continue;
@@ -802,7 +802,7 @@ export async function hygieneReportEvents(
           kind: 'alert',
           subkind: DESK_SUBKIND.savedWork,
           title: `${rw.branch} in ${spec1.name} was rewritten on the remote; your commits are kept aside`,
-          body: `Someone force-updated ${rw.branch} on the remote, so repository hygiene moved the local ${rw.branch} to match it instead of merging the old commits back in (nothing was pushed to ${rw.branch}). ${rw.commits.length} local commit${rw.commits.length === 1 ? ' was' : 's were'} never on the remote and ${rw.commits.length === 1 ? 'is' : 'are'} kept on the branch ${rw.savedBranch}${rw.pushed ? ' (also uploaded)' : ''}:\n${rw.commits.map((c) => `- ${c}`).join('\n')}\n\nCherry-pick what you still want onto ${rw.branch}.`,
+          body: `Someone force-updated ${rw.branch} on the remote, so repository hygiene moved the local ${rw.branch} to match it instead of merging the old commits back in (nothing was pushed to ${rw.branch}). ${rw.commits.length} local commit${rw.commits.length === 1 ? ' was' : 's were'} never on the remote and ${rw.commits.length === 1 ? 'is' : 'are'} kept in a stash entry on that workstation (no branch, nothing uploaded; recover with: git branch <name> stash@{n}^1, see git stash list):\n${rw.commits.map((c) => `- ${c}`).join('\n')}\n\nCherry-pick what you still want onto ${rw.branch}.`,
           options: [],
           blocking: false,
           pinned: false,

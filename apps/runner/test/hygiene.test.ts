@@ -98,30 +98,38 @@ describe('repository hygiene: the working branch must be confirmed', () => {
 });
 
 describe('repository hygiene: commit, pull and push on the working branch', () => {
-  it('stores uncommitted changes on a saved-work branch and pushes it; main and the checkout are untouched', async () => {
+  it('stores uncommitted changes in a stash, never pushed, no branch; main and the checkout are untouched', async () => {
     const repo = makeRepo();
     const mainBefore = originHead(repo);
+    const branchesBefore = sh(repo.origin, 'git', ['branch', '--list']);
     write(repo, 'wip.txt', 'unsaved');
     write(repo, 'README.md', '# changed\n');
+    const statusBefore = sh(repo.clone, 'git', ['status', '--porcelain']);
     const { result, commands } = await hygieneRepo(spec(repo));
     expect(result.problem).toBeNull();
     const saved = result.savedWork;
-    expect(saved?.branch).toMatch(/^guildwise\/saved-work\/\d{4}-\d{2}-\d{2}$/);
+    expect(saved?.branch).toBe('');
+    expect(saved?.stash).toMatch(/^saved work \d{4}-\d{2}-\d{2}T[\d:.]+Z: 2 file\(s\) not committed$/);
     expect(saved?.files.sort()).toEqual(['README.md', 'wip.txt']);
-    expect(saved?.pushed).toBe(true);
-    expect(result.actions.join(' ')).toContain('stored 2 unsaved file(s)');
-    // nothing landed on main, neither on the remote nor locally
+    expect(saved?.pushed).toBe(false);
+    expect(result.actions.join(' ')).toContain('stored 2 unsaved file(s) in a stash');
+    // nothing landed on main, nothing was pushed, no branch of any name was made
     expect(originHead(repo)).toBe(mainBefore);
     expect(sh(repo.clone, 'git', ['rev-parse', 'main'])).toBe(mainBefore);
-    // the saved-work branch is on the remote with both files
-    const tree = sh(repo.origin, 'git', ['ls-tree', '-r', '--name-only', saved?.branch as string]);
-    expect(tree).toContain('wip.txt');
-    expect(sh(repo.origin, 'git', ['show', `${saved?.branch}:README.md`])).toBe('# changed');
-    // the user's files are exactly as they were
+    expect(sh(repo.origin, 'git', ['branch', '--list'])).toBe(branchesBefore);
+    expect(sh(repo.clone, 'git', ['branch', '--list'])).not.toMatch(/guildwise|saved/);
+    expect(commands.some((c) => /\bpush\b/.test(c))).toBe(false);
+    // the user's files, index and status are exactly as they were
     expect(readFileSync(join(repo.clone, 'wip.txt'), 'utf8')).toBe('unsaved');
-    expect(sh(repo.clone, 'git', ['status', '--porcelain'])).toContain('wip.txt');
-    expect(commands.some((c) => c.includes('push -u origin guildwise/saved-work/'))).toBe(true);
-    expect(commands.some((c) => /push.*(--force|-f\b)/.test(c))).toBe(false);
+    expect(sh(repo.clone, 'git', ['status', '--porcelain'])).toBe(statusBefore);
+    // a real stash entry: list shows it, and applying it in a clean clone brings back tracked and untracked edits
+    expect(sh(repo.clone, 'git', ['stash', 'list'])).toContain(saved?.stash as string);
+    const clone2 = join(tmp(), 'clone2');
+    sh(repo.root, 'git', ['clone', repo.origin, clone2]);
+    sh(clone2, 'git', ['fetch', repo.clone, 'refs/stash:refs/stash']);
+    sh(clone2, 'git', ['stash', 'apply', 'refs/stash']);
+    expect(readFileSync(join(clone2, 'wip.txt'), 'utf8')).toBe('unsaved');
+    expect(readFileSync(join(clone2, 'README.md'), 'utf8')).toBe('# changed\n');
   });
 
   it('skips files that look like secrets and tells which', async () => {
@@ -135,7 +143,8 @@ describe('repository hygiene: commit, pull and push on the working branch', () =
     const saved = result.savedWork;
     expect(saved?.files.sort()).toEqual(['keyboard.ts', 'wip.txt']);
     expect(saved?.skipped.sort()).toEqual(['.env', 'api-key.json', 'deploy.pem']);
-    const tree = sh(repo.origin, 'git', ['ls-tree', '-r', '--name-only', saved?.branch as string]);
+    const tree = sh(repo.clone, 'git', ['stash', 'show', '--include-untracked', '--name-only', 'stash@{0}']);
+    expect(tree).toContain('wip.txt');
     expect(tree).not.toContain('.env');
     expect(tree).not.toContain('deploy.pem');
     // the secrets stay where they were
@@ -147,9 +156,8 @@ describe('repository hygiene: commit, pull and push on the working branch', () =
     write(repo, 'wip.txt', 'unsaved');
     const first = await hygieneRepo(spec(repo));
     const second = await hygieneRepo(spec(repo));
-    expect(second.result.savedWork?.branch).toBe(first.result.savedWork?.branch);
-    expect(second.result.savedWork?.pushed).toBe(false);
-    expect(sh(repo.clone, 'git', ['branch', '--list', 'guildwise/saved-work/*']).split('\n')).toHaveLength(1);
+    expect(second.result.savedWork?.stash).toBe(first.result.savedWork?.stash);
+    expect(sh(repo.clone, 'git', ['stash', 'list']).split('\n')).toHaveLength(1);
   });
 
   it('only secret-looking edits: nothing is saved, the files are named', async () => {
@@ -157,7 +165,7 @@ describe('repository hygiene: commit, pull and push on the working branch', () =
     write(repo, '.env.local', 'X=1');
     const { result } = await hygieneRepo(spec(repo));
     expect(result.savedWork).toMatchObject({ branch: '', files: [], skipped: ['.env.local'] });
-    expect(sh(repo.clone, 'git', ['branch', '--list', 'guildwise/saved-work/*'])).toBe('');
+    expect(sh(repo.clone, 'git', ['stash', 'list'])).toBe('');
   });
 
   it('pushes commits that were not pushed', async () => {
@@ -191,7 +199,7 @@ describe('repository hygiene: commit, pull and push on the working branch', () =
     expect(result.problem).toBeNull();
     expect(readFileSync(join(repo.clone, 'theirs.txt'), 'utf8')).toBe('x');
     expect(readFileSync(join(repo.clone, 'mine.txt'), 'utf8')).toBe('unsaved');
-    expect(result.savedWork?.branch).toBeTruthy();
+    expect(result.savedWork?.stash).toBeTruthy();
     expect(sh(repo.origin, 'git', ['ls-tree', '-r', '--name-only', 'main'])).not.toContain('mine.txt');
   });
 
@@ -205,12 +213,12 @@ describe('repository hygiene: commit, pull and push on the working branch', () =
     expect(result.actions.join(' ')).toContain('not updated yet');
     expect(originHead(repo)).toBe(before);
     expect(readFileSync(join(repo.clone, 'README.md'), 'utf8')).toBe('# mine\n');
-    expect(sh(repo.origin, 'git', ['show', `${result.savedWork?.branch}:README.md`])).toBe('# mine');
+    expect(sh(repo.clone, 'git', ['show', 'stash@{0}:README.md'])).toBe('# mine');
   });
 });
 
 describe('repository hygiene: a checkout on another branch', () => {
-  it('stores uncommitted changes of another branch on a saved-work branch built on that branch and leaves the checkout alone', async () => {
+  it('stores uncommitted changes of another branch in a stash built on that branch and leaves the checkout alone', async () => {
     const repo = makeRepo();
     sh(repo.clone, 'git', ['checkout', '-b', 'feature/x']);
     write(repo, 'wip.txt', 'unsaved');
@@ -218,7 +226,7 @@ describe('repository hygiene: a checkout on another branch', () => {
     const { result } = await hygieneRepo(spec(repo));
     expect(result.problem).toBeNull();
     expect(result.savedWork?.files).toEqual(['wip.txt']);
-    expect(sh(repo.clone, 'git', ['rev-parse', `${result.savedWork?.branch}~1`])).toBe(head);
+    expect(sh(repo.clone, 'git', ['rev-parse', 'stash@{0}^1'])).toBe(head);
     expect(sh(repo.clone, 'git', ['rev-parse', 'HEAD'])).toBe(head);
     expect(sh(repo.clone, 'git', ['branch', '--show-current'])).toBe('feature/x');
     expect(sh(repo.clone, 'git', ['status', '--porcelain'])).toContain('wip.txt');
@@ -362,7 +370,7 @@ describe('aom hygiene run', () => {
       hygiene: { repos: Array<{ repoId: string; problem: { kind: string } | null; commit?: string }> };
     };
     expect(data.summary).toContain('1 need attention');
-    expect(data.commands.some((c) => c.includes('saved-work'))).toBe(true);
+    expect(data.commands.some((c) => c.includes('stash store'))).toBe(true);
     expect(data.hygiene.repos[0]?.problem).toBeNull();
     expect((data.hygiene.repos[0] as { savedWork?: unknown }).savedWork).toBeDefined();
     expect(data.hygiene.repos[1]?.problem?.kind).toBe('needs_branch');
@@ -436,7 +444,7 @@ describe('repository hygiene: a rewritten (force-pushed) working branch is follo
     expect(result.pushed).toBe(false);
   });
 
-  it('local commits that were never on the remote go to a saved-work branch, the branch is realigned, nothing pushed to it', async () => {
+  it('local commits that were never on the remote are kept in a stash (no branch), the branch is realigned, nothing pushed', async () => {
     const repo = makeRepo();
     pushedCommit(repo, 'stale1.txt', 'a');
     write(repo, 'mine.txt', 'new work');
@@ -445,18 +453,23 @@ describe('repository hygiene: a rewritten (force-pushed) working branch is follo
     const localTip = sh(repo.clone, 'git', ['rev-parse', 'HEAD']);
     forceRewrite(repo, 1);
     const rewritten = originHead(repo);
+    const branchesBefore = sh(repo.origin, 'git', ['branch', '--list']);
 
     const { result } = await hygieneRepo(spec(repo));
 
     expect(result.problem).toBeNull();
     expect(result.rewritten?.commits).toHaveLength(1);
     expect(result.rewritten?.commits[0]).toContain('my unpushed work');
-    const kept = result.rewritten?.savedBranch ?? '';
-    expect(kept).toMatch(/^guildwise\/saved-work\//);
-    expect(sh(repo.clone, 'git', ['rev-parse', kept])).toBe(localTip);
+    expect(result.rewritten?.savedStash).toMatch(/^saved work .*1 local commit\(s\) of main/);
+    expect(result.rewritten?.savedBranch).toBeUndefined();
     expect(sh(repo.clone, 'git', ['rev-parse', 'main'])).toBe(rewritten);
     expect(originHead(repo)).toBe(rewritten);
-    expect(sh(repo.origin, 'git', ['rev-parse', kept])).toBe(localTip);
+    expect(sh(repo.origin, 'git', ['branch', '--list'])).toBe(branchesBefore);
+    expect(sh(repo.clone, 'git', ['branch', '--list'])).not.toMatch(/saved|guildwise/);
+    // the commits are recoverable from the stash without any ref name
+    expect(sh(repo.clone, 'git', ['rev-parse', 'stash@{0}^1'])).toBe(localTip);
+    sh(repo.clone, 'git', ['branch', 'recovered', 'stash@{0}^1']);
+    expect(sh(repo.clone, 'git', ['log', '-1', '--format=%s', 'recovered'])).toBe('my unpushed work');
   });
 
   it('normal divergence (both sides have new work) is still a conflict, and nothing is pushed', async () => {
@@ -480,7 +493,7 @@ describe('repository hygiene: a rewritten (force-pushed) working branch is follo
 });
 
 describe('repository hygiene: defers while a card shift runs in the repository', () => {
-  it('changes nothing (no saved-work branch, no pull) when a linked worktree has a running shift', async () => {
+  it('changes nothing (no stash, no pull) when a linked worktree has a running shift', async () => {
     const repo = makeRepo();
     const wt = join(tmp(), 'card-wt');
     sh(repo.clone, 'git', ['worktree', 'add', '-b', 'aom/toy-1-x', wt]);
@@ -494,10 +507,47 @@ describe('repository hygiene: defers while a card shift runs in the repository',
     expect(result.actions.join(' ')).toContain('deferred');
     expect(result.savedWork).toBeUndefined();
     expect(sh(repo.clone, 'git', ['rev-parse', 'HEAD'])).toBe(head);
-    expect(sh(repo.clone, 'git', ['branch', '--list', 'guildwise/*'])).toBe('');
+    expect(sh(repo.clone, 'git', ['stash', 'list'])).toBe('');
 
     const later = await hygieneRepo(spec(repo), []);
-    expect(later.result.savedWork?.branch).toBeTruthy();
+    expect(later.result.savedWork?.stash).toBeTruthy();
+  });
+});
+
+describe('repository hygiene: old saved-work branches are migrated away', () => {
+  it('stores local and origin guildwise/saved-work branches in stashes and deletes them', async () => {
+    const repo = makeRepo();
+    // an old-style branch with one commit, local and on origin
+    sh(repo.clone, 'git', ['checkout', '-b', 'guildwise/saved-work/2026-10-01']);
+    write(repo, 'old.txt', 'old');
+    sh(repo.clone, 'git', ['add', '-A']);
+    sh(repo.clone, 'git', ['commit', '-m', 'saved work (old)']);
+    const oldTip = sh(repo.clone, 'git', ['rev-parse', 'HEAD']);
+    sh(repo.clone, 'git', ['push', 'origin', 'guildwise/saved-work/2026-10-01']);
+    sh(repo.clone, 'git', ['checkout', 'main']);
+    // one that exists on origin only
+    sh(repo.clone, 'git', ['checkout', '-b', 'guildwise/saved-work/2026-10-02', 'main']);
+    write(repo, 'old2.txt', 'old2');
+    sh(repo.clone, 'git', ['add', '-A']);
+    sh(repo.clone, 'git', ['commit', '-m', 'saved work (old 2)']);
+    const old2Tip = sh(repo.clone, 'git', ['rev-parse', 'HEAD']);
+    sh(repo.clone, 'git', ['push', 'origin', 'guildwise/saved-work/2026-10-02']);
+    sh(repo.clone, 'git', ['checkout', 'main']);
+    sh(repo.clone, 'git', ['branch', '-D', 'guildwise/saved-work/2026-10-02']);
+    sh(repo.clone, 'git', ['branch', 'keepme', 'main']);
+    sh(repo.clone, 'git', ['push', 'origin', 'keepme']);
+
+    const { result } = await hygieneRepo(spec(repo));
+
+    expect(result.problem).toBeNull();
+    expect(sh(repo.clone, 'git', ['branch', '-a', '--list', '*saved-work*'])).toBe('');
+    expect(sh(repo.origin, 'git', ['branch', '--list'])).not.toContain('saved-work');
+    expect(sh(repo.origin, 'git', ['branch', '--list'])).toContain('keepme');
+    const parents = sh(repo.clone, 'git', ['stash', 'list', '--format=%H'])
+      .split('\n')
+      .map((h) => sh(repo.clone, 'git', ['rev-parse', `${h}^1`]));
+    expect(parents).toEqual(expect.arrayContaining([oldTip, old2Tip]));
+    expect(result.actions.join('\n')).toContain('removed that branch from origin');
   });
 });
 

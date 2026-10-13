@@ -139,4 +139,64 @@ describe('the saved-work notice', () => {
     expect(p.body).toContain('nothing reached the working branch');
     expect(p.body).toContain('.env');
   });
+
+  it('names the stash when the unsaved edits were stored in one (no branch)', async () => {
+    const { project, repo } = await load();
+    const spec = {
+      trigger: 'manual' as const,
+      repos: [
+        {
+          repoId: repo.id as string,
+          projectId: project.id as string,
+          projectKey: 'TOY',
+          projectName: 'Toy',
+          name: 'toy',
+          localPath: '/tmp/toy',
+          remoteUrl: 'https://example.test/acme/toy.repo',
+          workingBranch: 'main',
+          branchSource: 'repo' as const,
+          branchPrefix: 'aom/',
+          finishedBranches: [],
+        },
+      ],
+    };
+    const report = {
+      repos: [
+        {
+          repoId: repo.id as string,
+          actions: [],
+          problem: null,
+          branches: ['main'],
+          uncommitted: [],
+          pushed: false,
+          removedBranches: [],
+          cleaned: [],
+          savedWork: {
+            branch: '',
+            stash: 'saved work 2026-10-10T10:00:00.000Z: 2 file(s) not committed',
+            files: ['a.txt', 'b.txt'],
+            skipped: ['.env'],
+            pushed: true,
+          },
+        },
+      ],
+    };
+    const events = await hygieneReportEvents(
+      ctx(),
+      ctx().pool as never,
+      { id: w.projectId, org_id: project.org_id, workstation_id: w.workstationId, hygiene: spec },
+      '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
+      report,
+    );
+    const notice = events.find((e) => (e.event as any).payload?.subkind === 'saved_work');
+    expect(notice).toBeTruthy();
+    const p = (notice!.event as any).payload;
+    expect(p).toMatchObject({ kind: 'alert', blocking: false, projectId: project.id });
+    expect(p.title).toBe('Your unsaved work in toy was stored safely');
+    expect(p.body).toContain('git stash');
+    expect(p.body).toContain('saved work 2026-10-10');
+    expect(p.body).not.toContain('guildwise');
+    expect(p.body).toContain('nothing reached the working branch');
+    expect(p.body).toContain('.env');
+  });
 });

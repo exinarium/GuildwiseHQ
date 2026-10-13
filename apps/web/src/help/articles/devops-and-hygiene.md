@@ -41,7 +41,7 @@ Builders can also run `git rebase` in their own checkout of a card to tidy up th
 Once a day per workstation by default, the DevOps engineer tidies the repositories on that machine. On the **Workstations** page, open the workstation and find **Repository hygiene**: **Run** sets how often (off, every hour, every 6 hours, every 12 hours, daily or weekly) and **Run hygiene now** starts a run at once. For each repository it:
 
 - Fetches and pulls the latest changes.
-- Stores any unsaved edits of yours on a separate **saved-work branch** and uploads it, so nothing is lost. Your files stay exactly as they are, and nothing lands on main by surprise.
+- Stores any unsaved edits of yours in a **git stash** (`git stash list`, "saved work ...") on your machine, so nothing is lost. Nothing is pushed, no branch is added, your files stay exactly as they are, and nothing lands on main by surprise.
 - Pushes commits that have not been pushed yet.
 - Removes branches and worktrees (temporary checkouts) of finished cards.
 
