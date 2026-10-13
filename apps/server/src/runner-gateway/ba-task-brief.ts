@@ -15,7 +15,7 @@ import { buildReporterTask } from '../commands/reporter-tasks.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row } from '../db/sql.ts';
 import { standingOrdersFor } from '../queries/ledger.ts';
-import { agentSpecFor } from './brief.ts';
+import { agentSpecFor, shiftVault } from './brief.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
 
@@ -160,6 +160,6 @@ export async function buildBaTaskShiftStart(
     prepare: { rebase: false },
     maxShiftMinutes: BA_TASK_MAX_SHIFT_MINUTES,
     baTask,
-    vault: null,
+    vault: await shiftVault(ctx, agent, project.id),
   };
 }

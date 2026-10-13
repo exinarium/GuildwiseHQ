@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
+  type ChatVault,
   isSafeVaultFolder,
   type ShiftBrief,
   type ShiftVault,
@@ -37,7 +38,7 @@ const read = async (file: string, root: string): Promise<string | undefined> => 
  */
 export async function readVaultContext(
   vaultsDir: string,
-  vault: ShiftVault,
+  vault: ShiftVault | ChatVault,
 ): Promise<VaultShiftContext | null> {
   let root: string;
   try {
@@ -45,15 +46,17 @@ export async function readVaultContext(
   } catch {
     return null;
   }
-  if (!isSafeVaultFolder(vault.folder) || !existsSync(join(root, '.git'))) return null;
+  if ((vault.folder !== undefined && !isSafeVaultFolder(vault.folder)) || !existsSync(join(root, '.git')))
+    return null;
+  const folder = vault.folder ? vault.folder.split('/') : undefined;
   const orders: Array<{ title: string; body: string }> = [];
   const global = await read(join(root, 'standing-orders.md'), root);
   if (global) orders.push({ title: 'Vault standing orders', body: global });
-  const project = await read(join(root, ...vault.folder.split('/'), 'standing-orders.md'), root);
+  const project = folder ? await read(join(root, ...folder, 'standing-orders.md'), root) : undefined;
   if (project) orders.push({ title: 'Project standing orders (vault)', body: project });
-  const projectDoc = await read(join(root, ...vault.folder.split('/'), 'PROJECT.md'), root);
+  const projectDoc = folder ? await read(join(root, ...folder, 'PROJECT.md'), root) : undefined;
   // The site-managed rules reach curators through the brief (`feed.tasteSeed`); the file copy would show them twice.
-  const rawTaste = await read(join(root, ...vault.folder.split('/'), TASTE_FILE), root);
+  const rawTaste = folder ? await read(join(root, ...folder, TASTE_FILE), root) : undefined;
   const taste = rawTaste ? stripManagedSection(rawTaste) || undefined : undefined;
   return {
     addDir: root,

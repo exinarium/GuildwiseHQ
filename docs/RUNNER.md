@@ -861,6 +861,23 @@ Playwright's `test-results/`, `playwright-report/` and `blob-report/` (at the wo
 treated as artifacts: they are no guard finding, are removed (untracked ones) before the shift-end autocommit, and are
 never committed. Ignore them in `.gitignore` too.
 
+### Vault access
+
+The server decides which one vault a conversation may read (`vaultForProject`, `vaultForConversation` in
+`apps/server/src/commands/vaults.ts`); the runner opens only that vault's clone. A vault is never opened without a `.git`
+clone under `vaults/`; with none, the instructions say the vault is not cloned here and nothing crashes.
+
+| Work | Server sends | Runner opens | How |
+|---|---|---|---|
+| Card shift | `shift.start.vault` (project vault, else org vault on an Owner/Admin workstation) | the vault clone | `--add-dir`, Edit denied, sandbox `denyWrite`; PROJECT.md, standing orders (and taste) added to the brief |
+| Question shift, BA task shift | `shift.start.vault`, same rule, for the shift's project | the vault clone | read-only folder (as reference repositories: secret files denied); PROJECT.md and standing orders in the brief |
+| Chat about a project or card | `chat.start` `context.vault` `{ vaultId, kind, folder }`, same rule | the vault clone | read-only folder (`readDirs`: `--add-dir`, Edit denied, sandbox `denyWrite`, secret-file deny list); PROJECT.md and standing orders (clipped to 3,000 characters each) in the chat instructions |
+| Chat with no project | `context.vault` `{ vaultId, kind: 'org' }` (no `folder`), only on an Owner/Admin workstation | the vault clone | as above; only the root standing orders |
+| DevOps | none | reads anywhere anyway | n/a |
+
+The vault is listed in "Folders you can read" as read-only; writes go through `aom` commands (`aom publish`,
+`aom investigation record`, ...), never directly. A vault of another organization is never sent.
+
 ### Reference repositories and other read-only folders
 
 `repoRoots` (see Configuration) only says where repositories are found and cloned. It grants no read access, and there

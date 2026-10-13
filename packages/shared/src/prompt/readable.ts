@@ -4,9 +4,10 @@ export interface ReadableFolder {
   path: string;
   /**
    * `project`: the chat's own project repository; `reference`: a reference repository the owner picked; `org`: another
-   * repository of the organization (architect), registered or found under the organization source folder.
+   * repository of the organization (architect), registered or found under the organization source folder; `vault`: the
+   * knowledge vault clone (project vault or organization vault).
    */
-  kind: 'project' | 'reference' | 'org';
+  kind: 'project' | 'reference' | 'org' | 'vault';
 }
 
 /**
@@ -22,9 +23,16 @@ export function renderReadableFolders(folders: ReadableFolder[], opts: { working
   } else {
     for (const f of folders)
       lines.push(
-        `- ${f.path} (${f.kind === 'project' ? 'repository of this project' : f.kind === 'org' ? 'repository of the organization' : 'reference repository'} "${f.name}", read-only)`,
+        f.kind === 'vault'
+          ? `- ${f.path} (the knowledge vault "${f.name}": notes, decisions, standing orders; read-only)`
+          : `- ${f.path} (${f.kind === 'project' ? 'repository of this project' : f.kind === 'org' ? 'repository of the organization' : 'reference repository'} "${f.name}", read-only)`,
       );
   }
+  if (folders.some((f) => f.kind === 'vault'))
+    lines.push(
+      '',
+      'The knowledge vault is read-only for you: never write, edit or delete files in it. Anything that belongs in the vault is saved through an `aom` command meant for it (for example `aom publish` for a note or `aom investigation record` for an investigation, where your shift offers them), never directly; when no such command is available, say what should be saved and the manager or a later shift records it.',
+    );
   lines.push(
     '',
     'Everything else on the machine is blocked, and secret files (.env, keys, certificates) are blocked even inside these folders. Read-only means you cannot edit, create or delete files there; only your working directory can change.',

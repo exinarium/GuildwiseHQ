@@ -303,6 +303,22 @@ export const LocalReadRepoSchema = z.object({
 });
 export type LocalReadRepo = z.infer<typeof LocalReadRepoSchema>;
 
+/** The one vault a card shift may read (docs/ARCHITECTURE.md section 16.1): its project vault, or the organization vault. */
+export const ShiftVaultSchema = z.object({
+  vaultId: VaultIdSchema,
+  kind: VaultEventKind,
+  /** `projects/<name>` inside the vault. */
+  folder: VaultFolderSchema,
+});
+export type ShiftVault = z.infer<typeof ShiftVaultSchema>;
+
+/**
+ * The one vault a chat may read (read-only): the project's vault, or the organization vault. `folder` is absent for a chat
+ * with no project (the organization vault as a whole). Knowledge never crosses organizations.
+ */
+export const ChatVaultSchema = ShiftVaultSchema.extend({ folder: VaultFolderSchema.optional() });
+export type ChatVault = z.infer<typeof ChatVaultSchema>;
+
 export const ChatContextSchema = z.object({
   /** The organization of the chat (the runner resolves the organization source folder with it). */
   orgId: z.uuid().optional(),
@@ -322,6 +338,8 @@ export const ChatContextSchema = z.object({
   intake: IntakeContextSchema.optional(),
   /** Plugin MCP servers the project's Owner granted (names only; the runner holds the configuration). */
   mcpServers: z.array(z.string()).optional(),
+  /** The knowledge vault this chat may read (read-only; absent: none for this workstation). */
+  vault: ChatVaultSchema.optional(),
 });
 export type ChatContext = z.infer<typeof ChatContextSchema>;
 
@@ -441,15 +459,6 @@ export const RunnerCommandNameSchema = z.enum([
   'org.folder',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
-
-/** The one vault a card shift may read (docs/ARCHITECTURE.md section 16.1): its project vault, or the organization vault. */
-export const ShiftVaultSchema = z.object({
-  vaultId: VaultIdSchema,
-  kind: VaultEventKind,
-  /** `projects/<name>` inside the vault. */
-  folder: VaultFolderSchema,
-});
-export type ShiftVault = z.infer<typeof ShiftVaultSchema>;
 
 /** Typed payloads for the commands; `command.payload` is the loose record on the wire. */
 export const CommandPayloadSchemas = {

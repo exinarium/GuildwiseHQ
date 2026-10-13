@@ -14,6 +14,7 @@ import { ownsDevopsMachine, sharesAllowedProject } from '../commands/chats.ts';
 import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../commands/common.ts';
 import { intakeContext } from '../commands/intake.ts';
 import { grantedMcpServers, orgGrantedMcpServers } from '../commands/mcp-servers.ts';
+import { vaultForConversation } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -188,6 +189,12 @@ export class ChatRelay {
       const mcpGranted = row.thread_project_id
         ? await grantedMcpServers(ctx.pool, row.thread_project_id)
         : await orgGrantedMcpServers(ctx.pool, row.org_id, userId);
+      // The knowledge vault this chat may read (read-only): the project's, else the organization's (Owner/Admin workstations).
+      const vault = await vaultForConversation(ctx.pool, {
+        orgId: row.org_id,
+        projectId: row.thread_project_id,
+        workstationId: row.workstation_id,
+      });
       const context: ChatContext = {
         orgId: row.org_id,
         ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),
@@ -199,6 +206,7 @@ export class ChatRelay {
         ...(readRepos.length > 0 ? { readRepos } : {}),
         ...(localRepos.length > 0 ? { localReadRepos: localRepos } : {}),
         ...(mcpGranted.length > 0 ? { mcpServers: mcpGranted } : {}),
+        ...(vault ? { vault } : {}),
         ...(intake ? { intake } : {}),
       };
       const sent = ctx.services.runners.send(
