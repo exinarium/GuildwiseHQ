@@ -224,6 +224,7 @@ export async function getProjectDetail(
       forge: r.forge_kind ?? detectForgeKind(r.remote_url),
       forgeOverride: r.forge_kind ?? null,
       knownBranches: r.known_branches ?? [],
+      knownBranchesAt: iso(r.known_branches_at),
       workingBranchSetAt: iso(r.working_branch_set_at),
       branchQuestionId: questions.find((q) => q.repo_id === r.id)?.id ?? null,
       setup: clones

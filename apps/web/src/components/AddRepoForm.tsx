@@ -65,6 +65,7 @@ export function AddRepoForm({ projectId, onError }: { projectId: string; onError
     setRepoUrl(r.cloneUrl);
     setRepoName(r.fullName.split('/').pop() ?? r.fullName);
     if (r.defaultBranch && !repoBranch) setRepoBranch(r.defaultBranch);
+    if (r.defaultBranch && !repoMain) setRepoMain(r.defaultBranch);
     setOverride('auto');
     setPicking(false);
   };

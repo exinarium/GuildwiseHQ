@@ -669,7 +669,17 @@ export const ShiftStartedSchema = msg('shift.started', {
     })
     .optional(),
   /** The working branch did not exist: the runner created it from `from` (the default branch) and pushed it. */
-  branchCreated: z.object({ base: z.string(), from: z.string(), pushed: z.boolean() }).optional(),
+  branchCreated: z
+    .object({
+      base: z.string(),
+      from: z.string(),
+      pushed: z.boolean(),
+      /** The project's main branch was set explicitly (false: `from` is the host's default, which the runner looked up). */
+      mainBranchSet: z.boolean().optional(),
+    })
+    .optional(),
+  /** The branches origin has, as of the fetch for this shift (agent branches left out; absent: not known). */
+  originBranches: z.array(z.string()).max(200).optional(),
   /** What the "merge latest main first" step did (absent: it did not run). */
   syncMain: z
     .object({

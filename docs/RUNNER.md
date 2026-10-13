@@ -859,6 +859,19 @@ organization, so the project id keeps two same-keyed projects on one workstation
 same card. Worktrees created by older runner versions under `worktrees/<KEY>/<REF>` keep working: reuse follows the path
 the server recorded for the card. They are removed after finalize (`worktree.remove`), when the card ends without a merge, and by the sweep below.
 
+#### Base branch and the per-clone lock
+
+When a working branch has to be created and the project has no main branch set, the runner asks the host for its default
+branch (`git ls-remote --symref origin HEAD`, with the repository's git credentials) and points the clone's `origin/HEAD`
+at it; the clone's own `origin/HEAD` is only a fallback because it is fixed at clone time and goes stale. If the host
+cannot be asked and the clone has more than one of `main`, `master`, `develop`, `trunk`, the runner does not guess: the
+shift start (or pull request, or merge of main) fails with "Set the main branch for <repo> in Project settings". A working
+branch created without an explicit main branch is noted on the card and on the desk.
+
+All changes to one clone (worktree add and remove, branch create and delete, config writes, fetches, merging main, merge
+completions) run one after another under a per-repository lock, so shifts starting together in one clone do not collide
+on `.git/config.lock`. A git command that still hits "could not lock" or `index.lock` is retried a few times.
+
 #### Stale-worktree sweep
 
 A safety net for worktrees nobody removed (a crash, a card cancelled while the runner was offline, a database that was

@@ -370,9 +370,20 @@ export const projectProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `UPDATE project_repos SET working_branch_created_at=$2, working_branch_created_from=$3,
-              working_branch_created_pushed=$4 WHERE id=$1`,
-      [p.repoId, e.createdAt, p.from, p.pushed],
+              working_branch_created_pushed=$4,
+              known_branches = CASE WHEN known_branches ? $5::text THEN known_branches
+                                    ELSE known_branches || to_jsonb($5::text) END
+        WHERE id=$1`,
+      [p.repoId, e.createdAt, p.from, p.pushed, p.workingBranch],
     );
+  },
+  ProjectRepoBranchesObserved: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectRepoBranchesObserved'>).payload;
+    await exec(tx, 'UPDATE project_repos SET known_branches=$2::jsonb, known_branches_at=$3 WHERE id=$1', [
+      p.repoId,
+      JSON.stringify(p.branches),
+      e.createdAt,
+    ]);
   },
   ProjectRepoPathSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectRepoPathSet'>).payload;

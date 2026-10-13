@@ -31,7 +31,13 @@ export function WorkingBranchControl({
   const known = repo.knownBranches ?? [];
   const mainName = repo.mainBranch ?? null;
   const created = repo.workingBranchCreated ?? null;
-  const missing = !!repo.workingBranch && !created && known.length > 0 && !known.includes(repo.workingBranch);
+  // Only a list of known age can say a branch was not seen; an undated one proves nothing.
+  const missing =
+    !!repo.workingBranch &&
+    !created &&
+    known.length > 0 &&
+    !!repo.knownBranchesAt &&
+    !known.includes(repo.workingBranch);
   const sameBranch = !!repo.workingBranch && mainName === repo.workingBranch;
   return (
     <div className="mt-2 flex flex-col gap-2" data-testid={`branches-${repo.name}`}>
@@ -45,8 +51,9 @@ export function WorkingBranchControl({
       )}
       {missing && (
         <p className="text-xs text-subtle" data-testid={`working-branch-missing-${repo.name}`}>
-          The working branch {repo.workingBranch} does not exist in the repository yet. It will be created
-          from {mainName ?? 'the main branch'} and pushed when the first card starts.
+          The working branch {repo.workingBranch} has not been seen in the repository yet (branch list of{' '}
+          {formatDate(repo.knownBranchesAt as string)}). If it is not there, it is created from{' '}
+          {mainName ?? 'the main branch'} and pushed when the first card starts.
         </p>
       )}
       {sameBranch && (
@@ -95,6 +102,12 @@ function MainBranchRow({
         )}
       </div>
       <p className="text-xs text-subtle">{MAIN_BRANCH_EXPLAINER}</p>
+      {!repo.mainBranch && (
+        <p role="note" className="text-xs text-amber-700">
+          Main branch not set: the runner uses the host's default (its name is not known here). Set it if your main
+          branch is not the host's default.
+        </p>
+      )}
       {editing && (
         <form
           onSubmit={submit}

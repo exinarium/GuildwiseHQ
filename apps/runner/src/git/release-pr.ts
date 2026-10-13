@@ -1,6 +1,7 @@
+import { basename } from 'node:path';
 import { isSafeGitRef, type RepoOpenPrPayload, type RepoOpenPrResult } from '@aom/shared';
 import type { PrCreator } from './gh.ts';
-import { defaultBranchOf, git, hasRemote, revParse } from './git.ts';
+import { ambiguousMainMessage, git, hasRemote, resolveDefaultBranch, revParse } from './git.ts';
 import type { GitAuth } from './worktrees.ts';
 
 export interface ReleasePrInput {
@@ -30,7 +31,10 @@ export async function openReleasePr(input: ReleasePrInput): Promise<RepoOpenPrRe
 
   const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
   const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
-  const base = p.base ?? (await defaultBranchOf(repoPath));
+  const found = p.base ? null : await resolveDefaultBranch(repoPath, input.auth ? { auth: input.auth } : {});
+  if (found && !found.branch && found.ambiguous.length > 1)
+    return { ok: false, error: ambiguousMainMessage(basename(repoPath), found.ambiguous) };
+  const base = p.base ?? found?.branch;
   if (!base)
     return {
       ok: false,

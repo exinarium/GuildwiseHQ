@@ -81,6 +81,7 @@ export async function architectMergeMain(ctx: ArchitectGitContext): Promise<GitR
   const r = await mergeMainIntoCard(ctx.worktree, {
     ...(ctx.mainBranch ? { mainBranch: ctx.mainBranch } : {}),
     ref: ctx.ref,
+    ...(ctx.auth ? { auth: ctx.auth } : {}),
   });
   if ('error' in r) return { ok: false, error: r.error };
   ctx.recordMainSha(r.main);

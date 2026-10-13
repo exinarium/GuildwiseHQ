@@ -93,14 +93,31 @@ describe('the main branch and the working branch of a repository', () => {
     const first = wrap(
       <WorkingBranchControl
         projectId={ID(2)}
-        repo={repoDto({ workingBranch: 'next', mainBranch: 'main' }) as never}
+        repo={
+          repoDto({
+            workingBranch: 'next',
+            mainBranch: 'main',
+            knownBranchesAt: '2026-10-12T08:00:00.000Z',
+          }) as never
+        }
         isOwner
       />,
     );
     expect(await screen.findByTestId('working-branch-missing-shop')).toHaveTextContent(
-      'does not exist in the repository yet. It will be created from main and pushed when the first card starts',
+      'has not been seen in the repository yet',
     );
     first.unmount();
+    // a branch list of unknown age proves nothing: no claim at all
+    const undated = wrap(
+      <WorkingBranchControl
+        projectId={ID(2)}
+        repo={repoDto({ workingBranch: 'next', mainBranch: 'main' }) as never}
+        isOwner
+      />,
+    );
+    await screen.findByTestId('main-branch-shop');
+    expect(screen.queryByTestId('working-branch-missing-shop')).toBeNull();
+    undated.unmount();
     wrap(
       <WorkingBranchControl
         projectId={ID(2)}
@@ -117,6 +134,15 @@ describe('the main branch and the working branch of a repository', () => {
     expect(await screen.findByTestId('working-branch-created-shop')).toHaveTextContent(
       'created from main and pushed',
     );
+  });
+
+  it('warns when the main branch is not set, and not when it is', async () => {
+    const first = wrap(<WorkingBranchControl projectId={ID(2)} repo={repoDto() as never} isOwner />);
+    expect(await screen.findByRole('note')).toHaveTextContent('Main branch not set: the runner uses the host');
+    first.unmount();
+    wrap(<WorkingBranchControl projectId={ID(2)} repo={repoDto({ mainBranch: 'main' }) as never} isOwner />);
+    await screen.findByTestId('main-branch-shop');
+    expect(screen.queryByRole('note')).toBeNull();
   });
 
   it('opens a pull request from the working branch to the main branch (owner only, only when they differ)', async () => {

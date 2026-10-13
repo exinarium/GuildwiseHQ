@@ -37,7 +37,7 @@ async function developCard() {
     },
     defaultPath: path,
   });
-  expect(w.createdBranch).toEqual({ base: 'develop', from: 'main', pushed: true });
+  expect(w.createdBranch).toEqual({ base: 'develop', from: 'main', pushed: true, mainBranchSet: true });
   writeFileSync(join(path, 'thing.txt'), 'thing\n');
   sh(path, 'git', ['add', '-A']);
   sh(path, 'git', ['commit', '-m', 'add thing']);

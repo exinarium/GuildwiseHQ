@@ -60,7 +60,7 @@ import {
   type GitReply,
 } from '../git/architect-git.ts';
 import { computeDiffStats, riskTier } from '../git/diffstat.ts';
-import { git } from '../git/git.ts';
+import { git, originBranchNames } from '../git/git.ts';
 import {
   abortMerge,
   mergeInProgress,
@@ -182,6 +182,8 @@ interface ActiveShift {
   worktree?: WorktreeResult;
   startSha?: string;
   branchesAtStart: BranchSnapshot;
+  /** The branches origin had at this shift's fetch (reported on shift.started so the server's branch list is fresh). */
+  originBranches?: string[];
   stopReason?: StopReason | 'timeout';
   reportState: 'none' | 'pending' | 'accepted';
   pendingReports: Map<string, (r: ReportVerdict) => void>;
@@ -476,6 +478,8 @@ export class ShiftSupervisor {
       cwd = s.worktree.path;
       s.startSha = (await git(cwd, ['rev-parse', 'HEAD'])).stdout.trim();
       s.branchesAtStart = await snapshotBranches(cwd);
+      const seen = await originBranchNames(repo.localPath);
+      if (seen.length) s.originBranches = seen;
     }
 
     // Test environment (spec "Testing strategy"): a tester needs the deployed app and Docker. If not, the server
@@ -621,6 +625,7 @@ export class ShiftSupervisor {
             }
           : {}),
         ...(s.worktree?.createdBranch ? { branchCreated: s.worktree.createdBranch } : {}),
+        ...(s.originBranches ? { originBranches: s.originBranches } : {}),
         ...(s.syncMain ? { syncMain: s.syncMain } : {}),
       });
     if (s.worktree?.createdBranch && !s.startedSent) {
@@ -834,6 +839,7 @@ export class ShiftSupervisor {
     const r = await mergeMainIntoCard(wt, {
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
+      ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
     });
     if ('error' in r) {
       this.log.warn(`merging the latest main into ${msg.brief.card.ref} failed: ${r.error}`);

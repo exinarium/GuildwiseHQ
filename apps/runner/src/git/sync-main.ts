@@ -1,7 +1,7 @@
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { isSafeGitRef } from '@aom/shared';
 import { isProtectedBranchRejection } from './gh.ts';
-import { defaultBranchOf, git, gitOk, hasRemote, revParse } from './git.ts';
+import { ambiguousMainMessage, git, gitOk, hasRemote, resolveDefaultBranch, revParse } from './git.ts';
 import { identityEnv, withIntegrationWorktree } from './integration.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
@@ -63,7 +63,8 @@ export async function syncMainIntoWorking(input: SyncMainInput): Promise<SyncMai
   if (input.mainBranch !== undefined && !isSafeGitRef(input.mainBranch)) return { kind: 'nothing' };
   if (!(await hasRemote(repoPath))) return { kind: 'nothing' };
   return withRepoLock(repoPath, async (): Promise<SyncMainOutcome> => {
-    const main = input.mainBranch ?? (await defaultBranchOf(repoPath));
+    // Unset: the remote's own default (never a guess between main and master; with two candidates nothing is merged).
+    const main = input.mainBranch ?? (await resolveDefaultBranch(repoPath, { auth: input.auth })).branch;
     if (!main || main === working || !isSafeGitRef(main)) return { kind: 'nothing' };
     const env = identityEnv(input.identity);
     const message = `Merge ${main} into ${working} (aom ${input.ref})`;
@@ -135,9 +136,15 @@ export type CardMergeOutcome =
  */
 export async function mergeMainIntoCard(
   worktree: string,
-  opts: { mainBranch?: string; ref: string; identity?: { name: string; email: string } },
+  opts: { mainBranch?: string; ref: string; identity?: { name: string; email: string }; auth?: GitAuth },
 ): Promise<CardMergeOutcome | { error: string }> {
-  const main = opts.mainBranch ?? (await defaultBranchOf(worktree));
+  let main = opts.mainBranch;
+  if (!main) {
+    const found = await resolveDefaultBranch(worktree, opts.auth ? { auth: opts.auth } : {});
+    if (!found.branch && found.ambiguous.length > 1)
+      return { error: ambiguousMainMessage(basename(worktree), found.ambiguous) };
+    main = found.branch ?? undefined;
+  }
   if (!main || !isSafeGitRef(main)) return { error: 'the main branch of this repository is not known' };
   if (await hasRemote(worktree)) await git(worktree, ['fetch', '--', 'origin', main]);
   const target = (await revParse(worktree, `refs/remotes/origin/${main}`)) ? `origin/${main}` : main;

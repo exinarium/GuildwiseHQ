@@ -1,10 +1,20 @@
 import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { basename, dirname } from 'node:path';
 import type { ForgeKind, WorktreeSpec } from '@aom/shared';
 import { isSafeGitRef } from '@aom/shared';
 import { confineAny } from '../fs-safe.ts';
-import { branchNames, currentBranch, defaultBranchOf, git, gitOk, hasRemote, revParse } from './git.ts';
+import {
+  ambiguousMainMessage,
+  branchNames,
+  currentBranch,
+  git,
+  gitOk,
+  hasRemote,
+  resolveDefaultBranch,
+  revParse,
+} from './git.ts';
+import { withRepoLock } from './repo-lock.ts';
 
 export class WorktreeError extends Error {}
 
@@ -33,7 +43,7 @@ export interface WorktreeResult {
   created: boolean;
   headSha: string;
   /** Set when the working branch did not exist and was created (and pushed) from the repository's default branch. */
-  createdBranch?: { base: string; from: string; pushed: boolean };
+  createdBranch?: { base: string; from: string; pushed: boolean; mainBranchSet: boolean };
 }
 
 export interface EnsureWorktreeInput {
@@ -71,6 +81,12 @@ async function isWorktreeOn(path: string, branch: string): Promise<boolean> {
  * Both modes are idempotent so a rejected or crashed first shift can be retried. Throws `WorktreeError` otherwise.
  */
 export async function ensureWorktree(input: EnsureWorktreeInput): Promise<WorktreeResult> {
+  // Worktree add, branch create and the config writes behind them are serialized per clone (two shifts starting at once
+  // collided on .git/config.lock).
+  return withRepoLock(input.repoPath, () => ensureWorktreeLocked(input));
+}
+
+async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<WorktreeResult> {
   const { repoPath, spec } = input;
   const branch = spec.branchName;
   const base = spec.baseBranch;
@@ -129,6 +145,7 @@ export async function ensureWorktree(input: EnsureWorktreeInput): Promise<Worktr
   if (!(await revParse(repoPath, startPoint))) {
     // The working branch exists neither locally nor on origin: create it from the default branch and push it.
     const made = await createWorkingBranch(repoPath, base, { mainBranch: spec.mainBranch, auth: input.auth });
+    if (!made.ok && made.refusal) throw new WorktreeError(made.refusal);
     if (!made.ok) throw new BaseBranchMissingError(base, made.defaultBranch, made.branches, made.error);
     createdBranch = made.created;
     startPoint = base;
@@ -150,10 +167,33 @@ export async function createWorkingBranch(
   opts: { mainBranch?: string; auth?: GitAuth } = {},
 ): Promise<
   | { ok: true; created: NonNullable<WorktreeResult['createdBranch']> }
-  | { ok: false; defaultBranch: string | null; branches: string[]; error?: string }
+  | { ok: false; defaultBranch: string | null; branches: string[]; error?: string; refusal?: string }
 > {
+  return withRepoLock(repoPath, () => createWorkingBranchLocked(repoPath, base, opts));
+}
+
+async function createWorkingBranchLocked(
+  repoPath: string,
+  base: string,
+  opts: { mainBranch?: string; auth?: GitAuth },
+): ReturnType<typeof createWorkingBranch> {
   const branches = await branchNames(repoPath);
-  const def = opts.mainBranch ?? (await defaultBranchOf(repoPath, branches));
+  let def = opts.mainBranch;
+  if (!def) {
+    // Unset: ask the remote what its default is (the clone's origin/HEAD goes stale); never guess between candidates.
+    const found = await resolveDefaultBranch(repoPath, {
+      branches,
+      ...(opts.auth ? { auth: (url: string) => (opts.auth as GitAuth)(url) } : {}),
+    });
+    if (!found.branch && found.ambiguous.length > 1)
+      return {
+        ok: false,
+        defaultBranch: null,
+        branches,
+        refusal: ambiguousMainMessage(basename(repoPath), found.ambiguous),
+      };
+    def = found.branch ?? undefined;
+  }
   if (!def || !isSafeGitRef(def)) return { ok: false, defaultBranch: null, branches };
   const failed = (error: string) => ({ ok: false as const, defaultBranch: def, branches, error });
   const remote = await hasRemote(repoPath);
@@ -178,7 +218,7 @@ export async function createWorkingBranch(
       );
     }
   }
-  return { ok: true, created: { base, from: def, pushed: remote } };
+  return { ok: true, created: { base, from: def, pushed: remote, mainBranchSet: opts.mainBranch !== undefined } };
 }
 
 /** `worktree.remove` command: idempotent. Deletes the branch only when asked. */
@@ -190,6 +230,22 @@ export async function removeWorktree(input: {
   roots: string[];
 }): Promise<{ removed: boolean; branchDeleted: boolean }> {
   const path = confineAny(input.roots, input.path);
+  const repoOf = async (): Promise<string | null> => {
+    if (!existsSync(path)) return null;
+    const r = await git(path, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    if (r.exitCode !== 0) return null;
+    const common = r.stdout.trim();
+    return /[\\/]\.git$/.test(common) ? common.slice(0, -5) : common;
+  };
+  const clone = await repoOf();
+  // Serialized with the other changes to that clone (worktree add, branch create).
+  return clone ? withRepoLock(clone, () => removeWorktreeLocked(input, path)) : removeWorktreeLocked(input, path);
+}
+
+async function removeWorktreeLocked(
+  input: { branchName?: string; deleteBranch?: boolean },
+  path: string,
+): Promise<{ removed: boolean; branchDeleted: boolean }> {
   if (input.branchName !== undefined && !isSafeGitRef(input.branchName))
     throw new WorktreeError(`refusing unsafe branch name ${JSON.stringify(input.branchName)}`);
   let repo: string | null = null;

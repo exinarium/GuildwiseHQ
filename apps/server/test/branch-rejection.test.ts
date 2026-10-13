@@ -227,6 +227,39 @@ describe('a working branch the runner created', () => {
     r.ended(start.shiftId, 'stopped');
   });
 
+  it('adds the created branch to the repository branch list, notes the unset main branch, and takes the origin list', async () => {
+    await reset();
+    await w.hire('Bea', 'builder', 'junior');
+    const card = await w.card({ title: 'Branch list' });
+    const start = await p.next('Bea');
+    r.accepted(start.shiftId);
+    r.send('shift.started', {
+      shiftId: start.shiftId,
+      branchCreated: { base: 'pieter/dev', from: 'main', pushed: true, mainBranchSet: false },
+    });
+    await new Promise((res) => setTimeout(res, 300));
+    let proj = await ok<any>(owner('GET', `/api/projects/${w.projectId}`));
+    let repo = proj.repos.find((x: any) => x.id === w.repoId);
+    expect(repo.knownBranches).toContain('pieter/dev');
+    const notes = await q(`SELECT payload FROM events WHERE type='ThreadMessagePosted' AND stream_id=$1`, [
+      `thread-${card.id}`,
+    ]);
+    expect(notes.map((e) => e.payload.body).join('\n')).toContain('The main branch is not set');
+    const alerts = await q(`SELECT 1 FROM desk_items WHERE subkind='main_branch_unset' AND card_id=$1`, [
+      card.id,
+    ]);
+    expect(alerts).toHaveLength(1);
+
+    // origin's own list replaces the stored one and dates it
+    r.send('shift.started', { shiftId: start.shiftId, originBranches: ['main', 'pieter/dev', 'feature/x'] });
+    await new Promise((res) => setTimeout(res, 300));
+    proj = await ok<any>(owner('GET', `/api/projects/${w.projectId}`));
+    repo = proj.repos.find((x: any) => x.id === w.repoId);
+    expect(repo.knownBranches).toEqual(['main', 'pieter/dev', 'feature/x']);
+    expect(repo.knownBranchesAt).toBeTruthy();
+    r.ended(start.shiftId, 'stopped');
+  });
+
   it('a failed creation reaches the question', async () => {
     await reset();
     await w.hire('Bea', 'builder', 'junior');
