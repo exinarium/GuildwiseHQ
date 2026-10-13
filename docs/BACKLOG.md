@@ -10,6 +10,35 @@ Leftovers on done items: #20 (MCP tool names per server are not listed; refreshe
 a configured token is used) and #27 (a reopened research card keeps its published status; a reopened cancelled bug child
 does not put its resumed parent back to waiting).
 
+### 34. Integrations page: set up a workstation's integrations and API keys in one place
+
+**Owner request (2026-10-13):** an easy way to add the API keys for Bitbucket, GitHub, Jira and whatever integrations
+follow. Keys are probably per workstation; a dedicated **Integrations** page in the app is the wanted shape.
+
+**Today** each integration has its own path, mostly on the command line of the workstation:
+- Forges: `aom-runner git-connect` (Bitbucket API token, Azure DevOps PAT, GitLab PAT into
+  `<data dir>/secrets/git-tokens.json`, `apps/runner/src/forge/tokens.ts`), the forge CLIs' own logins (`gh`, `glab`), or
+  SSH keys (`apps/runner/src/forge/connect.ts`, `ssh.ts`). The status shows on Workstations and in Project settings.
+- Jira: `aom-runner jira-connect` (`apps/runner/src/external/jira-store.ts`).
+- Plugin MCP servers: configured in Claude Code itself; Guildwise only sees the report (#20).
+- Platform-level keys (Paystack, Postmark) are server env, not part of this.
+
+**Wanted (design first):**
+- An **Integrations** page per workstation (reachable from Workstations, and from the "not connected" warnings in
+  Project settings and on cards): one tile per integration with its status (connected, as whom, scopes, last checked,
+  expiry where known), **Connect / Replace / Test / Remove**, and step-by-step help with links to where the token is made
+  and which scopes it needs (the Jira scopes question showed this is needed).
+- A **registry of integration kinds** (id, label, fields, required scopes, help text, test call, where the runner keeps
+  it), so a new integration is one entry plus its adapter, not a new CLI command and a new screen.
+- **Secrets stay on the workstation** (the current rule: the server stores connected / not connected, never the token).
+  Decide how a key typed in the browser reaches the runner: relayed over the runner's websocket and never stored or logged
+  on the server (end-to-end encrypted to the runner's key would be better), or a local-only page the runner serves on
+  localhost. The CLI commands stay for headless machines.
+- Who may set them: the workstation's own user (it is their machine and their credentials); org Owners see status only.
+- Optional later: organisation-wide keys (one Jira service account for all workstations) stored encrypted, if the owner
+  wants that; and OAuth sign-in where a provider offers it (Atlassian, GitHub app) instead of pasted tokens.
+- Help docs and What's new, runner version bump, tests in runner, server and web.
+
 ### 32. Cap or summarise the handoff notes in shift instructions
 
 Every shift prompt carries **all** previous handoffs of the card in full (`packages/shared/src/prompt/shift-prompt.ts`,
