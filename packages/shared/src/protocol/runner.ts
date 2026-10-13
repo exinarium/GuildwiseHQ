@@ -205,6 +205,8 @@ export const ShiftBriefSchema = z.object({
       /** The folder the architect may write documents in (`repo`); the runner adds it to the writable globs. */
       folder: z.string().optional(),
       investigationOnly: z.boolean(),
+      /** Set when the vault was asked for but the project has none: the report goes in the repository (one line for the prompt). */
+      note: z.string().optional(),
       /** Merge the latest main branch first applies to this card (the architect resolves a conflict). */
       mergeMainFirst: z.boolean().default(false),
       /** The report that was recorded by the investigate stage (later stages read it). */

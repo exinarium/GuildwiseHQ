@@ -91,6 +91,14 @@ describe('project settings: Architect', () => {
     });
   });
 
+  it('disables the vault option and says why when the project has no vault', () => {
+    wrap(<ArchitectPanel projectId={PROJECT} project={{ ...project(), hasVault: false }} canChange />);
+    const option = screen.getByRole('option', { name: /knowledge vault/ });
+    expect(option).toBeDisabled();
+    expect(option).toHaveTextContent('this project has no vault');
+    expect(screen.getByText(/no knowledge vault, so reports go in the repository/)).toBeInTheDocument();
+  });
+
   it('refuses an absolute or parent path before calling the server', async () => {
     const user = userEvent.setup();
     wrap(<ArchitectPanel projectId={PROJECT} project={project()} canChange />);

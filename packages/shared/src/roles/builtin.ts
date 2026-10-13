@@ -49,7 +49,9 @@ How to work:
 2. If the brief says a merge of the main branch is waiting in your worktree (it lists the conflicted files), resolve it first: fix the conflicted files so both sides' intent survives, \`git add\` them, run \`git commit --no-edit\`, then \`aom git verify-merge\`. Never change behaviour while resolving a conflict. \`aom git fetch\` and \`aom git merge-main\` let you refresh and re-merge origin's main branch during your shift.
 3. Investigate: read the card's repository (your worktree), read the other repositories listed under "Folders you can read" (they are read-only; use them for comparisons and to see how a sibling project solved the same problem), and search the web for best practice. Run code only read-only, or in a copy under your scratch directory (like the reviewer).
 4. Write the result to the report path named in the "Investigation" section of the card (by default docs/investigations/<REF>-<slug>.md in your worktree; a path starting with "vault:" or a vault location means a file under your scratch directory that the runner copies into the knowledge vault). Structure: the question, findings, comparison of the options, the recommendation. For a card that will be built also write the design: the files and modules to change, the data model, the API, risks, and how each acceptance criterion maps to the design. Commit the report on the card branch.
+   The knowledge vault is read-only for you: never write into the vault folder (or any vault clone) yourself. For a vault report you write the file in your scratch directory only; \`aom design\` or \`aom investigate\` hands it to the runner, which files it in the vault. If the brief says the vault location is not available for this project, the report goes in the repository as the brief says.
 5. A card that will be built: \`aom design --report <path> --summary "<3-6 lines for the builder>"\` (outcome handoff, the card goes to build). An investigation-only card: \`aom investigate --report <path> --summary "<what you found and recommend>"\` (outcome report, the card goes to finalize where the BA records it).
+   If the report is refused for a location problem (for example there is no vault), ask once with \`aom question\`, keep the report file in your scratch directory, and give its full path in the question so the work is not lost. Do not retry in a different place on your own.
 6. Anything only the owner can decide goes to \`aom question\` (blocking) with options and a recommendation. If the card is unclear, ask with \`--doing "spec unclear"\`.
 7. \`aom git push\` publishes the card branch when the report should be visible before the card ends (optional).`;
 
@@ -259,6 +261,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'architect',
+    version: 2,
     name: 'Architect',
     purpose:
       'Investigates and designs cards before they are built: reads the code (any repository of the organization), compares, writes the design or investigation report and merges the main branch.',

@@ -14,13 +14,14 @@ import {
   resolveReportTarget,
   type ServerToRunnerOf,
   type ShiftBrief,
+  VAULT_UNAVAILABLE_NOTE,
   type WorktreeSpec,
 } from '@aom/shared';
 import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
 import { workflowView } from '../commands/cards.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { grantedMcpServers } from '../commands/mcp-servers.ts';
-import { vaultForProject } from '../commands/vaults.ts';
+import { projectHasVault, vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import type { ClaimResult } from '../dispatcher/claim.ts';
@@ -56,7 +57,11 @@ export async function agentSpecFor(ctx: Ctx, a: Row): Promise<AgentRuntimeSpec> 
 }
 
 /** Brief for one card shift: what the agent sees (docs/ARCHITECTURE.md section 11.2, ShiftBrief). */
-export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | null> {
+export async function buildBrief(
+  ctx: Ctx,
+  shift: Row,
+  opts: { vaultAvailable?: boolean } = {},
+): Promise<ShiftBrief | null> {
   const card = await one(ctx.pool, 'SELECT * FROM cards WHERE id=$1', [shift.card_id]);
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [shift.agent_id]);
   if (!card || !agent) return null;
@@ -171,7 +176,13 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       skills: [...new Set([...(agent.skills as string[]), ...(extension?.skills ?? [])])],
     },
     ...(card.design_needed || card.investigation_only || card.investigation
-      ? { investigation: investigationBrief(card, project) }
+      ? {
+          investigation: investigationBrief(
+            card,
+            project,
+            opts.vaultAvailable ?? (await projectHasVault(ctx.pool, project.id)),
+          ),
+        }
       : {}),
     handoffs: handoffs.map((h) => ({
       stage: h.stage,
@@ -223,13 +234,18 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
 }
 
 /** Where the architect writes its report, and what was recorded once it did (docs/design/architect-and-workflows.md 3.4). */
-function investigationBrief(card: Row, project: Row): NonNullable<ShiftBrief['investigation']> {
+function investigationBrief(
+  card: Row,
+  project: Row,
+  vaultAvailable: boolean,
+): NonNullable<ShiftBrief['investigation']> {
   const target = resolveReportTarget({
     cardReportPath: card.fields?.reportPath,
     projectPath: project.investigation_path,
     projectLocation: project.investigation_location,
     ref: card.ref,
     title: card.title,
+    vaultAvailable,
   });
   const rec = card.investigation as {
     reportPath: string;
@@ -242,6 +258,7 @@ function investigationBrief(card: Row, project: Row): NonNullable<ShiftBrief['in
     location: target.location,
     ...(target.location === 'repo' && target.folder ? { folder: target.folder } : {}),
     investigationOnly: card.investigation_only ?? false,
+    ...(target.vaultUnavailable ? { note: VAULT_UNAVAILABLE_NOTE } : {}),
     mergeMainFirst: card.merge_main_first ?? project.merge_main_first ?? true,
     ...(rec
       ? {
@@ -261,7 +278,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
   const shift = await one(ctx.pool, 'SELECT * FROM shifts WHERE id=$1', [claim.shiftId]);
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [claim.agentId]);
   if (!shift || !agent) return null;
-  const brief = await buildBrief(ctx, shift);
+  let brief = await buildBrief(ctx, shift);
   if (!brief) return null;
   const worktree: WorktreeSpec | null = claim.worktree
     ? {
@@ -277,6 +294,9 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
   // The one vault this card may read: its project vault (or the organization vault), only if this workstation's user can access it.
   const ws = await one(ctx.pool, 'SELECT user_id FROM workstations WHERE id=$1', [claim.workstationId]);
   const vault = ws ? await vaultForProject(ctx.pool, brief.project.id, ws.user_id) : null;
+  // This workstation's user cannot reach a vault the project-level check found (an organization vault): the runner would refuse a vault report.
+  if (!vault && brief.investigation?.location === 'vault')
+    brief = (await buildBrief(ctx, shift, { vaultAvailable: false })) ?? brief;
   // plugin MCP servers the project's Owner granted (names only; the runner holds the configuration)
   const mcp = await grantedMcpServers(ctx.pool, brief.project.id);
   return {

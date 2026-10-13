@@ -167,7 +167,7 @@ export function CardFormFields({
               label="Report path (optional)"
               value={v.fields.reportPath ?? ''}
               error={errors.reportPath}
-              hint="A file or folder in the repository, or vault:<path>. Default: the project's investigation folder."
+              hint="A file or folder in the repository, or vault:<path> (vault: only works when the project has a knowledge vault). Default: the project's investigation folder."
               onChange={(e) => setField('reportPath', e.target.value)}
             />
           )}

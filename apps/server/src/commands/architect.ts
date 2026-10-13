@@ -11,9 +11,10 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { forbidden } from '../errors.ts';
+import { badRequest, forbidden } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { NO_VAULT_MESSAGE, projectHasVault } from './vaults.ts';
 
 /** Is an architect hired (an active agent with the `architect` role) in the organization? */
 export async function architectHired(db: Queryable, orgId: string): Promise<boolean> {
@@ -41,6 +42,8 @@ export async function setArchitectSettings(
     const orgAdmin = isOrgManager({ orgRole: org.role }) && org.id === p.org_id;
     if (p.my_role !== 'owner' && !orgAdmin)
       throw forbidden('only the project Owner or an organization Owner or Admin can do this');
+    if (req.investigationLocation === 'vault' && !(await projectHasVault(tx, projectId)))
+      throw badRequest('no_vault', NO_VAULT_MESSAGE);
     const same =
       (p.design_step ?? false) === req.designStep &&
       (p.merge_main_first ?? true) === req.mergeMainFirst &&

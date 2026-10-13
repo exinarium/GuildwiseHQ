@@ -73,6 +73,7 @@ function investigationContext(brief: ShiftBrief): string {
         ? `- Write your report to the file \`${inv.reportPath}\` under your scratch directory (the runner copies it into the project's knowledge vault when you report). It is not committed to the repository.`
         : `- Write your report to \`${inv.reportPath}\` in your worktree and commit it on the card branch.`,
     );
+    if (inv.note) lines.push(`- ${inv.note}`);
     if (inv.mergeMainFirst)
       lines.push('- The latest main branch is merged first (see the note on a waiting merge below, if any).');
   }

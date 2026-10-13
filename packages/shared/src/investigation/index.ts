@@ -22,7 +22,12 @@ export interface ReportTarget {
   reportPath: string;
   /** The folder the architect may write documents in (the folder of `reportPath`). */
   folder: string;
+  /** The vault was asked for (project setting or `vault:` on the card) but the project has none: the report goes in the repository. */
+  vaultUnavailable?: boolean;
 }
+
+export const VAULT_UNAVAILABLE_NOTE =
+  "The vault location isn't available for this project, so the report goes in the repository.";
 
 export const reportFileName = (ref: string, title: string): string =>
   `${ref.toUpperCase()}-${slugify(title, 50) || 'investigation'}.md`;
@@ -41,6 +46,8 @@ export function resolveReportTarget(input: {
   projectLocation?: string | null;
   ref: string;
   title: string;
+  /** False: the project has no knowledge vault, a vault location falls back to the repository. Default true. */
+  vaultAvailable?: boolean;
 }): ReportTarget {
   const file = reportFileName(input.ref, input.title);
   const place = (raw: string, location: InvestigationLocation): ReportTarget => {
@@ -49,13 +56,25 @@ export function resolveReportTarget(input: {
     const reportPath = isFile ? clean : clean ? `${clean}/${file}` : file;
     return { location, reportPath, folder: isFile ? dirOf(clean) : clean };
   };
+  const vaultOk = input.vaultAvailable !== false;
+  let fellBack = false;
   const card = typeof input.cardReportPath === 'string' ? input.cardReportPath.trim() : '';
-  if (card && isValidReportPath(card))
-    return card.startsWith('vault:') ? place(card.slice('vault:'.length), 'vault') : place(card, 'repo');
+  if (card && isValidReportPath(card)) {
+    if (!card.startsWith('vault:')) return place(card, 'repo');
+    if (vaultOk) return place(card.slice('vault:'.length), 'vault');
+    fellBack = true;
+  }
   const project = input.projectPath?.trim() ?? '';
-  const location: InvestigationLocation = input.projectLocation === 'vault' ? 'vault' : 'repo';
-  if (project && isValidReportPath(project) && !project.startsWith('vault:')) return place(project, location);
-  return place(INVESTIGATION_DEFAULT_PATH, location);
+  let location: InvestigationLocation = input.projectLocation === 'vault' ? 'vault' : 'repo';
+  if (location === 'vault' && !vaultOk) {
+    location = 'repo';
+    fellBack = true;
+  }
+  const target =
+    project && isValidReportPath(project) && !project.startsWith('vault:')
+      ? place(project, location)
+      : place(INVESTIGATION_DEFAULT_PATH, location);
+  return fellBack ? { ...target, vaultUnavailable: true } : target;
 }
 
 // ------------------------------------------------------------------------------------------------ secrets
