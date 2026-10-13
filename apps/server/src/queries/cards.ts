@@ -20,6 +20,7 @@ import { orgRoleOf } from '../auth/org-context.ts';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
 import { enabledWorkflows } from '../catalogue/project-workflows.ts';
+import { attachmentsOf } from '../commands/card-attachments.ts';
 import { memberRefusal } from '../commands/phases.ts';
 import type { Ctx } from '../context.ts';
 import {
@@ -280,6 +281,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
       data: m.data,
       createdAt: iso(m.created_at) as string,
     })),
+    attachments: await attachmentsOf(ctx.pool, card.id),
     currentShift: shiftRow ? toShiftDto(shiftRow) : null,
     mcpUsage: mcpShifts.map((s) => ({
       shiftId: s.id,
@@ -298,6 +300,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
       canReleaseBackoff: manage && open && !!backoffOf(card, ctx.clock.now()),
       canCancel: manage && open,
       canComment: canCommentOnCard(role),
+      canAttach: manage && open,
     },
     diffStats: lastDiff?.data?.diffStats ?? null,
     testing: await cardTesting(ctx, card, manage),

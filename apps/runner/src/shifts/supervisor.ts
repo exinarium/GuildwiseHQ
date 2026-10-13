@@ -12,6 +12,7 @@ import {
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import {
   type AgentRuntimeSpec,
+  type BriefAttachment,
   type GuardViolation,
   hasTranscript,
   type InvestigationData,
@@ -27,6 +28,7 @@ import {
   outcomeDataSchema,
   type PublishRequest,
   type RepoReport,
+  renderCardAttachments,
   renderReadableFolders,
   type ServerToRunnerOf,
   type ShiftBrief,
@@ -39,6 +41,12 @@ import {
   type VaultWriteCommand,
 } from '@aom/shared';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
+import {
+  cardAttachmentsDir,
+  describeSynced,
+  type ServerHttp,
+  syncCardAttachments,
+} from '../attachments/index.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
 import { cardPayload, shiftTexts } from '../devops/requests.ts';
@@ -118,6 +126,8 @@ export interface SupervisorDeps {
   findRepo: (remoteUrlNormalized: string) => Promise<RepoReport | undefined>;
   /** This workstation's clone by catalog key (path relative to a repoRoot): reference repositories picked on this workstation. */
   findLocal?: (localKey: string) => Promise<{ localPath: string } | undefined>;
+  /** The runner's HTTP calls to the server (attachment bytes). Absent: attachments are not copied. */
+  http?: ServerHttp;
   /** Forwards an rpc to the server (`rpc.request`). */
   rpc: (shiftId: string, method: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>;
   /** Writes (and commits, pushes) a file into a vault clone: `aom publish` puts research notes there (M6). */
@@ -502,6 +512,22 @@ export class ShiftSupervisor {
     const readFolders = mergeReadFolders(registeredFolders, folderRepos);
     if (msg.kind === 'card')
       texts.instructions += `\n${renderReadableFolders(readFolders, { workingDir: cwd })}\n`;
+    // The card's attachments, copied read-only next to the shift (outside the worktree) and listed in the instructions.
+    const attachDir = cardAttachmentsDir(sandbox.tmp);
+    mkdirSync(attachDir, { recursive: true });
+    if (msg.kind === 'card' && this.deps.http) {
+      const wanted = msg.brief.card.attachments ?? [];
+      const synced = await syncCardAttachments({
+        dest: attachDir,
+        shiftId: msg.shiftId,
+        http: this.deps.http,
+        items: wanted.map((attachment) => ({ attachment })),
+      }).catch((err) => ({ files: [], errors: [String(err)] }));
+      for (const e of synced.errors) this.log.warn(`card attachment not copied: ${e}`);
+      if (synced.files.length > 0)
+        texts.instructions += `\n${renderCardAttachments(attachDir, synced.files)}\n`;
+      mkdirSync(attachDir, { recursive: true });
+    }
     if (s.syncMain && msg.kind === 'card') texts.prompt += `\n${mainSyncNote(s.syncMain)}\n`;
     await adapter.writeInstructions(sandbox, texts.instructions);
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
@@ -692,6 +718,7 @@ export class ShiftSupervisor {
           return this.deps.rpc(s.msg.shiftId, req.method, req.params);
         if (req.method === 'card.get')
           return { ok: true, result: cardPayload({ ...s.msg, brief: s.brief ?? s.msg.brief }) };
+        if (req.method === 'card.attachments') return this.cardAttachments(s, req.params);
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
         if (req.method === 'sudo.run') return this.sudoRun(s, req.params);
         if (
@@ -709,6 +736,26 @@ export class ShiftSupervisor {
         return this.deps.rpc(s.msg.shiftId, req.method, req.params);
       },
     };
+  }
+
+  /** `aom card attachments`: copies the attachments of the shift's card again (the server says which ones it may read). */
+  private async cardAttachments(s: ActiveShift, params: Record<string, unknown>): Promise<IpcRpcResponse> {
+    if (!this.deps.http || !s.sandbox)
+      return { ok: false, error: 'attachments are not available on this runner' };
+    const listed = await this.deps.rpc(
+      s.msg.shiftId,
+      'card.attachments',
+      params.ref ? { ref: params.ref } : {},
+    );
+    if (!listed.ok) return listed;
+    const cards = (listed.result as { cards: Array<{ ref: string; attachments: BriefAttachment[] }> }).cards;
+    const synced = await syncCardAttachments({
+      dest: cardAttachmentsDir(s.sandbox.tmp),
+      shiftId: s.msg.shiftId,
+      http: this.deps.http,
+      items: cards.flatMap((c) => c.attachments.map((attachment) => ({ ref: c.ref, attachment }))),
+    });
+    return { ok: true, result: describeSynced(synced) };
   }
 
   /** The guard's view of this shift: the role's scope plus what the project and the main-branch merges add. */

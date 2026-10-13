@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BriefAttachmentSchema } from '../attachments/index.ts';
 import { DevOpsAccessSchema, DevOpsRequester } from '../events/devops.ts';
 import { HygieneReportSchema, HygieneSpecSchema } from '../hygiene/index.ts';
 
@@ -46,6 +47,8 @@ export const DevopsShiftSchema = z.object({
       fields: z.record(z.string(), z.unknown()).optional(),
       project: z.object({ key: z.string(), name: z.string() }).optional(),
       repo: z.string().optional(),
+      /** Files attached to the card (`aom card attachments` copies them next to the shift). */
+      attachments: z.array(BriefAttachmentSchema).optional(),
       /** Latest comments, oldest first. */
       comments: z
         .array(z.object({ authorName: z.string(), kind: z.string(), body: z.string(), at: z.iso.datetime() }))

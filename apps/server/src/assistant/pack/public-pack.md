@@ -39,7 +39,7 @@ Each repository can be on GitHub, GitLab, Bitbucket Cloud, Azure DevOps or a pla
 - Phases: group cards into a milestone; when the last card is done, follow-ups such as deploys or regression runs run in order once you approve them.
 - Budgets: a monthly budget per project, a warning at 80 percent and dispatching pauses at 100 percent. Running shifts finish.
 - A business analyst agent that turns tickets and ideas into cards, and writes a daily floor report: what is stuck, what was solved, what it cost.
-- Intake from Jira and GitHub: the BA maps incoming tickets to projects and drafts cards with specs and test plans.
+- Intake from Jira and GitHub: the BA maps incoming tickets to projects and drafts cards with specs and test plans. It can look at a Jira ticket's screenshots and design files (downloaded on your workstation with your Jira token, which never leaves it), and cards carry file attachments for builders and testers.
 - Outbox: posts to Jira, GitHub or email wait for your approval before they go out.
 - Org design: roles, departments and workflows, designed in a chat with the BA and approved by the Owner.
 - Standing orders and automations (formerly schedules): recurring instructions and work that starts by itself, on a time or when something happens in a workflow.
@@ -139,6 +139,7 @@ Reading the board and its warning banners, creating and editing cards, moving ca
 - Reading the board: The board shows one column per stage (for a Code project: Spec, To do, Rework, In progress, Blocked, Review, Test, Docs, Finalize and Done). Empty columns fold into a small strip; click one to open it. At the top you can search cards, filter by Blocked, Rework or Unassigned, and filter by priority.…
 - Why a card does not move: If a queued card has a warning icon, no agent can pick it up right now. Hover the icon, focus it with the keyboard or click or tap it to see why (Esc closes the explanation):
 - Creating a card: To create a card:
+- Attachments: A card can carry files: screenshots, a design (SVG, PDF), a specification, a log. Use Attachments, Add files on the New card form, or the Attachments section of an open card, where you can also drag files in. Images show as previews; Download saves a file and Remove deletes it.…
 - Editing a card: You can edit a card while it is a draft or queued and unclaimed:
 - Moving cards: To move a card to a different stage (for example to fix a stuck card):
 - Backing off: When three shifts on the same card end with no report within ten minutes (the agent crashed or timed out), the card shows an amber badge such as "backing off until 14:32 (3 failures)", and a "keeps failing" item lands on your desk. Guildwise HQ waits 1 minute before offering it again;…
@@ -186,7 +187,8 @@ The ledger, searching it, vaults and shared knowledge, vault conflicts.
 Intake from Jira and GitHub, unmapped tickets, credentials, the outbox and guardrails.
 - Intake: To bring a ticket into Guildwise HQ:
 - Unmapped tickets: If a ticket does not match a project (for example it is a support request for a system you do not track):
-- Credentials: - Jira: set up via your runner's config file (stays on your machine). - GitHub: uses your machine's gh login (configured with gh auth login).
+- Jira attachments: The tool your BA reads Jira with shows the names of a ticket's attachments, but not the screenshots or design files themselves, and agents have no internet. So the BA asks your workstation's runner to download them with your Jira login.…
+- Credentials: - Jira: on the workstation run aom-runner jira-connect. It asks for your Jira address, your Atlassian e-mail and an API token (create one at id.atlassian.com, Security, API tokens; for Jira Data Center use a personal access token and no e-mail), checks them and saves the token on that computer only.…
 - Outbox: When an agent drafts an update to post back to a ticket (a comment, a status change, etc.), it lands on your desk as an Outbox approval.
 - Guardrails: Before posting, your runner checks the text against your organization's agent names and internal terms. A draft that mentions an agent by name, or gives away internal process details (review scores, rework reasons and similar), is refused even if you approved it. The agent can revise and resubmit.
 

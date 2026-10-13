@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CardAttachmentDtoSchema } from '../attachments/index.ts';
 import {
   CardOrigin,
   CardStatus,
@@ -10,11 +11,11 @@ import {
   ThreadMessageKind,
 } from '../cards/types.ts';
 import { CardChangesSchema } from '../events/card.ts';
+import { CardMcpUsageSchema } from '../mcp/index.ts';
 import { WorkabilitySchema } from './board.ts';
 import { IsoTime } from './common.ts';
 import { SpendBriefSchema } from './costs.ts';
 import { PublicationDtoSchema } from './research.ts';
-import { CardMcpUsageSchema } from '../mcp/index.ts';
 import { ShiftDtoSchema } from './shifts.ts';
 import { CardTestingSchema } from './testing.ts';
 
@@ -202,6 +203,8 @@ export const CardDetailResponseSchema = z.object({
   activity: z.array(CardActivityDtoSchema).default([]),
   threadId: z.uuid().nullable(),
   thread: z.array(ThreadMessageDtoSchema),
+  /** Files attached to the card (metadata; the bytes come from `/api/cards/:id/attachments/:attachmentId`). */
+  attachments: z.array(CardAttachmentDtoSchema).optional(),
   currentShift: ShiftDtoSchema.nullable(),
   /** MCP servers and tools the card's agents used, per shift (only shifts that used any; oldest first). */
   mcpUsage: z.array(CardMcpUsageSchema).optional(),
@@ -215,6 +218,8 @@ export const CardDetailResponseSchema = z.object({
     canReleaseBackoff: z.boolean().optional(),
     canCancel: z.boolean(),
     canComment: z.boolean(),
+    /** Add and remove attachments (who may edit the card, also while it is claimed). */
+    canAttach: z.boolean().optional(),
     /** Set or clear the risk tier override: while the card is open and no merge is pending. */
     canSetRisk: z.boolean().default(false),
     /** Put the card in a phase or take it out (the card is open and not a suite or bug child). */

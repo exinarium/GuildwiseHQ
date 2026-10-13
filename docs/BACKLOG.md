@@ -70,6 +70,37 @@ used". See `docs/RUNNER.md` "Plugin MCP servers".
 **Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
 the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
 
+### 21. Jira attachments for agents and card attachments
+
+**Problem (owner, production, 2026-10-13):** during intake the BA read Jira ticket DCPL-4276 through the Atlassian plugin
+MCP server but could not see its screenshots or the attached `SlideOutHistory.svg`. Agent sandboxes have no network (a
+shell reaches registries and `extraAllowedDomains`, a chat nothing: `apps/runner/src/adapters/claude-policy.ts`) and agents
+hold no Jira credentials; the remote MCP server keeps the sign-in and its tools return attachment metadata, not content.
+Guildwise cards also had no attachments, so the BA could not pass files on to the builders.
+
+**Decided (owner, 2026-10-13): build both now.**
+- **Runner-mediated Jira download.** `aom source attachments <KEY>` lists and `aom source attachment <KEY> [<file|id> | --all]`
+  downloads: the runner calls Jira's REST API with its own credentials and writes the files to
+  `<agent scratch>/attachments/<KEY>/`, returning the local paths for the Read tool. Only the ticket of the intake (or the
+  card in context's `externalRef`); 20 MB per file, 60 MB per call; the token never reaches an agent. Credentials:
+  `aom-runner jira-connect` (base URL, e-mail, API token) stores them in `secrets/jira.json` (0600); the old `jira` block in
+  `config.json` is still read. The Workstations page shows Jira connected / not connected / refused (`jira.report`, never
+  the token). The Atlassian plugin's OAuth sign-in lives inside the MCP client and cannot be reused for the runner's REST
+  calls, so the API token is the supported way.
+- **Card attachments.** Bytes in Postgres (`card_attachment_data`, migration 1780, operational: not in the event log, kept
+  over a rebuild); `CardAttachmentAdded` / `CardAttachmentRemoved` carry metadata only. 20 MB per file, 100 MB and 50 files
+  per card; images, svg, pdf, zip, Office and text; programs and scripts refused; type and content checked; SVG and HTML
+  served sandboxed (CSP `sandbox`, `nosniff`, HTML as a text download). Whoever may edit the card adds and removes; every
+  project member views. Web: Attachments section on the card (drag and drop, previews, download, remove) and on the New
+  card form. Agents: `aom card attach <path> [--card REF]` (the BA, for the cards of its intake), `aom card attachments`;
+  the runner copies a card's attachments read-only into `<agent tmp>/card-attachments/` at the start of every card shift
+  (builders, reviewers, testers) and on demand for the DevOps engineer and chats.
+- BA role v11: downloads and looks at the ticket's attachments, attaches the relevant ones to the cards it writes and
+  says which.
+
+**Built:** see `docs/RUNNER.md` "Jira on the runner" and "Attachments", `docs/USER-GUIDE.md` 3.7 and 4.8, help
+(Board and cards, Intake and outbox, Workstations). Needs runner 0.1.3 and `aom-runner jira-connect` on the workstation.
+
 ## 2026-10-12
 
 Owner's list of 2026-10-12. Item 8 of that list (reference repositories per project) is #4 below. The affiliate
@@ -299,6 +330,7 @@ commission on that subscription for as long as it keeps running (recurring, life
 - #13: Workflow and role builder; sub-workflows and event triggers (incl. inbound e-mail). Done 2026-10-12; incoming webhooks later.
 - #10: More than one workflow per project; custom steps in existing workflows. Done 2026-10-12.
 - #20: Plugin MCP servers for sandboxed agents. Done 2026-10-13.
+- #21: Jira attachments for agents and card attachments. Done 2026-10-13.
 
 ## 2026-10-10
 

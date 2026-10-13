@@ -6,8 +6,8 @@ import {
   PolledIssueSchema,
 } from '@aom/shared';
 import { z } from 'zod';
-import type { JiraConfig } from '../config.ts';
 import { defaultExec, type Exec } from '../external/github.ts';
+import { type JiraProvider, jiraOf } from '../external/jira-store.ts';
 
 type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -27,7 +27,7 @@ export class IntegrationPoller {
     private readonly opts: {
       ghBin?: string;
       exec?: Exec;
-      jira?: JiraConfig | undefined;
+      jira?: JiraProvider;
       fetch?: FetchFn;
       /** Mock runtime: read the issues from this file when it exists. */
       mockFile?: string | undefined;
@@ -101,11 +101,8 @@ export class IntegrationPoller {
   }
 
   private async jira(p: IntegrationRunPayload): Promise<PolledIssue[]> {
-    const cfg = this.opts.jira;
-    if (!cfg)
-      throw new Error(
-        'no Jira credentials on this workstation: add "jira": { "baseUrl", "email", "apiToken" } to the runner config (config.json)',
-      );
+    const cfg = jiraOf(this.opts.jira);
+    if (!cfg) throw new Error('no Jira credentials on this workstation: run `aom-runner jira-connect`');
     const base = cfg.baseUrl.replace(/\/+$/, '');
     const auth = cfg.email
       ? `Basic ${Buffer.from(`${cfg.email}:${cfg.apiToken}`).toString('base64')}`

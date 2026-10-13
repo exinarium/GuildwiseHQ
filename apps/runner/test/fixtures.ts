@@ -45,6 +45,8 @@ export interface ShiftOptions {
   cardType?: string;
   /** Extra card fields (e.g. `mockEnv`). */
   fields?: Record<string, unknown>;
+  /** Files attached to the card (the brief carries their metadata). */
+  attachments?: NonNullable<ShiftBrief['card']['attachments']>;
   /** Merged into the brief (e.g. `investigation`, a card with `investigationOnly`). */
   briefExtra?: Partial<ShiftBrief>;
   /** Replaces the brief's outcomes (e.g. the architect's `report` outcome). */
@@ -111,6 +113,7 @@ export function makeShiftStart(o: ShiftOptions): Record<string, unknown> {
       completionAction: 'push_branch',
       docsNeeded: false,
       dependencies: [],
+      ...(o.attachments ? { attachments: o.attachments } : {}),
     },
     project: {
       id: projectIdFor(key),

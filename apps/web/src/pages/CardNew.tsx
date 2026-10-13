@@ -3,11 +3,13 @@ import { type FormEvent, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
 import { useWorkflows } from '../api/queries/agents.ts';
+import { uploadAll } from '../api/queries/attachments.ts';
 import { useMe } from '../api/queries/auth.ts';
 import { missingFromError, useCreateCard } from '../api/queries/cards.ts';
 import { useProjectWorkflows } from '../api/queries/project-workflows.ts';
 import { useProject, useProjects } from '../api/queries/projects.ts';
 import { CardFormFields } from '../components/CardFormFields.tsx';
+import { NewCardFiles } from '../components/NewCardFiles.tsx';
 import {
   Button,
   ButtonLink,
@@ -154,6 +156,8 @@ export function CardNewForm({
   ];
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [note, setNote] = useState<{ id: string; ref: string; missing: string[] } | null>(null);
+  // Files picked on the form: attached right after the card is created.
+  const [files, setFiles] = useState<File[]>([]);
   const submit = (specify: boolean) => {
     const r = buildCardRequest(workflow, v, specify, mockUi, designDefault);
     setErrors(r.errors);
@@ -168,7 +172,15 @@ export function CardNewForm({
     create.mutate(
       { projectId, ...body, ...(chooseWorkflow ? { workflowKey: workflow.key } : {}), specify },
       {
-        onSuccess: (res) => {
+        onSuccess: async (res) => {
+          if (files.length > 0) {
+            const { failed } = await uploadAll(res.card.id, files);
+            setFiles([]);
+            if (failed.length)
+              toast.error(
+                `${res.card.ref} was saved, but ${failed.length} file${failed.length === 1 ? '' : 's'} could not be attached (${failed.map((f) => `${f.name}: ${f.message}`).join('; ')}). Add them on the card.`,
+              );
+          }
           if (specify && res.missing?.length) {
             const errs: Record<string, string> = {};
             for (const m of res.missing)
@@ -256,6 +268,7 @@ export function CardNewForm({
             />
           </div>
         </Panel>
+        <NewCardFiles files={files} onChange={setFiles} />
         {errors._form && <ErrorBox error={new Error(errors._form)} />}
         {Object.keys(errors).some((k) => k !== '_form') && (
           <Callout tone="danger" role="alert">

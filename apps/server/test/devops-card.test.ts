@@ -136,6 +136,42 @@ describe('a DevOps request filed for a card', () => {
     await finish(start.shiftId);
   });
 
+  it('lists and downloads the attachments of its card (and no other card)', async () => {
+    const card = await w.card({ title: 'With a screenshot' });
+    const other = await w.card({ title: 'Without access' });
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
+    const add = async (cardId: string, name: string) =>
+      (
+        await w.t.app.inject({
+          method: 'POST',
+          url: `/api/cards/${cardId}/attachments?name=${name}`,
+          headers: {
+            origin: 'http://aom.test',
+            cookie: w.owner.cookie,
+            'content-type': 'application/octet-stream',
+          },
+          payload: png,
+        })
+      ).json();
+    const mine = await add(card.id, 'mine.png');
+    const theirs = await add(other.id, 'theirs.png');
+    const { start } = await devopsShiftFor(card.id, 'look at the screenshot');
+    expect(start.devops?.card?.attachments).toMatchObject([{ id: mine.id, name: 'mine.png' }]);
+    const listed = await rpc(start.shiftId, 'card.attachments', {});
+    expect(listed.ok).toBe(true);
+    expect(listed.result.cards).toMatchObject([{ ref: card.ref, attachments: [{ id: mine.id }] }]);
+    expect((await rpc(start.shiftId, 'card.attachments', { ref: other.ref })).ok).toBe(false);
+    const get = (id: string) =>
+      w.t.app.inject({
+        method: 'GET',
+        url: `/api/runner/attachments/${id}?shift=${start.shiftId}`,
+        headers: { authorization: `Bearer ${w.runnerToken}` },
+      });
+    expect((await get(mine.id)).statusCode).toBe(200);
+    expect((await get(theirs.id)).statusCode).toBe(403);
+    await finish(start.shiftId);
+  });
+
   it('a request without a card has no card access, and the brief has no card', async () => {
     const { start } = await devopsShiftFor(undefined, 'free disk space');
     expect(start.devops?.card).toBeUndefined();

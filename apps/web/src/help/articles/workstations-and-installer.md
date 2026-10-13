@@ -1,7 +1,7 @@
 ---
 title: Workstations and the installer
 summary: What a workstation is, the Add a workstation wizard, installing by hand, Claude sign-in, Windows and connecting git hosts.
-keywords: [workstation, installer, runner, WSL2, setup, wizard, credentials, src folder, windows task, git host, git-connect, ssh, ssh key, github, gitlab, bitbucket, azure devops, plain git, connect]
+keywords: [workstation, installer, runner, WSL2, setup, wizard, credentials, src folder, windows task, jira, jira-connect, git host, git-connect, ssh, ssh key, github, gitlab, bitbucket, azure devops, plain git, connect]
 order: 18
 ---
 
@@ -85,6 +85,8 @@ Then click **Check again**. The DevOps engineer can walk you through any of thes
 3. Click **Check SSH**. Optionally paste a repository address to test with the real thing. You get one state: *SSH works*, *The host refused the key* (add the public key on the host), *Host key changed*, *Host not reachable* (a firewall may block port 22), *No key yet* or *ssh is not installed*.
 
 In a terminal, the same is `aom-runner git-connect github --ssh` (add `--key-file <path>` or `--agent`; `--check` tests it). A repository can use the other method: the owner picks **Access** under the repository in the project settings, and the workstation switches that clone between https and ssh by itself. The private key never leaves the workstation and agents never read it.
+
+**Jira.** Below the git hosts the workstation card has a **Jira** line: *Connected as ...*, *Not connected* or *Refused*. Agents use it to read the files attached to a Jira ticket through your workstation (see [Intake and outbox](/help/intake-and-outbox#jira-attachments)). To connect, run `aom-runner jira-connect` in a terminal on that workstation: it asks for your Jira address, e-mail and an API token, checks them with Jira and saves them on that computer (`secrets/jira.json`, readable by you only); the page only learns the state.
 
 SSH only covers git itself. Pull requests, branch rules and the repository list still need the token or CLI login: with SSH only, finishing a card pushes the branch and you or the manager open the pull request by hand, and Project settings says so under the repository.
 

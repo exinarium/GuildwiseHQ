@@ -13,6 +13,8 @@ const EXEMPT_PREFIXES = [
   '/api/billing/paystack/webhook',
   // The mail provider's inbound webhook: no cookie, no Origin; the shared secret is the credential.
   '/api/inbound/mail/',
+  // The runner uploads a file an agent attached with its runner token (Bearer), no cookie and no Origin.
+  '/api/runner/uploads/',
 ];
 
 /**
@@ -37,6 +39,9 @@ export function checkContentType(req: FastifyRequest): void {
   if (isUnsubscribePost(req.url)) return;
   // PayFast's notification is a form post.
   if ((req.url.split('?')[0] ?? '') === '/api/billing/payfast/itn') return;
+  // A file upload is the raw body (the web app sends application/octet-stream), not JSON.
+  const path = req.url.split('?')[0] ?? '';
+  if (/^\/api\/cards\/[^/]+\/attachments$/.test(path) || path.startsWith('/api/runner/uploads/')) return;
   const ct = req.headers['content-type'];
   const hasBody = req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0';
   const chunked = req.headers['transfer-encoding'] !== undefined;

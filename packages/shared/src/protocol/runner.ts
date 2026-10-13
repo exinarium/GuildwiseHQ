@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BriefAttachmentSchema } from '../attachments/index.ts';
 import { DiffStats } from '../cards/types.ts';
 import {
   EnvEnsurePayloadSchema,
@@ -156,6 +157,8 @@ export const ShiftBriefSchema = z.object({
     /** The card only investigates: investigate -> finalize, no build. */
     investigationOnly: z.boolean().optional(),
     dependencies: z.array(z.object({ ref: z.string(), title: z.string(), status: z.string() })),
+    /** Files attached to the card: the runner copies them into a read-only folder next to the shift. */
+    attachments: z.array(BriefAttachmentSchema).optional(),
     parent: z.object({ ref: z.string(), title: z.string() }).optional(),
     /**
      * The card was made from an inbound e-mail (docs/design/workflow-builder.md D9): these fields (and the title) hold
@@ -305,6 +308,8 @@ export const ChatContextSchema = z.object({
   cardId: z.uuid().optional(),
   projectKey: z.string().optional(),
   cardRef: z.string().optional(),
+  /** The ticket key the card in context was made from (`fields.externalRef`): the Jira attachments the chat may download. */
+  cardExternalRef: z.string().optional(),
   /** Where the card's worktree lives on its home workstation (read-only context for the chat). */
   cardWorktreePath: z.string().optional(),
   /** Repositories the chat may read here: the project's own and its reference repositories (absent: none). */
@@ -540,6 +545,20 @@ export const RuntimesReportSchema = msg('runtimes.report', { runtimes: z.array(R
  * `aom-runner git-connect` and on the `git.status` command.
  */
 export const GitReportSchema = msg('git.report', { connections: GitConnectionsSchema });
+/**
+ * Jira on this workstation (docs/RUNNER.md "Jira on the runner"): facts only, never the token. `connected`: the saved
+ * credentials were accepted; `refused`: Jira said no (wrong or expired token); `not_connected`: none saved.
+ */
+export const JiraStatusSchema = z.object({
+  state: z.enum(['connected', 'not_connected', 'refused']),
+  baseUrl: z.string().max(300).optional(),
+  /** The Jira user the credentials belong to (display name), when connected. */
+  account: z.string().max(200).optional(),
+  detail: z.string().max(300).optional(),
+});
+export type JiraStatus = z.infer<typeof JiraStatusSchema>;
+/** Sent after `welcome`, after `aom-runner jira-connect` and on the `git.status` command. */
+export const JiraReportSchema = msg('jira.report', { status: JiraStatusSchema });
 /**
  * The organisation source folders set on this workstation and the folders it offers as candidates (absolute paths,
  * sub folders of the repo roots, bounded). Sent after `welcome`, after every re-scan and after `org.folder`.
@@ -785,6 +804,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   GitReportSchema,
   OrgFoldersReportSchema,
   McpServersReportSchema,
+  JiraReportSchema,
   RunnerUpdateReportSchema,
   ShiftAcceptedSchema,
   ShiftRejectedSchema,

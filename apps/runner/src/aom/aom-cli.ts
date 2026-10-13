@@ -3,6 +3,7 @@
 // per-shift token from the environment. Verb table: one line per verb.
 import { readFileSync, realpathSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
+import { resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   type BaTaskShift,
@@ -51,6 +52,7 @@ const BOOLEAN_FLAGS = new Set([
   'private',
   'public',
   'decision',
+  'all',
 ]);
 
 /** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
@@ -519,6 +521,23 @@ const VERBS: Record<string, Verb> = {
       ctx.io.out(`Commented on the card.${r?.messageId ? ` (${r.messageId})` : ''}\n`);
       return 0;
     }
+    // `aom card attach <path> [--card REF]` (the BA's intake chat) / `aom card attachments [REF]`: files on cards.
+    if (sub === 'attach') {
+      if (!p.positionals[1]) throw new UsageError('usage: aom card attach <path> [--card <REF>]');
+      const card = one(p, 'card');
+      const r = await rpc(ctx, 'card.attach', {
+        path: resolvePath(p.positionals[1]),
+        ...(card ? { ref: card } : {}),
+      });
+      ctx.io.out(`${typeof r === 'string' ? r : JSON.stringify(r)}\n`);
+      return 0;
+    }
+    if (sub === 'attachments') {
+      const ref = p.positionals[1] ?? one(p, 'card');
+      const r = await rpc(ctx, 'card.attachments', ref ? { ref } : {});
+      ctx.io.out(`${typeof r === 'string' ? r : JSON.stringify(r)}\n`);
+      return 0;
+    }
     // `aom card <REF>` (a BA task): a member card of the phase, read-only.
     if (sub) {
       ctx.io.out(`${JSON.stringify(await rpc(ctx, 'card.get', { ref: sub }), null, 2)}\n`);
@@ -891,8 +910,31 @@ const VERBS: Record<string, Verb> = {
     return 0;
   },
   source: async (ctx, p) => {
-    if (p.positionals[0] !== 'read' || !one(p, 'ref'))
-      throw new UsageError('usage: aom source read --ref <owner/repo#12 | ABC-123 | ticket URL>');
+    const sub = p.positionals[0];
+    // `aom source attachments <KEY>` lists a Jira ticket's files; `aom source attachment <KEY> [<filename|id> | --all]`
+    // has the runner download them (with its own Jira credentials) into your scratch dir and prints the local paths.
+    if (sub === 'attachments' || sub === 'attachment') {
+      const key = p.positionals[1] ?? one(p, 'key');
+      if (!key)
+        throw new UsageError(
+          sub === 'attachments'
+            ? 'usage: aom source attachments <ABC-123>'
+            : 'usage: aom source attachment <ABC-123> [<filename|id> | --all]',
+        );
+      const r = await rpc(
+        ctx,
+        sub === 'attachments' ? 'source.attachments' : 'source.attachment',
+        sub === 'attachments'
+          ? { key }
+          : { key, ...(p.positionals[2] ? { name: p.positionals[2] } : {}), all: has(p, 'all') },
+      );
+      ctx.io.out(`${typeof r === 'string' ? r : JSON.stringify(r, null, 2)}\n`);
+      return 0;
+    }
+    if (sub !== 'read' || !one(p, 'ref'))
+      throw new UsageError(
+        'usage: aom source read --ref <owner/repo#12 | ABC-123 | ticket URL> | aom source attachments <ABC-123> | aom source attachment <ABC-123> [<filename|id> | --all]',
+      );
     const r = await rpc(ctx, 'source.read', { ref: one(p, 'ref') });
     ctx.io.out(`${typeof r === 'string' ? r : JSON.stringify(r, null, 2)}\n`);
     return 0;
@@ -933,6 +975,9 @@ export const USAGE = `usage: aom <verb> [options]
   outbound draft --kind <comment|resolution|decision> --body "<text>"   BA: draft the update for the card's ticket (the manager approves it)
   risk <small|large> --reason "<why>"      BA: override the card's risk tier (drives the review tier and the merge approval)
   source read --ref <owner/repo#12 | ticket URL>        BA intake: read a GitHub issue (Jira: the Jira skill)
+  source attachments <ABC-123> | source attachment <ABC-123> [<filename|id> | --all]   BA intake: list the files of the Jira ticket / have the runner download them (its own Jira login) into your scratch dir and print the local paths to Read (screenshots, SVG)
+  card attach <path> [--card <REF>]          BA intake: attach a file from your scratch dir (for example a downloaded Jira attachment) to a card you drafted
+  card attachments [<REF>]                   copy the card's attached files next to this shift (read-only) and print the paths; builders get them at the start of the shift
   org catalogue | org role draft --json '<json>' | --file <json|-> | org workflow draft (same) | org workflow variant --file <json|-> (a project's own version) | org validate <key> | org submit <key> | org department --name "<n>"   BA design chat: draft roles and workflows (the owner approves on the desk)
   transcript --url <url>                     fetch the transcript of a video or podcast (the runner saves it in the vault; prints a header and the text)
   phase list | propose --name "<n>" [--description "<t>"] [--followups-file <json>] | assign <REF> --phase <ref>|--none | submit <ref>   BA intake: propose a phase, put cards in it, ask the manager to confirm

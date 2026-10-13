@@ -2,7 +2,12 @@ import { z } from 'zod';
 import { RightsReportSchema } from '../devops/environment.ts';
 import { DevOpsAccessSchema } from '../events/devops.ts';
 import { ConnectableForgeSchema, GitConnectionSchema, RepoRefSchema } from '../forge/index.ts';
-import { OrgFolderStateSchema, RunnerUpdateStateSchema, RuntimeInfoSchema } from '../protocol/runner.ts';
+import {
+  JiraStatusSchema,
+  OrgFolderStateSchema,
+  RunnerUpdateStateSchema,
+  RuntimeInfoSchema,
+} from '../protocol/runner.ts';
 import { IsoTime } from './common.ts';
 
 /** Repository hygiene of a workstation: its cadence and the last run (docs/design/phases.md addendum). */
@@ -75,6 +80,8 @@ export const WorkstationDtoSchema = z.object({
     .optional(),
   /** Which git providers this workstation is connected to (facts reported by the runner; never a credential). */
   git: z.object({ connections: z.array(GitConnectionSchema), checkedAt: IsoTime.nullable() }).optional(),
+  /** Jira on this workstation (facts only): connected, not connected or refused. */
+  jira: z.object({ status: JiraStatusSchema.nullable(), checkedAt: IsoTime.nullable() }).optional(),
   /**
    * The organisation source folders the runner reports (set with the app or `aom-runner org-folder`), by organisation,
    * with the folders it offers in the picker. Only sent to the workstation's owner (absent in the admin list).

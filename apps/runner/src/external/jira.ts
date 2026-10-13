@@ -4,10 +4,11 @@ import {
   type ExternalRef,
   type ExternalSource,
   JIRA_SKILL_PATH,
+  type JiraStatus,
   type PostResult,
 } from '@aom/shared';
-import type { JiraConfig } from '../config.ts';
 import { PostError, SourceReadError } from './github.ts';
+import { type JiraProvider, jiraOf } from './jira-store.ts';
 
 /** Thrown when Jira is asked to be read by the runner: the BA reads it itself, with the Jira skill, inside its session. */
 export class SkillMediatedError extends SourceReadError {
@@ -39,7 +40,8 @@ export class JiraAdapter implements ExternalAdapter {
   constructor(
     private readonly opts: {
       reader?: (ref: ExternalRef) => Promise<ExternalSource>;
-      config?: JiraConfig | undefined;
+      /** The credentials, or a function that reads them fresh (`aom-runner jira-connect` needs no restart). */
+      config?: JiraProvider;
       /** A seam so tests never reach Jira (undici MockAgent). */
       fetch?: FetchFn;
     } = {},
@@ -50,16 +52,23 @@ export class JiraAdapter implements ExternalAdapter {
     return Promise.reject(new SkillMediatedError(ref.key));
   }
 
-  private api(key: string): { url: string; headers: Record<string, string>; browse: string } {
-    const cfg = this.opts.config;
-    if (!cfg)
-      throw new PostError(
-        'no Jira credentials on this workstation: add "jira": { "baseUrl", "email", "apiToken" } to the runner config (config.json), then retry',
-      );
+  private creds(): { base: string; auth: string } | null {
+    const cfg = jiraOf(this.opts.config);
+    if (!cfg) return null;
     const base = cfg.baseUrl.replace(/\/+$/, '');
     const auth = cfg.email
       ? `Basic ${Buffer.from(`${cfg.email}:${cfg.apiToken}`).toString('base64')}`
       : `Bearer ${cfg.apiToken}`;
+    return { base, auth };
+  }
+
+  private api(key: string): { url: string; headers: Record<string, string>; browse: string } {
+    const c = this.creds();
+    if (!c)
+      throw new PostError(
+        'no Jira credentials on this workstation: run `aom-runner jira-connect` (the API token stays on this machine), then retry',
+      );
+    const { base, auth } = c;
     return {
       url: `${base}/rest/api/2/issue/${encodeURIComponent(key)}/comment`,
       headers: { authorization: auth, accept: 'application/json', 'content-type': 'application/json' },
@@ -67,8 +76,8 @@ export class JiraAdapter implements ExternalAdapter {
     };
   }
 
-  private send(url: string, init: RequestInit): Promise<Response> {
-    return (this.opts.fetch ?? ((u, i) => fetch(u, { ...i, signal: AbortSignal.timeout(30_000) })))(
+  private send(url: string, init: RequestInit, timeoutMs = 30_000): Promise<Response> {
+    return (this.opts.fetch ?? ((u, i) => fetch(u, { ...i, signal: AbortSignal.timeout(timeoutMs) })))(
       url,
       init,
     );
@@ -103,4 +112,132 @@ export class JiraAdapter implements ExternalAdapter {
     );
     return hit ? { externalRef: hit.id ? `${api.browse}?focusedCommentId=${hit.id}` : api.browse } : null;
   }
+
+  // ------------------------------------------------------------------------------------------------ attachments
+
+  private needCreds(): { base: string; auth: string } {
+    const c = this.creds();
+    if (!c)
+      throw new SourceReadError(
+        'this workstation has no Jira credentials: ask the manager to run `aom-runner jira-connect` on it (the API token stays on the machine and is never shown to you)',
+      );
+    return c;
+  }
+
+  /** The files attached to a ticket (metadata only). */
+  async listAttachments(key: string): Promise<JiraAttachmentInfo[]> {
+    const { base, auth } = this.needCreds();
+    const res = await this.send(`${base}/rest/api/2/issue/${encodeURIComponent(key)}?fields=attachment`, {
+      method: 'GET',
+      headers: { authorization: auth, accept: 'application/json' },
+    });
+    if (res.status === 401 || res.status === 403)
+      throw new SourceReadError(
+        `Jira refused the saved credentials (HTTP ${res.status}): the manager must run \`aom-runner jira-connect\` again`,
+      );
+    if (res.status === 404)
+      throw new SourceReadError(`Jira has no ticket ${key} (or this account cannot see it)`);
+    if (res.status < 200 || res.status >= 300)
+      throw new SourceReadError(`Jira answered ${res.status} for ${key}`);
+    const body = (await res.json().catch(() => ({}))) as {
+      fields?: {
+        attachment?: Array<{
+          id?: string | number;
+          filename?: string;
+          size?: number;
+          mimeType?: string;
+          created?: string;
+          author?: { displayName?: string };
+        }>;
+      };
+    };
+    return (body.fields?.attachment ?? []).flatMap((a) =>
+      a.id !== undefined && a.filename
+        ? [
+            {
+              id: String(a.id),
+              filename: a.filename,
+              size: typeof a.size === 'number' ? a.size : 0,
+              mimeType: a.mimeType ?? 'application/octet-stream',
+              ...(a.created ? { created: a.created } : {}),
+              ...(a.author?.displayName ? { author: a.author.displayName } : {}),
+            },
+          ]
+        : [],
+    );
+  }
+
+  /**
+   * One attachment's bytes. The URL is built from the configured base URL and the attachment id, never taken from Jira's
+   * answer, so the credentials can only go to the Jira host they were saved for. Stops reading past `maxBytes`.
+   */
+  async downloadAttachment(att: JiraAttachmentInfo, maxBytes: number): Promise<Buffer> {
+    const { base, auth } = this.needCreds();
+    const res = await this.send(
+      `${base}/rest/api/2/attachment/content/${encodeURIComponent(att.id)}`,
+      {
+        method: 'GET',
+        headers: { authorization: auth, accept: '*/*' },
+      },
+      120_000,
+    );
+    if (res.status < 200 || res.status >= 300)
+      throw new SourceReadError(`Jira answered ${res.status} for ${att.filename}`);
+    const declared = Number(res.headers.get('content-length') ?? 0);
+    if (declared > maxBytes)
+      throw new SourceReadError(`${att.filename} is larger than ${Math.round(maxBytes / 1024 / 1024)} MB`);
+    const chunks: Buffer[] = [];
+    let total = 0;
+    const reader = res.body?.getReader();
+    if (!reader) return Buffer.from(await res.arrayBuffer());
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new SourceReadError(`${att.filename} is larger than ${Math.round(maxBytes / 1024 / 1024)} MB`);
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks);
+  }
+
+  /** Does Jira accept the saved credentials? (Facts only: never the token.) */
+  async checkStatus(): Promise<JiraStatus> {
+    const c = this.creds();
+    const cfg = jiraOf(this.opts.config);
+    if (!c || !cfg) return { state: 'not_connected' };
+    try {
+      const res = await this.send(`${c.base}/rest/api/2/myself`, {
+        method: 'GET',
+        headers: { authorization: c.auth, accept: 'application/json' },
+      });
+      if (res.status === 401 || res.status === 403)
+        return {
+          state: 'refused',
+          baseUrl: c.base,
+          detail: `Jira answered ${res.status}: the token is wrong or expired`,
+        };
+      if (res.status < 200 || res.status >= 300)
+        return { state: 'refused', baseUrl: c.base, detail: `Jira answered ${res.status}` };
+      const me = (await res.json().catch(() => ({}))) as { displayName?: string };
+      return { state: 'connected', baseUrl: c.base, ...(me.displayName ? { account: me.displayName } : {}) };
+    } catch (err) {
+      return {
+        state: 'refused',
+        baseUrl: c.base,
+        detail: `cannot reach Jira: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
+      };
+    }
+  }
+}
+
+export interface JiraAttachmentInfo {
+  id: string;
+  filename: string;
+  size: number;
+  mimeType: string;
+  created?: string;
+  author?: string;
 }

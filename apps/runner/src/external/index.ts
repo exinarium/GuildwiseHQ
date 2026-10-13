@@ -1,7 +1,7 @@
 import { type ExternalAdapter, type ExternalRef, type ExternalSource, parseExternalRef } from '@aom/shared';
-import type { JiraConfig } from '../config.ts';
 import { type Exec, GithubAdapter, PostError, SourceReadError } from './github.ts';
 import { JiraAdapter } from './jira.ts';
+import type { JiraProvider } from './jira-store.ts';
 
 export type { Exec };
 export { GithubAdapter, JiraAdapter, PostError, SourceReadError };
@@ -18,7 +18,7 @@ export class ExternalAdapters {
     opts: {
       ghBin?: string;
       exec?: Exec;
-      jira?: JiraConfig | undefined;
+      jira?: JiraProvider;
       jiraFetch?: (url: string, init: RequestInit) => Promise<Response>;
     } = {},
   ): ExternalAdapters {
@@ -29,6 +29,12 @@ export class ExternalAdapters {
       }),
       new JiraAdapter({ config: opts.jira, ...(opts.jiraFetch ? { fetch: opts.jiraFetch } : {}) }),
     ]);
+  }
+
+  /** The Jira adapter (attachments, status); undefined only in tests that inject their own adapters. */
+  get jira(): JiraAdapter | undefined {
+    const a = this.byName.get('jira');
+    return a instanceof JiraAdapter ? a : undefined;
   }
 
   get(system: string): ExternalAdapter | undefined {

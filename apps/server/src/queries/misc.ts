@@ -374,6 +374,7 @@ export async function workstationDtos(
       limit: ctx.services.runners.isOnline(w.id) ? (ctx.services.runners.get(w.id)?.maxShifts ?? null) : null,
     },
     git: { connections: w.git_connections ?? [], checkedAt: iso(w.git_checked_at) },
+    jira: { status: w.jira_status ?? null, checkedAt: iso(w.jira_checked_at) },
     orgFolders: {
       folders: w.org_folders ?? [],
       errors: w.org_folder_errors ?? {},

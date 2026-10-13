@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 import {
@@ -13,13 +13,23 @@ import {
   type Usage,
 } from '@aom/shared';
 import type { RuntimeAdapter, RuntimeSession } from '../adapters/types.ts';
+import {
+  allowedJiraKeys,
+  attachFileFromAgent,
+  cardAttachmentsDir,
+  describeSynced,
+  downloadJiraAttachments,
+  listJiraAttachments,
+  type ServerHttp,
+  syncCardAttachments,
+} from '../attachments/index.ts';
 import { type ExternalAdapters, formatSource } from '../external/index.ts';
 import { confine } from '../fs-safe.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../read-repos.ts';
-import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import { ensureSandbox, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 
 type ChatStartMsg = ServerToRunnerOf<'chat.start'>;
 
@@ -41,6 +51,8 @@ export interface ChatDeps {
   /** The organization source folder of an organization (architect chats read every repository under it). */
   orgSourceFolder?(orgId: string): string | undefined;
   repoRoots?(): string[];
+  /** The runner's HTTP calls to the server (attachment bytes). */
+  http?: ServerHttp;
   /** `aom git status|connect` in the DevOps engineer's chat. */
   git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
 }
@@ -49,6 +61,7 @@ interface ActiveChat {
   msg: ChatStartMsg;
   session?: RuntimeSession;
   token?: string;
+  sandbox?: Sandbox;
   stopReason?: 'cancelled' | string;
 }
 
@@ -157,6 +170,13 @@ export class ChatManager {
       },
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
         if (req.method === 'source.read') return this.readSource(req.params);
+        if (
+          req.method === 'source.attachments' ||
+          req.method === 'source.attachment' ||
+          req.method === 'card.attachments' ||
+          req.method === 'card.attach'
+        )
+          return this.attachments(chat, req.method, req.params);
         if (req.method === 'git.status' || req.method === 'git.connect')
           return chat.msg.agent.isDevops && this.deps.git
             ? this.deps.git.handle(req.method, req.params)
@@ -166,6 +186,80 @@ export class ChatManager {
           : { ok: false, error: `${req.method} is not available in a chat conversation` };
       },
     };
+  }
+
+  /**
+   * Attachments in a chat: `source.attachments|attachment` (Jira files, downloaded by the runner with its own credentials
+   * for the ticket this conversation is about), `card.attachments` (copies of the attached files of the cards in reach)
+   * and `card.attach` (the BA puts a downloaded file on a card of its intake).
+   */
+  private async attachments(
+    chat: ActiveChat,
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<IpcRpcResponse> {
+    const sb = chat.sandbox;
+    if (!sb) return { ok: false, error: 'this conversation has no workspace yet' };
+    const { chatId } = chat.msg;
+    try {
+      if (method === 'source.attachments' || method === 'source.attachment') {
+        const deps = {
+          jira: () => this.deps.external?.jira,
+          scratch: sb.scratch,
+          allowed: allowedJiraKeys({
+            intake: chat.msg.context.intake,
+            cardExternalRef: chat.msg.context.cardExternalRef,
+          }),
+        };
+        return {
+          ok: true,
+          result:
+            method === 'source.attachments'
+              ? await listJiraAttachments(deps, params.key)
+              : await downloadJiraAttachments(
+                  deps,
+                  params.key,
+                  typeof params.name === 'string' ? params.name : undefined,
+                  params.all === true,
+                ),
+        };
+      }
+      const http = this.deps.http;
+      if (!http) return { ok: false, error: 'this runner cannot reach the server for files' };
+      if (method === 'card.attach') {
+        const ref = typeof params.ref === 'string' && params.ref ? params.ref : undefined;
+        return {
+          ok: true,
+          result: await attachFileFromAgent({
+            path: String(params.path ?? ''),
+            ref,
+            roots: [sb.scratch, sb.tmp],
+            rpc: (m, p) => this.deps.rpc(chatId, m, p),
+            http,
+          }),
+        };
+      }
+      // card.attachments
+      const listed = await this.deps.rpc(chatId, 'card.attachments', params.ref ? { ref: params.ref } : {});
+      if (!listed.ok) return listed;
+      const cards = (
+        listed.result as { cards: Array<{ ref: string; attachments: Array<Record<string, unknown>> }> }
+      ).cards;
+      const synced = await syncCardAttachments({
+        dest: cardAttachmentsDir(sb.tmp),
+        shiftId: chatId,
+        http,
+        items: cards.flatMap((c) =>
+          c.attachments.map((a) => ({
+            ref: c.ref,
+            attachment: a as unknown as import('@aom/shared').BriefAttachment,
+          })),
+        ),
+      });
+      return { ok: true, result: describeSynced(synced) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   /** The manager's own Jira skill (`skills/jira.md` in the organization vault) replaces the built-in text in an intake chat. */
@@ -202,6 +296,9 @@ export class ChatManager {
       return;
     }
     const sandbox = await ensureSandbox(paths, msg.agent.agentId, msg.agent.name);
+    chat.sandbox = sandbox;
+    const attachDir = cardAttachmentsDir(sandbox.tmp);
+    mkdirSync(attachDir, { recursive: true });
     // A card in context: read its worktree (if this workstation has it) without being able to change it.
     const wt = chatWorktree(paths, msg.context);
     const devops = msg.agent.isDevops === true; // G-Q1: runs as the user, unsandboxed, like its shifts

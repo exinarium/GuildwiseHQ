@@ -67,6 +67,10 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
       },
     ],
   },
+  'jira.report': {
+    ...env('jira.report'),
+    status: { state: 'connected', baseUrl: 'https://acme.atlassian.net', account: 'Pieter' },
+  },
   'mcp.servers': {
     ...env('mcp.servers'),
     servers: [

@@ -1,7 +1,7 @@
 ---
 title: Board and cards
 summary: Reading the board and its warning banners, creating and editing cards, moving cards, backing off, risk tiers and search.
-keywords: [board, card, stage, workflow, risk, backing off, search, banner, blocked, warning, budget, hygiene, why stuck]
+keywords: [board, card, stage, workflow, risk, backing off, search, banner, blocked, warning, budget, hygiene, why stuck, attachments, files, screenshots, upload]
 order: 5
 ---
 
@@ -56,9 +56,16 @@ To create a card:
    - **Affected areas**: which files or systems.
    - **Constraints**: limits and linked decisions.
    - **Test plan**: the E2E test scenarios.
+   - **Attachments**: screenshots, designs or documents to attach as soon as the card is saved (optional; see below).
 3. Click **Save draft**, or click **Specify** to send it on (this requires every field a build needs; the form tells you what is missing. An investigation-only card needs only the title, context, requirements and repository).
 
 Drafts can stay until you are ready to specify them. A draft saved with missing fields can be finished later on its card page, where **Specify** is also offered.
+
+## Attachments {#attachments}
+
+A card can carry files: screenshots, a design (SVG, PDF), a specification, a log. Use **Attachments, Add files** on the New card form, or the **Attachments** section of an open card, where you can also drag files in. Images show as previews; **Download** saves a file and **Remove** deletes it. The card's owner and the project owner can add and remove files, also while an agent works on the card; every member of the project can look and download. The BA attaches the files of a Jira ticket to the cards it drafts (it says which).
+
+Limits: 20 MB per file, 100 MB and 50 files per card. Images, SVG, PDF, zip, Office files and text files are accepted; programs and scripts are refused. Builders, reviewers, testers and the DevOps engineer get the card's files as read-only copies next to their shift and can look at them (an agent can view an image), so write in the card what each file shows. The card's timeline records who attached or removed a file.
 
 ## Editing a card {#editing-a-card}
 

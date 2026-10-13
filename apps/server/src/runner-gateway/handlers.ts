@@ -9,6 +9,7 @@ import {
 } from '@aom/shared';
 import type { ChatTerminal } from '../chat/relay.ts';
 import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
+import { attachmentRpc } from '../commands/card-attachments.ts';
 import { cardMessage, SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { designRpc } from '../commands/design-rpc.ts';
 import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
@@ -16,7 +17,7 @@ import { devopsCardRpc } from '../commands/devops-card.ts';
 import { outboundDraftRpc } from '../commands/drafts.ts';
 import { endQuestionShift } from '../commands/escalation.ts';
 import { applyFinalizeResult } from '../commands/finalize.ts';
-import { applyForgeReposResult, applyGitReport } from '../commands/forges.ts';
+import { applyForgeReposResult, applyGitReport, applyJiraReport } from '../commands/forges.ts';
 import { applyWorktreeSweepResult } from '../commands/hygiene.ts';
 import { intakeRpc } from '../commands/intake.ts';
 import { investigationRecordRpc } from '../commands/investigation.ts';
@@ -166,6 +167,9 @@ export class RunnerHandlers {
         return;
       case 'org.folders':
         await applyOrgFoldersReport(this.ctx, conn.workstationId, msg);
+        return;
+      case 'jira.report':
+        await applyJiraReport(this.ctx, conn.workstationId, msg.status);
         return;
       case 'mcp.servers':
         await applyMcpServersReport(this.ctx, conn.workstationId, msg);
@@ -795,6 +799,8 @@ export class RunnerHandlers {
       ]);
       if (!shift) return reply(false, undefined, 'unknown shift');
       if (msg.method === 'ledger.search') return reply(true, await ledgerSearchRpc(ctx, shift, msg.params));
+      if (msg.method === 'card.attachments' || msg.method === 'card.attach.begin')
+        return reply(...(await attachmentRpc(ctx, shift, msg.method, msg.params)));
       // A BA task shift is read-only and has no card: only the phase verbs and reading are available.
       if (shift.kind === 'ba_task') return reply(...(await baTaskRpc(ctx, shift, msg.method, msg.params)));
       // A DevOps shift reaches only the card its request was filed for (`aom card show|comment|update`).

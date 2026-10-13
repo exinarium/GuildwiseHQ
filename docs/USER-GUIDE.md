@@ -323,6 +323,8 @@ Each workstation also gets a free **DevOps engineer** automatically. You never h
 
 > **Tip:** you do not have to write it all yourself. Open a chat with the BA ("Chat" button on the desk), say what you want in your own words, and the BA drafts and specifies the cards for you.
 
+**Attachments.** A card can carry files: screenshots, a design (SVG, PDF), a spec, a log. On the New card form use **Attachments, Add files**; on an open card use the **Attachments** section (drag files in or choose **Add files**; images show as previews; **Download** and **Remove** are on each file). The card owner and the project owner can add and remove files; every member of the project can look and download. Limits: 20 MB per file, 100 MB and 50 files per card; images, SVG, PDF, zip, Office files and text are accepted, programs and scripts are refused. Builders, reviewers and testers get the files as read-only copies next to their shift and can look at them (an agent can view an image), so say in the card what each file shows. The BA attaches the files of a Jira ticket to the cards it drafts and says which went where.
+
 ### 3.8 Watch it happen
 
 Within a minute the card moves to **Build**. A builder works on it, then a reviewer, then a tester. Open the card to follow along: the **Live shift** panel shows what the agent is doing right now, **Handoffs** shows the notes agents leave for each other, and **Timeline** records every step.
@@ -631,6 +633,8 @@ Then add an automation **When an e-mail arrives** and choose the inbox. **Fill t
 ![Intake](guide/assets/intake-view.jpg)
 
 ![An outbound update waiting for approval](guide/assets/desk-outbound.jpg)
+
+**Jira attachments (screenshots and design files).** The Atlassian tool the BA reads Jira with shows the names of a ticket's attachments but not their content, and the agents' sandboxes have no internet. So the BA asks your **workstation's runner** to download them: it uses an API token that you save once on that computer and that never leaves it. On the workstation run `aom-runner jira-connect` (Jira Cloud: your Atlassian e-mail and an API token from https://id.atlassian.com/manage-profile/security/api-tokens; Jira Data Center: a personal access token and no e-mail). The Workstations page then shows **Jira: Connected as your name** (or **Not connected** / **Refused** with what to do). From then on, when you hand the BA a Jira ticket, it lists the ticket's attachments, downloads the images and design files (20 MB per file), looks at every screenshot and SVG, writes what they show into the cards and attaches the relevant files to the cards (see 3.7), so builders and testers can look at the same pictures. It only reaches the ticket you gave it, never another one. If the workstation is not connected the BA tells you and carries on without the files.
 
 > **In the app:** Help, "Automations and integrations" (`/help/automations-and-integrations`; the old `/help/schedules-and-integrations` still works) and "Intake and outbox" (`/help/intake-and-outbox`).
 
@@ -1002,7 +1006,7 @@ Four situations you will meet again and again, start to finish.
 
 **You want:** the order history page gets a CSV export, and it should be live for customers.
 
-1. **Say what you want.** Open a chat with the BA (**Chat** on the desk): "Customers keep asking for a spreadsheet of their orders. Add a CSV export to the order history page." Or paste the Jira or GitHub issue into **Intake**. The BA reads it, asks you what it cannot decide (which columns, which delimiter) and drafts the card with requirements and acceptance criteria.
+1. **Say what you want.** Open a chat with the BA (**Chat** on the desk): "Customers keep asking for a spreadsheet of their orders. Add a CSV export to the order history page." Or paste the Jira or GitHub issue into **Intake**. The BA reads it, asks you what it cannot decide (which columns, which delimiter) and drafts the card with requirements and acceptance criteria. For a Jira ticket with screenshots or design files, the BA downloads them through your workstation (see "Jira attachments" in 4.8), looks at them and attaches the relevant ones to the cards it writes.
 2. **Check the card.** Open it. If the draft is not quite right, **Edit** it (possible while it is a draft or queued and not yet claimed). Click **Specify** when it reads well.
 3. **Let the team work.** The builder builds, the reviewer reviews (sending the work back with comments if needed, which shows as *rework*), the tester tests. Open **Timeline** and **Handoffs** any time to see why.
 4. **Answer questions.** If the builder asks "should the CSV include cancelled orders?", the question reaches your desk with options and a recommendation. Pick one and add it to the ledger as a **decision**, and nobody will ask again.

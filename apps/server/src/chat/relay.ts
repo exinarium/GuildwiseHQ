@@ -75,7 +75,7 @@ export class ChatRelay {
     const { ctx } = this;
     const row = await one(
       ctx.pool,
-      `SELECT a.*, t.kind AS thread_kind, t.project_id AS thread_project_id, t.card_id AS thread_card_id, p.key AS project_key, c.ref AS card_ref, c.worktree_path AS card_worktree_path
+      `SELECT a.*, t.kind AS thread_kind, t.project_id AS thread_project_id, t.card_id AS thread_card_id, p.key AS project_key, c.ref AS card_ref, c.worktree_path AS card_worktree_path, c.fields->>'externalRef' AS card_external_ref
          FROM threads t JOIN agents a ON a.id = t.agent_id
          LEFT JOIN projects p ON p.id = t.project_id LEFT JOIN cards c ON c.id = t.card_id
         WHERE t.id = $1 AND t.kind IN ('chat','intake') AND t.created_by = $2 AND t.deleted_at IS NULL`,
@@ -192,6 +192,9 @@ export class ChatRelay {
         orgId: row.org_id,
         ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),
         ...(row.thread_card_id ? { cardId: row.thread_card_id, cardRef: row.card_ref } : {}),
+        ...(row.thread_card_id && typeof row.card_external_ref === 'string' && row.card_external_ref
+          ? { cardExternalRef: row.card_external_ref }
+          : {}),
         ...(row.thread_card_id && row.card_worktree_path ? { cardWorktreePath: row.card_worktree_path } : {}),
         ...(readRepos.length > 0 ? { readRepos } : {}),
         ...(localRepos.length > 0 ? { localReadRepos: localRepos } : {}),

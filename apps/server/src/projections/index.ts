@@ -115,6 +115,7 @@ export const PROJECTION_TABLES = [
   'card_handoffs',
   'card_transitions',
   'card_activity',
+  'card_attachments',
   'shifts',
   'shift_costs',
   'threads',
