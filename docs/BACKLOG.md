@@ -80,7 +80,7 @@ action yet; the design commits stay in the worktree until finalize). The protect
 pushes the card branch (it is a pull request). Second half: repository hygiene now deletes the branch of a **done or
 cancelled** card (origin, the clone and its worktree) when its commits are in the working branch (merged), or every
 commit's patch is already in the working branch or main (`git cherry`: rebased or cherry-picked), or its pull request
-was merged or declined (forge `changeState`, answered by the runner through the new rpc `hygiene.change_state`).
+was merged (a declined one only when the commits are elsewhere too) (forge `changeState`, answered by the runner through the new rpc `hygiene.change_state`).
 Never: an open pull request, a branch with commits found nowhere else, a branch of an open or reopened card (the
 server leaves it out), a worktree with edits or a running shift, anything outside `aom/`, `aom-integration/` and the
 project's prefix. Origin is deleted with a lease on the fetched SHA. Each deletion is logged on the card and one desk

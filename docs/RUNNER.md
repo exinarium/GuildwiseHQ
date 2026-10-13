@@ -1330,8 +1330,10 @@ repositories: local path, remote and working branch (the active phase's, else th
   the list) whose branch starts with `aom/`, `aom-integration/` or the project's prefix, and is not the working or
   main branch: a pull request that is still open keeps it; otherwise it goes when (a) every tip (local and origin) is
   contained in the working branch, (b) every commit's patch is already in the working branch or main (`git cherry`, so
-  rebased and cherry-picked work counts), or (c) the card's pull request was merged or declined (the runner asks its
-  forge adapter through rpc `hygiene.change_state`; unknown state falls back to (a) and (b)). Deleted, in this order:
+  rebased and cherry-picked work counts), or (c) the card's pull request was merged (the runner asks its
+  forge adapter through rpc `hygiene.change_state`; unknown state falls back to (a) and (b)). A declined pull request
+  does not release a branch by itself: only (a) or (b) can, otherwise the branch holds the only copy of the work and is
+  kept (note "kept: pull request declined, has unmerged commits"). Deleted, in this order:
   the card's worktree (`git worktree remove`, no force: edits or a running shift keep the branch), the branch on origin
   (`git push --delete` with a lease on the fetched SHA, so work pushed since the fetch survives), the local branch.
   Without a fetched origin nothing is removed. The result lists `cleaned[]` (card, branch, reason, where); the server

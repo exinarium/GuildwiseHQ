@@ -132,7 +132,7 @@ describe('hygiene removes the branches of finished cards', () => {
     expect(originHeads(repo)).toContain('aom/toy-6-d');
   });
 
-  it('uses the pull request: merged or declined releases the branch, open keeps it, unknown falls back to the commits', async () => {
+  it('uses the pull request: merged releases the branch, open and declined (with unmerged commits) keep it, unknown falls back to the commits', async () => {
     const repo = makeRepo();
     pushedBranch(repo, 'aom/toy-7-merged', '7.txt'); // squash-merged on the host: not in main's history
     pushedBranch(repo, 'aom/toy-8-open', '8.txt');
@@ -162,10 +162,27 @@ describe('hygiene removes the branches of finished cards', () => {
     );
     expect(result.cleaned.map((c) => [c.branch, c.reason]).sort()).toEqual([
       ['aom/toy-7-merged', 'its pull request was merged'],
-      ['aom/toy-9-declined', 'its pull request was declined'],
     ]);
-    expect(originHeads(repo).sort()).toEqual(['aom/toy-10-unknown', 'aom/toy-8-open', 'main']);
+    expect(result.actions).toContain('aom/toy-9-declined kept: pull request declined, has unmerged commits');
+    expect(originHeads(repo).sort()).toEqual([
+      'aom/toy-10-unknown',
+      'aom/toy-8-open',
+      'aom/toy-9-declined',
+      'main',
+    ]);
     expect(asked).toHaveLength(4);
+  });
+
+  it('a declined pull request still releases a branch whose commits are already in the working branch', async () => {
+    const repo = makeRepo();
+    pushedBranch(repo, 'aom/toy-12-f', 'f.txt');
+    sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'merge f', 'aom/toy-12-f']);
+    sh(repo.clone, 'git', ['push', 'origin', 'main']);
+    const { result } = await hygieneRepo(spec(repo, [card(12, 'aom/toy-12-f', 'https://h/pull/12')]), [], {
+      changeState: async () => 'closed',
+    });
+    expect(result.cleaned.map((c) => c.branch)).toEqual(['aom/toy-12-f']);
+    expect(result.cleaned[0]?.reason).toMatch(/merged into/);
   });
 
   it('an open pull request keeps the branch even when its commits are already in the working branch', async () => {

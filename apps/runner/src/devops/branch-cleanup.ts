@@ -13,7 +13,8 @@ import { git, revParse } from '../git/git.ts';
  * - its pull request, when it had one, is not open;
  * - and its work is somewhere else: (a) every tip is contained in the working branch, or (b) every commit's patch is
  *   already in the working branch or main (rebased, cherry-picked, squashed per commit), or (c) the pull request was
- *   merged or declined.
+ *   merged. A declined pull request releases nothing by itself: its branch goes only by (a) or (b), otherwise it holds
+ *   the only copy of the work and is kept.
  * Anything else (unmerged commits, an unreadable branch, a worktree with edits) is left alone.
  */
 
@@ -133,7 +134,8 @@ export async function cleanFinishedCards(
     const originSha = input.remote ? await revParse(repoPath, `refs/remotes/origin/${b}`) : null;
     if (!localSha && !originSha) continue;
 
-    // Its pull request decides first: an open one keeps the branch; a merged or declined one releases it.
+    // Its pull request decides first: an open one keeps the branch; a merged one releases it. A declined one does not:
+    // its commits may exist nowhere else, so (a) and (b) decide.
     let prState: 'open' | 'merged' | 'closed' | null = null;
     if (card.prUrl && input.changeState) {
       prState = await input.changeState({ remoteUrl: spec.remoteUrl, prUrl: card.prUrl }).catch(() => null);
@@ -141,7 +143,6 @@ export async function cleanFinishedCards(
     }
     let reason: string | null = null;
     if (prState === 'merged') reason = 'its pull request was merged';
-    else if (prState === 'closed') reason = 'its pull request was declined';
     else {
       const tips = [...new Set([localSha, originSha].filter((t): t is string => !!t))];
       for (const tip of tips) {
@@ -153,7 +154,10 @@ export async function cleanFinishedCards(
         reason = r;
       }
     }
-    if (!reason) continue;
+    if (!reason) {
+      if (prState === 'closed') notes.push(`${b} kept: pull request declined, has unmerged commits`);
+      continue;
+    }
 
     const entry: Cleaned = {
       cardId: card.cardId,

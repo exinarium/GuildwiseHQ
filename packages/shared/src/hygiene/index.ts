@@ -111,7 +111,7 @@ export const HygieneRepoSpecSchema = z.object({
   /**
    * Cards that are done or cancelled and whose branch hygiene may remove (empty when the project turned "Remove
    * finished card branches" off): from origin, the clone and the card's worktree, once the work is in the working
-   * branch (merged or rebased/cherry-picked) or its pull request is merged or declined.
+   * branch (merged or rebased/cherry-picked) or its pull request is merged (a declined one keeps a branch with unmerged commits).
    */
   finishedCards: z
     .array(
