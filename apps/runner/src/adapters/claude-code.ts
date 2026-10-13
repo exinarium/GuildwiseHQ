@@ -17,7 +17,7 @@ import type { z } from 'zod';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
-import { agentTmpDir } from '../sandbox/sandbox.ts';
+import { agentTmpDir, CACHE_ENV_KEYS, DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
 import { selfCommand } from '../shims.ts';
 import {
   agentEnv,
@@ -82,11 +82,14 @@ export function sessionEnv(
       if (v !== undefined) extra[k] = v;
     }
   } else if (cfg.scrubSubprocessEnv) extra.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
-  // input.env carries the agent's private HOME (sandboxEnv); the DevOps HOME above must win over it
+  // input.env carries the agent's private HOME (sandboxEnv); the DevOps HOME above must win over it. DevOps also keeps
+  // the user's own package caches: the shared sandbox caches and .NET settings are for sandboxed agents.
+  const sessionVars = { ...input.env };
+  if (devops) for (const k of CACHE_ENV_KEYS) delete sessionVars[k];
   return agentEnv(
     devops
-      ? { ...input.env, HOME: extra.HOME as string, USERPROFILE: extra.USERPROFILE as string }
-      : input.env,
+      ? { ...sessionVars, HOME: extra.HOME as string, USERPROFILE: extra.USERPROFILE as string }
+      : sessionVars,
     provider,
     parent,
     extra,
@@ -227,6 +230,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   ): ClaudePolicyContext {
     const root = this.paths?.root ?? dirname(dirname(input.sandbox.home));
     const script = selfCommand('aom').at(-1);
+    const nugetFallbackDir = userNugetPackages(this.realHome());
     return {
       runnerRoot: root,
       agentDir: dirname(input.sandbox.home),
@@ -240,6 +244,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       mode: this.cfg.sandbox,
       extraAllowedDomains: this.cfg.extraAllowedDomains,
       toolchainReadPaths: toolchainReadPaths(this.cfg.toolchainPaths ?? []),
+      sharedCacheDir: input.sandbox.cacheRoot ?? join(root, 'cache'),
+      ...(nugetFallbackDir ? { nugetFallbackDir } : {}),
+      ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR } : {}),
       otherAgentTmps: this.paths ? otherAgentTmps(this.paths, dirname(input.sandbox.home)) : [],
     };
   }

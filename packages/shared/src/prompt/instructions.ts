@@ -85,6 +85,7 @@ export function renderInstructions(brief: ShiftBrief): string {
       '- Work only inside your current working directory (the card worktree).',
       '- Do not push, rebase, checkout or switch branches; do not touch other worktrees.',
       '- Search the ledger with `aom ledger search` before asking a question.',
+      '- The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.',
       `- This shift may run for at most ${brief.shift.maxShiftMinutes} minutes.`,
     ].join('\n'),
   );

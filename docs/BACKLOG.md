@@ -70,6 +70,21 @@ used". See `docs/RUNNER.md` "Plugin MCP servers".
 **Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
 the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
 
+### 23. Faster agent builds: shared package caches, dotnet in the sandbox
+
+**Done (owner complaint, 2026-10-13: agents are very slow on a .NET project).** Three causes, from the production shift
+logs: (1) each agent's private HOME started with empty package caches, so every shift restored every package; (2)
+`dotnet build`/`test` failed in the sandbox with `IOException ... NuGet-Migrations` because .NET's named-mutex files live
+in `/tmp/.dotnet`, which the read-only `/tmp` of the sandbox refused, so agents asked DevOps to build outside it; (3)
+every shell command of a reviewer failed with `bwrap: Can't create file <worktree>/.gitconfig: Read-only file system`,
+caused by masking the data dir (a parent of the read-only worktree). Fixed in the runner: shared per-runner caches under
+`<data dir>/cache` (NuGet, npm, pnpm, yarn, pip, Gradle, Maven, Go) with the user's `~/.nuget/packages` as a read-only
+NuGet fallback; `/tmp/.dotnet` writable plus `DOTNET_*`/MSBuild variables (no build servers left behind); read-only shifts
+mask the data dir entry by entry; NuGet hosts added to the network allowlist; one line in the agent instructions. Verified
+in the real bubblewrap sandbox and with Claude Code. See `docs/RUNNER.md` "Shared package caches and .NET". Runner
+change: needs the next runner version. **Open:** cargo is not shared (its home holds credentials); private package feeds
+that need credentials from the user's `NuGet.Config` stay unavailable to sandboxed agents.
+
 ### 22. Agents read the vault in chats
 
 **Done (owner decision, 2026-10-13).** Agents can read the knowledge vault in chats and in question and BA task shifts,

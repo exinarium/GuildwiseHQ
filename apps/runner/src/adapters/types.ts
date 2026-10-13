@@ -20,7 +20,7 @@ export interface ShiftStartInput {
   instructionsMarkdown: string;
   /** Worktree path or agent scratch dir. */
   cwd: string;
-  sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch' | 'tmp'>;
+  sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch' | 'tmp' | 'cacheRoot'>;
   agent: AgentRuntimeSpec;
   /** AOM_IPC_URL, AOM_SHIFT_TOKEN, AOM_SHIFT_ID, PATH prefix, plus the sandbox env. */
   env: Record<string, string>;
@@ -65,7 +65,7 @@ export interface ChatStartInput {
   message: string;
   /** Agent scratch dir, or the card worktree when the chat has a card in context (read only). */
   cwd: string;
-  sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch' | 'tmp'>;
+  sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch' | 'tmp' | 'cacheRoot'>;
   agent: AgentRuntimeSpec;
   /** AOM_IPC_URL, AOM_SHIFT_TOKEN (chat scoped), AOM_SHIFT_ID, PATH prefix, plus the sandbox env. */
   env: Record<string, string>;
@@ -88,7 +88,7 @@ export interface RuntimeAdapter {
   capabilities(): Promise<RuntimeCapabilities>;
   /** Where this runtime reads its instructions (Claude Code: `<configDir>/CLAUDE.md`). */
   writeInstructions(
-    sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch' | 'tmp'>,
+    sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch' | 'tmp' | 'cacheRoot'>,
     markdown: string,
   ): Promise<void>;
   start(input: ShiftStartInput): Promise<RuntimeSession>;

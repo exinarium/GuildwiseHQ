@@ -51,6 +51,15 @@ export interface ClaudePolicyContext {
   otherAgentTmps?: string[];
   /** Toolchain dirs (the Node install, configured toolchainPaths) sandboxed commands may read despite the read block. */
   toolchainReadPaths?: string[];
+  /**
+   * The runner's shared package caches (`<runner root>/cache`): writable for every agent of this runner, so a package
+   * restored once is reused by all. The trade-off (agents of one runner share caches) is in docs/RUNNER.md.
+   */
+  sharedCacheDir?: string;
+  /** The user's own `~/.nuget/packages`: readable (never writable) as a NuGet fallback folder. */
+  nugetFallbackDir?: string;
+  /** `/tmp/.dotnet` (Linux): .NET's named-mutex files; without write access every `dotnet build` fails. */
+  dotnetShmDir?: string;
   /** OS user id (default: the runner's), for `/run/user/<uid>`. Injectable for tests. */
   uid?: number;
   /** Names in `/tmp` (default: read from the disk), to mask ssh-agent directories. Injectable for tests. */
@@ -81,6 +90,8 @@ export const REGISTRY_DOMAINS = [
   'index.rubygems.org',
   'repo.maven.apache.org',
   'repo1.maven.org',
+  'api.nuget.org',
+  '*.nuget.org',
   'plugins.gradle.org',
   'services.gradle.org',
   'github.com',
@@ -236,17 +247,23 @@ function sandboxBlock(
   if (ctx.mode === 'off') return undefined;
   const runnerPrivate = RUNNER_PRIVATE.map((p) => join(ctx.runnerRoot, p));
   const shell = tools.has('shell') || tools.has('bash');
+  // A role that cannot edit and may not commit gets a read-only worktree; its scratch, tmp and home stay writable.
+  // (When its cwd is its own scratch dir there is no worktree to protect.)
+  const worktreeLocked = profile.readOnlyWorktree && !inside(ctx.cwd, ctx.agentDir);
   const denyRead = [
     // the whole data dir: config.json (runner token, Jira/provider credentials), the outbox, every other agent's
     // sandbox and every other card's worktree; the agent's own areas are re-opened below.
-    ctx.runnerRoot,
+    // Exception: a read-only worktree. Masking a directory that contains it makes bubblewrap try to create Claude
+    // Code's protected dotfiles (`.gitconfig`, `.bashrc`, ...) inside the read-only cwd, and every command then
+    // fails with "bwrap: Can't create file <worktree>/.gitconfig: Read-only file system". So the data dir is masked
+    // entry by entry, leaving only the path down to the worktree open.
+    ...(worktreeLocked && inside(ctx.cwd, ctx.runnerRoot)
+      ? denyAround(ctx.runnerRoot, ctx.cwd)
+      : [ctx.runnerRoot]),
     ...(ctx.otherAgentTmps ?? []),
     ...HOME_SECRETS.map((p) => join(ctx.realHome, p)),
     ...(profile.browser ? browserMask(ctx) : []),
   ];
-  // A role that cannot edit and may not commit gets a read-only worktree; its scratch, tmp and home stay writable.
-  // (When its cwd is its own scratch dir there is no worktree to protect.)
-  const worktreeLocked = profile.readOnlyWorktree && !inside(ctx.cwd, ctx.agentDir);
   const readDirs = ctx.readDirs ?? [];
   // A read-only folder is opened to the shell entry by entry so its secret files stay out (allowRead beats denyRead).
   const readEntries = readDirs.flatMap((d) => sandboxReadEntries(d) ?? []);
@@ -256,7 +273,14 @@ function sandboxBlock(
     allowUnsandboxedCommands: false,
     autoAllowBashIfSandboxed: true,
     filesystem: {
-      allowWrite: [agentHome, scratch, tmp, ...ctx.gitDirs],
+      allowWrite: [
+        agentHome,
+        scratch,
+        tmp,
+        ...ctx.gitDirs,
+        ...(ctx.sharedCacheDir ? [ctx.sharedCacheDir] : []),
+        ...(ctx.dotnetShmDir ? [ctx.dotnetShmDir] : []),
+      ],
       // never the repository's hooks or config (they run outside the sandbox when the user next uses git), the
       // vault, or the runner's private state
       denyWrite: [
@@ -276,6 +300,7 @@ function sandboxBlock(
         ...readEntries,
         ...ctx.aomReadPaths,
         ...(ctx.toolchainReadPaths ?? []),
+        ...(ctx.nugetFallbackDir ? [ctx.nugetFallbackDir] : []),
       ],
     },
     // On Linux the sandbox blocks creating any Unix socket (seccomp cannot filter by path), so the `aom` CLI cannot
@@ -293,6 +318,27 @@ function sandboxBlock(
       allowLocalBinding: shell,
     },
   };
+}
+
+/**
+ * Everything under `root` that must stay unreadable except the path leading down to `keep`: at every level of the
+ * chain the siblings of the next step are listed (the entries of `root` itself, then the other projects' worktree
+ * folders, then the other cards' worktrees). The folder `keep` is not masked, nor is anything above it. A sibling
+ * created after the shift started is not covered (rare: worktrees are made before their shift begins).
+ */
+export function denyAround(root: string, keep: string): string[] {
+  const parts = relative(root, keep).split(sep).filter(Boolean);
+  const out: string[] = [];
+  let dir = root;
+  try {
+    for (const next of parts) {
+      for (const e of readdirSync(dir)) if (e !== next) out.push(join(dir, e));
+      dir = join(dir, next);
+    }
+  } catch {
+    return [root]; // cannot list it: mask everything (the safe direction)
+  }
+  return out;
 }
 
 /** `aom`, `aom *` and the same for the shim's absolute path in the runner's bin dir. */
