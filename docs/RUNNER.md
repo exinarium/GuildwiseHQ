@@ -326,6 +326,7 @@ agents/
     home/                       HOME for the agent (contains git .gitconfig identity)
     claude/                     CLAUDE_CONFIG_DIR (credentials, memory, cache)
     scratch/                    working directory for the agent's own files
+cache/                          package caches shared by all agents of this runner (nuget, npm, pnpm, pip, gradle, maven, ...)
 worktrees/
   <PROJECT>-<number>/
     aom/toy-1-...               git worktrees on branch aom/<ref>-<slug>
@@ -752,6 +753,46 @@ See [DevOps shifts are unsandboxed](#devops-shifts-are-unsandboxed).
 
 All are cleaned up when the agent is fired.
 
+### Shared package caches and .NET in the sandbox
+
+Every agent has a private HOME, so `~/.nuget/packages`, `~/.npm`, the pnpm store, pip, Gradle and Maven caches used to
+start empty for every agent and every shift: a full package restore each time. The runner now keeps one set of caches
+per runner, under `<data dir>/cache/`, created at the first shift and shared by all of its agents:
+
+| Directory | Variable the agent's environment gets |
+| --- | --- |
+| `cache/nuget`, `cache/nuget-http`, `cache/nuget-plugins` | `NUGET_PACKAGES`, `NUGET_HTTP_CACHE_PATH`, `NUGET_PLUGINS_CACHE_PATH` |
+| `cache/npm`, `cache/pnpm`, `cache/yarn` | `npm_config_cache`, `npm_config_store_dir` (pnpm), `YARN_CACHE_FOLDER` |
+| `cache/pip` | `PIP_CACHE_DIR` |
+| `cache/gradle` | `GRADLE_USER_HOME` (caches only: the agents' homes hold no `gradle.properties` or credentials, and the user's `~/.gradle` is not shared) |
+| `cache/maven` | `MAVEN_OPTS=-Dmaven.repo.local=<dir>` (the user's `~/.m2/settings.xml` is not read) |
+| `cache/go-mod`, `cache/go-build` | `GOMODCACHE`, `GOCACHE` |
+
+The cache directories are in the sandbox's `allowWrite` (and nothing else under the data dir is). Cargo is not shared:
+its home also holds installed binaries and registry credentials. Your own `~/.nuget/packages`, when it exists, is
+offered read-only as a NuGet fallback folder (`NUGET_FALLBACK_PACKAGES`, and in the sandbox's `allowRead`): packages you
+already restored are found without a download, and nothing can write to that folder. The sandbox's network allowlist
+includes `api.nuget.org` and `*.nuget.org`.
+
+**Trade-off.** Agents of one runner share these caches, and they run as the same OS user. An agent could therefore put a
+modified package into the shared cache that another agent later builds with. That is the same trust level as the rest
+of the sandbox (see "Threat model and residual risk"): the packages come from the registries the agent can already reach,
+the caches are content-addressed by package id and version, and they never reach your own caches. Delete
+`<data dir>/cache` at any time to start clean; it is recreated on the next shift. The DevOps engineer is unsandboxed and
+keeps using your own caches.
+
+**.NET.** `dotnet build`, `test` and `restore` failed inside the sandbox with
+`System.IO.IOException: The system cannot open the device or file specified. : NuGet-Migrations`. On Linux .NET keeps
+the shared memory and lock files behind named mutexes in `/tmp/.dotnet` (it ignores `TMPDIR`), the sandbox's `/tmp` is
+read-only, and NuGet takes a named mutex at startup. The runner creates `/tmp/.dotnet` (mode 0777, as .NET does) and
+puts it in `allowWrite`. Each agent also gets `DOTNET_CLI_HOME` (its own home), `DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1`,
+`DOTNET_NOLOGO=1`, `DOTNET_CLI_TELEMETRY_OPTOUT=1`, `NUGET_CERT_REVOCATION_MODE=offline` (the sandbox does not allow
+the certificate revocation hosts, which only delayed restores) and, so that no build server outlives the shift,
+`MSBUILDDISABLENODEREUSE=1`, `DOTNET_CLI_USE_MSBUILD_SERVER=0` and `UseSharedCompilation=false`. If the `dotnet` install
+is under your home (for example `~/.dotnet`), list it in `runtimes.claude-code.toolchainPaths`. Verified in the real
+sandbox (`dotnet new console` and `dotnet build`, with a package from the fallback folder and one downloaded into the
+shared cache); `test/sandbox-caches.test.ts` repeats it under bubblewrap and skips when `bwrap` or `dotnet` is missing.
+
 ### Git worktrees
 
 Worktrees are created under `worktrees/<KEY>-<project id prefix>/<REF>/` (project keys are only unique per
@@ -801,7 +842,7 @@ cannot loosen anything.
 | `sandbox.filesystem.denyRead` | the runner data dir, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.config/gh`, `~/.config/gcloud`, `~/.claude`, `~/.claude.json` | runner token, Jira and provider credentials, the linked `.credentials.json` |
 | `sandbox.filesystem.allowRead` | its worktree, the vault, the `aom` shim and script, the Node install the runner runs on, and `runtimes.claude-code.toolchainPaths` | with the read block on, sandboxed commands lose read access to all of `/home`; this re-opens only what the shift needs (toolchains such as `~/.nvm/...` included) |
 | `sandbox.excludedCommands` | `aom`, `aom *`, `<runner>/bin/aom`, `<runner>/bin/aom *` | entries use `Bash(...)` rule syntax, so a bare `aom` would only match `aom` with no arguments; `aom` must run outside because Linux sandboxes cannot connect Unix sockets |
-| `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + the main repository's `.git` (a linked worktree commits into it) / the repository's `.git/hooks` and `.git/config`, the vault, the runner's private files, and the worktree itself for roles with no `edit` tool that may not commit | hooks and git config run outside the sandbox the next time the user uses git |
+| `sandbox.filesystem.allowWrite` / `denyWrite` | agent `home` + `scratch` + `tmp` + the main repository's `.git` (a linked worktree commits into it) + the runner's shared package caches (`<data dir>/cache`) + `/tmp/.dotnet` on Linux (see "Shared package caches and .NET") / the repository's `.git/hooks` and `.git/config`, the vault, the runner's private files, and the worktree itself for roles with no `edit` tool that may not commit | hooks and git config run outside the sandbox the next time the user uses git |
 | `sandbox.network` | `strictAllowlist: true`; `allowedDomains`: package registries and source hosts for roles with `shell` (npm, yarn, PyPI, crates.io, Go proxy, RubyGems, Maven/Gradle, github.com), nothing for others; `allowUnixSockets`: the runner's IPC socket; `allowAllUnixSockets: true` for browser roles only (see below); `allowLocalBinding` for `shell` roles | scouts and researchers reach the web through `WebFetch`/`WebSearch` (permission rules, not the sandbox); builders reach registries from the shell. Add private mirrors with `runtimes.claude-code.extraAllowedDomains` |
 
 Claude Code's sandbox wraps shell commands only; the Read/Edit/Write/WebFetch tools are governed by the permission rules
@@ -1159,6 +1200,17 @@ A role without the `edit` tool that may not commit (reviewer, business analyst, 
 read-only worktree in the sandbox: its worktree path is in `sandbox.filesystem.denyWrite`, while its scratch, temp and
 home directories stay writable. A reviewer that needs a build or tests that write caches copies the worktree into its
 scratch dir (`rsync -a ./ "$TMPDIR/review/"`) and runs it there; the reviewer instructions say so (role version 2).
+The shared package caches stay writable, so a read-only shift can still restore, build and test in its copy.
+
+A read-only worktree used to make **every** shell command of such a role fail with
+`bwrap: Can't create file <worktree>/.gitconfig: Read-only file system`. Cause: the runner masked the whole data dir
+(`denyRead`), and the worktree lives inside it. When the read-only working directory sits under a masked directory,
+bubblewrap tries to create Claude Code's protected dotfiles (`.gitconfig`, `.bashrc`, ...) as mount points inside it,
+which a read-only directory refuses (reproduced with the real sandbox; the same read-only directory with no masked
+parent works, and a writable worktree is not affected). For a read-only shift the runner now masks the data dir entry by entry
+(`denyAround`): everything except the path down to the worktree is still hidden (`config.json`, other agents, other
+cards' worktrees), but no parent of the worktree is masked. Worktrees created after the shift started are not hidden
+from it (they are made before their own shift begins).
 A role that may not commit (reviewer, scout, ...) is also rolled back after every shift, which stays as the safety net
 and is still recorded as a guard violation: `git checkout -f <branch>`,
 `git reset --hard <start sha>`, `git clean -fd` inside its worktree. Roles with `writableGlobs` (tester: the project's
@@ -1377,6 +1429,8 @@ The DevOps engineer is outside the sandbox altogether (previous section): everyt
 - The sandbox depends on Claude Code and the OS (bubblewrap/Seatbelt) being correct; the permission rules are matched on
   command text and are not a boundary by themselves.
 - A same-user local attacker (outside the agent) can read `config.json` regardless.
+- The agents of one runner share the package caches under `<data dir>/cache` (see "Shared package caches and .NET"):
+  one agent can leave a modified package for another to build with.
 
 **Recommendation:** run the runner as a dedicated, unprivileged OS user with its own home directory and a data directory
 only that user can read (`sudo useradd -m aom-runner`, install the service from the section above under that user).

@@ -56,6 +56,10 @@ While the installer runs, this page lists the health checks as they finish: Node
 
 Afterwards, a workstation's card on the **Workstations** page shows whether it is **Connected** or **Offline**, its runtimes (with a sandbox warning if one cannot sandbox agents), how many shifts are running, and its repositories. To run the checks again, run `aom-runner doctor` on that computer.
 
+## Shared package caches {#shared-caches}
+
+Agents of one workstation share its package caches (NuGet, npm, pnpm, pip, Gradle, Maven, Go), kept in the runner's data folder, so each package is downloaded once. Packages already restored in your own NuGet folder are reused too, read-only. Because the agents run as the same computer user, one agent could in principle leave a modified package for another; delete the `cache` folder in the runner's data folder to start clean. .NET projects build and test inside the sandbox; if a sandbox error persists after a retry, ask the DevOps engineer to build outside it.
+
 ## Windows {#windows}
 
 **Default: WSL2** (recommended). Install the runner inside a WSL2 Ubuntu distribution and follow the Linux instructions. The installer turns on WSL2 for you; you just follow the steps. Agents run sandboxed inside WSL2 just like on Linux.
