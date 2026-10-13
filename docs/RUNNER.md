@@ -415,7 +415,9 @@ aom-runner doctor             # checks node, git, claude, docker, yt-dlp, repos,
 
 #### External integrations
 
-**Jira** (M8 outbox, optional):
+**Jira** (posting approved updates, and downloading ticket attachments for agents; optional). Set it up with
+`aom-runner jira-connect` (see "Jira on the runner" below): the token is then stored in `secrets/jira.json`, not here.
+The older `jira` block in `config.json` is still read when there is no `secrets/jira.json`:
 - **baseUrl** (required): Jira server URL
 - **email** (optional): Jira Cloud username (if provided, use basic auth)
 - **apiToken** (required): Jira Cloud API token or Data Center personal access token
@@ -440,10 +442,9 @@ Edit `config.json` manually (mode 0600) or use the pair command with `--mock` fl
 **Jira API token:**
 1. Go to https://id.atlassian.com/manage-profile/security/api-tokens
 2. Create a token and copy it
-3. Edit config.json:
-   ```json
-   { "jira": { "baseUrl": "https://jira.example.com", "email": "you@example.com", "apiToken": "..." } }
-   ```
+3. Run `aom-runner jira-connect` (base URL, your Atlassian e-mail, the token; see "Jira on the runner").
+   Writing `{ "jira": { "baseUrl": "...", "email": "...", "apiToken": "..." } }` into config.json still works
+   but keeps the token in the main config file; prefer the command.
 
 **Git hosts (pull requests, repository list and creation):** the git host is chosen per project repository (GitHub, GitLab, Bitbucket Cloud, Azure DevOps, or plain git). Connect each one you use, on this workstation, with
 
@@ -614,6 +615,10 @@ aom investigation record --title "<t>" --summary-file <md> [--decision]   # BA a
 aom finalize --action none                              # investigation-only card with the report in the vault: no git step
 aom outbound draft --kind <comment|resolution|decision> --body "<text>"
 aom source read --ref <owner/repo#12 | ticket URL>
+aom source attachments <ABC-123>                        # the files attached to the intake's Jira ticket
+aom source attachment <ABC-123> [<filename|id> | --all] # the runner downloads them into your scratch dir and prints the paths
+aom card attach <path> [--card <REF>]                   # put a file from your scratch dir on a card you drafted
+aom card attachments [<REF>]                            # copy a card's attached files next to the shift (read-only)
 aom org ...                                            (design chat: draft roles/workflows; role/workflow drafts take --json, --file or --file - too)
 ```
 
@@ -914,6 +919,81 @@ is no config key that does: what an agent may read beyond its own work folder co
 - **What the agent is told.** The instructions of a card shift and of a chat end with "Folders you can read" (working
   directory, each read-only folder, and that the owner manages reference repositories in the project settings and that no
   configuration key exists for it).
+
+### Jira on the runner
+
+Agent sandboxes have no network (a shell reaches package registries and `extraAllowedDomains` only; chats reach
+nothing), and agents hold no Jira credentials. The Atlassian plugin's MCP server (see "Plugin MCP servers") holds its own
+sign-in and returns attachment names and sizes, not the files. So the **runner** reads Jira's REST API itself, on the
+workstation, with the owner's own API token, and hands the agent local files.
+
+**Connect (once per workstation, by the owner):**
+
+```
+aom-runner jira-connect                     # asks for the base URL, your e-mail and the API token (hidden)
+aom-runner jira-connect --status            # connected as ..., or why not (exit code 1 when not connected)
+aom-runner jira-connect --disconnect        # removes the saved credentials
+aom-runner jira-connect --base-url https://yourcompany.atlassian.net --email you@company.com   # token on stdin
+```
+
+Jira Cloud: create an API token at https://id.atlassian.com/manage-profile/security/api-tokens and use your Atlassian
+e-mail. Jira Data Center: leave the e-mail empty and use a personal access token. The command checks the credentials
+with `GET /rest/api/2/myself` and saves nothing when Jira refuses them. The token is stored in
+`<data dir>/secrets/jira.json` (mode 0600, directory 0700), like the git tokens, never in `config.json`; a `jira` block in
+`config.json` (the older form) is still read when there is no secrets file, and the secrets file wins. With several
+pairings the credentials go to all of them unless `--pairing` names one. A running runner picks the change up within
+the minute (no restart); the same file posts the approved updates to Jira.
+
+The Workstations page shows a **Jira** line for the workstation: *Connected as ...*, *Not connected* (with the command
+to run) or *Refused* (Jira rejected the saved token: connect again). The runner sends `jira.report` with the state, the
+site address and the account's display name; never the token. (The Atlassian plugin's OAuth sign-in lives inside the
+MCP client and is not available to the runner's REST calls, so the API token is the supported way.)
+
+**What an agent can do** (BA intake chats, and any chat about a card whose `externalRef` is a Jira key):
+
+```
+aom source attachments DCPL-4276                    # name, id, type, size, author, date of every attachment
+aom source attachment DCPL-4276 SlideOutHistory.svg # one file, by name or id
+aom source attachment DCPL-4276 --all               # every file
+```
+
+The runner downloads with its own credentials and writes to `<agent scratch>/attachments/<KEY>/<file>`, then prints the
+local paths. The scratch directory is a working directory of the agent, so the Read tool opens them (Claude Code shows
+images, SVG and text read as text). Rules:
+
+- **Scope.** Only the ticket the conversation is about: the intake's own Jira key, or the card in context's `externalRef`.
+  Any other key is refused before Jira is asked. A GitHub intake has none.
+- **Limits.** At most 20 MB per file and 60 MB per call; a file over the limit (by its declared size or while streaming)
+  is skipped and listed under "Skipped". Download time limit 120 s per file.
+- **Where the token goes.** The download URL is built from the saved base URL and the attachment id, never taken from
+  Jira's answer, so the token can only go to the host it was saved for. It is not in any file, answer, environment
+  variable or instruction an agent can see; `secrets/` is denied to every agent like the rest of the data directory.
+- A runner without credentials answers with the command to run; the BA tells the manager and continues without the files.
+
+### Attachments (card files for builders and testers)
+
+A card can carry files (screenshots, designs, documents). They are stored in the server's database (not the event log),
+shown on the card, and copied by the runner for the agents.
+
+- **Shift start.** The brief carries each attachment's name, type, size and sha256. Before the agent starts, the runner
+  downloads them from the server (`GET /api/runner/attachments/<id>?shift=<shift id>` with the runner token; the server
+  allows only the attachments of that shift's card) into `<agent tmp>/card-attachments/` (the agent's private temp
+  directory, outside the worktree, never committed), checks every sha256, makes the files read-only and lists them in the
+  shift's instructions. The Claude adapter adds the folder to the agent's readable folders. A file that cannot be fetched
+  is logged and the shift starts without it. Removed attachments disappear at the next copy.
+- **`aom card attachments [REF]`** copies them again on demand (builders, reviewers, testers, the DevOps engineer for the
+  card of its request, and chats about the card). In an intake chat it copies the files of every card of the intake.
+- **`aom card attach <path> [--card REF]`** (the BA in its intake chat): attaches a file to a card **of that intake** (the
+  card may be a draft or specified; without `--card` the intake must have exactly one card). The runner reads the file,
+  which must lie in the agent's scratch or temp directory (a path outside is refused), runs the same type and size checks
+  as the server, asks the server for a one-time upload ticket (`card.attach.begin`; the server decides whether the agent may
+  attach to that card), then sends the bytes with `PUT /api/runner/uploads/<id>` and the runner token. A file downloaded
+  from Jira is recorded as coming from `jira <KEY>`. Every other role is refused.
+- **Limits and types.** 20 MB per file, 100 MB and 50 files per card. Images (png, jpg, gif, webp, bmp, ico), svg, pdf,
+  zip and Office files (docx, xlsx, pptx) and text (txt, md, csv, tsv, json, xml, yaml, log, diff, patch, har, html) are
+  accepted; programs and scripts (exe, dll, bat, sh, ps1, js, jar, ... and any file starting with an executable or `#!`
+  header) and every other type are refused, as is content that does not match its extension. SVG and HTML are served
+  with a sandboxing Content-Security-Policy and `nosniff`; HTML is delivered as a plain-text download.
 
 ### Plugin MCP servers
 
@@ -1328,7 +1408,7 @@ A simulation organization (see `docs/ARCHITECTURE.md` section 33) has no worksta
 **Credentials stay on the machine:**
 - Runner token: stored in `config.json` (mode 0600); agents are denied the data directory (see the threat model)
 - Claude credentials: stored in agent's `CLAUDE_CONFIG_DIR` (mode 0700) or symlinked to your `~/.claude/.credentials.json` (the sandbox denies reading the real file to shell commands; Claude Code itself reads it)
-- Jira token: stored in `config.json` (mode 0600)
+- Jira token: stored by `aom-runner jira-connect` in `secrets/jira.json` (mode 0600, directory 0700; an older `jira` block in `config.json` is still read); agents are denied `secrets/` and never see it; only connected / not connected / refused is reported to the server
 - Git hosts: the `gh` / `glab` logins, or tokens saved by `aom-runner git-connect` in `secrets/git-tokens.json` (0600); only connected / not connected is reported to the server
 - Vault SSH keys: used from machine's SSH agent or keyfiles
 
