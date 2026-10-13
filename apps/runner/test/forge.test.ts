@@ -676,3 +676,41 @@ describe('Azure DevOps with a Microsoft Entra service principal', () => {
     expect((await partial.status?.())?.state).toBe('not_connected');
   });
 });
+
+describe('openChange reuses an open change for the same branch (a reopened card)', () => {
+  const bbTokens = () => {
+    const t = new MemoryTokenStore();
+    t.set({ provider: 'bitbucket-cloud', host: 'bitbucket.org', token: 'T', user: 'me@example.com' });
+    return t;
+  };
+
+  it('Bitbucket: returns the open pull request and creates none', async () => {
+    const f = fakeFetch([
+      [
+        'GET https://api.bitbucket.org/2.0/repositories/ws/app/pullrequests?',
+        { values: [{ id: 7, links: { html: { href: 'https://bitbucket.org/ws/app/pull-requests/7' } } }] },
+      ],
+    ]);
+    const bb = new BitbucketCloudForge(env({ fetch: f.fetch, tokens: bbTokens() }));
+    const r = repo('bitbucket-cloud', 'bitbucket.org', 'ws/app');
+    expect(await bb.openChange(r, { base: 'main', head: 'aom/x', title: 't', body: '' })).toEqual({
+      id: '7',
+      url: 'https://bitbucket.org/ws/app/pull-requests/7',
+    });
+    expect(f.calls.some((c) => c.method === 'POST')).toBe(false);
+    expect(decodeURIComponent(f.calls[0]?.url ?? '')).toContain('source.branch.name="aom/x"');
+  });
+
+  it('GitHub: returns the open pull request and does not run gh pr create', async () => {
+    const x = new FakeExec([
+      [/^gh pr list/, { stdout: JSON.stringify([{ number: 5, url: 'https://github.com/acme/web/pull/5' }]) }],
+    ]);
+    const gh = new GitHubForge(env({ exec: x }));
+    const r = repo('github', 'github.com', 'acme/web');
+    expect(await gh.openChange(r, { base: 'main', head: 'aom/x', title: 't', body: 'b' })).toEqual({
+      id: '5',
+      url: 'https://github.com/acme/web/pull/5',
+    });
+    expect(x.calls.some((c) => c.line.startsWith('gh pr create'))).toBe(false);
+  });
+});

@@ -859,7 +859,7 @@ A **Member** works inside the projects an Owner or Admin has added them to. You 
 | --- | --- |
 | See the board, desk items and cards of **your** projects | See other projects, create a project or change the priority order |
 | Create and edit cards, and comment | Add or remove people, or change project settings |
-| Move, release or cancel **your own** cards | Manage cards of other people (ask an Owner or Admin) |
+| Move, release, cancel or reopen **your own** cards | Manage cards of other people (ask an Owner or Admin) |
 | Answer questions on your own cards | Answer project-level decisions (Owners and Admins do) |
 | Pair **your own** workstation and hire agents on it, for projects you are on | Hire agents on someone else's workstation, or widen an agent's permissions |
 | Change or fire the agents **you** hired | Change other people's agents |
@@ -1015,6 +1015,12 @@ Four situations you will meet again and again, start to finish.
 7. **Done.** The card is in the Done column and says *"Your change is live on main"* (and, after the phase, it is deployed and tested).
 
 ![A finished card with its timeline](guide/assets/card-detail.jpg)
+
+### Reopening a finished card
+
+A card that is **Done** or **Cancelled** can go back to work. Open it and click **Reopen** (the card's creator and the project owner see it). Pick the stage to reopen into (it starts on the first stage an agent works, usually Build), give a reason and confirm. The card keeps its branch and the pull request opened for it: the next agent continues on the same branch, and when you finalize with **Open a pull request** again, Guildwise reuses the pull request that is still open instead of failing. The card's timeline reads "Reopened by ... into Build: <reason>", and the card thread shows the earlier pull request link so the agent knows it exists.
+
+Other cards that depend on the reopened card are held again until it is done, unless they already started; those get a note on their thread. A card in a phase makes the phase incomplete again while the phase is still open.
 
 ### 8.2 From research to a project
 

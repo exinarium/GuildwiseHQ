@@ -20,6 +20,7 @@ import {
   useMoveCard,
   useReleaseBackoff,
   useReleaseCard,
+  useReopenCard,
   useSpecifyCard,
 } from '../api/queries/cards.ts';
 import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
@@ -180,7 +181,7 @@ export function CardDetailView({
   const rehome = useRehomeCard(card.id);
   const me = useMe();
   const expert = me.data?.user?.gitExpert === true;
-  const [dialog, setDialog] = useState<'move' | 'cancel' | 'edit' | 'risk' | null>(null);
+  const [dialog, setDialog] = useState<'move' | 'cancel' | 'edit' | 'risk' | 'reopen' | null>(null);
   const [confirm, setConfirm] = useState<'release' | 'rehome' | null>(null);
   const toast = useToast();
   const mockUi = me.data?.features?.mockUi ?? false;
@@ -260,6 +261,11 @@ export function CardDetailView({
               </Button>
             )}
             {permissions.canMove && <Button onClick={() => setDialog('move')}>Move</Button>}
+            {permissions.canReopen && workflow && (
+              <Button data-testid="reopen-card" onClick={() => setDialog('reopen')}>
+                Reopen
+              </Button>
+            )}
             <AskDevOpsButton
               variant="quiet"
               label="Ask DevOps"
@@ -616,6 +622,15 @@ export function CardDetailView({
           current={card.stage}
         />
       )}
+      {workflow && permissions.canReopen && (
+        <ReopenDialog
+          open={dialog === 'reopen'}
+          onOpenChange={(o) => !o && setDialog(null)}
+          cardId={card.id}
+          workflow={workflow}
+          branchName={card.branchName}
+        />
+      )}
       {workflow && permissions.canEdit && dialog === 'edit' && (
         <EditCardDialog
           open
@@ -777,6 +792,68 @@ function MoveDialog({
           <Button onClick={() => onOpenChange(false)}>Close</Button>
           <Button type="submit" variant="primary" disabled={move.isPending}>
             Move card
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function ReopenDialog({
+  open,
+  onOpenChange,
+  cardId,
+  workflow,
+  branchName,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  cardId: string;
+  workflow: WorkflowDefinition;
+  branchName: string | null;
+}) {
+  const reopen = useReopenCard(cardId);
+  const toast = useToast();
+  const stages = workflow.stages.filter((s) => s.kind === 'agent' || s.kind === 'manual');
+  const [toStage, setToStage] = useState((stages.find((s) => s.kind === 'agent') ?? stages[0])?.id ?? '');
+  const [reason, setReason] = useState('');
+  const [err, setErr] = useState('');
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!reason.trim()) return setErr('A reason is required');
+    setErr('');
+    reopen.mutate(
+      { toStage, reason: reason.trim() },
+      {
+        onSuccess: () => {
+          setReason('');
+          onOpenChange(false);
+          toast.success('Card reopened');
+        },
+      },
+    );
+  };
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Reopen card"
+      description={`The card goes back to work in the stage you pick. Its branch${branchName ? ` (${branchName})` : ''} is kept and the next shift continues on it; an open pull request is kept and reused when the card is finalized again.`}
+    >
+      <form onSubmit={submit} className="flex flex-col gap-3" noValidate>
+        <Select label="Reopen into" value={toStage} onChange={(e) => setToStage(e.target.value)}>
+          {stages.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.label}
+            </option>
+          ))}
+        </Select>
+        <TextArea label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} error={err} />
+        <ErrorBox error={reopen.error} />
+        <div className="flex justify-end gap-2">
+          <Button onClick={() => onOpenChange(false)}>Close</Button>
+          <Button type="submit" variant="primary" disabled={reopen.isPending}>
+            Reopen card
           </Button>
         </div>
       </form>

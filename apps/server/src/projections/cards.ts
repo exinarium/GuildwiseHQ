@@ -507,6 +507,52 @@ export const cardProjectors: Record<string, Projector> = {
     );
   },
 
+  // A done or cancelled card goes back to work. The branch, worktree and the earlier finalize result (`finalize_action`,
+  // `finalize_result`: the PR url) stay as history; `finalized_at`, a failed or pending finalize and the claim are cleared.
+  CardReopened: async (tx, e) => {
+    const p = ev<'CardReopened'>(e).payload;
+    await mutateCard(
+      tx,
+      e,
+      p.cardId,
+      async () => {
+        await exec(
+          tx,
+          `UPDATE cards SET stage=$2, status=$3, queued_at = CASE WHEN $3 = 'queued' THEN $4::timestamptz ELSE queued_at END,
+                  excluded_agent_ids='{}', review_approvals=0, updated_at=$4, finalized_at=NULL,
+                  finalize_state=NULL, finalize_error=NULL, finalize_desk_item_id=NULL, last_rejection=NULL,
+                  claim_id=NULL, claimed_by_agent_id=NULL, claim_workstation_id=NULL, claim_shift_id=NULL,
+                  claimed_at=NULL, lease_expires_at=NULL,
+                  retry_after=NULL, retry_failures=0, retry_episode_id=NULL WHERE id=$1`,
+          [p.cardId, p.toStage, p.status, e.createdAt],
+        );
+        const who = await one<{ display_name: string }>(tx, 'SELECT display_name FROM users WHERE id=$1', [
+          p.by,
+        ]);
+        const wf = await one<{ definition: { stages?: Array<{ id: string; label: string }> } }>(
+          tx,
+          `SELECT v.definition FROM workflow_versions v JOIN cards c ON c.workflow_version_id = v.id WHERE c.id=$1`,
+          [p.cardId],
+        );
+        const label = wf?.definition.stages?.find((x) => x.id === p.toStage)?.label ?? p.toStage;
+        await exec(
+          tx,
+          `INSERT INTO card_activity (card_id, kind, summary, reason, user_id, agent_id, event_seq, at)
+           VALUES ($1,'reopened',$2,$3,$4,NULL,$5,$6)`,
+          [
+            p.cardId,
+            `Reopened by ${who?.display_name ?? 'a manager'} into ${label} (was ${p.fromStatus})`,
+            p.reason,
+            p.by,
+            e.seq.toString(),
+            e.createdAt,
+          ],
+        );
+      },
+      { agentId: null, userId: p.by },
+    );
+  },
+
   FinalizeRequested: async (tx, e) => {
     const p = ev<'FinalizeRequested'>(e).payload;
     await mutateCard(tx, e, p.cardId, () =>

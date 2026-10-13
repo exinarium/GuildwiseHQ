@@ -119,7 +119,7 @@ export const TransitionDtoSchema = z.object({
 /** A timeline entry that is not a stage or status change: a field edit or a risk tier override. */
 export const CardActivityDtoSchema = z.object({
   id: z.number().int(),
-  kind: z.enum(['edited', 'risk_tier', 'merge_policy', 'phase', 'merge_verified']),
+  kind: z.enum(['edited', 'risk_tier', 'merge_policy', 'phase', 'merge_verified', 'reopened']),
   summary: z.string(),
   reason: z.string().nullable(),
   userId: z.uuid().nullable(),
@@ -217,6 +217,8 @@ export const CardDetailResponseSchema = z.object({
     /** Release the loop breaker's back-off by hand. */
     canReleaseBackoff: z.boolean().optional(),
     canCancel: z.boolean(),
+    /** Put a done or cancelled card back to work (owner and managers). */
+    canReopen: z.boolean().optional(),
     canComment: z.boolean(),
     /** Add and remove attachments (who may edit the card, also while it is claimed). */
     canAttach: z.boolean().optional(),
@@ -313,6 +315,8 @@ export const MoveCardRequestSchema = z.object({
   toStage: z.string().min(1),
   reason: z.string().min(1).max(2000),
 });
+/** `POST /api/cards/:id/reopen`: a done or cancelled card goes back to an agent or manual stage of its workflow. */
+export const ReopenCardRequestSchema = MoveCardRequestSchema;
 export const ReleaseCardRequestSchema = z.object({ reason: z.string().max(2000).optional() });
 export const CancelCardRequestSchema = z.object({
   reason: z.string().min(1).max(2000),

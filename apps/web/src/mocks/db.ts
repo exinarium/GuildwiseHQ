@@ -234,6 +234,7 @@ export function detail(card: CardDto): CardDetailResponse {
       canRelease: card.status === 'claimed',
       canReleaseBackoff: !!card.backoff,
       canCancel: card.status !== 'cancelled' && card.status !== 'done',
+      canReopen: card.status === 'cancelled' || card.status === 'done',
       canComment: true,
     },
     diffStats: null,

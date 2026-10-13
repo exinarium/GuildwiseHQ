@@ -299,6 +299,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
       canRelease: manage && !!card.claim_id,
       canReleaseBackoff: manage && open && !!backoffOf(card, ctx.clock.now()),
       canCancel: manage && open,
+      canReopen: manage && !open,
       canComment: canCommentOnCard(role),
       canAttach: manage && open,
     },

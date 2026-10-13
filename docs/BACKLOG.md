@@ -70,6 +70,23 @@ used". See `docs/RUNNER.md` "Plugin MCP servers".
 **Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
 the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
 
+### 27. Reopen a done or cancelled card
+
+**Done (2026-10-13).** Production need: P4-3 was done (finalized with `pr`, PR open on Bitbucket, branch repaired by hand)
+and had to go back to Build, but `moveCard` refuses closed cards. New `POST /api/cards/:id/reopen { toStage, reason }`
+(card owner and project owner, like a move; only `done`/`cancelled` cards; `toStage` an agent or manual stage of the
+card's pinned workflow). Event `CardReopened {cardId, fromStage, fromStatus, toStage, status, reason, by}`: the projection
+sets stage and status (queued / draft), clears `finalized_at`, a pending or failed finalize, the claim and the back-off,
+and keeps branch, worktree path and `finalize_action` / `finalize_result` (the PR url) as history. Timeline row
+(`card_activity` kind `reopened`) and a card thread note naming the earlier PR. The dependency gate already holds open
+dependents (it only lets `done`/`cancelled` through); dependents that already started get a thread note. Phase membership
+is derived from the card status, so an open phase is incomplete again; a phase that already completed is not reopened.
+Runner: `ensureWorktree` continues from `origin/<card branch>` when the local branch is gone (reuse and create); the forge
+adapters (GitHub, GitLab, Bitbucket, Azure) return the open change for the same head and base instead of creating a second
+one. Web: **Reopen** button, stage picker (default the first agent stage) and required reason on the card page.
+**Not done:** an interest run of a reopened research card keeps its published status; a reopened cancelled bug child does
+not put its resumed parent back to waiting.
+
 ### 25. Working branch from the wrong base; concurrent worktree lock
 
 **Done (2026-10-13).** Production evidence: on Flow-Web (Bitbucket, a live `main` and a 14 month old `master`) with no main

@@ -615,6 +615,91 @@ export async function moveCard(
   });
 }
 
+/**
+ * Puts a done or cancelled card back to work in an agent or manual stage of its pinned workflow (owner/manager only,
+ * like a move). The card keeps its branch and worktree record and the earlier finalize result (a PR url stays in the
+ * history); the next shift reuses the branch and a later `pr` finalize reuses the open pull request. Open cards that
+ * depend on it are held again by the dependency gate; the ones that already started get a note.
+ */
+export async function reopenCard(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  idOrRef: string,
+  toStage: string,
+  reason: string,
+) {
+  return withAppendTx(ctx.pool, async (tx) => {
+    const card = await loadManageable(tx, user, idOrRef);
+    if (!['done', 'cancelled'].includes(card.status))
+      throw conflict(
+        'not_closed',
+        `only a done or cancelled card can be reopened (this one is ${card.status})`,
+      );
+    const wf = await loadWorkflowById(tx, card.workflow_version_id);
+    const stage = wf ? getStage(wf.definition, toStage) : undefined;
+    if (!stage)
+      throw badRequest('unknown_stage', `stage '${toStage}' does not exist in this card's workflow`);
+    if (stage.kind !== 'agent' && stage.kind !== 'manual')
+      throw badRequest('invalid_stage', 'a card is reopened into a work stage (an agent or manual stage)');
+    const missing = stage.kind === 'agent' ? requiredMissing(cardView(card), stage) : [];
+    if (missing.length)
+      throw unprocessable('missing_fields', `missing required fields: ${missing.join(', ')}`, { missing });
+    const status = stage.kind === 'manual' ? 'draft' : 'queued';
+    const earlier = (card.finalize_result ?? {}) as { prUrl?: string; pushedBranch?: string };
+    const earlierNote = earlier.prUrl
+      ? ` An earlier pull request exists: ${earlier.prUrl} (finalizing again reuses it while it is open).`
+      : earlier.pushedBranch
+        ? ` The branch ${earlier.pushedBranch} was pushed earlier.`
+        : '';
+    const scope = projectScope(card.org_id, card.project_id);
+    const events: AppendInput[] = [
+      {
+        streamId: streamId.card(card.id),
+        event: {
+          type: 'CardReopened',
+          payload: {
+            cardId: card.id,
+            fromStage: card.stage,
+            fromStatus: card.status,
+            toStage,
+            status,
+            reason,
+            by: user.id,
+          },
+        },
+        actor: userActor(user.id),
+        scope,
+      },
+      cardMessage(
+        card,
+        { kind: 'system' },
+        'system',
+        `Reopened by ${user.displayName} into ${stage.label}: ${reason}. The card branch${card.branch_name ? ` ${card.branch_name}` : ''} is kept and the next shift continues on it.${earlierNote}`,
+      ),
+    ];
+    const dependents = await rows(
+      tx,
+      `SELECT c.* FROM card_dependencies d JOIN cards c ON c.id = d.card_id
+        WHERE d.depends_on_card_id = $1 AND c.status NOT IN ('done','cancelled')`,
+      [card.id],
+    );
+    for (const dep of dependents) {
+      const started = dep.claim_id || dep.worktree_path || dep.rework_round > 0;
+      if (started)
+        events.push(
+          cardMessage(
+            dep,
+            { kind: 'system' },
+            'system',
+            `${card.ref} (a card this one depends on) was reopened by ${user.displayName}: ${reason}. Its work may change; check the result again before you finish.`,
+          ),
+        );
+    }
+    await ctx.store.append(events, { tx });
+    return card.id as string;
+  });
+}
+
 export async function releaseCard(ctx: Ctx, user: AuthSession['user'], idOrRef: string, reason?: string) {
   return withAppendTx(ctx.pool, async (tx) => {
     const card = await loadManageable(tx, user, idOrRef);
