@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import {
   type CompletionAction,
+  DEFAULT_PR_BRANCH_PREFIX,
   DESK_SUBKIND,
   type FinalizeCardRequest,
   type FinalizeExecutePayload,
   type FinalizeResult,
   FinalizeResultSchema,
+  isSafeGitRef,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -40,12 +42,28 @@ export async function mergeGate(db: Queryable, card: Row, action: CompletionActi
   return p?.waived ? 'waived' : 'approval';
 }
 
+/** The ticket in a pull request branch name: the tracker key the card came from (Jira), else the card ref. */
+export function prBranchTicket(externalKey: string | null | undefined, ref: string): string {
+  const key = (externalKey ?? '').trim();
+  return /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(key) ? key : ref;
+}
+
 /** `finalize.execute` for the card's home workstation (the runner executes the completion action; no agent). */
 export async function queueExecute(tx: Tx, card: Row, action: CompletionAction): Promise<string> {
   if (!card.home_workstation_id || !card.repo_id || !card.branch_name)
     throw conflict('no_worktree', 'the card has no worktree on a workstation to finalize from');
   const repo = (await one(tx, 'SELECT * FROM project_repos WHERE id=$1', [card.repo_id])) as Row;
   const project = (await one(tx, 'SELECT * FROM projects WHERE id=$1', [card.project_id])) as Row;
+  // The branch a pull request goes out under: the one used before (rework updates the same pull request), else
+  // <prefix>/<ticket>. The local card branch keeps its name.
+  const earlier = (card.finalize_result ?? {}) as { pushedBranch?: string };
+  const intake = (await one(
+    tx,
+    `SELECT i.external_key FROM intake_cards ic JOIN intakes i ON i.id = ic.intake_id
+      WHERE ic.card_id=$1 AND i.external_key IS NOT NULL ORDER BY ic.created_at LIMIT 1`,
+    [card.id],
+  )) as { external_key: string } | null;
+  const ticket = prBranchTicket(intake?.external_key, card.ref);
   const payload: FinalizeExecutePayload = {
     cardId: card.id,
     ref: card.ref,
@@ -57,6 +75,9 @@ export async function queueExecute(tx: Tx, card: Row, action: CompletionAction):
     remoteUrlNormalized: repo.remote_url_normalized,
     baseBranch: card.base_branch ?? repo.working_branch ?? project.working_branch,
     branchName: card.branch_name,
+    prBranchPrefix: project.pr_branch_prefix || DEFAULT_PR_BRANCH_PREFIX,
+    ticket,
+    ...(earlier.pushedBranch && isSafeGitRef(earlier.pushedBranch) ? { remoteBranch: earlier.pushedBranch } : {}),
     worktreePath: card.worktree_path ?? null,
     prTitle: `${card.ref}: ${card.title}`,
     prBody: `${card.title}\n\nCard ${card.ref}.`,

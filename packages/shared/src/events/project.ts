@@ -2,7 +2,13 @@ import { z } from 'zod';
 import { ForgeKindSchema, GitAccessMethodSchema } from '../forge/index.ts';
 import { WorkingBranchReason } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
-import { BranchPrefixSchema, GitRefSchema, ProjectPathSchema, VaultFolderSchema } from '../safe.ts';
+import {
+  BranchPrefixSchema,
+  GitRefSchema,
+  PrBranchPrefixSchema,
+  ProjectPathSchema,
+  VaultFolderSchema,
+} from '../safe.ts';
 import { defineEvent, Id } from './define.ts';
 
 /**
@@ -26,6 +32,8 @@ export const ProjectChangesSchema = z
     defaultCompletion: z.enum(['merge', 'pr']),
     /** Repository hygiene deletes the branches of done or cancelled cards once their work is elsewhere (default on). */
     removeFinishedBranches: z.boolean(),
+    /** Prefix of the branch a pull request is pushed under, `<prefix>/<ticket>` (empty: `feature`). */
+    prBranchPrefix: PrBranchPrefixSchema,
     subCategories: z.array(z.string()),
     vaultFolder: VaultFolderSchema.nullable(),
     architecturalGlobs: z.array(z.string()),

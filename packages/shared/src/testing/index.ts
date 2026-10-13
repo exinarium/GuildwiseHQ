@@ -61,6 +61,14 @@ export const FinalizeExecutePayloadSchema = z.object({
   branchName: z.string(),
   /** Where the card's worktree lives on the workstation (null when unknown: the runner recreates it). */
   worktreePath: z.string().nullable(),
+  /**
+   * Pull request branch name on the git host: the runner pushes `<local branch>:<remote name>`. `remoteBranch` is a name
+   * pushed earlier (rework updates the same branch and pull request); otherwise `<prBranchPrefix>/<ticket>`, with
+   * `-2`, `-3` when origin already has it. Absent (old servers): the local branch name is used.
+   */
+  prBranchPrefix: z.string().optional(),
+  ticket: z.string().optional(),
+  remoteBranch: z.string().optional(),
   prTitle: z.string().optional(),
   prBody: z.string().optional(),
   /** The git provider chosen on the repository (absent: detected from the remote URL). */

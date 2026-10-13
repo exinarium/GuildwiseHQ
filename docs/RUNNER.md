@@ -486,6 +486,8 @@ The `gh` CLI is required for GitHub for approved repository setup (`aom repo cre
 
 Without a login for the repository's host (or on plain git) finalize with action `pr` falls back to pushing the branch and posting a desk notice for manual PR creation. Finalize with action `merge` first asks the host whether the working branch allows direct pushes; when it is protected (or the push is refused by a branch policy) the runner pushes the card branch and opens a pull request instead, with a desk notice. See the BA's `aom finalize --action <pr|push_branch|merge>` command.
 
+**Pull request branch name.** With `pr` (and the protected-branch fallback) the card branch is pushed as `<local>:refs/heads/<prefix>/<ticket>`, not under its local `aom/...` name: `prBranchPrefix` is the project setting (default `feature`), `ticket` the tracker key of the card's intake (for example `DCPL-4276`) else the card ref. A name origin already has gets `-2`, `-3`; `remoteBranch` (the `pushedBranch` of an earlier finalize) is reused so rework updates the same branch and pull request. The pull request is opened from that name, and hygiene removes the finished card's branch on origin by that stored name only (`finishedCards[].remoteBranch`), never by prefix. Runners older than this change ignore the fields and keep pushing the card branch name.
+
 **Rotate runner token** (invalidates old token):
 ```sh
 aom-runner rotate-token    # runner must be stopped

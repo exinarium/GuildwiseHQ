@@ -407,7 +407,10 @@ describe('removing the branches of finished cards', () => {
     const reopened = await w.card();
     const sibling = await w.card();
     await setDone(merged.id, 'aom/toy-a-merged');
-    await setDone(viaPr.id, 'aom/toy-b-pr', { prUrl: 'https://github.com/acme/toy/pull/660' });
+    await setDone(viaPr.id, 'aom/toy-b-pr', {
+      prUrl: 'https://github.com/acme/toy/pull/660',
+      pushedBranch: 'pieter/TOY-77',
+    });
     await setDone(reopened.id, 'aom/toy-c-reopened');
     // a reopened card is open again (status no longer done) and keeps its branch name
     await q(`UPDATE cards SET status='queued', stage='build' WHERE id=$1`, [reopened.id]);
@@ -423,8 +426,10 @@ describe('removing the branches of finished cards', () => {
       cardId: viaPr.id,
       ref: viaPr.ref,
       prUrl: 'https://github.com/acme/toy/pull/660',
+      remoteBranch: 'pieter/TOY-77',
     });
     expect(byBranch['aom/toy-a-merged'].prUrl).toBeUndefined();
+    expect(byBranch['aom/toy-a-merged'].remoteBranch).toBeUndefined();
     await finish(start, { repos: [result()] });
   });
 

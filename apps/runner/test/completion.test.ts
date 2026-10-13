@@ -212,3 +212,63 @@ describe('completion: push_branch and pr', () => {
     expect(res.error).toMatch(/no origin/);
   });
 });
+
+describe('completion: pull request branch name on origin', () => {
+  const withPr = (
+    repo: { remoteNormalized: string },
+    path: string,
+    over: Partial<FinalizeExecutePayload> = {},
+  ): FinalizeExecutePayload => ({
+    ...payload(repo, path, 'pr'),
+    prBranchPrefix: 'pieter',
+    ticket: 'DCPL-4276',
+    ...over,
+  });
+  const heads = (repo: { origin: string }) =>
+    sh(repo.origin, 'git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads']).split('\n');
+
+  it('pushes <local>:<prefix>/<ticket> and opens the pull request from that name; the local branch keeps its name', async () => {
+    const { repo, path } = await cardWorktree();
+    const pr = new FakePr({ url: 'https://example.test/acme/toy/pull/9' });
+    const res = await run(repo, withPr(repo, path), pr);
+    expect(res).toMatchObject({ ok: true, pushedBranch: 'pieter/DCPL-4276' });
+    expect(pr.calls[0]?.branch).toBe('pieter/DCPL-4276');
+    expect(heads(repo)).toContain('pieter/DCPL-4276');
+    expect(heads(repo)).not.toContain(BRANCH);
+    expect(sh(repo.origin, 'git', ['rev-parse', 'pieter/DCPL-4276'])).toBe(
+      sh(path, 'git', ['rev-parse', 'HEAD']),
+    );
+    expect(sh(path, 'git', ['branch', '--show-current'])).toBe(BRANCH);
+  });
+
+  it('adds -2 when origin already has that name for another pull request', async () => {
+    const { repo, path } = await cardWorktree();
+    sh(repo.clone, 'git', ['push', 'origin', 'main:refs/heads/pieter/DCPL-4276']);
+    const res = await run(repo, withPr(repo, path), new FakePr({ url: 'u' }));
+    expect(res.pushedBranch).toBe('pieter/DCPL-4276-2');
+    expect(heads(repo)).toEqual(expect.arrayContaining(['pieter/DCPL-4276', 'pieter/DCPL-4276-2']));
+  });
+
+  it('rework pushes to the stored remote branch, so the same pull request is updated', async () => {
+    const { repo, path } = await cardWorktree();
+    const first = await run(repo, withPr(repo, path), new FakePr({ url: 'u' }));
+    expect(first.pushedBranch).toBe('pieter/DCPL-4276');
+    writeFileSync(join(path, 'more.txt'), 'more\n');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'address review']);
+    const pr = new FakePr({ url: 'u' });
+    const again = await run(repo, withPr(repo, path, { remoteBranch: first.pushedBranch }), pr);
+    expect(again.pushedBranch).toBe('pieter/DCPL-4276');
+    expect(pr.calls[0]?.branch).toBe('pieter/DCPL-4276');
+    expect(heads(repo).filter((h) => h.startsWith('pieter/'))).toEqual(['pieter/DCPL-4276']);
+    expect(sh(repo.origin, 'git', ['rev-parse', 'pieter/DCPL-4276'])).toBe(
+      sh(path, 'git', ['rev-parse', 'HEAD']),
+    );
+  });
+
+  it('without a prefix from the server (old servers) the card branch name is pushed as before', async () => {
+    const { repo, path } = await cardWorktree();
+    const res = await run(repo, payload(repo, path, 'pr'), new FakePr({ url: 'u' }));
+    expect(res.pushedBranch).toBe(BRANCH);
+  });
+});

@@ -101,10 +101,17 @@ export async function hygieneSpecFor(
     );
     // Done or cancelled cards whose branch no open card (a reopened one) uses; empty when the project turned it off.
     const finishedCards = r.remove_finished_branches
-      ? await rows<{ id: string; ref: string; branch_name: string; pr_url: string | null }>(
+      ? await rows<{
+          id: string;
+          ref: string;
+          branch_name: string;
+          pr_url: string | null;
+          remote_branch: string | null;
+        }>(
           db,
           `SELECT DISTINCT ON (c.branch_name) c.id, c.ref, c.branch_name,
-                  c.finalize_result->>'prUrl' AS pr_url
+                  c.finalize_result->>'prUrl' AS pr_url,
+                  c.finalize_result->>'pushedBranch' AS remote_branch
              FROM cards c
             WHERE c.project_id=$1 AND (c.repo_id = $2 OR c.repo_id IS NULL) AND c.status IN ('done','cancelled')
               AND c.branch_name IS NOT NULL
@@ -134,6 +141,7 @@ export async function hygieneSpecFor(
         ref: c.ref,
         branch: c.branch_name,
         ...(c.pr_url ? { prUrl: c.pr_url } : {}),
+        ...(c.remote_branch && c.remote_branch !== c.branch_name ? { remoteBranch: c.remote_branch } : {}),
       })),
     });
   }

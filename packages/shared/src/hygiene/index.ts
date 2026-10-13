@@ -136,6 +136,8 @@ export const HygieneRepoSpecSchema = z.object({
         branch: z.string(),
         /** The pull request the card was finalized with, when it was one. */
         prUrl: z.string().optional(),
+        /** The name the card's pull request branch has on origin when it differs from the local branch (`<prefix>/<ticket>`). */
+        remoteBranch: z.string().optional(),
       }),
     )
     .default([]),

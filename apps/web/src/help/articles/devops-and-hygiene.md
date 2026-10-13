@@ -44,6 +44,7 @@ Once a day per workstation by default, the DevOps engineer tidies the repositori
 - Stores any unsaved edits of yours in a **git stash** (`git stash list`, "saved work ...") on your machine, so nothing is lost. Nothing is pushed, no branch is added, your files stay exactly as they are, and nothing lands on main by surprise.
 - Pushes commits that have not been pushed yet.
 - Removes branches and worktrees (temporary checkouts) of finished cards.
+- Pull requests are pushed to the git host as `<prefix>/<ticket>` (project setting "Pull request branch prefix", default `feature`).
 
 The panel shows the last and next run and any open findings.
 

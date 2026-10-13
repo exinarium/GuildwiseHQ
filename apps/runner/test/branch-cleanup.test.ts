@@ -49,11 +49,12 @@ const spec = (repo: TestRepo, cards: Card[], over: Partial<HygieneRepoSpec> = {}
   finishedCards: cards,
   ...over,
 });
-const card = (n: number, branch: string, prUrl?: string): Card => ({
+const card = (n: number, branch: string, prUrl?: string, remoteBranch?: string): Card => ({
   cardId: CARD(n),
   ref: `TOY-${n}`,
   branch,
   ...(prUrl ? { prUrl } : {}),
+  ...(remoteBranch ? { remoteBranch } : {}),
 });
 
 /** A card branch with one commit, pushed to origin (as `pr` / `push_branch` do), back on main in the clone. */
@@ -324,5 +325,32 @@ describe('a reopened card gets its branch back', () => {
       defaultPath: path,
     });
     expect(existsSync(join(path, 'k.txt'))).toBe(true);
+  });
+});
+
+describe('hygiene removes the pull request branch by its stored name only', () => {
+  it("deletes pieter/TOY-1 (stored for the card) and leaves the user's other pieter/* branches alone", async () => {
+    const repo = makeRepo();
+    pushedBranch(repo, 'aom/toy-1-a', 'a.txt');
+    sh(repo.clone, 'git', ['push', 'origin', 'aom/toy-1-a:refs/heads/pieter/TOY-1']);
+    sh(repo.clone, 'git', ['push', 'origin', 'aom/toy-1-a:refs/heads/pieter/mine']);
+    sh(repo.clone, 'git', ['push', 'origin', '--delete', 'aom/toy-1-a']);
+    sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'merge a', 'aom/toy-1-a']);
+    sh(repo.clone, 'git', ['push', 'origin', 'main']);
+    const { result } = await hygieneRepo(spec(repo, [card(1, 'aom/toy-1-a', undefined, 'pieter/TOY-1')]));
+    expect(result.problem).toBeNull();
+    expect(originHeads(repo)).not.toContain('pieter/TOY-1');
+    expect(originHeads(repo)).toContain('pieter/mine');
+    expect(localHeads(repo)).not.toContain('aom/toy-1-a');
+    expect(result.cleaned[0]).toMatchObject({ ref: 'TOY-1', origin: true });
+  });
+
+  it('keeps an unmerged pull request branch', async () => {
+    const repo = makeRepo();
+    pushedBranch(repo, 'aom/toy-2-b', 'b.txt');
+    sh(repo.clone, 'git', ['push', 'origin', 'aom/toy-2-b:refs/heads/pieter/TOY-2']);
+    const { result } = await hygieneRepo(spec(repo, [card(2, 'aom/toy-2-b', undefined, 'pieter/TOY-2')]));
+    expect(result.cleaned).toEqual([]);
+    expect(originHeads(repo)).toContain('pieter/TOY-2');
   });
 });

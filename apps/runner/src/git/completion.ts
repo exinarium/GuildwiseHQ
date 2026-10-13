@@ -57,7 +57,13 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
   const { payload: p } = input;
   const action = p.action;
   // Owner-controlled refs: refuse anything git could parse as an option or an odd refspec.
-  for (const ref of [p.branchName, p.baseBranch, `aom-integration/${p.ref.toLowerCase()}`])
+  for (const ref of [
+    p.branchName,
+    p.baseBranch,
+    `aom-integration/${p.ref.toLowerCase()}`,
+    ...(p.remoteBranch ? [p.remoteBranch] : []),
+    ...(p.prBranchPrefix && p.ticket ? [`${p.prBranchPrefix}/${p.ticket}`] : []),
+  ])
     if (!isSafeGitRef(ref)) return fail(action, `refusing unsafe branch name ${JSON.stringify(ref)}`);
   let wt: string;
   try {
@@ -97,15 +103,17 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
       action,
       `cannot ${action === 'pr' ? 'open a PR' : 'push'}: the repository has no origin remote`,
     );
-  const push = await pushBranch(input, wt);
+  // A pull request goes out under <prefix>/<ticket>; a plain branch push keeps the card branch name.
+  const head = action === 'pr' ? await remoteBranchFor(input, wt) : p.branchName;
+  const push = await pushBranch(input, wt, head);
   if (push.exitCode !== 0) return fail(action, `git push failed: ${(push.stderr || push.stdout).trim()}`);
-  if (action === 'push_branch') return { ok: true, action, pushedBranch: p.branchName };
+  if (action === 'push_branch') return { ok: true, action, pushedBranch: head };
 
   try {
     const r = await input.pr.create({
       cwd: wt,
       base: p.baseBranch,
-      branch: p.branchName,
+      branch: head,
       title: p.prTitle ?? `${p.ref}: ${p.title}`,
       body: p.prBody ?? p.title,
       forge: p.forge ?? null,
@@ -114,21 +122,47 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
       return {
         ok: true,
         action,
-        pushedBranch: p.branchName,
-        notice: `${r.unavailable}: the branch ${p.branchName} was pushed, open the pull request by hand`,
+        pushedBranch: head,
+        notice: `${r.unavailable}: the branch ${head} was pushed, open the pull request by hand`,
       };
-    return { ok: true, action, pushedBranch: p.branchName, ...(r.url ? { prUrl: r.url } : {}) };
+    return { ok: true, action, pushedBranch: head, ...(r.url ? { prUrl: r.url } : {}) };
   } catch (err) {
     return fail(action, errMsg(err));
   }
 }
 
-/** `git push -u origin <branch>` with the host's credentials when the runner has any. */
-async function pushBranch(input: CompletionInput, wt: string) {
+/**
+ * The name a pull request branch has on origin. A name used before (`remoteBranch`: rework updates the same branch and
+ * pull request) wins; else `<prefix>/<ticket>`, with `-2`, `-3` ... when origin already has a branch of that name. Old
+ * servers send neither: the card branch name, as before.
+ */
+async function remoteBranchFor(input: CompletionInput, wt: string): Promise<string> {
+  const { payload: p } = input;
+  if (p.remoteBranch) return p.remoteBranch;
+  if (!p.prBranchPrefix || !p.ticket) return p.branchName;
+  const base = `${p.prBranchPrefix}/${p.ticket}`;
+  const url = (await git(wt, ['remote', 'get-url', 'origin'])).stdout.trim();
+  const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
+  for (let n = 1; n <= 50; n++) {
+    const name = n === 1 ? base : `${base}-${n}`;
+    const r = await git(wt, [...a.args, 'ls-remote', '--exit-code', '--heads', 'origin', `refs/heads/${name}`], {
+      env: a.env,
+      timeoutMs: 60_000,
+    });
+    // 2: no such ref (free). Any other failure (offline, auth): keep the first name, the push reports the problem.
+    if (r.exitCode === 2) return name;
+    if (r.exitCode !== 0) return base;
+  }
+  return base;
+}
+
+/** `git push -u origin <local>:<remote>` with the host's credentials when the runner has any. */
+async function pushBranch(input: CompletionInput, wt: string, remoteName?: string) {
   const { payload: p } = input;
   const url = (await git(wt, ['remote', 'get-url', 'origin'])).stdout.trim();
   const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
-  return git(wt, [...a.args, 'push', '-u', 'origin', '--', p.branchName], { env: a.env });
+  const spec = remoteName && remoteName !== p.branchName ? `${p.branchName}:refs/heads/${remoteName}` : p.branchName;
+  return git(wt, [...a.args, 'push', '-u', 'origin', '--', spec], { env: a.env });
 }
 
 async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult> {
@@ -212,14 +246,15 @@ async function viaChange(
   reason?: string,
 ): Promise<FinalizeResult> {
   const { payload: p } = input;
-  const push = await pushBranch(input, wt);
+  const head = await remoteBranchFor(input, wt);
+  const push = await pushBranch(input, wt, head);
   if (push.exitCode !== 0) return fail('pr', `git push failed: ${(push.stderr || push.stdout).trim()}`);
   const why = reason ? `${base} refused a direct push` : `${base} is protected on the git host`;
   try {
     const r = await input.pr.create({
       cwd: wt,
       base,
-      branch: p.branchName,
+      branch: head,
       title: p.prTitle ?? `${p.ref}: ${p.title}`,
       body: p.prBody ?? p.title,
       forge: p.forge ?? null,
@@ -229,14 +264,14 @@ async function viaChange(
         ok: true,
         action: 'pr',
         protectedBranch: true,
-        pushedBranch: p.branchName,
-        notice: `${why}, and a pull request could not be opened (${r.unavailable}): the branch ${p.branchName} was pushed, open the pull request by hand`,
+        pushedBranch: head,
+        notice: `${why}, and a pull request could not be opened (${r.unavailable}): the branch ${head} was pushed, open the pull request by hand`,
       };
     return {
       ok: true,
       action: 'pr',
       protectedBranch: true,
-      pushedBranch: p.branchName,
+      pushedBranch: head,
       ...(r.url ? { prUrl: r.url } : {}),
       notice: `${why}: opened a pull request instead of merging directly${r.url ? ` (${r.url})` : ''}`,
     };

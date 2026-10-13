@@ -136,6 +136,8 @@ export const ProjectDtoSchema = z.object({
   defaultCompletion: z.enum(['merge', 'pr']).optional(),
   /** Repository hygiene removes the branches of finished cards once their work is merged elsewhere (default on). */
   removeFinishedBranches: z.boolean().optional(),
+  /** Prefix of pull request branches on the git host, `<prefix>/<ticket>`; empty means the default `feature`. */
+  prBranchPrefix: z.string().optional(),
   subCategories: z.array(z.string()),
   vaultFolder: z.string().nullable(),
   /** The project has a knowledge vault (its own or the organization's); a vault report location needs one. */

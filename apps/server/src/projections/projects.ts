@@ -10,6 +10,7 @@ const PROJECT_COLUMNS: Record<string, string> = {
   workingBranch: 'working_branch',
   defaultCompletion: 'default_completion',
   removeFinishedBranches: 'remove_finished_branches',
+  prBranchPrefix: 'pr_branch_prefix',
   subCategories: 'sub_categories',
   vaultFolder: 'vault_folder',
   architecturalGlobs: 'architectural_globs',

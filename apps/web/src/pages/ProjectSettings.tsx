@@ -1,4 +1,4 @@
-import { COMPLETION_ACTION_LABELS } from '@aom/shared';
+import { COMPLETION_ACTION_LABELS, isSafePrBranchPrefix } from '@aom/shared';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { usePatchProject, useProject, useRemoveRepo } from '../api/queries/projects.ts';
@@ -55,6 +55,7 @@ export function ProjectSettings() {
   const expert = useExpertMode();
   const [landing, setLanding] = useState<'merge' | 'pr'>('merge');
   const [removeBranches, setRemoveBranches] = useState(true);
+  const [prPrefix, setPrPrefix] = useState('');
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
   const [name, setName] = useState('');
   const [branch, setBranch] = useState('');
@@ -70,6 +71,7 @@ export function ProjectSettings() {
     setBranch(project.workingBranch);
     setLanding(project.defaultCompletion ?? 'merge');
     setRemoveBranches(project.removeFinishedBranches ?? true);
+    setPrPrefix(project.prBranchPrefix ?? '');
     setArch(project.architecturalGlobs.join('\n'));
     setE2e(project.e2eGlobs.join('\n'));
   }, [project]);
@@ -90,13 +92,19 @@ export function ProjectSettings() {
   const { repos, members } = q.data;
   const activeRepos = repos.filter((r) => !r.removedAt);
 
+  const prPrefixOk = isSafePrBranchPrefix(prPrefix.trim());
   const save = (e: FormEvent) => {
     e.preventDefault();
+    if (traits.usesRepos && !prPrefixOk) return;
     patch.mutate(
       {
         name: name.trim(),
         ...(expert ? { workingBranch: branch.trim() } : {}),
-        ...(traits.usesRepos ? { defaultCompletion: landing, removeFinishedBranches: removeBranches } : {}),
+        ...(traits.usesRepos ? {
+                defaultCompletion: landing,
+                removeFinishedBranches: removeBranches,
+                prBranchPrefix: prPrefix.trim(),
+              } : {}),
         ...(traits.usesRepos ? { architecturalGlobs: lines(arch) } : {}),
         ...(traits.hasTestStage ? { e2eGlobs: lines(e2e) } : {}),
       },
@@ -193,6 +201,17 @@ export function ProjectSettings() {
                 <option value="merge">{COMPLETION_ACTION_LABELS.merge.label} (no pull request)</option>
                 <option value="pr">Pull request I approve</option>
               </Select>
+            )}
+            {traits.usesRepos && (
+              <TextInput
+                label="Pull request branch prefix"
+                data-testid="pr-branch-prefix"
+                hint="Pull requests go to the git host as <prefix>/<ticket>, for example pieter/DCPL-4276. Empty: feature."
+                placeholder="feature"
+                value={prPrefix}
+                error={prPrefixOk ? undefined : 'Letters, digits, . _ - and /, at most 40 characters.'}
+                onChange={(e) => setPrPrefix(e.target.value)}
+              />
             )}
             {traits.usesRepos && (
               <label className="flex items-start gap-2 text-sm text-fg">

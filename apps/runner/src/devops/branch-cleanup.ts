@@ -130,8 +130,12 @@ export async function cleanFinishedCards(
     seen.add(b);
     if (!isSafeGitRef(b) || !hasGuildwisePrefix(b, spec.branchPrefix)) continue;
     if (b === wb || b === spec.mainBranch || b === current) continue;
+    // The pull request branch on origin has the name the server stored for this card (`<prefix>/<ticket>`), found by
+    // that name alone, never by a prefix: other branches of the user under the same prefix are not touched.
+    const ob = card.remoteBranch ?? b;
+    if (!isSafeGitRef(ob) || ob === wb || ob === spec.mainBranch) continue;
     const localSha = await revParse(repoPath, `refs/heads/${b}`);
-    const originSha = input.remote ? await revParse(repoPath, `refs/remotes/origin/${b}`) : null;
+    const originSha = input.remote ? await revParse(repoPath, `refs/remotes/origin/${ob}`) : null;
     if (!localSha && !originSha) continue;
 
     // Its pull request decides first: an open one keeps the branch; a merged one releases it. A declined one does not:
@@ -181,19 +185,19 @@ export async function cleanFinishedCards(
       entry.worktree = true;
     } else if (wt) continue;
     if (originSha) {
-      input.log(`git -C ${repoPath} push --delete origin ${b}`);
+      input.log(`git -C ${repoPath} push --delete origin ${ob}`);
       const del = await git(repoPath, [
         'push',
         '--delete',
-        `--force-with-lease=refs/heads/${b}:${originSha}`,
+        `--force-with-lease=refs/heads/${ob}:${originSha}`,
         'origin',
         '--',
-        b,
+        ob,
       ]);
       if (del.exitCode === 0) entry.origin = true;
       else {
         const why = (del.stderr || del.stdout).trim().split('\n')[0] ?? 'git failed';
-        notes.push(`${b} not removed from origin: ${why}`);
+        notes.push(`${ob} not removed from origin: ${why}`);
         // The local copy stays too: the next run decides again with the remote branch still there.
         if (entry.worktree) cleaned.push(entry);
         continue;

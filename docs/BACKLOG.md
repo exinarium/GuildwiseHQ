@@ -116,24 +116,6 @@ follow. Keys are probably per workstation; a dedicated **Integrations** page in 
   wants that; and OAuth sign-in where a provider offers it (Atlassian, GitHub app) instead of pasted tokens.
 - Help docs and What's new, runner version bump, tests in runner, server and web.
 
-### 32. Cap or summarise the handoff notes in shift instructions
-
-Every shift prompt carries **all** previous handoffs of the card in full (`packages/shared/src/prompt/shift-prompt.ts`,
-section "Previous handoffs"). A card that goes round review/rework or test several times (P4-3, P4-7) collects a long
-tail of notes, most of them superseded, and the prompt keeps growing (it already pushed reviewer prompts past the argv
-limit before 0.1.7 moved them to stdin). Wanted: keep the latest few handoffs in full and the rest as one line each
-(stage / agent / outcome / date), or a rolling summary written at handoff time; a size budget for the section with the
-oldest notes trimmed first; the full history stays on the card page. Tests in `packages/shared` for the trimming.
-
-### 33. .NET builds in a repository without `.gitmodules`
-
-Seen while testing #31: in a repository that has no `.gitmodules` file, a .NET build in the sandbox can fail with
-"Access to .gitmodules is denied" (SourceLink / the git task probes the file, and the sandbox refuses the read of a path
-that does not exist under the worktree's protected git paths). The owner's repositories have the file, so nobody is
-affected today. Wanted: reproduce in the sandbox with a repo without `.gitmodules`, then allow reading that path
-(read-only) in the policy (`apps/runner/src/adapters/claude-policy.ts`) or set `EnableSourceLink=false` /
-`EnableSourceControlManagerQueries=false` for agent builds (`apps/runner/src/sandbox/sandbox.ts`); a runner test either way.
-
 ### 14. Incoming webhooks as an automation trigger
 
 **Decided (owner, 2026-10-12): later.** The `webhook_in` trigger kind exists in the schema (`packages/shared/src/schedules`)
@@ -160,11 +142,6 @@ scenes, the phases-in-reporting scenes, desk items with the simple-mode / saved-
 steps in the Playwright `guide` project fail on simple mode (phase reporting 409 `phase_not_open`, the hygiene
 working-branch question, test-stage scenes, the edited-card step). Fix the seeds the way the e2e specs were fixed
 (expert mode where needed), re-capture, rebuild `guide.html` and the PDF.
-
-### 18. Working-branch question lists saved-work branches
-
-The hygiene question "Keep trunk as working branch?" also offers the automatic `guildwise/saved-work/<date>` branches as
-choices. Leave them out of the options.
 
 ### 19. Per-sender limit for inbound e-mail
 
@@ -252,8 +229,92 @@ The details of each done item follow this list, by date.
 - #29: Hired agents keep stale role permissions. Done 2026-10-13.
 - #30: Cards inherit the project's completion action. Done 2026-10-13.
 - #31: Builders stuck: MSBuild nodes and don't-ask Bash denials. Done 2026-10-13 (runner 0.1.9).
+- #32: Cap or summarise the handoff notes in shift instructions. Done 2026-10-13.
+- #18: Working-branch question lists saved-work branches. Done 2026-10-13.
+- #33: .NET builds in a repository without `.gitmodules`. Done 2026-10-13.
+- #45: No Guildwise trace in repositories: saved work in stashes. Done 2026-10-13.
+- #46: Branch prefix per project for pull-request branches. Done 2026-10-13.
 
 ## 2026-10-13 (done)
+
+### 46. Branch prefix per project for pull-request branches
+
+**Owner request (2026-10-13):** a pull request branch must not carry `aom/`; it is `<project prefix>/<ticket>`, for example
+`pieter/DCPL-4276`.
+
+**Done (2026-10-13).** New project setting **Pull request branch prefix** (`prBranchPrefix`, migration 1830, edited in
+Project settings by those who may change the project; validated as a safe ref path, 40 characters, empty means `feature`).
+`finalize.execute` carries `prBranchPrefix`, `ticket` (the tracker key of the card's intake when it is a key such as
+`DCPL-4276`, else the card ref) and `remoteBranch` (the name a card used before, read from `finalize_result.pushedBranch`).
+The runner pushes `<local>:refs/heads/<remote name>`, adds `-2`, `-3` when origin already has the name, opens the pull request
+from the remote name and returns it as `pushedBranch`, so rework updates the same branch and pull request. The local card
+branch is unchanged. Hygiene removes the finished card's remote branch by the stored name only (`finishedCards[].remoteBranch`),
+never by prefix. Old open pull requests keep their `aom/...` branch (their stored `pushedBranch` is reused). Only the `pr`
+action and the protected-branch fallback use the new name; "push the branch" keeps the card branch name.
+
+### 45. No Guildwise trace in repositories: saved work in stashes
+
+**Owner request (2026-10-13):** nothing with the product's name may end up in the user's repositories, local or remote.
+
+**Done (2026-10-13).** Saved work no longer uses `guildwise/saved-work/*` branches and is never pushed. Uncommitted edits
+(also untracked files, minus secret-looking ones) become a stash entry `saved work <ISO date>: N file(s) not committed`
+built from throwaway indexes (W with parents HEAD and I, a third parent for untracked files, then `git stash store`), so
+`git stash list/show/apply` work and the checkout and index are untouched. Local commits that were never on origin when a
+rewritten working branch is realigned are kept as a stash entry whose first parent is the old tip (`git branch <name>
+stash@{n}^1` recovers them). Every hygiene run migrates older runners' `guildwise/saved-work/*` branches: local ones are
+stored as a stash and deleted, ones on origin are fetched, kept and deleted from origin (that exact prefix only). Runner-made
+merges and rebases use the repository's own `user.name`/`user.email` (fallback to the runner identity only when none is
+set), the merge messages no longer say "aom", and the leftovers commit no longer starts with `aom:`. Tests in
+`apps/runner/test/hygiene.test.ts`, `repo-identity.test.ts`, `completion.test.ts` and `sync-main.test.ts`.
+Left as they are, for a decision: agent commits are authored as the agent (`<name> (aom)`, `<id>@agents.aom.invalid`,
+`apps/runner/src/sandbox/sandbox.ts`), and the knowledge vault repositories get `aom: ...` commit messages.
+
+### 33. .NET builds in a repository without `.gitmodules`
+
+Seen while testing #31: in a repository that has no `.gitmodules` file, a .NET build in the sandbox can fail with
+"Access to .gitmodules is denied" (SourceLink / the git task probes the file, and the sandbox refuses the read of a path
+that does not exist under the worktree's protected git paths). The owner's repositories have the file, so nobody is
+affected today. Wanted: reproduce in the sandbox with a repo without `.gitmodules`, then allow reading that path
+(read-only) in the policy (`apps/runner/src/adapters/claude-policy.ts`) or set `EnableSourceLink=false` /
+`EnableSourceControlManagerQueries=false` for agent builds (`apps/runner/src/sandbox/sandbox.ts`); a runner test either way.
+
+**Done (2026-10-13).** Reproduced in a bubblewrap sandbox with a fresh `dotnet new classlib` in a git repository
+without `.gitmodules`: the sandbox runtime protects `<repo>/.gitmodules` and, when the file does not exist, masks it with
+`/dev/null`; the SDK's `Microsoft.Build.Tasks.Git` then fails with "Error reading git repository information: Access to
+the path '.../.gitmodules' is denied". A policy change could not fix this (the path is on the runtime's own deny list), so
+the sandbox env now sets `EnableSourceControlManagerQueries=false` (`dotnetEnv` in `apps/runner/src/sandbox/sandbox.ts`);
+`EnableSourceLink=false` alone does not stop the probe (tried). Verified by hand and in `apps/runner/test/sandbox-caches.test.ts`
+(a build with the mask passes; without the variable it fails on `.gitmodules`). Note: on this machine those real-sandbox
+tests, and the older ones beside them, fail at baseline with a .NET `NuGet-Migrations` mutex error when `/tmp/.dotnet` is a
+bind mount; they pass where that works.
+
+### 32. Cap or summarise the handoff notes in shift instructions
+
+Every shift prompt carries **all** previous handoffs of the card in full (`packages/shared/src/prompt/shift-prompt.ts`,
+section "Previous handoffs"). A card that goes round review/rework or test several times (P4-3, P4-7) collects a long
+tail of notes, most of them superseded, and the prompt keeps growing (it already pushed reviewer prompts past the argv
+limit before 0.1.7 moved them to stdin). Wanted: keep the latest few handoffs in full and the rest as one line each
+(stage / agent / outcome / date), or a rolling summary written at handoff time; a size budget for the section with the
+oldest notes trimmed first; the full history stays on the card page. Tests in `packages/shared` for the trimming.
+
+**Done (2026-10-13).** `renderHandoffs` in `packages/shared/src/prompt/shift-prompt.ts` builds the "Previous handoffs"
+section: the latest 4 handoffs stay in full, older ones become one line each (`- stage / agent / outcome (at): first
+line, 160 characters`) under a line that says how many were shortened and that the full history is on the card page. The
+section has a budget of 12,000 characters: the oldest full notes are shortened first, and the latest handoff is never
+dropped, only cut with a "[… truncated, full note on the card page]" marker when it alone is too long. Tests in
+`packages/shared/test/prompt.test.ts`. `aom card <REF>` in a BA task (`ba-tasks.ts`) returns the handoffs as data for the
+BA, not as prompt text, so it is unchanged.
+
+### 18. Working-branch question lists saved-work branches
+
+The hygiene question "Keep trunk as working branch?" also offers the automatic `guildwise/saved-work/<date>` branches as
+choices. Leave them out of the options.
+
+**Done (2026-10-13).** The working-branch question and the automatic default (`defaultWorkingBranch`) leave out
+runner-owned branches (`guildwise/saved-work/`, `conflict/`, `aom-integration/`) and agent card branches (`aom/`). The
+predicate is shared (`isRunnerOwnedBranch`, `isNotWorkingBranchCandidate` in `packages/shared/src/hygiene`); the runner's
+post-shift guard uses the same list. Tests in `apps/server/test/simple-mode-branch.test.ts` and
+`packages/shared/test/prompt.test.ts`.
 
 ### 20. Plugin MCP servers for sandboxed agents
 

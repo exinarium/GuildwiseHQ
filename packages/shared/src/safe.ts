@@ -23,6 +23,24 @@ export function isSafeBranchPrefix(prefix: string): boolean {
   return prefix === '' || isSafeGitRef(`${prefix}x`);
 }
 
+/**
+ * The prefix of the branch a pull request is pushed under (`pieter` gives `pieter/DCPL-4276`): empty (use the default)
+ * or a ref component path without spaces and without leading or trailing slash, 40 characters at most.
+ */
+export function isSafePrBranchPrefix(prefix: string): boolean {
+  return (
+    prefix === '' ||
+    (prefix.length <= 40 &&
+      !prefix.startsWith('/') &&
+      !prefix.endsWith('/') &&
+      /^[A-Za-z0-9._/-]+$/.test(prefix) &&
+      isSafeGitRef(`${prefix}/X-1`))
+  );
+}
+
+/** Used when a project sets no pull request branch prefix: no product name in the repository. */
+export const DEFAULT_PR_BRANCH_PREFIX = 'feature';
+
 /** `projects/<folder>` or a plain folder inside a vault: relative, forward slashes, no `.`/`..`/`.git` segments. */
 export function isSafeVaultFolder(folder: string): boolean {
   if (folder.length === 0 || folder.length > 200) return false;
@@ -100,6 +118,9 @@ export const GitRefSchema = z.string().refine(isSafeGitRef, { message: 'not a va
 export const BranchPrefixSchema = z
   .string()
   .refine(isSafeBranchPrefix, { message: 'not a valid branch prefix (for example "aom/")' });
+export const PrBranchPrefixSchema = z.string().refine(isSafePrBranchPrefix, {
+  message: 'not a valid branch prefix (letters, digits, . _ - and /, at most 40 characters, for example "pieter")',
+});
 export const VaultFolderSchema = z
   .string()
   .refine(isSafeVaultFolder, { message: 'must be a relative folder without ".." segments' });

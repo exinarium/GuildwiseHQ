@@ -1,6 +1,6 @@
 import { codeWorkflowV1, feedWorkflowV1, type ProjectDetailResponse, researchWorkflowV1 } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Board } from '../pages/Board.tsx';
@@ -30,6 +30,7 @@ const dto = (workflowKey: string) => ({
   myRole: 'owner',
   mergeLargeWithoutApproval: false,
   mergeLargeChanged: null,
+  prBranchPrefix: 'pieter',
 });
 
 const defs = { code: codeWorkflowV1, research: researchWorkflowV1, feed: feedWorkflowV1 };
@@ -90,7 +91,16 @@ describe('project settings for repo-less workflows', () => {
     expect(await screen.findByText('Repositories')).toBeInTheDocument();
     expect(screen.getByLabelText('E2E globs')).toBeInTheDocument();
     expect(screen.getByLabelText('Architectural globs')).toBeInTheDocument();
+    expect(screen.getByLabelText('Pull request branch prefix')).toHaveValue('pieter');
     expect(screen.getByText('Merge large changes without my approval')).toBeInTheDocument();
+  });
+
+  it('flags an invalid pull request branch prefix', async () => {
+    stub('code');
+    open();
+    const field = await screen.findByLabelText('Pull request branch prefix');
+    fireEvent.change(field, { target: { value: 'has space' } });
+    expect(await screen.findByText(/at most 40 characters/)).toBeInTheDocument();
   });
 
   it('hides repositories, globs and the merge policy for research', async () => {
@@ -100,6 +110,7 @@ describe('project settings for repo-less workflows', () => {
     await vi.waitFor(() => expect(screen.queryByText('Repositories')).toBeNull());
     expect(screen.queryByLabelText('E2E globs')).toBeNull();
     expect(screen.queryByLabelText('Architectural globs')).toBeNull();
+    expect(screen.queryByLabelText('Pull request branch prefix')).toBeNull();
     expect(screen.queryByText('Merge large changes without my approval')).toBeNull();
   });
 
