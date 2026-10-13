@@ -182,7 +182,18 @@ export const SESSION_TOOLS_DENIED = [
   'ExitWorktree',
 ];
 
-const ALWAYS_DENIED = [...SESSION_TOOLS_DENIED, 'Bash(git push:*)', 'Bash(git reset --hard:*)'];
+/**
+ * The stash list is shared by every worktree of a clone, and repository hygiene keeps the user's saved work there: an
+ * agent may stash and `git stash apply` its own changes, but never drop, pop or clear an entry.
+ */
+export const STASH_REMOVING_DENIED = ['Bash(git stash drop:*)', 'Bash(git stash pop:*)', 'Bash(git stash clear:*)'];
+
+const ALWAYS_DENIED = [
+  ...SESSION_TOOLS_DENIED,
+  'Bash(git push:*)',
+  'Bash(git reset --hard:*)',
+  ...STASH_REMOVING_DENIED,
+];
 
 /**
  * G-Q12: rebase, checkout and switch were denied for every role. The builder may now run them to

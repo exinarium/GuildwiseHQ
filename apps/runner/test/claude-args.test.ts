@@ -143,6 +143,9 @@ describe('claude settings.json: permissions per role (review M3)', () => {
     for (const d of [
       'Bash(git push:*)',
       'Bash(git reset --hard:*)',
+      'Bash(git stash drop:*)',
+      'Bash(git stash pop:*)',
+      'Bash(git stash clear:*)',
       'Bash(sudo:*)',
       'Bash(rm -rf /*)',
       'WebFetch',

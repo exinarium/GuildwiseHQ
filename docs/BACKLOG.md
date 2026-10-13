@@ -269,6 +269,8 @@ set), the merge messages no longer say "aom", and the leftovers commit no longer
 Left as they are, for a decision: agent commits are authored as the agent (`<name> (aom)`, `<id>@agents.aom.invalid`,
 `apps/runner/src/sandbox/sandbox.ts`), and the knowledge vault repositories get `aom: ...` commit messages.
 
+Agents share the clone's stash list, so `git stash drop`, `pop` and `clear` are denied for every agent role (`STASH_REMOVING_DENIED` in `claude-policy.ts`) and the instructions say to `git stash apply` only their own entry.
+
 ### 33. .NET builds in a repository without `.gitmodules`
 
 Seen while testing #31: in a repository that has no `.gitmodules` file, a .NET build in the sandbox can fail with
