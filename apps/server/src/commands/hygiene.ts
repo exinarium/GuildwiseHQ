@@ -13,6 +13,7 @@ import {
   renderHygieneRequest,
   streamId,
   summarizeSweep,
+  isNotWorkingBranchCandidate,
   WORKING_BRANCH_KEEP_OPTION,
   WORKING_BRANCH_OTHER_OPTION,
   WORKING_BRANCH_SUBKIND,
@@ -306,7 +307,8 @@ const EXPERT_MANAGER_SQL = `SELECT 1 AS x FROM project_members pm JOIN users u O
   WHERE pm.project_id=$1 AND pm.status='active' AND u.git_expert LIMIT 1`;
 
 /** The branch to confirm without asking: the project's own (default `main`), else main/master, else the only branch. */
-export function defaultWorkingBranch(project: Row, known: string[]): string | null {
+export function defaultWorkingBranch(project: Row, allKnown: string[]): string | null {
+  const known = allKnown.filter((b) => !isNotWorkingBranchCandidate(b));
   const own = project.working_branch as string | undefined;
   if (own && known.includes(own)) return own;
   const common = ['main', 'master'].find((b) => known.includes(b));
@@ -376,7 +378,10 @@ export async function workingBranchQuestionEvents(
   const known: string[] = q.branches?.length ? q.branches : (repo.known_branches ?? []);
   // "Keep" makes no sense for a branch that does not exist.
   const keep = current && !q.missing ? current : null;
-  const branches = [...new Set(known)].filter((b) => b !== keep).slice(0, MAX_OPTIONS);
+  // Runner-owned branches (saved work, conflict attempts, integration) and agent card branches are never offered.
+  const branches = [...new Set(known)]
+    .filter((b) => b !== keep && !isNotWorkingBranchCandidate(b))
+    .slice(0, MAX_OPTIONS);
   // The suggested answer: the repository's default branch when known, else the only branch there is.
   const defaultBranch = q.missing?.defaultBranch ?? null;
   const suggested = defaultBranch ?? (branches.length === 1 ? (branches[0] as string) : null);

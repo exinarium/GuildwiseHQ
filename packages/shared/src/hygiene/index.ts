@@ -8,6 +8,21 @@ import { isSafeGitRef } from '../safe.ts';
  * and the desk question that confirms a repository's working branch.
  */
 
+// ------------------------------------------------------------------------------------------- runner-owned branches
+
+/** Branch name prefixes the runner creates for itself (saved work, conflict attempts, integration branches). */
+export const RUNNER_OWNED_BRANCH_PREFIXES = ['guildwise/saved-work/', 'conflict/', 'aom-integration/'] as const;
+/** Agent card branches (the default branch prefix; a project can choose another one). */
+export const CARD_BRANCH_PREFIX = 'aom/';
+
+/** A branch the runner owns: never the agent's doing, never a candidate working branch. */
+export const isRunnerOwnedBranch = (name: string): boolean =>
+  RUNNER_OWNED_BRANCH_PREFIXES.some((p) => name.startsWith(p));
+
+/** A branch that is not a sensible working branch: runner-owned, or an agent card branch (`aom/`). */
+export const isNotWorkingBranchCandidate = (name: string): boolean =>
+  isRunnerOwnedBranch(name) || name.startsWith(CARD_BRANCH_PREFIX);
+
 // ------------------------------------------------------------------------------------------- cadence
 
 /** Hours between two scheduled hygiene runs of a workstation; 0 turns the schedule off. Owner decision 1: daily. */

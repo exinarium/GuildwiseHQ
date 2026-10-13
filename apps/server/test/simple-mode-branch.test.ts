@@ -56,6 +56,32 @@ describe('working branch without questions (simple mode)', () => {
   });
 });
 
+describe('working branch options', () => {
+  it('never offers runner-owned or agent card branches', async () => {
+    await q('UPDATE project_repos SET working_branch=$2, working_branch_set_at=now() WHERE id=$1', [
+      w.repoId,
+      'main',
+    ]);
+    await q('UPDATE users SET git_expert=true WHERE id=$1', [w.owner.id]);
+    const { project, repo } = await load();
+    const ev = await workingBranchQuestionEvents(ctx(), ctx().pool, project, repo, {
+      reason: 'phase',
+      because: 'the new phase',
+      branches: [
+        'main',
+        'develop',
+        'guildwise/saved-work/2026-10-10',
+        'conflict/abc',
+        'aom-integration/x',
+        'aom/toy-1-thing',
+      ],
+    });
+    const labels = ((ev[0]!.event as any).payload.options as Array<{ label: string }>).map((o) => o.label);
+    expect(labels).toContain('develop');
+    expect(labels.join(' ')).not.toMatch(/saved-work|conflict\/|aom-integration|aom\//);
+  });
+});
+
 describe('the saved-work notice', () => {
   it('tells the managers where the unsaved edits went and which files were left alone', async () => {
     const { project, repo } = await load();

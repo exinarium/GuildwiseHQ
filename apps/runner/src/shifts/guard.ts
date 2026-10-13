@@ -1,4 +1,4 @@
-import type { AgentPermissions, GuardViolation } from '@aom/shared';
+import { isRunnerOwnedBranch, type AgentPermissions, type GuardViolation } from '@aom/shared';
 import picomatch from 'picomatch';
 import { currentBranch, git } from '../git/git.ts';
 
@@ -33,13 +33,6 @@ export async function siblingWorktreeBranches(worktree: string): Promise<Set<str
   }
   return out;
 }
-
-/**
- * Branches the runner itself creates and moves in the shared .git (repository hygiene's saved-work and conflict
- * branches, integration branches): never the agent's doing. (Other cards' `aom/` branches advanced by their own shifts are
- * covered by {@link siblingWorktreeBranches}.)
- */
-const RUNNER_OWNED_BRANCH = /^(guildwise\/saved-work\/|conflict\/|aom-integration\/)/;
 
 /**
  * A branch whose new tip adds no commit beyond what the remote already has (a pull or fast-forward of the owner's
@@ -278,7 +271,7 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
   const moved: string[] = [];
   for (const b of Object.keys(now)) {
     if (b === input.branchName || siblings.has(b) || input.branchesAtStart[b] === now[b]) continue;
-    if (RUNNER_OWNED_BRANCH.test(b)) continue;
+    if (isRunnerOwnedBranch(b)) continue;
     if (await isSyncOnly(input.worktree, now[b] as string, input.branchesAtStart[b])) continue;
     moved.push(b);
   }
