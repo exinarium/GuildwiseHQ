@@ -216,7 +216,7 @@ describe('finalize.execute command', () => {
 
   it('reports expected failures in the result, not as a command failure', async () => {
     await start();
-    const res = await send(base({ branchName: 'aom/does-not-exist' }));
+    const res = await send(base({ worktreePath: '/etc/outside-the-runner' }));
     expect(res.ok).toBe(true);
     expect((res.result as any).ok).toBe(false);
     expect((res.result as any).error).toMatch(/worktree is not available/);

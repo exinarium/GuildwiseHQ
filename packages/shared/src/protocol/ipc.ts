@@ -212,6 +212,9 @@ export const RpcMethodSchema = z.enum([
   'git.fetch',
   'git.merge_main',
   'git.verify_merge',
+  /** DevOps repository hygiene, answered by the runner itself: the shifts with a running worktree, and a pull request's state. */
+  'hygiene.busy_worktrees',
+  'hygiene.change_state',
   /** The BA's finalize shift on an investigation-only card: record the result in the ledger and PROJECT.md. */
   'investigation.record',
   /** Attachments: Jira files downloaded by the runner (`source.*`, answered by the runner), a card's files copied next to the shift, a file the BA attaches to a card of its intake. */

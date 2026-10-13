@@ -22,6 +22,7 @@ import {
   type ShiftBrief,
   type ShiftReport,
 } from '@aom/shared';
+import type { ChangeStateLookup } from '../devops/branch-cleanup.ts';
 import { runHygiene } from '../devops/hygiene.ts';
 
 export interface AomIo {
@@ -795,7 +796,19 @@ const VERBS: Record<string, Verb> = {
     } catch {
       // older runner: no deferral
     }
-    const run = await runHygiene(spec, busy);
+    // Pull request states come from the runner (it holds the git host logins); without it the branches of cards that
+    // went through a pull request are judged by their commits alone.
+    const changeState: ChangeStateLookup = async (q) => {
+      try {
+        const r = (await rpc(ctx, 'hygiene.change_state', q)) as {
+          state?: 'open' | 'merged' | 'closed' | null;
+        };
+        return r.state ?? null;
+      } catch {
+        return null;
+      }
+    };
+    const run = await runHygiene(spec, busy, { changeState });
     const note = textFlag(ctx, p, 'note', false)?.trim();
     const summary = `${run.summary}${note ? `\n\n${note}` : ''}`;
     ctx.io.out(`${summary}\n`);

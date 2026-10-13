@@ -10,6 +10,7 @@ import {
 } from '@aom/shared';
 import { currentBranch, git, hasRemote, revParse } from '../git/git.ts';
 import { changedFiles } from '../git/sweep.ts';
+import { type ChangeStateLookup, cleanFinishedCards } from './branch-cleanup.ts';
 import { saveCommitsBranch, saveUncommittedWork } from './saved-work.ts';
 
 /**
@@ -25,6 +26,8 @@ import { saveCommitsBranch, saveUncommittedWork } from './saved-work.ts';
  * - on the working branch: pull (fast-forward, else rebase when the tree is clean), push what is unpushed;
  * - on any other branch: leave the working tree alone, only move the working branch ref and push it;
  * - merged branches of finished cards are deleted locally, never an unmerged one;
+ * - branches of done or cancelled cards are removed from origin, the clone and their worktree once their work is in the
+ *   working branch, migrated (rebased) or their pull request is closed (branch-cleanup.ts; the project can turn it off);
  * - whatever cannot be resolved (conflict, auth failure, missing clone) is reported as the repository's problem.
  */
 
@@ -138,7 +141,11 @@ async function realignRewritten(
     const kept = await saveCommitsBranch(repo.path, tip, { remote, log: (c) => repo.commands.push(c) });
     if (!kept.branch) {
       // Without a safe copy the branch stays as it is.
-      mark(res, 'error', `${wb} was rewritten on origin but its own commits could not be saved: ${kept.error}`);
+      mark(
+        res,
+        'error',
+        `${wb} was rewritten on origin but its own commits could not be saved: ${kept.error}`,
+      );
       res.rewritten = info;
       return;
     }
@@ -209,9 +216,15 @@ async function busyShiftWorktrees(repo: Repo, busy: string[]): Promise<string[]>
   return mine.filter((p) => busyReal.has(real(p)));
 }
 
+export interface HygieneDeps {
+  /** State of a card's pull request on its git host (answered by the runner, which holds the logins). */
+  changeState?: ChangeStateLookup;
+}
+
 export async function hygieneRepo(
   spec: HygieneRepoSpec,
   busyWorktrees: string[] = [],
+  deps: HygieneDeps = {},
 ): Promise<{ result: HygieneRepoResult; commands: string[] }> {
   const res: HygieneRepoResult = {
     repoId: spec.repoId,
@@ -221,6 +234,7 @@ export async function hygieneRepo(
     uncommitted: [],
     pushed: false,
     removedBranches: [],
+    cleaned: [],
   };
   const repo = new Repo(spec.localPath);
   const done = () => ({ result: res, commands: repo.commands });
@@ -286,7 +300,9 @@ export async function hygieneRepo(
       if (dirty.length > 0) await saveWork(repo, res, remote);
       const here = cur === wb;
       if (!here && (await checkedOut(repo)).has(wb)) {
-        res.actions.push(`origin/${wb} was rewritten, but ${wb} is checked out in another worktree: left alone`);
+        res.actions.push(
+          `origin/${wb} was rewritten, but ${wb} is checked out in another worktree: left alone`,
+        );
         res.rewritten = { branch: wb, realigned: false, commits: [], pushed: false };
       } else await realignRewritten(repo, res, wb, rw.unique, here, remote);
     }
@@ -376,7 +392,9 @@ export async function hygieneRepo(
   // Branches of finished cards that are merged into the working branch.
   const target = hasRemoteRef ? `refs/remotes/origin/${wb}` : `refs/heads/${wb}`;
   const busy = await checkedOut(repo);
+  const handled = new Set(spec.finishedCards.map((c) => c.branch));
   for (const b of spec.finishedBranches) {
+    if (handled.has(b)) continue;
     if (!spec.branchPrefix || !b.startsWith(spec.branchPrefix) || !isSafeGitRef(b) || busy.has(b)) continue;
     if (!(await revParse(spec.localPath, `refs/heads/${b}`))) continue;
     if (!(await isAncestor(repo, `refs/heads/${b}`, target))) continue;
@@ -384,6 +402,26 @@ export async function hygieneRepo(
   }
   if (res.removedBranches.length)
     res.actions.push(`deleted merged branch(es) ${res.removedBranches.join(', ')}`);
+  if (spec.finishedCards.length) {
+    const swept = await cleanFinishedCards({
+      repoPath: spec.localPath,
+      spec,
+      target,
+      wb,
+      remote,
+      fetched,
+      busy: busyWorktrees,
+      ...(deps.changeState ? { changeState: deps.changeState } : {}),
+      log: (c) => repo.commands.push(c),
+    });
+    res.cleaned = swept.cleaned;
+    for (const c of swept.cleaned) res.removedBranches.push(c.branch);
+    if (swept.cleaned.length)
+      res.actions.push(
+        `removed ${swept.cleaned.length} finished card branch(es): ${swept.cleaned.map((c) => `${c.branch} (${c.reason})`).join('; ')}`,
+      );
+    res.actions.push(...swept.notes);
+  }
   await repo.git(['worktree', 'prune'], true);
   if (res.actions.filter((a) => a !== 'fetched origin').length === 0) res.actions.push(`${wb} is in order`);
   return done();
@@ -406,11 +444,15 @@ export function summarizeHygiene(spec: HygieneSpec, report: HygieneReport): stri
   ].join('\n');
 }
 
-export async function runHygiene(spec: HygieneSpec, busyWorktrees: string[] = []): Promise<HygieneRun> {
+export async function runHygiene(
+  spec: HygieneSpec,
+  busyWorktrees: string[] = [],
+  deps: HygieneDeps = {},
+): Promise<HygieneRun> {
   const repos: HygieneRepoResult[] = [];
   const commands: string[] = [];
   for (const r of spec.repos) {
-    const { result, commands: cmds } = await hygieneRepo(r, busyWorktrees);
+    const { result, commands: cmds } = await hygieneRepo(r, busyWorktrees, deps);
     result.uncommitted = result.uncommitted.slice(0, MAX_FILES);
     repos.push(result);
     commands.push(...cmds);

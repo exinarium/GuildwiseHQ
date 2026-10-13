@@ -25,7 +25,8 @@ export async function saveCommitsBranch(
     branch = savedWorkBranch(now, `-${n}`);
   opts.log?.(`git -C ${cwd} branch ${branch} ${tip.slice(0, 7)}`);
   const made = await git(cwd, ['branch', '--', branch, tip]);
-  if (made.exitCode !== 0) return { branch: '', pushed: false, error: 'could not create the saved-work branch' };
+  if (made.exitCode !== 0)
+    return { branch: '', pushed: false, error: 'could not create the saved-work branch' };
   if (!opts.remote) return { branch, pushed: false };
   opts.log?.(`git -C ${cwd} push -u origin ${branch}`);
   const push = await git(cwd, ['push', '-u', 'origin', '--', branch]);

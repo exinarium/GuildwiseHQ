@@ -71,6 +71,7 @@ const result = (over: Record<string, unknown> = {}) => ({
   uncommitted: [],
   pushed: false,
   removedBranches: [],
+  cleaned: [],
   ...over,
 });
 
@@ -387,5 +388,115 @@ describe('re-confirming when something changes', () => {
     expect(start.devops?.hygiene?.repos[0]?.phaseRef).toBeTruthy();
     await finish(start, { repos: [result()] });
     expect(phase).toBeTruthy();
+  });
+});
+
+describe('removing the branches of finished cards', () => {
+  const setDone = (id: string, branch: string, finalize?: Record<string, unknown>) =>
+    q(
+      `UPDATE cards SET status='done', stage='done', branch_name=$2, repo_id=$3, finalize_result=$4 WHERE id=$1`,
+      [id, branch, w.repoId, finalize ? JSON.stringify(finalize) : null],
+    );
+
+  it('sends done and cancelled cards with their branch and pull request, and leaves out a branch an open card uses', async () => {
+    await q(
+      `UPDATE devops_requests SET status='done' WHERE hygiene IS NOT NULL AND status IN ('queued','running')`,
+    );
+    const merged = await w.card();
+    const viaPr = await w.card();
+    const reopened = await w.card();
+    const sibling = await w.card();
+    await setDone(merged.id, 'aom/toy-a-merged');
+    await setDone(viaPr.id, 'aom/toy-b-pr', { prUrl: 'https://github.com/acme/toy/pull/660' });
+    await setDone(reopened.id, 'aom/toy-c-reopened');
+    // a reopened card is open again (status no longer done) and keeps its branch name
+    await q(`UPDATE cards SET status='queued', stage='build' WHERE id=$1`, [reopened.id]);
+    await q(`UPDATE cards SET status='cancelled', branch_name='aom/toy-c-reopened' WHERE id=$1`, [
+      sibling.id,
+    ]);
+
+    const { start } = await startHygiene();
+    const repo = start.devops?.hygiene?.repos[0];
+    const byBranch = Object.fromEntries((repo?.finishedCards ?? []).map((c: any) => [c.branch, c]));
+    expect(Object.keys(byBranch).sort()).toEqual(['aom/toy-a-merged', 'aom/toy-b-pr']);
+    expect(byBranch['aom/toy-b-pr']).toMatchObject({
+      cardId: viaPr.id,
+      ref: viaPr.ref,
+      prUrl: 'https://github.com/acme/toy/pull/660',
+    });
+    expect(byBranch['aom/toy-a-merged'].prUrl).toBeUndefined();
+    await finish(start, { repos: [result()] });
+  });
+
+  it('the project setting "Remove finished card branches" (default on) switches it off', async () => {
+    const proj = await ok<any>(owner('GET', `/api/projects/${w.projectId}`));
+    expect(proj.project.removeFinishedBranches).toBe(true);
+    await ok(owner('PATCH', `/api/projects/${w.projectId}`, { removeFinishedBranches: false }));
+    expect((await ok<any>(owner('GET', `/api/projects/${w.projectId}`))).project.removeFinishedBranches).toBe(
+      false,
+    );
+    const { start } = await startHygiene();
+    const repo = start.devops?.hygiene?.repos[0];
+    expect(repo?.finishedCards).toEqual([]);
+    expect(repo?.finishedBranches).toEqual([]);
+    await finish(start, { repos: [result()] });
+    await ok(owner('PATCH', `/api/projects/${w.projectId}`, { removeFinishedBranches: true }));
+  });
+
+  it('a report with removed branches logs each on its card and posts one notice for the run', async () => {
+    const a = await w.card();
+    const b = await w.card();
+    await q(`UPDATE cards SET status='done', branch_name='aom/toy-x-a', repo_id=$2 WHERE id=$1`, [
+      a.id,
+      w.repoId,
+    ]);
+    await q(`UPDATE cards SET status='cancelled', branch_name='aom/toy-x-b', repo_id=$2 WHERE id=$1`, [
+      b.id,
+      w.repoId,
+    ]);
+    const { start } = await startHygiene();
+    await finish(start, {
+      repos: [
+        result({
+          cleaned: [
+            {
+              cardId: a.id,
+              ref: a.ref,
+              branch: 'aom/toy-x-a',
+              reason: 'merged into pieter/dev',
+              origin: true,
+              local: true,
+              worktree: false,
+            },
+            {
+              cardId: b.id,
+              ref: b.ref,
+              branch: 'aom/toy-x-b',
+              reason: 'its pull request was declined',
+              origin: true,
+              local: false,
+              worktree: true,
+            },
+          ],
+        }),
+      ],
+    });
+    const log = async (id: string) =>
+      (
+        await q(`SELECT body FROM thread_messages WHERE thread_id=$1 AND kind='system' ORDER BY created_at`, [
+          id,
+        ])
+      )
+        .map((m: any) => m.body)
+        .join('\n');
+    expect(await log(a.id)).toContain(
+      'Branch aom/toy-x-a deleted from origin, this workstation: merged into pieter/dev.',
+    );
+    expect(await log(b.id)).toContain('deleted from origin, its worktree: its pull request was declined.');
+    const notices = await q(`SELECT title, body FROM desk_items WHERE subkind='branch_cleanup'`);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.title).toBe('Repository hygiene removed 2 finished card branches');
+    expect(notices[0]?.body).toContain('aom/toy-x-a');
+    expect(notices[0]?.body).toContain('aom/toy-x-b');
   });
 });

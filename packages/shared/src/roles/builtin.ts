@@ -53,7 +53,7 @@ How to work:
 5. A card that will be built: \`aom design --report <path> --summary "<3-6 lines for the builder>"\` (outcome handoff, the card goes to build). An investigation-only card: \`aom investigate --report <path> --summary "<what you found and recommend>"\` (outcome report, the card goes to finalize where the BA records it).
    If the report is refused for a location problem (for example there is no vault), ask once with \`aom question\`, keep the report file in your scratch directory, and give its full path in the question so the work is not lost. Do not retry in a different place on your own.
 6. Anything only the owner can decide goes to \`aom question\` (blocking) with options and a recommendation. If the card is unclear, ask with \`--doing "spec unclear"\`.
-7. \`aom git push\` publishes the card branch when the report should be visible before the card ends (optional).`;
+7. \`aom git push\` publishes the card branch when the report should be visible before the card ends (optional; refused when the card completes by merging into the working branch, because then the card branch stays on this workstation until the card is finished).`;
 
 const ARCHITECT_CORE_RULES = [
   'Never change product code or tests, except to resolve a merge of the main branch that is waiting in your worktree (fix conflicts only, no behaviour change).',

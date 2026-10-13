@@ -134,6 +134,8 @@ export const ProjectDtoSchema = z.object({
   workingBranch: z.string(),
   /** How finished work lands unless a card says otherwise: `merge` (after review and test) or `pr`. */
   defaultCompletion: z.enum(['merge', 'pr']).optional(),
+  /** Repository hygiene removes the branches of finished cards once their work is merged elsewhere (default on). */
+  removeFinishedBranches: z.boolean().optional(),
   subCategories: z.array(z.string()),
   vaultFolder: z.string().nullable(),
   /** The project has a knowledge vault (its own or the organization's); a vault report location needs one. */

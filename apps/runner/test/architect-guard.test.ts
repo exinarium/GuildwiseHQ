@@ -68,6 +68,7 @@ async function setup() {
     branchName: BRANCH,
     mainBranch: 'main',
     ref: 'TOY-1',
+    completionAction: 'push_branch' as 'pr' | 'push_branch' | 'merge' | null,
     recordMainSha: (sha: string) => void mainShas.push(sha),
     startMainSha: () => mainShas.at(-1),
   };
@@ -227,6 +228,20 @@ describe('architect git (run by the runner)', () => {
     expect(await architectPush(t.ctx, BRANCH)).toMatchObject({ ok: true });
     // main on origin never moved
     expect(sh(t.repo.origin, 'git', ['log', '--format=%s', 'main'])).toBe('initial');
+  });
+
+  it('does not push the card branch of a card that is merged (or has no action yet): it stays local', async () => {
+    const t = await setup();
+    writeFileSync(join(t.path, 'NOTES.md'), 'n\n');
+    t.commit();
+    for (const action of ['merge', null] as const) {
+      const r = await architectPush({ ...t.ctx, completionAction: action });
+      expect(r).toMatchObject({ ok: false });
+      expect(sh(t.repo.origin, 'git', ['for-each-ref', '--format=%(refname)', 'refs/heads'])).toBe(
+        'refs/heads/main',
+      );
+    }
+    expect(await architectPush({ ...t.ctx, completionAction: 'pr' })).toMatchObject({ ok: true });
   });
 
   it('refuses to push uncommitted work or an unfinished merge', async () => {

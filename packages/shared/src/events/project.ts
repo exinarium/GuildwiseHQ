@@ -24,6 +24,8 @@ export const ProjectChangesSchema = z
     workingBranch: GitRefSchema,
     /** How finished work lands by default: merge into the working branch after review and test, or a pull request. */
     defaultCompletion: z.enum(['merge', 'pr']),
+    /** Repository hygiene deletes the branches of done or cancelled cards once their work is elsewhere (default on). */
+    removeFinishedBranches: z.boolean(),
     subCategories: z.array(z.string()),
     vaultFolder: VaultFolderSchema.nullable(),
     architecturalGlobs: z.array(z.string()),

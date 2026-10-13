@@ -87,6 +87,7 @@ describe('the saved-work notice', () => {
           uncommitted: [],
           pushed: false,
           removedBranches: [],
+          cleaned: [],
           savedWork: {
             branch: 'guildwise/saved-work/2026-10-10',
             files: ['a.txt', 'b.txt'],

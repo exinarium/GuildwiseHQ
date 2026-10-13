@@ -70,6 +70,27 @@ used". See `docs/RUNNER.md` "Plugin MCP servers".
 **Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
 the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
 
+### 28. Card branches stay local; hygiene removes finished card branches
+
+**Done (2026-10-13).** Owner decision: no agent card branch (`aom/<ref>-...`) on origin unless the card's completion
+action needs it. `pr` and `push_branch` push the card branch (as before); `merge` merges it into the working branch on
+the workstation and pushes only the working branch. Audit result: the completion code and sync-main already pushed
+only the working branch; the leak was the architect's `aom git push`, now refused for a `merge` card (and one with no
+action yet; the design commits stay in the worktree until finalize). The protected-working-branch fallback still
+pushes the card branch (it is a pull request). Second half: repository hygiene now deletes the branch of a **done or
+cancelled** card (origin, the clone and its worktree) when its commits are in the working branch (merged), or every
+commit's patch is already in the working branch or main (`git cherry`: rebased or cherry-picked), or its pull request
+was merged or declined (forge `changeState`, answered by the runner through the new rpc `hygiene.change_state`).
+Never: an open pull request, a branch with commits found nowhere else, a branch of an open or reopened card (the
+server leaves it out), a worktree with edits or a running shift, anything outside `aom/`, `aom-integration/` and the
+project's prefix. Origin is deleted with a lease on the fetched SHA. Each deletion is logged on the card and one desk
+notice sums up the run; the per-project setting **Remove finished card branches** (default on) switches it off. A
+reopened card whose branch is gone gets it back: `ensureWorktree` in `reuse` mode now recreates the branch from
+origin's copy or the working branch instead of failing. The production leftovers (`aom/p4-*` of Flow-Server, Flow-Web,
+Flow-Client) are handled by the next hygiene run on these rules (P4-5, PR #661 merged: removed; P4-3, PR #660 open:
+kept). Also fixed on the way: the IPC schema did not know `hygiene.busy_worktrees`, so the "defer while a shift runs"
+check from #26 silently never ran; it is now an allowed rpc method.
+
 ### 26. Hygiene must not undo a rewritten working branch
 
 **Done (2026-10-13).** Production evidence: the owner's coordinator repaired Flow-Web's `pieter/dev` with a force-push

@@ -1248,7 +1248,7 @@ The architect (built-in role `architect`, claims every `investigate*` stage) is 
   out-of-scope discard skip a worktree with `MERGE_HEAD`), and the next architect shift inherits it.
 - **Commit, push, merge, fetch.** The agent keeps `git push*`, `git fetch*`, `git pull*`, `git remote*`, `git rebase*`,
   `git checkout*`, `git switch*` and `git reset --hard*` denied; it may `git add`, `git commit` and `git merge`.
-  `aom git push` (rpc `git.push`) pushes **the card branch only** (`git push -u origin <branch>` with the runner's
+  `aom git push` (rpc `git.push`) pushes **the card branch only** (and only for a `pr` or `push_branch` card) (`git push -u origin <branch>` with the runner's
   `GitAuth`; any other ref is refused); `aom git fetch` (`git.fetch`) fetches origin; `aom git merge-main`
   (`git.merge_main`) merges the latest `origin/<main>` into the card branch and leaves a conflict in the worktree;
   `aom git verify-merge` (`git.verify_merge`) checks that a resolution is complete (no merge in progress, no unmerged
@@ -1324,7 +1324,18 @@ repositories: local path, remote and working branch (the active phase's, else th
 - **on another branch**: leaves the working tree alone, moves the working branch forward from `origin` and pushes it
   when it is only ahead;
 - deletes local `aom/...` branches of finished cards that are merged into the working branch and not checked out in a
-  worktree, and runs `git worktree prune`.
+  worktree, and runs `git worktree prune`;
+- **removes the branches of finished cards** (`devops/branch-cleanup.ts`; the project setting "Remove finished card
+  branches", default on, empties the list the server sends). For each done or cancelled card (a reopened card is not in
+  the list) whose branch starts with `aom/`, `aom-integration/` or the project's prefix, and is not the working or
+  main branch: a pull request that is still open keeps it; otherwise it goes when (a) every tip (local and origin) is
+  contained in the working branch, (b) every commit's patch is already in the working branch or main (`git cherry`, so
+  rebased and cherry-picked work counts), or (c) the card's pull request was merged or declined (the runner asks its
+  forge adapter through rpc `hygiene.change_state`; unknown state falls back to (a) and (b)). Deleted, in this order:
+  the card's worktree (`git worktree remove`, no force: edits or a running shift keep the branch), the branch on origin
+  (`git push --delete` with a lease on the fetched SHA, so work pushed since the fetch survives), the local branch.
+  Without a fetched origin nothing is removed. The result lists `cleaned[]` (card, branch, reason, where); the server
+  logs a line on each card and posts one `branch_cleanup` notice per run.
 
 It never force-pushes, resets or discards anything. What it cannot resolve (a conflict, a branch that is not there, an
 authentication failure, a missing clone) is reported and becomes a signal in the
@@ -1350,6 +1361,15 @@ the working branch is protected (`gh api repos/{owner}/{repo}/branches/<branch>/
 declined", GH013 and the like) the same way: the card branch is pushed and a pull request is opened instead
 (`FinalizeResult.protectedBranch`, `action: pr`). The server records `pr` on the card and switches the project default
 to `pr` with a note on the card. Nothing is forced. Hosts other than GitHub are covered by the rejected-push path only.
+
+**When a card branch reaches origin.** Only when the completion action needs it: `pr` (the pull request needs the
+branch), `push_branch`, and the protected-branch fallback above (a pull request). With `merge` the runner merges the
+card branch into the working branch in a local integration worktree and pushes only the working branch; the card branch
+never leaves the workstation. The architect's `aom git push` follows the same rule: it is refused (with the reason) for a
+card whose action is `merge` or not yet set, and its design commits stay in the worktree until finalize. Hygiene removes
+a card branch once the card is finished and the work is elsewhere (see "Repository hygiene"). If a reopened card's branch
+was removed, the next shift recreates it: `ensureWorktree` in `reuse` mode takes `origin/<branch>` when it still exists,
+else cuts the branch from the working branch.
 
 ### DevOps shifts are unsandboxed
 
