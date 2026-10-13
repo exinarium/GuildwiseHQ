@@ -121,16 +121,18 @@ describe('worktrees', () => {
     }
   });
 
-  it('rejects with worktree_failed (WorktreeError) when reuse finds neither directory nor branch', async () => {
+  it('reuse with neither directory nor branch (hygiene removed a finished card; it was reopened) starts the branch afresh from the working branch', async () => {
     const repo = makeRepo();
-    await expect(
-      ensureWorktree({
-        repoPath: repo.clone,
-        roots: ['/'],
-        spec: spec({ mode: 'reuse', branchName: 'aom/gone' }),
-        defaultPath: join(tmp(), 'wt'),
-      }),
-    ).rejects.toBeInstanceOf(WorktreeError);
+    const r = await ensureWorktree({
+      repoPath: repo.clone,
+      roots: ['/'],
+      spec: spec({ mode: 'reuse', branchName: 'aom/gone' }),
+      defaultPath: join(tmp(), 'wt'),
+    });
+    expect(r.created).toBe(true);
+    expect(r.branchRecreated).toBe(true);
+    expect(sh(r.path, 'git', ['branch', '--show-current'])).toBe('aom/gone');
+    expect(r.headSha).toBe(sh(repo.clone, 'git', ['rev-parse', 'main']));
   });
 
   it('creates a base branch that does not exist from the default branch', async () => {

@@ -144,6 +144,7 @@ describe('what hygiene cannot resolve becomes a reporter signal', () => {
     uncommitted: [],
     pushed: false,
     removedBranches: [],
+    cleaned: [],
     ...over,
   });
 

@@ -28,7 +28,15 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { agentActor, orgScope, projectScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
+import {
+  agentActor,
+  cardMessage,
+  orgScope,
+  projectScope,
+  SYSTEM_ACTOR,
+  userActor,
+  userScope,
+} from './common.ts';
 import { hygieneConflictEvents } from './conflict-attempts.ts';
 import { createDevOpsRequestIn, threadMessage } from './devops.ts';
 import { userBy } from './phase-events.ts';
@@ -70,7 +78,8 @@ export async function hygieneSpecFor(
   const list = await rows(
     db,
     `SELECT wr.local_path, r.id AS repo_id, r.name, r.remote_url, r.working_branch AS repo_branch,
-            p.id AS project_id, p.key AS project_key, p.name AS project_name, p.branch_prefix
+            r.main_branch, p.id AS project_id, p.key AS project_key, p.name AS project_name, p.branch_prefix,
+            p.remove_finished_branches
        FROM workstation_repos wr
        JOIN project_repos r ON r.id = wr.project_repo_id AND r.removed_at IS NULL
        JOIN projects p ON p.id = r.project_id AND p.status = 'active' AND p.workflow_key <> '${RESEARCH_STAGE_WORKFLOW}'
@@ -89,6 +98,22 @@ export async function hygieneSpecFor(
         ORDER BY at DESC LIMIT ${MAX_FINISHED_BRANCHES}`,
       [r.project_id, r.repo_id],
     );
+    // Done or cancelled cards whose branch no open card (a reopened one) uses; empty when the project turned it off.
+    const finishedCards = r.remove_finished_branches
+      ? await rows<{ id: string; ref: string; branch_name: string; pr_url: string | null }>(
+          db,
+          `SELECT DISTINCT ON (c.branch_name) c.id, c.ref, c.branch_name,
+                  c.finalize_result->>'prUrl' AS pr_url
+             FROM cards c
+            WHERE c.project_id=$1 AND (c.repo_id = $2 OR c.repo_id IS NULL) AND c.status IN ('done','cancelled')
+              AND c.branch_name IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM cards o WHERE o.project_id = c.project_id AND o.branch_name = c.branch_name
+                                 AND o.status NOT IN ('done','cancelled'))
+            ORDER BY c.branch_name, c.updated_at DESC
+            LIMIT ${MAX_FINISHED_BRANCHES}`,
+          [r.project_id, r.repo_id],
+        )
+      : [];
     repos.push({
       repoId: r.repo_id,
       projectId: r.project_id,
@@ -101,7 +126,14 @@ export async function hygieneSpecFor(
       branchSource: eff.source,
       ...(eff.phaseRef ? { phaseRef: eff.phaseRef } : {}),
       branchPrefix: r.branch_prefix,
-      finishedBranches: finished.map((f) => f.branch_name),
+      finishedBranches: r.remove_finished_branches ? finished.map((f) => f.branch_name) : [],
+      mainBranch: r.main_branch ?? null,
+      finishedCards: finishedCards.map((c) => ({
+        cardId: c.id,
+        ref: c.ref,
+        branch: c.branch_name,
+        ...(c.pr_url ? { prUrl: c.pr_url } : {}),
+      })),
     });
   }
   return { trigger, repos };
@@ -679,6 +711,73 @@ export async function hygieneReportEvents(
       actor: SYSTEM_ACTOR,
       scope: projectScope(project.org_id, spec1.projectId),
     });
+  }
+  // Branches of finished cards that were removed: a line on each card, and one notice for the whole run.
+  const removedAll: Array<{
+    project: HygieneRepoSpec;
+    repoName: string;
+    list: NonNullable<HygieneReport['repos'][number]['cleaned']>;
+  }> = [];
+  for (const r of reported) {
+    if (!r.cleaned.length) continue;
+    const spec1 = byRepo.get(r.repoId) as HygieneRepoSpec;
+    removedAll.push({ project: spec1, repoName: spec1.name, list: r.cleaned });
+    const allowed = new Set(spec1.finishedCards.map((c) => c.cardId));
+    for (const c of r.cleaned) {
+      if (!allowed.has(c.cardId)) continue;
+      const card = await one(tx, 'SELECT id FROM cards WHERE id=$1', [c.cardId]);
+      if (!card) continue;
+      const where = [
+        c.origin ? 'origin' : '',
+        c.local ? 'this workstation' : '',
+        c.worktree ? 'its worktree' : '',
+      ]
+        .filter(Boolean)
+        .join(', ');
+      events.push(
+        cardMessage(
+          card,
+          { kind: 'system' },
+          'system',
+          `Branch ${c.branch} deleted${where ? ` from ${where}` : ''}: ${c.reason}.`,
+        ),
+      );
+    }
+  }
+  if (removedAll.length) {
+    const total = removedAll.reduce((n, x) => n + x.list.length, 0);
+    const project = await one(tx, 'SELECT org_id FROM projects WHERE id=$1', [
+      removedAll[0]?.project.projectId,
+    ]);
+    if (project) {
+      const deskItemId = randomUUID();
+      events.push({
+        streamId: streamId.desk(deskItemId),
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId,
+            kind: 'alert',
+            subkind: DESK_SUBKIND.branchCleanup,
+            title: `Repository hygiene removed ${total} finished card branch${total === 1 ? '' : 'es'}`,
+            body: `Branches of done or cancelled cards whose work is already in the working branch (or whose pull request is closed) were deleted:\n${removedAll
+              .flatMap((x) => x.list.map((c) => `- ${x.repoName}: ${c.branch} (${c.reason})`))
+              .slice(0, 40)
+              .join(
+                '\n',
+              )}\n\nNothing else was touched. Turn this off with "Remove finished card branches" in the project settings.`,
+            options: [],
+            blocking: false,
+            pinned: false,
+            projectId: removedAll[0]?.project.projectId,
+            affectedCardIds: [],
+            askedBy: { kind: 'system' },
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: projectScope(project.org_id, removedAll[0]?.project.projectId as string),
+      });
+    }
   }
   // The remote rewrote the working branch: the local branch followed it. Only when local commits that were never on the
   // remote had to be kept aside is there anything to tell the managers about.

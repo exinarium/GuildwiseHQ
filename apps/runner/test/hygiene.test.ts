@@ -46,6 +46,8 @@ const spec = (repo: TestRepo, over: Partial<HygieneRepoSpec> = {}): HygieneRepoS
   branchSource: 'repo',
   branchPrefix: 'aom/',
   finishedBranches: [],
+  mainBranch: null,
+  finishedCards: [],
   ...over,
 });
 

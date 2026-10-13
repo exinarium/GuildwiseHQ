@@ -44,6 +44,8 @@ export interface WorktreeResult {
   headSha: string;
   /** Set when the working branch did not exist and was created (and pushed) from the repository's default branch. */
   createdBranch?: { base: string; from: string; pushed: boolean; mainBranchSet: boolean };
+  /** Set when a `reuse` found the card branch gone locally and on origin and cut it afresh from the working branch. */
+  branchRecreated?: boolean;
 }
 
 export interface EnsureWorktreeInput {
@@ -132,9 +134,12 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
     return result(false);
   }
 
-  // The card branch is gone locally (worktree removed, clone pruned) but was pushed: a reopened card continues from it.
+  // The card branch is gone locally (worktree removed, clone pruned, hygiene removed a finished card's branch) but may
+  // still be on origin: a reopened card continues from that copy, in both modes. Fetched with the repo's git auth.
   if (await hasRemote(repoPath)) {
-    await git(repoPath, ['fetch', '--', 'origin', branch]);
+    const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
+    const a = input.auth && url ? await input.auth(url) : { args: [], env: {} };
+    await git(repoPath, [...a.args, 'fetch', '--', 'origin', branch], { env: a.env });
     if (await revParse(repoPath, `refs/remotes/origin/${branch}`)) {
       const r = await git(repoPath, ['worktree', 'add', '-b', branch, '--', path, `origin/${branch}`]);
       if (r.exitCode !== 0) fail(`git worktree add ${branch} from origin failed: ${r.stderr.trim()}`);
@@ -142,7 +147,9 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
     }
   }
 
-  if (spec.mode === 'reuse') fail(`Worktree ${path} and branch ${branch} are both missing`);
+  // Reuse mode with the branch gone everywhere (hygiene removed it, the clone lost it): the branch starts afresh from
+  // the working branch below, and the shift says so on the card. Create mode starts from the working branch anyway.
+  const recreated = spec.mode === 'reuse';
 
   let startPoint = base;
   if (await hasRemote(repoPath)) {
@@ -162,7 +169,11 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
   }
   const r = await git(repoPath, ['worktree', 'add', '-b', branch, '--', path, startPoint]);
   if (r.exitCode !== 0) fail(`git worktree add -b ${branch} failed: ${r.stderr.trim()}`);
-  return { ...(await result(true)), ...(createdBranch ? { createdBranch } : {}) };
+  return {
+    ...(await result(true)),
+    ...(createdBranch ? { createdBranch } : {}),
+    ...(recreated ? { branchRecreated: true } : {}),
+  };
 }
 
 /**

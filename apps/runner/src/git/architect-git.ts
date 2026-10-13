@@ -17,6 +17,11 @@ export interface ArchitectGitContext {
   /** The repository's main branch when the server named it. */
   mainBranch?: string;
   ref: string;
+  /**
+   * The card's completion action. Only a card that ends in a pull request or a pushed branch publishes its card branch;
+   * with `merge` (or none yet) the branch stays local and the runner pushes just the working branch at finalize.
+   */
+  completionAction?: 'pr' | 'push_branch' | 'merge' | null;
   auth?: GitAuth;
   /** Remembers the `origin/<main>` SHA merged into the card branch (the post-shift guard exempts what it changed). */
   recordMainSha: (sha: string) => void;
@@ -37,6 +42,11 @@ export async function architectPush(ctx: ArchitectGitContext, requested?: string
       error: `only the card branch (${ctx.branchName}) can be pushed; '${requested}' was refused`,
     };
   if (!isSafeGitRef(ctx.branchName)) return { ok: false, error: 'the card branch name is not a safe ref' };
+  if (ctx.completionAction !== 'pr' && ctx.completionAction !== 'push_branch')
+    return {
+      ok: false,
+      error: `this card ${ctx.completionAction === 'merge' ? 'is merged into the working branch when it finishes' : 'has no completion action that publishes its branch'}, so the card branch is not pushed: it stays on this workstation and your commits are used from here. Commit your work and continue`,
+    };
   if (!(await hasRemote(ctx.worktree))) return { ok: false, error: 'the repository has no origin remote' };
   const dirty = (await git(ctx.worktree, ['status', '--porcelain', '--untracked-files=no'])).stdout.trim();
   if (dirty) return { ok: false, error: 'commit your changes first; the branch has uncommitted edits' };

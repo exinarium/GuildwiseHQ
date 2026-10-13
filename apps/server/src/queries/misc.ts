@@ -50,6 +50,7 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     branchPrefix: p.branch_prefix,
     workingBranch: p.working_branch,
     defaultCompletion: p.default_completion ?? 'merge',
+    removeFinishedBranches: p.remove_finished_branches ?? true,
     subCategories: p.sub_categories,
     vaultFolder: p.vault_folder,
     hasVault: p.has_vault ?? false,

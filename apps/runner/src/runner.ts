@@ -251,7 +251,9 @@ export class Runner {
         // Answered here, not by the server: which worktrees have a running shift (repository hygiene defers those repos).
         method === 'hygiene.busy_worktrees'
           ? Promise.resolve({ ok: true, result: { worktrees: this.supervisor.worktreePaths() } })
-          : this.rpc(shiftId, method, params),
+          : method === 'hygiene.change_state'
+            ? this.changeState(params)
+            : this.rpc(shiftId, method, params),
       maxConcurrentShifts: () =>
         Math.min(this.maxConcurrent, this.opts.sharedCap?.() ?? Number.POSITIVE_INFINITY),
       maxShiftMsOverride: opts.maxShiftMsOverride,
@@ -727,6 +729,24 @@ export class Runner {
       found = this.repos.find(match);
     }
     return found;
+  }
+
+  /**
+   * `hygiene.change_state` (repository hygiene): is the pull request still open, merged or declined? Asked of the
+   * card's git host with this workstation's login; `null` when the host cannot tell (plain git, no login, no network).
+   */
+  private async changeState(params: Record<string, unknown>): Promise<IpcRpcResponse> {
+    const remoteUrl = typeof params.remoteUrl === 'string' ? params.remoteUrl : '';
+    const prUrl = typeof params.prUrl === 'string' ? params.prUrl : '';
+    // The id every adapter takes is the trailing number of the pull request link (pull/660, merge_requests/12, ...).
+    const id = /(\d+)\/?(?:[?#].*)?$/.exec(prUrl)?.[1];
+    const hit = remoteUrl && id ? forgeForUrl(this.forgeEnv, remoteUrl) : null;
+    if (!hit || !id || !hit.forge.changeState) return { ok: true, result: { state: null } };
+    try {
+      return { ok: true, result: { state: await hit.forge.changeState(hit.repo, id) } };
+    } catch {
+      return { ok: true, result: { state: null } };
+    }
   }
 
   private rpc(shiftId: string, method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> {

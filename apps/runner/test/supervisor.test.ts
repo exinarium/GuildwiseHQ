@@ -237,6 +237,7 @@ describe('supervisor', () => {
       mode: 'reuse',
       stage: 'review',
     });
+    (noTree as any).worktree.branchName = '--not-a-ref';
     h!.server.send('shift.start', noTree);
     const wf = await h!.server.waitFor('shift.rejected', (m) => m.shiftId === noTree.shiftId);
     expect(wf.reason).toBe('worktree_failed');
@@ -260,7 +261,12 @@ describe('supervisor', () => {
     msg.worktree.baseBranch = 'trunk';
     h!.server.send('shift.start', msg);
     const started = await h!.server.waitFor('shift.started', (m) => m.shiftId === msg.shiftId);
-    expect(started.branchCreated).toEqual({ base: 'trunk', from: 'main', pushed: true, mainBranchSet: false });
+    expect(started.branchCreated).toEqual({
+      base: 'trunk',
+      from: 'main',
+      pushed: true,
+      mainBranchSet: false,
+    });
     // origin's branch list rides on shift.started so the server's list is not stale
     expect(started.originBranches).toEqual(expect.arrayContaining(['main', 'trunk']));
     expect(started.worktree).toMatchObject({ baseBranch: 'trunk', created: true });

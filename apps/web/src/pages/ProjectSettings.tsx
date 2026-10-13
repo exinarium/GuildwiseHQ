@@ -54,6 +54,7 @@ export function ProjectSettings() {
   const toast = useToast();
   const expert = useExpertMode();
   const [landing, setLanding] = useState<'merge' | 'pr'>('merge');
+  const [removeBranches, setRemoveBranches] = useState(true);
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
   const [name, setName] = useState('');
   const [branch, setBranch] = useState('');
@@ -68,6 +69,7 @@ export function ProjectSettings() {
     setName(project.name);
     setBranch(project.workingBranch);
     setLanding(project.defaultCompletion ?? 'merge');
+    setRemoveBranches(project.removeFinishedBranches ?? true);
     setArch(project.architecturalGlobs.join('\n'));
     setE2e(project.e2eGlobs.join('\n'));
   }, [project]);
@@ -94,7 +96,7 @@ export function ProjectSettings() {
       {
         name: name.trim(),
         ...(expert ? { workingBranch: branch.trim() } : {}),
-        ...(traits.usesRepos ? { defaultCompletion: landing } : {}),
+        ...(traits.usesRepos ? { defaultCompletion: landing, removeFinishedBranches: removeBranches } : {}),
         ...(traits.usesRepos ? { architecturalGlobs: lines(arch) } : {}),
         ...(traits.hasTestStage ? { e2eGlobs: lines(e2e) } : {}),
       },
@@ -191,6 +193,25 @@ export function ProjectSettings() {
                 <option value="merge">{COMPLETION_ACTION_LABELS.merge.label} (no pull request)</option>
                 <option value="pr">Pull request I approve</option>
               </Select>
+            )}
+            {traits.usesRepos && (
+              <label className="flex items-start gap-2 text-sm text-fg">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={removeBranches}
+                  data-testid="remove-finished-branches"
+                  onChange={(e) => setRemoveBranches(e.target.checked)}
+                />
+                <span>
+                  Remove finished card branches
+                  <span className="block text-xs text-subtle">
+                    Repository hygiene deletes the branch of a done or cancelled card, on the git host and on
+                    the workstation, once its work is in the working branch or its pull request is closed.
+                    Branches with work found nowhere else, and open pull requests, are never touched.
+                  </span>
+                </span>
+              </label>
             )}
             {traits.usesRepos && (
               <TextArea

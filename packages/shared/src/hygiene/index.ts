@@ -106,6 +106,24 @@ export const HygieneRepoSpecSchema = z.object({
   branchPrefix: z.string().default('aom/'),
   /** Branches of finished or cancelled cards: deleted locally when merged into the working branch. */
   finishedBranches: z.array(z.string()).default([]),
+  /** The repository's main branch when the project named one (a branch whose patches are all there counts as migrated). */
+  mainBranch: z.string().nullable().default(null),
+  /**
+   * Cards that are done or cancelled and whose branch hygiene may remove (empty when the project turned "Remove
+   * finished card branches" off): from origin, the clone and the card's worktree, once the work is in the working
+   * branch (merged or rebased/cherry-picked) or its pull request is merged or declined.
+   */
+  finishedCards: z
+    .array(
+      z.object({
+        cardId: z.uuid(),
+        ref: z.string(),
+        branch: z.string(),
+        /** The pull request the card was finalized with, when it was one. */
+        prUrl: z.string().optional(),
+      }),
+    )
+    .default([]),
 });
 export type HygieneRepoSpec = z.infer<typeof HygieneRepoSpecSchema>;
 
@@ -151,6 +169,21 @@ export const HygieneRepoResultSchema = z.object({
   commit: z.string().optional(),
   pushed: z.boolean().default(false),
   removedBranches: z.array(z.string()).default([]),
+  /** Card branches removed because the card is finished and its work is elsewhere; one entry per branch. */
+  cleaned: z
+    .array(
+      z.object({
+        cardId: z.uuid(),
+        ref: z.string(),
+        branch: z.string(),
+        /** Why it was safe: "merged into pieter/dev", "all commits already in ...", "pull request merged". */
+        reason: z.string(),
+        origin: z.boolean().default(false),
+        local: z.boolean().default(false),
+        worktree: z.boolean().default(false),
+      }),
+    )
+    .default([]),
   /** The user's uncommitted edits were stored on this branch (and pushed when `pushed`); their checkout is untouched. */
   savedWork: z
     .object({

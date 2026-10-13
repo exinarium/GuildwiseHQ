@@ -82,7 +82,9 @@ describe('completion: merge', () => {
     // a real merge commit (two parents)
     expect(sh(repo.origin, 'git', ['rev-list', '--parents', '-n', '1', 'main']).split(' ')).toHaveLength(3);
     // the card branch was not pushed anywhere
-    expect(sh(repo.origin, 'git', ['branch', '--list'])).not.toContain('aom/');
+    expect(sh(repo.origin, 'git', ['for-each-ref', '--format=%(refname)', 'refs/heads'])).toBe(
+      'refs/heads/main',
+    );
     // the local clone's main (checked out, clean) fast-forwarded; no integration worktree is left behind
     expect(readFileSync(join(repo.clone, 'thing.txt'), 'utf8')).toBe('thing\n');
     expect(sh(repo.clone, 'git', ['worktree', 'list'])).not.toContain('integration');

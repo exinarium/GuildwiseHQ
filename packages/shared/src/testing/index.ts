@@ -19,6 +19,8 @@ export const DESK_SUBKIND = {
   finalizeFailed: 'finalize_failed',
   prNotice: 'pr_notice',
   savedWork: 'saved_work',
+  /** Repository hygiene removed branches of finished cards (a notice, one per run). */
+  branchCleanup: 'branch_cleanup',
   outbound: 'outbound',
   outboundFailed: 'outbound_failed',
   repoCreate: 'repo_create',

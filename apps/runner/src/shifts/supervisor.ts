@@ -636,6 +636,12 @@ export class ShiftSupervisor {
         `created working branch ${b.base} from ${b.from}${b.pushed ? ' and pushed it' : ''}`,
       );
     }
+    if (s.worktree?.branchRecreated && !s.startedSent)
+      this.addProgress(
+        s,
+        'status',
+        `branch ${s.worktree.branchName} was gone locally and on origin; recreated it from ${s.worktree.baseBranch}`,
+      );
     if (!s.startedSent) {
       s.startedSent = true;
       this.persist(s);
@@ -897,6 +903,7 @@ export class ShiftSupervisor {
       branchName: s.worktree.branchName,
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
+      completionAction: msg.brief.card.completionAction,
       ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
       recordMainSha: (sha: string) => {
         if (!s.mainShas.includes(sha)) s.mainShas.push(sha);
