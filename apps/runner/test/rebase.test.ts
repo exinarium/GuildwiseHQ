@@ -25,6 +25,15 @@ function advanceOrigin(root: string, origin: string, file: string, content: stri
   sh(other, 'git', ['push', 'origin', 'main']);
 }
 
+/** `git merge origin/main` that stops on a conflict (the caller resolves it). */
+function mergeExpectingConflict(path: string) {
+  try {
+    sh(path, 'git', ['merge', '--no-edit', 'origin/main']);
+  } catch {
+    // conflict: resolved by the test
+  }
+}
+
 describe('rebase step before test and finalize (section 13.6)', () => {
   it('rebases the card branch onto the fetched working branch', async () => {
     const repo = makeRepo();
@@ -61,6 +70,49 @@ describe('rebase step before test and finalize (section 13.6)', () => {
     expect(sh(path, 'git', ['rev-parse', '--git-path', 'rebase-merge'])).toBeTruthy();
     expect(existsSync(sh(path, 'git', ['rev-parse', '--git-path', 'rebase-merge']))).toBe(false);
     expect(sh(path, 'git', ['branch', '--show-current'])).toBe('aom/toy-1-x');
+  });
+
+  it('a card that already merged the working branch and resolved the conflict is left alone (P4-3)', async () => {
+    const repo = makeRepo();
+    const path = join(tmp(), 'wt');
+    await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec, defaultPath: path });
+    writeFileSync(join(path, 'README.md'), '# mine\n');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'edit readme']);
+    advanceOrigin(repo.root, repo.origin, 'README.md', '# theirs\n');
+    // The builder merges the working branch and settles the conflict in the merge commit.
+    sh(path, 'git', ['fetch', 'origin', 'main']);
+    mergeExpectingConflict(path);
+    writeFileSync(join(path, 'README.md'), '# mine and theirs\n');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '--no-edit']);
+    const before = sh(path, 'git', ['rev-parse', 'HEAD']);
+
+    expect(await rebaseOntoBase(path, 'main')).toBe('up_to_date');
+    expect(sh(path, 'git', ['rev-parse', 'HEAD'])).toBe(before);
+    expect(sh(path, 'git', ['status', '--porcelain'])).toBe('');
+  });
+
+  it('a card with its own merge commit is brought up to date with a merge, keeping the resolution', async () => {
+    const repo = makeRepo();
+    const path = join(tmp(), 'wt');
+    await ensureWorktree({ repoPath: repo.clone, roots: ['/'], spec, defaultPath: path });
+    writeFileSync(join(path, 'README.md'), '# mine\n');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'edit readme']);
+    advanceOrigin(repo.root, repo.origin, 'README.md', '# theirs\n');
+    sh(path, 'git', ['fetch', 'origin', 'main']);
+    mergeExpectingConflict(path);
+    writeFileSync(join(path, 'README.md'), '# mine and theirs\n');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '--no-edit']);
+    // The working branch moves on again with an unrelated change.
+    advanceOrigin(repo.root, repo.origin, 'later.txt', 'later');
+
+    expect(await rebaseOntoBase(path, 'main')).toBe('merged');
+    expect(existsSync(join(path, 'later.txt'))).toBe(true);
+    expect(sh(path, 'git', ['show', 'HEAD:README.md'])).toBe('# mine and theirs');
+    expect(sh(path, 'git', ['status', '--porcelain'])).toBe('');
   });
 
   it('works without an origin remote (local base branch)', async () => {
