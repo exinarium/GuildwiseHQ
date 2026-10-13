@@ -2,6 +2,83 @@
 
 Logged fixes to pick up when development resumes. Newest first.
 
+## Direction (owner, 2026-10-13)
+
+Guildwise started as a tool for software teams (the owner built it for his own work), but the aim is **running a whole
+organisation with AI**: that is why departments, custom roles, custom workflows and automations exist. Items #35–#44 come
+from a look at rebelzero.ai (a Cape Town / New York AI consultancy that builds and runs business agents for clients:
+voice, front office, back office, follow-ups, pipeline). To be discussed with the owner before building.
+
+### 35. Trust page and POPIA notice
+
+We have Privacy and Terms but no Trust or POPIA page. The substance exists: an event log of every action (who, what,
+when), sandboxed agents, secrets that stay on the workstation, human approval steps, data not used for training (state the
+model provider's terms accurately). Wanted: a public `/trust` page (security, data handling, approvals, audit, sub-processors,
+where data is hosted) and a `/popia` notice (Information Officer, purposes, rights, cross-border transfer), linked from the
+footer and sign-up. Legal wording to be checked by the owner.
+
+### 36. Savings calculator on the landing page
+
+An estimator in the spirit of rebelzero.ai's admin-cost calculator: team size × hourly cost × share of work that is routine
+(tickets, bug fixes, reviews, reports) × share agents could take → hours a month, money a year, full-time equivalents,
+set against the Guildwise plan price. Clearly labelled an estimate. Later variants per department (support, finance,
+marketing) as the non-software side grows.
+
+### 37. Value report per organisation
+
+Turn what we already record (cards done, time in each stage, shift cost and tokens, rework rounds) into "this month your
+agents finished 42 cards, about X hours of work, for $Y of usage". Needs an estimate of human time per card (by size /
+type, adjustable per organisation, or the owner's own estimate on the card). On the Metrics/Costs pages, in the weekly
+briefing (#38) and exportable for a manager. Include "next best actions": stuck cards, agents that fail often, projects
+without work.
+
+### 38. Weekly briefing
+
+A Monday summary per member (e-mail and push, opt-out per person): cards done and shipped, what is waiting on you (desk
+items, approvals, questions), blocked or failing work, spend against budget, agent and workstation health, and the value
+figures of #37. Per organisation and per project for managers; a short version for members.
+
+### 39. Paid setup package
+
+A fixed-price onboarding service: connect repositories and integrations, design departments, roles and workflows, hire
+the right agents, run the first cards together, and hand over a 90-day plan. Rebelzero.ai sells a $799 two-week "AI
+roadmap" with a "pays for itself" guarantee; decide price, scope and guarantee. Mostly an offer, a page and a booking /
+payment flow (Paystack); possibly a request form that becomes a card in the platform's own organisation.
+
+### 40. Pages per audience
+
+Landing pages per buyer: agencies, .NET / Java shops, SaaS teams with a Jira backlog, and later non-software
+departments and industries (professional services, property, hospitality) as #42 lands. Each with its own problem,
+example workflow, and savings figures.
+
+### 41. More ways in: WhatsApp, web forms, one inbox
+
+Cards and requests come in by e-mail today (inbound mail, automations). Wanted: WhatsApp (Business API) and an embeddable
+web form as intake channels, with the same untrusted-input handling, per-sender limits (#19) and draft-first rules; a
+unified inbox per organisation across channels with replies from inside Guildwise (#15).
+
+### 42. Business-operations departments and agents
+
+Grow beyond software with ready-made departments, roles and workflows (templates in the Org Designer):
+- **Front office:** answer enquiries, qualify, draft proposals and quotes for approval.
+- **Back office:** invoice reconciliation, payment matching, reports.
+- **Relationships:** follow-ups and nurturing of clients and leads.
+- **Growth:** pipeline forecast, deals at risk, next actions.
+Needs connectors to CRM, accounting, bookings and spreadsheets (through the integrations page, #34, and MCP servers, #20),
+approval steps for anything that sends money or messages (#16), and agents that run without a code repository (the
+workstation/sandbox model today assumes a repo for card work).
+
+### 43. Voice agent
+
+Answer and place calls around the clock, qualify callers with the organisation's own questions, book meetings, and log a
+call summary to the card / CRM. Needs a telephony provider (Twilio or a South African one), speech-to-text and
+text-to-speech, recording consent (POPIA), and a hand-over to a human. Large; after #41 and #42.
+
+### 44. Client table and "who are our clients" view
+
+A client / contact list per organisation, fed by intake channels and connected systems (CRM, finance, bookings), so cards,
+threads, invoices and calls hang off a client. Base for #41–#43 and for the value report per client.
+
 ## 2026-10-13
 
 Follow-ups from the 2026-10-12 release (items #1–#13).
