@@ -6,6 +6,28 @@ Logged fixes to pick up when development resumes. Newest first.
 
 Follow-ups from the 2026-10-12 release (items #1–#13).
 
+Leftovers on done items: #20 (MCP tool names per server are not listed; refreshed OAuth tokens are not written back when
+a configured token is used) and #27 (a reopened research card keeps its published status; a reopened cancelled bug child
+does not put its resumed parent back to waiting).
+
+### 32. Cap or summarise the handoff notes in shift instructions
+
+Every shift prompt carries **all** previous handoffs of the card in full (`packages/shared/src/prompt/shift-prompt.ts`,
+section "Previous handoffs"). A card that goes round review/rework or test several times (P4-3, P4-7) collects a long
+tail of notes, most of them superseded, and the prompt keeps growing (it already pushed reviewer prompts past the argv
+limit before 0.1.7 moved them to stdin). Wanted: keep the latest few handoffs in full and the rest as one line each
+(stage / agent / outcome / date), or a rolling summary written at handoff time; a size budget for the section with the
+oldest notes trimmed first; the full history stays on the card page. Tests in `packages/shared` for the trimming.
+
+### 33. .NET builds in a repository without `.gitmodules`
+
+Seen while testing #31: in a repository that has no `.gitmodules` file, a .NET build in the sandbox can fail with
+"Access to .gitmodules is denied" (SourceLink / the git task probes the file, and the sandbox refuses the read of a path
+that does not exist under the worktree's protected git paths). The owner's repositories have the file, so nobody is
+affected today. Wanted: reproduce in the sandbox with a repo without `.gitmodules`, then allow reading that path
+(read-only) in the policy (`apps/runner/src/adapters/claude-policy.ts`) or set `EnableSourceLink=false` /
+`EnableSourceControlManagerQueries=false` for agent builds (`apps/runner/src/sandbox/sandbox.ts`); a runner test either way.
+
 ### 14. Incoming webhooks as an automation trigger
 
 **Decided (owner, 2026-10-12): later.** The `webhook_in` trigger kind exists in the schema (`packages/shared/src/schedules`)
@@ -42,6 +64,90 @@ choices. Leave them out of the options.
 
 Inbound mail has a per-organisation hourly limit (`AOM_INBOUND_RATE_PER_HOUR`). Add an optional per-sender limit so one
 noisy or looping sender cannot use up an organisation's allowance.
+
+## 2026-10-11
+
+### 3. Affiliate programme for influencers
+
+**Idea (owner).** Influencers get a personal code. A customer enters it at sign-up/checkout, and the influencer earns
+commission on that subscription for as long as it keeps running (recurring, lifetime of the subscription).
+
+**Decided (owner, 2026-10-11).**
+- **Customer discount:** a valid affiliate code gives the customer **10% off their first month**.
+- **Who can join:** anyone, through a public **application form** (name, email, channels/audience, how they will promote,
+  payout details). Applications are **reviewed by the super admin**, who **approves or rejects** each one (with an
+  optional reason, emailed to the applicant). Only approved affiliates get a code and a dashboard.
+- **Tax:** affiliates handle their own tax. Guildwise HQ is not responsible for affiliates' taxes; this goes into the
+  **Affiliate Terms** (and a reference in the main Terms), accepted when applying.
+- **Payout report:** the super admin gets a report of the payouts due **per affiliate** (per month: referred
+  subscriptions, payments received, commission earned, held, payable, already paid), to monitor and pay them; mark a
+  payout as paid (date, reference); export to CSV.
+
+- **Commission:** **20%** of each payment (excluding VAT), the same default for every affiliate, for as long as the
+  subscription runs.
+- **Hold (refund) period:** **30 days**; a commission becomes payable 30 days after the payment it came from (reversed if
+  refunded within that time).
+- **Payout window:** payouts are made **between the 25th and 30th of every month**, covering everything that became
+  payable by then; the payout report is ready for the super admin before the 25th (e.g. on the 24th, with an email).
+- **Minimum payout:** **$100**; a smaller balance rolls over to the next month.
+- **Discount timing:** the 10% applies to the **first paid month after the trial**.
+
+- **Payout method:** **USD to the affiliate's PayPal account** (PayPal email collected on the application form).
+  **South African affiliates may request a direct bank transfer (EFT)** instead; bank details collected and stored
+  encrypted, shown only to the super admin in the payout report. **EFT payouts are in ZAR, fixed from the client's
+  invoice:** each commission is 20% of the invoice's rand amount excluding VAT (invoices already store `zar_cents` and
+  `fx_rate`), so there is no exchange-rate risk at payout time. The $100 minimum is checked on the USD value; the
+  statement shows both.
+- **Fees:** **Guildwise HQ pays the sending fee** (PayPal payout fee, ~2% capped at $20; or the EFT fee), so the
+  affiliate receives the full commission. Fees the affiliate's own PayPal/bank charges for receiving, converting or
+  withdrawing, and their taxes, are the affiliate's responsibility (Affiliate Terms). Keep a USD balance in PayPal to
+  avoid double conversion. Wise as an extra method only if affiliates ask for it.
+- **Later:** PayPal Payouts API to pay all PayPal affiliates in one batch from the payout report.
+
+**Design notes.**
+- **Codes:** one per approved affiliate (more later), entered at sign-up or checkout, or via link
+  `guildwisehq.com/?ref=CODE` (cookie for N days). One code per organization, locked once the first payment succeeds.
+- **Commission mechanics:** stops on cancellation; reversed on refunds/chargebacks within the hold period.
+- **Affiliate dashboard:** referred sign-ups, active subscriptions, commission earned, held, payable and paid; their own
+  monthly statement.
+- **Rules:** no self-referral (same email/domain/card as the affiliate); audit trail of approvals, code and rate
+  changes; super admin can suspend an affiliate and their codes.
+- **Where it touches:** public application page, Platform > Affiliates (applications queue, affiliates, codes, payout
+  report), billing (Paystack charge webhooks already drive invoices: commission per paid invoice, discount on the first
+  paid invoice), sign-up/checkout, events/projections, emails (application received/approved/rejected, monthly
+  statement), legal pages (Affiliate Terms; tax clause).
+- **Depends on:** Paystack live (no real payments until then).
+
+## Done
+
+The details of each done item follow this list, by date.
+
+- #1: Runners update themselves once a day. Done 2026-10-12.
+- #2: Verify rights fails on Arch: package manager not detected. Done 2026-10-12.
+- #5: Bitbucket shows "not available" although it is connected. Done 2026-10-12.
+- #6: SSH as an alternative to API tokens for repository access. Done 2026-10-12.
+- #7: The development environment check ignores a project in a sub directory. Done 2026-10-12.
+- #8: Commit and push to the working branch, without a pull request. Done 2026-10-12.
+- #11: "Fix" button that sends the DevOps engineer to fix an environment problem. Done 2026-10-12.
+- #4: Agents cannot read code outside their card worktree (chats, comparing repositories). Done 2026-10-12.
+- #12: DevOps cannot read or update the card it is working for. Done 2026-10-12.
+- #9: Architect role and an investigation and design step. Done 2026-10-12.
+- #13: Workflow and role builder; sub-workflows and event triggers (incl. inbound e-mail). Done 2026-10-12; incoming webhooks later.
+- #10: More than one workflow per project; custom steps in existing workflows. Done 2026-10-12.
+- #20: Plugin MCP servers for sandboxed agents. Done 2026-10-13.
+- #21: Jira attachments for agents and card attachments. Done 2026-10-13.
+- #22: Agents read the vault in chats. Done 2026-10-13.
+- #23: Faster agent builds: shared package caches, dotnet in the sandbox. Done 2026-10-13.
+- #24: Agent toolchain registry (DevOps registers tools for agents). Done 2026-10-13.
+- #25: Working branch from the wrong base; concurrent worktree lock. Done 2026-10-13.
+- #26: Hygiene must not undo a rewritten working branch. Done 2026-10-13.
+- #27: Reopen a done or cancelled card. Done 2026-10-13 (leftovers noted on the item).
+- #28: Card branches stay local; hygiene removes finished card branches. Done 2026-10-13.
+- #29: Hired agents keep stale role permissions. Done 2026-10-13.
+- #30: Cards inherit the project's completion action. Done 2026-10-13.
+- #31: Builders stuck: MSBuild nodes and don't-ask Bash denials. Done 2026-10-13 (runner 0.1.9).
+
+## 2026-10-13 (done)
 
 ### 20. Plugin MCP servers for sandboxed agents
 
@@ -449,76 +555,6 @@ access, and there is no setting that does. Consequences seen on 2026-10-12:
 - Agent instructions: say which folders are readable and that the owner manages reference repos in the project settings
   (stop agents inventing config keys).
 - Tests in the runner (policy builder, chat cwd/add-dirs) and the server/web (project settings, protocol field).
-
-## 2026-10-11
-
-### 3. Affiliate programme for influencers
-
-**Idea (owner).** Influencers get a personal code. A customer enters it at sign-up/checkout, and the influencer earns
-commission on that subscription for as long as it keeps running (recurring, lifetime of the subscription).
-
-**Decided (owner, 2026-10-11).**
-- **Customer discount:** a valid affiliate code gives the customer **10% off their first month**.
-- **Who can join:** anyone, through a public **application form** (name, email, channels/audience, how they will promote,
-  payout details). Applications are **reviewed by the super admin**, who **approves or rejects** each one (with an
-  optional reason, emailed to the applicant). Only approved affiliates get a code and a dashboard.
-- **Tax:** affiliates handle their own tax. Guildwise HQ is not responsible for affiliates' taxes; this goes into the
-  **Affiliate Terms** (and a reference in the main Terms), accepted when applying.
-- **Payout report:** the super admin gets a report of the payouts due **per affiliate** (per month: referred
-  subscriptions, payments received, commission earned, held, payable, already paid), to monitor and pay them; mark a
-  payout as paid (date, reference); export to CSV.
-
-- **Commission:** **20%** of each payment (excluding VAT), the same default for every affiliate, for as long as the
-  subscription runs.
-- **Hold (refund) period:** **30 days**; a commission becomes payable 30 days after the payment it came from (reversed if
-  refunded within that time).
-- **Payout window:** payouts are made **between the 25th and 30th of every month**, covering everything that became
-  payable by then; the payout report is ready for the super admin before the 25th (e.g. on the 24th, with an email).
-- **Minimum payout:** **$100**; a smaller balance rolls over to the next month.
-- **Discount timing:** the 10% applies to the **first paid month after the trial**.
-
-- **Payout method:** **USD to the affiliate's PayPal account** (PayPal email collected on the application form).
-  **South African affiliates may request a direct bank transfer (EFT)** instead; bank details collected and stored
-  encrypted, shown only to the super admin in the payout report. **EFT payouts are in ZAR, fixed from the client's
-  invoice:** each commission is 20% of the invoice's rand amount excluding VAT (invoices already store `zar_cents` and
-  `fx_rate`), so there is no exchange-rate risk at payout time. The $100 minimum is checked on the USD value; the
-  statement shows both.
-- **Fees:** **Guildwise HQ pays the sending fee** (PayPal payout fee, ~2% capped at $20; or the EFT fee), so the
-  affiliate receives the full commission. Fees the affiliate's own PayPal/bank charges for receiving, converting or
-  withdrawing, and their taxes, are the affiliate's responsibility (Affiliate Terms). Keep a USD balance in PayPal to
-  avoid double conversion. Wise as an extra method only if affiliates ask for it.
-- **Later:** PayPal Payouts API to pay all PayPal affiliates in one batch from the payout report.
-
-**Design notes.**
-- **Codes:** one per approved affiliate (more later), entered at sign-up or checkout, or via link
-  `guildwisehq.com/?ref=CODE` (cookie for N days). One code per organization, locked once the first payment succeeds.
-- **Commission mechanics:** stops on cancellation; reversed on refunds/chargebacks within the hold period.
-- **Affiliate dashboard:** referred sign-ups, active subscriptions, commission earned, held, payable and paid; their own
-  monthly statement.
-- **Rules:** no self-referral (same email/domain/card as the affiliate); audit trail of approvals, code and rate
-  changes; super admin can suspend an affiliate and their codes.
-- **Where it touches:** public application page, Platform > Affiliates (applications queue, affiliates, codes, payout
-  report), billing (Paystack charge webhooks already drive invoices: commission per paid invoice, discount on the first
-  paid invoice), sign-up/checkout, events/projections, emails (application received/approved/rejected, monthly
-  statement), legal pages (Affiliate Terms; tax clause).
-- **Depends on:** Paystack live (no real payments until then).
-
-## Done
-
-- #1: Runners update themselves once a day. Done 2026-10-12.
-- #2: Verify rights fails on Arch: package manager not detected. Done 2026-10-12.
-- #5: Bitbucket shows "not available" although it is connected. Done 2026-10-12.
-- #6: SSH as an alternative to API tokens for repository access. Done 2026-10-12.
-- #7: The development environment check ignores a project in a sub directory. Done 2026-10-12.
-- #8: Commit and push to the working branch, without a pull request. Done 2026-10-12.
-- #11: "Fix" button that sends the DevOps engineer to fix an environment problem. Done 2026-10-12.
-- #4: Agents cannot read code outside their card worktree (chats, comparing repositories). Done 2026-10-12.
-- #12: DevOps cannot read or update the card it is working for. Done 2026-10-12.
-- #9: Architect role and an investigation and design step. Done 2026-10-12.
-- #13: Workflow and role builder; sub-workflows and event triggers (incl. inbound e-mail). Done 2026-10-12; incoming webhooks later.
-- #10: More than one workflow per project; custom steps in existing workflows. Done 2026-10-12.
-- #20: Plugin MCP servers for sandboxed agents. Done 2026-10-13.
-- #21: Jira attachments for agents and card attachments. Done 2026-10-13.
 
 ## 2026-10-10
 
