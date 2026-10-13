@@ -15,6 +15,8 @@ export interface ProcessSpec {
   usage: () => Usage;
   /** Also pass the runner's own environment to the child (default). Agent sessions with an allow-listed `env` set false. */
   inheritEnv?: boolean;
+  /** Written to the child's stdin (then closed); without it stdin is closed. Keeps a big prompt out of argv (E2BIG). */
+  input?: string;
   /** Raw stdout lines are appended here. */
   logFile?: string;
   /** Appended to the exit event's error when the process fails (e.g. a parsed API error). */
@@ -61,7 +63,7 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
     env: spec.env,
     extendEnv: spec.inheritEnv ?? true,
     reject: false,
-    stdin: 'ignore',
+    ...(spec.input !== undefined ? { input: spec.input } : { stdin: 'ignore' as const }),
     stdout: 'pipe',
     stderr: 'pipe',
     forceKillAfterDelay: 10_000,
@@ -94,10 +96,13 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
     });
     const code = typeof r.exitCode === 'number' ? r.exitCode : null;
     const failed = code !== 0;
+    // No exit code and no signal: the process never ran (execa reports the failed spawn here, it does not throw).
+    const startFailed = r.failed && code === null && !r.signal;
     const error = failed
       ? [
           spec.exitError?.(),
-          r.failed && code === null && !r.signal ? r.shortMessage : undefined,
+          // not shortMessage: it repeats the whole command line, prompt included
+          startFailed ? (r.originalMessage ?? r.message?.split('\n')[0] ?? 'spawn failed') : undefined,
           stderrTail.trim(),
         ]
           .filter(Boolean)
@@ -108,6 +113,7 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
       kind: 'exit',
       code,
       ...(r.signal ? { signal: String(r.signal) } : {}),
+      ...(startFailed ? { startFailed: true as const } : {}),
       ...(error ? { error } : {}),
     });
     queue.end();

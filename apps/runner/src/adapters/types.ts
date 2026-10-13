@@ -52,7 +52,14 @@ export type RuntimeEvent =
   | { kind: 'tool'; name: string; summary: string }
   | { kind: 'usage'; usage: Usage }
   | { kind: 'final'; text: string }
-  | { kind: 'exit'; code: number | null; signal?: string; error?: string };
+  | {
+      kind: 'exit';
+      code: number | null;
+      signal?: string;
+      error?: string;
+      /** The process never ran (spawn failed: E2BIG, ENOENT, EACCES, ...): not an agent crash. `error` says why. */
+      startFailed?: boolean;
+    };
 
 export interface RuntimeSession {
   events(): AsyncIterable<RuntimeEvent>;

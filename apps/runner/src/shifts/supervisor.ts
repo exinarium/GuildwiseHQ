@@ -594,19 +594,7 @@ export class ShiftSupervisor {
         logFile: `${paths.shiftLogs}/${msg.shiftId}.jsonl`,
       });
     } catch (err) {
-      this.deps.transport.send('shift.ended', {
-        shiftId: msg.shiftId,
-        outcome: 'crashed',
-        exitCode: null,
-        durationMs: Date.now() - s.startedAt.getTime(),
-        usage: zeroUsage(),
-        finalText:
-          `failed to start ${msg.agent.runtime}: ${err instanceof Error ? err.message : String(err)}`.slice(
-            0,
-            4000,
-          ),
-        guardViolations: [],
-      });
+      this.startFailed(s, err);
       return;
     }
 
@@ -667,6 +655,11 @@ export class ShiftSupervisor {
       clearInterval(flush);
     }
     this.flushProgress(s);
+    // The agent process never ran (spawn failed): not an agent crash, nothing to collect or roll back.
+    if (exit.startFailed && !s.stopReason) {
+      this.startFailed(s, new Error(exit.error ?? `could not run ${msg.agent.runtime}`));
+      return;
+    }
 
     // Fallback: a fenced aom-report block in the last assistant message.
     if (s.reportState === 'none' && !s.stopReason && s.finalText) {
@@ -726,6 +719,20 @@ export class ShiftSupervisor {
       ...(s.finalText || exit.error ? { finalText: (s.finalText ?? exit.error ?? '').slice(0, 4000) } : {}),
       guardViolations: s.guardViolations,
     });
+  }
+
+  /**
+   * The runtime could not be started (settings, spawn, E2BIG, ...). Logged with the stack, and reported as a runner
+   * rejection ("Shift could not start: <reason>"): the server notes it on the card and puts the card back in the
+   * queue, and it does not count as an agent crash (`crashed` outcomes feed the loop breaker and the digests).
+   */
+  private startFailed(s: ActiveShift, err: unknown): void {
+    const reason = err instanceof Error ? err.message : String(err);
+    this.log.error(
+      `shift ${s.msg.shiftId} (${s.msg.brief.card.ref}, ${s.msg.agent.roleKey}) could not start ${s.msg.agent.runtime}: ${reason}`,
+      err,
+    );
+    this.reject(s.msg.shiftId, 'internal', `Shift could not start: ${reason}`.slice(0, 1000));
   }
 
   private onRuntimeEvent(s: ActiveShift, ev: RuntimeEvent): void {
@@ -1355,7 +1362,6 @@ const rejected = (error: string, matches?: LedgerMatch[]): IpcReportResponse => 
   ...(matches ? { matches } : {}),
 });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
 
 /** Finds a valid terminal ```aom-report {json}``` block in the last assistant text. */
 export function extractFallbackReport(text: string): ShiftReport | null {
