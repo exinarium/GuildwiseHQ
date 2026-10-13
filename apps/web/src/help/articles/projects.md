@@ -1,7 +1,7 @@
 ---
 title: Projects
 summary: Creating projects, the priority order, project types and workflows, research cards, sharing, archiving and decision policy.
-keywords: [project, priority, ranking, order, code, research, workflow, card, sharing, archiving, repository, git host, github, gitlab, bitbucket, azure devops, pull request, how finished work lands, reference repositories, read other repositories, compare repositories, several workflows, enable workflow, default workflow, project variant, customise workflow, insert step]
+keywords: [project, priority, ranking, order, code, research, workflow, card, sharing, archiving, repository, git host, github, gitlab, bitbucket, azure devops, pull request, how finished work lands, reference repositories, mcp servers, mcp, jira, confluence, plugin, external tools, read other repositories, compare repositories, several workflows, enable workflow, default workflow, project variant, customise workflow, insert step]
 order: 4
 ---
 
@@ -34,6 +34,15 @@ By default an agent only sees the folder of the card it is working on (and, in a
 2. Under **Add a reference repository** pick a repository and click **Add**. The list has a **Projects** section (the repositories of the organization's other projects: organization Owners and Admins see all of them, everyone else the projects they belong to) and an **On <workstation>** section for each of your workstations, which lists any repository cloned there, even one that belongs to no project. Use **Remove** to take one away again.
 
 The agents then get those repositories **read-only**, in card work and in chats, on every workstation that has them cloned. They cannot change them, and secret files inside (`.env` files, keys, certificates) stay blocked. Every repository you do not pick stays blocked, as does everything else on the workstation (other projects, this platform's own code). A repository you pick from a workstation is opened on that workstation; if it has a remote, also on your other workstations that have a clone of the same remote. Nothing is added on its own. Only the project owner can change the list; other managers can see it. The agents are told which folders they can read, so they ask you to add a repository instead of searching for a setting.
+
+## MCP servers {#mcp-servers}
+
+External tools such as Jira or Confluence reach your agents through **MCP servers** from the Claude Code plugins installed and enabled on your workstation. Agents do not see your own Claude Code setup, so each server must be handed over deliberately, and two things are needed:
+
+1. In the project's settings, **MCP servers**, the organization **Owner** picks the server under **Grant an MCP server** and clicks **Grant** (**Remove** takes it away). Administrators and project owners who are not the Owner can read the list but not change it. If the list of servers is empty, install and enable a plugin on a connected workstation; the runner reports it within a few minutes.
+2. The agent's **role** must also have the server in its tool permissions ([Custom roles](/help/org-chart-and-design#custom-roles), **What it may do**, **External tools**). Without it the agent cannot call the server's tools even when the project granted it.
+
+The agent then works with the access of your signed-in plugin, so it can reach what you can reach. A server whose tools can **write, send or delete** lets an agent change data in that service as you: each server shows a warning, so prefer read-only use and grant such servers only to roles you trust with it. The tools an agent called are listed on the card under **External tools used**. If the plugin needs a sign-in, do it once in Claude Code on the workstation. The DevOps engineer is not affected by this setting.
 
 ## Workflows of a project {#workflows}
 
