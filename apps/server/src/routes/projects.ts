@@ -14,15 +14,17 @@ import {
   SetConcurrencyCapRequestSchema,
   SetFullSuiteRequestSchema,
   SetMergePolicyRequestSchema,
+  SetProjectMcpServersRequestSchema,
   SetReferenceReposRequestSchema,
   SetWorkingBranchRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireOrg, requireUser } from '../auth/guards.ts';
+import { requireOrg, requireOrgRole, requireUser } from '../auth/guards.ts';
 import { setArchitectSettings } from '../commands/architect.ts';
 import { cancelConversion, convertPreview, convertProject } from '../commands/convert.ts';
 import { setRepoForge, setRepoMainBranch, setRepoProjectPath } from '../commands/forges.ts';
 import { setRepoWorkingBranch } from '../commands/hygiene.ts';
+import { mcpServerCandidates, setProjectMcpServers } from '../commands/mcp-servers.ts';
 import {
   addRepo,
   archiveProject,
@@ -180,6 +182,23 @@ export function projectRoutes(ctx: Ctx) {
           req.body,
         );
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    /** The plugin MCP servers the caller's own workstations report (names for the role builder's picker). */
+    app.get('/api/mcp-servers', async (req) => {
+      const a = await requireOrgRole(ctx, req, 'member');
+      return { servers: await mcpServerCandidates(ctx.pool, a.session.user.id, a.orgId) };
+    });
+
+    /** Plugin MCP servers the project's agents may use (the organization's Owner only). */
+    app.put(
+      '/api/projects/:id/mcp-servers',
+      { schema: { params: IdParamsSchema, body: SetProjectMcpServersRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setProjectMcpServers(ctx, s.user, req.params.id, req.body.servers);
+        return getProjectDetail(ctx, s.user.id, req.params.id);
       },
     );
 

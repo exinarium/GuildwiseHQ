@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ShiftEndOutcome, ShiftKind } from '../events/shift.ts';
+import { McpCallSchema } from '../mcp/index.ts';
 import { IsoTime } from './common.ts';
 
 export const ShiftDtoSchema = z.object({
@@ -28,6 +29,8 @@ export const ShiftDtoSchema = z.object({
   progressTail: z.array(
     z.object({ at: IsoTime, kind: z.enum(['text', 'tool', 'status']), text: z.string() }),
   ),
+  /** MCP tools the shift's agent called (server and tool names, with counts). */
+  mcpCalls: z.array(McpCallSchema).optional(),
 });
 export type ShiftDto = z.infer<typeof ShiftDtoSchema>;
 export const ShiftsQuerySchema = z.object({ agentId: z.uuid().optional(), cardId: z.uuid().optional() });

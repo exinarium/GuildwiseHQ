@@ -1,5 +1,6 @@
 import {
   HEARTBEAT_SEC,
+  type McpCall,
   normalizeRemoteUrl,
   type RunnerToServer,
   type RunnerToServerOf,
@@ -19,6 +20,7 @@ import { applyForgeReposResult, applyGitReport } from '../commands/forges.ts';
 import { applyWorktreeSweepResult } from '../commands/hygiene.ts';
 import { intakeRpc } from '../commands/intake.ts';
 import { investigationRecordRpc } from '../commands/investigation.ts';
+import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
@@ -164,6 +166,9 @@ export class RunnerHandlers {
         return;
       case 'org.folders':
         await applyOrgFoldersReport(this.ctx, conn.workstationId, msg);
+        return;
+      case 'mcp.servers':
+        await applyMcpServersReport(this.ctx, conn.workstationId, msg);
         return;
       case 'shift.accepted':
         await markShiftAccepted(this.ctx, ws, msg.shiftId);
@@ -657,12 +662,20 @@ export class RunnerHandlers {
     const { ctx } = this;
     const s = await one(
       ctx.pool,
-      'SELECT id, card_id, progress_tail FROM shifts WHERE id=$1 AND workstation_id=$2',
+      'SELECT id, card_id, progress_tail, mcp_calls FROM shifts WHERE id=$1 AND workstation_id=$2',
       [msg.shiftId, conn.workstationId],
     );
     if (!s) return;
     const tail = [...(s.progress_tail as unknown[]), ...msg.items].slice(-50);
-    await exec(ctx.pool, 'UPDATE shifts SET progress_tail=$2 WHERE id=$1', [s.id, JSON.stringify(tail)]);
+    // MCP tools the agent called (server and tool names), tallied for the card's log
+    const mcp = mcpCallsIn(msg.items);
+    if (mcp.length > 0)
+      await exec(ctx.pool, 'UPDATE shifts SET progress_tail=$2, mcp_calls=$3::jsonb WHERE id=$1', [
+        s.id,
+        JSON.stringify(tail),
+        JSON.stringify(mergeMcpCalls((s.mcp_calls ?? []) as McpCall[], mcp)),
+      ]);
+    else await exec(ctx.pool, 'UPDATE shifts SET progress_tail=$2 WHERE id=$1', [s.id, JSON.stringify(tail)]);
     ctx.services.browser.shiftProgress(s.id, s.card_id, msg.items);
   }
 

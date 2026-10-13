@@ -10,6 +10,7 @@ import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { ConvertPanel } from '../components/ConvertPanel.tsx';
 import { DeployTargetsPanel } from '../components/DeployTargetsPanel.tsx';
 import { FullSuitePanel } from '../components/FullSuitePanel.tsx';
+import { McpServersPanel } from '../components/McpServersPanel.tsx';
 import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
 import { FollowupDefaultsPanel, PhasesPanel } from '../components/PhasesPanel.tsx';
@@ -299,6 +300,16 @@ export function ProjectSettings() {
             workstationRepos={q.data.referenceWorkstationRepos ?? []}
             workstationCandidates={q.data.workstationRepoCandidates ?? []}
             isOwner={project.myRole === 'owner'}
+          />
+        </div>
+      )}
+      {project && (
+        <div id="mcp-servers" className="scroll-mt-20">
+          <McpServersPanel
+            projectId={id}
+            granted={q.data.mcpServers ?? []}
+            candidates={q.data.mcpServerCandidates ?? []}
+            canGrant={q.data.canGrantMcpServers === true}
           />
         </div>
       )}

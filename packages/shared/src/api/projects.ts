@@ -9,6 +9,7 @@ import {
   GitAccessMethodSchema,
 } from '../forge/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
+import { McpServerCandidateDtoSchema } from '../mcp/index.ts';
 import { RepoDescriptionSchema, RepoNameSchema, RepoVisibilitySchema, repoNameError } from '../repo/index.ts';
 import {
   BranchPrefixSchema,
@@ -223,6 +224,12 @@ export const ProjectDetailResponseSchema = z.object({
   referenceWorkstationRepos: z.array(WorkstationRepoDtoSchema).default([]),
   /** Clones on the caller's own workstations they could pick ([] for non-owners). */
   workstationRepoCandidates: z.array(WorkstationRepoDtoSchema).default([]),
+  /** Plugin MCP servers granted to the project's agents (names; everyone who can see the project reads them). */
+  mcpServers: z.array(z.string()).default([]),
+  /** The organization's Owner may change the grant; others read it. */
+  canGrantMcpServers: z.boolean().default(false),
+  /** What the Owner could grant: the plugin MCP servers their workstations report ([] for everyone else). */
+  mcpServerCandidates: z.array(McpServerCandidateDtoSchema).default([]),
   /** The setting's change history, newest first (who turned it on or off, when). */
   mergePolicyHistory: z
     .array(z.object({ enabled: z.boolean(), byName: z.string(), at: IsoTime }))

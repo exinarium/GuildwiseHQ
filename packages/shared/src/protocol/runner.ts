@@ -24,6 +24,7 @@ import {
 import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
+import { MAX_MCP_SERVERS, McpServerInfoSchema } from '../mcp/index.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { RepoCreatePayloadSchema } from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
@@ -312,6 +313,8 @@ export const ChatContextSchema = z.object({
   localReadRepos: z.array(LocalReadRepoSchema).optional(),
   /** M7: set for the BA's intake chat (project list, mapping state, cards created so far). */
   intake: IntakeContextSchema.optional(),
+  /** Plugin MCP servers the project's Owner granted (names only; the runner holds the configuration). */
+  mcpServers: z.array(z.string()).optional(),
 });
 export type ChatContext = z.infer<typeof ChatContextSchema>;
 
@@ -545,6 +548,13 @@ export const OrgFoldersReportSchema = msg('org.folders', {
   folders: z.array(OrgFolderStateSchema).max(100),
   candidates: z.array(z.string().max(1000)).max(MAX_ORG_FOLDER_CANDIDATES),
 });
+/**
+ * The MCP servers of the installed, enabled Claude Code plugins of this workstation (names, plugin, transport; never an
+ * environment value, header, token or argument). Sent after `welcome` and after every re-scan that changed them.
+ */
+export const McpServersReportSchema = msg('mcp.servers', {
+  servers: z.array(McpServerInfoSchema).max(MAX_MCP_SERVERS),
+});
 /** How a runner's self-update stands (docs/RUNNER.md "Updates"). */
 export const RUNNER_UPDATE_STATES = [
   'up_to_date',
@@ -724,6 +734,8 @@ export const ShiftStartSchema = msg('shift.start', {
   /** The project's reference repositories: read-only for this shift when the workstation has a clone. */
   readRepos: z.array(ReadRepoSchema).optional(),
   localReadRepos: z.array(LocalReadRepoSchema).optional(),
+  /** Plugin MCP servers the project's Owner granted (names only); a card shift gets the ones its role may call. */
+  mcpServers: z.array(z.string()).optional(),
 });
 export const ShiftStopSchema = msg('shift.stop', { shiftId: z.uuid(), reason: ShiftStopReasonSchema });
 export const ShiftReportResultSchema = msg('shift.report.result', {
@@ -772,6 +784,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   RuntimesReportSchema,
   GitReportSchema,
   OrgFoldersReportSchema,
+  McpServersReportSchema,
   RunnerUpdateReportSchema,
   ShiftAcceptedSchema,
   ShiftRejectedSchema,

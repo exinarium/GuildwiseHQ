@@ -4,6 +4,7 @@ import {
   type DefinitionIssue,
   type ExplainedRoleIssue,
   explainRoleIssues,
+  type McpServerCandidateDto,
   type RoleDraftInput,
   type RoleSection,
   validateRoleDefinition,
@@ -156,6 +157,7 @@ export function RoleBuilder({
   departments,
   workflows,
   knownSkills = [],
+  knownMcpServers = [],
   isOwner,
   keyLocked = false,
   serverIssues,
@@ -169,6 +171,8 @@ export function RoleBuilder({
   workflows: readonly ClaimableWorkflow[];
   /** Skills other roles use, offered as quick picks. */
   knownSkills?: readonly string[];
+  /** Plugin MCP servers the organization's workstations report: offered as picks for the external tools. */
+  knownMcpServers?: readonly McpServerCandidateDto[];
   /** The signed-in user is the organization Owner: only they switch on wide access. */
   isOwner: boolean;
   /** The short name of an existing role cannot change. */
@@ -432,11 +436,46 @@ export function RoleBuilder({
             />
           )}
         </div>
+        {knownMcpServers.length > 0 && (
+          <fieldset className="flex flex-col gap-2" data-testid="mcp-picker">
+            <legend className="text-sm font-medium">
+              External tools your workstations offer (MCP servers)
+            </legend>
+            {knownMcpServers.map((s) => {
+              const on = mcpToolsOf(perms).includes(s.name);
+              return (
+                <label key={s.name} className="inline-flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    disabled={readOnly}
+                    onChange={(e) =>
+                      setPerms(
+                        withMcpTools(
+                          perms,
+                          e.target.checked
+                            ? [...mcpToolsOf(perms), s.name]
+                            : mcpToolsOf(perms).filter((n) => n !== s.name),
+                        ),
+                      )
+                    }
+                  />
+                  {s.plugin} / {s.server}
+                  <span className="font-mono text-xs text-subtle">mcp:{s.name}</span>
+                </label>
+              );
+            })}
+            <p className="text-xs text-subtle">
+              A role can only use a server the project's Owner also granted in the project settings (MCP
+              servers). Each server is a separate risk: only add tools you trust.
+            </p>
+          </fieldset>
+        )}
         <ListInput
           label="External tools (MCP, comma separated)"
           value={mcpToolsOf(perms)}
           disabled={readOnly}
-          hint="Names of tool servers this role may use. Each one is a separate risk: only add tools you trust."
+          hint="Names of tool servers this role may use, as listed above. Each one is a separate risk: only add tools you trust."
           onChange={(v) => setPerms(withMcpTools(perms, v))}
         />
         <div data-testid="permission-summary" className="rounded-control bg-surface-sunken p-3 text-sm">

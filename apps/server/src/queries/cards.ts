@@ -180,6 +180,7 @@ export function toShiftDto(s: Row): ShiftDto {
     tokensCacheRead: s.tokens_cache_read === null ? null : Number(s.tokens_cache_read),
     tokensCacheWrite: s.tokens_cache_write === null ? null : Number(s.tokens_cache_write),
     progressTail: s.progress_tail,
+    mcpCalls: s.mcp_calls ?? [],
   };
 }
 
@@ -218,6 +219,13 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
       `${SHIFT_SELECT} WHERE s.card_id=$1 AND s.status <> 'ended' ORDER BY s.started_at DESC LIMIT 1`,
       [card.id],
     ));
+  const mcpShifts = await rows(
+    ctx.pool,
+    `SELECT s.id, s.stage, s.started_at, s.mcp_calls, a.name AS agent_name FROM shifts s
+       JOIN agents a ON a.id = s.agent_id
+      WHERE s.card_id=$1 AND jsonb_array_length(s.mcp_calls) > 0 ORDER BY s.started_at`,
+    [card.id],
+  );
   const ctxAuth = { userId, projectRole: role, cardOwnerUserId: card.owner_user_id };
   const manage = canManageCard(ctxAuth);
   const open = !['done', 'cancelled'].includes(card.status);
@@ -273,6 +281,13 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
       createdAt: iso(m.created_at) as string,
     })),
     currentShift: shiftRow ? toShiftDto(shiftRow) : null,
+    mcpUsage: mcpShifts.map((s) => ({
+      shiftId: s.id,
+      agentName: s.agent_name ?? null,
+      stage: s.stage ?? null,
+      startedAt: iso(s.started_at) as string,
+      calls: s.mcp_calls,
+    })),
     permissions: {
       canEdit: manage && (card.status === 'draft' || (card.status === 'queued' && !card.claim_id)),
       canSetRisk: manage && open && !['awaiting_approval', 'running'].includes(card.finalize_state ?? ''),
