@@ -70,6 +70,23 @@ used". See `docs/RUNNER.md` "Plugin MCP servers".
 **Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
 the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
 
+### 24. Agent toolchain registry (DevOps registers tools for agents)
+
+**Done (owner, 2026-10-13: "we cannot code for every possible path").** Some projects need .NET 10, others .NET 8, and the
+`dotnet` first on the runner PATH (`/usr/local/bin/dotnet`, SDK 8 only) hid `~/.dotnet` (8 and 10) from sandboxed agents;
+more generally a tool the DevOps engineer installed was invisible to them. The runner now keeps one list of **agent
+toolchains** (`{name, binDirs, readDirs, env, source}`): detected (.NET roots, nvm, pyenv/uv, Go, `~/.cargo/bin`, sdkman,
+mise/asdf, `~/.local/bin`), configured (`toolchainPaths`, `dotnetRoot`) and registered by the DevOps engineer with
+`aom toolchain add|list|remove` (`toolchains.json`, 0600). Sandboxed agents get every entry on PATH, readable, with its
+variables (credentials refused); DevOps shifts get the same PATH. .NET: the root with the most SDKs wins (config
+`dotnetRoot` overrides), `DOTNET_ROOT` is set, and the environment check reads `global.json` and the target frameworks
+against it ("missing SDK 10.0", "missing runtime 8.0") and installs into that root with `dotnet-install.sh`. The agent
+instructions list the toolchains and send missing tools to DevOps. Workstations page: "Agent toolchains" with Remove for
+registered ones (additive `toolchains.report` message, `workstations.toolchains`, `toolchain.remove` command). Verified
+net8.0 and net10.0 builds in the real bubblewrap sandbox with `/home` hidden. See `docs/RUNNER.md` "Agent toolchains".
+Runner and server change. **Open:** no automatic install-and-register for tools the environment check does not know; the
+version of detected tools other than .NET, Go and nvm Node is not read.
+
 ### 23. Faster agent builds: shared package caches, dotnet in the sandbox
 
 **Done (owner complaint, 2026-10-13: agents are very slow on a .NET project).** Three causes, from the production shift
@@ -82,7 +99,7 @@ caused by masking the data dir (a parent of the read-only worktree). Fixed in th
 NuGet fallback; `/tmp/.dotnet` writable plus `DOTNET_*`/MSBuild variables (no build servers left behind); read-only shifts
 mask the data dir entry by entry; NuGet hosts added to the network allowlist; one line in the agent instructions. Verified
 in the real bubblewrap sandbox and with Claude Code. See `docs/RUNNER.md` "Shared package caches and .NET". Runner
-change: needs the next runner version. **Open:** cargo is not shared (its home holds credentials); private package feeds
+change: needs the next runner version. Follow-up: several .NET versions and a generic tool registry, see #24. **Open:** cargo is not shared (its home holds credentials); private package feeds
 that need credentials from the user's `NuGet.Config` stay unavailable to sandboxed agents.
 
 ### 22. Agents read the vault in chats

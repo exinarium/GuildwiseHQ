@@ -789,9 +789,68 @@ puts it in `allowWrite`. Each agent also gets `DOTNET_CLI_HOME` (its own home), 
 `DOTNET_NOLOGO=1`, `DOTNET_CLI_TELEMETRY_OPTOUT=1`, `NUGET_CERT_REVOCATION_MODE=offline` (the sandbox does not allow
 the certificate revocation hosts, which only delayed restores) and, so that no build server outlives the shift,
 `MSBUILDDISABLENODEREUSE=1`, `DOTNET_CLI_USE_MSBUILD_SERVER=0` and `UseSharedCompilation=false`. If the `dotnet` install
-is under your home (for example `~/.dotnet`), list it in `runtimes.claude-code.toolchainPaths`. Verified in the real
+is under your home (for example `~/.dotnet`) it is found automatically, see "Agent toolchains". Verified in the real
 sandbox (`dotnet new console` and `dotnet build`, with a package from the fallback folder and one downloaded into the
 shared cache); `test/sandbox-caches.test.ts` repeats it under bubblewrap and skips when `bwrap` or `dotnet` is missing.
+
+### Agent toolchains
+
+The sandbox hides `/home`, and the PATH of the runner service rarely has the tools a project needs (a system `dotnet`
+with SDK 8 first, Node under nvm, Go under `~/go/sdk`). The runner therefore keeps one list of **agent toolchains**, each
+`{ name, binDirs, readDirs, env, source }`, and gives all of it to every sandboxed agent and chat (new shifts and chats
+pick up a change; no restart):
+
+- **PATH:** every `binDirs` (that exists) goes after the `aom` shim and before the service PATH, in a stable order:
+  registered by DevOps, then configured, then detected. The unsandboxed DevOps engineer gets the same PATH.
+- **Read access:** `binDirs` and `readDirs` are added to the sandbox's readable toolchain paths (with the Node install
+  and `toolchainPaths`). They are read-only.
+- **Variables:** `env` is merged (the first entry that sets one wins). Credentials are refused: a name containing TOKEN,
+  SECRET, PASSWORD, KEY, CREDENTIAL, AUTH, COOKIE or SESSION unless it is on the allowlist (`DOTNET_ROOT`, `JAVA_HOME`,
+  `GOROOT`, `ANDROID_HOME`, `RUSTUP_HOME`, ...), a value that looks like a token, key or URL with a password, and the
+  names the runner owns (`PATH`, `HOME`, `TMPDIR`, `LD_*`, `AOM_*`, `CLAUDE*`, `GIT_*`, `NUGET_*`, ...).
+
+Sources: **detected** (directory reads only, nothing is started): the .NET root, nvm's default Node, pyenv shims, uv
+Pythons, `/usr/local/go` and `~/go/sdk/go*` (`GOROOT`), `~/.cargo/bin` (the bin folder only: the cargo home holds
+credentials; the rustup toolchains are readable), sdkman Java/Gradle/Maven (`JAVA_HOME`), mise and asdf shims and
+`~/.local/bin`; **config** (`runtimes.claude-code.toolchainPaths`, read access only as before, and the top-level
+`dotnetRoot`); **devops**, stored in `<data dir>/toolchains.json` (mode 0600, re-validated on every load).
+
+**.NET.** The `dotnet` muxer resolves SDKs only inside its own root, so one root has to hold them all. The candidates are
+`$DOTNET_ROOT`, `~/.dotnet`, `/usr/share/dotnet`, `/usr/lib/dotnet`, `/usr/local/share/dotnet`, `/opt/dotnet`, the
+Homebrew locations and the root behind `dotnet` on PATH (symlinks resolved); SDKs are the names under `<root>/sdk`,
+runtimes those under `shared/Microsoft.NETCore.App`. The root with the most SDK versions wins (a superset of the others
+when there is one; a tie goes to the highest SDK), `dotnetRoot` in `config.json` overrides. The agent gets
+`DOTNET_ROOT=<root>` and the root first on PATH. On the owner's machine this is `~/.dotnet` (8.0.425 and 10.0.401), not
+`/usr/local/bin/dotnet`. The environment check ("Development environment") no longer asks `dotnet --version`: it reads
+`global.json` (with its `rollForward`, default `latestPatch`) and the `TargetFramework(s)` of the projects against the
+chosen root and reports `missing SDK 10.0.100 (global.json)`, `missing SDK 10.0 (target framework net10.0)` or
+`missing runtime 8.0`, plus a line **.NET SDKs 8.0.425, 10.0.401 (~/.dotnet)**. With "Install packages and tools"
+allowed it installs into the chosen root with `dotnet-install.sh --install-dir <root> --channel <x.y>` (no sudo when the
+root is in the user's home); a root that is not writable (`/usr/share/dotnet`) keeps the package manager recipes.
+
+**`aom toolchain`** (outside the sandbox, over the IPC like `aom git`):
+
+```
+aom toolchain list
+aom toolchain add <name> --bin <dir> [--bin <dir>]... [--read <dir>]... [--env KEY=VALUE]...
+aom toolchain remove <name>
+```
+
+Everyone may `list`; only the DevOps engineer (shift or chat) may `add` and `remove`. The runner checks every path: it
+must be absolute (`~` allowed) and exist, is resolved with `realpath` (a symlink into `~/.ssh` is refused), and may not
+be `/`, the home folder or a parent of it, the runner's data folder or anything inside it, or a credential store
+(`~/.ssh`, `~/.aws`, `~/.config/gh`, ...); a bin folder must contain an executable. A registered name replaces a detected
+one. The DevOps instructions say: after installing a tool for the agents, register it, and prefer user-space installs
+(`~/.dotnet`, `~/.local`, `~/go/sdk`, nvm, pyenv/uv, sdkman, mise/asdf). The agents' instructions list the toolchains
+(`Toolchains available to you: dotnet 8.0.425, 10.0.401; node-nvm 22.1.0; ...`) and tell them to ask `aom devops`
+instead of installing a tool themselves.
+
+**Workstations page.** The runner reports the list (`toolchains.report`: names, versions, folders and variable *names*,
+never a value) after `welcome`, when it changed and after every `aom toolchain add|remove`; the card shows **Agent
+toolchains** with the source ("detected", "added by DevOps on <date>") and, for the owner, **Remove** on the ones DevOps
+registered (`toolchain.remove` command). Verified in the real bubblewrap sandbox with `/home` hidden: net8.0 and
+net10.0 projects build and run from `~/.dotnet` although `/usr/local/bin/dotnet` (SDK 8 only) is first on PATH
+(`test/sandbox-dotnet-roots.test.ts`, skipped without bwrap or dotnet).
 
 ### Git worktrees
 
@@ -1378,7 +1437,7 @@ with no row (everything that existed before) are never held back. The runner (`s
   notice on the desk (deduplicated per project and workstation; closed again when it is ready); the last 80 log lines are in the report (Project settings, Development environment) and the full log is in
   `logs/env/<project id>.log` on the workstation. Changing the DevOps access, entering the sudo password or "Check again"
   re-runs it. A tool installed at user level (`~/.dotnet`, `~/.cargo`) is found by the runner through the user bin folders it
-  adds to `PATH`; agents in the sandbox read `runtimes.claude-code.toolchainPaths` (add `~/.dotnet` there).
+  adds to `PATH`; agents in the sandbox see it through the agent toolchains ("Agent toolchains": `~/.dotnet` is found automatically, `aom toolchain add` registers anything else). A missing tool's "How to fix" ends with that registration step, so the Fix-with-DevOps button asks DevOps to install and register it.
 
 **3. Ticked rights are proven.** For every right the manager ticks on a DevOps engineer the runner checks it on the
 machine (`rights.verify`, sent when the ticks change and on "Verify now") and the Workstations page shows

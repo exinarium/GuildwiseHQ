@@ -1,4 +1,5 @@
 import { appendFileSync, mkdirSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   type DevOpsAccess,
@@ -9,9 +10,16 @@ import {
 } from '@aom/shared';
 import { redact } from '../secrets/redact.ts';
 import { detectStacks, viewOf } from './detect.ts';
+import {
+  type DotnetSelection,
+  dotnetGaps,
+  dotnetProcessEnv,
+  dotnetRootWritable,
+  shortPath,
+} from './dotnet.ts';
 import type { ExecResult, Executor } from './exec.ts';
 import { type DetectedManager, detectManagers, managerCommands, noManagerAdvice } from './managers.ts';
-import { STACKS, TOOLS } from './stacks.ts';
+import { dotnetInstallInto, STACKS, TOOLS } from './stacks.ts';
 import type { Check, Detection, Manager, Params, Platform, Step, ToolSpec } from './types.ts';
 
 /** `have >= want`, comparing dotted numbers segment by segment (`8` is satisfied by `8.0.100` and `9.0`). */
@@ -44,6 +52,34 @@ export interface EnsureDeps {
   tables?: { stacks: typeof STACKS; tools: Record<string, ToolSpec> };
   /** D6: run the project's dependency installs once the tools are ready (default true). */
   installDependencies?: boolean;
+  /**
+   * The .NET installs of this workstation (`selectDotnet`). When present the SDK check reads the chosen root's directories
+   * (global.json, target frameworks) instead of asking `dotnet --version`, `dotnet` runs with that root, and a missing SDK
+   * is installed into it.
+   */
+  dotnet?: () => DotnetSelection;
+}
+
+/** Env for a command: `dotnet` and its installers run with the chosen root first on PATH and as DOTNET_ROOT. */
+function dotnetRunEnv(
+  cmd: string,
+  deps: EnsureDeps,
+): { env: Record<string, string> } | Record<string, never> {
+  const chosen = cmd === 'dotnet' ? deps.dotnet?.().chosen : undefined;
+  return chosen ? { env: dotnetProcessEnv(chosen, process.env.PATH) } : {};
+}
+
+/** What the project asks of the SDK and what the chosen root lacks; used by the check and the installer. */
+function dotnetPlan(params: Params, deps: EnsureDeps) {
+  const sel = (deps.dotnet as () => DotnetSelection)();
+  const needs = {
+    ...(params.globalVersion ? { globalVersion: params.globalVersion } : {}),
+    ...(params.rollForward ? { rollForward: params.rollForward } : {}),
+    tfmMajors: (params.tfmMajors ?? '').split(',').filter(Boolean).map(Number),
+  };
+  const gap = dotnetGaps(sel.chosen, needs);
+  if (!sel.chosen) gap.problems.unshift('no .NET SDK found');
+  return { sel, gap };
 }
 
 function isDirectory(p: string): boolean {
@@ -157,6 +193,17 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
   if (deps.installDependencies !== false)
     reports.push(...(await installDependencies(runs, tables, p.access, done, deps, log)));
 
+  // The .NET SDKs agents will see: one line in the report (Workstations / Development environment).
+  const dn = deps.dotnet?.();
+  if (dn?.chosen && stackList.some((s) => s.id.startsWith('dotnet')))
+    reports.unshift({
+      stack: 'dotnet',
+      tool: '.NET SDKs',
+      status: 'ok',
+      version: dn.chosen.sdks.join(', '),
+      detail: `(${shortPath(dn.chosen.root)})`,
+    });
+
   // 4. The verdict.
   const state: EnvironmentReport['state'] = reports.some((r) => r.status === 'needs_access')
     ? 'needs_access'
@@ -216,6 +263,7 @@ async function installDependencies(
         const r = await deps.exec.run(isAbsolute(cmd) ? cmd : step.cmd, step.args, {
           cwd: run.localPath,
           timeoutMs: 30 * 60_000,
+          ...dotnetRunEnv(step.cmd, deps),
         });
         for (const line of `${r.stdout}\n${r.stderr}`.split('\n').slice(-8))
           if (line.trim()) log(`  ${line.trim()}`);
@@ -242,7 +290,9 @@ function mergeParams(a: Params, b: Params): Params {
   for (const [k, v] of Object.entries(b)) {
     if (v === undefined) continue;
     const cur = out[k];
-    if (cur === undefined) out[k] = v;
+    if (k === 'tfmMajors' && cur !== undefined)
+      out[k] = [...new Set(`${cur},${v}`.split(','))].sort((a, b) => Number(a) - Number(b)).join(',');
+    else if (cur === undefined) out[k] = v;
     else if (/^\d+(\.\d+)*$/.test(cur) && /^\d+(\.\d+)*$/.test(v) && !versionAtLeast(cur, v)) out[k] = v;
   }
   return out;
@@ -254,9 +304,17 @@ async function probe(
   params: Params,
   deps: EnsureDeps,
 ): Promise<{ ok: boolean; version?: string; output: string }> {
+  if (spec.id === 'dotnet-sdk' && deps.dotnet) {
+    const { sel, gap } = dotnetPlan(params, deps);
+    const top = sel.chosen?.sdks.at(-1);
+    const where = sel.chosen ? ` in ${shortPath(sel.chosen.root)} (has ${sel.chosen.sdks.join(', ')})` : '';
+    return gap.problems.length
+      ? { ok: false, ...(top ? { version: top } : {}), output: `${gap.problems.join('; ')}${where}` }
+      : { ok: true, ...(top ? { version: top } : {}), output: '' };
+  }
   let output = '';
   for (const c of spec.checks(params, deps.platform)) {
-    const r = await deps.exec.run(c.cmd, c.args, { timeoutMs: 60_000 });
+    const r = await deps.exec.run(c.cmd, c.args, { timeoutMs: 60_000, ...dotnetRunEnv(c.cmd, deps) });
     output = `${r.stdout}\n${r.stderr}`;
     if (r.exitCode !== 0) continue;
     if (c.contains && !containsToken(output, c.contains)) continue;
@@ -297,7 +355,14 @@ async function ensureTool(
     return { ...base, status: 'ok', ...(before.version ? { version: before.version } : {}) };
   }
   log(`${spec.name}: missing (${before.output})`);
-  const manual = spec.manual?.(params, deps.platform);
+  const manualBase = spec.manual?.(params, deps.platform);
+  // Whatever DevOps installs for the agents has to be registered, or the sandbox cannot see it.
+  const manual = manualBase
+    ? `${manualBase}. Then register it for the agents: aom toolchain add <name> --bin <its bin folder> (a user-space install is best; .NET under ~/.dotnet is found automatically).`.slice(
+        0,
+        900,
+      )
+    : manualBase;
   const needsAccess = (why: string, fix: string): ToolReport => ({
     ...base,
     status: 'needs_access',
@@ -327,7 +392,21 @@ async function ensureTool(
 
   // Pick the first installer whose steps can run with the rights there are.
   const managers = detected.map((m) => m.id);
-  const recipes = spec.recipes(params, deps.platform);
+  let recipes = spec.recipes(params, deps.platform);
+  if (spec.id === 'dotnet-sdk' && deps.dotnet && deps.platform !== 'win32') {
+    // Install into the root the agents use. A user-level root (~/.dotnet) is filled by the official script without
+    // administrator rights; a system root (/usr/share/dotnet) keeps the package manager recipes.
+    const { sel, gap } = dotnetPlan(params, deps);
+    const root = sel.chosen?.root ?? join(homedir(), '.dotnet');
+    if (!sel.chosen || dotnetRootWritable(root)) {
+      const sdk = gap.channels.length
+        ? gap.channels
+        : gap.runtimeChannels.length
+          ? []
+          : [`${params.sdkMajor ?? '8'}.0`];
+      recipes = { any: [{ cmd: 'bash', args: ['-c', dotnetInstallInto(root, sdk, gap.runtimeChannels)] }] };
+    } else delete recipes.any;
+  }
   const candidates: Manager[] = [
     ...managers.filter((m) => recipes[m]),
     ...(recipes.any ? (['any'] as Manager[]) : []),
@@ -366,7 +445,10 @@ async function ensureTool(
     const r =
       step.root && rootMode !== 'root'
         ? await deps.root.run(step.cmd, step.args, { timeoutMs: 30 * 60_000 })
-        : await deps.exec.run(step.cmd, step.args, { timeoutMs: 30 * 60_000 });
+        : await deps.exec.run(step.cmd, step.args, {
+            timeoutMs: 30 * 60_000,
+            ...dotnetRunEnv(step.cmd, deps),
+          });
     for (const line of `${r.stdout}\n${r.stderr}`.split('\n').slice(-12))
       if (line.trim()) log(`  ${line.trim()}`);
     if (r.exitCode !== 0) {

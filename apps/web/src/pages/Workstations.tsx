@@ -24,6 +24,7 @@ import {
   useToast,
 } from '../components/ui.tsx';
 import { AddWorkstationWizard } from '../components/workstations/AddWorkstationWizard.tsx';
+import { AgentToolchains } from '../components/workstations/AgentToolchains.tsx';
 import { CloudWorkstations } from '../components/workstations/CloudWorkstations.tsx';
 import { OrgSourceFolder } from '../components/workstations/OrgSourceFolder.tsx';
 import { RunnerUpdateBadge } from '../components/workstations/RunnerUpdateBadge.tsx';
@@ -274,6 +275,7 @@ export function WorkstationCard({
               <p className="mt-1 text-xs text-subtle">Last seen {formatDateTime(w.lastSeenAt)}</p>
             )}
             {!admin && <OrgSourceFolder w={w} />}
+            {!admin && <AgentToolchains w={w} />}
             {!admin && <GitConnectionsPanel w={w} />}
             {!admin && <JiraStatusLine w={w} />}
             {!admin && <DevOpsPanel w={w} />}

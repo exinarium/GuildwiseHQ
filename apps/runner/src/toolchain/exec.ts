@@ -49,7 +49,9 @@ export const realExecutor: Executor = {
         env: {
           ...process.env,
           ...opts.env,
-          PATH: [...userBinDirs(), process.env.PATH ?? '', ...BREW_BIN_DIRS].join(delimiter),
+          PATH: [opts.env?.PATH ?? '', ...userBinDirs(), process.env.PATH ?? '', ...BREW_BIN_DIRS]
+            .filter(Boolean)
+            .join(delimiter),
           DEBIAN_FRONTEND: 'noninteractive',
           DOTNET_CLI_TELEMETRY_OPTOUT: '1',
           DOTNET_NOLOGO: '1',

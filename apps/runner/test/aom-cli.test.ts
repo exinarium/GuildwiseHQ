@@ -192,6 +192,41 @@ describe('aom CLI', () => {
     expect(t.err.join('')).toContain('usage: aom devops');
   });
 
+  it('toolchain add/list/remove become rpcs with their flags; usage is checked', async () => {
+    const t = await setup();
+    const code = await t.run(
+      'toolchain',
+      'add',
+      'zig',
+      '--bin',
+      '/opt/zig',
+      '--bin',
+      '/opt/zig2',
+      '--read',
+      '/opt/lib',
+      '--env',
+      'ZIG_HOME=/opt/zig',
+    );
+    expect(t.err.join('')).toBe('');
+    expect(code).toBe(0);
+    expect(t.rpcs.at(-1)).toEqual({
+      method: 'toolchain.add',
+      params: {
+        name: 'zig',
+        bin: ['/opt/zig', '/opt/zig2'],
+        read: ['/opt/lib'],
+        env: { ZIG_HOME: '/opt/zig' },
+      },
+    });
+    expect(await t.run('toolchain', 'list')).toBe(0);
+    expect(t.rpcs.at(-1)).toEqual({ method: 'toolchain.list', params: {} });
+    expect(await t.run('toolchain', 'remove', 'zig')).toBe(0);
+    expect(t.rpcs.at(-1)).toEqual({ method: 'toolchain.remove', params: { name: 'zig' } });
+    expect(await t.run('toolchain', 'add')).toBe(1);
+    expect(await t.run('toolchain', 'add', 'x', '--env', 'NOEQUALS')).toBe(1);
+    expect(t.err.join('')).toContain('usage: aom toolchain');
+  });
+
   it('card show / comment reach the one card of a DevOps request through rpc', async () => {
     const t = await setup();
     expect(await t.run('card', 'show')).toBe(0);

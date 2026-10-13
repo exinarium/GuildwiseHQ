@@ -31,6 +31,8 @@ export interface RunnerPaths {
   mockState: string;
   /** Persisted `shift.start` messages of running shifts, so a restarted runner can resume them. */
   activeShifts: string;
+  /** Toolchains the DevOps engineer registered for the agents (`aom toolchain add`), mode 0600. */
+  toolchains: string;
   agentDir(agentId: string): string;
   /**
    * Default worktree location. Project keys are only unique per organization, so the project id (first 8 hex
@@ -58,6 +60,7 @@ export function runnerPaths(root: string): RunnerPaths {
     status: join(root, 'status.json'),
     mockState: join(root, 'mock-state'),
     activeShifts: join(root, 'active-shifts'),
+    toolchains: join(root, 'toolchains.json'),
     agentDir: (agentId) => join(root, 'agents', agentId),
     worktreePath: (projectKey, cardRef, projectId) =>
       join(root, 'worktrees', projectId ? `${projectKey}-${projectId.slice(0, 8)}` : projectKey, cardRef),
