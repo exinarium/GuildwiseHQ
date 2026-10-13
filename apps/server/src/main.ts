@@ -7,6 +7,7 @@ import { runDataMigrations } from './data-migrations/index.ts';
 import { migrate } from './db/migrate.ts';
 import { createPool } from './db/pool.ts';
 import { PgEventStore } from './eventstore/pg-event-store.ts';
+import { rebaseAgentsToCurrentRoles } from './hr/follow-role.ts';
 import { buildProjectors } from './projections/index.ts';
 
 const config = loadConfig();
@@ -44,6 +45,9 @@ if (config.dataMigrations) {
 const app = await createApp(config, { background: true });
 const reg = await registerBuiltins(app.ctx);
 if (reg.workflows || reg.roles) app.log.info(reg, 'registered built-in catalogue');
+// Hired agents follow their role's current version (permissions = role + the agent's own deviations).
+const rebased = await rebaseAgentsToCurrentRoles(app.ctx);
+if (rebased) app.log.info({ rebased }, 'agents rebased onto their current role version');
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {

@@ -87,6 +87,14 @@ export const agentProjectors: Record<string, Projector> = {
     }
     if (sets.length) await exec(tx, `UPDATE agents SET ${sets.join(', ')} WHERE id=$1`, params);
   },
+  AgentPermissionsRebased: async (tx, e) => {
+    const p = (e.event as EventOf<'AgentPermissionsRebased'>).payload;
+    await exec(tx, 'UPDATE agents SET role_version=$2, permissions=$3 WHERE id=$1', [
+      p.agentId,
+      p.toRoleVersion,
+      JSON.stringify(p.permissions),
+    ]);
+  },
   AgentRetired: async (tx, e) => {
     const p = (e.event as EventOf<'AgentRetired'>).payload;
     await exec(tx, `UPDATE agents SET status='retired', retired_at=$2 WHERE id=$1`, [p.agentId, e.createdAt]);

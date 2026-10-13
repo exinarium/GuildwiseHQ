@@ -73,6 +73,22 @@ export const agentEvents = [
     'AgentFocusSet',
     z.object({ agentId: Id, projectIds: z.array(Id).max(MAX_FOCUS_PROJECTS), by: Id }),
   ),
+  /**
+   * The agent's role moved to a new version and the agent follows it: its permissions are re-derived as the new
+   * version's permissions plus the agent's own deviations (kept from `previous`). Written by the server at boot and when
+   * an organization role version is approved, so projections rebuild to the same permissions.
+   */
+  defineEvent(
+    'AgentPermissionsRebased',
+    z.object({
+      agentId: Id,
+      roleKey: z.string().min(1),
+      fromRoleVersion: z.number().int().min(1),
+      toRoleVersion: z.number().int().min(1),
+      previous: AgentPermissionsSchema,
+      permissions: AgentPermissionsSchema,
+    }),
+  ),
   defineEvent('AgentRetired', z.object({ agentId: Id, by: Id, releasedCardIds: z.array(Id) })),
   defineEvent('AgentReset', z.object({ agentId: Id })),
   /** "Re-roll face": a new seed (and optionally another style) for the agent's generated face. */

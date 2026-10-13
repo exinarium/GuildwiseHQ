@@ -112,7 +112,7 @@ describe('the architect role', () => {
     ])
       expect(ba?.instructions).toContain(s);
     const builder = getBuiltinRole('builder');
-    expect(builder?.version).toBe(3);
+    expect(builder?.version).toBe(4);
     expect(builder?.instructions).toMatch(/design report/i);
   });
 });

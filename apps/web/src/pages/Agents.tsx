@@ -4,6 +4,7 @@ import {
   type McpServerCandidateDto,
   NAME_THEMES,
   type ProjectDto,
+  type RoleDefinition,
 } from '@aom/shared';
 import { Dices, Users } from 'lucide-react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
@@ -25,6 +26,7 @@ import { useDepartments } from '../api/queries/org.ts';
 import { useProjects } from '../api/queries/projects.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
 import { AgentMcpSection } from '../components/agents/AgentMcpSection.tsx';
+import { AgentRoleFollow } from '../components/agents/AgentRoleFollow.tsx';
 import {
   type Access,
   AllowedProjectsDialog,
@@ -183,6 +185,7 @@ export function Agents() {
             <AgentCard
               hr={h}
               roleName={roleName(h.agent.roleKey)}
+              role={roles.data?.find((r) => r.definition.key === h.agent.roleKey)?.definition}
               station={stationName(h.agent.workstationId)}
               projects={projects.data ?? []}
               canManage={canManage(h.agent)}
@@ -232,6 +235,7 @@ export function Agents() {
 function AgentCard({
   hr,
   roleName,
+  role,
   station,
   projects,
   canManage,
@@ -249,6 +253,7 @@ function AgentCard({
 }: {
   hr: HrAgent;
   roleName: string;
+  role: RoleDefinition | undefined;
   station: string;
   projects: ProjectDto[];
   canManage: boolean;
@@ -366,6 +371,7 @@ function AgentCard({
               </Link>
             ))}
       </p>
+      <AgentRoleFollow agent={a} role={role} />
       {!a.isDevops && <AgentStats stats={hr.stats} roleName={roleName.toLowerCase()} />}
       {isBuilder && <WorkQualityPanel quality={hr.quality} />}
       {!a.isDevops && (

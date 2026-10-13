@@ -25,7 +25,7 @@ describe('hiring', () => {
     expect(r.body).toMatchObject({
       name: 'Ada',
       roleKey: 'builder',
-      roleVersion: 3,
+      roleVersion: 4,
       seniority: 'junior',
       status: 'active',
       capacity: 1,
