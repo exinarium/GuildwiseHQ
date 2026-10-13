@@ -1,10 +1,20 @@
-import { copyFileSync, existsSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { execa } from 'execa';
 import type { z } from 'zod';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
+import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { agentTmpDir } from '../sandbox/sandbox.ts';
 import { selfCommand } from '../shims.ts';
@@ -170,8 +180,23 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     private readonly cfg: ClaudeConfig,
     private readonly paths?: RunnerPaths,
     /** Test hook: simulate the platform and PATH the sandbox check sees. */
-    private readonly host: { platform?: NodeJS.Platform; pathVar?: string } = {},
+    private readonly host: {
+      platform?: NodeJS.Platform;
+      pathVar?: string;
+      /** Test hook: the plugin MCP servers of this machine (default: read from the Claude Code home). */
+      mcpServers?: () => PluginMcpServer[];
+      /** Test hook: the user's real home (where `.claude/.credentials.json` lives; default: this user's). */
+      home?: string;
+    } = {},
   ) {}
+
+  private realHome(): string {
+    return this.host.home ?? homedir();
+  }
+
+  private pluginServers(): PluginMcpServer[] {
+    return (this.host.mcpServers ?? (() => discoverPluginMcpServers()))();
+  }
 
   private assertCanRun(): void {
     const sb = this.sandboxStatus();
@@ -201,7 +226,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       readDirs: input.readDirs ?? [],
       aomReadPaths: [this.paths?.bin ?? join(root, 'bin'), ...(script ? [dirname(script)] : [])],
       ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
-      realHome: homedir(),
+      realHome: this.realHome(),
       mode: this.cfg.sandbox,
       extraAllowedDomains: this.cfg.extraAllowedDomains,
       toolchainReadPaths: toolchainReadPaths(this.cfg.toolchainPaths ?? []),
@@ -253,8 +278,12 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       join(dir, 'settings.json'),
       `${JSON.stringify(buildShiftSettings(input.agent.permissions, this.policy(input, input.cwd), input.sandbox, input.agent.roleKey, input.agent.isDevops), null, 2)}\n`,
     );
-    await writeFile(join(dir, 'mcp.json'), `${JSON.stringify({ mcpServers: {} })}\n`);
-    this.linkCredentials(dir);
+    const used = this.writeMcpConfig(
+      dir,
+      input.agent.permissions.allowedTools,
+      input.agent.isDevops ? undefined : input.mcpServers,
+    );
+    this.linkCredentials(dir, used);
 
     const cmd = buildClaudeCommand(
       // the card repository metadata is readable (never through a rule that makes it read-only for the commit)
@@ -287,6 +316,14 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     };
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
+    // Granted plugin MCP servers this role may call (the DevOps engineer's chat keeps its own behaviour).
+    const intakeMcp = input.intake ? this.cfg.intake?.mcpConfig : undefined;
+    const used = this.writeMcpConfig(
+      dir,
+      input.agent.permissions.allowedTools,
+      devops ? undefined : input.context?.mcpServers,
+      intakeMcp && existsSync(intakeMcp) ? intakeMcp : undefined,
+    );
     await writeFile(
       join(dir, 'settings.json'),
       `${JSON.stringify(
@@ -294,7 +331,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           ? buildDevopsChatSettings(input.agent.permissions, this.policy(input, input.cwd), input.sandbox)
           : buildChatSettings(
               input.readOnly,
-              input.intake ? (this.cfg.intake?.allowedTools ?? []) : [],
+              [
+                ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
+                ...used.map((u) => `mcp__${u.name}`),
+              ],
               this.policy(chatInput, input.cwd, true),
               input.sandbox,
             ),
@@ -302,15 +342,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         2,
       )}\n`,
     );
-    // The BA's intake reads Jira with the user's own MCP server (configured on this workstation); other chats have none.
-    const intakeMcp = input.intake ? this.cfg.intake?.mcpConfig : undefined;
-    await writeFile(
-      join(dir, 'mcp.json'),
-      intakeMcp && existsSync(intakeMcp)
-        ? readFileSync(intakeMcp, 'utf8')
-        : `${JSON.stringify({ mcpServers: {} })}\n`,
-    );
-    this.linkCredentials(dir);
+    this.linkCredentials(dir, used);
     const cmd = buildClaudeChatCommand(chatInput, this.cfg);
     const parser = new ClaudeStreamParser();
     return spawnSession({
@@ -326,14 +358,73 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     });
   }
 
-  /** No token configured: reuse the user's default login, symlinked (copied on Windows) into the agent's config dir. */
-  private linkCredentials(configDir: string): void {
+  /**
+   * The agent's mcp.json: `{ mcpServers: {} }` unless the project granted plugin servers AND the role has the
+   * `mcp:<name>` permission for them (both are required). The full server configuration comes from this workstation's
+   * plugins (it never travelled through the server) and is written readable by the runner user only. The BA's intake
+   * chat keeps its configured Jira MCP file; granted servers are added to it.
+   */
+  writeMcpConfig(
+    dir: string,
+    allowedTools: readonly string[],
+    granted: readonly string[] | undefined,
+    base?: string,
+  ): PluginMcpServer[] {
+    let doc: { mcpServers: Record<string, unknown> } = { mcpServers: {} };
+    if (base) {
+      try {
+        const parsed = JSON.parse(readFileSync(base, 'utf8')) as { mcpServers?: Record<string, unknown> };
+        doc = { ...parsed, mcpServers: { ...(parsed.mcpServers ?? {}) } };
+      } catch {
+        // an unreadable intake file: the chat then has no MCP server, as before
+      }
+    }
+    const want =
+      granted && granted.length > 0 ? mcpConfigFor(this.pluginServers(), granted, allowedTools) : null;
+    if (want) Object.assign(doc.mcpServers, want.mcpServers);
+    const path = join(dir, 'mcp.json');
+    writeFileSync(path, `${JSON.stringify(doc)}\n`, { mode: 0o600 });
+    try {
+      chmodSync(path, 0o600);
+    } catch {
+      // not supported on every platform
+    }
+    return want?.used ?? [];
+  }
+
+  /**
+   * Credentials of the agent's config dir.
+   * - No token configured (the user's own login is reused): the credentials file is linked as before (symlink, copy on
+   *   Windows). It already holds the plugin servers' OAuth tokens (`mcpOAuth`), and Claude Code writes refreshed
+   *   tokens back through the link, so a rotated refresh token is not lost.
+   * - A token (`oauth` / `api_key`) is configured: the file is not linked. When servers are in use, a private copy with
+   *   only the `mcpOAuth` entries of those servers is written (the model login is the token, so nothing else is
+   *   needed); without servers there is no file.
+   */
+  linkCredentials(configDir: string, servers: PluginMcpServer[] = []): void {
     const configured =
       (this.cfg.authMode === 'oauth' && this.cfg.oauthToken) ||
       (this.cfg.authMode === 'api_key' && this.cfg.apiKey);
-    if (configured) return;
-    const src = join(homedir(), '.claude', '.credentials.json');
+    const src = join(this.realHome(), '.claude', '.credentials.json');
     const dest = join(configDir, '.credentials.json');
+    if (configured) {
+      rmSync(dest, { force: true });
+      if (servers.length === 0 || !existsSync(src)) return;
+      try {
+        const all = JSON.parse(readFileSync(src, 'utf8')) as { mcpOAuth?: Record<string, unknown> };
+        const keys = servers.map((s) => s.key);
+        const mcpOAuth = Object.fromEntries(
+          Object.entries(all.mcpOAuth ?? {}).filter(([k]) =>
+            keys.some((key) => k === key || k.startsWith(`${key}|`)),
+          ),
+        );
+        if (Object.keys(mcpOAuth).length > 0)
+          writeFileSync(dest, `${JSON.stringify({ mcpOAuth })}\n`, { mode: 0o600 });
+      } catch {
+        // unreadable credentials: the servers start unauthenticated and fail, which the agent reports
+      }
+      return;
+    }
     if (!existsSync(src)) return;
     rmSync(dest, { force: true });
     try {

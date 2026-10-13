@@ -67,6 +67,18 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
       },
     ],
   },
+  'mcp.servers': {
+    ...env('mcp.servers'),
+    servers: [
+      {
+        name: 'plugin_atlassian_atlassian',
+        plugin: 'atlassian',
+        server: 'atlassian',
+        transport: 'http',
+        host: 'mcp.atlassian.com',
+      },
+    ],
+  },
   'org.folders': {
     ...env('org.folders'),
     folders: [

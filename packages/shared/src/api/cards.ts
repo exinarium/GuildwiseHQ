@@ -14,6 +14,7 @@ import { WorkabilitySchema } from './board.ts';
 import { IsoTime } from './common.ts';
 import { SpendBriefSchema } from './costs.ts';
 import { PublicationDtoSchema } from './research.ts';
+import { CardMcpUsageSchema } from '../mcp/index.ts';
 import { ShiftDtoSchema } from './shifts.ts';
 import { CardTestingSchema } from './testing.ts';
 
@@ -202,6 +203,8 @@ export const CardDetailResponseSchema = z.object({
   threadId: z.uuid().nullable(),
   thread: z.array(ThreadMessageDtoSchema),
   currentShift: ShiftDtoSchema.nullable(),
+  /** MCP servers and tools the card's agents used, per shift (only shifts that used any; oldest first). */
+  mcpUsage: z.array(CardMcpUsageSchema).optional(),
   /** Allowed manager actions for the requesting user (for hiding buttons). */
   permissions: z.object({
     canEdit: z.boolean(),

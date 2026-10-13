@@ -46,6 +46,7 @@ import { removeWorktree } from './git/worktrees.ts';
 import { IntegrationPoller } from './integrations/poll.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
+import { discoverPluginMcpServers, type PluginMcpServer, reportOf } from './mcp/plugins.ts';
 import { changeOrgFolder, orgFolderCandidates, orgFolderStates } from './org-folder.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
 import { forbiddenReadPath } from './read-repos.ts';
@@ -101,6 +102,13 @@ export interface RunnerOptions {
    * reaches a real forge from them.
    */
   gitReport?: boolean;
+  /**
+   * Report the MCP servers of the installed, enabled Claude Code plugins (`mcp.servers`). Default on, off with the mock
+   * runtime and under tests so the report never reads the machine's real Claude Code home.
+   */
+  mcpReport?: boolean;
+  /** Test hook: the plugin MCP servers of this machine (default: read from the Claude Code home). */
+  mcpDiscover?: () => PluginMcpServer[];
   /** Test hook: platform for the toolchain table (default: this machine). */
   platform?: Platform;
   /** The process-wide self-update status, sent to the server after each welcome (see `update/updater.ts`). */
@@ -141,6 +149,8 @@ export class Runner {
   private catalog: ScannedRepo[] = [];
   /** The runtimes last reported (hello or runtimes.report), to send a new report only on change. */
   private lastRuntimes: string | undefined;
+  /** The plugin MCP servers last reported, to send a new report only on change. */
+  private lastMcp: string | undefined;
   private maxConcurrent: number;
   private readonly rpcs = new Map<string, (r: IpcRpcResponse) => void>();
   private readonly sweepQueries = new Map<string, (live: string[]) => void>();
@@ -277,6 +287,7 @@ export class Runner {
     this.client.on('welcome', (w) => {
       void this.reportGit(true);
       void this.reportOrgFolders();
+      this.reportMcpServers(true);
       this.reportUpdate();
       opts.onConnected?.();
       this.maxConcurrent = Math.min(w.limits.maxConcurrentShifts, opts.config.maxConcurrentShifts);
@@ -466,6 +477,24 @@ export class Runner {
     this.lastRuntimes = key;
     await this.reportGit(false);
     await this.reportOrgFolders();
+    this.reportMcpServers(false);
+  }
+
+  /**
+   * Tells the server which MCP servers the installed, enabled Claude Code plugins of this machine offer (name, plugin,
+   * transport, host name; never an environment value, header, token or argument). On `welcome` and when it changed.
+   */
+  private reportMcpServers(force: boolean): void {
+    if (!(this.opts.mcpReport ?? !(this.opts.config.runtimes.mock?.enabled || process.env.VITEST))) return;
+    try {
+      const report = reportOf((this.opts.mcpDiscover ?? (() => discoverPluginMcpServers()))());
+      const key = JSON.stringify(report);
+      if (!force && key === this.lastMcp) return;
+      this.lastMcp = key;
+      this.client.send('mcp.servers', { servers: report });
+    } catch (err) {
+      this.log.warn(`plugin MCP server discovery failed: ${String(err)}`);
+    }
   }
 
   /** Tells the server which git providers this workstation is connected to (facts only, never a token). */

@@ -150,6 +150,15 @@ export const projectEvents = [
    * agents may read, read-only, in card work and in chats on the workstations that have them. `repoIds` is the whole
    * list (empty clears it). Nothing else on the workstation is ever opened.
    */
+  /**
+   * The organization's Owner chose which plugin MCP servers (Claude Code plugins on the Owner's workstations) this
+   * project's agents may use; whole list, names only (`plugin_atlassian_atlassian`). A role still needs the
+   * `mcp:<name>` permission to call the tools. The runner holds the configuration; nothing secret is in the event.
+   */
+  defineEvent(
+    'ProjectMcpServersSet',
+    z.object({ projectId: Id, servers: z.array(z.string().min(1).max(120)).max(50), by: Id }),
+  ),
   defineEvent(
     'ProjectReferenceReposSet',
     z.object({

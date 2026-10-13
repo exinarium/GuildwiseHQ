@@ -11,6 +11,7 @@ import type { z } from 'zod';
 import { orgRoleOf, orgSuspended } from '../auth/org-context.ts';
 import { pendingConversionOf } from '../commands/convert.ts';
 import { hygieneDtos } from '../commands/hygiene.ts';
+import { mcpServerCandidates } from '../commands/mcp-servers.ts';
 import type { Ctx } from '../context.ts';
 import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts } from '../costs/index.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
@@ -149,6 +150,7 @@ export async function getProjectDetail(
     throw conflict('managed_by_interest', 'this is an interest: manage it on the Interests page');
   if (p.org_status && !isOrgOperational(p.org_status) && p.org_owner !== userId)
     throw orgSuspended({ name: p.org_name ?? 'The organization', status: p.org_status });
+  const orgOwner = p.org_owner === userId;
   const repos = await rows(
     ctx.pool,
     'SELECT * FROM project_repos WHERE project_id=$1 AND removed_at IS NULL ORDER BY name',
@@ -255,6 +257,9 @@ export async function getProjectDetail(
     ),
     workstationRepoCandidates:
       p.my_role === 'owner' ? await workstationRepoCandidates(ctx.pool, userId, p.org_id) : [],
+    mcpServers: (p.mcp_servers ?? []) as string[],
+    canGrantMcpServers: orgOwner,
+    mcpServerCandidates: orgOwner ? await mcpServerCandidates(ctx.pool, userId, p.org_id) : [],
     mergePolicyHistory: history.map((h) => ({
       enabled: h.payload.mergeLargeWithoutApproval === true,
       byName: h.by_name ?? 'unknown',

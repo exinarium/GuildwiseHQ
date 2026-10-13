@@ -19,6 +19,7 @@ import {
 import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
 import { workflowView } from '../commands/cards.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
+import { grantedMcpServers } from '../commands/mcp-servers.ts';
 import { vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
@@ -276,6 +277,8 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
   // The one vault this card may read: its project vault (or the organization vault), only if this workstation's user can access it.
   const ws = await one(ctx.pool, 'SELECT user_id FROM workstations WHERE id=$1', [claim.workstationId]);
   const vault = ws ? await vaultForProject(ctx.pool, brief.project.id, ws.user_id) : null;
+  // plugin MCP servers the project's Owner granted (names only; the runner holds the configuration)
+  const mcp = await grantedMcpServers(ctx.pool, brief.project.id);
   return {
     shiftId: claim.shiftId,
     claimId: claim.claimId,
@@ -291,6 +294,7 @@ export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<Shi
     // repository of the organization for a role with `readOrgRepos` (the architect).
     readRepos: await shiftReadRepos(ctx, agent, brief.project.id, ws?.user_id, claim.worktree?.repoId),
     localReadRepos: await localReadRepos(ctx.pool, brief.project.id, claim.workstationId),
+    ...(mcp.length > 0 ? { mcpServers: mcp } : {}),
   };
 }
 

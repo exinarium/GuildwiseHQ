@@ -1,7 +1,7 @@
 ---
 title: Organization chart and design
 summary: The org chart, custom roles, custom workflows and departments.
-keywords: [org chart, organization, role, workflow, design, department, escalation]
+keywords: [org chart, organization, role, workflow, design, department, escalation, mcp, external tools]
 order: 17
 ---
 
@@ -35,7 +35,7 @@ To make a custom role:
 2. Work through the sections of the form:
    - **Basics**: **Name**, **Short name (key)** (filled in from the name; it cannot change after the first save), **Department** and **Purpose**.
    - **How it works**: the **Instructions** (like a briefing for a new colleague) and the **Rules that always apply** (core rules, one per line; you cannot override them later).
-   - **What it may do**: plain-language switches, each with a risk badge and a note: read files (always on), change files, run commands, search the web, save its work (commit), run browsers and read all organization repositories. Below them you can limit the role to some folders and list external (MCP) tools. A summary spells out what the role can and cannot do. Pushing, rebasing and switching branches are blocked for every role.
+   - **What it may do**: plain-language switches, each with a risk badge and a note: read files (always on), change files, run commands, search the web, save its work (commit), run browsers and read all organization repositories. Below them you can limit the role to some folders and pick external (MCP) tools: the MCP servers your workstations report are offered as switches (you can also type a name), and a role can only use a server that the organization Owner also granted to the project (see [Projects](/help/projects#mcp-servers)). A summary spells out what the role can and cannot do. Pushing, rebasing and switching branches are blocked for every role.
    - **Model**: the runtime, the model (cheaper and faster, or stronger and costlier) and the effort.
    - **Seniority**: which levels you can hire, and the **skills** it has. Skills other roles already use are offered as quick picks.
    - **Steps it can take**: a checklist of the steps of your custom workflows. Tick the steps (or **Any step of** a workflow). A workflow that is still a draft can be ticked too, so you can make a role and its workflow together.

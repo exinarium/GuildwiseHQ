@@ -20,6 +20,7 @@ export * from './intake/index.ts';
 export * from './interests/index.ts';
 export * from './investigation/index.ts';
 export * from './mail/index.ts';
+export * from './mcp/index.ts';
 export * from './orgs/index.ts';
 export * from './phases/index.ts';
 export * from './prompt/index.ts';

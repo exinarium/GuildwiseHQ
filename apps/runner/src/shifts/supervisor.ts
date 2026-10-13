@@ -529,6 +529,8 @@ export class ShiftSupervisor {
         env: s.env,
         addDirs: vaultCtx ? [vaultCtx.addDir] : [],
         readDirs: readFolders.map((f) => f.path),
+        // plugin MCP servers: card shifts only (the DevOps engineer, questions and BA tasks keep their behaviour)
+        ...(msg.kind === 'card' && msg.mcpServers?.length ? { mcpServers: msg.mcpServers } : {}),
         maxShiftMinutes: msg.maxShiftMinutes,
         logFile: `${paths.shiftLogs}/${msg.shiftId}.jsonl`,
       });

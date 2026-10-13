@@ -13,6 +13,7 @@ import { projectRole } from '../authz/scope.ts';
 import { ownsDevopsMachine, sharesAllowedProject } from '../commands/chats.ts';
 import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../commands/common.ts';
 import { intakeContext } from '../commands/intake.ts';
+import { grantedMcpServers } from '../commands/mcp-servers.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -182,6 +183,9 @@ export class ChatRelay {
       const localRepos = row.thread_project_id
         ? await localReadRepos(ctx.pool, row.thread_project_id, row.workstation_id)
         : [];
+      const mcpGranted = row.thread_project_id
+        ? await grantedMcpServers(ctx.pool, row.thread_project_id)
+        : [];
       const context: ChatContext = {
         orgId: row.org_id,
         ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),
@@ -189,6 +193,7 @@ export class ChatRelay {
         ...(row.thread_card_id && row.card_worktree_path ? { cardWorktreePath: row.card_worktree_path } : {}),
         ...(readRepos.length > 0 ? { readRepos } : {}),
         ...(localRepos.length > 0 ? { localReadRepos: localRepos } : {}),
+        ...(mcpGranted.length > 0 ? { mcpServers: mcpGranted } : {}),
         ...(intake ? { intake } : {}),
       };
       const sent = ctx.services.runners.send(

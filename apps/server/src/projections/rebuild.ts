@@ -108,7 +108,7 @@ export async function rebuildProjections(
     );
     await exec(
       tx,
-      'CREATE TEMP TABLE _save_ws ON COMMIT DROP AS SELECT id, connected, last_seen_at, runtimes, hostname, platform, runner_version, runner_update, org_folders, org_folder_errors, org_folder_candidates, org_folders_checked_at FROM workstations',
+      'CREATE TEMP TABLE _save_ws ON COMMIT DROP AS SELECT id, connected, last_seen_at, runtimes, hostname, platform, runner_version, runner_update, org_folders, org_folder_errors, org_folder_candidates, org_folders_checked_at, mcp_servers, mcp_servers_checked_at FROM workstations',
     );
     // Live claims keep the lease the heartbeats extended: replay alone would reset it to `claimed_at + 1h`, which
     // for a long shift is already in the past and would make the reaper release a claim that is still working.
@@ -118,7 +118,7 @@ export async function rebuildProjections(
     );
     await exec(
       tx,
-      'CREATE TEMP TABLE _save_shifts ON COMMIT DROP AS SELECT id, progress_tail, accepted_at FROM shifts',
+      'CREATE TEMP TABLE _save_shifts ON COMMIT DROP AS SELECT id, progress_tail, accepted_at, mcp_calls FROM shifts',
     );
 
     await exec(tx, `TRUNCATE ${PROJECTION_TABLES.map((t) => `"${t}"`).join(', ')} RESTART IDENTITY CASCADE`);
@@ -153,12 +153,13 @@ export async function rebuildProjections(
       `UPDATE workstations w SET connected = s.connected, last_seen_at = s.last_seen_at, runtimes = s.runtimes,
             hostname = s.hostname, platform = s.platform, runner_version = s.runner_version, runner_update = s.runner_update,
             org_folders = s.org_folders, org_folder_errors = s.org_folder_errors,
-            org_folder_candidates = s.org_folder_candidates, org_folders_checked_at = s.org_folders_checked_at
+            org_folder_candidates = s.org_folder_candidates, org_folders_checked_at = s.org_folders_checked_at,
+            mcp_servers = s.mcp_servers, mcp_servers_checked_at = s.mcp_servers_checked_at
          FROM _save_ws s WHERE w.id = s.id`,
     );
     await exec(
       tx,
-      `UPDATE shifts x SET progress_tail = s.progress_tail, accepted_at = s.accepted_at FROM _save_shifts s WHERE x.id = s.id`,
+      `UPDATE shifts x SET progress_tail = s.progress_tail, accepted_at = s.accepted_at, mcp_calls = s.mcp_calls FROM _save_shifts s WHERE x.id = s.id`,
     );
     await exec(
       tx,

@@ -43,6 +43,31 @@ choices. Leave them out of the options.
 Inbound mail has a per-organisation hourly limit (`AOM_INBOUND_RATE_PER_HOUR`). Add an optional per-sender limit so one
 noisy or looping sender cannot use up an organisation's allowance.
 
+### 20. Plugin MCP servers for sandboxed agents
+
+**Problem (owner, 2026-10-13):** the MCP servers of the owner's Claude Code setup (on this workstation they come from
+Claude Code **plugins**, for example Atlassian; user-scope `mcpServers` in `~/.claude.json` is empty) are not available
+to sandboxed agents. Every agent starts with its own `CLAUDE_CONFIG_DIR` and `HOME` and `--strict-mcp-config --mcp-config
+<configDir>/mcp.json`, which was always `{ "mcpServers": {} }` (only the BA intake chat had `intake.mcpConfig`). Roles can
+be given `mcp:<name>` permissions, but no server was ever provided.
+
+**Decided (owner, 2026-10-13):**
+- Scope: **plugin MCP servers** (installed and enabled Claude Code plugins). Not claude.ai connectors, not hand-added
+  servers; designed so those can be added later (`discoverPluginMcpServers` is the one source).
+- Granting: **per project**. Project settings, "MCP servers" lists the servers the project's agents may use, picked from
+  what that workstation's runner reports. A role **also** needs the `mcp:<server>` permission. Both are required.
+- Safety: **only the organization Owner grants** servers to a project (server-enforced). The settings screen marks servers
+  whose tools can write, send or delete (heuristic from tool names when the runner lists tools, otherwise a per-server
+  warning) and advises read-only use. The tools agents call are logged on the card (server and tool names per shift). The
+  DevOps engineer's behaviour stays unchanged.
+
+**Built:** runner discovery and `mcp.servers` report, `ProjectMcpServersSet`, `shift.start` / `chat.start` `mcpServers`
+(names only), local `mcp.json` and credentials handling, project settings panel, role builder picker, card "External tools
+used". See `docs/RUNNER.md` "Plugin MCP servers".
+
+**Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
+the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
+
 ## 2026-10-12
 
 Owner's list of 2026-10-12. Item 8 of that list (reference repositories per project) is #4 below. The affiliate
@@ -271,6 +296,7 @@ commission on that subscription for as long as it keeps running (recurring, life
 - #9: Architect role and an investigation and design step. Done 2026-10-12.
 - #13: Workflow and role builder; sub-workflows and event triggers (incl. inbound e-mail). Done 2026-10-12; incoming webhooks later.
 - #10: More than one workflow per project; custom steps in existing workflows. Done 2026-10-12.
+- #20: Plugin MCP servers for sandboxed agents. Done 2026-10-13.
 
 ## 2026-10-10
 

@@ -31,6 +31,11 @@ export interface ShiftStartInput {
    * writable; secret files inside stay unreadable (claude-policy.ts).
    */
   readDirs?: string[];
+  /**
+   * Plugin MCP servers the project's Owner granted (names). The adapter writes the ones the role may call into the
+   * agent's MCP config, with the configuration from this workstation's plugins.
+   */
+  mcpServers?: string[];
   maxShiftMinutes: number;
   /** Chat only. */
   resumeSessionId?: string;

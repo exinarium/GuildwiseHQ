@@ -10,6 +10,7 @@ import { Link, useSearchParams } from 'react-router';
 import { useAgents } from '../api/queries/agents.ts';
 import { useMe } from '../api/queries/auth.ts';
 import { useCreateChat } from '../api/queries/chats.ts';
+import { useMcpServers } from '../api/queries/mcp.ts';
 import {
   useCreateDepartment,
   useDiscardDraft,
@@ -353,6 +354,7 @@ function RoleEditPanel({
   const save = useSaveRoleDraft();
   const submit = useSubmitDraft();
   const me = useMe();
+  const mcpServers = useMcpServers();
   // Only the Owner of the organization switches on wide access; in a shared project's organization we are never it.
   const isOwner = !projectId && me.data?.activeOrg?.role === 'owner';
   const workflows = useMemo(() => claimableWorkflows(cat.workflows), [cat.workflows]);
@@ -383,6 +385,7 @@ function RoleEditPanel({
         departments={departments}
         workflows={workflows}
         knownSkills={knownSkills}
+        knownMcpServers={mcpServers.data ?? []}
         isOwner={isOwner}
         keyLocked={edit.keyLocked || !!edit.id}
         serverIssues={edit.issues}

@@ -31,6 +31,7 @@ import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
 import { FinalizePanel } from '../components/FinalizePanel.tsx';
 import { InvestigationPanel, MainSyncNote } from '../components/InvestigationPanel.tsx';
+import { McpUsagePanel } from '../components/McpUsagePanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
 import { ShiftLog } from '../components/ShiftLog.tsx';
@@ -378,6 +379,7 @@ export function CardDetailView({
               <ShiftLog key={currentShift.id} shift={currentShift} />
             </Panel>
           )}
+          <McpUsagePanel usage={data.mcpUsage ?? []} />
           {data.publication && <PublicationPanel publication={data.publication} />}
           <InvestigationPanel card={card} />
           {keys.length > 0 && (

@@ -915,6 +915,94 @@ is no config key that does: what an agent may read beyond its own work folder co
   directory, each read-only folder, and that the owner manages reference repositories in the project settings and that no
   configuration key exists for it).
 
+### Plugin MCP servers
+
+External tools (Jira, Confluence, ...) reach sandboxed agents only through MCP servers that come from **Claude Code
+plugins** installed and enabled on the workstation. Every agent runs with its own `CLAUDE_CONFIG_DIR` and `HOME` and
+`--strict-mcp-config --mcp-config <configDir>/mcp.json`, so nothing of the owner's own Claude Code setup is visible to
+it: the `mcp.json` is `{ "mcpServers": {} }` unless the three conditions below hold. (Hand-added servers and claude.ai
+connectors are not covered yet; `discoverPluginMcpServers` is the one source to extend.)
+
+**Three keys, all required.** (1) The server is installed and enabled on this workstation. (2) The organization's
+**Owner** granted it to the project (project settings, MCP servers; server-enforced: Admins and project owners are
+refused). (3) The agent's role has the permission `mcp:<name>` (role builder, "What it may do"). `mcp:*` does not exist
+(the role validator only accepts `mcp:` plus a name of letters, digits, `_`, `.` and `-`), so a role names each server.
+The DevOps engineer, question shifts and BA tasks never get plugin servers; the DevOps chat and shifts behave as before.
+
+**Discovery** (`src/mcp/plugins.ts`, the way Claude Code does it; files are read, nothing is executed):
+
+- the Claude Code home is `$CLAUDE_CONFIG_DIR` of the runner's own environment, else `~/.claude`;
+- a plugin counts when it is in `plugins/installed_plugins.json` with a **user-scope** install (project- and local-scope
+  installs belong to one repository, not to the workstation) and `enabledPlugins["<plugin>@<marketplace>"]` in
+  `settings.json` is `true` (absent or `false`: skipped, so a disabled plugin offers nothing);
+- servers are read from `<installPath>/.claude-plugin/plugin.json` (or `plugin.json`) `mcpServers` (an inline object, a
+  path inside the plugin, or a list of those) and the `.mcp.json` at the plugin root (`{ "mcpServers": {...} }` or the
+  bare map; a server in `plugin.json` wins over the same name in `.mcp.json`). A path that leaves the plugin is ignored.
+  The agent-plugins `mcp.json` (no dot) is not read: Claude Code does not read it either;
+- `${CLAUDE_PLUGIN_ROOT}` (and `$CLAUDE_PLUGIN_ROOT`) is expanded to the install path. Other `${VAR}` references are
+  **left as they are**: the agent's environment is an allow-list, so a server that needs a variable of the owner's shell
+  does not start. Resolving them would copy that variable into a file the agent can read, so it is deliberately not done;
+- the type is `http` (also `streamable-http`), `sse`, or `stdio` (a `command`).
+
+**The name.** Claude Code calls a plugin server `plugin:<plugin>:<server>` and its tools `mcp__plugin_<plugin>_<server>__<tool>`.
+Guildwise uses the tool-prefix form, `plugin_atlassian_atlassian`, as the server's name everywhere: the project grant, the
+role permission `mcp:plugin_atlassian_atlassian` (which becomes the allow rule `mcp__plugin_atlassian_atlassian`) and the
+tool log. In the agent's `mcp.json` the entry is keyed `plugin:atlassian:atlassian`, so the tool names match, and Claude
+Code finds the OAuth token it stored for that name.
+
+**What the runner reports** (`mcp.servers`, after `welcome` and after a re-scan that changed it; off with the mock runtime
+and under tests, `Runner` option `mcpReport`): per server `name`, `plugin`, `server`, `transport` and, for a remote server,
+the **host name** only. Never the command, arguments, environment, headers, URL path or query, or any token. `tools` (tool
+names) is in the schema for the settings screen's write warnings, but the runner does not start servers to ask for them, so
+today it is empty and the screen shows the general warning per server. The server keeps the last report per workstation
+(`workstations.mcp_servers`, kept over a projection rebuild) and drops invalid entries.
+
+**The grant.** Event `ProjectMcpServersSet { projectId, servers: string[], by }` (whole list, names only; projection
+`projects.mcp_servers`). Each name must be reported by one of the Owner's own active workstations that serve the
+organization, or already be granted. `PUT /api/projects/:id/mcp-servers { servers }` (org Owner only, 403 otherwise);
+`GET /api/mcp-servers` lists the caller's candidates for the role builder. `shift.start` (card shifts only) and the
+`chat.start` context carry `mcpServers` (names). On another member's workstation that lacks the plugin the name is simply
+not found and nothing is written.
+
+**At the start of a card shift or chat** (`ClaudeCodeAdapter.writeMcpConfig`): the server entries that are granted, found
+locally and allowed by the role's `mcp:<name>` permissions are written, with their **full local configuration**
+(command, args, env, headers, as the plugin declares them), into `<configDir>/mcp.json` with mode 0600. That configuration
+never travelled through the server. A chat also gets `mcp__<name>` allow rules in its settings (chats ignore the role's
+other tool permissions); a card shift gets them from the role's `mcp:` entries as before. The BA intake chat keeps its
+`runtimes.claude-code.intake.mcpConfig` file and the granted servers are added to it.
+
+**How the servers authenticate inside the agent's `CLAUDE_CONFIG_DIR`.** Claude Code keeps the OAuth tokens of remote
+servers in `~/.claude/.credentials.json` under `mcpOAuth`, keyed `<server key>|<hash of the connection>` (for example
+`plugin:atlassian:atlassian|60c89fc9e49f37c7`), next to the model login (`claudeAiOauth`). Stdio servers get their
+`env` from their config entry.
+
+- With the default login (`authMode: default`) the file is already linked into the agent's config dir (a symlink; a copy
+  on Windows), so the entry is found as long as the server key and connection are unchanged. The link is kept, not
+  narrowed: the file holds the model login whose refresh token Claude Code rotates, and a copy would lose the rotated
+  token and sign the owner out. Refreshed MCP tokens are written back through the link as well. (This is the same
+  exposure agents already had; the file stays unreadable to the agent's shell by the `~/.claude` read deny.)
+- With a configured token (`authMode: oauth` or `api_key`) nothing was linked before and nothing broader is linked now:
+  when servers are in use the runner writes a private copy (mode 0600) containing **only** the `mcpOAuth` entries whose key
+  is, or starts with `<server key>|`, for the servers in use. No model login, no other server's token. Without servers there
+  is no credentials file (a stale one is removed). Limitation: a refreshed token is not written back to `~/.claude`; if the
+  server rotates refresh tokens the owner may have to sign in to that plugin again (`/mcp` in Claude Code).
+- If the stored token does not match (Claude changed how the key is derived, or the owner has not signed in to the plugin),
+  the server starts unauthenticated and its tools fail; the agent reports that in its shift. Sign in to the plugin once
+  in Claude Code on the workstation.
+
+**The sandbox.** The checks are unchanged: `~/.claude` and `~/.claude.json` stay in `HOME_SECRETS` (Read denied for the
+built-in tools and `denyRead` for the shell), the agent's `HOME` is its own directory, and the config dir is write-denied.
+Claude Code starts **stdio MCP servers itself, outside the Bash tool's OS sandbox** (the sandbox wraps the shell tool
+only; this is why the "Security" section says MCP servers run with the runner user's rights). So a stdio server can read
+and write what the runner user can, whatever the role's permissions, and sees the agent's `HOME`, not the owner's. That is
+why granting is the Owner's alone and why the screen asks for read-only use. Remote servers are reached by Claude Code
+itself with the stored token. (Test on the real workstation: a granted stdio server starts, a remote one authenticates, and
+`Read(~/.claude/**)` is still refused.)
+
+**The card's log.** The tool calls an agent makes already appear in the shift's progress as `mcp__<server>__<tool>: <input>`.
+The server tallies them per shift (`shifts.mcp_calls`, `[{ server, tool, count }]`, kept over a rebuild) and the card shows
+**External tools used** per shift (`mcpUsage` in the card detail).
+
 ### The architect: organization source folder, git and the main merge
 
 The architect (built-in role `architect`, claims every `investigate*` stage) is the only role with `permissions.readOrgRepos`
