@@ -129,6 +129,11 @@ export const projectEvents = [
       pushed: z.boolean(),
     }),
   ),
+  /** The runner fetched origin for a shift and saw these branches (agent branches left out): the repository's branch list. */
+  defineEvent(
+    'ProjectRepoBranchesObserved',
+    z.object({ projectId: Id, repoId: Id, branches: z.array(z.string().min(1)).max(200) }),
+  ),
   /** The owner chose (or cleared, `accessMethod: null`) how git reaches the repository: SSH key or API token / CLI login. */
   defineEvent(
     'ProjectRepoAccessSet',

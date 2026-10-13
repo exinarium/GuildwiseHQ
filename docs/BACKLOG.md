@@ -70,6 +70,22 @@ used". See `docs/RUNNER.md` "Plugin MCP servers".
 **Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
 the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
 
+### 25. Working branch from the wrong base; concurrent worktree lock
+
+**Done (2026-10-13).** Production evidence: on Flow-Web (Bitbucket, a live `main` and a 14 month old `master`) with no main
+branch set, `pieter/dev` was cut from `master` because the runner trusted the clone's `origin/HEAD`, set at clone time.
+And P4-4's shift start failed with "could not lock config file .git/config" when two shifts added worktrees to one clone at
+once. Fixed in the runner: with no main branch set it asks the host (`git ls-remote --symref origin HEAD`, with the repo's
+git auth) and repairs `origin/HEAD`; when the host cannot be asked and the clone has more than one of
+main/master/develop/trunk it refuses (shift start, `repo.open_pr`, merge-main) with "Set the main branch for <repo> in
+Project settings". Every change to a clone (worktree add/remove, branch create, fetch, sync-main, merge completion) runs
+under one per-clone lock (re-entrant), and git retries a few times on "could not lock" / `index.lock`. Server and web: the
+"Created working branch" card note says the main branch was unset, plus a desk notice (`main_branch_unset`); project
+settings warn "Main branch not set"; the add form pre-fills the main branch from the picker's default branch.
+`project_repos.known_branches` no longer goes stale: a created working branch is added to it, `shift.started` carries
+origin's branch list (`ProjectRepoBranchesObserved`, `known_branches_at`), and the "working branch does not exist yet" hint
+now says "not seen yet" and shows only for a dated list.
+
 ### 24. Agent toolchain registry (DevOps registers tools for agents)
 
 **Done (owner, 2026-10-13: "we cannot code for every possible path").** Some projects need .NET 10, others .NET 8, and the

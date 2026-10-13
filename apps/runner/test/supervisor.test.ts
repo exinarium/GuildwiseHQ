@@ -260,7 +260,9 @@ describe('supervisor', () => {
     msg.worktree.baseBranch = 'trunk';
     h!.server.send('shift.start', msg);
     const started = await h!.server.waitFor('shift.started', (m) => m.shiftId === msg.shiftId);
-    expect(started.branchCreated).toEqual({ base: 'trunk', from: 'main', pushed: true });
+    expect(started.branchCreated).toEqual({ base: 'trunk', from: 'main', pushed: true, mainBranchSet: false });
+    // origin's branch list rides on shift.started so the server's list is not stale
+    expect(started.originBranches).toEqual(expect.arrayContaining(['main', 'trunk']));
     expect(started.worktree).toMatchObject({ baseBranch: 'trunk', created: true });
     expect(h!.server.invalid).toEqual([]);
   });
@@ -268,9 +270,10 @@ describe('supervisor', () => {
   it('rejects with the branches it has when the base branch cannot be created', async () => {
     await start(async () => {});
     sh(h!.repo.clone, 'git', ['remote', 'set-head', 'origin', '--delete']);
-    sh(h!.repo.clone, 'git', ['branch', '-m', 'main', 'trunk']);
-    sh(h!.repo.clone, 'git', ['branch', 'develop']);
+    sh(h!.repo.clone, 'git', ['branch', '-m', 'main', 'stable']);
+    sh(h!.repo.clone, 'git', ['branch', 'staging']);
     sh(h!.repo.clone, 'git', ['branch', '-dr', 'origin/main']);
+    sh(h!.repo.clone, 'git', ['remote', 'set-url', 'origin', '/nonexistent/gone.git']); // the host cannot be asked
     const msg = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized, ref: 'TOY-9' }) as any;
     msg.worktree.baseBranch = 'release';
     h!.server.send('shift.start', msg);

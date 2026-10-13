@@ -57,6 +57,8 @@ export const ProjectRepoDtoSchema = z.object({
   forgeOverride: ForgeKindSchema.nullable().optional(),
   /** Branches of the clone, as the last hygiene run saw them (the options of the working-branch question). */
   knownBranches: z.array(z.string()).optional(),
+  /** When that list was last refreshed (absent: unknown, so it proves nothing about a branch missing). */
+  knownBranchesAt: IsoTime.nullable().optional(),
   workingBranchSetAt: IsoTime.nullable().optional(),
   /** The open desk question that asks for this repository's working branch. */
   branchQuestionId: z.uuid().nullable().optional(),

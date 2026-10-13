@@ -529,6 +529,19 @@ export async function applyShiftStarted(ctx: Ctx, tx: Tx, ws: WsRef, msg: Runner
   const created = msg.branchCreated;
   await ctx.store.append(
     [
+      ...(card?.repo_id && msg.originBranches
+        ? [
+            {
+              streamId: streamId.project(card.project_id),
+              event: {
+                type: 'ProjectRepoBranchesObserved' as const,
+                payload: { projectId: card.project_id, repoId: card.repo_id, branches: msg.originBranches },
+              },
+              actor: runnerActor(ws.id),
+              scope: projectScope(card.org_id, card.project_id),
+            },
+          ]
+        : []),
       ...(card && msg.syncMain ? await mainSyncEvents(tx, ws, card, msg.syncMain) : []),
       ...(card && created
         ? [
@@ -536,7 +549,7 @@ export async function applyShiftStarted(ctx: Ctx, tx: Tx, ws: WsRef, msg: Runner
               card,
               { kind: 'system' },
               'system',
-              `Created working branch ${created.base} from ${created.from}${created.pushed ? ' and pushed it to origin' : ''}: it did not exist in the repository.`,
+              `Created working branch ${created.base} from ${created.from}${created.pushed ? ' and pushed it to origin' : ''}: it did not exist in the repository.${created.mainBranchSet === false ? ` The main branch is not set for this repository, so the runner used the host's default (${created.from}).` : ''}`,
               { branchCreated: created },
             ),
             ...(card.repo_id
@@ -558,6 +571,7 @@ export async function applyShiftStarted(ctx: Ctx, tx: Tx, ws: WsRef, msg: Runner
                   },
                 ]
               : []),
+            ...(created.mainBranchSet === false ? [mainBranchUnsetNotice(card, created.from)] : []),
           ]
         : []),
       {
@@ -661,6 +675,33 @@ async function mainSyncEvents(
     });
   }
   return events;
+}
+
+/** A working branch was created from the host's default because the project has no main branch set: tell the owner. */
+function mainBranchUnsetNotice(card: Row, from: string): AppendInput {
+  const deskItemId = randomUUID();
+  return {
+    streamId: streamId.desk(deskItemId),
+    event: {
+      type: 'DeskItemCreated',
+      payload: {
+        deskItemId,
+        kind: 'alert',
+        subkind: DESK_SUBKIND.mainBranchUnset,
+        title: `${card.ref}: working branch created without a main branch set`,
+        body: `The working branch was created from ${from}, the host's default, because no main branch is set for the repository. If ${from} is not your main branch, set it in Project settings.`,
+        options: [],
+        blocking: false,
+        pinned: false,
+        cardId: card.id,
+        projectId: card.project_id,
+        affectedCardIds: [],
+        askedBy: { kind: 'system' },
+      },
+    },
+    actor: SYSTEM_ACTOR,
+    scope: projectScope(card.org_id, card.project_id),
+  };
 }
 
 export async function applyShiftRejected(

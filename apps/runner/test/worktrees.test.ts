@@ -116,7 +116,7 @@ describe('worktrees', () => {
       spec: spec({ baseBranch: 'nope' }),
       defaultPath: join(tmp(), 'wt'),
     });
-    expect(r.createdBranch).toEqual({ base: 'nope', from: 'main', pushed: true });
+    expect(r.createdBranch).toEqual({ base: 'nope', from: 'main', pushed: true, mainBranchSet: false });
   });
 
   it('works for a repo without an origin (base = local branch)', async () => {
@@ -196,7 +196,7 @@ describe('a working branch the clone does not have', () => {
     const clone = masterOnly();
     const r = await ensure(clone, 'main');
     expect(r.created).toBe(true);
-    expect(r.createdBranch).toEqual({ base: 'main', from: 'master', pushed: true });
+    expect(r.createdBranch).toEqual({ base: 'main', from: 'master', pushed: true, mainBranchSet: false });
     const origin = sh(clone, 'git', ['remote', 'get-url', 'origin']);
     expect(sh(origin, 'git', ['rev-parse', 'refs/heads/main'])).toBe(
       sh(origin, 'git', ['rev-parse', 'refs/heads/master']),
@@ -219,17 +219,18 @@ describe('a working branch the clone does not have', () => {
   it('asks (BaseBranchMissingError) when no default branch can be told', async () => {
     const clone = masterOnly();
     sh(clone, 'git', ['remote', 'set-head', 'origin', '--delete']);
-    sh(clone, 'git', ['branch', '-m', 'master', 'trunk']);
-    sh(clone, 'git', ['push', 'origin', 'trunk']);
-    sh(clone, 'git', ['branch', 'develop']);
-    sh(clone, 'git', ['push', 'origin', 'develop']);
+    sh(clone, 'git', ['branch', '-m', 'master', 'stable']);
+    sh(clone, 'git', ['push', 'origin', 'stable']);
+    sh(clone, 'git', ['branch', 'staging']);
+    sh(clone, 'git', ['push', 'origin', 'staging']);
     sh(clone, 'git', ['branch', '-dr', 'origin/master']);
+    sh(clone, 'git', ['remote', 'set-url', 'origin', join(tmp(), 'gone.git')]); // the host cannot be asked
     const err = await ensure(clone, 'main');
     expect(err).toBeInstanceOf(BaseBranchMissingError);
     expect(err).toBeInstanceOf(WorktreeError);
     expect(err.message).toBe("working branch 'main' does not exist in this repo");
     expect(err).toMatchObject({ base: 'main', defaultBranch: null });
-    expect(err.branches).toEqual(['develop', 'trunk']);
+    expect(err.branches).toEqual(['stable', 'staging']);
     expect(sh(clone, 'git', ['branch', '--list', 'main'])).toBe('');
   });
 
@@ -247,7 +248,7 @@ describe('a working branch the clone does not have', () => {
       spec: spec({ baseBranch: 'develop', mainBranch: 'release', branchName: 'aom/bc-9-x' }),
       defaultPath: join(tmp(), 'wt', 'BC-9'),
     });
-    expect(r.createdBranch).toEqual({ base: 'develop', from: 'release', pushed: true });
+    expect(r.createdBranch).toEqual({ base: 'develop', from: 'release', pushed: true, mainBranchSet: true });
     const origin = sh(clone, 'git', ['remote', 'get-url', 'origin']);
     expect(sh(origin, 'git', ['rev-parse', 'refs/heads/develop'])).toBe(
       sh(origin, 'git', ['rev-parse', 'refs/heads/release']),
