@@ -355,6 +355,23 @@ export async function vaultAudience(
  * the project vault if the project has one, else the organization vault (only on the workstations of the
  * organization's Owner and Admins). Knowledge never crosses organizations (docs/ARCHITECTURE.md 16.1).
  */
+/**
+ * Does the project have a knowledge vault of its own, or the organization one? (The same lookup as `vaultForProject`,
+ * without the check of one workstation's user.)
+ */
+export async function projectHasVault(db: Queryable, projectId: string): Promise<boolean> {
+  return !!(await one(
+    db,
+    `SELECT 1 FROM projects p WHERE p.id=$1 AND EXISTS (
+       SELECT 1 FROM vaults v WHERE v.project_id = p.id
+          OR (v.org_id = p.org_id AND v.kind = 'org' AND v.project_id IS NULL))`,
+    [projectId],
+  ));
+}
+
+export const NO_VAULT_MESSAGE =
+  'this project has no knowledge vault, so reports cannot go to the vault; register a vault first or use the repository';
+
 export async function vaultForProject(
   db: Queryable,
   projectId: string,

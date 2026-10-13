@@ -134,6 +134,8 @@ export const ProjectDtoSchema = z.object({
   defaultCompletion: z.enum(['merge', 'pr']).optional(),
   subCategories: z.array(z.string()),
   vaultFolder: z.string().nullable(),
+  /** The project has a knowledge vault (its own or the organization's); a vault report location needs one. */
+  hasVault: z.boolean().optional(),
   architecturalGlobs: z.array(z.string()),
   e2eGlobs: z.array(z.string()),
   status: z.enum(['active', 'archived']),

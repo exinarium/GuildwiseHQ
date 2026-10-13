@@ -44,6 +44,7 @@ export function ArchitectPanel({
     mergeMainFirst !== (project.mergeMainFirst ?? true) ||
     location !== (project.investigationLocation ?? 'repo') ||
     path.trim() !== (project.investigationPath ?? 'docs/investigations');
+  const noVault = project.hasVault === false;
   const hasArchitect = (agents.data ?? []).some((a) => a.roleKey === 'architect' && a.status === 'active');
 
   return (
@@ -108,7 +109,9 @@ export function ArchitectPanel({
             onChange={(e) => setLocation(e.target.value as 'repo' | 'vault')}
           >
             <option value="repo">The repository (merged with the card)</option>
-            <option value="vault">The knowledge vault</option>
+            <option value="vault" disabled={noVault}>
+              The knowledge vault{noVault ? ' (this project has no vault)' : ''}
+            </option>
           </Select>
           <TextInput
             label={location === 'repo' ? 'Folder in the repository' : 'Folder in the project vault'}
@@ -117,7 +120,11 @@ export function ArchitectPanel({
             error={pathError}
             data-testid="investigation-path"
             onChange={(e) => setPath(e.target.value)}
-            hint="A report is named <card ref>-<title>.md. A card can name its own report path."
+            hint={
+              noVault
+                ? 'This project has no knowledge vault, so reports go in the repository until a vault is registered. A report is named <card ref>-<title>.md.'
+                : 'A report is named <card ref>-<title>.md. A card can name its own report path.'
+            }
           />
         </div>
       </div>

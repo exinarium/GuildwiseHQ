@@ -321,6 +321,15 @@ describe('the architect shift', () => {
 
   it('the report path in the brief follows the card, then the project, then the default', async () => {
     await team();
+    // a vault: card path needs a vault
+    if ((await q(`SELECT 1 FROM vaults WHERE kind='org'`)).length === 0)
+      await ok(
+        w.t.req('POST', '/api/vaults', {
+          cookie: cookie(),
+          body: { kind: 'org', remoteUrl: 'git@example.test:srv/work.git' },
+        }),
+        201,
+      );
     await ok(setArchitect({ investigationPath: 'design/notes', investigationLocation: 'repo' }));
     const a = await w.card({ title: 'Project path', designNeeded: true });
     const b = await w.card({

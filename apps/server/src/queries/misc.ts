@@ -31,6 +31,9 @@ export const PROJECT_DEPARTMENT_SQL = `(SELECT w.department FROM workflow_versio
 /** Display name of whoever last changed the large-merge setting. */
 const MERGE_CHANGED_BY_SQL = `(SELECT u.display_name FROM users u WHERE u.id = p.merge_large_changed_by) AS merge_large_changed_by_name`;
 
+const HAS_VAULT_SQL = `EXISTS (SELECT 1 FROM vaults v WHERE v.project_id = p.id
+  OR (v.org_id = p.org_id AND v.kind = 'org' AND v.project_id IS NULL)) AS has_vault`;
+
 /** Published research notes of the project (the Research tab shows when there are some). */
 const PUBLISHED_NOTES_SQL = `(SELECT count(*)::int FROM research_publications rp WHERE rp.project_id = p.id) AS published_notes`;
 
@@ -49,6 +52,7 @@ export function toProjectDto(p: Row, myRole: 'owner' | 'manager'): ProjectDto {
     defaultCompletion: p.default_completion ?? 'merge',
     subCategories: p.sub_categories,
     vaultFolder: p.vault_folder,
+    hasVault: p.has_vault ?? false,
     architecturalGlobs: p.architectural_globs,
     e2eGlobs: p.e2e_globs,
     status: p.status,
@@ -79,7 +83,7 @@ export async function listProjects(
   const r = (
     await rows(
       ctx.pool,
-      `SELECT p.*, pm.role AS my_role, o.name AS org_name, ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PUBLISHED_NOTES_SQL}
+      `SELECT p.*, pm.role AS my_role, o.name AS org_name, ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL}
          FROM projects p JOIN project_members pm
          ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
          LEFT JOIN organizations o ON o.id = p.org_id
@@ -140,7 +144,7 @@ export async function getProjectDetail(
   const p = await one(
     ctx.pool,
     `SELECT p.*, pm.role AS my_role, o.name AS org_name, o.status AS org_status, o.owner_user_id AS org_owner,
-            ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PUBLISHED_NOTES_SQL} FROM projects p JOIN project_members pm
+            ${PROJECT_DEPARTMENT_SQL}, ${MERGE_CHANGED_BY_SQL}, ${PUBLISHED_NOTES_SQL}, ${HAS_VAULT_SQL} FROM projects p JOIN project_members pm
        ON pm.project_id = p.id AND pm.user_id = $1 AND pm.status = 'active'
        LEFT JOIN organizations o ON o.id = p.org_id WHERE p.id = $2`,
     [userId, projectId],

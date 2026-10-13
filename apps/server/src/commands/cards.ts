@@ -36,6 +36,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { cardMessage, projectScope, userActor } from './common.ts';
 import { openLoopAlerts } from './loop-breaker.ts';
+import { NO_VAULT_MESSAGE, projectHasVault } from './vaults.ts';
 
 /**
  * The workflow that runs a card of this type in this project (docs/design/restructure.md section 8.1, and
@@ -229,6 +230,7 @@ export async function createCardIn(
   }
   const parsed = parseCardFields(def.fieldSet, { ...emptyFields(def.fieldSet), ...req.fields });
   if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
+  await assertVaultReportPath(tx, project.id, parsed.data);
 
   let repoId = req.repoId;
   // A card whose workflow works in the vault (research in a code project) never takes a repository.
@@ -467,6 +469,9 @@ export async function patchCardIn(
     }
     const parsed = parseCardFields(wf?.definition.fieldSet ?? 'code', merged);
     if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
+    // Only a path that is new on this card is checked: a card that already has one can still be edited.
+    if ((parsed.data as Record<string, unknown>).reportPath !== (card.fields as Row | null)?.reportPath)
+      await assertVaultReportPath(tx, card.project_id, parsed.data);
     changes.fields = parsed.data;
   }
   if (patch.dependencies !== undefined) {
@@ -495,6 +500,16 @@ export async function patchCardIn(
   return card.id as string;
 }
 
+/** A card report path `vault:...` needs a knowledge vault for the project (the runner refuses the report otherwise). */
+async function assertVaultReportPath(db: Queryable, projectId: string, fields: unknown): Promise<void> {
+  const p = (fields as { reportPath?: unknown } | null | undefined)?.reportPath;
+  if (typeof p === 'string' && p.trim().startsWith('vault:') && !(await projectHasVault(db, projectId)))
+    throw badRequest(
+      'no_vault',
+      `the report path '${p.trim()}' needs a knowledge vault. ${NO_VAULT_MESSAGE}`,
+    );
+}
+
 export async function specifyCard(ctx: Ctx, user: AuthSession['user'], idOrRef: string): Promise<string> {
   return withAppendTx(ctx.pool, (tx) => specifyCardIn(ctx, tx, user, idOrRef));
 }
@@ -515,6 +530,7 @@ export async function specifyCardIn(
   if (missing.length) {
     throw unprocessable('missing_fields', `missing required fields: ${missing.join(', ')}`, { missing });
   }
+  await assertVaultReportPath(tx, card.project_id, card.fields);
   await ctx.store.append(
     [
       {

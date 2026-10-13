@@ -42,7 +42,7 @@ describe('the architect role', () => {
   const architect = getBuiltinRole('architect');
   it('is a senior Opus role that reads the organization and writes documentation only', () => {
     expect(architect).toMatchObject({
-      version: 1,
+      version: 2,
       builtIn: true,
       department: 'delivery',
       seniorityLevels: ['senior'],
@@ -260,6 +260,30 @@ describe('where the report goes', () => {
       location: 'vault',
       reportPath: 'research/notes/TOY-7-which-queue-should-we-use.md',
     });
+  });
+
+  it('falls back to the repository when the project has no vault', () => {
+    expect(
+      resolveReportTarget({
+        ...base,
+        projectPath: 'design',
+        projectLocation: 'vault',
+        vaultAvailable: false,
+      }),
+    ).toEqual({
+      location: 'repo',
+      reportPath: 'design/TOY-7-which-queue-should-we-use.md',
+      folder: 'design',
+      vaultUnavailable: true,
+    });
+    expect(
+      resolveReportTarget({ ...base, cardReportPath: 'vault:research/notes', vaultAvailable: false }),
+    ).toMatchObject({
+      location: 'repo',
+      reportPath: 'docs/investigations/TOY-7-which-queue-should-we-use.md',
+      vaultUnavailable: true,
+    });
+    expect(resolveReportTarget({ ...base, vaultAvailable: false }).vaultUnavailable).toBeUndefined();
   });
 
   it('ignores a card or project path that is not a safe relative path', () => {
