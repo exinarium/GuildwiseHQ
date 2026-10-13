@@ -2,6 +2,30 @@ import { JIRA_SKILL_MD } from '../external/index.ts';
 import type { AgentRuntimeSpec, ChatContext } from '../protocol/runner.ts';
 import { type ReadableFolder, renderReadableFolders } from './readable.ts';
 
+/** What the runner found in the vault clone for a chat: `missing` when this workstation has no clone of the vault. */
+export interface ChatVaultNotes {
+  missing?: boolean;
+  projectDoc?: string;
+  standingOrders?: Array<{ title: string; body: string }>;
+}
+
+const VAULT_NOTE_MAX = 3000;
+const clip = (t: string): string =>
+  t.length > VAULT_NOTE_MAX ? `${t.slice(0, VAULT_NOTE_MAX)}\n[...cut]` : t;
+
+/** The vault's project doc and standing orders, kept short; a missing clone is said plainly. */
+function renderChatVaultSection(v: ChatVaultNotes): string | undefined {
+  if (v.missing)
+    return [
+      '# Knowledge vault',
+      'This conversation has a knowledge vault, but it is not cloned on this workstation yet, so you cannot read it here. Say so if the manager asks about it; do not guess its contents.',
+    ].join('\n');
+  const out = ['# Knowledge vault'];
+  if (v.projectDoc) out.push('## PROJECT.md', clip(v.projectDoc));
+  for (const o of v.standingOrders ?? []) out.push(`## ${o.title}`, clip(o.body));
+  return out.length > 1 ? out.join('\n') : undefined;
+}
+
 /**
  * Instructions for a chat session (docs/ARCHITECTURE.md section 14): the manager talks to the agent directly, from any
  * browser. The agent answers in the conversation; it does not claim cards or report outcomes. Pure and deterministic.
@@ -9,7 +33,7 @@ import { type ReadableFolder, renderReadableFolders } from './readable.ts';
 export function renderChatInstructions(
   agent: Pick<AgentRuntimeSpec, 'name' | 'roleKey' | 'seniority'>,
   ctx: ChatContext,
-  opts: { jiraSkill?: string; readFolders?: ReadableFolder[] } = {},
+  opts: { jiraSkill?: string; readFolders?: ReadableFolder[]; vault?: ChatVaultNotes } = {},
 ): string {
   const out: string[] = [];
   out.push('# Who you are');
@@ -43,6 +67,9 @@ export function renderChatInstructions(
   );
   // The DevOps engineer reads anywhere (it runs as the user); everyone else only what the runner opened.
   if (agent.roleKey !== 'devops' && opts.readFolders) out.push(renderReadableFolders(opts.readFolders));
+  const vaultSection =
+    agent.roleKey !== 'devops' && opts.vault ? renderChatVaultSection(opts.vault) : undefined;
+  if (vaultSection) out.push(vaultSection);
   const intakeChat = ctx.intake && !ctx.intake.fromChat;
   if (agent.roleKey === 'devops')
     out.push(

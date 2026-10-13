@@ -379,6 +379,34 @@ export async function vaultForProject(
   };
 }
 
+/**
+ * The vault a conversation (chat, question shift, BA task) of `orgId` may read, read-only, on `workstationId`: the
+ * project's vault (or the organization vault) for a project, else the organization vault, which only the workstations
+ * of the organization's Owner and Admins get. `folder` is absent for the organization vault as a whole. A project of
+ * another organization never matches. Null: nothing to read (no vault, a non-manager workstation, an unknown project).
+ */
+export async function vaultForConversation(
+  db: Queryable,
+  scope: { orgId: string; projectId?: string | null; workstationId?: string | null },
+): Promise<{ vaultId: string; kind: 'org' | 'project'; folder?: string } | null> {
+  if (!scope.workstationId) return null;
+  const ws = await one(db, 'SELECT user_id FROM workstations WHERE id=$1', [scope.workstationId]);
+  if (!ws) return null;
+  if (scope.projectId) {
+    const p = await one(db, 'SELECT org_id FROM projects WHERE id=$1', [scope.projectId]);
+    if (!p || p.org_id !== scope.orgId) return null;
+    const v = await vaultForProject(db, scope.projectId, ws.user_id);
+    return v ? { vaultId: v.id, kind: v.kind, folder: v.folder } : null;
+  }
+  if (!isOrgManager({ orgRole: await orgRoleOf(db, ws.user_id, scope.orgId) })) return null;
+  const v = await one(
+    db,
+    `SELECT id, kind FROM vaults WHERE org_id=$1 AND kind='org' AND project_id IS NULL`,
+    [scope.orgId],
+  );
+  return v ? { vaultId: v.id, kind: v.kind } : null;
+}
+
 // ------------------------------------------------------------------------------------- vault.write
 
 /**

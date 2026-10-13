@@ -256,6 +256,19 @@ function investigationBrief(card: Row, project: Row): NonNullable<ShiftBrief['in
   };
 }
 
+/** The vault a question or BA task shift of `projectId` reads (read-only), on the agent's workstation. */
+export async function shiftVault(
+  ctx: Ctx,
+  agent: { workstation_id?: string | null },
+  projectId: string,
+): Promise<{ vaultId: string; kind: 'org' | 'project'; folder: string } | null> {
+  const ws = agent.workstation_id
+    ? await one(ctx.pool, 'SELECT user_id FROM workstations WHERE id=$1', [agent.workstation_id])
+    : undefined;
+  const v = ws ? await vaultForProject(ctx.pool, projectId, ws.user_id) : null;
+  return v ? { vaultId: v.id, kind: v.kind, folder: v.folder } : null;
+}
+
 /** The `shift.start` payload for a fresh claim. */
 export async function buildShiftStart(ctx: Ctx, claim: ClaimResult): Promise<ShiftStartPayload | null> {
   const shift = await one(ctx.pool, 'SELECT * FROM shifts WHERE id=$1', [claim.shiftId]);

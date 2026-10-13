@@ -8,6 +8,7 @@ import {
   type IpcRpcRequest,
   type IpcRpcResponse,
   JIRA_SKILL_PATH,
+  type ReadableFolder,
   renderChatInstructions,
   type ServerToRunnerOf,
   type Usage,
@@ -20,6 +21,7 @@ import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../read-repos.ts';
 import { ensureSandbox, sandboxEnv } from '../sandbox/sandbox.ts';
+import { readVaultContext } from '../vaults/context.ts';
 
 type ChatStartMsg = ServerToRunnerOf<'chat.start'>;
 
@@ -233,13 +235,33 @@ export class ChatManager {
             runnerRoot: paths.root,
           })
         : [];
-    const folders = mergeReadFolders(registered, fromFolder);
+    // The knowledge vault of this chat (read-only): its clone is a read-only folder like a reference repository (secret
+    // files blocked); no clone here: the instructions say so. The DevOps engineer reads anywhere anyway.
+    const vaultCtx =
+      !devops && msg.context.vault ? await readVaultContext(paths.vaults, msg.context.vault) : null;
+    const vaultFolder: ReadableFolder[] = vaultCtx
+      ? [
+          {
+            name: msg.context.vault?.kind === 'org' ? 'organization' : 'project',
+            path: vaultCtx.addDir,
+            kind: 'vault',
+          },
+        ]
+      : [];
+    const folders = mergeReadFolders(mergeReadFolders(registered, fromFolder), vaultFolder);
 
     await adapter.writeInstructions(
       sandbox,
       renderChatInstructions(msg.agent, msg.context, {
         jiraSkill: await this.jiraSkill(msg),
         readFolders: folders,
+        ...(!devops && msg.context.vault
+          ? {
+              vault: vaultCtx
+                ? { projectDoc: vaultCtx.projectDoc, standingOrders: vaultCtx.standingOrders }
+                : { missing: true },
+            }
+          : {}),
       }),
     );
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));

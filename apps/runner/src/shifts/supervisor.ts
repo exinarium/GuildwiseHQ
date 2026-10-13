@@ -26,6 +26,7 @@ import {
   normalizeUrl,
   outcomeDataSchema,
   type PublishRequest,
+  type ReadableFolder,
   type RepoReport,
   renderReadableFolders,
   type ServerToRunnerOf,
@@ -472,9 +473,22 @@ export class ShiftSupervisor {
     if (!s.resumed) this.deps.transport.send('shift.accepted', { shiftId: msg.shiftId });
     this.persist(s);
 
-    // A card shift reads only the vault the server named for this card; a DevOps shift reads none.
+    // A card, question or BA task shift reads only the vault the server named for it; a DevOps shift reads none.
     const vaultCtx =
-      msg.kind === 'card' && msg.vault ? await readVaultContext(paths.vaults, msg.vault) : null;
+      (msg.kind === 'card' || msg.kind === 'question' || msg.kind === 'ba_task') && msg.vault
+        ? await readVaultContext(paths.vaults, msg.vault)
+        : null;
+    // Question and BA task shifts open the vault as a read-only folder (secret files blocked, like a reference repository).
+    const vaultReadFolder: ReadableFolder[] =
+      vaultCtx && msg.kind !== 'card'
+        ? [
+            {
+              name: msg.vault?.kind === 'org' ? 'organization' : 'project',
+              path: vaultCtx.addDir,
+              kind: 'vault',
+            },
+          ]
+        : [];
     s.brief = withVaultContext(msg.brief, vaultCtx);
     const texts = shiftTexts(msg, s.brief);
     // The project's reference repositories (read-only), for a card shift only; only clones this runner found itself.
@@ -502,6 +516,8 @@ export class ShiftSupervisor {
     const readFolders = mergeReadFolders(registeredFolders, folderRepos);
     if (msg.kind === 'card')
       texts.instructions += `\n${renderReadableFolders(readFolders, { workingDir: cwd })}\n`;
+    else if (vaultReadFolder.length > 0)
+      texts.instructions += `\n${renderReadableFolders(vaultReadFolder, { workingDir: cwd })}\n`;
     if (s.syncMain && msg.kind === 'card') texts.prompt += `\n${mainSyncNote(s.syncMain)}\n`;
     await adapter.writeInstructions(sandbox, texts.instructions);
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
@@ -527,8 +543,8 @@ export class ShiftSupervisor {
         sandbox,
         agent: msg.agent as AgentRuntimeSpec,
         env: s.env,
-        addDirs: vaultCtx ? [vaultCtx.addDir] : [],
-        readDirs: readFolders.map((f) => f.path),
+        addDirs: vaultCtx && msg.kind === 'card' ? [vaultCtx.addDir] : [],
+        readDirs: [...readFolders, ...vaultReadFolder].map((f) => f.path),
         // plugin MCP servers: card shifts only (the DevOps engineer, questions and BA tasks keep their behaviour)
         ...(msg.kind === 'card' && msg.mcpServers?.length ? { mcpServers: msg.mcpServers } : {}),
         maxShiftMinutes: msg.maxShiftMinutes,

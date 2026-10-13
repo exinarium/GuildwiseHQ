@@ -70,6 +70,17 @@ used". See `docs/RUNNER.md` "Plugin MCP servers".
 **Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
 the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
 
+### 22. Agents read the vault in chats
+
+**Done (owner decision, 2026-10-13).** Agents can read the knowledge vault in chats and in question and BA task shifts,
+not only in card shifts. The server adds `vault` to `chat.start` (`context.vault`) and to question and BA task
+`shift.start` (`vaultForConversation`, `shiftVault`): the project's vault, else the organization vault on the workstations
+of the organization's Owner and Admins; a chat with no project gets the organization vault (no folder); never another
+organization's. The runner opens the clone as a read-only folder (Edit denied, sandbox `denyWrite`, the secret-file deny
+list of reference repositories), adds PROJECT.md and the standing orders to the chat instructions (clipped), and says so
+when the vault is not cloned on the workstation. "Folders you can read" lists the vault and sends writes through `aom`
+commands. See `docs/RUNNER.md` "Vault access". Runner change: needs the next runner version.
+
 ## 2026-10-12
 
 Owner's list of 2026-10-12. Item 8 of that list (reference repositories per project) is #4 below. The affiliate

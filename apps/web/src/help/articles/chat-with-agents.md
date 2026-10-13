@@ -23,7 +23,7 @@ A chat that belongs to a project is marked "visible to this project's managers":
 
 Rights are checked on every message: if you are removed from the project, you can no longer chat with its agents through an old thread.
 
-**Note**: agents may write notes and drafts in their own scratch folder during a chat. They cannot change your repositories, the vault or their own configuration from a chat.
+**Note**: agents may write notes and drafts in their own scratch folder during a chat. They cannot change your repositories, the vault or their own configuration from a chat. They can read the knowledge vault: see [Which vault an agent reads](/help/ledger-and-vaults#agents-and-vaults).
 
 ## What the agent can read {#what-it-can-read}
 

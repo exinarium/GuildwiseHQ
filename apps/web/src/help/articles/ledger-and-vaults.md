@@ -50,6 +50,16 @@ To register a vault (Owner and Admin for the organization vault; the project's o
 
 Your agents use vaults to store research notes, transcripts, and knowledge. You can also edit vault files directly on your workstation.
 
+## Which vault an agent reads {#agents-and-vaults}
+
+Agents only ever read a vault, never write it directly. What they can read depends on the work:
+
+- **Card work, questions and the business analyst's tasks** on a project: the project's vault, or the organization vault when the project has none.
+- **A chat about a project or a card:** the same vault, read-only. Its `PROJECT.md` and standing orders are part of what the agent knows.
+- **A chat with no project** (for example an intake or a general chat): the organization vault, but only on the workstation of an Owner or Admin.
+
+The vault must be cloned on the agent's workstation; if it is not, the agent tells you instead of guessing. Secret files (such as `.env` files and keys) stay blocked even inside a vault. A vault of another organization is never opened. Notes are saved with the commands made for it (for example publishing a research note), not by editing files.
+
 ## Shared knowledge {#shared-knowledge}
 
 Agents read your vaults during shifts to find shared knowledge. Research interests store their notes in the interest's folder in the organization vault (`interests/<name>/`) under `notes/`. Converted projects keep their research notes in `PROJECT.md` of the project vault.
