@@ -84,6 +84,25 @@ export async function grantedMcpServers(db: Queryable, projectId: string): Promi
 }
 
 /**
+ * For a chat that belongs to no project yet (an intake chat: the BA maps the ticket to a project during the chat, or a
+ * general chat with an agent): the servers granted to any active project of the organization that the chatting user is an
+ * active member of. The agent still needs its own `mcp:<server>` permission (checked on the runner).
+ */
+export async function orgGrantedMcpServers(db: Queryable, orgId: string, userId: string): Promise<string[]> {
+  const list = await rows<{ name: string }>(
+    db,
+    `SELECT DISTINCT s.name FROM projects p
+       CROSS JOIN LATERAL unnest(p.mcp_servers) AS s(name)
+      WHERE p.org_id = $1 AND p.status = 'active'
+        AND EXISTS (SELECT 1 FROM project_members pm
+                     WHERE pm.project_id = p.id AND pm.user_id = $2 AND pm.status = 'active')
+      ORDER BY s.name`,
+    [orgId, userId],
+  );
+  return list.map((r) => r.name);
+}
+
+/**
  * The organization's Owner (not an Admin, not the project owner as such) chooses which plugin MCP servers the project's
  * agents may use. The whole list is replaced. Each name must be one the Owner's own workstations report, or one the
  * project already has.

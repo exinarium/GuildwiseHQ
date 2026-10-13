@@ -13,7 +13,7 @@ import { projectRole } from '../authz/scope.ts';
 import { ownsDevopsMachine, sharesAllowedProject } from '../commands/chats.ts';
 import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../commands/common.ts';
 import { intakeContext } from '../commands/intake.ts';
-import { grantedMcpServers } from '../commands/mcp-servers.ts';
+import { grantedMcpServers, orgGrantedMcpServers } from '../commands/mcp-servers.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -183,9 +183,11 @@ export class ChatRelay {
       const localRepos = row.thread_project_id
         ? await localReadRepos(ctx.pool, row.thread_project_id, row.workstation_id)
         : [];
+      // A chat with no project yet (an intake chat maps the ticket to a project during the chat) gets the servers granted
+      // to the organization's projects this user belongs to; the agent's own mcp:<server> permission still applies.
       const mcpGranted = row.thread_project_id
         ? await grantedMcpServers(ctx.pool, row.thread_project_id)
-        : [];
+        : await orgGrantedMcpServers(ctx.pool, row.org_id, userId);
       const context: ChatContext = {
         orgId: row.org_id,
         ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),

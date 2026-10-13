@@ -205,4 +205,21 @@ describe('plugin MCP servers: what the runner is told', () => {
     b.close();
     r.close();
   });
+
+  it('a chat with no project (intake) carries what the user’s projects were granted', async () => {
+    await ok(put(w.owner.cookie, [ATLASSIAN.name]));
+    const r = await w.connectRunner();
+    const agent = await w.hire('Intake BA', 'builder', 'junior');
+    const b = await Browser.open(w.baseUrl, w.owner.cookie);
+    await b.hello();
+    const chat = (
+      await ok<any>(w.t.req('POST', '/api/chats', { cookie: w.owner.cookie, body: { agentId: agent.id } }), 201)
+    ).chat;
+    b.send({ type: 'chat.send', threadId: chat.threadId, body: 'read the ticket', clientMsgId: 'i1' });
+    const start = await r.waitFor('chat.start', (f) => f.message === 'read the ticket');
+    expect(start.context.projectId).toBeUndefined();
+    expect(start.context.mcpServers).toEqual([ATLASSIAN.name]);
+    b.close();
+    r.close();
+  });
 });
