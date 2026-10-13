@@ -93,6 +93,9 @@ describe('guard', () => {
     const { repo, path, guard } = await setup('builder');
     sh(path, 'git', ['checkout', '-b', 'rogue']);
     expect((await guard()).map((v) => v.rule)).toContain('wrong_branch');
+    writeFileSync(join(path, 'r.txt'), 'r');
+    sh(path, 'git', ['add', '-A']);
+    sh(path, 'git', ['commit', '-m', 'rogue work']);
     sh(path, 'git', ['checkout', 'aom/toy-1-x']);
     expect((await guard()).map((v) => v.rule)).toEqual(['commits_on_other_branch']); // the new branch itself
     sh(path, 'git', ['branch', '-D', 'rogue']);
@@ -102,6 +105,32 @@ describe('guard', () => {
     sh(repo.clone, 'git', ['add', '-A']);
     sh(repo.clone, 'git', ['commit', '-m', 'on main']);
     expect((await guard()).map((v) => v.rule)).toContain('commits_on_other_branch');
+  });
+});
+
+describe('guard: runner housekeeping in the shared .git is not the agent', () => {
+  it('a saved-work branch and a pull of the working branch during the shift pass; a real commit on another branch is still flagged', async () => {
+    const { repo, guard } = await setup('builder');
+    // repository hygiene in the owner's checkout: saved-work branch ...
+    writeFileSync(join(repo.clone, 'wip.txt'), 'w');
+    sh(repo.clone, 'git', ['checkout', '-b', 'guildwise/saved-work/2026-10-13']);
+    sh(repo.clone, 'git', ['add', '-A']);
+    sh(repo.clone, 'git', ['commit', '-m', 'chore: saved work (Guildwise HQ hygiene)']);
+    sh(repo.clone, 'git', ['checkout', 'main']);
+    // ... and a fast-forward of main from origin
+    const other = join(tmp(), 'other');
+    sh(repo.root, 'git', ['clone', repo.origin, other]);
+    writeFileSync(join(other, 'theirs.txt'), 't');
+    sh(other, 'git', ['add', '-A']);
+    sh(other, 'git', ['commit', '-m', 'remote work']);
+    sh(other, 'git', ['push', 'origin', 'main']);
+    sh(repo.clone, 'git', ['pull', '--ff-only', 'origin', 'main']);
+    expect(await guard()).toEqual([]);
+    // the agent really commits on main
+    writeFileSync(join(repo.clone, 'm.txt'), 'm');
+    sh(repo.clone, 'git', ['add', '-A']);
+    sh(repo.clone, 'git', ['commit', '-m', 'agent work on main']);
+    expect((await guard()).map((v) => v.rule)).toEqual(['commits_on_other_branch']);
   });
 });
 

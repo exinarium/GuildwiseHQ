@@ -70,6 +70,23 @@ used". See `docs/RUNNER.md` "Plugin MCP servers".
 **Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
 the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
 
+### 26. Hygiene must not undo a rewritten working branch
+
+**Done (2026-10-13).** Production evidence: the owner's coordinator repaired Flow-Web's `pieter/dev` with a force-push
+(13 stale `master` commits removed). The owner's checkout still had the old commit, so repository hygiene saw local and
+`origin/pieter/dev` diverged, filed a DevOps conflict request, and DevOps merged the remote into the old branch and
+pushed it: the removed commits were back. Fixed: hygiene detects a **rewritten remote** (an earlier value of
+`origin/<branch>`, from the remote-tracking reflog, that the branch no longer contains and that the local branch is
+at, behind or on top of) and realigns the local branch to the remote (`git reset --keep` when checked out, uncommitted
+changes kept; `git branch -f` otherwise). Local commits that were never on the remote go to
+`guildwise/saved-work/<date>` and a desk notice lists them. Nothing is merged and nothing is pushed to the working
+branch; the DevOps conflict request no longer pushes the working branch and says a remote rewrite is not a conflict.
+Same release, the post-shift guard: it no longer rejects an agent with `commits_on_other_branch` for housekeeping in the
+shared `.git` (`guildwise/saved-work/*`, `conflict/*`, `aom-integration/*`, and branches whose new commits are all on
+a remote-tracking ref or were already on the branch at shift start, i.e. a pull or fast-forward); commits that are on no
+remote ref still count. And hygiene defers a repository while a card shift has a worktree in it (`aom hygiene run` asks
+the runner; the next run tidies it).
+
 ### 25. Working branch from the wrong base; concurrent worktree lock
 
 **Done (2026-10-13).** Production evidence: on Flow-Web (Bitbucket, a live `main` and a 14 month old `master`) with no main

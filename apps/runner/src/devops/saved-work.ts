@@ -6,6 +6,38 @@ import { git } from '../git/git.ts';
 
 type Saved = NonNullable<HygieneRepoResult['savedWork']>;
 
+/**
+ * Local commits that were never on the remote are kept on a `guildwise/saved-work/<date>` branch (pointing at `tip`)
+ * before the working branch is realigned to a rewritten remote. Only that branch is pushed, never the working branch.
+ */
+export async function saveCommitsBranch(
+  cwd: string,
+  tip: string,
+  opts: { remote: boolean; now?: Date; log?: (cmd: string) => void },
+): Promise<{ branch: string; pushed: boolean; error?: string }> {
+  const now = opts.now ?? new Date();
+  let branch = savedWorkBranch(now);
+  for (
+    let n = 2;
+    (await git(cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])).exitCode === 0;
+    n++
+  )
+    branch = savedWorkBranch(now, `-${n}`);
+  opts.log?.(`git -C ${cwd} branch ${branch} ${tip.slice(0, 7)}`);
+  const made = await git(cwd, ['branch', '--', branch, tip]);
+  if (made.exitCode !== 0) return { branch: '', pushed: false, error: 'could not create the saved-work branch' };
+  if (!opts.remote) return { branch, pushed: false };
+  opts.log?.(`git -C ${cwd} push -u origin ${branch}`);
+  const push = await git(cwd, ['push', '-u', 'origin', '--', branch]);
+  return push.exitCode === 0
+    ? { branch, pushed: true }
+    : {
+        branch,
+        pushed: false,
+        error: `saved on ${branch} here, but pushing it failed: ${(push.stderr || push.stdout).trim().split('\n')[0]}`,
+      };
+}
+
 /** Paths with changes (modified, deleted, untracked) from `git status --porcelain -z`; renames name both paths. */
 export async function dirtyPaths(cwd: string): Promise<string[]> {
   const r = await git(cwd, ['status', '--porcelain', '-z', '--untracked-files=all']);

@@ -1308,6 +1308,17 @@ repositories: local path, remote and working branch (the active phase's, else th
   reaches the working branch. Files that look like secrets (`.env*`, `*.pem`, `*.key`, `id_rsa`, names containing
   key, secret, token, password or credential, unless they are source or notes) are skipped and named in a desk notice
   (`saved_work`) that tells you where your work is;
+- **a repository with a running card shift** (a worktree of the clone belongs to a running shift) is skipped and
+  reported as "deferred": hygiene moves refs in the `.git` the shift shares, so it waits for the next run. The
+  post-shift guard additionally ignores housekeeping refs (`guildwise/saved-work/*`, `conflict/*`, `aom-integration/*`)
+  and branches whose new commits are all on a remote-tracking ref or were there at shift start (a pull); a commit on
+  another branch that is on no remote ref is still `commits_on_other_branch`;
+- **a working branch the remote rewrote** (force-push; an earlier value of `origin/<branch>`, read from its reflog,
+  was dropped and the local branch is at, behind or on top of it): the local branch follows the remote, it is never
+  merged and never pushed. Checked out: `git reset --keep origin/<branch>` (your uncommitted edits stay; if they are in
+  the way the realignment waits). Not checked out: `git branch -f`. Local commits that were never on the remote are first
+  kept on `guildwise/saved-work/<date>` (pushed) and listed in a desk notice. A rewrite is not a conflict: no conflict
+  branch, no DevOps request, and DevOps conflict resolution never pushes the working branch;
 - **on the working branch**: pulls (fast-forward; with unsaved edits in the way it waits instead of rebasing over them;
   a clean tree falls back to a rebase that is aborted on conflict), and pushes what is unpushed;
 - **on another branch**: leaves the working tree alone, moves the working branch forward from `origin` and pushes it

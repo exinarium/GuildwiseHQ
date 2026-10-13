@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
@@ -371,6 +371,131 @@ describe('aom hygiene run', () => {
     const t = await cli(undefined);
     expect(await t.run('hygiene', 'run')).toBe(1);
     expect(t.reports).toHaveLength(0);
+  });
+});
+
+/** Local commit, pushed: the old remote tip. */
+function pushedCommit(repo: TestRepo, file: string, text: string) {
+  write(repo, file, text);
+  sh(repo.clone, 'git', ['add', '-A']);
+  sh(repo.clone, 'git', ['commit', '-m', `local ${file}`]);
+  sh(repo.clone, 'git', ['push', 'origin', 'main']);
+}
+
+/** Somebody force-pushes main: the last `drop` commits are removed and one new commit is added. */
+function forceRewrite(repo: TestRepo, drop: number, file = 'fixed.txt') {
+  const other = join(tmp(), 'rewriter');
+  sh(repo.root, 'git', ['clone', repo.origin, other]);
+  sh(other, 'git', ['checkout', 'main']);
+  sh(other, 'git', ['reset', '--hard', `HEAD~${drop}`]);
+  writeFileSync(join(other, file), 'repaired');
+  sh(other, 'git', ['add', '-A']);
+  sh(other, 'git', ['commit', '-m', `repair ${file}`]);
+  sh(other, 'git', ['push', '--force', 'origin', 'main']);
+}
+
+describe('repository hygiene: a rewritten (force-pushed) working branch is followed, never merged back', () => {
+  it('checked out with an uncommitted change: realigned with reset --keep, change preserved, nothing pushed, no conflict', async () => {
+    const repo = makeRepo();
+    pushedCommit(repo, 'stale1.txt', 'a');
+    pushedCommit(repo, 'stale2.txt', 'b');
+    forceRewrite(repo, 2);
+    const rewritten = originHead(repo);
+    write(repo, 'README.md', '# my edit\n');
+
+    const { result, commands } = await hygieneRepo(spec(repo));
+
+    expect(result.problem).toBeNull();
+    expect(result.rewritten?.realigned).toBe(true);
+    expect(result.rewritten?.commits).toEqual([]);
+    expect(sh(repo.clone, 'git', ['rev-parse', 'HEAD'])).toBe(rewritten);
+    expect(sh(repo.clone, 'git', ['branch', '--show-current'])).toBe('main');
+    expect(existsSync(join(repo.clone, 'stale1.txt'))).toBe(false);
+    expect(readFileSync(join(repo.clone, 'README.md'), 'utf8')).toBe('# my edit\n');
+    expect(originHead(repo)).toBe(rewritten);
+    expect(result.pushed).toBe(false);
+    expect(commands.join('\n')).not.toMatch(/push (-u )?origin main/);
+    expect(sh(repo.clone, 'git', ['branch', '--list', 'conflict/*'])).toBe('');
+  });
+
+  it('not checked out: the branch is moved to the new remote, nothing pushed', async () => {
+    const repo = makeRepo();
+    pushedCommit(repo, 'stale1.txt', 'a');
+    forceRewrite(repo, 1);
+    const rewritten = originHead(repo);
+    sh(repo.clone, 'git', ['checkout', '-b', 'feature/x']);
+
+    const { result } = await hygieneRepo(spec(repo));
+
+    expect(result.problem).toBeNull();
+    expect(result.rewritten?.realigned).toBe(true);
+    expect(sh(repo.clone, 'git', ['rev-parse', 'main'])).toBe(rewritten);
+    expect(originHead(repo)).toBe(rewritten);
+    expect(result.pushed).toBe(false);
+  });
+
+  it('local commits that were never on the remote go to a saved-work branch, the branch is realigned, nothing pushed to it', async () => {
+    const repo = makeRepo();
+    pushedCommit(repo, 'stale1.txt', 'a');
+    write(repo, 'mine.txt', 'new work');
+    sh(repo.clone, 'git', ['add', '-A']);
+    sh(repo.clone, 'git', ['commit', '-m', 'my unpushed work']);
+    const localTip = sh(repo.clone, 'git', ['rev-parse', 'HEAD']);
+    forceRewrite(repo, 1);
+    const rewritten = originHead(repo);
+
+    const { result } = await hygieneRepo(spec(repo));
+
+    expect(result.problem).toBeNull();
+    expect(result.rewritten?.commits).toHaveLength(1);
+    expect(result.rewritten?.commits[0]).toContain('my unpushed work');
+    const kept = result.rewritten?.savedBranch ?? '';
+    expect(kept).toMatch(/^guildwise\/saved-work\//);
+    expect(sh(repo.clone, 'git', ['rev-parse', kept])).toBe(localTip);
+    expect(sh(repo.clone, 'git', ['rev-parse', 'main'])).toBe(rewritten);
+    expect(originHead(repo)).toBe(rewritten);
+    expect(sh(repo.origin, 'git', ['rev-parse', kept])).toBe(localTip);
+  });
+
+  it('normal divergence (both sides have new work) is still a conflict, and nothing is pushed', async () => {
+    const repo = makeRepo();
+    sh(repo.clone, 'git', ['checkout', '-b', 'feature/x']);
+    sh(repo.clone, 'git', ['checkout', 'main']);
+    write(repo, 'local.txt', 'l');
+    sh(repo.clone, 'git', ['add', '-A']);
+    sh(repo.clone, 'git', ['commit', '-m', 'local only']);
+    remoteCommit(repo, 'theirs.txt', 't');
+    const before = originHead(repo);
+    sh(repo.clone, 'git', ['checkout', 'feature/x']);
+
+    const { result, commands } = await hygieneRepo(spec(repo));
+
+    expect(result.problem?.kind).toBe('conflict');
+    expect(result.rewritten).toBeUndefined();
+    expect(originHead(repo)).toBe(before);
+    expect(commands.join('\n')).not.toMatch(/push (-u )?origin main/);
+  });
+});
+
+describe('repository hygiene: defers while a card shift runs in the repository', () => {
+  it('changes nothing (no saved-work branch, no pull) when a linked worktree has a running shift', async () => {
+    const repo = makeRepo();
+    const wt = join(tmp(), 'card-wt');
+    sh(repo.clone, 'git', ['worktree', 'add', '-b', 'aom/toy-1-x', wt]);
+    remoteCommit(repo, 'theirs.txt', 't');
+    write(repo, 'wip.txt', 'unsaved');
+    const head = sh(repo.clone, 'git', ['rev-parse', 'HEAD']);
+
+    const { result } = await hygieneRepo(spec(repo), [wt]);
+
+    expect(result.problem).toBeNull();
+    expect(result.actions.join(' ')).toContain('deferred');
+    expect(result.savedWork).toBeUndefined();
+    expect(sh(repo.clone, 'git', ['rev-parse', 'HEAD'])).toBe(head);
+    expect(sh(repo.clone, 'git', ['branch', '--list', 'guildwise/*'])).toBe('');
+
+    const later = await hygieneRepo(spec(repo), []);
+    expect(later.result.savedWork?.branch).toBeTruthy();
   });
 });
 

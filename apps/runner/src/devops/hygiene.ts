@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import {
   HYGIENE_PROBLEM_LABEL,
   type HygieneProblemKind,
@@ -10,7 +10,7 @@ import {
 } from '@aom/shared';
 import { currentBranch, git, hasRemote, revParse } from '../git/git.ts';
 import { changedFiles } from '../git/sweep.ts';
-import { saveUncommittedWork } from './saved-work.ts';
+import { saveCommitsBranch, saveUncommittedWork } from './saved-work.ts';
 
 /**
  * Repository hygiene of one workstation (docs/design/phases.md, "DevOps repository hygiene and the working branch").
@@ -20,6 +20,8 @@ import { saveUncommittedWork } from './saved-work.ts';
  *   the uncommitted changes are only reported (the server turns that into a question on the desk);
  * - uncommitted edits in the user's checkout are stored on a `guildwise/saved-work/<date>` branch and pushed (files that
  *   look like secrets are skipped); the checkout itself and the working branch are never touched by that;
+ * - a working branch the remote REWROTE (force-push dropped commits that the local branch still has) is realigned to
+ *   the remote, never merged and never pushed; local commits that were never on the remote go to a saved-work branch;
  * - on the working branch: pull (fast-forward, else rebase when the tree is clean), push what is unpushed;
  * - on any other branch: leave the working tree alone, only move the working branch ref and push it;
  * - merged branches of finished cards are deleted locally, never an unmerged one;
@@ -78,6 +80,89 @@ async function checkedOut(repo: Repo): Promise<Set<string>> {
 const isAncestor = async (repo: Repo, a: string, b: string): Promise<boolean> =>
   (await repo.git(['merge-base', '--is-ancestor', a, b])).exitCode === 0;
 
+/**
+ * Did the remote force-update `origin/<wb>`? Yes when an earlier value of the remote-tracking ref (its reflog) was
+ * dropped from the branch (not reachable from the current tip) and the local branch is that value, behind it or on top
+ * of it, while the local branch is not simply contained in the remote. `unique` are the local commits that were never
+ * on the remote (oldest first), the only work a realignment could lose.
+ */
+async function rewrittenRemote(repo: Repo, wb: string): Promise<{ unique: string[] } | null> {
+  const local = `refs/heads/${wb}`;
+  const origin = `refs/remotes/origin/${wb}`;
+  if (await isAncestor(repo, local, origin)) return null;
+  const log = await repo.git(['log', '-g', '--format=%H', '-n', '100', origin]);
+  if (log.exitCode !== 0) return null;
+  const olds = [
+    ...new Set(
+      log.stdout
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean),
+    ),
+  ];
+  let dropped = false;
+  for (const o of olds) {
+    if (await isAncestor(repo, o, origin)) continue;
+    if ((await isAncestor(repo, local, o)) || (await isAncestor(repo, o, local))) {
+      dropped = true;
+      break;
+    }
+  }
+  if (!dropped) return null;
+  const r = await repo.git(['rev-list', '--reverse', local, '--not', origin, ...olds]);
+  return { unique: r.stdout.split('\n').filter(Boolean) };
+}
+
+/**
+ * Realigns the local working branch to the rewritten remote. Local commits that were never on the remote are kept on a
+ * saved-work branch first and named in the result. Nothing is pushed to the working branch.
+ */
+async function realignRewritten(
+  repo: Repo,
+  res: HygieneRepoResult,
+  wb: string,
+  unique: string[],
+  checkedOutHere: boolean,
+  remote: boolean,
+): Promise<void> {
+  const info: NonNullable<HygieneRepoResult['rewritten']> = {
+    branch: wb,
+    realigned: false,
+    commits: [],
+    pushed: false,
+  };
+  if (unique.length) {
+    const subjects = await repo.git(['log', '--no-walk=unsorted', '--format=%h %s', ...unique.slice(0, 20)]);
+    info.commits = subjects.stdout.split('\n').filter(Boolean);
+    const tip = (await repo.git(['rev-parse', `refs/heads/${wb}`])).stdout.trim();
+    const kept = await saveCommitsBranch(repo.path, tip, { remote, log: (c) => repo.commands.push(c) });
+    if (!kept.branch) {
+      // Without a safe copy the branch stays as it is.
+      mark(res, 'error', `${wb} was rewritten on origin but its own commits could not be saved: ${kept.error}`);
+      res.rewritten = info;
+      return;
+    }
+    info.savedBranch = kept.branch;
+    info.pushed = kept.pushed;
+    if (kept.error)
+      mark(res, /authentication|permission|denied/i.test(kept.error) ? 'auth_failed' : 'error', kept.error);
+  }
+  const moved = checkedOutHere
+    ? await repo.git(['reset', '--keep', `refs/remotes/origin/${wb}`], true)
+    : await repo.git(['branch', '-f', wb, `origin/${wb}`], true);
+  if (moved.exitCode === 0) {
+    info.realigned = true;
+    res.actions.push(
+      `origin/${wb} was rewritten (commits were removed there): ${wb} now matches it${info.savedBranch ? `; ${unique.length} local commit(s) that were never on origin are kept on ${info.savedBranch}` : ''}; nothing was pushed to ${wb}`,
+    );
+  } else {
+    res.actions.push(
+      `origin/${wb} was rewritten but ${wb} not realigned yet: ${checkedOutHere ? 'your own unsaved edits are in the way' : failText(moved)}`,
+    );
+  }
+  res.rewritten = info;
+}
+
 /** The user's own uncommitted edits go to a saved-work branch (pushed), never onto the working branch. */
 async function saveWork(repo: Repo, res: HygieneRepoResult, remote: boolean): Promise<void> {
   const { saved, error } = await saveUncommittedWork(repo.path, {
@@ -104,8 +189,29 @@ const mark = (res: HygieneRepoResult, kind: HygieneProblemKind, detail: string) 
   if (!res.problem || kind === 'needs_branch') res.problem = { kind, detail };
 };
 
+/** Worktrees of the clone (other than the clone itself) that have a running shift. */
+async function busyShiftWorktrees(repo: Repo, busy: string[]): Promise<string[]> {
+  if (busy.length === 0) return [];
+  const r = await repo.git(['worktree', 'list', '--porcelain']);
+  const mine = r.stdout
+    .split(/\n\n+/)
+    .slice(1)
+    .map((b) => /^worktree (.+)$/m.exec(b)?.[1])
+    .filter((p): p is string => !!p);
+  const real = (p: string) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return p;
+    }
+  };
+  const busyReal = new Set(busy.map(real));
+  return mine.filter((p) => busyReal.has(real(p)));
+}
+
 export async function hygieneRepo(
   spec: HygieneRepoSpec,
+  busyWorktrees: string[] = [],
 ): Promise<{ result: HygieneRepoResult; commands: string[] }> {
   const res: HygieneRepoResult = {
     repoId: spec.repoId,
@@ -121,6 +227,14 @@ export async function hygieneRepo(
 
   if (!existsSync(spec.localPath) || (await repo.git(['rev-parse', '--git-dir'])).exitCode !== 0) {
     mark(res, 'missing', `no git clone at ${spec.localPath}`);
+    return done();
+  }
+  // Branches and saved-work refs live in the .git a running shift shares: do not move any while a card shift works here.
+  const running = await busyShiftWorktrees(repo, busyWorktrees);
+  if (running.length > 0) {
+    res.actions.push(
+      `deferred: ${running.length} card shift(s) are running in this repository; nothing was changed, the next run tidies it`,
+    );
     return done();
   }
   const remote = await hasRemote(spec.localPath);
@@ -163,7 +277,24 @@ export async function hygieneRepo(
     return done();
   }
 
-  if (cur === wb) {
+  // A remote that was force-updated is followed, never merged back (and the dropped commits are never pushed again).
+  let rewritten = false;
+  if (remote && fetched && hasLocal && hasRemoteRef) {
+    const rw = await rewrittenRemote(repo, wb);
+    if (rw) {
+      rewritten = true;
+      if (dirty.length > 0) await saveWork(repo, res, remote);
+      const here = cur === wb;
+      if (!here && (await checkedOut(repo)).has(wb)) {
+        res.actions.push(`origin/${wb} was rewritten, but ${wb} is checked out in another worktree: left alone`);
+        res.rewritten = { branch: wb, realigned: false, commits: [], pushed: false };
+      } else await realignRewritten(repo, res, wb, rw.unique, here, remote);
+    }
+  }
+
+  if (rewritten) {
+    // handled above: nothing to pull, push or combine
+  } else if (cur === wb) {
     if (dirty.length > 0) await saveWork(repo, res, remote);
     if (remote && fetched) {
       if (hasRemoteRef) {
@@ -275,11 +406,11 @@ export function summarizeHygiene(spec: HygieneSpec, report: HygieneReport): stri
   ].join('\n');
 }
 
-export async function runHygiene(spec: HygieneSpec): Promise<HygieneRun> {
+export async function runHygiene(spec: HygieneSpec, busyWorktrees: string[] = []): Promise<HygieneRun> {
   const repos: HygieneRepoResult[] = [];
   const commands: string[] = [];
   for (const r of spec.repos) {
-    const { result, commands: cmds } = await hygieneRepo(r);
+    const { result, commands: cmds } = await hygieneRepo(r, busyWorktrees);
     result.uncommitted = result.uncommitted.slice(0, MAX_FILES);
     repos.push(result);
     commands.push(...cmds);

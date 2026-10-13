@@ -680,6 +680,37 @@ export async function hygieneReportEvents(
       scope: projectScope(project.org_id, spec1.projectId),
     });
   }
+  // The remote rewrote the working branch: the local branch followed it. Only when local commits that were never on the
+  // remote had to be kept aside is there anything to tell the managers about.
+  for (const r of reported) {
+    const rw = r.rewritten;
+    if (!rw?.savedBranch || rw.commits.length === 0) continue;
+    const spec1 = byRepo.get(r.repoId) as HygieneRepoSpec;
+    const project = await one(tx, 'SELECT org_id FROM projects WHERE id=$1', [spec1.projectId]);
+    if (!project) continue;
+    const deskItemId = randomUUID();
+    events.push({
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemCreated',
+        payload: {
+          deskItemId,
+          kind: 'alert',
+          subkind: DESK_SUBKIND.savedWork,
+          title: `${rw.branch} in ${spec1.name} was rewritten on the remote; your commits are kept aside`,
+          body: `Someone force-updated ${rw.branch} on the remote, so repository hygiene moved the local ${rw.branch} to match it instead of merging the old commits back in (nothing was pushed to ${rw.branch}). ${rw.commits.length} local commit${rw.commits.length === 1 ? ' was' : 's were'} never on the remote and ${rw.commits.length === 1 ? 'is' : 'are'} kept on the branch ${rw.savedBranch}${rw.pushed ? ' (also uploaded)' : ''}:\n${rw.commits.map((c) => `- ${c}`).join('\n')}\n\nCherry-pick what you still want onto ${rw.branch}.`,
+          options: [],
+          blocking: false,
+          pinned: false,
+          projectId: spec1.projectId,
+          affectedCardIds: [],
+          askedBy: { kind: 'system' },
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(project.org_id, spec1.projectId),
+    });
+  }
   for (const r of reported) {
     // G-Q2: DevOps tries to combine a diverged working branch on a separate branch first; two failures go to the desk.
     // (Not for a hygiene run that was itself a conflict attempt: that one is the attempt.)

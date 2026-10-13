@@ -34,6 +34,25 @@ export async function siblingWorktreeBranches(worktree: string): Promise<Set<str
   return out;
 }
 
+/**
+ * Branches the runner itself creates and moves in the shared .git (repository hygiene's saved-work and conflict
+ * branches, integration branches): never the agent's doing. (Other cards' `aom/` branches advanced by their own shifts are
+ * covered by {@link siblingWorktreeBranches}.)
+ */
+const RUNNER_OWNED_BRANCH = /^(guildwise\/saved-work\/|conflict\/|aom-integration\/)/;
+
+/**
+ * A branch whose new tip adds no commit beyond what the remote already has (a pull or fast-forward of the owner's
+ * checkout or of hygiene) or what the branch had at the start (a reset backwards) is a sync, not agent work. Only
+ * commits that are on no remote-tracking ref and were not on the branch before count.
+ */
+async function isSyncOnly(cwd: string, tip: string, before: string | undefined): Promise<boolean> {
+  const args = ['rev-list', '--max-count=1', tip, '--not', '--remotes'];
+  if (before) args.push(before);
+  const r = await git(cwd, args);
+  return r.exitCode === 0 && r.stdout.trim() === '';
+}
+
 export interface GuardInput {
   worktree: string;
   roleKey: string;
@@ -256,9 +275,13 @@ export async function runGuard(input: GuardInput): Promise<GuardViolation[]> {
   }
   const now = await snapshotBranches(input.worktree);
   const siblings = await siblingWorktreeBranches(input.worktree);
-  const moved = Object.keys(now).filter(
-    (b) => b !== input.branchName && !siblings.has(b) && input.branchesAtStart[b] !== now[b],
-  );
+  const moved: string[] = [];
+  for (const b of Object.keys(now)) {
+    if (b === input.branchName || siblings.has(b) || input.branchesAtStart[b] === now[b]) continue;
+    if (RUNNER_OWNED_BRANCH.test(b)) continue;
+    if (await isSyncOnly(input.worktree, now[b] as string, input.branchesAtStart[b])) continue;
+    moved.push(b);
+  }
   if (moved.length > 0) {
     violations.push({
       rule: 'commits_on_other_branch',
