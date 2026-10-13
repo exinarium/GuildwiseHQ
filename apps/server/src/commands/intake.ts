@@ -298,7 +298,7 @@ export interface Responder {
 }
 
 /** The intake a BA chat belongs to (the chat's shift id -> its thread -> the intake). Null when it is none. */
-async function intakeOf(ctx: Ctx, shift: Row): Promise<Responder | null> {
+export async function intakeOf(ctx: Ctx, shift: Row): Promise<Responder | null> {
   const threadId = ctx.services.chat.threadOfChat(shift.id);
   if (!threadId) return null;
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [shift.agent_id]);

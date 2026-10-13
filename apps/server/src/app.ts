@@ -54,6 +54,7 @@ import { billingRoutes } from './routes/billing.ts';
 import { blogApiRoutes } from './routes/blog-api.ts';
 import { blogPlatformRoutes } from './routes/blog-platform.ts';
 import { blogPublicRoutes } from './routes/blog-public.ts';
+import { cardAttachmentRoutes } from './routes/card-attachments.ts';
 import { cardRoutes } from './routes/cards.ts';
 import { catalogueRoutes } from './routes/catalogue.ts';
 import { chatRoutes } from './routes/chats.ts';
@@ -304,7 +305,8 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
     reply.header('x-content-type-options', 'nosniff');
     reply.header('x-frame-options', 'DENY');
     reply.header('referrer-policy', 'no-referrer');
-    reply.header('content-security-policy', csp);
+    // An attachment sets its own, stricter policy (sandboxed: no script ever runs from an uploaded file).
+    if (!reply.hasHeader('content-security-policy')) reply.header('content-security-policy', csp);
     reply.header('cross-origin-opener-policy', 'same-origin');
     reply.header('permissions-policy', 'camera=(self), microphone=(), geolocation=(), payment=()');
     // HSTS only where the public origin is https (a plain-http dev server must not pin browsers to https).
@@ -357,6 +359,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(phaseRoutes(ctx));
   await app.register(reportingRoutes(ctx));
   await app.register(setupChecklistRoutes(ctx));
+  await app.register(cardAttachmentRoutes(ctx));
   const assistantClient =
     opts.assistantClient !== undefined
       ? opts.assistantClient

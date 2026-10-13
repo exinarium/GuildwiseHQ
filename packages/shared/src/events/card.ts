@@ -380,4 +380,22 @@ export const cardEvents = [
       data: z.record(z.string(), z.unknown()).default({}),
     }),
   ),
+  /** A file was attached to the card. Metadata only: the bytes live in `card_attachment_data`, never in the event log. */
+  defineEvent(
+    'CardAttachmentAdded',
+    z.object({
+      cardId: Id,
+      attachmentId: Id,
+      name: z.string().min(1).max(300),
+      contentType: z.string().min(1).max(200),
+      size: z.number().int().positive(),
+      sha256: z.string().regex(/^[0-9a-f]{64}$/),
+      /** Where it came from, e.g. `jira DCPL-4276`; absent: uploaded by hand. */
+      source: z.string().max(200).optional(),
+    }),
+  ),
+  defineEvent(
+    'CardAttachmentRemoved',
+    z.object({ cardId: Id, attachmentId: Id, name: z.string().min(1).max(300) }),
+  ),
 ] as const;

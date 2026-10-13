@@ -23,6 +23,7 @@ import {
   useSpecifyCard,
 } from '../api/queries/cards.ts';
 import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
+import { AttachmentsPanel } from '../components/AttachmentsPanel.tsx';
 import { BackoffBadge } from '../components/BackoffBadge.tsx';
 import { EditCardDialog, RiskTierDialog } from '../components/CardEdit.tsx';
 import { CardPhase } from '../components/CardPhase.tsx';
@@ -394,6 +395,11 @@ export function CardDetailView({
               </dl>
             </Panel>
           )}
+          <AttachmentsPanel
+            cardId={card.id}
+            attachments={data.attachments ?? []}
+            canAttach={permissions.canAttach ?? false}
+          />
           <SubworkflowsPanel data={data.subworkflows} />
           <ThreadPanel cardId={card.id} thread={thread} canComment={permissions.canComment} />
           {data.testing && (

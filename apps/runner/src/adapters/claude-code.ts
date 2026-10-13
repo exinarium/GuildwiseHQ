@@ -11,6 +11,7 @@ import {
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { CARD_ATTACHMENTS_DIR } from '@aom/shared';
 import { execa } from 'execa';
 import type { z } from 'zod';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
@@ -118,6 +119,15 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
   for (const d of [...input.addDirs, ...(input.readDirs ?? [])]) args.push('--add-dir', d);
   if (input.resumeSessionId) args.push('--resume', input.resumeSessionId);
   return { bin: cfg.bin, args, env: sessionEnv(input, cfg) };
+}
+
+/**
+ * The read-only copy of a card's attachments (`<agent tmp>/card-attachments`, filled by the runner), when it exists: the
+ * built-in file tools may read it although it lies outside the worktree.
+ */
+export function cardAttachmentDirs(sandbox: { tmp: string }): string[] {
+  const dir = join(sandbox.tmp, CARD_ATTACHMENTS_DIR);
+  return existsSync(dir) ? [dir] : [];
 }
 
 /** `claude -p <message> --resume <id> --output-format stream-json --verbose --include-partial-messages` (section 14). */
@@ -287,7 +297,16 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
     const cmd = buildClaudeCommand(
       // the card repository metadata is readable (never through a rule that makes it read-only for the commit)
-      { ...input, readDirs: [...new Set([...(input.readDirs ?? []), ...gitDirsOf(input.cwd)])] },
+      {
+        ...input,
+        readDirs: [
+          ...new Set([
+            ...(input.readDirs ?? []),
+            ...gitDirsOf(input.cwd),
+            ...cardAttachmentDirs(input.sandbox),
+          ]),
+        ],
+      },
       this.cfg,
     );
     const parser = new ClaudeStreamParser();
@@ -312,7 +331,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     // Read/Grep of `<repo>/.git/worktrees/<card>/HEAD`). The DevOps engineer reads anywhere and needs none of it.
     const chatInput = {
       ...input,
-      readDirs: devops ? [] : [...new Set([...(input.readDirs ?? []), ...gitDirsOf(input.cwd)])],
+      readDirs: devops
+        ? []
+        : [
+            ...new Set([
+              ...(input.readDirs ?? []),
+              ...gitDirsOf(input.cwd),
+              ...cardAttachmentDirs(input.sandbox),
+            ]),
+          ],
     };
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });

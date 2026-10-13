@@ -17,6 +17,7 @@ import {
   type WorktreeSpec,
 } from '@aom/shared';
 import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
+import { briefAttachments } from '../commands/card-attachments.ts';
 import { workflowView } from '../commands/cards.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { grantedMcpServers } from '../commands/mcp-servers.ts';
@@ -140,6 +141,7 @@ export async function buildBrief(ctx: Ctx, shift: Row): Promise<ShiftBrief | nul
       designNeeded: card.design_needed ?? false,
       investigationOnly: card.investigation_only ?? false,
       dependencies: deps.map((d) => ({ ref: d.ref, title: d.title, status: d.status })),
+      attachments: await briefAttachments(ctx.pool, card.id),
       parent: parent ? { ref: parent.ref, title: parent.title } : undefined,
       ...(mailLink
         ? {
@@ -357,6 +359,7 @@ export async function devopsCardBrief(
     fields,
     project: project ? { key: project.key, name: project.name } : undefined,
     repo: repo?.name,
+    attachments: await briefAttachments(ctx.pool, card.id),
     comments: comments.reverse().map((m) => ({
       authorName: m.user_name ?? m.agent_name ?? 'system',
       kind: m.kind,

@@ -16,6 +16,8 @@ import { sandboxDoctorLines, sandboxState } from './adapters/claude-policy.ts';
 import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
 import { toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { requestRotatedToken } from './connection/rotate.ts';
+import { JiraAdapter } from './external/jira.ts';
+import { JiraCredentialStore, jiraFile, normalizeJiraBaseUrl } from './external/jira-store.ts';
 import {
   connectSteps,
   describeConnection,
@@ -571,6 +573,95 @@ async function promptLine(question: string): Promise<string> {
   }
 }
 
+interface JiraConnectOpts {
+  dataDir?: string;
+  pairing?: string;
+  baseUrl?: string;
+  email?: string;
+  status?: boolean;
+  disconnect?: boolean;
+}
+
+/**
+ * `aom-runner jira-connect`: saves this workstation's Jira credentials for downloading ticket attachments and posting
+ * approved updates. Asks for the base URL, your e-mail and an API token (hidden; or piped on stdin), checks them against
+ * Jira and stores them in `secrets/jira.json` (mode 0600), never in config.json. The token is never shown to an agent
+ * and never sent to the server (it only learns "connected / not connected / refused").
+ */
+async function jiraConnect(opts: JiraConnectOpts): Promise<void> {
+  const { root, entries } = selectPairings(opts);
+  const targets = entries.map((e) => {
+    const paths = runnerPaths(entryDir(root, e));
+    return {
+      paths,
+      store: new JiraCredentialStore(jiraFile(paths.secrets)),
+      config: loadConfig(entryConfigPath(root, e)),
+    };
+  });
+  const first = targets[0] as (typeof targets)[number];
+  const done = () => {
+    for (const t of targets) touchRecheck(t.paths.secrets);
+    console.log('A running runner reports the new status to the server within a minute.');
+  };
+  const current = first.store.load() ?? first.config.jira;
+  if (opts.disconnect) {
+    for (const t of targets) t.store.remove();
+    console.log(
+      'Saved Jira credentials removed. (A "jira" block in config.json, if you still have one, is not touched.)',
+    );
+    return done();
+  }
+  if (opts.status) {
+    if (!current) {
+      console.log('Jira: not connected. Run `aom-runner jira-connect`.');
+      process.exitCode = 1;
+      return;
+    }
+    const s = await new JiraAdapter({ config: current }).checkStatus();
+    console.log(
+      s.state === 'connected'
+        ? `Jira: connected to ${s.baseUrl}${s.account ? ` as ${s.account}` : ''}.`
+        : `Jira: ${s.state === 'refused' ? 'refused' : 'not connected'}${s.detail ? ` (${s.detail})` : ''}.`,
+    );
+    process.exitCode = s.state === 'connected' ? 0 : 1;
+    return;
+  }
+  console.log(
+    'Connecting this workstation to Jira. Nothing leaves this machine except the calls to your Jira site.\n' +
+      'Jira Cloud: create an API token at https://id.atlassian.com/manage-profile/security/api-tokens and use your Atlassian e-mail.\n' +
+      'Jira Data Center: leave the e-mail empty and use a personal access token.\n',
+  );
+  const askedUrl =
+    opts.baseUrl ??
+    (await promptLine(
+      `Jira base URL${current ? ` [${current.baseUrl}]` : ' (https://yourcompany.atlassian.net)'}: `,
+    ));
+  const baseUrl = normalizeJiraBaseUrl(askedUrl || current?.baseUrl || '');
+  if (!baseUrl) throw new Error('a Jira base URL such as https://yourcompany.atlassian.net is required');
+  const askedMail =
+    opts.email ??
+    (await promptLine(
+      `E-mail address${current?.email ? ` [${current.email}]` : ' (empty for a Data Center token)'}: `,
+    ));
+  const mail = (askedMail || (opts.email === undefined ? current?.email : '') || '').trim();
+  const token = await promptSecret('API token (hidden): ');
+  if (!token) throw new Error('an API token is required');
+  const cfg = { baseUrl, ...(mail ? { email: mail } : {}), apiToken: token };
+  const status = await new JiraAdapter({ config: cfg }).checkStatus();
+  if (status.state !== 'connected') {
+    console.error(
+      `Jira did not accept these credentials: ${status.detail ?? status.state}. Nothing was saved.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  for (const t of targets) t.store.save(cfg);
+  console.log(
+    `Connected to ${baseUrl}${status.account ? ` as ${status.account}` : ''}. Saved on this machine only (mode 0600).`,
+  );
+  done();
+}
+
 interface GitConnectOpts {
   dataDir?: string;
   pairing?: string;
@@ -881,6 +972,18 @@ export function buildProgram(): Command {
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(gitConnect);
+  program
+    .command('jira-connect')
+    .description(
+      "set up this workstation's Jira login (to download ticket attachments for agents and post approved updates); the API token stays on this machine",
+    )
+    .option('--base-url <url>', 'your Jira site, e.g. https://yourcompany.atlassian.net')
+    .option('--email <address>', 'your Atlassian e-mail address (empty for a Data Center token)')
+    .option('--status', 'only show whether it is connected')
+    .option('--disconnect', 'remove the saved credentials')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(jiraConnect);
   const repos = program.command('repos').description('manage the folders scanned for git repositories');
   repos
     .command('add <path>')

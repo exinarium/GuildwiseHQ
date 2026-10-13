@@ -154,6 +154,12 @@ function renderIntakeSection(intake: NonNullable<ChatContext['intake']>, jiraSki
   out.push(
     [
       '- `aom source read --ref <owner/repo#n>`: read a GitHub issue (read-only, through `gh` on this workstation). Jira is read with the Jira skill below.',
+      ...(intake.externalSystem === 'jira' || !intake.externalSystem
+        ? [
+            '- `aom source attachments <KEY>` / `aom source attachment <KEY> [<filename|id> | --all]`: the Jira tool lists attachments but cannot show them, and your shell has no network. The runner downloads them with its own Jira login into your scratch directory (20 MB per file) and prints the paths; open screenshots and SVG with the Read tool. Only the ticket of this intake.',
+          ]
+        : []),
+      '- `aom card attach <path> [--card <REF>]`: attach a downloaded file (from your scratch directory) to a card you drafted, so the builder and tester can look at it.',
       '- `aom intake map --project <KEY>`: the ticket belongs to this project.',
       '- `aom intake unmapped --note "<why>"`: no project fits; the manager is asked on the desk and you are told the answer.',
       "- `aom card create --json '<draft json>'`: draft a card (project, title, cardType, completionAction, docsNeeded, priority, repo, dependencies, externalRef, fields). Prints the new ref and what is still missing. `--file <path>` and `--file -` (stdin) also work: you do not need to write a file first.",

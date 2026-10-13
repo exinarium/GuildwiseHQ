@@ -7,6 +7,7 @@ import { usePairingCode, useUnlinkWorkstation, useWorkstations } from '../api/qu
 import { BRAND } from '../brand.ts';
 import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
 import { GitConnectionsPanel } from '../components/GitConnections.tsx';
+import { JiraStatusLine } from '../components/JiraStatusLine.tsx';
 import { SandboxUnavailable, SandboxWarning } from '../components/SandboxWarning.tsx';
 import {
   Badge,
@@ -274,6 +275,7 @@ export function WorkstationCard({
             )}
             {!admin && <OrgSourceFolder w={w} />}
             {!admin && <GitConnectionsPanel w={w} />}
+            {!admin && <JiraStatusLine w={w} />}
             {!admin && <DevOpsPanel w={w} />}
             <ErrorBox error={unpair.error} />
           </div>

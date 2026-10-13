@@ -17,12 +17,14 @@ import {
 } from '@aom/shared';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
+import { ServerHttp } from './attachments/index.ts';
 import { ChatManager } from './chat/chat.ts';
 import { loadConfig, type RunnerConfig, saveConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ExternalAdapters } from './external/index.ts';
+import { resolveJira } from './external/jira-store.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { AgentGit } from './forge/agent-git.ts';
 import { recheckFile } from './forge/connect.ts';
@@ -95,6 +97,8 @@ export interface RunnerOptions {
    * hold given what the others run (machine total minus the others' running shifts). Unset: no shared budget.
    */
   sharedCap?: () => number;
+  /** Test seam: the fetch the runner uses for its own HTTP calls to the server (attachment bytes). */
+  serverFetch?: typeof fetch;
   /** Test hook: runs the commands of toolchain installs, rights checks and sudo (default: real processes). */
   executor?: Executor;
   /**
@@ -161,6 +165,9 @@ export class Runner {
   readonly forgeEnv: ForgeEnv;
   private readonly agentGit: AgentGit;
   private lastGit: string | undefined;
+  private lastJira: string | undefined;
+  /** The runner's own HTTP calls to the server (attachment bytes); the token is read fresh (it can rotate). */
+  private readonly serverHttp: ServerHttp;
   private lastRecheck = 0;
   private fatalResolve?: (code: number) => void;
   /** The server said the workstation was unpaired: the runner stops cleanly. */
@@ -174,6 +181,11 @@ export class Runner {
     this.log = opts.log ?? nullLogger;
     this.paths = runnerPaths(opts.dataDir);
     this.outbox = new Outbox(this.paths.outbox);
+    this.serverHttp = new ServerHttp({
+      base: () => opts.config.serverUrl,
+      token: () => this.freshConfig().runnerToken,
+      ...(opts.serverFetch ? { fetch: opts.serverFetch } : {}),
+    });
     this.exec = opts.executor ?? realExecutor;
     this.forgeEnv = {
       exec: this.exec,
@@ -224,6 +236,7 @@ export class Runner {
       findRepo: (norm) => this.findRepo(norm),
       findLocal: (k) => this.findLocal(k),
       writeVault: (cmd) => this.vaults.write(cmd),
+      http: this.serverHttp,
       rpc: (shiftId, method, params) => this.rpc(shiftId, method, params),
       maxConcurrentShifts: () =>
         Math.min(this.maxConcurrent, this.opts.sharedCap?.() ?? Number.POSITIVE_INFINITY),
@@ -240,7 +253,7 @@ export class Runner {
       opts.external ??
       ExternalAdapters.defaults({
         ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
-        jira: opts.config.jira,
+        jira: () => this.jiraConfig(),
       });
     this.chat = new ChatManager({
       paths: this.paths,
@@ -250,6 +263,7 @@ export class Runner {
       send: (type, payload) => void this.client.send(type, payload),
       rpc: (chatId, method, params) => this.rpc(chatId, method, params),
       external: this.external,
+      http: this.serverHttp,
       findRepo: (n) => this.findRepo(n),
       findLocal: (k) => this.findLocal(k),
       git: this.agentGit,
@@ -280,7 +294,7 @@ export class Runner {
     });
     this.poller = new IntegrationPoller({
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
-      jira: opts.config.jira,
+      jira: () => this.jiraConfig(),
       ...(opts.config.runtimes.mock?.enabled ? { mockFile: join(this.paths.root, 'mock-issues.json') } : {}),
     });
     this.client.on('message', (m) => this.onMessage(m));
@@ -305,6 +319,11 @@ export class Runner {
       // Unpaired is a normal end (exit 0, so a service manager does not restart a runner that cannot work).
       this.fatalResolve?.(this.unpaired ? 0 : code === 4409 ? 3 : 2);
     });
+  }
+
+  /** Jira credentials in force: `secrets/jira.json` (written by `aom-runner jira-connect`), else config.json's `jira` block. */
+  private jiraConfig() {
+    return resolveJira(this.paths.secrets, this.freshConfig().jira);
   }
 
   /** The organization source folder of an organization (read fresh from config.json, so `org-folder set` needs no restart). */
@@ -497,9 +516,24 @@ export class Runner {
     }
   }
 
+  /** Tells the server whether Jira is connected on this workstation and whether Jira accepts the saved credentials. */
+  private async reportJira(force: boolean): Promise<void> {
+    try {
+      const status = await (this.external.jira?.checkStatus() ??
+        Promise.resolve({ state: 'not_connected' as const }));
+      const key = JSON.stringify(status);
+      if (!force && key === this.lastJira) return;
+      this.lastJira = key;
+      this.client.send('jira.report', { status });
+    } catch (err) {
+      this.log.warn(`jira status check failed: ${String(err)}`);
+    }
+  }
+
   /** Tells the server which git providers this workstation is connected to (facts only, never a token). */
   private async reportGit(force: boolean): Promise<void> {
     if (!(this.opts.gitReport ?? !(this.opts.config.runtimes.mock?.enabled || process.env.VITEST))) return;
+    void this.reportJira(force);
     try {
       const hosts: Partial<Record<'github' | 'gitlab', string[]>> = {};
       for (const r of this.repos) {

@@ -9,6 +9,23 @@ import type { Tx } from '../db/tx.ts';
 import type { Projector, StoredEvent } from '../eventstore/types.ts';
 import { getCard, leaseExpiry, mutateCard, recordTransition } from './util.ts';
 
+/** A timeline row (kind `edited`) for an attachment added or removed. */
+function attachmentActivity(tx: Tx, e: StoredEvent, cardId: string, summary: string) {
+  return exec(
+    tx,
+    `INSERT INTO card_activity (card_id, kind, summary, reason, user_id, agent_id, event_seq, at)
+     VALUES ($1,'edited',$2,NULL,$3,$4,$5,$6)`,
+    [
+      cardId,
+      summary,
+      e.actor.kind === 'user' ? e.actor.id : null,
+      e.actor.kind === 'agent' ? e.actor.id : null,
+      e.seq.toString(),
+      e.createdAt,
+    ],
+  );
+}
+
 const ev = <T extends EventType>(e: StoredEvent): EventOf<T> => e.event as EventOf<T>;
 
 const CARD_CHANGE_COLUMNS: Record<string, string> = {
@@ -180,6 +197,37 @@ export const cardProjectors: Record<string, Projector> = {
         ]);
       }
     }
+  },
+
+  CardAttachmentAdded: async (tx, e) => {
+    const p = ev<'CardAttachmentAdded'>(e).payload;
+    const card = await getCard(tx, p.cardId);
+    await exec(
+      tx,
+      `INSERT INTO card_attachments (id, card_id, org_id, name, content_type, size, sha256, source, added_by_user, added_by_agent, event_seq, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [
+        p.attachmentId,
+        p.cardId,
+        card?.org_id ?? null,
+        p.name,
+        p.contentType,
+        p.size,
+        p.sha256,
+        p.source ?? null,
+        e.actor.kind === 'user' ? e.actor.id : null,
+        e.actor.kind === 'agent' ? e.actor.id : null,
+        e.seq.toString(),
+        e.createdAt,
+      ],
+    );
+    await attachmentActivity(tx, e, p.cardId, `attached ${p.name}`);
+  },
+
+  CardAttachmentRemoved: async (tx, e) => {
+    const p = ev<'CardAttachmentRemoved'>(e).payload;
+    await exec(tx, 'DELETE FROM card_attachments WHERE id=$1', [p.attachmentId]);
+    await attachmentActivity(tx, e, p.cardId, `removed attachment ${p.name}`);
   },
 
   InvestigationReported: async (tx, e) => {

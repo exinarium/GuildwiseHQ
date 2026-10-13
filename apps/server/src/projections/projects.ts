@@ -68,8 +68,14 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
     P,
   );
   await exec(tx, `DELETE FROM card_blockers WHERE card_id IN (${cards}) OR desk_item_id IN (${desk})`, P);
+  await exec(
+    tx,
+    `DELETE FROM card_attachment_data WHERE id IN (SELECT id FROM card_attachments WHERE card_id IN (${cards}))`,
+    P,
+  );
   for (const t of [
     'card_handoffs',
+    'card_attachments',
     'card_transitions',
     'card_activity',
     'test_runs',

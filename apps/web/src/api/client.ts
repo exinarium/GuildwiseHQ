@@ -73,6 +73,45 @@ export function qs(params: Record<string, string | number | undefined | null>): 
   return s ? `?${s}` : '';
 }
 
+/**
+ * Sends a file as the raw request body (an attachment): the name travels in the query, the content type is always
+ * `application/octet-stream` (the server decides the real type from the name and the content).
+ */
+export async function upload<T>(path: string, file: File): Promise<T> {
+  const headers: Record<string, string> = {
+    accept: 'application/json',
+    'content-type': 'application/octet-stream',
+  };
+  const org = getActiveOrgId();
+  if (org) headers['x-aom-org'] = org;
+  const res = await fetch(
+    `/api${path}${path.includes('?') ? '&' : '?'}name=${encodeURIComponent(file.name)}`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: file,
+    },
+  );
+  const text = await res.text();
+  let json: unknown = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  if (!res.ok) {
+    const err = (json as { error?: { code?: string; message?: string; details?: unknown } } | null)?.error;
+    throw new ApiError(
+      res.status,
+      err?.code ?? (res.status === 413 ? 'too_large' : 'http_error'),
+      err?.message ?? (res.status === 413 ? 'The file is too large' : `HTTP ${res.status}`),
+      err?.details,
+    );
+  }
+  return json as T;
+}
+
 export function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : 'Something went wrong';
 }

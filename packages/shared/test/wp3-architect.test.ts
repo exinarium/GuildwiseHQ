@@ -102,7 +102,7 @@ describe('the architect role', () => {
 
   it('the BA v10 instructions cover the intake flags and the investigation-only finalize; the builder reads the design', () => {
     const ba = getBuiltinRole('ba');
-    expect(ba?.version).toBe(10);
+    expect(ba?.version).toBe(11);
     for (const s of [
       'designNeeded',
       'investigationOnly',

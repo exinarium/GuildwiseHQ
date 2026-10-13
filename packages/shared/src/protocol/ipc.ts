@@ -211,6 +211,12 @@ export const RpcMethodSchema = z.enum([
   'git.verify_merge',
   /** The BA's finalize shift on an investigation-only card: record the result in the ledger and PROJECT.md. */
   'investigation.record',
+  /** Attachments: Jira files downloaded by the runner (`source.*`, answered by the runner), a card's files copied next to the shift, a file the BA attaches to a card of its intake. */
+  'source.attachments',
+  'source.attachment',
+  'card.attachments',
+  'card.attach',
+  'card.attach.begin',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

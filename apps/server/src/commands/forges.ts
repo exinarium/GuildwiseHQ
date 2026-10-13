@@ -6,6 +6,7 @@ import {
   ForgeRepoListSchema,
   ForgeReposResultSchema,
   GitConnectionsSchema,
+  JiraStatusSchema,
   normalizeProjectPath,
   streamId,
 } from '@aom/shared';
@@ -29,6 +30,17 @@ export async function applyGitReport(ctx: Ctx, workstationId: string, connection
   const parsed = GitConnectionsSchema.safeParse(connections);
   if (!parsed.success) return;
   await exec(ctx.pool, 'UPDATE workstations SET git_connections=$2, git_checked_at=$3 WHERE id=$1', [
+    workstationId,
+    JSON.stringify(parsed.data),
+    ctx.clock.now(),
+  ]);
+}
+
+/** `jira.report`: whether the runner holds Jira credentials and whether Jira accepts them (facts only, never the token). */
+export async function applyJiraReport(ctx: Ctx, workstationId: string, status: unknown): Promise<void> {
+  const parsed = JiraStatusSchema.safeParse(status);
+  if (!parsed.success) return;
+  await exec(ctx.pool, 'UPDATE workstations SET jira_status=$2, jira_checked_at=$3 WHERE id=$1', [
     workstationId,
     JSON.stringify(parsed.data),
     ctx.clock.now(),
