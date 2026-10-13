@@ -2124,7 +2124,7 @@ cap('schedules, interests, intake', async () => {
   await pPage.setViewportSize({ width: 1280, height: 1200 });
   await open(pPage, '/schedules');
   await snap(pPage, 'schedules', { maxH: 1400, content: true });
-  await pPage.getByRole('button', { name: 'New schedule' }).first().click();
+  await pPage.getByRole('button', { name: 'New automation' }).first().click();
   await snap(pPage, 'schedule-wizard', { sel: pPage.getByRole('dialog') });
   await pPage.keyboard.press('Escape');
   await open(pPage, '/interests');

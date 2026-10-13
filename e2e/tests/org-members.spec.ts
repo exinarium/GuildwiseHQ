@@ -47,7 +47,7 @@ test('the Owner invites a Member, who sees the organization read-only; the Owner
   await page.reload();
   await page.getByRole('tab', { name: 'Plan & limits' }).click();
   await expect(page.getByTestId('plan-summary')).toContainText('Founding');
-  await expect(page.getByTestId('usage-agents')).toContainText('Unlimited');
+  await expect(page.getByTestId('usage-projects')).toContainText('Unlimited');
 
   // the Owner makes the Member an Admin: the Admin now sees the management tabs
   await page.getByRole('tab', { name: 'Members' }).click();

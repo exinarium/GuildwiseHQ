@@ -70,6 +70,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [7.5 The Support inbox](#75-the-support-inbox)
   - [7.6 The audit log](#76-the-audit-log)
   - [7.7 The blog, API keys and social sharing](#77-the-blog-api-keys-and-social-sharing)
+  - [7.8 Simulation organizations, demos and deleting them](#78-simulation-organizations-demos-and-deleting-them)
 - [8. Everyday workflows](#8-everyday-workflows)
   - [8.1 A feature, from intake to deploy](#81-a-feature-from-intake-to-deploy)
   - [8.2 From research to a project](#82-from-research-to-a-project)
@@ -89,6 +90,8 @@ This guide is for people who have never worked with AI agents before. You do not
 - [Appendix B. More documentation](#appendix-b-more-documentation)
 
 <!-- /toc -->
+
+
 
 ## 1. What Guildwise HQ is
 

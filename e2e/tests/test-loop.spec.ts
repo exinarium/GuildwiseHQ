@@ -269,7 +269,8 @@ test('AC finalize merge (small): the runner merges to the working branch without
   const panel = page.getByTestId('finalize-panel');
   await expect(panel).toBeVisible();
   await expect(panel.getByTestId('finalize-approval-note')).toHaveCount(0);
-  await expect(panel.getByTestId('finalize-action')).toHaveValue('merge');
+  // simple mode shows the action as a sentence (the picker is expert-mode only)
+  await expect(panel.getByTestId('finalize-plain-action')).toContainText('straight into main');
   await panel.getByTestId('finalize-button').click();
 
   await waitCard('TST-2', 'done', (c) => c?.status === 'done');

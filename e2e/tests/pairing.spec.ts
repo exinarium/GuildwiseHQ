@@ -52,7 +52,6 @@ test('AC2: pairing code, aom-runner pair + start, workstation Connected with the
   const add = page.getByRole('form', { name: 'Add repository' });
   await add.getByLabel('Repository name').fill('toy');
   await add.getByLabel('Remote URL').fill(paths.origin);
-  await add.getByLabel('Branch (optional)').fill('main');
   await add.getByRole('button', { name: /add/i }).click();
   await expect(page.getByTestId('repos')).toContainText('toy');
 

@@ -322,7 +322,7 @@ test('an e-mail digest at a set time arrives in Mailpit', async () => {
   await wiz.getByLabel('Name', { exact: true }).first().fill('Evening digest');
   await wiz.getByLabel('Digest').selectOption({ label: 'Project summary' });
   await wiz.getByLabel('Project', { exact: true }).selectOption({ label: 'SCH Scheduled work' });
-  await wiz.getByLabel('To').fill(SCHEDULER.email);
+  await wiz.getByLabel('To', { exact: true }).fill(SCHEDULER.email);
   await wiz.getByLabel('Subject').fill('Evening summary of {project}');
   await page.getByTestId('wizard-save').click();
   const row = page.getByTestId('schedule-Evening digest');
