@@ -24,7 +24,8 @@ export interface GitOptions {
 }
 
 /** git lost a race for a lock file (two operations in one clone at once); it did nothing and can simply be run again. */
-const LOCK_ERROR = /could not lock|unable to create '[^']*\.lock'|index\.lock|cannot lock ref|another git process/i;
+const LOCK_ERROR =
+  /could not lock|unable to create '[^']*\.lock'|index\.lock|cannot lock ref|another git process/i;
 
 /** Pauses (ms) between the retries of a command that hit a lock error; tests shorten them. */
 export const lockRetry = { delaysMs: [100, 250, 500, 1000, 2000] };
