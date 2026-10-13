@@ -249,9 +249,49 @@ describe('finalize', () => {
     expect((await finalize(early.id, {}, 409)).error.code).toBe('not_finalizable');
   });
 
-  it('refuses a card without a completion action', async () => {
-    const card = await cardAtFinalize({ title: 'No action' });
-    await q('UPDATE cards SET completion_action=NULL WHERE id=$1', [card.id]);
-    expect((await finalize(card.id, {}, 409)).error.code).toBe('no_completion_action');
+  const setDefault = (defaultCompletion: 'merge' | 'pr') =>
+    ok(
+      w.t.req('PATCH', `/api/projects/${w.projectId}`, {
+        cookie: w.owner.cookie,
+        body: { defaultCompletion },
+      }),
+    );
+  const shownCard = (id: string) =>
+    ok<any>(w.t.req('GET', `/api/cards/${id}`, { cookie: w.owner.cookie })).then((x) => x.card);
+
+  it('a card with no completion action of its own lands as the project says when it is finalized', async () => {
+    try {
+      const card = await cardAtFinalize({ title: 'Follows the project', completionAction: undefined });
+      expect((await cardRow(card.id)).completion_action).toBeNull();
+      // The project changed after the card was created: the card follows it.
+      await setDefault('pr');
+      expect(await shownCard(card.id)).toMatchObject({
+        completionAction: null,
+        effectiveCompletionAction: 'pr',
+        completionActionSource: 'project',
+      });
+      const from = r.received.length;
+      expect(await finalize(card.id)).toMatchObject({ action: 'pr', state: 'running' });
+      expect((await nextCommand(from)).payload).toMatchObject({ action: 'pr' });
+      // Following the project stores nothing on the card.
+      expect((await cardRow(card.id)).completion_action).toBeNull();
+    } finally {
+      await setDefault('merge');
+    }
+  });
+
+  it('an explicit completion action on the card is kept when the project default changes', async () => {
+    try {
+      const card = await cardAtFinalize({ title: 'Overridden', completionAction: 'push_branch' });
+      await setDefault('pr');
+      expect(await shownCard(card.id)).toMatchObject({
+        completionAction: 'push_branch',
+        effectiveCompletionAction: 'push_branch',
+        completionActionSource: 'card',
+      });
+      expect(await finalize(card.id)).toMatchObject({ action: 'push_branch' });
+    } finally {
+      await setDefault('merge');
+    }
   });
 });

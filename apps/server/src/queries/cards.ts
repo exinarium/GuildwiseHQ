@@ -21,6 +21,7 @@ import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
 import { enabledWorkflows } from '../catalogue/project-workflows.ts';
 import { attachmentsOf } from '../commands/card-attachments.ts';
+import { effectiveCompletion } from '../commands/completion.ts';
 import { memberRefusal } from '../commands/phases.ts';
 import type { Ctx } from '../context.ts';
 import {
@@ -100,6 +101,7 @@ export async function toCardDto(ctx: Ctx, c: Row): Promise<CardDto> {
     `SELECT dc.id, dc.ref, dc.title, dc.status FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id WHERE d.card_id=$1 ORDER BY dc.number`,
     [c.id],
   );
+  const completion = await effectiveCompletion(ctx.pool, c);
   const agent = c.claimed_by_agent_id
     ? await one(ctx.pool, 'SELECT name FROM agents WHERE id=$1', [c.claimed_by_agent_id])
     : undefined;
@@ -135,6 +137,8 @@ export async function toCardDto(ctx: Ctx, c: Row): Promise<CardDto> {
         }
       : null,
     completionAction: c.completion_action,
+    effectiveCompletionAction: completion.action,
+    completionActionSource: completion.source,
     repoId: c.repo_id,
     baseBranch: c.base_branch,
     branchName: c.branch_name,

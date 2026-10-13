@@ -477,6 +477,8 @@ Agents always work on a card branch of their own. **How finished work lands** (p
 | **Pull request** (`pr`) | The card branch is pushed and a pull request is opened into the working branch (that is the main branch when you use one branch), for you to review and merge. | Card branch to working branch. |
 | **Push the card branch only** (`push_branch`) | The card branch is pushed and nothing else happens; someone combines it by hand. | None. |
 
+A card follows its project: it has no completion action of its own unless someone sets one on that card (expert mode, or the BA when you asked for a different landing for that card). When you change the project setting, every card that has not set its own, open or not yet started, follows the change; a card with its own action keeps it. In expert mode choose **Project default** on the card to go back to following the project.
+
 When the working branch is not the main branch, the work reaches the main branch the way you choose: in the repository row of the project settings the owner clicks **Open pull request: develop to main**, and the workstation opens a pull request from the working branch to the main branch through the git host (or reports that there is nothing new to open). This is deliberately a project action and not part of every card, so a release is reviewed once, not per card.
 
 If the working branch is protected on the code host (it refuses direct changes), Guildwise notices, opens a pull request for the card instead, and switches the project to pull requests with a note on the card. A large change that would be committed to the working branch waits for your approval on the desk first (see 4.12).

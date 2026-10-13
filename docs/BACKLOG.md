@@ -70,6 +70,24 @@ used". See `docs/RUNNER.md` "Plugin MCP servers".
 **Open:** tool names are not listed by the runner yet (needs starting the server or a cached tool list), so the warning is
 the general one per server; refreshed OAuth tokens are not written back when a configured token (`oauth` / `api_key`) is used.
 
+### 30. Cards inherit the project's completion action
+
+**Done (2026-10-13).** Owner requirement: "Cards should inherit their project completion action unless specifically
+overwritten." Cause: card creation copied `projects.default_completion` onto the card, and the BA/intake path set one as
+well, so a later change to the project never reached existing cards (production P4: project default `merge`, every card
+`pr`). Now `cards.completion_action` NULL means "inherit" and is stored only for a deliberate override (create or edit
+with a value, or a finalize that picks a different action than the card would get). The effective value (card value, else
+the project's `default_completion` at the time of use) is resolved in one helper (`commands/completion.ts`) and used by
+finalize (manager button and BA `aom finalize`, the large-merge approval, the finalize result), the runner brief
+(`brief.card.completionAction`, which gates the architect push and card-branch pushes from #28), the Finalize panel and
+phase task reports. The card DTO keeps `completionAction` (stored, nullable) and adds `effectiveCompletionAction` and
+`completionActionSource` (`project` or `card`). A card no longer needs its own completion action to be specified
+(`requiredMissing` skips it). Web: the expert-mode select reads "Project default (Merge)" and sends a value only when
+changed; the card page and plain outcome text show the effective value. BA role version 12: do not set `completionAction`
+unless the manager asked for a different landing for that card. Data migration `card-completion-inherit-2026-10`: one
+`CardUpdated` (system actor, reason "follow the project default") per open card that had a value, logged per card and
+recorded in `data_migrations`; done and cancelled cards keep their recorded value. The runner did not change.
+
 ### 28. Card branches stay local; hygiene removes finished card branches
 
 **Done (2026-10-13).** Owner decision: no agent card branch (`aom/<ref>-...`) on origin unless the card's completion

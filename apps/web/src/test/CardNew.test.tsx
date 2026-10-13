@@ -9,7 +9,7 @@ import { CardNewForm } from '../pages/CardNew.tsx';
 const PROJECT = '0192f3a0-0000-7000-8000-000000000001';
 const REPO = '0192f3a0-0000-7000-8000-000000000002';
 
-function setup(mockUi = true, expert = false) {
+function setup(mockUi = true, expert = false, projectDefault?: 'merge' | 'pr') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   // expert mode shows the per-card completion action (it is off by default)
   qc.setQueryData(['me'], { user: { gitExpert: expert } });
@@ -24,6 +24,7 @@ function setup(mockUi = true, expert = false) {
           workflow={codeWorkflowV1}
           repos={[{ id: REPO, name: 'toy' }]}
           mockUi={mockUi}
+          projectDefault={projectDefault}
         />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -119,6 +120,18 @@ describe('CardNew validation', () => {
     expect(body.fields.mock).toEqual({ review: ['changes', 'ok'] });
     expect(body.repoId).toBe(REPO);
     expect(body.completionAction).toBe('push_branch');
+  });
+
+  it('offers the project default first and sends no completion action unless it is changed', async () => {
+    const user = setup(true, true, 'pr');
+    const select = screen.getByLabelText('Completion action') as HTMLSelectElement;
+    expect(select.value).toBe('');
+    expect(within(select).getByRole('option', { name: /Project default \(.+\)/ })).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Title'), 'Follows the project');
+    await user.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body).not.toHaveProperty('completionAction');
   });
 
   it('rejects a malformed mock script', async () => {

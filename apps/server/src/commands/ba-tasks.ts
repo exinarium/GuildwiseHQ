@@ -22,6 +22,7 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, orgScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
+import { effectiveCompletionAction } from './completion.ts';
 import {
   actorOf,
   agentBy,
@@ -300,7 +301,7 @@ async function readRpc(
       title: card.title,
       status: card.status,
       stage: card.stage,
-      completionAction: card.completion_action,
+      completionAction: await effectiveCompletionAction(ctx.pool, card),
       finalizeResult: card.finalize_result,
       fields: card.fields,
       handoffs: handoffs.map((h) => ({ stage: h.stage, outcome: h.outcome, note: h.note })),

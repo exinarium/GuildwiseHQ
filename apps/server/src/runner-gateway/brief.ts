@@ -20,6 +20,7 @@ import {
 import { loadRole, loadWorkflowById } from '../catalogue/loader.ts';
 import { briefAttachments } from '../commands/card-attachments.ts';
 import { workflowView } from '../commands/cards.ts';
+import { effectiveCompletionAction } from '../commands/completion.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { grantedMcpServers } from '../commands/mcp-servers.ts';
 import { projectHasVault, vaultForProject } from '../commands/vaults.ts';
@@ -141,7 +142,7 @@ export async function buildBrief(
       fields: card.fields,
       riskTier: card.risk_tier,
       reworkRound: card.rework_round,
-      completionAction: card.completion_action,
+      completionAction: await effectiveCompletionAction(ctx.pool, card),
       docsNeeded: card.docs_needed,
       designNeeded: card.design_needed ?? false,
       investigationOnly: card.investigation_only ?? false,

@@ -1,3 +1,4 @@
+import type { CompletionAction } from '@aom/shared';
 import { FolderKanban } from 'lucide-react';
 import { type FormEvent, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
@@ -105,6 +106,7 @@ export function CardNew() {
       repos={(detail.data?.repos ?? []).filter((r) => !r.removedAt)}
       mockUi={mockUi}
       designDefault={detail.data?.project.designStep ?? false}
+      projectDefault={detail.data?.project.defaultCompletion}
     />
   );
 }
@@ -122,6 +124,7 @@ export function CardNewForm({
   repos,
   mockUi = false,
   designDefault = false,
+  projectDefault,
 }: {
   projectId: string;
   projectKey: string;
@@ -137,6 +140,8 @@ export function CardNewForm({
   mockUi?: boolean;
   /** The project's "Investigate & design before build" setting. */
   designDefault?: boolean;
+  /** How the project lands finished work (the default a new card follows). */
+  projectDefault?: CompletionAction | undefined;
 }) {
   const nav = useNavigate();
   const create = useCreateCard();
@@ -265,6 +270,7 @@ export function CardNewForm({
               repos={repos}
               mockUi={mockUi}
               designDefault={designDefault}
+              projectDefault={projectDefault}
             />
           </div>
         </Panel>

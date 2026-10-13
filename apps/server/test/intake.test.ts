@@ -249,7 +249,9 @@ describe('the BA drafts cards in the intake chat', () => {
     (partial.fields as Record<string, unknown>).testPlan = undefined;
     const incomplete = await rpc(start.chatId, 'card.create', { ...partial, completionAction: undefined });
     expect(incomplete.ok).toBe(true);
-    expect(incomplete.result.missing.sort()).toEqual(['testPlan']); // the completion action comes from the project default;
+    expect(incomplete.result.missing.sort()).toEqual(['testPlan']); // the completion action follows the project default
+    // The BA left it out: nothing is stored on the card, so it inherits the project's setting.
+    expect((await q('SELECT completion_action FROM cards'))[0]).toMatchObject({ completion_action: null });
     const refused = await rpc(start.chatId, 'card.specify', { ref: incomplete.result.ref });
     expect(refused.ok).toBe(false);
     expect(refused.error).toMatch(/missing: .*testPlan/);

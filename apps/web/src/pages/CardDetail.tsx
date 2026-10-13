@@ -412,7 +412,7 @@ export function CardDetailView({
             <FinalizePanel
               cardId={card.id}
               finalize={data.testing.finalize}
-              completionAction={card.completionAction ?? null}
+              completionAction={card.effectiveCompletionAction}
               canAct={permissions.canMove}
             />
           )}
@@ -480,8 +480,8 @@ export function CardDetailView({
                     <Meta
                       k="Completion action"
                       v={
-                        card.completionAction
-                          ? COMPLETION_ACTION_LABELS[card.completionAction].label
+                        card.effectiveCompletionAction
+                          ? `${COMPLETION_ACTION_LABELS[card.effectiveCompletionAction].label}${card.completionActionSource === 'project' ? ' (project default)' : ''}`
                           : 'not set'
                       }
                     />

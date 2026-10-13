@@ -340,6 +340,8 @@ export function isFilled(value: unknown): boolean {
 /** Keys from `stage.requiredFields` that are not filled on the card. */
 export function requiredMissing(card: FillableCard, stage: Pick<Stage, 'requiredFields'>): string[] {
   return stage.requiredFields.filter((key) => {
+    // A card with no completion action of its own follows the project's default, which always exists.
+    if (key === 'completionAction') return false;
     const top = (card as Record<string, unknown>)[key];
     if (key in CARD_COLUMN_FIELDS) return !isFilled(top);
     return !isFilled(card.fields?.[key]);

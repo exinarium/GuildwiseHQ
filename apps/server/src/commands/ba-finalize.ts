@@ -4,6 +4,7 @@ import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { agentActor, cardMessage, projectScope } from './common.ts';
+import { effectiveCompletionAction } from './completion.ts';
 import { mergeApprovalEvents, mergeGate, queueExecute } from './finalize.ts';
 import { investigationRecorded } from './investigation.ts';
 
@@ -95,7 +96,8 @@ export async function baFinalizeEvents(
   if (input.action === 'none') return finalizeWithoutGit(tx, { ...input, scope });
   const action: CompletionAction = input.action;
   const events: AppendInput[] = [];
-  const revised = action !== card.completion_action;
+  const inherited = await effectiveCompletionAction(tx, card);
+  const revised = action !== inherited;
   if (revised) {
     events.push(
       {
@@ -108,7 +110,7 @@ export async function baFinalizeEvents(
         card,
         { kind: 'agent', agentId: agent.id },
         'comment',
-        `Completion action revised from ${card.completion_action ?? 'none'} to ${action}: ${input.note}`,
+        `Completion action revised from ${inherited ?? 'none'} to ${action}: ${input.note}`,
       ),
     );
   }
