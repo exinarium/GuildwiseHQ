@@ -320,6 +320,27 @@ export function Costs() {
                   </td>
                 </tr>
               )}
+              {r.management && r.management.costMicros > 0 && (
+                <tr data-testid="costs-management">
+                  <th scope="row" className="py-2 pr-3 text-left font-medium text-fg">
+                    Management (CEO)
+                  </th>
+                  <td className="tnum py-2 pr-3 text-right">{money(r.management.costMicros, cur)}</td>
+                  <td className="tnum py-2 pr-3 text-right text-muted">{tokenLine(r.management)}</td>
+                  <td className="py-2 pr-3 text-subtle">
+                    <Link to="/org/ceo?tab=reporting" className="text-brand-text hover:underline">
+                      Organization budget
+                    </Link>
+                  </td>
+                  <td className="py-2">
+                    <ShareBar
+                      part={r.management.costMicros}
+                      whole={r.totals.costMicros}
+                      label="Management (CEO)"
+                    />
+                  </td>
+                </tr>
+              )}
             </Table>
           </Panel>
           <div className="grid gap-4 lg:grid-cols-2">

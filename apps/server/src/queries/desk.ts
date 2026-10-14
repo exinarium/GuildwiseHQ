@@ -21,6 +21,10 @@ SELECT d.*, c.ref AS card_ref, c.title AS card_title, c.stage AS card_stage, c.s
        a.name AS agent_name, u.display_name AS answered_by_name, aa.name AS answered_by_agent_name,
        u.avatar_kind, u.avatar_seed, u.avatar_style, u.avatar_image_id,
        (SELECT i.id FROM intakes i WHERE i.mapping_desk_item_id = d.id) AS intake_id,
+       (SELECT json_build_object('agentName', ca.name, 'reason', x.reason, 'confidence', x.confidence, 'undoable', (x.status = 'done' AND x.inverse IS NOT NULL))
+          FROM ceo_actions x LEFT JOIN agents ca ON ca.id = (SELECT agent_id FROM ceo_settings cs WHERE cs.org_id = x.org_id)
+         WHERE x.id = d.ceo_action_id) AS ceo_action,
+       (SELECT ca2.name FROM ceo_settings cs2 JOIN agents ca2 ON ca2.id = cs2.agent_id WHERE cs2.org_id = d.org_id) AS ceo_name,
        (SELECT json_build_object('id', ii.id, 'name', ii.name) FROM interests ii WHERE ii.project_id = d.project_id AND d.kind = 'rating') AS interest
   FROM desk_items d
   LEFT JOIN cards c ON c.id = d.card_id
@@ -167,6 +171,35 @@ export function toDeskDto(
             ...(r.data.interestId ? { interestId: r.data.interestId } : {}),
           }
         : null,
+    ...(r.ceo_action || r.ceo_recommendation
+      ? {
+          ceo: {
+            actionId: r.ceo_action_id ?? null,
+            agentName: r.ceo_action?.agentName ?? r.ceo_name ?? null,
+            reason: r.ceo_action?.reason ?? r.ceo_recommendation?.reason ?? null,
+            confidence: r.ceo_action?.confidence ?? r.ceo_recommendation?.confidence ?? null,
+            undoable: r.ceo_action?.undoable === true,
+            recommendation: r.ceo_recommendation
+              ? {
+                  actionId: r.ceo_recommendation.actionId,
+                  option: r.ceo_recommendation.option ?? null,
+                  text: r.ceo_recommendation.text ?? null,
+                  reason: r.ceo_recommendation.reason,
+                  confidence: r.ceo_recommendation.confidence,
+                }
+              : null,
+          },
+        }
+      : {}),
+    ...(r.subkind === 'ceo_report' && r.data?.ceo
+      ? {
+          ceoReport: {
+            actions: r.data.ceo.actions ?? [],
+            scores: r.data.ceo.scores ?? [],
+            fallback: r.data.fallback === true,
+          },
+        }
+      : {}),
     canAnswer: r.status === 'open' && canAnswerItem(r, userId, role, orgRoles.get(r.org_id) ?? null),
     createdAt: iso(r.created_at) as string,
   };

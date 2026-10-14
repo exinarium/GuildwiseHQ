@@ -69,6 +69,9 @@ export async function costsReport(
   const overhead = (
     await rows(db, `SELECT ${AGG} FROM shift_costs sc WHERE ${where} AND sc.project_id IS NULL`, args)
   )[0];
+  const management = (
+    await rows(db, `SELECT ${AGG} FROM shift_costs sc WHERE ${where} AND sc.kind IN ('ceo','ceo_chat')`, args)
+  )[0];
   const byProject = await rows(
     db,
     `SELECT sc.project_id, p.key, p.name, p.kind, p.budget_micros, p.budget_override_month,
@@ -107,6 +110,7 @@ export async function costsReport(
     to,
     totals: totalsOf(total, c),
     overhead: totalsOf(overhead, c),
+    ...(management && Number(management.usd ?? 0) > 0 ? { management: totalsOf(management, c) } : {}),
     byProject: byProject.map((r) => {
       const budget: BudgetDto | null =
         r.budget_micros === null

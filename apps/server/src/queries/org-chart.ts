@@ -11,7 +11,7 @@ export const departmentLabel = (key: string): string =>
   /^[a-z][a-z0-9_-]*$/.test(key) ? `${key[0]?.toUpperCase()}${key.slice(1).replace(/[_-]/g, ' ')}` : key;
 
 /** The built-in departments come first, in the order the work flows; custom ones follow alphabetically. */
-const DEPARTMENT_ORDER = ['delivery', 'research', 'knowledge', 'operations'];
+const DEPARTMENT_ORDER = ['management', 'delivery', 'research', 'knowledge', 'operations'];
 const deptRank = (k: string) => {
   const i = DEPARTMENT_ORDER.indexOf(k);
   return i === -1 ? DEPARTMENT_ORDER.length : i;
@@ -78,6 +78,8 @@ export async function getOrgChart(db: Queryable, orgId: string, now: Date): Prom
   const cost = await orgCostCtx(db, orgId);
   const spend = await spendBriefs(db, cost, now, 'agent', ids);
 
+  const ceoAgent = list.find((a) => a.role_key === 'ceo' && a.status === 'active');
+  const ceoUp = ceoAgent && !ceoAgent.paused_at ? ceoAgent : undefined;
   const bas = list.filter((a) => a.role_key === 'ba' && !a.is_devops && a.status === 'active');
   const seniorsOf = (a: Row) =>
     list.filter(
@@ -97,15 +99,21 @@ export async function getOrgChart(db: Queryable, orgId: string, now: Date): Prom
     else if (!a.ws_online) status = 'offline';
     else if (mine.length) status = 'working';
     else if (stuck.length) status = 'blocked';
-    const seniors = a.is_devops || a.role_key === 'ba' ? [] : seniorsOf(a);
+    const seniors = a.is_devops || a.role_key === 'ba' || a.role_key === 'ceo' ? [] : seniorsOf(a);
+    // peer -> BA -> CEO -> desk; a step nobody can take is skipped (the CEO also when it is paused).
+    const up = ceoUp
+      ? { level: 'ceo' as const, agentIds: [ceoUp.id as string] }
+      : { level: 'desk' as const, agentIds: [] };
     const escalatesTo =
-      a.is_devops || a.role_key === 'ba'
+      a.is_devops || a.role_key === 'ceo'
         ? { level: 'desk' as const, agentIds: [] }
-        : a.seniority === 'junior' && seniors.length
-          ? { level: 'peer' as const, agentIds: seniors.map((s) => s.id as string) }
-          : bas.length
-            ? { level: 'ba' as const, agentIds: bas.map((b) => b.id as string) }
-            : { level: 'desk' as const, agentIds: [] };
+        : a.role_key === 'ba'
+          ? up
+          : a.seniority === 'junior' && seniors.length
+            ? { level: 'peer' as const, agentIds: seniors.map((s) => s.id as string) }
+            : bas.length
+              ? { level: 'ba' as const, agentIds: bas.map((b) => b.id as string) }
+              : up;
     return {
       id: a.id,
       name: a.name,
@@ -170,6 +178,7 @@ export async function getOrgChart(db: Queryable, orgId: string, now: Date): Prom
     admins: admins.map((u) => ({ userId: u.id, name: u.display_name })),
     departments,
     agents,
+    ceo: ceoAgent ? { agentId: ceoAgent.id as string, paused: Boolean(ceoAgent.paused_at) } : null,
     projects: projects.map((p) => ({ id: p.id, key: p.key, name: p.name })),
     workstations: stations.map((w) => ({
       id: w.id,

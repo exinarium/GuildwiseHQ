@@ -16,6 +16,7 @@ import {
   Server,
   Settings,
   Timer,
+  UserCog,
   Users,
   Vault,
   Workflow,
@@ -111,7 +112,14 @@ export function buildNav(opts: {
           match: (p) => p === '/agents' || p === '/hr',
         },
         { id: 'org-chart', label: 'Org chart', to: '/org-chart', icon: Network, testId: 'nav-org-chart' },
-        { id: 'org', label: 'Roles & workflows', to: '/org', icon: Workflow },
+        ...(canManage ? [{ id: 'ceo', label: 'CEO', to: '/org/ceo', icon: UserCog, testId: 'nav-ceo' }] : []),
+        {
+          id: 'org',
+          label: 'Roles & workflows',
+          to: '/org',
+          icon: Workflow,
+          match: (p) => p === '/org' || p.startsWith('/org/workflows'),
+        },
         { id: 'workstations', label: 'Workstations', to: '/workstations', icon: Server },
         {
           id: 'integrations',

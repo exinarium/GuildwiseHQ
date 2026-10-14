@@ -624,7 +624,8 @@ export class ShiftSupervisor {
 
     // A card, question or BA task shift reads only the vault the server named for it; a DevOps shift reads none.
     const vaultCtx =
-      (msg.kind === 'card' || msg.kind === 'question' || msg.kind === 'ba_task') && msg.vault
+      (msg.kind === 'card' || msg.kind === 'question' || msg.kind === 'ba_task' || msg.kind === 'ceo') &&
+      msg.vault
         ? await readVaultContext(paths.vaults, msg.vault)
         : null;
     // Question and BA task shifts open the vault as a read-only folder (secret files blocked, like a reference repository).
@@ -938,6 +939,11 @@ export class ShiftSupervisor {
     return {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
       rpc: async (req: IpcRpcRequest) => {
+        // `aom ceo ...` belongs to the CEO's own shifts (the server checks the agent again).
+        if (req.method === 'ceo')
+          return s.msg.kind === 'ceo' && s.msg.agent.roleKey === 'ceo'
+            ? this.deps.rpc(s.msg.shiftId, req.method, req.params)
+            : ({ ok: false, error: 'not_ceo: only the CEO may use `aom ceo`' } as IpcRpcResponse);
         // A BA task reads a member card of the phase by ref (`aom card <REF>`): the server answers that.
         // A DevOps shift reads its request's card (`aom card show`) through the server, which serves only that card.
         if (req.method === 'card.get' && s.msg.kind === 'devops' && (req.params.ref || req.params.linked))

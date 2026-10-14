@@ -177,6 +177,11 @@ export class ChatManager {
           : { accepted: false, message: `Rejected: ${r.error ?? 'failed'}`, error: r.error ?? 'failed' };
       },
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
+        // The owner's chat with the CEO: `aom ceo ...` (the server checks the agent and the owner again).
+        if (req.method === 'ceo')
+          return chat.msg.agent.roleKey === 'ceo'
+            ? this.deps.rpc(chatId, req.method, req.params)
+            : { ok: false, error: 'not_ceo: only the CEO may use `aom ceo`' };
         if (req.method === 'source.read') return this.readSource(chat, req.params);
         if (
           req.method === 'source.attachments' ||

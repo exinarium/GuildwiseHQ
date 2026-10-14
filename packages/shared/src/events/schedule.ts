@@ -49,6 +49,8 @@ export const SCHEDULE_EVENT_NAMES = [
   'card_stage_reached',
   'card_done',
   'investigation_reported',
+  /** The CEO notified the owner (needs you, urgent, task done): an automation can forward it (Slack, Teams). */
+  'ceo_notification',
 ] as const;
 export const ScheduleEventName = z.enum(SCHEDULE_EVENT_NAMES);
 export type ScheduleEventName = z.infer<typeof ScheduleEventName>;

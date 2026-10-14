@@ -3,7 +3,7 @@ import type { OrgChartAgent } from '@aom/shared';
 /**
  * Layout of the organization chart (a pure function, tested without a browser).
  *
- * The tree is the escalation tree: the manager at the top, the BAs below, then each department (a labelled box) with
+ * The tree is the escalation tree: the manager at the top, the CEO (when there is one) below, then the BAs, then each department (a labelled box) with
  * one group per role: the seniors on the upper row and the juniors under them. A junior's line goes up to the seniors
  * of its role; a senior's (or a junior with no senior) goes up to the BAs; the BAs' go to the manager. DevOps engineers
  * are not part of the tree (they are listed per workstation).
@@ -19,7 +19,7 @@ const MANAGER_H = 100;
 
 export interface LaidNode {
   id: string;
-  kind: 'manager' | 'ba' | 'agent' | 'placeholder';
+  kind: 'manager' | 'ceo' | 'ba' | 'agent' | 'placeholder';
   agent?: OrgChartAgent;
   x: number;
   y: number;
@@ -31,7 +31,7 @@ export interface LaidEdge {
   from: string;
   to: string;
   /** What the line means: a question going up to a senior of the role, to the BA, or to the manager's desk. */
-  kind: 'peer' | 'ba' | 'desk';
+  kind: 'peer' | 'ba' | 'ceo' | 'desk';
   d: string;
 }
 export interface LaidBox {
@@ -72,8 +72,10 @@ export function layoutOrgChart(
   departments: Array<{ key: string; label: string }>,
 ): OrgLayout {
   const tree = agents.filter((a) => !a.isDevops);
+  // The CEO sits between the Owner and the BAs; it is not part of a department box.
+  const ceo = tree.find((a) => a.roleKey === 'ceo') ?? null;
   const bas = tree.filter((a) => a.roleKey === 'ba').sort(bySeniority);
-  const rest = tree.filter((a) => a.roleKey !== 'ba');
+  const rest = tree.filter((a) => a.roleKey !== 'ba' && a.roleKey !== 'ceo');
 
   // department -> role groups
   const groupsOf = (dept: string): RoleGroup[] => {
@@ -110,7 +112,8 @@ export function layoutOrgChart(
   const width = Math.max(baRowW, deptRowW, MANAGER_W) + PAD * 2;
 
   const yManager = 0;
-  const yBa = yManager + MANAGER_H + GAP_Y;
+  const yCeo = yManager + MANAGER_H + GAP_Y;
+  const yBa = (ceo ? yCeo + NODE_H : yManager + MANAGER_H) + GAP_Y;
   const yBox = yBa + NODE_H + GAP_Y;
   const yTop = yBox + BOX_HEAD + PAD / 2;
   const yUnder = yTop + NODE_H + GAP_Y * 0.75;
@@ -128,6 +131,9 @@ export function layoutOrgChart(
 
   const mx = (width - MANAGER_W) / 2;
   add({ id: 'manager', kind: 'manager', x: mx, y: yManager, w: MANAGER_W, h: MANAGER_H });
+
+  if (ceo)
+    add({ id: ceo.id, kind: 'ceo', agent: ceo, x: (width - NODE_W) / 2, y: yCeo, w: NODE_W, h: NODE_H });
 
   // BAs, centred
   const baX0 = (width - baRowW) / 2;
@@ -185,7 +191,11 @@ export function layoutOrgChart(
       d: elbow(centre(child), child.y, centre(parent), parent.y + parent.h, bus),
     });
   const managerNode = pos.get('manager') as LaidNode;
-  for (const id of baIds) connect(pos.get(id) as LaidNode, managerNode, 'desk', yBa - GAP_Y / 2);
+  if (ceo) {
+    const ceoNode = pos.get(ceo.id) as LaidNode;
+    connect(ceoNode, managerNode, 'desk', yCeo - GAP_Y / 2);
+    for (const id of baIds) connect(pos.get(id) as LaidNode, ceoNode, 'ceo', yBa - GAP_Y / 2);
+  } else for (const id of baIds) connect(pos.get(id) as LaidNode, managerNode, 'desk', yBa - GAP_Y / 2);
   for (const d of depts)
     for (const g of d.groups) {
       for (const a of g.tops) {

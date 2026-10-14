@@ -195,6 +195,55 @@ describe('org chart helpers', () => {
   });
 });
 
+describe('the CEO on the chart', () => {
+  const ceoAgent = agent(20, 'Cora', {
+    roleKey: 'ceo',
+    roleLabel: 'Chief executive',
+    department: 'management',
+    seniority: 'senior',
+    escalatesTo: { level: 'desk', agentIds: [] },
+  });
+  const withCeo: OrgChart = {
+    ...CHART,
+    departments: [{ key: 'management', label: 'Mgmt' }, ...CHART.departments],
+    agents: [
+      ceoAgent,
+      ...CHART.agents.map((a) =>
+        a.roleKey === 'ba' ? { ...a, escalatesTo: { level: 'ceo' as const, agentIds: [U(20)] } } : a,
+      ),
+    ],
+    ceo: { agentId: U(20), paused: true },
+  };
+
+  it('puts the CEO between the manager and the BAs, outside the department boxes', () => {
+    const l = layoutOrgChart(withCeo.agents, withCeo.departments);
+    const y = (id: string) => l.nodes.find((n) => n.id === id)?.y ?? -1;
+    expect(y('manager')).toBeLessThan(y(U(20)));
+    expect(y(U(20))).toBeLessThan(y(U(10)));
+    expect(l.nodes.find((n) => n.id === U(20))?.kind).toBe('ceo');
+    expect(l.boxes.map((b) => b.key)).toEqual(['delivery', 'research']);
+    expect(l.edges.find((e) => e.from === U(10))?.to).toBe(U(20));
+    expect(l.edges.find((e) => e.from === U(10))?.kind).toBe('ceo');
+    expect(l.edges.find((e) => e.from === U(20))?.to).toBe('manager');
+  });
+
+  it('names the CEO as the escalation level and lists Management first', () => {
+    expect(escalationText(withCeo.agents.find((a) => a.roleKey === 'ba') as OrgChartAgent, withCeo)).toBe(
+      'the CEO (Cora)',
+    );
+    const g = groupByDepartment(withCeo.agents, withCeo.departments);
+    expect(g[0]).toMatchObject({ key: 'management', label: 'Management' });
+  });
+
+  it('marks a paused CEO', async () => {
+    show(withCeo);
+    const chart = await screen.findByTestId('org-chart');
+    const tile = within(chart).getByRole('button', { name: /^Cora,/ });
+    expect(tile).toHaveAttribute('data-paused', 'true');
+    expect(tile).toHaveTextContent('Paused');
+  });
+});
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 function show(chart: OrgChart = CHART, role: 'owner' | 'member' = 'owner') {

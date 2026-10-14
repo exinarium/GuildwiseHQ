@@ -1,4 +1,5 @@
 export * from './ba-task.ts';
+export * from './ceo.ts';
 export * from './chat.ts';
 export * from './commands.ts';
 export * from './devops.ts';

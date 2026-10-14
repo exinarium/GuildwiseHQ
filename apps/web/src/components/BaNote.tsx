@@ -34,7 +34,7 @@ export function BaNote({ item }: { item: DeskItemDto }) {
             className="font-medium text-brand-text hover:underline"
             data-testid="ba-chat-link"
           >
-            Discuss this with your BA
+            {item.subkind === 'ceo_report' ? 'Discuss this with your CEO' : 'Discuss this with your BA'}
           </Link>
         </p>
       )}

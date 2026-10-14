@@ -20,6 +20,7 @@ import {
 } from './claude-auth.ts';
 import {
   agentEnv,
+  buildCeoSettings,
   buildChatSettings,
   buildDevopsChatSettings,
   buildShiftSettings,
@@ -403,7 +404,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     const used = this.writeMcpConfig(
       dir,
       input.agent.permissions.allowedTools,
-      devops ? undefined : input.context?.mcpServers,
+      devops || input.agent.roleKey === 'ceo' ? undefined : input.context?.mcpServers,
       intakeMcp && existsSync(intakeMcp) ? intakeMcp : undefined,
     );
     await writeFile(
@@ -411,15 +412,17 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       `${JSON.stringify(
         devops
           ? buildDevopsChatSettings(input.agent.permissions, this.policy(input, input.cwd), input.sandbox)
-          : buildChatSettings(
-              input.readOnly,
-              [
-                ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
-                ...used.map((u) => `mcp__${u.name}`),
-              ],
-              this.policy(chatInput, input.cwd, true),
-              input.sandbox,
-            ),
+          : input.agent.roleKey === 'ceo'
+            ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
+            : buildChatSettings(
+                input.readOnly,
+                [
+                  ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
+                  ...used.map((u) => `mcp__${u.name}`),
+                ],
+                this.policy(chatInput, input.cwd, true),
+                input.sandbox,
+              ),
         null,
         2,
       )}\n`,

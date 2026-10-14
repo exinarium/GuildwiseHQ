@@ -49,6 +49,10 @@ export const ROUTING_EXEMPT_SUBKINDS: readonly string[] = [
   'phase_results',
   'unmapped_ticket',
   'batch_question',
+  /** The CEO's own output: its daily report, its recommendations and its notifications are never held or noted. */
+  'ceo_report',
+  'ceo_recommendation',
+  'ceo_notice',
 ];
 
 // ----------------------------------------------------------------------------------------------- prefs

@@ -37,6 +37,10 @@ export const AgentDtoSchema = z.object({
   /** The generated face (seed and style); every agent has one. */
   avatarSeed: z.string().optional(),
   avatarStyle: AvatarStyleSchema.optional(),
+  /** The agent takes no new work (paused by a manager or by the CEO); null when it works. */
+  pausedAt: IsoTime.nullable().optional(),
+  pauseReason: z.string().nullable().optional(),
+  pausedByCeo: z.boolean().optional(),
   /** The OS-sandbox state its workstation reports for the agent's runtime (null/absent: not reported). */
   sandbox: SandboxStateSchema.nullable().optional(),
   sandboxReason: z.string().nullable().optional(),

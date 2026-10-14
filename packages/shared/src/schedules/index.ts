@@ -67,6 +67,12 @@ export const SCHEDULE_EVENT_TRIGGERS: ReadonlyArray<{
     hint: 'The architect recorded an investigation or design report for a card.',
     cardFilters: 'workflow',
   },
+  {
+    id: 'ceo_notification',
+    label: 'The CEO notifies you',
+    eventType: 'CeoNotified',
+    hint: 'Your CEO needs you, has something urgent, or finished a task you gave it. Use it to forward the message with "Send a webhook" (Slack, Teams).',
+  },
 ];
 
 /** Every domain event type a trigger name is read from. */
@@ -281,6 +287,9 @@ export const MAPPING_TOKENS = [
   'card.title',
   'issue.title',
   'issue.key',
+  'ceo.kind',
+  'ceo.title',
+  'ceo.text',
   'event',
   'date',
 ] as const;

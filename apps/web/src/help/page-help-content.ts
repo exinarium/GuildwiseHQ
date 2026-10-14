@@ -739,6 +739,30 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'org-chart-and-design#org-chart',
   },
+  '/org/ceo': {
+    title: 'CEO',
+    intro:
+      'Appoint an optional CEO agent that works your desk and the floor inside limits you set. It starts in a training period and every decision can be undone.',
+    controls: [
+      {
+        name: 'Overview',
+        text: 'The CEO state, spend, training progress and the Pause, Graduate and Disable buttons.',
+      },
+      {
+        name: 'Authority',
+        text: 'For each kind of action choose whether the CEO decides, recommends or never does it.',
+      },
+      {
+        name: 'Activity log',
+        text: 'Everything the CEO decided, recommended or refused, with an Undo where one exists.',
+      },
+      {
+        name: 'Memory',
+        text: 'The rules the CEO remembers. Only the Owner can read and change them.',
+      },
+    ],
+    article: 'your-ceo',
+  },
   '/costs': {
     title: 'Costs',
     intro:

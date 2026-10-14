@@ -4,6 +4,7 @@ import { approvalEvents } from './approval.ts';
 import { blogEvents } from './blog.ts';
 import { cardEvents } from './card.ts';
 import { catalogueEvents } from './catalogue.ts';
+import { ceoEvents } from './ceo.ts';
 import { chatEvents } from './chat.ts';
 import { costEvents } from './cost.ts';
 import { deskEvents } from './desk.ts';
@@ -46,6 +47,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...shiftEvents,
   ...agentEvents,
   ...catalogueEvents,
+  ...ceoEvents,
   ...deskEvents,
   ...ledgerEvents,
   ...chatEvents,
@@ -83,6 +85,7 @@ export * from './approval.ts';
 export * from './blog.ts';
 export * from './card.ts';
 export * from './catalogue.ts';
+export * from './ceo.ts';
 export * from './chat.ts';
 export * from './cost.ts';
 export { defineEvent, IsoDate, Usage, UserRole } from './define.ts';

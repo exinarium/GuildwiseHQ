@@ -19,7 +19,7 @@ export const toSignalBrief = (r: Record<string, any>): SignalBrief => ({
 export async function lastFloorReportAt(db: Queryable, orgId: string): Promise<Date | null> {
   const r = await rows<{ t: Date | null }>(
     db,
-    `SELECT max(created_at) AS t FROM desk_items WHERE org_id=$1 AND subkind='floor_report'`,
+    `SELECT max(created_at) AS t FROM desk_items WHERE org_id=$1 AND subkind IN ('floor_report','ceo_report')`,
     [orgId],
   );
   return r[0]?.t ? new Date(r[0].t) : null;

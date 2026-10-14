@@ -1,5 +1,6 @@
 import { JIRA_SKILL_MD } from '../external/index.ts';
 import type { AgentRuntimeSpec, ChatContext } from '../protocol/runner.ts';
+import { renderCeoChatSection } from './ceo.ts';
 import { type ReadableFolder, renderReadableFolders } from './readable.ts';
 
 /** What the runner found in the vault clone for a chat: `missing` when this workstation has no clone of the vault. */
@@ -82,6 +83,7 @@ export function renderChatInstructions(
         "- `aom git status [<provider>]` and `aom git connect <github|gitlab|azure-devops|bitbucket-cloud>`: check or set up this workstation's login to a git host. A browser or device-code sign-in prints a URL and code: show them to the user exactly and ask them to finish it in their browser, then run `aom git status`. If a token is needed the command says so: never ask for, type or handle a token yourself; tell the user to run `aom-runner git-connect <provider>` in a terminal here or use the Connect helper under Workstations in the app. For Azure DevOps a Microsoft Entra service principal is the best sign-in (personal access tokens are the fallback; global ones stop working on 2026-12-01).",
       ].join('\n'),
     );
+  if (agent.roleKey === 'ceo' && ctx.ceo) out.push(renderCeoChatSection(ctx.ceo.brief));
   if (agent.roleKey === 'ba' && !intakeChat) out.push(renderDesignSection());
   if (agent.roleKey === 'ba' && !intakeChat) out.push(renderChatCardsSection(ctx));
   if (ctx.intake && intakeChat) out.push(renderIntakeSection(ctx.intake, opts.jiraSkill));

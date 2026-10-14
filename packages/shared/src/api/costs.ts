@@ -84,6 +84,8 @@ export const CostsReportSchema = z.object({
   totals: SpendTotalsSchema,
   /** Spend with no project: chats without a card, BA work outside a project. */
   overhead: SpendTotalsSchema,
+  /** The CEO's own spend (shifts and chat; docs/design/ceo-agent-v2.md D11): the "Management" line. Absent without a CEO. */
+  management: SpendTotalsSchema.optional(),
   byProject: z.array(
     SpendTotalsSchema.extend({
       projectId: z.uuid(),

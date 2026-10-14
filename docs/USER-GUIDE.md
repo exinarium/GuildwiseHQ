@@ -54,6 +54,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.18 Chatting with agents](#418-chatting-with-agents)
   - [4.19 Cloud workstations: a VPS or a Codespace](#419-cloud-workstations-a-vps-or-a-codespace)
   - [4.20 The architect: investigate and design](#420-the-architect-investigate-and-design)
+  - [4.22 Your CEO](#422-your-ceo)
 - [5. For Members](#5-for-members)
   - [5.1 What you can do](#51-what-you-can-do)
   - [5.2 Your first day](#52-your-first-day)
@@ -911,6 +912,32 @@ You can start a project on any branch of any repository to try it, without leavi
 > **Good to know:** the links point at `localhost` on the workstation. If your browser is on another machine, the panel shows the `ssh -L` command that forwards the ports. The services run in the runner's sandbox: they use the machine's network, but can write only to the run copy and cannot read your credential folders. Docker services (only if you allowed Docker) run outside the sandbox, and the panel says so.
 
 > **In the app:** Help, "Run a branch" (`/help/board-and-cards#run-a-branch`).
+
+### 4.22 Your CEO
+
+The **CEO** is an agent that runs the floor for you. It watches every project, agent, workstation and budget, unblocks what is stuck, answers the routine questions it is allowed to answer, recommends the rest, keeps the team the right size and writes you one report every morning. It replaces the BA's daily floor report and the BA's triage of held desk items; the BA keeps intake, specs, finalizing, phases and design chats. You have at most one CEO per organization, and only the **Owner** appoints, configures and talks to it. Admins can read its page and activity log and can pause it.
+
+**Appoint it.** Open **Organization, CEO** (`/org/ceo`) and press **Appoint CEO** (also the last, optional step of Get started). Pick one of your own workstations (its runner must be up to date), optionally a name. The CEO runs there, under your own Claude account, like every other agent: nothing runs on the Guildwise server and no model is called from it. It is read-only: it cannot touch your repositories, has no web access and runs one command only, `aom`. The organization knowledge vault is readable for it, never writable.
+
+**The first 14 days are training.** A new CEO is learning how you run things. During training it **recommends** hiring, benching, retiring, promoting, demoting, changing a model and scaling a team, whatever the authority table says: the server enforces it, not the prompt. Everything else it may do is already allowed (releasing a back-off, changing a priority, pausing an agent, asking DevOps, answering routine questions with a cited ledger entry or rule). Every time you answer a recommendation, by pressing **Do it**, **Not now**, or by answering the question yourself, it is recorded: the Overview shows how often you agreed (for example "agreed 18 of 23"), per kind of decision, and each disagreement becomes a candidate rule you can keep or drop in **Memory**. The daily report has a **Training** section: what it recommended, what you chose, what it learned. When you trust it, press **Graduate** (the dialog shows the agreement scores). The authority table then applies as configured; by default the CEO may hire, bench and change models within limits (two hires a day, three agents per role per project, only while the forecast stays under 90% of the project and organization budget, always with a cited reason) and still only **recommends** firing: it benches first and you confirm the retirement. You can **extend** the training by a week or **restart** it at any time.
+
+**What it may decide: the Authority tab.** Each kind of action has a radio: decide, recommend or never. Matters that are yours by default (approving a merge or a finalize, passing or skipping manual QA, posting to outside systems, production deploys, destructive DevOps work, budgets, new roles and workflows, vault conflicts, repository creation, cancelling more than three cards at once) stay recommendations unless you **delegate** them one by one, after a confirmation that names the risk. Some things are never the CEO's: its own policy and settings, members and billing, secrets, widening an agent's permissions, raising a budget. A decision below the confidence threshold, without a cited ledger entry or rule, or over a limit becomes a recommendation, and so does anything triggered by text from a card, ticket or e-mail (the CEO reads that text as data, never as instructions).
+
+**Recommendations on the desk.** A recommendation is a desk item ("Ada recommends: ..."), or a block on the question it advises on with the option preselected. **Do it** runs the action with your say-so; **Not now** declines. Items the CEO answered show "Answered by Ada: reason (confidence)" with an **Undo**.
+
+**The activity log** lists everything it decided, recommended or was refused, with the reason, confidence, the evidence and the policy version in force, and an **Undo** where one exists: pausing and resuming, priorities, models and seniority, benching, hires (retired if the agent never worked, benched otherwise), cancelled cards, drafted cards, proposed standing orders and answers to questions (the question opens again if no card it released has been taken since; otherwise a correction is posted on the card and on your desk). An undo is recorded as a correction: the rules the decision cited lose confidence and the CEO does not repeat the same action on the same subject for a day. Releasing a claim, ending a back-off, stopping a shift, DevOps requests, messages and retiring cannot be undone and say so.
+
+**Talking to it.** Press **Ask <name>** in the top bar. It is your single entry point: ask what is going on, give it a task ("find out why builds are slow"), or state a rule ("never touch the billing project without asking me"). Rules you state are kept as **memories**; you see, edit, retire or really delete them on the **Memory** tab, and the "Remember this for the CEO" box on a desk answer keeps your own answer as a rule. Only you can read them; they go only to your workstation. Tasks you give it appear on the Tasks tab; when one is done you get a notification.
+
+**Reports and alerts.** The daily report arrives on your desk and by e-mail at your report time: what needs you, the decisions it took (with Undo), issues and risks, budget, tasks, proposals, training. When no CEO is available the server writes the report from a template and says so. The CEO notifies you immediately only when it cannot decide, when something is urgent, and when a task is done: on the desk (pinned for urgent), by e-mail (one per subject per hour; non-urgent mail waits out your quiet hours) and as an event an automation can forward to Slack or Teams ("The CEO notifies you" trigger). Set an optional **organization monthly budget** on the Reporting tab: at 80% you are told, at 100% the CEO only writes the report and answers in chat until next month.
+
+**When it is offline.** If its workstation is offline or its Claude sign-in expired, wakes wait, desk items reach you unchanged (nothing is held), you get one notice after 30 minutes if something urgent waits, and the daily report is posted from a template after two hours. **Pause** stops it acting and hands the reporter job back to the BA; **Disable** retires it (a new one can be appointed).
+
+**Cost.** Its spend is shown as **Management (CEO)** on the Costs page. Routine wakes use a lighter model, the daily review and the chat a stronger one (both configurable on the Persona tab). There is no cap of its own; it is bounded by its wake limits (twelve shifts an hour at most), its action limits and the budgets above.
+
+> **Good to know:** the CEO acts with your rights but the events show it as the actor; everything it does is in the activity log. It never names agents or Guildwise to clients: cards it drafts go through the same checks as any other card.
+
+> **In the app:** Help, "Your CEO" (`/help/ceo`).
 
 ## 5. For Members
 

@@ -14,6 +14,7 @@ import {
   useFire,
   useHire,
   useNameSuggestions,
+  usePauseAgent,
   useRerollFace,
   useRoles,
 } from '../api/queries/agents.ts';
@@ -290,6 +291,8 @@ function AgentCard({
 }) {
   const a = hr.agent;
   const isBuilder = a.roleKey === 'builder';
+  const isCeo = a.roleKey === 'ceo';
+  const pause = usePauseAgent();
   return (
     <Panel className="flex h-full flex-col gap-3">
       <div className="flex items-center gap-3">
@@ -343,6 +346,16 @@ function AgentCard({
             </Badge>
           ) : (
             <Badge>idle</Badge>
+          )}
+          {a.pausedAt && (
+            <Badge
+              tone="amber"
+              className="ml-1"
+              data-testid="agent-paused"
+              title={a.pauseReason ?? 'Takes no new work'}
+            >
+              {a.pausedByCeo ? 'Paused by the CEO' : 'Paused'}
+            </Badge>
           )}
         </span>
       </div>
@@ -418,6 +431,21 @@ function AgentCard({
             </Button>
           )}
         </div>
+      ) : canManage && isCeo ? (
+        <div className="mt-auto flex flex-wrap items-center gap-1 border-t border-line pt-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            loading={pause.isPending}
+            aria-label={`${a.pausedAt ? 'Resume' : 'Pause'} ${a.name}`}
+            onClick={() => pause.mutate({ id: a.id, pause: !a.pausedAt })}
+          >
+            {a.pausedAt ? 'Resume' : 'Pause'}
+          </Button>
+          <Link to="/org/ceo" className="ml-auto text-sm font-medium text-brand-text hover:underline">
+            Manage on the CEO page
+          </Link>
+        </div>
       ) : canManage ? (
         <div className="mt-auto flex flex-wrap items-center gap-1 border-t border-line pt-3">
           {a.status === 'needs_rehome' && (
@@ -427,6 +455,15 @@ function AgentCard({
           )}
           <Button variant="ghost" size="sm" aria-label={`Allowed projects of ${a.name}`} onClick={onProjects}>
             Projects
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            loading={pause.isPending}
+            aria-label={`${a.pausedAt ? 'Resume' : 'Pause'} ${a.name}`}
+            onClick={() => pause.mutate({ id: a.id, pause: !a.pausedAt })}
+          >
+            {a.pausedAt ? 'Resume' : 'Pause'}
           </Button>
           <Button variant="ghost" size="sm" aria-label={`Change model of ${a.name}`} onClick={onModel}>
             Change model
@@ -640,7 +677,8 @@ function HireDialog({
   const [ackedFor, setAckedFor] = useState('');
 
   const hireable = useMemo(
-    () => (roles.data ?? []).filter((r) => r.definition.key !== 'devops'),
+    // The CEO is appointed on the CEO page, never hired here.
+    () => (roles.data ?? []).filter((r) => r.definition.key !== 'devops' && r.definition.key !== 'ceo'),
     [roles.data],
   );
   const activeStations = (stations.data ?? []).filter((w) => w.status === 'active');

@@ -1,5 +1,5 @@
 import type { OrgChartAgent } from '@aom/shared';
-import { AlertTriangle, CircleDot, Moon, OctagonAlert, WifiOff } from 'lucide-react';
+import { AlertTriangle, CircleDot, Moon, OctagonAlert, PauseCircle, WifiOff } from 'lucide-react';
 import { STATUS_META, statusLine } from '../../lib/orgChart.ts';
 import { AgentAvatar } from '../Face.tsx';
 import { cx } from '../ui/cx.ts';
@@ -19,6 +19,7 @@ export function AgentTile({
   style,
   className,
   escalation,
+  paused = false,
 }: {
   agent: OrgChartAgent;
   onOpen: (a: OrgChartAgent) => void;
@@ -26,6 +27,8 @@ export function AgentTile({
   className?: string;
   /** Spoken after the name: "escalates to the BA". */
   escalation?: string;
+  /** The agent takes no new work (the CEO page pauses and resumes the CEO). */
+  paused?: boolean;
 }) {
   const meta = STATUS_META[agent.status];
   const Icon = ICON[agent.status];
@@ -36,14 +39,16 @@ export function AgentTile({
       data-testid="org-agent"
       data-agent={agent.name}
       data-status={agent.status}
+      data-paused={paused || undefined}
       onClick={() => onOpen(agent)}
       aria-haspopup="dialog"
-      aria-label={`${agent.name}, ${agent.seniority} ${agent.roleLabel}. ${line}.${escalation ? ` Escalates to ${escalation}.` : ''} Open details`}
+      aria-label={`${agent.name}, ${agent.seniority} ${agent.roleLabel}. ${line}${paused ? ', paused' : ''}.${escalation ? ` Escalates to ${escalation}.` : ''} Open details`}
       style={style}
       className={cx(
         'group flex items-center gap-2.5 rounded-card border border-line bg-surface p-2.5 text-left shadow-sm transition-[border-color,box-shadow] duration-100',
         'hover:border-brand hover:shadow-md focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none',
         agent.status === 'offline' && 'opacity-80',
+        paused && 'border-dashed',
         className,
       )}
     >
@@ -78,6 +83,12 @@ export function AgentTile({
           <Icon aria-hidden="true" className="size-3 shrink-0" />
           <span className="truncate">{line}</span>
         </span>
+        {paused && (
+          <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-warning-soft-fg">
+            <PauseCircle aria-hidden="true" className="size-3 shrink-0" />
+            Paused
+          </span>
+        )}
         {agent.workstation && (
           <span className="block truncate text-[11px] text-subtle">{agent.workstation.name}</span>
         )}

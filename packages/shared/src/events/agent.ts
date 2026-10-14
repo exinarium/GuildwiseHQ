@@ -91,6 +91,20 @@ export const agentEvents = [
   ),
   defineEvent('AgentRetired', z.object({ agentId: Id, by: Id, releasedCardIds: z.array(Id) })),
   defineEvent('AgentReset', z.object({ agentId: Id })),
+  /** The agent takes no new work (a running shift finishes). By the manager, or by the CEO on the owner's behalf. */
+  defineEvent(
+    'AgentPaused',
+    z.object({
+      agentId: Id,
+      by: Id.optional(),
+      reason: z.string().max(500).default(''),
+      viaCeo: z.boolean().default(false),
+    }),
+  ),
+  defineEvent(
+    'AgentResumed',
+    z.object({ agentId: Id, by: Id.optional(), viaCeo: z.boolean().default(false) }),
+  ),
   /** "Re-roll face": a new seed (and optionally another style) for the agent's generated face. */
   defineEvent(
     'AgentAvatarRerolled',

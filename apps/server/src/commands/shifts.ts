@@ -23,6 +23,8 @@ import {
   WorkflowResolveError,
 } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
+import { applyCeoReport } from '../ceo/report.ts';
+import { endCeoShift } from '../ceo/shift.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -167,6 +169,7 @@ export async function applyShiftReport(
   if (shift.kind === 'devops') return applyDevopsReport(ctx, tx, ws, msg, shift);
   if (shift.kind === 'question') return applyQuestionReport(ctx, tx, ws, msg.report, shift);
   if (shift.kind === 'ba_task') return applyBaTaskReport(ctx, tx, ws, msg, shift);
+  if (shift.kind === 'ceo') return applyCeoReport(ctx, tx, ws, msg, shift);
   if (!shift.card_id) return { accepted: false, error: 'this shift has no card to report on' };
   const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [shift.card_id]);
   if (!card) return { accepted: false, error: 'card not found' };
@@ -772,6 +775,10 @@ export async function applyShiftRejected(
     await ctx.store.append(await endBaTaskShift(tx, s, 'rejected'), { tx });
     return;
   }
+  if (s.kind === 'ceo') {
+    await ctx.store.append(await endCeoShift(tx, s, 'rejected'), { tx });
+    return;
+  }
   const card = s.card_id
     ? await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [s.card_id])
     : undefined;
@@ -887,6 +894,18 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
   if (s.kind === 'ba_task') {
     await ctx.store.append(
       await endBaTaskShift(tx, s, msg.outcome, {
+        durationMs: msg.durationMs,
+        usage: msg.usage,
+        exitCode: msg.exitCode,
+        guardViolations: msg.guardViolations,
+      }),
+      { tx },
+    );
+    return;
+  }
+  if (s.kind === 'ceo') {
+    await ctx.store.append(
+      await endCeoShift(tx, s, msg.outcome, {
         durationMs: msg.durationMs,
         usage: msg.usage,
         exitCode: msg.exitCode,

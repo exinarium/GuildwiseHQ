@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ReviewData, TestEvidence } from '../cards/types.ts';
+import { CeoDoneDataSchema, CeoReportDataSchema } from '../ceo/ipc.ts';
 import { DevopsApprovalDataSchema, DevopsDoneDataSchema } from '../devops/index.ts';
 import { CandidatesDataSchema, DigestDataSchema } from '../feed/index.ts';
 import { AnswerReportSchema, EscalateReportSchema, FinalizeReportDataSchema } from '../intake/index.ts';
@@ -105,6 +106,10 @@ export function outcomeDataSchema(kind: string): z.ZodType {
       return FollowupFailedDataSchema;
     case 'phaseResults':
       return PhaseResultsDataSchema;
+    case 'ceoDone':
+      return CeoDoneDataSchema;
+    case 'ceoReport':
+      return CeoReportDataSchema;
     default:
       return z.record(z.string(), z.unknown());
   }
@@ -231,6 +236,8 @@ export const RpcMethodSchema = z.enum([
   'run.logs',
   'run.ready',
   'run.fail',
+  /** The CEO agent's management verbs (`aom ceo ...`): one method, the op is in the params. */
+  'ceo',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

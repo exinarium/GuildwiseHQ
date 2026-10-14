@@ -11,6 +11,8 @@ import {
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import { projectRole } from '../authz/scope.ts';
+import { buildChatBrief } from '../ceo/brief.ts';
+import { loadCeo } from '../ceo/state.ts';
 import { ownsDevopsMachine, sharesAllowedProject } from '../commands/chats.ts';
 import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../commands/common.ts';
 import { intakeContext } from '../commands/intake.ts';
@@ -97,6 +99,10 @@ export class ChatRelay {
       }) || (await ownsDevopsMachine(ctx.pool, userId, row));
     if (!active || !mayDirect || (row.thread_project_id && roleThread === null))
       return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);
+    // Only the organization Owner talks to the CEO (it holds their rules and acts with their rights).
+    const isCeo = row.role_key === 'ceo';
+    if (isCeo && (await orgRoleOf(ctx.pool, userId, row.org_id)) !== 'owner')
+      return this.fail(userId, msg.threadId, CHAT_ERROR.unknownThread);
     if (this.byThread.has(msg.threadId)) return this.fail(userId, msg.threadId, CHAT_ERROR.busy);
     // Nothing is queued: an offline workstation is reported immediately and the message is not saved.
     if (row.status !== 'active' || !row.workstation_id || !ctx.services.runners.isOnline(row.workstation_id))
@@ -172,7 +178,7 @@ export class ChatRelay {
       // them); the DevOps engineer reads anywhere anyway.
       // The business analyst never reads code (#47): the Architect investigates the repositories, the BA specifies. A BA chat
       // gets no repository at all, neither the project's, the reference repositories nor a card's worktree.
-      const readsCode = row.role_key !== BA_ROLE_KEY;
+      const readsCode = row.role_key !== BA_ROLE_KEY && !isCeo;
       const readRepos: ReadRepo[] =
         row.thread_project_id && readsCode
           ? [
@@ -201,8 +207,10 @@ export class ChatRelay {
         projectId: row.thread_project_id,
         workstationId: row.workstation_id,
       });
+      const ceoState = isCeo ? await loadCeo(ctx.pool, row.org_id) : undefined;
       const context: ChatContext = {
         orgId: row.org_id,
+        ...(ceoState ? { ceo: { brief: await buildChatBrief(ctx, ceoState, row) } } : {}),
         ...(row.thread_project_id ? { projectId: row.thread_project_id, projectKey: row.project_key } : {}),
         ...(row.thread_card_id ? { cardId: row.thread_card_id, cardRef: row.card_ref } : {}),
         ...(row.thread_card_id && typeof row.card_external_ref === 'string' && row.card_external_ref
@@ -223,7 +231,9 @@ export class ChatRelay {
         {
           chatId,
           threadId: msg.threadId,
-          agent: await agentSpecFor(ctx, row),
+          agent: ceoState
+            ? { ...(await agentSpecFor(ctx, row)), ...ceoState.settings.models.chat }
+            : await agentSpecFor(ctx, row),
           message: msg.body,
           ...(prior?.sid ? { resumeSessionId: prior.sid as string } : {}),
           context,

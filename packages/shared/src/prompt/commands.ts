@@ -67,6 +67,10 @@ export function commandForOutcome(outcome: BriefOutcome): string {
       return 'aom batch skip --note "<why this ticket needs no card>"';
     case 'batch_fail':
       return 'aom batch fail --note "<why this ticket cannot be turned into cards>"';
+    case 'ceo_done':
+      return 'aom ceo done --summary "<what you decided, recommended and left for the owner>"';
+    case 'ceo_report':
+      return 'aom ceo report --summary-file <report.md>';
     case 'phase_results':
       return 'aom phase results --summary-file <report.md>';
     default:

@@ -7,6 +7,7 @@ import {
   type ServerToRunner,
   streamId,
 } from '@aom/shared';
+import { ceoRpc } from '../ceo/gateway.ts';
 import type { ChatTerminal } from '../chat/relay.ts';
 import { baTaskRpc, endBaTaskShift } from '../commands/ba-tasks.ts';
 import { attachmentRpc } from '../commands/card-attachments.ts';
@@ -907,6 +908,10 @@ export class RunnerHandlers {
       if (msg.method === 'ledger.search') return reply(true, await ledgerSearchRpc(ctx, shift, msg.params));
       if (msg.method === 'card.attachments' || msg.method === 'card.attach.begin')
         return reply(...(await attachmentRpc(ctx, shift, msg.method, msg.params)));
+      // The CEO's management verbs (a CEO shift or the owner's chat with the CEO); the gateway checks the agent.
+      if (msg.method === 'ceo') return reply(...(await ceoRpc(ctx, shift, msg.params)));
+      if (shift.kind === 'ceo')
+        return reply(false, undefined, `${msg.method} is not available in a CEO shift: use \`aom ceo\``);
       // A BA task shift is read-only and has no card: only the phase verbs and reading are available.
       if (shift.kind === 'ba_task') return reply(...(await baTaskRpc(ctx, shift, msg.method, msg.params)));
       // A DevOps shift reaches only the card its request was filed for (`aom card show|comment|update`).

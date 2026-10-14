@@ -8,8 +8,8 @@ import { SpendBriefSchema } from './costs.ts';
 export const OrgChartStatusSchema = z.enum(['working', 'blocked', 'idle', 'offline', 'needs_rehome']);
 export type OrgChartStatus = z.infer<typeof OrgChartStatusSchema>;
 
-/** Who answers an agent's question first: a senior of its role, then the BA, then the manager's desk. */
-export const EscalationLevelSchema = z.enum(['peer', 'ba', 'desk']);
+/** Who answers an agent's question first: a senior of its role, then the BA, then the CEO (when there is one), then the manager's desk. */
+export const EscalationLevelSchema = z.enum(['peer', 'ba', 'ceo', 'desk']);
 export type EscalationLevel = z.infer<typeof EscalationLevelSchema>;
 
 export const OrgChartAgentSchema = z.object({
@@ -64,6 +64,8 @@ export const OrgChartSchema = z.object({
   /** Departments in display order (key, label) that have at least one agent. */
   departments: z.array(z.object({ key: z.string(), label: z.string() })),
   agents: z.array(OrgChartAgentSchema),
+  /** The CEO between the Owner and the rest (absent: none). */
+  ceo: z.object({ agentId: z.uuid(), paused: z.boolean() }).nullable().optional(),
   /** The projects of the organization (for the allow-list filter). */
   projects: z.array(z.object({ id: z.uuid(), key: z.string(), name: z.string() })),
   /** Each workstation that hosts agents, with its DevOps engineer (shown apart from the chart). */

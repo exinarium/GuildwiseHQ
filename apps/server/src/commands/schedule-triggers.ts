@@ -107,6 +107,16 @@ async function contextOf(db: Queryable, e: Row, name: TriggerName): Promise<Even
     what = `phase ${ph.ref} (${ph.name}) completed`;
     details.phase = { ref: ph.ref, name: ph.name };
     sourceId = p.phaseId;
+  } else if (name === 'ceo_notification') {
+    if (p.channels?.automation === false) return null;
+    ref = String(p.kind ?? '');
+    what = `CEO notification (${String(p.kind).replace('_', ' ')}): ${String(p.title ?? '').slice(0, 140)}`;
+    sourceId = p.notificationId ?? null;
+    projectId = null;
+    tokens['ceo.kind'] = String(p.kind ?? '');
+    tokens['ceo.title'] = String(p.title ?? '');
+    tokens['ceo.text'] = String(p.text ?? '');
+    details.ceo = { kind: p.kind, title: p.title };
   } else if (name === 'email_received' || name === 'email_reply') {
     // A reply to a thread that has a card is an `email_reply`; every other message is `email_received`.
     if ((name === 'email_reply') !== Boolean(p.replyToCardId) || p.status !== 'received') return null;

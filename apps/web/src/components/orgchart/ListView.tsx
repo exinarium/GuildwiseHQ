@@ -1,5 +1,5 @@
 import type { OrgChart, OrgChartAgent } from '@aom/shared';
-import { escalationText, groupByDepartment } from '../../lib/orgChart.ts';
+import { escalationText, groupByDepartment, isPausedCeo } from '../../lib/orgChart.ts';
 import { AgentTile } from './AgentTile.tsx';
 
 /** The same organization as plain grouped lists: phones, and anyone who prefers reading to looking. */
@@ -66,6 +66,7 @@ export function ListView({
                         agent={a}
                         onOpen={onOpen}
                         escalation={escalationText(a, chart)}
+                        paused={isPausedCeo(chart, a)}
                         className="w-full"
                       />
                       <p className="mt-0.5 pl-1 text-xs text-subtle">
