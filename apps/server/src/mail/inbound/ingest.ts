@@ -11,7 +11,7 @@ import {
 import { orgScope, SYSTEM_ACTOR } from '../../commands/common.ts';
 import type { Ctx } from '../../context.ts';
 import { one, type Queryable, type Row, rows } from '../../db/sql.ts';
-import { withAppendTx } from '../../db/tx.ts';
+import { type Tx, withAppendTx } from '../../db/tx.ts';
 import { bodyText, headerText } from './sanitize.ts';
 import type { NormalizedInbound } from './types.ts';
 
@@ -129,7 +129,7 @@ async function findThread(db: Queryable, route: Route, m: NormalizedInbound): Pr
 /** One desk notice per sender and organisation per day when a sender goes over the per-sender limit. */
 async function raiseSenderNotice(
   ctx: Ctx,
-  tx: Queryable,
+  tx: Tx,
   route: Route,
   sender: string,
   limit: number,

@@ -15,8 +15,8 @@ export async function sendInThread(
   ctx: Ctx,
   orgId: string,
   threadId: string,
-  mail: { to: string; subject: string; text: string },
-): Promise<{ messageId: string }> {
+  mail: { to: string; subject: string; text: string; sentBy?: string },
+): Promise<{ messageId: string; id: string; subject: string; text: string }> {
   const thread = await one(ctx.pool, 'SELECT * FROM mail_threads WHERE id=$1 AND org_id=$2', [
     threadId,
     orgId,
@@ -39,8 +39,8 @@ export async function sendInThread(
   const body = bodyText(mail.text, null, 100_000);
   await ctx.pool.query(
     `INSERT INTO mail_messages (id, org_id, inbox_id, thread_id, direction, message_id, in_reply_to, refs, from_address,
-       to_address, subject, body_text, received_at, status)
-     VALUES ($1,$2,$3,$4,'out',$5,$6,$7,$8,$9,$10,$11,$12,'processed')`,
+       to_address, subject, body_text, received_at, status, sent_by)
+     VALUES ($1,$2,$3,$4,'out',$5,$6,$7,$8,$9,$10,$11,$12,'processed',$13)`,
     [
       id,
       orgId,
@@ -54,15 +54,22 @@ export async function sendInThread(
       subject,
       body.text,
       ctx.clock.now(),
+      mail.sentBy ?? null,
     ],
   );
-  await ctx.mailer.send({
-    to: mail.to,
-    subject,
-    text: body.text,
-    replyTo: replyAddressFor(addr.address, thread.token),
-    orgId,
-    ...headers,
-  });
-  return { messageId: headers.messageId };
+  try {
+    await ctx.mailer.send({
+      to: mail.to,
+      subject,
+      text: body.text,
+      replyTo: replyAddressFor(addr.address, thread.token),
+      orgId,
+      ...headers,
+    });
+  } catch {
+    // Nothing went out: do not keep a sent message in the conversation.
+    await ctx.pool.query('DELETE FROM mail_messages WHERE id=$1', [id]);
+    throw conflict('mail_send_failed', 'the reply could not be sent; try again in a moment');
+  }
+  return { messageId: headers.messageId, id, subject, text: body.text };
 }

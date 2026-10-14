@@ -44,6 +44,7 @@ import { InvestigationPanel, MainSyncNote } from '../components/InvestigationPan
 import { McpUsagePanel } from '../components/McpUsagePanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
+import { CardMailReply } from '../components/MailThreadPanel.tsx';
 import { QaPanel } from '../components/QaPanel.tsx';
 import { ShiftLog } from '../components/ShiftLog.tsx';
 import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
@@ -437,6 +438,7 @@ export function CardDetailView({
             canAttach={permissions.canAttach ?? false}
           />
           <SubworkflowsPanel data={data.subworkflows} />
+          {card.origin === 'email' && <CardMailReply cardId={card.id} />}
           <ThreadPanel cardId={card.id} thread={thread} canComment={permissions.canComment} />
           {data.testing && (
             <FinalizePanel

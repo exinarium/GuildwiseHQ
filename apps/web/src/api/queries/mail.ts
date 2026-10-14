@@ -8,6 +8,9 @@ import {
   MailInboxesResponseSchema,
   type MailMessageDto,
   MailMessagesResponseSchema,
+  type MailReplyRequest,
+  type MailThreadDto,
+  MailThreadDtoSchema,
   type PatchMailInboxRequest,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -63,5 +66,31 @@ export function useInboundHealth() {
     queryKey: ['platform', 'inbound'],
     queryFn: () => get<InboundHealth>('/platform/inbound', InboundHealthSchema),
     refetchInterval: 30_000,
+  });
+}
+
+/** A conversation, found through its card or its id (`kind`). */
+export type ThreadRef = { kind: 'card'; id: string } | { kind: 'thread'; id: string };
+const threadPath = (r: ThreadRef) => (r.kind === 'card' ? `/cards/${r.id}/mail-thread` : `/mail-threads/${r.id}`);
+const replyPath = (r: ThreadRef) => (r.kind === 'card' ? `/cards/${r.id}/mail-reply` : `/mail-threads/${r.id}/reply`);
+
+export function useMailThread(ref: ThreadRef | undefined) {
+  return useQuery({
+    queryKey: ['mail-thread', ref?.kind, ref?.id],
+    queryFn: () => get<MailThreadDto>(threadPath(ref as ThreadRef), MailThreadDtoSchema),
+    enabled: !!ref,
+    retry: false,
+  });
+}
+
+/** Sends a reply as the organisation; refreshes the conversation and the card's thread. */
+export function useMailReply(ref: ThreadRef) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: MailReplyRequest) => post<MailThreadDto>(replyPath(ref), b, MailThreadDtoSchema),
+    onSuccess: (thread) => {
+      qc.setQueryData(['mail-thread', ref.kind, ref.id], thread);
+      for (const key of ['card', 'thread']) void qc.invalidateQueries({ queryKey: [key] });
+    },
   });
 }

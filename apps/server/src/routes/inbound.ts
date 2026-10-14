@@ -1,12 +1,14 @@
 import {
+  CardParamsSchema,
   CreateMailInboxRequestSchema,
   IdParamsSchema,
   MailMessagesQuerySchema,
+  MailReplyRequestSchema,
   PatchMailInboxRequestSchema,
 } from '@aom/shared';
 import multipart from '@fastify/multipart';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { requireOrg, requireSuperAdmin } from '../auth/guards.ts';
+import { requireOrg, requireSuperAdmin, requireUser } from '../auth/guards.ts';
 import {
   createInbox,
   inboundHealth,
@@ -15,6 +17,7 @@ import {
   patchInbox,
   rotateInbox,
 } from '../commands/mail-inboxes.ts';
+import { getMailThread, replyToMailThread } from '../commands/mail-reply.ts';
 import type { Ctx } from '../context.ts';
 import { HttpError, notFound } from '../errors.ts';
 import { countInbound, ingestInbound } from '../mail/inbound/ingest.ts';
@@ -147,6 +150,32 @@ export function inboundRoutes(ctx: Ctx) {
       async (req) => {
         const a = await requireOrg(ctx, req, { min: 'admin' });
         return { messages: await listMessages(ctx, a.orgId, req.params.id, req.query.limit) };
+      },
+    );
+
+    // ---- Conversations and replies as the organisation (#15)
+    app.get('/api/mail-threads/:id', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return getMailThread(ctx, s.user, { threadId: req.params.id });
+    });
+    app.post(
+      '/api/mail-threads/:id/reply',
+      { schema: { params: IdParamsSchema, body: MailReplyRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return replyToMailThread(ctx, s.user, { threadId: req.params.id }, req.body);
+      },
+    );
+    app.get('/api/cards/:id/mail-thread', { schema: { params: CardParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return getMailThread(ctx, s.user, { cardId: req.params.id });
+    });
+    app.post(
+      '/api/cards/:id/mail-reply',
+      { schema: { params: CardParamsSchema, body: MailReplyRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        return replyToMailThread(ctx, s.user, { cardId: req.params.id }, req.body);
       },
     );
 

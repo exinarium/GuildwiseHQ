@@ -150,6 +150,8 @@ export interface Config {
     secret: string | undefined;
     maxMessageBytes: number;
     ratePerHour: number;
+    /** Per sender address and organisation; 0 = off. */
+    ratePerSenderPerHour: number;
     spamThreshold: number;
   };
   /** Key of the Anthropic API (the public assistant); undefined: the assistant is off. */
