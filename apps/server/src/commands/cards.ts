@@ -21,6 +21,7 @@ import {
   type WorkflowCardView,
   type WorkflowDefinition,
   workflowHasDesignStage,
+  workflowHasIntegrationGuard,
   workflowSupportsInvestigationOnly,
   workflowUsesRepos,
 } from '@aom/shared';
@@ -35,6 +36,7 @@ import { badRequest, conflict, forbidden, notFound, unprocessable } from '../err
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { cardMessage, projectScope, userActor } from './common.ts';
+import { integrationTestsDefault } from './integration-tests.ts';
 import { openLoopAlerts } from './loop-breaker.ts';
 import { NO_VAULT_MESSAGE, projectHasVault } from './vaults.ts';
 
@@ -249,6 +251,9 @@ export async function createCardIn(
   const parsed = parseCardFields(def.fieldSet, { ...emptyFields(def.fieldSet), ...req.fields });
   if (!parsed.success) throw badRequest('invalid_fields', 'card fields are invalid', parsed.error.issues);
   await assertVaultReportPath(tx, project.id, parsed.data);
+  // Integration tests (backlog #59): the card follows the project's Run & test setting unless it was told otherwise.
+  if (workflowHasIntegrationGuard(def) && parsed.data.integrationTests === undefined)
+    parsed.data.integrationTests = await integrationTestsDefault(tx, project.id);
 
   let repoId = req.repoId;
   // A card whose workflow works in the vault (research in a code project) never takes a repository.
@@ -359,11 +364,19 @@ export async function loadManageable(tx: Tx, user: AuthSession['user'], idOrRef:
  * (it is the priority the card gets if it is reopened); a cancelled card takes nothing.
  */
 export function editRefusal(card: Row, patch: PatchCardRequest): { code: string; message: string } | null {
-  const { riskTier, reason: _reason, priority: _priority, completionAction, ...rest } = patch;
+  const {
+    riskTier,
+    reason: _reason,
+    priority: _priority,
+    completionAction,
+    integrationTests,
+    ...rest
+  } = patch;
   const edits = Object.entries(rest).some(([, v]) => v !== undefined);
   if (
     card.status === 'cancelled' ||
-    (card.status === 'done' && (edits || riskTier !== undefined || completionAction !== undefined))
+    (card.status === 'done' &&
+      (edits || riskTier !== undefined || completionAction !== undefined || integrationTests !== undefined))
   )
     return { code: 'card_closed', message: `card is ${card.status}` };
   if (edits) {
@@ -510,6 +523,19 @@ export async function patchCardIn(
   if (patch.dependencies !== undefined) {
     await assertDependencies(tx, card.project_id, patch.dependencies, card.id);
     changes.dependencies = patch.dependencies;
+  }
+  if (patch.integrationTests !== undefined) {
+    const current = (changes.fields ?? card.fields ?? {}) as Record<string, unknown>;
+    if (current.integrationTests !== patch.integrationTests) {
+      // A light key like the priority (any open card), but only until the Test stage has started: after that the
+      // environment, the shift and the suite results exist.
+      const stages = wf?.definition.stages ?? [];
+      const testAt = stages.findIndex((s) => s.id === 'test');
+      const at = stages.findIndex((s) => s.id === card.stage);
+      if (testAt >= 0 && at >= testAt)
+        throw conflict('test_started', `${card.ref} has reached its Test stage: the choice is made`);
+      changes.fields = { ...current, integrationTests: patch.integrationTests };
+    }
   }
   if (Object.keys(changes).length === 0) return card.id as string;
   await ctx.store.append(

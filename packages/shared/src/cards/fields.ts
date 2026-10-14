@@ -124,6 +124,11 @@ export const CodeFieldsSchema = z.object({
   constraints: z.string().optional(),
   linkedLedgerIds: z.array(z.uuid()).optional(),
   testPlan: z.string().optional(),
+  /**
+   * Run the tester's `test` stage (integration and E2E tests against a running environment). Set from the project's
+   * Run & test setting when the card is specified; the BA or manager may switch it off or on per card.
+   */
+  integrationTests: z.boolean().optional(),
   /** Architect report location override: relative path inside the worktree, or `vault:<path>`. */
   reportPath: ReportPathSchema.optional(),
   externalRef: z.string().optional(),
@@ -155,6 +160,7 @@ export const CODE_FIELDS: Record<string, FieldMeta> = {
   constraints: { label: 'Constraints', kind: 'markdown' },
   linkedLedgerIds: { label: 'Linked ledger entries', kind: 'list' },
   testPlan: { label: 'Test plan', kind: 'markdown' },
+  integrationTests: { label: 'Integration tests', kind: 'boolean' },
   reportPath: { label: 'Report path', kind: 'text' },
   externalRef: { label: 'External reference', kind: 'text' },
   mock: { label: 'Mock script', kind: 'json' },

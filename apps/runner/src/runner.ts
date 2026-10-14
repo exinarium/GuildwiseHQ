@@ -74,6 +74,7 @@ import { RunManager } from './runs/manager.ts';
 import { wipeAgent } from './sandbox/sandbox.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { SudoVault } from './secrets/sudo.ts';
+import { TargetSecrets } from './secrets/targets.ts';
 import { ShiftSupervisor, type SupervisorDeps } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
 import { selectDotnet } from './toolchain/dotnet.ts';
@@ -116,6 +117,8 @@ export interface RunnerOptions {
   external?: ExternalAdapters;
   /** Test hook: replaces the tester environment check (docker, deployed app). */
   envChecker?: import('./testing/environment.ts').EnvChecker;
+  /** Test hook: how a deployed target is probed before a tester shift (default: an HTTP request to its URL). */
+  probeTarget?: (url: string) => Promise<string | null>;
   /** Sweep stale worktrees this long after the first connection of the process (default 15 s); a negative value turns it off. */
   startupSweepMs?: number;
   /** How long a sweep waits for the server's answer about live worktrees (default 15 s). */
@@ -184,6 +187,8 @@ export class Runner {
   /** The key pair for secrets the manager sends (the sudo password) and the store that holds the password. */
   readonly keys: RunnerKeys;
   readonly sudo: SudoVault;
+  /** Test accounts for deploy targets (docs/design/run-and-integration-tests.md D11): ciphertext only on disk. */
+  readonly targetSecrets: TargetSecrets;
   /** The integrations of this workstation: status, connect from the web, interactive sign-ins (docs/design/integrations-page.md). */
   readonly integrations: IntegrationService;
   readonly claudeStore: ClaudeCredentialStore;
@@ -256,6 +261,10 @@ export class Runner {
       file: join(this.paths.secrets, 'sudo.enc'),
       keys: this.keys,
       exec: this.exec,
+    });
+    this.targetSecrets = new TargetSecrets({
+      file: join(this.paths.secrets, 'targets.json'),
+      keys: this.keys,
     });
     this.maxConcurrent = opts.config.maxConcurrentShifts;
     this.sync = new SyncService({
@@ -375,10 +384,12 @@ export class Runner {
       reportWaitMs: opts.reportWaitMs,
       exitGraceMs: opts.exitGraceMs,
       envChecker: opts.envChecker,
+      ...(opts.probeTarget ? { probeTarget: opts.probeTarget } : {}),
       sudoRun: (cmd, args) => this.sudo.run(cmd, args),
       git: this.agentGit,
       toolchains: this.toolchains,
       runs: this.runs,
+      targetSecrets: this.targetSecrets,
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
       syncAfterFetch: (t) => this.sync.sync(t, { fetch: false, locked: true }).then(() => undefined),
@@ -743,8 +754,14 @@ export class Runner {
       activeShifts: this.supervisor.activeShifts(),
       maxConcurrentShifts: this.opts.config.maxConcurrentShifts,
       sudoKey: this.keys.publicKey,
-      // Run a branch needs process groups and /proc or ps: not on native Windows.
-      capabilities: platform() === 'win32' ? ['ceo:1'] : ['runs:1', 'runs:2', 'ceo:1'],
+      // Run a branch needs process groups and /proc or ps: not on native Windows. Test environments for cards (`runs:3`) are
+      // for real testers: the mock runtime (CI, demos) runs no tests, so its cards keep the plain test step.
+      capabilities:
+        platform() === 'win32'
+          ? ['ceo:1']
+          : this.opts.config.runtimes.mock?.enabled
+            ? ['runs:1', 'runs:2', 'ceo:1']
+            : ['runs:1', 'runs:2', 'runs:3', 'ceo:1'],
       maxRunEnvironments: this.freshConfig().maxRunEnvironments,
       integrationsVersion: INTEGRATIONS_VERSION,
     };
@@ -1263,6 +1280,13 @@ export class Runner {
         done(true, await this.integrations.handle(command, payload));
       } else if (command === 'sudo.clear') {
         this.sudo.clear();
+        done(true, { cleared: true });
+      } else if (command === 'env.secret.set') {
+        // Ciphertext in, a fact out: the value is never in an answer, a log line or an event.
+        done(true, this.targetSecrets.set(CommandPayloadSchemas['env.secret.set'].parse(payload)));
+      } else if (command === 'env.secret.clear') {
+        const p = CommandPayloadSchemas['env.secret.clear'].parse(payload);
+        this.targetSecrets.clear(p.targetId, p.name);
         done(true, { cleared: true });
       } else {
         done(false, undefined, `command ${command} is not supported by this runner version`);

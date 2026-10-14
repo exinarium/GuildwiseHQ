@@ -40,6 +40,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, runnerActor, SYSTEM_ACTOR, userActor } from './common.ts';
 import { createDevOpsRequestIn, threadMessage } from './devops.ts';
+import { rebaseConflictEvents } from './rebase.ts';
 import { deliver } from './workstation-setup.ts';
 
 /**
@@ -325,7 +326,7 @@ async function staleCheck(ctx: Ctx, tx: Tx, projectId: string): Promise<void> {
 
 // ------------------------------------------------------------------------------------------ start
 
-const branchKey = (sources: Array<{ repoId: string; branch: string }>): string =>
+export const branchKey = (sources: Array<{ repoId: string; branch: string }>): string =>
   createHash('sha1')
     .update(
       sources
@@ -335,7 +336,7 @@ const branchKey = (sources: Array<{ repoId: string; branch: string }>): string =
     )
     .digest('hex');
 
-async function capsOf(db: Queryable, workstationId: string) {
+export async function capsOf(db: Queryable, workstationId: string) {
   const c = await one(
     db,
     'SELECT capabilities, max_run_environments FROM workstation_capabilities WHERE workstation_id=$1',
@@ -345,7 +346,46 @@ async function capsOf(db: Queryable, workstationId: string) {
     runs: ((c?.capabilities ?? []) as string[]).includes('runs:1'),
     /** `runs:2`: plan replay, Restart and the service sandbox. */
     replay: ((c?.capabilities ?? []) as string[]).includes('runs:2'),
+    /** `runs:3`: test environments for cards (rebase of the card branch, forwarders, suites). */
+    testEnv: ((c?.capabilities ?? []) as string[]).includes('runs:3'),
     max: (c?.max_run_environments as number | null) ?? DEFAULT_MAX_RUN_ENVIRONMENTS,
+  };
+}
+
+/**
+ * The saved plan the runner may replay for these repositories and services (no model call), or nothing: no runner
+ * support, no plan, a stale one (marked here when the settings changed), or a plan that does not cover what is asked.
+ */
+export async function findReplay(
+  ctx: Ctx,
+  tx: Tx,
+  projectId: string,
+  workstationId: string,
+  runnerReplays: boolean,
+  repoIds: string[],
+  services: string[],
+): Promise<{ replay?: NonNullable<RunStartPayload['replay']>; planRow?: Row }> {
+  if (!runnerReplays) return {};
+  const planRow = await one(
+    tx,
+    `SELECT * FROM run_plans WHERE project_id=$1 AND workstation_id=$2 AND status='active'`,
+    [projectId, workstationId],
+  );
+  if (!planRow || planRow.settings_hash === null || planRow.build_hash === null) return {};
+  if (planRow.settings_hash !== (await settingsHashOf(tx, projectId))) {
+    await markPlanStale(ctx, tx, planRow, 'settings');
+    return {};
+  }
+  const plan = RunPlanSchema.safeParse(planRow.plan);
+  if (!plan.success || !planCovers(plan.data, repoIds, services)) return {};
+  return {
+    planRow,
+    replay: {
+      planId: planRow.id,
+      version: planRow.version,
+      plan: plan.data,
+      buildHash: planRow.build_hash,
+    },
   };
 }
 
@@ -460,38 +500,15 @@ export async function startRun(
     const summary = `Run ${chosen.map((s) => `${s.repo.name}@${s.branch}`).join(', ')} of ${project.name}${card ? ` (card ${card.ref})` : ''}`;
 
     // A current saved plan is replayed by the runner with no model call; anything else goes through the DevOps engineer.
-    let replay: RunStartPayload['replay'];
-    let replayPlanRow: Row | undefined;
-    if (caps.replay) {
-      const planRow = await one(
-        tx,
-        `SELECT * FROM run_plans WHERE project_id=$1 AND workstation_id=$2 AND status='active'`,
-        [project.id, ws.id],
-      );
-      if (planRow && planRow.settings_hash !== null && planRow.build_hash !== null) {
-        if (planRow.settings_hash !== (await settingsHashOf(tx, project.id))) {
-          await markPlanStale(ctx, tx, planRow, 'settings');
-        } else {
-          const plan = RunPlanSchema.safeParse(planRow.plan);
-          if (
-            plan.success &&
-            planCovers(
-              plan.data,
-              chosen.map((c) => c.repo.id),
-              req.services ?? [],
-            )
-          ) {
-            replayPlanRow = planRow;
-            replay = {
-              planId: planRow.id,
-              version: planRow.version,
-              plan: plan.data,
-              buildHash: planRow.build_hash,
-            };
-          }
-        }
-      }
-    }
+    const { replay, planRow: replayPlanRow } = await findReplay(
+      ctx,
+      tx,
+      project.id,
+      ws.id,
+      caps.replay,
+      chosen.map((c) => c.repo.id),
+      req.services ?? [],
+    );
     await exec(
       tx,
       `INSERT INTO run_environments (id, org_id, project_id, workstation_id, purpose, card_id, sources, services, state,
@@ -591,12 +608,12 @@ export async function startRun(
 // ----------------------------------------------------------------------------------- stop and extend
 
 /** Records the stop request and tells the runner. `by` null: the server itself (TTL, a finished request). */
-async function requestStopIn(
+export async function requestStopIn(
   ctx: Ctx,
   tx: Tx,
   r: Row,
   by: string | null,
-  reason: 'stopped' | 'ttl' | 'failed',
+  reason: 'stopped' | 'ttl' | 'failed' | 'verdict',
 ): Promise<void> {
   const now = ctx.clock.now();
   await exec(
@@ -927,6 +944,27 @@ export async function applyRunStatus(ctx: Ctx, workstationId: string, raw: RunSt
       r.devops_request_id
         ? events.push(threadMessage(r.devops_request_id, r.org_id, { kind: 'system' }, 'system', text))
         : undefined;
+    if (terminal && state === 'failed' && r.purpose === 'test' && msg.rebaseConflictFiles && r.card_id) {
+      // The card branch conflicts with its base branch: no environment can run it, the card goes to Rework (like a tester
+      // shift whose rebase conflicted).
+      const card = await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [r.card_id]);
+      if (card && card.status === 'queued' && !card.claim_id) {
+        const repo = card.repo_id
+          ? await one(tx, 'SELECT working_branch FROM project_repos WHERE id=$1', [card.repo_id])
+          : undefined;
+        const proj = await one(tx, 'SELECT working_branch FROM projects WHERE id=$1', [card.project_id]);
+        events.push(
+          ...rebaseConflictEvents(
+            card,
+            workstationId,
+            card.stage,
+            (repo?.working_branch ?? proj?.working_branch ?? '') as string,
+            msg.rebaseConflictFiles,
+          ),
+        );
+      }
+      await exec(tx, 'UPDATE run_environments SET failure_handled=true WHERE id=$1', [r.id]);
+    }
     if (terminal) {
       events.push({
         streamId: streamId.run(r.id),
@@ -953,7 +991,11 @@ export async function applyRunStatus(ctx: Ctx, workstationId: string, raw: RunSt
     if (events.length) await ctx.store.append(events, { tx });
     return true;
   });
-  if (changed) ctx.services.browser.runChanged(msg.envId);
+  if (changed) {
+    ctx.services.browser.runChanged(msg.envId);
+    // A card may be waiting for its test environment (healthy), or need a new one (failed, stopped): look again.
+    if (['healthy', 'failed', 'stopped'].includes(msg.state)) ctx.services.dispatcher.trigger();
+  }
 }
 
 /** `run.plan.saved` from `aom run ready`: the next version of the project's plan on this workstation. */

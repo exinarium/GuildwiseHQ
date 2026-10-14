@@ -138,6 +138,13 @@ test('setup: a paired mock runner, the organization vault, project ARC on the to
   const proj = await api.post('/api/projects', { data: { key: 'ARC', name: 'Architect project' } });
   expect(proj.status(), await proj.text()).toBe(201);
   projectId = (await proj.json()).project.id;
+  // The Test step runs only when the project switched integration tests on (this runner announces no test environments,
+  // so the tester works from the card's test plan as before).
+  expect(
+    (
+      await api.put(`/api/projects/${projectId}/integration-tests`, { data: { settings: { mode: 'local' } } })
+    ).status(),
+  ).toBe(200);
   // Manual QA after Finalize is on for real projects; this spec runs cards to Done, so it is off here.
   expect((await api.put(`/api/projects/${projectId}/manual-qa`, { data: { enabled: false } })).status()).toBe(
     200,

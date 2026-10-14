@@ -26,6 +26,11 @@ export function toTargetDto(t: Row): DeployTargetDto {
     appUrl: t.app_url,
     notes: t.notes,
     createdAt: iso(t.created_at) as string,
+    testEnabled: t.test_enabled ?? false,
+    production: t.production ?? false,
+    destructiveOk: t.destructive_ok ?? false,
+    testHosts: t.test_hosts ?? [],
+    secretNames: t.secret_names ?? [],
   };
 }
 
@@ -119,6 +124,17 @@ function checkShape(input: {
   }
 }
 
+/** A production target is never tested, and a target the tester tests needs the URL it answers on. */
+function checkTesting(t: { testEnabled: boolean; production: boolean; appUrl?: string | null | undefined }) {
+  if (t.production && t.testEnabled)
+    throw unprocessable(
+      'production_not_tested',
+      'a production target is never tested: switch one of the two off',
+    );
+  if (t.testEnabled && !t.appUrl)
+    throw unprocessable('test_needs_url', 'a target the tester tests needs an app URL (where it answers)');
+}
+
 const nameTaken = async (tx: Queryable, projectId: string, name: string, exceptId?: string) =>
   one(
     tx,
@@ -136,6 +152,11 @@ export async function addDeployTarget(
     const p = await loadVisibleProject(tx, user.id, projectId);
     if (p.status !== 'active') throw conflict('project_archived', 'project is archived');
     checkShape(req);
+    checkTesting({
+      testEnabled: req.testEnabled ?? false,
+      production: req.production ?? false,
+      appUrl: req.appUrl ?? null,
+    });
     if (req.workstationId) await assertMemberWorkstation(tx, projectId, req.workstationId);
     if (await nameTaken(tx, projectId, req.name))
       throw conflict('target_name_taken', `a deploy target named '${req.name}' already exists`);
@@ -156,6 +177,11 @@ export async function addDeployTarget(
               ...(req.appUrl ? { appUrl: req.appUrl } : {}),
               notes: req.notes,
               createdBy: user.id,
+              ...(req.testEnabled !== undefined ? { testEnabled: req.testEnabled } : {}),
+              ...(req.production !== undefined ? { production: req.production } : {}),
+              ...(req.destructiveOk !== undefined ? { destructiveOk: req.destructiveOk } : {}),
+              ...(req.testHosts ? { testHosts: req.testHosts } : {}),
+              ...(req.secretNames ? { secretNames: req.secretNames } : {}),
             },
           },
           actor: userActor(user.id),
@@ -191,6 +217,11 @@ export async function updateDeployTarget(
       merged.host = null;
     }
     checkShape(merged);
+    checkTesting({
+      testEnabled: patch.testEnabled ?? t.test_enabled ?? false,
+      production: patch.production ?? t.production ?? false,
+      appUrl: patch.appUrl !== undefined ? patch.appUrl : t.app_url,
+    });
     if (merged.workstationId && merged.workstationId !== t.workstation_id)
       await assertMemberWorkstation(tx, t.project_id, merged.workstationId);
     if (patch.name && (await nameTaken(tx, t.project_id, patch.name, t.id)))
@@ -202,6 +233,11 @@ export async function updateDeployTarget(
     if (merged.host !== t.host) changes.host = merged.host;
     if (patch.appUrl !== undefined) changes.appUrl = patch.appUrl;
     if (patch.notes !== undefined) changes.notes = patch.notes;
+    if (patch.testEnabled !== undefined) changes.testEnabled = patch.testEnabled;
+    if (patch.production !== undefined) changes.production = patch.production;
+    if (patch.destructiveOk !== undefined) changes.destructiveOk = patch.destructiveOk;
+    if (patch.testHosts !== undefined) changes.testHosts = patch.testHosts;
+    if (patch.secretNames !== undefined) changes.secretNames = patch.secretNames;
     if (Object.keys(changes).length === 0) return;
     await ctx.store.append(
       [

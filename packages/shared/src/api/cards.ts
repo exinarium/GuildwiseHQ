@@ -317,6 +317,8 @@ export const PatchCardRequestSchema = CardChangesSchema.omit({
   completionAction: CompletionAction.nullable().optional(),
   /** Why the risk tier is overridden (required when `riskTier` is sent; `null` clears the override). */
   reason: z.string().trim().min(1).max(1000).optional(),
+  /** Run the tester's integration tests on this card (backlog #59): any open card, until its Test stage starts. */
+  integrationTests: z.boolean().optional(),
 });
 export type PatchCardRequest = z.infer<typeof PatchCardRequestSchema>;
 

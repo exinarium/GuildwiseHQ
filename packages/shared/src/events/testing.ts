@@ -9,7 +9,16 @@ export const TestPlatform = z.enum(['web', 'mobile']);
 export type TestPlatform = z.infer<typeof TestPlatform>;
 
 /** What the test environment of a workstation lacked when a tester shift was about to start (section 13 / spec "Test environment"). */
-export const TestEnvProblem = z.enum(['app_not_deployed', 'docker_missing']);
+export const TestEnvProblem = z.enum([
+  'app_not_deployed',
+  'docker_missing',
+  /** Integration tests are on but no run plan exists for the project on this workstation yet (DevOps works it out). */
+  'run_plan_missing',
+  /** The test environment did not come up (the plan failed) or is gone. */
+  'run_failed',
+  /** Remote mode: the target does not answer. */
+  'target_unreachable',
+]);
 export type TestEnvProblem = z.infer<typeof TestEnvProblem>;
 
 /** Kind of a suite card: spawned after finalize (`full_suite`) or requested by the manager (`regression`). */

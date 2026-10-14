@@ -7,6 +7,7 @@ import {
   TestEvidence,
 } from '../cards/types.ts';
 import { RegressionPlatform, SuiteKind, TestPlatform } from '../events/testing.ts';
+import { TestSuiteResultDtoSchema } from '../runs/integration.ts';
 import { IsoTime } from './common.ts';
 
 /** `POST /api/cards/:id/finalize` (manager). Without a BA (before M7) the manager triggers finalize by hand. */
@@ -77,5 +78,22 @@ export const CardTestingSchema = z.object({
     lastError: z.string().nullable(),
   }),
   suiteKind: SuiteKind.nullable(),
+  /** Integration and E2E suites the tester reported on this card (every report, oldest first; backlog #59). */
+  suiteResults: z.array(TestSuiteResultDtoSchema).optional(),
+  /** The test environment of this card: provisioning, healthy, or kept for inspection after a failure. */
+  testEnvironment: z
+    .object({
+      envId: z.uuid(),
+      state: z.string(),
+      activity: z.string().nullable(),
+      workstationName: z.string(),
+      /** Failed card: the environment is kept until then; `canStop` lets the owner stop it earlier. */
+      keptUntil: IsoTime.nullable(),
+      lastError: z.string().nullable(),
+      commit: z.string().nullable(),
+      urls: z.array(z.string()),
+    })
+    .nullable()
+    .optional(),
 });
 export type CardTesting = z.infer<typeof CardTestingSchema>;

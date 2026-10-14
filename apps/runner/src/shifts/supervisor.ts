@@ -87,9 +87,19 @@ import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../read-repos.ts';
 import { preparePublication } from '../research/publish.ts';
+import { type EnvForwards, startForwards } from '../runs/forward.ts';
 import type { RunManager } from '../runs/manager.ts';
 import { ensureSandbox, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
-import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
+import type { TargetSecrets } from '../secrets/targets.ts';
+import {
+  defaultEnvChecker,
+  type EnvChecker,
+  legacyEnvFileNote,
+  needsTestEnvironment,
+} from '../testing/environment.ts';
+import { environmentNote } from '../testing/environment-note.ts';
+import { probeTargetUrl, targetHosts } from '../testing/remote-target.ts';
+import { testerRpc } from '../testing/tester-env.ts';
 import {
   agentPath,
   describeToolchains,
@@ -186,6 +196,10 @@ export interface SupervisorDeps {
   toolchains?: ToolchainRegistry;
   /** Run a branch (#58): the environments `aom run` of a DevOps `run` request works on. */
   runs?: RunManager;
+  /** Test accounts for deploy targets (the tester of a remote target gets them as a 0600 dotenv file). */
+  targetSecrets?: TargetSecrets;
+  /** Test hook: how a remote target is probed before a tester shift starts (default: an HTTP request). */
+  probeTarget?: (url: string) => Promise<string | null>;
 }
 
 /** The server's answer to a `shift.report`: what the agent is told (and any ledger matches for a question). */
@@ -242,6 +256,8 @@ interface ActiveShift {
   syncMain?: { result: NonNullable<ShiftStartedSyncMain['result']>; commit?: string; files?: string[] };
   /** `origin/<main>` SHAs merged into the card branch this shift: the guard exempts what those merges brought in. */
   mainShas: string[];
+  /** The tester's environment forwarders (Unix sockets to the environment's ports), closed when the shift ends. */
+  forwards?: EnvForwards;
 }
 
 type ShiftStartedSyncMain = {
@@ -354,6 +370,7 @@ export class ShiftSupervisor {
     } finally {
       if (shift.token) this.deps.ipc.revoke(shift.token);
       if (shift.graceTimer) clearTimeout(shift.graceTimer);
+      shift.forwards?.close();
       this.active.delete(msg.shiftId);
       this.forget(msg.shiftId);
     }
@@ -610,12 +627,40 @@ export class ShiftSupervisor {
 
     // Test environment (spec "Testing strategy"): a tester needs the deployed app and Docker. If not, the server
     // raises a DevOps request for the card and parks it (the shift is rejected, nothing started).
-    if (!s.resumed && needsTestEnvironment(msg)) {
-      const check = this.deps.envChecker ?? defaultEnvChecker();
-      const problem = await check({ msg, worktree: s.worktree?.path ?? null, paths });
-      if (problem) {
-        this.reject(msg.shiftId, 'environment_not_ready', problem.detail, undefined, problem);
-        return;
+    const testEnv = msg.brief.environment;
+    // Any card shift of a stage that needs the project's environment gets it (the tester's `test`, a project's own smoke test).
+    const hasEnv = msg.kind === 'card' && !msg.agent.isDevops && !!testEnv;
+    if (!s.resumed && (hasEnv || needsTestEnvironment(msg))) {
+      if (testEnv?.mode === 'local' && testEnv.envId && this.deps.runs) {
+        // The server started this environment for the card (D9): it must be up here, healthy, right now.
+        const view = this.deps.runs.testEnvironment(testEnv.envId);
+        if (!view || view.state !== 'healthy') {
+          const detail = view
+            ? `the test environment is ${view.state}`
+            : 'this runner does not know the test environment (any more)';
+          this.reject(msg.shiftId, 'environment_not_ready', detail, undefined, {
+            problem: 'run_failed',
+            detail,
+          });
+          return;
+        }
+      } else if (testEnv?.mode === 'remote' && testEnv.target) {
+        // A deployed target: nothing is started, but it must answer (the sandbox allows exactly its host).
+        const why = await (this.deps.probeTarget ?? probeTargetUrl)(testEnv.target.url);
+        if (why) {
+          this.reject(msg.shiftId, 'environment_not_ready', why, undefined, {
+            problem: 'target_unreachable',
+            detail: why,
+          });
+          return;
+        }
+      } else {
+        const check = this.deps.envChecker ?? defaultEnvChecker();
+        const problem = await check({ msg, worktree: s.worktree?.path ?? null, paths });
+        if (problem) {
+          this.reject(msg.shiftId, 'environment_not_ready', problem.detail, undefined, problem);
+          return;
+        }
       }
     }
 
@@ -700,6 +745,17 @@ export class ShiftSupervisor {
       texts.instructions += `\n${toolchainNote(describeToolchains(tc.entries))}\n`;
     const signIn = msg.kind === 'card' ? this.deps.mcpSignInNote?.(msg.mcpServers) : undefined;
     if (signIn) texts.instructions += `\n${signIn}\n`;
+    // The tester's environment: where the app is, which suites to run, how to reach it from the sandbox.
+    if (hasEnv && testEnv)
+      texts.instructions += `\n${environmentNote(testEnv, testEnv.envId ? this.deps.runs?.testEnvironment(testEnv.envId) : null)}\n`;
+    else if (msg.kind === 'card' && needsTestEnvironment(msg) && s.worktree) {
+      // `.aom/test-env.json` is retired (D12): still read for this version, then ignored. Say so once, to the owner.
+      const note = legacyEnvFileNote(s.worktree.path);
+      if (note) {
+        this.addProgress(s, 'status', note);
+        this.log.warn(`${msg.brief.card.ref}: ${note}`);
+      }
+    }
     await adapter.writeInstructions(sandbox, texts.instructions);
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
     s.env = {
@@ -714,6 +770,39 @@ export class ShiftSupervisor {
         : {}),
       PATH: tc ? agentPath(tc, paths.bin) : `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
     };
+    // A remote target: its address, and the test accounts declared for it as a 0600 file the tester's tools read.
+    if (hasEnv && testEnv?.mode === 'remote' && testEnv.target) {
+      s.env.AOM_TARGET_URL = testEnv.target.url;
+      s.env.AOM_TARGET_NAME = testEnv.target.name;
+      if (this.deps.targetSecrets && testEnv.target.secretNames.length > 0) {
+        const f = this.deps.targetSecrets.writeFile(
+          join(sandbox.tmp, 'env'),
+          testEnv.target.id,
+          testEnv.target.secretNames,
+        );
+        if (f.path) s.env.AOM_ENV_SECRETS_FILE = f.path;
+        if (f.missing.length > 0)
+          this.addProgress(
+            s,
+            'status',
+            `No value is stored on this workstation for the test account setting(s) ${f.missing.join(', ')} of ${testEnv.target.name}.`,
+          );
+      }
+    }
+    // The environment's ports reach the tester's sandbox through Unix sockets (`aom-env` bridges them to localhost).
+    if (hasEnv && testEnv?.mode === 'local' && testEnv.envId && this.deps.runs) {
+      const runs = this.deps.runs;
+      const envId = testEnv.envId;
+      try {
+        s.forwards = await startForwards(sandbox.tmp, [...runs.testPorts(envId)], () =>
+          runs.testPorts(envId),
+        );
+        s.env.AOM_ENV_FORWARDS = s.forwards.spec;
+        s.env.AOM_ENV_ID = envId;
+      } catch (err) {
+        this.log.warn(`could not start the environment forwarders for ${msg.brief.card.ref}: ${String(err)}`);
+      }
+    }
 
     try {
       s.session = await adapter.start({
@@ -729,6 +818,9 @@ export class ShiftSupervisor {
         ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
         // plugin MCP servers: card shifts only (the DevOps engineer, questions and BA tasks keep their behaviour)
         ...(msg.kind === 'card' && msg.mcpServers?.length ? { mcpServers: msg.mcpServers } : {}),
+        ...(hasEnv && testEnv?.mode === 'remote' && testEnv.target
+          ? { extraAllowedDomains: targetHosts(testEnv.target) }
+          : {}),
         maxShiftMinutes: msg.maxShiftMinutes,
         logFile: `${paths.shiftLogs}/${msg.shiftId}.jsonl`,
       });
@@ -960,6 +1052,8 @@ export class ShiftSupervisor {
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
         if (req.method === 'sudo.run') return this.sudoRun(s, req.params);
         if (req.method.startsWith('run.')) return this.runRpc(s, req.method, req.params);
+        if (req.method.startsWith('env.') || req.method === 'test.suite')
+          return this.testerRpc(s, req.method, req.params);
         if (req.method.startsWith('toolchain.'))
           return toolchainRpc(
             this.deps.toolchains,
@@ -1067,6 +1161,42 @@ export class ShiftSupervisor {
       requestId: s.msg.devops.requestId,
       declared: run.declared ?? [],
     });
+  }
+
+  /**
+   * `aom env ...` and `aom test suite` of a tester (docs/design/run-and-integration-tests.md 4.4, 4.6): only the tester
+   * of a card, only for the environment this shift was briefed with. The runner answers what it knows (state, ports,
+   * logs, restart) and parses reports and logs; the server holds suites and results.
+   */
+  private async testerRpc(
+    s: ActiveShift,
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<IpcRpcResponse> {
+    if (s.msg.kind !== 'card' || s.msg.agent.isDevops)
+      return { ok: false, error: '`aom env` and `aom test suite` are for an agent working a card' };
+    return testerRpc(
+      {
+        env: s.msg.brief.environment,
+        runs: this.deps.runs,
+        sandbox: s.sandbox,
+        worktree: s.worktree?.path,
+        commit: () => this.sourceCommit(s),
+        rpc: (m, p) => this.deps.rpc(s.msg.shiftId, m, p),
+        http: this.deps.http,
+      },
+      method,
+      params,
+    );
+  }
+
+  /** The commit of the card's repository in the running environment (shown in the results table). */
+  private sourceCommit(s: ActiveShift): string | undefined {
+    const envId = s.msg.brief.environment?.envId;
+    if (!envId || !this.deps.runs) return undefined;
+    const view = this.deps.runs.testEnvironment(envId);
+    const own = view?.sources.find((x) => x.repoId === s.msg.worktree?.repoId) ?? view?.sources[0];
+    return own?.commit ?? undefined;
   }
 
   /** `aom card attachments`: copies the attachments of the shift's card again (the server says which ones it may read). */

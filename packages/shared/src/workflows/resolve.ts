@@ -115,3 +115,7 @@ export const workflowHasDesignStage = (def: Pick<WorkflowDefinition, 'stages'>):
 /** Does the workflow end an investigation-only card at Finalize (an outcome guarded by `investigationOnly`)? */
 export const workflowSupportsInvestigationOnly = (def: Pick<WorkflowDefinition, 'stages'>): boolean =>
   def.stages.some((s) => s.outcomes.some((o) => o.when?.field === 'investigationOnly'));
+
+/** Does the workflow have a stage guarded by the card's `integrationTests` field (code v4: the tester's `test` stage)? */
+export const workflowHasIntegrationGuard = (def: Pick<WorkflowDefinition, 'stages'>): boolean =>
+  def.stages.some((s) => s.when?.field === 'integrationTests');

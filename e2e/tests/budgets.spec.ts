@@ -89,6 +89,13 @@ test('setup: a runner, project BUD on the toy repo, a builder and a reviewer', a
   const proj = await api.post('/api/projects', { data: { key: 'BUD', name: 'Budget project' } });
   expect(proj.status(), await proj.text()).toBe(201);
   projectId = (await proj.json()).project.id;
+  // The Test step runs only when the project switched integration tests on (this runner announces no test environments,
+  // so the tester works from the card's test plan as before).
+  expect(
+    (
+      await api.put(`/api/projects/${projectId}/integration-tests`, { data: { settings: { mode: 'local' } } })
+    ).status(),
+  ).toBe(200);
   const add = await api.post(`/api/projects/${projectId}/repos`, {
     data: { name: 'toy', remoteUrl: paths.origin, workingBranch: 'main' },
   });

@@ -143,6 +143,7 @@ export const PROJECTION_TABLES = [
   'project_environments',
   'environment_changes',
   'test_runs',
+  'test_suite_results',
   'schedules',
   'schedule_runs',
   'schedule_attempts',

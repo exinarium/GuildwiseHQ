@@ -1,6 +1,7 @@
 import type { CardTesting, RelatedCard } from '@aom/shared';
 import { effectiveCompletionAction } from '../commands/completion.ts';
 import { mergeGate } from '../commands/finalize.ts';
+import { suiteResultsOf } from '../commands/integration-tests.ts';
 import type { Ctx } from '../context.ts';
 import { iso, type Row, rows } from '../db/sql.ts';
 
@@ -31,6 +32,14 @@ export async function cardTesting(ctx: Ctx, card: Row, canManage: boolean): Prom
   const action = ((card.finalize_action === 'none' ? null : card.finalize_action) ??
     (await effectiveCompletionAction(ctx.pool, card)) ??
     null) as CardTesting['finalize']['action'];
+  const env = (
+    await rows(
+      ctx.pool,
+      `SELECT e.*, w.name AS workstation_name FROM run_environments e JOIN workstations w ON w.id = e.workstation_id
+        WHERE e.card_id=$1 AND e.purpose='test' ORDER BY e.created_at DESC LIMIT 1`,
+      [card.id],
+    )
+  )[0];
   const open_ = card.stage === 'finalize' && card.status === 'queued' && !card.claim_id;
   return {
     testRuns: runs.map((r) => ({
@@ -58,5 +67,25 @@ export async function cardTesting(ctx: Ctx, card: Row, canManage: boolean): Prom
       lastError: card.finalize_error ?? null,
     },
     suiteKind: card.origin === 'full_suite' || card.origin === 'regression' ? card.origin : null,
+    suiteResults: await suiteResultsOf(ctx.pool, card.id),
+    testEnvironment: env
+      ? {
+          envId: env.id,
+          state: env.state,
+          activity: env.activity ?? null,
+          workstationName: env.workstation_name,
+          // kept for inspection after a failure: it ends at `expires_at`
+          keptUntil:
+            env.verdict_at && env.expires_at && !['stopped', 'failed'].includes(env.state)
+              ? (iso(env.expires_at) as string)
+              : null,
+          lastError: env.last_error ?? null,
+          commit:
+            ((env.sources ?? []) as Array<{ repoId: string; commit?: string | null }>).find(
+              (s) => s.repoId === card.repo_id,
+            )?.commit ?? null,
+          urls: ((env.services_status ?? []) as Array<{ urls?: string[] }>).flatMap((s) => s.urls ?? []),
+        }
+      : null,
   };
 }

@@ -65,9 +65,23 @@ async function probeDocker(): Promise<{ ok: boolean; detail: string }> {
   }
 }
 
+/** The file the earlier versions read the health URL from. Retired (D12): the run plan holds it now. */
+export const LEGACY_ENV_FILE = join('.aom', 'test-env.json');
+
+/**
+ * `.aom/test-env.json` is a Guildwise trace in the user's repository (docs/design/run-and-integration-tests.md D12). It is
+ * still read in this version (a deprecation note says so) and ignored in the next; a shift with a test environment never
+ * reads it. Returns the note when the file exists.
+ */
+export function legacyEnvFileNote(worktree: string): string | null {
+  return existsSync(join(worktree, LEGACY_ENV_FILE))
+    ? `${LEGACY_ENV_FILE} is deprecated: the health check now comes from the project's run plan (Project settings > Run & test). The file is still read in this version and ignored in the next; it can be deleted from the repository.`
+    : null;
+}
+
 /**
  * Real check: Docker answers (`docker info`) and, when the repository declares one in `.aom/test-env.json`
- * (`{"healthUrl": "http://localhost:3000/health"}`), the deployed application answers with a 2xx.
+ * (`{"healthUrl": "http://localhost:3000/health"}`; deprecated, optional), the deployed application answers with a 2xx.
  */
 export function defaultEnvChecker(opts: DefaultCheckerOptions = {}): EnvChecker {
   return async (input) => {

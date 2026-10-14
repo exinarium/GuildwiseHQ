@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { ceoPass } from '../ceo/pass.ts';
 import { withCommitAs } from '../commands/commit-as.ts';
+import { testEnvironmentPass } from '../commands/test-environments.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { DISPATCH_LOCK_ID } from '../db/tx.ts';
@@ -242,6 +243,8 @@ export class Dispatcher {
     await baTaskPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
     await ceoPass(this.ctx);
     await testingPass(this.ctx);
+    // Test environments for cards waiting at an environment stage (the tester can claim them once healthy).
+    await testEnvironmentPass(this.ctx);
     for (const r of made) await this.sendShiftStart(r);
     return made;
   }

@@ -97,6 +97,8 @@ export interface EnvState {
   keptUntil?: number;
   /** The environment's private /tmp (the services' HOME lives in it). */
   runTmp?: string;
+  /** A test environment whose card branch conflicted with its base branch while rebasing (the files). */
+  rebaseConflictFiles?: string[];
 }
 
 export const LIVE_ENV_STATES: readonly RunEnvState[] = [

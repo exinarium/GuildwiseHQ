@@ -31,6 +31,12 @@ export const DeployTargetDtoSchema = z.object({
   appUrl: z.string().nullable(),
   notes: z.string(),
   createdAt: IsoTime,
+  /** Testing by the tester (backlog #59, phase 4). Absent from an older server. */
+  testEnabled: z.boolean().optional(),
+  production: z.boolean().optional(),
+  destructiveOk: z.boolean().optional(),
+  testHosts: z.array(z.string()).optional(),
+  secretNames: z.array(z.string()).optional(),
 });
 export type DeployTargetDto = z.infer<typeof DeployTargetDtoSchema>;
 
@@ -41,6 +47,20 @@ export const SshHostSchema = z
   .max(200)
   .regex(/^[A-Za-z0-9_][A-Za-z0-9._@:-]*$/, 'a host alias or user@host without spaces');
 
+/** A hostname the tester's sandbox may reach (no scheme, port or wildcard). */
+export const TestHostSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(
+    /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/,
+    'a hostname such as api.staging.example.com',
+  );
+/** The name of a test account secret: environment-variable shaped. */
+export const SecretNameSchema = z
+  .string()
+  .regex(/^[A-Za-z_][A-Za-z0-9_]{0,99}$/, 'letters, digits and _, such as TEST_USER_PASSWORD');
+
 const DeployTargetBodySchema = z.object({
   name: z.string().trim().min(1).max(120),
   kind: DeployTargetKind,
@@ -48,6 +68,11 @@ const DeployTargetBodySchema = z.object({
   host: SshHostSchema.nullable().optional(),
   appUrl: HttpUrlSchema.nullable().optional(),
   notes: z.string().max(4000).default(''),
+  testEnabled: z.boolean().optional(),
+  production: z.boolean().optional(),
+  destructiveOk: z.boolean().optional(),
+  testHosts: z.array(TestHostSchema).max(10).optional(),
+  secretNames: z.array(SecretNameSchema).max(20).optional(),
 });
 export const CreateDeployTargetRequestSchema = DeployTargetBodySchema;
 export type CreateDeployTargetRequest = z.infer<typeof CreateDeployTargetRequestSchema>;

@@ -238,6 +238,14 @@ export const RpcMethodSchema = z.enum([
   'run.fail',
   /** The CEO agent's management verbs (`aom ceo ...`): one method, the op is in the params. */
   'ceo',
+  /** The tester's environment (#59): `aom env info|logs|restart|suites`, answered by the runner (suites: by the server). */
+  'env.info',
+  'env.logs',
+  'env.restart',
+  'env.suites',
+  'env.suites.propose',
+  /** `aom test suite`: the runner parses the report, attaches the log and sends the result to the server. */
+  'test.suite',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

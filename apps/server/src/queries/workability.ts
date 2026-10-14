@@ -49,7 +49,7 @@ SELECT c.id AS card_id, a.id AS agent_id, ws.id AS workstation_id, a.name, a.cap
        (a.seniority = 'senior') AS is_senior,
        (${E.senior}) AS senior_ok, (${E.notExcluded}) AS not_excluded, (${E.tier}) AS tier_ok,
        (${E.home}) AS home_ok, (${E.worktree}) AS worktree_ok, (${E.repo}) AS repo_ok, (${E.env}) AS env_ok,
-       (${E.vault}) AS vault_ok, (${E.caps}) AS caps_ok,
+       (${E.vault}) AS vault_ok, (${E.caps}) AS caps_ok, (${E.envReady}) AS env_ready,
        (ws.status = 'active' AND wu.status = 'active' AND ws.connected AND ws.last_seen_at > $2
          AND EXISTS (SELECT 1 FROM jsonb_array_elements(ws.runtimes) r
                       WHERE r->>'id' = a.runtime AND COALESCE((r->>'available')::boolean, false))) AS online,
@@ -166,7 +166,7 @@ export async function cardWorkability(ctx: Ctx, cards: Row[]): Promise<Map<strin
     // From here on someone is hired who could take it: the rest is where they are and whether they are up.
     // 5. Placement: the card's repo, vault, worktree home and capabilities on some eligible agent's workstation.
     const placed = free.filter(
-      (a) => a.home_ok && a.worktree_ok && a.repo_ok && a.env_ok && a.vault_ok && a.caps_ok,
+      (a) => a.home_ok && a.worktree_ok && a.repo_ok && a.env_ok && a.vault_ok && a.caps_ok && a.env_ready,
     );
     if (placed.length === 0) return waiting(await placementReason(c, free, roleLower));
     // 6. Online.
@@ -222,6 +222,19 @@ export async function cardWorkability(ctx: Ctx, cards: Row[]): Promise<Map<strin
       }).`;
     }
     if (allFail('vault_ok')) return `no workstation with an eligible ${roleLower} holds the project's vault.`;
+    if (allFail('env_ready')) {
+      const e = (
+        await rows(
+          ctx.pool,
+          `SELECT state, activity FROM run_environments WHERE card_id=$1 AND purpose='test' AND verdict_at IS NULL
+            ORDER BY created_at DESC LIMIT 1`,
+          [c.id],
+        )
+      )[0];
+      return e
+        ? `starting its test environment (${e.activity ?? e.state}).`
+        : 'its test environment has not been started yet (the card waits for a workstation that can start it).';
+    }
     if (allFail('caps_ok'))
       return `no eligible ${roleLower} has the capabilities this card needs (${(c.required_capabilities ?? []).join(', ')}).`;
     return `no workstation can host this card for an eligible ${roleLower}.`;

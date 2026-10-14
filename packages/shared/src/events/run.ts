@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IntegrationSuiteSchema, IntegrationTestsSchema, SuiteStatusSchema } from '../runs/integration.ts';
 import { RunPlanSchema, RunSettingsSchema } from '../runs/plan.ts';
 import { RunEndReasonSchema, RunPurposeSchema, RunSourceSchema } from '../runs/types.ts';
 import { defineEvent, Id } from './define.ts';
@@ -17,6 +18,40 @@ export const runEvents = [
       repoInstructions: z.array(z.object({ repoId: Id, runInstructions: z.string().max(20000) })),
       settings: RunSettingsSchema,
       by: Id,
+    }),
+  ),
+  /** The integration test setting of a project (mode, suites, how long a failed environment is kept, flaky retries). */
+  defineEvent(
+    'ProjectIntegrationTestsSet',
+    z.object({ projectId: Id, settings: IntegrationTestsSchema, by: Id }),
+  ),
+  /** A tester proposed suites it found (`aom env suites propose`); they wait unconfirmed in the project settings. */
+  defineEvent(
+    'IntegrationSuitesProposed',
+    z.object({ projectId: Id, cardId: Id, suites: z.array(IntegrationSuiteSchema).min(1).max(10) }),
+  ),
+  /** A suite ran in a tester's shift (`aom test suite`): feeds the card's table and the pass check. */
+  defineEvent(
+    'TestSuiteReported',
+    z.object({
+      cardId: Id,
+      shiftId: Id,
+      testerAgentId: Id,
+      suite: z.string().min(1).max(60),
+      kind: z.enum(['integration', 'e2e']).nullable(),
+      envMode: z.enum(['local', 'remote']).nullable(),
+      envId: Id.nullable(),
+      deployTargetId: Id.nullable(),
+      commit: z.string().max(64).nullable(),
+      status: SuiteStatusSchema,
+      passed: z.number().int().min(0),
+      failed: z.number().int().min(0),
+      skipped: z.number().int().min(0),
+      durationMs: z.number().int().min(0),
+      attempts: z.number().int().min(1).default(1),
+      failures: z.array(z.string().max(300)).max(10).default([]),
+      attachmentId: Id.nullable().default(null),
+      note: z.string().max(2000).nullable().default(null),
     }),
   ),
   /** The runner saved the steps and services that worked (`aom run ready`). One active plan per project and workstation. */

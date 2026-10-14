@@ -84,6 +84,7 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
     'card_transitions',
     'card_activity',
     'test_runs',
+    'test_suite_results',
     'intake_cards',
     'agent_card_stats',
     'agent_review_log',

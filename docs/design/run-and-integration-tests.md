@@ -244,3 +244,41 @@ targets serve suite/regression cards; Q3 testers keep package registries plus ex
 default per project; Q6 TTL 8 h with Extend, failed test environments kept 1 h. **Q4 differs from the recommendation:**
 the owner said integration and E2E tests are enabled per project, so every existing project starts with mode `off`
 until he switches it on. Production deploys wait for the owner; builds go to local/UAT.
+
+**P3 is built** (backlog #59, capability `runs:3`, migrations 1910 and 1990). Differences and additions: workflow `code` **v4**
+(`code` v3 is the manual QA version, see manual-qa.md) carries the guard and `environment: 'project'`; cards on v1 to v3 move to
+v4 as Review approves them (`ReviewApproved.workflowVersionId` and `.integrationTests`), a card already in Test or beyond is left alone
+(`reviewApprovedPlan`); `integrationTests` is a code card field (`fields.integrationTests`), defaulted from the project setting
+at creation and when the review approves a card that never had it, changed per card with `PATCH /api/cards/:id
+{integrationTests}` until the Test stage starts. The setting is `projects.integration_tests` (event
+`ProjectIntegrationTestsSet`, `GET|PUT /api/projects/:id/integration-tests`, owner only). Provisioning is
+`commands/test-environments.ts` called from the dispatcher pass: `run_environments` gets `verdict_at` (the card's verdict was
+given: the copy is no longer its to use; kept until `expires_at` after a failure) and `failure_handled`; the candidate query's
+`envReady` clause keeps a card at an environment stage back until its environment is healthy on the agent's workstation (not for
+suite and regression cards, cards that opted out, projects not in `local` mode, runners without `runs:3`). A failed environment parks the
+card on its DevOps request (`TestEnvironmentParked`, `env_parks`) and retries; the third failure is a blocking desk item. The
+shift-time problems `run_plan_missing`, `run_failed` and `target_unreachable` are accepted on `shift.rejected`; a tester shift the
+runner turned away for a missing environment starts a new one through the DevOps engineer (forced request). `aom test pass` is
+refused by the server while a confirmed suite lacks a passing result in the shift (`suitesWithoutPass`); a pass after a failure of the
+same suite is recorded as `flaky` (the server counts attempts); a suite flaky three times in seven days raises one desk notice
+(`flaky_suite`) per project and suite. Not built in P3: "Update & restart" for a test environment, automatic restart after a reboot
+or crash (a test environment that lost its services ends as `runner_restarted` and the card gets a new one).
+**Spike (a)** (2026-10-14) passed with a real bubblewrap `--unshare-net` call: `socat` bridging a Unix socket to the host's app,
+`curl` and Playwright Chromium reach `http://localhost:<port>` inside it (RUNNER.md, "Integration tests by the tester").
+
+**P4 is built, except private-address targets** (backlog #59, migration 1920). `deploy_targets` gets `test_enabled`, `production` (CHECK:
+never both), `destructive_ok`, `test_hosts` and `secret_names` (events `DeployTargetAdded/Updated`, `PATCH /api/deploy-targets/:id`;
+a tested target needs its app URL). The project setting `remote` takes such a target (`deployTargetId`; checked on save and again
+when a shift starts: a target switched off meanwhile gives the tester no environment). Remote mode starts nothing: the tester's
+brief carries `environment {mode:'remote', target{url, hosts, destructiveOk, secretNames}, suites}`; the runner probes the URL
+(`target_unreachable` becomes a blocking desk item, no retry loop) and gives the sandbox exactly the target's hostnames. A
+destructive suite on a target without `destructive_ok` is refused unless it is reported `skipped`, and `aom test pass` does not
+wait for it. Test accounts: the durable command `env.secret.set` (payload sealed in the browser like the sudo password, emptied
+when answered, expires after a day; `target_secret_status` keeps names and time only), `PUT /api/workstations/:id/target-secrets`,
+`GET /api/projects/:id/target-secrets`; the web UI is under Project settings > Deploy targets > Testing. Per-card remote testing
+needs the branch deployed to the target first (owner decision Q2: per-card runs are local). **Spike (b)** (2026-10-14): `curl` and
+Chromium honour the sandbox proxy variables, Node's `fetch` needs `NODE_USE_ENV_PROXY=1` (set by `aom-env`) and Playwright's
+`request` fixture needs an explicit `proxy`. **Spike (c)** (an IP literal or a private address in `allowedDomains`) could not be run
+outside a Claude session; the design note in RUNNER.md proposes forwarding private targets through the Unix-socket forwarders
+instead. Not built: private-address targets, macOS testers, copying a plan between workstations, tunnels.
+

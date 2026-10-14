@@ -260,6 +260,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       addDirs?: string[];
       readDirs?: string[];
       toolchainReadDirs?: string[];
+      extraAllowedDomains?: string[];
     },
     cwd: string,
     /** A chat never writes: the repository metadata of its worktree is read-only there, not a writable dir. */
@@ -279,7 +280,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
       realHome: this.realHome(),
       mode: this.cfg.sandbox,
-      extraAllowedDomains: this.cfg.extraAllowedDomains,
+      extraAllowedDomains: [...this.cfg.extraAllowedDomains, ...(input.extraAllowedDomains ?? [])],
       toolchainReadPaths: toolchainReadPaths([
         ...(this.cfg.toolchainPaths ?? []),
         ...(input.toolchainReadDirs ?? []),

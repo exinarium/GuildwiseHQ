@@ -284,17 +284,29 @@ export async function attachmentRpc(
     if (method === 'card.attach.begin') {
       const p = AttachBeginParamsSchema.safeParse(params);
       if (!p.success) return [false, undefined, 'usage: aom card attach <path> [--card <REF>]'];
-      if ((shift.kind !== 'chat' && shift.kind !== 'ba_task') || scope.attachable.size === 0)
+      // A tester's shift may attach the log or report of a suite it ran (`aom test suite --log`) to its own card.
+      const testerOwn =
+        p.data.source === TEST_SUITE_SOURCE &&
+        shift.kind === 'card' &&
+        scope.cards.length === 1 &&
+        scope.cards[0]?.claim_shift_id === shift.id &&
+        (await one(ctx.pool, 'SELECT 1 AS ok FROM agents WHERE id=$1 AND role_key=$2', [
+          shift.agent_id,
+          'tester',
+        ]));
+      if (!testerOwn && ((shift.kind !== 'chat' && shift.kind !== 'ba_task') || scope.attachable.size === 0))
         return [
           false,
           undefined,
           'only the BA, in its intake chat, can attach files to the cards it created',
         ];
-      const card = pick(
-        scope.cards.filter((c) => scope.attachable.has(c.id)),
-        p.data.ref,
-        'attach files to',
-      );
+      const card = testerOwn
+        ? (scope.cards[0] as Row)
+        : pick(
+            scope.cards.filter((c) => scope.attachable.has(c.id)),
+            p.data.ref,
+            'attach files to',
+          );
       if (['done', 'cancelled'].includes(card.status))
         return [false, undefined, `${card.ref} is ${card.status}: attachments can no longer be changed`];
       const name = safeAttachmentName(p.data.name);
@@ -330,6 +342,9 @@ export async function attachmentRpc(
     return [false, undefined, err instanceof Error ? err.message : String(err)];
   }
 }
+
+/** The `source` a tester's suite log carries (`card.attach.begin`): the one case a card shift may attach a file. */
+export const TEST_SUITE_SOURCE = 'test suite';
 
 /** `PUT /api/runner/uploads/:id` from the runner that holds the ticket: stores the bytes. */
 export async function completeUpload(

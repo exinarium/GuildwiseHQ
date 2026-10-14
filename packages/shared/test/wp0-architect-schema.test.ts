@@ -59,6 +59,7 @@ function withInvestigate(): WorkflowDefinition {
     syncMainBefore: true,
     maxShiftMinutes: 90,
     requiredCapabilities: [],
+    environment: 'none',
     outcomes: [
       {
         id: 'handoff',

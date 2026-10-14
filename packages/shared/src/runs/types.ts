@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { RunPlanSchema, RunSettingsSchema } from './plan.ts';
 
 /**
@@ -121,6 +122,18 @@ export const RunStartPayloadSchema = z.object({
   ttlAt: z.iso.datetime(),
   allowDocker: z.boolean().default(false),
   /**
+   * A test environment for a card (#59, D9): before the run worktrees are cut, the runner rebases the card branch onto its
+   * base branch (the `test` stage's `rebaseBefore`) and the environment runs the rebased commit. A conflict fails the start.
+   */
+  rebaseCard: z
+    .object({
+      repoId: z.uuid(),
+      cardWorktreePath: z.string().min(1),
+      baseBranch: z.string().min(1).max(250),
+      commitAs: CommitAsSchema.nullable().optional(),
+    })
+    .optional(),
+  /**
    * A current saved plan (P2): the runner replays it with no model call after it prepared the worktrees. `buildHash` is
    * the hash of the BUILD.md files the plan was made from; when the worktrees' BUILD.md differs the plan is stale.
    * Absent: the DevOps engineer works out how to run (a request is filed with the start).
@@ -180,6 +193,8 @@ export const RunStatusSchema = z.object({
   error: z.string().max(4000).optional(),
   /** For `stopped` and `failed`: why. */
   endReason: RunEndReasonSchema.optional(),
+  /** A test environment whose card branch conflicted with its base branch while rebasing: the files. The card goes to Rework. */
+  rebaseConflictFiles: z.array(z.string().max(500)).max(200).optional(),
 });
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
