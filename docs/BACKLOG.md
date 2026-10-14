@@ -15,24 +15,6 @@ run them, when enabled, against a **local** environment (started on the workstat
 **remote** one (a URL configured in the project). The tester's sandbox then allows exactly that host (localhost ports or
 the remote host), nothing else.
 
-### 67. Support e-mail into the Support console; an inbox for every organisation
-
-**Owner request (2026-10-14):** route support e-mail through inbound mail (SendGrid Inbound Parse, #62) so the console
-updates itself: a customer's e-mail answer to a support mail lands on its request (and reopens an answered or closed
-one), and a new e-mail to the support routing address opens a new request. Support mails then carry a routing Reply-To
-(e.g. `support+<ref>@in.guildwisehq.com`) instead of the support mailbox; staff still get every message by e-mail.
-Every new organisation gets an inbox address automatically when it is created (existing organisations without one get
-one too). Help section and a tooltip on the inbox page explain forwarding (Gmail, Outlook, aliases). DNS (MX for
-`in.guildwisehq.com`) and the SendGrid parse host are set up on deploy day; everything else is built ahead.
-
-**Also (owner, 2026-10-14): model providers on the Trust page and the Privacy policy come from one shared list.** General
-wording first (agents use the provider and account the customer connects; data goes from the customer's workstation to
-that provider under the customer's agreement; Guildwise's servers send it nowhere), then a table generated from the list:
-provider, what it is used for, whose account, link to its data-use terms (today: Anthropic for agents on the customer's
-account, and Anthropic for Guildwise's own landing assistant and blog writer on the platform key). A test fails when a
-runtime/provider exists in the code without an entry. The Privacy policy's sub-processors use the same list, and
-SendGrid replaces Postmark for inbound mail everywhere (Privacy, DEPLOY.md).
-
 ## Direction (owner, 2026-10-13)
 
 Guildwise started as a tool for software teams (the owner built it for his own work), but the aim is **running a whole
@@ -210,6 +192,61 @@ The details of each done item follow this list, by date.
 
 ## 2026-10-14 (done)
 
+### 67. Support e-mail into the Support console; an inbox for every organisation
+
+**Owner request (2026-10-14):** route support e-mail through inbound mail (SendGrid Inbound Parse, #62) so the console
+updates itself: a customer's e-mail answer to a support mail lands on its request (and reopens an answered or closed
+one), and a new e-mail to the support routing address opens a new request. Support mails then carry a routing Reply-To
+(e.g. `support+<ref>@in.guildwisehq.com`) instead of the support mailbox; staff still get every message by e-mail.
+Every new organisation gets an inbox address automatically when it is created (existing organisations without one get
+one too). Help section and a tooltip on the inbox page explain forwarding (Gmail, Outlook, aliases). DNS (MX for
+`in.guildwisehq.com`) and the SendGrid parse host are set up on deploy day; everything else is built ahead.
+
+**Also (owner, 2026-10-14): model providers on the Trust page and the Privacy policy come from one shared list.** General
+wording first (agents use the provider and account the customer connects; data goes from the customer's workstation to
+that provider under the customer's agreement; Guildwise's servers send it nowhere), then a table generated from the list:
+provider, what it is used for, whose account, link to its data-use terms (today: Anthropic for agents on the customer's
+account, and Anthropic for Guildwise's own landing assistant and blog writer on the platform key). A test fails when a
+runtime/provider exists in the code without an entry. The Privacy policy's sub-processors use the same list, and
+SendGrid replaces Postmark for inbound mail everywhere (Privacy, DEPLOY.md).
+
+**Done (2026-10-14).**
+
+*A. Support e-mail routing* (`mail/inbound/support.ts`, `commands/support.ts`, migration 1980). With inbound mail configured (provider and
+domain), support mails to a person (acknowledgement, staff reply) use `Reply-To: support+<token>@<inbound domain>`; the token
+(`support_tickets.reply_token`, 12 random characters) is made on first use and belongs to one request. Inbound mail to that address is added
+to the request as the person's message (reopens answered or closed, staff told by e-mail like an in-app follow-up, attachments listed by name,
+type and size and not kept, stored once per Message-ID). Mail to `support@<inbound domain>` opens a new request (kind question; a sender who
+is a user is linked to the account, and to the organization when they belong to exactly one); the acknowledgement is sent like for the form,
+threaded under their mail. A reply to our support Message-ID from the contact address also finds its request. **Decision:** a token that
+matches no request is a new request (the message to support is kept, not lost). Ignored and counted, never acknowledged: automatic mail,
+spam, failed sender checks, too large, mail from our own addresses or the inbound domain, more than 3 new requests an hour from one address,
+more than 30 follow-ups an hour on one request. Without inbound mail nothing changes. DEPLOY.md names the address to forward
+(`support@guildwisehq.com` to `support@in.guildwisehq.com`). Tests: `apps/server/test/support-inbound.test.ts`.
+
+*B. An inbox for every organization* (`ensureOrgInbox` in `commands/mail-inboxes.ts`, data migration `org-inboxes-2026-10`). A new organization
+(sign-up, accepted invitation) gets a **Main inbox** in the same transaction; the boot migration gives existing organizations without any
+inbox one (event `MailInboxCreated` by the system actor). The address is made from `AOM_INBOUND_DOMAIN` alone, so it exists before DNS. **Decision:**
+with the domain unset nothing is created, and the migration (it runs on every boot and only acts on organizations with no inbox, so it is not
+recorded as done) creates them once the domain is set and the server restarted. Help: USER-GUIDE, help article paragraph, and a **?** tooltip
+on the inbox page (Gmail, Outlook, aliases, customers keep writing to their own address). Tests: `org-inboxes.test.ts`, `mail-inbox.test.tsx`.
+
+*C. Model providers list* (`apps/web/src/legal/providers.ts`). One list (id, name, purpose, whose account, data, terms link, what it covers); Trust
+page and Privacy policy print the general wording and a table made from it through `fillFacts` (`{{modelProvidersIntro}}`, `{{providersTable}}`;
+the legal markdown parser now reads pipe tables). Today: Anthropic for agents (your account, connected on your workstation) and Anthropic for the
+landing assistant and blog writer (Guildwise's platform key, no customer data). `providers.test.ts` fails when a runner adapter, an "ai"
+integration kind, a role's default runtime or a provider SDK in the server has no entry. SendGrid replaces Postmark for inbound mail in the legal
+texts and DEPLOY.md (the Postmark steps are gone; the adapter stays in the code, unused).
+
+*D. Draft with BA* (#15 leftover; migration 1981). **Draft with BA** on the card Reply panel and the thread view asks for a `mail_reply_draft`
+BA task (org level, any BA; `POST /api/cards/:id/mail-draft`, `/api/mail-threads/:id/draft`, same permission as replying). The BA gets the
+conversation (outside text in untrusted blocks), the card and who sends, and is told to write as the organization's own person in plain mail and
+never mention agents, AI or Guildwise; it reports with `aom report mail-draft --text-file` (or `mail-draft-fail`). The server refuses a draft that
+names an agent, "AI agent" or Guildwise (the same check as the send), stores it in `mail_reply_drafts`, and the panel (polling) puts it in the
+reply box to edit; never sent by itself. A send from a draft records `MailReplySent.draftedBy = 'ba'` and uses the draft up; the reveal check still
+runs on send. No BA hired: 409 `no_ba` with a message; no BA takes it in time or two failed attempts: the draft is marked failed. Tests:
+server `mail-draft.test.ts`, shared `mail-draft.test.ts`, runner `ba-task-shift.test.ts` (mail_reply_draft), web `mail-reply.test.tsx`.
+
 ### 66. Azure DevOps tokens of two organisations overwrite each other
 
 `FileTokenStore` (`apps/runner/src/forge/tokens.ts`) keyed tokens by `provider@host`, so two Azure DevOps organisations on
@@ -265,8 +302,8 @@ organisation's name, no footer. It is stored as an outgoing message of the threa
 `MailReplySent` event and a comment on the card. A send failure stores nothing (409 `mail_send_failed`); 30 replies an hour per
 organisation. **Invisible organisation** (owner rule): a reply naming an agent of the organisation, "AI agent", "Guildwise" or
 guildwisehq is refused with 422 `reply_reveals_internals` and the list of what to take out. Tests: server `mail-reply.test.ts`, web `mail-reply.test.tsx`.
-**Not done:** the agent-drafted reply ("Draft with BA" as a BA task and an `aom` command) needs a new BA task kind across the shared
-protocol, the server brief and the runner; left for a follow-up. The reply box takes a draft (`draft`/`draftedBy` props, `MailReplySent.draftedBy`)
+**Draft with BA:** done under #67 (task kind `mail_reply_draft`, `aom report mail-draft`).
+**Was not done here:** the agent-drafted reply ("Draft with BA" as a BA task and an `aom` command). The reply box takes a draft (`draft`/`draftedBy` props, `MailReplySent.draftedBy`)
 so a human reviews it before sending, never auto-sent.
 
 ### 16. "Owner approves" step kind in workflows

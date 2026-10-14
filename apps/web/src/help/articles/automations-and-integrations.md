@@ -86,6 +86,8 @@ An inbox is an address that turns incoming mail into cards. Every organisation g
 
 **Safe by default.** Mail from strangers is information, not instructions. The agents see it inside a marked block that tells them to treat it as data; HTML becomes plain text; attachments are listed but not kept; links are never opened. Cards start as **drafts** for the BA or you. The Owner can **allow-list** a sender (`ana@acme.com`) or a domain (`acme.com`): a card from them can go straight to the agents when the automation is set to *Queued for the agents*, but only when their address could be verified.
 
+**Reply from Guildwise.** On a card made from e-mail, **Reply** answers as your organization. **Draft with BA** has a BA write a draft into the reply box; you read it, change it and send it. It is never sent by itself.
+
 **Replies.** A reply to a mail that became a card is added to the card as a comment (matched by its reply headers or by the address it was sent to), and runs any **When a reply arrives** automation. **Repeats** can limit an automation to one card per conversation, or per subject and sender.
 
 ## Starting a workflow automatically {#starts-automatically}

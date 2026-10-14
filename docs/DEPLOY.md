@@ -184,17 +184,17 @@ Set these in `.env` before starting the server. All have defaults suitable for d
 
 ### Inbound e-mail
 
-Organisations receive e-mail at their own Guildwise addresses (`<name>-<random>@<inbound domain>`). The mail arrives through one provider webhook; **the provider account, the domain and these variables are a one-time platform set-up** (see "Inbound e-mail: one-time platform set-up" below). The first three variables must all be set for organisations to make an inbox.
+Organisations receive e-mail at their own Guildwise addresses (`<name>-<random>@<inbound domain>`). The mail arrives through one provider webhook; **the provider account, the domain and these variables are a one-time platform set-up** (see "Inbound e-mail: one-time platform set-up" below). The first three variables must all be set for the webhook to accept mail. Every organisation gets an inbox address automatically when it is created, and existing organisations get one at the next start (see "An inbox for every organisation" below).
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `AOM_INBOUND_PROVIDER` | unset | `sendgrid` (production, Inbound Parse), `postmark` or `fake` (development and tests: a plain JSON message, same authentication). Unset: inbound e-mail is off and `/api/inbound/mail/*` answers 404 |
+| `AOM_INBOUND_PROVIDER` | unset | `sendgrid` (production, Inbound Parse) or `fake` (development and tests: a plain JSON message, same authentication). A `postmark` adapter still exists in the code but is not used by Guildwise. Unset: inbound e-mail is off and `/api/inbound/mail/*` answers 404 |
 | `AOM_INBOUND_DOMAIN` | unset | The receiving domain organisation addresses are made on, e.g. `in.guildwisehq.com`. Use a sub-domain that carries no other mail |
-| `AOM_INBOUND_SECRET` | unset | Secret (at least 16 characters). The webhook is refused (401) without it: it is the password of the Basic-auth URL given to SendGrid or Postmark (or the `X-AOM-Inbound-Secret` header). Generate with `openssl rand -hex 24` |
-| `AOM_INBOUND_MAX_BYTES` | `10000000` | Largest message (attachments included) that is stored. Bigger ones are recorded as skipped ("too large") with no text. SendGrid delivers at most 30 MB and Postmark 35 MB |
+| `AOM_INBOUND_SECRET` | unset | Secret (at least 16 characters). The webhook is refused (401) without it: it is the password of the Basic-auth URL given to SendGrid (or the `X-AOM-Inbound-Secret` header). Generate with `openssl rand -hex 24` |
+| `AOM_INBOUND_MAX_BYTES` | `10000000` | Largest message (attachments included) that is stored. Bigger ones are recorded as skipped ("too large") with no text. SendGrid delivers at most 30 MB |
 | `AOM_INBOUND_RATE_PER_HOUR` | `60` | Messages one organisation can receive per hour. Over it, messages are recorded as skipped; at twice the limit they are only counted |
 | `AOM_INBOUND_RATE_PER_SENDER_PER_HOUR` | `20` | Messages one sender address can send to an organisation per hour. Over it, messages are recorded as skipped (`sender_rate_limited`) and the Owner gets one desk notice per sender per day. `0` switches the limit off |
-| `AOM_INBOUND_SPAM_THRESHOLD` | `5` | Spam score (SpamAssassin scale, as Postmark reports it) from which a message is skipped as spam |
+| `AOM_INBOUND_SPAM_THRESHOLD` | `5` | Spam score (SpamAssassin scale, as SendGrid reports it) from which a message is skipped as spam |
 
 ### Landing-page assistant ("Ask Guildwise")
 
@@ -299,50 +299,45 @@ these headers. Access logs redact invitation tokens and pairing codes in URLs.
 
 ## Inbound e-mail: one-time platform set-up
 
-> **This is the platform owner's one-time step.** Nothing below is done by organisations: once it is in place, each organisation makes its own address under **Organization > E-mail inbox** and sets up its own allow-list and automations. Until `AOM_INBOUND_PROVIDER`, `AOM_INBOUND_DOMAIN` and `AOM_INBOUND_SECRET` are set, that page says inboxes are not switched on.
+> **This is the platform owner's one-time step.** Nothing below is done by organisations: once it is in place, each organisation already has its inbox address (Organization > E-mail inbox) and sets up its own allow-list and automations. Until `AOM_INBOUND_PROVIDER`, `AOM_INBOUND_DOMAIN` and `AOM_INBOUND_SECRET` are set, that page says inboxes are not switched on.
 
-How it works: Postmark receives mail for the inbound domain and POSTs each message as JSON to `https://<public host>/api/inbound/mail/postmark`. The server checks the secret, finds the organisation by the recipient address, stores the text (never an attachment's content), and the organisation's automations decide what happens. Mail for one organisation is never visible to another: the address decides, and conversations are matched inside the inbox only.
-
-1. **Postmark.** Create an account at postmarkapp.com and a **Server** (for example "Guildwise inbound"). Inbound processing is on the server's **Default Inbound Stream**. The Postmark server token is not used by Guildwise (outgoing mail keeps using `AOM_SMTP_URL`).
-2. **Choose the inbound domain.** A sub-domain used only for receiving, e.g. `in.guildwisehq.com`. Do not use a domain whose mail you already receive elsewhere.
-3. **DNS.** At your DNS host add one MX record for that sub-domain only:
-
-   | Type | Name | Value | Priority |
-   | --- | --- | --- | --- |
-   | MX | `in.guildwisehq.com` | `inbound.postmarkapp.com` | 10 |
-
-   Check with `dig MX in.guildwisehq.com +short` (expect `10 inbound.postmarkapp.com.`). No SPF or DKIM records are needed for receiving. The MX record of the main domain stays as it is.
-4. **Secret.** Generate one (`openssl rand -hex 24`) and put it in the server environment as `AOM_INBOUND_SECRET`.
-5. **Webhook.** In Postmark open the server's **Default Inbound Stream > Settings**. Set the **Inbound domain** to `in.guildwisehq.com` and the **Webhook URL** to
-
-   ```
-   https://aom:<AOM_INBOUND_SECRET>@<your public host>/api/inbound/mail/postmark
-   ```
-
-   (Postmark sends the user name and password as HTTP Basic auth; the user name can be anything, the password is the secret.) Leave **Include raw email content in JSON payload** off. Optionally set Postmark's own spam threshold; Guildwise also skips messages scoring `AOM_INBOUND_SPAM_THRESHOLD` or more.
-6. **Environment.** Set `AOM_INBOUND_PROVIDER=postmark`, `AOM_INBOUND_DOMAIN=in.guildwisehq.com` and `AOM_INBOUND_SECRET=<the secret>`, then restart the server. If a reverse proxy sits in front, let `POST /api/inbound/mail/*` through with bodies up to 36 MB (the bundled `deploy/Caddyfile` sets no limit) and keep forwarding the real client address.
-7. **Check.** Sign in as the platform administrator and open **Platform > Inbound mail**: it should say *Ready*. As an Owner make an inbox under **Organization > E-mail inbox**, send it a mail, and see it listed (status "Skipped: No automation picked it up" until an automation uses the inbox). Postmark's **Inbound > Activity** shows each webhook attempt; use **Retry** there after fixing a mistake.
-
-What the server does with the traffic: a request without the secret is refused (401) before its body is read; a recipient address that belongs to nobody is dropped with a 200 and counted (Platform > Inbound mail shows the counts); problems with a message (spam, a failed DKIM check, an automatic reply or bounce, too large, too many from one organisation) are also answered 200 and recorded for the organisation as "skipped" with the reason, so Postmark does not retry them. A temporary failure on our side answers 5xx and Postmark retries for several hours; the same Message-ID is never stored twice. Rotating an address in the app retires the old one at once. The text of a message is kept for 180 days (`MAIL_RETENTION_DAYS` in `apps/server/src/mail/inbound/prune.ts`, pruned every five minutes); attachments are never stored.
+How it works: SendGrid (the account that already sends our mail) receives mail for the inbound domain and POSTs each message to `https://<public host>/api/inbound/mail/sendgrid`. The server checks the secret, finds the organisation by the recipient address, stores the text (never an attachment's content), and the organisation's automations decide what happens. Mail for one organisation is never visible to another: the address decides, and conversations are matched inside the inbox only. Mail to `support@<inbound domain>` goes to Guildwise's own Support console instead (see "Support e-mail" below).
 
 ### Inbound e-mail through SendGrid Inbound Parse
 
-Outgoing mail already goes through SendGrid (`AOM_SMTP_URL=smtp://apikey:...@smtp.sendgrid.net`); Inbound Parse uses the same account for receiving. The server side is the `sendgrid` provider: SendGrid POSTs `multipart/form-data` to `https://<public host>/api/inbound/mail/sendgrid`. Both Inbound Parse modes are read; use **"POST the raw, full MIME message"**: the server then parses the original message itself, which keeps Message-ID, In-Reply-To and References (replies are threaded by them) and every character set exactly. In the default (parsed) mode SendGrid splits the message for you: threading still works (from the `headers` field) and non-UTF-8 text is decoded with the charset SendGrid states, but SendGrid, not Guildwise, does the parsing.
+Outgoing mail already goes through SendGrid (`AOM_SMTP_URL=smtp://apikey:...@smtp.sendgrid.net`); Inbound Parse uses the same account for receiving. The server side is the `sendgrid` provider: SendGrid POSTs `multipart/form-data`. Both Inbound Parse modes are read; use **"POST the raw, full MIME message"**: the server then parses the original message itself, which keeps Message-ID, In-Reply-To and References (replies are threaded by them) and every character set exactly. In the default (parsed) mode SendGrid splits the message for you: threading still works (from the `headers` field) and non-UTF-8 text is decoded with the charset SendGrid states, but SendGrid, not Guildwise, does the parsing.
 
 1. **Authenticate the domain in SendGrid** (Settings > Sender Authentication) for the domain the parse host belongs to (`guildwisehq.com`), so SendGrid accepts it as yours. Receiving needs no SPF or DKIM records of its own.
-2. **DNS.** Add `MX  in.guildwisehq.com  ->  mx.sendgrid.net  priority 10`. The sub-domain must carry no other mail. Check with `dig MX in.guildwisehq.com +short` (expect `10 mx.sendgrid.net.`).
+2. **DNS.** Add `MX  in.guildwisehq.com  ->  mx.sendgrid.net  priority 10`. The sub-domain must carry no other mail and no other MX. Check with `dig MX in.guildwisehq.com +short` (expect `10 mx.sendgrid.net.`). The MX record of the main domain stays as it is.
 3. **Secret.** `openssl rand -hex 24`, set as `AOM_INBOUND_SECRET`.
 4. **Parse host.** SendGrid > Settings > Inbound Parse > **Add Host & URL**: receiving domain `guildwisehq.com`, subdomain `in`, destination URL
    ```
    https://inbound:<AOM_INBOUND_SECRET>@guildwisehq.com/api/inbound/mail/sendgrid
    ```
    Tick **POST the raw, full MIME message**. Optionally tick **Check incoming emails for spam** (the score is then used against `AOM_INBOUND_SPAM_THRESHOLD`). SendGrid sends the user name and password as HTTP Basic auth; the user name can be anything.
-5. **Environment.** `AOM_INBOUND_PROVIDER=sendgrid`, `AOM_INBOUND_DOMAIN=in.guildwisehq.com`, `AOM_INBOUND_SECRET=<the secret>`; restart. The reverse proxy must let `POST /api/inbound/mail/*` through with bodies up to 36 MB.
-6. **Check.** As in the Postmark steps: **Platform > Inbound mail** says *Ready*; make an inbox under **Organization > E-mail inbox** and send it a mail.
+5. **Environment.** `AOM_INBOUND_PROVIDER=sendgrid`, `AOM_INBOUND_DOMAIN=in.guildwisehq.com`, `AOM_INBOUND_SECRET=<the secret>`; restart. The reverse proxy must let `POST /api/inbound/mail/*` through with bodies up to 36 MB (the bundled `deploy/Caddyfile` sets no limit) and keep forwarding the real client address.
+6. **Check.** Sign in as the platform administrator and open **Platform > Inbound mail**: it should say *Ready*. As an Owner open **Organization > E-mail inbox**, send a mail to the address shown, and see it listed (status "Skipped: No automation picked it up" until an automation uses the inbox). SendGrid's Inbound Parse activity shows each webhook attempt.
 
-Notes. SendGrid does not offer a signed webhook for Inbound Parse (its signed Event Webhook is for delivery events only; to the best of our knowledge, not verified against the current SendGrid documentation), so the Basic-auth secret in the URL is the only credential: keep it long and over HTTPS only, and rotate it by changing it in both places. A message over `AOM_INBOUND_MAX_BYTES` is recorded as skipped ("too large") and answered 200. SendGrid retries a non-2xx answer for up to three days; the same Message-ID is stored once. Attachments are counted (name, type, size), never stored.
+What the server does with the traffic: a request without the secret is refused (401) before its body is read; a recipient address that belongs to nobody is dropped with a 200 and counted (Platform > Inbound mail shows the counts); problems with a message (spam, a failed DKIM check, an automatic reply or bounce, too large, too many from one organisation or one sender) are also answered 200 and recorded for the organisation as "skipped" with the reason, so SendGrid does not retry them. A temporary failure on our side answers 5xx and SendGrid retries for up to three days; the same Message-ID is never stored twice. Rotating an address in the app retires the old one at once. The text of a message is kept for 180 days (`MAIL_RETENTION_DAYS` in `apps/server/src/mail/inbound/prune.ts`, pruned every five minutes); attachments are never stored.
+
+Notes. SendGrid does not offer a signed webhook for Inbound Parse (its signed Event Webhook is for delivery events only; to the best of our knowledge, not verified against the current SendGrid documentation), so the Basic-auth secret in the URL is the only credential: keep it long and over HTTPS only, and rotate it by changing it in both places. A message over `AOM_INBOUND_MAX_BYTES` is recorded as skipped ("too large") and answered 200. Attachments are counted (name, type, size), never stored.
 
 Local development: set `AOM_INBOUND_PROVIDER=fake`, `AOM_INBOUND_DOMAIN=in.localhost.test` and a secret, then `curl -u x:<secret> -H 'content-type: application/json' -d '{"from":"ana@acme.com","to":"<the inbox address>","subject":"Hi","text":"Hello"}' http://localhost:4600/api/inbound/mail/fake`.
+
+### An inbox for every organisation
+
+Every organisation gets a **Main inbox** address (`<slug>-<random>@<inbound domain>`) when it is created (sign-up and accepted invitation), and the boot data migration `org-inboxes-2026-10` gives each existing organisation without any inbox one, in the event log like any other inbox. The address is made from `AOM_INBOUND_DOMAIN` alone, so it exists before DNS and the SendGrid parse host do (mail sent to it just bounces until the MX record is in place). **If `AOM_INBOUND_DOMAIN` is unset, nothing is created; set it and restart, and the migration (which runs on every boot and only acts on organisations with no inbox at all) creates the missing inboxes.** An organisation that already has an inbox, switched off or not, is never given a second one, and an Owner can still make more (up to five) or get a new address. Owner step on deploy day: nothing beyond setting `AOM_INBOUND_DOMAIN` before the first start of this version, so the inboxes are made at that start.
+
+### Support e-mail (Platform > Support)
+
+With inbound mail configured (provider and domain set), Guildwise's own Support console is reachable by e-mail too:
+
+- Every support mail to a person (acknowledgement, staff reply) carries a **Reply-To of `support+<token>@<inbound domain>`**; the token is random and belongs to that one request. The person's answer lands on the request as their message (it reopens an answered or closed request) and the support addresses are told by e-mail, as for an in-app follow-up. An attachment is listed by name, type and size and not kept.
+- Mail to **`support@<inbound domain>`** opens a **new request** from the sender (a sender who is a user is linked to their account and organisation). A `support+<token>` address whose token matches no request is also treated as a new request, so a message to support is never lost. The acknowledgement goes out like it does for the form. Spam, failed sender checks, automatic replies, bounces, mail from our own addresses or the inbound domain, and more than 3 new requests an hour from one address are ignored and counted (never acknowledged), so two automatic senders cannot loop.
+- Staff still get every message by e-mail at the support addresses (Platform > Support, notification addresses).
+- When inbound mail is not configured nothing changes: replies go to the first support address as before.
+
+**Addresses to forward on deploy day.** Make sure `support@guildwisehq.com` exists as a mailbox or alias, then forward it (and `contact@guildwisehq.com` if used) to **`support@in.guildwisehq.com`** at the mail host (no other change: the customer keeps writing to the address they know; replies to our acknowledgements go straight to `support+<token>@in.guildwisehq.com`, which needs no forwarding because the MX record of `in.guildwisehq.com` already points at SendGrid).
 
 ## Database and backups
 
