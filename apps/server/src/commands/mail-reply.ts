@@ -16,6 +16,7 @@ import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { sendInThread } from '../mail/inbound/reply.ts';
 import { cardMessage, orgScope, userActor } from './common.ts';
+import { markDraftUsed } from './mail-draft.ts';
 
 /**
  * Replies to an e-mail conversation from inside Guildwise (#15). Who may answer as the organisation: the Owner and
@@ -53,7 +54,7 @@ type User = AuthSession['user'];
 export type ThreadRef = { threadId: string } | { cardId: string };
 
 /** The thread a reply goes to, found through its card or its id; the viewer must be allowed to see it. */
-async function resolveThread(
+export async function resolveThread(
   ctx: Ctx,
   user: User,
   by: ThreadRef,
@@ -86,7 +87,7 @@ async function resolveThread(
 }
 
 /** The sender of the latest message that was accepted (a skipped message is never answered). */
-async function replyAddress(db: Queryable, threadId: string): Promise<string | null> {
+export async function replyAddress(db: Queryable, threadId: string): Promise<string | null> {
   const m = await one(
     db,
     `SELECT from_address FROM mail_messages
@@ -206,6 +207,8 @@ export async function replyToMailThread(
         ),
       );
     await ctx.store.append(events, { tx });
+    // A reply sent from the BA's draft: the draft is used up (it is not offered again).
+    if (req.draftedBy) await markDraftUsed(tx, thread.id, user.id, ctx.clock.now());
   });
   return getMailThread(ctx, user, by);
 }

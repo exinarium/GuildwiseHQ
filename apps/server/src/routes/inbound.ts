@@ -9,6 +9,7 @@ import {
 import multipart from '@fastify/multipart';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { requireOrg, requireSuperAdmin, requireUser } from '../auth/guards.ts';
+import { currentMailDraft, requestMailDraft } from '../commands/mail-draft.ts';
 import {
   createInbox,
   inboundHealth,
@@ -21,8 +22,8 @@ import { getMailThread, replyToMailThread } from '../commands/mail-reply.ts';
 import type { Ctx } from '../context.ts';
 import { HttpError, notFound } from '../errors.ts';
 import { countInbound } from '../mail/inbound/ingest.ts';
-import { dispatchInbound } from '../mail/inbound/support.ts';
 import { configuredProvider, webhookAuthorised } from '../mail/inbound/providers.ts';
+import { dispatchInbound } from '../mail/inbound/support.ts';
 import { BadInbound, type MultipartBody } from '../mail/inbound/types.ts';
 import { typed } from './util.ts';
 
@@ -179,6 +180,26 @@ export function inboundRoutes(ctx: Ctx) {
         return replyToMailThread(ctx, s.user, { cardId: req.params.id }, req.body);
       },
     );
+
+    // ---- "Draft with BA": a reply draft written by a BA task, reviewed and sent by a person
+    app.get('/api/mail-threads/:id/draft', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return { draft: await currentMailDraft(ctx, s.user, { threadId: req.params.id }) };
+    });
+    app.post('/api/mail-threads/:id/draft', { schema: { params: IdParamsSchema } }, async (req, reply) => {
+      const s = await requireUser(ctx, req);
+      reply.code(202);
+      return { draft: await requestMailDraft(ctx, s.user, { threadId: req.params.id }) };
+    });
+    app.get('/api/cards/:id/mail-draft', { schema: { params: CardParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return { draft: await currentMailDraft(ctx, s.user, { cardId: req.params.id }) };
+    });
+    app.post('/api/cards/:id/mail-draft', { schema: { params: CardParamsSchema } }, async (req, reply) => {
+      const s = await requireUser(ctx, req);
+      reply.code(202);
+      return { draft: await requestMailDraft(ctx, s.user, { cardId: req.params.id }) };
+    });
 
     // ---- The platform's view of the provider (super admin)
     app.get('/api/platform/inbound', async (req) => {

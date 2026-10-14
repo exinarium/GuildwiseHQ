@@ -137,3 +137,19 @@ export const MailReplyRequestSchema = z.object({
   draftedBy: z.enum(['ba']).optional(),
 });
 export type MailReplyRequest = z.infer<typeof MailReplyRequestSchema>;
+
+/** "Draft with BA": a reply draft the BA is writing or has written for the current person to review. */
+export const MAIL_DRAFT_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
+export const MailDraftDtoSchema = z.object({
+  id: z.uuid(),
+  status: z.enum(MAIL_DRAFT_STATUSES),
+  /** The draft, once `done`. Not sent: the person edits it in the reply box and sends it. */
+  text: z.string().nullable(),
+  subject: z.string().nullable(),
+  /** Why no draft came (`failed`). */
+  error: z.string().nullable(),
+  createdAt: IsoTime,
+});
+export type MailDraftDto = z.infer<typeof MailDraftDtoSchema>;
+export const MailDraftResponseSchema = z.object({ draft: MailDraftDtoSchema.nullable() });
+export type MailDraftResponse = z.infer<typeof MailDraftResponseSchema>;

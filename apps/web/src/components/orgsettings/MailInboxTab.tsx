@@ -214,10 +214,14 @@ function InboxCard({ inbox, isOwner }: { inbox: MailInboxDto; isOwner: boolean }
           To use your own address (support@yourcompany.com), set that mailbox to forward every message to the
           address above. Anyone can write to it, so mail from strangers is read as information, never as
           instructions.{' '}
-          <HelpHint article="automations-and-integrations#email-inbox" label="About forwarding mail to this inbox">
-            Your customers keep writing to your own address. Set that mailbox to forward to this one: in Gmail,
-            Settings, Forwarding and POP/IMAP, Add a forwarding address; in Outlook, Settings, Mail, Forwarding;
-            or use a forwarding rule or alias at your mail host. Replies go from your own mailbox as usual.
+          <HelpHint
+            article="automations-and-integrations#email-inbox"
+            label="About forwarding mail to this inbox"
+          >
+            Your customers keep writing to your own address. Set that mailbox to forward to this one: in
+            Gmail, Settings, Forwarding and POP/IMAP, Add a forwarding address; in Outlook, Settings, Mail,
+            Forwarding; or use a forwarding rule or alias at your mail host. Replies go from your own mailbox
+            as usual.
           </HelpHint>
         </p>
         <AllowList inbox={inbox} canEdit={isOwner} />

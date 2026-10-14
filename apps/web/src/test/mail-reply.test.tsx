@@ -114,3 +114,112 @@ describe('reply to an e-mail conversation', () => {
     expect(screen.queryByTestId('card-mail-reply')).toBeNull();
   });
 });
+
+describe('Draft with BA', () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const draft = (status: string, over: Record<string, unknown> = {}) => ({
+    id: '0192f3a0-0000-7000-8000-0000000000a1',
+    status,
+    text: null,
+    subject: null,
+    error: null,
+    createdAt: '2026-10-14T10:10:00.000Z',
+    ...over,
+  });
+  /** Routes the card's thread, its draft (the state is `current`) and the draft/reply posts. */
+  function routes(current: { draft: unknown }) {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const post = init?.method === 'POST';
+      if (String(url).endsWith('/mail-draft')) return json({ draft: post ? draft('queued') : current.draft });
+      if (String(url).endsWith('/mail-reply')) return json(thread());
+      return json(thread());
+    });
+  }
+
+  it('asks for a draft, says the BA is writing, and puts the draft in the box to edit; nothing is sent', async () => {
+    const current: { draft: unknown } = { draft: null };
+    routes(current);
+    const user = userEvent.setup();
+    wrap(<CardMailReply cardId={CARD} />);
+    await screen.findByTestId('mail-message-in');
+    await user.click(screen.getByTestId('mail-draft-ask'));
+    expect(await screen.findByTestId('mail-draft-working')).toHaveTextContent(
+      'nothing is sent until you press Send',
+    );
+    expect(screen.getByTestId('mail-draft-ask')).toBeDisabled();
+    const ask = fetchMock.mock.calls.find(
+      ([u, init]) => init?.method === 'POST' && String(u).endsWith('/mail-draft'),
+    );
+    expect(ask?.[0]).toContain(`/cards/${CARD}/mail-draft`);
+    // the BA finishes: the next poll brings the draft
+    current.draft = draft('done', { text: 'Hello Ana,\n\nI will send someone today.\n\nPat' });
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('mail-reply-text')).toHaveValue(
+          'Hello Ana,\n\nI will send someone today.\n\nPat',
+        ),
+      { timeout: 8000 },
+    );
+    expect(screen.getByTestId('mail-draft-note')).toHaveTextContent('Drafted by the BA');
+    expect(
+      fetchMock.mock.calls.some(([u, init]) => init?.method === 'POST' && String(u).endsWith('/mail-reply')),
+    ).toBe(false);
+    // the person changes it and sends: the reply records that it started from the BA's draft
+    await user.type(screen.getByTestId('mail-reply-text'), ' Thanks.');
+    await user.click(screen.getByTestId('mail-reply-send'));
+    await waitFor(() => expect(screen.getByTestId('mail-reply-sent')).toBeInTheDocument());
+    const send = fetchMock.mock.calls.find(
+      ([u, init]) => init?.method === 'POST' && String(u).endsWith('/mail-reply'),
+    ) as [string, RequestInit];
+    expect(JSON.parse(String(send[1].body))).toEqual({
+      text: 'Hello Ana,\n\nI will send someone today.\n\nPat Thanks.',
+      draftedBy: 'ba',
+    });
+  }, 20_000);
+
+  it('a reply the person wrote themselves is not marked as drafted', async () => {
+    routes({ draft: null });
+    const user = userEvent.setup();
+    wrap(<CardMailReply cardId={CARD} />);
+    await screen.findByTestId('mail-message-in');
+    await user.type(screen.getByTestId('mail-reply-text'), 'On our way.');
+    await user.click(screen.getByTestId('mail-reply-send'));
+    await waitFor(() => expect(screen.getByTestId('mail-reply-sent')).toBeInTheDocument());
+    const send = fetchMock.mock.calls.find(
+      ([u, init]) => init?.method === 'POST' && String(u).endsWith('/mail-reply'),
+    ) as [string, RequestInit];
+    expect(JSON.parse(String(send[1].body))).toEqual({ text: 'On our way.' });
+  });
+
+  it('shows why no draft came and offers it again', async () => {
+    routes({
+      draft: draft('failed', {
+        error: 'No BA was available to write the draft. Try again, or write the reply yourself.',
+      }),
+    });
+    wrap(<CardMailReply cardId={CARD} />);
+    expect(await screen.findByTestId('mail-draft-failed')).toHaveTextContent('write the reply yourself');
+    expect(screen.getByTestId('mail-draft-ask')).toBeEnabled();
+  });
+
+  it('does not overwrite what the person already typed: it offers the draft instead', async () => {
+    const current: { draft: unknown } = { draft: null };
+    routes(current);
+    const user = userEvent.setup();
+    wrap(<CardMailReply cardId={CARD} />);
+    await screen.findByTestId('mail-message-in');
+    await user.type(screen.getByTestId('mail-reply-text'), 'My own words');
+    await user.click(screen.getByTestId('mail-draft-ask'));
+    current.draft = draft('done', { text: 'The BA wrote this.' });
+    const use = await screen.findByTestId('mail-draft-use', {}, { timeout: 8000 });
+    expect(screen.getByTestId('mail-reply-text')).toHaveValue('My own words');
+    await user.click(use);
+    expect(screen.getByTestId('mail-reply-text')).toHaveValue('The BA wrote this.');
+  }, 20_000);
+});

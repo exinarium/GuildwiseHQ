@@ -1,8 +1,8 @@
 import { migrateBlogCiteCleanup } from './blog-cite-cleanup.ts';
 import { migrateBlogLaunch } from './blog-launch.ts';
 import { migrateCardCompletionInherit } from './card-completion-inherit.ts';
-import { migrateOrgInboxes } from './org-inboxes.ts';
 import { migrateNoPersonal } from './no-personal.ts';
+import { migrateOrgInboxes } from './org-inboxes.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
 import { migratePushBranchRetired } from './push-branch-retired.ts';
 import { migrateRestructure } from './restructure.ts';
@@ -24,8 +24,8 @@ export {
   NO_PERSONAL_MIGRATION,
   planNoPersonal,
 } from './no-personal.ts';
-export { type DataMigrationEnv, formatPlan, migrateOrgs, ORGS_MIGRATION, planOrgMigration } from './orgs.ts';
 export { migrateOrgInboxes, ORG_INBOXES_MIGRATION } from './org-inboxes.ts';
+export { type DataMigrationEnv, formatPlan, migrateOrgs, ORGS_MIGRATION, planOrgMigration } from './orgs.ts';
 export {
   migratePushBranchRetired,
   PUSH_BRANCH_RETIRED_MIGRATION,

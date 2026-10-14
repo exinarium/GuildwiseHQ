@@ -1,4 +1,3 @@
-import { ensureOrgInbox } from './mail-inboxes.ts';
 import { randomUUID } from 'node:crypto';
 import {
   type InvitationInfoResponse,
@@ -23,6 +22,7 @@ import { newOrgInvitationMail } from '../mail/templates.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { orgScope, userScope } from './common.ts';
 import { hireDevopsForOrgIn } from './devops.ts';
+import { ensureOrgInbox } from './mail-inboxes.ts';
 import { notifySignup } from './platform-notify.ts';
 
 const INVITE_TTL_MS = 7 * 24 * 3600_000;

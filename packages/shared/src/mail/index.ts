@@ -98,3 +98,5 @@ export const MAIL_STATUS_LABELS = {
   skipped: 'Skipped',
 } as const;
 export type MailMessageStatus = keyof typeof MAIL_STATUS_LABELS;
+
+export * from './draft.ts';

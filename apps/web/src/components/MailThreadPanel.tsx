@@ -1,6 +1,12 @@
 import { MAIL_REPLY_MAX_CHARS, type MailThreadDto } from '@aom/shared';
 import { useState } from 'react';
-import { type ThreadRef, useMailReply, useMailThread } from '../api/queries/mail.ts';
+import {
+  type ThreadRef,
+  useMailDraft,
+  useMailReply,
+  useMailThread,
+  useRequestMailDraft,
+} from '../api/queries/mail.ts';
 import { formatDateTime } from '../lib/time.ts';
 import { Badge, Button, Callout, ErrorBox, ListSkeleton, Panel, TextArea } from './ui.tsx';
 
@@ -53,6 +59,17 @@ export function MailThreadPanel({
   const [text, setText] = useState('');
   const [fromDraft, setFromDraft] = useState<string | undefined>();
   const [sentNote, setSentNote] = useState('');
+  // "Draft with BA": the draft the BA wrote waits here until the person reads it, changes it and sends it.
+  const baDraft = useMailDraft(refTo);
+  const askDraft = useRequestMailDraft(refTo);
+  const [loadedDraft, setLoadedDraft] = useState<string | null>(null);
+  const [usedDraft, setUsedDraft] = useState(false);
+  const found = baDraft.data;
+  if (found?.status === 'done' && found.text && found.id !== loadedDraft && !text.trim()) {
+    setLoadedDraft(found.id);
+    setUsedDraft(true);
+    setText(found.text);
+  }
   if (draft && draft !== fromDraft) {
     setFromDraft(draft);
     setText(draft);
@@ -63,10 +80,14 @@ export function MailThreadPanel({
   const thread = q.data;
   const send = () =>
     reply.mutate(
-      { text: text.trim(), ...(draftedBy && text === draft ? { draftedBy } : {}) },
+      {
+        text: text.trim(),
+        ...((draftedBy && text === draft) || usedDraft ? { draftedBy: draftedBy ?? 'ba' } : {}),
+      },
       {
         onSuccess: () => {
           setText('');
+          setUsedDraft(false);
           setSentNote(`Sent to ${thread.replyTo}`);
         },
       },
@@ -104,6 +125,15 @@ export function MailThreadPanel({
             >
               Send reply
             </Button>
+            <Button
+              type="button"
+              onClick={() => askDraft.mutate()}
+              loading={askDraft.isPending}
+              disabled={found?.status === 'queued' || found?.status === 'running'}
+              data-testid="mail-draft-ask"
+            >
+              Draft with BA
+            </Button>
             {extra?.(thread)}
             {sentNote && (
               <span className="text-sm text-success" role="status" data-testid="mail-reply-sent">
@@ -111,7 +141,39 @@ export function MailThreadPanel({
               </span>
             )}
           </div>
-          <ErrorBox error={reply.error} />
+          {(found?.status === 'queued' || found?.status === 'running') && (
+            <p className="text-sm text-muted" role="status" data-testid="mail-draft-working">
+              The BA is writing a draft. It appears in the box when it is ready; nothing is sent until you
+              press Send.
+            </p>
+          )}
+          {found?.status === 'failed' && (
+            <p className="text-sm text-danger" role="alert" data-testid="mail-draft-failed">
+              {found.error ?? 'The BA could not write a draft.'}
+            </p>
+          )}
+          {found?.status === 'done' && found.text && found.id === loadedDraft && usedDraft && (
+            <p className="text-sm text-muted" data-testid="mail-draft-note">
+              Drafted by the BA. Read it and change what you need before you send it.
+            </p>
+          )}
+          {found?.status === 'done' && found.text && found.id !== loadedDraft && text.trim() && (
+            <div>
+              <Button
+                type="button"
+                size="sm"
+                data-testid="mail-draft-use"
+                onClick={() => {
+                  setLoadedDraft(found.id);
+                  setUsedDraft(true);
+                  setText(found.text as string);
+                }}
+              >
+                Replace what I wrote with the BA's draft
+              </Button>
+            </div>
+          )}
+          <ErrorBox error={reply.error ?? askDraft.error} />
         </form>
       ) : (
         <Callout tone="info" title="You cannot reply here">

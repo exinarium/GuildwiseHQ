@@ -25,6 +25,7 @@ import { agentActor, orgScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { effectiveCompletionAction } from './completion.ts';
 import { intakeRpc } from './intake.ts';
 import { applyBatchReport, batchRpcGuard } from './intake-batch.ts';
+import { applyMailDraftReport, runMailDraftFallback } from './mail-draft.ts';
 import {
   actorOf,
   agentBy,
@@ -118,6 +119,7 @@ export async function applyBaTaskReport(
       error: 'this task is no longer open; there is nothing left to do. Finish now.',
     };
   if (task.kind === 'batch_intake') return applyBatchReport(ctx, tx, shift, task, msg.report);
+  if (task.kind === 'mail_reply_draft') return applyMailDraftReport(ctx, tx, task, msg);
   if (isReporterTaskKind(task.kind)) return applyReporterReport(ctx, tx, _ws, msg, shift, task);
   const phase = await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [task.phase_id]);
   if (!phase) return { accepted: false, error: 'the phase is gone. Finish now.' };
@@ -482,6 +484,7 @@ export async function runBaTaskFallback(ctx: Ctx, tx: Tx, task: Row): Promise<vo
     );
     return;
   }
+  if (task.kind === 'mail_reply_draft') return runMailDraftFallback(ctx, tx, task);
   if (isReporterTaskKind(task.kind)) return runReporterFallback(ctx, tx, task);
   const phase = await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [task.phase_id]);
   const done = (note: string) =>

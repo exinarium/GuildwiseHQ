@@ -488,3 +488,48 @@ describe('batch_intake shifts (#63)', () => {
     expect(reports(h, msg.shiftId)[0]?.report).toMatchObject({ outcomeId: 'batch_fail' });
   }, 60_000);
 });
+
+describe('mail_reply_draft shifts (#67 D)', () => {
+  const draftShift = (hh: Harness, text = 'Where is my invoice for September?') =>
+    taskShift(hh, 'mail_reply_draft', {
+      phase: undefined as never,
+      cards: [],
+      followups: [],
+      outstanding: [],
+      mailDraft: {
+        draftId: uuidv7(),
+        orgName: 'Acme Ltd',
+        senderName: 'Pat Jones',
+        to: 'ana@customer.test',
+        subject: 'Invoice',
+        messages: [
+          { direction: 'in', from: 'ana@customer.test', fromName: 'Ana', at: '2026-10-14T08:00:00Z', text },
+        ],
+      },
+    });
+
+  it('writes the draft to a file and reports it; the instructions say to write as the organisation and never reveal', async () => {
+    h = await startHarness();
+    const msg = draftShift(h);
+    const ended = await run(h, msg);
+    expect(ended.outcome).toBe('reported');
+    const rep = reports(h, msg.shiftId)[0]?.report as any;
+    expect(rep).toMatchObject({ kind: 'outcome', outcomeId: 'mail_draft_done' });
+    expect(rep.data.text).toContain('Where is my invoice for September?');
+    expect(rep.data.text).toContain('Pat');
+    const md = readFileSync(join(h.dataDir, 'agents', msg.agent.agentId, 'claude', 'CLAUDE.md'), 'utf8');
+    expect(md).toContain("Write as Acme Ltd's own person");
+    expect(md).toContain('Never mention agents, AI');
+    expect(md).toContain('aom report mail-draft --text-file');
+    expect(md).toContain('aom report mail-draft-fail');
+    expect(existsSync(worktreeOf(h))).toBe(false);
+    expect(h.server.invalid).toEqual([]);
+  }, 60_000);
+
+  it('can report that no reply can be written', async () => {
+    h = await startHarness();
+    const msg = draftShift(h, 'nothing here [draft_fail]');
+    await run(h, msg);
+    expect(reports(h, msg.shiftId)[0]?.report).toMatchObject({ outcomeId: 'mail_draft_fail' });
+  }, 60_000);
+});

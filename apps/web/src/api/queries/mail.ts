@@ -2,6 +2,8 @@ import {
   type CreateMailInboxRequest,
   type InboundHealth,
   InboundHealthSchema,
+  type MailDraftDto,
+  MailDraftResponseSchema,
   type MailInboxDto,
   MailInboxDtoSchema,
   type MailInboxesResponse,
@@ -92,7 +94,36 @@ export function useMailReply(ref: ThreadRef) {
     mutationFn: (b: MailReplyRequest) => post<MailThreadDto>(replyPath(ref), b, MailThreadDtoSchema),
     onSuccess: (thread) => {
       qc.setQueryData(['mail-thread', ref.kind, ref.id], thread);
+      void qc.invalidateQueries({ queryKey: ['mail-draft', ref.kind, ref.id] });
       for (const key of ['card', 'thread']) void qc.invalidateQueries({ queryKey: [key] });
     },
+  });
+}
+
+const draftPath = (r: ThreadRef) =>
+  r.kind === 'card' ? `/cards/${r.id}/mail-draft` : `/mail-threads/${r.id}/draft`;
+
+/** The reply draft a BA is writing (or has written) for the current person, polled while it is on its way. */
+export function useMailDraft(ref: ThreadRef | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ['mail-draft', ref?.kind, ref?.id],
+    queryFn: async () =>
+      (await get<{ draft: MailDraftDto | null }>(draftPath(ref as ThreadRef), MailDraftResponseSchema)).draft,
+    enabled: !!ref && enabled,
+    retry: false,
+    refetchInterval: (q) => {
+      const status = q.state.data?.status;
+      return status === 'queued' || status === 'running' ? 3000 : false;
+    },
+  });
+}
+
+/** "Draft with BA": asks a BA for a reply draft. Nothing is sent. */
+export function useRequestMailDraft(ref: ThreadRef) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      (await post<{ draft: MailDraftDto | null }>(draftPath(ref), {}, MailDraftResponseSchema)).draft,
+    onSuccess: (draft) => qc.setQueryData(['mail-draft', ref.kind, ref.id], draft),
   });
 }

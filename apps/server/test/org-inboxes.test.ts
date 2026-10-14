@@ -98,14 +98,20 @@ describe('existing organisations (boot data migration)', () => {
     expect(await q('SELECT 1 FROM mail_inboxes')).toHaveLength(0);
 
     // organisation b already has an inbox of its own (switched off): it is not touched
-    await q(`INSERT INTO mail_inboxes (id, org_id, label, enabled, created_at, updated_at)
-             VALUES (gen_random_uuid(), $1, 'Mine', false, now(), now())`, [b.id]);
+    await q(
+      `INSERT INTO mail_inboxes (id, org_id, label, enabled, created_at, updated_at)
+             VALUES (gen_random_uuid(), $1, 'Mine', false, now(), now())`,
+      [b.id],
+    );
     const first = await migrateOrgInboxes(env());
     const created = (await q('SELECT org_id FROM mail_inboxes WHERE label=$1', ['Main inbox'])) as any[];
     expect(first?.created).toBe(created.length);
     expect(created.some((r) => r.org_id === a.id)).toBe(true);
     expect(created.some((r) => r.org_id === b.id)).toBe(false);
-    const addr = (await q(`SELECT a.address FROM mail_addresses a JOIN mail_inboxes i ON i.id=a.inbox_id WHERE i.org_id=$1`, [a.id])) as any[];
+    const addr = (await q(
+      `SELECT a.address FROM mail_addresses a JOIN mail_inboxes i ON i.id=a.inbox_id WHERE i.org_id=$1`,
+      [a.id],
+    )) as any[];
     expect(addr).toHaveLength(1);
     expect(addr[0].address).toMatch(ADDRESS);
 
@@ -113,8 +119,6 @@ describe('existing organisations (boot data migration)', () => {
     expect((await migrateOrgInboxes(env()))?.created).toBe(0);
     expect(await q('SELECT 1 FROM mail_inboxes WHERE org_id=$1', [a.id])).toHaveLength(1);
     // and the event log has it (projection rebuilds reproduce it)
-    expect(
-      (await q(`SELECT 1 FROM events WHERE type='MailInboxCreated'`)).length,
-    ).toBe(created.length);
+    expect((await q(`SELECT 1 FROM events WHERE type='MailInboxCreated'`)).length).toBe(created.length);
   });
 });
