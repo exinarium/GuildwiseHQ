@@ -20,6 +20,18 @@ export type McpTransport = z.infer<typeof McpTransportSchema>;
  * becomes `plugin_atlassian_atlassian`, the tool `mcp__plugin_atlassian_atlassian__search`): the key of a project grant
  * and the `mcp:<name>` permission of a role. `host` is the host name of a remote server (no path, no query).
  */
+/**
+ * Whether the workstation's user is signed in to a server that needs it (OAuth, kept by Claude Code): `signed_in`,
+ * `needs_sign_in`, or `not_needed` (stdio servers). Decided from the presence of a stored sign-in only; older runners
+ * omit it.
+ */
+export const McpAuthStateSchema = z.enum(['signed_in', 'needs_sign_in', 'not_needed']);
+export type McpAuthState = z.infer<typeof McpAuthStateSchema>;
+
+/** What the manager is told to do for a server that needs sign-in (shown on the Workstations page and given to agents). */
+export const mcpSignInInstruction = (server: string, workstation: string): string =>
+  `On ${workstation}, run \`claude\`, then \`/mcp\`, choose ${server}, Authenticate.`;
+
 export const McpServerInfoSchema = z.object({
   name: z.string().min(1).max(120).regex(MCP_NAME_RE),
   plugin: z.string().min(1).max(120),
@@ -28,6 +40,7 @@ export const McpServerInfoSchema = z.object({
   host: z.string().max(200).optional(),
   /** Tool names, only when the runner could list them cheaply (it does not start servers to ask). */
   tools: z.array(z.string().max(200)).max(500).optional(),
+  authState: McpAuthStateSchema.optional(),
 });
 export type McpServerInfo = z.infer<typeof McpServerInfoSchema>;
 

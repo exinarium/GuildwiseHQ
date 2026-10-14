@@ -21,6 +21,10 @@ export interface ProcessSpec {
   logFile?: string;
   /** Appended to the exit event's error when the process fails (e.g. a parsed API error). */
   exitError?: () => string | undefined;
+  /** Did the process fail because the runtime's login does not work? (Given the stderr tail; asked only on a failure.) */
+  authFailure?: (stderrTail: string) => boolean;
+  /** Runs once the process is gone, before the exit event is announced (collecting what the session left behind). */
+  onExit?: (r: { code: number | null; authFailed: boolean }) => void | Promise<void>;
 }
 
 class EventQueue {
@@ -109,11 +113,18 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
           .join(' | ')
           .slice(0, 1000) || undefined
       : undefined;
+    const authFailed = failed && !startFailed && spec.authFailure?.(stderrTail) === true;
+    try {
+      await spec.onExit?.({ code, authFailed });
+    } catch {
+      // best effort
+    }
     queue.push({
       kind: 'exit',
       code,
       ...(r.signal ? { signal: String(r.signal) } : {}),
       ...(startFailed ? { startFailed: true as const } : {}),
+      ...(authFailed ? { authFailed: true as const } : {}),
       ...(error ? { error } : {}),
     });
     queue.end();

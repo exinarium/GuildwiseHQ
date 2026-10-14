@@ -22,6 +22,7 @@ import { applyWorktreeSweepResult } from '../commands/hygiene.ts';
 import { intakeRpc } from '../commands/intake.ts';
 import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
+import { syncClaudeAuthNotice, syncMcpSignInNotices } from '../commands/workstation-notices.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
@@ -174,6 +175,7 @@ export class RunnerHandlers {
         return;
       case 'mcp.servers':
         await applyMcpServersReport(this.ctx, conn.workstationId, msg);
+        await syncMcpSignInNotices(this.ctx, { id: conn.workstationId, userId: conn.userId }, msg).catch(() => {});
         return;
       case 'toolchains.report':
         await applyToolchainsReport(this.ctx, conn.workstationId, msg);
@@ -397,8 +399,14 @@ export class RunnerHandlers {
       JSON.stringify(runtimes),
     ]);
     await alignDevopsRuntime(ctx, conn.workstationId, runtimes);
-    const brief = (rs: Array<{ id: string; available: boolean; sandbox?: string }>) =>
-      rs.map((r) => ({ id: r.id, available: r.available, ...(r.sandbox ? { sandbox: r.sandbox } : {}) }));
+    await syncClaudeAuthNotice(ctx, { id: conn.workstationId, userId: conn.userId }, runtimes).catch(() => {});
+    const brief = (rs: Array<{ id: string; available: boolean; sandbox?: string; auth?: string }>) =>
+      rs.map((r) => ({
+        id: r.id,
+        available: r.available,
+        ...(r.sandbox ? { sandbox: r.sandbox } : {}),
+        ...(r.auth ? { auth: r.auth } : {}),
+      }));
     const now = brief(runtimes);
     if (JSON.stringify(brief(before?.runtimes ?? [])) === JSON.stringify(now)) return;
     await ctx.store.append([
@@ -447,6 +455,9 @@ export class RunnerHandlers {
     await recordRepoCatalog(ctx.pool, conn.workstationId, msg.repoCatalog, now);
     await this.recordVaults(conn, msg.vaults);
     await alignDevopsRuntime(ctx, conn.workstationId, msg.runtimes);
+    await syncClaudeAuthNotice(ctx, { id: conn.workstationId, userId: conn.userId }, msg.runtimes).catch(
+      () => {},
+    );
     await ctx.store.append([
       {
         streamId: streamId.workstation(conn.workstationId),

@@ -1,4 +1,5 @@
 import type { Usage } from '@aom/shared';
+import { isAuthFailureText } from './claude-auth.ts';
 import type { RuntimeEvent } from './types.ts';
 
 type Json = Record<string, unknown>;
@@ -56,6 +57,16 @@ export class ClaudeStreamParser {
   private lastModel: string | undefined;
   private errorSubtype: string | undefined;
   sessionId: string | undefined;
+  private authFailed = false;
+
+  /**
+   * The session failed because the Claude login does not work ("OAuth session expired and could not be refreshed",
+   * "Please run /login", an authentication_error): seen on an error result or on an assistant message flagged as an
+   * authentication failure. Ordinary text about login is not enough.
+   */
+  get authFailure(): boolean {
+    return this.authFailed;
+  }
 
   /**
    * Token use of the session so far: the `result` line's total when the session finished, else the sum of the
@@ -104,6 +115,7 @@ export class ClaudeStreamParser {
         events.push({ kind: 'delta', text: d.text });
       }
     } else if (msg.type === 'assistant' && isObj(msg.message)) {
+      if (msg.error === 'authentication_failed') this.authFailed = true;
       if (typeof msg.message.model === 'string' && msg.message.model && !msg.message.model.startsWith('<'))
         this.lastModel = msg.message.model;
       if (isObj(msg.message.usage) && typeof msg.message.id === 'string')
@@ -136,6 +148,8 @@ export class ClaudeStreamParser {
       events.push({ kind: 'usage', usage: this.usage() });
       const failed = msg.is_error === true || (typeof msg.subtype === 'string' && msg.subtype !== 'success');
       if (failed) this.errorSubtype = typeof msg.subtype === 'string' ? msg.subtype : 'error';
+      if (failed && isAuthFailureText(`${typeof msg.result === 'string' ? msg.result : ''}`))
+        this.authFailed = true;
       if (typeof msg.result === 'string' && msg.result.trim()) {
         events.push({ kind: 'final', text: msg.result });
       }

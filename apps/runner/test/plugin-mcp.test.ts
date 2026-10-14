@@ -281,19 +281,18 @@ describe('the agent config dir', () => {
     expect(Object.keys(mcpJson().mcpServers).sort()).toEqual(['jira', 'plugin:files:local']);
   });
 
-  it('with the default login the credentials stay linked (refreshed tokens write through)', () => {
-    if (process.platform === 'win32') return;
+  it('with the default login the agent gets a private copy (never a symlink)', async () => {
     const a = adapter({ authMode: 'default' }, real);
     const used = a.writeMcpConfig(agent, ['mcp:plugin_atlassian_atlassian'], ['plugin_atlassian_atlassian']);
-    a.linkCredentials(agent, used);
-    expect(lstatSync(join(agent, '.credentials.json')).isSymbolicLink()).toBe(true);
+    await a.linkCredentials(agent, used);
+    expect(lstatSync(join(agent, '.credentials.json')).isSymbolicLink()).toBe(false);
     expect(JSON.parse(readFileSync(join(agent, '.credentials.json'), 'utf8'))).toEqual(CREDS);
   });
 
-  it('with a configured token only the OAuth entries of the servers in use are copied', () => {
+  it('with a configured token only the OAuth entries of the servers in use are copied', async () => {
     const a = adapter({ authMode: 'oauth', oauthToken: 'tok' }, real);
     const used = a.writeMcpConfig(agent, ['mcp:plugin_atlassian_atlassian'], ['plugin_atlassian_atlassian']);
-    a.linkCredentials(agent, used);
+    await a.linkCredentials(agent, used);
     const copy = JSON.parse(readFileSync(join(agent, '.credentials.json'), 'utf8'));
     expect(copy).toEqual({
       mcpOAuth: { 'plugin:atlassian:atlassian|abc123': CREDS.mcpOAuth['plugin:atlassian:atlassian|abc123'] },
@@ -304,10 +303,10 @@ describe('the agent config dir', () => {
     if (process.platform !== 'win32') expect(statSync(join(agent, '.credentials.json')).mode & 0o077).toBe(0);
   });
 
-  it('with a configured token and no server in use no credentials file is left behind', () => {
+  it('with a configured token and no server in use no credentials file is left behind', async () => {
     const a = adapter({ authMode: 'api_key', apiKey: 'k' }, real);
     writeFileSync(join(agent, '.credentials.json'), 'stale');
-    a.linkCredentials(agent, []);
+    await a.linkCredentials(agent, []);
     expect(existsSync(join(agent, '.credentials.json'))).toBe(false);
   });
 });

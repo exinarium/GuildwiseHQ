@@ -143,6 +143,10 @@ export interface SupervisorDeps {
     cmd: VaultWriteCommand,
   ) => Promise<{ written: boolean; committed: boolean; pushed: boolean; paused: boolean }>;
   maxConcurrentShifts?: () => number;
+  /** Runs before a shift is put back for an expired login: the runner tells the server the runtime is paused first. */
+  beforeAuthReject?: () => Promise<void>;
+  /** Text for the agent's instructions about granted MCP servers that need a sign-in here (empty: none). */
+  mcpSignInNote?: (granted: readonly string[] | undefined) => string;
   /** Test/dev override of `maxShiftMinutes` (milliseconds). */
   maxShiftMsOverride?: number;
   /** How long a report waits for `shift.report.result` before being treated as queued. Default 120 s. */
@@ -395,6 +399,7 @@ export class ShiftSupervisor {
       | 'worktree_failed'
       | 'rebase_conflict'
       | 'environment_not_ready'
+      | 'auth_expired'
       | 'internal',
     detail?: string,
     conflictedFiles?: string[],
@@ -561,6 +566,8 @@ export class ShiftSupervisor {
     const tc = this.deps.toolchains?.resolve();
     if (tc && msg.kind !== 'devops')
       texts.instructions += `\n${toolchainNote(describeToolchains(tc.entries))}\n`;
+    const signIn = msg.kind === 'card' ? this.deps.mcpSignInNote?.(msg.mcpServers) : undefined;
+    if (signIn) texts.instructions += `\n${signIn}\n`;
     await adapter.writeInstructions(sandbox, texts.instructions);
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
     s.env = {
@@ -720,6 +727,17 @@ export class ShiftSupervisor {
       });
       if (undone)
         this.log.warn(`rolled back changes a read-only role made in the worktree of shift ${msg.shiftId}`);
+    }
+
+    // The Claude login does not work: not an agent crash. Whatever the agent left is committed above; the card goes back
+    // to the queue without penalty and waits (the runtime is reported expired) until the login works again.
+    if (exit.authFailed && s.reportState === 'none' && !s.stopReason) {
+      this.log.warn(
+        `shift ${msg.shiftId}: the ${msg.agent.runtime} login does not work; the shift is put back`,
+      );
+      await this.deps.beforeAuthReject?.().catch(() => undefined);
+      this.reject(msg.shiftId, 'auth_expired', 'The Claude login on this workstation has expired.');
+      return;
     }
 
     let outcome: 'reported' | 'no_report' | 'stopped' | 'crashed' | 'timeout';

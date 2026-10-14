@@ -10,6 +10,8 @@ export interface RuntimeCapabilities {
   /** Effective OS-sandbox state and why (absent: the runtime has no such concept). */
   sandbox?: 'enforced' | 'unsandboxed' | 'unavailable';
   sandboxReason?: string;
+  /** The runtime's login: `expired` makes it unavailable until it works again (absent: the runtime has no login). */
+  auth?: 'ok' | 'expired';
 }
 
 export interface ShiftStartInput {
@@ -59,6 +61,8 @@ export type RuntimeEvent =
       error?: string;
       /** The process never ran (spawn failed: E2BIG, ENOENT, EACCES, ...): not an agent crash. `error` says why. */
       startFailed?: boolean;
+      /** The runtime's login does not work (expired / not signed in): the shift is put back, not counted as a crash. */
+      authFailed?: boolean;
     };
 
 export interface RuntimeSession {

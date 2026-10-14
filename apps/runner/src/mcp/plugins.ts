@@ -1,7 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve, sep } from 'node:path';
-import { type McpServerInfo, type McpTransport, mcpToolPrefixName } from '@aom/shared';
+import {
+  type McpAuthState,
+  type McpServerInfo,
+  type McpTransport,
+  mcpSignInInstruction,
+  mcpToolPrefixName,
+} from '@aom/shared';
+import { mcpAuthOf, readCredentials } from '../adapters/claude-auth.ts';
 
 /**
  * MCP servers that come from Claude Code plugins, found the way Claude Code finds them: the plugin is installed
@@ -149,11 +156,56 @@ function hostOf(config: Record<string, unknown>): string | undefined {
   }
 }
 
+/**
+ * Reads the stored sign-ins once (`mcpOAuth` of the Claude credentials file; key presence and expiry only, no token value
+ * leaves it) and answers per server: a local (stdio) server needs none; a remote one that carries its own headers (an API
+ * key) needs none; any other remote server is `signed_in` when a stored sign-in exists, else `needs_sign_in`.
+ */
+export function mcpAuthStates(
+  home: string = claudeHome(),
+  now: number = Date.now(),
+): (s: PluginMcpServer) => McpAuthState {
+  const creds = readCredentials(join(home, '.credentials.json'));
+  return (s) => {
+    if (s.transport === 'stdio') return 'not_needed';
+    const headers = s.config.headers;
+    if (isObj(headers) && Object.keys(headers).length > 0) return 'not_needed';
+    if (typeof s.config.headersHelper === 'string') return 'not_needed';
+    return mcpAuthOf(creds, s.key, now);
+  };
+}
+
+/**
+ * The note an agent gets when a plugin MCP server granted to it is not signed in on this workstation: its tools will fail,
+ * so it must not keep retrying, and it tells the manager the exact steps. Empty when nothing needs a sign-in.
+ */
+export function mcpSignInNote(
+  servers: PluginMcpServer[],
+  granted: readonly string[] | undefined,
+  authOf: (s: PluginMcpServer) => McpAuthState,
+  workstation: string,
+): string {
+  const need = servers.filter((s) => granted?.includes(s.name) && authOf(s) === 'needs_sign_in');
+  if (need.length === 0) return '';
+  return [
+    '## MCP servers that need sign-in',
+    '',
+    `These MCP servers are granted to you but are not signed in on this workstation, so their tools will fail: ${need.map((s) => s.server).join(', ')}. Do not retry them. Work without them where you can, and tell the manager exactly this, once:`,
+    ...need.map((s) => `- "${s.server} needs sign-in. ${mcpSignInInstruction(s.server, workstation)}"`),
+    '',
+  ].join('\n');
+}
+
 /** What goes to the server: facts only. No env, headers, args, command, URL or token. */
-export function reportOf(servers: PluginMcpServer[]): McpServerInfo[] {
+export function reportOf(
+  servers: PluginMcpServer[],
+  authOf?: (s: PluginMcpServer) => McpAuthState,
+): McpServerInfo[] {
   return servers.map((s) => {
     const host = s.transport === 'stdio' ? undefined : hostOf(s.config);
+    const authState = authOf ? authOf(s) : undefined;
     return {
+      ...(authState ? { authState } : {}),
       name: s.name,
       plugin: s.plugin,
       server: s.server,

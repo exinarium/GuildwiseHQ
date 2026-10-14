@@ -45,6 +45,8 @@ export interface ChatDeps {
   send(type: 'chat.delta' | 'chat.done' | 'chat.error', payload: Record<string, unknown>): void;
   /** M7: the ticket systems of this workstation (`aom source read`); credentials never leave it. */
   external?: ExternalAdapters;
+  /** Text for the agent's instructions about granted MCP servers that need a sign-in here (empty: none). */
+  mcpSignInNote?: (granted: readonly string[] | undefined) => string;
   /** RPC to the server under the chat's id (the server treats a chat as a shift of kind `chat`). */
   rpc(chatId: string, method: string, params: Record<string, unknown>): Promise<IpcRpcResponse>;
   /** This workstation's clone of a repository by normalized remote (its repository scan): the project's read-only repositories. */
@@ -357,9 +359,10 @@ export class ChatManager {
       : [];
     const folders = mergeReadFolders(mergeReadFolders(registered, fromFolder), vaultFolder);
 
+    const signIn = devops ? '' : (this.deps.mcpSignInNote?.(msg.context.mcpServers) ?? '');
     await adapter.writeInstructions(
       sandbox,
-      renderChatInstructions(msg.agent, msg.context, {
+      `${signIn ? `${signIn}\n` : ''}${renderChatInstructions(msg.agent, msg.context, {
         jiraSkill: await this.jiraSkill(msg),
         readFolders: folders,
         ...(!devops && msg.context.vault
@@ -369,7 +372,7 @@ export class ChatManager {
                 : { missing: true },
             }
           : {}),
-      }),
+      })}`,
     );
     chat.token = this.deps.ipc.registerShift(this.handlerFor(chat));
     const tc = this.deps.toolchains?.resolve();
@@ -401,7 +404,7 @@ export class ChatManager {
     let sessionId: string | undefined;
     let streamed = '';
     let finalText: string | undefined;
-    let exit: { code: number | null; error?: string } = { code: null };
+    let exit: { code: number | null; error?: string; authFailed?: boolean } = { code: null };
     for await (const ev of chat.session.events()) {
       if (ev.kind === 'session') sessionId = ev.runtimeSessionId;
       else if (ev.kind === 'delta') {
@@ -413,6 +416,11 @@ export class ChatManager {
 
     if (chat.stopReason) return this.error(msg, chat.stopReason);
     if (exit.code !== 0) {
+      if (exit.authFailed)
+        return this.error(
+          msg,
+          'The Claude login on this workstation has expired. On that machine run `claude`, then `/login`; this conversation works again once you have.',
+        );
       return this.error(msg, exit.error ?? `the ${msg.agent.runtime} process exited with code ${exit.code}`);
     }
     this.deps.send('chat.done', {
