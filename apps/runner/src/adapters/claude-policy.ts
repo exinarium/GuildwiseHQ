@@ -186,11 +186,29 @@ export const SESSION_TOOLS_DENIED = [
  * The stash list is shared by every worktree of a clone, and repository hygiene keeps the user's saved work there: an
  * agent may stash and `git stash apply` its own changes, but never drop, pop or clear an entry.
  */
-export const STASH_REMOVING_DENIED = ['Bash(git stash drop:*)', 'Bash(git stash pop:*)', 'Bash(git stash clear:*)'];
+export const STASH_REMOVING_DENIED = [
+  'Bash(git stash drop:*)',
+  'Bash(git stash pop:*)',
+  'Bash(git stash clear:*)',
+];
+
+/**
+ * `Bash(git push:*)` is a prefix rule, so `git -C <dir> push` and `git -c k=v push` would slip past it. Claude Code rules
+ * accept `*` anywhere in a pattern, so the global-option forms are denied too. (Compound commands such as
+ * `cd x && git push` are split by Claude Code and each part is matched.) The real guard is the sandbox: it holds no
+ * git credentials, and the runner never hands an agent a push (backlog #61).
+ */
+export const GIT_PUSH_DENIED = [
+  'Bash(git push:*)',
+  'Bash(git -C * push)',
+  'Bash(git -C * push *)',
+  'Bash(git -c * push)',
+  'Bash(git -c * push *)',
+];
 
 const ALWAYS_DENIED = [
   ...SESSION_TOOLS_DENIED,
-  'Bash(git push:*)',
+  ...GIT_PUSH_DENIED,
   'Bash(git reset --hard:*)',
   ...STASH_REMOVING_DENIED,
 ];

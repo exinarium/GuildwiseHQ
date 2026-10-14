@@ -12,16 +12,11 @@ import type { GitAuth } from './worktrees.ts';
 export interface ArchitectGitContext {
   /** The card worktree. */
   worktree: string;
-  /** The card branch: the only ref that may be pushed. */
+  /** The card branch. */
   branchName: string;
   /** The repository's main branch when the server named it. */
   mainBranch?: string;
   ref: string;
-  /**
-   * The card's completion action. Only a card that ends in a pull request or a pushed branch publishes its card branch;
-   * with `merge` (or none yet) the branch stays local and the runner pushes just the working branch at finalize.
-   */
-  completionAction?: 'pr' | 'push_branch' | 'merge' | null;
   auth?: GitAuth;
   /** Remembers the `origin/<main>` SHA merged into the card branch (the post-shift guard exempts what it changed). */
   recordMainSha: (sha: string) => void;
@@ -34,32 +29,17 @@ export type GitReply = { ok: true; message: string } | { ok: false; error: strin
 const remoteUrl = async (cwd: string): Promise<string> =>
   (await git(cwd, ['remote', 'get-url', 'origin'])).stdout.trim();
 
-/** `aom git push [<branch>]`: pushes the card branch (`git push -u origin <branch>`), nothing else. */
-export async function architectPush(ctx: ArchitectGitContext, requested?: string): Promise<GitReply> {
-  if (requested !== undefined && requested !== ctx.branchName)
-    return {
-      ok: false,
-      error: `only the card branch (${ctx.branchName}) can be pushed; '${requested}' was refused`,
-    };
-  if (!isSafeGitRef(ctx.branchName)) return { ok: false, error: 'the card branch name is not a safe ref' };
-  if (ctx.completionAction !== 'pr' && ctx.completionAction !== 'push_branch')
-    return {
-      ok: false,
-      error: `this card ${ctx.completionAction === 'merge' ? 'is merged into the working branch when it finishes' : 'has no completion action that publishes its branch'}, so the card branch is not pushed: it stays on this workstation and your commits are used from here. Commit your work and continue`,
-    };
-  if (!(await hasRemote(ctx.worktree))) return { ok: false, error: 'the repository has no origin remote' };
-  const dirty = (await git(ctx.worktree, ['status', '--porcelain', '--untracked-files=no'])).stdout.trim();
-  if (dirty) return { ok: false, error: 'commit your changes first; the branch has uncommitted edits' };
-  if (await mergeInProgress(ctx.worktree))
-    return { ok: false, error: 'a merge is in progress: finish it (`git commit --no-edit`) before pushing' };
-  const url = await remoteUrl(ctx.worktree);
-  const a = ctx.auth && url ? await ctx.auth(url) : { args: [], env: {} };
-  const push = await git(ctx.worktree, [...a.args, 'push', '-u', 'origin', '--', ctx.branchName], {
-    env: a.env,
-  });
-  if (push.exitCode !== 0)
-    return { ok: false, error: `git push failed: ${(push.stderr || push.stdout).trim().slice(0, 500)}` };
-  return { ok: true, message: `Pushed ${ctx.branchName} to origin.` };
+/**
+ * `aom git push`: always refused (backlog #61, owner rule 2026-10-14). No card or agent branch is pushed unless the
+ * goal is a pull request, and then the runner pushes it itself at finalize under the project's `<prefix>/<ticket>`
+ * name. An agent has no push of its own: commit on the card branch and the runner lands the work.
+ */
+export async function architectPush(_ctx: ArchitectGitContext, _requested?: string): Promise<GitReply> {
+  return {
+    ok: false,
+    error:
+      'agents never push: the card branch stays on this workstation and the runner lands your work when the card finishes (a pull request is pushed by the runner under the project branch prefix, never by you). Commit your work and continue',
+  };
 }
 
 /** `aom git fetch`: fetches origin (every branch) so `origin/<main>` and `origin/<working>` can be compared. */

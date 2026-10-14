@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { CardStatus, CardType, CompletionAction, TestEvidence } from '../cards/types.ts';
+import {
+  CardStatus,
+  CardType,
+  CompletionAction,
+  StoredCompletionAction,
+  TestEvidence,
+} from '../cards/types.ts';
 import { RegressionPlatform, SuiteKind, TestPlatform } from '../events/testing.ts';
 import { IsoTime } from './common.ts';
 
@@ -15,7 +21,7 @@ export const FinalizeCardResponseSchema = z.object({
   ref: z.string(),
   /** `awaiting_approval`: a large-tier merge waits for the desk; `running`: `finalize.execute` was queued. */
   state: z.enum(['awaiting_approval', 'running']),
-  action: CompletionAction,
+  action: StoredCompletionAction,
   deskItemId: z.uuid().nullable(),
 });
 export type FinalizeCardResponse = z.infer<typeof FinalizeCardResponseSchema>;
@@ -63,7 +69,7 @@ export const CardTestingSchema = z.object({
   finalize: z.object({
     /** The manager may press Finalize now (stage finalize, queued, unclaimed). */
     available: z.boolean(),
-    action: CompletionAction.nullable(),
+    action: StoredCompletionAction.nullable(),
     /** Merge on a large-tier card waits for a desk approval first. */
     requiresApproval: z.boolean(),
     state: z.enum(['idle', 'awaiting_approval', 'running', 'failed']),

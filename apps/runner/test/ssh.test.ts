@@ -366,7 +366,7 @@ describe('git over ssh end to end (fake ssh program)', () => {
         ref: 'TOY-1',
         title: 'Add thing',
         projectKey: 'TOY',
-        action: 'push_branch',
+        action: 'pr',
         repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
         remoteUrlNormalized: normalizeRemoteUrl('git@example.test:acme/web.git'),
         baseBranch: 'main',
@@ -382,7 +382,7 @@ describe('git over ssh end to end (fake ssh program)', () => {
       pr: { create: async () => ({ unavailable: 'unused' }) },
       auth: (url, forge) => gitAuthFor(w.env, url, forge),
     });
-    expect(res).toMatchObject({ ok: true, action: 'push_branch', pushedBranch: branch });
+    expect(res).toMatchObject({ ok: true, action: 'pr', pushedBranch: branch });
     expect(sh(w.origin.origin, 'git', ['rev-parse', '--verify', `refs/heads/${branch}`])).toMatch(
       /^[0-9a-f]{40}$/,
     );

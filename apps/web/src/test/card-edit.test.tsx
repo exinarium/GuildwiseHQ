@@ -324,8 +324,8 @@ describe('priority and completion action in place (#54)', () => {
     expect(screen.getByTestId('completion-hint')).toHaveTextContent('Applies to the next finalise');
     await user.selectOptions(screen.getByTestId('card-priority'), '1');
     await waitFor(() => expect(patches).toContainEqual({ priority: 1 }));
-    await user.selectOptions(screen.getByTestId('card-completion'), 'push_branch');
-    await waitFor(() => expect(patches).toContainEqual({ completionAction: 'push_branch' }));
+    await user.selectOptions(screen.getByTestId('card-completion'), 'pr');
+    await waitFor(() => expect(patches).toContainEqual({ completionAction: 'pr' }));
     await user.selectOptions(screen.getByTestId('card-completion'), '');
     await waitFor(() => expect(patches).toContainEqual({ completionAction: null }));
   });

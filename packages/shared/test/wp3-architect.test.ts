@@ -91,11 +91,12 @@ describe('the architect role', () => {
       'aom design',
       'aom investigate',
       'aom git verify-merge',
-      'aom git push',
+      'Never push',
       'aom question',
       'Folders you can read'.length ? 'read the other repositories' : '',
     ])
       expect(i).toContain(s);
+    expect(i).not.toContain('aom git push');
     expect(architect?.coreRules.join('\n')).toMatch(/never push/i);
     expect(architect?.coreRules.join('\n')).toMatch(/secrets/i);
   });

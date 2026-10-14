@@ -117,10 +117,14 @@ describe('priority and completion action at any time (#54)', () => {
     expect((await cardRow(card.id)).status).toBe('claimed');
     const d = await detail(card.id);
     expect(d.permissions).toMatchObject({ canEdit: false, canEditPriority: true, canEditCompletion: true });
-    const res = await patch(card.id, { priority: 1, completionAction: 'push_branch' });
+    const res = await patch(card.id, { priority: 1, completionAction: 'pr' });
     expect(res.status).toBe(200);
-    expect(res.body.card).toMatchObject({ priority: 1, completionAction: 'push_branch' });
+    expect(res.body.card).toMatchObject({ priority: 1, completionAction: 'pr' });
     expect((await q('SELECT priority FROM cards WHERE id=$1', [card.id]))[0]?.priority).toBe(1);
+    // push_branch was retired (backlog #61): a command refuses it and the card keeps its action
+    const retired = await patch(card.id, { completionAction: 'push_branch' });
+    expect(retired.status).toBe(400);
+    expect((await cardRow(card.id)).completion_action).toBe('pr');
     // mixed with a heavy edit, the whole patch is refused
     const mixed = await patch(card.id, { priority: 2, title: 'Nope' });
     expect(mixed.status).toBe(409);

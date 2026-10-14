@@ -15,19 +15,35 @@ export type CardType = z.infer<typeof CardType>;
 export const CardStatus = z.enum(['draft', 'queued', 'claimed', 'blocked', 'waiting', 'done', 'cancelled']);
 export type CardStatus = z.infer<typeof CardStatus>;
 
-export const CompletionAction = z.enum(['pr', 'push_branch', 'merge']);
+/**
+ * The completion actions a command may set. `push_branch` was retired (backlog #61: no card or agent branch is pushed
+ * unless the goal is a pull request); it is only kept in the Stored* variants below so old events, rows and
+ * finalized cards still parse.
+ */
+export const CompletionAction = z.enum(['pr', 'merge']);
 export type CompletionAction = z.infer<typeof CompletionAction>;
 
+/** Every completion action ever stored, including the retired `push_branch`. Events and responses use this. */
+export const StoredCompletionAction = z.enum(['pr', 'push_branch', 'merge']);
+export type StoredCompletionAction = z.infer<typeof StoredCompletionAction>;
+
 /** A completion action, or `none`: an investigation-only card whose report lives in the vault ends without any git step. */
-export const FinalizeAction = z.enum(['pr', 'push_branch', 'merge', 'none']);
+export const FinalizeAction = z.enum(['pr', 'merge', 'none']);
 export type FinalizeAction = z.infer<typeof FinalizeAction>;
+
+/** Like `FinalizeAction`, plus the retired `push_branch`: old `FinalizeRequested` / `CardFinalized` events. */
+export const StoredFinalizeAction = z.enum(['pr', 'push_branch', 'merge', 'none']);
+export type StoredFinalizeAction = z.infer<typeof StoredFinalizeAction>;
 
 /**
  * What each completion action means, in the words of the UI and the docs. Two branches per repository: the **main
  * branch** (where pull requests go) and the **working branch** (where card work is integrated; may be the same).
  * The stored values are unchanged: `merge` is "commit and push to the working branch".
  */
-export const COMPLETION_ACTION_LABELS: Record<CompletionAction, { label: string; description: string }> = {
+export const COMPLETION_ACTION_LABELS: Record<
+  StoredCompletionAction,
+  { label: string; description: string }
+> = {
   merge: {
     label: 'Commit and push to the working branch',
     description:
@@ -39,8 +55,9 @@ export const COMPLETION_ACTION_LABELS: Record<CompletionAction, { label: string;
       'The card branch is pushed and a pull request is opened for review into the working branch (the main branch when you use one branch). Pull requests from the working branch to the main branch are opened from the project settings.',
   },
   push_branch: {
-    label: 'Push the card branch only',
-    description: 'The card branch is pushed and nothing else happens; someone combines it by hand.',
+    label: 'Push the card branch only (retired)',
+    description:
+      'No longer offered: a card branch is only pushed for a pull request. Cards that finished this way keep the label.',
   },
 };
 

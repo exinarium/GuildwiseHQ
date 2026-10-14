@@ -47,7 +47,7 @@ To create a card:
 2. Fill in the form:
    - **Project** and **Card type** (feature, bug, support, refactor, docs).
    - **Title**: what the work is (e.g., "Fix login timeout").
-   - **Repository**. You do not choose how the work ships: it follows the project's **How finished work lands** setting (see [Testing and finalization](/help/testing-and-finalization#finalization)). With expert mode on (Settings) you can also choose a **Completion action** per card (`pr`, `push_branch` or `merge`).
+   - **Repository**. You do not choose how the work ships: it follows the project's **How finished work lands** setting (see [Testing and finalization](/help/testing-and-finalization#finalization)). With expert mode on (Settings) you can also choose a **Completion action** per card (`pr` or `merge`).
    - **Priority**, and **Docs needed** (whether a technical writer should document it).
    - **Investigate & design before build**, **Investigation only** and **Merge the latest main branch first** (code projects): an architect designs the change first, or only investigates and reports; see [The architect](/help/architect). The first follows the project setting unless you change it on the card.
    - **Context**: why this exists, the current behaviour.

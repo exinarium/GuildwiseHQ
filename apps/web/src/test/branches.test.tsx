@@ -138,7 +138,9 @@ describe('the main branch and the working branch of a repository', () => {
 
   it('warns when the main branch is not set, and not when it is', async () => {
     const first = wrap(<WorkingBranchControl projectId={ID(2)} repo={repoDto() as never} isOwner />);
-    expect(await screen.findByRole('note')).toHaveTextContent('Main branch not set: the runner uses the host');
+    expect(await screen.findByRole('note')).toHaveTextContent(
+      'Main branch not set: the runner uses the host',
+    );
     first.unmount();
     wrap(<WorkingBranchControl projectId={ID(2)} repo={repoDto({ mainBranch: 'main' }) as never} isOwner />);
     await screen.findByTestId('main-branch-shop');
@@ -189,10 +191,10 @@ describe('the main branch and the working branch of a repository', () => {
 
 describe('completion actions are labelled by what they do', () => {
   it('"merge" is the commit-and-push option; the stored values do not change', () => {
-    expect(CompletionAction.options).toEqual(['pr', 'push_branch', 'merge']);
+    expect(CompletionAction.options).toEqual(['pr', 'merge']);
     expect(COMPLETION_ACTION_LABELS.merge.label).toBe('Commit and push to the working branch');
     expect(COMPLETION_ACTION_LABELS.merge.description).toMatch(/No pull request/);
     expect(COMPLETION_ACTION_LABELS.pr.label).toBe('Pull request');
-    expect(COMPLETION_ACTION_LABELS.push_branch.label).toBe('Push the card branch only');
+    expect(COMPLETION_ACTION_LABELS.push_branch.label).toMatch(/retired/);
   });
 });

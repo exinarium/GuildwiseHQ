@@ -8,6 +8,7 @@ import {
   DecisionPolicy,
   DiffStats,
   RiskTier,
+  StoredCompletionAction,
   ThreadMessageKind,
 } from '../cards/types.ts';
 import { CardChangesSchema } from '../events/card.ts';
@@ -68,9 +69,9 @@ export const CardDtoSchema = z.object({
     .nullable()
     .optional(),
   /** The card's own override; null means it follows the project's default. */
-  completionAction: CompletionAction.nullable(),
+  completionAction: StoredCompletionAction.nullable(),
   /** How finished work lands now: the card's override, else the project's default. */
-  effectiveCompletionAction: CompletionAction.nullable(),
+  effectiveCompletionAction: StoredCompletionAction.nullable(),
   completionActionSource: z.enum(['project', 'card']),
   repoId: z.uuid().nullable(),
   baseBranch: z.string().nullable(),
@@ -297,6 +298,8 @@ export const PatchCardRequestSchema = CardChangesSchema.omit({
   riskTierOverridden: true,
   ownerUserId: true,
 }).extend({
+  /** `push_branch` is retired (backlog #61): a command may only set `pr`, `merge` or null (follow the project). */
+  completionAction: CompletionAction.nullable().optional(),
   /** Why the risk tier is overridden (required when `riskTier` is sent; `null` clears the override). */
   reason: z.string().trim().min(1).max(1000).optional(),
 });

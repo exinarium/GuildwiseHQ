@@ -172,20 +172,20 @@ describe('finalize', () => {
     expect(c.finalize_error).toContain('not yet');
   });
 
-  it('push_branch and pr on a large card need no approval (only merges do)', async () => {
-    const card = await cardAtFinalize({ title: 'Large push', completionAction: 'push_branch' }, true);
+  it('pr on a large card needs no approval (only merges do)', async () => {
+    const card = await cardAtFinalize({ title: 'Large pr', completionAction: 'pr' }, true);
     const from = r.received.length;
     const out = await finalize(card.id);
-    expect(out).toMatchObject({ state: 'running', action: 'push_branch' });
+    expect(out).toMatchObject({ state: 'running', action: 'pr' });
     const cmd = await nextCommand(from);
-    result(cmd.commandId, { ok: true, action: 'push_branch', pushedBranch: 'aom/x' });
+    result(cmd.commandId, { ok: true, action: 'pr', pushedBranch: 'aom/x' });
     await until(async () => (await cardRow(card.id)).status === 'done', 3000, 'pushed');
     // the suite runs on the pushed branch
     const suite = (
       await q('SELECT fields FROM cards WHERE parent_card_id=$1 AND origin=$2', [card.id, 'full_suite'])
     )[0]!;
     expect(suite?.fields.suiteBranch).toBe('aom/x');
-    // a worktree of a push is removed but its branch kept
+    // a worktree of a pull request is removed but its branch kept
     const wt = await nextCommand(from, 'worktree.remove');
     expect((wt.payload as any).deleteBranch).toBe(false);
   });
@@ -282,14 +282,14 @@ describe('finalize', () => {
 
   it('an explicit completion action on the card is kept when the project default changes', async () => {
     try {
-      const card = await cardAtFinalize({ title: 'Overridden', completionAction: 'push_branch' });
+      const card = await cardAtFinalize({ title: 'Overridden', completionAction: 'merge' });
       await setDefault('pr');
       expect(await shownCard(card.id)).toMatchObject({
-        completionAction: 'push_branch',
-        effectiveCompletionAction: 'push_branch',
+        completionAction: 'merge',
+        effectiveCompletionAction: 'merge',
         completionActionSource: 'card',
       });
-      expect(await finalize(card.id)).toMatchObject({ action: 'push_branch' });
+      expect(await finalize(card.id)).toMatchObject({ action: 'merge' });
     } finally {
       await setDefault('merge');
     }

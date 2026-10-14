@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
-import { DiffStats } from '../cards/types.ts';
+import { DiffStats, StoredCompletionAction } from '../cards/types.ts';
 import {
   EnvEnsurePayloadSchema,
   RepoClonePayloadSchema,
@@ -155,7 +155,7 @@ export const ShiftBriefSchema = z.object({
     fields: z.record(z.string(), z.unknown()),
     riskTier: z.enum(['small', 'large']).nullable(),
     reworkRound: z.number().int().nonnegative(),
-    completionAction: z.enum(['pr', 'push_branch', 'merge']).nullable(),
+    completionAction: StoredCompletionAction.nullable(),
     docsNeeded: z.boolean(),
     /** Run the Investigate & design stage before build (absent: older servers). */
     designNeeded: z.boolean().optional(),

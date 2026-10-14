@@ -274,6 +274,7 @@ The details of each done item follow this list, by date.
 - #48: MCP auth state reported and shown (Needs sign-in, desk notice, agent note). Done 2026-10-14.
 - #49: `aom source read` reads Jira tickets through the runner's Jira connection. Done 2026-10-14.
 - #50: Claude login expiry: detect, pause, notify, resume; credentials copied under a lock instead of symlinked. Done 2026-10-14.
+- #61: No card or agent branch is pushed unless the goal is a pull request. Done 2026-10-14.
 
 ## 2026-10-14 (done)
 
@@ -434,6 +435,39 @@ clones the DevOps engineer set up, while `workstation_repos` is rewritten at eve
 Project settings show "pieter/dev is 3 commits behind origin", "has diverged from origin" or "... and has uncommitted
 changes" with **Sync now** (the workstation's owner; `POST /api/workstations/:id/repos/:repoId/sync`). Tests:
 `sync-branch.test.ts`, server `shift-stop-sync.test.ts`, web `shift-stop-sync.test.tsx`.
+
+### 61. No card or agent branch is pushed unless the goal is a pull request
+
+**Owner rule (2026-10-14).** Branches of agent worktrees (card branches `aom/<ref>-...`, architect and investigation
+branches, anything an agent worktree holds) are never pushed to origin unless the card's effective completion action is
+`pr`; then the runner pushes the branch under the project prefix name `<prefix>/<ticket>` (#46) and opens the pull
+request. The working branch itself may still be pushed by the runner for `merge` (that is where integrated work lands),
+and the hygiene and sync of the user's working branch stay as they are.
+
+**Done (2026-10-14).** Audit of every push in the runner:
+
+| Push | Where | Result |
+| --- | --- | --- |
+| Card branch, `push_branch` completion | `git/completion.ts` | Removed. The action is retired: new commands refuse it (`CompletionAction` is `pr` / `merge`), the runner refuses it if a stale command arrives. |
+| Card branch, `pr` completion | `git/completion.ts` | Kept: the only push of a card branch, under `<prefix>/<ticket>`. |
+| Working branch, `merge` completion | `git/completion.ts` | Kept (where integrated work lands). |
+| Protected working branch fallback | `git/completion.ts` `viaChange` | Kept: it is a pull request, `<prefix>/<ticket>` naming. |
+| Architect `aom git push` | `git/architect-git.ts`, `aom/aom-cli.ts`, `shifts/supervisor.ts` | Changed: always refused (the CLI refuses before any request; the runner rpc `git.push` refuses too, for an older CLI). The architect's report is committed on the card branch and lands like other card work. `aom git fetch`, `merge-main` and `verify-merge` stay. |
+| Release pull request | `git/release-pr.ts` | Kept: owner-initiated from Project settings; the head is the project's working branch, not a runner-chosen name, and it is pushed only when origin lacks it. |
+| New repository, initial branch | `repo/create.ts` | Kept: owner-approved repository creation. |
+| Knowledge vault repositories | `vaults/sync.ts` | Kept: a separate vault repository, not an agent worktree. |
+| Merge main into the working branch | `git/sync-main.ts` | Kept (working branch). |
+| Create the working branch on origin | `git/worktrees.ts` | Kept (working branch). |
+| Hygiene pushes the working branch; deletes of merged branches | `devops/hygiene.ts`, `branch-cleanup.ts`, `saved-work.ts`, `git/merged.ts` | Kept: working branch only; the others only delete from origin. |
+| An agent's own `git push` | `adapters/claude-policy.ts` | Denied already (`Bash(git push:*)`); the `git -C <dir> push` and `git -c k=v push` forms are now denied too, and the shared instructions say "Never push; the runner lands your work." The sandbox holds no git credentials either. |
+
+`push_branch` data: a project cannot hold it (its default is `merge` or `pr`, with a CHECK). The data migration
+`push-branch-retired-2026-10` clears the override on every open card that has it (one `CardUpdated` per card, system
+actor, with the reason), so they follow the project. Done and cancelled cards, and cards already finalized with
+`push_branch`, keep the old value (old events and rows still parse; the merge check still reads them). A card that still
+carries the value before the migration runs follows the project. Tests: runner `completion.test.ts`,
+`completion-working-branch.test.ts`, `architect-guard.test.ts`, `aom-git-push.test.ts`, `claude-args.test.ts`; server
+`push-branch-retired.test.ts`; web `CardNew.test.tsx`; shared `push-branch-retired.test.ts`.
 
 ## 2026-10-13 (done)
 

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CardType, CompletionAction, FinalizeAction, RiskTier } from '../cards/types.ts';
+import { CardType, RiskTier, StoredCompletionAction, StoredFinalizeAction } from '../cards/types.ts';
 import { ExternalSystem } from '../events/intake.ts';
 
 /**
@@ -15,10 +15,10 @@ export const BA_ROLE_KEY = 'ba';
 
 /**
  * Data of the `finalized` outcome (`aom finalize`): empty. The action that runs is the card's own completion action; an agent never chooses
- * it (the server refuses `pr`, `push_branch` and `merge` here). `none` (no git step) is only accepted for investigation-only cards
+ * it (the server refuses `pr` and `merge` here). `none` (no git step) is only accepted for investigation-only cards
  * whose report lives in the vault, and the server derives it.
  */
-export const FinalizeReportDataSchema = z.object({ action: FinalizeAction.optional() });
+export const FinalizeReportDataSchema = z.object({ action: StoredFinalizeAction.optional() });
 export type FinalizeReportData = z.infer<typeof FinalizeReportDataSchema>;
 
 // ------------------------------------------------------------------- card drafting (chat-scoped RPCs)
@@ -45,7 +45,7 @@ export const CardDraftSchema = z.object({
   /** One of the project's enabled workflows; absent: the project's default for the card type. */
   workflowKey: z.string().min(1).optional(),
   /** Agents may not set it (the server refuses a draft that names it); kept in the schema so the refusal can teach. */
-  completionAction: CompletionAction.optional(),
+  completionAction: StoredCompletionAction.optional(),
   docsNeeded: z.boolean().optional(),
   /** Run Investigate & design (architect) before build; absent: the project's setting. */
   designNeeded: z.boolean().optional(),

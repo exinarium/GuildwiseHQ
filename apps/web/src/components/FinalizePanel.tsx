@@ -1,4 +1,9 @@
-import { type CardDetailResponse, COMPLETION_ACTION_LABELS, type CompletionAction } from '@aom/shared';
+import {
+  type CardDetailResponse,
+  COMPLETION_ACTION_LABELS,
+  CompletionAction,
+  type StoredCompletionAction,
+} from '@aom/shared';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useFinalizeCard } from '../api/queries/testing.ts';
@@ -7,9 +12,9 @@ import { Button, ErrorBox, Panel, Select } from './ui.tsx';
 
 type Testing = NonNullable<CardDetailResponse['testing']>;
 
-const ACTIONS: ReadonlyArray<{ value: CompletionAction; label: string }> = (
-  ['merge', 'pr', 'push_branch'] as const
-).map((value) => ({ value, label: COMPLETION_ACTION_LABELS[value].label }));
+const ACTIONS: ReadonlyArray<{ value: CompletionAction; label: string }> = CompletionAction.options.map(
+  (value) => ({ value, label: COMPLETION_ACTION_LABELS[value].label }),
+);
 
 export function FinalizePanel({
   cardId,
@@ -19,14 +24,17 @@ export function FinalizePanel({
 }: {
   cardId: string;
   finalize: Testing['finalize'];
-  completionAction: CompletionAction | null;
+  completionAction: StoredCompletionAction | null;
   canAct: boolean;
 }) {
   const run = useFinalizeCard(cardId);
   const expert = useExpertMode();
   const [picked, setPicked] = useState<CompletionAction | null>(null);
   if (!finalize.available && finalize.state === 'idle') return null;
-  const action = picked ?? finalize.action ?? completionAction ?? 'pr';
+  // `push_branch` is retired: a card that still shows it is finalized like the default.
+  const live = (a: StoredCompletionAction | null | undefined): CompletionAction | null =>
+    a === 'push_branch' ? null : (a ?? null);
+  const action: CompletionAction = picked ?? live(finalize.action) ?? live(completionAction) ?? 'pr';
   const needsApproval = finalize.requiresApproval && action === 'merge';
   const deskItemId = run.data?.deskItemId ?? finalize.deskItemId;
   const state = run.data?.state ?? finalize.state;

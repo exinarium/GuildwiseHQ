@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CompletionAction, TestEvidence } from '../cards/types.ts';
+import { StoredCompletionAction, TestEvidence } from '../cards/types.ts';
 import { defineEvent, Id } from './define.ts';
 
 /** Platforms a regression run can target; `both` creates one card per platform. */
@@ -98,14 +98,14 @@ export const testingEvents = [
   /** Large-tier merge: the manager must approve on the desk before `finalize.execute` is queued. */
   defineEvent(
     'FinalizeApprovalRequested',
-    z.object({ cardId: Id, action: CompletionAction, deskItemId: Id, requestedBy: Id }),
+    z.object({ cardId: Id, action: StoredCompletionAction, deskItemId: Id, requestedBy: Id }),
   ),
   /** The completion action failed (or the approval was refused): the card is back at Finalize. */
   defineEvent(
     'FinalizeFailed',
     z.object({
       cardId: Id,
-      action: CompletionAction,
+      action: StoredCompletionAction,
       error: z.string(),
       conflictedFiles: z.array(z.string()).default([]),
     }),

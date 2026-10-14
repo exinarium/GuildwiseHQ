@@ -154,17 +154,38 @@ describe('completion: merge', () => {
   });
 });
 
-describe('completion: push_branch and pr', () => {
-  it('push_branch pushes the card branch with upstream and does not touch main', async () => {
+describe('completion: no card branch is pushed unless the goal is a pull request (backlog #61)', () => {
+  const originHeads = (repo: { origin: string }) =>
+    sh(repo.origin, 'git', ['for-each-ref', '--format=%(refname)', 'refs/heads']);
+
+  it('the retired push_branch action is refused and pushes nothing', async () => {
     const { repo, path } = await cardWorktree();
-    const mainBefore = sh(repo.origin, 'git', ['rev-parse', 'main']);
     const res = await run(repo, payload(repo, path, 'push_branch'));
-    expect(res).toMatchObject({ ok: true, pushedBranch: BRANCH });
-    expect(sh(repo.origin, 'git', ['rev-parse', BRANCH])).toBe(sh(path, 'git', ['rev-parse', 'HEAD']));
-    expect(sh(repo.origin, 'git', ['rev-parse', 'main'])).toBe(mainBefore);
-    expect(sh(path, 'git', ['rev-parse', '--abbrev-ref', '@{upstream}'])).toBe(`origin/${BRANCH}`);
+    expect(res).toMatchObject({ ok: false });
+    expect(res.error).toMatch(/retired/);
+    expect(originHeads(repo)).toBe('refs/heads/main');
   });
 
+  it('merge pushes the working branch only, never the card branch', async () => {
+    const { repo, path } = await cardWorktree();
+    const res = await run(repo, payload(repo, path, 'merge'));
+    expect(res.ok).toBe(true);
+    expect(originHeads(repo)).toBe('refs/heads/main');
+  });
+
+  it('a pull request pushes the card branch under <prefix>/<ticket>, not the aom/ name', async () => {
+    const { repo, path } = await cardWorktree();
+    const res = await run(
+      repo,
+      { ...payload(repo, path, 'pr'), prBranchPrefix: 'pieter', ticket: 'DCPL-1' },
+      new FakePr({ url: 'https://example.test/acme/toy/pull/1' }),
+    );
+    expect(res).toMatchObject({ ok: true, pushedBranch: 'pieter/DCPL-1' });
+    expect(originHeads(repo).split('\n').sort()).toEqual(['refs/heads/main', 'refs/heads/pieter/DCPL-1']);
+  });
+});
+
+describe('completion: pr', () => {
   it('pr pushes, then asks the PR adapter; the URL is returned', async () => {
     const { repo, path } = await cardWorktree();
     const pr = new FakePr({ url: 'https://example.test/acme/toy/pull/7' });
@@ -207,7 +228,7 @@ describe('completion: push_branch and pr', () => {
     const repo = makeRepo();
     sh(repo.clone, 'git', ['remote', 'remove', 'origin']);
     const { path } = await cardWorktree(repo);
-    const res = await run(repo, payload(repo, path, 'push_branch'));
+    const res = await run(repo, payload(repo, path, 'pr'));
     expect(res).toMatchObject({ ok: false });
     expect(res.error).toMatch(/no origin/);
   });

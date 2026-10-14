@@ -110,7 +110,7 @@ export function makeShiftStart(o: ShiftOptions): Record<string, unknown> {
       },
       riskTier: 'small',
       reworkRound: o.reworkRound ?? 0,
-      completionAction: 'push_branch',
+      completionAction: 'merge',
       docsNeeded: false,
       dependencies: [],
       ...(o.attachments ? { attachments: o.attachments } : {}),

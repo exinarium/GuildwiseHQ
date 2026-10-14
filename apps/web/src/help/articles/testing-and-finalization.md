@@ -37,7 +37,8 @@ With **expert mode** on (Settings), each card also has its own **completion acti
 
 - **Commit and push to the working branch**: no pull request. The card's branch is merged into the working branch and the working branch is pushed. Small cards go straight in; large cards wait for your approval on the desk (**Approve merge**).
 - **Pull request**: push the card branch to the git host and open a pull request into the working branch (the main branch when you use one branch), when the workstation is connected to the host, or ask the desk if it cannot.
-- **Push the card branch only**: push the card branch to the git host without opening a pull request.
+
+A card branch only reaches the git host when the work goes out as a pull request; with **Commit and push to the working branch** it stays on the workstation.
 
 When the working branch is not the main branch, the project owner opens the pull request that carries the work to the main branch from the repository's row in the project settings (**Open pull request: develop to main**); a runner on a workstation that has the repository opens it through the git host.
 

@@ -49,13 +49,19 @@ const fail = (action: FinalizeResult['action'], error: string): FinalizeResult =
 /**
  * The completion action of a card (docs/ARCHITECTURE.md sections 13.5, 13.6, 24.13): deterministic runner code, no
  * agent. Rebases the card branch onto the working branch first (a conflict is reported, never resolved), then
- * `merge` (integration worktree on the working branch, `git merge --no-ff`, push the working branch), `push_branch`
- * (`git push -u origin <branch>`) or `pr` (push + `gh pr create`; without `gh` the branch is pushed and a notice
- * is returned). Idempotent: a branch already merged reports its merge commit again.
+ * `merge` (integration worktree on the working branch, `git merge --no-ff`, push the working branch) or `pr` (push the
+ * card branch under `<prefix>/<ticket>` + `gh pr create`; without `gh` the branch is pushed and a notice is returned).
+ * A card branch is pushed ONLY for `pr` (backlog #61); `push_branch` is retired and refused. Idempotent: a branch
+ * already merged reports its merge commit again.
  */
 export async function executeCompletion(input: CompletionInput): Promise<FinalizeResult> {
   const { payload: p } = input;
   const action = p.action;
+  if (action !== 'merge' && action !== 'pr')
+    return fail(
+      action,
+      `the completion action ${JSON.stringify(action)} is retired: a card branch is only pushed for a pull request. Choose merge or pr`,
+    );
   // Owner-controlled refs: refuse anything git could parse as an option or an odd refspec.
   for (const ref of [
     p.branchName,
@@ -98,16 +104,11 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
 
   if (action === 'merge') return merge(input, wt);
   const remote = await hasRemote(wt);
-  if (!remote)
-    return fail(
-      action,
-      `cannot ${action === 'pr' ? 'open a PR' : 'push'}: the repository has no origin remote`,
-    );
-  // A pull request goes out under <prefix>/<ticket>; a plain branch push keeps the card branch name.
-  const head = action === 'pr' ? await remoteBranchFor(input, wt) : p.branchName;
+  if (!remote) return fail(action, 'cannot open a PR: the repository has no origin remote');
+  // A pull request goes out under <prefix>/<ticket>.
+  const head = await remoteBranchFor(input, wt);
   const push = await pushBranch(input, wt, head);
   if (push.exitCode !== 0) return fail(action, `git push failed: ${(push.stderr || push.stdout).trim()}`);
-  if (action === 'push_branch') return { ok: true, action, pushedBranch: head };
 
   try {
     const r = await input.pr.create({
@@ -145,10 +146,14 @@ async function remoteBranchFor(input: CompletionInput, wt: string): Promise<stri
   const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
   for (let n = 1; n <= 50; n++) {
     const name = n === 1 ? base : `${base}-${n}`;
-    const r = await git(wt, [...a.args, 'ls-remote', '--exit-code', '--heads', 'origin', `refs/heads/${name}`], {
-      env: a.env,
-      timeoutMs: 60_000,
-    });
+    const r = await git(
+      wt,
+      [...a.args, 'ls-remote', '--exit-code', '--heads', 'origin', `refs/heads/${name}`],
+      {
+        env: a.env,
+        timeoutMs: 60_000,
+      },
+    );
     // 2: no such ref (free). Any other failure (offline, auth): keep the first name, the push reports the problem.
     if (r.exitCode === 2) return name;
     if (r.exitCode !== 0) return base;
@@ -161,7 +166,8 @@ async function pushBranch(input: CompletionInput, wt: string, remoteName?: strin
   const { payload: p } = input;
   const url = (await git(wt, ['remote', 'get-url', 'origin'])).stdout.trim();
   const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
-  const spec = remoteName && remoteName !== p.branchName ? `${p.branchName}:refs/heads/${remoteName}` : p.branchName;
+  const spec =
+    remoteName && remoteName !== p.branchName ? `${p.branchName}:refs/heads/${remoteName}` : p.branchName;
   return git(wt, [...a.args, 'push', '-u', 'origin', '--', spec], { env: a.env });
 }
 

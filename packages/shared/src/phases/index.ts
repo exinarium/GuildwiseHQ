@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MockScriptSchema } from '../cards/fields.ts';
-import { CompletionAction, FinalizeAction } from '../cards/types.ts';
+import { StoredFinalizeAction } from '../cards/types.ts';
 import { RegressionPlatform } from '../events/testing.ts';
 import type { ReporterTaskKind } from '../reporter/index.ts';
 import { isReporterTaskKind, ReporterTaskSchema, reporterBriefOutcomes } from '../reporter/index.ts';
@@ -137,7 +137,7 @@ export const PhaseCardOutcome = z.object({
   ref: z.string(),
   title: z.string(),
   outcome: PhaseCardOutcomeKind,
-  action: FinalizeAction.optional(),
+  action: StoredFinalizeAction.optional(),
   resultRef: z
     .object({
       mergeCommit: z.string().optional(),
