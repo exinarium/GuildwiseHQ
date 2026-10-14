@@ -519,7 +519,9 @@ export function buildCeoSettings(
   paths: { home: string; configDir: string; scratch: string; tmp: string },
 ): ClaudeSettings {
   const s = buildChatSettings(false, [], { ...ctx, extraAllowedDomains: [] }, paths);
-  s.permissions.deny = [...new Set([...s.permissions.deny, 'WebFetch', 'WebSearch', 'mcp__*', 'NotebookEdit'])];
+  s.permissions.deny = [
+    ...new Set([...s.permissions.deny, 'WebFetch', 'WebSearch', 'mcp__*', 'NotebookEdit']),
+  ];
   return s;
 }
 

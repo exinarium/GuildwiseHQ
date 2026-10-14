@@ -22,7 +22,12 @@ export interface NewWake {
 const RECENT_ACTION_MS = 30 * 60_000;
 
 /** Subkinds the CEO produces or that need no wake (its own output, phase items, reports). */
-const NO_WAKE_SUBKINDS = new Set([...ROUTING_EXEMPT_SUBKINDS, 'ceo_recommendation', 'ceo_notice', 'ceo_report']);
+const NO_WAKE_SUBKINDS = new Set([
+  ...ROUTING_EXEMPT_SUBKINDS,
+  'ceo_recommendation',
+  'ceo_notice',
+  'ceo_report',
+]);
 
 export async function enqueueWake(db: Queryable, orgId: string, w: NewWake, now: Date): Promise<boolean> {
   const subjectKind = w.subjectKind ?? '';
@@ -70,20 +75,29 @@ export async function enqueueWake(db: Queryable, orgId: string, w: NewWake, now:
 
 /** Wake sources (docs/design/ceo-agent-v2.md section 5.1): committed events become wakes for an active CEO. */
 export function registerCeoWakes(ctx: Ctx): () => void {
-  const cache = new Map<string, { at: number; active: boolean; agentId: string | null; urgentSignals: string[] }>();
+  const cache = new Map<
+    string,
+    { at: number; active: boolean; agentId: string | null; urgentSignals: string[] }
+  >();
   const ceoOf = async (orgId: string) => {
     const hit = cache.get(orgId);
     const now = Date.now();
     if (hit && now - hit.at < 3000) return hit;
     const c = await ceoActive(ctx.pool, orgId);
-    const v = { at: now, active: !!c, agentId: c?.agentId ?? null, urgentSignals: c?.settings.urgentSignals ?? [] };
+    const v = {
+      at: now,
+      active: !!c,
+      agentId: c?.agentId ?? null,
+      urgentSignals: c?.settings.urgentSignals ?? [],
+    };
     cache.set(orgId, v);
     return v;
   };
 
   const handle = async (e: StoredEvent): Promise<void> => {
     const type = e.event.type;
-    if (type === 'CeoEnabled' || type === 'CeoDisabled' || type === 'CeoPaused' || type === 'CeoResumed') cache.clear();
+    if (type === 'CeoEnabled' || type === 'CeoDisabled' || type === 'CeoPaused' || type === 'CeoResumed')
+      cache.clear();
     const orgId = e.scope.orgId;
     if (!orgId) return;
     const interesting =
@@ -103,7 +117,8 @@ export function registerCeoWakes(ctx: Ctx): () => void {
     if (!ceo.active) return;
     // What the CEO itself caused does not wake it.
     if (e.actor.kind === 'agent' && e.actor.id === ceo.agentId) return;
-    if (e.causationId && (await one(ctx.pool, 'SELECT 1 FROM ceo_actions WHERE id=$1', [e.causationId]))) return;
+    if (e.causationId && (await one(ctx.pool, 'SELECT 1 FROM ceo_actions WHERE id=$1', [e.causationId])))
+      return;
     const now = ctx.clock.now();
     const ev = e.event as any;
     const p = ev.payload;
@@ -133,7 +148,11 @@ export function registerCeoWakes(ctx: Ctx): () => void {
       case 'QuestionRaised':
       case 'QuestionEscalated': {
         if (p.routedTo !== 'manager') return;
-        const item = await one(ctx.pool, 'SELECT title, blocking, pinned, subkind FROM desk_items WHERE id=$1', [p.deskItemId]);
+        const item = await one(
+          ctx.pool,
+          'SELECT title, blocking, pinned, subkind FROM desk_items WHERE id=$1',
+          [p.deskItemId],
+        );
         await enqueueWake(
           ctx.pool,
           orgId,
@@ -153,7 +172,8 @@ export function registerCeoWakes(ctx: Ctx): () => void {
       }
       case 'BaSignalRaised':
       case 'BaSignalUpdated': {
-        const urgent = p.urgency === 'urgent' || (type === 'BaSignalRaised' && ceo.urgentSignals.includes(p.kind));
+        const urgent =
+          p.urgency === 'urgent' || (type === 'BaSignalRaised' && ceo.urgentSignals.includes(p.kind));
         if (type === 'BaSignalUpdated' && p.urgency !== 'urgent') return;
         await enqueueWake(
           ctx.pool,
@@ -186,7 +206,14 @@ export function registerCeoWakes(ctx: Ctx): () => void {
         await enqueueWake(
           ctx.pool,
           orgId,
-          { reason: `shift_${p.outcome}`, urgency: 'normal', subjectKind: 'agent', subjectId: p.agentId, subjectLabel: a.name, eventSeq: e.seq },
+          {
+            reason: `shift_${p.outcome}`,
+            urgency: 'normal',
+            subjectKind: 'agent',
+            subjectId: p.agentId,
+            subjectLabel: a.name,
+            eventSeq: e.seq,
+          },
           now,
         );
         break;
@@ -223,7 +250,15 @@ export function registerCeoWakes(ctx: Ctx): () => void {
           await enqueueWake(
             ctx.pool,
             orgId,
-            { reason: 'task_follow_up', urgency: 'normal', subjectKind: 'task', subjectId: t.id, subjectLabel: t.title, detail: { changed: type }, eventSeq: e.seq },
+            {
+              reason: 'task_follow_up',
+              urgency: 'normal',
+              subjectKind: 'task',
+              subjectId: t.id,
+              subjectLabel: t.title,
+              detail: { changed: type },
+              eventSeq: e.seq,
+            },
             now,
           );
         break;

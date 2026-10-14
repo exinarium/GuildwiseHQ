@@ -2,8 +2,8 @@ import { DomainEventSchema } from '@aom/shared';
 import type pg from 'pg';
 import type { Clock } from '../clock.ts';
 import { rows } from '../db/sql.ts';
-import { actingAgent } from './acting.ts';
 import { APPEND_LOCK_ID, type Tx, withTx } from '../db/tx.ts';
+import { actingAgent } from './acting.ts';
 import {
   type AppendInput,
   ConcurrencyError,
@@ -80,7 +80,9 @@ export class PgEventStore implements EventStore {
         versions.set(input.streamId, version);
         const acting = actingAgent();
         const actor =
-          acting && input.actor.kind === 'user' ? { kind: 'agent' as const, id: acting.agentId } : input.actor;
+          acting && input.actor.kind === 'user'
+            ? { kind: 'agent' as const, id: acting.agentId }
+            : input.actor;
         const causation = input.causationId ?? (acting ? acting.actionId : null);
         const r = await rows(
           tx,

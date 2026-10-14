@@ -27,7 +27,14 @@ export function inQuietHours(q: { from: string; to: string } | null, minutes: nu
 export async function notifyOwner(
   ctx: Ctx,
   orgId: string,
-  input: { kind: NotifyKind; title: string; text: string; taskId?: string | undefined; deskItemId?: string | undefined; subject?: string },
+  input: {
+    kind: NotifyKind;
+    title: string;
+    text: string;
+    taskId?: string | undefined;
+    deskItemId?: string | undefined;
+    subject?: string;
+  },
 ): Promise<{ notificationId: string; deskItemId?: string; emailed: boolean }> {
   const ceo = await loadCeo(ctx.pool, orgId);
   if (!ceo || !ceo.agentId) return { notificationId: '', emailed: false };
@@ -52,7 +59,11 @@ export async function notifyOwner(
           pinned: input.kind !== 'task_done',
           affectedCardIds: [],
           askedBy: { kind: 'agent', agentId: ceo.agentId, role: 'ceo' },
-          data: { kind: input.kind, ...(input.taskId ? { taskId: input.taskId } : {}), ...(input.deskItemId ? { about: input.deskItemId } : {}) },
+          data: {
+            kind: input.kind,
+            ...(input.taskId ? { taskId: input.taskId } : {}),
+            ...(input.deskItemId ? { about: input.deskItemId } : {}),
+          },
         },
       },
       actor: agentActor(ceo.agentId),
@@ -82,14 +93,19 @@ export async function notifyOwner(
   let emailed = false;
   if (ch.email) {
     const flag = `mail:${input.kind}:${input.subject ?? input.title.slice(0, 60)}`;
-    const last = await one<{ at: Date }>(ctx.pool, 'SELECT at FROM ceo_flags WHERE org_id=$1 AND flag=$2', [orgId, flag]);
+    const last = await one<{ at: Date }>(ctx.pool, 'SELECT at FROM ceo_flags WHERE org_id=$1 AND flag=$2', [
+      orgId,
+      flag,
+    ]);
     const recent = last && ctx.clock.now().getTime() - new Date(last.at).getTime() < EMAIL_WINDOW_MS;
     const owner = await orgOwnerId(ctx.pool, orgId);
     const u = await one(ctx.pool, 'SELECT email, timezone FROM users WHERE id=$1', [owner]);
     const quiet =
-      input.kind !== 'urgent' && inQuietHours(ceo.settings.quietHours, localMinutes(ctx.clock.now(), u?.timezone));
+      input.kind !== 'urgent' &&
+      inQuietHours(ceo.settings.quietHours, localMinutes(ctx.clock.now(), u?.timezone));
     if (!recent && !quiet && u?.email) {
-      const name = (await one(ctx.pool, 'SELECT name FROM agents WHERE id=$1', [ceo.agentId]))?.name ?? 'Your CEO';
+      const name =
+        (await one(ctx.pool, 'SELECT name FROM agents WHERE id=$1', [ceo.agentId]))?.name ?? 'Your CEO';
       try {
         await ctx.mailer.send({
           ...ceoNotifyMail({
@@ -119,7 +135,12 @@ export async function notifyOwner(
 
 function localMinutes(now: Date, tz: string | null | undefined): number {
   try {
-    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: tz || 'UTC', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz || 'UTC',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(now);
     const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
     return get('hour') * 60 + get('minute');
   } catch {

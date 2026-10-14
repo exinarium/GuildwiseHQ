@@ -1,6 +1,6 @@
-import { renderCeoChatSection } from './ceo.ts';
 import { JIRA_SKILL_MD } from '../external/index.ts';
 import type { AgentRuntimeSpec, ChatContext } from '../protocol/runner.ts';
+import { renderCeoChatSection } from './ceo.ts';
 import { type ReadableFolder, renderReadableFolders } from './readable.ts';
 
 /** What the runner found in the vault clone for a chat: `missing` when this workstation has no clone of the vault. */

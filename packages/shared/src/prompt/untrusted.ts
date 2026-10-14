@@ -43,4 +43,5 @@ export function renderUntrusted(label: string, text: string, notice: string = UN
 export const hasUntrustedBlock = (prompt: string): boolean => prompt.includes(`${MARK} CONTENT (`);
 
 /** `renderUntrusted` with the CEO's notice. */
-export const renderCeoData = (label: string, text: string): string => renderUntrusted(label, text, CEO_DATA_NOTICE);
+export const renderCeoData = (label: string, text: string): string =>
+  renderUntrusted(label, text, CEO_DATA_NOTICE);

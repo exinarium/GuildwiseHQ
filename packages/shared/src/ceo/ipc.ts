@@ -58,7 +58,11 @@ export const CeoRpcSchema = z.discriminatedUnion('op', [
     kind: z.enum(['card', 'agent', 'project', 'shift', 'desk-item', 'workstation']),
     ref: z.string().min(1).max(200),
   }),
-  z.object({ op: z.literal('search'), in: z.enum(['desk', 'cards', 'memory']), q: z.string().min(1).max(300) }),
+  z.object({
+    op: z.literal('search'),
+    in: z.enum(['desk', 'cards', 'memory']),
+    q: z.string().min(1).max(300),
+  }),
   z.object({ op: z.literal('costs'), days: z.number().int().min(1).max(90).default(30) }),
   CeoActRpc,
   z.object({
@@ -87,10 +91,14 @@ export const CeoRpcSchema = z.discriminatedUnion('op', [
     id: z.uuid().optional(),
     title: z.string().trim().min(1).max(300).optional(),
     request: z.string().max(4000).optional(),
-    status: z.enum(['open', 'in_progress', 'waiting_owner', 'waiting_work', 'done', 'failed', 'cancelled']).optional(),
+    status: z
+      .enum(['open', 'in_progress', 'waiting_owner', 'waiting_work', 'done', 'failed', 'cancelled'])
+      .optional(),
     note: z.string().max(4000).optional(),
     due: z.iso.datetime().optional(),
-    watch: z.array(z.object({ kind: z.enum(['card', 'devops', 'desk', 'agent']), id: z.string().min(1) })).optional(),
+    watch: z
+      .array(z.object({ kind: z.enum(['card', 'devops', 'desk', 'agent']), id: z.string().min(1) }))
+      .optional(),
   }),
   z.object({
     op: z.literal('memory'),
@@ -131,7 +139,9 @@ export const CeoShiftSchema = z.object({
   batchId: z.uuid(),
   wakeIds: z.array(z.uuid()),
   /** The reasons, compact (untrusted text inside is already fenced in `brief`). */
-  reasons: z.array(z.object({ reason: z.string(), urgency: z.string(), subject: z.string(), at: z.string() })),
+  reasons: z.array(
+    z.object({ reason: z.string(), urgency: z.string(), subject: z.string(), at: z.string() }),
+  ),
   /** Fully rendered prompt body for the session (snapshot, events, memories, policy in plain words). */
   brief: z.string(),
   localDate: z.string().optional(),

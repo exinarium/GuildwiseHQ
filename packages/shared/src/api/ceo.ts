@@ -1,8 +1,11 @@
 import { z } from 'zod';
 import { CeoPolicySchema } from '../ceo/policy.ts';
-import { CeoSettingsSchema, CeoTrainingSchema, UpdateCeoSettingsRequestSchema } from '../ceo/settings.ts';
-import { CeoMemoryKind, CeoTaskStatus } from '../events/ceo.ts';
-
+import {
+  type CeoSettingsSchema,
+  type CeoTrainingSchema,
+  UpdateCeoSettingsRequestSchema,
+} from '../ceo/settings.ts';
+import { type CeoMemoryKind, CeoTaskStatus } from '../events/ceo.ts';
 
 /** The CEO page and its API (docs/design/ceo-agent-v2.md section 8). The Owner configures; Admins read. */
 
@@ -130,7 +133,12 @@ export interface CeoActionDto {
   verdictReason: string;
   cause: string | null;
   untrusted: boolean;
-  undo: { available: boolean; kind: 'inverse' | 'compensating' | null; label: string | null; reason: string | null };
+  undo: {
+    available: boolean;
+    kind: 'inverse' | 'compensating' | null;
+    label: string | null;
+    reason: string | null;
+  };
   deskItemId: string | null;
   response: string | null;
   responseNote: string | null;
@@ -175,6 +183,7 @@ export interface CeoTaskDtoApi {
 }
 
 export const CeoChatResponseSchema = z.object({ threadId: z.uuid() });
-export const CeoUndoResponseSchema = z.object({ kind: z.enum(['inverse', 'compensating']), message: z.string() });
-
-
+export const CeoUndoResponseSchema = z.object({
+  kind: z.enum(['inverse', 'compensating']),
+  message: z.string(),
+});

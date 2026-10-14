@@ -375,4 +375,12 @@ A safe sandbox for tests and demos: agents run on a simulated workstation, nothi
 - Pace: The platform administrator sets how fast the simulated workstation works: Fast (good for tests), Normal or Slow (good for demos, so people can watch a card move).
 - Starting a demo: On a simulation organization, the platform administrator can choose Load demo scenario. It adds two projects with repositories, a hired team for each, cards in several stages, a few desk questions and a schedule, so a demo starts from a busy board. It only adds to an empty organization.
 - Deleting a simulation organization: The platform administrator can choose Delete simulation organization on the organization's page and type its name to confirm. This removes the organization and everything in it for good, including its history.…
+
+### Your CEO
+An optional agent that handles the desk and the floor for you, starts in training, and can always be undone.
+- Training period: A new CEO starts in training. It recommends and you decide: during training, hiring, benching, retiring, promoting, model changes and scaling are only recommendations, and your answers on the desk teach it. The Overview tab shows how often you agreed with it.…
+- What it may decide: The Authority tab sets, for each kind of action, whether the CEO decides, recommends or never does it. Matters like production deploys, manual QA and budgets stay yours unless you delegate one (you confirm each). Billing, members, security and secrets are never delegated.…
+- Activity log and Undo: Everything it decided, recommended or refused is in the Activity log, with its reason, its confidence and the evidence. Most decisions have an Undo, also on the desk item and in the daily report. The Owner can export the log.
+- Memory: It remembers rules you give it. Tick Remember this for the CEO when you answer, or add a rule on the Memory tab. Proposed rules wait for your Keep or Drop. Only the Owner can read the memory.
+- Talking to it: Press Ask in the top bar for your standing chat, or give it a task on the Tasks tab. Its spend shows as Management on the Costs page.
 </help_outline>

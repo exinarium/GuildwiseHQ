@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { streamId } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { appoint, act, graduate, keepOnline, startCeoShift, wakeNow } from './helpers/ceo.ts';
+import { act, appoint, graduate, keepOnline, startCeoShift, wakeNow } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { seed } from './helpers/seed.ts';
@@ -26,7 +26,8 @@ afterAll(async () => {
 
 const dispatcher = () => w.t.app.ctx.services.dispatcher;
 const reporter = () => w.t.app.ctx.services.reporter;
-const owner = (method: string, url: string, body?: unknown) => w.t.req(method, url, { cookie: w.owner.cookie, body });
+const owner = (method: string, url: string, body?: unknown) =>
+  w.t.req(method, url, { cookie: w.owner.cookie, body });
 const wakes = (status?: string) =>
   q(`SELECT * FROM ceo_wakes ${status ? `WHERE status='${status}'` : ''} ORDER BY created_at`);
 const shifts = () => q(`SELECT * FROM shifts WHERE kind='ceo' ORDER BY started_at`);
@@ -39,7 +40,11 @@ async function clean() {
 }
 
 /** Finishes the running CEO shift the way the runner does: terminal report, then `shift.ended`. */
-async function finish(shiftId: string, outcomeId = 'ceo_done', data: Record<string, unknown> = { summary: 'handled' }) {
+async function finish(
+  shiftId: string,
+  outcomeId = 'ceo_done',
+  data: Record<string, unknown> = { summary: 'handled' },
+) {
   const { reportId } = r.report(shiftId, { kind: 'outcome', outcomeId, note: outcomeId, data });
   const res = (await r.waitFor('shift.report.result', (f) => f.reportId === reportId)) as any;
   r.ended(shiftId, 'reported');
@@ -80,7 +85,11 @@ describe('batching and caps', () => {
     await wakeNow(w, 'signal:blocked', 'urgent'); // arrives during the shift
     await dispatcher().run();
     await r.barrier();
-    expect(r.of('shift.start').filter((f: any) => f.kind === 'ceo' && f.shiftId !== start.shiftId && r.received.indexOf(f) >= from)).toHaveLength(0);
+    expect(
+      r
+        .of('shift.start')
+        .filter((f: any) => f.kind === 'ceo' && f.shiftId !== start.shiftId && r.received.indexOf(f) >= from),
+    ).toHaveLength(0);
     expect((await wakes('pending')).length).toBe(1);
     await finish(start.shiftId);
     const next = await startCeoShift(w, r, r.received.length);
@@ -135,14 +144,26 @@ describe('wake sources', () => {
         streamId: streamId.desk(id),
         event: {
           type: 'QuestionRaised',
-          payload: { deskItemId: id, projectId: w.projectId, askedBy: { kind: 'system' }, question: 'Tabs or spaces?', options: [], blocking: false, routedTo: 'manager' },
+          payload: {
+            deskItemId: id,
+            projectId: w.projectId,
+            askedBy: { kind: 'system' },
+            question: 'Tabs or spaces?',
+            options: [],
+            blocking: false,
+            routedTo: 'manager',
+          },
         },
         actor: { kind: 'system', id: null },
         scope: { orgId: w.owner.id, projectId: w.projectId, audience: 'project' },
       },
     ]);
     await until(async () => (await wakes('pending')).length === 1, 3000, 'wake');
-    expect((await wakes('pending'))[0]).toMatchObject({ reason: 'question', untrusted: true, subject_id: id });
+    expect((await wakes('pending'))[0]).toMatchObject({
+      reason: 'question',
+      untrusted: true,
+      subject_id: id,
+    });
   });
 
   it('what the CEO itself caused does not wake it', async () => {
@@ -153,7 +174,14 @@ describe('wake sources', () => {
         streamId: streamId.desk(id),
         event: {
           type: 'DeskItemCreated',
-          payload: { deskItemId: id, kind: 'alert', subkind: 'bug_reported', title: 'by the CEO', projectId: w.projectId, askedBy: { kind: 'agent', agentId, role: 'ceo' } },
+          payload: {
+            deskItemId: id,
+            kind: 'alert',
+            subkind: 'bug_reported',
+            title: 'by the CEO',
+            projectId: w.projectId,
+            askedBy: { kind: 'agent', agentId, role: 'ceo' },
+          },
         },
         actor: { kind: 'agent', id: agentId },
         scope: { orgId: w.owner.id, projectId: w.projectId, audience: 'project' },
@@ -173,9 +201,19 @@ describe('wake sources', () => {
     expect(res.result.status).toBe('executed');
     await finish(s.shiftId);
     const { enqueueWake } = await import('../src/ceo/wakes.ts');
-    const queued = await enqueueWake(w.t.app.ctx.pool, w.owner.id, { reason: 'x', urgency: 'normal', subjectKind: 'card', subjectId: card.id }, w.t.clock.now());
+    const queued = await enqueueWake(
+      w.t.app.ctx.pool,
+      w.owner.id,
+      { reason: 'x', urgency: 'normal', subjectKind: 'card', subjectId: card.id },
+      w.t.clock.now(),
+    );
     expect(queued).toBe(false);
-    const urgent = await enqueueWake(w.t.app.ctx.pool, w.owner.id, { reason: 'x', urgency: 'urgent', subjectKind: 'card', subjectId: card.id }, w.t.clock.now());
+    const urgent = await enqueueWake(
+      w.t.app.ctx.pool,
+      w.owner.id,
+      { reason: 'x', urgency: 'urgent', subjectKind: 'card', subjectId: card.id },
+      w.t.clock.now(),
+    );
     expect(urgent).toBe(true);
   });
 });
@@ -186,7 +224,18 @@ describe('routing: the CEO replaces the BA reporter', () => {
     await seed(w, [
       {
         streamId: streamId.desk(id),
-        event: { type: 'DeskItemCreated', payload: { deskItemId: id, kind: 'alert', subkind: 'bug_reported', title, body: 'b', projectId: w.projectId, askedBy: { kind: 'system' } } },
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId: id,
+            kind: 'alert',
+            subkind: 'bug_reported',
+            title,
+            body: 'b',
+            projectId: w.projectId,
+            askedBy: { kind: 'system' },
+          },
+        },
         actor: { kind: 'system', id: null },
         scope: { orgId: w.owner.id, projectId: w.projectId, audience: 'project' },
       },
@@ -216,9 +265,15 @@ describe('routing: the CEO replaces the BA reporter', () => {
     await until(async () => (await wakes('pending')).length === 1, 3000, 'wake');
     w.t.clock.advance(6 * 60_000);
     const s = await startCeoShift(w, r, r.received.length);
-    const res = (await act(r, s.shiftId, 'triage', { item: id, do: 'dismiss', note: 'duplicate of known noise' })) as any;
+    const res = (await act(r, s.shiftId, 'triage', {
+      item: id,
+      do: 'dismiss',
+      note: 'duplicate of known noise',
+    })) as any;
     expect(res.result.status).toBe('executed');
-    expect((await q(`SELECT triage, status FROM desk_items WHERE id=$1`, [id]))[0]).toMatchObject({ triage: 'dismissed' });
+    expect((await q(`SELECT triage, status FROM desk_items WHERE id=$1`, [id]))[0]).toMatchObject({
+      triage: 'dismissed',
+    });
     await finish(s.shiftId);
   });
 
@@ -271,10 +326,20 @@ describe('the daily review', () => {
     expect(start.ceo.purpose).toBe('review');
     expect(start.brief.shift.outcomes.map((o: any) => o.id)).toEqual(['ceo_report']);
     expect(start.ceo.brief).toContain('Training');
-    const badId = r.report(start.shiftId, { kind: 'outcome', outcomeId: 'ceo_report', note: 'r', data: { report: '' } }).reportId;
+    const badId = r.report(start.shiftId, {
+      kind: 'outcome',
+      outcomeId: 'ceo_report',
+      note: 'r',
+      data: { report: '' },
+    }).reportId;
     const bad = (await r.waitFor('shift.report.result', (f) => f.reportId === badId)) as any;
     expect(bad.accepted).toBe(false);
-    const { reportId } = r.report(start.shiftId, { kind: 'outcome', outcomeId: 'ceo_report', note: 'r', data: { report: '## Needs you\nnone\n\n## Decisions I took\nnone' } });
+    const { reportId } = r.report(start.shiftId, {
+      kind: 'outcome',
+      outcomeId: 'ceo_report',
+      note: 'r',
+      data: { report: '## Needs you\nnone\n\n## Decisions I took\nnone' },
+    });
     const res = (await r.waitFor('shift.report.result', (f) => f.reportId === reportId)) as any;
     expect(res.accepted).toBe(true);
     r.ended(start.shiftId, 'reported');

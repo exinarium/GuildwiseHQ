@@ -189,7 +189,13 @@ export function toDeskDto(
         }
       : {}),
     ...(r.subkind === 'ceo_report' && r.data?.ceo
-      ? { ceoReport: { actions: r.data.ceo.actions ?? [], scores: r.data.ceo.scores ?? [], fallback: r.data.fallback === true } }
+      ? {
+          ceoReport: {
+            actions: r.data.ceo.actions ?? [],
+            scores: r.data.ceo.scores ?? [],
+            fallback: r.data.fallback === true,
+          },
+        }
       : {}),
     canAnswer: r.status === 'open' && canAnswerItem(r, userId, role, orgRoles.get(r.org_id) ?? null),
     createdAt: iso(r.created_at) as string,

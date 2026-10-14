@@ -415,14 +415,14 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           : input.agent.roleKey === 'ceo'
             ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
             : buildChatSettings(
-              input.readOnly,
-              [
-                ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
-                ...used.map((u) => `mcp__${u.name}`),
-              ],
-              this.policy(chatInput, input.cwd, true),
-              input.sandbox,
-            ),
+                input.readOnly,
+                [
+                  ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
+                  ...used.map((u) => `mcp__${u.name}`),
+                ],
+                this.policy(chatInput, input.cwd, true),
+                input.sandbox,
+              ),
         null,
         2,
       )}\n`,

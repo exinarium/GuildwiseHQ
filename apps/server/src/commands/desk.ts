@@ -12,11 +12,11 @@ import {
   WORKING_BRANCH_SUBKIND,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
+import type { AuthSession } from '../auth/sessions.ts';
+import { projectRole } from '../authz/scope.ts';
 import { acceptRecommendation, rejectRecommendation } from '../ceo/accept.ts';
 import { onOwnerAnswer } from '../ceo/learning.ts';
 import { rememberFromDeskAnswer } from '../ceo/memory.ts';
-import type { AuthSession } from '../auth/sessions.ts';
-import { projectRole } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -216,13 +216,17 @@ export async function answerDeskItem(
   // The CEO learns from the owner's own answers (training observation, pattern candidates) and keeps a rule on request.
   const ans = after.item;
   if (ans && (await orgRoleOf(ctx.pool, user.id, ans.org_id)) === 'owner') {
-    await onOwnerAnswer(ctx, ans.org_id, user.id, ans, { optionId: req.optionId, text: req.answer }).catch((err) =>
-      ctx.log.error({ err }, 'ceo learning failed'),
+    await onOwnerAnswer(ctx, ans.org_id, user.id, ans, { optionId: req.optionId, text: req.answer }).catch(
+      (err) => ctx.log.error({ err }, 'ceo learning failed'),
     );
     if (req.remember)
-      await rememberFromDeskAnswer(ctx, ans.org_id, user.id, { id: ans.id, title: ans.title, subkind: ans.subkind }, req.answer).catch(
-        (err) => ctx.log.error({ err }, 'ceo remember failed'),
-      );
+      await rememberFromDeskAnswer(
+        ctx,
+        ans.org_id,
+        user.id,
+        { id: ans.id, title: ans.title, subkind: ans.subkind },
+        req.answer,
+      ).catch((err) => ctx.log.error({ err }, 'ceo remember failed'));
   }
   return answered;
 }

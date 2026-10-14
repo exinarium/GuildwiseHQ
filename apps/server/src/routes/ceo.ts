@@ -16,7 +16,6 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireOrg } from '../auth/guards.ts';
-import { loadCeo } from '../ceo/state.ts';
 import {
   appointCeo,
   changeTraining,
@@ -29,7 +28,15 @@ import {
   updateCeoSettings,
 } from '../ceo/commands.ts';
 import { ceoChatThread, moveCeo } from '../ceo/home.ts';
-import { addOwnerRule, confirmMemory, editMemory, forgetMemory, listMemories, retireMemory } from '../ceo/memory.ts';
+import {
+  addOwnerRule,
+  confirmMemory,
+  editMemory,
+  forgetMemory,
+  listMemories,
+  retireMemory,
+} from '../ceo/memory.ts';
+import { loadCeo } from '../ceo/state.ts';
 import { createTask, listTasks, updateTask } from '../ceo/tasks.ts';
 import { enqueueWake } from '../ceo/wakes.ts';
 import type { Ctx } from '../context.ts';
@@ -84,7 +91,11 @@ export function ceoRoutes(ctx: Ctx) {
 
     app.post('/api/ceo/policy/reset', async (req) => {
       const a = await owner(req);
-      return { policy: await resetCeoPolicy(ctx, a.session.user, a.orgId), defaults: DEFAULT_CEO_POLICY, canEdit: true };
+      return {
+        policy: await resetCeoPolicy(ctx, a.session.user, a.orgId),
+        defaults: DEFAULT_CEO_POLICY,
+        canEdit: true,
+      };
     });
 
     app.post('/api/ceo/appoint', { schema: { body: AppointCeoRequestSchema } }, async (req, reply) => {
@@ -134,12 +145,18 @@ export function ceoRoutes(ctx: Ctx) {
       return listActions(ctx.pool, a.orgId, req.query);
     });
 
-    app.get('/api/ceo/actions/export.csv', { schema: { querystring: CeoActionsQuerySchema } }, async (req, reply) => {
-      const a = await requireOrg(ctx, req, { min: 'admin' });
-      const r = await listActions(ctx.pool, a.orgId, { ...req.query, limit: 200 });
-      reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="ceo-activity.csv"');
-      return actionsCsv(r.actions);
-    });
+    app.get(
+      '/api/ceo/actions/export.csv',
+      { schema: { querystring: CeoActionsQuerySchema } },
+      async (req, reply) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        const r = await listActions(ctx.pool, a.orgId, { ...req.query, limit: 200 });
+        reply
+          .header('content-type', 'text/csv; charset=utf-8')
+          .header('content-disposition', 'attachment; filename="ceo-activity.csv"');
+        return actionsCsv(r.actions);
+      },
+    );
 
     app.post('/api/ceo/actions/:id/undo', { schema: { params: CeoIdParamsSchema } }, async (req) => {
       const a = await owner(req);
@@ -164,11 +181,15 @@ export function ceoRoutes(ctx: Ctx) {
       return { id };
     });
 
-    app.patch('/api/ceo/memories/:id', { schema: { params: CeoIdParamsSchema, body: PatchCeoMemoryRequestSchema } }, async (req) => {
-      const a = await owner(req);
-      await editMemory(ctx, a.orgId, a.session.user.id, req.params.id, req.body);
-      return { ok: true };
-    });
+    app.patch(
+      '/api/ceo/memories/:id',
+      { schema: { params: CeoIdParamsSchema, body: PatchCeoMemoryRequestSchema } },
+      async (req) => {
+        const a = await owner(req);
+        await editMemory(ctx, a.orgId, a.session.user.id, req.params.id, req.body);
+        return { ok: true };
+      },
+    );
 
     app.post('/api/ceo/memories/:id/confirm', { schema: { params: CeoIdParamsSchema } }, async (req) => {
       const a = await owner(req);
@@ -198,17 +219,40 @@ export function ceoRoutes(ctx: Ctx) {
       const a = await owner(req);
       const c = await loadCeo(ctx.pool, a.orgId);
       if (!c?.enabled) throw forbidden('there is no CEO to give a task to');
-      const id = await createTask(ctx, a.orgId, { title: req.body.title, request: req.body.request, due: req.body.due, by: { kind: 'owner', userId: a.session.user.id } });
-      await enqueueWake(ctx.pool, a.orgId, { reason: 'owner_task', urgency: 'normal', subjectKind: 'task', subjectId: id, subjectLabel: req.body.title }, ctx.clock.now());
+      const id = await createTask(ctx, a.orgId, {
+        title: req.body.title,
+        request: req.body.request,
+        due: req.body.due,
+        by: { kind: 'owner', userId: a.session.user.id },
+      });
+      await enqueueWake(
+        ctx.pool,
+        a.orgId,
+        {
+          reason: 'owner_task',
+          urgency: 'normal',
+          subjectKind: 'task',
+          subjectId: id,
+          subjectLabel: req.body.title,
+        },
+        ctx.clock.now(),
+      );
       ctx.services.dispatcher.trigger();
       reply.code(201);
       return { id };
     });
 
-    app.patch('/api/ceo/tasks/:id', { schema: { params: CeoIdParamsSchema, body: PatchCeoTaskRequestSchema } }, async (req) => {
-      const a = await owner(req);
-      await updateTask(ctx, a.orgId, req.params.id, req.body, 'owner', { kind: 'user', id: a.session.user.id });
-      return { ok: true };
-    });
+    app.patch(
+      '/api/ceo/tasks/:id',
+      { schema: { params: CeoIdParamsSchema, body: PatchCeoTaskRequestSchema } },
+      async (req) => {
+        const a = await owner(req);
+        await updateTask(ctx, a.orgId, req.params.id, req.body, 'owner', {
+          kind: 'user',
+          id: a.session.user.id,
+        });
+        return { ok: true };
+      },
+    );
   };
 }

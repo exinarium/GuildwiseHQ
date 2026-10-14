@@ -22,7 +22,6 @@ import {
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
-import type { AppendInput } from '../eventstore/types.ts';
 import { loadRole } from '../catalogue/loader.ts';
 import { agentScope, sandboxGate, suggestNames } from '../commands/agents.ts';
 import { cardMessage, orgScope, userActor } from '../commands/common.ts';
@@ -30,6 +29,7 @@ import type { Ctx } from '../context.ts';
 import { exec, one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import type { AppendInput } from '../eventstore/types.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { ownerPrincipal } from './engine.ts';
@@ -52,7 +52,12 @@ export async function appointCeo(
   const agentId = randomUUID();
   await withAppendTx(ctx.pool, async (tx) => {
     await requireOwner(tx, user.id, org.id);
-    if (await one(tx, `SELECT 1 FROM agents WHERE org_id=$1 AND role_key=$2 AND status <> 'retired'`, [org.id, CEO_ROLE_KEY]))
+    if (
+      await one(tx, `SELECT 1 FROM agents WHERE org_id=$1 AND role_key=$2 AND status <> 'retired'`, [
+        org.id,
+        CEO_ROLE_KEY,
+      ])
+    )
       throw conflict('ceo_exists', 'this organization already has a CEO');
     const ws = await one(
       tx,
@@ -62,10 +67,21 @@ export async function appointCeo(
     if (!ws) throw notFound('workstation not found: the CEO runs on your own workstation');
     const role = await loadRole(tx, org.id, CEO_ROLE_KEY);
     if (!role) throw badRequest('unknown_role', 'the CEO role is not available');
-    const uses = await one(tx, `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_devops LIMIT 1`, [org.id, req.workstationId]);
+    const uses = await one(
+      tx,
+      `SELECT 1 FROM agents WHERE org_id=$1 AND workstation_id=$2 AND status='active' AND NOT is_devops LIMIT 1`,
+      [org.id, req.workstationId],
+    );
     if (!uses) await assertWithinLimit(tx, org.id, 'workstations');
     const dm = role.definition.defaultModel;
-    const unsandboxedAck = await sandboxGate(ctx, tx, user.id, req.workstationId, dm.runtime, req.acknowledgeUnsandboxed);
+    const unsandboxedAck = await sandboxGate(
+      ctx,
+      tx,
+      user.id,
+      req.workstationId,
+      dm.runtime,
+      req.acknowledgeUnsandboxed,
+    );
     const name = req.name?.trim() || (await suggestNames(ctx, org.id, undefined, 1))[0] || 'Chief';
     if (await one(tx, 'SELECT 1 FROM agents WHERE org_id=$1 AND lower(name)=lower($2)', [org.id, name]))
       throw conflict('name_taken', `the name '${name}' is already used in this organization`);
@@ -136,7 +152,10 @@ export async function disableCeo(ctx: Ctx, user: AuthSession['user'], orgId: str
       [
         {
           streamId: streamId.agent(ceo.agentId),
-          event: { type: 'AgentRetired', payload: { agentId: ceo.agentId, by: user.id, releasedCardIds: [] } },
+          event: {
+            type: 'AgentRetired',
+            payload: { agentId: ceo.agentId, by: user.id, releasedCardIds: [] },
+          },
           actor: userActor(user.id),
           scope: orgScope(orgId),
         },
@@ -149,17 +168,31 @@ export async function disableCeo(ctx: Ctx, user: AuthSession['user'], orgId: str
       ],
       { tx },
     );
-    await exec(tx, `UPDATE ceo_wakes SET status='dropped' WHERE org_id=$1 AND status IN ('pending','taken')`, [orgId]);
-    if (a?.workstation_id) await enqueueRunnerCommand(tx, a.workstation_id, 'agent.wipe', { agentId: ceo.agentId });
+    await exec(
+      tx,
+      `UPDATE ceo_wakes SET status='dropped' WHERE org_id=$1 AND status IN ('pending','taken')`,
+      [orgId],
+    );
+    if (a?.workstation_id)
+      await enqueueRunnerCommand(tx, a.workstation_id, 'agent.wipe', { agentId: ceo.agentId });
     if (a?.workstation_id) {
       // a running CEO shift stops
-      const open = await rows(tx, `SELECT id, workstation_id FROM shifts WHERE agent_id=$1 AND status <> 'ended'`, [ceo.agentId]);
+      const open = await rows(
+        tx,
+        `SELECT id, workstation_id FROM shifts WHERE agent_id=$1 AND status <> 'ended'`,
+        [ceo.agentId],
+      );
       for (const s of open) ctx.services.gateway.stopShift(s.workstation_id, s.id, 'agent_retired');
     }
   });
 }
 
-export async function pauseCeo(ctx: Ctx, user: AuthSession['user'], orgId: string, reason?: string): Promise<void> {
+export async function pauseCeo(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  orgId: string,
+  reason?: string,
+): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     const role = await orgRoleOf(tx, user.id, orgId);
     if (!isOrgManager({ orgRole: role })) throw forbidden('only the Owner and Admins can pause the CEO');
@@ -167,7 +200,14 @@ export async function pauseCeo(ctx: Ctx, user: AuthSession['user'], orgId: strin
     if (!ceo?.enabled) throw conflict('no_ceo', 'there is no CEO');
     if (ceo.paused) return;
     await ctx.store.append(
-      [{ streamId: streamId.ceo(orgId), event: { type: 'CeoPaused', payload: { orgId, by: user.id, ...(reason ? { reason } : {}) } }, actor: userActor(user.id), scope: orgScope(orgId) }],
+      [
+        {
+          streamId: streamId.ceo(orgId),
+          event: { type: 'CeoPaused', payload: { orgId, by: user.id, ...(reason ? { reason } : {}) } },
+          actor: userActor(user.id),
+          scope: orgScope(orgId),
+        },
+      ],
       { tx },
     );
   });
@@ -181,7 +221,14 @@ export async function resumeCeo(ctx: Ctx, user: AuthSession['user'], orgId: stri
     if (!ceo?.enabled) throw conflict('no_ceo', 'there is no CEO');
     if (!ceo.paused) return;
     await ctx.store.append(
-      [{ streamId: streamId.ceo(orgId), event: { type: 'CeoResumed', payload: { orgId, by: user.id } }, actor: userActor(user.id), scope: orgScope(orgId) }],
+      [
+        {
+          streamId: streamId.ceo(orgId),
+          event: { type: 'CeoResumed', payload: { orgId, by: user.id } },
+          actor: userActor(user.id),
+          scope: orgScope(orgId),
+        },
+      ],
       { tx },
     );
   });
@@ -206,14 +253,22 @@ export async function updateCeoSettings(
       notify: { ...ceo.settings.notify, ...(patch.notify ?? {}) },
     });
     await ctx.store.append(
-      [{ streamId: streamId.ceo(orgId), event: { type: 'CeoSettingsChanged', payload: { orgId, settings: merged, by: user.id } }, actor: userActor(user.id), scope: orgScope(orgId) }],
+      [
+        {
+          streamId: streamId.ceo(orgId),
+          event: { type: 'CeoSettingsChanged', payload: { orgId, settings: merged, by: user.id } },
+          actor: userActor(user.id),
+          scope: orgScope(orgId),
+        },
+      ],
       { tx },
     );
     return merged;
   });
 }
 
-const POLICY_DELEGATION_RISK = 'Delegating an owner-reserved matter lets the CEO decide it without asking you.';
+const POLICY_DELEGATION_RISK =
+  'Delegating an owner-reserved matter lets the CEO decide it without asking you.';
 
 /** The owner saves the policy: a new version, validated; delegations need the explicit confirmation. */
 export async function updateCeoPolicy(
@@ -228,16 +283,33 @@ export async function updateCeoPolicy(
     const ceo = await loadCeo(tx, orgId);
     if (!ceo?.enabled) throw conflict('no_ceo', 'there is no CEO');
     const parsed = CeoPolicySchema.safeParse(policy);
-    if (!parsed.success) throw badRequest('invalid_policy', parsed.error.issues.map((i) => `${i.path.join('.')} ${i.message}`).join('; '));
+    if (!parsed.success)
+      throw badRequest(
+        'invalid_policy',
+        parsed.error.issues.map((i) => `${i.path.join('.')} ${i.message}`).join('; '),
+      );
     const next = { ...parsed.data, version: ceo.policyVersion + 1 };
     const added = next.delegated.filter((k) => !ceo.policy.delegated.includes(k));
     if (added.length && !opts.confirmDelegation)
-      throw conflict('delegation_unconfirmed', `${POLICY_DELEGATION_RISK} Confirm to delegate: ${added.join(', ')}.`);
+      throw conflict(
+        'delegation_unconfirmed',
+        `${POLICY_DELEGATION_RISK} Confirm to delegate: ${added.join(', ')}.`,
+      );
     await ctx.store.append(
       [
         {
           streamId: streamId.ceo(orgId),
-          event: { type: 'CeoPolicyChanged', payload: { orgId, version: next.version, previousVersion: ceo.policyVersion, policy: next, by: user.id, ...(opts.note ? { note: opts.note } : {}) } },
+          event: {
+            type: 'CeoPolicyChanged',
+            payload: {
+              orgId,
+              version: next.version,
+              previousVersion: ceo.policyVersion,
+              policy: next,
+              by: user.id,
+              ...(opts.note ? { note: opts.note } : {}),
+            },
+          },
           actor: userActor(user.id),
           scope: orgScope(orgId),
         },
@@ -282,7 +354,14 @@ export async function changeTraining(
           : startTraining(now, ceo.training.extensions + 1);
     const scores = await trainingScores(tx, orgId);
     await ctx.store.append(
-      [{ streamId: streamId.ceo(orgId), event: { type: 'CeoTrainingChanged', payload: { orgId, action, training: t, by: user.id, scores } }, actor: userActor(user.id), scope: orgScope(orgId) }],
+      [
+        {
+          streamId: streamId.ceo(orgId),
+          event: { type: 'CeoTrainingChanged', payload: { orgId, action, training: t, by: user.id, scores } },
+          actor: userActor(user.id),
+          scope: orgScope(orgId),
+        },
+      ],
       { tx },
     );
     return t;
@@ -299,9 +378,13 @@ async function pre(
   params: Record<string, any>,
 ): Promise<string | undefined> {
   if (name === 'resume-agent' || name === 'pause-agent') {
-    const a = await one(tx, 'SELECT paused_at, status FROM agents WHERE id=$1 AND org_id=$2', [params.agent, orgId]);
+    const a = await one(tx, 'SELECT paused_at, status FROM agents WHERE id=$1 AND org_id=$2', [
+      params.agent,
+      orgId,
+    ]);
     if (!a || a.status === 'retired') return 'the agent is gone';
-    if ((pc.paused === true) !== !!a.paused_at) return pc.paused ? 'the agent is no longer paused' : 'the agent has been paused since';
+    if ((pc.paused === true) !== !!a.paused_at)
+      return pc.paused ? 'the agent is no longer paused' : 'the agent has been paused since';
   }
   if (name === 'priority') {
     const c = await one(tx, 'SELECT priority FROM cards WHERE id=$1 AND org_id=$2', [params.card, orgId]);
@@ -309,10 +392,15 @@ async function pre(
     if (c.priority !== pc.priority) return `the priority was changed again (it is ${c.priority} now)`;
   }
   if (name === 'model' || name === 'seniority') {
-    const a = await one(tx, 'SELECT model, seniority, status FROM agents WHERE id=$1 AND org_id=$2', [params.agent, orgId]);
+    const a = await one(tx, 'SELECT model, seniority, status FROM agents WHERE id=$1 AND org_id=$2', [
+      params.agent,
+      orgId,
+    ]);
     if (!a || a.status === 'retired') return 'the agent is gone';
-    if (pc.model !== undefined && a.model !== pc.model) return `the model was changed again (it is ${a.model} now)`;
-    if (pc.seniority !== undefined && a.seniority !== pc.seniority) return `the seniority was changed again (it is ${a.seniority} now)`;
+    if (pc.model !== undefined && a.model !== pc.model)
+      return `the model was changed again (it is ${a.model} now)`;
+    if (pc.seniority !== undefined && a.seniority !== pc.seniority)
+      return `the seniority was changed again (it is ${a.seniority} now)`;
   }
   if (name === 'unhire') {
     const a = await one(tx, 'SELECT status FROM agents WHERE id=$1 AND org_id=$2', [params.agent, orgId]);
@@ -323,7 +411,10 @@ async function pre(
     if (c?.status !== 'cancelled') return 'the card is not cancelled any more';
   }
   if (name === 'cancel-draft') {
-    const c = await one(tx, 'SELECT status, claim_id FROM cards WHERE id=$1 AND org_id=$2', [params.card, orgId]);
+    const c = await one(tx, 'SELECT status, claim_id FROM cards WHERE id=$1 AND org_id=$2', [
+      params.card,
+      orgId,
+    ]);
     if (!c || ['done', 'cancelled'].includes(c.status)) return 'the card is closed already';
     if (c.claim_id) return 'an agent has started on the card';
   }
@@ -340,12 +431,20 @@ export interface UndoResult {
 }
 
 /** Inverses that run through the ordinary commands (each in its own transaction); the audit follows. */
-async function runInverse(ctx: Ctx, user: AuthSession['user'], inv: { action: string; params: Record<string, any> }): Promise<string> {
+async function runInverse(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  inv: { action: string; params: Record<string, any> },
+): Promise<string> {
   const { cancelCard, dismissInto, patchCard, reopenCard } = await import('./undo-commands.ts');
   const { fireAgent, patchAgent, setAgentAllowedProjects } = await import('../commands/agents.ts');
   const p = inv.params;
   const unhire = async (agentId: string) => {
-    const worked = await one(ctx.pool, `SELECT 1 FROM shifts WHERE agent_id=$1 AND status='ended' AND kind <> 'chat' LIMIT 1`, [agentId]);
+    const worked = await one(
+      ctx.pool,
+      `SELECT 1 FROM shifts WHERE agent_id=$1 AND status='ended' AND kind <> 'chat' LIMIT 1`,
+      [agentId],
+    );
     if (worked) {
       await setAgentAllowedProjects(ctx, user, agentId, []);
       return 'benched (it had already worked)';
@@ -388,20 +487,38 @@ async function runInverse(ctx: Ctx, user: AuthSession['user'], inv: { action: st
   }
 }
 
-const OUTSIDE_TX = new Set(['priority', 'model', 'seniority', 'allow-restore', 'unhire', 'scale-undo', 'reopen-card', 'cancel-draft', 'dismiss-item']);
+const OUTSIDE_TX = new Set([
+  'priority',
+  'model',
+  'seniority',
+  'allow-restore',
+  'unhire',
+  'scale-undo',
+  'reopen-card',
+  'cancel-draft',
+  'dismiss-item',
+]);
 
 /**
  * Undo (docs/design/ceo-agent-v2.md section 3.5): checks that the precondition still holds, runs the stored inverse as the
  * Owner, appends `CeoActionUndone`. A desk answer is compensating: it re-opens the question when no card it released has
  * been taken since; otherwise the answer stays and a correction goes on the card and the owner's desk.
  */
-export async function undoCeoAction(ctx: Ctx, user: AuthSession['user'], orgId: string, actionId: string): Promise<UndoResult> {
+export async function undoCeoAction(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  orgId: string,
+  actionId: string,
+): Promise<UndoResult> {
   const a = await one(ctx.pool, 'SELECT * FROM ceo_actions WHERE id=$1 AND org_id=$2', [actionId, orgId]);
   if (!a) throw notFound('action not found');
   await requireOwner(ctx.pool, user.id, orgId);
   if (a.status === 'undone') throw conflict('already_undone', 'this action was already undone');
   if (a.status !== 'done' || !a.inverse)
-    throw conflict('not_reversible', 'this action cannot be undone (it is not reversible, or it was only a recommendation)');
+    throw conflict(
+      'not_reversible',
+      'this action cannot be undone (it is not reversible, or it was only a recommendation)',
+    );
   const inv = a.inverse as {
     kind: 'inverse' | 'compensating';
     action: string;
@@ -438,33 +555,54 @@ export async function undoCeoAction(ctx: Ctx, user: AuthSession['user'], orgId: 
           streamId: streamId.agent(inv.params.agent),
           event:
             inv.action === 'resume-agent'
-              ? { type: 'AgentResumed' as const, payload: { agentId: inv.params.agent, by: user.id, viaCeo: false } }
-              : { type: 'AgentPaused' as const, payload: { agentId: inv.params.agent, by: user.id, reason: 'undo', viaCeo: false } },
+              ? {
+                  type: 'AgentResumed' as const,
+                  payload: { agentId: inv.params.agent, by: user.id, viaCeo: false },
+                }
+              : {
+                  type: 'AgentPaused' as const,
+                  payload: { agentId: inv.params.agent, by: user.id, reason: 'undo', viaCeo: false },
+                },
           actor: userActor(user.id),
           scope: agentScope(ag ?? { org_id: orgId }),
         });
       } else if (inv.action === 'reopen-question') {
         const item = await one(tx, 'SELECT * FROM desk_items WHERE id=$1', [inv.params.item]);
-        if (!item || item.status !== 'answered') throw conflict('stale', 'cannot undo: the question is not answered any more');
+        if (!item || item.status !== 'answered')
+          throw conflict('stale', 'cannot undo: the question is not answered any more');
         const cardIds: string[] = inv.params.unblocked ?? [];
-        const cards = cardIds.length ? await rows(tx, 'SELECT * FROM cards WHERE id = ANY($1::uuid[])', [cardIds]) : [];
+        const cards = cardIds.length
+          ? await rows(tx, 'SELECT * FROM cards WHERE id = ANY($1::uuid[])', [cardIds])
+          : [];
         const untouched = cards.every((c) => c.status === 'queued' && !c.claim_id);
         if (untouched) {
           events.push({
             streamId: streamId.desk(item.id),
             event: {
               type: 'QuestionReopened' as const,
-              payload: { deskItemId: item.id, by: { kind: 'user' as const, id: user.id }, note: 'The owner undid the CEO answer.', blockedCardIds: cardIds },
+              payload: {
+                deskItemId: item.id,
+                by: { kind: 'user' as const, id: user.id },
+                note: 'The owner undid the CEO answer.',
+                blockedCardIds: cardIds,
+              },
             },
             actor: userActor(user.id),
-            scope: item.project_id ? { orgId, projectId: item.project_id, audience: 'project' as const } : orgScope(orgId),
+            scope: item.project_id
+              ? { orgId, projectId: item.project_id, audience: 'project' as const }
+              : orgScope(orgId),
           });
           message = 'The question is open again on your desk; the cards wait for your answer.';
         } else {
           kind = 'compensating';
           for (const c of cards)
             events.push(
-              cardMessage(c, { kind: 'system' }, 'system', `The owner undid the CEO's answer to "${String(item.title).slice(0, 120)}": do not rely on it. Ask the owner if it matters for your work.`),
+              cardMessage(
+                c,
+                { kind: 'system' },
+                'system',
+                `The owner undid the CEO's answer to "${String(item.title).slice(0, 120)}": do not rely on it. Ask the owner if it matters for your work.`,
+              ),
             );
           const noticeId = randomUUID();
           events.push({
@@ -496,7 +634,9 @@ export async function undoCeoAction(ctx: Ctx, user: AuthSession['user'], orgId: 
   }
   ctx.services.dispatcher.trigger();
   const { onUndo } = await import('./learning.ts');
-  await onUndo(ctx, orgId, user.id, a as Row).catch((err) => ctx.log.error({ err }, 'ceo undo learning failed'));
+  await onUndo(ctx, orgId, user.id, a as Row).catch((err) =>
+    ctx.log.error({ err }, 'ceo undo learning failed'),
+  );
   return { kind, message };
 }
 

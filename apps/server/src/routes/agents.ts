@@ -12,11 +12,11 @@ import type { FastifyInstance } from 'fastify';
 import { requireOrg, requireUser } from '../auth/guards.ts';
 import {
   fireAgent,
-  setAgentPaused,
   hireAgent,
   patchAgent,
   setAgentAllowedProjects,
   setAgentFocusProjects,
+  setAgentPaused,
   suggestNames,
 } from '../commands/agents.ts';
 import { rerollAgentAvatar } from '../commands/avatar.ts';

@@ -46,7 +46,10 @@ export async function endCeoShift(
   if (batch) {
     const failed = !(outcome === 'rejected' || outcome === 'lost' || outcome === 'stopped');
     const attempts = Number(batch.attempts) + (failed ? 1 : 0);
-    await exec(tx, `UPDATE ceo_batches SET status='failed', attempts=$2, updated_at=now() WHERE id=$1`, [batch.id, attempts]);
+    await exec(tx, `UPDATE ceo_batches SET status='failed', attempts=$2, updated_at=now() WHERE id=$1`, [
+      batch.id,
+      attempts,
+    ]);
     await exec(
       tx,
       `UPDATE ceo_wakes SET status = CASE WHEN reason <> 'daily_review' AND $2::int >= 2 THEN 'failed' ELSE 'pending' END,

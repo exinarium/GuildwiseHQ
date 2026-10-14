@@ -23,10 +23,11 @@ export const ceoProjectors: Record<string, Projector> = {
   },
   CeoDisabled: async (tx, e) => {
     const p = ev<'CeoDisabled'>(e).payload;
-    await exec(tx, 'UPDATE ceo_settings SET enabled=false, agent_id=NULL, paused=false, updated_at=$2 WHERE org_id=$1', [
-      p.orgId,
-      e.createdAt,
-    ]);
+    await exec(
+      tx,
+      'UPDATE ceo_settings SET enabled=false, agent_id=NULL, paused=false, updated_at=$2 WHERE org_id=$1',
+      [p.orgId, e.createdAt],
+    );
   },
   CeoPaused: async (tx, e) => {
     const p = ev<'CeoPaused'>(e).payload;
@@ -38,10 +39,11 @@ export const ceoProjectors: Record<string, Projector> = {
   },
   CeoResumed: async (tx, e) => {
     const p = ev<'CeoResumed'>(e).payload;
-    await exec(tx, 'UPDATE ceo_settings SET paused=false, paused_reason=NULL, updated_at=$2 WHERE org_id=$1', [
-      p.orgId,
-      e.createdAt,
-    ]);
+    await exec(
+      tx,
+      'UPDATE ceo_settings SET paused=false, paused_reason=NULL, updated_at=$2 WHERE org_id=$1',
+      [p.orgId, e.createdAt],
+    );
   },
   CeoPolicyChanged: async (tx, e) => {
     const p = ev<'CeoPolicyChanged'>(e).payload;
@@ -87,9 +89,11 @@ export const ceoProjectors: Record<string, Projector> = {
 
   CeoShiftDispatched: async (tx, e) => {
     const p = ev<'CeoShiftDispatched'>(e).payload;
-    const a = await one<{ runtime: string; model: string }>(tx, 'SELECT runtime, model FROM agents WHERE id=$1', [
-      p.agentId,
-    ]);
+    const a = await one<{ runtime: string; model: string }>(
+      tx,
+      'SELECT runtime, model FROM agents WHERE id=$1',
+      [p.agentId],
+    );
     if (!a) return;
     await exec(
       tx,
@@ -168,12 +172,11 @@ export const ceoProjectors: Record<string, Projector> = {
   },
   CeoActionUndone: async (tx, e) => {
     const p = ev<'CeoActionUndone'>(e).payload;
-    await exec(tx, `UPDATE ceo_actions SET status='undone', undone_at=$2, undone_by=$3, undo_kind=$4 WHERE id=$1`, [
-      p.actionId,
-      e.createdAt,
-      p.by,
-      p.kind,
-    ]);
+    await exec(
+      tx,
+      `UPDATE ceo_actions SET status='undone', undone_at=$2, undone_by=$3, undo_kind=$4 WHERE id=$1`,
+      [p.actionId, e.createdAt, p.by, p.kind],
+    );
     await exec(tx, 'UPDATE desk_items SET ceo_action_id=NULL WHERE ceo_action_id=$1', [p.actionId]);
   },
 
@@ -183,14 +186,26 @@ export const ceoProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO ceo_tasks (id, org_id, title, request, status, thread_id, due_at, watch, created_by, created_at, updated_at)
        VALUES ($1,$2,$3,$4,'open',$5,$6,$7,$8,$9,$9) ON CONFLICT (id) DO NOTHING`,
-      [p.taskId, p.orgId, p.title, p.request, p.threadId ?? null, p.due ?? null, j(p.watch), p.by, e.createdAt],
+      [
+        p.taskId,
+        p.orgId,
+        p.title,
+        p.request,
+        p.threadId ?? null,
+        p.due ?? null,
+        j(p.watch),
+        p.by,
+        e.createdAt,
+      ],
     );
   },
   CeoTaskUpdated: async (tx, e) => {
     const p = ev<'CeoTaskUpdated'>(e).payload;
     const cur = await one<{ notes: unknown[] }>(tx, 'SELECT notes FROM ceo_tasks WHERE id=$1', [p.taskId]);
     if (!cur) return;
-    const notes = p.note ? [...(cur.notes ?? []), { at: e.createdAt.toISOString(), by: p.by, note: p.note }] : cur.notes;
+    const notes = p.note
+      ? [...(cur.notes ?? []), { at: e.createdAt.toISOString(), by: p.by, note: p.note }]
+      : cur.notes;
     const terminal = p.status === 'done' || p.status === 'failed' || p.status === 'cancelled';
     await exec(
       tx,
@@ -252,10 +267,11 @@ export const ceoProjectors: Record<string, Projector> = {
   },
   CeoMemoryRetired: async (tx, e) => {
     const p = ev<'CeoMemoryRetired'>(e).payload;
-    await exec(tx, `UPDATE ceo_memories SET status='retired', retired_reason=$2 WHERE id=$1 AND status <> 'forgotten'`, [
-      p.memoryId,
-      p.reason,
-    ]);
+    await exec(
+      tx,
+      `UPDATE ceo_memories SET status='retired', retired_reason=$2 WHERE id=$1 AND status <> 'forgotten'`,
+      [p.memoryId, p.reason],
+    );
   },
   CeoMemoryAdjusted: async (tx, e) => {
     const p = ev<'CeoMemoryAdjusted'>(e).payload;
@@ -312,10 +328,11 @@ export const ceoProjectors: Record<string, Projector> = {
           WHERE id=$1 AND status='queued'`,
         [cardId, e.createdAt],
       );
-      await exec(tx, 'INSERT INTO card_blockers (card_id, desk_item_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [
-        cardId,
-        p.deskItemId,
-      ]);
+      await exec(
+        tx,
+        'INSERT INTO card_blockers (card_id, desk_item_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+        [cardId, p.deskItemId],
+      );
     }
   },
 };

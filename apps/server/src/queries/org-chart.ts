@@ -101,7 +101,9 @@ export async function getOrgChart(db: Queryable, orgId: string, now: Date): Prom
     else if (stuck.length) status = 'blocked';
     const seniors = a.is_devops || a.role_key === 'ba' || a.role_key === 'ceo' ? [] : seniorsOf(a);
     // peer -> BA -> CEO -> desk; a step nobody can take is skipped (the CEO also when it is paused).
-    const up = ceoUp ? { level: 'ceo' as const, agentIds: [ceoUp.id as string] } : { level: 'desk' as const, agentIds: [] };
+    const up = ceoUp
+      ? { level: 'ceo' as const, agentIds: [ceoUp.id as string] }
+      : { level: 'desk' as const, agentIds: [] };
     const escalatesTo =
       a.is_devops || a.role_key === 'ceo'
         ? { level: 'desk' as const, agentIds: [] }

@@ -15,7 +15,8 @@ afterAll(async () => {
   await closeAdminPool();
 });
 
-const owner = (method: string, url: string, body?: unknown) => w.t.req(method, url, { cookie: w.owner.cookie, body });
+const owner = (method: string, url: string, body?: unknown) =>
+  w.t.req(method, url, { cookie: w.owner.cookie, body });
 
 describe('the CEO is appointed once per organization', () => {
   it('has no CEO at first and the status says so', async () => {
@@ -37,7 +38,10 @@ describe('the CEO is appointed once per organization', () => {
   });
 
   it('appoint creates the agent, the default policy and a training period', async () => {
-    const res = await ok<any>(owner('POST', '/api/ceo/appoint', { workstationId: w.workstationId, name: 'Ada Prime' }), 201);
+    const res = await ok<any>(
+      owner('POST', '/api/ceo/appoint', { workstationId: w.workstationId, name: 'Ada Prime' }),
+      201,
+    );
     const a = (await q(`SELECT * FROM agents WHERE id=$1`, [res.agentId]))[0]!;
     expect(a.role_key).toBe('ceo');
     expect(a.seniority).toBe('senior');
@@ -61,8 +65,14 @@ describe('the CEO is appointed once per organization', () => {
 
   it('Admins read but only the Owner configures', async () => {
     const admin = await w.t.userSession(`admin-${Date.now()}@example.test`);
-    await q(`INSERT INTO org_members (org_id, user_id, role, status, joined_at) VALUES ($1,$2,'admin','active',now())`, [w.owner.id, admin.id]);
-    const get = await w.t.req('GET', '/api/ceo/status', { cookie: admin.cookie, headers: { 'x-aom-org': w.owner.id } });
+    await q(
+      `INSERT INTO org_members (org_id, user_id, role, status, joined_at) VALUES ($1,$2,'admin','active',now())`,
+      [w.owner.id, admin.id],
+    );
+    const get = await w.t.req('GET', '/api/ceo/status', {
+      cookie: admin.cookie,
+      headers: { 'x-aom-org': w.owner.id },
+    });
     expect(get.status).toBe(200);
     const put = await w.t.req('PUT', '/api/ceo/settings', {
       cookie: admin.cookie,

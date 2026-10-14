@@ -5,11 +5,10 @@ import { orgScope, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { conflict, notFound } from '../errors.ts';
+import { conflict, forbidden, notFound } from '../errors.ts';
 import { ensureCeoThread } from './chat.ts';
 import { isOrgOwner } from './commands.ts';
 import { loadCeo } from './state.ts';
-import { forbidden } from '../errors.ts';
 
 /** The CEO moves to another of the owner's workstations (its home; no automatic failover). */
 export async function moveCeo(
@@ -22,7 +21,9 @@ export async function moveCeo(
     if (!(await isOrgOwner(tx, user.id, orgId))) throw forbidden('only the organization Owner can do this');
     const ceo = await loadCeo(tx, orgId);
     if (!ceo?.enabled || !ceo.agentId) throw conflict('no_ceo', 'there is no CEO');
-    const running = await one(tx, `SELECT 1 FROM shifts WHERE agent_id=$1 AND status <> 'ended' LIMIT 1`, [ceo.agentId]);
+    const running = await one(tx, `SELECT 1 FROM shifts WHERE agent_id=$1 AND status <> 'ended' LIMIT 1`, [
+      ceo.agentId,
+    ]);
     if (running) throw conflict('ceo_busy', 'the CEO is working right now: try again in a minute');
     const a = await one(tx, 'SELECT * FROM agents WHERE id=$1', [ceo.agentId]);
     const ws = await one(
@@ -39,7 +40,13 @@ export async function moveCeo(
           streamId: streamId.agent(a.id),
           event: {
             type: 'AgentRehomed',
-            payload: { agentId: a.id, workstationId: ws.id, runtime: a.runtime, model: a.model, ...(ack ? { unsandboxedAck: ack } : {}) },
+            payload: {
+              agentId: a.id,
+              workstationId: ws.id,
+              runtime: a.runtime,
+              model: a.model,
+              ...(ack ? { unsandboxedAck: ack } : {}),
+            },
           },
           actor: userActor(user.id),
           scope: orgScope(orgId),
@@ -52,7 +59,8 @@ export async function moveCeo(
 
 /** The owner's standing chat with the CEO: found or created. */
 export async function ceoChatThread(ctx: Ctx, user: AuthSession['user'], orgId: string): Promise<string> {
-  if (!(await isOrgOwner(ctx.pool, user.id, orgId))) throw forbidden('only the organization Owner can talk to the CEO');
+  if (!(await isOrgOwner(ctx.pool, user.id, orgId)))
+    throw forbidden('only the organization Owner can talk to the CEO');
   return withAppendTx(ctx.pool, async (tx) => {
     const t = await ensureCeoThread(tx, orgId);
     if (!t.threadId) throw conflict('no_ceo', 'there is no CEO');

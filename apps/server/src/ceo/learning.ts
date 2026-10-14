@@ -1,4 +1,4 @@
-import { CLASS_LABEL, type ActionClass, type RecommendationResponse, streamId } from '@aom/shared';
+import { type ActionClass, CLASS_LABEL, type RecommendationResponse, streamId } from '@aom/shared';
 import { orgScope, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row } from '../db/sql.ts';
@@ -24,7 +24,14 @@ async function observe(
   ctx: Ctx,
   orgId: string,
   userId: string | null,
-  o: { cls: string; scope: string; text: string; source: 'owner_desk_answer' | 'owner_override' | 'owner_undo' | 'owner_training'; sourceRef: string; kind: 'decision_pattern' | 'correction' },
+  o: {
+    cls: string;
+    scope: string;
+    text: string;
+    source: 'owner_desk_answer' | 'owner_override' | 'owner_undo' | 'owner_training';
+    sourceRef: string;
+    kind: 'decision_pattern' | 'correction';
+  },
 ): Promise<void> {
   const hash = textHash(o.text);
   await withAppendTx(ctx.pool, async (tx) => {
@@ -40,7 +47,13 @@ async function observe(
             streamId: streamId.ceo(orgId),
             event: {
               type: 'CeoMemoryAdjusted',
-              payload: { memoryId: same.id, orgId, confidence: Math.min(0.9, Number(same.confidence) + 0.1), observations: Number(same.observations) + 1, reason: 'observed again' },
+              payload: {
+                memoryId: same.id,
+                orgId,
+                confidence: Math.min(0.9, Number(same.confidence) + 0.1),
+                observations: Number(same.observations) + 1,
+                reason: 'observed again',
+              },
             },
             actor: userId ? userActor(userId) : { kind: 'system', id: null },
             scope: orgScope(orgId),
@@ -77,7 +90,11 @@ export async function recordResponse(
   response: RecommendationResponse,
   opts: { note?: string | undefined; ownerChoice?: string | undefined; deskItemId?: string | undefined } = {},
 ): Promise<void> {
-  const a = await one(ctx.pool, `SELECT * FROM ceo_actions WHERE id=$1 AND org_id=$2 AND mode='recommended' AND response IS NULL`, [actionId, orgId]);
+  const a = await one(
+    ctx.pool,
+    `SELECT * FROM ceo_actions WHERE id=$1 AND org_id=$2 AND mode='recommended' AND response IS NULL`,
+    [actionId, orgId],
+  );
   if (!a) return;
   await ctx.store.append([
     {
@@ -123,12 +140,24 @@ export async function recordResponse(
 }
 
 async function bump(ctx: Ctx, orgId: string, memoryId: string, delta: number, reason: string): Promise<void> {
-  const m = await one(ctx.pool, `SELECT confidence FROM ceo_memories WHERE id=$1 AND org_id=$2 AND status IN ('active','candidate')`, [memoryId, orgId]);
+  const m = await one(
+    ctx.pool,
+    `SELECT confidence FROM ceo_memories WHERE id=$1 AND org_id=$2 AND status IN ('active','candidate')`,
+    [memoryId, orgId],
+  );
   if (!m) return;
   await ctx.store.append([
     {
       streamId: streamId.ceo(orgId),
-      event: { type: 'CeoMemoryAdjusted', payload: { memoryId, orgId, confidence: Math.max(0, Math.min(1, Number(m.confidence) + delta)), reason } },
+      event: {
+        type: 'CeoMemoryAdjusted',
+        payload: {
+          memoryId,
+          orgId,
+          confidence: Math.max(0, Math.min(1, Number(m.confidence) + delta)),
+          reason,
+        },
+      },
       actor: { kind: 'system', id: null },
       scope: orgScope(orgId),
     },
@@ -162,11 +191,18 @@ export async function onOwnerAnswer(
 ): Promise<void> {
   const ceo = await loadCeo(ctx.pool, orgId);
   if (!ceo?.enabled) return;
-  const rec = item.ceo_recommendation as { actionId?: string; option?: string | null; text?: string | null } | null;
+  const rec = item.ceo_recommendation as {
+    actionId?: string;
+    option?: string | null;
+    text?: string | null;
+  } | null;
   if (rec?.actionId) {
-    const same = rec.option ? rec.option === answer.optionId : (rec.text ?? '').trim().toLowerCase() === answer.text.trim().toLowerCase();
+    const same = rec.option
+      ? rec.option === answer.optionId
+      : (rec.text ?? '').trim().toLowerCase() === answer.text.trim().toLowerCase();
     const label2 = answer.optionId
-      ? ((item.options as Array<{ id: string; label: string }>).find((o) => o.id === answer.optionId)?.label ?? answer.optionId)
+      ? ((item.options as Array<{ id: string; label: string }>).find((o) => o.id === answer.optionId)
+          ?.label ?? answer.optionId)
       : answer.text.slice(0, 120);
     await recordResponse(ctx, orgId, userId, rec.actionId, same ? 'accepted' : 'different', {
       ownerChoice: label2,

@@ -24,7 +24,11 @@ export async function budgetBlock(
     const { orgBudgetState } = await import('./orgbudget.ts');
     const st = await orgBudgetState(env.ctx, env.ceo, now);
     const org = (st.spent / elapsed) * daysInMonth;
-    const nAgents = await one<{ n: string }>(env.ctx.pool, `SELECT count(*)::text AS n FROM agents WHERE org_id=$1 AND status='active' AND NOT is_devops AND role_key <> 'ceo'`, [env.orgId]);
+    const nAgents = await one<{ n: string }>(
+      env.ctx.pool,
+      `SELECT count(*)::text AS n FROM agents WHERE org_id=$1 AND status='active' AND NOT is_devops AND role_key <> 'ceo'`,
+      [env.orgId],
+    );
     const add = kind === 'hire' ? org / Math.max(1, Number(nAgents?.n ?? 1)) : agentMonthMicros * 0.5;
     if (org + add > env.ceo.policy.limits.budgetHeadroom * st.budget)
       return `the organization budget: the forecast ${money(org + add)} for the month would pass ${Math.round(env.ceo.policy.limits.budgetHeadroom * 100)}% of ${money(st.budget)}`;
@@ -63,7 +67,8 @@ export async function hireEvidenceMissing(env: ActionEnv): Promise<boolean> {
     const [kind, id] = raw.split(':');
     if (!id) continue;
     if (kind === 'signal' && /^[0-9a-f-]{36}$/i.test(id)) {
-      if (await one(env.ctx.pool, 'SELECT 1 FROM ba_signals WHERE id=$1 AND org_id=$2', [id, env.orgId])) return false;
+      if (await one(env.ctx.pool, 'SELECT 1 FROM ba_signals WHERE id=$1 AND org_id=$2', [id, env.orgId]))
+        return false;
     }
     if (kind === 'hr') {
       const { computeRecommendations } = await import('../hr/recommendations.ts');
@@ -71,7 +76,14 @@ export async function hireEvidenceMissing(env: ActionEnv): Promise<boolean> {
       if (recs.some((r) => r.id === id)) return false;
     }
     if (kind === 'desk' && /^[0-9a-f-]{36}$/i.test(id)) {
-      if (await one(env.ctx.pool, `SELECT 1 FROM desk_items WHERE id=$1 AND org_id=$2 AND subkind='tester_bottleneck'`, [id, env.orgId])) return false;
+      if (
+        await one(
+          env.ctx.pool,
+          `SELECT 1 FROM desk_items WHERE id=$1 AND org_id=$2 AND subkind='tester_bottleneck'`,
+          [id, env.orgId],
+        )
+      )
+        return false;
     }
   }
   return true;

@@ -1,8 +1,8 @@
-import type { Row } from '../db/sql.ts';
-import { one } from '../db/sql.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
-import { makeEnv, ownerPrincipal, runAction, type EngineResult } from './engine.ts';
+import type { Row } from '../db/sql.ts';
+import { one } from '../db/sql.ts';
+import { type EngineResult, makeEnv, ownerPrincipal, runAction } from './engine.ts';
 import { recordResponse } from './learning.ts';
 import { notifyOwner } from './notify.ts';
 import { loadCeo } from './state.ts';
@@ -13,10 +13,18 @@ import { loadCeo } from './state.ts';
  * is the training observation "accepted". When the world moved on (the card is gone, the agent was fired), the owner
  * is told on the desk instead of being left wondering.
  */
-export async function acceptRecommendation(ctx: Ctx, user: AuthSession['user'], item: Row): Promise<EngineResult | undefined> {
+export async function acceptRecommendation(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  item: Row,
+): Promise<EngineResult | undefined> {
   const actionId = item.data?.actionId as string | undefined;
   if (!actionId) return undefined;
-  const a = await one(ctx.pool, `SELECT * FROM ceo_actions WHERE id=$1 AND org_id=$2 AND mode='recommended'`, [actionId, item.org_id]);
+  const a = await one(
+    ctx.pool,
+    `SELECT * FROM ceo_actions WHERE id=$1 AND org_id=$2 AND mode='recommended'`,
+    [actionId, item.org_id],
+  );
   const ceo = await loadCeo(ctx.pool, item.org_id);
   if (!a || !ceo?.agentId) return undefined;
   const agent = await one(ctx.pool, 'SELECT id, name FROM agents WHERE id=$1', [ceo.agentId]);
@@ -50,7 +58,12 @@ export async function acceptRecommendation(ctx: Ctx, user: AuthSession['user'], 
   return r;
 }
 
-export async function rejectRecommendation(ctx: Ctx, user: AuthSession['user'], item: Row, note?: string): Promise<void> {
+export async function rejectRecommendation(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  item: Row,
+  note?: string,
+): Promise<void> {
   const actionId = item.data?.actionId as string | undefined;
   if (!actionId) return;
   await recordResponse(ctx, item.org_id, user.id, actionId, 'rejected', { deskItemId: item.id, note });

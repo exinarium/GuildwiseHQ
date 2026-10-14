@@ -157,6 +157,7 @@ describe('two-user isolation', () => {
       'architect',
       'ba',
       'builder',
+      'ceo',
       'checker',
       'curator',
       'devops',

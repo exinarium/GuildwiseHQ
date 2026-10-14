@@ -9,8 +9,8 @@ import {
 } from '@aom/shared';
 import { z } from 'zod';
 import { loadVisibleCard } from '../authz/scope.ts';
+import { patchCard, releaseBackoff, releaseCard } from '../commands/cards.ts';
 import { cardMessage, orgScope, projectScope, userActor } from '../commands/common.ts';
-import { releaseBackoff, releaseCard, patchCard } from '../commands/cards.ts';
 import { createDevOpsRequestIn, devopsAgentOn } from '../commands/devops.ts';
 import { mergedAnswerNotes } from '../commands/escalation.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -34,19 +34,24 @@ export const ceoBy = (env: Pick<ActionEnv, 'agentId'>): DeskActor => ({
   role: 'ceo',
 });
 
-
 /** Appends in its own transaction; with `openItem` the desk item must still be open (row locked): nobody answered meanwhile. */
 export async function appendLocked(env: ActionEnv, events: AppendInput[], openItem?: string): Promise<void> {
   await withAppendTx(env.ctx.pool, async (tx) => {
     if (openItem) {
       const cur = await one(tx, 'SELECT status FROM desk_items WHERE id=$1 FOR UPDATE', [openItem]);
-      if (cur?.status !== 'open') throw conflict('already_closed', `this item is already ${cur?.status ?? 'gone'}`);
+      if (cur?.status !== 'open')
+        throw conflict('already_closed', `this item is already ${cur?.status ?? 'gone'}`);
     }
     await env.ctx.store.append(events, { tx });
   });
 }
 
-export const refuse = (message: string): Prepared => ({ subjectKind: '', subjectId: '', subjectLabel: '', refuse: message });
+export const refuse = (message: string): Prepared => ({
+  subjectKind: '',
+  subjectId: '',
+  subjectLabel: '',
+  refuse: message,
+});
 
 /** The desk item of this organization (held items included: the CEO triages those). */
 export async function deskItem(tx: Queryable, orgId: string, id: string): Promise<Row | undefined> {
@@ -69,31 +74,44 @@ export async function cardOf(tx: Queryable, env: ActionEnv, ref: string) {
 }
 
 export async function agentByName(tx: Queryable, orgId: string, name: string): Promise<Row | undefined> {
-  return one(tx, `SELECT * FROM agents WHERE org_id=$1 AND (lower(name)=lower($2) OR id::text=$2)`, [orgId, name]);
+  return one(tx, `SELECT * FROM agents WHERE org_id=$1 AND (lower(name)=lower($2) OR id::text=$2)`, [
+    orgId,
+    name,
+  ]);
 }
 
 // ------------------------------------------------------------------------------------------------ answers
 
 const AnswerP = z
-  .object({ item: z.uuid(), option: z.string().max(40).optional(), text: z.string().trim().max(20000).optional() })
+  .object({
+    item: z.uuid(),
+    option: z.string().max(40).optional(),
+    text: z.string().trim().max(20000).optional(),
+  })
   .refine((p) => p.option || p.text, { message: 'give --option or --text' });
 
 const answer: ActionDef<z.infer<typeof AnswerP>> = {
   cls: 'desk.answer_question',
   schema: AnswerP,
-  describe: (p, pr) => `Answer "${pr.subjectLabel}" with ${p.option ? `option ${p.option}` : `"${truncate(p.text ?? '', 80)}"`}`,
+  describe: (p, pr) =>
+    `Answer "${pr.subjectLabel}" with ${p.option ? `option ${p.option}` : `"${truncate(p.text ?? '', 80)}"`}`,
   async prepare(env, p) {
     const tx = env.ctx.pool;
     const item = await deskItem(tx, env.orgId, p.item);
     if (!item) return refuse('that desk item does not exist');
-    const base = { subjectKind: 'desk', subjectId: item.id as string, subjectLabel: truncate(item.title, 120) };
+    const base = {
+      subjectKind: 'desk',
+      subjectId: item.id as string,
+      subjectLabel: truncate(item.title, 120),
+    };
     if (item.status !== 'open') return { ...base, refuse: `this item is already ${item.status}` };
     if (item.kind !== 'question' && item.kind !== 'escalation')
       return { ...base, refuse: 'approvals and alerts are resolved, not answered' };
     if (p.option && !(item.options as Array<{ id: string }>).some((o) => o.id === p.option))
       return { ...base, refuse: `option ${p.option} is not one of the item's options` };
     // A card owned by someone else than the organization Owner with "owner only": that person decides.
-    const foreignOwner = item.card_policy === 'owner_only' && item.card_owner && item.card_owner !== item.org_owner;
+    const foreignOwner =
+      item.card_policy === 'owner_only' && item.card_owner && item.card_owner !== item.org_owner;
     return {
       ...base,
       deskMode: foreignOwner ? 'recommend' : deskMode(env.ceo.policy, item.kind, item.subkind),
@@ -205,14 +223,19 @@ const triage: ActionDef<z.infer<typeof TriageP>> = {
     const tx = env.ctx.pool;
     const item = await deskItem(tx, env.orgId, p.item);
     if (!item) return refuse('that desk item does not exist');
-    const base = { subjectKind: 'desk', subjectId: item.id as string, subjectLabel: truncate(item.title, 120) };
+    const base = {
+      subjectKind: 'desk',
+      subjectId: item.id as string,
+      subjectLabel: truncate(item.title, 120),
+    };
     if (item.status !== 'open') return { ...base, refuse: `this item is already ${item.status}` };
     if (p.do !== 'annotate' && (item.kind !== 'alert' || item.blocking || item.pinned))
       return { ...base, refuse: 'only plain alerts can be dismissed or merged; this one needs the owner' };
     if (p.do === 'merge') {
       if (item.triage !== 'pending') return { ...base, refuse: 'only held items can be merged' };
       const into = p.into ? await deskItem(tx, env.orgId, p.into) : undefined;
-      if (!into || into.status !== 'open' || into.id === item.id) return { ...base, refuse: '"into" must be another open item' };
+      if (!into || into.status !== 'open' || into.id === item.id)
+        return { ...base, refuse: '"into" must be another open item' };
     }
     return {
       ...base,
@@ -277,9 +300,14 @@ const resolveNotice: ActionDef<z.infer<typeof ResolveP>> = {
     const tx = env.ctx.pool;
     const item = await deskItem(tx, env.orgId, p.item);
     if (!item) return refuse('that desk item does not exist');
-    const base = { subjectKind: 'desk', subjectId: item.id as string, subjectLabel: truncate(item.title, 120) };
+    const base = {
+      subjectKind: 'desk',
+      subjectId: item.id as string,
+      subjectLabel: truncate(item.title, 120),
+    };
     if (item.status !== 'open') return { ...base, refuse: `this item is already ${item.status}` };
-    if (item.kind !== 'alert' || item.blocking) return { ...base, refuse: 'only non-blocking alerts can be acknowledged' };
+    if (item.kind !== 'alert' || item.blocking)
+      return { ...base, refuse: 'only non-blocking alerts can be acknowledged' };
     return {
       ...base,
       deskMode: deskMode(env.ceo.policy, item.kind, item.subkind),
@@ -296,7 +324,12 @@ const resolveNotice: ActionDef<z.infer<typeof ResolveP>> = {
           streamId: streamId.desk(item.id),
           event: {
             type: 'DeskItemResolved',
-            payload: { deskItemId: item.id, resolution: 'acknowledged', ...(p.note ? { note: p.note } : {}), by: ceoBy(env) },
+            payload: {
+              deskItemId: item.id,
+              resolution: 'acknowledged',
+              ...(p.note ? { note: p.note } : {}),
+              by: ceoBy(env),
+            },
           },
           actor: userActor(env.owner.id),
           scope: itemScope(item),
@@ -319,7 +352,11 @@ function cardPrepare(
     const tx = env.ctx.pool;
     const card = await cardOf(tx, env, p.card);
     if (!card) return refuse(`card ${p.card} not found`);
-    const base = { subjectKind: 'card', subjectId: card.id as string, subjectLabel: `${card.ref} ${truncate(card.title, 80)}` };
+    const base = {
+      subjectKind: 'card',
+      subjectId: card.id as string,
+      subjectLabel: `${card.ref} ${truncate(card.title, 80)}`,
+    };
     const why = needs(card);
     return why ? { ...base, refuse: why } : { ...base, data: { card } };
   };
@@ -341,7 +378,9 @@ const releaseBackoffAction: ActionDef<z.infer<typeof CardP>> = {
   cls: 'card.release_backoff',
   schema: CardP,
   describe: (_p, pr) => `End the back-off of ${pr.subjectLabel}`,
-  prepare: cardPrepare((c) => (c.retry_after && c.retry_episode_id ? undefined : 'the card is not in back-off')),
+  prepare: cardPrepare((c) =>
+    c.retry_after && c.retry_episode_id ? undefined : 'the card is not in back-off',
+  ),
   async execute(env, p, pr) {
     const card = pr.data?.card as Row;
     await releaseBackoff(env.ctx, env.owner, card.id, p.note ?? 'released by the CEO');
@@ -359,7 +398,11 @@ const priority: ActionDef<z.infer<typeof PriorityP>> = {
     const tx = env.ctx.pool;
     const card = await cardOf(tx, env, p.card);
     if (!card) return refuse(`card ${p.card} not found`);
-    const base = { subjectKind: 'card', subjectId: card.id as string, subjectLabel: `${card.ref} ${truncate(card.title, 80)}` };
+    const base = {
+      subjectKind: 'card',
+      subjectId: card.id as string,
+      subjectLabel: `${card.ref} ${truncate(card.title, 80)}`,
+    };
     if (['cancelled'].includes(card.status)) return { ...base, refuse: 'a cancelled card takes no priority' };
     if (card.priority === p.to) return { ...base, refuse: `the priority is already ${p.to}` };
     return { ...base, data: { card } };
@@ -407,7 +450,9 @@ const message: ActionDef<z.infer<typeof MessageP>> = {
   },
   async execute(env, p, pr) {
     const card = pr.data?.card as Row;
-    await appendLocked(env, [cardMessage(card, { kind: 'agent', agentId: env.agentId }, 'comment', p.text, { viaCeo: true })]);
+    await appendLocked(env, [
+      cardMessage(card, { kind: 'agent', agentId: env.agentId }, 'comment', p.text, { viaCeo: true }),
+    ]);
     return { message: 'Posted on the card thread.', result: { cardId: card.id } };
   },
 };
@@ -431,7 +476,8 @@ function shiftPrepare(): (env: ActionEnv, p: z.infer<typeof ShiftP>) => Promise<
       subjectLabel: `${s.agent_name}${s.card_ref ? ` on ${s.card_ref}` : ` (${s.kind})`}`,
     };
     if (s.status === 'ended') return { ...base, refuse: 'the shift has already ended' };
-    if (s.kind === 'ceo' || s.agent_id === env.agentId) return { ...base, refuse: 'the CEO does not stop its own shifts' };
+    if (s.kind === 'ceo' || s.agent_id === env.agentId)
+      return { ...base, refuse: 'the CEO does not stop its own shifts' };
     return { ...base, data: { shift: s } };
   };
 }
@@ -446,7 +492,10 @@ const stopShift: ActionDef<z.infer<typeof ShiftP>> = {
     const keep = p.keepCard === true && !!s.card_id;
     if (keep) await env.ctx.pool.query('UPDATE shifts SET stop_keep_card=true WHERE id=$1', [s.id]);
     const sent = env.ctx.services.gateway.stopShift(s.workstation_id, s.id, 'manager');
-    return { message: sent ? 'Stop sent to the runner.' : 'The runner is not connected; the shift will be reaped.', result: { shiftId: s.id, sent } };
+    return {
+      message: sent ? 'Stop sent to the runner.' : 'The runner is not connected; the shift will be reaped.',
+      result: { shiftId: s.id, sent },
+    };
   },
 };
 
@@ -458,7 +507,10 @@ const killTools: ActionDef<z.infer<typeof ShiftP>> = {
   async execute(env, _p, pr) {
     const s = pr.data?.shift as Row;
     const sent = env.ctx.services.gateway.killTools(s.workstation_id, s.id);
-    return { message: sent ? 'Running commands killed; the shift goes on.' : 'The runner is not connected.', result: { shiftId: s.id, sent } };
+    return {
+      message: sent ? 'Running commands killed; the shift goes on.' : 'The runner is not connected.',
+      result: { shiftId: s.id, sent },
+    };
   },
 };
 
@@ -496,7 +548,10 @@ const pauseAgent: ActionDef<z.infer<typeof AgentP>> = {
     await appendLocked(env, [
       {
         streamId: streamId.agent(a.id),
-        event: { type: 'AgentPaused', payload: { agentId: a.id, by: env.owner.id, reason: p.reason ?? 'paused by the CEO', viaCeo: true } },
+        event: {
+          type: 'AgentPaused',
+          payload: { agentId: a.id, by: env.owner.id, reason: p.reason ?? 'paused by the CEO', viaCeo: true },
+        },
         actor: userActor(env.owner.id),
         scope: orgScope(a.org_id),
       },
@@ -547,7 +602,8 @@ const resumeAgent: ActionDef<z.infer<typeof AgentP>> = {
 
 // ---------------------------------------------------------------------------------------------- devops
 
-const DESTRUCTIVE = /\b(delete|drop|destroy|wipe|purge|truncate|rm -rf|force[- ]?push|reset --hard|production|prod\b|deploy|release|rollback|migrate|sudo|format)\b/i;
+const DESTRUCTIVE =
+  /\b(delete|drop|destroy|wipe|purge|truncate|rm -rf|force[- ]?push|reset --hard|production|prod\b|deploy|release|rollback|migrate|sudo|format)\b/i;
 
 const DevopsP = z.object({
   workstation: z.string().min(1).max(120),
@@ -566,7 +622,8 @@ const devops: ActionDef<z.infer<typeof DevopsP>> = {
          AND EXISTS (SELECT 1 FROM agents a WHERE a.workstation_id = w.id AND a.org_id=$1 AND a.is_devops AND a.status='active')`,
       [env.orgId, p.workstation],
     );
-    if (!ws) return refuse(`no workstation named ${p.workstation} with a DevOps engineer of this organization`);
+    if (!ws)
+      return refuse(`no workstation named ${p.workstation} with a DevOps engineer of this organization`);
     const card = p.card ? await cardOf(tx, env, p.card) : undefined;
     if (p.card && !card) return refuse(`card ${p.card} not found`);
     return {
@@ -611,5 +668,6 @@ export const ACTIONS: Partial<Record<CeoActionName, ActionDef>> = {
   message,
 };
 
-export const classOfAction = (name: string): ActionClass | undefined => (ACTIONS as Record<string, ActionDef>)[name]?.cls;
+export const classOfAction = (name: string): ActionClass | undefined =>
+  (ACTIONS as Record<string, ActionDef>)[name]?.cls;
 void notFound;

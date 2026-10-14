@@ -30,7 +30,11 @@ function ceoShift(hh: Harness, purpose: 'wake' | 'review', roleKey = 'ceo') {
   base.worktree = null;
   base.agent = { ...base.agent, roleKey, permissions: role.permissions, name: 'Ada Prime', isDevops: false };
   base.brief.agent.name = 'Ada Prime';
-  base.brief.card = { ...base.brief.card, ref: 'CEO', title: purpose === 'review' ? 'Daily review' : 'Management wake' };
+  base.brief.card = {
+    ...base.brief.card,
+    ref: 'CEO',
+    title: purpose === 'review' ? 'Daily review' : 'Management wake',
+  };
   base.brief.shift = {
     id: base.shiftId,
     kind: 'ceo',
@@ -43,7 +47,13 @@ function ceoShift(hh: Harness, purpose: 'wake' | 'review', roleKey = 'ceo') {
         : [{ id: 'ceo_done', label: 'The wake is handled', kind: 'success', data: 'ceoDone' }],
     maxShiftMinutes: 15,
   };
-  base.brief.role = { key: 'ceo', name: role.name, instructions: role.instructions, coreRules: role.coreRules, skills: [] };
+  base.brief.role = {
+    key: 'ceo',
+    name: role.name,
+    instructions: role.instructions,
+    coreRules: role.coreRules,
+    skills: [],
+  };
   base.ceo = {
     purpose,
     batchId: uuidv7(),
@@ -59,7 +69,8 @@ async function run(hh: Harness, msg: { shiftId: string }) {
   return hh.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId, 60_000);
 }
 
-const reports = (hh: Harness, shiftId: string) => hh.server.of('shift.report').filter((r) => r.shiftId === shiftId);
+const reports = (hh: Harness, shiftId: string) =>
+  hh.server.of('shift.report').filter((r) => r.shiftId === shiftId);
 
 describe('ceo shifts on the mock runtime', () => {
   it('a wake: no worktree, the CEO instructions, snapshot -> act -> recommend -> done through the real aom verbs', async () => {
@@ -90,7 +101,12 @@ describe('ceo shifts on the mock runtime', () => {
   }, 60_000);
 
   it('the daily review ends with the report', async () => {
-    h = await startHarness({ rpc: (m) => ((m.params as any).op === 'snapshot' ? { ok: true, result: { text: SNAPSHOT } } : { ok: true, result: { status: 'executed', message: 'ok' } }) });
+    h = await startHarness({
+      rpc: (m) =>
+        (m.params as any).op === 'snapshot'
+          ? { ok: true, result: { text: SNAPSHOT } }
+          : { ok: true, result: { status: 'executed', message: 'ok' } },
+    });
     const msg = ceoShift(h, 'review');
     await run(h, msg);
     const rep = reports(h, msg.shiftId)[0]?.report as any;

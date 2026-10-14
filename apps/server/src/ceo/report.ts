@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import {
   type ActionClass,
-  CLASS_LABEL,
+  agreementScores,
+  CEO_OUTCOME,
   CeoDoneDataSchema,
   CeoReportDataSchema,
-  CEO_OUTCOME,
+  CLASS_LABEL,
   type DeskActor,
   type FloorDigest,
-  type RunnerToServerOf,
-  agreementScores,
   localParts,
+  type RunnerToServerOf,
   renderFloorReportFallback,
   streamId,
   sumScores,
@@ -39,9 +39,18 @@ async function actionsOfDay(db: Queryable, orgId: string, now: Date) {
 }
 
 /** The deterministic part of a CEO report when no CEO wrote it (the floor facts plus the CEO's activity). */
-export async function renderCeoReportFallback(db: Queryable, orgId: string, digest: FloorDigest, now: Date): Promise<string> {
+export async function renderCeoReportFallback(
+  db: Queryable,
+  orgId: string,
+  digest: FloorDigest,
+  now: Date,
+): Promise<string> {
   const acts = await actionsOfDay(db, orgId, now);
-  const pending = await rows(db, `SELECT title FROM desk_items WHERE org_id=$1 AND status='open' AND subkind='ceo_recommendation' ORDER BY created_at LIMIT 20`, [orgId]);
+  const pending = await rows(
+    db,
+    `SELECT title FROM desk_items WHERE org_id=$1 AND status='open' AND subkind='ceo_recommendation' ORDER BY created_at LIMIT 20`,
+    [orgId],
+  );
   const out = [
     `# Daily report ${digest.localDate}`,
     '',
@@ -51,7 +60,13 @@ export async function renderCeoReportFallback(db: Queryable, orgId: string, dige
     pending.length ? pending.map((p) => `- ${p.title}`).join('\n') : '- none',
     '',
     '## Decisions the CEO took in the last 24 hours',
-    acts.filter((a) => a.mode === 'decided').map((a) => `- ${CLASS_LABEL[a.class as ActionClass] ?? a.class}: ${a.subject_label}${a.status === 'undone' ? ' (undone)' : ''}`).join('\n') || '- none',
+    acts
+      .filter((a) => a.mode === 'decided')
+      .map(
+        (a) =>
+          `- ${CLASS_LABEL[a.class as ActionClass] ?? a.class}: ${a.subject_label}${a.status === 'undone' ? ' (undone)' : ''}`,
+      )
+      .join('\n') || '- none',
     '',
     renderFloorReportFallback(digest).replace(/^# .*\n/, ''),
   ];
@@ -66,14 +81,25 @@ export async function postCeoReport(
   ctx: Ctx,
   db: Queryable,
   orgId: string,
-  input: { report: string; localDate: string; fallback: boolean; batchId?: string | undefined; agentId?: string | undefined; tx?: Tx | undefined },
+  input: {
+    report: string;
+    localDate: string;
+    fallback: boolean;
+    batchId?: string | undefined;
+    agentId?: string | undefined;
+    tx?: Tx | undefined;
+  },
 ): Promise<void> {
   const now = ctx.clock.now();
   const digest = await buildFloorDigest(db, orgId, now, input.localDate);
   const thread = await ensureCeoThread(db, orgId);
   const acts = await actionsOfDay(db, orgId, now);
   const scores = agreementScores(
-    await rows<{ class: string; response: any }>(db, `SELECT class, response FROM ceo_actions WHERE org_id=$1 AND mode='recommended' AND response IS NOT NULL`, [orgId]),
+    await rows<{ class: string; response: any }>(
+      db,
+      `SELECT class, response FROM ceo_actions WHERE org_id=$1 AND mode='recommended' AND response IS NOT NULL`,
+      [orgId],
+    ),
   );
   const deskItemId = randomUUID();
   const by: DeskActor = input.agentId ? { kind: 'agent', agentId: input.agentId, role: 'ceo' } : systemBy;
@@ -102,7 +128,14 @@ export async function postCeoReport(
             digest,
             fallback: input.fallback,
             ceo: {
-              actions: acts.map((a) => ({ id: a.id, class: a.class, mode: a.mode, status: a.status, subject: a.subject_label, undoable: a.undoable })),
+              actions: acts.map((a) => ({
+                id: a.id,
+                class: a.class,
+                mode: a.mode,
+                status: a.status,
+                subject: a.subject_label,
+                undoable: a.undoable,
+              })),
               scores,
               totals: sumScores(scores),
             },
@@ -116,7 +149,13 @@ export async function postCeoReport(
       streamId: streamId.ceo(orgId),
       event: {
         type: 'CeoReportPosted',
-        payload: { orgId, localDate: input.localDate, deskItemId, fallback: input.fallback, ...(input.batchId ? { batchId: input.batchId } : {}) },
+        payload: {
+          orgId,
+          localDate: input.localDate,
+          deskItemId,
+          fallback: input.fallback,
+          ...(input.batchId ? { batchId: input.batchId } : {}),
+        },
       },
       actor: input.agentId ? agentActor(input.agentId) : SYSTEM_ACTOR,
       scope: orgScope(orgId),
@@ -137,14 +176,30 @@ export async function postCeoReport(
   );
 }
 
-async function sendReportMail(ctx: Ctx, orgId: string, report: string, localDate: string, fallback: boolean): Promise<void> {
+async function sendReportMail(
+  ctx: Ctx,
+  orgId: string,
+  report: string,
+  localDate: string,
+  fallback: boolean,
+): Promise<void> {
   const ceo = await loadCeo(ctx.pool, orgId);
   const ownerId = await orgOwnerId(ctx.pool, orgId);
   const u = await one(ctx.pool, 'SELECT email, display_name FROM users WHERE id=$1', [ownerId]);
   if (!u?.email) return;
-  const name = ceo?.agentId ? ((await one(ctx.pool, 'SELECT name FROM agents WHERE id=$1', [ceo.agentId]))?.name ?? 'Your CEO') : 'Your CEO';
+  const name = ceo?.agentId
+    ? ((await one(ctx.pool, 'SELECT name FROM agents WHERE id=$1', [ceo.agentId]))?.name ?? 'Your CEO')
+    : 'Your CEO';
   await ctx.mailer.send({
-    ...ceoReportMail({ to: u.email, name: u.display_name, origin: ctx.config.publicOrigin, ceoName: name, localDate, report, fallback }),
+    ...ceoReportMail({
+      to: u.email,
+      name: u.display_name,
+      origin: ctx.config.publicOrigin,
+      ceoName: name,
+      localDate,
+      report,
+      fallback,
+    }),
     orgId,
   });
 }
@@ -160,19 +215,36 @@ export async function applyCeoReport(
   const batch = await one(tx, 'SELECT * FROM ceo_batches WHERE shift_id=$1 FOR UPDATE', [shift.id]);
   const report = msg.report;
   if (!batch || batch.status !== 'running')
-    return { accepted: false, error: 'this shift is no longer open; there is nothing left to do. Finish now.' };
+    return {
+      accepted: false,
+      error: 'this shift is no longer open; there is nothing left to do. Finish now.',
+    };
   if (report.kind === 'comment') return { accepted: true };
   if (report.kind !== 'outcome')
-    return { accepted: false, error: 'there are no questions in a background task: use `aom ceo notify` or `aom ceo recommend` to reach the owner' };
+    return {
+      accepted: false,
+      error:
+        'there are no questions in a background task: use `aom ceo notify` or `aom ceo recommend` to reach the owner',
+    };
   const review = batch.purpose === 'review';
   const expected = review ? CEO_OUTCOME.report : CEO_OUTCOME.done;
   if (report.outcomeId !== expected)
-    return { accepted: false, error: `outcome '${report.outcomeId}' is not available (allowed: ${expected})` };
+    return {
+      accepted: false,
+      error: `outcome '${report.outcomeId}' is not available (allowed: ${expected})`,
+    };
   const now = ctx.clock.now();
   if (review) {
     const data = CeoReportDataSchema.safeParse(report.data);
     if (!data.success) return { accepted: false, error: `invalid report data: ${data.error.message}` };
-    await postCeoReport(ctx, tx, batch.org_id, { report: data.data.report, localDate: batch.local_date ?? localParts(now, null).date, fallback: false, batchId: batch.id, agentId: shift.agent_id, tx });
+    await postCeoReport(ctx, tx, batch.org_id, {
+      report: data.data.report,
+      localDate: batch.local_date ?? localParts(now, null).date,
+      fallback: false,
+      batchId: batch.id,
+      agentId: shift.agent_id,
+      tx,
+    });
   } else {
     const data = CeoDoneDataSchema.safeParse(report.data);
     if (!data.success) return { accepted: false, error: `invalid data: ${data.error.message}` };
@@ -184,12 +256,20 @@ export async function applyCeoReport(
 }
 
 /** A review nobody wrote in time (or that failed twice) is posted by the server. */
-export async function postFallbackReview(ctx: Ctx, orgId: string, localDate: string, wakeIds: string[]): Promise<void> {
+export async function postFallbackReview(
+  ctx: Ctx,
+  orgId: string,
+  localDate: string,
+  wakeIds: string[],
+): Promise<void> {
   const now = ctx.clock.now();
   const digest = await buildFloorDigest(ctx.pool, orgId, now, localDate);
   const text = await renderCeoReportFallback(ctx.pool, orgId, digest, now);
   await postCeoReport(ctx, ctx.pool, orgId, { report: text, localDate, fallback: true });
-  await exec(ctx.pool, `UPDATE ceo_wakes SET status='done', done_at=$2 WHERE id = ANY($1::uuid[])`, [wakeIds, now]);
+  await exec(ctx.pool, `UPDATE ceo_wakes SET status='done', done_at=$2 WHERE id = ANY($1::uuid[])`, [
+    wakeIds,
+    now,
+  ]);
 }
 
 /** Queues the day's review once the owner's local clock passes the report time (per organization with an active CEO). */

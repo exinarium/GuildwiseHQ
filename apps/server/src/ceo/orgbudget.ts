@@ -18,7 +18,11 @@ export async function orgBudgetState(ctx: Ctx, ceo: CeoState, now: Date): Promis
   const c = await orgCostCtx(ctx.pool, ceo.orgId);
   const m = monthOf(c, now);
   if (!budget) return { budget: 0, spent: 0, percent: null, month: m.key };
-  const r = await one(ctx.pool, `SELECT COALESCE(sum(cost_usd_micros),0) AS usd FROM shift_costs WHERE org_id=$1 AND ended_at >= $2 AND ended_at < $3`, [ceo.orgId, m.start, m.next]);
+  const r = await one(
+    ctx.pool,
+    `SELECT COALESCE(sum(cost_usd_micros),0) AS usd FROM shift_costs WHERE org_id=$1 AND ended_at >= $2 AND ended_at < $3`,
+    [ceo.orgId, m.start, m.next],
+  );
   const spent = inCurrency(r?.usd, c);
   return { budget, spent, percent: Math.round((spent / budget) * 100), month: m.key };
 }
@@ -27,13 +31,24 @@ export async function orgBudgetState(ctx: Ctx, ceo: CeoState, now: Date): Promis
  * 80% of the organization budget: the owner is told once a month; 100%: told again (urgent) and the CEO goes into minimal
  * mode (`minimal`: only the daily report and the chat). Returns whether minimal mode applies now.
  */
-export async function checkOrgBudget(ctx: Ctx, ceo: CeoState, now: Date): Promise<{ minimal: boolean; state: OrgBudgetState }> {
+export async function checkOrgBudget(
+  ctx: Ctx,
+  ceo: CeoState,
+  now: Date,
+): Promise<{ minimal: boolean; state: OrgBudgetState }> {
   const state = await orgBudgetState(ctx, ceo, now);
   if (!state.budget || state.percent === null) return { minimal: false, state };
   const once = async (flag: string, fn: () => Promise<unknown>) => {
-    const done = await one(ctx.pool, 'SELECT 1 FROM ceo_flags WHERE org_id=$1 AND flag=$2', [ceo.orgId, flag]);
+    const done = await one(ctx.pool, 'SELECT 1 FROM ceo_flags WHERE org_id=$1 AND flag=$2', [
+      ceo.orgId,
+      flag,
+    ]);
     if (done) return;
-    await exec(ctx.pool, `INSERT INTO ceo_flags (org_id, flag, value, at) VALUES ($1,$2,'1',$3) ON CONFLICT DO NOTHING`, [ceo.orgId, flag, now]);
+    await exec(
+      ctx.pool,
+      `INSERT INTO ceo_flags (org_id, flag, value, at) VALUES ($1,$2,'1',$3) ON CONFLICT DO NOTHING`,
+      [ceo.orgId, flag, now],
+    );
     await fn();
   };
   if (state.percent >= 80)

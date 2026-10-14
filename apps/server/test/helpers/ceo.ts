@@ -8,7 +8,10 @@ import { ok, until, type World } from './world.ts';
 
 /** The workstation is online (the fake runner sends no heartbeats) with the mock runtime and the `ceo:1` capability. */
 export async function keepOnline(w: World) {
-  await q(`UPDATE workstations SET connected=true, last_seen_at=$2 WHERE id=$1`, [w.workstationId, w.t.clock.now()]);
+  await q(`UPDATE workstations SET connected=true, last_seen_at=$2 WHERE id=$1`, [
+    w.workstationId,
+    w.t.clock.now(),
+  ]);
   await q(
     `INSERT INTO workstation_capabilities (workstation_id, capabilities, max_run_environments, updated_at) VALUES ($1,'{ceo:1}',2,now())
      ON CONFLICT (workstation_id) DO UPDATE SET capabilities='{ceo:1}'`,
@@ -19,7 +22,10 @@ export async function keepOnline(w: World) {
 /** Appoints the CEO on the world's workstation and points it at the mock runtime. */
 export async function appoint(w: World, name = 'Ada Prime') {
   const res = await ok<any>(
-    w.t.req('POST', '/api/ceo/appoint', { cookie: w.owner.cookie, body: { workstationId: w.workstationId, name } }),
+    w.t.req('POST', '/api/ceo/appoint', {
+      cookie: w.owner.cookie,
+      body: { workstationId: w.workstationId, name },
+    }),
     201,
   );
   await q(`UPDATE agents SET runtime='mock', model='mock' WHERE id=$1`, [res.agentId]);
@@ -31,7 +37,10 @@ export const graduate = (w: World) =>
   ok(w.t.req('POST', '/api/ceo/training', { cookie: w.owner.cookie, body: { action: 'graduate' } }));
 
 /** A blocking question on a card, routed to the manager's desk (an agent asked it). */
-export async function blockingQuestion(w: World, over: { title?: string; options?: string[]; subkind?: string } = {}) {
+export async function blockingQuestion(
+  w: World,
+  over: { title?: string; options?: string[]; subkind?: string } = {},
+) {
   const card = await w.card({ title: over.title ?? 'Which database?' });
   const id = randomUUID();
   await seed(w, [
@@ -85,7 +94,11 @@ export async function startCeoShift(w: World, r: FakeRunner, from = 0) {
   const start = (await r.waitFor('shift.start', (f) => f.kind === 'ceo', 8000, from)) as any;
   r.accepted(start.shiftId);
   r.started(start.shiftId);
-  await until(async () => (await q(`SELECT 1 FROM shifts WHERE id=$1 AND status='running'`, [start.shiftId]))[0], 3000, 'ceo shift running');
+  await until(
+    async () => (await q(`SELECT 1 FROM shifts WHERE id=$1 AND status='running'`, [start.shiftId]))[0],
+    3000,
+    'ceo shift running',
+  );
   return start;
 }
 
@@ -97,9 +110,33 @@ export async function ceo(r: FakeRunner, shiftId: string, params: Record<string,
   return (await r.waitFor('rpc.response', (f) => f.rpcId === rpcId, 8000, from)) as any;
 }
 
-export const act = (r: FakeRunner, shiftId: string, action: string, params: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
-  ceo(r, shiftId, { op: 'act', action, params, reason: 'because the situation calls for it', confidence: 0.9, evidence: [], ...extra });
+export const act = (
+  r: FakeRunner,
+  shiftId: string,
+  action: string,
+  params: Record<string, unknown>,
+  extra: Record<string, unknown> = {},
+) =>
+  ceo(r, shiftId, {
+    op: 'act',
+    action,
+    params,
+    reason: 'because the situation calls for it',
+    confidence: 0.9,
+    evidence: [],
+    ...extra,
+  });
 
-export async function wakeNow(w: World, reason = 'desk_item', urgency: 'urgent' | 'normal' = 'urgent', subjectId = randomUUID()) {
-  await enqueueWake(w.t.app.ctx.pool, w.owner.id, { reason, urgency, subjectKind: 'test', subjectId, subjectLabel: 'test' }, w.t.clock.now());
+export async function wakeNow(
+  w: World,
+  reason = 'desk_item',
+  urgency: 'urgent' | 'normal' = 'urgent',
+  subjectId = randomUUID(),
+) {
+  await enqueueWake(
+    w.t.app.ctx.pool,
+    w.owner.id,
+    { reason, urgency, subjectKind: 'test', subjectId, subjectLabel: 'test' },
+    w.t.clock.now(),
+  );
 }

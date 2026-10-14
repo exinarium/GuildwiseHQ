@@ -1247,6 +1247,18 @@ Thread messages collapse: the 1st failure posts the usual "Shift ended without a
 
 **The sweep (`reporter/reporter.ts`, `AOM_REPORTER_SECONDS`, default 60; `POST /api/test/clock` runs it too).** (1) Releases expired holds. (2) Runs the deterministic detectors (`reporter/detectors.ts`; thresholds are the single `REPORTER` object in `packages/shared/src/reporter`): `loop` (an open loop-breaker episode: `retry_failures >= 3` with `retry_after` set), `repeated_approval` (approval desk items clustered by subkind and `topicWords` overlap ≥ 0.6, ≥ 3 in 24 h; urgent if one was rejected), `blocked` (> 4 h), `unclaimed` (queued > 30 min and `cardWorkability` not ok), `rework` (round ≥ 3) and `finalize_failures` (≥ 2); and reconciles `ba_signals` by fingerprint (raise, update when count/urgency/subject changed, resolve when the condition clears, acknowledging the signal's open `ba_report` item). (3) Queues a `floor_alert` task for each urgent signal no task has covered; the BA's analysis becomes a `DeskItemAnnotated` note on the signal's own desk item (the loop alert) or a new `alert/ba_report`. (4) Queues the daily `floor_report` when the manager's local clock passes `dailyAt` (`floorReportDue`: local date from `users.timezone` via `Intl`, UTC while unset; once per local date, tracked in `users.floor_report_day`; an organization created after today's boundary waits for tomorrow's; skipped when the digest is empty). The digest (`reporter/digest.ts buildFloorDigest`) is deterministic SQL: open phases and the open bug cards that hold them (`origin 'test_failure'`, created after `completed_at`), signals, cards in back-off, open DevOps requests, items the BA resolved (`triage` dismissed/merged, or questions answered by a BA) and failed shifts since the previous report. The report item (`alert/floor_report`, `data` = the digest) and each `alert/ba_report` link to the standing chat thread (`ensureReportThread`: one `ChatThreadCreated` with the BA per organization owner, kept in `users.ba_chat_thread_id`).
 
+### 9.11 The CEO agent
+
+A built-in role `ceo` (one per organisation) takes over the BA's reporter job when it is active and reachable (`ceo/state.ts`
+`ceoActive`, `ceoReachable`): the routing interceptor holds non-urgent items for the CEO instead of queueing BA tasks, the
+reporter sweep queues the daily review wake instead of the floor report, and urgent signals become wakes instead of
+`floor_alert` tasks. Wake sources (`ceo/wakes.ts`) are an event subscriber that fills the operational table `ceo_wakes`; the
+dispatcher pass `ceoPass` (`ceo/pass.ts`) batches pending wakes into one `kind: 'ceo'` shift per organisation. The CEO acts
+only through the rpc method `ceo` (`ceo/gateway.ts`, `ceo/engine.ts`): every write is checked by `evaluatePolicy`
+(`packages/shared/src/ceo/policy.ts`), limited, executed by the existing command functions under `withActingAgent` (events carry
+the CEO as actor and the action id as `causation_id`), and audited as `CeoActionTaken`. Owner responses to recommendations are
+the training signal (`ceo/learning.ts`). Full design: `docs/design/ceo-agent-v2.md`.
+
 ### 9.6 Hire cap for first runs (removed in M9)
 
 The first-run cap (2 builders, 1 of each other role) and `AOM_FIRST_RUN_HIRE_CAP` are gone; the HR board's recommendations (model, split, fire or reassign) replace the guard rail.

@@ -538,7 +538,8 @@ function ceoPrint(ctx: AomContext, p: Parsed, r: unknown): void {
   }
   const o = r as { text?: string; status?: string; message?: string; tasks?: unknown[]; wouldBe?: string };
   if (typeof o?.text === 'string') ctx.io.out(`${o.text}\n`);
-  else if (o?.status || o?.message) ctx.io.out(`${o.status ?? ''}${o.status && o.message ? ': ' : ''}${o.message ?? ''}\n`);
+  else if (o?.status || o?.message)
+    ctx.io.out(`${o.status ?? ''}${o.status && o.message ? ': ' : ''}${o.message ?? ''}\n`);
   else ctx.io.out(`${JSON.stringify(r, null, 2)}\n`);
 }
 
@@ -562,7 +563,14 @@ async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
   const args = p.positionals.slice(1);
   switch (sub) {
     case 'snapshot':
-      ceoPrint(ctx, p, await rpc(ctx, 'ceo', { op: 'snapshot', ...(one(p, 'section') ? { section: one(p, 'section') } : {}) }));
+      ceoPrint(
+        ctx,
+        p,
+        await rpc(ctx, 'ceo', {
+          op: 'snapshot',
+          ...(one(p, 'section') ? { section: one(p, 'section') } : {}),
+        }),
+      );
       return 0;
     case 'show':
       if (!args[0] || !args[1]) throw new UsageError(CEO_USAGE);
@@ -573,7 +581,11 @@ async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
       ceoPrint(ctx, p, await rpc(ctx, 'ceo', { op: 'search', in: args[0], q: args.slice(1).join(' ') }));
       return 0;
     case 'costs':
-      ceoPrint(ctx, p, await rpc(ctx, 'ceo', { op: 'costs', ...(one(p, 'days') ? { days: Number(one(p, 'days')) } : {}) }));
+      ceoPrint(
+        ctx,
+        p,
+        await rpc(ctx, 'ceo', { op: 'costs', ...(one(p, 'days') ? { days: Number(one(p, 'days')) } : {}) }),
+      );
       return 0;
     case 'act': {
       const action = args[0];
@@ -593,13 +605,22 @@ async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
       const item = one(p, 'item');
       const base = { op: 'recommend', ...ceoReasoned(p), ...(one(p, 'key') ? { key: one(p, 'key') } : {}) };
       if (item) {
-        const r = await rpc(ctx, 'ceo', { ...base, item, ...(one(p, 'option') ? { option: one(p, 'option') } : {}), ...(one(p, 'text') ? { text: one(p, 'text') } : {}) });
+        const r = await rpc(ctx, 'ceo', {
+          ...base,
+          item,
+          ...(one(p, 'option') ? { option: one(p, 'option') } : {}),
+          ...(one(p, 'text') ? { text: one(p, 'text') } : {}),
+        });
         ceoPrint(ctx, p, r);
         return (r as { status?: string }).status === 'refused' ? 1 : 0;
       }
       const action = one(p, 'action');
       if (!action) throw new UsageError(CEO_USAGE);
-      const r = await rpc(ctx, 'ceo', { ...base, action, params: ceoParams(p, new Set([...CEO_CONTROL_FLAGS, 'action'])) });
+      const r = await rpc(ctx, 'ceo', {
+        ...base,
+        action,
+        params: ceoParams(p, new Set([...CEO_CONTROL_FLAGS, 'action'])),
+      });
       ceoPrint(ctx, p, r);
       return (r as { status?: string }).status === 'refused' ? 1 : 0;
     }
@@ -659,9 +680,15 @@ async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
       return (r as { status?: string }).status === 'refused' ? 1 : 0;
     }
     case 'done':
-      return report(ctx, outcome('ceo_done', 'Wake handled', { summary: textFlag(ctx, p, 'summary', true) as string }));
+      return report(
+        ctx,
+        outcome('ceo_done', 'Wake handled', { summary: textFlag(ctx, p, 'summary', true) as string }),
+      );
     case 'report':
-      return report(ctx, outcome('ceo_report', 'Daily report', { report: textFlag(ctx, p, 'summary', true) as string }));
+      return report(
+        ctx,
+        outcome('ceo_report', 'Daily report', { report: textFlag(ctx, p, 'summary', true) as string }),
+      );
     default:
       throw new UsageError(CEO_USAGE);
   }

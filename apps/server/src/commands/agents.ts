@@ -278,7 +278,10 @@ export async function hireAgent(
     if (roleDef.definition.key === DEVOPS_ROLE_KEY)
       throw badRequest('invalid_role', 'DevOps engineers are hired automatically per workstation');
     if (roleDef.definition.key === 'ceo')
-      throw badRequest('invalid_role', 'the CEO is appointed, not hired: use Appoint CEO (POST /api/ceo/appoint)');
+      throw badRequest(
+        'invalid_role',
+        'the CEO is appointed, not hired: use Appoint CEO (POST /api/ceo/appoint)',
+      );
     if (!roleDef.definition.seniorityLevels.includes(req.seniority)) {
       throw badRequest(
         'invalid_seniority',

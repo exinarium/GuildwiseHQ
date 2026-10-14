@@ -1072,6 +1072,32 @@ clone under `vaults/`; with none, the instructions say the vault is not cloned h
 The vault is listed in "Folders you can read" as read-only; writes go through `aom` commands (`aom publish`,
 `aom investigation record`, ...), never directly. A vault of another organization is never sent.
 
+### The CEO shift (`kind: 'ceo'`) and `aom ceo`
+
+The organization's CEO agent (docs/design/ceo-agent-v2.md) runs on one of the owner's workstations in two ways: **wake shifts**
+and the **owner's chat**. A wake shift is `shift.start` with `kind: 'ceo'` and the additive field `ceo`
+(`{ purpose: 'wake' | 'review', batchId, wakeIds, reasons, brief }`; the `brief` text carries the snapshot, the owner's rules
+and the policy in words, with every title written by an agent or a ticket inside an untrusted block). It has **no card, no
+worktree and no `--resume`**: the working directory is the agent's scratch directory, the brief carries a placeholder card
+(`CEO`), and a review shift has 30 minutes, a wake 15. The runner announces the capability `ceo:1` in `hello`; the server
+sends a CEO shift only to a runner that has it (an older runner is shown "update the runner" on the CEO page).
+
+**Sandbox profile** (`buildCeoSettings`, the same for the wake shift and the chat): allow `Read`, `Glob`, `Grep`, `Bash(aom:*)`
+and `Edit` in the agent's scratch directory only; deny `WebFetch`, `WebSearch`, every MCP server, `NotebookEdit` and the
+usual git denies; `sandbox.network.allowedDomains` is empty; the organization vault is a read-only folder (`--add-dir`
+equivalent: `additionalDirectories`, `Edit` denied, sandbox `denyWrite`, secret files denied); the runner's data directory and
+other agents' directories stay unreadable. Even a role definition that grants more tools gets this profile (tested in
+`apps/runner/test/ceo-settings.test.ts`).
+
+**`aom ceo ...`** is one IPC rpc method, `ceo`, with an `op` (`snapshot`, `show`, `search`, `costs`, `act`, `recommend`,
+`notify`, `task`, `memory`); the runner forwards it unchanged as `rpc.request` under the shift or chat id, and refuses it
+unless the shift is a `ceo` shift (or a chat) of an agent whose role is `ceo`. The server checks the agent again, applies the
+policy, the limits and the audit, and answers `{ status: 'executed' | 'recommended' | 'refused' | 'dry_run' | 'duplicate', ... }`.
+A refusal is exit code 1; a recommendation is not an error. A wake shift ends with exactly one terminal report: `aom ceo done
+--summary "..."` (outcome `ceo_done`) or, for the daily review, `aom ceo report --summary-file <md>` (outcome `ceo_report`).
+The mock runtime has a scripted CEO (`mock-agent` in `ceo` mode, and a mock CEO chat) for the simulated workstation and the
+tests; it drives the same verbs.
+
 ### Reference repositories and other read-only folders
 
 `repoRoots` (see Configuration) only says where repositories are found and cloned. It grants no read access, and there

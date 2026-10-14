@@ -11,8 +11,8 @@ import {
   isStaffingClass,
   OWNER_RESERVED_KEYS,
   reservedKeyOfDesk,
-  startTraining,
   STAFFING_CLASSES,
+  startTraining,
   sumScores,
   trainingDaysLeft,
   withDelegation,
@@ -27,7 +27,15 @@ describe('the default policy', () => {
   });
 
   it('lets the CEO decide the safe operational classes and recommends the risky ones', () => {
-    for (const c of ['card.release', 'card.release_backoff', 'card.reprioritise', 'shift.stop', 'agent.pause', 'devops.request', 'notify.owner'])
+    for (const c of [
+      'card.release',
+      'card.release_backoff',
+      'card.reprioritise',
+      'shift.stop',
+      'agent.pause',
+      'devops.request',
+      'notify.owner',
+    ])
       expect(evaluatePolicy(P, c, base).verdict, c).toBe('allow');
     for (const c of ['card.cancel', 'agent.retire', 'devops.approve', 'standing_order.activate'])
       expect(evaluatePolicy(P, c, base).verdict, c).toBe('recommend');
@@ -38,7 +46,10 @@ describe('the default policy', () => {
     expect(deskMode(P, 'question', 'manual_qa')).toBe('recommend');
     expect(deskMode(P, 'approval', 'large_merge')).toBe('recommend');
     expect(deskMode(P, 'alert', 'loop_backoff')).toBe('decide');
-    expect(evaluatePolicy(P, 'desk.answer_question', { ...base, deskMode: deskMode(P, 'question', 'manual_qa') }).verdict).toBe('recommend');
+    expect(
+      evaluatePolicy(P, 'desk.answer_question', { ...base, deskMode: deskMode(P, 'question', 'manual_qa') })
+        .verdict,
+    ).toBe('recommend');
   });
 });
 
@@ -47,8 +58,15 @@ describe('the gate', () => {
     const r = evaluatePolicy(P, 'desk.answer_question', { ...base, reservedKey: 'manual_qa' });
     expect(r).toMatchObject({ verdict: 'recommend', cause: 'reserved' });
     const delegated = withDelegation(P, 'manual_qa', true);
-    expect(evaluatePolicy(delegated, 'desk.answer_question', { ...base, reservedKey: 'manual_qa' }).verdict).toBe('allow');
-    expect(evaluatePolicy(withDelegation(delegated, 'manual_qa', false), 'desk.answer_question', { ...base, reservedKey: 'manual_qa' }).verdict).toBe('recommend');
+    expect(
+      evaluatePolicy(delegated, 'desk.answer_question', { ...base, reservedKey: 'manual_qa' }).verdict,
+    ).toBe('allow');
+    expect(
+      evaluatePolicy(withDelegation(delegated, 'manual_qa', false), 'desk.answer_question', {
+        ...base,
+        reservedKey: 'manual_qa',
+      }).verdict,
+    ).toBe('recommend');
     expect(P.delegated).toEqual([]); // the default is untouched
   });
 
@@ -61,14 +79,26 @@ describe('the gate', () => {
   });
 
   it('a confidence below the threshold, a missing citation and a reached limit downgrade to a recommendation', () => {
-    expect(evaluatePolicy(P, 'card.release', { confidence: 0.5 })).toMatchObject({ verdict: 'recommend', cause: 'confidence' });
-    expect(evaluatePolicy(P, 'desk.answer_question', { ...base, evidenceMissing: true })).toMatchObject({ verdict: 'recommend', cause: 'evidence' });
-    expect(evaluatePolicy(P, 'card.release', { ...base, limitReached: '3 per day' })).toMatchObject({ verdict: 'recommend', cause: 'limit' });
+    expect(evaluatePolicy(P, 'card.release', { confidence: 0.5 })).toMatchObject({
+      verdict: 'recommend',
+      cause: 'confidence',
+    });
+    expect(evaluatePolicy(P, 'desk.answer_question', { ...base, evidenceMissing: true })).toMatchObject({
+      verdict: 'recommend',
+      cause: 'evidence',
+    });
+    expect(evaluatePolicy(P, 'card.release', { ...base, limitReached: '3 per day' })).toMatchObject({
+      verdict: 'recommend',
+      cause: 'limit',
+    });
   });
 
   it('text from outside cannot cause staffing, standing orders or memories', () => {
     for (const c of ['agent.hire', 'agent.change_model', 'standing_order.propose', 'memory.write'])
-      expect(evaluatePolicy(P, c, { ...base, untrustedOrigin: true }), c).toMatchObject({ verdict: 'recommend', cause: 'untrusted' });
+      expect(evaluatePolicy(P, c, { ...base, untrustedOrigin: true }), c).toMatchObject({
+        verdict: 'recommend',
+        cause: 'untrusted',
+      });
     expect(evaluatePolicy(P, 'card.release', { ...base, untrustedOrigin: true }).verdict).toBe('allow');
   });
 
@@ -76,8 +106,19 @@ describe('the gate', () => {
     const p = clonePolicy(P);
     p.classes['card.release'] = { mode: 'never', delayMinutes: 0 };
     expect(evaluatePolicy(p, 'card.release', base).verdict).toBe('deny');
-    for (const c of ['ceo.policy', 'budget.raise', 'budget.override', 'billing', 'secrets', 'agent.widen_permissions', 'devops.fire'])
-      expect(evaluatePolicy(P, c, { confidence: 1, ...{ reservedKey: null } }), c).toMatchObject({ verdict: 'deny', cause: 'never' });
+    for (const c of [
+      'ceo.policy',
+      'budget.raise',
+      'budget.override',
+      'billing',
+      'secrets',
+      'agent.widen_permissions',
+      'devops.fire',
+    ])
+      expect(evaluatePolicy(P, c, { confidence: 1, ...{ reservedKey: null } }), c).toMatchObject({
+        verdict: 'deny',
+        cause: 'never',
+      });
     expect(evaluatePolicy(P, 'made.up', base).verdict).toBe('deny');
     expect(evaluatePolicy(P, 'card.release', { ...base, deskMode: 'never' }).verdict).toBe('deny');
   });
@@ -89,7 +130,10 @@ describe('the training period forces recommendations on staffing', () => {
     const allDecide = clonePolicy(P);
     for (const c of STAFFING_CLASSES) allDecide.classes[c] = { mode: 'decide', delayMinutes: 0 };
     for (const c of STAFFING_CLASSES) {
-      expect(evaluatePolicy(allDecide, c, { ...base, training: true }), c).toMatchObject({ verdict: 'recommend', cause: 'training' });
+      expect(evaluatePolicy(allDecide, c, { ...base, training: true }), c).toMatchObject({
+        verdict: 'recommend',
+        cause: 'training',
+      });
       expect(evaluatePolicy(allDecide, c, { ...base, training: false }).verdict, c).toBe('allow');
     }
     expect(isStaffingClass('agent.pause')).toBe(false);
@@ -129,7 +173,11 @@ describe('training state and agreement', () => {
       { class: 'agent.change_model', response: 'accepted' },
       { class: 'desk.answer_question', response: 'different' },
     ]);
-    expect(scores.find((s) => s.class === 'agent.hire')).toEqual({ class: 'agent.hire', agreed: 1, total: 3 });
+    expect(scores.find((s) => s.class === 'agent.hire')).toEqual({
+      class: 'agent.hire',
+      agreed: 1,
+      total: 3,
+    });
     expect(sumScores(scores)).toEqual({ agreed: 2, total: 5 });
     expect(scores[0]!.class).toBe('agent.hire'); // most answered first
   });

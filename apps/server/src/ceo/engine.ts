@@ -8,8 +8,8 @@ import {
   type PolicyVerdict,
   streamId,
 } from '@aom/shared';
-import type { AuthSession } from '../auth/sessions.ts';
 import { orgOwnerId } from '../auth/org-context.ts';
+import type { AuthSession } from '../auth/sessions.ts';
 import { agentActor, orgScope } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
@@ -33,12 +33,17 @@ export async function ownerPrincipal(ctx: Ctx, orgId: string): Promise<AuthSessi
 const canon = (v: unknown): string =>
   JSON.stringify(v, (_k, x) =>
     x && typeof x === 'object' && !Array.isArray(x)
-      ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+      ? Object.fromEntries(
+          Object.entries(x as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)),
+        )
       : x,
   );
 
 export const defaultKey = (scopeId: string, action: string, params: unknown): string =>
-  createHash('sha256').update(`${scopeId}|${action}|${canon(params)}`).digest('hex').slice(0, 40);
+  createHash('sha256')
+    .update(`${scopeId}|${action}|${canon(params)}`)
+    .digest('hex')
+    .slice(0, 40);
 
 export interface EngineResult {
   status: 'executed' | 'recommended' | 'refused' | 'dry_run' | 'duplicate';
@@ -76,7 +81,11 @@ async function evidenceFound(ctx: Ctx, orgId: string, ids: string[]): Promise<nu
       );
       if (r) n++;
     } else if (kind === 'memory') {
-      const r = await one(ctx.pool, `SELECT 1 FROM ceo_memories WHERE id=$1 AND org_id=$2 AND status='active'`, [id, orgId]);
+      const r = await one(
+        ctx.pool,
+        `SELECT 1 FROM ceo_memories WHERE id=$1 AND org_id=$2 AND status='active'`,
+        [id, orgId],
+      );
       if (r) n++;
     }
   }
@@ -219,7 +228,13 @@ async function recommendEvents(
           pinned: false,
           affectedCardIds: [],
           askedBy: ceoBy(env),
-          data: { actionId: env.actionId, class: def.cls, action: rpc.action, params: rpc.params, subjectId: prepared.subjectId },
+          data: {
+            actionId: env.actionId,
+            class: def.cls,
+            action: rpc.action,
+            params: rpc.params,
+            subjectId: prepared.subjectId,
+          },
         },
       },
       actor: agentActor(env.agentId),
@@ -264,7 +279,10 @@ export async function runAction(
   const { ctx } = env;
   const def = ACTIONS[rpc.action as CeoActionName];
   if (!def)
-    return { status: 'refused', message: `the action '${rpc.action}' is not available (yet). Recommend it to the owner instead.` };
+    return {
+      status: 'refused',
+      message: `the action '${rpc.action}' is not available (yet). Recommend it to the owner instead.`,
+    };
   const key = rpc.key ?? defaultKey(origin.scopeId, rpc.action, rpc.params);
   const prior = await one(
     ctx.pool,
@@ -281,7 +299,8 @@ export async function runAction(
       result: prior.result,
     };
   const lockKey = `${env.orgId}|${key}`;
-  if (inflight.has(lockKey)) return { status: 'duplicate', message: 'The same call is being handled right now.' };
+  if (inflight.has(lockKey))
+    return { status: 'duplicate', message: 'The same call is being handled right now.' };
   inflight.add(lockKey);
   try {
     const parsed = def.schema.safeParse(rpc.params);
@@ -297,21 +316,24 @@ export async function runAction(
     if (prepared.refuse) return { status: 'refused', message: prepared.refuse };
     const eff: ActionDef = prepared.classOverride ? { ...def, cls: prepared.classOverride } : def;
 
-    const evidence = eff.cls === 'desk.answer_question' || prepared.needsEvidence ? await evidenceFound(ctx, env.orgId, rpc.evidence) : 1;
+    const evidence =
+      eff.cls === 'desk.answer_question' || prepared.needsEvidence
+        ? await evidenceFound(ctx, env.orgId, rpc.evidence)
+        : 1;
     const limit = prepared.limitReached ?? (await genericLimit(env, eff.cls, prepared));
     const verdict: PolicyVerdict = opts.force
       ? { verdict: 'allow', reason: 'the owner accepted this recommendation' }
       : opts.recommendOnly
         ? { verdict: 'recommend', reason: 'raised by the CEO as a recommendation', cause: 'mode' }
         : evaluatePolicy(env.ceo.policy, eff.cls, {
-          confidence: rpc.confidence,
-          training: env.ceo.training.on,
-          untrustedOrigin: origin.untrusted,
-          reservedKey: prepared.reservedKey ?? null,
-          evidenceMissing: !!prepared.needsEvidence && evidence === 0,
-          deskMode: prepared.deskMode,
-          limitReached: limit,
-        });
+            confidence: rpc.confidence,
+            training: env.ceo.training.on,
+            untrustedOrigin: origin.untrusted,
+            reservedKey: prepared.reservedKey ?? null,
+            evidenceMissing: !!prepared.needsEvidence && evidence === 0,
+            deskMode: prepared.deskMode,
+            limitReached: limit,
+          });
     const wouldBe: CeoActionMode =
       verdict.verdict === 'allow' ? 'decided' : verdict.verdict === 'recommend' ? 'recommended' : 'refused';
     if (rpc.dryRun)
@@ -323,7 +345,12 @@ export async function runAction(
 
     if (verdict.verdict === 'deny') {
       await ctx.store.append([auditEvent(env, origin, eff, call, prepared, 'refused', verdict, key)]);
-      return { status: 'refused', mode: 'refused', actionId: env.actionId, message: `Refused: ${verdict.reason}.` };
+      return {
+        status: 'refused',
+        mode: 'refused',
+        actionId: env.actionId,
+        message: `Refused: ${verdict.reason}.`,
+      };
     }
 
     if (verdict.verdict === 'recommend') {
@@ -334,7 +361,10 @@ export async function runAction(
           deskItemId: rec.duplicate,
           message: 'The owner already has a recommendation for this on the desk.',
         };
-      await ctx.store.append([auditEvent(env, origin, eff, call, prepared, 'recommended', verdict, key), ...rec.events]);
+      await ctx.store.append([
+        auditEvent(env, origin, eff, call, prepared, 'recommended', verdict, key),
+        ...rec.events,
+      ]);
       return {
         status: 'recommended',
         mode: 'recommended',
@@ -376,19 +406,24 @@ export async function recommendOnItem(
   origin: CallOrigin,
 ): Promise<EngineResult> {
   const { ctx } = env;
-  const item = await one(
-    ctx.pool,
-    `SELECT d.* FROM desk_items d WHERE d.id=$1 AND d.org_id=$2`,
-    [rpc.item, env.orgId],
-  );
+  const item = await one(ctx.pool, `SELECT d.* FROM desk_items d WHERE d.id=$1 AND d.org_id=$2`, [
+    rpc.item,
+    env.orgId,
+  ]);
   if (!item) return { status: 'refused', message: 'that desk item does not exist' };
   if (item.status !== 'open') return { status: 'refused', message: `this item is already ${item.status}` };
   if (rpc.option && !(item.options as Array<{ id: string }>).some((o) => o.id === rpc.option))
     return { status: 'refused', message: `option ${rpc.option} is not one of the item's options` };
   if (!rpc.option && !rpc.text) return { status: 'refused', message: 'give --option or --text' };
-  const key = rpc.key ?? defaultKey(origin.scopeId, 'recommend', { item: rpc.item, option: rpc.option, text: rpc.text });
-  const prior = await one(ctx.pool, 'SELECT id FROM ceo_actions WHERE org_id=$1 AND idem_key=$2', [env.orgId, key]);
-  if (prior) return { status: 'duplicate', actionId: prior.id, message: 'This recommendation was already made.' };
+  const key =
+    rpc.key ??
+    defaultKey(origin.scopeId, 'recommend', { item: rpc.item, option: rpc.option, text: rpc.text });
+  const prior = await one(ctx.pool, 'SELECT id FROM ceo_actions WHERE org_id=$1 AND idem_key=$2', [
+    env.orgId,
+    key,
+  ]);
+  if (prior)
+    return { status: 'duplicate', actionId: prior.id, message: 'This recommendation was already made.' };
   const cls = item.kind === 'question' || item.kind === 'escalation' ? 'desk.answer_question' : 'desk.triage';
   const events: AppendInput[] = [];
   if (item.triage === 'pending')
@@ -396,10 +431,17 @@ export async function recommendOnItem(
       streamId: streamId.desk(item.id),
       event: {
         type: 'DeskItemTriaged',
-        payload: { deskItemId: item.id, outcome: 'passed', note: `${env.agentName} recommends an answer`, by: ceoBy(env) },
+        payload: {
+          deskItemId: item.id,
+          outcome: 'passed',
+          note: `${env.agentName} recommends an answer`,
+          by: ceoBy(env),
+        },
       },
       actor: agentActor(env.agentId),
-      scope: item.project_id ? { orgId: env.orgId, projectId: item.project_id, audience: 'project' } : orgScope(env.orgId),
+      scope: item.project_id
+        ? { orgId: env.orgId, projectId: item.project_id, audience: 'project' }
+        : orgScope(env.orgId),
     });
   const label = String(item.title).replace(/\s+/g, ' ').slice(0, 120);
   events.push(
@@ -461,4 +503,3 @@ export async function recommendOnItem(
     message: 'Your recommendation is on the item; the owner decides.',
   };
 }
-

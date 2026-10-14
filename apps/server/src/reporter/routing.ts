@@ -6,11 +6,11 @@ import {
   topicWords,
   WORKING_BRANCH_SUBKIND,
 } from '@aom/shared';
+import { ceoActive, ceoReachable } from '../ceo/state.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { ceoActive, ceoReachable } from '../ceo/state.ts';
 import { reportingOf } from './settings.ts';
 import { baAvailable, enqueueReporterTask } from './tasks.ts';
 
@@ -84,8 +84,10 @@ export function createRoutingInterceptor(ctx: Ctx) {
       }
       return cache.get(key) ?? null;
     };
-    const active = async (orgId: string, projectId: string | null): Promise<boolean> => (await who(orgId, projectId)) !== null;
-    const byBa = async (orgId: string, projectId: string | null): Promise<boolean> => (await who(orgId, projectId)) === 'ba';
+    const active = async (orgId: string, projectId: string | null): Promise<boolean> =>
+      (await who(orgId, projectId)) !== null;
+    const byBa = async (orgId: string, projectId: string | null): Promise<boolean> =>
+      (await who(orgId, projectId)) === 'ba';
     const held = new Map<string, { orgId: string; projectId: string | null; ids: string[] }>();
     const noted = new Map<string, { orgId: string; projectId: string | null; ids: string[] }>();
     const add = (m: typeof held, orgId: string, projectId: string | null, id: string): void => {

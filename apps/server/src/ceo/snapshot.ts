@@ -6,7 +6,9 @@ import { loadCeo } from './state.ts';
 
 const MAX_CHARS = 22_000; // about 6k tokens
 const clip = (s: unknown, n: number): string => {
-  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  const t = String(s ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 };
 const ago = (d: Date | string | null | undefined, now: Date): string => {
@@ -14,7 +16,8 @@ const ago = (d: Date | string | null | undefined, now: Date): string => {
   const m = Math.max(0, Math.round((now.getTime() - new Date(d).getTime()) / 60_000));
   return m < 90 ? `${m}m` : m < 2880 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
 };
-const money = (micros: number | string | null | undefined): string => `$${(Number(micros ?? 0) / 1e6).toFixed(2)}`;
+const money = (micros: number | string | null | undefined): string =>
+  `$${(Number(micros ?? 0) / 1e6).toFixed(2)}`;
 
 export const SNAPSHOT_SECTIONS = [
   'org',
@@ -43,8 +46,14 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
   const dayStart = new Date(now.getTime() - 86_400_000);
 
   if (want('org')) {
-    const o = await one(ctx.pool, 'SELECT o.name, o.currency, u.timezone FROM organizations o JOIN users u ON u.id=o.owner_user_id WHERE o.id=$1', [orgId]);
-    out.push(`## Organization\nname: ${clip(o?.name, 80)} | time: ${now.toISOString()} | owner timezone: ${o?.timezone ?? 'UTC'} | currency: ${o?.currency ?? 'USD'}`);
+    const o = await one(
+      ctx.pool,
+      'SELECT o.name, o.currency, u.timezone FROM organizations o JOIN users u ON u.id=o.owner_user_id WHERE o.id=$1',
+      [orgId],
+    );
+    out.push(
+      `## Organization\nname: ${clip(o?.name, 80)} | time: ${now.toISOString()} | owner timezone: ${o?.timezone ?? 'UTC'} | currency: ${o?.currency ?? 'USD'}`,
+    );
   }
 
   if (want('projects')) {
@@ -60,12 +69,14 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
       [orgId, monthStart],
     );
     out.push(
-      `## Projects (month spend vs budget)\n${ps
-        .map(
-          (p) =>
-            `${p.key} id=${p.id} queued=${p.queued} blocked=${p.blocked} active=${p.active} spend=${money(p.month_micros)}${p.budget_micros ? ` of ${money(p.budget_micros)} (${Math.round((Number(p.month_micros) / Number(p.budget_micros)) * 100)}%)` : ' (no budget)'} last_activity=${ago(p.last_activity, now)}`,
-        )
-        .join('\n') || 'none'}`,
+      `## Projects (month spend vs budget)\n${
+        ps
+          .map(
+            (p) =>
+              `${p.key} id=${p.id} queued=${p.queued} blocked=${p.blocked} active=${p.active} spend=${money(p.month_micros)}${p.budget_micros ? ` of ${money(p.budget_micros)} (${Math.round((Number(p.month_micros) / Number(p.budget_micros)) * 100)}%)` : ' (no budget)'} last_activity=${ago(p.last_activity, now)}`,
+          )
+          .join('\n') || 'none'
+      }`,
     );
     const names = ps.map((p) => `${p.key}: ${clip(p.name, 60)}`).join('\n');
     if (names) out.push(renderCeoData('Project names', names));
@@ -92,7 +103,8 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
     out.push(
       `## Cards needing attention\n${cs.map((c) => `${c.ref} id=${c.id} why=${c.why} status=${c.status} stage=${c.stage} prio=${c.priority} rework=${c.rework_round}${c.agent_name ? ` agent=${c.agent_name}` : ''}${c.retry_after ? ` backoff_until=${new Date(c.retry_after).toISOString()}` : ''}`).join('\n') || 'none'}`,
     );
-    if (cs.length) out.push(renderCeoData('Card titles', cs.map((c) => `${c.ref}: ${clip(c.title, 100)}`).join('\n')));
+    if (cs.length)
+      out.push(renderCeoData('Card titles', cs.map((c) => `${c.ref}: ${clip(c.title, 100)}`).join('\n')));
   }
 
   if (want('shifts')) {
@@ -103,7 +115,9 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
         WHERE s.org_id=$1 AND s.status <> 'ended' AND s.kind <> 'ceo' ORDER BY s.started_at LIMIT 25`,
       [orgId],
     );
-    out.push(`## Running shifts\n${ss.map((s) => `shift=${s.id} ${s.kind} agent=${s.agent_name}${s.card_ref ? ` card=${s.card_ref}` : ''} running=${ago(s.started_at, now)}`).join('\n') || 'none'}`);
+    out.push(
+      `## Running shifts\n${ss.map((s) => `shift=${s.id} ${s.kind} agent=${s.agent_name}${s.card_ref ? ` card=${s.card_ref}` : ''} running=${ago(s.started_at, now)}`).join('\n') || 'none'}`,
+    );
   }
 
   if (want('agents')) {
@@ -119,12 +133,14 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
       [orgId, new Date(now.getTime() - 45_000), now, monthStart],
     );
     out.push(
-      `## Agents\n${as
-        .map(
-          (a) =>
-            `${a.name} id=${a.id} ${a.role_key}/${a.seniority} ${a.model} ${a.paused_at ? 'PAUSED ' : ''}${a.status === 'needs_rehome' ? 'NEEDS_REHOME ' : ''}ws=${a.ws_name ?? '-'}${a.online ? '' : ' (offline)'} shifts7d=${a.shifts7} failed14d=${a.failed14} spend=${money(a.month_micros)}${a.allowed_project_ids && a.allowed_project_ids.length === 0 ? ' BENCHED' : ''}`,
-        )
-        .join('\n') || 'none'}`,
+      `## Agents\n${
+        as
+          .map(
+            (a) =>
+              `${a.name} id=${a.id} ${a.role_key}/${a.seniority} ${a.model} ${a.paused_at ? 'PAUSED ' : ''}${a.status === 'needs_rehome' ? 'NEEDS_REHOME ' : ''}ws=${a.ws_name ?? '-'}${a.online ? '' : ' (offline)'} shifts7d=${a.shifts7} failed14d=${a.failed14} spend=${money(a.month_micros)}${a.allowed_project_ids && a.allowed_project_ids.length === 0 ? ' BENCHED' : ''}`,
+          )
+          .join('\n') || 'none'
+      }`,
     );
   }
 
@@ -137,12 +153,20 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
       [orgId],
     );
     out.push(
-      `## Workstations\n${ws
-        .map((w) => {
-          const rt = (w.runtimes as Array<{ id: string; available: boolean; auth?: string; sandbox?: string }> | null) ?? [];
-          return `${w.name} id=${w.id} ${w.connected ? 'online' : `offline ${ago(w.last_seen_at, now)}`} runner=${w.runner_version ?? '?'} runtimes=${rt.map((r) => `${r.id}:${r.available ? 'ok' : 'unavailable'}${r.auth === 'expired' ? '(sign-in expired)' : ''}${r.sandbox ? `/${r.sandbox}` : ''}`).join(',') || 'none'}`;
-        })
-        .join('\n') || 'none'}`,
+      `## Workstations\n${
+        ws
+          .map((w) => {
+            const rt =
+              (w.runtimes as Array<{
+                id: string;
+                available: boolean;
+                auth?: string;
+                sandbox?: string;
+              }> | null) ?? [];
+            return `${w.name} id=${w.id} ${w.connected ? 'online' : `offline ${ago(w.last_seen_at, now)}`} runner=${w.runner_version ?? '?'} runtimes=${rt.map((r) => `${r.id}:${r.available ? 'ok' : 'unavailable'}${r.auth === 'expired' ? '(sign-in expired)' : ''}${r.sandbox ? `/${r.sandbox}` : ''}`).join(',') || 'none'}`;
+          })
+          .join('\n') || 'none'
+      }`,
     );
   }
 
@@ -159,18 +183,43 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
         `item=${d.id} ${d.kind}${d.subkind ? `:${d.subkind}` : ''}${d.blocking ? ' BLOCKING' : ''}${d.pinned ? ' PINNED' : ''}${d.triage === 'pending' ? ' HELD' : ''}${d.recommended ? ' (you recommended)' : ''} age=${ago(d.created_at, now)} your_mode=${ceo ? deskMode(ceo.policy, d.kind, d.subkind) : '-'}`,
     );
     out.push(`## Open desk items\n${lines.join('\n') || 'none'}`);
-    if (ds.length) out.push(renderCeoData('Desk item titles (written by agents and systems)', ds.map((d) => `${d.id.slice(0, 8)}: ${clip(d.title, 140)}`).join('\n')));
+    if (ds.length)
+      out.push(
+        renderCeoData(
+          'Desk item titles (written by agents and systems)',
+          ds.map((d) => `${d.id.slice(0, 8)}: ${clip(d.title, 140)}`).join('\n'),
+        ),
+      );
   }
 
   if (want('signals')) {
-    const ss = await rows(ctx.pool, `SELECT id, kind, urgency, count, subject, first_seen_at FROM ba_signals WHERE org_id=$1 AND status <> 'resolved' ORDER BY (urgency='urgent') DESC, first_seen_at LIMIT 20`, [orgId]);
-    out.push(`## Open signals\n${ss.map((s) => `signal=${s.id} ${s.kind} ${s.urgency} x${s.count} since ${ago(s.first_seen_at, now)}`).join('\n') || 'none'}`);
-    if (ss.length) out.push(renderCeoData('Signal subjects', ss.map((s) => `${s.id.slice(0, 8)}: ${clip((s.subject as Row)?.title, 120)}`).join('\n')));
+    const ss = await rows(
+      ctx.pool,
+      `SELECT id, kind, urgency, count, subject, first_seen_at FROM ba_signals WHERE org_id=$1 AND status <> 'resolved' ORDER BY (urgency='urgent') DESC, first_seen_at LIMIT 20`,
+      [orgId],
+    );
+    out.push(
+      `## Open signals\n${ss.map((s) => `signal=${s.id} ${s.kind} ${s.urgency} x${s.count} since ${ago(s.first_seen_at, now)}`).join('\n') || 'none'}`,
+    );
+    if (ss.length)
+      out.push(
+        renderCeoData(
+          'Signal subjects',
+          ss.map((s) => `${s.id.slice(0, 8)}: ${clip((s.subject as Row)?.title, 120)}`).join('\n'),
+        ),
+      );
   }
 
   if (want('hr')) {
     const recs = await computeRecommendations(ctx, orgId).catch(() => []);
-    out.push(`## HR recommendations\n${recs.slice(0, 12).map((r) => `hr=${r.id} ${r.kind} agent=${r.agentName ?? '-'} action=${r.action.type}`).join('\n') || 'none'}`);
+    out.push(
+      `## HR recommendations\n${
+        recs
+          .slice(0, 12)
+          .map((r) => `hr=${r.id} ${r.kind} agent=${r.agentName ?? '-'} action=${r.action.type}`)
+          .join('\n') || 'none'
+      }`,
+    );
   }
 
   if (want('ceo') && ceo) {
@@ -179,15 +228,37 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
       `SELECT id, class, action, mode, status, subject_label, created_at FROM ceo_actions WHERE org_id=$1 AND created_at >= $2 ORDER BY created_at DESC LIMIT 20`,
       [orgId, dayStart],
     );
-    const tasks = await rows(ctx.pool, `SELECT id, title, status FROM ceo_tasks WHERE org_id=$1 AND status IN ('open','in_progress','waiting_owner','waiting_work') ORDER BY created_at LIMIT 10`, [orgId]);
-    const spend = await one(ctx.pool, `SELECT COALESCE(sum(cost_usd_micros) FILTER (WHERE ended_at >= $2),0) AS day, COALESCE(sum(cost_usd_micros),0) AS month FROM shift_costs WHERE org_id=$1 AND kind IN ('ceo','ceo_chat') AND ended_at >= $3`, [orgId, dayStart, monthStart]);
+    const tasks = await rows(
+      ctx.pool,
+      `SELECT id, title, status FROM ceo_tasks WHERE org_id=$1 AND status IN ('open','in_progress','waiting_owner','waiting_work') ORDER BY created_at LIMIT 10`,
+      [orgId],
+    );
+    const spend = await one(
+      ctx.pool,
+      `SELECT COALESCE(sum(cost_usd_micros) FILTER (WHERE ended_at >= $2),0) AS day, COALESCE(sum(cost_usd_micros),0) AS month FROM shift_costs WHERE org_id=$1 AND kind IN ('ceo','ceo_chat') AND ended_at >= $3`,
+      [orgId, dayStart, monthStart],
+    );
     out.push(
       `## You (the CEO)\ntraining: ${ceo.training.on ? `ON (${trainingDaysLeft(ceo.training, now)} days left; staffing and model changes are recommendations only)` : 'off (graduated)'} | policy v${ceo.policyVersion} | spend today ${money(spend?.day)} month ${money(spend?.month)}\nopen tasks: ${tasks.map((t) => `${t.id} [${t.status}]`).join(', ') || 'none'}\nyour actions in the last 24h (do not repeat or flap):\n${acts.map((a) => `${a.id.slice(0, 8)} ${a.class} ${a.mode}${a.status === 'undone' ? ' UNDONE by the owner' : ''} ${ago(a.created_at, now)} ago`).join('\n') || 'none'}`,
     );
-    if (acts.length) out.push(renderCeoData('Subjects of your recent actions', acts.map((a) => `${a.id.slice(0, 8)}: ${clip(a.subject_label, 100)}`).join('\n')));
-    if (tasks.length) out.push(renderCeoData('Task titles (from the owner)', tasks.map((t) => `${t.id.slice(0, 8)}: ${clip(t.title, 100)}`).join('\n')));
+    if (acts.length)
+      out.push(
+        renderCeoData(
+          'Subjects of your recent actions',
+          acts.map((a) => `${a.id.slice(0, 8)}: ${clip(a.subject_label, 100)}`).join('\n'),
+        ),
+      );
+    if (tasks.length)
+      out.push(
+        renderCeoData(
+          'Task titles (from the owner)',
+          tasks.map((t) => `${t.id.slice(0, 8)}: ${clip(t.title, 100)}`).join('\n'),
+        ),
+      );
   }
 
   const text = out.join('\n\n');
-  return text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS)}\n[...cut: ask for a section with --section]` : text;
+  return text.length > MAX_CHARS
+    ? `${text.slice(0, MAX_CHARS)}\n[...cut: ask for a section with --section]`
+    : text;
 }

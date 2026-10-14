@@ -1,6 +1,6 @@
+import { BUILTIN_ROLES } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { buildCeoSettings, buildShiftSettings } from '../src/adapters/claude-policy.ts';
-import { BUILTIN_ROLES } from '@aom/shared';
 import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
 
 const ceoRole = BUILTIN_ROLES.find((r) => r.key === 'ceo');

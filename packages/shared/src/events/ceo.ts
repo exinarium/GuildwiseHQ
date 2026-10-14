@@ -1,11 +1,6 @@
 import { z } from 'zod';
 import { CeoPolicySchema } from '../ceo/policy.ts';
-import {
-  CeoSettingsSchema,
-  CeoTrainingSchema,
-  NotifyKind,
-  RecommendationResponse,
-} from '../ceo/settings.ts';
+import { CeoSettingsSchema, CeoTrainingSchema, NotifyKind, RecommendationResponse } from '../ceo/settings.ts';
 import { defineEvent, Id, IsoDate } from './define.ts';
 
 /**
@@ -39,7 +34,10 @@ export const CeoTaskStatus = z.enum([
 ]);
 export type CeoTaskStatus = z.infer<typeof CeoTaskStatus>;
 
-export const CeoTaskWatch = z.object({ kind: z.enum(['card', 'devops', 'desk', 'agent']), id: z.string().min(1) });
+export const CeoTaskWatch = z.object({
+  kind: z.enum(['card', 'devops', 'desk', 'agent']),
+  id: z.string().min(1),
+});
 
 export const CeoMemoryKind = z.enum(['rule', 'preference', 'decision_pattern', 'fact', 'correction']);
 export type CeoMemoryKind = z.infer<typeof CeoMemoryKind>;
@@ -93,7 +91,9 @@ export const ceoEvents = [
       training: CeoTrainingSchema,
       by: Id,
       /** Agreement scores at that moment, shown in the confirmation (class, agreed, total). */
-      scores: z.array(z.object({ class: z.string(), agreed: z.number().int(), total: z.number().int() })).default([]),
+      scores: z
+        .array(z.object({ class: z.string(), agreed: z.number().int(), total: z.number().int() }))
+        .default([]),
     }),
   ),
   /** The standing chat thread of the owner with the CEO. */
@@ -124,10 +124,12 @@ export const ceoEvents = [
       chatThreadId: Id.optional(),
       /** The owner pressed Accept on a recommendation of the CEO: the action ran with the owner's say-so. */
       acceptedFrom: Id.optional(),
-      origin: z.object({ untrusted: z.boolean().default(false), eventIds: z.array(z.string()).default([]) }).default({
-        untrusted: false,
-        eventIds: [],
-      }),
+      origin: z
+        .object({ untrusted: z.boolean().default(false), eventIds: z.array(z.string()).default([]) })
+        .default({
+          untrusted: false,
+          eventIds: [],
+        }),
       inverse: CeoInverseSchema.optional(),
       idemKey: z.string().min(1).max(200),
       result: z.record(z.string(), z.unknown()).default({}),
@@ -227,7 +229,13 @@ export const ceoEvents = [
   ),
   defineEvent(
     'CeoMemoryEdited',
-    z.object({ memoryId: Id, orgId: Id, textHash: z.string().length(64), scope: z.string().max(100).optional(), by: Id }),
+    z.object({
+      memoryId: Id,
+      orgId: Id,
+      textHash: z.string().length(64),
+      scope: z.string().max(100).optional(),
+      by: Id,
+    }),
   ),
   defineEvent(
     'CeoMemoryRetired',
@@ -286,6 +294,11 @@ export const ceoEvents = [
   /** An answered question was taken back: it is open again and its cards wait again. */
   defineEvent(
     'QuestionReopened',
-    z.object({ deskItemId: Id, by: z.object({ kind: z.enum(['user', 'agent', 'system']), id: Id.optional() }), note: z.string().max(1000).optional(), blockedCardIds: z.array(Id).default([]) }),
+    z.object({
+      deskItemId: Id,
+      by: z.object({ kind: z.enum(['user', 'agent', 'system']), id: Id.optional() }),
+      note: z.string().max(1000).optional(),
+      blockedCardIds: z.array(Id).default([]),
+    }),
   ),
 ] as const;

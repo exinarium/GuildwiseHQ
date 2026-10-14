@@ -10,9 +10,9 @@ import {
   streamId,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
+import { projectRole } from '../authz/scope.ts';
 import { buildChatBrief } from '../ceo/brief.ts';
 import { loadCeo } from '../ceo/state.ts';
-import { projectRole } from '../authz/scope.ts';
 import { ownsDevopsMachine, sharesAllowedProject } from '../commands/chats.ts';
 import { agentActor, orgScope, projectScope, runnerActor, userActor } from '../commands/common.ts';
 import { intakeContext } from '../commands/intake.ts';
@@ -231,7 +231,9 @@ export class ChatRelay {
         {
           chatId,
           threadId: msg.threadId,
-          agent: ceoState ? { ...(await agentSpecFor(ctx, row)), ...ceoState.settings.models.chat } : await agentSpecFor(ctx, row),
+          agent: ceoState
+            ? { ...(await agentSpecFor(ctx, row)), ...ceoState.settings.models.chat }
+            : await agentSpecFor(ctx, row),
           message: msg.body,
           ...(prior?.sid ? { resumeSessionId: prior.sid as string } : {}),
           context,

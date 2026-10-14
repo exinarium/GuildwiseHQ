@@ -1,17 +1,16 @@
 import {
   type ActionClass,
-  CLASS_LABEL,
+  agreementScores,
   type CeoActionDto,
   type CeoActionsQuery,
   type CeoStatusDto,
-  agreementScores,
+  CLASS_LABEL,
   sumScores,
   trainingDaysLeft,
 } from '@aom/shared';
-import { ceoReachable, loadCeo } from '../ceo/state.ts';
+import { CEO_CAPABILITY, ceoReachable, loadCeo } from '../ceo/state.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { CEO_CAPABILITY } from '../ceo/state.ts';
 
 export function toActionDto(r: Row): CeoActionDto {
   const inv = r.inverse as { kind: 'inverse' | 'compensating'; label?: string } | null;
@@ -38,16 +37,15 @@ export function toActionDto(r: Row): CeoActionDto {
       available: r.status === 'done' && !!inv,
       kind: inv?.kind ?? null,
       label: r.status === 'done' ? (inv?.label ?? null) : null,
-      reason:
-        undone
-          ? 'already undone'
-          : r.mode === 'recommended'
-            ? 'a recommendation: nothing was done'
-            : r.mode === 'refused'
-              ? 'refused: nothing was done'
-              : inv
-                ? null
-                : 'not reversible: the work continues',
+      reason: undone
+        ? 'already undone'
+        : r.mode === 'recommended'
+          ? 'a recommendation: nothing was done'
+          : r.mode === 'refused'
+            ? 'refused: nothing was done'
+            : inv
+              ? null
+              : 'not reversible: the work continues',
     },
     deskItemId: r.desk_item_id ?? null,
     response: r.response ?? null,
@@ -71,11 +69,23 @@ export async function listActions(
         AND ($5::timestamptz IS NULL OR created_at >= $5) AND ($6::timestamptz IS NULL OR created_at <= $6)
         AND ($7::timestamptz IS NULL OR created_at < $7)
       ORDER BY created_at DESC, event_seq DESC LIMIT $8`,
-    [orgId, q.class ?? null, q.mode ?? null, q.subject ?? null, q.from ?? null, q.to ?? null, q.before ?? null, q.limit + 1],
+    [
+      orgId,
+      q.class ?? null,
+      q.mode ?? null,
+      q.subject ?? null,
+      q.from ?? null,
+      q.to ?? null,
+      q.before ?? null,
+      q.limit + 1,
+    ],
   );
   const more = list.length > q.limit;
   const page = list.slice(0, q.limit);
-  return { actions: page.map(toActionDto), next: more ? (iso(page[page.length - 1]?.created_at) ?? null) : null };
+  return {
+    actions: page.map(toActionDto),
+    next: more ? (iso(page[page.length - 1]?.created_at) ?? null) : null,
+  };
 }
 
 export function actionsCsv(list: CeoActionDto[]): string {
@@ -83,13 +93,28 @@ export function actionsCsv(list: CeoActionDto[]): string {
   return [
     'time,class,action,mode,status,subject,reason,confidence,policy_version,verdict',
     ...list.map((a) =>
-      [a.at, a.classLabel, a.action, a.mode, a.status, f(a.subjectLabel), f(a.reason), a.confidence, a.policyVersion, f(a.verdictReason)].join(','),
+      [
+        a.at,
+        a.classLabel,
+        a.action,
+        a.mode,
+        a.status,
+        f(a.subjectLabel),
+        f(a.reason),
+        a.confidence,
+        a.policyVersion,
+        f(a.verdictReason),
+      ].join(','),
     ),
   ].join('\n');
 }
 
 /** Everything the CEO page's Overview needs. */
-export async function ceoStatus(ctx: Ctx, orgId: string, viewerRole: 'owner' | 'admin' | 'member'): Promise<CeoStatusDto> {
+export async function ceoStatus(
+  ctx: Ctx,
+  orgId: string,
+  viewerRole: 'owner' | 'admin' | 'member',
+): Promise<CeoStatusDto> {
   const now = ctx.clock.now();
   const ceo = await loadCeo(ctx.pool, orgId);
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -103,7 +128,14 @@ export async function ceoStatus(ctx: Ctx, orgId: string, viewerRole: 'owner' | '
     [orgId, dayStart, monthStart],
   );
   const cur = await one(ctx.pool, 'SELECT currency FROM organizations WHERE id=$1', [orgId]);
-  const emptyTraining = { on: false, startedAt: null, until: null, graduatedAt: null, extensions: 0, daysLeft: 0 };
+  const emptyTraining = {
+    on: false,
+    startedAt: null,
+    until: null,
+    graduatedAt: null,
+    extensions: 0,
+    daysLeft: 0,
+  };
   const base = {
     isOwner: viewerRole === 'owner',
     canPause: viewerRole === 'owner' || viewerRole === 'admin',
@@ -137,7 +169,13 @@ export async function ceoStatus(ctx: Ctx, orgId: string, viewerRole: 'owner' | '
       lastReportAt: null,
       policyVersion: 0,
       undone7d: { undone: 0, decided: 0 },
-      workstations: ws.map((w) => ({ id: w.id, name: w.name, online: !!w.online, capable: !!w.capable, current: false })),
+      workstations: ws.map((w) => ({
+        id: w.id,
+        name: w.name,
+        online: !!w.online,
+        capable: !!w.capable,
+        current: false,
+      })),
       ...base,
     };
   const agent = ceo.agentId
@@ -150,12 +188,32 @@ export async function ceoStatus(ctx: Ctx, orgId: string, viewerRole: 'owner' | '
     : undefined;
   const reach = ceo.enabled ? await ceoReachable(ctx.pool, orgId, now) : { ok: false };
   const scores = agreementScores(
-    await rows<{ class: string; response: any }>(ctx.pool, `SELECT class, response FROM ceo_actions WHERE org_id=$1 AND mode='recommended' AND response IS NOT NULL`, [orgId]),
+    await rows<{ class: string; response: any }>(
+      ctx.pool,
+      `SELECT class, response FROM ceo_actions WHERE org_id=$1 AND mode='recommended' AND response IS NOT NULL`,
+      [orgId],
+    ),
   );
-  const pending = await one<{ n: string }>(ctx.pool, `SELECT count(*)::text AS n FROM ceo_wakes WHERE org_id=$1 AND status IN ('pending','taken')`, [orgId]);
-  const running = await one(ctx.pool, `SELECT started_at, b.purpose FROM shifts s JOIN ceo_batches b ON b.shift_id = s.id WHERE s.org_id=$1 AND s.kind='ceo' AND s.status <> 'ended' LIMIT 1`, [orgId]);
-  const tasks = await one<{ n: string }>(ctx.pool, `SELECT count(*)::text AS n FROM ceo_tasks WHERE org_id=$1 AND status IN ('open','in_progress','waiting_owner','waiting_work')`, [orgId]);
-  const lastReport = await one<{ t: Date | null }>(ctx.pool, `SELECT max(created_at) AS t FROM desk_items WHERE org_id=$1 AND subkind='ceo_report'`, [orgId]);
+  const pending = await one<{ n: string }>(
+    ctx.pool,
+    `SELECT count(*)::text AS n FROM ceo_wakes WHERE org_id=$1 AND status IN ('pending','taken')`,
+    [orgId],
+  );
+  const running = await one(
+    ctx.pool,
+    `SELECT started_at, b.purpose FROM shifts s JOIN ceo_batches b ON b.shift_id = s.id WHERE s.org_id=$1 AND s.kind='ceo' AND s.status <> 'ended' LIMIT 1`,
+    [orgId],
+  );
+  const tasks = await one<{ n: string }>(
+    ctx.pool,
+    `SELECT count(*)::text AS n FROM ceo_tasks WHERE org_id=$1 AND status IN ('open','in_progress','waiting_owner','waiting_work')`,
+    [orgId],
+  );
+  const lastReport = await one<{ t: Date | null }>(
+    ctx.pool,
+    `SELECT max(created_at) AS t FROM desk_items WHERE org_id=$1 AND subkind='ceo_report'`,
+    [orgId],
+  );
   const week = await one(
     ctx.pool,
     `SELECT count(*) FILTER (WHERE mode='decided')::int AS decided, count(*) FILTER (WHERE status='undone')::int AS undone
@@ -188,7 +246,13 @@ export async function ceoStatus(ctx: Ctx, orgId: string, viewerRole: 'owner' | '
     lastReportAt: iso(lastReport?.t),
     policyVersion: ceo.policyVersion,
     undone7d: { undone: Number(week?.undone ?? 0), decided: Number(week?.decided ?? 0) },
-    workstations: ws.map((w) => ({ id: w.id, name: w.name, online: !!w.online, capable: !!w.capable, current: w.id === agent?.workstation_id })),
+    workstations: ws.map((w) => ({
+      id: w.id,
+      name: w.name,
+      online: !!w.online,
+      capable: !!w.capable,
+      current: w.id === agent?.workstation_id,
+    })),
     ...base,
   };
 }

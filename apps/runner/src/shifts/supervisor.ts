@@ -624,7 +624,8 @@ export class ShiftSupervisor {
 
     // A card, question or BA task shift reads only the vault the server named for it; a DevOps shift reads none.
     const vaultCtx =
-      (msg.kind === 'card' || msg.kind === 'question' || msg.kind === 'ba_task' || msg.kind === 'ceo') && msg.vault
+      (msg.kind === 'card' || msg.kind === 'question' || msg.kind === 'ba_task' || msg.kind === 'ceo') &&
+      msg.vault
         ? await readVaultContext(paths.vaults, msg.vault)
         : null;
     // Question and BA task shifts open the vault as a read-only folder (secret files blocked, like a reference repository).

@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import {
   CEO_OUTCOME,
   type CeoShift,
-  floorReportDue,
   floorDigestIsEmpty,
+  floorReportDue,
   type ServerToRunnerOf,
   type ShiftBrief,
   streamId,
@@ -13,15 +13,15 @@ import { orgScope, runnerActor, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { carrierProject } from '../reporter/tasks.ts';
 import { buildFloorDigest } from '../reporter/digest.ts';
 import { reportingOf } from '../reporter/settings.ts';
+import { carrierProject } from '../reporter/tasks.ts';
 import { agentSpecFor, shiftVault } from '../runner-gateway/brief.ts';
 import { buildCeoBrief } from './brief.ts';
 import { notifyOwner } from './notify.ts';
 import { checkOrgBudget } from './orgbudget.ts';
 import { postFallbackReview } from './report.ts';
-import { ceoReachable, type CeoState, loadCeo } from './state.ts';
+import { type CeoState, ceoReachable, loadCeo } from './state.ts';
 import { enqueueWake } from './wakes.ts';
 
 type ShiftStartPayload = Omit<ServerToRunnerOf<'shift.start'>, 'v' | 'id' | 'type' | 'ts'>;
@@ -35,7 +35,10 @@ const OVERRUN_SLACK_MS = 10 * 60_000;
 const MAX_ATTEMPTS = 2;
 
 /** Model and effort for a purpose: the owner's settings (wake, review, chat) override the role default. */
-export function modelFor(ceo: CeoState, purpose: 'wake' | 'review' | 'chat'): { model: string; effort: string } {
+export function modelFor(
+  ceo: CeoState,
+  purpose: 'wake' | 'review' | 'chat',
+): { model: string; effort: string } {
   return ceo.settings.models[purpose];
 }
 
@@ -61,12 +64,21 @@ async function buildCeoShiftStart(
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
   if (!role) return null;
   const projectId = await carrierProject(ctx.pool, agent.org_id, null);
-  const project = projectId ? await one(ctx.pool, 'SELECT * FROM projects WHERE id=$1', [projectId]) : undefined;
+  const project = projectId
+    ? await one(ctx.pool, 'SELECT * FROM projects WHERE id=$1', [projectId])
+    : undefined;
   const { text, reasons } = await buildCeoBrief(ctx, ceo, agent, wakes, purpose, localDate);
   const maxMinutes = purpose === 'review' ? CEO_REVIEW_MAX_MINUTES : CEO_WAKE_MAX_MINUTES;
   const m = modelFor(ceo, purpose === 'review' ? 'review' : 'wake');
   const spec = await agentSpecFor(ctx, agent);
-  const ceoShift: CeoShift = { purpose, batchId, wakeIds: wakes.map((w) => w.id), reasons, brief: text, ...(localDate ? { localDate } : {}) };
+  const ceoShift: CeoShift = {
+    purpose,
+    batchId,
+    wakeIds: wakes.map((w) => w.id),
+    reasons,
+    brief: text,
+    ...(localDate ? { localDate } : {}),
+  };
   const brief: ShiftBrief = {
     shift: {
       id: shiftId,
@@ -134,13 +146,20 @@ async function offlineNotice(ctx: Ctx, ceo: CeoState, reason: string | undefined
     `SELECT min(created_at) AS at FROM ceo_wakes WHERE org_id=$1 AND status='pending' AND urgency='urgent'`,
     [ceo.orgId],
   );
-  const flag = await one(ctx.pool, `SELECT value FROM ceo_flags WHERE org_id=$1 AND flag='offline_notice'`, [ceo.orgId]);
+  const flag = await one(ctx.pool, `SELECT value FROM ceo_flags WHERE org_id=$1 AND flag='offline_notice'`, [
+    ceo.orgId,
+  ]);
   if (!waiting?.at) {
-    if (flag) await exec(ctx.pool, `DELETE FROM ceo_flags WHERE org_id=$1 AND flag='offline_notice'`, [ceo.orgId]);
+    if (flag)
+      await exec(ctx.pool, `DELETE FROM ceo_flags WHERE org_id=$1 AND flag='offline_notice'`, [ceo.orgId]);
     return;
   }
   if (flag || now.getTime() - new Date(waiting.at).getTime() < OFFLINE_NOTICE_MS) return;
-  await exec(ctx.pool, `INSERT INTO ceo_flags (org_id, flag, value, at) VALUES ($1,'offline_notice','1',$2) ON CONFLICT DO NOTHING`, [ceo.orgId, now]);
+  await exec(
+    ctx.pool,
+    `INSERT INTO ceo_flags (org_id, flag, value, at) VALUES ($1,'offline_notice','1',$2) ON CONFLICT DO NOTHING`,
+    [ceo.orgId, now],
+  );
   await notifyOwner(ctx, ceo.orgId, {
     kind: 'urgent',
     title: 'Your CEO is offline',
@@ -152,7 +171,11 @@ async function offlineNotice(ctx: Ctx, ceo: CeoState, reason: string | undefined
 /** Ends CEO shifts the runner never reported on (a lost connection). */
 async function endStale(ctx: Ctx, now: Date): Promise<void> {
   const cutoff = new Date(now.getTime() - CEO_REVIEW_MAX_MINUTES * 60_000 - OVERRUN_SLACK_MS);
-  const stale = await rows(ctx.pool, `SELECT id FROM shifts WHERE kind='ceo' AND status <> 'ended' AND started_at < $1`, [cutoff]);
+  const stale = await rows(
+    ctx.pool,
+    `SELECT id FROM shifts WHERE kind='ceo' AND status <> 'ended' AND started_at < $1`,
+    [cutoff],
+  );
   if (!stale.length) return;
   const { endCeoShift } = await import('./shift.ts');
   for (const s of stale)
@@ -181,11 +204,17 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
     const ceo = await loadCeo(ctx.pool, orgId);
     if (!ceo?.agentId) continue;
     // Old wakes are not worth a shift any more: the next report lists them as missed while offline.
-    await exec(ctx.pool, `UPDATE ceo_wakes SET status='dropped' WHERE org_id=$1 AND status='pending' AND urgency <> 'scheduled' AND created_at < $2`, [orgId, new Date(now.getTime() - MISSED_DROP_MS)]);
+    await exec(
+      ctx.pool,
+      `UPDATE ceo_wakes SET status='dropped' WHERE org_id=$1 AND status='pending' AND urgency <> 'scheduled' AND created_at < $2`,
+      [orgId, new Date(now.getTime() - MISSED_DROP_MS)],
+    );
     // Organization budget: 80% and 100% notices; at 100% minimal mode (only the daily report; the chat is not a wake).
     const { minimal } = await checkOrgBudget(ctx, ceo, now).catch(() => ({ minimal: false }));
     const reach = await ceoReachable(ctx.pool, orgId, now);
-    await offlineNotice(ctx, ceo, reach.ok ? undefined : reach.reason, now).catch((err) => ctx.log.error({ err }, 'ceo offline notice failed'));
+    await offlineNotice(ctx, ceo, reach.ok ? undefined : reach.reason, now).catch((err) =>
+      ctx.log.error({ err }, 'ceo offline notice failed'),
+    );
     // A review nobody took for two hours: the server writes it.
     const lateReview = await rows(
       ctx.pool,
@@ -193,10 +222,17 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
           AND (created_at < $2 OR attempts >= $3)`,
       [orgId, new Date(now.getTime() - FALLBACK_REVIEW_MS), MAX_ATTEMPTS],
     );
-    for (const r of lateReview) await postFallbackReview(ctx, orgId, r.local_date ?? '', [r.id]).catch((err) => ctx.log.error({ err }, 'ceo fallback report failed'));
+    for (const r of lateReview)
+      await postFallbackReview(ctx, orgId, r.local_date ?? '', [r.id]).catch((err) =>
+        ctx.log.error({ err }, 'ceo fallback report failed'),
+      );
     if (!reach.ok) continue;
 
-    const running = await one(ctx.pool, `SELECT 1 FROM shifts WHERE org_id=$1 AND kind='ceo' AND status <> 'ended' LIMIT 1`, [orgId]);
+    const running = await one(
+      ctx.pool,
+      `SELECT 1 FROM shifts WHERE org_id=$1 AND kind='ceo' AND status <> 'ended' LIMIT 1`,
+      [orgId],
+    );
     if (running) continue;
     const cap = await one<{ n: string }>(
       ctx.pool,
@@ -205,7 +241,11 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
     );
     if (Number(cap?.n ?? 0) >= ceo.policy.limits.maxWakesPerHour) continue;
 
-    const all = await rows(ctx.pool, `SELECT * FROM ceo_wakes WHERE org_id=$1 AND status='pending' ORDER BY created_at, id`, [orgId]);
+    const all = await rows(
+      ctx.pool,
+      `SELECT * FROM ceo_wakes WHERE org_id=$1 AND status='pending' ORDER BY created_at, id`,
+      [orgId],
+    );
     const pending = minimal ? all.filter((w) => w.reason === 'daily_review') : all;
     if (pending.length === 0) continue;
     const window = ceo.settings.wakeWindowMinutes * 60_000;
@@ -223,23 +263,42 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
     const batchId = randomUUID();
     const shiftId = randomUUID();
     const ok = await withAppendTx(ctx.pool, async (tx) => {
-      const taken = await rows(tx, `UPDATE ceo_wakes SET status='taken', batch_id=$2, taken_at=$3 WHERE id = ANY($1::uuid[]) AND status='pending' RETURNING id`, [pending.map((w) => w.id), batchId, now]);
+      const taken = await rows(
+        tx,
+        `UPDATE ceo_wakes SET status='taken', batch_id=$2, taken_at=$3 WHERE id = ANY($1::uuid[]) AND status='pending' RETURNING id`,
+        [pending.map((w) => w.id), batchId, now],
+      );
       if (taken.length === 0) return false;
-      await exec(tx, `INSERT INTO ceo_batches (id, org_id, agent_id, shift_id, purpose, local_date, status, attempts, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,'running',$7,$8,$8)`, [
-        batchId,
-        orgId,
-        agent.id,
-        shiftId,
-        purpose,
-        review?.local_date ?? null,
-        Math.max(0, ...pending.map((w) => Number(w.attempts))),
-        now,
-      ]);
+      await exec(
+        tx,
+        `INSERT INTO ceo_batches (id, org_id, agent_id, shift_id, purpose, local_date, status, attempts, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,'running',$7,$8,$8)`,
+        [
+          batchId,
+          orgId,
+          agent.id,
+          shiftId,
+          purpose,
+          review?.local_date ?? null,
+          Math.max(0, ...pending.map((w) => Number(w.attempts))),
+          now,
+        ],
+      );
       await ctx.store.append(
         [
           {
             streamId: streamId.ceo(orgId),
-            event: { type: 'CeoShiftDispatched', payload: { orgId, batchId, shiftId, agentId: agent.id, workstationId: reach.workstationId as string, purpose, wakeCount: taken.length } },
+            event: {
+              type: 'CeoShiftDispatched',
+              payload: {
+                orgId,
+                batchId,
+                shiftId,
+                agentId: agent.id,
+                workstationId: reach.workstationId as string,
+                purpose,
+                wakeCount: taken.length,
+              },
+            },
             actor: SYSTEM_ACTOR,
             scope: orgScope(orgId),
           },
@@ -249,7 +308,16 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
       return true;
     });
     if (!ok) continue;
-    const built = await buildCeoShiftStart(ctx, ceo, agent, batchId, shiftId, pending, purpose, review?.local_date ?? undefined);
+    const built = await buildCeoShiftStart(
+      ctx,
+      ceo,
+      agent,
+      batchId,
+      shiftId,
+      pending,
+      purpose,
+      review?.local_date ?? undefined,
+    );
     if (!built) {
       const { releaseBatch } = await import('./shift.ts');
       await releaseBatch(ctx, batchId, 'could not build the brief');
@@ -274,15 +342,40 @@ export async function queueCeoReviews(ctx: Ctx, now: Date): Promise<number> {
     const ceo = await loadCeo(ctx.pool, orgId);
     if (!ceo) continue;
     const prefs = await reportingOf(ctx.pool, orgId);
-    const due = floorReportDue(now, prefs.timezone, ceo.settings.reportAt ?? prefs.dailyAt, ceo.reportDay, prefs.createdAt);
+    const due = floorReportDue(
+      now,
+      prefs.timezone,
+      ceo.settings.reportAt ?? prefs.dailyAt,
+      ceo.reportDay,
+      prefs.createdAt,
+    );
     if (!due.due) continue;
-    const exists = await one(ctx.pool, `SELECT 1 FROM ceo_wakes WHERE org_id=$1 AND reason='daily_review' AND local_date=$2 AND status <> 'dropped'`, [orgId, due.localDate]);
+    const exists = await one(
+      ctx.pool,
+      `SELECT 1 FROM ceo_wakes WHERE org_id=$1 AND reason='daily_review' AND local_date=$2 AND status <> 'dropped'`,
+      [orgId, due.localDate],
+    );
     if (exists) continue;
     // A day with nothing to say needs no report (the CEO's own activity counts).
     const digest = await buildFloorDigest(ctx.pool, orgId, now, due.localDate);
-    const acts = await one(ctx.pool, `SELECT 1 FROM ceo_actions WHERE org_id=$1 AND created_at > $2 AND mode IN ('decided','recommended') LIMIT 1`, [orgId, new Date(now.getTime() - 86_400_000)]);
+    const acts = await one(
+      ctx.pool,
+      `SELECT 1 FROM ceo_actions WHERE org_id=$1 AND created_at > $2 AND mode IN ('decided','recommended') LIMIT 1`,
+      [orgId, new Date(now.getTime() - 86_400_000)],
+    );
     if (floorDigestIsEmpty(digest) && !acts) continue;
-    await enqueueWake(ctx.pool, orgId, { reason: 'daily_review', urgency: 'scheduled', subjectKind: 'review', subjectId: due.localDate, localDate: due.localDate }, now);
+    await enqueueWake(
+      ctx.pool,
+      orgId,
+      {
+        reason: 'daily_review',
+        urgency: 'scheduled',
+        subjectKind: 'review',
+        subjectId: due.localDate,
+        localDate: due.localDate,
+      },
+      now,
+    );
     n++;
   }
   return n;

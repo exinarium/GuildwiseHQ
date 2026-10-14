@@ -50,7 +50,11 @@ export const CeoSettingsSchema = z.object({
   models: CeoModelsSchema,
   /** Local time of the daily review; null follows the organization's reporting time. */
   reportAt: HHMM.nullable().default(null),
-  notify: z.object({ needs_you: NotifyChannelsSchema, urgent: NotifyChannelsSchema, task_done: NotifyChannelsSchema }),
+  notify: z.object({
+    needs_you: NotifyChannelsSchema,
+    urgent: NotifyChannelsSchema,
+    task_done: NotifyChannelsSchema,
+  }),
   /** E-mails that are not urgent wait until the daily report between these local times. */
   quietHours: z.object({ from: HHMM, to: HHMM }).nullable().default(null),
   /** Signal kinds that wake the CEO at once. */
@@ -155,4 +159,7 @@ export function agreementScores(
 }
 
 export const sumScores = (scores: readonly AgreementScore[]): { agreed: number; total: number } =>
-  scores.reduce((a, s) => ({ agreed: a.agreed + s.agreed, total: a.total + s.total }), { agreed: 0, total: 0 });
+  scores.reduce((a, s) => ({ agreed: a.agreed + s.agreed, total: a.total + s.total }), {
+    agreed: 0,
+    total: 0,
+  });

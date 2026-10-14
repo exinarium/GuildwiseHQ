@@ -1348,7 +1348,17 @@ async function ceoMain(brief: Brief): Promise<number> {
   for (const l of lines) {
     const m = /^(\S+-\d+) id=\S+ why=backoff/.exec(l);
     if (!m) continue;
-    const r = aom(['ceo', 'act', 'release-backoff', '--card', m[1] as string, '--reason', 'the back-off has run its course', '--confidence', '0.9']);
+    const r = aom([
+      'ceo',
+      'act',
+      'release-backoff',
+      '--card',
+      m[1] as string,
+      '--reason',
+      'the back-off has run its course',
+      '--confidence',
+      '0.9',
+    ]);
     done.push(`${m[1]}: ${(r.out || r.err).trim()}`);
     n++;
   }
@@ -1356,7 +1366,18 @@ async function ceoMain(brief: Brief): Promise<number> {
   for (const l of lines) {
     const m = /^item=(\S+) question\S* BLOCKING/.exec(l);
     if (!m) continue;
-    const r = aom(['ceo', 'recommend', '--item', m[1] as string, '--option', 'o1', '--reason', 'the first option is the usual choice', '--confidence', '0.6']);
+    const r = aom([
+      'ceo',
+      'recommend',
+      '--item',
+      m[1] as string,
+      '--option',
+      'o1',
+      '--reason',
+      'the first option is the usual choice',
+      '--confidence',
+      '0.6',
+    ]);
     done.push(`question ${String(m[1]).slice(0, 8)}: ${(r.out || r.err).trim()}`);
     n++;
   }
@@ -1385,11 +1406,20 @@ async function ceoMain(brief: Brief): Promise<number> {
       ].join('\n'),
     );
     const r = aom(['ceo', 'report', '--summary-file', file]);
-    emit({ kind: 'final', text: r.code === 0 ? `mock CEO reported: ${r.out.trim()}` : `mock CEO report failed: ${(r.err || r.out).trim()}` });
+    emit({
+      kind: 'final',
+      text:
+        r.code === 0
+          ? `mock CEO reported: ${r.out.trim()}`
+          : `mock CEO report failed: ${(r.err || r.out).trim()}`,
+    });
     return 0;
   }
   const r = aom(['ceo', 'done', '--summary', summary]);
-  emit({ kind: 'final', text: r.code === 0 ? `mock CEO done: ${r.out.trim()}` : `mock CEO failed: ${(r.err || r.out).trim()}` });
+  emit({
+    kind: 'final',
+    text: r.code === 0 ? `mock CEO done: ${r.out.trim()}` : `mock CEO failed: ${(r.err || r.out).trim()}`,
+  });
   return 0;
 }
 
@@ -1404,8 +1434,22 @@ async function ceoChatMain(): Promise<number> {
   emit({ kind: 'session', runtimeSessionId: process.env.AOM_MOCK_SESSION ?? 'mock-ceo' });
   emit({ kind: 'usage', usage: { inputTokens: message.length, outputTokens: 100 } });
   if (/^\s*(always|never|i prefer)\b/i.test(message)) {
-    const r = aom(['ceo', 'memory', 'propose', '--text', message.trim(), '--source', 'owner_chat', '--quote', message.trim()]);
-    say(r.code === 0 ? 'Noted. I will follow that rule from now on.' : `I could not record that: ${(r.err || r.out).trim()}`);
+    const r = aom([
+      'ceo',
+      'memory',
+      'propose',
+      '--text',
+      message.trim(),
+      '--source',
+      'owner_chat',
+      '--quote',
+      message.trim(),
+    ]);
+    say(
+      r.code === 0
+        ? 'Noted. I will follow that rule from now on.'
+        : `I could not record that: ${(r.err || r.out).trim()}`,
+    );
   } else if (/^\s*task:/i.test(message)) {
     const title = message.replace(/^\s*task:\s*/i, '').trim();
     const r = aom(['ceo', 'task', 'create', '--title', title.slice(0, 200), '--request', title]);

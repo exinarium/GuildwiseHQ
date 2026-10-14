@@ -294,7 +294,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     version: 1,
     name: 'Chief executive',
     purpose:
-      "Runs the organisation for the owner: watches all work, unblocks it, staffs it within budget, decides within its authority, recommends the rest and reports once a day.",
+      'Runs the organisation for the owner: watches all work, unblocks it, staffs it within budget, decides within its authority, recommends the rest and reports once a day.',
     department: 'management',
     instructions: CEO_INSTRUCTIONS,
     coreRules: [
@@ -306,7 +306,12 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     ],
     seniorityLevels: ['senior'],
     defaultModel: { runtime: 'claude-code', model: 'sonnet', effort: 'medium' },
-    permissions: perms({ allowedTools: ['read', 'shell'], deniedShellPatterns: [], writableGlobs: [], mayCommit: false }),
+    permissions: perms({
+      allowedTools: ['read', 'shell'],
+      deniedShellPatterns: [],
+      writableGlobs: [],
+      mayCommit: false,
+    }),
     skills: [],
     claimableStages: [],
   }),

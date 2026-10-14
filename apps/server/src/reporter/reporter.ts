@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { type FloorDigest, floorDigestIsEmpty, floorReportDue, streamId } from '@aom/shared';
+import { queueCeoReviews } from '../ceo/pass.ts';
 import { orgScope, projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { releaseHeldEvents } from '../commands/reporter-tasks.ts';
 import type { Ctx } from '../context.ts';
@@ -10,7 +11,6 @@ import { type Detected, detectAll } from './detectors.ts';
 import { buildFloorDigest } from './digest.ts';
 import { systemBy } from './report-items.ts';
 import { reportingOf } from './settings.ts';
-import { queueCeoReviews } from '../ceo/pass.ts';
 import { enqueueReporterTask } from './tasks.ts';
 
 export interface ReporterRun {

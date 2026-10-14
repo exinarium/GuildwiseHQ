@@ -53,7 +53,11 @@ export async function addMemoryIn(ctx: Ctx, tx: Tx, m: NewMemory): Promise<strin
             ...(m.byUserId ? { by: m.byUserId } : {}),
           },
         },
-        actor: m.byAgentId ? agentActor(m.byAgentId) : m.byUserId ? userActor(m.byUserId) : { kind: 'system', id: null },
+        actor: m.byAgentId
+          ? agentActor(m.byAgentId)
+          : m.byUserId
+            ? userActor(m.byUserId)
+            : { kind: 'system', id: null },
         scope: orgScope(m.orgId),
       },
     ],
@@ -99,7 +103,11 @@ const toDto = (r: Row): MemoryDto => ({
 
 const SELECT = `SELECT m.*, t.text, t.quote FROM ceo_memories m LEFT JOIN ceo_memory_text t ON t.memory_id = m.id`;
 
-export async function listMemories(ctx: Ctx, orgId: string, opts: { status?: string; includeRetired?: boolean } = {}): Promise<MemoryDto[]> {
+export async function listMemories(
+  ctx: Ctx,
+  orgId: string,
+  opts: { status?: string; includeRetired?: boolean } = {},
+): Promise<MemoryDto[]> {
   const list = await rows(
     ctx.pool,
     `${SELECT} WHERE m.org_id=$1 AND m.status <> 'forgotten' AND ($2::text IS NULL OR m.status=$2)
@@ -111,8 +119,21 @@ export async function listMemories(ctx: Ctx, orgId: string, opts: { status?: str
 }
 
 /** The memories a brief carries: active rules and preferences always (capped), plus text matches for the topic. */
-export async function relevantMemories(ctx: Ctx, orgId: string, topic: string, limit = 15): Promise<MemoryDto[]> {
-  const words = [...new Set(topic.toLowerCase().replace(/[^a-z0-9\s]+/g, ' ').split(/\s+/).filter((w) => w.length >= 4))].slice(0, 12);
+export async function relevantMemories(
+  ctx: Ctx,
+  orgId: string,
+  topic: string,
+  limit = 15,
+): Promise<MemoryDto[]> {
+  const words = [
+    ...new Set(
+      topic
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]+/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 4),
+    ),
+  ].slice(0, 12);
   const always = await rows(
     ctx.pool,
     `${SELECT} WHERE m.org_id=$1 AND m.status='active' AND m.kind IN ('rule','preference') ORDER BY m.confidence DESC, m.created_at DESC LIMIT 10`,
@@ -131,7 +152,12 @@ export async function relevantMemories(ctx: Ctx, orgId: string, topic: string, l
 }
 
 export async function searchMemories(ctx: Ctx, orgId: string, q: string): Promise<MemoryDto[]> {
-  const words = q.toLowerCase().replace(/[^a-z0-9\s]+/g, ' ').split(/\s+/).filter((w) => w.length >= 3).slice(0, 8);
+  const words = q
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 3)
+    .slice(0, 8);
   if (!words.length) return [];
   const list = await rows(
     ctx.pool,
@@ -142,7 +168,11 @@ export async function searchMemories(ctx: Ctx, orgId: string, q: string): Promis
 }
 
 async function lockMemory(tx: Tx, orgId: string, id: string): Promise<Row> {
-  const m = await one(tx, `SELECT * FROM ceo_memories WHERE id=$1 AND org_id=$2 AND status <> 'forgotten' FOR UPDATE`, [id, orgId]);
+  const m = await one(
+    tx,
+    `SELECT * FROM ceo_memories WHERE id=$1 AND org_id=$2 AND status <> 'forgotten' FOR UPDATE`,
+    [id, orgId],
+  );
   if (!m) throw notFound('memory not found');
   return m;
 }
@@ -157,14 +187,30 @@ const ownerEvent = (orgId: string, userId: string, event: any) => ({
 export async function confirmMemory(ctx: Ctx, orgId: string, userId: string, id: string): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     await lockMemory(tx, orgId, id);
-    await ctx.store.append([ownerEvent(orgId, userId, { type: 'CeoMemoryConfirmed', payload: { memoryId: id, orgId, by: userId, status: 'active' } })], { tx });
+    await ctx.store.append(
+      [
+        ownerEvent(orgId, userId, {
+          type: 'CeoMemoryConfirmed',
+          payload: { memoryId: id, orgId, by: userId, status: 'active' },
+        }),
+      ],
+      { tx },
+    );
   });
 }
 
 export async function retireMemory(ctx: Ctx, orgId: string, userId: string, id: string): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     await lockMemory(tx, orgId, id);
-    await ctx.store.append([ownerEvent(orgId, userId, { type: 'CeoMemoryRetired', payload: { memoryId: id, orgId, by: userId, reason: 'retired by the owner' } })], { tx });
+    await ctx.store.append(
+      [
+        ownerEvent(orgId, userId, {
+          type: 'CeoMemoryRetired',
+          payload: { memoryId: id, orgId, by: userId, reason: 'retired by the owner' },
+        }),
+      ],
+      { tx },
+    );
   });
 }
 
@@ -181,12 +227,34 @@ export async function editMemory(
     const events = [];
     if (patch.text !== undefined) {
       await exec(tx, 'UPDATE ceo_memory_text SET text=$2 WHERE memory_id=$1', [id, patch.text]);
-      events.push(ownerEvent(orgId, userId, { type: 'CeoMemoryEdited', payload: { memoryId: id, orgId, textHash: textHash(patch.text), ...(patch.scope ? { scope: patch.scope } : {}), by: userId } }));
+      events.push(
+        ownerEvent(orgId, userId, {
+          type: 'CeoMemoryEdited',
+          payload: {
+            memoryId: id,
+            orgId,
+            textHash: textHash(patch.text),
+            ...(patch.scope ? { scope: patch.scope } : {}),
+            by: userId,
+          },
+        }),
+      );
     } else if (patch.scope) {
-      events.push(ownerEvent(orgId, userId, { type: 'CeoMemoryEdited', payload: { memoryId: id, orgId, textHash: m.text_hash, scope: patch.scope, by: userId } }));
+      events.push(
+        ownerEvent(orgId, userId, {
+          type: 'CeoMemoryEdited',
+          payload: { memoryId: id, orgId, textHash: m.text_hash, scope: patch.scope, by: userId },
+        }),
+      );
     }
     if (patch.confirm || m.status === 'candidate')
-      if (patch.confirm !== false) events.push(ownerEvent(orgId, userId, { type: 'CeoMemoryConfirmed', payload: { memoryId: id, orgId, by: userId, status: 'active' } }));
+      if (patch.confirm !== false)
+        events.push(
+          ownerEvent(orgId, userId, {
+            type: 'CeoMemoryConfirmed',
+            payload: { memoryId: id, orgId, by: userId, status: 'active' },
+          }),
+        );
     await ctx.store.append(events, { tx });
   });
 }
@@ -195,13 +263,37 @@ export async function editMemory(
 export async function forgetMemory(ctx: Ctx, orgId: string, userId: string, id: string): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
     await lockMemory(tx, orgId, id);
-    await ctx.store.append([ownerEvent(orgId, userId, { type: 'CeoMemoryForgotten', payload: { memoryId: id, orgId, by: userId } })], { tx });
+    await ctx.store.append(
+      [
+        ownerEvent(orgId, userId, {
+          type: 'CeoMemoryForgotten',
+          payload: { memoryId: id, orgId, by: userId },
+        }),
+      ],
+      { tx },
+    );
   });
 }
 
 /** The owner adds a rule by hand. */
-export async function addOwnerRule(ctx: Ctx, orgId: string, userId: string, text: string, scope = 'org'): Promise<string> {
-  return addMemory(ctx, { orgId, kind: 'rule', scope, source: 'owner_statement', sourceRef: 'memory_tab', confidence: 0.95, status: 'active', text, byUserId: userId });
+export async function addOwnerRule(
+  ctx: Ctx,
+  orgId: string,
+  userId: string,
+  text: string,
+  scope = 'org',
+): Promise<string> {
+  return addMemory(ctx, {
+    orgId,
+    kind: 'rule',
+    scope,
+    source: 'owner_statement',
+    sourceRef: 'memory_tab',
+    confidence: 0.95,
+    status: 'active',
+    text,
+    byUserId: userId,
+  });
 }
 
 /** An owner's own desk answer with "remember this": a rule with the quote. */

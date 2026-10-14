@@ -44,6 +44,22 @@ sending domain may be Guildwise), and commits already on the working branches ar
 (local, removed after the merge). The runner still reads `.aom/test-env.json` from a repository when it exists (retiring it
 is design D12 / P3). The mock agent writes `aom-mock/` files (test only).
 
+### 68. CEO agent
+
+**Owner request (2026-10-14):** "a CEO every organisation needs": one agent that is the single input unit, watches every
+project, agent, workstation and budget, decides within an authority the owner sets, recommends the rest, delegates to the BA,
+Architect and DevOps, hires and benches within budgets, learns the owner's rules and reports every morning. Designs:
+`docs/design/ceo-agent.md` (first) and `docs/design/ceo-agent-v2.md` (code-checked; wins where they differ). Owner decisions
+2026-10-14: starts in a **14-day training period** (staffing and model changes are recommendations only, enforced on the
+server; every response of the owner is learning; Graduate ends it), Sonnet/medium wakes, Opus/high review and chat, the CEO
+report replaces the BA floor report, only the Owner gives tasks and reads memories (Admins read the activity log), firing is
+bench then the owner confirms, an optional organisation monthly budget.
+
+**Still open (listed here, not built).** Department heads (#42) reporting to the CEO and the `ceo` level in the real
+escalation chain (the org chart shows it; questions reach the CEO through its wakes); `human/approval` steps (#16) delegated to
+the CEO; standby workstation failover; web push; a weekly CEO self-review; learning clusters beyond identical observations;
+the vault mirror `ceo/owner-profile.md`; cooling-off delays per class (`delayMinutes` is in the policy, not acted on yet).
+
 ### 59. Integration and E2E tests per project, run by testers
 
 **Owner decision (2026-10-14):** whether integration and E2E tests run is a per-project setting. They need networking, so
@@ -273,6 +289,43 @@ The details of each done item follow this list, by date.
 - #38: Monday briefing e-mail per member (long version for Owners and Admins, opt-out in Settings). Done 2026-10-14.
 
 ## 2026-10-14 (done)
+
+### 68. CEO agent (built)
+
+**Done (2026-10-14).** Built per `docs/design/ceo-agent-v2.md`.
+- **Role and appointment.** Built-in role `ceo` (department `management`, senior only, no stages). One active CEO per
+  organisation (unique partial index `agents_one_ceo`, `409 ceo_exists`); `POST /api/ceo/appoint` (Owner), the hire form refuses
+  it, it cannot be fired (`ceo_cannot_be_fired`), `Disable` retires it. Migrations 2000 (settings, audit, tasks, memories,
+  wakes, batches, flags; shift kind `ceo`), 2001 (agent pause), 2002 (desk fields). Events `Ceo*`, `AgentPaused/Resumed`,
+  `CardReassigned`, `QuestionReopened`. Agent pause and resume now exist for everyone (`POST /api/agents/:id/pause|resume`,
+  the dispatcher skips paused agents).
+- **Authority.** `packages/shared/src/ceo/policy.ts`: action classes, `decide | recommend | never`, desk-item mapping,
+  owner-reserved matters (delegable one by one with a confirmation), hard-never classes, limits, `evaluatePolicy` (pure,
+  tested). **Training period** (14 days, until Graduate; extend or restart): staffing and model classes are forced to
+  `recommend` in the gate; every owner response (Do it, Not now, answering differently) is recorded
+  (`CeoRecommendationResponded`) and shown as an agreement score per class; disagreements become memory candidates.
+- **Management API.** `aom ceo ...` over one rpc method `ceo`; server gateway `apps/server/src/ceo/{engine,gateway,actions,actions2}.ts`:
+  idempotency key (default derived), `--dry-run`, policy, evidence check (ledger entries and owner rules must exist), rate and
+  subject limits, an action the owner undid is not repeated for a day, audit `CeoActionTaken` with the CEO as actor
+  (`causation_id` = the action; commands run unchanged under an acting-agent context in the event store). Actions: answer,
+  triage, resolve-notice, release, release-backoff, reassign, priority, cancel-card, stop-shift, kill-tools, pause/resume-agent,
+  model, seniority, allow, hire, bench, retire (bench first, owner confirms), scale, apply-rec, devops, propose/activate-order,
+  message, intake (draft card for the BA). Staffing guards: hires per day, agents per role per project, CEO-hired total, model
+  cap, one tier a week, budget headroom (project and optional organisation budget), evidence required.
+- **Wakes and reports.** Server-side sources (desk items, questions, signals, auth notices, budget, shift failures, task
+  follow-ups) become `ceo_wakes`; debounced (5 min, urgent at once), one shift at a time, 12 shifts an hour, self-caused events
+  and recent subjects suppressed. The daily review replaces the BA floor report (desk + e-mail, owner time; template fallback
+  after 2 h); held items go to the CEO instead of BA tasks; offline: nothing is held, one notice after 30 minutes.
+- **Runner.** Shift kind `ceo` (no worktree), sandbox profile (`aom` only, no web, no MCP, vault read-only), capability
+  `ceo:1`, `aom ceo`, mock CEO for the simulated workstation. The owner's chat uses the existing chat path (`Ask <name>`).
+- **Web.** `/org/ceo` (Overview with training and Graduate, Authority, Reporting & alerts, Persona & instructions, Memory, Tasks,
+  Activity log with Undo, Workstations), desk blocks (answered by, recommends, Undo, Remember), Agents pause, Costs
+  Management line, org chart node, optional setup step, help article, What's new.
+- **Memory and tasks.** Owner-authored sources only (chat, own desk answers, undo/override corrections); text in an operational
+  table so forgetting really deletes; tasks with watches and task-done notifications; automation trigger
+  `ceo_notification` (tokens `{ceo.kind}`, `{ceo.title}`, `{ceo.text}`).
+- Tests: `packages/shared/test/ceo-policy.test.ts`; server `ceo-core`, `ceo-gateway`, `ceo-wakes`, `ceo-training`,
+  `ceo-actions`, `ceo-memory`; runner `ceo-settings`, `aom-ceo`, `ceo-shift`; web `ceo-*.test.tsx`, `desk-ceo.test.tsx`.
 
 ### 66. Azure DevOps tokens of two organisations overwrite each other
 

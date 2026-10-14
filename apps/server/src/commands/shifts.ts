@@ -23,6 +23,8 @@ import {
   WorkflowResolveError,
 } from '@aom/shared';
 import { loadWorkflowById } from '../catalogue/loader.ts';
+import { applyCeoReport } from '../ceo/report.ts';
+import { endCeoShift } from '../ceo/shift.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Row } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
@@ -32,8 +34,6 @@ import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
 import { cardView, workflowView } from './cards.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
-import { applyCeoReport } from '../ceo/report.ts';
-import { endCeoShift } from '../ceo/shift.ts';
 import { applyDevopsReport, endDevopsShift } from './devops.ts';
 import { applyQuestionReport, endQuestionShift } from './escalation.ts';
 import { buildDigestEvents } from './feeds.ts';

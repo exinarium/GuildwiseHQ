@@ -32,7 +32,8 @@ afterAll(async () => {
   await closeAdminPool();
 });
 
-const owner = (method: string, url: string, body?: unknown) => w.t.req(method, url, { cookie: w.owner.cookie, body });
+const owner = (method: string, url: string, body?: unknown) =>
+  w.t.req(method, url, { cookie: w.owner.cookie, body });
 const result = (resp: any) => {
   expect(resp.ok, JSON.stringify(resp)).toBe(true);
   return resp.result;
@@ -49,7 +50,9 @@ describe('cards', () => {
     const card = await w.card({ title: 'Move me' });
     const res = result(await act(r, shiftId, 'reassign', { card: card.ref, agent: 'Sam' }));
     expect(res.status).toBe('executed');
-    expect(await q(`SELECT 1 FROM events WHERE type='CardReassigned' AND payload->>'cardId'=$1`, [card.id])).toHaveLength(1);
+    expect(
+      await q(`SELECT 1 FROM events WHERE type='CardReassigned' AND payload->>'cardId'=$1`, [card.id]),
+    ).toHaveLength(1);
     const same = result(await act(r, shiftId, 'reassign', { card: card.ref, agent: 'Nobody' }));
     expect(same.status).toBe('refused');
     expect(w.t.app.ctx.services.dispatcher.preferred.get(card.id)?.agentId).toBe((await agent('Sam')).id);
@@ -61,7 +64,9 @@ describe('cards', () => {
     expect(rec.status).toBe('recommended');
     expect((await q(`SELECT status FROM cards WHERE id=$1`, [card.id]))[0]!.status).toBe('queued');
     await setMode('card.cancel', 'decide');
-    const done = result(await act(r, shiftId, 'cancel-card', { card: card.ref, note: 'obsolete' }, { key: 'cancel-2' }));
+    const done = result(
+      await act(r, shiftId, 'cancel-card', { card: card.ref, note: 'obsolete' }, { key: 'cancel-2' }),
+    );
     expect(done.status).toBe('executed');
     expect((await q(`SELECT status FROM cards WHERE id=$1`, [card.id]))[0]!.status).toBe('cancelled');
     await ok(owner('POST', `/api/ceo/actions/${done.actionId}/undo`));
@@ -71,7 +76,12 @@ describe('cards', () => {
 
   it('asks the BA for a card: it is drafted and specified, and can be cancelled by undo', async () => {
     await w.hire('Ben', 'ba', 'senior');
-    const res = result(await act(r, shiftId, 'intake', { project: 'TOY', text: 'Customers want an export to CSV of their cards.\nInclude the filters.' }));
+    const res = result(
+      await act(r, shiftId, 'intake', {
+        project: 'TOY',
+        text: 'Customers want an export to CSV of their cards.\nInclude the filters.',
+      }),
+    );
     expect(res.status, JSON.stringify(res)).toBe('executed');
     const card = (await q(`SELECT * FROM cards WHERE id=$1`, [res.result.cardId]))[0]!;
     expect(card.title).toContain('export to CSV');
@@ -143,13 +153,31 @@ describe('agents', () => {
   });
 
   it('scales a role up and down with the same guard rails', async () => {
-    const up = result(await act(r, shiftId, 'scale', { role: 'builder', project: 'TOY', to: 2, seniority: 'junior' }, { evidence: [`signal:${signalId}`] }));
+    const up = result(
+      await act(
+        r,
+        shiftId,
+        'scale',
+        { role: 'builder', project: 'TOY', to: 2, seniority: 'junior' },
+        { evidence: [`signal:${signalId}`] },
+      ),
+    );
     expect(up.status, JSON.stringify(up)).toBe('executed');
     expect(up.result.agentIds).toHaveLength(1);
     expect(await q(`SELECT 1 FROM agents WHERE role_key='builder' AND status='active'`)).toHaveLength(2);
-    const noop = result(await act(r, shiftId, 'scale', { role: 'builder', project: 'TOY', to: 2 }, { evidence: [`signal:${signalId}`], key: 'n2' }));
+    const noop = result(
+      await act(
+        r,
+        shiftId,
+        'scale',
+        { role: 'builder', project: 'TOY', to: 2 },
+        { evidence: [`signal:${signalId}`], key: 'n2' },
+      ),
+    );
     expect(noop.status).toBe('refused');
-    const down = result(await act(r, shiftId, 'scale', { role: 'builder', project: 'TOY', to: 1 }, { key: 'down' }));
+    const down = result(
+      await act(r, shiftId, 'scale', { role: 'builder', project: 'TOY', to: 1 }, { key: 'down' }),
+    );
     expect(down.status).toBe('executed');
     await ok(owner('POST', `/api/ceo/actions/${down.actionId}/undo`));
     await ok(owner('POST', `/api/ceo/actions/${up.actionId}/undo`));
@@ -164,13 +192,25 @@ describe('standing orders', () => {
     const item = (await q(`SELECT id FROM desk_items WHERE subkind='standing_order' AND status='open'`))[0]!;
     await ok(owner('POST', `/api/desk/${item.id}/resolve`, { resolution: 'approved' }));
     await new Promise((x) => setTimeout(x, 150));
-    expect((await q(`SELECT body FROM ledger_entries WHERE scope='standing_order'`)).some((l) => l.body.includes('linter'))).toBe(true);
-    const act2 = result(await act(r, shiftId, 'activate-order', { scope: 'org', text: 'Always write the changelog before finalizing.' }));
+    expect(
+      (await q(`SELECT body FROM ledger_entries WHERE scope='standing_order'`)).some((l) =>
+        l.body.includes('linter'),
+      ),
+    ).toBe(true);
+    const act2 = result(
+      await act(r, shiftId, 'activate-order', {
+        scope: 'org',
+        text: 'Always write the changelog before finalizing.',
+      }),
+    );
     expect(act2.status).toBe('recommended');
     expect((await q(`SELECT 1 FROM ledger_entries WHERE body LIKE '%changelog%'`)).length).toBe(0);
     const rec = (await q(`SELECT desk_item_id FROM ceo_actions WHERE id=$1`, [act2.actionId]))[0]!;
     await ok(owner('POST', `/api/desk/${rec.desk_item_id}/resolve`, { resolution: 'approved' }));
-    expect((await q(`SELECT 1 FROM ledger_entries WHERE body LIKE '%changelog%' AND scope='standing_order'`)).length).toBe(1);
+    expect(
+      (await q(`SELECT 1 FROM ledger_entries WHERE body LIKE '%changelog%' AND scope='standing_order'`))
+        .length,
+    ).toBe(1);
   });
 });
 

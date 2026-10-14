@@ -35,7 +35,12 @@ export async function ensureCeoThread(
         streamId: streamId.thread(threadId),
         event: {
           type: 'ChatThreadCreated',
-          payload: { threadId, agentId: ceo.agentId, title: `Chat with ${agent?.name ?? 'your CEO'}`, createdBy: ownerId },
+          payload: {
+            threadId,
+            agentId: ceo.agentId,
+            title: `Chat with ${agent?.name ?? 'your CEO'}`,
+            createdBy: ownerId,
+          },
         },
         actor: SYSTEM_ACTOR,
         scope: orgScope(orgId),

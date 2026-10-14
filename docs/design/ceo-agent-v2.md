@@ -518,3 +518,36 @@ Sonnet wakes, Opus review and chat, no cap, $5/day notice; Q4 the CEO report and
 once with Undo, delays per class optional, **plus the 14-day "recommend mostly" start with a Graduate button from
 `ceo-agent.md`**; Q6 primary workstation only, no failover yet. #65 "invisible organisation" exists (clients never see
 agents, AI or Guildwise); the CEO respects it.
+
+
+## Build notes (2026-10-14): what the code does differently from this design
+
+Names verified against the code, and the deviations the build took:
+
+- **Training period (owner decision, added after v2).** `ceo_settings.training` (`on`, `startedAt`, `until`, `graduatedAt`,
+  `extensions`); the gate `evaluatePolicy` returns `recommend` with cause `training` for the staffing classes
+  (`STAFFING_CLASSES`: hire, bench, retire, scale, change_model, change_seniority, allow_list) while `training` is on,
+  whatever the table says. Owner responses are `CeoRecommendationResponded` (`accepted`, `accepted_changed`, `rejected`,
+  `different`), stored on `ceo_actions`; the Overview shows agreement per class; disagreements become `decision_pattern`
+  candidates (source `owner_training`). `CeoTrainingChanged` (graduate, extend, restart).
+- **Migrations**: 2000 (`ceo_settings`, `ceo_actions`, `ceo_tasks`, `ceo_memories`, `ceo_memory_text`, `ceo_wakes`,
+  `ceo_batches`, `ceo_flags`, `agents_one_ceo`, shift kind `ceo`), 2001 (agent pause), 2002 (desk fields). 2003 (org budget) was
+  not needed: the optional organisation budget is a CEO setting (`orgBudgetMonthlyMicros`) checked by the CEO pass.
+- **Transport**: one existing rpc method `ceo` (not a new WS message pair `ceo.rpc`), so an old server or runner needs no new
+  frame type; the runner announces the capability `ceo:1` in `hello` instead of a version gate (the runner version is not bumped).
+- **Actor**: `ctx.actingAgent` is an `AsyncLocalStorage` in the event store (`eventstore/acting.ts`): inside an action every
+  event with a `user` actor is stored with the CEO as actor and `causation_id` = the action id (no `meta` column exists).
+  The context is switched off when the action ends because timers inherit it.
+- **Existing names**: the desk subkinds are `DESK_SUBKIND` in `packages/shared/src/testing/index.ts` plus `HR_DESK_SUBKIND`,
+  `PHASE_DESK_SUBKIND`, `REPORT_DESK_SUBKIND`; `ROUTING_EXEMPT_SUBKINDS` gained `ceo_report`, `ceo_recommendation`,
+  `ceo_notice`; the chat thread of the reports is `users.ba_chat_thread_id` (BA) and `ceo_settings.chat_thread_id` (CEO);
+  agent status is `active | retired | needs_rehome` (pause is the new `paused_at`); `causation_id` exists on `events`.
+- **Agent pause** now exists for managers too (`POST /api/agents/:id/pause|resume`); the CEO and DevOps cannot be paused that way.
+- **Chat cost bucket**: CEO chat shifts are priced as `shift_costs.kind = 'ceo_chat'` (the costs projector maps `chat` of a CEO
+  agent), wake shifts as `ceo`, project NULL; the Costs report has `management`.
+- **Retiring**: `retire` requires the agent to be benched first and defaults to `recommend`; accepting the recommendation runs
+  `fireAgent`. There is no scheduled retirement event.
+- **Not built**: `ceo` as a real step of the escalation chain (`ChainLevel` unchanged; the org chart shows it and the CEO
+  gets questions through wakes), the vault mirror `ceo/owner-profile.md`, per-class cooling-off delays (`delayMinutes`
+  is stored, not acted on), standby failover, `workstations.ceo_placement` (the CEO hires onto the owner's own workstations
+  only), clustering of observed desk answers beyond identical text.

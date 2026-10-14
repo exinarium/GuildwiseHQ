@@ -58,7 +58,9 @@ export async function loadCeo(db: Queryable, orgId: string): Promise<CeoState | 
 export async function ceoActive(db: Queryable, orgId: string): Promise<CeoState | undefined> {
   const c = await loadCeo(db, orgId);
   if (!c || !c.enabled || c.paused || !c.agentId) return undefined;
-  const a = await one(db, `SELECT 1 FROM agents WHERE id=$1 AND status='active' AND paused_at IS NULL`, [c.agentId]);
+  const a = await one(db, `SELECT 1 FROM agents WHERE id=$1 AND status='active' AND paused_at IS NULL`, [
+    c.agentId,
+  ]);
   return a ? c : undefined;
 }
 
@@ -97,8 +99,15 @@ export async function ceoReachable(db: Queryable, orgId: string, now: Date): Pro
   const rt = (a.runtimes as Array<{ id: string; available: boolean; sandbox?: string }> | null)?.find(
     (x) => x.id === a.runtime,
   );
-  if (!rt?.available) return { ok: false, reason: `the ${a.runtime} runtime on ${a.ws_name} is not available (sign-in?)`, ...base };
-  if (rt.sandbox === 'unavailable') return { ok: false, reason: `${a.ws_name} cannot sandbox agents`, ...base };
-  if (!a.capable) return { ok: false, reason: `the runner on ${a.ws_name} is too old for the CEO: update it`, ...base };
+  if (!rt?.available)
+    return {
+      ok: false,
+      reason: `the ${a.runtime} runtime on ${a.ws_name} is not available (sign-in?)`,
+      ...base,
+    };
+  if (rt.sandbox === 'unavailable')
+    return { ok: false, reason: `${a.ws_name} cannot sandbox agents`, ...base };
+  if (!a.capable)
+    return { ok: false, reason: `the runner on ${a.ws_name} is too old for the CEO: update it`, ...base };
   return { ok: true, ...base };
 }

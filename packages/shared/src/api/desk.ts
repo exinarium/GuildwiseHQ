@@ -120,7 +120,16 @@ export const DeskItemDtoSchema = z.object({
   /** The CEO's daily report: the actions of the last 24 hours (for Undo) and the training scores. */
   ceoReport: z
     .object({
-      actions: z.array(z.object({ id: z.uuid(), class: z.string(), mode: z.string(), status: z.string(), subject: z.string(), undoable: z.boolean() })),
+      actions: z.array(
+        z.object({
+          id: z.uuid(),
+          class: z.string(),
+          mode: z.string(),
+          status: z.string(),
+          subject: z.string(),
+          undoable: z.boolean(),
+        }),
+      ),
       scores: z.array(z.object({ class: z.string(), agreed: z.number().int(), total: z.number().int() })),
       fallback: z.boolean(),
     })

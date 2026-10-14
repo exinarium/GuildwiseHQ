@@ -299,23 +299,34 @@ const UNTRUSTED_RECOMMEND: readonly string[] = [
 ];
 
 export function evaluatePolicy(policy: CeoPolicy, cls: string, input: PolicyInput): PolicyVerdict {
-  if (isHardNever(cls)) return { verdict: 'deny', reason: `${cls} is never delegated to the CEO`, cause: 'never' };
+  if (isHardNever(cls))
+    return { verdict: 'deny', reason: `${cls} is never delegated to the CEO`, cause: 'never' };
   if (!(ACTION_CLASSES as readonly string[]).includes(cls))
     return { verdict: 'deny', reason: `unknown action class ${cls}`, cause: 'never' };
   const mode = policy.classes[cls]?.mode ?? 'recommend';
-  if (mode === 'never') return { verdict: 'deny', reason: 'the owner set this action to never', cause: 'never' };
+  if (mode === 'never')
+    return { verdict: 'deny', reason: 'the owner set this action to never', cause: 'never' };
   if (input.deskMode === 'never')
     return { verdict: 'deny', reason: 'the owner set this kind of item to never', cause: 'never' };
   if (input.training && isStaffingClass(cls))
     return {
       verdict: 'recommend',
-      reason: 'training period: staffing and model changes are recommendations until the owner graduates the CEO',
+      reason:
+        'training period: staffing and model changes are recommendations until the owner graduates the CEO',
       cause: 'training',
     };
   if (mode === 'recommend')
-    return { verdict: 'recommend', reason: 'the policy gives this action as a recommendation', cause: 'mode' };
+    return {
+      verdict: 'recommend',
+      reason: 'the policy gives this action as a recommendation',
+      cause: 'mode',
+    };
   if (input.deskMode === 'recommend')
-    return { verdict: 'recommend', reason: 'the policy asks for a recommendation on this kind of item', cause: 'desk' };
+    return {
+      verdict: 'recommend',
+      reason: 'the policy asks for a recommendation on this kind of item',
+      cause: 'desk',
+    };
   if (input.reservedKey && !policy.delegated.includes(input.reservedKey))
     return {
       verdict: 'recommend',
@@ -323,7 +334,11 @@ export function evaluatePolicy(policy: CeoPolicy, cls: string, input: PolicyInpu
       cause: 'reserved',
     };
   if (input.untrustedOrigin && UNTRUSTED_RECOMMEND.includes(cls))
-    return { verdict: 'recommend', reason: 'triggered by outside text: recommended, not decided', cause: 'untrusted' };
+    return {
+      verdict: 'recommend',
+      reason: 'triggered by outside text: recommended, not decided',
+      cause: 'untrusted',
+    };
   if (input.confidence < policy.minConfidence)
     return {
       verdict: 'recommend',
@@ -331,8 +346,13 @@ export function evaluatePolicy(policy: CeoPolicy, cls: string, input: PolicyInpu
       cause: 'confidence',
     };
   if (input.evidenceMissing)
-    return { verdict: 'recommend', reason: 'no cited ledger entry or owner rule backs this decision', cause: 'evidence' };
-  if (input.limitReached) return { verdict: 'recommend', reason: `limit reached: ${input.limitReached}`, cause: 'limit' };
+    return {
+      verdict: 'recommend',
+      reason: 'no cited ledger entry or owner rule backs this decision',
+      cause: 'evidence',
+    };
+  if (input.limitReached)
+    return { verdict: 'recommend', reason: `limit reached: ${input.limitReached}`, cause: 'limit' };
   return { verdict: 'allow', reason: 'within the CEO policy' };
 }
 
