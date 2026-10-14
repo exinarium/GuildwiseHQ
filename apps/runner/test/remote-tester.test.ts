@@ -133,7 +133,8 @@ describe('remote target helpers', () => {
     expect(await probeTargetUrl(url)).toBeNull();
     expect(await probeTargetUrl(url)).toMatch(/answered 502/);
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    expect(await probeTargetUrl(url)).toMatch(/ECONNREFUSED/);
+    // a pooled keep-alive connection may be the one that notices (UND_ERR_SOCKET) instead of a fresh refused connection
+    expect(await probeTargetUrl(url)).toMatch(/ECONNREFUSED|UND_ERR_SOCKET|ECONNRESET|fetch failed/);
   });
 });
 
