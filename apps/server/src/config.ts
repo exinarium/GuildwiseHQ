@@ -40,11 +40,11 @@ const EnvSchema = z.object({
   /** Inbound e-mail (docs/DEPLOY.md "Inbound e-mail"): the mail provider that posts to `/api/inbound/mail/<provider>`. Unset: no inbound mail. `fake` is for development and tests. */
   AOM_INBOUND_PROVIDER: z.preprocess(
     (v) => (v === '' ? undefined : v),
-    z.enum(['postmark', 'fake']).optional(),
+    z.enum(['postmark', 'sendgrid', 'fake']).optional(),
   ),
   /** The domain organisation addresses are made on (`<slug>-<random>@<domain>`), e.g. `in.guildwisehq.com`. */
   AOM_INBOUND_DOMAIN: z.string().optional(),
-  /** Shared secret of the provider webhook: the password of the Basic-auth URL given to Postmark (or the `X-AOM-Inbound-Secret` header). */
+  /** Shared secret of the provider webhook: the password of the Basic-auth URL given to Postmark or SendGrid (or the `X-AOM-Inbound-Secret` header). */
   AOM_INBOUND_SECRET: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(16).optional()),
   /** Largest message (all parts, attachments included) that is stored; bigger ones are recorded as skipped. */
   AOM_INBOUND_MAX_BYTES: z.coerce.number().int().min(10_000).max(35_000_000).default(10_000_000),
@@ -144,7 +144,7 @@ export interface Config {
   supportFrom: string | undefined;
   /** Inbound e-mail by provider webhook; `provider` undefined: switched off. */
   inbound: {
-    provider: 'postmark' | 'fake' | undefined;
+    provider: 'postmark' | 'sendgrid' | 'fake' | undefined;
     domain: string | undefined;
     secret: string | undefined;
     maxMessageBytes: number;
