@@ -62,6 +62,14 @@ export const costProjectors: Record<string, Projector> = {
     ]);
   },
 
+  OrgValueSettingsChanged: async (tx, e) => {
+    const p = ev<EventOf<'OrgValueSettingsChanged'>>(e).payload;
+    await exec(tx, 'UPDATE organizations SET value_settings=$2 WHERE id=$1', [
+      p.orgId,
+      JSON.stringify({ hoursByType: p.hoursByType, hourlyValue: p.hourlyValue }),
+    ]);
+  },
+
   ProjectBudgetSet: async (tx, e) => {
     const p = ev<EventOf<'ProjectBudgetSet'>>(e).payload;
     await exec(
