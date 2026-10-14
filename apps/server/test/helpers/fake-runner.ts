@@ -18,6 +18,7 @@ export interface HelloOptions {
   outboxPending?: number;
   maxConcurrentShifts?: number;
   sudoKey?: { keyId: string; publicKey: string };
+  integrationsVersion?: number;
 }
 
 /** In-process runner speaking the shared protocol; auto-acks server messages that need it. */
@@ -96,6 +97,7 @@ export class FakeRunner {
       outboxPending: o.outboxPending ?? 0,
       ...(o.maxConcurrentShifts ? { maxConcurrentShifts: o.maxConcurrentShifts } : {}),
       ...(o.sudoKey ? { sudoKey: o.sudoKey } : {}),
+      ...(o.integrationsVersion ? { integrationsVersion: o.integrationsVersion } : {}),
     });
   }
 

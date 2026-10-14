@@ -22,14 +22,6 @@ run them, when enabled, against a **local** environment (started on the workstat
 **remote** one (a URL configured in the project). The tester's sandbox then allows exactly that host (localhost ports or
 the remote host), nothing else.
 
-### 60. Claude sign-in from the web
-
-**Owner request (2026-10-14):** sign in to Claude (and MCP servers, #48) from the web instead of the terminal. Idea: the
-runner starts `claude setup-token` (or the login flow) itself, sends the sign-in URL to the app, the owner opens it and
-pastes the code back on the Integrations page (#34); the runner finishes the flow and keeps the token on the workstation
-(it never reaches the server). MCP OAuth uses a localhost callback, so it works directly only when the browser is on the
-workstation; otherwise needs the same paste-the-code relay. Part of the #34 design.
-
 ## Direction (owner, 2026-10-13)
 
 Guildwise started as a tool for software teams (the owner built it for his own work), but the aim is **running a whole
@@ -114,35 +106,6 @@ Follow-ups from the 2026-10-12 release (items #1–#13).
 Leftovers on done items: #20 (MCP tool names per server are not listed; refreshed OAuth tokens are not written back when
 a configured token is used) and #27 (a reopened research card keeps its published status; a reopened cancelled bug child
 does not put its resumed parent back to waiting).
-
-### 34. Integrations page: set up a workstation's integrations and API keys in one place
-
-**Owner request (2026-10-13):** an easy way to add the API keys for Bitbucket, GitHub, Jira and whatever integrations
-follow. Keys are probably per workstation; a dedicated **Integrations** page in the app is the wanted shape.
-
-**Today** each integration has its own path, mostly on the command line of the workstation:
-- Forges: `aom-runner git-connect` (Bitbucket API token, Azure DevOps PAT, GitLab PAT into
-  `<data dir>/secrets/git-tokens.json`, `apps/runner/src/forge/tokens.ts`), the forge CLIs' own logins (`gh`, `glab`), or
-  SSH keys (`apps/runner/src/forge/connect.ts`, `ssh.ts`). The status shows on Workstations and in Project settings.
-- Jira: `aom-runner jira-connect` (`apps/runner/src/external/jira-store.ts`).
-- Plugin MCP servers: configured in Claude Code itself; Guildwise only sees the report (#20).
-- Platform-level keys (Paystack, Postmark) are server env, not part of this.
-
-**Wanted (design first):**
-- An **Integrations** page per workstation (reachable from Workstations, and from the "not connected" warnings in
-  Project settings and on cards): one tile per integration with its status (connected, as whom, scopes, last checked,
-  expiry where known), **Connect / Replace / Test / Remove**, and step-by-step help with links to where the token is made
-  and which scopes it needs (the Jira scopes question showed this is needed).
-- A **registry of integration kinds** (id, label, fields, required scopes, help text, test call, where the runner keeps
-  it), so a new integration is one entry plus its adapter, not a new CLI command and a new screen.
-- **Secrets stay on the workstation** (the current rule: the server stores connected / not connected, never the token).
-  Decide how a key typed in the browser reaches the runner: relayed over the runner's websocket and never stored or logged
-  on the server (end-to-end encrypted to the runner's key would be better), or a local-only page the runner serves on
-  localhost. The CLI commands stay for headless machines.
-- Who may set them: the workstation's own user (it is their machine and their credentials); org Owners see status only.
-- Optional later: organisation-wide keys (one Jira service account for all workstations) stored encrypted, if the owner
-  wants that; and OAuth sign-in where a provider offers it (Atlassian, GitHub app) instead of pasted tokens.
-- Help docs and What's new, runner version bump, tests in runner, server and web.
 
 ### 14. Incoming webhooks as an automation trigger
 
@@ -276,8 +239,52 @@ The details of each done item follow this list, by date.
 - #50: Claude login expiry: detect, pause, notify, resume; credentials copied under a lock instead of symlinked. Done 2026-10-14.
 - #61: No card or agent branch is pushed unless the goal is a pull request. Done 2026-10-14.
 - #62: Inbound e-mail through SendGrid Inbound Parse. Done 2026-10-14.
+- #34: Integrations page (MVP): connect Claude, GitHub, Bitbucket, GitLab, Azure DevOps, Jira and MCP servers from the web. Done 2026-10-14 (phase 2 and 3 leftovers on the item).
+- #60: Claude sign-in from the web (`claude setup-token` driven by the runner; MCP sign-in with paste-back). Done 2026-10-14 (MVP).
 
 ## 2026-10-14 (done)
+
+### 34. Integrations page: set up a workstation's integrations and API keys in one place
+
+**Owner request (2026-10-13):** an easy way to add the API keys for Bitbucket, GitHub, Jira and whatever integrations follow;
+a dedicated **Integrations** page, per workstation. Design: `docs/design/integrations-page.md` (owner decisions in section 11).
+
+**Done (MVP, 2026-10-14).** One registry (`packages/shared/src/integrations/registry.ts`) drives the page, the server's
+validation and the CLI help; adding an integration is one registry entry plus one runner adapter. The page
+(`/workstations/:id/integrations`, chooser at `/integrations`) shows a tile per integration with status, as whom, scopes,
+expiry and last check, and Connect / Replace / Test / Remove with the steps and links to where the token is made.
+Values typed in the browser are sealed there (RSA-OAEP-256 wraps an AES-256-GCM key, bound to the workstation, request, kind,
+instance and operation) with the runner's own key; the server relays the ciphertext in the durable command queue, empties
+the payload when the runner answers (or after ten minutes), and never logs it. The runner checks the values with the provider
+and saves them only when the provider accepts them. A local switch (`aom-runner integrations allow-web off`) turns web
+connect off on a workstation; machine-wide logins (`~/.claude`, `gh`, MCP sign-ins) are changed from the web only by the
+machine's primary pairing. Built: Claude Code (API key, token made elsewhere, `claude setup-token`), GitHub (device code,
+token), GitLab and Azure DevOps (token), Bitbucket Cloud (e-mail + API token), Jira (API token), MCP servers (sign-in with
+paste-back); SSH keys show status and the public key and stay managed in Workstations. Runner: `integrations.report` and
+`integration.session` messages, six `integration.*` commands, `aom-runner integrations [list|allow-web|machine-admin]`;
+`jira-connect`, `git-connect` tokens and `auth` use the same adapters, so the CLI and the page agree. Server: migration 1870,
+routes `/api/workstations/:id/integrations/*`, expiry sweep, three audit events, statuses derived from the older reports for
+runners that cannot connect from the web. Deep links from the desk notices, the MCP and sign-in panels, the repository
+provider control and the Jira line. Tests in shared, runner, server and web.
+
+**Left for phase 2:** `claude auth login` (machine-wide default login) and `az login --use-device-code` from the web; Jira
+scoped tokens (cloudId); notices 14 days before a token expires (migration 1880); the MCP Test through `claude mcp get`;
+pushing session updates over the browser websocket instead of polling; collapsing the Git, Jira and MCP panels on
+Workstations into a summary line; moving the sudo password to the same envelope; the SSH key tile (create a key, test, use
+for clones) inside the page. **Phase 3:** the Owner/Admin status overview for members' workstations, an optional page served
+by the runner on localhost, organisation-wide keys, provider OAuth apps. The runner release is a separate go-ahead.
+
+### 60. Claude sign-in from the web
+
+**Owner request (2026-10-14):** sign in to Claude (and MCP servers, #48) from the web instead of the terminal.
+
+**Done (MVP, 2026-10-14).** Claude Code tile, "Sign in with your Claude subscription": the runner runs `claude setup-token`
+in a pseudo-terminal (`script(1)`), the page shows the sign-in link, the owner pastes the code the Anthropic page shows, and
+the runner keeps the year-long token in `secrets/claude.json` and switches that workstation to `oauth` mode without a restart
+(the Claude adapter reads the credential at each session start); it then re-checks the login, reports the runtime and the
+desk notice closes. MCP servers: `claude mcp login <server> --no-browser` prints the provider's link; the owner pastes the
+address of the failed localhost page back (or the browser on the workstation completes it by itself). The desk notices
+`claude_auth_expired` and `mcp_needs_sign_in` have a "Sign in from the web" action. The token never reaches the server.
 
 ### 62. Inbound e-mail through SendGrid Inbound Parse
 

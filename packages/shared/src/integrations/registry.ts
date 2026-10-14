@@ -1,4 +1,4 @@
-import { type IntegrationKindId, type IntegrationScope, INTEGRATION_INSTANCE_RE } from './schema.ts';
+import { INTEGRATION_INSTANCE_RE, type IntegrationKindId, type IntegrationScope } from './schema.ts';
 
 /**
  * The integration registry (docs/design/integrations-page.md section 1). The page, the server's validation, the CLI help
@@ -48,7 +48,12 @@ export interface IntegrationKind {
   /** One of it per workstation, or several (per host, organization, server, provider@host). */
   instances:
     | 'single'
-    | { by: 'host' | 'organization' | 'server' | 'provider-host'; label: string; placeholder: string; defaultInstance?: string };
+    | {
+        by: 'host' | 'organization' | 'server' | 'provider-host';
+        label: string;
+        placeholder: string;
+        defaultInstance?: string;
+      };
   /** Where the credential lives. `mixed`: it depends on the method (`methodScope`). */
   scope: IntegrationScope | 'mixed';
   /** Scope per method id for `mixed` kinds (a method not listed is `workstation`). */
@@ -111,7 +116,10 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
         steps: [
           {
             text: 'Create a key in the Anthropic Console.',
-            link: { href: 'https://console.anthropic.com/settings/keys', label: 'Anthropic Console, API keys' },
+            link: {
+              href: 'https://console.anthropic.com/settings/keys',
+              label: 'Anthropic Console, API keys',
+            },
           },
           { text: 'Paste it here. Usage is billed to your API account.' },
         ],
@@ -142,7 +150,8 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
       docsUrl: 'https://docs.claude.com/en/docs/claude-code/setup',
     },
     test: { label: 'Check the login', what: 'Asks `claude auth status`, then makes one minimal call.' },
-    storage: 'secrets/claude.json (mode 0600), this workstation only. The default login is ~/.claude/.credentials.json.',
+    storage:
+      'secrets/claude.json (mode 0600), this workstation only. The default login is ~/.claude/.credentials.json.',
     cli: 'aom-runner auth oauth-token',
     minRunner: MIN_RUNNER,
     minIntegrationsVersion: 1,
@@ -311,7 +320,10 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
         steps: [
           {
             text: 'Create an organization-scoped token (global tokens stop working on 2026-12-01).',
-            link: { href: 'https://dev.azure.com/', label: 'Azure DevOps, User settings, Personal access tokens' },
+            link: {
+              href: 'https://dev.azure.com/',
+              label: 'Azure DevOps, User settings, Personal access tokens',
+            },
           },
           { text: 'Paste it here.' },
         ],
@@ -359,11 +371,15 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
         label: 'Create a key and add its public half to the git host',
         flow: 'local_only',
         steps: [
-          { text: 'Manage SSH keys from Workstations, Git hosts, or run `aom-runner git-connect <provider> --ssh-key` on the workstation.' },
+          {
+            text: 'Manage SSH keys from Workstations, Git hosts, or run `aom-runner git-connect <provider> --ssh-key` on the workstation.',
+          },
         ],
       },
     ],
-    help: { summary: 'SSH access for git (clone, fetch, push). Pull requests still need the token or CLI login.' },
+    help: {
+      summary: 'SSH access for git (clone, fetch, push). Pull requests still need the token or CLI login.',
+    },
     test: { label: 'Check SSH', what: 'Runs `ssh -T` or `git ls-remote`.' },
     storage: '~/.ssh/aom_<provider> and secrets/git-ssh.json. The private key never leaves the workstation.',
     cli: 'aom-runner git-connect {provider} --ssh-key',
@@ -453,7 +469,8 @@ export const INTEGRATION_KINDS: readonly IntegrationKind[] = [
       ],
     },
     test: { label: 'Check the sign-in', what: 'Looks for a stored sign-in (the same check agents use).' },
-    storage: "~/.claude/.credentials.json (Claude Code's own store), shared by every pairing on this machine.",
+    storage:
+      "~/.claude/.credentials.json (Claude Code's own store), shared by every pairing on this machine.",
     cli: 'claude mcp login <server> --no-browser',
     minRunner: MIN_RUNNER,
     minIntegrationsVersion: 1,
@@ -482,7 +499,10 @@ export function validIntegrationInstance(kind: IntegrationKind, instance: string
 /** The CLI line of a kind with the instance filled in. */
 export function integrationCli(kind: IntegrationKind, instance: string): string {
   const provider = instance.includes('@') ? (instance.split('@')[0] as string) : instance;
-  return kind.cli.replace('{instance}', instance || '').replace('{provider}', provider).trim();
+  return kind.cli
+    .replace('{instance}', instance || '')
+    .replace('{provider}', provider)
+    .trim();
 }
 
 /**

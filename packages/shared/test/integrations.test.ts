@@ -9,8 +9,8 @@ import {
   INTEGRATION_KIND_IDS,
   INTEGRATION_KINDS,
   IntegrationSessionSchema,
-  IntegrationsReportSchema,
   IntegrationStatusSchema,
+  IntegrationsReportSchema,
   integrationAad,
   integrationCli,
   integrationKind,
@@ -75,10 +75,14 @@ describe('integration registry', () => {
     expect(validIntegrationInstance(gh, 'bad host')).toBe(false);
     expect(checkIntegrationRequest('jira', '', 'token', 'fields')).toBeNull();
     expect(checkIntegrationRequest('jira', '', 'token', 'interactive')).toMatch(/not a interactive/);
-    expect(checkIntegrationRequest('claude-code', '', 'default_login', 'interactive')).toMatch(/not available/);
+    expect(checkIntegrationRequest('claude-code', '', 'default_login', 'interactive')).toMatch(
+      /not available/,
+    );
     expect(checkIntegrationRequest('nope', '', 'token', 'fields')).toMatch(/unknown/);
     expect(checkIntegrationRequest('claude-code', '', 'setup_token', 'interactive')).toBeNull();
-    expect(checkIntegrationRequest('mcp', 'plugin_atlassian_atlassian', 'oauth_paste', 'interactive')).toBeNull();
+    expect(
+      checkIntegrationRequest('mcp', 'plugin_atlassian_atlassian', 'oauth_paste', 'interactive'),
+    ).toBeNull();
   });
 
   it('knows where a credential lives', () => {
@@ -108,9 +112,7 @@ describe('integration status and protocol', () => {
       scope: 'workstation',
     });
     expect(ok.success).toBe(true);
-    expect(
-      IntegrationStatusSchema.safeParse({ ...ok.data, state: 'nonsense' }).success,
-    ).toBe(false);
+    expect(IntegrationStatusSchema.safeParse({ ...ok.data, state: 'nonsense' }).success).toBe(false);
     expect(IntegrationStatusSchema.safeParse({ ...ok.data, detail: 'x'.repeat(401) }).success).toBe(false);
   });
 
@@ -189,8 +191,8 @@ describe('sealing for the runner', () => {
   });
 
   it('builds a stable AAD', () => {
-    expect(
-      integrationAad({ workstationId: 'w', ref: 'r', kind: 'jira', instance: '', op: 'connect' }),
-    ).toBe('guildwise-integration-v1\nw\nr\njira\n\nconnect');
+    expect(integrationAad({ workstationId: 'w', ref: 'r', kind: 'jira', instance: '', op: 'connect' })).toBe(
+      'guildwise-integration-v1\nw\nr\njira\n\nconnect',
+    );
   });
 });

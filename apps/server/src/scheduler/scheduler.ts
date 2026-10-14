@@ -5,6 +5,7 @@ import { autoPublishDue } from '../commands/blog.ts';
 import { blogDigestTick } from '../commands/blog-digest.ts';
 import { evaluateAllBudgets } from '../commands/budgets.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
+import { sweepIntegrations } from '../commands/integrations.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
@@ -153,6 +154,7 @@ export class Scheduler {
   private async triggers(): Promise<void> {
     await sweepSubworkflows(this.ctx).catch((err) => this.ctx.log.error({ err }, 'sub-workflows failed'));
     await sweepEventTriggers(this.ctx).catch((err) => this.ctx.log.error({ err }, 'event triggers failed'));
+    await sweepIntegrations(this.ctx).catch((err) => this.ctx.log.error({ err }, 'integration sweep failed'));
     await deliverDue(this.ctx).catch((err) => this.ctx.log.error({ err }, 'schedule deliveries failed'));
   }
 

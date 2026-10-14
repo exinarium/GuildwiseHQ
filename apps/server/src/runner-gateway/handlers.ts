@@ -20,6 +20,11 @@ import { applyFinalizeResult } from '../commands/finalize.ts';
 import { applyForgeReposResult, applyGitReport, applyJiraReport } from '../commands/forges.ts';
 import { applyWorktreeSweepResult } from '../commands/hygiene.ts';
 import { intakeRpc } from '../commands/intake.ts';
+import {
+  applyIntegrationCommandResult,
+  applyIntegrationSession,
+  applyIntegrationsReport,
+} from '../commands/integrations.ts';
 import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
@@ -168,6 +173,12 @@ export class RunnerHandlers {
       case 'git.report':
         await applyGitReport(this.ctx, conn.workstationId, msg.connections);
         return;
+      case 'integrations.report':
+        await applyIntegrationsReport(this.ctx, conn.workstationId, msg);
+        return;
+      case 'integration.session':
+        await applyIntegrationSession(this.ctx, conn.workstationId, msg);
+        return this.ack(conn, msg);
       case 'org.folders':
         await applyOrgFoldersReport(this.ctx, conn.workstationId, msg);
         return;
@@ -357,6 +368,18 @@ export class RunnerHandlers {
             msg.result,
             msg.error,
           );
+        } else if (cmd?.type?.startsWith('integration.')) {
+          // Terminal: every answer (a status, a refusal sentence) is applied once and never retried blindly. The payload may
+          // hold a sealed envelope: it is emptied here.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyIntegrationCommandResult(
+            this.ctx,
+            conn.workstationId,
+            { id: msg.commandId, type: cmd.type, payload: cmd.payload },
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
         } else if (cmd?.type === 'sudo.set') {
           // The ciphertext is forgotten here (applySudoSetResult empties the payload) whatever the answer was.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -449,8 +472,16 @@ export class RunnerHandlers {
     await exec(
       ctx.pool,
       // runner_update is cleared: a runner that can update itself reports it again right after `welcome`.
-      `UPDATE workstations SET runtimes=$2, runner_version=$3, hostname=$4, platform=$5, last_seen_at=$6, runner_update=NULL WHERE id=$1`,
-      [conn.workstationId, JSON.stringify(msg.runtimes), msg.runnerVersion, msg.hostname, msg.platform, now],
+      `UPDATE workstations SET runtimes=$2, runner_version=$3, hostname=$4, platform=$5, last_seen_at=$6, runner_update=NULL, integrations_version=$7 WHERE id=$1`,
+      [
+        conn.workstationId,
+        JSON.stringify(msg.runtimes),
+        msg.runnerVersion,
+        msg.hostname,
+        msg.platform,
+        now,
+        msg.integrationsVersion ?? null,
+      ],
     );
     // The public key the sudo password is encrypted with (the private half stays on the runner).
     conn.setupCapable = !!msg.sudoKey;

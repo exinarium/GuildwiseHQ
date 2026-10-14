@@ -23,6 +23,8 @@ import {
   RepoAccessPayloadSchema,
 } from '../forge/index.ts';
 import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
+import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
+import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
 import {
   IntegrationBeginPayloadSchema,
   IntegrationCancelPayloadSchema,
@@ -30,12 +32,10 @@ import {
   IntegrationInputPayloadSchema,
   IntegrationRequestPayloadSchema,
   IntegrationSessionMsgSchema,
-  IntegrationsPolicySchema,
   IntegrationStatusSchema,
+  IntegrationsPolicySchema,
   MAX_INTEGRATION_STATUSES,
 } from '../integrations/schema.ts';
-import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
-import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
 import { MAX_MCP_SERVERS, McpServerInfoSchema } from '../mcp/index.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { RepoCreatePayloadSchema } from '../repo/index.ts';

@@ -68,6 +68,7 @@ import { hrRoutes } from './routes/hr.ts';
 import { inboundRoutes } from './routes/inbound.ts';
 import { installerRoutes } from './routes/installer.ts';
 import { intakeRoutes } from './routes/intakes.ts';
+import { integrationRoutes } from './routes/integrations.ts';
 import { interestRoutes } from './routes/interests.ts';
 import { invitationRoutes } from './routes/invitations.ts';
 import { ledgerRoutes } from './routes/ledger.ts';
@@ -196,10 +197,23 @@ export function contentSecurityPolicy(config: { publicOrigin: string; secureCook
   ].join('; ');
 }
 
+/** pino `redact` options: a sealed envelope of the Integrations page never reaches a log line, whatever object holds it. */
+export const LOG_REDACT = {
+  paths: ['req.body.envelope', '*.envelope', 'body.envelope', 'payload.envelope', 'err.body.envelope'],
+  censor: '[redacted]',
+};
+
 export async function createApp(config: Config, opts: BuildOptions = {}): Promise<AomApp> {
   const app = Fastify({
     logger:
-      opts.logger === false ? false : { level: config.logLevel, serializers: { req: requestLogSerializer } },
+      opts.logger === false
+        ? false
+        : {
+            level: config.logLevel,
+            serializers: { req: requestLogSerializer },
+            // Second line of defence: sealed envelopes of the Integrations page must never reach a log line.
+            redact: LOG_REDACT,
+          },
     trustProxy: true,
     bodyLimit: 2 * 1024 * 1024,
   }) as unknown as AomApp;
@@ -330,6 +344,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(orgRoutes(ctx));
   await app.register(platformRoutes(ctx));
   await app.register(workstationRoutes(ctx));
+  await app.register(integrationRoutes(ctx));
   await app.register(installerRoutes(ctx));
   await app.register(cloudRoutes(ctx));
   await app.register(supportRoutes(ctx));

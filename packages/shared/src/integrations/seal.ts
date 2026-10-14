@@ -17,7 +17,13 @@ import {
 
 // The shared package builds with ES2023 only (no DOM types): the little of WebCrypto used here is declared locally.
 interface SubtleLike {
-  importKey(format: string, data: unknown, algo: unknown, extractable: boolean, usages: string[]): Promise<unknown>;
+  importKey(
+    format: string,
+    data: unknown,
+    algo: unknown,
+    extractable: boolean,
+    usages: string[],
+  ): Promise<unknown>;
   generateKey(algo: unknown, extractable: boolean, usages: string[]): Promise<unknown>;
   exportKey(format: string, key: unknown): Promise<ArrayBuffer>;
   encrypt(algo: unknown, key: unknown, data: unknown): Promise<ArrayBuffer>;

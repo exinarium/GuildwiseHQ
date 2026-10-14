@@ -9,11 +9,13 @@ export async function enqueueRunnerCommand(
   workstationId: string,
   type: RunnerCommandName,
   payload: Record<string, unknown>,
+  /** Commands that carry a sealed envelope expire: after this they are never delivered (a sweep empties them). */
+  expiresAt?: Date,
 ): Promise<string> {
   const r = await one<{ id: string }>(
     db,
-    `INSERT INTO runner_commands (workstation_id, type, payload) VALUES ($1,$2,$3) RETURNING id`,
-    [workstationId, type, JSON.stringify(payload)],
+    `INSERT INTO runner_commands (workstation_id, type, payload, expires_at) VALUES ($1,$2,$3,$4) RETURNING id`,
+    [workstationId, type, JSON.stringify(payload), expiresAt ?? null],
   );
   return (r as { id: string }).id;
 }
@@ -41,6 +43,7 @@ export async function claimPendingCommands(
       db,
       `UPDATE runner_commands SET status='sent', attempts = attempts + 1, sent_at=$2
         WHERE id IN (SELECT id FROM runner_commands WHERE workstation_id=$1 AND status='pending'
+                        AND (expires_at IS NULL OR expires_at > $2)
                       ORDER BY created_at, id FOR UPDATE SKIP LOCKED)
         RETURNING id, type, payload, attempts, created_at`,
       [workstationId, now],
