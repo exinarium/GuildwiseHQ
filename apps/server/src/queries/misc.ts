@@ -107,14 +107,13 @@ export async function budgetsFor(ctx: Ctx, userId: string, projects: Row[]): Pro
     const role = await orgRoleOf(ctx.pool, userId, orgId);
     const c = await orgCostCtx(ctx.pool, orgId);
     const mine = projects.filter((p) => p.org_id === orgId);
-    const spend = mine.some((p) => p.budget_micros !== null && p.budget_micros !== undefined)
-      ? await monthSpendByProject(
-          ctx.pool,
-          c,
-          now,
-          mine.map((p) => p.id),
-        )
-      : new Map<string, number>();
+    // Always load the month's spend: the board shows it for projects without a budget too (#56).
+    const spend = await monthSpendByProject(
+      ctx.pool,
+      c,
+      now,
+      mine.map((p) => p.id),
+    );
     for (const p of mine)
       out.set(
         p.id,
