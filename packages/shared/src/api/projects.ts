@@ -20,6 +20,7 @@ import {
 } from '../safe.ts';
 import { IsoTime } from './common.ts';
 import { BudgetDtoSchema } from './costs.ts';
+import { RepoSyncDtoSchema } from './workstations.ts';
 
 export const ProjectRepoDtoSchema = z.object({
   id: z.uuid(),
@@ -72,6 +73,16 @@ export const ProjectRepoDtoSchema = z.object({
         detail: z.string().nullable(),
         localPath: z.string().nullable(),
         updatedAt: IsoTime,
+      }),
+    )
+    .optional(),
+  /** The working branch against origin, per workstation that holds a clone (the runner's last check). */
+  syncs: z
+    .array(
+      RepoSyncDtoSchema.extend({
+        workstationId: z.uuid(),
+        workstationName: z.string(),
+        canSync: z.boolean(),
       }),
     )
     .optional(),

@@ -3,12 +3,15 @@ import { ChevronRight, Server, TriangleAlert } from 'lucide-react';
 import { useCallback, useId, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
+import { useRunningShifts } from '../api/queries/shifts.ts';
 import { usePairingCode, useUnlinkWorkstation, useWorkstations } from '../api/queries/workstations.ts';
 import { BRAND } from '../brand.ts';
 import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
 import { GitConnectionsPanel } from '../components/GitConnections.tsx';
 import { JiraStatusLine } from '../components/JiraStatusLine.tsx';
+import { RepoSyncLine } from '../components/RepoSync.tsx';
 import { SandboxUnavailable, SandboxWarning } from '../components/SandboxWarning.tsx';
+import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
 import {
   Badge,
   Button,
@@ -145,6 +148,28 @@ export function Workstations() {
   );
 }
 
+/** Running shifts of this workstation that belong to no card (DevOps work, chats): each can be stopped here. */
+function CardlessShifts({ workstationId }: { workstationId: string }) {
+  const running = useRunningShifts();
+  const list = (running.data ?? []).filter(
+    (s) => s.workstationId === workstationId && s.cardId === null && s.status !== 'ended',
+  );
+  if (list.length === 0) return null;
+  return (
+    <ul className="mt-2 flex flex-col gap-2" data-testid="cardless-shifts">
+      {list.map((s) => (
+        <li key={s.id} className="flex flex-col gap-1.5 rounded-control border border-line px-2 py-1.5">
+          <span className="text-xs text-muted">
+            {s.agentName ?? 'Agent'} · {s.kind}
+          </span>
+          <ShiftClock shift={s} />
+          <ShiftStopControls shift={s} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function WorkstationCard({
   w,
   admin = false,
@@ -258,14 +283,21 @@ export function WorkstationCard({
                       : `${w.shifts.running} (limit shown while connected)`
                     : 'Not reported'}
                 </p>
+                {!admin && <CardlessShifts workstationId={w.id} />}
               </div>
               <div>
                 <p className="mb-1 text-xs font-medium text-subtle">Repositories</p>
                 <ul data-testid="workstation-repos">
                   {w.repos.length === 0 && <li className="text-subtle">None reported</li>}
                   {w.repos.map((r) => (
-                    <li key={r.projectRepoId} className="font-mono text-xs break-all">
-                      {r.localPath}
+                    <li key={r.projectRepoId}>
+                      <span className="font-mono text-xs break-all">{r.localPath}</span>
+                      <RepoSyncLine
+                        sync={r.sync}
+                        workstationId={w.id}
+                        repoId={r.projectRepoId}
+                        canSync={!admin}
+                      />
                     </li>
                   ))}
                 </ul>

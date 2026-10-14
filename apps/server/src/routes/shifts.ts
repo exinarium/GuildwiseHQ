@@ -10,7 +10,7 @@ import { requireUser } from '../auth/guards.ts';
 import { orgRoleOf } from '../auth/org-context.ts';
 import { projectRole } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
-import { one, rows } from '../db/sql.ts';
+import { exec, one, rows } from '../db/sql.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import { SHIFT_SELECT, toShiftDto } from '../queries/cards.ts';
 import { typed } from './util.ts';
@@ -32,9 +32,9 @@ export function shiftRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       const list = await rows(
         ctx.pool,
-        `${SHIFT_SELECT} WHERE ${VISIBLE} AND ($2::uuid IS NULL OR s.agent_id = $2) AND ($3::uuid IS NULL OR s.card_id = $3)
+        `${SHIFT_SELECT} WHERE ${VISIBLE} AND ($2::uuid IS NULL OR s.agent_id = $2) AND ($3::uuid IS NULL OR s.card_id = $3) AND ($4::boolean IS NOT TRUE OR s.status <> 'ended')
           ORDER BY s.started_at DESC LIMIT 200`,
-        [s.user.id, req.query.agentId ?? null, req.query.cardId ?? null],
+        [s.user.id, req.query.agentId ?? null, req.query.cardId ?? null, req.query.active === '1'],
       );
       return { shifts: list.map(toShiftDto) };
     });
@@ -49,39 +49,53 @@ export function shiftRoutes(ctx: Ctx) {
       return toShiftDto(row);
     });
 
+    /** The card's owner or project owner; for a shift without a card, its workstation's owner or an org manager. */
+    const loadForStop = async (userId: string, shiftId: string) => {
+      const row = await one(ctx.pool, `${SHIFT_SELECT} WHERE s.id = $2 AND ${VISIBLE}`, [userId, shiftId]);
+      if (!row) throw notFound('shift not found');
+      if (row.status === 'ended') throw conflict('shift_ended', 'shift has already ended');
+      if (row.card_id) {
+        const card = await one(ctx.pool, 'SELECT project_id, owner_user_id FROM cards WHERE id=$1', [
+          row.card_id,
+        ]);
+        const role = card ? await projectRole(ctx.pool, userId, card.project_id) : null;
+        if (!card || !canManageCard({ userId, projectRole: role, cardOwnerUserId: card.owner_user_id })) {
+          throw forbidden('only the card owner or the project owner can stop a shift');
+        }
+      } else {
+        const own = await one(ctx.pool, 'SELECT 1 FROM workstations WHERE id=$1 AND user_id=$2', [
+          row.workstation_id,
+          userId,
+        ]);
+        if (!own && !isOrgManager({ orgRole: await orgRoleOf(ctx.pool, userId, row.org_id) }))
+          throw forbidden('only the organization Owner and Admins can stop this shift');
+      }
+      return row;
+    };
+
+    /**
+     * Stops a shift. By default the card goes back in the queue; `keepCard` keeps it with the same agent, which starts
+     * a fresh shift (only for a card shift). The runner saves the work in the worktree either way.
+     */
     app.post(
       '/api/shifts/:id/stop',
       { schema: { params: IdParamsSchema, body: StopShiftRequestSchema.optional() } },
       async (req) => {
         const s = await requireUser(ctx, req);
-        const row = await one(ctx.pool, `${SHIFT_SELECT} WHERE s.id = $2 AND ${VISIBLE}`, [
-          s.user.id,
-          req.params.id,
-        ]);
-        if (!row) throw notFound('shift not found');
-        if (row.status === 'ended') throw conflict('shift_ended', 'shift has already ended');
-        if (row.card_id) {
-          const card = await one(ctx.pool, 'SELECT project_id, owner_user_id FROM cards WHERE id=$1', [
-            row.card_id,
-          ]);
-          const role = card ? await projectRole(ctx.pool, s.user.id, card.project_id) : null;
-          if (
-            !card ||
-            !canManageCard({ userId: s.user.id, projectRole: role, cardOwnerUserId: card.owner_user_id })
-          ) {
-            throw forbidden('only the card owner or the project owner can stop a shift');
-          }
-        } else {
-          const own = await one(ctx.pool, 'SELECT 1 FROM workstations WHERE id=$1 AND user_id=$2', [
-            row.workstation_id,
-            s.user.id,
-          ]);
-          if (!own && !isOrgManager({ orgRole: await orgRoleOf(ctx.pool, s.user.id, row.org_id) }))
-            throw forbidden('only the organization Owner and Admins can stop this shift');
-        }
+        const row = await loadForStop(s.user.id, req.params.id);
+        const keep = req.body?.keepCard === true && !!row.card_id;
+        if (keep) await exec(ctx.pool, 'UPDATE shifts SET stop_keep_card=true WHERE id=$1', [row.id]);
         const sent = ctx.services.gateway.stopShift(row.workstation_id, row.id, 'manager');
         return { ok: true, sent };
       },
     );
+
+    /** "Stop the running command": the agent's commands are killed, the shift goes on and the agent sees the command fail. */
+    app.post('/api/shifts/:id/kill-tools', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      const row = await loadForStop(s.user.id, req.params.id);
+      const sent = ctx.services.gateway.killTools(row.workstation_id, row.id);
+      return { ok: true, sent };
+    });
   };
 }

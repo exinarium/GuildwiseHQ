@@ -41,31 +41,13 @@ search, filters by project / date / agent), and from which a card can still be o
 Cards inherit the project's completion action (#30), but one card still opened a pull request. The BA must not set or
 override the completion action; only people may change it on a card.
 
-### 53. Unstick an agent
-
-A way to free an agent whose running processes hang: from the card / agent / workstation page, stop the running command
-or restart the shift (kill the whole process tree in the sandbox, keep the work), plus an automatic watchdog when a shift
-shows no progress for a set time.
-
 ### 54. Change priority and completion action on a card at any time
 
 Priority and completion action should be editable in every card status (handled sanely while a finalise is running).
 
-### 55. Agents get stuck running unit tests of broken projects
-
-Builders hang while running the unit tests of projects that do not build or whose tests hang (.NET). Needs per-command
-time limits and hang detection for test runs (e.g. `dotnet test --blame-hang-timeout`), and instructions on what to do
-when a project's tests are broken before the agent touched it.
-
 ### 56. The board shows $0.00 spend this month
 
 The board's spend figure shows $0.00 this month instead of the real total.
-
-### 57. The local working branch falls behind origin
-
-After a pull request is merged, origin moves but the local working branch stays behind. Agents must always start from
-the latest code (fetch and fast-forward before work), and the app should show "out of sync" for a repository's working
-branch with a "Sync now" action.
 
 ### 58. Start action: run the project on a branch
 
@@ -306,6 +288,78 @@ The details of each done item follow this list, by date.
 - #33: .NET builds in a repository without `.gitmodules`. Done 2026-10-13.
 - #45: No Guildwise trace in repositories: saved work in stashes. Done 2026-10-13.
 - #46: Branch prefix per project for pull-request branches. Done 2026-10-13.
+- #53: Unstick an agent: stop shift, stop the running command, idle watchdog. Done 2026-10-14.
+- #55: Agents stuck running unit tests: per-command time limits and test instructions. Done 2026-10-14.
+- #57: The local working branch falls behind origin: sync, status and Sync now. Done 2026-10-14.
+
+## 2026-10-14 (done)
+
+### 53. Unstick an agent
+
+A way to free an agent whose running processes hang: from the card / agent / workstation page, stop the running command
+or restart the shift (kill the whole process tree in the sandbox, keep the work), plus an automatic watchdog when a shift
+shows no progress for a set time.
+
+**Done (2026-10-14).** Web: the live-shift panel of a card shows "Running N min" and "last activity N min ago" with **Stop the
+running command** and **Stop shift** (for the card's owner and the project owner). Stop shift asks: **Stop and re-queue**
+(the card goes back in the queue, as Release did) or **Stop, keep the card with this agent** (`POST /api/shifts/:id/stop` with
+`keepCard: true`; the shift row remembers it in `shifts.stop_keep_card`, the release is followed by the dispatcher giving the
+card to the same agent first, `Dispatcher.prefer`, so it starts a fresh shift). The Agents page shows the same badge and
+buttons on an agent that is running a shift; the Workstations page lists running shifts without a card (DevOps work, chats)
+with the same stop controls. The Release dialog no longer says work is not kept: the runner commits the worktree when the
+shift ends (the card's branch keeps it). Protocol (additive): `shift.kill_tools` (server to runner) via
+`POST /api/shifts/:id/kill-tools`; the runner walks `/proc` from the agent process and sends SIGTERM, then SIGKILL after 3 s,
+to its shell children (`bash`, `sh`, `bwrap`, ...) and everything below them, so MCP servers and the sandbox's `socat` helpers
+live on and the agent sees its command fail (`apps/runner/src/adapters/proc-tree.ts`). The agent process now leads its own
+process group (`detached`); `stop()` sends SIGTERM to the group and SIGKILL after 10 s, and the runner's exit hook kills
+live groups. Idle watchdog (`ShiftSupervisor.idleCheck`, `IDLE_LIMITS`): a turn that finished (result line) and then 8 min of
+silence, or 20 min of silence during a turn, kills the running commands and posts "no activity for N min; stopped the running
+command" on the shift; 5 min later, still silent, the shift is stopped (outcome `timeout`, so the loop breaker counts it)
+and the usual end-of-shift code commits the work and notes what was unreported. Tests: `proc-tree.test.ts`,
+`supervisor.test.ts` (kill_tools, both watchdog limits), server `shift-stop-sync.test.ts`, web `shift-stop-sync.test.tsx`.
+
+### 55. Agents get stuck running unit tests of broken projects
+
+Builders hang while running the unit tests of projects that do not build or whose tests hang (.NET). Needs per-command
+time limits and hang detection for test runs (e.g. `dotnet test --blame-hang-timeout`), and instructions on what to do
+when a project's tests are broken before the agent touched it.
+
+**Done (2026-10-14).** Evidence: shifts a42271ec and e85e17fc on P4-11 started two full `dotnet test` runs of an
+integration suite (needs a live server; the sandbox only allows registry domains) as background tasks with
+`timeout=3600000` and polled them with `sleep` loops for 12+ minutes. Claude Code's per-command timeout was defeated because
+nothing capped it. Agent sessions now get `BASH_DEFAULT_TIMEOUT_MS=300000` (5 min) and `BASH_MAX_TIMEOUT_MS=900000`
+(15 min); both names are in the installed Claude Code binary's environment-variable list (checked in 2.1.299), set in
+`sessionEnv` (`apps/runner/src/adapters/claude-code.ts`). The builder/tester instructions (`packages/shared/src/prompt/instructions.ts`,
+"Boundaries") now say: unit tests only, in the foreground, with a hang limit (`dotnet test ... --blame-hang-timeout 2m
+--blame-hang-dump-type none`, any other long command under `timeout <seconds>`); never integration or end-to-end suites
+(anything that needs a running server, network or services; those are for the testers, see #59) and name in the handoff the suites
+left out; never two full suites at once and never background tasks polled with `sleep`; tests that already fail on the base
+commit are checked once, noted in the handoff and not fixed. `DOTNET_PROCESSOR_COUNT=1` stays: MSBuild sizes its worker
+nodes from it and the nodes' named pipes cannot start in the sandbox (#31), so raising it to 2 for test hosts is not safe to do
+blindly; left as it is. The idle watchdog of #53 is the second line of defence.
+
+### 57. The local working branch falls behind origin
+
+After a pull request is merged, origin moves but the local working branch stays behind. Agents must always start from
+the latest code (fetch and fast-forward before work), and the app should show "out of sync" for a repository's working
+branch with a "Sync now" action.
+
+**Done (2026-10-14).** Facts: card worktrees already fetched and branched from `origin/<base>`; what stayed stale was the local
+working-branch ref and the owner's own checkout (on this machine the runner clone is the owner's checkout). New
+`syncWorkingBranch` (`apps/runner/src/git/sync-branch.ts`): fetches `origin <branch>` only; checkout on the branch and clean:
+`merge --ff-only`; branch not checked out: `update-ref` with the expected old value, only when local is an ancestor of
+origin; diverged, dirty, checked out in another worktree, or a card shift running in the repository (the same busy-worktree
+guard hygiene uses): nothing is touched and the state says why (`synced`, `updated`, `behind`, `ahead`, `diverged`, `dirty`,
+`busy`, ...). It never forces and never touches uncommitted work. It runs best effort after the fetch of a new card worktree
+(project working branch only), after a finalize with `pr` or `merge`, on a server request ("Sync now", command `repo.sync`)
+and every 10 minutes for the repositories the runner knows a working branch for (`SyncService`, targets remembered in
+`sync-targets.json`; the server seeds them with a `repo.sync` at each hello for confirmed working branches). The runner reports
+`repo.sync_status` {repoId, workingBranch, state, ahead, behind, dirty, onBranch, checkedOutBranch, detail, checkedAt};
+the server stores it in `repo_sync_status` (migration 1860; a separate table, not `repo_clones`, which only has rows for
+clones the DevOps engineer set up, while `workstation_repos` is rewritten at every hello). Web: Workstations (repositories) and
+Project settings show "pieter/dev is 3 commits behind origin", "has diverged from origin" or "... and has uncommitted
+changes" with **Sync now** (the workstation's owner; `POST /api/workstations/:id/repos/:repoId/sync`). Tests:
+`sync-branch.test.ts`, server `shift-stop-sync.test.ts`, web `shift-stop-sync.test.tsx`.
 
 ## 2026-10-13 (done)
 

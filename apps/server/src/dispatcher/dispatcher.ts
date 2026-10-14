@@ -1,6 +1,6 @@
 import pg from 'pg';
 import type { Ctx } from '../context.ts';
-import { type Row, rows } from '../db/sql.ts';
+import { one, type Row, rows } from '../db/sql.ts';
 import { DISPATCH_LOCK_ID } from '../db/tx.ts';
 import type { StoredEvent } from '../eventstore/types.ts';
 import { buildShiftStart } from '../runner-gateway/brief.ts';
@@ -80,12 +80,19 @@ export class Dispatcher {
   private auto = false;
   /** agentId -> epoch ms until which the agent is skipped (after a runner rejection). */
   readonly cooldown = new Map<string, number>();
+  /** cardId -> the agent that should take the card again right after a "stop, keep the card with this agent". */
+  readonly preferred = new Map<string, { agentId: string; until: number }>();
 
   constructor(private readonly ctx: Ctx) {}
 
   /** Turns on the debounced passes `trigger()` asks for (the background mode of `start()`, or a test that wants them). */
   enableAuto(): void {
     this.auto = true;
+  }
+
+  /** The card goes to this agent first when it is queued again (for two minutes). */
+  prefer(cardId: string, agentId: string): void {
+    this.preferred.set(cardId, { agentId, until: this.ctx.clock.now().getTime() + 120_000 });
   }
 
   start(): void {
@@ -193,6 +200,22 @@ export class Dispatcher {
     await phasePass(this.ctx);
     const made: ClaimResult[] = [];
     const agents = await this.freeAgents();
+    for (const [cardId, p] of [...this.preferred]) {
+      if (p.until < nowMs) {
+        this.preferred.delete(cardId);
+        continue;
+      }
+      const a = agents.find((x) => x.row.id === p.agentId);
+      const card = await one(this.ctx.pool, 'SELECT stage, status FROM cards WHERE id=$1', [cardId]);
+      if (!a || !card || card.status !== 'queued' || a.active >= a.row.capacity || this.skip(a.row, nowMs))
+        continue;
+      const r = await claim(this.ctx, { cardId, agentId: a.row.id, expectedStage: card.stage });
+      this.preferred.delete(cardId);
+      if (r) {
+        made.push(r);
+        a.active++;
+      }
+    }
     for (const { row, caps, active } of agents) {
       if (active >= row.capacity || this.skip(row, nowMs)) continue;
       const view = agentView(row, caps);

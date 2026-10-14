@@ -155,6 +155,20 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
     diffStats: { files: 2, added: 10, removed: 1, architecturalPaths: [] },
     riskTier: 'small',
   },
+  'repo.sync_status': {
+    ...env('repo.sync_status'),
+    status: {
+      repoId: U.a,
+      workingBranch: 'dev',
+      state: 'behind',
+      ahead: 0,
+      behind: 2,
+      dirty: false,
+      onBranch: true,
+      checkedOutBranch: 'dev',
+      checkedAt: '2026-10-14T10:00:00.000Z',
+    },
+  },
   'shift.ended': {
     ...env('shift.ended'),
     shiftId: U.a,
@@ -213,6 +227,7 @@ const serverToRunner: Record<string, Record<string, unknown>> = {
     maxShiftMinutes: 60,
   },
   'shift.stop': { ...env('shift.stop'), shiftId: U.a, reason: 'timeout' },
+  'shift.kill_tools': { ...env('shift.kill_tools'), shiftId: U.a },
   'shift.report.result': { ...env('shift.report.result'), reportId: U.d, accepted: false, error: 'nope' },
   'worktrees.live': {
     ...env('worktrees.live'),

@@ -60,6 +60,11 @@ export interface EnsureWorktreeInput {
   roots: string[];
   /** Credentials for pushing a working branch this creates (absent: the user's own git setup is used). */
   auth?: GitAuth;
+  /**
+   * Called (best effort, errors ignored) right after origin/<base> was fetched for a new card branch, under the
+   * clone's lock: the runner uses it to bring the local working branch up to date too.
+   */
+  onFetched?: (base: string) => Promise<void>;
 }
 
 /** Credentials for git against the repository's host (clone, push). */
@@ -157,6 +162,7 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
     if (f.exitCode === 0 || (await revParse(repoPath, `refs/remotes/origin/${base}`))) {
       if (await revParse(repoPath, `refs/remotes/origin/${base}`)) startPoint = `origin/${base}`;
     }
+    if (f.exitCode === 0 && input.onFetched) await input.onFetched(base).catch(() => undefined);
   }
   let createdBranch: WorktreeResult['createdBranch'];
   if (!(await revParse(repoPath, startPoint))) {

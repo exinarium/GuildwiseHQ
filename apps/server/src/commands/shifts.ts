@@ -867,8 +867,12 @@ export async function applyShiftEnded(ctx: Ctx, tx: Tx, ws: WsRef, msg: RunnerTo
     : await one(tx, 'SELECT 1 FROM desk_items WHERE shift_id=$1 AND blocking LIMIT 1', [s.id]);
   if (card && card.claim_shift_id === s.id) {
     const stopped = msg.outcome === 'stopped';
+    const keep = stopped && s.stop_keep_card === true;
+    if (keep) ctx.services.dispatcher.prefer(card.id, s.agent_id);
     const text = stopped
-      ? 'Shift stopped; the card is back in the queue.'
+      ? keep
+        ? 'Shift stopped; the card stays with the same agent, which starts a fresh shift.'
+        : 'Shift stopped; the card is back in the queue.'
       : `Shift ended without a report (${msg.outcome}); the card is back in the queue.${msg.finalText ? `\n\n${msg.finalText}` : ''}`;
     // Loop breaker: repeated failures put the card in back-off and collapse the repeated thread message.
     const plan =

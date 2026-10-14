@@ -53,6 +53,12 @@ export const SAVED: Array<{ table: string; restoreWhere: string }> = [
     restoreWhere:
       'workstation_id IN (SELECT id FROM workstations) AND project_repo_id IN (SELECT id FROM project_repos)',
   },
+  // Where a working branch stands against origin (migration 1860): reported by the runner, not an event.
+  {
+    table: 'repo_sync_status',
+    restoreWhere:
+      'workstation_id IN (SELECT id FROM workstations) AND project_repo_id IN (SELECT id FROM project_repos)',
+  },
   // Every clone a runner reported (migration 1640): operational, replaced on each report.
   { table: 'workstation_repo_catalog', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
   // Written by the runner's rpc, not a projection (migration 1300), but it references `projects`: the CASCADE below empties it.

@@ -33,6 +33,15 @@ export const ShiftDtoSchema = z.object({
   mcpCalls: z.array(McpCallSchema).optional(),
 });
 export type ShiftDto = z.infer<typeof ShiftDtoSchema>;
-export const ShiftsQuerySchema = z.object({ agentId: z.uuid().optional(), cardId: z.uuid().optional() });
+export const ShiftsQuerySchema = z.object({
+  agentId: z.uuid().optional(),
+  cardId: z.uuid().optional(),
+  /** `1`: only shifts that have not ended (the running-shift badges). */
+  active: z.enum(['1']).optional(),
+});
 export const ShiftsResponseSchema = z.object({ shifts: z.array(ShiftDtoSchema) });
-export const StopShiftRequestSchema = z.object({ reason: z.string().optional() });
+export const StopShiftRequestSchema = z.object({
+  reason: z.string().optional(),
+  /** Keep the card claimed by this agent: it starts a fresh shift at once. Default: the card goes back in the queue. */
+  keepCard: z.boolean().optional(),
+});

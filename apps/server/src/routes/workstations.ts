@@ -14,6 +14,7 @@ import { requireAdmin, requireUser } from '../auth/guards.ts';
 import { readRepoList, requestGitRecheck, requestRepoList } from '../commands/forges.ts';
 import { requestOrgFolder } from '../commands/org-folders.ts';
 import { requestGitSsh } from '../commands/repo-access.ts';
+import { requestRepoSync } from '../commands/repo-sync.ts';
 import { requestToolchainRemove } from '../commands/toolchains.ts';
 import {
   createPairingCode,
@@ -92,6 +93,18 @@ export function workstationRoutes(ctx: Ctx) {
       async (req, reply) => {
         const s = await requireUser(ctx, req);
         await requestToolchainRemove(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return { ok: true };
+      },
+    );
+
+    /** "Sync now": the runner fetches the working branch of a clone and fast-forwards it when that is safe. */
+    app.post(
+      '/api/workstations/:id/repos/:repoId/sync',
+      { schema: { params: z.object({ id: z.uuid(), repoId: z.uuid() }) } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        await requestRepoSync(ctx, s.user, { workstationId: req.params.id, repoId: req.params.repoId });
         reply.code(202);
         return { ok: true };
       },

@@ -44,6 +44,7 @@ import { checkBranchMerged } from './git/merged.ts';
 import { openReleasePr } from './git/release-pr.ts';
 import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { sweepWorktrees } from './git/sweep.ts';
+import { SyncService } from './git/sync-service.ts';
 import { removeWorktree } from './git/worktrees.ts';
 import { IntegrationPoller } from './integrations/poll.ts';
 import { IpcServer } from './ipc/server.ts';
@@ -58,7 +59,7 @@ import { RepoCreator } from './repo/create.ts';
 import { wipeAgent } from './sandbox/sandbox.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { SudoVault } from './secrets/sudo.ts';
-import { ShiftSupervisor } from './shifts/supervisor.ts';
+import { ShiftSupervisor, type SupervisorDeps } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
 import { selectDotnet } from './toolchain/dotnet.ts';
 import { ensureEnvironment } from './toolchain/ensure.ts';
@@ -79,6 +80,10 @@ export interface RunnerOptions {
   exitGraceMs?: number;
   /** Re-scan repos and re-probe runtimes this often (ms). Defaults: 10 min. */
   rescanMs?: number;
+  /** The interval of the working-branch check (default 10 min). */
+  syncIntervalMs?: number;
+  /** Test seam: idle watchdog limits and clock. */
+  idle?: SupervisorDeps['idle'];
   adapters?: Map<string, RuntimeAdapter>;
   /** Test hook: milliseconds per vault sync interval second (default 1000). */
   vaultSecondMs?: number;
@@ -149,6 +154,8 @@ export class Runner {
   /** Tools agents may use: detected, configured and registered by the DevOps engineer (`aom toolchain`). */
   readonly toolchains: ToolchainRegistry;
   private readonly exec: Executor;
+  /** Keeps each repository's local working branch in step with origin (fetch, fast-forward when safe, report). */
+  readonly sync: SyncService;
   private readonly log: Logger;
   private readonly adapters: Map<string, RuntimeAdapter>;
   private readonly external: ExternalAdapters;
@@ -210,6 +217,28 @@ export class Runner {
       exec: this.exec,
     });
     this.maxConcurrent = opts.config.maxConcurrentShifts;
+    this.sync = new SyncService({
+      file: join(this.paths.root, 'sync-targets.json'),
+      findRepo: (n) => this.findRepo(n),
+      busyWorktrees: () => this.supervisor.worktreePaths(),
+      auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+      send: (r) =>
+        void this.client.send('repo.sync_status', {
+          status: {
+            repoId: r.repoId,
+            workingBranch: r.workingBranch,
+            state: r.state,
+            ahead: r.ahead,
+            behind: r.behind,
+            dirty: r.dirty,
+            onBranch: r.onBranch,
+            checkedOutBranch: r.checkedOutBranch,
+            ...(r.detail ? { detail: r.detail.slice(0, 400) } : {}),
+            checkedAt: r.checkedAt,
+          },
+        }),
+      log: this.log,
+    });
     this.adapters = opts.adapters ?? buildAdapters(opts.config, this.paths);
     this.client = new RunnerClient({
       url: toWsUrl(opts.config.serverUrl),
@@ -257,6 +286,7 @@ export class Runner {
       maxConcurrentShifts: () =>
         Math.min(this.maxConcurrent, this.opts.sharedCap?.() ?? Number.POSITIVE_INFINITY),
       maxShiftMsOverride: opts.maxShiftMsOverride,
+      ...(opts.idle ? { idle: opts.idle } : {}),
       reportWaitMs: opts.reportWaitMs,
       exitGraceMs: opts.exitGraceMs,
       envChecker: opts.envChecker,
@@ -265,6 +295,7 @@ export class Runner {
       toolchains: this.toolchains,
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+      syncAfterFetch: (t) => this.sync.sync(t, { fetch: false, locked: true }).then(() => undefined),
     });
     this.external =
       opts.external ??
@@ -421,6 +452,7 @@ export class Runner {
     this.supervisor.resumePersisted();
     this.vaults.start();
     this.client.start();
+    this.sync.start(this.opts.syncIntervalMs);
     const t = setInterval(() => void this.rescan(), this.opts.rescanMs ?? 600_000);
     t.unref();
     this.timers.push(t);
@@ -443,6 +475,7 @@ export class Runner {
 
   async stop(): Promise<void> {
     for (const t of this.timers) clearInterval(t);
+    this.sync.stop();
     this.vaults.stop();
     await this.supervisor.stopAll('manager');
     await this.chat.cancelAll('runner stopped');
@@ -774,6 +807,9 @@ export class Runner {
       case 'shift.stop':
         void this.supervisor.handleStop(msg.shiftId, msg.reason);
         break;
+      case 'shift.kill_tools':
+        void this.supervisor.killTools(msg.shiftId);
+        break;
       case 'shift.report.result':
         this.supervisor.onReportResult(msg);
         break;
@@ -838,6 +874,26 @@ export class Runner {
         // The hygiene job's sweep: the result is an answer (ok:true) even when nothing could be swept.
         CommandPayloadSchemas['worktrees.sweep'].parse(payload);
         done(true, await this.sweepWorktrees());
+      } else if (command === 'repo.sync') {
+        // "Sync now": the answer is the branch's state (ok:true) even when it could not be moved.
+        const p = CommandPayloadSchemas['repo.sync'].parse(payload);
+        const r = await this.sync.sync({
+          repoId: p.repoId,
+          remoteUrlNormalized: p.remoteUrlNormalized,
+          workingBranch: p.workingBranch,
+        });
+        done(true, {
+          repoId: r.repoId,
+          workingBranch: r.workingBranch,
+          state: r.state,
+          ahead: r.ahead,
+          behind: r.behind,
+          dirty: r.dirty,
+          onBranch: r.onBranch,
+          checkedOutBranch: r.checkedOutBranch,
+          ...(r.detail ? { detail: r.detail.slice(0, 400) } : {}),
+          checkedAt: r.checkedAt,
+        });
       } else if (command === 'repos.rescan') {
         await this.rescan();
         done(true, { repos: this.repos.length });
@@ -856,21 +912,26 @@ export class Runner {
         if (!repo) {
           done(true, { ok: false, action: p.action, error: `no local clone for ${p.remoteUrlNormalized}` });
         } else {
-          done(
-            true,
-            await executeCompletion({
-              payload: p,
-              repoPath: repo.localPath,
-              worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
-              worktreesDir: this.paths.worktrees,
-              integrationDir: this.paths.integration,
-              pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
-              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
-              rules:
-                this.opts.branchRules ??
-                ((cwd, branch, forge) => branchRulesFor(this.forgeEnv, cwd, branch, forge)),
-            }),
-          );
+          const completion = await executeCompletion({
+            payload: p,
+            repoPath: repo.localPath,
+            worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
+            worktreesDir: this.paths.worktrees,
+            integrationDir: this.paths.integration,
+            pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
+            auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+            rules:
+              this.opts.branchRules ??
+              ((cwd, branch, forge) => branchRulesFor(this.forgeEnv, cwd, branch, forge)),
+          });
+          done(true, completion);
+          // The working branch on origin may have moved (a merge, or a pull request merged since): bring the local one along.
+          if (completion.ok && (p.action === 'pr' || p.action === 'merge'))
+            void this.sync.sync({
+              repoId: p.repoId,
+              remoteUrlNormalized: p.remoteUrlNormalized,
+              workingBranch: p.baseBranch,
+            });
         }
       } else if (command === 'repo.open_pr') {
         // "No clone here", "nothing to open" and every git host refusal are answers (ok:true, result.ok:false).

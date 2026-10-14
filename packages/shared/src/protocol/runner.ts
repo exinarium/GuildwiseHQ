@@ -432,6 +432,45 @@ export type OrgFolderState = z.infer<typeof OrgFolderStateSchema>;
 /** Upper bound of the folders the runner offers in the picker. */
 export const MAX_ORG_FOLDER_CANDIDATES = 200;
 
+/**
+ * `repo.sync` ("Sync now"): fetch the repository's working branch and fast-forward it when that is safe (nothing is
+ * forced and uncommitted work is never touched). The answer is a `RepoSyncStatus`; the runner also sends the same
+ * facts as `repo.sync_status` after its periodic checks.
+ */
+export const RepoSyncPayloadSchema = z.object({
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string().min(1).max(500),
+  workingBranch: z.string().min(1).max(200),
+});
+export type RepoSyncPayload = z.infer<typeof RepoSyncPayloadSchema>;
+export const RepoSyncStateSchema = z.enum([
+  'synced',
+  'updated',
+  'behind',
+  'ahead',
+  'diverged',
+  'dirty',
+  'busy',
+  'no_remote',
+  'missing_branch',
+  'error',
+]);
+export type RepoSyncState = z.infer<typeof RepoSyncStateSchema>;
+export const RepoSyncStatusSchema = z.object({
+  /** The project repository (the server knows the workstation from the connection). */
+  repoId: z.uuid(),
+  workingBranch: z.string().max(200),
+  state: RepoSyncStateSchema,
+  ahead: z.number().int().nonnegative(),
+  behind: z.number().int().nonnegative(),
+  dirty: z.boolean(),
+  onBranch: z.boolean(),
+  checkedOutBranch: z.string().max(200).nullable(),
+  detail: z.string().max(400).optional(),
+  checkedAt: z.iso.datetime(),
+});
+export type RepoSyncStatus = z.infer<typeof RepoSyncStatusSchema>;
+
 export const RunnerCommandNameSchema = z.enum([
   'agent.wipe',
   'worktree.remove',
@@ -458,6 +497,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.open_pr',
   'org.folder',
   'toolchain.remove',
+  'repo.sync',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -493,6 +533,7 @@ export const CommandPayloadSchemas = {
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'org.folder': OrgFolderCommandSchema,
   'toolchain.remove': z.object({ name: z.string().min(1).max(80) }),
+  'repo.sync': RepoSyncPayloadSchema,
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([
@@ -801,6 +842,8 @@ export const ShiftStartSchema = msg('shift.start', {
   mcpServers: z.array(z.string()).optional(),
 });
 export const ShiftStopSchema = msg('shift.stop', { shiftId: z.uuid(), reason: ShiftStopReasonSchema });
+/** "Stop the running command": the runner kills the commands the agent runs (its tool process trees); the shift goes on. */
+export const ShiftKillToolsSchema = msg('shift.kill_tools', { shiftId: z.uuid() });
 export const ShiftReportResultSchema = msg('shift.report.result', {
   reportId: z.uuid(),
   accepted: z.boolean(),
@@ -837,6 +880,8 @@ export const CommandSchema = msg('command', {
   payload: z.record(z.string(), z.unknown()),
 });
 /** Either direction. */
+/** Where a repository's working branch stands against origin (periodic check, or after "Sync now"). */
+export const RepoSyncStatusMsgSchema = msg('repo.sync_status', { status: RepoSyncStatusSchema });
 export const AckSchema = msg('ack', { ackOf: z.string().min(1) });
 
 export const RunnerToServerSchema = z.discriminatedUnion('type', [
@@ -857,6 +902,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   ShiftProgressSchema,
   ShiftReportMsgSchema,
   ShiftEndedSchema,
+  RepoSyncStatusMsgSchema,
   RpcRequestSchema,
   WorktreesQuerySchema,
   ChatDeltaSchema,
@@ -874,6 +920,7 @@ export const ServerToRunnerSchema = z.discriminatedUnion('type', [
   WelcomeSchema,
   ShiftStartSchema,
   ShiftStopSchema,
+  ShiftKillToolsSchema,
   ShiftReportResultSchema,
   RpcResponseSchema,
   WorktreesLiveSchema,
