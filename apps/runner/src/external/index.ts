@@ -1,4 +1,11 @@
-import { type ExternalAdapter, type ExternalRef, type ExternalSource, parseExternalRef } from '@aom/shared';
+import {
+  type ExternalAdapter,
+  type ExternalRef,
+  type ExternalSource,
+  parseExternalRef,
+  renderUntrusted,
+} from '@aom/shared';
+import { allowedJiraKeys } from '../attachments/index.ts';
 import { type Exec, GithubAdapter, PostError, SourceReadError } from './github.ts';
 import { JiraAdapter } from './jira.ts';
 import type { JiraProvider } from './jira-store.ts';
@@ -76,4 +83,27 @@ export function formatSource(s: ExternalSource): string {
       );
   }
   return lines.join('\n');
+}
+
+/**
+ * `aom source read` for a Jira reference: only the ticket this conversation is about (the same scope rule as the
+ * attachments), and the text comes back as untrusted content. Null when the reference is not a Jira one.
+ */
+export async function readScopedJira(
+  external: ExternalAdapters,
+  refText: string,
+  ctx: Parameters<typeof allowedJiraKeys>[0],
+): Promise<string | null> {
+  const parsed = parseExternalRef(refText);
+  if (parsed?.system !== 'jira') return null;
+  const allowed = allowedJiraKeys(ctx);
+  const key = parsed.key.toUpperCase();
+  if (!allowed.includes(key))
+    throw new SourceReadError(
+      allowed.length
+        ? `you may only read ${allowed.join(', ')} here (the ticket this conversation is about), not ${key}`
+        : `this conversation is not about a Jira ticket, so there is nothing to read (asked for ${key})`,
+    );
+  const text = formatSource(await external.readSource({ ...parsed, key }));
+  return renderUntrusted(`Jira ticket ${key}`, text);
 }

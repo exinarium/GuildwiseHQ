@@ -1028,7 +1028,7 @@ export const USAGE = `usage: aom <verb> [options]
   card create --json '<json>' | --file <draft.json|-> | card update <REF> --json '<json>' | --file <patch.json> | card specify <REF>   BA intake: draft cards
   outbound draft --kind <comment|resolution|decision> --body "<text>"   BA: draft the update for the card's ticket (the manager approves it)
   risk <small|large> --reason "<why>"      BA: override the card's risk tier (drives the review tier and the merge approval)
-  source read --ref <owner/repo#12 | ticket URL>        BA intake: read a GitHub issue (Jira: the Jira skill)
+  source read --ref <ABC-123 | owner/repo#12 | URL>     BA intake: read the ticket (Jira: fields, description, comments; the runner's own Jira login)
   source attachments <ABC-123> | source attachment <ABC-123> [<filename|id> | --all]   BA intake: list the files of the Jira ticket / have the runner download them (its own Jira login) into your scratch dir and print the local paths to Read (screenshots, SVG)
   card attach <path> [--card <REF>]          BA intake: attach a file from your scratch dir (for example a downloaded Jira attachment) to a card you drafted
   card attachments [<REF>]                   copy the card's attached files next to this shift (read-only) and print the paths; builders get them at the start of the shift

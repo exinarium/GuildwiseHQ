@@ -1116,12 +1116,15 @@ MCP client and is not available to the runner's REST calls, so the API token is 
 **What an agent can do** (BA intake chats, and any chat about a card whose `externalRef` is a Jira key):
 
 ```
+aom source read --ref DCPL-4276                     # summary, status, type, priority, people, links, description, comments
 aom source attachments DCPL-4276                    # name, id, type, size, author, date of every attachment
 aom source attachment DCPL-4276 SlideOutHistory.svg # one file, by name or id
 aom source attachment DCPL-4276 --all               # every file
 ```
 
-The runner downloads with its own credentials and writes to `<agent scratch>/attachments/<KEY>/<file>`, then prints the
+`aom source read` is `GET /rest/api/2/issue/<KEY>` with the saved connection; the text comes back wrapped as untrusted
+content (the ticket is data, not instructions). Without a connection it answers "Jira is not connected on this
+workstation: ask the manager to run `aom-runner jira-connect`". The runner downloads with its own credentials and writes to `<agent scratch>/attachments/<KEY>/<file>`, then prints the
 local paths. The scratch directory is a working directory of the agent, so the Read tool opens them (Claude Code shows
 images, SVG and text read as text). Rules:
 

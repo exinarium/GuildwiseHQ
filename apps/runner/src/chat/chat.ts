@@ -24,7 +24,7 @@ import {
   type ServerHttp,
   syncCardAttachments,
 } from '../attachments/index.ts';
-import { type ExternalAdapters, formatSource } from '../external/index.ts';
+import { type ExternalAdapters, formatSource, readScopedJira } from '../external/index.ts';
 import { confine } from '../fs-safe.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
@@ -174,7 +174,7 @@ export class ChatManager {
           : { accepted: false, message: `Rejected: ${r.error ?? 'failed'}`, error: r.error ?? 'failed' };
       },
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
-        if (req.method === 'source.read') return this.readSource(req.params);
+        if (req.method === 'source.read') return this.readSource(chat, req.params);
         if (
           req.method === 'source.attachments' ||
           req.method === 'source.attachment' ||
@@ -282,11 +282,16 @@ export class ChatManager {
   }
 
   /** `aom source read --ref <ticket>`: read a ticket on this workstation (GitHub through `gh`; Jira is the agent's skill). */
-  private async readSource(params: Record<string, unknown>): Promise<IpcRpcResponse> {
+  private async readSource(chat: ActiveChat, params: Record<string, unknown>): Promise<IpcRpcResponse> {
     const ref = String(params.ref ?? '').trim();
     if (!ref) return { ok: false, error: 'usage: aom source read --ref <owner/repo#12>' };
     if (!this.deps.external) return { ok: false, error: 'this runner has no ticket adapters' };
     try {
+      const scoped = await readScopedJira(this.deps.external, ref, {
+        intake: chat.msg.context.intake,
+        cardExternalRef: chat.msg.context.cardExternalRef,
+      });
+      if (scoped !== null) return { ok: true, result: scoped };
       return { ok: true, result: formatSource(await this.deps.external.readText(ref)) };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
