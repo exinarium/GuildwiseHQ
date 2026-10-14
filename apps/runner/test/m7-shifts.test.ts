@@ -130,7 +130,7 @@ describe('question shifts on the mock runtime', () => {
 });
 
 describe('BA finalize on the mock runtime', () => {
-  it('claims the Finalize stage of a built card and reports the completion action as the finalized outcome', async () => {
+  it('claims the Finalize stage of a built card and reports the finalized outcome (no action chosen)', async () => {
     h = await startHarness();
     await h.runShift({ stage: 'build' });
     const f = await h.runShift({ stage: 'finalize', agentName: 'Ben' });
@@ -138,7 +138,7 @@ describe('BA finalize on the mock runtime', () => {
     expect(reports(h, f.shiftId)[0]?.report).toMatchObject({
       kind: 'outcome',
       outcomeId: 'finalized',
-      data: { action: 'push_branch' },
+      data: {},
     });
     expect(h.server.invalid).toEqual([]);
   }, 120_000);

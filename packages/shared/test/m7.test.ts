@@ -102,13 +102,13 @@ describe('M7 reports and rpc', () => {
     expect(ShiftReportSchema.safeParse({ kind: 'answer', itemId: 'nope', text: 'x' }).success).toBe(false);
   });
 
-  it('finalize outcome data is the completion action', () => {
+  it('finalize outcome data carries no action an agent chose', () => {
     expect(outcomeDataSchema('finalize').safeParse({ action: 'pr' }).success).toBe(true);
     expect(outcomeDataSchema('finalize').safeParse({ action: 'ship' }).success).toBe(false);
     expect(FinalizeReportDataSchema.parse({ action: 'merge' }).action).toBe('merge');
     expect(
       commandForOutcome({ id: 'finalized', label: 'Finalized', kind: 'success', data: 'finalize' }),
-    ).toMatch(/aom finalize --action/);
+    ).toMatch(/aom finalize --note/);
   });
 
   it('knows the BA rpc methods', () => {

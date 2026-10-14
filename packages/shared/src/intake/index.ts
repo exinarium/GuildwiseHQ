@@ -14,10 +14,11 @@ export const UNMAPPED_TICKET_SUBKIND = 'unmapped_ticket';
 export const BA_ROLE_KEY = 'ba';
 
 /**
- * Data of the `finalized` outcome (`aom finalize --action ...`): the completion action to run, possibly revised. `none` (no git step) is for investigation-only cards whose report lives in the
- * vault; the server enforces that.
+ * Data of the `finalized` outcome (`aom finalize`): empty. The action that runs is the card's own completion action; an agent never chooses
+ * it (the server refuses `pr`, `push_branch` and `merge` here). `none` (no git step) is only accepted for investigation-only cards
+ * whose report lives in the vault, and the server derives it.
  */
-export const FinalizeReportDataSchema = z.object({ action: FinalizeAction });
+export const FinalizeReportDataSchema = z.object({ action: FinalizeAction.optional() });
 export type FinalizeReportData = z.infer<typeof FinalizeReportDataSchema>;
 
 // ------------------------------------------------------------------- card drafting (chat-scoped RPCs)

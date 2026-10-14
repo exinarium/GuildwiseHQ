@@ -484,7 +484,7 @@ Fallbacks stay supported: a PAT for one organization (`git-connect azure-devops 
 
 The `gh` CLI is required for GitHub for approved repository setup (`aom repo create`, below): the runner creates the repository with your own `gh` login after you approve it on the desk. It needs a repository root (`aom-runner repos add <path>`; the new clone goes under the first one) and `gh auth login`. For GitLab, Azure DevOps and Bitbucket Cloud the same request carries `provider` (and `host` for a self-managed GitLab or GitHub Enterprise); the runner creates the repository through that provider's adapter with the login saved by `git-connect`, then clones, makes the first commit and pushes with the same credential, and the server adds it to the project with that provider as its git host. The desk item names the git host. The command runs only on the project owner's workstation, with no shell (`gh` and `git` are run directly; `AOM_GH_BIN` overrides the `gh` path), refuses an existing GitHub repository unless it is empty and yours, confines the clone to the repository root and records each request so a retry never creates a second repository.
 
-Without a login for the repository's host (or on plain git) finalize with action `pr` falls back to pushing the branch and posting a desk notice for manual PR creation. Finalize with action `merge` first asks the host whether the working branch allows direct pushes; when it is protected (or the push is refused by a branch policy) the runner pushes the card branch and opens a pull request instead, with a desk notice. See the BA's `aom finalize --action <pr|push_branch|merge>` command.
+Without a login for the repository's host (or on plain git) finalize with action `pr` falls back to pushing the branch and posting a desk notice for manual PR creation. Finalize with action `merge` first asks the host whether the working branch allows direct pushes; when it is protected (or the push is refused by a branch policy) the runner pushes the card branch and opens a pull request instead, with a desk notice. See the BA's `aom finalize` command (the action is the card's own; agents never choose it).
 
 **Pull request branch name.** With `pr` (and the protected-branch fallback) the card branch is pushed as `<local>:refs/heads/<prefix>/<ticket>`, not under its local `aom/...` name: `prBranchPrefix` is the project setting (default `feature`), `ticket` the tracker key of the card's intake (for example `DCPL-4276`) else the card ref. A name origin already has gets `-2`, `-3`; `remoteBranch` (the `pushedBranch` of an earlier finalize) is reused so rework updates the same branch and pull request. The pull request is opened from that name, and hygiene removes the finished card's branch on origin by that stored name only (`finishedCards[].remoteBranch`), never by prefix. Runners older than this change ignore the fields and keep pushing the card branch name.
 
@@ -604,7 +604,7 @@ aom test fail --title "<bug>" --note "<text>" [--evidence "<text>"] [--command "
 aom card create --json '<draft json>'      # or --file <draft.json>, or --file - to read stdin
 aom card update <REF> --json '<patch json>' # or --file <patch.json> / --file -
 aom card specify <REF>
-aom finalize --action <pr|push_branch|merge> --note "<why>"  # pr requires `gh`; falls back to push_branch otherwise
+aom finalize --note "<note>"                  # BA: runs the card's own completion action (never chosen by the agent; pr requires `gh`, falls back to push_branch otherwise)
 aom answer --item <id> --text "<answer>" [--option <id>]
 aom escalate --item <id> --note "<what must be decided>"
 aom intake map --project <KEY> | aom intake unmapped --note "<why>"
@@ -615,7 +615,7 @@ aom git push | fetch | merge-main | verify-merge   # architect only (investigate
 aom design --report <path> --summary "<text>"           # architect: hand the designed card to build (outcome handoff)
 aom investigate --report <path> --summary "<text>"      # architect: end an investigation-only card (outcome report)
 aom investigation record --title "<t>" --summary-file <md> [--decision]   # BA at Finalize of an investigation-only card
-aom finalize --action none                              # investigation-only card with the report in the vault: no git step
+aom finalize                                      # investigation-only card with the report in the vault: no git step (derived by the server)
 aom outbound draft --kind <comment|resolution|decision> --body "<text>"
 aom source read --ref <owner/repo#12 | ticket URL>
 aom source attachments <ABC-123>                        # the files attached to the intake's Jira ticket

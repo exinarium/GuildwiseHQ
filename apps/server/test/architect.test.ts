@@ -37,11 +37,12 @@ const design = (over: Record<string, unknown> = {}, outcomeId = 'handoff') => ({
     ...over,
   },
 });
-const finalized = (action: string) => ({
+/** The BA's finalize report: no action (an agent never chooses it); `none` only to test the legacy value. */
+const finalized = (action?: string) => ({
   kind: 'outcome',
   outcomeId: 'finalized',
   note: 'ok',
-  data: { action },
+  data: action ? { action } : {},
 });
 const patch = (id: string, body: Record<string, unknown>) =>
   w.t.req('PATCH', `/api/cards/${id}`, { cookie: cookie(), body });
@@ -410,7 +411,7 @@ describe('investigation-only cards: record, then finalize', () => {
     expect(fin.brief.card.investigationOnly).toBe(true);
     expect(fin.brief.investigation!.report).toMatchObject({ reportPath: REPORT, location: 'repo' });
     await p.startShift(r, fin);
-    const refused = await p.report(r, fin.shiftId, finalized('merge'));
+    const refused = await p.report(r, fin.shiftId, finalized());
     expect(refused.accepted).toBe(false);
     expect(refused.error).toMatch(/aom investigation record/);
 
@@ -440,7 +441,7 @@ describe('investigation-only cards: record, then finalize', () => {
 
     // now the BA may finalize with the card's completion action: the runner merges the report commit
     const from = r.received.length;
-    const ok1 = await p.report(r, fin.shiftId, finalized('merge'));
+    const ok1 = await p.report(r, fin.shiftId, finalized());
     expect(ok1.accepted).toBe(true);
     r.ended(fin.shiftId, 'reported');
     const cmd = await r.waitFor('command', (f) => f.command === 'finalize.execute', 15_000, from);
@@ -458,13 +459,13 @@ describe('investigation-only cards: record, then finalize', () => {
     expect((await cardRow(card.id)).status).not.toBe('done');
   });
 
-  it('a report in the vault is finalized with action none: no git step, the card is done', async () => {
+  it('a report in the vault is finalized without a git step (the server derives it): no git step, the card is done', async () => {
     const card = await investigated('vault');
     const fin = await next('Ben');
     await p.startShift(r, fin);
     await rpc(fin.shiftId, 'investigation.record', { title: 'Vault answer', summary: 'See the report.' });
     const from = r.received.length;
-    const res = await p.report(r, fin.shiftId, finalized('none'));
+    const res = await p.report(r, fin.shiftId, finalized());
     expect(res.accepted).toBe(true);
     r.ended(fin.shiftId, 'reported');
     await until(async () => (await cardRow(card.id)).status === 'done', 3000, 'card done');
@@ -496,7 +497,7 @@ describe('investigation-only cards: record, then finalize', () => {
     await p.startShift(r, fin);
     const res = await p.report(r, fin.shiftId, finalized('none'));
     expect(res.accepted).toBe(false);
-    expect(res.error).toMatch(/only for investigation-only cards/);
+    expect(res.error).toMatch(/only an investigation-only card/);
   });
 
   it('recording is refused for a card that is not investigation-only', async () => {

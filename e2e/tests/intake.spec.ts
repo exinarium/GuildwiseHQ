@@ -159,11 +159,10 @@ JSON
   );
 });
 
-test('AC intake: the manager pastes a Jira key, the BA reads it with the skill, maps it and drafts a card with a completion action', async () => {
+test('AC intake: the manager pastes a Jira key, the BA reads it with the skill, maps it and drafts a card (the project decides how it lands)', async () => {
   source('INT-12', {
     title: 'Add the login page',
     body: 'Users cannot sign in to the toy.',
-    completionAction: 'push_branch',
     acceptanceCriteria: ['The form validates the email', 'Errors are shown inline'],
     // the downstream builder stops at the first review (nobody to approve: Rae is busy reviewing nothing)
     mock: { build: ['ok'] },
@@ -191,7 +190,7 @@ test('AC intake: the manager pastes a Jira key, the BA reads it with the skill, 
   const c = await card('INT-1');
   expect(c).toMatchObject({
     origin: 'intake',
-    completion_action: 'push_branch',
+    completion_action: null, // an agent never sets it: the project's default applies
     repo_id: projects.INT?.repoId,
     card_type: 'feature',
   });
@@ -226,7 +225,7 @@ test('AC intake: the manager pastes a Jira key, the BA reads it with the skill, 
 });
 
 test('AC unmapped: a ticket that fits no project becomes a desk question; the answer maps it and the BA carries on', async () => {
-  source('ZZZ-9', { title: 'A mystery', body: 'Nobody knows where this belongs.', completionAction: 'pr' });
+  source('ZZZ-9', { title: 'A mystery', body: 'Nobody knows where this belongs.' });
   await page.goto('/intake');
   await page.getByLabel('Ticket or need').fill('ZZZ-9 please');
   await page.getByRole('button', { name: 'Start intake' }).click();
@@ -272,7 +271,7 @@ test('AC unmapped: a ticket that fits no project becomes a desk question; the an
   await expect(page.getByTestId('intake-cards')).toContainText('A mystery', { timeout: 60_000 });
   await expect(page.getByTestId('chat-panel')).toContainText('I mapped ZZZ-9 to project OTH');
   const c = await card('OTH-1');
-  expect(c).toMatchObject({ origin: 'intake', completion_action: 'pr' });
+  expect(c).toMatchObject({ origin: 'intake', completion_action: null });
   expect(c.fields.externalRef).toBe('ZZZ-9');
   // the decision is in the ledger, so the next ticket of this kind needs no question
   const ledger = await q<any>(`SELECT title FROM ledger_entries WHERE source_desk_item_id=$1`, [item.id]);

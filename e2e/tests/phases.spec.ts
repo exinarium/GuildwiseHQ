@@ -208,8 +208,8 @@ test('AC2: the BA proposes a phase with two cards in an intake; the manager conf
         ],
       },
       cards: [
-        { title: 'Autosave drafts', completionAction: 'merge', phase: true },
-        { title: 'Autosave indicator', completionAction: 'merge', phase: true },
+        { title: 'Autosave drafts', phase: true },
+        { title: 'Autosave indicator', phase: true },
       ],
     }),
   );

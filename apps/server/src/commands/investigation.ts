@@ -162,7 +162,7 @@ export async function investigationRecordRpc(
           true,
           {
             entryId,
-            message: `Recorded in the ledger${target?.vaultId ? ' and queued for PROJECT.md' : ' (this project has no vault, so PROJECT.md is unchanged)'}. Finalize now: \`aom finalize --action ${inv.location === 'vault' ? 'none' : 'merge'}\`.`,
+            message: `Recorded in the ledger${target?.vaultId ? ' and queued for PROJECT.md' : ' (this project has no vault, so PROJECT.md is unchanged)'}. Finalize now: \`aom finalize\`.`,
           },
         ],
         ...(workstationId ? { workstationId } : {}),

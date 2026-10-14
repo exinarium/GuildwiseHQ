@@ -9,7 +9,7 @@ import { mergeApprovalEvents, mergeGate, queueExecute } from './finalize.ts';
 import { investigationRecorded } from './investigation.ts';
 
 /**
- * `aom finalize --action none`: an investigation-only card whose report lives in the vault has nothing to merge or push.
+ * `aom finalize` on an investigation-only card whose report lives in the vault has nothing to merge or push.
  * The card is finished at once (`CardFinalized` with action `none`) and its worktree is given back. Refused for any other
  * card, and for a report that is in the repository (that report must reach the working branch).
  */
@@ -26,13 +26,13 @@ async function finalizeWithoutGit(
   if (!card.investigation_only)
     return {
       ok: false,
-      error: '`--action none` is only for investigation-only cards; use merge, pr or push_branch',
+      error: 'only an investigation-only card with its report in the vault finishes without a git step',
     };
   const inv = card.investigation as { location?: string } | null;
   if (inv?.location !== 'vault')
     return {
       ok: false,
-      error: `the report of ${card.ref} is in the repository, so it must be merged: finalize with \`--action merge\` (or pr / push_branch)`,
+      error: `the report of ${card.ref} is in the repository, so it must be merged: run \`aom finalize\` without --action`,
     };
   const events: AppendInput[] = [
     {
@@ -65,24 +65,29 @@ async function finalizeWithoutGit(
     ok: true,
     events,
     message: 'Recorded. The investigation is finished; no merge was needed. Finish now.',
+    action: 'none',
     ...(workstationId ? { workstationId } : {}),
   };
 }
 
+/** Same teaching message as the #52 guard on card drafts: only people choose how a card lands. */
+export const FINALIZE_ACTION_REFUSAL =
+  'agents may not choose the completion action: finalize runs the card\'s own completion action (set by a person on the card, else the project\'s default). Run `aom finalize --note "<note>"` without --action. If the card should land differently, say so in the conversation and ask the manager to change it on the card page.';
+
 export type BaFinalize =
-  | { ok: true; events: AppendInput[]; message: string; workstationId?: string }
+  | { ok: true; events: AppendInput[]; message: string; workstationId?: string; action: FinalizeAction }
   | { ok: false; error: string };
 
 /**
  * The BA's background finalize queue (docs/ARCHITECTURE.md section 24 item 22; docs/SPEC.md "Finalize"): the BA claims
- * the Finalize stage and reports `aom finalize --action ...`. The action may revise the card's completion action
- * (recorded on the card). A large-tier merge waits for the manager's approval on the desk; anything else goes to the
+ * the Finalize stage and reports `aom finalize`. The action is always the card's effective completion action
+ * (a person's override, else the project default). A large-tier merge waits for the manager's approval on the desk; anything else goes to the
  * card's home workstation as `finalize.execute`, where the runner runs the completion action (`git/completion.ts`)
  * with no agent involved. The manager's Finalize button stays as an override (`requestFinalize`).
  */
 export async function baFinalizeEvents(
   tx: Tx,
-  input: { card: Row; agent: Row; action: FinalizeAction; note: string },
+  input: { card: Row; agent: Row; action?: FinalizeAction | undefined; note: string },
 ): Promise<BaFinalize> {
   const { card, agent } = input;
   const scope = projectScope(card.org_id, card.project_id);
@@ -93,27 +98,19 @@ export async function baFinalizeEvents(
       ok: false,
       error: `${card.ref} is an investigation-only card: record the result first with \`aom investigation record --title "<what was investigated>" --summary-file <summary.md>\`, then finalize`,
     };
-  if (input.action === 'none') return finalizeWithoutGit(tx, { ...input, scope });
-  const action: CompletionAction = input.action;
+  // Agents never choose how a card lands (#52): only the card's own action runs. `none` is derived, not chosen.
+  if (input.action !== undefined && input.action !== 'none')
+    return { ok: false, error: FINALIZE_ACTION_REFUSAL };
+  const reportInVault =
+    card.investigation_only && (card.investigation as { location?: string } | null)?.location === 'vault';
+  if (input.action === 'none' || reportInVault) return finalizeWithoutGit(tx, { ...input, scope });
   const events: AppendInput[] = [];
-  const inherited = await effectiveCompletionAction(tx, card);
-  const revised = action !== inherited;
-  if (revised) {
-    events.push(
-      {
-        streamId: streamId.card(card.id),
-        event: { type: 'CardUpdated', payload: { cardId: card.id, changes: { completionAction: action } } },
-        actor,
-        scope,
-      },
-      cardMessage(
-        card,
-        { kind: 'agent', agentId: agent.id },
-        'comment',
-        `Completion action revised from ${inherited ?? 'none'} to ${action}: ${input.note}`,
-      ),
-    );
-  }
+  const action: CompletionAction | null = await effectiveCompletionAction(tx, card);
+  if (!action)
+    return {
+      ok: false,
+      error: `${card.ref} has no completion action: ask the manager to set one on the card or in the project settings`,
+    };
   const by = `${agent.name} (BA)`;
   const gate = await mergeGate(tx, card, action);
   if (gate === 'approval') {
@@ -123,6 +120,7 @@ export async function baFinalizeEvents(
       ok: true,
       events,
       message: 'Recorded. A large merge needs the manager: the approval is on the desk. Finish now.',
+      action,
     };
   }
   let workstationId: string;
@@ -158,5 +156,6 @@ export async function baFinalizeEvents(
     events,
     message: `Recorded. The runner is executing the completion action (${action}). Finish now.`,
     workstationId,
+    action,
   };
 }

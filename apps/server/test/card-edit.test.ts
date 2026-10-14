@@ -293,7 +293,7 @@ describe('the BA overrides the risk tier from its shift (aom risk)', () => {
       kind: 'outcome',
       outcomeId: 'finalized',
       note: 'ready',
-      data: { action: 'merge' },
+      data: {},
     });
     expect(fin).toMatchObject({ accepted: true });
     expect(await cardRow(card.id)).toMatchObject({ status: 'waiting', finalize_state: 'awaiting_approval' });

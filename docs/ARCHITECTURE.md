@@ -1595,7 +1595,7 @@ aom devops-approval --action ... --reason ... --command ...   # M3 DevOps only: 
 aom devops-done --summary ... [--command ...]...  # M3 DevOps only: terminal, EnvironmentChanged
 aom publish --file <md> --path <vault-relative> --citations-file <json>   # M6 checker
 aom digest --file <items.json>                     # M5 curator
-aom finalize --action pr|push_branch|merge         # M7 BA
+aom finalize                                      # M7 BA: runs the card's own completion action (agents never choose it)
 aom answer --item <deskItemId> --text ...          # M7 BA/senior in a question shift
 aom escalate --item <deskItemId> --note ...        # M7
 aom phase list|propose|assign|submit ...           # BA intake chat: propose a phase and its cards (the manager confirms on the desk)
