@@ -1,4 +1,5 @@
 import {
+  BriefingPreferenceSchema,
   DigestItemsQuerySchema,
   IdParamsSchema,
   RateDigestItemRequestSchema,
@@ -9,6 +10,7 @@ import { requireUser } from '../auth/guards.ts';
 import { loadVisibleProject } from '../authz/scope.ts';
 import { rateDigestItem } from '../commands/digests.ts';
 import { transcriptFor } from '../commands/transcripts.ts';
+import { briefingEnabled, setBriefingEnabled } from '../commands/weekly-briefing.ts';
 import type { Ctx } from '../context.ts';
 import { HttpError } from '../errors.ts';
 import { listDigestItems } from '../queries/digests.ts';
@@ -31,6 +33,18 @@ export function digestRoutes(ctx: Ctx) {
         return rateDigestItem(ctx, s.user, req.params.id, req.body);
       },
     );
+
+    // The Monday briefing: each person's own switch (on unless they turned it off).
+    app.get('/api/me/weekly-briefing', async (req) => {
+      const s = await requireUser(ctx, req);
+      return BriefingPreferenceSchema.parse({ enabled: await briefingEnabled(ctx, s.user.id) });
+    });
+
+    app.put('/api/me/weekly-briefing', { schema: { body: BriefingPreferenceSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await setBriefingEnabled(ctx, s.user.id, req.body.enabled);
+      return BriefingPreferenceSchema.parse({ enabled: req.body.enabled });
+    });
 
     app.get(
       '/api/projects/:id/transcript',

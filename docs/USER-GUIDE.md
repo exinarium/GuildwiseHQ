@@ -566,6 +566,10 @@ Every shift records what it used (input, output and cache tokens and the model).
 
 Setting a budget below what was already spent pauses the project at once. Members can see the progress but not change it. Guests see only that a project is paused.
 
+**Value report.** At the top of the Costs page: "This month: 42 cards, ~168 hours of work, $84 usage, ~80x return", the change against last month, and **Next best actions** (cards that have not moved for days, agents that fail often, projects with no work). The hours are an estimate of what a person would have needed, by card type; Owners and Admins can change them under **Adjust the estimates**. **Export value report (CSV)** downloads it.
+
+**Monday briefing.** Every Monday at 08:00 (organization time) you get an e-mail with what was finished, what waits on you, what is blocked and the health of your agents and workstations; Owners and Admins also get spend against budget and the value report. Switch it off under **Settings, Monday briefing**.
+
 **Currency.** Under **Costs, Currency and prices** type a three-letter currency code and how many units make one US dollar (for example `EUR` and `0.92`). Changing the rate changes how history is shown, not what was recorded.
 
 > **In the app:** Help, "Budgets and costs" (`/help/budgets-and-costs`).

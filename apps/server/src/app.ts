@@ -454,7 +454,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
         return reply.sendFile(landingFor(req.cookies, root, valid));
       });
       // The public legal pages: prerendered from apps/web/src/legal/*.md at build time, for everyone (signed in or not).
-      for (const doc of ['privacy', 'terms'] as const)
+      for (const doc of ['privacy', 'terms', 'trust', 'popia'] as const)
         app.get(`/${doc}`, (_req, reply) => {
           void reply.header('cache-control', 'no-cache');
           return reply.sendFile(existsSync(join(root, `${doc}.html`)) ? `${doc}.html` : 'index.html');

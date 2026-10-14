@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import {
   BUDGET,
   budgetStatus,
+  DEFAULT_HOURS_PER_CARD,
   formatMoney,
   isOrgManager,
   streamId,
   toMicros,
   type UpdateCostSettingsRequest,
+  type UpdateValueSettingsRequest,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -148,6 +150,37 @@ export async function setCostSettings(
           event: {
             type: 'OrgCostSettingsChanged',
             payload: { orgId, currency: req.currency, usdRate: req.usdRate, by: user.id },
+          },
+          actor: userActor(user.id),
+          scope: orgScope(orgId),
+        },
+      ],
+      { tx },
+    );
+  });
+}
+
+/** The Owner or an Admin sets the human hours per card type and the value of an hour for the value report. */
+export async function setValueSettings(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  orgId: string,
+  req: UpdateValueSettingsRequest,
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const role = await orgRoleOf(tx, user.id, orgId);
+    if (!isOrgManager({ orgRole: role }))
+      throw forbidden('only the organization Owner and Admins can change the value estimates');
+    const hoursByType = Object.fromEntries(
+      Object.entries(req.hoursByType).filter(([k]) => k in DEFAULT_HOURS_PER_CARD),
+    );
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.org(orgId),
+          event: {
+            type: 'OrgValueSettingsChanged',
+            payload: { orgId, hoursByType, hourlyValue: req.hourlyValue, by: user.id },
           },
           actor: userActor(user.id),
           scope: orgScope(orgId),

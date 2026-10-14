@@ -51,7 +51,11 @@ const landingInDev = (): Plugin => ({
   configureServer(server) {
     server.middlewares.use((req, _res, next) => {
       const [path, query] = (req.url ?? '').split('?');
-      if (req.method === 'GET' && (path === '/privacy' || path === '/terms')) req.url = '/legal.html';
+      if (
+        req.method === 'GET' &&
+        (path === '/privacy' || path === '/terms' || path === '/trust' || path === '/popia')
+      )
+        req.url = '/legal.html';
       else if (req.method === 'GET' && path === '/' && !/(^|;\s*)aom_sid=/.test(req.headers.cookie ?? ''))
         req.url = `/landing.html${query ? `?${query}` : ''}`;
       next();
@@ -84,7 +88,11 @@ const prerenderLanding = (): Plugin => {
       try {
         const mod = (await server.ssrLoadModule('/src/landing/render.tsx')) as { render: () => string };
         const legalMod = (await server.ssrLoadModule('/src/landing/render-legal.tsx')) as {
-          renderLegal: (doc: 'privacy' | 'terms') => { html: string; title: string; description: string };
+          renderLegal: (doc: 'privacy' | 'terms' | 'trust' | 'popia') => {
+            html: string;
+            title: string;
+            description: string;
+          };
         };
         const file = resolve(cfg.root, cfg.build.outDir, 'landing.html');
         const html = readFileSync(file, 'utf8');
@@ -103,11 +111,11 @@ const prerenderLanding = (): Plugin => {
             .replace('</head>', `${preload}</head>`)
             .replace(/<div id="root">(?:<!--app-html-->)?<\/div>/, `<div id="root">${mod.render()}</div>`),
         );
-        // /privacy and /terms: the same shell with the text of src/legal/*.md already in it (the server sends them as static files).
+        // /privacy, /terms, /trust and /popia: the same shell with the text of src/legal/*.md already in it (the server sends them as static files).
         const attr = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
         const legalFile = resolve(cfg.root, cfg.build.outDir, 'legal.html');
         const shell = readFileSync(legalFile, 'utf8');
-        for (const doc of ['privacy', 'terms'] as const) {
+        for (const doc of ['privacy', 'terms', 'trust', 'popia'] as const) {
           const r = legalMod.renderLegal(doc);
           writeFileSync(
             resolve(cfg.root, cfg.build.outDir, `${doc}.html`),

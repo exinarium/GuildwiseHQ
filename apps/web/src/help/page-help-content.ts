@@ -788,6 +788,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         name: 'Export CSV',
         text: 'Download costs data for analysis in a spreadsheet or accounting system.',
       },
+      {
+        name: 'What the agents delivered',
+        text: 'Cards finished this month, estimated hours of work, usage and return. Adjust the estimates there.',
+      },
     ],
     article: 'budgets-and-costs#monthly-budgets',
   },
@@ -1301,7 +1305,8 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   },
   '/intake/batches/:id': {
     title: 'Batch intake',
-    intro: 'One batch of tickets: what the BA has done with each, the cards it created and the questions it asked.',
+    intro:
+      'One batch of tickets: what the BA has done with each, the cards it created and the questions it asked.',
     controls: [
       {
         name: 'Ticket status',

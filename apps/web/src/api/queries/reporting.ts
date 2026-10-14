@@ -1,4 +1,6 @@
 import {
+  type BriefingPreference,
+  BriefingPreferenceSchema,
   type MeResponse,
   MeResponseSchema,
   type ReportingResponse,
@@ -49,5 +51,22 @@ export function useSetTimezone() {
       qc.setQueryData(meKey, me);
       void qc.invalidateQueries({ queryKey: reportingKey });
     },
+  });
+}
+
+/** Your own switch for the Monday briefing mail (on unless you turned it off). */
+export function useBriefingPreference() {
+  return useQuery({
+    queryKey: ['me', 'weekly-briefing'],
+    queryFn: () => get<BriefingPreference>('/me/weekly-briefing', BriefingPreferenceSchema),
+  });
+}
+
+export function useSetBriefingPreference() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      put<BriefingPreference>('/me/weekly-briefing', { enabled }, BriefingPreferenceSchema),
+    onSuccess: (data) => qc.setQueryData(['me', 'weekly-briefing'], data),
   });
 }

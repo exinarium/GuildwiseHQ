@@ -14,6 +14,19 @@ export const costEvents = [
     z.object({ orgId: Id, currency: CurrencyCode, usdRate: z.number().positive().max(1_000_000), by: Id }),
   ),
   /**
+   * The Owner or an Admin set how many human hours a finished card of each type is worth in the value report, and the
+   * value of an hour (null = the default). Whole replacement: types left out use the defaults.
+   */
+  defineEvent(
+    'OrgValueSettingsChanged',
+    z.object({
+      orgId: Id,
+      hoursByType: z.record(z.string(), z.number().min(0).max(1000)),
+      hourlyValue: z.number().min(0).max(1_000_000).nullable(),
+      by: Id,
+    }),
+  ),
+  /**
    * An Owner or Admin set (or removed, with null) a project's monthly budget in micro-units of the organization's
    * currency. `clearWarned` / `clearPaused` are computed by the command from the month's spend so a raised budget
    * lifts the pause and re-arms the warning, and a replay needs no spend to reproduce it.

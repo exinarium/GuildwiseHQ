@@ -258,6 +258,6 @@ export function sitemap(origin: string, posts: PublicBlogPost[], tags: string[])
     `<url><loc>${xml(loc)}</loc>${lastmod ? `<lastmod>${new Date(lastmod).toISOString()}</lastmod>` : ''}</url>`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${[url(`${origin}/`), url(`${origin}/blog`, posts[0]?.updatedAt), ...tags.map((t) => url(`${origin}/blog/tag/${t}`)), ...posts.map((p) => url(p.url, p.updatedAt)), url(`${origin}/privacy`), url(`${origin}/terms`), url(`${origin}/contact`)].join('\n')}
+${[url(`${origin}/`), url(`${origin}/blog`, posts[0]?.updatedAt), ...tags.map((t) => url(`${origin}/blog/tag/${t}`)), ...posts.map((p) => url(p.url, p.updatedAt)), url(`${origin}/privacy`), url(`${origin}/terms`), url(`${origin}/trust`), url(`${origin}/popia`), url(`${origin}/contact`)].join('\n')}
 </urlset>`;
 }

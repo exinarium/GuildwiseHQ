@@ -18,6 +18,7 @@ import {
   TextInput,
   useToast,
 } from '../components/ui.tsx';
+import { ValuePanel } from '../components/ValuePanel.tsx';
 import { money, tokensShort as tokens } from '../lib/money.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 
@@ -232,6 +233,8 @@ export function Costs() {
           </Select>
         </div>
       </div>
+
+      <ValuePanel />
 
       {empty ? (
         <EmptyState
