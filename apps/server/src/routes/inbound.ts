@@ -4,7 +4,8 @@ import {
   MailMessagesQuerySchema,
   PatchMailInboxRequestSchema,
 } from '@aom/shared';
-import type { FastifyInstance } from 'fastify';
+import multipart from '@fastify/multipart';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { requireOrg, requireSuperAdmin } from '../auth/guards.ts';
 import {
   createInbox,
@@ -18,11 +19,45 @@ import type { Ctx } from '../context.ts';
 import { HttpError, notFound } from '../errors.ts';
 import { countInbound, ingestInbound } from '../mail/inbound/ingest.ts';
 import { configuredProvider, webhookAuthorised } from '../mail/inbound/providers.ts';
-import { BadInbound } from '../mail/inbound/types.ts';
+import { BadInbound, type MultipartBody } from '../mail/inbound/types.ts';
 import { typed } from './util.ts';
 
-/** Postmark's limit is 35 MB; bigger bodies never reach us. The stored-message limit (`AOM_INBOUND_MAX_BYTES`) is lower. */
+/** Postmark's and SendGrid's limit is 30 to 35 MB; bigger bodies never reach us. The stored-message limit (`AOM_INBOUND_MAX_BYTES`) is lower. */
 const WEBHOOK_BODY_LIMIT = 36 * 1024 * 1024;
+
+/**
+ * SendGrid Inbound Parse posts `multipart/form-data`. Fields are read as latin-1 so every byte survives (the adapter decodes with
+ * the charset SendGrid states); a file (an attachment) is only counted, never kept. Throws `BadInbound` for a form that is
+ * malformed or over the limits.
+ */
+async function collectMultipart(req: FastifyRequest): Promise<MultipartBody> {
+  const body: MultipartBody = { fields: {}, files: [], bytes: 0 };
+  try {
+    for await (const part of req.parts()) {
+      if (part.type === 'file') {
+        let size = 0;
+        for await (const chunk of part.file) size += (chunk as Buffer).length;
+        body.bytes += size;
+        if (part.file.truncated) body.bytes += WEBHOOK_BODY_LIMIT;
+        // The raw-MIME mode could send `email` as a file part: keep nothing, the field form is what SendGrid uses.
+        body.files.push({
+          field: part.fieldname,
+          filename: part.filename ?? '',
+          contentType: part.mimetype ?? '',
+          size,
+        });
+      } else {
+        const value = typeof part.value === 'string' ? part.value : '';
+        body.bytes += value.length;
+        if (part.valueTruncated) body.bytes += WEBHOOK_BODY_LIMIT;
+        if (!(part.fieldname in body.fields)) body.fields[part.fieldname] = value;
+      }
+    }
+  } catch (err) {
+    throw new BadInbound(`unreadable form: ${(err as Error).message}`);
+  }
+  return body;
+}
 
 /**
  * Inbound e-mail (docs/design/workflow-builder.md D9): the provider webhook, an organisation's inboxes (Owner and
@@ -31,6 +66,17 @@ const WEBHOOK_BODY_LIMIT = 36 * 1024 * 1024;
 export function inboundRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
     const app = typed(fastify);
+    // Multipart is parsed for this plugin's routes only (the webhook); `defCharset` keeps field bytes intact.
+    await fastify.register(multipart, {
+      defCharset: 'latin1',
+      limits: {
+        fieldSize: WEBHOOK_BODY_LIMIT,
+        fileSize: WEBHOOK_BODY_LIMIT,
+        files: 100,
+        fields: 60,
+        parts: 200,
+      },
+    } as Parameters<typeof multipart>[1]);
 
     // ---- The provider webhook: no cookie, no Origin. The shared secret is the credential, checked before the body is read.
     fastify.post(
@@ -51,9 +97,9 @@ export function inboundRoutes(ctx: Ctx) {
       async (req, reply) => {
         const provider = configuredProvider(ctx.config);
         if (!provider) throw notFound('inbound e-mail is not set up');
-        let message: ReturnType<typeof provider.parse>;
+        let message: Awaited<ReturnType<typeof provider.parse>>;
         try {
-          message = provider.parse(req.body);
+          message = await provider.parse(req.isMultipart() ? await collectMultipart(req) : req.body);
         } catch (err) {
           if (!(err instanceof BadInbound)) throw err;
           // A body we cannot read will not get better: 200 so the provider does not retry it for hours.

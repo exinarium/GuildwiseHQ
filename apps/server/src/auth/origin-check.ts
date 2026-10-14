@@ -37,6 +37,8 @@ const isUnsubscribePost = (url: string): boolean => /^\/blog\/unsubscribe\//.tes
 export function checkContentType(req: FastifyRequest): void {
   if (SAFE.has(req.method)) return;
   if (isUnsubscribePost(req.url)) return;
+  // SendGrid Inbound Parse posts multipart/form-data; the shared secret (checked before the body is read) is the credential.
+  if ((req.url.split('?')[0] ?? '') === '/api/inbound/mail/sendgrid') return;
   // PayFast's notification is a form post.
   if ((req.url.split('?')[0] ?? '') === '/api/billing/payfast/itn') return;
   // A file upload is the raw body (the web app sends application/octet-stream), not JSON.

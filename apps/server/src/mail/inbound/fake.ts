@@ -9,7 +9,7 @@ import { addressOf, BadInbound, type InboundProvider, type NormalizedInbound } f
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const verdict = (v: unknown): 'pass' | 'fail' | 'none' => (v === 'pass' || v === 'fail' ? v : 'none');
 
-export const fakeProvider: InboundProvider = {
+export const fakeProvider: Omit<InboundProvider, 'parse'> & { parse(body: unknown): NormalizedInbound } = {
   id: 'fake',
   parse(body: unknown): NormalizedInbound {
     if (!body || typeof body !== 'object') throw new BadInbound('not a message');

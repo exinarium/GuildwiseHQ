@@ -275,8 +275,21 @@ The details of each done item follow this list, by date.
 - #49: `aom source read` reads Jira tickets through the runner's Jira connection. Done 2026-10-14.
 - #50: Claude login expiry: detect, pause, notify, resume; credentials copied under a lock instead of symlinked. Done 2026-10-14.
 - #61: No card or agent branch is pushed unless the goal is a pull request. Done 2026-10-14.
+- #62: Inbound e-mail through SendGrid Inbound Parse. Done 2026-10-14.
 
 ## 2026-10-14 (done)
+
+### 62. Inbound e-mail through SendGrid Inbound Parse
+
+Inbound mail comes in through SendGrid (outgoing already does) instead of Postmark: one account, one DNS vendor.
+
+**Done (2026-10-14).** New `AOM_INBOUND_PROVIDER=sendgrid` (`apps/server/src/mail/inbound/sendgrid.ts`). The webhook route
+accepts `multipart/form-data` (only `/api/inbound/mail/sendgrid`; `@fastify/multipart` with size and part limits;
+attachments are counted, never kept) and reads both Inbound Parse modes: raw MIME (`email` field, parsed with `postal-mime`,
+recommended) and parsed fields (`headers`, `text`, `html`, `envelope`, `charsets`, `attachment-info`, `attachmentN`). Same
+normalised message as Postmark, so threads, cards, rate limit and untrusted rendering are unchanged; SendGrid's `dkim`, `SPF`
+and `spam_score` fields feed the existing checks. Auth is the existing Basic-auth secret in the webhook URL. DEPLOY.md has the
+set-up steps. Tests: `test/inbound-sendgrid.test.ts`.
 
 ### 47. Intake: the BA tries to read the code itself
 

@@ -28,9 +28,17 @@ export interface NormalizedInbound {
 export class BadInbound extends Error {}
 
 export interface InboundProvider {
-  id: 'postmark' | 'fake';
+  id: 'postmark' | 'sendgrid' | 'fake';
   /** Reads the provider's webhook body. Throws `BadInbound` when it is not a message of this provider. */
-  parse(body: unknown): NormalizedInbound;
+  parse(body: unknown): NormalizedInbound | Promise<NormalizedInbound>;
+}
+
+/** A `multipart/form-data` webhook body (SendGrid) as the route collects it: text fields, and each file's size only. */
+export interface MultipartBody {
+  fields: Record<string, string>;
+  files: Array<{ field: string; filename: string; contentType: string; size: number }>;
+  /** Bytes of every part received (fields, files, attachments); the message's size on the wire. */
+  bytes: number;
 }
 
 export interface HeaderPair {
