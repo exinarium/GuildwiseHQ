@@ -6,11 +6,14 @@ import { useBoard } from '../api/queries/board.ts';
 import { useInterests } from '../api/queries/interests.ts';
 import { usePhases } from '../api/queries/phases.ts';
 import { useProject, useProjects } from '../api/queries/projects.ts';
+import { useRuns } from '../api/queries/runs.ts';
 import { BoardView, NO_FILTER } from '../components/BoardView.tsx';
 import { BudgetBanner } from '../components/BudgetBanner.tsx';
 import { ConvertProjectDialog } from '../components/ConvertProjectDialog.tsx';
 import { PhaseFilter } from '../components/PhaseFilter.tsx';
 import { RegressionDialog } from '../components/RegressionDialog.tsx';
+import { RunBranchDialog } from '../components/runs/RunBranchDialog.tsx';
+import { RunList } from '../components/runs/RunPanel.tsx';
 import { projectTypeLabel } from '../components/shell/ProjectSwitcher.tsx';
 import {
   Button,
@@ -22,9 +25,6 @@ import {
   PriorityPicker,
   Skeleton,
 } from '../components/ui.tsx';
-import { RunBranchDialog } from '../components/runs/RunBranchDialog.tsx';
-import { RunList } from '../components/runs/RunPanel.tsx';
-import { useRuns } from '../api/queries/runs.ts';
 import { setLastProjectKey } from '../lib/lastProject.ts';
 import { money } from '../lib/money.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
@@ -220,6 +220,14 @@ export function Board() {
               onClick={() => setF({ qaFor: filter.qaFor === null ? myId : null })}
             >
               Waiting for my QA ({cards.filter((c) => c.qa?.assigneeUserId === myId).length})
+            </FilterChip>
+          )}
+          {myId && cards.some((c) => c.approval) && (
+            <FilterChip
+              pressed={filter.approvalFor !== null}
+              onClick={() => setF({ approvalFor: filter.approvalFor === null ? myId : null })}
+            >
+              Waiting for my approval ({cards.filter((c) => c.approval?.approverUserId === myId).length})
             </FilterChip>
           )}
         </div>

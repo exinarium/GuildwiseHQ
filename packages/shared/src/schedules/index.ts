@@ -293,7 +293,9 @@ const HOOK_TOKEN = /^hook\.[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+){0,4}$/;
 export const isHookToken = (name: string): boolean => HOOK_TOKEN.test(name);
 
 export const isMappingToken = (name: string): boolean =>
-  (MAPPING_TOKENS as readonly string[]).includes(name) || CARD_FIELD_TOKEN.test(name) || HOOK_TOKEN.test(name);
+  (MAPPING_TOKENS as readonly string[]).includes(name) ||
+  CARD_FIELD_TOKEN.test(name) ||
+  HOOK_TOKEN.test(name);
 
 /** Calls an incoming webhook accepts per hour unless the trigger says otherwise. */
 export const HOOK_DEFAULT_PER_HOUR = 60;

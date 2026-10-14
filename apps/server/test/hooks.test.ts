@@ -75,7 +75,9 @@ describe('creating and reading a hook automation', () => {
     const s = await ok<any>(make(), 201);
     expect(s.webhookSecret).toMatch(/^hook_/);
     expect(s.hookUrl).toBe(`/api/hooks/${s.id}`);
-    expect(s.hookUrlWithSecret).toBe(`${w.t.app.ctx.config.publicOrigin}/api/hooks/${s.id}/${s.webhookSecret}`);
+    expect(s.hookUrlWithSecret).toBe(
+      `${w.t.app.ctx.config.publicOrigin}/api/hooks/${s.id}/${s.webhookSecret}`,
+    );
     expect(s.hasWebhookSecret).toBe(true);
     expect(JSON.stringify(s)).not.toContain('secretHash');
     const stored = (await q('SELECT trigger FROM schedules WHERE id=$1', [s.id]))[0];
@@ -194,7 +196,12 @@ describe('calling a hook', () => {
       owner('POST', '/api/schedules', {
         name: 'Ask BA on hook',
         trigger: { kind: 'webhook_in' },
-        action: { kind: 'ba_task', projectId: w.projectId, prompt: 'Summarise the alert for the Owner', deliver: 'desk_notice' },
+        action: {
+          kind: 'ba_task',
+          projectId: w.projectId,
+          prompt: 'Summarise the alert for the Owner',
+          deliver: 'desk_notice',
+        },
       }),
       201,
     );

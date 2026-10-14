@@ -12,7 +12,7 @@ import { loadVisibleCard } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { conflict, forbidden, notFound } from '../errors.ts';
+import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { sendInThread } from '../mail/inbound/reply.ts';
 import { cardMessage, orgScope, userActor } from './common.ts';
@@ -22,6 +22,29 @@ import { cardMessage, orgScope, userActor } from './common.ts';
  * Admins, and the owner and managers of the project of the card the conversation made. The reply is stored on the
  * thread, noted on the card, and goes out through the normal mailer; a person always sends it (the BA only drafts).
  */
+
+/**
+ * Clients outside the organisation never see agents, AI or Guildwise. A reply that names them is refused so the person
+ * edits it (the BA is told to write as the organisation's own person; this is the check behind that).
+ */
+export async function revealedMarkers(db: Queryable, orgId: string, ...texts: string[]): Promise<string[]> {
+  const text = texts.join('\n').toLowerCase();
+  const found = new Set<string>();
+  for (const m of ['guildwise', 'guildwisehq', 'ai agent', 'ai assistant', 'ai-generated', 'language model'])
+    if (text.includes(m)) found.add(m);
+  const agents = await rows<{ name: string }>(db, `SELECT DISTINCT name FROM agents WHERE org_id=$1`, [
+    orgId,
+  ]);
+  for (const a of agents) {
+    const n = a.name.trim();
+    if (
+      n.length >= 3 &&
+      new RegExp(`(^|[^\\p{L}])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}])`, 'iu').test(text)
+    )
+      found.add(n);
+  }
+  return [...found];
+}
 
 /** Replies one organisation can send per hour: a guard against a stuck button or a stolen session. */
 export const MAIL_REPLIES_PER_ORG_PER_HOUR = 30;
@@ -122,6 +145,13 @@ export async function replyToMailThread(
   if (!canReply) throw forbidden(reason ?? 'you may not reply to this conversation');
   const to = await replyAddress(ctx.pool, thread.id);
   if (!to) throw conflict('nobody_to_answer', 'there is no accepted message from a sender to answer');
+  const markers = await revealedMarkers(ctx.pool, thread.org_id, req.text, req.subject ?? '');
+  if (markers.length)
+    throw unprocessable(
+      'reply_reveals_internals',
+      `Clients must not see agents, AI or Guildwise. Take out: ${markers.map((m) => `"${m}"`).join(', ')}.`,
+      { markers },
+    );
   const recent = Number(
     (
       await one(

@@ -26,6 +26,7 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { HttpError } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { enterHumanStep } from './approval.ts';
 import { createCardIn, workflowView } from './cards.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
 
@@ -57,7 +58,22 @@ const END_EVENTS = new Set([
   'CardCancelled',
   'CardMovedByManager',
 ]);
-const INTEREST = [...new Set([...ENTRY_EVENTS, ...END_EVENTS])];
+/**
+ * Events after which a card may sit at a person's step (approval, or a custom workflow's QA): every way a card moves into a
+ * stage, including the built-in review and test outcomes and a send back from QA.
+ */
+const HUMAN_ENTRY_EVENTS = new Set([
+  ...ENTRY_EVENTS,
+  'ReviewApproved',
+  'TestPassed',
+  'ChildCardResolved',
+  'ChangesRequested',
+  'QaPassed',
+  'QaSkipped',
+  'CardFinalized',
+  'CardReopened',
+]);
+const INTEREST = [...new Set([...HUMAN_ENTRY_EVENTS, ...END_EVENTS])];
 
 async function readCursor(ctx: Ctx): Promise<bigint> {
   await ctx.pool.query(
@@ -80,8 +96,14 @@ export async function sweepSubworkflows(ctx: Ctx): Promise<number> {
     (await one<{ m: string | null }>(ctx.pool, 'SELECT max(seq) AS m FROM events'))?.m ?? 0,
   );
   if (head <= cursor) return 0;
-  // Are there sub-workflow stages at all? Most deployments have none: skip the read, still move the cursor.
-  const any = await one(ctx.pool, `SELECT 1 FROM workflow_stages WHERE kind = 'subworkflow' LIMIT 1`);
+  // Are there sub-workflow or custom person's steps at all? Most deployments have none: skip the read, still move the cursor.
+  // (The built-in QA step is a person's step too, but it opens with `CardFinalized`, not here.)
+  const any = await one(
+    ctx.pool,
+    `SELECT 1 FROM workflow_stages s JOIN workflow_versions v ON v.id = s.workflow_version_id
+      WHERE s.kind = 'subworkflow' OR (s.kind = 'human' AND NOT (v.org_id IS NULL AND v.key = 'code' AND s.stage_id = 'manual_qa'))
+      LIMIT 1`,
+  );
   let done = 0;
   let at = cursor;
   let stoppedAt: bigint | null = null;
@@ -130,6 +152,7 @@ async function handleEvent(ctx: Ctx, e: Row): Promise<number> {
   if (!cardId) return 0;
   let n = 0;
   if (ENTRY_EVENTS.has(e.type) && (await enterSubworkflow(ctx, cardId))) n++;
+  if (HUMAN_ENTRY_EVENTS.has(e.type) && (await enterHumanStep(ctx, cardId))) n++;
   if (END_EVENTS.has(e.type) && (await resolveSubworkflow(ctx, cardId))) n++;
   return n;
 }

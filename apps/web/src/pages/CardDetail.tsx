@@ -24,6 +24,8 @@ import {
   useSpecifyCard,
 } from '../api/queries/cards.ts';
 import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
+import { useRuns } from '../api/queries/runs.ts';
+import { ApprovalPanel } from '../components/ApprovalPanel.tsx';
 import { AttachmentsPanel } from '../components/AttachmentsPanel.tsx';
 import { BackoffBadge } from '../components/BackoffBadge.tsx';
 import {
@@ -34,18 +36,17 @@ import {
 } from '../components/CardEdit.tsx';
 import { CardPhase } from '../components/CardPhase.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
-import { RunBranchDialog } from '../components/runs/RunBranchDialog.tsx';
-import { RunList } from '../components/runs/RunPanel.tsx';
-import { useRuns } from '../api/queries/runs.ts';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
 import { FinalizePanel } from '../components/FinalizePanel.tsx';
 import { InvestigationPanel, MainSyncNote } from '../components/InvestigationPanel.tsx';
+import { CardMailReply } from '../components/MailThreadPanel.tsx';
 import { McpUsagePanel } from '../components/McpUsagePanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
-import { CardMailReply } from '../components/MailThreadPanel.tsx';
 import { QaPanel } from '../components/QaPanel.tsx';
+import { RunBranchDialog } from '../components/runs/RunBranchDialog.tsx';
+import { RunList } from '../components/runs/RunPanel.tsx';
 import { ShiftLog } from '../components/ShiftLog.tsx';
 import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
 import {
@@ -393,6 +394,7 @@ export function CardDetailView({
       <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
           {data.qa && <QaPanel cardId={card.id} qa={data.qa} />}
+          {data.approval && <ApprovalPanel cardId={card.id} approval={data.approval} />}
           {currentShift && currentShift.status !== 'ended' && (
             <Panel
               title={

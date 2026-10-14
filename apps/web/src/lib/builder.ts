@@ -556,6 +556,11 @@ export function moveStep(m: BuilderModel, uid: string, dir: -1 | 1): BuilderMode
   return model;
 }
 
+const omitHuman = (extra: BuilderStep['extra']): BuilderStep['extra'] => {
+  const { human: _h, ...rest } = extra;
+  return rest;
+};
+
 /** Changes what kind of step this is, keeping the rest sensible (final steps have no routes, only agent steps a role). */
 export function setStepKind(m: BuilderModel, uid: string, kind: StepKindValue): BuilderModel {
   const i = m.steps.findIndex((s) => s.uid === uid);
@@ -565,6 +570,7 @@ export function setStepKind(m: BuilderModel, uid: string, kind: StepKindValue): 
     ...s,
     kind,
     role: kind === 'agent' ? s.role : null,
+    extra: kind === 'human' ? s.extra : omitHuman(s.extra),
     routes: kind === 'terminal' ? [] : s.routes,
     ...(kind === 'subworkflow'
       ? { subworkflow: s.subworkflow ?? newSubworkflowConfig() }
@@ -575,6 +581,83 @@ export function setStepKind(m: BuilderModel, uid: string, kind: StepKindValue): 
     if (next) model = setNext(model, uid, next.uid);
   }
   return kind === 'subworkflow' ? ensureFailedRoute(model, uid) : model;
+}
+
+type HumanPurpose = 'qa' | 'approval';
+type ApproverIn = NonNullable<NonNullable<StageIn['human']>['approver']>;
+
+/** What a person's step is, for the kind picker: the purpose of a `human` step, else its kind. */
+export const humanPurposeOf = (s: Pick<BuilderStep, 'kind' | 'extra'>): HumanPurpose | null =>
+  s.kind === 'human' ? (s.extra.human?.purpose ?? null) : null;
+
+const humanRoute = (
+  step: BuilderStep,
+  id: string,
+  label: string,
+  kind: 'success' | 'failure',
+  to: string,
+): BuilderRoute => ({
+  id,
+  label,
+  kind,
+  to,
+  event: 'StageCompleted',
+  data: 'none',
+  rework: kind === 'failure',
+  effect: 'none',
+  ...(step.routes.find((r) => r.id === id)?.when ? { when: step.routes.find((r) => r.id === id)?.when } : {}),
+});
+
+/**
+ * Makes the step one a person completes: an approval (approve, or send back with a comment) or manual QA (pass, skip,
+ * send back). It keeps where the step goes next and where it sends back to; a send back defaults to the nearest earlier
+ * agent step. Only offered for custom workflows (docs/design/manual-qa.md, backlog #16).
+ */
+export function setHumanPurpose(m: BuilderModel, uid: string, purpose: HumanPurpose): BuilderModel {
+  const i = m.steps.findIndex((s) => s.uid === uid);
+  const step = m.steps[i];
+  if (!step) return m;
+  const earlier = m.steps
+    .slice(0, i)
+    .reverse()
+    .find((s) => s.kind === 'agent');
+  const nextRoute = step.routes[nextIndex(step)];
+  const backRoute = step.routes[sendBackIndex(step)];
+  const next = nextRoute?.to ?? m.steps[i + 1]?.uid ?? uid;
+  const back = backRoute?.to ?? earlier?.uid ?? m.steps[0]?.uid ?? uid;
+  const prior = step.extra.human?.purpose === purpose ? step.extra.human : undefined;
+  return patchStep(m, uid, (s) => ({
+    ...s,
+    kind: 'human',
+    role: null,
+    seniorOnly: false,
+    subworkflow: undefined,
+    extra: {
+      ...s.extra,
+      human:
+        purpose === 'approval'
+          ? { purpose, assignee: 'starter', approver: prior?.approver ?? { kind: 'org_owner' } }
+          : { purpose, assignee: 'starter' },
+    },
+    routes:
+      purpose === 'approval'
+        ? [
+            humanRoute(s, 'approve', 'Approve', 'success', next),
+            humanRoute(s, 'send_back', 'Send back', 'failure', back),
+          ]
+        : [
+            humanRoute(s, 'pass', 'Pass', 'success', next),
+            humanRoute(s, 'skip', 'Skip the test', 'success', next),
+            humanRoute(s, 'send_back', 'Send back', 'failure', back),
+          ],
+  }));
+}
+
+/** Who approves an approval step. */
+export function setApprover(m: BuilderModel, uid: string, approver: ApproverIn): BuilderModel {
+  return patchStep(m, uid, (s) =>
+    s.extra.human ? { ...s, extra: { ...s.extra, human: { ...s.extra.human, approver } } } : s,
+  );
 }
 
 /** A sub-workflow step with nothing chosen yet: waits for the other card, fails the step if that card is cancelled. */
@@ -840,7 +923,7 @@ export const KIND_LABEL: Record<StepKindValue, string> = {
   manual: 'Starts here (someone fills in the card)',
   agent: 'Work done by an agent',
   subworkflow: 'Start another workflow',
-  human: 'A person does this step (built in)',
+  human: 'A person does this step',
   terminal: 'Finished',
 };
 
@@ -864,6 +947,8 @@ export function describeDraft(m: BuilderModel, draftId?: string): string {
     if (s.kind === 'agent') bits.push(s.role ? `done by ${s.role}` : 'no role yet');
     else if (s.kind === 'manual') bits.push('starts here');
     else if (s.kind === 'terminal') bits.push('final step');
+    else if (s.kind === 'human')
+      bits.push(s.extra.human?.purpose === 'qa' ? 'a person tests it' : 'a person approves it');
     else bits.push('starts another workflow');
     const n = nextIndex(s);
     if (n !== -1) bits.push(`then ${label((s.routes[n] as BuilderRoute).to)}`);

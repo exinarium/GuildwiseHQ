@@ -54,7 +54,9 @@ import { formatDateTime } from '../lib/time.ts';
 export function Automations() {
   const list = useScheduleList();
   const [wizard, setWizard] = useState<{ open: boolean; editing?: ScheduleDto }>({ open: false });
-  const [secret, setSecret] = useState<{ name: string; value: string; url?: string | undefined } | null>(null);
+  const [secret, setSecret] = useState<{ name: string; value: string; url?: string | undefined } | null>(
+    null,
+  );
   const schedules = list.data?.schedules ?? [];
   const system = list.data?.system ?? [];
 
@@ -83,7 +85,12 @@ export function Automations() {
         }
       />
       {secret && (
-        <SecretNotice name={secret.name} value={secret.value} url={secret.url} onClose={() => setSecret(null)} />
+        <SecretNotice
+          name={secret.name}
+          value={secret.value}
+          url={secret.url}
+          onClose={() => setSecret(null)}
+        />
       )}
       {list.isPending && <ListSkeleton label="Loading automations" rows={2} />}
       <ErrorBox error={list.error} onRetry={() => list.refetch()} />
@@ -154,10 +161,10 @@ function SecretNotice({
       <Callout tone="info" data-testid="hook-secret">
         <p className="font-medium">Web address of "{name}"</p>
         <p className="mt-1 text-sm">
-          Copy it now: it is shown only this once, because only a fingerprint of the secret in it is kept. Whoever
-          has it can start this automation, so keep it private. POST JSON to it, or send the secret as{' '}
-          <code>Authorization: Bearer ...</code> to the address without the secret. A new secret or switching it
-          off ends the old one at once.
+          Copy it now: it is shown only this once, because only a fingerprint of the secret in it is kept.
+          Whoever has it can start this automation, so keep it private. POST JSON to it, or send the secret as{' '}
+          <code>Authorization: Bearer ...</code> to the address without the secret. A new secret or switching
+          it off ends the old one at once.
         </p>
         <p
           className="mt-2 rounded-control bg-sunken px-2 py-1.5 font-mono text-sm break-all text-fg"
@@ -396,7 +403,8 @@ function ScheduleRow({
                 loading={revoke.isPending && revoke.variables === s.id}
                 onClick={() =>
                   revoke.mutate(s.id, {
-                    onSuccess: () => toast.success('The web address is switched off until you make a new secret'),
+                    onSuccess: () =>
+                      toast.success('The web address is switched off until you make a new secret'),
                   })
                 }
                 data-testid="revoke-secret"

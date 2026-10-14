@@ -45,6 +45,8 @@ export const DESK_SUBKIND = {
   subworkflowRefused: 'subworkflow_refused',
   /** Manual QA (docs/design/manual-qa.md): a finished card waits for the person who started it to test it. */
   manualQa: 'manual_qa',
+  /** A card waits at an approval step (workflow `human` step with purpose approval). */
+  approvalStep: 'approval_step',
 } as const;
 
 /** Card origins whose card is a suite (full E2E suite or regression run) rather than a feature under test. */

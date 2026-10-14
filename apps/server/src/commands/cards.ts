@@ -621,19 +621,24 @@ export async function moveCard(
       throw badRequest('unknown_stage', `stage '${toStage}' does not exist in this card's workflow`);
     if (stage.kind === 'terminal')
       throw badRequest('invalid_stage', 'use cancel or finalize to close a card');
-    // Manual QA opens when a card is finalized (it needs an assignee and a desk item): it is not a place to move to.
+    // A person's step (manual QA, an approval) opens by itself when the card reaches it: it is not a place to move to.
     if (stage.kind === 'human' || (stage.id === 'qa_steps' && wf?.definition.key === 'code'))
-      throw badRequest('invalid_stage', 'manual QA starts by itself when the card is finalized');
+      throw badRequest('invalid_stage', 'a step for a person starts by itself when the card reaches it');
     const missing = stage.kind === 'agent' ? requiredMissing(cardView(card), stage) : [];
     if (missing.length)
       throw unprocessable('missing_fields', `missing required fields: ${missing.join(', ')}`, { missing });
     const status = stage.kind === 'manual' ? 'draft' : 'queued';
     // Moving a card out of manual QA closes the person's desk item.
-    const qa = card.qa as { deskItemId?: string | null } | null;
-    const qaItem =
-      (card.stage === 'qa_steps' || card.stage === 'manual_qa') && qa?.deskItemId
-        ? await one(tx, 'SELECT status FROM desk_items WHERE id=$1', [qa.deskItemId])
-        : undefined;
+    const approval = card.approval as { deskItemId?: string | null; stageId?: string; state?: string } | null;
+    const qa =
+      card.stage === 'qa_steps' || card.stage === 'manual_qa'
+        ? (card.qa as { deskItemId?: string | null } | null)
+        : approval?.state === 'open' && approval.stageId === card.stage
+          ? approval
+          : null;
+    const qaItem = qa?.deskItemId
+      ? await one(tx, 'SELECT status FROM desk_items WHERE id=$1', [qa.deskItemId])
+      : undefined;
     const events: AppendInput[] = [
       ...(qaItem?.status === 'open' && qa?.deskItemId
         ? [

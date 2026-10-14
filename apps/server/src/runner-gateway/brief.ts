@@ -66,6 +66,22 @@ async function qaSentBackBy(db: Queryable, card: Row): Promise<string | null> {
   return (await one(db, 'SELECT display_name FROM users WHERE id=$1', [by]))?.display_name ?? 'the tester';
 }
 
+/** The latest send back by a person, from manual QA or an approval step: who, what and when (null: none). */
+async function personSendBack(
+  db: Queryable,
+  card: Row,
+): Promise<{ name: string; comment: string; at: string } | null> {
+  const found: Array<{ by: string; comment: string; at: string; label: string }> = [];
+  const qa = card.qa?.lastSendBack as { by: string; comment: string; at: string } | undefined;
+  if (qa) found.push({ ...qa, label: 'manual QA' });
+  const ap = card.approval?.lastSendBack as { by: string; comment: string; at: string } | undefined;
+  if (ap) found.push({ ...ap, label: 'approval' });
+  const last = found.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())[0];
+  if (!last) return null;
+  const name = (await one(db, 'SELECT display_name FROM users WHERE id=$1', [last.by]))?.display_name;
+  return { name: `${name ?? 'the approver'} (${last.label})`, comment: last.comment, at: last.at };
+}
+
 /**
  * What the builder must address: the latest "request changes" of a reviewer, or, when the card was sent back from manual
  * QA after that, the tester's comment (shown as a review comment).
@@ -73,13 +89,12 @@ async function qaSentBackBy(db: Queryable, card: Row): Promise<string | null> {
 function reviewCommentsOf(
   lastChanges: Row | undefined,
   card: Row,
-  qaName: string | null,
+  sb: { name: string; comment: string; at: string } | null,
 ): ShiftBrief['reviewComments'] {
-  const sb = card.qa?.lastSendBack as { comment: string; at: string } | undefined;
-  if (sb && qaName && (!lastChanges || new Date(sb.at) > new Date(lastChanges.created_at)))
+  if (sb && (!lastChanges || new Date(sb.at) > new Date(lastChanges.created_at)))
     return [
       {
-        reviewerName: `${qaName} (manual QA)`,
+        reviewerName: sb.name,
         reasons: [],
         criteriaMissed: [],
         comments: sb.comment,
@@ -252,7 +267,7 @@ export async function buildBrief(
       note: h.note,
       at: iso(h.created_at) as string,
     })),
-    reviewComments: reviewCommentsOf(lastChanges, card, await qaSentBackBy(ctx.pool, card)),
+    reviewComments: reviewCommentsOf(lastChanges, card, await personSendBack(ctx.pool, card)),
     thread: thread.reverse().map((m) => {
       // Replies that came in by e-mail are outside text: their name is not the sender's to choose either.
       const outside = m.data?.source === 'email';

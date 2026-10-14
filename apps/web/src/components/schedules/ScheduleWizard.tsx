@@ -523,7 +523,8 @@ function TriggerFields({
   );
   if (s.triggerKind === 'cron') return <div className="grid gap-4 sm:grid-cols-2">{cronFields}</div>;
   if (isMailKind(s.triggerKind)) return <MailTriggerFields s={s} set={set} errors={errors} />;
-  if (s.triggerKind === 'webhook_in') return <HookTriggerFields s={s} set={set} errors={errors} isOwner={isOwner} />;
+  if (s.triggerKind === 'webhook_in')
+    return <HookTriggerFields s={s} set={set} errors={errors} isOwner={isOwner} />;
   if (s.triggerKind === 'intake_ticket')
     return (
       <div className="grid gap-4 sm:grid-cols-2">

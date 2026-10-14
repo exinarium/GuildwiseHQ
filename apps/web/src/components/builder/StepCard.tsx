@@ -2,14 +2,18 @@ import type { ExplainField, FrozenIds, RoleDefinition } from '@aom/shared';
 import { AlertCircle, AlertTriangle, ChevronDown, ChevronRight, Lock } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
+import { useOrgMembers } from '../../api/queries/orgs.ts';
 import {
   type BuilderIssue,
   type BuilderModel,
   type BuilderStep,
+  humanPurposeOf,
   KIND_LABEL,
   nextIndex,
   sendBackIndex,
+  setApprover,
   setFirstStep,
+  setHumanPurpose,
   setStepKind,
   toggleRequired,
   updateStep,
@@ -53,6 +57,36 @@ export interface StepCardProps {
   canRemove: boolean;
 }
 
+const APPROVER_LABEL = {
+  org_owner: 'The organization Owner',
+  project_owner: 'The project owner',
+  starter: 'The person who started the card',
+  member: 'A named member',
+} as const;
+
+/** The member picker of "A named member" (only mounted for that choice, so it fetches only then). */
+function MemberPick({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (userId: string) => void;
+  disabled: boolean;
+}) {
+  const members = useOrgMembers();
+  return (
+    <Select label="Which member" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Choose a member</option>
+      {(members.data ?? []).map((m) => (
+        <option key={m.userId} value={m.userId}>
+          {m.displayName}
+        </option>
+      ))}
+    </Select>
+  );
+}
+
 export function StepCard(p: StepCardProps) {
   const { step, model, onChange, issues, readOnly = false } = p;
   const uid = step.uid;
@@ -87,6 +121,10 @@ export function StepCard(p: StepCardProps) {
     ...(step.kind === 'subworkflow' || p.renderSubworkflowEditor ? (['subworkflow'] as const) : []),
     'terminal',
   ];
+  const purpose = humanPurposeOf(step);
+  /** The picker value: a person's step is chosen by what the person does. */
+  const pick = step.kind === 'human' ? (purpose ?? 'approval') : step.kind;
+  const approver = step.extra.human?.approver;
 
   return (
     <li id={`step-${uid}`} data-testid={`step-${uid}`}>
@@ -208,9 +246,16 @@ export function StepCard(p: StepCardProps) {
             />
             <Select
               label="What kind of step is this?"
-              value={step.kind}
+              value={pick}
               disabled={readOnly}
-              onChange={(e) => onChange(setStepKind(model, uid, e.target.value as BuilderStep['kind']))}
+              onChange={(e) => {
+                const v = e.target.value;
+                onChange(
+                  v === 'approval' || v === 'qa'
+                    ? setHumanPurpose(model, uid, v)
+                    : setStepKind(model, uid, v as BuilderStep['kind']),
+                );
+              }}
               {...fieldProps('kind')}
             >
               {kinds.map((k) => (
@@ -218,7 +263,54 @@ export function StepCard(p: StepCardProps) {
                   {KIND_LABEL[k]}
                 </option>
               ))}
+              <option value="approval">A person approves it on the desk</option>
+              <option value="qa">A person tests it (pass, skip or send back)</option>
             </Select>
+
+            {step.kind === 'human' && purpose === 'approval' && (
+              <div className="flex flex-col gap-2" data-testid={`approval-${uid}`}>
+                <Select
+                  label="Who approves"
+                  value={approver?.kind ?? 'org_owner'}
+                  disabled={readOnly}
+                  onChange={(e) => {
+                    const k = e.target.value as keyof typeof APPROVER_LABEL;
+                    onChange(
+                      setApprover(
+                        model,
+                        uid,
+                        k === 'member'
+                          ? { kind: 'member', userId: approver?.kind === 'member' ? approver.userId : '' }
+                          : { kind: k },
+                      ),
+                    );
+                  }}
+                  {...fieldProps('role')}
+                >
+                  {Object.entries(APPROVER_LABEL).map(([k, text]) => (
+                    <option key={k} value={k}>
+                      {text}
+                    </option>
+                  ))}
+                </Select>
+                {approver?.kind === 'member' && (
+                  <MemberPick
+                    value={approver.userId}
+                    disabled={readOnly}
+                    onChange={(userId) => onChange(setApprover(model, uid, { kind: 'member', userId }))}
+                  />
+                )}
+                <p className="text-xs text-subtle">
+                  The card waits here and shows on that person's desk. If they send it back they must say why:
+                  choose below which earlier step it goes back to. The Owner and Admins can always act too.
+                </p>
+              </div>
+            )}
+            {step.kind === 'human' && purpose === 'qa' && (
+              <p className="text-sm text-muted" data-testid={`qa-step-${uid}`}>
+                The person who started the card tests it and passes it, skips the test or sends it back.
+              </p>
+            )}
 
             {step.kind === 'manual' && (
               <p className="text-sm text-muted">

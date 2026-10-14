@@ -160,7 +160,12 @@ async function recordLimit(ctx: Ctx, s: Record<string, any>, limit: number, now:
     firedFor: now,
   };
   await withAppendTx(ctx.pool, async (tx) => {
-    if (await one(tx, 'SELECT 1 FROM schedule_runs WHERE schedule_id=$1 AND source_key=$2', [s.id, spec.sourceKey]))
+    if (
+      await one(tx, 'SELECT 1 FROM schedule_runs WHERE schedule_id=$1 AND source_key=$2', [
+        s.id,
+        spec.sourceKey,
+      ])
+    )
       return;
     const o: RunOutcome = {
       runId: randomUUID(),

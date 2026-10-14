@@ -25,7 +25,7 @@ import { workflowView } from './cards.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { approveHeldDraftEvents } from './drafts.ts';
 import { queueOutboundPost } from './outbox.ts';
-import { inQaStage, QA_STAGE, QA_STEPS_STAGE, type QaAssigneeSource } from './qa-flow.ts';
+import { inQaStage, QA_STAGE, QA_STEPS_STAGE, type QaAssigneeSource, qaStageOf } from './qa-flow.ts';
 
 /**
  * Manual QA (docs/design/manual-qa.md): the events that open it when a card leaves Finalize, and the person's actions on it:
@@ -59,13 +59,15 @@ interface QaDoc {
 export function qaOpenEvents(
   card: Row,
   assignee: { userId: string; source: QaAssigneeSource },
-  toStage: 'qa_steps' | 'manual_qa',
+  toStage: string,
   assigneeName: string,
+  /** A custom workflow's QA step (not after a merge): its label. */
+  customLabel?: string,
 ): AppendInput[] {
   const scope = projectScope(card.org_id, card.project_id);
   const deskItemId = randomUUID();
   return [
-    deskQuestion(card, assignee.userId, deskItemId),
+    deskQuestion(card, assignee.userId, deskItemId, customLabel !== undefined),
     {
       streamId: streamId.card(card.id),
       event: {
@@ -85,15 +87,17 @@ export function qaOpenEvents(
       card,
       { kind: 'system' },
       'system',
-      toStage === 'qa_steps'
-        ? `${card.ref} is merged and goes to manual QA: ${assigneeName} tests it. The test steps are being written.`
-        : `${card.ref} is merged and goes to manual QA: ${assigneeName} tests it. No agent is hired to write test steps, so they come from the card itself.`,
+      customLabel !== undefined
+        ? `${card.ref} waits at "${customLabel}": ${assigneeName} tests it.`
+        : toStage === 'qa_steps'
+          ? `${card.ref} is merged and goes to manual QA: ${assigneeName} tests it. The test steps are being written.`
+          : `${card.ref} is merged and goes to manual QA: ${assigneeName} tests it. No agent is hired to write test steps, so they come from the card itself.`,
       { qa: 'opened', assigneeUserId: assignee.userId },
     ),
   ];
 }
 
-function deskQuestion(card: Row, assigneeUserId: string, deskItemId: string): AppendInput {
+function deskQuestion(card: Row, assigneeUserId: string, deskItemId: string, custom = false): AppendInput {
   return {
     streamId: streamId.desk(deskItemId),
     event: {
@@ -103,7 +107,7 @@ function deskQuestion(card: Row, assigneeUserId: string, deskItemId: string): Ap
         cardId: card.id,
         projectId: card.project_id,
         askedBy: { kind: 'system' },
-        doing: 'The work is merged. Waiting for you to test it.',
+        doing: custom ? 'Waiting for you to test it.' : 'The work is merged. Waiting for you to test it.',
         question: `Test ${card.ref}: ${card.title}`,
         options: QA_OPTIONS,
         recommendation: 'pass',
@@ -181,24 +185,32 @@ async function lockQaCard(
   tx: Tx,
   user: AuthSession['user'],
   idOrRef: string,
-): Promise<{ card: Row; qa: QaDoc }> {
+): Promise<{ card: Row; qa: QaDoc; qaStage: string }> {
   const visible = await loadVisibleCard(tx, user.id, idOrRef);
   const card = (await one(tx, 'SELECT * FROM cards WHERE id=$1 FOR UPDATE', [visible.card.id])) as Row;
   const qa = card.qa as QaDoc | null;
-  if (!qa || !inQaStage(card) || !['queued', 'claimed', 'waiting'].includes(card.status))
+  const qaStage = await qaStageOf(tx, card);
+  if (!qa || !qaStage || !['queued', 'claimed', 'waiting'].includes(card.status))
     throw conflict('not_in_qa', `${card.ref} is not waiting for manual QA`);
   if (!(await mayActOnQa(tx, user, card, visible.role)))
     throw forbidden('only the person assigned to test this card, the project owner or managers can do this');
-  return { card, qa };
+  return { card, qa, qaStage };
 }
 
 /** The outcome of `manual_qa` to the stage it names in the card's workflow (build for a send back). */
-async function outcomeTarget(tx: Tx, card: Row, outcomeId: 'pass' | 'skip' | 'send_back'): Promise<string> {
+async function outcomeTarget(
+  tx: Tx,
+  card: Row,
+  outcomeId: 'pass' | 'skip' | 'send_back',
+  qaStage: string,
+): Promise<string> {
   const wf = await loadWorkflowById(tx, card.workflow_version_id);
   const fallback = outcomeId === 'send_back' ? 'build' : 'done';
-  if (!wf || !getStage(wf.definition, QA_STAGE)) return fallback;
+  // While the agent writes the steps (`qa_steps`), the person's decision is the one of the QA step that follows.
+  const stage = qaStage === QA_STEPS_STAGE ? QA_STAGE : qaStage;
+  if (!wf || !getStage(wf.definition, stage)) return fallback;
   try {
-    return resolveOutcome(wf.definition, workflowView(card), QA_STAGE, outcomeId).toStage;
+    return resolveOutcome(wf.definition, workflowView(card), stage, outcomeId).toStage;
   } catch {
     return fallback;
   }
@@ -214,10 +226,16 @@ async function finish(
 ): Promise<void> {
   let deliverTo: string | null = null;
   await withAppendTx(ctx.pool, async (tx) => {
-    const { card, qa } = await lockQaCard(tx, user, idOrRef);
+    const { card, qa, qaStage } = await lockQaCard(tx, user, idOrRef);
     const scope = projectScope(card.org_id, card.project_id);
     const who = await nameOf(tx, user.id);
     const open = await deskItemOpen(tx, qa);
+    // A custom workflow's QA step may lead on to another step; the built-in one always ends in done.
+    const target = await outcomeTarget(tx, card, kind === 'passed' ? 'pass' : 'skip', qaStage);
+    const wf = await loadWorkflowById(tx, card.workflow_version_id);
+    const targetStage = wf ? getStage(wf.definition, target) : undefined;
+    const ends = target === 'done' || !targetStage || targetStage.kind === 'terminal';
+    const goesTo = target === 'done' ? {} : { toStage: target };
     const event: AppendInput['event'] =
       kind === 'passed'
         ? {
@@ -227,6 +245,7 @@ async function finish(
               by: user.id,
               ...(text ? { note: text } : {}),
               ...(qa.deskItemId ? { deskItemId: qa.deskItemId } : {}),
+              ...goesTo,
             },
           }
         : {
@@ -236,8 +255,10 @@ async function finish(
               by: user.id,
               ...(text ? { reason: text } : {}),
               ...(qa.deskItemId ? { deskItemId: qa.deskItemId } : {}),
+              ...goesTo,
             },
           };
+    const after = ends ? 'is done.' : `goes on to "${targetStage?.label ?? target}".`;
     const released = await approveHeldDraftEvents(tx, card, user, kind);
     await ctx.store.append(
       [
@@ -255,8 +276,8 @@ async function finish(
           { kind: 'system' },
           'system',
           kind === 'passed'
-            ? `Manual QA passed by ${who}${text ? `: ${text}` : '.'} ${card.ref} is done.`
-            : `Manual QA skipped by ${who} (not tested)${text ? `: ${text}` : '.'} ${card.ref} is done.`,
+            ? `Manual QA passed by ${who}${text ? `: ${text}` : '.'} ${card.ref} ${after}`
+            : `Manual QA skipped by ${who} (not tested)${text ? `: ${text}` : '.'} ${card.ref} ${after}`,
           { qa: kind },
         ),
         ...released.events,
@@ -287,9 +308,9 @@ export async function sendBackQa(
   const comment = req.comment.trim();
   if (!comment) throw badRequest('comment_required', 'say what failed: the builder reads this comment');
   await withAppendTx(ctx.pool, async (tx) => {
-    const { card, qa } = await lockQaCard(tx, user, idOrRef);
+    const { card, qa, qaStage } = await lockQaCard(tx, user, idOrRef);
     const scope = projectScope(card.org_id, card.project_id);
-    const toStage = await outcomeTarget(tx, card, 'send_back');
+    const toStage = await outcomeTarget(tx, card, 'send_back', qaStage);
     const who = await nameOf(tx, user.id);
     const open = await deskItemOpen(tx, qa);
     await ctx.store.append(
@@ -428,7 +449,8 @@ export async function cardQaDto(
   const qa = card.qa as QaDoc | null;
   if (!qa) return null;
   // A manager moved the card out of QA before it was decided: there is nothing to show until it is finalized again.
-  if (!inQaStage(card) && (qa.state === 'open' || qa.state === 'steps')) return null;
+  const inQa = (await qaStageOf(db, card)) !== null;
+  if (!inQa && (qa.state === 'open' || qa.state === 'steps')) return null;
   const ids = [qa.assigneeUserId, qa.decision?.by].filter((x): x is string => !!x);
   const users = new Map(
     (await rows(db, 'SELECT id, display_name, avatar_seed FROM users WHERE id = ANY($1::uuid[])', [ids])).map(
@@ -440,7 +462,7 @@ export async function cardQaDto(
     `SELECT kind, external_key, body FROM outbound_drafts WHERE card_id=$1 AND status='held' ORDER BY created_at LIMIT 1`,
     [card.id],
   );
-  const open = inQaStage(card) && ['queued', 'claimed', 'waiting'].includes(card.status);
+  const open = inQa && ['queued', 'claimed', 'waiting'].includes(card.status);
   const members = open
     ? (
         await rows(

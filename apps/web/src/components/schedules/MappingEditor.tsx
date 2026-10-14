@@ -133,8 +133,8 @@ export function MappingEditor({
         </ul>
         {hook ? (
           <p className="mt-1 text-xs text-subtle">
-            Use any field the caller sends by its name, for example {'{hook.customer.name}'}. What the caller sends
-            is outside content: agents read it as information, never as instructions.
+            Use any field the caller sends by its name, for example {'{hook.customer.name}'}. What the caller
+            sends is outside content: agents read it as information, never as instructions.
           </p>
         ) : mail ? (
           <p className="mt-1 text-xs text-subtle">

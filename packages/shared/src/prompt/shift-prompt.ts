@@ -31,17 +31,15 @@ function handoffOneLine(h: Handoff): string {
  * Previous handoffs for a shift prompt: the latest few in full, older ones as one line each, the whole section within a
  * character budget (oldest full notes shortened first; the latest is only truncated, never dropped).
  */
-export function renderHandoffs(
-  handoffs: Handoff[],
-  opts: { full?: number; budget?: number } = {},
-): string {
+export function renderHandoffs(handoffs: Handoff[], opts: { full?: number; budget?: number } = {}): string {
   if (handoffs.length === 0) return '';
   const full = Math.max(1, opts.full ?? HANDOFFS_FULL);
   const budget = opts.budget ?? HANDOFFS_BUDGET;
   const fullFrom = { v: Math.max(0, handoffs.length - full) };
   const fullBlock = (h: Handoff, max?: number): string => {
     const note = h.note.trim();
-    const body = max !== undefined && note.length > max ? `${note.slice(0, Math.max(0, max))}\n${TRUNCATED}` : note;
+    const body =
+      max !== undefined && note.length > max ? `${note.slice(0, Math.max(0, max))}\n${TRUNCATED}` : note;
     return `### ${handoffHead(h)}\n${body}`;
   };
   const build = (latestMax?: number): string => {

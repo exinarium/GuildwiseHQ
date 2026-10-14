@@ -493,8 +493,7 @@ export function buildScheduleRequest(s: WizardState, c: BuildContext): BuildResu
       ...(per ? { maxPerHour: per } : {}),
       ...(s.hookAllowQueued ? { allowQueued: true } : {}),
     };
-  }
-  else if (s.triggerKind === 'event') {
+  } else if (s.triggerKind === 'event') {
     const def = SCHEDULE_EVENT_TRIGGERS.find((e) => e.id === s.event);
     const cardEvent = !!def?.cardFilters;
     if (def?.cardFilters === 'stage') {

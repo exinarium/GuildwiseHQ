@@ -137,7 +137,10 @@ function qaActivity(
   );
 }
 
-/** QaPassed / QaSkipped: the card is done (the held outgoing comment is released in the same append). */
+/**
+ * QaPassed / QaSkipped: the card is done (the held outgoing comment is released in the same append). A custom workflow's
+ * QA step may lead on to another step (`toStage`): the card goes there instead, and is done only at a final step.
+ */
 async function qaFinish(
   tx: Tx,
   e: StoredEvent,
@@ -145,22 +148,51 @@ async function qaFinish(
   kind: 'passed' | 'skipped',
   by: string,
   note: string | null,
+  toStage?: string,
 ) {
-  await mutateCard(
-    tx,
-    e,
-    cardId,
-    () =>
-      exec(
-        tx,
-        `UPDATE cards SET stage='done', status='done', finalized_at=$2, updated_at=$2,
+  const card = toStage ? await getCard(tx, cardId) : undefined;
+  const dest =
+    toStage && card
+      ? await one<{ kind: string }>(
+          tx,
+          'SELECT kind FROM workflow_stages WHERE workflow_version_id=$1 AND stage_id=$2',
+          [card.workflow_version_id, toStage],
+        )
+      : undefined;
+  if (toStage && dest && dest.kind !== 'terminal') {
+    await mutateCard(
+      tx,
+      e,
+      cardId,
+      () =>
+        exec(
+          tx,
+          `UPDATE cards SET stage=$2, status=$3, queued_at = CASE WHEN $3 = 'queued' THEN $4::timestamptz ELSE queued_at END,
+                  updated_at=$4, excluded_agent_ids='{}', review_approvals=0,
+                  claim_id=NULL, claimed_by_agent_id=NULL, claim_workstation_id=NULL, claim_shift_id=NULL,
+                  claimed_at=NULL, lease_expires_at=NULL
+            WHERE id=$1`,
+          [cardId, toStage, dest.kind === 'human' ? 'waiting' : 'queued', e.createdAt],
+        ),
+      { agentId: null, userId: by },
+    );
+  } else {
+    await mutateCard(
+      tx,
+      e,
+      cardId,
+      () =>
+        exec(
+          tx,
+          `UPDATE cards SET stage=$3, status='done', finalized_at=$2, updated_at=$2,
                 claim_id=NULL, claimed_by_agent_id=NULL, claim_workstation_id=NULL, claim_shift_id=NULL,
                 claimed_at=NULL, lease_expires_at=NULL
           WHERE id=$1`,
-        [cardId, e.createdAt],
-      ),
-    { agentId: null, userId: by },
-  );
+          [cardId, e.createdAt, toStage ?? 'done'],
+        ),
+      { agentId: null, userId: by },
+    );
+  }
   await qaMerge(tx, cardId, { state: kind, decision: { kind, by, note, at: e.createdAt } });
   await qaActivity(
     tx,
@@ -170,6 +202,30 @@ async function qaFinish(
     kind === 'passed' ? 'Manual QA passed' : 'Manual QA skipped (not tested)',
     note,
     by,
+  );
+}
+
+/** Merges `patch` into the card's `approval` document. */
+function approvalMerge(tx: Tx, cardId: string, patch: Record<string, unknown>) {
+  return exec(tx, `UPDATE cards SET approval = COALESCE(approval, '{}'::jsonb) || $2::jsonb WHERE id=$1`, [
+    cardId,
+    JSON.stringify(patch),
+  ]);
+}
+
+function approvalActivity(
+  tx: Tx,
+  e: StoredEvent,
+  cardId: string,
+  summary: string,
+  reason: string | null,
+  userId: string | null,
+) {
+  return exec(
+    tx,
+    `INSERT INTO card_activity (card_id, kind, summary, reason, user_id, agent_id, event_seq, at)
+     VALUES ($1,'approval',$2,$3,$4,NULL,$5,$6)`,
+    [cardId, summary, reason, userId, e.seq.toString(), e.createdAt],
   );
 }
 
@@ -714,12 +770,12 @@ export const cardProjectors: Record<string, Projector> = {
 
   QaPassed: async (tx, e) => {
     const p = ev<'QaPassed'>(e).payload;
-    await qaFinish(tx, e, p.cardId, 'passed', p.by, p.note ?? null);
+    await qaFinish(tx, e, p.cardId, 'passed', p.by, p.note ?? null, p.toStage);
   },
 
   QaSkipped: async (tx, e) => {
     const p = ev<'QaSkipped'>(e).payload;
-    await qaFinish(tx, e, p.cardId, 'skipped', p.by, p.reason ?? null);
+    await qaFinish(tx, e, p.cardId, 'skipped', p.by, p.reason ?? null, p.toStage);
   },
 
   QaSentBack: async (tx, e) => {
@@ -749,6 +805,56 @@ export const cardProjectors: Record<string, Projector> = {
       decision: { kind: 'sent_back', by: p.by, note: p.comment, at: e.createdAt },
     });
     await qaActivity(tx, e, p.cardId, 'qa', 'Sent back from manual QA', p.comment, p.by);
+  },
+
+  // ---- approval steps (#16): `cards.approval` holds the approver, the desk item, the last decision, the send-back count.
+  ApprovalRequested: async (tx, e) => {
+    const p = ev<'ApprovalRequested'>(e).payload;
+    await mutateCard(tx, e, p.cardId, () =>
+      exec(
+        tx,
+        `UPDATE cards SET status='waiting', updated_at=$2, claim_id=NULL, claimed_by_agent_id=NULL,
+                claim_workstation_id=NULL, claim_shift_id=NULL, claimed_at=NULL, lease_expires_at=NULL
+          WHERE id=$1`,
+        [p.cardId, e.createdAt],
+      ),
+    );
+    await approvalMerge(tx, p.cardId, {
+      state: 'open',
+      stageId: p.stageId,
+      approverUserId: p.approverUserId,
+      approverKind: p.approverKind,
+      fellBack: p.fellBack === true,
+      openedAt: e.createdAt,
+      deskItemId: p.deskItemId,
+      entrySeq: p.entrySeq ?? null,
+      decision: null,
+    });
+    await approvalActivity(tx, e, p.cardId, 'Waiting for approval', null, null);
+  },
+
+  ApprovalDecided: async (tx, e) => {
+    const p = ev<'ApprovalDecided'>(e).payload;
+    const prior = (await getCard(tx, p.cardId))?.approval as { sentBackCount?: number } | null | undefined;
+    const sentBack = p.decision === 'sent_back';
+    await approvalMerge(tx, p.cardId, {
+      state: p.decision,
+      decision: { kind: p.decision, by: p.by, note: p.note ?? null, at: e.createdAt },
+      ...(sentBack
+        ? {
+            sentBackCount: Number(prior?.sentBackCount ?? 0) + 1,
+            lastSendBack: { by: p.by, comment: p.note ?? '', at: e.createdAt },
+          }
+        : {}),
+    });
+    await approvalActivity(
+      tx,
+      e,
+      p.cardId,
+      sentBack ? 'Sent back from the approval step' : 'Approved',
+      p.note ?? null,
+      p.by,
+    );
   },
 
   CardCancelled: async (tx, e) => {

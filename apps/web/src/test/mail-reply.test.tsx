@@ -84,7 +84,9 @@ describe('reply to an e-mail conversation', () => {
     expect(send).toBeDisabled();
     await user.type(screen.getByTestId('mail-reply-text'), 'On our way.');
     await user.click(send);
-    await waitFor(() => expect(screen.getByTestId('mail-reply-sent')).toHaveTextContent('Sent to ana@acme.com'));
+    await waitFor(() =>
+      expect(screen.getByTestId('mail-reply-sent')).toHaveTextContent('Sent to ana@acme.com'),
+    );
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST') as [string, RequestInit];
     expect(post[0]).toContain(`/cards/${CARD}/mail-reply`);
     expect(JSON.parse(String(post[1].body))).toEqual({ text: 'On our way.' });
@@ -93,7 +95,12 @@ describe('reply to an e-mail conversation', () => {
 
   it('says why a reply is not possible instead of showing the form', async () => {
     fetchMock.mockResolvedValue(
-      json(thread({ canReply: false, cannotReplyReason: 'Only the Owner, Admins and the project owner or managers can reply' })),
+      json(
+        thread({
+          canReply: false,
+          cannotReplyReason: 'Only the Owner, Admins and the project owner or managers can reply',
+        }),
+      ),
     );
     wrap(<CardMailReply cardId={CARD} />);
     expect(await screen.findByText(/Only the Owner, Admins and the project owner/)).toBeInTheDocument();

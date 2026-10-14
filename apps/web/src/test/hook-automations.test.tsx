@@ -76,7 +76,9 @@ describe('incoming webhook automations: the request', () => {
   });
 
   it('is read back into the wizard when editing', () => {
-    const s = stateFromSchedule(hookSchedule({ trigger: { kind: 'webhook_in', maxPerHour: 30, allowQueued: true } }));
+    const s = stateFromSchedule(
+      hookSchedule({ trigger: { kind: 'webhook_in', maxPerHour: 30, allowQueued: true } }),
+    );
     expect(s).toMatchObject({ triggerKind: 'webhook_in', hookMaxPerHour: '30', hookAllowQueued: true });
   });
 

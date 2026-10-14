@@ -70,7 +70,11 @@ beforeAll(async () => {
       action: {
         kind: 'create_card',
         projectId: w.projectId,
-        template: { title: 'Mail', fields: {}, mapping: { title: '{email.subject}', context: '{email.body}' } },
+        template: {
+          title: 'Mail',
+          fields: {},
+          mapping: { title: '{email.subject}', context: '{email.body}' },
+        },
       },
     }),
     201,
@@ -93,6 +97,48 @@ afterAll(async () => {
   await closeAdminPool();
 });
 
+describe('the organisation looks like itself to the client', () => {
+  it('sends plain mail from the platform address under the organisation name, with no Guildwise text', async () => {
+    const res = await ok<any>(
+      owner('POST', `/api/cards/${cardId}/mail-reply`, { text: 'We will look at it today.' }),
+    );
+    const m = sent.at(-1) as any;
+    const org = (await q('SELECT name FROM organizations WHERE id=$1', [orgId]))[0]?.name as string;
+    expect(m.from.startsWith(`"${org}" <`) && m.from.endsWith('>')).toBe(true);
+    expect(m.html).toBeUndefined();
+    expect(m.text).toBe('We will look at it today.');
+    expect(m.text.toLowerCase()).not.toContain('guildwise');
+    expect(m.subject.toLowerCase()).not.toContain('guildwise');
+    expect(m.replyTo).toContain(`@${DOMAIN}`);
+    expect(m.inReplyTo).toBeTruthy();
+    expect(res.messages.at(-1).direction).toBe('out');
+    sent.length = 0;
+    await q(`DELETE FROM mail_messages WHERE direction='out'`);
+  });
+
+  it('refuses a reply that names agents, AI or Guildwise, so the person edits it', async () => {
+    const agent = (await q('SELECT name FROM agents WHERE org_id=$1 LIMIT 1', [orgId]))[0]?.name as
+      | string
+      | undefined;
+    for (const text of [
+      'Our AI agent will look into it',
+      'Sent via Guildwise',
+      'See https://guildwisehq.com/x',
+      ...(agent ? [`${agent} fixed it`] : []),
+    ]) {
+      const res = await owner('POST', `/api/cards/${cardId}/mail-reply`, { text });
+      expect(res.status, text).toBe(422);
+      expect(res.body.error.code).toBe('reply_reveals_internals');
+    }
+    const subject = await owner('POST', `/api/cards/${cardId}/mail-reply`, {
+      text: 'Fine',
+      subject: 'Re: Guildwise',
+    });
+    expect(subject.status).toBe(422);
+    expect(sent).toHaveLength(0);
+  });
+});
+
 describe('reply to an e-mail conversation', () => {
   it('shows the conversation on the card and who may reply', async () => {
     const t = await ok<any>(owner('GET', `/api/cards/${cardId}/mail-thread`));
@@ -107,15 +153,19 @@ describe('reply to an e-mail conversation', () => {
     expect(res.messages[1]).toMatchObject({ text: 'On our way.', subject: 'Re: Printer is on fire' });
     expect(res.messages[1].sentByName).toBeTruthy();
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ to: 'ana@acme.com', subject: 'Re: Printer is on fire', text: 'On our way.' });
+    expect(sent[0]).toMatchObject({
+      to: 'ana@acme.com',
+      subject: 'Re: Printer is on fire',
+      text: 'On our way.',
+    });
     expect(sent[0]?.replyTo).toMatch(new RegExp(`\\+[a-z2-9]{10}@${DOMAIN.replace(/\./g, '\\.')}$`));
-    const ev = await q(`SELECT payload FROM events WHERE type='MailReplySent' AND payload->>'threadId'=$1`, [
-      threadId,
+    const ev = await q(`SELECT payload FROM events WHERE type='MailReplySent' AND payload->>'messageId'=$1`, [
+      res.messages[1].id,
     ]);
     expect(ev).toHaveLength(1);
     expect(ev[0]?.payload).toMatchObject({ cardId, to: 'ana@acme.com' });
     const note = await q(
-      `SELECT body FROM thread_messages WHERE thread_id=$1 AND body LIKE 'E-mail reply sent to%'`,
+      `SELECT body FROM thread_messages WHERE thread_id=$1 AND body LIKE 'E-mail reply sent to%On our way.%'`,
       [cardId],
     );
     expect(note).toHaveLength(1);
@@ -123,17 +173,19 @@ describe('reply to an e-mail conversation', () => {
   });
 
   it('a customer answer to the reply lands on the same card', async () => {
-    const out = (await q(`SELECT message_id FROM mail_messages WHERE thread_id=$1 AND direction='out'`, [
-      threadId,
-    ]))[0];
+    const out = (
+      await q(`SELECT message_id FROM mail_messages WHERE thread_id=$1 AND direction='out'`, [threadId])
+    )[0];
     expect((await hook({ inReplyTo: out?.message_id, subject: 'Re: Printer is on fire' })).statusCode).toBe(
       200,
     );
     await until(
       async () => {
         await sweep();
-        return (await q(`SELECT 1 FROM mail_messages WHERE thread_id=$1 AND status='comment_added'`, [threadId]))
-          .length === 1;
+        return (
+          (await q(`SELECT 1 FROM mail_messages WHERE thread_id=$1 AND status='comment_added'`, [threadId]))
+            .length === 1
+        );
       },
       8000,
       'customer reply',
@@ -142,10 +194,14 @@ describe('reply to an e-mail conversation', () => {
 
   it('works from the inbox for an organisation Owner, on a thread without a card', async () => {
     expect((await hook({ subject: 'Nobody takes this', from: 'bob@acme.com' })).statusCode).toBe(200);
-    const t2 = (await q(
-      `SELECT t.id FROM mail_threads t JOIN mail_messages m ON m.thread_id = t.id WHERE m.subject='Nobody takes this'`,
-    ))[0]?.id as string;
-    const res = await ok<any>(owner('POST', `/api/mail-threads/${t2}/reply`, { text: 'Hello Bob', subject: 'Custom' }));
+    const t2 = (
+      await q(
+        `SELECT t.id FROM mail_threads t JOIN mail_messages m ON m.thread_id = t.id WHERE m.subject='Nobody takes this'`,
+      )
+    )[0]?.id as string;
+    const res = await ok<any>(
+      owner('POST', `/api/mail-threads/${t2}/reply`, { text: 'Hello Bob', subject: 'Custom' }),
+    );
     expect(res.messages.at(-1)).toMatchObject({ direction: 'out', subject: 'Custom' });
     expect(sent.at(-1)).toMatchObject({ to: 'bob@acme.com', subject: 'Custom' });
   });
@@ -159,7 +215,10 @@ describe('reply to an e-mail conversation', () => {
       ['GET', `/api/mail-threads/${threadId}`],
       ['POST', `/api/mail-threads/${threadId}/reply`],
     ] as const) {
-      const res = await w.t.req(m, url, { cookie: stranger.cookie, body: m === 'POST' ? { text: 'hi' } : undefined });
+      const res = await w.t.req(m, url, {
+        cookie: stranger.cookie,
+        body: m === 'POST' ? { text: 'hi' } : undefined,
+      });
       expect([403, 404]).toContain(res.status);
     }
     expect(sent.length).toBe(before);
@@ -179,7 +238,8 @@ describe('reply to an e-mail conversation', () => {
 
   it('does not answer a thread with nobody accepted to answer, and a send failure stores nothing', async () => {
     expect((await hook({ subject: 'Spam', from: 'x@y.com', spamScore: 99 })).statusCode).toBe(200);
-    const spam = (await q(`SELECT thread_id FROM mail_messages WHERE subject='Spam'`))[0]?.thread_id as string;
+    const spam = (await q(`SELECT thread_id FROM mail_messages WHERE subject='Spam'`))[0]
+      ?.thread_id as string;
     const res = await w.t.req('POST', `/api/mail-threads/${spam}/reply`, {
       cookie: w.owner.cookie,
       body: { text: 'hi' },
@@ -202,7 +262,9 @@ describe('reply to an e-mail conversation', () => {
       });
       expect(fail.status).toBe(409);
       expect(fail.body.error?.code ?? fail.body.code).toBe('mail_send_failed');
-      expect((await q(`SELECT count(*)::int AS n FROM mail_messages WHERE direction='out'`))[0]?.n).toBe(outBefore);
+      expect((await q(`SELECT count(*)::int AS n FROM mail_messages WHERE direction='out'`))[0]?.n).toBe(
+        outBefore,
+      );
     } finally {
       ctx.mailer = saved;
     }

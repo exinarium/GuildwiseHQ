@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { parseAddress } from '@aom/shared';
 import type { Ctx } from '../../context.ts';
 import { one, rows } from '../../db/sql.ts';
 import { conflict, notFound } from '../../errors.ts';
@@ -26,6 +27,13 @@ export async function sendInThread(
     thread.inbox_id,
   ]);
   if (!addr) throw conflict('inbox_has_no_address', 'this inbox has no address');
+  // Plain mail from the platform's sending address, under the organisation's own name: nothing in it says who wrote it.
+  const org = await one(ctx.pool, 'SELECT name FROM organizations WHERE id=$1', [orgId]);
+  const sender = parseAddress(ctx.config.mailFrom);
+  const orgName = String(org?.name ?? '')
+    .replace(/[<>"\r\n]/g, '')
+    .trim();
+  const from = sender && orgName ? `"${orgName}" <${sender}>` : undefined;
   const earlier = (
     await rows<{ id: string }>(
       ctx.pool,
@@ -49,7 +57,7 @@ export async function sendInThread(
       headers.messageId,
       headers.inReplyTo ?? null,
       headers.references ?? [],
-      addr.address,
+      sender ?? addr.address,
       mail.to,
       subject,
       body.text,
@@ -62,6 +70,7 @@ export async function sendInThread(
       to: mail.to,
       subject,
       text: body.text,
+      ...(from ? { from } : {}),
       replyTo: replyAddressFor(addr.address, thread.token),
       orgId,
       ...headers,

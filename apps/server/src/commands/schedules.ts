@@ -424,11 +424,7 @@ async function validate(
   await validateEventTrigger(tx, orgId, t);
   if (t.kind === 'webhook_in' && t.allowQueued && (await orgRoleOf(tx, user.id, orgId)) !== 'owner')
     throw forbidden('only the Owner can let cards from an incoming webhook start queued');
-  if (
-    n.action.kind === 'create_card' &&
-    usesHookTokens(n.action.template.mapping) &&
-    t.kind !== 'webhook_in'
-  )
+  if (n.action.kind === 'create_card' && usesHookTokens(n.action.template.mapping) && t.kind !== 'webhook_in')
     throw badRequest('invalid_mapping', 'the {hook.*} fields only exist for an incoming webhook trigger');
   if (t.kind === 'cron' || t.kind === 'issue_labelled') assertCronAndZone(t.cron, t.timezone);
   if (t.kind === 'issue_labelled') {
@@ -735,9 +731,7 @@ export async function rotateWebhookSecret(
         ? cur
         : { ...cur, secretEnc: await encryptSecret(ctx, secret) };
     const trigger: ScheduleTrigger =
-      curTrigger.kind === 'webhook_in'
-        ? { ...curTrigger, secretHash: hashHookSecret(secret) }
-        : curTrigger;
+      curTrigger.kind === 'webhook_in' ? { ...curTrigger, secretHash: hashHookSecret(secret) } : curTrigger;
     await ctx.store.append(
       [
         {

@@ -71,8 +71,10 @@ export function useInboundHealth() {
 
 /** A conversation, found through its card or its id (`kind`). */
 export type ThreadRef = { kind: 'card'; id: string } | { kind: 'thread'; id: string };
-const threadPath = (r: ThreadRef) => (r.kind === 'card' ? `/cards/${r.id}/mail-thread` : `/mail-threads/${r.id}`);
-const replyPath = (r: ThreadRef) => (r.kind === 'card' ? `/cards/${r.id}/mail-reply` : `/mail-threads/${r.id}/reply`);
+const threadPath = (r: ThreadRef) =>
+  r.kind === 'card' ? `/cards/${r.id}/mail-thread` : `/mail-threads/${r.id}`;
+const replyPath = (r: ThreadRef) =>
+  r.kind === 'card' ? `/cards/${r.id}/mail-reply` : `/mail-threads/${r.id}/reply`;
 
 export function useMailThread(ref: ThreadRef | undefined) {
   return useQuery({

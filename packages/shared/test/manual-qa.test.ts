@@ -12,7 +12,6 @@ import {
   getStage,
   resolveOutcome,
   roleClaimsStage,
-  validateCustomWorkflow,
   validateWorkflow,
   type WorkflowDefinition,
 } from '../src/index.ts';
@@ -123,36 +122,6 @@ describe('human stages in validation', () => {
     const unknown = clone();
     (unknown.stages.find((s) => s.id === 'qa_steps') as { fallbackRole?: string }).fallbackRole = 'nobody';
     expect(codes(unknown)).toContain('unknown_fallback_role');
-  });
-
-  it('custom workflows cannot use human steps or fallback roles', () => {
-    const custom = {
-      key: 'review-flow',
-      version: 1,
-      name: 'Review flow',
-      builtIn: false,
-      fieldSet: 'custom',
-      cardTypes: ['feature'],
-      initialStage: 'check',
-      stages: [
-        {
-          id: 'check',
-          label: 'Check',
-          column: 'Check',
-          kind: 'human',
-          human: { purpose: 'qa' },
-          claimRole: null,
-          doneCriteria: 'checked',
-          outcomes: [{ id: 'done', label: 'Done', kind: 'success', to: 'end', event: 'StageCompleted' }],
-        },
-        { id: 'end', label: 'End', column: 'End', kind: 'terminal', claimRole: null, doneCriteria: '' },
-      ],
-    };
-    const issues = validateCustomWorkflow(custom, BUILTIN_ROLES, {
-      builtinWorkflowKeys: ['code'],
-      departments: [],
-    });
-    expect(issues.map((i) => i.code)).toContain('human_stage_not_custom');
   });
 });
 
