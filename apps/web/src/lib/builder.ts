@@ -64,6 +64,8 @@ export interface BuilderStep {
   when?: { field: string; equals: unknown };
   worktree: 'create' | 'reuse' | 'none';
   maxShiftMinutes: number;
+  /** The step runs against the project's running environment (Project settings > Run & test, integration tests). */
+  environment: boolean;
   subworkflow?: SubworkflowConfigInput;
   routes: BuilderRoute[];
   /** Stage settings the builder does not edit; kept as they are. */
@@ -197,6 +199,7 @@ export function fromDefinition(
     ...(s.when ? { when: { field: fieldRef(s.when.field), equals: s.when.equals } } : {}),
     worktree: s.worktree ?? 'none',
     maxShiftMinutes: s.maxShiftMinutes ?? DEFAULT_MAX_SHIFT,
+    environment: s.environment === 'project',
     ...(s.subworkflow ? { subworkflow: mapSubworkflowFields(s.subworkflow, fieldRef) } : {}),
     routes: (s.outcomes ?? []).map((o) => ({
       id: o.id,
@@ -311,6 +314,7 @@ export function toDefinition(model: BuilderModel, opts: { frozen?: FrozenIds } =
       syncMainBefore: s.extra.syncMainBefore,
       ...(s.extra.approvals ? { approvals: { ...s.extra.approvals } } : {}),
       maxShiftMinutes: s.maxShiftMinutes,
+      ...(s.environment ? { environment: 'project' as const } : {}),
       requiredCapabilities: [...s.extra.requiredCapabilities],
       ...(s.extra.human ? { human: { ...s.extra.human } } : {}),
       ...(s.extra.fallbackRole ? { fallbackRole: s.extra.fallbackRole } : {}),
@@ -367,6 +371,7 @@ export function blankStep(
     requiredFields: [],
     worktree: 'none',
     maxShiftMinutes: DEFAULT_MAX_SHIFT,
+    environment: false,
     routes: [],
     extra: { rebaseBefore: false, syncMainBefore: false, requiredCapabilities: [] },
   };

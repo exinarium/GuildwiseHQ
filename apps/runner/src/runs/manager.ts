@@ -38,6 +38,7 @@ import picomatch from 'picomatch';
 import { z } from 'zod';
 import type { SandboxMode } from '../adapters/claude-policy.ts';
 import { git } from '../git/git.ts';
+import { RebaseConflictError, rebaseOntoBase } from '../git/rebase.ts';
 import { withRepoLock } from '../git/repo-lock.ts';
 import { removeWorktree } from '../git/worktrees.ts';
 import type { Logger } from '../log.ts';
@@ -376,6 +377,7 @@ export class RunManager {
       `run-${env.envId.slice(0, 8)}`,
     );
     mkdirSync(base, { recursive: true });
+    if (p.rebaseCard) await this.rebaseCardBranch(env, p.rebaseCard);
     const used = new Set<string>();
     for (const s of p.sources) {
       const repo = await this.deps.findRepo(s.remoteUrlNormalized);
@@ -406,6 +408,34 @@ export class RunManager {
         commit,
       });
       this.save(env);
+    }
+  }
+
+  /**
+   * A test environment runs the commit the tester will test: the card branch rebased onto its base branch (the `test`
+   * stage's `rebaseBefore`, done here so the tester's own rebase finds nothing to do). A conflict fails the start; the
+   * server sends the card to Rework with the files.
+   */
+  private async rebaseCardBranch(
+    env: EnvState,
+    rc: NonNullable<RunStartPayload['rebaseCard']>,
+  ): Promise<void> {
+    const root = resolve(this.deps.paths.worktrees);
+    const wt = resolve(rc.cardWorktreePath);
+    if (wt !== root && !wt.startsWith(`${root}/`) && !wt.startsWith(`${root}\\`))
+      throw new Error("the card worktree is not inside this runner's worktrees folder");
+    if (!existsSync(wt)) throw new Error('the card worktree does not exist on this workstation');
+    env.activity = 'rebasing the card branch';
+    this.save(env);
+    this.report(env);
+    try {
+      await rebaseOntoBase(wt, rc.baseBranch, rc.commitAs ?? null);
+    } catch (err) {
+      if (err instanceof RebaseConflictError) {
+        env.rebaseConflictFiles = err.conflictedFiles;
+        throw new Error(`the card branch conflicts with ${rc.baseBranch}: ${err.conflictedFiles.join(', ')}`);
+      }
+      throw err;
     }
   }
 
@@ -817,6 +847,7 @@ export class RunManager {
       ...(env.activity ? { activity: env.activity.slice(0, 300) } : {}),
       ...(env.error ? { error: env.error.slice(0, 4000) } : {}),
       ...(env.endReason && !isLiveEnv(env) ? { endReason: env.endReason } : {}),
+      ...(env.rebaseConflictFiles ? { rebaseConflictFiles: env.rebaseConflictFiles.slice(0, 200) } : {}),
     };
   }
 
@@ -1794,6 +1825,82 @@ export class RunManager {
         exitCode: 0,
       },
     };
+  }
+
+  // ------------------------------------------------------------------------------------- the tester
+
+  /** The ports of a test environment that is up: what the tester's forwarders may connect to (and nothing else). */
+  testPorts(envId: string): Set<number> {
+    const env = this.envs.get(envId);
+    if (!env || !isLiveEnv(env) || env.state === 'stopping') return new Set();
+    return new Set(env.services.flatMap((s) => s.ports.map((p) => p.port)));
+  }
+
+  /** Every secret value of the environment's services (env files): removed from anything the tester attaches. */
+  secretsOf(envId: string): Set<string> {
+    const out = new Set<string>();
+    const env = this.envs.get(envId);
+    for (const svc of env?.services ?? [])
+      for (const v of this.runtime.get(`${envId}/${svc.def.name}`)?.secrets ?? []) out.add(v);
+    return out;
+  }
+
+  /** What a tester sees of its environment: state, the commit of each repository, and every service with its ports. */
+  testEnvironment(envId: string): {
+    envId: string;
+    state: string;
+    purpose: string;
+    expiresAt: string;
+    sources: Array<{ repoId: string; name: string; branch: string; commit: string | null }>;
+    services: Array<{
+      name: string;
+      state: string;
+      health: string;
+      ports: Array<{ name: string; port: number; url?: string }>;
+    }>;
+  } | null {
+    const env = this.envs.get(envId);
+    if (!env) return null;
+    return {
+      envId,
+      state: env.state,
+      purpose: env.purpose,
+      expiresAt: env.ttlAt,
+      sources: env.sources.map((s) => ({
+        repoId: s.repoId,
+        name: s.name,
+        branch: s.branch,
+        commit: s.commit,
+      })),
+      services: env.services.map((s) => ({
+        name: s.def.name,
+        state: s.state,
+        health: s.health,
+        ports: s.ports.map((p) => ({ name: p.name, port: p.port, ...(p.url ? { url: p.url } : {}) })),
+      })),
+    };
+  }
+
+  /** `aom env logs` / `aom env restart` of the tester working this test environment (read-only otherwise). */
+  async testerRpc(
+    envId: string,
+    method: 'env.logs' | 'env.restart',
+    params: Record<string, unknown>,
+  ): Promise<IpcRpcResponse> {
+    const env = this.envs.get(envId);
+    if (!env) return { ok: false, error: 'this environment does not exist (any more) on this workstation' };
+    if (method === 'env.logs') return this.logs(env, params);
+    if (!isLiveEnv(env)) return { ok: false, error: `the environment is ${env.state}` };
+    const r = await this.restart({ envId, update: false, ttlAt: env.ttlAt, revive: false });
+    return r.ok
+      ? {
+          ok: true,
+          result: {
+            message:
+              'Restarting the environment at the same commit. Check `aom env info` until every service is healthy again.',
+          },
+        }
+      : { ok: false, error: r.error ?? 'could not restart the environment' };
   }
 
   /** BUILD.md of each repository, for the DevOps brief (waits until the run worktrees exist). */

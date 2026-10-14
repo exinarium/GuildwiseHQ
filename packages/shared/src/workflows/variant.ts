@@ -31,6 +31,7 @@ export const InsertedStageSchema = StageSchema.pick({
   rebaseBefore: true,
   maxShiftMinutes: true,
   requiredCapabilities: true,
+  environment: true,
 }).extend({
   /** Board column; defaults to the label. */
   column: z.string().optional(),
@@ -171,6 +172,7 @@ export function materialiseVariant(
         syncMainBefore: s.syncMainBefore,
         maxShiftMinutes: s.maxShiftMinutes,
         requiredCapabilities: s.requiredCapabilities,
+        environment: s.environment,
       }),
     );
   }
@@ -203,6 +205,25 @@ export function investigateInsertion(after: string): StageInsertionInput {
         'The code and the other repositories were investigated; the findings, a comparison with best practice and a design or recommendation are in the report, committed on the card branch.',
       data: 'investigation',
       maxShiftMinutes: 90,
+    },
+  };
+}
+
+/**
+ * Template "Smoke test": a tester step after any stage that runs against the project's running environment
+ * (`environment: 'project'`, Project settings > Run & test). Needs `smoke*` as the step id (the tester claims it).
+ */
+export function smokeTestInsertion(after: string): StageInsertionInput {
+  return {
+    after,
+    stage: {
+      id: `smoke_after_${after}`,
+      label: 'Smoke test',
+      claimRole: 'tester',
+      doneCriteria:
+        'The running environment answers and its main flows work: the checks named on the card and the project suites were run against it and reported.',
+      environment: 'project',
+      maxShiftMinutes: 60,
     },
   };
 }

@@ -56,6 +56,9 @@ export type IssueCode =
   | 'human_has_role'
   | 'fallback_role_misplaced'
   | 'unknown_fallback_role'
+  // rule 12 (environment stages)
+  | 'environment_misplaced'
+  | 'environment_role_no_shell'
   // custom workflows only
   | 'not_custom'
   | 'invalid_key'
@@ -420,6 +423,24 @@ export function validateWorkflow(
         );
       }
     }
+  }
+
+  // Rule 12: a stage that runs against the project's environment is an agent stage worked by a role with a shell
+  // (it starts commands that talk to the running app). The role is checked when it is known.
+  for (const s of def.stages) {
+    if (s.environment !== 'project') continue;
+    if (s.kind !== 'agent') {
+      err(12, 'environment_misplaced', `stage '${s.id}': only agent stages can need an environment`, s.id);
+      continue;
+    }
+    const role = roleCatalogue.find((r) => r.key === s.claimRole);
+    if (role && !role.permissions.allowedTools.includes('shell'))
+      err(
+        12,
+        'environment_role_no_shell',
+        `stage '${s.id}' needs a running environment but role '${role.key}' has no shell to test it with`,
+        s.id,
+      );
   }
 
   // Warnings.

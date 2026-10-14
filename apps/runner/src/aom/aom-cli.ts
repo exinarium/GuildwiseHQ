@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import {
   type BaTaskShift,
   type DevopsShift,
+  formatCommandLine,
   formatLedgerMatches,
   IPC_REPORT_PATH,
   IPC_RPC_PATH,
@@ -710,7 +711,115 @@ const VERBS: Record<string, Verb> = {
         }),
       );
     }
-    throw new UsageError('usage: aom test pass|fail ...');
+    if (sub === 'suite') {
+      // The runner counts a JUnit report, attaches the log and records the result on the card (docs/design/run-and-integration-tests.md 4.6).
+      const name = one(p, 'name');
+      const status = one(p, 'status');
+      if (!name || !status)
+        throw new UsageError(
+          'usage: aom test suite --name <suite> --status passed|failed|timeout|skipped [--junit <glob>] [--log <file>] [--passed N] [--failed N] [--skipped N] [--duration-ms N]',
+        );
+      const n = (k: string): number | undefined => {
+        const v = one(p, k);
+        if (v === undefined) return undefined;
+        const x = Number(v);
+        if (!Number.isInteger(x) || x < 0) throw new UsageError(`--${k} must be a whole number`);
+        return x;
+      };
+      const r = (await rpc(ctx, 'test.suite', {
+        name,
+        status,
+        ...(one(p, 'junit') ? { junit: one(p, 'junit') } : {}),
+        ...(one(p, 'log') ? { log: one(p, 'log') } : {}),
+        ...(n('passed') !== undefined ? { passed: n('passed') } : {}),
+        ...(n('failed') !== undefined ? { failed: n('failed') } : {}),
+        ...(n('skipped') !== undefined ? { skipped: n('skipped') } : {}),
+        ...(n('duration-ms') !== undefined ? { durationMs: n('duration-ms') } : {}),
+      })) as { message?: string } | null;
+      ctx.io.out(`${r?.message ?? 'Recorded.'}\n`);
+      return 0;
+    }
+    throw new UsageError('usage: aom test pass|fail|suite ...');
+  },
+  /** `aom env info|logs|restart|suites` (tester): the running environment of the card and the project's suites. */
+  env: async (ctx, p) => {
+    const sub = p.positionals[0] ?? 'info';
+    const usage =
+      'usage: aom env info | logs <service> [--lines N] | restart | suites | suites propose --name <suite> --cmd "<command>" [--kind integration|e2e] [--cwd <dir>] [--repo <name>] [--timeout <min>] [--junit <glob>] [--destructive]';
+    const say = (m: string | undefined, dflt = ''): void => {
+      const t = m ?? dflt;
+      ctx.io.out(t.endsWith('\n') ? t : `${t}\n`);
+    };
+    if (sub === 'info') {
+      say(((await rpc(ctx, 'env.info')) as { message?: string }).message);
+      return 0;
+    }
+    if (sub === 'logs') {
+      const service = p.positionals[1];
+      if (!service) throw new UsageError(usage);
+      const lines = one(p, 'lines');
+      say(
+        (
+          (await rpc(ctx, 'env.logs', { service, ...(lines ? { lines: Number(lines) } : {}) })) as {
+            message?: string;
+          }
+        ).message,
+      );
+      return 0;
+    }
+    if (sub === 'restart') {
+      say(((await rpc(ctx, 'env.restart')) as { message?: string }).message);
+      return 0;
+    }
+    if (sub === 'suites' && p.positionals[1] === 'propose') {
+      const name = one(p, 'name');
+      const cmd = one(p, 'cmd');
+      if (!name || !cmd) throw new UsageError(usage);
+      const r = (await rpc(ctx, 'env.suites.propose', {
+        suites: [
+          {
+            name,
+            cmd: parseCommandLine(cmd),
+            kind: one(p, 'kind') ?? 'integration',
+            ...(one(p, 'repo') ? { repo: one(p, 'repo') } : {}),
+            ...(one(p, 'cwd') ? { cwd: one(p, 'cwd') } : {}),
+            ...(one(p, 'timeout') ? { timeoutMin: Number(one(p, 'timeout')) } : {}),
+            ...(one(p, 'junit') ? { junit: one(p, 'junit') } : {}),
+            destructive: has(p, 'destructive'),
+          },
+        ],
+      })) as { message?: string };
+      say(r.message, 'Proposed.');
+      return 0;
+    }
+    if (sub === 'suites') {
+      const r = (await rpc(ctx, 'env.suites')) as {
+        mode: string;
+        flakyRetry: number;
+        suites: Array<{
+          name: string;
+          kind: string;
+          cmd: string[];
+          cwd: string;
+          confirmed: boolean;
+          timeoutMin: number;
+          destructive: boolean;
+          junit?: string;
+        }>;
+      };
+      if (r.suites.length === 0) {
+        say(
+          'No suites are set for this project. Read TESTING.md, BUILD.md and the test config, then propose what you find with `aom env suites propose`.',
+        );
+        return 0;
+      }
+      for (const s of r.suites)
+        say(
+          `${s.confirmed ? '[required]' : '[proposed]'} ${s.name} (${s.kind}${s.destructive ? ', destructive' : ''}, at most ${s.timeoutMin} min): ${formatCommandLine(s.cmd)} in ${s.cwd}${s.junit ? `, report ${s.junit}` : ''}`,
+        );
+      return 0;
+    }
+    throw new UsageError(usage);
   },
   devops: async (ctx, p) => {
     const text = p.positionals[0] ?? one(p, 'text');
@@ -1125,6 +1234,8 @@ export const USAGE = `usage: aom <verb> [options]
   digest --file <json> [--note "<text>"] | --none   curator: post the digest (empty when nothing qualifies)
   review approve --score <1-5> --note "<text>"
   review changes --reason <r>[,<r>] --score <1-5> [--criteria-missed "<c>"]... --note "<text>"
+  test suite --name <suite> --status passed|failed|timeout|skipped [--junit <glob>] [--log <file>]   tester: report one suite run (a pass after a failure counts as flaky)
+  env info | logs <service> | restart | suites [propose ...]   tester: the running environment (use \`aom-env --timeout <min> -- <cmd>\` to reach it) and the project's suites
   test pass --evidence "<text>" [--command "<cmd>"]...
   test fail --title "<bug>" --note "<text>" [--evidence "<text>"] [--command "<cmd>"]...
   outcome <id> --note "<text>" [--data-file <json>]

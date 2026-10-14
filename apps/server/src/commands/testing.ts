@@ -191,10 +191,51 @@ export async function suiteOutcomeEvents(
   return events;
 }
 
-const PROBLEM_TEXT: Record<TestEnvProblem, string> = {
+export const PROBLEM_TEXT: Record<TestEnvProblem, string> = {
   app_not_deployed: 'The application is not deployed or not running on this workstation',
   docker_missing: 'Docker is not installed or not running on this workstation',
+  run_plan_missing: 'There is no run plan for this project on this workstation yet',
+  run_failed: 'The test environment did not come up',
+  target_unreachable: 'The deploy target under test does not answer',
 };
+
+/**
+ * A blocking desk item: the card cannot be tested until a person fixes the environment and resolves it. Used when the
+ * DevOps engineer cannot help (no access, none on the workstation) or already tried twice.
+ */
+export function testEnvironmentHardStop(
+  card: Row,
+  problem: TestEnvProblem,
+  detail: string,
+  why: string,
+): AppendInput[] {
+  const deskItemId = randomUUID();
+  const suffix = detail ? ` (${detail})` : '';
+  return [
+    {
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemCreated',
+        payload: {
+          deskItemId,
+          kind: 'escalation',
+          subkind: DESK_SUBKIND.testEnvironment,
+          title: `${card.ref} cannot be tested: ${PROBLEM_TEXT[problem].toLowerCase()}`,
+          body: `${PROBLEM_TEXT[problem]}${suffix}. ${why}\n\nFix the environment (or grant the DevOps engineer the access it needs), then resolve this item and the card returns to the Test queue.`,
+          options: [],
+          blocking: true,
+          pinned: true,
+          cardId: card.id,
+          projectId: card.project_id,
+          affectedCardIds: [card.id],
+          askedBy: { kind: 'system' },
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(card.org_id, card.project_id),
+    },
+  ];
+}
 
 /**
  * `shift.rejected{environment_not_ready}` of a tester shift: ask this workstation's DevOps engineer and park the card
@@ -215,33 +256,8 @@ export async function environmentNotReadyEvents(
   const scope = projectScope(card.org_id, card.project_id);
   const detail = env.detail ? ` (${env.detail})` : '';
 
-  const hardStop = (why: string): AppendInput[] => {
-    const deskItemId = randomUUID();
-    return [
-      {
-        streamId: streamId.desk(deskItemId),
-        event: {
-          type: 'DeskItemCreated',
-          payload: {
-            deskItemId,
-            kind: 'escalation',
-            subkind: DESK_SUBKIND.testEnvironment,
-            title: `${card.ref} cannot be tested: ${PROBLEM_TEXT[problem].toLowerCase()}`,
-            body: `${PROBLEM_TEXT[problem]}${detail}. ${why}\n\nFix the environment (or grant the DevOps engineer the access it needs), then resolve this item and the card returns to the Test queue.`,
-            options: [],
-            blocking: true,
-            pinned: true,
-            cardId: card.id,
-            projectId: card.project_id,
-            affectedCardIds: [card.id],
-            askedBy: { kind: 'system' },
-          },
-        },
-        actor: SYSTEM_ACTOR,
-        scope,
-      },
-    ];
-  };
+  const hardStop = (why: string): AppendInput[] =>
+    testEnvironmentHardStop(card, problem, env.detail ?? '', why);
 
   if (!canInstall) return hardStop('The DevOps engineer cannot install Docker with the access it has.');
   if (Number(card.env_parks) >= 2) return hardStop('The DevOps engineer already tried to fix this twice.');

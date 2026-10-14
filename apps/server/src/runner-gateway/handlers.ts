@@ -51,6 +51,8 @@ import {
   type ReportResult,
   releaseClaimEvents,
 } from '../commands/shifts.ts';
+import { applyTargetSecretResult } from '../commands/target-secrets.ts';
+import { proposeSuites, recordSuiteResult, suitesFor } from '../commands/test-environments.ts';
 import { applyToolchainsReport } from '../commands/toolchains.ts';
 import { transcriptStoreRpc } from '../commands/transcripts.ts';
 import { applyVaultConflict, markVaultStatus, queueVaultConfigure } from '../commands/vaults.ts';
@@ -426,6 +428,17 @@ export class RunnerHandlers {
             msg.ok,
             msg.result,
             String(cmd.payload.keyId ?? ''),
+          );
+        } else if (cmd?.type === 'env.secret.set') {
+          // Like the sudo password: the ciphertext is forgotten whatever the answer was.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyTargetSecretResult(
+            this.ctx,
+            conn.workstationId,
+            msg.commandId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
           );
         } else {
           await completeCommand(this.ctx.pool, msg.commandId, msg.ok, msg.error, this.ctx.clock.now());
@@ -916,6 +929,9 @@ export class RunnerHandlers {
         return reply(...(await this.devopsRequest(conn, shift, msg.params)));
       if (msg.method === 'outbound.draft') return reply(...(await outboundDraftRpc(ctx, shift, msg.params)));
       if (msg.method === 'card.risk') return reply(...(await riskTierRpc(ctx, shift, msg.params)));
+      if (msg.method === 'test.suite') return reply(...(await recordSuiteResult(ctx, shift, msg.params)));
+      if (msg.method === 'env.suites') return reply(...(await suitesFor(ctx.pool, shift)));
+      if (msg.method === 'env.suites.propose') return reply(...(await proposeSuites(ctx, shift, msg.params)));
       if (msg.method === 'investigation.record')
         return reply(...(await investigationRecordRpc(ctx, shift, msg.params)));
       if (msg.method === 'transcript.store')

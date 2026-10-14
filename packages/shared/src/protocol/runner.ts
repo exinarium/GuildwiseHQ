@@ -40,6 +40,7 @@ import { MAX_MCP_SERVERS, McpServerInfoSchema } from '../mcp/index.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { CommitAsSchema, RepoCreatePayloadSchema, RepoIdentityFactSchema } from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
+import { EnvSecretClearPayloadSchema, EnvSecretSetPayloadSchema, ShiftEnvironmentSchema } from '../runs/integration.ts';
 import {
   RunExtendPayloadSchema,
   RunLogLinesSchema,
@@ -302,6 +303,11 @@ export const ShiftBriefSchema = z.object({
       tasteSeed: z.array(z.string()).default([]),
     })
     .optional(),
+  /**
+   * The environment this shift tests against (a `test`-like stage with `environment: 'project'` and integration tests on
+   * for the project). Absent: the shift has none (the tester follows the card's test plan as before).
+   */
+  environment: ShiftEnvironmentSchema.optional(),
 });
 export type ShiftBrief = z.infer<typeof ShiftBriefSchema>;
 
@@ -518,6 +524,8 @@ export const RunnerCommandNameSchema = z.enum([
   'rights.verify',
   'sudo.set',
   'sudo.clear',
+  'env.secret.set',
+  'env.secret.clear',
   'git.status',
   'forge.repos',
   'git.ssh',
@@ -564,6 +572,8 @@ export const CommandPayloadSchemas = {
   'rights.verify': RightsVerifyPayloadSchema,
   'sudo.set': SudoSetPayloadSchema,
   'sudo.clear': z.object({}),
+  'env.secret.set': EnvSecretSetPayloadSchema,
+  'env.secret.clear': EnvSecretClearPayloadSchema,
   'git.status': z.object({}),
   'forge.repos': ForgeReposPayloadSchema,
   'git.ssh': GitSshPayloadSchema,
@@ -585,7 +595,7 @@ export const CommandPayloadSchemas = {
 } as const;
 
 /** The commands that carry a sealed envelope: their payload is emptied once answered, and they expire. */
-export const ENVELOPE_COMMANDS: ReadonlySet<string> = new Set(['integration.connect', 'integration.input']);
+export const ENVELOPE_COMMANDS: ReadonlySet<string> = new Set(['integration.connect', 'integration.input', 'env.secret.set']);
 
 export const ShiftRejectReasonSchema = z.enum([
   'busy',

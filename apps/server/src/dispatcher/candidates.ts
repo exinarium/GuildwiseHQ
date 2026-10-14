@@ -107,6 +107,19 @@ export function eligibility(A: AgentRefs) {
     env: `(c.repo_id IS NULL OR st.claim_role = 'devops' OR NOT EXISTS (
         SELECT 1 FROM project_environments pe
          WHERE pe.project_id = c.project_id AND pe.workstation_id = ${A.workstationId} AND pe.state <> 'ready'))`,
+    // A stage with `environment: 'project'` (the tester's integration tests, code v4) waits until the environment the
+    // server started for the card's commit is healthy on this agent's workstation (docs/design/run-and-integration-tests.md
+    // D9). No wait when the project does not run local environments, the card opted out, it is a suite or regression
+    // card (they use a target URL), or the workstation's runner cannot provision (an older runner: the tester works as before).
+    envReady: `(st.environment <> 'project'
+      OR c.origin IN ('full_suite','regression')
+      OR p.integration_tests->>'mode' IS DISTINCT FROM 'local'
+      OR COALESCE((c.fields->>'integrationTests')::boolean, true) = false
+      OR NOT EXISTS (SELECT 1 FROM workstation_capabilities wc
+                      WHERE wc.workstation_id = ${A.workstationId} AND 'runs:3' = ANY (wc.capabilities))
+      OR EXISTS (SELECT 1 FROM run_environments re
+                  WHERE re.card_id = c.id AND re.purpose = 'test' AND re.verdict_at IS NULL AND re.state = 'healthy'
+                    AND re.workstation_id = ${A.workstationId}))`,
     vault: `(c.repo_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM vaults v WHERE ${vaultOfCard}) OR EXISTS (
         SELECT 1 FROM vaults v JOIN workstation_vaults wv ON wv.vault_id = v.id AND wv.workstation_id = ${A.workstationId}
          WHERE ${vaultOfCard}))`,
@@ -137,6 +150,7 @@ WHERE c.status = 'queued'
   AND ${E.env}
   AND ${E.vault}
   AND ${E.worktree}
+  AND ${E.envReady}
   AND (p.max_concurrent_shifts IS NULL OR (SELECT count(*) FROM cards pc
         WHERE pc.project_id = c.project_id AND pc.claim_id IS NOT NULL) < p.max_concurrent_shifts)
   AND (c.retry_after IS NULL OR c.retry_after <= $9::timestamptz)

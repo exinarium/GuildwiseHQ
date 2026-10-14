@@ -907,6 +907,22 @@ You can start a project on any branch of any repository to try it, without leavi
 
 > **In the app:** Help, "Run a branch" (`/help/board-and-cards#run-a-branch`).
 
+### 4.22 Integration tests run by the tester
+
+Unit tests are run by builders and reviewers. **Integration and end-to-end tests** need a running copy of the app, so only the tester runs them, and only when you switch them on for the project. They start **off**: with them off, cards skip the Test step as soon as review approves them.
+
+**Switch them on.** Under **Project settings, Run and test, Integration tests** choose "Yes, on the workstation that has the card" (a deployed target comes with the next phase). The tester needs the project to be runnable first: the **run plan** above (the DevOps engineer works it out the first time and the runner replays it afterwards). Then list the **suites**: a name, the repository and folder, the command, whether it is integration or end-to-end, the longest it may run, an optional JUnit report path and whether it writes or deletes data. With none listed, the tester reads `TESTING.md`, `BUILD.md` and the test config, runs what it finds and proposes the suites here, marked "Proposed by a tester", for you to **Confirm**. **Keep a failed card's copy for** says how long the running copy of a failed card stays up so you can open it, and **Run a failing suite again** is how many times a failure is retried before it counts.
+
+**What happens to a card.** When the builder and reviewer are done and the project has the setting on, the card waits in Test while its workstation starts the card's branch (first rebased onto the working branch; a conflict sends the card to Rework with the files, as before). If there is no run plan yet, or it fails, the DevOps engineer is asked and the card waits for that request; a second failure puts a blocking item on your desk. When the app is healthy the tester runs every confirmed suite against it and reports each run. A suite that fails and then passes on the retry is recorded as **flaky**: it counts as passed, the card shows it, and the tester cannot pass the card while a confirmed suite has no passing result. The copy is stopped when the tester gives its verdict, or kept for the time you set after a failure. The **card page** lists every run (result, counts, time, which commit, a link to the log) under "Integration tests", and the environment panel shows the copy while it exists.
+
+**One card.** In **Details** a card has an "Integration tests" switch that follows the project setting when the card is specified. Turn it off for a documentation-only card; it can be changed until the Test step starts.
+
+**Cards already under way.** A card still before review when you upgrade moves to the new workflow version as review approves it, and then follows the project setting; a card already in Test or beyond finishes the way it started. Custom steps can need a running environment too: in the workflow builder tick "Needs a running environment" on a step the tester works (for example a smoke test after review).
+
+> **Good to know:** the tester reaches the app on the same `localhost:<port>` it has on the workstation, through a tunnel the runner opens only for that copy, and nothing else on the machine. Builders and reviewers still run unit tests only and name the suites they left out in their handoff. Passwords for test accounts never go in the settings: use an env file on the workstation, as for the run plan.
+
+> **In the app:** Help, "Integration tests" (`/help/board-and-cards#integration-tests`).
+
 ## 5. For Members
 
 A **Member** works inside the projects an Owner or Admin has added them to. You do the day-to-day work: write cards, answer questions, hire your own agents and follow the board. You do not manage the organization.

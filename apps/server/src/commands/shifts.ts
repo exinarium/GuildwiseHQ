@@ -42,7 +42,15 @@ import { QA_STEPS_STAGE } from './qa-flow.ts';
 import { raiseQuestion } from './questions.ts';
 import { rebaseConflictEvents } from './rebase.ts';
 import { buildPublicationEvents } from './research.ts';
+import {
+  endTestEnvironmentIn,
+  openSuitesOf,
+  reviewApprovedPlan,
+  runProblemEvents,
+  stageEnvironmentOf,
+} from './test-environments.ts';
 import { environmentNotReadyEvents, suiteOutcomeEvents, testFailedEvents } from './testing.ts';
+import { deliver } from './workstation-setup.ts';
 
 export interface WsRef {
   id: string;
@@ -286,7 +294,10 @@ export async function applyShiftReport(
       const tier = (card.risk_tier ?? 'small') as 'small' | 'large';
       const required = stage.approvals?.[tier] ?? 1;
       const soFar = Number(card.review_approvals) + 1;
-      const toStage = soFar >= required ? resolved.toStage : card.stage;
+      // The last approval: a card on an older `code` version moves to the one with the integration test guard, and a card
+      // that never had `integrationTests` takes the project's setting now (docs/design/run-and-integration-tests.md D8).
+      const plan = soFar >= required ? await reviewApprovedPlan(tx, card, wf, outcome.id) : null;
+      const toStage = soFar >= required ? (plan?.toStage ?? resolved.toStage) : card.stage;
       main = mk({
         type: 'ReviewApproved',
         payload: {
@@ -297,6 +308,8 @@ export async function applyShiftReport(
           approvalsSoFar: soFar,
           approvalsRequired: required,
           toStage,
+          ...(plan?.workflowVersionId ? { workflowVersionId: plan.workflowVersionId } : {}),
+          ...(plan?.integrationTests !== undefined ? { integrationTests: plan.integrationTests } : {}),
         },
       });
       break;
@@ -341,6 +354,13 @@ export async function applyShiftReport(
         mains = await testFailedEvents(tx, card, agent.id, report.note, ev);
         break;
       }
+      // Integration tests: the pass is refused while a confirmed suite of the project has no passing result in this shift.
+      const open = await openSuitesOf(tx, card, shift);
+      if (open.length > 0)
+        return {
+          accepted: false,
+          error: `${open.length === 1 ? 'a suite has' : 'suites have'} no passing result yet: ${open.join(', ')}. Run ${open.length === 1 ? 'it' : 'them'} and report each with \`aom test suite --name <suite> --status passed|failed|timeout|skipped\`; a failure is reported with \`aom test fail\`.`,
+        };
       main = mk({
         type: 'TestPassed',
         payload: {
@@ -506,6 +526,11 @@ export async function applyShiftReport(
     ],
     { tx },
   );
+  // A stage that ran against the project's environment is over: stop it (kept for a while after a failure).
+  if ((await stageEnvironmentOf(tx, card)) === 'project') {
+    const nudge = await endTestEnvironmentIn(ctx, tx, card, outcome.kind === 'failure');
+    if (nudge) deliver(ctx, [nudge]);
+  }
   return { accepted: true, ...(acceptMessage ? { message: acceptMessage } : {}) };
 }
 
@@ -794,7 +819,11 @@ export async function applyShiftRejected(
       )),
     );
   } else if (msg.reason === 'environment_not_ready' && msg.environment) {
-    extra.push(...(await environmentNotReadyEvents(ctx, tx, ws, card, msg.environment)));
+    extra.push(
+      ...(['run_plan_missing', 'run_failed', 'target_unreachable'].includes(msg.environment.problem)
+        ? await runProblemEvents(ctx, tx, card, msg.environment)
+        : await environmentNotReadyEvents(ctx, tx, ws, card, msg.environment)),
+    );
   }
   let rejection: { reason: string; detail: string; kind?: 'branch'; repoId?: string } | undefined;
   if (msg.reason === 'worktree_failed' && msg.branchProblem && card.repo_id) {

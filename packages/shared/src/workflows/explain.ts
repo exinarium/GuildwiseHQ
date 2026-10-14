@@ -284,6 +284,15 @@ const SPEC: Record<IssueCode, Spec> = {
     field: 'role',
     text: ({ step }) => `${step} names a fallback role that does not exist. Pick another role.`,
   },
+  environment_misplaced: {
+    field: 'kind',
+    text: ({ step }) => `${step} is not an agent step, so it cannot need a running environment.`,
+  },
+  environment_role_no_shell: {
+    field: 'role',
+    text: ({ step }) =>
+      `${step} needs a running environment, but the role chosen for it cannot run commands to test it. Pick a role with a shell, such as the tester.`,
+  },
   human_stage_not_custom: {
     field: 'kind',
     text: ({ step }) =>

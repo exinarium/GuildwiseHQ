@@ -24,6 +24,7 @@ import { effectiveCompletionAction } from '../commands/completion.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { grantedMcpServers } from '../commands/mcp-servers.ts';
 import { runBriefFor } from '../commands/runs.ts';
+import { shiftEnvironmentFor } from '../commands/test-environments.ts';
 import { projectHasVault, vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -255,6 +256,7 @@ export async function buildBrief(
       })),
     ],
     ledger: await cardLedgerEntries(ctx.pool, card.id),
+    ...(await testerEnvironment(ctx, card, agent, shift)),
     ...(card.card_type === 'feed'
       ? {
           feed: {
@@ -265,6 +267,18 @@ export async function buildBrief(
         }
       : {}),
   };
+}
+
+/** The environment a tester shift tests against (backlog #59): the card's healthy local test environment on this workstation. */
+async function testerEnvironment(
+  ctx: Ctx,
+  card: Row,
+  agent: Row,
+  shift: Row,
+): Promise<{ environment: NonNullable<ShiftBrief['environment']> } | Record<string, never>> {
+  if (agent.role_key !== 'tester' || agent.is_devops) return {};
+  const env = await shiftEnvironmentFor(ctx.pool, card, shift.workstation_id ?? agent.workstation_id);
+  return env ? { environment: env } : {};
 }
 
 /** Where the architect writes its report, and what was recorded once it did (docs/design/architect-and-workflows.md 3.4). */

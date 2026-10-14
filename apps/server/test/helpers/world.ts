@@ -98,6 +98,14 @@ export async function createWorld(
      * through Finalize to Done switch it off here unless they test QA (`manualQa: true`).
      */
     manualQa?: boolean;
+    /**
+     * The tester's `test` stage is skipped unless the project switched integration tests on (code v4, backlog #59). The
+     * suites that drive a card through Test with the plain test plan run with the setting on (mode `local`): the fake
+     * runner of those suites does not announce `runs:3`, so nothing is provisioned and the tester works as before.
+     * `'off'` keeps the production default (the stage is skipped); `'local'` leaves it to the test, which sets it up
+     * through the API (its runner announces `runs:3`).
+     */
+    integrationTests?: 'plain' | 'off' | 'local';
   } = {},
 ): Promise<World> {
   const t = await createTestApp({ env: opts.env, listen: opts.listen ?? true });
@@ -114,6 +122,13 @@ export async function createWorld(
       t.req('PUT', `/api/projects/${proj.project.id}/manual-qa`, {
         cookie: owner.cookie,
         body: { enabled: false },
+      }),
+    );
+  if ((opts.integrationTests ?? 'plain') === 'plain')
+    await ok(
+      t.req('PUT', `/api/projects/${proj.project.id}/integration-tests`, {
+        cookie: owner.cookie,
+        body: { settings: { mode: 'local' } },
       }),
     );
   const added = await ok<any>(

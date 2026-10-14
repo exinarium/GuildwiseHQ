@@ -231,6 +231,14 @@ export const RpcMethodSchema = z.enum([
   'run.logs',
   'run.ready',
   'run.fail',
+  /** The tester's environment (#59): `aom env info|logs|restart|suites`, answered by the runner (suites: by the server). */
+  'env.info',
+  'env.logs',
+  'env.restart',
+  'env.suites',
+  'env.suites.propose',
+  /** `aom test suite`: the runner parses the report, attaches the log and sends the result to the server. */
+  'test.suite',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

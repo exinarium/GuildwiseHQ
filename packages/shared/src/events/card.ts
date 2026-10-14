@@ -187,6 +187,12 @@ export const cardEvents = [
       approvalsRequired: z.number().int().min(1),
       /** `review` while more approvals are due, else the next stage (`test`, or a step a project variant inserted). */
       toStage: Stage,
+      /**
+       * A card pinned to an older built-in `code` version moves to this newer one when it leaves Review (it has the
+       * `test` guard and environment), with `integrationTests` set from the project's setting at that moment.
+       */
+      workflowVersionId: Id.optional(),
+      integrationTests: z.boolean().optional(),
     }),
   ),
   defineEvent(

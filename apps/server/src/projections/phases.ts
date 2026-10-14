@@ -379,8 +379,8 @@ export const phaseProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO deploy_targets (id, org_id, project_id, name, kind, workstation_id, host, app_url, notes, created_by,
-         created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)`,
+         created_at, updated_at, test_enabled, production, destructive_ok, test_hosts, secret_names)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,$12,$13,$14,$15::text[],$16::text[])`,
       [
         p.targetId,
         proj?.org_id,
@@ -393,6 +393,11 @@ export const phaseProjectors: Record<string, Projector> = {
         p.notes,
         p.createdBy,
         e.createdAt,
+        p.testEnabled ?? false,
+        p.production ?? false,
+        p.destructiveOk ?? false,
+        p.testHosts ?? [],
+        p.secretNames ?? [],
       ],
     );
   },
@@ -406,7 +411,10 @@ export const phaseProjectors: Record<string, Projector> = {
               workstation_id = CASE WHEN $4::boolean THEN $5 ELSE workstation_id END,
               host = CASE WHEN $6::boolean THEN $7 ELSE host END,
               app_url = CASE WHEN $8::boolean THEN $9 ELSE app_url END,
-              notes = COALESCE($10, notes), updated_at=$11
+              notes = COALESCE($10, notes), updated_at=$11,
+              test_enabled = COALESCE($12, test_enabled), production = COALESCE($13, production),
+              destructive_ok = COALESCE($14, destructive_ok), test_hosts = COALESCE($15::text[], test_hosts),
+              secret_names = COALESCE($16::text[], secret_names)
         WHERE id=$1`,
       [
         p.targetId,
@@ -420,6 +428,11 @@ export const phaseProjectors: Record<string, Projector> = {
         c.appUrl ?? null,
         c.notes ?? null,
         e.createdAt,
+        c.testEnabled ?? null,
+        c.production ?? null,
+        c.destructiveOk ?? null,
+        c.testHosts ?? null,
+        c.secretNames ?? null,
       ],
     );
   },

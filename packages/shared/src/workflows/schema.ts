@@ -142,8 +142,17 @@ export const StageSchema = z.object({
   approvals: z.object({ small: z.number().int().min(1), large: z.number().int().min(1) }).optional(),
   maxShiftMinutes: z.number().int().min(5).max(480).default(60),
   requiredCapabilities: z.array(z.string()).default([]),
+  /**
+   * `project`: the stage runs against a running environment of the project (Project settings > Run & test, integration
+   * tests). The dispatcher starts one for the card's commit before the stage is claimed and the server stops it at the
+   * verdict (docs/design/run-and-integration-tests.md D8, D9). Agent stages claimed by a role with a shell only.
+   */
+  environment: z.enum(['none', 'project']).default('none'),
 });
 export type Stage = z.infer<typeof StageSchema>;
+
+/** Does the stage need a running environment of the project? */
+export const stageNeedsEnvironment = (s: Pick<Stage, 'environment'>): boolean => s.environment === 'project';
 
 export const CustomFieldSchema = z.object({
   key: z.string(),

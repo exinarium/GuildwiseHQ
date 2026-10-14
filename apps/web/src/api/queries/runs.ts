@@ -1,5 +1,8 @@
 import {
   type ExtendRunRequest,
+  type IntegrationTestsResponse,
+  IntegrationTestsResponseSchema,
+  IntegrationTestsSchema,
   isLiveRunState,
   type RestartRunRequest,
   type RunEnvironmentDto,
@@ -7,6 +10,7 @@ import {
   RunEnvironmentsResponseSchema,
   type RunSettingsResponse,
   RunSettingsResponseSchema,
+  type SetIntegrationTestsRequest,
   type SetRunSettingsRequest,
   type StartRunRequest,
 } from '@aom/shared';
@@ -111,5 +115,55 @@ export function useSaveRunSettings(projectId: string) {
       qc.setQueryData(['run-settings', projectId], data);
       qc.invalidateQueries({ queryKey: ['project', projectId] });
     },
+  });
+}
+
+/** The project's integration test setting (backlog #59): mode, suites, how long a failed environment is kept. */
+export function useIntegrationTests(projectId: string | undefined) {
+  return useQuery({
+    enabled: !!projectId,
+    queryKey: ['integration-tests', projectId],
+    queryFn: async (): Promise<IntegrationTestsResponse> => {
+      const d = await get<Partial<IntegrationTestsResponse>>(
+        `/projects/${projectId}/integration-tests`,
+        IntegrationTestsResponseSchema,
+      );
+      // tolerate an older server that does not answer yet
+      return {
+        settings: IntegrationTestsSchema.parse(d.settings ?? {}),
+        repos: d.repos ?? [],
+        targets: d.targets ?? [],
+        canProvision: d.canProvision ?? false,
+      };
+    },
+  });
+}
+
+export function useSaveIntegrationTests(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: SetIntegrationTestsRequest) =>
+      put<IntegrationTestsResponse>(
+        `/projects/${projectId}/integration-tests`,
+        v,
+        IntegrationTestsResponseSchema,
+      ),
+    onSuccess: (data) => {
+      qc.setQueryData(['integration-tests', projectId], data);
+      qc.invalidateQueries({ queryKey: ['project', projectId] });
+    },
+  });
+}
+
+export function useConfirmSuite(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { name: string; confirmed: boolean }) =>
+      post<IntegrationTestsResponse>(
+        `/projects/${projectId}/integration-tests/suites/${encodeURIComponent(v.name)}/confirm`,
+        { confirmed: v.confirmed },
+        IntegrationTestsResponseSchema,
+      ),
+    onSuccess: (data) => qc.setQueryData(['integration-tests', projectId], data),
   });
 }

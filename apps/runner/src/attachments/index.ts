@@ -290,6 +290,8 @@ export function describeSynced(synced: { files: SyncedFile[]; errors: string[] }
 export async function attachFileFromAgent(opts: {
   path: string;
   ref?: string | undefined;
+  /** Where the file came from (`test suite` for a tester's suite log); default: the Jira key in the path, if any. */
+  source?: string | undefined;
   /** Folders the agent may attach from (its scratch and temp dirs). */
   roots: string[];
   rpc: (method: string, params: Record<string, unknown>) => Promise<IpcRpcResponse>;
@@ -319,7 +321,7 @@ export async function attachFileFromAgent(opts: {
     name,
     size: bytes.byteLength,
     sha256: createHash('sha256').update(bytes).digest('hex'),
-    ...(jira ? { source: `jira ${jira[1]}` } : {}),
+    ...(opts.source ? { source: opts.source } : jira ? { source: `jira ${jira[1]}` } : {}),
   });
   if (!begin.ok) throw new Error(begin.error ?? 'the server refused the attachment');
   const t = begin.result as { uploadId: string; ref: string; name: string };

@@ -6,6 +6,7 @@ import {
   codeWorkflowV1,
   codeWorkflowV2,
   codeWorkflowV3,
+  codeWorkflowV4,
   DomainEventSchema,
   feedWorkflowV1,
   getBuiltinWorkflow,
@@ -45,19 +46,21 @@ describe('built-in workflows', () => {
     },
   );
 
-  it('exposes the built-in definitions (code v1, v2 and v3, the others v1)', () => {
+  it('exposes the built-in definitions (code v1 to v4, the others v1)', () => {
     expect(BUILTIN_WORKFLOWS.map((w) => `${w.key}@${w.version}`).sort()).toEqual([
       'code-bugfix@1',
       'code@1',
       'code@2',
       'code@3',
+      'code@4',
       'feed@1',
       'research@1',
     ]);
-    expect(getBuiltinWorkflow('code')).toBe(codeWorkflowV3);
+    expect(getBuiltinWorkflow('code')).toBe(codeWorkflowV4);
+    expect(getBuiltinWorkflow('code', 3)).toBe(codeWorkflowV3);
     expect(getBuiltinWorkflow('code', 2)).toBe(codeWorkflowV2);
     expect(getBuiltinWorkflow('code', 1)).toBe(codeWorkflowV1);
-    expect(getBuiltinWorkflow('code', 4)).toBeUndefined();
+    expect(getBuiltinWorkflow('code', 5)).toBeUndefined();
     expect(getBuiltinWorkflow('nope')).toBeUndefined();
   });
 

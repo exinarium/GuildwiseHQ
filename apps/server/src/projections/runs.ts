@@ -1,4 +1,4 @@
-import type { EventOf } from '@aom/shared';
+import { type EventOf, IntegrationTestsSchema } from '@aom/shared';
 import { exec, one } from '../db/sql.ts';
 import type { Projector } from '../eventstore/types.ts';
 
@@ -19,6 +19,66 @@ export const runProjectors: Record<string, Projector> = {
         r.repoId,
         r.runInstructions,
       ]);
+  },
+  ProjectIntegrationTestsSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectIntegrationTestsSet'>).payload;
+    await exec(tx, 'UPDATE projects SET integration_tests=$2::jsonb WHERE id=$1', [
+      p.projectId,
+      JSON.stringify(p.settings),
+    ]);
+  },
+  IntegrationSuitesProposed: async (tx, e) => {
+    const p = (e.event as EventOf<'IntegrationSuitesProposed'>).payload;
+    const row = await one<{ integration_tests: unknown }>(
+      tx,
+      'SELECT integration_tests FROM projects WHERE id=$1',
+      [p.projectId],
+    );
+    const settings = IntegrationTestsSchema.parse(row?.integration_tests ?? {});
+    const known = new Set(settings.suites.map((s) => s.name.toLowerCase()));
+    const added = p.suites
+      .filter((s) => !known.has(s.name.toLowerCase()))
+      .map((s) => ({ ...s, confirmed: false }));
+    if (added.length === 0 || settings.suites.length + added.length > 30) return;
+    await exec(tx, 'UPDATE projects SET integration_tests=$2::jsonb WHERE id=$1', [
+      p.projectId,
+      JSON.stringify({ ...settings, suites: [...settings.suites, ...added] }),
+    ]);
+  },
+  TestSuiteReported: async (tx, e) => {
+    const p = (e.event as EventOf<'TestSuiteReported'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO test_suite_results (id, org_id, project_id, card_id, shift_id, agent_id, suite, kind, env_mode, env_id,
+          deploy_target_id, commit, status, passed, failed, skipped, duration_ms, attempts, failures, attachment_id,
+          note, event_seq, created_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb,
+          $19, $20, $21, $22)`,
+      [
+        e.scope.orgId,
+        e.scope.projectId,
+        p.cardId,
+        p.shiftId,
+        p.testerAgentId,
+        p.suite,
+        p.kind,
+        p.envMode,
+        p.envId,
+        p.deployTargetId,
+        p.commit,
+        p.status,
+        p.passed,
+        p.failed,
+        p.skipped,
+        p.durationMs,
+        p.attempts,
+        JSON.stringify(p.failures),
+        p.attachmentId,
+        p.note,
+        e.seq.toString(),
+        e.createdAt,
+      ],
+    );
   },
   RunPlanSaved: async (tx, e) => {
     const p = (e.event as EventOf<'RunPlanSaved'>).payload;

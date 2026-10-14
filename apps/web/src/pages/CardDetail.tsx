@@ -5,6 +5,7 @@ import {
   isMockField,
   type SubworkflowChildDto,
   type WorkflowDefinition,
+  workflowHasIntegrationGuard,
   workflowUsesRepos,
 } from '@aom/shared';
 import { MoreHorizontal } from 'lucide-react';
@@ -24,6 +25,7 @@ import {
   useSpecifyCard,
 } from '../api/queries/cards.ts';
 import { useDecisionPolicy, useRehomeCard } from '../api/queries/members.ts';
+import { useRuns } from '../api/queries/runs.ts';
 import { AttachmentsPanel } from '../components/AttachmentsPanel.tsx';
 import { BackoffBadge } from '../components/BackoffBadge.tsx';
 import {
@@ -34,9 +36,6 @@ import {
 } from '../components/CardEdit.tsx';
 import { CardPhase } from '../components/CardPhase.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
-import { RunBranchDialog } from '../components/runs/RunBranchDialog.tsx';
-import { RunList } from '../components/runs/RunPanel.tsx';
-import { useRuns } from '../api/queries/runs.ts';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
 import { FinalizePanel } from '../components/FinalizePanel.tsx';
@@ -45,6 +44,9 @@ import { McpUsagePanel } from '../components/McpUsagePanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
 import { QaPanel } from '../components/QaPanel.tsx';
+import { RunBranchDialog } from '../components/runs/RunBranchDialog.tsx';
+import { RunList } from '../components/runs/RunPanel.tsx';
+import { IntegrationTestsToggle, SuiteResultsPanel } from '../components/runs/SuiteResults.tsx';
 import { ShiftLog } from '../components/ShiftLog.tsx';
 import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
 import {
@@ -214,6 +216,10 @@ export function CardDetailView({
     color: stageStyle(st.column).color,
   }));
   const active = card.status !== 'done' && card.status !== 'cancelled';
+  // The integration tests switch is the owner's until the Test stage starts (then the environment and results exist).
+  const testAt = (workflow?.stages ?? []).findIndex((st) => st.id === 'test');
+  const testStarted =
+    testAt >= 0 && (workflow?.stages ?? []).findIndex((st) => st.id === card.stage) >= testAt;
   const canRehome = permissions.canMove && !card.claimedByAgentName && active;
   const canRelease = permissions.canRelease && card.status === 'claimed';
   const canCancel = permissions.canCancel && active;
@@ -446,6 +452,7 @@ export function CardDetailView({
               canAct={permissions.canMove}
             />
           )}
+          {data.testing && <SuiteResultsPanel cardId={card.id} testing={data.testing} />}
           {data.testing && <EvidencePanel testing={data.testing} handoffs={handoffs} />}
           <OutboundHistory
             cardId={card.id}
@@ -521,6 +528,15 @@ export function CardDetailView({
                     <Meta k="Where it lands" v={landingText(card)} />
                   )}
                   <Meta k="Docs needed" v={card.docsNeeded ? 'yes' : 'no'} />
+                  {workflow &&
+                    workflowHasIntegrationGuard(workflow) &&
+                    typeof card.fields.integrationTests === 'boolean' && (
+                      <IntegrationTestsToggle
+                        cardId={card.id}
+                        value={card.fields.integrationTests}
+                        editable={permissions.canMove && !testStarted}
+                      />
+                    )}
                   {card.designNeeded && (
                     <Meta
                       k="Investigate & design"

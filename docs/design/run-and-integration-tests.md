@@ -244,3 +244,25 @@ targets serve suite/regression cards; Q3 testers keep package registries plus ex
 default per project; Q6 TTL 8 h with Extend, failed test environments kept 1 h. **Q4 differs from the recommendation:**
 the owner said integration and E2E tests are enabled per project, so every existing project starts with mode `off`
 until he switches it on. Production deploys wait for the owner; builds go to local/UAT.
+
+**P3 is built** (backlog #59, capability `runs:3`, migrations 1910 and 1990). Differences and additions: workflow `code` **v4**
+(`code` v3 is the manual QA version, see manual-qa.md) carries the guard and `environment: 'project'`; cards on v1 to v3 move to
+v4 as Review approves them (`ReviewApproved.workflowVersionId` and `.integrationTests`), a card already in Test or beyond is left alone
+(`reviewApprovedPlan`); `integrationTests` is a code card field (`fields.integrationTests`), defaulted from the project setting
+at creation and when the review approves a card that never had it, changed per card with `PATCH /api/cards/:id
+{integrationTests}` until the Test stage starts. The setting is `projects.integration_tests` (event
+`ProjectIntegrationTestsSet`, `GET|PUT /api/projects/:id/integration-tests`, owner only). Provisioning is
+`commands/test-environments.ts` called from the dispatcher pass: `run_environments` gets `verdict_at` (the card's verdict was
+given: the copy is no longer its to use; kept until `expires_at` after a failure) and `failure_handled`; the candidate query's
+`envReady` clause keeps a card at an environment stage back until its environment is healthy on the agent's workstation (not for
+suite and regression cards, cards that opted out, projects not in `local` mode, runners without `runs:3`). A failed environment parks the
+card on its DevOps request (`TestEnvironmentParked`, `env_parks`) and retries; the third failure is a blocking desk item. The
+shift-time problems `run_plan_missing`, `run_failed` and `target_unreachable` are accepted on `shift.rejected`; a tester shift the
+runner turned away for a missing environment starts a new one through the DevOps engineer (forced request). `aom test pass` is
+refused by the server while a confirmed suite lacks a passing result in the shift (`suitesWithoutPass`); a pass after a failure of the
+same suite is recorded as `flaky` (the server counts attempts); a suite flaky three times in seven days raises one desk notice
+(`flaky_suite`) per project and suite. Not built in P3: "Update & restart" for a test environment, automatic restart after a reboot
+or crash (a test environment that lost its services ends as `runner_restarted` and the card gets a new one).
+**Spike (a)** (2026-10-14) passed with a real bubblewrap `--unshare-net` call: `socat` bridging a Unix socket to the host's app,
+`curl` and Playwright Chromium reach `http://localhost:<port>` inside it (RUNNER.md, "Integration tests by the tester").
+

@@ -24,6 +24,7 @@ import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
+import { IntegrationTestsSettings } from '../components/runs/IntegrationTestsSettings.tsx';
 import { RunSettings } from '../components/runs/RunSettings.tsx';
 import {
   Badge,
@@ -355,8 +356,9 @@ export function ProjectSettings() {
         </div>
       )}
       {project && traits.usesRepos && (
-        <div id="run" className="scroll-mt-20">
+        <div id="run" className="flex scroll-mt-20 flex-col gap-5">
           <RunSettings projectId={id} canEdit={project.myRole === 'owner'} />
+          <IntegrationTestsSettings projectId={id} canEdit={project.myRole === 'owner'} />
         </div>
       )}
       {project && traits.usesRepos && (

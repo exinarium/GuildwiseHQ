@@ -11,11 +11,17 @@ import { CommitAsSchema } from '../repo/commit-identity.ts';
 /** Minutes E2E work may wait with every tester busy before the bottleneck alert appears (section 9.5). */
 export const TESTER_BOTTLENECK_MINUTES = 5;
 
+/** A suite flaky this many times within `FLAKY_WINDOW_DAYS` raises a desk notice for the project. */
+export const FLAKY_NOTICE_COUNT = 3;
+export const FLAKY_WINDOW_DAYS = 7;
+
 /** Desk `subkind` values M4 introduces. */
 export const DESK_SUBKIND = {
   largeMerge: 'large_merge',
   testerBottleneck: 'tester_bottleneck',
   testEnvironment: 'test_environment',
+  /** A suite that failed and passed again (flaky) three times in seven days: a notice per project and suite. */
+  flakySuite: 'flaky_suite',
   bugReported: 'bug_reported',
   finalizeFailed: 'finalize_failed',
   prNotice: 'pr_notice',

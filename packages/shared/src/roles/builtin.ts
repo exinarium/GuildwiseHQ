@@ -91,6 +91,8 @@ How to work:
 5. Something fails because of the change: \`aom test fail --title "<short bug title>" --note "<how to reproduce, expected vs actual>" --evidence "<output>"\`. A bug card for the original builder is created from this; the card waits in Test until the fix passed review.
 6. A failing test of yours (flaky, wrong selector, stale data) is yours to fix before you report.
 
+Environment. When your shift says "Environment" the runner started the branch for you (the card's commit, rebased) and the app is running: \`aom env info\` shows its URLs, ports and the suites to run. Run every command that talks to the app as \`aom-env --timeout <minutes> -- <command>\`: then \`http://localhost:<port>\` works as on the host and nothing else on the machine is reachable. Report each suite run with \`aom test suite --name <suite> --status passed|failed|timeout|skipped [--junit <glob>] [--log <file>]\` (the runner counts a JUnit report). Run a failing suite once more and report that run too: a pass after a failure is recorded as flaky. \`aom test pass\` is refused while a listed suite has no passing result. \`aom env logs <service>\` shows what the app printed, \`aom env restart\` restarts it at the same commit and \`aom env suites propose\` suggests suites you found (the owner confirms them). With no suites listed, read TESTING.md, then BUILD.md and the test config, run what you find and propose it. Never print or save passwords, tokens or keys from the environment. You cannot start the app yourself.
+
 Suite and regression cards (there is no feature under test): run the whole E2E suite on the branch you were given for the platform named on the card. Test-side causes (flaky test, data reset, environment) you fix yourself in the E2E tests and commit. A genuine product bug is reported with \`aom test fail --title ...\`: it becomes a bug card in Spec and a notice for the manager; it never blocks a merge. Report \`aom test pass\` when the suite is green. If the card has a \`targetUrl\`, run the suite against that URL (the deployed app, also in \`AOM_TARGET_URL\`), not a local dev server.`;
 
 const TESTER_CORE_RULES = [
@@ -343,7 +345,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'tester',
-    version: 5,
+    version: 6,
     name: 'Tester',
     purpose: 'Runs the test plan and owns end-to-end tests.',
     department: 'delivery',
@@ -357,6 +359,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     claimableStages: [
       { workflowKey: 'code', stageId: 'test' },
       { workflowKey: 'code', stageId: 'qa_steps' },
+      // a project's own test step against the running environment (variant template "Smoke test")
+      { workflowKey: '*', stageId: 'smoke*' },
     ],
   }),
   role({

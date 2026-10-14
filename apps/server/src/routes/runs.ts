@@ -1,13 +1,19 @@
 import {
+  ConfirmSuiteRequestSchema,
   ExtendRunRequestSchema,
   IdParamsSchema,
   RestartRunRequestSchema,
   RunsQuerySchema,
+  SetIntegrationTestsRequestSchema,
+  SetTargetSecretRequestSchema,
   SetRunSettingsRequestSchema,
   StartRunRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
+import { confirmSuite, getIntegrationTests, setIntegrationTests } from '../commands/integration-tests.ts';
+import { setTargetSecret, targetSecretStatuses } from '../commands/target-secrets.ts';
 import {
   extendRun,
   getRun,
@@ -90,6 +96,54 @@ export function runRoutes(ctx: Ctx) {
         const s = await requireUser(ctx, req);
         await setRunSettings(ctx, s.user, req.params.id, req.body);
         return getRunSettings(ctx, s.user, req.params.id);
+      },
+    );
+
+    // Integration tests of the tester (backlog #59): the project's mode and suites.
+    app.get('/api/projects/:id/integration-tests', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return getIntegrationTests(ctx, s.user, req.params.id);
+    });
+
+    app.put(
+      '/api/projects/:id/integration-tests',
+      { schema: { params: IdParamsSchema, body: SetIntegrationTestsRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await setIntegrationTests(ctx, s.user, req.params.id, req.body);
+        return getIntegrationTests(ctx, s.user, req.params.id);
+      },
+    );
+
+    // Test accounts of a deploy target: the browser's sealed value for one name on one of the viewer's workstations.
+    app.put(
+      '/api/workstations/:id/target-secrets',
+      { schema: { params: IdParamsSchema, body: SetTargetSecretRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        await setTargetSecret(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return { queued: true };
+      },
+    );
+
+    app.get('/api/projects/:id/target-secrets', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      return targetSecretStatuses(ctx, s.user, req.params.id);
+    });
+
+    app.post(
+      '/api/projects/:id/integration-tests/suites/:name/confirm',
+      {
+        schema: {
+          params: z.object({ id: z.uuid(), name: z.string().min(1).max(60) }),
+          body: ConfirmSuiteRequestSchema,
+        },
+      },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await confirmSuite(ctx, s.user, req.params.id, req.params.name, req.body.confirmed);
+        return getIntegrationTests(ctx, s.user, req.params.id);
       },
     );
   };

@@ -485,6 +485,19 @@ export const cardProjectors: Record<string, Projector> = {
 
   ReviewApproved: async (tx, e) => {
     const p = ev<'ReviewApproved'>(e).payload;
+    // A card on an older built-in `code` version moves to the version that has the integration test guard when it leaves
+    // Review (docs/design/run-and-integration-tests.md D8); the project's setting decides `integrationTests` then.
+    if (p.workflowVersionId || p.integrationTests !== undefined)
+      await mutateCard(tx, e, p.cardId, () =>
+        exec(
+          tx,
+          `UPDATE cards SET workflow_version_id = COALESCE($2::uuid, workflow_version_id),
+                  fields = CASE WHEN $3::boolean IS NULL THEN fields
+                                ELSE jsonb_set(COALESCE(fields, '{}'::jsonb), '{integrationTests}', to_jsonb($3::boolean)) END
+            WHERE id=$1`,
+          [p.cardId, p.workflowVersionId ?? null, p.integrationTests ?? null],
+        ),
+      );
     if (p.toStage === 'review') {
       await mutateCard(tx, e, p.cardId, () =>
         exec(

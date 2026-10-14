@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { apiAs } from '../support/api.ts';
 import { BASE_URL, MEMBER, paths } from '../support/env.ts';
 import { addRepoRoot, pairRunner, startRunner } from '../support/runner.ts';
 import { expandWorkstation } from '../support/ui.ts';
@@ -54,6 +55,18 @@ test('AC2: pairing code, aom-runner pair + start, workstation Connected with the
   await add.getByLabel('Remote URL').fill(paths.origin);
   await add.getByRole('button', { name: /add/i }).click();
   await expect(page.getByTestId('repos')).toContainText('toy');
+
+  // The Test step runs only when the project switched integration tests on (this runner announces no test environments,
+  // so the tester works from the card's test plan as before): the specs that run cards through Test rely on it.
+  const api = await apiAs(MEMBER.email, MEMBER.password);
+  const toy = (
+    (await (await api.get('/api/projects')).json()).projects as Array<{ id: string; key: string }>
+  ).find((p) => p.key === 'TOY');
+  expect(
+    (
+      await api.put(`/api/projects/${toy?.id}/integration-tests`, { data: { settings: { mode: 'local' } } })
+    ).status(),
+  ).toBe(200);
 
   await page.getByRole('link', { name: 'Workstations' }).click();
   await expandWorkstation(page.getByTestId('workstation-E2E Desktop'));

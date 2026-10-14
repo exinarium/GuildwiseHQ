@@ -380,7 +380,7 @@ describe('manual QA after finalize', () => {
     const row = await cardRow(card.id);
     expect(row.stage).toBe('qa_steps');
     const v3 = await q('SELECT version FROM workflow_versions WHERE id=$1', [row.workflow_version_id]);
-    expect(v3[0]).toMatchObject({ version: 3 });
+    expect(v3[0]).toMatchObject({ version: 4 }); // the newest built-in version (QA stages plus the integration test guard)
   }, 120_000);
 
   it('QA is not a stage to move to; moving the card out of it closes the desk item and hides the panel', async () => {

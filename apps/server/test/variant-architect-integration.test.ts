@@ -214,7 +214,7 @@ describe('a variant created on code v1 and rebased onto v2', () => {
     ]);
     const def2 = (await q('SELECT definition FROM workflow_versions WHERE id=$1', [rebased.body.id]))[0]!
       .definition;
-    expect(def2.extends).toEqual({ key: 'code', version: 3 });
+    expect(def2.extends).toEqual({ key: 'code', version: 4 });
     const sub = await ok<any>(w.t.req('POST', variantUrl(`${rebased.body.id}/submit`), owner()));
     expect((await d.resolve(sub.deskItemId, 'approved')).status).toBe(200);
 

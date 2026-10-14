@@ -100,6 +100,10 @@ If an agent seems stuck, open the card: the live shift shows how long it has run
 
 **Run this branch** (card) or **Run branch...** (board) has the workstation's DevOps engineer start the project so you can try it; it stops by itself after the time in **Project settings > Run and test**, or when you click **Stop**. The first start is worked out by the engineer and saved as a plan; later starts replay it with no DevOps run. **Restart** and **Update & restart** (fast-forward to the branch head) are on the panel.
 
+## Integration tests {#integration-tests}
+
+**Project settings > Run and test > Integration tests** (off until you switch it on) makes the tester run integration and end-to-end suites against a running copy of each card's branch. The card waits in Test while its workstation starts it; the card page lists every suite run (a pass after a failure is marked flaky), and a failed card's copy is kept for the time you set. Switch it off for one card in **Details**.
+
 ## Backing off {#backing-off}
 
 When three shifts on the same card end with no report within ten minutes (the agent crashed or timed out), the card shows an amber badge such as "backing off until 14:32 (3 failures)", and a "keeps failing" item lands on your desk. Guildwise HQ waits 1 minute before offering it again; every further failure doubles the wait, up to 1 hour.

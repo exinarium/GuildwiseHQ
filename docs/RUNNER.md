@@ -1570,8 +1570,18 @@ and the DevOps engineer split the work:
   the runner also stops one itself ten minutes after its expiry if the server could not.
 - **Residual risk.** A sandboxed service shares the host network, so it can reach anything the machine can (internal hosts,
   databases on localhost); only Docker steps (opt-in) and a runner with the sandbox off run with the user's full rights. The
-  tester access (forwarders and `aom-env`, D6) and the integration-test mode are phase 3.
-- Not available on native Windows (the hello does not announce `runs:1` or `runs:2` there).
+  tester access (forwarders and `aom-env`, D6) is described under "Integration tests by the tester" below.
+- Not available on native Windows (the hello does not announce `runs:1`, `runs:2` or `runs:3` there).
+
+### Integration tests by the tester (backlog #59, `runs:3`)
+
+The project setting (Project settings > Run and test > Integration tests: `off`, `local`, `remote`) decides whether the `test` stage of workflow `code` v4 runs. With `local`, the server provisions a test environment per card and the tester works against it. Details of the design are in `docs/design/run-and-integration-tests.md` (sections 4 and 7, P3).
+
+- **Provisioning.** A card queued at an `environment: 'project'` stage waits until an environment for it is `healthy` on its workstation. The server sends `run.start` with `purpose: 'test'` and `rebaseCard {repoId, cardWorktreePath, baseBranch}`: the runner first rebases the card branch onto its base branch in the card worktree (the stage's `rebaseBefore`, so the tester's own rebase finds nothing to do; a conflict fails the start and sends the card to Rework with the files, `run.status.rebaseConflictFiles`), then cuts the detached run worktrees from the rebased commit and replays the saved run plan (or the DevOps engineer works it out, as for a manual start). The environment lives until the tester's verdict (`run.stop` with `reason: verdict`), or `keepOnFailureMin` after a failed card, or four hours at most.
+- **Forwarders (D6).** Each Bash call of a sandboxed agent has its own network namespace, so `localhost:<port>` there is empty. For a tester shift with an environment the runner listens on one Unix socket per environment port in the agent's private tmp dir (`<tmp>/env/<port>.sock`), connects each connection to `127.0.0.1:<that port>` and nothing else, and refuses it as soon as the environment stops. `AOM_ENV_FORWARDS=<port>=<socket>,...` and `AOM_ENV_ID` are set in the agent's environment. The wrapper `bin/aom-env [--timeout <minutes>] -- <command>` (written next to the `aom` shim, needs `socat` and `timeout`, which the sandbox prerequisites already include) starts a `socat TCP-LISTEN:<port>,bind=127.0.0.1,fork UNIX-CONNECT:<socket>` per forward inside the command's namespace, waits until they listen and runs the command, which finds `http://localhost:<port>` exactly as on the host (same port numbers: cookies, CORS and hard-coded URLs keep working). `--timeout` kills the command's whole process group (exit status 124) so a hanging suite cannot keep the shift busy. Ports 3128 and 1080 (the sandbox proxy bridges) are never forwarded. The tester role already has `allowAllUnixSockets` (browsers) and `allowLocalBinding`. **Spike (a), 2026-10-14:** a real bubblewrap call with `--unshare-net` (the flags the Claude sandbox uses), `socat` bridging a host Unix socket to a host HTTP server, `curl` and Playwright Chromium to `http://localhost:<port>` inside it: both reach the app. Not available on macOS (Seatbelt has no network namespace; the environment stage is refused there with a message, phase 4).
+- **Commands for the tester** (all answered by the runner, over the IPC): `aom env info` (the environment, its ports and URLs, the suites), `aom env logs <service> [--lines N]`, `aom env restart` (same commit; needs a plan), `aom env suites` and `aom env suites propose --name ... --cmd "..."` (answered by the server: the suites the owner confirmed, and unconfirmed suggestions), and `aom test suite --name <suite> --status passed|failed|timeout|skipped [--junit <glob>] [--log <file>]`. The runner reads the JUnit report (relative to the worktree, scratch or temp folder only; a report with failing cases cannot be recorded as passed), attaches the log or report to the card as an attachment (redacted: values of the environment's env files become `***`) and sends `test.suite` to the server, which records `TestSuiteReported`. The server turns a pass after an earlier failure of the same suite in the same shift into `flaky` and counts attempts. `aom test pass` is refused while a confirmed suite of the project has no passing (passed, flaky, skipped) result in the shift. A tester may attach to its own card only suite logs (`source: test suite`).
+- **Instructions.** The runner appends an "Environment" section to the tester's instructions (where the app is, `aom-env`, the suites to run) from `brief.environment`, so testers hired before the role gained its own Environment section (tester v6) work too.
+- **Capability.** The hello announces `runs:3` (not on native Windows). A server provisions only for a workstation that did.
 
 ### DevOps shifts are unsandboxed
 
@@ -1851,20 +1861,12 @@ one place each (`claude-code.ts`, `mcp.ts`, `github.ts`) and a version bump shou
 
 ### Test environment check
 
-Testers need Docker and the application running. Before a tester shift starts, the runner checks:
+A tester shift needs something to test against. Two cases:
 
-1. Docker is installed and responsive (`docker info`)
-2. If `.aom/test-env.json` exists in the repository root, the app's health endpoint is reachable
+- **A test environment for the card** (integration tests are on for the project, runner capability `runs:3`): the server starts the card's commit on this workstation before it hands the card to a tester (section "Integration tests by the tester" below). `shift.start` then carries `brief.environment`; the runner checks that environment is `healthy` on this workstation and rejects the shift with `environment_not_ready` / `run_failed` when it is not (the server then asks the DevOps engineer and parks the card). Docker is not checked.
+- **No environment** (the project has integration tests off, a runner without `runs:3`, suite and regression cards): as before. Before a tester shift starts, the runner checks that Docker is installed and responsive (`docker info`) and, if `.aom/test-env.json` exists in the repository root, that the app's health endpoint answers with a 2xx.
 
-**Test environment file** (`.aom/test-env.json`):
-
-```json
-{
-  "healthUrl": "http://localhost:3000/health"
-}
-```
-
-The tester's DevOps engineer (or setup job) creates this file once the app is deployed. If the health check fails, the tester shift is blocked with a desk notice; DevOps resolves it.
+**`.aom/test-env.json` is retired** (design D12): `{"healthUrl": "http://localhost:3000/health"}` is still read in this version, and a shift that finds the file notes that it is deprecated (the health check now comes from the run plan, Project settings > Run and test). It is ignored from the next version on; the file can be deleted from the repository. It is never required.
 
 **Mock mode** (testing): the card's `fields.mockEnv` field names a problem (`"docker_missing"` or `"app_not_deployed"`). The mock persists the problem in `.aom-runner/mock-state/` until fixed by mock DevOps.
 

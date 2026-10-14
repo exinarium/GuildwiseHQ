@@ -40,6 +40,11 @@ export interface ShiftStartInput {
    * agent's MCP config, with the configuration from this workstation's plugins.
    */
   mcpServers?: string[];
+  /**
+   * Hosts the shell may reach besides the package registries for this shift only: the deployed target a tester tests
+   * (docs/design/run-and-integration-tests.md D7). Hostnames, no ports (the sandbox cannot filter ports).
+   */
+  extraAllowedDomains?: string[];
   maxShiftMinutes: number;
   /** Chat only. */
   resumeSessionId?: string;

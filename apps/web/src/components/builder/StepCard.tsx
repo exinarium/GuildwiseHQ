@@ -349,6 +349,18 @@ export function StepCard(p: StepCardProps) {
               </Select>
             )}
 
+            {step.kind === 'agent' && (
+              <label className="flex min-h-9 items-center gap-2 text-sm" data-testid="step-environment">
+                <input
+                  type="checkbox"
+                  checked={step.environment}
+                  disabled={readOnly}
+                  onChange={(e) => set({ environment: e.target.checked })}
+                />
+                Needs a running environment (Run &amp; test settings)
+              </label>
+            )}
+
             {(step.kind === 'agent' || !isInitial) && (
               <details className="text-sm">
                 <summary className="cursor-pointer font-medium text-muted">More settings (advanced)</summary>
