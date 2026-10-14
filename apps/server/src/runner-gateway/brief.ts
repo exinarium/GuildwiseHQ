@@ -153,6 +153,13 @@ export async function buildBrief(
        FROM mail_threads t WHERE t.card_id=$1 AND t.org_id=$2`,
     [card.id, card.org_id],
   );
+  // A card made from an incoming webhook (#14): same treatment, from the payload.
+  const hookLink = mailLink
+    ? undefined
+    : await one(ctx.pool, 'SELECT fields, title FROM card_untrusted WHERE card_id=$1 AND org_id=$2', [
+        card.id,
+        card.org_id,
+      ]);
   const extension = ext?.extensions as
     | { instructions?: string; skills?: string[]; standingOrders?: string[] }
     | undefined;
@@ -190,6 +197,16 @@ export async function buildBrief(
       dependencies: deps.map((d) => ({ ref: d.ref, title: d.title, status: d.status })),
       attachments: await briefAttachments(ctx.pool, card.id),
       parent: parent ? { ref: parent.ref, title: parent.title } : undefined,
+      ...(hookLink
+        ? {
+            untrusted: {
+              source: 'email' as const,
+              kind: 'webhook' as const,
+              fields: (hookLink.fields ?? []) as string[],
+              title: Boolean(hookLink.title),
+            },
+          }
+        : {}),
       ...(mailLink
         ? {
             untrusted: {
@@ -409,15 +426,24 @@ export async function devopsCardBrief(
     'SELECT untrusted_fields, untrusted_title FROM mail_threads WHERE card_id=$1 AND org_id=$2',
     [card.id, orgId],
   );
+  const hook = mail
+    ? undefined
+    : await one(ctx.pool, 'SELECT fields, title FROM card_untrusted WHERE card_id=$1 AND org_id=$2', [
+        card.id,
+        orgId,
+      ]);
+  const outsideFields = (mail ? mail.untrusted_fields : hook?.fields) ?? [];
+  const outsideTitle = Boolean(mail ? mail.untrusted_title : hook?.title);
+  const what = mail ? 'E-mail' : 'Webhook';
   const fields = { ...((card.fields ?? {}) as Record<string, unknown>) };
-  for (const key of (mail?.untrusted_fields ?? []) as string[]) {
+  for (const key of outsideFields as string[]) {
     const v = fields[key];
     if (v !== undefined && v !== null)
-      fields[key] = renderUntrusted(`E-mail: ${key}`, typeof v === 'string' ? v : JSON.stringify(v));
+      fields[key] = renderUntrusted(`${what}: ${key}`, typeof v === 'string' ? v : JSON.stringify(v));
   }
   return {
     ref: card.ref,
-    title: mail?.untrusted_title ? renderUntrusted('E-mail subject', card.title) : card.title,
+    title: outsideTitle ? renderUntrusted(`${what} subject`, card.title) : card.title,
     cardType: card.card_type,
     stage: card.stage ?? undefined,
     status: card.status,

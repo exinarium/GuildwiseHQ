@@ -23,6 +23,7 @@ import { Link } from 'react-router';
 import {
   useDeleteSchedule,
   usePatchSchedule,
+  useRevokeSecret,
   useRotateSecret,
   useRunSchedule,
   useScheduleList,
@@ -53,7 +54,7 @@ import { formatDateTime } from '../lib/time.ts';
 export function Automations() {
   const list = useScheduleList();
   const [wizard, setWizard] = useState<{ open: boolean; editing?: ScheduleDto }>({ open: false });
-  const [secret, setSecret] = useState<{ name: string; value: string } | null>(null);
+  const [secret, setSecret] = useState<{ name: string; value: string; url?: string | undefined } | null>(null);
   const schedules = list.data?.schedules ?? [];
   const system = list.data?.system ?? [];
 
@@ -66,7 +67,7 @@ export function Automations() {
     a === 'Whole organization' ? -1 : b === 'Whole organization' ? 1 : a.localeCompare(b),
   );
   const onCreated = (c: CreateScheduleResponse) => {
-    if (c.webhookSecret) setSecret({ name: c.name, value: c.webhookSecret });
+    if (c.webhookSecret) setSecret({ name: c.name, value: c.webhookSecret, url: c.hookUrlWithSecret });
   };
 
   return (
@@ -81,7 +82,9 @@ export function Automations() {
           </Button>
         }
       />
-      {secret && <SecretNotice name={secret.name} value={secret.value} onClose={() => setSecret(null)} />}
+      {secret && (
+        <SecretNotice name={secret.name} value={secret.value} url={secret.url} onClose={() => setSecret(null)} />
+      )}
       {list.isPending && <ListSkeleton label="Loading automations" rows={2} />}
       <ErrorBox error={list.error} onRetry={() => list.refetch()} />
       {ordered.map(([group, items]) => (
@@ -135,7 +138,39 @@ export function Automations() {
   );
 }
 
-function SecretNotice({ name, value, onClose }: { name: string; value: string; onClose: () => void }) {
+function SecretNotice({
+  name,
+  value,
+  url,
+  onClose,
+}: {
+  name: string;
+  value: string;
+  url?: string | undefined;
+  onClose: () => void;
+}) {
+  if (url)
+    return (
+      <Callout tone="info" data-testid="hook-secret">
+        <p className="font-medium">Web address of "{name}"</p>
+        <p className="mt-1 text-sm">
+          Copy it now: it is shown only this once, because only a fingerprint of the secret in it is kept. Whoever
+          has it can start this automation, so keep it private. POST JSON to it, or send the secret as{' '}
+          <code>Authorization: Bearer ...</code> to the address without the secret. A new secret or switching it
+          off ends the old one at once.
+        </p>
+        <p
+          className="mt-2 rounded-control bg-sunken px-2 py-1.5 font-mono text-sm break-all text-fg"
+          data-testid="hook-url-value"
+        >
+          {url}
+        </p>
+        <div className="mt-2 flex gap-2">
+          <Button onClick={() => void navigator.clipboard?.writeText(url)}>Copy</Button>
+          <Button onClick={onClose}>I have saved it</Button>
+        </div>
+      </Callout>
+    );
   return (
     <Callout tone="info" data-testid="webhook-secret">
       <p className="font-medium">Signing secret of "{name}"</p>
@@ -197,17 +232,19 @@ function ScheduleRow({
 }: {
   schedule: ScheduleDto;
   onEdit: () => void;
-  onSecret: (v: { name: string; value: string }) => void;
+  onSecret: (v: { name: string; value: string; url?: string | undefined }) => void;
 }) {
   const patch = usePatchSchedule();
   const run = useRunSchedule();
   const del = useDeleteSchedule();
   const test = useTestSchedule();
   const rotate = useRotateSecret();
+  const revoke = useRevokeSecret();
   const toast = useToast();
   const [confirming, setConfirming] = useState(false);
   const [history, setHistory] = useState(false);
   const webhook = isWebhookAction(s.action);
+  const incoming = s.trigger.kind === 'webhook_in';
   const testable = webhook || (s.action.kind === 'integration' && s.action.integration === 'email');
   const editable = s.canEdit !== false;
   const Chevron = history ? ChevronDown : ChevronRight;
@@ -242,14 +279,23 @@ function ScheduleRow({
         <div>
           <dt className="text-xs text-subtle">When</dt>
           <dd data-testid="schedule-when">{describeTrigger(s.trigger)}</dd>
+          {incoming && s.hookUrl && (
+            <dd className="mt-1 font-mono text-xs break-all text-muted" data-testid="hook-url">
+              {window.location.origin}
+              {s.hookUrl}/&lt;secret&gt;
+              {s.hasWebhookSecret ? '' : ' (switched off: make a new secret to use it)'}
+            </dd>
+          )}
         </div>
         <div>
           <dt className="text-xs text-subtle">Next run</dt>
           <dd data-testid="schedule-next">
             {s.nextFireAt
               ? formatDateTime(s.nextFireAt)
-              : s.trigger.kind === 'event'
-                ? 'on the event'
+              : s.trigger.kind === 'event' || incoming
+                ? incoming
+                  ? 'when its address is called'
+                  : 'on the event'
                 : 'not scheduled'}
           </dd>
         </div>
@@ -331,17 +377,31 @@ function ScheduleRow({
               )}
               {s.enabled ? 'Pause' : 'Resume'}
             </Button>
-            {webhook && (
+            {(webhook || incoming) && (
               <Button
                 loading={rotate.isPending && rotate.variables === s.id}
                 onClick={() =>
                   rotate.mutate(s.id, {
-                    onSuccess: (r) => onSecret({ name: s.name, value: r.webhookSecret }),
+                    onSuccess: (r) =>
+                      onSecret({ name: s.name, value: r.webhookSecret, url: r.hookUrlWithSecret }),
                   })
                 }
               >
                 <KeyRound aria-hidden="true" className="size-4" />
                 New secret
+              </Button>
+            )}
+            {incoming && s.hasWebhookSecret && (
+              <Button
+                loading={revoke.isPending && revoke.variables === s.id}
+                onClick={() =>
+                  revoke.mutate(s.id, {
+                    onSuccess: () => toast.success('The web address is switched off until you make a new secret'),
+                  })
+                }
+                data-testid="revoke-secret"
+              >
+                Switch the secret off
               </Button>
             )}
             <Button variant="danger-ghost" className="ml-auto" onClick={() => setConfirming(true)}>

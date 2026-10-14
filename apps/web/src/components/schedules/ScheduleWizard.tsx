@@ -58,6 +58,7 @@ const TRIGGER_ICON: Record<TriggerKind, LucideIcon> = {
   intake_ticket: Ticket,
   email_received: Mail,
   email_reply: Reply,
+  webhook_in: Webhook,
   issue_labelled: Tag,
   manual: Hand,
 };
@@ -367,6 +368,15 @@ function WizardDialog({
                 set({
                   triggerKind: v,
                   ...(t?.notWith?.includes(v) ? { tile: 'create_card' as const } : {}),
+                  ...(v === 'webhook_in' && s.mapping.length === 0
+                    ? {
+                        mapping: [
+                          { target: 'title', text: '{hook.title}' },
+                          { target: 'context', text: '{hook.body}' },
+                        ],
+                        start: 'draft' as const,
+                      }
+                    : {}),
                   // An automation for mail starts from the usual mapping: the subject is the title, the text the context.
                   ...(isMailKind(v) && s.mapping.length === 0
                     ? {
@@ -389,6 +399,7 @@ function WizardDialog({
               errors={errors}
               workstations={myWorkstations}
               projects={myProjects}
+              isOwner={me?.activeOrg?.role === 'owner'}
             />
           </div>
         )}
@@ -463,12 +474,14 @@ function TriggerFields({
   errors,
   workstations,
   projects,
+  isOwner,
 }: {
   s: WizardState;
   set: (p: Partial<WizardState>) => void;
   errors: Record<string, string>;
   workstations: Array<{ id: string; name: string }>;
   projects: Array<{ id: string; key: string; name: string }>;
+  isOwner: boolean;
 }) {
   const cardFilters = SCHEDULE_EVENT_TRIGGERS.find((x) => x.id === s.event)?.cardFilters;
   if (s.triggerKind === 'manual')
@@ -510,6 +523,7 @@ function TriggerFields({
   );
   if (s.triggerKind === 'cron') return <div className="grid gap-4 sm:grid-cols-2">{cronFields}</div>;
   if (isMailKind(s.triggerKind)) return <MailTriggerFields s={s} set={set} errors={errors} />;
+  if (s.triggerKind === 'webhook_in') return <HookTriggerFields s={s} set={set} errors={errors} isOwner={isOwner} />;
   if (s.triggerKind === 'intake_ticket')
     return (
       <div className="grid gap-4 sm:grid-cols-2">
@@ -681,6 +695,53 @@ function CardEventFilters({
   );
 }
 
+/** Incoming webhook: how often it may be called, and (Owner only) whether its cards may start queued. */
+function HookTriggerFields({
+  s,
+  set,
+  errors,
+  isOwner,
+}: {
+  s: WizardState;
+  set: (p: Partial<WizardState>) => void;
+  errors: Record<string, string>;
+  isOwner: boolean;
+}) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2" data-testid="hook-trigger-fields">
+      <p className="text-sm text-muted sm:col-span-2">
+        Saving makes a private web address with a secret in it. You see it once, so copy it then. Whatever the
+        caller sends is outside content: it can fill the card through {'{hook.<field>}'} tokens, agents read
+        it as information, never as instructions, and the card starts as a draft.
+      </p>
+      <TextInput
+        label="Calls accepted per hour (optional)"
+        hint="More are refused. The default is 60."
+        inputMode="numeric"
+        value={s.hookMaxPerHour}
+        onChange={(e) => set({ hookMaxPerHour: e.target.value })}
+        error={errors.hookMaxPerHour}
+      />
+      <label className="flex items-start gap-2 text-sm text-fg">
+        <input
+          type="checkbox"
+          className="mt-1"
+          checked={s.hookAllowQueued}
+          disabled={!isOwner}
+          onChange={(e) => set({ hookAllowQueued: e.target.checked })}
+          data-testid="hook-allow-queued"
+        />
+        <span>
+          Let its cards start queued for the agents (without a draft step)
+          <span className="block text-xs text-subtle">
+            {isOwner ? 'Only when the card is set to start queued.' : 'Only the Owner can allow this.'}
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
 /** The inbox a mail trigger listens to, and (for new mail) the senders and subject it is limited to. */
 function MailTriggerFields({
   s,
@@ -763,6 +824,7 @@ function AutomationCardOptions({
         onChange={(mapping) => set({ mapping })}
         error={errors.mapping}
         mail={isMailKind(s.triggerKind)}
+        hook={s.triggerKind === 'webhook_in'}
       />
       <div className="grid gap-4 sm:grid-cols-3">
         <Select

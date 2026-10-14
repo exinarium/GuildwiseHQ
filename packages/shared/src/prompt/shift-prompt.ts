@@ -161,14 +161,15 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
   const mail = card.untrusted;
   const outside = new Set(mail?.fields ?? []);
   const from = mail?.from ? ` from ${mail.from}` : '';
+  const what = mail?.kind === 'webhook' ? 'Webhook' : 'E-mail';
   /** A text field that came from an outside e-mail goes inside the untrusted block. */
   const guarded = (key: string, title: string, body: string): string | null =>
     outside.has(key)
-      ? section(title, renderUntrusted(`E-mail${from}: ${title.toLowerCase()}`, body))
+      ? section(title, renderUntrusted(`${what}${from}: ${title.toLowerCase()}`, body))
       : section(title, body);
 
   if (mail?.title !== false && mail)
-    parts.push(`# ${card.ref}\n${renderUntrusted(`E-mail subject${from}`, card.title)}`);
+    parts.push(`# ${card.ref}\n${renderUntrusted(`${what} subject${from}`, card.title)}`);
   else parts.push(`# ${card.ref}: ${card.title}`);
   parts.push(
     [
@@ -207,7 +208,7 @@ export function renderShiftPrompt(brief: ShiftBrief): string {
     if (known.has(key)) continue;
     const v = f[key];
     const body = typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v);
-    parts.push(section(`Field: ${key}`, renderUntrusted(`E-mail${from}: ${key}`, body)));
+    parts.push(section(`Field: ${key}`, renderUntrusted(`${what}${from}: ${key}`, body)));
   }
   parts.push(section('Completion action', card.completionAction ?? ''));
   parts.push(

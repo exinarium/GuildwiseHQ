@@ -355,12 +355,10 @@ describe('safety limits', () => {
 });
 
 describe('triggers', () => {
-  it('refuses an inbox of another organisation, keeps webhook_in refused', async () => {
+  it('refuses an inbox of another organisation', async () => {
     const bad = await make({ kind: 'email_received', inboxId: otherInbox.id });
     expect(bad.status).toBe(400);
     expect(bad.body.error.code).toBe('unknown_inbox');
-    const hookIn = await make({ kind: 'webhook_in', secretHash: 'x' });
-    expect(hookIn.body.error.code).toBe('trigger_not_available');
     const badFrom = await make({ kind: 'email_received', inboxId: inbox.id, from: ['nope'] });
     expect(badFrom.status).toBe(400);
   });

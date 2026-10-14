@@ -67,5 +67,11 @@ export const useTestSchedule = () =>
   );
 export const useRotateSecret = () =>
   useScheduleAction((id: string) =>
-    post<{ webhookSecret: string }>(`/schedules/${id}/rotate-secret`, {}, RotateSecretResponseSchema),
+    post<{ webhookSecret: string; hookUrlWithSecret?: string | undefined }>(
+      `/schedules/${id}/rotate-secret`,
+      {},
+      RotateSecretResponseSchema,
+    ),
   );
+export const useRevokeSecret = () =>
+  useScheduleAction((id: string) => post<ScheduleDto>(`/schedules/${id}/revoke-secret`, {}));

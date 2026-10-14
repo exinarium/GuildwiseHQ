@@ -26,12 +26,13 @@ export type TriggerKind =
   | 'issue_labelled'
   | 'email_received'
   | 'email_reply'
+  | 'webhook_in'
   | 'manual';
 
 export const isMailKind = (k: TriggerKind): boolean => k === 'email_received' || k === 'email_reply';
 /** Triggers that react to something that happened (their cards are "made by an automation"). */
 export const isReactiveKind = (k: TriggerKind): boolean =>
-  k === 'event' || k === 'intake_ticket' || isMailKind(k);
+  k === 'event' || k === 'intake_ticket' || k === 'webhook_in' || isMailKind(k);
 export type ActionTile =
   | 'create_card'
   | 'regression_run'
@@ -67,6 +68,12 @@ export const TRIGGER_TILES: Array<{ id: TriggerKind; label: string; description:
     description: 'Someone replies to a mail that became a card. The reply is added to the card as a comment.',
   },
   {
+    id: 'webhook_in',
+    label: 'When a web address is called',
+    description:
+      'Another system (monitoring, a form, n8n, Zapier) calls a private address with a secret. The fields it sends can fill the card. Cards start as drafts.',
+  },
+  {
     id: 'issue_labelled',
     label: 'When an issue is labelled',
     description: 'A GitHub or Jira issue gets a label. Your workstation polls; the credentials stay on it.',
@@ -96,7 +103,7 @@ export const ACTION_TILES: Array<{
     id: 'regression_run',
     label: 'Run a regression',
     description: 'A regression card per platform, queued at Test.',
-    notWith: ['issue_labelled', 'email_received', 'email_reply'],
+    notWith: ['issue_labelled', 'email_received', 'email_reply', 'webhook_in'],
   },
   {
     id: 'devops_request',
@@ -112,13 +119,13 @@ export const ACTION_TILES: Array<{
     id: 'github',
     label: 'Poll GitHub issues',
     description: 'New issues of a repository go into intake with the BA. Runs on your workstation.',
-    notWith: ['issue_labelled', 'event', 'email_received', 'email_reply'],
+    notWith: ['issue_labelled', 'event', 'email_received', 'email_reply', 'webhook_in'],
   },
   {
     id: 'jira',
     label: 'Poll Jira issues',
     description: 'New issues from a JQL filter go into intake with the BA. Runs on your workstation.',
-    notWith: ['issue_labelled', 'event', 'email_received', 'email_reply'],
+    notWith: ['issue_labelled', 'event', 'email_received', 'email_reply', 'webhook_in'],
   },
   {
     id: 'webhook',
@@ -190,7 +197,7 @@ export function describeTrigger(t: ScheduleTrigger): string {
     case 'intake_ticket':
       return `When an intake ticket is created${t.source ? ` (${t.source === 'issues' ? 'from issues' : 'from the intake chat'})` : ''}`;
     case 'webhook_in':
-      return 'When an incoming webhook is called';
+      return `When its web address is called${t.maxPerHour ? ` (at most ${t.maxPerHour} an hour)` : ''}`;
   }
 }
 
@@ -244,6 +251,9 @@ export interface WizardState {
   inboxId: string;
   mailFrom: string;
   mailSubject: string;
+  /** `webhook_in`: calls accepted per hour ('' = the default) and whether the Owner lets its cards start queued. */
+  hookMaxPerHour: string;
+  hookAllowQueued: boolean;
   provider: 'github' | 'jira';
   labelQuery: string;
   label: string;
@@ -299,6 +309,8 @@ export const emptyWizard = (over: Partial<WizardState> = {}): WizardState => ({
   inboxId: '',
   mailFrom: '',
   mailSubject: '',
+  hookMaxPerHour: '',
+  hookAllowQueued: false,
   provider: 'github',
   labelQuery: '',
   label: '',
@@ -340,7 +352,8 @@ export function stateFromSchedule(s: ScheduleDto, workflow?: WorkflowDefinition)
     t.kind === 'issue_labelled' ||
     t.kind === 'intake_ticket' ||
     t.kind === 'email_received' ||
-    t.kind === 'email_reply'
+    t.kind === 'email_reply' ||
+    t.kind === 'webhook_in'
       ? t.kind
       : 'manual';
   if (t.kind === 'cron') {
@@ -362,6 +375,9 @@ export function stateFromSchedule(s: ScheduleDto, workflow?: WorkflowDefinition)
     st.mailSubject = t.subjectContains ?? '';
   } else if (t.kind === 'email_reply') {
     st.inboxId = t.inboxId;
+  } else if (t.kind === 'webhook_in') {
+    st.hookMaxPerHour = t.maxPerHour ? String(t.maxPerHour) : '';
+    st.hookAllowQueued = t.allowQueued === true;
   } else if (t.kind === 'intake_ticket') {
     st.intakeSource = t.source === 'issues' || t.source === 'web' ? t.source : '';
   } else if (t.kind === 'issue_labelled') {
@@ -468,6 +484,16 @@ export function buildScheduleRequest(s: WizardState, c: BuildContext): BuildResu
   if (s.triggerKind === 'cron')
     trigger = { kind: 'cron', cron: expression, timezone: s.timezone.trim() || 'UTC' };
   else if (s.triggerKind === 'manual') trigger = { kind: 'manual' };
+  else if (s.triggerKind === 'webhook_in') {
+    const per = s.hookMaxPerHour.trim() ? Number(s.hookMaxPerHour) : undefined;
+    if (per !== undefined && (!Number.isInteger(per) || per < 1 || per > 10000))
+      errors.hookMaxPerHour = 'A whole number from 1 to 10000';
+    trigger = {
+      kind: 'webhook_in',
+      ...(per ? { maxPerHour: per } : {}),
+      ...(s.hookAllowQueued ? { allowQueued: true } : {}),
+    };
+  }
   else if (s.triggerKind === 'event') {
     const def = SCHEDULE_EVENT_TRIGGERS.find((e) => e.id === s.event);
     const cardEvent = !!def?.cardFilters;

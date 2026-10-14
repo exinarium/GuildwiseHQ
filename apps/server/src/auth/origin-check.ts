@@ -13,6 +13,8 @@ const EXEMPT_PREFIXES = [
   '/api/billing/paystack/webhook',
   // The mail provider's inbound webhook: no cookie, no Origin; the shared secret is the credential.
   '/api/inbound/mail/',
+  // Incoming webhooks of automations (#14): no cookie, no Origin; the secret is the credential.
+  '/api/hooks/',
   // The runner uploads a file an agent attached with its runner token (Bearer), no cookie and no Origin.
   '/api/runner/uploads/',
 ];
