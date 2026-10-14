@@ -60,6 +60,12 @@ export const CeoSettingsSchema = z.object({
   wakeWindowMinutes: z.number().int().min(1).max(60).default(5),
   /** Soft notice when the CEO's own spend passes this many micro-units in a day (0: off). */
   spendNoticeMicros: z.number().int().min(0).default(5_000_000),
+  /**
+   * An optional monthly budget for the whole organization, in micro-units of its currency (0: none). At 80% the owner is
+   * told, at 100% the CEO continues in minimal mode (the daily report and the chat) and nothing else wakes it; hires and
+   * model-ups also stay under it. Projects keep their own budgets.
+   */
+  orgBudgetMonthlyMicros: z.number().int().min(0).default(0),
 });
 export type CeoSettings = z.infer<typeof CeoSettingsSchema>;
 
@@ -75,6 +81,7 @@ export const DEFAULT_CEO_SETTINGS: CeoSettings = {
   blockedHours: 4,
   wakeWindowMinutes: 5,
   spendNoticeMicros: 5_000_000,
+  orgBudgetMonthlyMicros: 0,
 };
 
 export const UpdateCeoSettingsRequestSchema = CeoSettingsSchema.partial();

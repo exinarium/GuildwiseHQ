@@ -19,6 +19,16 @@ export async function budgetBlock(
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
   const elapsed = Math.max(1, (now.getTime() - start.getTime()) / 86_400_000);
+  // The optional organization budget holds hires and model-ups back too.
+  if (env.ceo.settings.orgBudgetMonthlyMicros > 0) {
+    const { orgBudgetState } = await import('./orgbudget.ts');
+    const st = await orgBudgetState(env.ctx, env.ceo, now);
+    const org = (st.spent / elapsed) * daysInMonth;
+    const nAgents = await one<{ n: string }>(env.ctx.pool, `SELECT count(*)::text AS n FROM agents WHERE org_id=$1 AND status='active' AND NOT is_devops AND role_key <> 'ceo'`, [env.orgId]);
+    const add = kind === 'hire' ? org / Math.max(1, Number(nAgents?.n ?? 1)) : agentMonthMicros * 0.5;
+    if (org + add > env.ceo.policy.limits.budgetHeadroom * st.budget)
+      return `the organization budget: the forecast ${money(org + add)} for the month would pass ${Math.round(env.ceo.policy.limits.budgetHeadroom * 100)}% of ${money(st.budget)}`;
+  }
   const projects = await rows(
     env.ctx.pool,
     `SELECT p.id, p.key, p.budget_micros,

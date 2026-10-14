@@ -19,6 +19,7 @@ import { reportingOf } from '../reporter/settings.ts';
 import { agentSpecFor, shiftVault } from '../runner-gateway/brief.ts';
 import { buildCeoBrief } from './brief.ts';
 import { notifyOwner } from './notify.ts';
+import { checkOrgBudget } from './orgbudget.ts';
 import { postFallbackReview } from './report.ts';
 import { ceoReachable, type CeoState, loadCeo } from './state.ts';
 import { enqueueWake } from './wakes.ts';
@@ -181,6 +182,8 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
     if (!ceo?.agentId) continue;
     // Old wakes are not worth a shift any more: the next report lists them as missed while offline.
     await exec(ctx.pool, `UPDATE ceo_wakes SET status='dropped' WHERE org_id=$1 AND status='pending' AND urgency <> 'scheduled' AND created_at < $2`, [orgId, new Date(now.getTime() - MISSED_DROP_MS)]);
+    // Organization budget: 80% and 100% notices; at 100% minimal mode (only the daily report; the chat is not a wake).
+    const { minimal } = await checkOrgBudget(ctx, ceo, now).catch(() => ({ minimal: false }));
     const reach = await ceoReachable(ctx.pool, orgId, now);
     await offlineNotice(ctx, ceo, reach.ok ? undefined : reach.reason, now).catch((err) => ctx.log.error({ err }, 'ceo offline notice failed'));
     // A review nobody took for two hours: the server writes it.
@@ -202,7 +205,8 @@ export async function ceoPass(ctx: Ctx): Promise<number> {
     );
     if (Number(cap?.n ?? 0) >= ceo.policy.limits.maxWakesPerHour) continue;
 
-    const pending = await rows(ctx.pool, `SELECT * FROM ceo_wakes WHERE org_id=$1 AND status='pending' ORDER BY created_at, id`, [orgId]);
+    const all = await rows(ctx.pool, `SELECT * FROM ceo_wakes WHERE org_id=$1 AND status='pending' ORDER BY created_at, id`, [orgId]);
+    const pending = minimal ? all.filter((w) => w.reason === 'daily_review') : all;
     if (pending.length === 0) continue;
     const window = ceo.settings.wakeWindowMinutes * 60_000;
     const due = pending.some(

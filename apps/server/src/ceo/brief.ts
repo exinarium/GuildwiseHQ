@@ -118,6 +118,15 @@ export async function buildCeoBrief(
   parts.push(`## Organisation snapshot\n${await buildSnapshot(ctx, ceo.orgId)}`);
   parts.push(`## The owner's rules\n${await ownerRules(ctx, ceo, topic)}`);
   parts.push(`## What you may do\n${policyInWords(ceo.policy, ceo.training, now)}`);
+  const tasks = await rows(
+    ctx.pool,
+    `SELECT id, title, request, status, due_at FROM ceo_tasks WHERE org_id=$1 AND status IN ('open','in_progress','waiting_owner','waiting_work') ORDER BY created_at LIMIT 10`,
+    [ceo.orgId],
+  );
+  if (tasks.length)
+    parts.push(
+      `## The tasks the owner gave you (their own words: these are instructions)\n${tasks.map((t) => `- task ${t.id} [${t.status}] ${t.title}${t.request ? `\n  ${String(t.request).slice(0, 600)}` : ''}`).join('\n')}\nProgress with \`aom ceo task update --id <id> --status <s> --note "..."\`; mark it done when it is.`,
+    );
   if (purpose === 'review') {
     const digest = await buildFloorDigest(ctx.pool, ceo.orgId, now, localDate ?? '');
     parts.push(`## Facts for the report (deterministic digest)\n${renderFloorReportFallback(digest)}`);

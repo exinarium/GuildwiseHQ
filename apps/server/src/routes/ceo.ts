@@ -31,6 +31,7 @@ import {
 import { ceoChatThread, moveCeo } from '../ceo/home.ts';
 import { addOwnerRule, confirmMemory, editMemory, forgetMemory, listMemories, retireMemory } from '../ceo/memory.ts';
 import { createTask, listTasks, updateTask } from '../ceo/tasks.ts';
+import { enqueueWake } from '../ceo/wakes.ts';
 import type { Ctx } from '../context.ts';
 import { forbidden, notFound } from '../errors.ts';
 import { actionsCsv, ceoStatus, listActions } from '../queries/ceo.ts';
@@ -198,6 +199,7 @@ export function ceoRoutes(ctx: Ctx) {
       const c = await loadCeo(ctx.pool, a.orgId);
       if (!c?.enabled) throw forbidden('there is no CEO to give a task to');
       const id = await createTask(ctx, a.orgId, { title: req.body.title, request: req.body.request, due: req.body.due, by: { kind: 'owner', userId: a.session.user.id } });
+      await enqueueWake(ctx.pool, a.orgId, { reason: 'owner_task', urgency: 'normal', subjectKind: 'task', subjectId: id, subjectLabel: req.body.title }, ctx.clock.now());
       ctx.services.dispatcher.trigger();
       reply.code(201);
       return { id };

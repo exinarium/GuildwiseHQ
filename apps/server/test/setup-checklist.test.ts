@@ -28,7 +28,7 @@ describe('setup checklist', () => {
     await freshState();
     await q(`UPDATE projects SET status='archived' WHERE id=$1`, [w.projectId]);
     let c = await get();
-    expect(c.steps.map((s: any) => s.id)).toEqual(['project', 'repository', 'workstation', 'team', 'ba']);
+    expect(c.steps.map((s: any) => s.id)).toEqual(['project', 'repository', 'workstation', 'team', 'ba', 'ceo']);
     expect(step(c, 'project')).toMatchObject({ done: false, link: '/projects?new=1', actionable: true });
     expect(step(c, 'repository')).toMatchObject({ done: false });
     expect(step(c, 'workstation')).toMatchObject({ done: true, link: null });
