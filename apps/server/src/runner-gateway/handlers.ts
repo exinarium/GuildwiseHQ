@@ -42,6 +42,7 @@ import {
 import { applyToolchainsReport } from '../commands/toolchains.ts';
 import { transcriptStoreRpc } from '../commands/transcripts.ts';
 import { applyVaultConflict, markVaultStatus, queueVaultConfigure } from '../commands/vaults.ts';
+import { syncClaudeAuthNotice, syncMcpSignInNotices } from '../commands/workstation-notices.ts';
 import {
   applyEnvEnsureResult,
   applyRepoCloneResult,
@@ -178,6 +179,9 @@ export class RunnerHandlers {
         return;
       case 'mcp.servers':
         await applyMcpServersReport(this.ctx, conn.workstationId, msg);
+        await syncMcpSignInNotices(this.ctx, { id: conn.workstationId, userId: conn.userId }, msg).catch(
+          () => {},
+        );
         return;
       case 'toolchains.report':
         await applyToolchainsReport(this.ctx, conn.workstationId, msg);
@@ -405,8 +409,16 @@ export class RunnerHandlers {
       JSON.stringify(runtimes),
     ]);
     await alignDevopsRuntime(ctx, conn.workstationId, runtimes);
-    const brief = (rs: Array<{ id: string; available: boolean; sandbox?: string }>) =>
-      rs.map((r) => ({ id: r.id, available: r.available, ...(r.sandbox ? { sandbox: r.sandbox } : {}) }));
+    await syncClaudeAuthNotice(ctx, { id: conn.workstationId, userId: conn.userId }, runtimes).catch(
+      () => {},
+    );
+    const brief = (rs: Array<{ id: string; available: boolean; sandbox?: string; auth?: string }>) =>
+      rs.map((r) => ({
+        id: r.id,
+        available: r.available,
+        ...(r.sandbox ? { sandbox: r.sandbox } : {}),
+        ...(r.auth ? { auth: r.auth } : {}),
+      }));
     const now = brief(runtimes);
     if (JSON.stringify(brief(before?.runtimes ?? [])) === JSON.stringify(now)) return;
     await ctx.store.append([
@@ -455,6 +467,9 @@ export class RunnerHandlers {
     await recordRepoCatalog(ctx.pool, conn.workstationId, msg.repoCatalog, now);
     await this.recordVaults(conn, msg.vaults);
     await alignDevopsRuntime(ctx, conn.workstationId, msg.runtimes);
+    await syncClaudeAuthNotice(ctx, { id: conn.workstationId, userId: conn.userId }, msg.runtimes).catch(
+      () => {},
+    );
     await ctx.store.append([
       {
         streamId: streamId.workstation(conn.workstationId),

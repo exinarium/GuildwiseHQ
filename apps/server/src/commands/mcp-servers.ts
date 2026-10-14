@@ -59,6 +59,9 @@ export async function mcpServerCandidates(
       const have = byName.get(s.data.name);
       if (have) {
         if (!have.workstations.includes(w.name)) have.workstations.push(w.name);
+        have.needsSignIn ??= [];
+        if (s.data.authState === 'needs_sign_in' && !have.needsSignIn.includes(w.name))
+          have.needsSignIn.push(w.name);
         continue;
       }
       byName.set(s.data.name, {
@@ -69,6 +72,7 @@ export async function mcpServerCandidates(
         host: s.data.host ?? null,
         tools: s.data.tools ?? null,
         workstations: [w.name],
+        needsSignIn: s.data.authState === 'needs_sign_in' ? [w.name] : [],
       });
     }
   }

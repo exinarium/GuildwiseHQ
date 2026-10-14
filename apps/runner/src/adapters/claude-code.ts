@@ -1,13 +1,4 @@
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -19,6 +10,14 @@ import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '..
 import type { RunnerPaths } from '../paths.ts';
 import { agentTmpDir, CACHE_ENV_KEYS, DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
 import { selfCommand } from '../shims.ts';
+import {
+  type ClaudeAuthMonitor,
+  type CredentialPaths,
+  harvestAgentCredentials,
+  isAuthFailureText,
+  prepareAgentCredentials,
+  probeClaudeLogin,
+} from './claude-auth.ts';
 import {
   agentEnv,
   buildChatSettings,
@@ -217,6 +216,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       mcpServers?: () => PluginMcpServer[];
       /** Test hook: the user's real home (where `.claude/.credentials.json` lives; default: this user's). */
       home?: string;
+      /** The Claude login state of this runner (expiry detection, pause and resume); see claude-auth.ts. */
+      auth?: ClaudeAuthMonitor;
+      /** Test hook: the login probe (default: `claude auth status`, then one minimal `claude -p`). */
+      probe?: () => Promise<'ok' | 'expired' | 'unknown'>;
     } = {},
   ) {}
 
@@ -281,7 +284,12 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (realClaudeBlocked())
       return { runtime: this.id, version: 'blocked', available: false, capabilities: [] };
     const sb = this.sandboxStatus();
-    const sandbox = { sandbox: sb.state, sandboxReason: sb.reason };
+    const expired = this.host.auth?.state === 'expired';
+    const sandbox = {
+      sandbox: sb.state,
+      sandboxReason: sb.reason,
+      ...(this.host.auth ? { auth: expired ? ('expired' as const) : ('ok' as const) } : {}),
+    };
     try {
       const r = await execa(this.cfg.bin, ['--version'], { reject: false, timeout: 10_000, stdin: 'ignore' });
       const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(r.stdout));
@@ -298,6 +306,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         ok = false;
       // `unavailable`: required and missing, or best_effort without the allowUnsandboxed acknowledgement.
       if (sb.state === 'unavailable') ok = false;
+      // An expired login pauses the runtime: nothing is dispatched to it until the login works again.
+      if (expired) ok = false;
       return { runtime: this.id, version: m[0], available: ok, capabilities: ok ? caps : [], ...sandbox };
     } catch {
       return { runtime: this.id, version: 'unknown', available: false, capabilities: [], ...sandbox };
@@ -324,7 +334,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       input.agent.permissions.allowedTools,
       input.agent.isDevops ? undefined : input.mcpServers,
     );
-    this.linkCredentials(dir, used);
+    await this.linkCredentials(dir, used);
 
     const cmd = buildClaudeCommand(
       // the card repository metadata is readable (never through a rule that makes it read-only for the commit)
@@ -352,6 +362,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       usage: () => parser.usage(),
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
+      ...this.sessionHooks(dir, parser),
     });
   }
 
@@ -401,7 +412,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         2,
       )}\n`,
     );
-    this.linkCredentials(dir, used);
+    await this.linkCredentials(dir, used);
     const cmd = buildClaudeChatCommand(chatInput, this.cfg);
     const parser = new ClaudeStreamParser();
     return spawnSession({
@@ -414,6 +425,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       usage: () => parser.usage(),
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
+      ...this.sessionHooks(dir, parser),
     });
   }
 
@@ -451,22 +463,76 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     return want?.used ?? [];
   }
 
+  private credentialPaths(configDir: string): CredentialPaths {
+    return {
+      canonical: join(this.realHome(), '.claude', '.credentials.json'),
+      copy: join(configDir, '.credentials.json'),
+      lock: join(this.paths?.root ?? dirname(dirname(configDir)), 'claude-credentials.lock'),
+    };
+  }
+
+  /** The environment a login probe runs with: the runner's own, plus the configured provider credential. */
+  private probeEnv(): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (this.cfg.authMode === 'oauth' && this.cfg.oauthToken)
+      env.CLAUDE_CODE_OAUTH_TOKEN = this.cfg.oauthToken;
+    else if (this.cfg.authMode === 'api_key' && this.cfg.apiKey) env.ANTHROPIC_API_KEY = this.cfg.apiKey;
+    return env;
+  }
+
+  /**
+   * Checks that the Claude login works (`claude auth status`, then one minimal `claude -p`) and updates the auth state:
+   * `ok` flips an expired runtime back, `expired` pauses it. Called every few minutes while expired, and before a
+   * session when the access token is about to expire (that call also refreshes it). Nothing here prints a token.
+   */
+  async probeLogin(): Promise<'ok' | 'expired' | 'unknown'> {
+    if (realClaudeBlocked()) return 'unknown';
+    const r = await (
+      this.host.probe ?? (() => probeClaudeLogin({ bin: this.cfg.bin, env: this.probeEnv() }))
+    )();
+    if (r === 'ok') this.host.auth?.markOk();
+    else if (r === 'expired') this.host.auth?.markExpired();
+    return r;
+  }
+
+  /** What the process session needs to notice a dead login and to hand back refreshed tokens. */
+  private sessionHooks(
+    configDir: string,
+    parser: ClaudeStreamParser,
+  ): Pick<Parameters<typeof spawnSession>[0], 'authFailure' | 'onExit'> {
+    return {
+      authFailure: (stderr) => parser.authFailure || isAuthFailureText(stderr),
+      onExit: async ({ code, authFailed }) => {
+        if (authFailed) this.host.auth?.markExpired();
+        else if (code === 0 && parser.usage().outputTokens > 0) this.host.auth?.markOk();
+        if (this.usesSharedLogin()) await harvestAgentCredentials(this.credentialPaths(configDir));
+      },
+    };
+  }
+
+  /** The user's own `claude` login is shared with the agents (no token or key configured). */
+  private usesSharedLogin(): boolean {
+    return !(
+      (this.cfg.authMode === 'oauth' && this.cfg.oauthToken) ||
+      (this.cfg.authMode === 'api_key' && this.cfg.apiKey)
+    );
+  }
+
   /**
    * Credentials of the agent's config dir.
-   * - No token configured (the user's own login is reused): the credentials file is linked as before (symlink, copy on
-   *   Windows). It already holds the plugin servers' OAuth tokens (`mcpOAuth`), and Claude Code writes refreshed
-   *   tokens back through the link, so a rotated refresh token is not lost.
-   * - A token (`oauth` / `api_key`) is configured: the file is not linked. When servers are in use, a private copy with
+   * - No token configured (the user's own login is reused): the agent gets a private COPY of
+   *   `~/.claude/.credentials.json` (it holds the plugin servers' OAuth tokens, `mcpOAuth`, too). A symlink let one
+   *   agent's token refresh replace the file under the others and rotate the refresh token out from under them. The
+   *   copy is made under a runner-wide lock, after one refresh probe when the access token expires within 10 minutes,
+   *   and a newer login in the copy is written back after the session (`harvestAgentCredentials`).
+   * - A token (`oauth` / `api_key`) is configured: the file is not shared. When servers are in use, a private copy with
    *   only the `mcpOAuth` entries of those servers is written (the model login is the token, so nothing else is
    *   needed); without servers there is no file.
    */
-  linkCredentials(configDir: string, servers: PluginMcpServer[] = []): void {
-    const configured =
-      (this.cfg.authMode === 'oauth' && this.cfg.oauthToken) ||
-      (this.cfg.authMode === 'api_key' && this.cfg.apiKey);
+  async linkCredentials(configDir: string, servers: PluginMcpServer[] = []): Promise<void> {
     const src = join(this.realHome(), '.claude', '.credentials.json');
     const dest = join(configDir, '.credentials.json');
-    if (configured) {
+    if (!this.usesSharedLogin()) {
       rmSync(dest, { force: true });
       if (servers.length === 0 || !existsSync(src)) return;
       try {
@@ -484,13 +550,18 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       }
       return;
     }
-    if (!existsSync(src)) return;
-    rmSync(dest, { force: true });
+    if (!existsSync(src)) {
+      rmSync(dest, { force: true });
+      return;
+    }
     try {
-      if (process.platform === 'win32') copyFileSync(src, dest);
-      else symlinkSync(src, dest);
+      await prepareAgentCredentials(this.credentialPaths(configDir), {
+        refresh: async () => {
+          await this.probeLogin();
+        },
+      });
     } catch {
-      // already linked by a concurrent shift
+      // unreadable or unwritable credentials: the session reports a login that does not work
     }
   }
 }

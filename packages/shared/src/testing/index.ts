@@ -35,6 +35,10 @@ export const DESK_SUBKIND = {
   /** The latest main branch could not be merged into the working branch before a build (a notice). */
   mainMergeSkipped: 'main_merge_skipped',
   mainBranchUnset: 'main_branch_unset',
+  /** The runtime's login (Claude Code `/login`) expired on a workstation; cleared when it works again (a notice). */
+  claudeAuthExpired: 'claude_auth_expired',
+  /** A plugin MCP server granted to a project needs sign-in on a workstation; cleared when signed in (a notice). */
+  mcpNeedsSignIn: 'mcp_needs_sign_in',
   /** Investigate & design is switched on for a project but no architect is hired (a notice). */
   noArchitect: 'no_architect',
   /** A sub-workflow stage could not start its child card; the parent card is blocked until the manager looks (an alert). */

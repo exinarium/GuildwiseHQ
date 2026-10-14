@@ -6,6 +6,7 @@ import {
   defaultHost,
   type EnvEnsurePayload,
   type IpcRpcResponse,
+  type McpAuthState,
   normalizeRemoteUrl,
   type RepoReport,
   type RunnerCommandName,
@@ -15,6 +16,8 @@ import {
   uuidv7,
   type WorktreeSweepResult,
 } from '@aom/shared';
+import { ClaudeAuthMonitor } from './adapters/claude-auth.ts';
+import { ClaudeCodeAdapter } from './adapters/claude-code.ts';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { ServerHttp } from './attachments/index.ts';
@@ -49,7 +52,13 @@ import { removeWorktree } from './git/worktrees.ts';
 import { IntegrationPoller } from './integrations/poll.ts';
 import { IpcServer } from './ipc/server.ts';
 import { type Logger, nullLogger } from './log.ts';
-import { discoverPluginMcpServers, type PluginMcpServer, reportOf } from './mcp/plugins.ts';
+import {
+  discoverPluginMcpServers,
+  mcpAuthStates,
+  mcpSignInNote,
+  type PluginMcpServer,
+  reportOf,
+} from './mcp/plugins.ts';
 import { changeOrgFolder, orgFolderCandidates, orgFolderStates } from './org-folder.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
 import { forbiddenReadPath } from './read-repos.ts';
@@ -84,6 +93,12 @@ export interface RunnerOptions {
   syncIntervalMs?: number;
   /** Test seam: idle watchdog limits and clock. */
   idle?: SupervisorDeps['idle'];
+  /** How often an expired Claude login is probed (default 3 minutes). */
+  authProbeMs?: number;
+  /** Test seam: the sign-in state per MCP server key (default: read from the Claude credentials file). */
+  mcpAuth?: () => (server: PluginMcpServer) => McpAuthState;
+  /** The once-a-minute tick (MCP sign-in state, login probe); tests shorten it. */
+  minuteMs?: number;
   adapters?: Map<string, RuntimeAdapter>;
   /** Test hook: milliseconds per vault sync interval second (default 1000). */
   vaultSecondMs?: number;
@@ -167,6 +182,9 @@ export class Runner {
   /** The plugin MCP servers last reported, to send a new report only on change. */
   private lastMcp: string | undefined;
   private lastToolchains: string | undefined;
+  /** The Claude login of this machine: expired pauses the runtime (reported unavailable) until a probe succeeds. */
+  readonly claudeAuth = new ClaudeAuthMonitor();
+  private lastAuthProbe = 0;
   private maxConcurrent: number;
   private readonly rpcs = new Map<string, (r: IpcRpcResponse) => void>();
   private readonly sweepQueries = new Map<string, (live: string[]) => void>();
@@ -240,6 +258,15 @@ export class Runner {
       log: this.log,
     });
     this.adapters = opts.adapters ?? buildAdapters(opts.config, this.paths);
+    this.adapters = opts.adapters ?? buildAdapters(opts.config, this.paths, this.claudeAuth);
+    this.claudeAuth.onChange((state) => {
+      this.log.warn(
+        state === 'expired'
+          ? 'the Claude login does not work: work on this workstation is paused until you run `claude` and `/login` here'
+          : 'the Claude login works again: work resumes',
+      );
+      void this.reportRuntimes();
+    });
     this.client = new RunnerClient({
       url: toWsUrl(opts.config.serverUrl),
       token: opts.config.runnerToken,
@@ -268,6 +295,7 @@ export class Runner {
       paths: this.paths,
       config: opts.config,
       adapters: this.adapters,
+      beforeAuthReject: () => this.reportRuntimes(),
       ipc: this.ipc,
       outbox: this.outbox,
       log: this.log,
@@ -296,6 +324,7 @@ export class Runner {
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
       syncAfterFetch: (t) => this.sync.sync(t, { fetch: false, locked: true }).then(() => undefined),
+      mcpSignInNote: (granted) => this.mcpSignInNote(granted),
     });
     this.external =
       opts.external ??
@@ -311,6 +340,7 @@ export class Runner {
       send: (type, payload) => void this.client.send(type, payload),
       rpc: (chatId, method, params) => this.rpc(chatId, method, params),
       external: this.external,
+      mcpSignInNote: (granted) => this.mcpSignInNote(granted),
       http: this.serverHttp,
       findRepo: (n) => this.findRepo(n),
       findLocal: (k) => this.findLocal(k),
@@ -456,6 +486,13 @@ export class Runner {
     const t = setInterval(() => void this.rescan(), this.opts.rescanMs ?? 600_000);
     t.unref();
     this.timers.push(t);
+    // Every minute: the sign-in state of the plugin MCP servers, and (while the Claude login is expired) the login probe.
+    const m = setInterval(() => {
+      this.reportMcpServers(false);
+      void this.probeAuth();
+    }, this.opts.minuteMs ?? 60_000);
+    m.unref();
+    this.timers.push(m);
     // `aom-runner git-connect` touches a marker file: report the new git status without waiting for the rescan.
     const g = setInterval(() => {
       try {
@@ -512,9 +549,42 @@ export class Runner {
         available: c.available,
         capabilities: c.capabilities,
         ...(c.sandbox ? { sandbox: c.sandbox, sandboxReason: c.sandboxReason } : {}),
+        ...(c.auth ? { auth: c.auth } : {}),
       });
     }
     return out;
+  }
+
+  /** Sends `runtimes.report` when what the runtimes report (availability, sandbox, login) changed since the last one. */
+  private async reportRuntimes(): Promise<void> {
+    const runtimes = await this.runtimeInfos();
+    const key = JSON.stringify(runtimes);
+    const changed = this.lastRuntimes !== undefined && key !== this.lastRuntimes;
+    this.lastRuntimes = key;
+    if (changed) this.client.send('runtimes.report', { runtimes });
+  }
+
+  /**
+   * While the Claude login is expired: every 3 minutes a cheap probe (`claude auth status`, then one minimal call); when
+   * it works the runtime is reported available again and the server resumes dispatching and clears its notice.
+   */
+  private async probeAuth(): Promise<void> {
+    if (this.claudeAuth.state !== 'expired') return;
+    if (Date.now() - this.lastAuthProbe < (this.opts.authProbeMs ?? 180_000)) return;
+    this.lastAuthProbe = Date.now();
+    const a = this.adapters.get('claude-code');
+    if (a instanceof ClaudeCodeAdapter) await a.probeLogin();
+  }
+
+  /** The instructions note for granted plugin MCP servers that are not signed in on this workstation. */
+  private mcpSignInNote(granted: readonly string[] | undefined): string {
+    if (!granted?.length) return '';
+    try {
+      const servers = (this.opts.mcpDiscover ?? (() => discoverPluginMcpServers()))();
+      return mcpSignInNote(servers, granted, (this.opts.mcpAuth ?? mcpAuthStates)(), hostname());
+    } catch {
+      return '';
+    }
   }
 
   private async buildHello(): Promise<Record<string, unknown>> {
@@ -541,11 +611,7 @@ export class Runner {
     await this.scan();
     this.client.send('repos.report', { repos: this.repos, repoCatalog: this.repoCatalog() });
     // A re-probe may change a runtime (bubblewrap installed, claude upgraded): tell the server when it did.
-    const runtimes = await this.runtimeInfos();
-    const key = JSON.stringify(runtimes);
-    if (this.lastRuntimes !== undefined && key !== this.lastRuntimes)
-      this.client.send('runtimes.report', { runtimes });
-    this.lastRuntimes = key;
+    await this.reportRuntimes();
     await this.reportGit(false);
     await this.reportOrgFolders();
     this.reportMcpServers(false);
@@ -559,7 +625,10 @@ export class Runner {
   private reportMcpServers(force: boolean): void {
     if (!(this.opts.mcpReport ?? !(this.opts.config.runtimes.mock?.enabled || process.env.VITEST))) return;
     try {
-      const report = reportOf((this.opts.mcpDiscover ?? (() => discoverPluginMcpServers()))());
+      const report = reportOf(
+        (this.opts.mcpDiscover ?? (() => discoverPluginMcpServers()))(),
+        (this.opts.mcpAuth ?? mcpAuthStates)(),
+      );
       const key = JSON.stringify(report);
       if (!force && key === this.lastMcp) return;
       this.lastMcp = key;

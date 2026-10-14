@@ -176,10 +176,11 @@ export class Dispatcher {
     list.sort((x, y) => Number(originals.has(y.id)) - Number(originals.has(x.id)));
     const out = [];
     for (const a of list) {
-      const rt = (a.runtimes as Array<{ id: string; available: boolean; capabilities: string[] }>).find(
-        (r) => r.id === a.runtime,
-      );
-      if (!rt?.available) continue;
+      const rt = (
+        a.runtimes as Array<{ id: string; available: boolean; capabilities: string[]; auth?: string }>
+      ).find((r) => r.id === a.runtime);
+      // An expired login (Claude Code `/login`) pauses the workstation's work; it resumes when the runner reports ok.
+      if (!rt?.available || rt.auth === 'expired') continue;
       out.push({ row: a, caps: rt.capabilities, active: Number(a.active) });
     }
     return out;

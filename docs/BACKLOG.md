@@ -7,18 +7,6 @@ Logged fixes to pick up when development resumes. Newest first.
 Owner's bug and wish list from a day of real use (production, P4 / Flow-Web). Root causes are being investigated; each
 item gets its findings and fix when built.
 
-### 48. Authorise MCP servers from the web
-
-The BA needed the Atlassian plugin MCP authorised (OAuth) and the owner could not do that from the web. Wanted: the
-runner reports each server's auth state; the app shows "needs sign-in" per workstation with a clear action, and if possible
-starts the sign-in from the web. Fits the Integrations page (#34).
-
-### 50. Claude login expiry stops agents
-
-When the workstation's Claude Code login (OAuth) expires, agents fail until the owner runs `/login`. Wanted: find out why
-it expires (refresh not written back from the sandbox?), detect it, pause that workstation's work, tell the owner
-("run `claude /login` on <workstation>"), and resume by itself once the login works again.
-
 ### 58. Start action: run the project on a branch
 
 An easy way to start the project on a chosen branch to try it. Build/run instructions per project: if a repository has a
@@ -283,6 +271,9 @@ The details of each done item follow this list, by date.
 - #53: Unstick an agent: stop shift, stop the running command, idle watchdog. Done 2026-10-14.
 - #55: Agents stuck running unit tests: per-command time limits and test instructions. Done 2026-10-14.
 - #57: The local working branch falls behind origin: sync, status and Sync now. Done 2026-10-14.
+- #48: MCP auth state reported and shown (Needs sign-in, desk notice, agent note). Done 2026-10-14.
+- #49: `aom source read` reads Jira tickets through the runner's Jira connection. Done 2026-10-14.
+- #50: Claude login expiry: detect, pause, notify, resume; credentials copied under a lock instead of symlinked. Done 2026-10-14.
 
 ## 2026-10-14 (done)
 
@@ -294,13 +285,62 @@ on the ticket, the requirements and the spec, and hand code questions to the Arc
 
 **Done (2026-10-14).** The BA no longer reads code during intake. Its intake step 3 and the intake chat instructions now say: use PROJECT.md, the vault, the ledger and the ticket; never read source code and never ask the manager for repository or reference-repository access; put code questions into the card and set `designNeeded` (or `investigationOnly`) so the Architect investigates. The same rule is in the BA core rules. Hard enforcement in `chat/relay.ts`: a chat with the BA (role key `ba`) gets no `readRepos`, no `localReadRepos` and no card worktree path; other roles are unchanged. USER-GUIDE 4.18 says so. BA role version 13 (one bump with #49 and #52; hired agents follow it, #29).
 
+### 50. Claude login expiry stops agents
+
+When the workstation's Claude Code login (OAuth) expires, agents fail until the owner runs `/login`. Wanted: find out why
+it expires (refresh not written back from the sandbox?), detect it, pause that workstation's work, tell the owner
+("run `claude /login` on <workstation>"), and resume by itself once the login works again.
+
+**Done (2026-10-14).** Finding: agents got `.credentials.json` as a symlink to `~/.claude/.credentials.json`; every agent
+refreshes the access token itself and the refresh token rotates, so concurrent agents (and an atomic rename that replaced the
+link) raced each other and left some holding a used-up refresh token. Fixes: (1) each session now gets a private copy, made
+under a runner-wide lock, after one refresh probe when the access token expires within 10 minutes, and a newer login in the
+copy is written back atomically after the session (never an older one); (2) the runner recognises an authentication failure
+(error result, flagged assistant message, stderr) and marks the Claude runtime `auth: expired`, reported as unavailable in
+`runtimes.report` (additive `auth` field); (3) the failing shift is returned as `shift.rejected{auth_expired}`: the card goes
+back to the queue without penalty (not a crash, so the loop breaker, back-off and digests ignore it) and nothing is
+dispatched to the workstation (also checked by the dispatcher); (4) the server raises one desk notice for the owner
+(`claude_auth_expired`) and sends one e-mail ("run `claude` then `/login` on that machine, or `claude setup-token`"), closed by
+the system on recovery (there is no push channel in the product yet); (5) while expired the runner probes every 3 minutes
+(`claude auth status --json`, then one minimal `claude -p`) and resumes by itself. A `setup-token` (`authMode: "oauth"`) shares
+no credentials file at all and is the most robust choice (`docs/RUNNER.md`, "The Claude login"). Tests:
+`apps/runner/test/claude-auth.test.ts`, `apps/server/test/workstation-auth.test.ts`.
+
 ### 49. The BA does not know the runner's Jira integration
 
 The runner has a Jira API connection (`aom-runner jira-connect`, `aom source attachments`), but the BA did not know it and
 could not use it when MCP was unavailable. The BA's instructions must name it, and the BA should be able to read a ticket
 (fields, description, comments, attachments) through it.
 
+**Done (2026-10-14).** `aom source read --ref <KEY>` now reads a Jira ticket through the runner's saved Jira connection
+(`aom-runner jira-connect`): `GET /rest/api/2/issue/<KEY>?fields=summary,description,issuetype,status,priority,labels,
+components,reporter,assignee,parent,issuelinks,comment`, rendered as text (type, priority, people, parent, links, the
+wiki-markup description, the comments) and wrapped as untrusted content. Same scope rule as the attachments: only the
+intake's own key or the card's `externalRef`. Without a connection: "Jira is not connected on this workstation: ask the manager
+to run `aom-runner jira-connect`". The stale `SkillMediatedError` is gone; the `aom --help` line and `docs/RUNNER.md`
+("Jira on the runner") are updated. (The BA prompts that mention the command are changed with #47.) Tests:
+`apps/runner/test/external-adapters.test.ts` with a mocked HTTP.
+
 **Done (2026-10-14), prompt part.** The BA instructions (intake steps 1 and 1a), the intake chat instructions and the Jira skill text now name the workstation's Jira connection: `aom source read --ref <KEY>` (fields, description, comments, links), `aom source attachments <KEY>` and `aom source attachment <KEY> ...`; the Atlassian MCP server is only a fallback; when the runner says Jira is not connected the BA asks the manager to run `aom-runner jira-connect` on the workstation. The runner side (`aom source read` for a Jira key) is built separately in `apps/runner/src/external/jira.ts` and `aom-cli.ts`. BA role version 13.
+
+### 48. Authorise MCP servers from the web
+
+The BA needed the Atlassian plugin MCP authorised (OAuth) and the owner could not do that from the web. Wanted: the
+runner reports each server's auth state; the app shows "needs sign-in" per workstation with a clear action, and if possible
+starts the sign-in from the web. Fits the Integrations page (#34).
+
+**Done (2026-10-14).** The runner reports `authState` for every plugin MCP server (`signed_in`, `needs_sign_in`,
+`not_needed`), decided from the keys of `mcpOAuth` in the Claude credentials file only (never a token value; an expired
+access token with a refresh token still counts as signed in; stdio servers and remote servers with their own headers need no
+sign-in), re-scanned every minute and reported on change (`McpServerInfo.authState`, optional, so older runners omit it).
+The server stores it with the other facts, the Workstations page shows *Needs sign-in: On <workstation>, run `claude`, then
+`/mcp`, choose <server>, Authenticate.* (also in a workstation's warning count), the project's MCP servers panel shows the
+same per granted server, and the owner gets a desk notice (subkind `mcp_needs_sign_in`) when a granted server needs sign-in,
+closed by the system when it is signed in. At `shift.start` / `chat.start` the runner adds a section to the agent's
+instructions naming the granted servers that need sign-in and the exact sentence to give the manager. Starting the sign-in
+from the web is not possible (the OAuth flow belongs to the Claude Code client on the machine); the page gives the steps.
+Tests: `apps/runner/test/claude-auth.test.ts`, `apps/server/test/workstation-auth.test.ts`,
+`apps/web/src/test/sign-in-state.test.tsx`.
 
 ### 51. Archive done cards after a day
 

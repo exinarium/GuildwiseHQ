@@ -26,6 +26,7 @@ import {
   Panel,
   useToast,
 } from '../components/ui.tsx';
+import { signInProblems, WorkstationSignIns } from '../components/WorkstationSignIns.tsx';
 import { AddWorkstationWizard } from '../components/workstations/AddWorkstationWizard.tsx';
 import { AgentToolchains } from '../components/workstations/AgentToolchains.tsx';
 import { CloudWorkstations } from '../components/workstations/CloudWorkstations.tsx';
@@ -189,7 +190,12 @@ export function WorkstationCard({
   const expanded = expandedProp ?? own;
   const setExpanded = (v: boolean) => (onExpandedChange ? onExpandedChange(v) : setOwn(v));
   const bodyId = useId();
-  const warnings = unsandboxedRuntimes(w.runtimes).length + unavailableRuntimes(w.runtimes).length;
+  const problems = signInProblems(w);
+  const warnings =
+    unsandboxedRuntimes(w.runtimes).length +
+    unavailableRuntimes(w.runtimes).length +
+    (problems.claude ? 1 : 0) +
+    problems.mcp.length;
   return (
     <li data-testid={`workstation-${w.name}`}>
       <Panel>
@@ -222,7 +228,7 @@ export function WorkstationCard({
             {!expanded && warnings > 0 && (
               <Badge
                 tone="amber"
-                title="A runtime on this workstation has a sandbox warning. Show the details."
+                title="Something on this workstation needs attention (sandbox, sign-in). Show the details."
               >
                 <TriangleAlert aria-hidden="true" className="mr-1 size-3" />
                 {warnings} {warnings === 1 ? 'warning' : 'warnings'}
@@ -246,6 +252,7 @@ export function WorkstationCard({
         </div>
         {expanded && (
           <div id={bodyId} data-testid="workstation-details">
+            <WorkstationSignIns w={w} />
             {unsandboxedRuntimes(w.runtimes).map((r) => (
               <div key={r.id} className="mt-2" data-testid={`sandbox-warning-${r.id}`}>
                 <SandboxWarning testId="sandbox-warning">
@@ -267,6 +274,7 @@ export function WorkstationCard({
                   {w.runtimes.map((r) => (
                     <Badge key={r.id} tone={r.available ? 'green' : 'neutral'}>
                       {r.id} {r.version}
+                      {r.auth === 'expired' ? ' (login expired)' : ''}
                     </Badge>
                   ))}
                 </p>

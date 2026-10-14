@@ -756,7 +756,10 @@ export async function applyShiftRejected(
   } else if (['repo_missing', 'worktree_failed', 'runtime_unavailable', 'internal'].includes(msg.reason)) {
     rejection = { reason: msg.reason, detail: msg.detail ?? msg.reason.replaceAll('_', ' ') };
   }
-  const text = `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
+  const text =
+    msg.reason === 'auth_expired'
+      ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
+      : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
   await ctx.store.append(
     await releaseClaimEvents(tx, card, 'runner_rejected', text, 'rejected', extra, rejection),
     { tx },

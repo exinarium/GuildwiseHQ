@@ -24,7 +24,14 @@ export const workstationEvents = [
     'WorkstationRuntimesChanged',
     z.object({
       workstationId: Id,
-      runtimes: z.array(z.object({ id: z.string(), available: z.boolean(), sandbox: z.string().optional() })),
+      runtimes: z.array(
+        z.object({
+          id: z.string(),
+          available: z.boolean(),
+          sandbox: z.string().optional(),
+          auth: z.string().optional(),
+        }),
+      ),
     }),
   ),
   defineEvent('WorkstationDisconnected', z.object({ workstationId: Id })),

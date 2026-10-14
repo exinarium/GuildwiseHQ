@@ -79,6 +79,11 @@ export const RuntimeInfoSchema = z.object({
   /** Absent from older runners and from runtimes without a sandbox concept: no warning is shown then. */
   sandbox: SandboxStateSchema.optional(),
   sandboxReason: z.string().optional(),
+  /**
+   * The runtime's login: `expired` when its sign-in no longer works (Claude Code: "OAuth session expired"); such a
+   * runtime is also reported `available: false` so nothing is dispatched to it. Absent from older runners.
+   */
+  auth: z.enum(['ok', 'expired']).optional(),
 });
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
 
@@ -544,6 +549,8 @@ export const ShiftRejectReasonSchema = z.enum([
   'rebase_conflict',
   /** M4: a tester shift found the app not deployed or Docker missing (see `environment`). */
   'environment_not_ready',
+  /** The runtime's login expired (Claude Code: "OAuth session expired"): the card goes back to the queue, no penalty. */
+  'auth_expired',
   'internal',
 ]);
 export const ShiftStopReasonSchema = z.enum([
