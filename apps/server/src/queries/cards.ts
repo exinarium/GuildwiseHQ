@@ -26,6 +26,7 @@ import { enabledWorkflows } from '../catalogue/project-workflows.ts';
 import { attachmentsOf } from '../commands/card-attachments.ts';
 import { effectiveCompletion } from '../commands/completion.ts';
 import { memberRefusal } from '../commands/phases.ts';
+import { cardQaDto } from '../commands/qa.ts';
 import type { Ctx } from '../context.ts';
 import {
   budgetDto,
@@ -316,6 +317,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     diffStats: lastDiff?.data?.diffStats ?? null,
     testing: await cardTesting(ctx, card, manage),
     subworkflows: await subworkflowsPanel(ctx, userId, card),
+    qa: await cardQaDto(ctx.pool, card, { id: userId }, role),
     blockers: (
       await rows(
         ctx.pool,
@@ -533,6 +535,16 @@ export async function getBoard(
     cards.filter((c) => c.origin === 'subworkflow').map((c) => c.id as string),
   );
   const byColumn = new Map<string, BoardResponse['columns'][number]['cards']>(columns.map((c) => [c, []]));
+  // Manual QA: who each card in a QA stage waits for.
+  const qaPeople = new Map<string, string>(
+    (
+      await rows(ctx.pool, `SELECT id, display_name FROM users WHERE id = ANY($1::uuid[])`, [
+        cards
+          .filter((c) => (c.stage === 'qa_steps' || c.stage === 'manual_qa') && c.qa?.assigneeUserId)
+          .map((c) => c.qa.assigneeUserId as string),
+      ])
+    ).map((u) => [u.id as string, u.display_name as string]),
+  );
   for (const c of cards) {
     const { column } = await cardColumn(ctx, c);
     if (!byColumn.has(column)) byColumn.set(column, []);
@@ -556,21 +568,32 @@ export async function getBoard(
       waitingFor:
         c.status !== 'waiting'
           ? null
-          : subWaiting.has(c.id)
-            ? 'subworkflow'
-            : c.finalize_state === 'awaiting_approval'
-              ? 'approval'
-              : c.finalize_state === 'running'
-                ? 'finalizing'
-                : c.parked_request_id && !c.waiting_on_id
-                  ? 'devops'
-                  : 'bug',
+          : c.stage === 'manual_qa'
+            ? 'qa'
+            : subWaiting.has(c.id)
+              ? 'subworkflow'
+              : c.finalize_state === 'awaiting_approval'
+                ? 'approval'
+                : c.finalize_state === 'running'
+                  ? 'finalizing'
+                  : c.parked_request_id && !c.waiting_on_id
+                    ? 'devops'
+                    : 'bug',
       waitingOn: subWaiting.has(c.id)
         ? (subWaiting.get(c.id) as NonNullable<ReturnType<typeof subWaiting.get>>)
         : c.waiting_on_id
           ? { id: c.waiting_on_id, ref: c.waiting_on_ref }
           : null,
       ...(subStarted.has(c.id) ? { startedBy: subStarted.get(c.id) } : {}),
+      ...((c.stage === 'qa_steps' || c.stage === 'manual_qa') && c.qa?.assigneeUserId
+        ? {
+            qa: {
+              state: c.stage === 'qa_steps' ? ('steps' as const) : ('open' as const),
+              assigneeUserId: c.qa.assigneeUserId as string,
+              assigneeName: qaPeople.get(c.qa.assigneeUserId) ?? 'someone',
+            },
+          }
+        : {}),
       origin: c.origin,
       backoff: backoffOf(c, ctx.clock.now()),
       phase: c.phase_id ? { id: c.phase_id, ref: c.phase_ref, assignment: c.phase_assignment } : null,
@@ -592,11 +615,18 @@ export async function getBoard(
       .filter((s) => s.when?.field === 'designNeeded')
       .map((s) => s.column),
   );
+  // The QA column shows while the project has manual QA on, or while a card is in it.
+  const qaColumns = new Set(
+    (wf.definition as WorkflowDefinition).stages
+      .filter((s) => s.when?.field === 'manualQa')
+      .map((s) => s.column),
+  );
   return {
     projectId,
     workflowKey: wf.key,
     columns: [...byColumn.entries()]
       .filter(([name, cs]) => cs.length > 0 || !designColumns.has(name) || project.design_step === true)
+      .filter(([name, cs]) => cs.length > 0 || !qaColumns.has(name) || project.manual_qa !== false)
       .map(([name, cs]) => ({ name, cards: cs })),
   };
 }

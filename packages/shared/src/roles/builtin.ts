@@ -246,7 +246,7 @@ const role = (r: Omit<RoleDefinition, 'version' | 'builtIn'> & { version?: numbe
 export const BUILTIN_ROLES: RoleDefinition[] = [
   role({
     key: 'ba',
-    version: 13,
+    version: 14,
     name: 'Business analyst',
     purpose: 'Specifies cards, runs intake and finalizes finished work.',
     department: 'delivery',
@@ -263,6 +263,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     claimableStages: [
       { workflowKey: 'code', stageId: 'spec' },
       { workflowKey: 'code', stageId: 'finalize' },
+      // Writes the manual QA steps when no tester is hired (docs/design/manual-qa.md).
+      { workflowKey: 'code', stageId: 'qa_steps' },
     ],
   }),
   role({
@@ -331,7 +333,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
   }),
   role({
     key: 'tester',
-    version: 4,
+    version: 5,
     name: 'Tester',
     purpose: 'Runs the test plan and owns end-to-end tests.',
     department: 'delivery',
@@ -342,7 +344,10 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     // writableGlobs is resolved by the runner from project.e2e_globs for this role.
     permissions: perms({ writableGlobs: ['e2e/**', 'tests/e2e/**', 'playwright/**'], browser: true }),
     skills: [],
-    claimableStages: [{ workflowKey: 'code', stageId: 'test' }],
+    claimableStages: [
+      { workflowKey: 'code', stageId: 'test' },
+      { workflowKey: 'code', stageId: 'qa_steps' },
+    ],
   }),
   role({
     key: 'writer',

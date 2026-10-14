@@ -49,8 +49,14 @@ export function columnFor(
 ): string {
   if (card.status === 'draft') return COLUMN.spec;
   if (card.status === 'blocked') return COLUMN.blocked;
-  // A card waiting for the child of its sub-workflow step stays in that step's column (the card shows what it waits for).
-  if (card.status === 'waiting' && !isFinalizeWait(card) && stage.kind !== 'subworkflow')
+  // A card waiting for the child of its sub-workflow step, or for a person at a human step (manual QA), stays in that
+  // step's column (the card shows what it waits for).
+  if (
+    card.status === 'waiting' &&
+    !isFinalizeWait(card) &&
+    stage.kind !== 'subworkflow' &&
+    stage.kind !== 'human'
+  )
     return COLUMN.waiting;
   if (stage.id === 'build') {
     if (card.status === 'claimed') return COLUMN.inProgress;

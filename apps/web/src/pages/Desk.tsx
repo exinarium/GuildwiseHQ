@@ -23,6 +23,7 @@ import { LedgerForm } from '../components/LedgerForm.tsx';
 import { MappingForm } from '../components/MappingForm.tsx';
 import { OutboundApproval } from '../components/OutboundApproval.tsx';
 import { PhaseDeskItem } from '../components/PhaseDeskItem.tsx';
+import { QaDeskItem } from '../components/QaDeskItem.tsx';
 import { cx } from '../components/ui/cx.ts';
 import {
   Avatar,
@@ -432,8 +433,14 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
       ) : !item.canAnswer ? (
         <p className="mt-3 text-sm text-subtle" data-testid="read-only">
           Read only:{' '}
-          {item.card ? 'only the card owner can answer this.' : 'only the project owner can answer.'}
+          {item.subkind === 'manual_qa'
+            ? 'only the person asked to test this card, or a project owner or manager, can answer this.'
+            : item.card
+              ? 'only the card owner can answer this.'
+              : 'only the project owner can answer.'}
         </p>
+      ) : item.subkind === 'manual_qa' ? (
+        <QaDeskItem item={item} />
       ) : isPhaseDeskSubkind(item.subkind) ? (
         <PhaseDeskItem item={item} />
       ) : item.subkind === 'unmapped_ticket' ? (

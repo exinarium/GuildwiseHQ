@@ -5,6 +5,8 @@ import type { Projector, StoredEvent } from '../eventstore/types.ts';
 const ev = <
   T extends
     | 'OutboundDrafted'
+    | 'OutboundHeld'
+    | 'OutboundReleased'
     | 'OutboundBlocked'
     | 'OutboundApproved'
     | 'OutboundRejected'
@@ -39,6 +41,38 @@ export const outboundProjectors: Record<string, Projector> = {
         e.createdAt,
         p.cardId,
       ],
+    );
+  },
+
+  // A draft held until manual QA passes or is skipped: no desk item yet.
+  OutboundHeld: async (tx, e) => {
+    const p = ev<'OutboundHeld'>(e).payload;
+    await exec(
+      tx,
+      `INSERT INTO outbound_drafts (${COLUMNS})
+       SELECT $1, $2, c.project_id, c.id, $3, $4, $5, $6, $7, 'held', NULL, $8, $9, '[]', $10, $10 FROM cards c WHERE c.id=$11`,
+      [
+        p.draftId,
+        e.scope.orgId,
+        p.externalSystem,
+        p.externalKey,
+        p.externalUrl ?? null,
+        p.kind,
+        p.body,
+        p.draftedBy?.kind ?? null,
+        p.draftedBy ? (p.draftedBy.kind === 'agent' ? p.draftedBy.agentId : p.draftedBy.userId) : null,
+        e.createdAt,
+        p.cardId,
+      ],
+    );
+  },
+
+  OutboundReleased: async (tx, e) => {
+    const p = ev<'OutboundReleased'>(e).payload;
+    await exec(
+      tx,
+      `UPDATE outbound_drafts SET status='pending', desk_item_id=$2, updated_at=$3 WHERE id=$1 AND status='held'`,
+      [p.draftId, p.deskItemId, e.createdAt],
     );
   },
 

@@ -84,11 +84,11 @@ export const hygieneProjectors: Record<string, Projector> = {
     const orgId = e.scope.orgId as string;
     for (const r of p.repos) {
       if (r.branches.length)
-        await exec(tx, 'UPDATE project_repos SET known_branches=$2::jsonb, known_branches_at=$3 WHERE id=$1', [
-          r.repoId,
-          JSON.stringify(r.branches),
-          e.createdAt,
-        ]);
+        await exec(
+          tx,
+          'UPDATE project_repos SET known_branches=$2::jsonb, known_branches_at=$3 WHERE id=$1',
+          [r.repoId, JSON.stringify(r.branches), e.createdAt],
+        );
       // A missing working branch is a question on the desk, not a finding.
       if (!r.problem || r.problem.kind === 'needs_branch') {
         await resolveSubject(tx, e, p.workstationId, r.repoId);

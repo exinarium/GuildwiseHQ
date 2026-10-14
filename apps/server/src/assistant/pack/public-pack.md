@@ -207,6 +207,7 @@ The test stage, how finished work lands (working branch or pull request), the ma
 - Test stage: When a card reaches Test, a tester runs the E2E tests from the test plan. If tests pass:
 - Finalization: At the Finalize stage, your BA ships the work the way the project says. Every project repository has two branches, named in the project's repository settings:
 - Simple mode and expert mode: You do not need to know git to use Guildwise HQ. By default (simple mode) cards and the desk speak in results: *"Goes into the working branch after review and test"*, *"Your change is live on the working branch"*, *"Waiting for you to merge the pull request"*.…
+- Manual QA: After a card is finalized it goes to QA (when the project has it on, which is the default): the person who started the card gets a desk item and an agent writes test steps on the card.…
 - Full suite and regression: After finalization, a full suite card is created for testers to run the entire E2E suite once. A test-side failure (a flaky test, data or environment) is fixed by the tester; a genuine bug becomes a new bug card and you get a notice. These failures do not block merges.
 
 ### Phases and follow-ups

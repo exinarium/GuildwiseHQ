@@ -50,6 +50,12 @@ export type IssueCode =
   | 'subworkflow_unknown_card_type'
   | 'subworkflow_field_type'
   | 'subworkflow_required_unmapped'
+  // rule 11 (human stages)
+  | 'human_missing_config'
+  | 'human_config_misplaced'
+  | 'human_has_role'
+  | 'fallback_role_misplaced'
+  | 'unknown_fallback_role'
   // custom workflows only
   | 'not_custom'
   | 'invalid_key'
@@ -60,6 +66,7 @@ export type IssueCode =
   | 'manual_stage_not_initial'
   | 'role_not_claimable'
   | 'unsupported_custom_event'
+  | 'human_stage_not_custom'
   // project variants only
   | 'variant_base_not_allowed'
   | 'variant_base_mismatch'
@@ -273,7 +280,8 @@ export function validateWorkflow(
       if (o.effect === 'spawn_bug_child' && o.to !== s.id) {
         err(8, 'invalid_effect', `'${s.id}.${o.id}': spawn_bug_child must target the same stage`, s.id, o.id);
       }
-      if (o.effect === 'finalize' && !terminals.has(o.to)) {
+      // The card ends at the terminal stage, directly or through guarded steps that may be skipped (manual QA).
+      if (o.effect === 'finalize' && !terminals.has(o.to) && !byId.get(o.to)?.when) {
         err(8, 'invalid_effect', `'${s.id}.${o.id}': finalize must target a terminal stage`, s.id, o.id);
       }
       if (o.effect === 'resume_parent' && !def.cardTypes.includes('bug')) {
@@ -383,6 +391,35 @@ export function validateWorkflow(
         `sub-workflow stage '${s.id}' needs a failure route for a cancelled child`,
         s.id,
       );
+  }
+
+  // Rule 11: human stages (a person completes them; built-in workflows only) and fallback roles of agent stages.
+  for (const s of def.stages) {
+    if (s.kind !== 'human') {
+      if (s.human)
+        err(11, 'human_config_misplaced', `stage '${s.id}' is not a human stage but has a human block`, s.id);
+    } else if (!s.human) {
+      err(11, 'human_missing_config', `human stage '${s.id}' needs a human block`, s.id);
+    } else if (s.claimRole) {
+      err(
+        11,
+        'human_has_role',
+        `human stage '${s.id}' is completed by a person: it takes no claimRole`,
+        s.id,
+      );
+    }
+    if (s.fallbackRole !== undefined) {
+      if (s.kind !== 'agent') {
+        err(11, 'fallback_role_misplaced', `stage '${s.id}': only agent stages have a fallbackRole`, s.id);
+      } else if (!roleCatalogue.some((r) => r.key === s.fallbackRole)) {
+        err(
+          11,
+          'unknown_fallback_role',
+          `stage '${s.id}' names unknown fallback role '${s.fallbackRole}'`,
+          s.id,
+        );
+      }
+    }
   }
 
   // Warnings.

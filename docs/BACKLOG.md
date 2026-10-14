@@ -163,6 +163,9 @@ thread and the card, optional agent-drafted reply that a human sends.
 **Decided (owner, 2026-10-12): later.** A workflow step that waits for the Owner (or a named member) to approve on the
 desk, with approve / send back routes, in the workflow builder and the validator.
 
+**Update (2026-10-14):** the stage kind `human` (`human: { purpose: 'qa' | 'approval' }`) exists since manual QA (#64).
+This item adds `purpose: 'approval'` (server handler, panel, builder and validator for custom workflows).
+
 ### 17. Stale figures in the user guide
 
 6 of the 87 figures in `docs/guide` still show old screens (`desk-branch`, the test-stage, conflict and large-merge
@@ -276,8 +279,54 @@ The details of each done item follow this list, by date.
 - #50: Claude login expiry: detect, pause, notify, resume; credentials copied under a lock instead of symlinked. Done 2026-10-14.
 - #61: No card or agent branch is pushed unless the goal is a pull request. Done 2026-10-14.
 - #62: Inbound e-mail through SendGrid Inbound Parse. Done 2026-10-14.
+- #64: Manual QA after Finalize, assigned to the person who started the card. Done 2026-10-14.
 
 ## 2026-10-14 (done)
+
+### 64. Manual QA
+
+**Owner request (2026-10-14):** a card gets finalized and the owner does not test everything. When they do test and it
+fails, the card must not pass. So a QA step after Finalize, assigned to the person who started the thread, card or
+intake, that posts steps on what to test in different scenarios. They can accept, skip the test, send it back with a
+comment, or assign it to someone else. It lands on their board. It can be turned off per project. Finalize runs first;
+QA then posts the outgoing comment if it passes or is skipped; then the card moves to Done. Otherwise closed cards
+have to be reopened again and again. Design: `docs/design/manual-qa.md`.
+
+**Done (2026-10-14).** Built-in `code` workflow **v3** adds two stages after `finalize`: `qa_steps` (an agent writes the
+steps, read-only, no worktree; role tester, falling back to the BA when no tester is hired: new `Stage.fallbackRole`) and
+`manual_qa`, a new stage kind **`human`** (`human: { purpose: 'qa' | 'approval' }`) that nobody claims and the dispatcher
+ignores. Backlog #16 ("owner approves" step) reuses the kind: only its handler and panel are missing. Both stages are
+skipped through `when` guards on derived flags the server computes when the card leaves Finalize (`manualQa`: project
+setting on and not an investigation, scheduled or suite card; `qaAgent`: an active tester or BA may work the project), so
+`CardFinalized.toStage` is `done`, `qa_steps` or `manual_qa`. A card still pinned to v1/v2 when it is finalized is moved to
+v3 then (same stages up to Finalize), so cards in flight follow the setting; project variants that extend v2 do not get QA
+until rebased. The merge, the full-suite card and the worktree removal happen at `CardFinalized` as before; `finalized_at`,
+the archive timer (#51), `card_done` automations and sub-workflow completion count from `QaPassed` / `QaSkipped`.
+
+Project setting **Manual QA before done** (`ProjectManualQaSet`, `projects.manual_qa`, default on for every project, project
+Owner and organization Owners/Admins change it; `PUT /api/projects/:id/manual-qa`), next to the full-suite setting.
+Assignee: the person who started the intake chat or batch that made the card, else the card's creator, else the project
+owner, always an active member; a card sent back keeps whoever it was handed to. The assignee gets a desk question (subkind
+`manual_qa`, options Pass / Skip / Send back) and the card shows in the **QA** column with a "Waiting for my QA" board
+filter and a "QA: name" chip; the card thread records every step (there is no e-mail or push channel for desk items to add
+to). Actions (card QA panel and desk item, `POST /api/cards/:id/qa/{pass,skip,send-back,assign}`; the assignee, project
+owners and managers, organization Owners/Admins): **Pass** and **Skip** finish the card (events `QaPassed` / `QaSkipped`,
+the optional note is kept); **Send back** needs a comment, moves the card to Build with `rework_round + 1` (`QaSentBack`),
+and the builder reads the comment as a review comment ("<name> (manual QA)"); **Give to someone else** replaces the desk item
+(`QaAssigned`). The tester's steps arrive as the outcome note of `qa_steps` (`aom outcome steps --note-file`), are posted on
+the card and shown as a tickable checklist grouped by scenario. With no agent at all the card opens `manual_qa` at once and
+says so.
+
+**Held outgoing comment.** While a card will pass through QA, the BA's `aom outbound draft` records the draft as `held`
+(`OutboundHeld`: no desk item, nothing posted). `QaPassed` / `QaSkipped` release it (`OutboundReleased`): it becomes the
+usual pending draft with the owner's desk approval and posts from their workstation as before. A send back leaves it held.
+Drafts the manager writes by hand are not held. **Rework after a merge** needed no runner change: the server keeps the
+card's worktree path and branch after the merge, the next claim is a `reuse`, `ensureWorktree` cuts the deleted card branch
+afresh from the working branch (which already has the merged work) and the second finalize merges only the new commits
+(runner test `manual-qa-rework.test.ts`). Migration `1930_manual_qa.sql`. Tests: shared `manual-qa.test.ts`, server
+`manual-qa.test.ts`, runner `manual-qa-rework.test.ts`, web `qa-panel.test.tsx`. Role versions: BA 14, tester 5.
+**Not done:** the released comment still needs the owner's desk approval (one more click); `purpose: 'approval'` (#16);
+custom workflows cannot use `human` steps yet; project variants of v2 do not have QA.
 
 ### 62. Inbound e-mail through SendGrid Inbound Parse
 

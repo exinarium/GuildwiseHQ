@@ -35,6 +35,8 @@ import { applyQuestionReport, endQuestionShift } from './escalation.ts';
 import { buildDigestEvents } from './feeds.ts';
 import { workingBranchQuestionEvents } from './hygiene.ts';
 import { loopBreakerPlan, rejectionBackoffEvents } from './loop-breaker.ts';
+import { qaStepsEvents } from './qa.ts';
+import { QA_STEPS_STAGE } from './qa-flow.ts';
 import { raiseQuestion } from './questions.ts';
 import { rebaseConflictEvents } from './rebase.ts';
 import { buildPublicationEvents } from './research.ts';
@@ -349,6 +351,13 @@ export async function applyShiftReport(
       break;
     }
     case 'StageCompleted':
+      if (card.stage === QA_STEPS_STAGE) {
+        // Manual QA: the note is the agent's test steps; they are posted on the card for the person who tests it.
+        if (!report.note.trim())
+          return { accepted: false, error: 'the QA steps are empty: write the steps and report again' };
+        followUps.push(...qaStepsEvents(card, agent.id, report.note.trim()));
+        acceptMessage = 'Recorded. The steps are on the card for the person who tests it. Finish now.';
+      }
       if (outcome.data === 'investigation') {
         const inv = payloadData as InvestigationData;
         if (!isValidReportPath(inv.reportPath))

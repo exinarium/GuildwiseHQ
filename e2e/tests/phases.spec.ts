@@ -133,6 +133,10 @@ test('setup: a paired mock runner, project PHS on the toy repo, a BA, a builder,
   const proj = await api.post('/api/projects', { data: { key: 'PHS', name: 'Phases project' } });
   expect(proj.status(), await proj.text()).toBe(201);
   projectId = (await proj.json()).project.id;
+  // Manual QA after Finalize is on for real projects; this spec runs cards to Done, so it is off here.
+  expect((await api.put(`/api/projects/${projectId}/manual-qa`, { data: { enabled: false } })).status()).toBe(
+    200,
+  );
   const add = await api.post(`/api/projects/${projectId}/repos`, {
     data: { name: 'toy', remoteUrl: paths.origin, workingBranch: 'main' },
   });

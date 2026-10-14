@@ -55,7 +55,9 @@ export const SCHEDULE_EVENT_TRIGGERS: ReadonlyArray<{
     id: 'card_done',
     label: 'A card of a workflow is done',
     eventType: 'CardFinalized',
-    hint: 'A card of the workflow you choose was finalized and moved to Done.',
+    // With manual QA the card is done when QA passes or is skipped, not at the merge.
+    alsoEventTypes: ['QaPassed', 'QaSkipped'],
+    hint: 'A card of the workflow you choose was finalized (and passed manual QA, when that is on) and moved to Done.',
     cardFilters: 'workflow',
   },
   {

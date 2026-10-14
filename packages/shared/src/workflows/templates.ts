@@ -1,4 +1,9 @@
-import { CARD_COLUMN_FIELDS, type FieldKind, fieldCatalogue } from '../cards/fields.ts';
+import {
+  CARD_COLUMN_FIELDS,
+  DERIVED_BOOLEAN_FIELDS,
+  type FieldKind,
+  fieldCatalogue,
+} from '../cards/fields.ts';
 import { CardType } from '../cards/types.ts';
 import type { CustomField, Outcome, WorkflowDefinition, WorkflowDefinitionInput } from './schema.ts';
 
@@ -316,27 +321,48 @@ export function copyBuiltinAsCustom(
   const notices = new Set<string>();
   const catalogue = fieldCatalogue(builtin.fieldSet, builtin.customFields);
   const used = new Set<string>();
-  const stages = builtin.stages.map((s) => {
-    for (const f of s.requiredFields) used.add(f);
-    if (s.when) used.add(s.when.field);
-    const outcomes = s.outcomes.map((o) => {
-      if (o.when) used.add(o.when.field);
-      let event = o.event;
-      if (!CUSTOM_EVENTS.has(event) || (event === 'CardSpecified' && s.id !== builtin.initialStage)) {
-        notices.add(
-          `The special step result "${o.event}" became a plain "finished": the built-in behaviour it triggers is gone.`,
-        );
-        event = 'StageCompleted';
-      }
-      if (o.data !== 'none') notices.add(`Structured results ("${o.data}") are not carried over.`);
-      if (o.effect !== 'none')
-        notices.add(
-          `The automatic action "${o.effect}" is not carried over (for example spawning bug cards or finalizing).`,
-        );
-      return { ...o, event, data: 'none' as const, effect: 'none' as const };
+  // Manual QA (a person's step, and the agent step that prepares it) is built in: the copy goes from Finalize to Done.
+  const isQa = (s: WorkflowDefinition['stages'][number]) =>
+    s.kind === 'human' || (s.when !== undefined && s.when.field in DERIVED_BOOLEAN_FIELDS);
+  const forward = new Map<string, string>();
+  for (const s of builtin.stages)
+    if (isQa(s)) {
+      const next = s.outcomes.find((o) => o.kind === 'success');
+      if (next) forward.set(s.id, next.to);
+    }
+  const through = (id: string): string => {
+    const seen = new Set<string>();
+    let cur = id;
+    while (forward.has(cur) && !seen.has(cur)) {
+      seen.add(cur);
+      cur = forward.get(cur) as string;
+    }
+    return cur;
+  };
+  if (forward.size > 0) notices.add('Manual QA is built in and was left out of the copy.');
+  const stages = builtin.stages
+    .filter((s) => !isQa(s))
+    .map((s) => {
+      for (const f of s.requiredFields) used.add(f);
+      if (s.when) used.add(s.when.field);
+      const outcomes = s.outcomes.map((o) => {
+        if (o.when) used.add(o.when.field);
+        let event = o.event;
+        if (!CUSTOM_EVENTS.has(event) || (event === 'CardSpecified' && s.id !== builtin.initialStage)) {
+          notices.add(
+            `The special step result "${o.event}" became a plain "finished": the built-in behaviour it triggers is gone.`,
+          );
+          event = 'StageCompleted';
+        }
+        if (o.data !== 'none') notices.add(`Structured results ("${o.data}") are not carried over.`);
+        if (o.effect !== 'none')
+          notices.add(
+            `The automatic action "${o.effect}" is not carried over (for example spawning bug cards or finalizing).`,
+          );
+        return { ...o, to: through(o.to), event, data: 'none' as const, effect: 'none' as const };
+      });
+      return { ...structuredClone(s), outcomes };
     });
-    return { ...structuredClone(s), outcomes };
-  });
   const customFields: CustomField[] = [];
   for (const key of used) {
     if (key in CARD_COLUMN_FIELDS) continue;

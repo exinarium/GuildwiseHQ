@@ -20,6 +20,7 @@ const WAITING_LABEL = {
   finalizing: 'Finalizing',
   devops: 'waiting on DevOps',
   subworkflow: 'waiting for sub-workflow',
+  qa: 'waiting for QA',
 } as const;
 
 const HIDE_KEY = `${BRAND.storagePrefix}-board-hide-empty`;
@@ -31,6 +32,8 @@ export interface BoardFilter {
   unassigned: boolean;
   /** Show only cards at this level (nearest label); null = any. */
   priority: number | null;
+  /** Manual QA: show only the cards waiting for this user to test them (their user id); null = any. */
+  qaFor: string | null;
 }
 export const NO_FILTER: BoardFilter = {
   text: '',
@@ -38,6 +41,7 @@ export const NO_FILTER: BoardFilter = {
   rework: false,
   unassigned: false,
   priority: null,
+  qaFor: null,
 };
 
 export const matchesFilter = (c: BoardCard, f: BoardFilter): boolean => {
@@ -47,6 +51,7 @@ export const matchesFilter = (c: BoardCard, f: BoardFilter): boolean => {
   if (f.rework && c.reworkRound <= 0) return false;
   if (f.unassigned && c.assignee) return false;
   if (f.priority !== null && priorityLevel(c.priority).value !== f.priority) return false;
+  if (f.qaFor !== null && c.qa?.assigneeUserId !== f.qaFor) return false;
   return true;
 };
 
@@ -132,6 +137,18 @@ export function CardTile({
             </span>
           )}
           {card.blocked && <Badge tone="red">Blocked</Badge>}
+          {card.qa && (
+            <span data-testid="qa-chip">
+              <Badge
+                tone="amber"
+                title={
+                  card.qa.state === 'steps' ? 'The test steps are being written' : 'Waiting for the test'
+                }
+              >
+                QA: {card.qa.assigneeName}
+              </Badge>
+            </span>
+          )}
           {card.status === 'waiting' && (
             <span data-testid="waiting-badge">
               <Badge tone="amber">{WAITING_LABEL[card.waitingFor ?? 'bug']}</Badge>

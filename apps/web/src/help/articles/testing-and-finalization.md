@@ -58,6 +58,10 @@ If you know git and want the details, open **Settings** and tick **Show me branc
 - **Mark merged** on the phase page (see [Phases and follow-ups](/help/phases#phase-done));
 - the folder questions in the workstation installer.
 
+## Manual QA {#manual-qa}
+
+After a card is finalized it goes to **QA** (when the project has it on, which is the default): the person who started the card gets a desk item and an agent writes test steps on the card. They **Pass** it, **Skip the test**, **Send back** with a comment (the card returns to rework and goes through finalize and QA again) or **Give it to someone else**. The update on the ticket is held until the card passes or the test is skipped; then the card moves to Done. Switch it off in the project's **Settings**, **Manual QA before done**.
+
 ## Full suite and regression {#full-suite}
 
 After finalization, a **full suite** card is created for testers to run the entire E2E suite once. A test-side failure (a flaky test, data or environment) is fixed by the tester; a genuine bug becomes a new bug card and you get a notice. These failures do not block merges.

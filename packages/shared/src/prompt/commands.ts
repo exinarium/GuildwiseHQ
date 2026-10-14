@@ -29,6 +29,8 @@ export function commandForOutcome(outcome: BriefOutcome): string {
       return 'aom publish --file <note.md> --title "<title>" --citations-file <citations.json>   # citations: [ { url, title } ] of pages you opened; no citations, no publication';
     case 'unsupported':
       return 'aom outcome unsupported --note "<each unsupported claim and why>"';
+    case 'steps':
+      return 'aom outcome steps --note-file <steps.md>   # markdown: scenarios as headings, each step "- [ ] do ... / expect ..."; read-only, change nothing';
     case 'finalized':
       return 'aom finalize --note "<note>"   # runs the card\'s own completion action; never pass --action, only the manager changes it';
     case 'devops_done':

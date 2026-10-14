@@ -75,6 +75,12 @@ export async function answerDeskItem(
     if (item.status !== 'open') throw conflict('already_answered', `this item is already ${item.status}`);
     if (item.kind !== 'question' && item.kind !== 'escalation')
       throw badRequest('wrong_kind', 'approvals and alerts are resolved, not answered');
+    // Manual QA is decided with the card's own actions (pass, skip, send back), which also close this item.
+    if (item.subkind === 'manual_qa')
+      throw badRequest(
+        'use_qa_actions',
+        'manual QA is decided on the card: pass, skip, send back or hand over (POST /api/cards/:id/qa/...)',
+      );
     if (!mayAct) throw forbidden('only the card owner (or any manager, per the decision policy) can answer');
     if (req.optionId && !(item.options as Array<{ id: string }>).some((o) => o.id === req.optionId))
       throw badRequest('unknown_option', 'optionId is not one of the item options');

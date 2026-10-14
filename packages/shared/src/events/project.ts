@@ -269,6 +269,11 @@ export const projectEvents = [
    */
   defineEvent('ProjectFullSuiteSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
   /**
+   * Manual QA after Finalize (docs/design/manual-qa.md) turned off or on for the project. On by default. Only cards
+   * that have not yet passed Finalize are affected.
+   */
+  defineEvent('ProjectManualQaSet', z.object({ projectId: Id, enabled: z.boolean(), by: Id })),
+  /**
    * The project's architect settings (docs/design/architect-and-workflows.md): whether new cards run the Investigate &
    * design step by default, whether the latest main branch is merged first, and where the architect's reports go.
    */

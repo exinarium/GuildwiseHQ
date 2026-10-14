@@ -6,7 +6,15 @@ import { ExternalSystem } from './intake.ts';
 export const OutboundKind = z.enum(['comment', 'resolution', 'decision']);
 export type OutboundKind = z.infer<typeof OutboundKind>;
 
-export const OutboundStatus = z.enum(['pending', 'approved', 'rejected', 'posted', 'failed', 'blocked']);
+export const OutboundStatus = z.enum([
+  'pending',
+  'approved',
+  'rejected',
+  'posted',
+  'failed',
+  'blocked',
+  'held',
+]);
 export type OutboundStatus = z.infer<typeof OutboundStatus>;
 
 /** Who wrote the draft: the BA, or the manager by hand. */
@@ -37,6 +45,25 @@ export const outboundEvents = [
       draftedBy: OutboundAuthor.optional(),
     }),
   ),
+  /**
+   * The BA drafted an update while manual QA is on for the card: it is held (no desk item, nothing posted) until QA
+   * passes or is skipped, then `OutboundReleased` puts it on the desk as usual (docs/design/manual-qa.md section 5).
+   */
+  defineEvent(
+    'OutboundHeld',
+    z.object({
+      draftId: Id,
+      cardId: Id,
+      externalSystem: ExternalSystem,
+      externalKey: z.string().min(1).max(200),
+      externalUrl: z.string().optional(),
+      kind: OutboundKind,
+      body: z.string().min(1).max(20000),
+      draftedBy: OutboundAuthor.optional(),
+    }),
+  ),
+  /** Manual QA passed or was skipped: the held draft is now a normal pending draft with its desk approval. */
+  defineEvent('OutboundReleased', z.object({ draftId: Id, deskItemId: Id })),
   /** The draft mentioned something internal (an agent name, review or bounce history, ...) and never reached the desk. */
   defineEvent(
     'OutboundBlocked',

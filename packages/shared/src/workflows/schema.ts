@@ -13,6 +13,10 @@ export const OutcomeEventSchema = z.enum([
   'ResearchPublished',
   'DigestPosted',
   'CardSpecified',
+  /** Human QA step (manual_qa): accepted, skipped without testing, or sent back to the builder. */
+  'QaPassed',
+  'QaSkipped',
+  'QaSentBack',
 ]);
 export type OutcomeEvent = z.infer<typeof OutcomeEventSchema>;
 
@@ -86,6 +90,18 @@ export type SubworkflowConfigInput = z.input<typeof SubworkflowConfigSchema>;
 /** Deepest chain of sub-workflows allowed (a workflow starting a workflow starting a workflow = 3). */
 export const MAX_SUBWORKFLOW_DEPTH = 3;
 
+/**
+ * Configuration of a `human` stage: a step a person completes, never an agent (docs/design/manual-qa.md section 3).
+ * `purpose` selects the server's handling: `qa` is manual QA after Finalize; `approval` is reserved for the generic
+ * "owner approves" step (backlog #16), which reuses this kind. `assignee` says who gets it: the person who started the
+ * card (intake chat, batch, or card creator; the project owner as a fallback).
+ */
+export const HumanConfigSchema = z.object({
+  purpose: z.enum(['qa', 'approval']),
+  assignee: z.enum(['starter']).default('starter'),
+});
+export type HumanConfig = z.infer<typeof HumanConfigSchema>;
+
 export const StageSchema = z.object({
   id: z.string().regex(IdPattern),
   label: z.string(),
@@ -93,13 +109,21 @@ export const StageSchema = z.object({
   column: z.string(),
   /**
    * manual = moved by a user/BA command, never dispatched. subworkflow = run by the server: starts a child card
-   * (`subworkflow` holds the details); never dispatched to an agent.
+   * (`subworkflow` holds the details); never dispatched to an agent. human = completed by a person (`human` holds the
+   * details), e.g. manual QA; never dispatched to an agent.
    */
-  kind: z.enum(['agent', 'manual', 'terminal', 'subworkflow']),
+  kind: z.enum(['agent', 'manual', 'terminal', 'subworkflow', 'human']),
+  /** Required for kind 'human', absent otherwise. */
+  human: HumanConfigSchema.optional(),
   /** Required for kind 'subworkflow', absent otherwise. */
   subworkflow: SubworkflowConfigSchema.optional(),
   /** Required for kind 'agent'. */
   claimRole: z.string().nullable(),
+  /**
+   * Agent stages: the role that takes the stage when no agent of `claimRole` is hired in the organization (the QA steps
+   * are written by a tester, else by the business analyst). Absent: no fallback.
+   */
+  fallbackRole: z.string().optional(),
   seniorOnly: z.boolean().default(false),
   /** Card field keys that must be filled to ENTER the stage. */
   requiredFields: z.array(z.string()).default([]),

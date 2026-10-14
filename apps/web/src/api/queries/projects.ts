@@ -191,6 +191,18 @@ export function useSetFullSuite(id: string) {
   });
 }
 
+export function useSetManualQa(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => put(`/projects/${id}/manual-qa`, { enabled }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['board'] });
+    },
+  });
+}
+
 export function useSetArchitectSettings(id: string) {
   const qc = useQueryClient();
   return useMutation({

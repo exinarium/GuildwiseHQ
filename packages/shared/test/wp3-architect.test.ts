@@ -103,7 +103,7 @@ describe('the architect role', () => {
 
   it('the BA v10 instructions cover the intake flags and the investigation-only finalize; the builder reads the design', () => {
     const ba = getBuiltinRole('ba');
-    expect(ba?.version).toBe(13);
+    expect(ba?.version).toBe(14);
     for (const s of [
       'designNeeded',
       'investigationOnly',
@@ -121,10 +121,10 @@ describe('the architect role', () => {
 });
 
 describe('code workflow v2', () => {
-  it('is valid, keeps v1 and is the newest', () => {
+  it('is valid and keeps v1 (v3 adds manual QA)', () => {
     expect(validateWorkflow(codeWorkflowV2, BUILTIN_ROLES)).toEqual([]);
     expect(validateWorkflow(codeWorkflowV1, BUILTIN_ROLES)).toEqual([]);
-    expect(getBuiltinWorkflow('code')).toBe(codeWorkflowV2);
+    expect(getBuiltinWorkflow('code', 2)).toBe(codeWorkflowV2);
     expect(codeWorkflowV2.stages.map((s) => s.id)).toEqual([
       'spec',
       'investigate',

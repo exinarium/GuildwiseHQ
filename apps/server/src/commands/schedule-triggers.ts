@@ -170,6 +170,8 @@ async function contextOf(db: Queryable, e: Row, name: TriggerName): Promise<Even
     what = 'project converted';
   } else {
     // A card trigger: card_finalized, card_done, card_stage_reached, investigation_reported.
+    // A finalized card that goes to manual QA is not done yet: `card_done` fires with QaPassed / QaSkipped instead.
+    if (name === 'card_done' && e.type === 'CardFinalized' && p.toStage !== 'done') return null;
     const c = await one(
       db,
       `SELECT c.ref, c.title, c.project_id, c.interest_id, c.card_type, c.fields, c.schedule_id, v.key AS workflow_key
@@ -194,7 +196,11 @@ async function contextOf(db: Queryable, e: Row, name: TriggerName): Promise<Even
     const base = { ref: c.ref, title: c.title, workflow: card.workflowKey };
     if (name === 'card_finalized' || name === 'card_done') {
       what = `card ${c.ref} (${c.title}) ${name === 'card_done' ? 'done' : 'finalized'}`;
-      details.card = { ...base, action: p.action, ...(p.resultRef ? { result: p.resultRef } : {}) };
+      details.card = {
+        ...base,
+        ...(p.action ? { action: p.action } : {}),
+        ...(p.resultRef ? { result: p.resultRef } : {}),
+      };
     } else if (name === 'card_stage_reached') {
       what = `card ${c.ref} (${c.title}) reached ${p.toStage}`;
       details.card = { ...base, stage: p.toStage };
