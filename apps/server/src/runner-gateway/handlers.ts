@@ -27,6 +27,7 @@ import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '..
 import { applyBranchCheckResult } from '../commands/phases.ts';
 import { applyReleasePrResult } from '../commands/release-pr.ts';
 import { applyRepoCreateResult, repoCreateRpc } from '../commands/repo-create.ts';
+import { applyRepoSyncStatus, seedRepoSync } from '../commands/repo-sync.ts';
 import { riskTierRpc } from '../commands/risk.ts';
 import { applyIntegrationResult } from '../commands/schedule-triggers.ts';
 import {
@@ -168,6 +169,9 @@ export class RunnerHandlers {
         return;
       case 'org.folders':
         await applyOrgFoldersReport(this.ctx, conn.workstationId, msg);
+        return;
+      case 'repo.sync_status':
+        await applyRepoSyncStatus(this.ctx, conn.workstationId, msg.status);
         return;
       case 'jira.report':
         await applyJiraReport(this.ctx, conn.workstationId, msg.status);
@@ -334,6 +338,10 @@ export class RunnerHandlers {
               [msg.commandId, problem.slice(0, 500), this.ctx.clock.now()],
             );
           else await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+        } else if (cmd?.type === 'repo.sync') {
+          // Terminal: the answer is the branch's state; "could not move it" is an answer, not a failure.
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          if (msg.ok) await applyRepoSyncStatus(this.ctx, conn.workstationId, msg.result);
         } else if (cmd?.type === 'org.folder') {
           // Terminal: a refusal is an answer; its reason shows on the Workstations page until the next success.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -728,6 +736,9 @@ export class RunnerHandlers {
         conn,
         [...matched].filter((id) => !before.has(id)),
       );
+    await seedRepoSync(ctx, conn.workstationId).catch((err) =>
+      ctx.log.warn({ err }, 'could not queue the working-branch checks'),
+    );
     ctx.services.dispatcher.trigger();
   }
 

@@ -352,6 +352,68 @@ describe('supervisor', () => {
     expect(h!.runner.supervisor.activeShifts()).toHaveLength(0);
   });
 
+  it('shift.kill_tools kills the running commands and the shift goes on', async () => {
+    const { adapter } = await start(async (_i, ctl) => {
+      await new Promise<void>((resolve) => ctl.signal.addEventListener('abort', () => resolve()));
+    });
+    const msg = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized });
+    h!.server.send('shift.start', msg);
+    await h!.server.waitFor('shift.started');
+    h!.server.send('shift.kill_tools', { shiftId: msg.shiftId });
+    await waitUntil(() => adapter.killed === 1, 5000, 'kill_tools');
+    expect(h!.runner.supervisor.activeShifts()).toHaveLength(1);
+    h!.server.send('shift.stop', { shiftId: msg.shiftId, reason: 'manager' });
+    await h!.server.waitFor('shift.ended');
+  });
+
+  describe('idle watchdog', () => {
+    const idle = (now: () => number) => ({
+      idle: { now, turnMs: 20_000, doneMs: 8_000, graceMs: 5_000, checkMs: 20 },
+    });
+
+    it('kills the commands after the turn limit, then stops the shift as a timeout when still silent', async () => {
+      let t = 1_000_000;
+      const { adapter } = await start(
+        async (_i, ctl) => {
+          await new Promise<void>((resolve) => ctl.signal.addEventListener('abort', () => resolve()));
+        },
+        {},
+        idle(() => t),
+      );
+      const msg = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized });
+      h!.server.send('shift.start', msg);
+      await h!.server.waitFor('shift.started');
+      t += 21_000;
+      await waitUntil(() => adapter.killed === 1, 5000, 'commands killed');
+      expect(h!.runner.supervisor.activeShifts()).toHaveLength(1);
+      t += 6_000;
+      const ended = await h!.server.waitFor('shift.ended');
+      expect(ended.outcome).toBe('timeout');
+      const notes = h!.server.of('shift.progress').flatMap((m) => m.items.map((i) => i.text));
+      expect(notes.some((n) => /no activity for \d+ min; stopped the running command/.test(n))).toBe(true);
+    });
+
+    it('uses the shorter limit once a turn finished', async () => {
+      let t = 1_000_000;
+      const { adapter } = await start(
+        async (_i, ctl) => {
+          ctl.emit({ kind: 'final', text: 'done with the turn' });
+          await new Promise<void>((resolve) => ctl.signal.addEventListener('abort', () => resolve()));
+        },
+        {},
+        idle(() => t),
+      );
+      const msg = makeShiftStart({ remoteNormalized: h!.repo.remoteNormalized });
+      h!.server.send('shift.start', msg);
+      await h!.server.waitFor('shift.started');
+      await new Promise((r) => setTimeout(r, 100));
+      t += 9_000; // past doneMs (8 s), well under turnMs (20 s)
+      await waitUntil(() => adapter.killed === 1, 5000, 'commands killed after the turn finished');
+      h!.server.send('shift.stop', { shiftId: msg.shiftId, reason: 'manager' });
+      await h!.server.waitFor('shift.ended');
+    });
+  });
+
   it('claim_lost discards the unsent terminal report but keeps the worktree', async () => {
     await start(
       async (_i, ctl) => {

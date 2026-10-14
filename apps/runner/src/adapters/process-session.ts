@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Usage } from '@aom/shared';
 import { execa } from 'execa';
+import { killToolProcesses } from './proc-tree.ts';
 import type { RuntimeEvent, RuntimeSession } from './types.ts';
 
 export interface ProcessSpec {
@@ -21,6 +22,30 @@ export interface ProcessSpec {
   logFile?: string;
   /** Appended to the exit event's error when the process fails (e.g. a parsed API error). */
   exitError?: () => string | undefined;
+  /** How long SIGTERM gets before the whole process group is killed (default 10 s). */
+  killAfterMs?: number;
+}
+
+const POSIX = process.platform !== 'win32';
+/** Process groups of the live children, killed when the runner exits (a detached child no longer follows the runner). */
+const liveGroups = new Set<number>();
+let exitHookInstalled = false;
+function installExitHook(): void {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.on('exit', () => {
+    for (const pid of liveGroups) signalGroup(pid, 'SIGKILL');
+  });
+}
+
+/** Signals the child's whole process group (the child leads its own, see `detached`). False when it is gone. */
+function signalGroup(pid: number, sig: NodeJS.Signals): boolean {
+  try {
+    process.kill(-pid, sig);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 class EventQueue {
@@ -66,8 +91,18 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
     ...(spec.input !== undefined ? { input: spec.input } : { stdin: 'ignore' as const }),
     stdout: 'pipe',
     stderr: 'pipe',
-    forceKillAfterDelay: 10_000,
+    // A process group of its own: stopping the agent also stops whatever its tools left running.
+    ...(POSIX ? { detached: true } : { forceKillAfterDelay: 10_000 }),
     cleanup: true,
+  });
+  const pid = sub.pid;
+  if (POSIX && pid) {
+    liveGroups.add(pid);
+    installExitHook();
+  }
+  let lastActivity = Date.now();
+  sub.stdout?.on('data', () => {
+    lastActivity = Date.now();
   });
 
   let stderrTail = '';
@@ -88,6 +123,7 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
 
   const finished = (async () => {
     const r = await sub;
+    if (pid) liveGroups.delete(pid);
     // Let readline drain remaining lines before announcing the exit.
     await new Promise<void>((resolve) => {
       if (!rl) return resolve();
@@ -122,9 +158,22 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
   return {
     events: () => queue.iterable(),
     async stop() {
-      if (sub.exitCode === null && !sub.killed) sub.kill('SIGTERM');
+      if (sub.exitCode === null) {
+        if (POSIX && pid) {
+          signalGroup(pid, 'SIGTERM');
+          const t = setTimeout(() => signalGroup(pid, 'SIGKILL'), spec.killAfterMs ?? 10_000);
+          t.unref?.();
+          await finished;
+          clearTimeout(t);
+          signalGroup(pid, 'SIGKILL'); // what the agent left behind in the group
+          return;
+        }
+        if (!sub.killed) sub.kill('SIGTERM');
+      }
       await finished;
     },
+    killTools: () => killToolProcesses(pid),
+    lastActivityAt: () => lastActivity,
     usage: spec.usage,
   };
 }

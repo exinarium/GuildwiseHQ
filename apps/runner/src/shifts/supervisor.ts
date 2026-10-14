@@ -162,6 +162,14 @@ export interface SupervisorDeps {
   gitAuth?: GitAuth;
   /** The organization source folder of an organization (the architect reads every repository under it, read-only). */
   orgSourceFolder?: (orgId: string) => string | undefined;
+  /** Brings the local working branch of a repository up to date after a fetch (runs under the clone's lock). */
+  syncAfterFetch?: (target: {
+    repoId: string;
+    remoteUrlNormalized: string;
+    workingBranch: string;
+  }) => Promise<void>;
+  /** Idle watchdog thresholds and clock (tests shorten them). */
+  idle?: Partial<IdleLimits> & { now?: () => number };
   /** Agent toolchains (PATH, read access, variables of sandboxed agents; `aom toolchain` of the DevOps engineer). */
   toolchains?: ToolchainRegistry;
 }
@@ -184,7 +192,12 @@ interface ActiveShift {
   branchesAtStart: BranchSnapshot;
   /** The branches origin had at this shift's fetch (reported on shift.started so the server's branch list is fresh). */
   originBranches?: string[];
-  stopReason?: StopReason | 'timeout';
+  stopReason?: StopReason | 'timeout' | 'idle';
+  /** Idle watchdog: when the runtime last produced anything, whether its turn finished, and when it was told off. */
+  lastActivity: number;
+  turnDone: boolean;
+  idleNoteAt?: number;
+  idleBusy?: boolean;
   reportState: 'none' | 'pending' | 'accepted';
   pendingReports: Map<string, (r: ReportVerdict) => void>;
   guardViolations: GuardViolation[];
@@ -218,6 +231,25 @@ interface PersistedShift {
   startedSent: boolean;
   mainShas?: string[];
 }
+
+/**
+ * Idle watchdog (backlog #53). A shift whose agent process is alive but silent is not making progress (a hung test
+ * run, a command waiting for a service the sandbox cannot reach). After `doneMs` of silence once a turn finished, or
+ * `turnMs` during a turn, the commands it runs are killed and a note says so; if it is still silent `graceMs` later
+ * the shift is stopped (the end-of-shift code saves the work and notes what was left unreported).
+ */
+export interface IdleLimits {
+  turnMs: number;
+  doneMs: number;
+  graceMs: number;
+  checkMs: number;
+}
+export const IDLE_LIMITS: IdleLimits = {
+  turnMs: 20 * 60_000,
+  doneMs: 8 * 60_000,
+  graceMs: 5 * 60_000,
+  checkMs: 30_000,
+};
 
 const ACCEPTED_MESSAGE = 'Recorded. Finish now; do not make further changes.';
 
@@ -276,6 +308,8 @@ export class ShiftSupervisor {
     const shift: ActiveShift = {
       msg,
       startedAt: new Date(),
+      lastActivity: Date.now(),
+      turnDone: false,
       branchesAtStart: {},
       reportState: 'none',
       pendingReports: new Map(),
@@ -362,6 +396,51 @@ export class ShiftSupervisor {
       }
     }
     await s.session?.stop(`stop:${reason}`);
+  }
+
+  /** "Stop the running command": kills the commands the agent runs and lets the shift go on. Returns how many processes. */
+  async killTools(shiftId: string): Promise<number> {
+    const s = this.active.get(shiftId);
+    if (!s?.session?.killTools) return 0;
+    const n = await s.session.killTools();
+    this.addProgress(
+      s,
+      'status',
+      n > 0 ? `the running command was stopped (${n} process(es))` : 'no running command to stop',
+    );
+    this.flushProgress(s);
+    return n;
+  }
+
+  private async idleCheck(s: ActiveShift, limits: IdleLimits, now: () => number): Promise<void> {
+    if (s.idleBusy || !s.session || s.stopReason || s.reportState !== 'none') return;
+    s.idleBusy = true;
+    try {
+      const t = now();
+      const last = Math.max(s.lastActivity, s.session.lastActivityAt?.() ?? 0);
+      if (s.idleNoteAt !== undefined && last > s.idleNoteAt) s.idleNoteAt = undefined; // it woke up
+      const minutes = (ms: number) => Math.max(1, Math.round(ms / 60_000));
+      if (s.idleNoteAt !== undefined) {
+        if (t - s.idleNoteAt < limits.graceMs) return;
+        s.stopReason ??= 'idle';
+        this.addProgress(s, 'status', `still no activity after ${minutes(t - last)} min; stopping the shift`);
+        this.flushProgress(s);
+        this.log.warn(`shift ${s.msg.shiftId} stopped: no activity for ${minutes(t - last)} min`);
+        await s.session.stop('idle');
+        return;
+      }
+      if (t - last < (s.turnDone ? limits.doneMs : limits.turnMs)) return;
+      const n = (await s.session.killTools?.()) ?? 0;
+      s.idleNoteAt = now();
+      this.addProgress(
+        s,
+        'status',
+        `no activity for ${minutes(t - last)} min; ${n > 0 ? 'stopped the running command' : 'no running command found'}`,
+      );
+      this.flushProgress(s);
+    } finally {
+      s.idleBusy = false;
+    }
   }
 
   async stopAll(reason: StopReason = 'manager'): Promise<void> {
@@ -454,6 +533,17 @@ export class ShiftSupervisor {
           defaultPath: paths.worktreePath(msg.brief.project.key, msg.brief.card.ref, msg.brief.project.id),
           roots: [paths.worktrees],
           auth: this.deps.gitAuth,
+          // Bring the local working branch up to date with the fetch just made (only the project's own working branch).
+          ...(this.deps.syncAfterFetch && msg.worktree.baseBranch === msg.brief.project.workingBranch
+            ? {
+                onFetched: (base: string) =>
+                  this.deps.syncAfterFetch?.({
+                    repoId: msg.worktree?.repoId as string,
+                    remoteUrlNormalized: msg.worktree?.remoteUrlNormalized as string,
+                    workingBranch: base,
+                  }) ?? Promise.resolve(),
+              }
+            : {}),
         });
         if (msg.prepare.rebase && !s.resumed) await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch);
         if (sync && s.worktree.created) await this.finishMainSync(s, sync);
@@ -642,15 +732,24 @@ export class ShiftSupervisor {
       void s.session?.stop('timeout');
     }, maxMs);
     const flush = setInterval(() => this.flushProgress(s), this.deps.progressFlushMs ?? 1000);
+    const idle: IdleLimits = { ...IDLE_LIMITS, ...this.deps.idle };
+    const now = this.deps.idle?.now ?? Date.now;
+    s.lastActivity = now();
+    const watchdog = setInterval(() => void this.idleCheck(s, idle, now), idle.checkMs);
+    watchdog.unref?.();
     if (s.stopReason) void s.session.stop(`stop:${s.stopReason}`); // stop arrived while preparing
 
     let exit: Extract<RuntimeEvent, { kind: 'exit' }> = { kind: 'exit', code: null };
     try {
       for await (const ev of s.session.events()) {
+        s.lastActivity = now();
+        if (ev.kind === 'final') s.turnDone = true;
+        else if (ev.kind === 'delta' || ev.kind === 'progress' || ev.kind === 'tool') s.turnDone = false;
         if (ev.kind === 'exit') exit = ev;
         else this.onRuntimeEvent(s, ev);
       }
     } finally {
+      clearInterval(watchdog);
       clearTimeout(timeout);
       clearInterval(flush);
     }
@@ -685,7 +784,8 @@ export class ShiftSupervisor {
       }
       // A shift that ends without a report but with work in the worktree says so on the card (a denied tool used to
       // end shifts silently, with the work only in the worktree).
-      const unreported = s.reportState === 'none' && (!s.stopReason || s.stopReason === 'timeout');
+      const unreported =
+        s.reportState === 'none' && (!s.stopReason || s.stopReason === 'timeout' || s.stopReason === 'idle');
       const leftovers = unreported ? await uncommittedFiles(s.worktree.path) : [];
       const committed = await autoCommit({
         worktree: s.worktree.path,
@@ -698,7 +798,12 @@ export class ShiftSupervisor {
         const sha = committed
           ? (await git(s.worktree.path, ['rev-parse', '--short', 'HEAD'])).stdout.trim()
           : '';
-        const how = s.stopReason === 'timeout' ? 'timeout' : exit.code !== 0 ? 'crashed' : 'no_report';
+        const how =
+          s.stopReason === 'timeout' || s.stopReason === 'idle'
+            ? 'timeout'
+            : exit.code !== 0
+              ? 'crashed'
+              : 'no_report';
         await this.submit(s, {
           kind: 'comment',
           note: unreportedWorkNote(leftovers, {
@@ -724,7 +829,7 @@ export class ShiftSupervisor {
 
     let outcome: 'reported' | 'no_report' | 'stopped' | 'crashed' | 'timeout';
     if (s.reportState !== 'none' && s.stopReason !== 'claim_lost') outcome = 'reported';
-    else if (s.stopReason === 'timeout') outcome = 'timeout';
+    else if (s.stopReason === 'timeout' || s.stopReason === 'idle') outcome = 'timeout';
     else if (s.stopReason) outcome = 'stopped';
     else if (exit.code !== 0) outcome = 'crashed';
     else outcome = 'no_report';

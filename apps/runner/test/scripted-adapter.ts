@@ -27,6 +27,8 @@ export interface Ctl {
 export class ScriptedAdapter implements RuntimeAdapter {
   readonly id: string;
   inputs: ShiftStartInput[] = [];
+  /** How often `killTools` was called. */
+  killed = 0;
 
   constructor(
     private readonly script: (input: ShiftStartInput, ctl: Ctl) => Promise<unknown>,
@@ -102,6 +104,10 @@ export class ScriptedAdapter implements RuntimeAdapter {
       stop: async () => {
         abort.abort();
         await finished;
+      },
+      killTools: async () => {
+        this.killed++;
+        return 1;
       },
       usage: () => ({ inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 }),
     };

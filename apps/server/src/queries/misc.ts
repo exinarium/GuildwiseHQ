@@ -178,6 +178,14 @@ export async function getProjectDetail(
       WHERE rc.project_id=$1 AND w.status='active' ORDER BY w.name`,
     [projectId],
   );
+  const syncRows = await rows(
+    ctx.pool,
+    `SELECT s.*, w.name AS workstation_name, (w.user_id = $2) AS mine
+       FROM repo_sync_status s JOIN workstations w ON w.id = s.workstation_id
+       JOIN project_repos pr ON pr.id = s.project_repo_id
+      WHERE pr.project_id=$1 AND w.status='active' ORDER BY w.name`,
+    [projectId, userId],
+  );
   const envs = await rows(
     ctx.pool,
     `SELECT pe.*, w.name AS workstation_name FROM project_environments pe JOIN workstations w ON w.id = pe.workstation_id
@@ -228,6 +236,14 @@ export async function getProjectDetail(
       knownBranchesAt: iso(r.known_branches_at),
       workingBranchSetAt: iso(r.working_branch_set_at),
       branchQuestionId: questions.find((q) => q.repo_id === r.id)?.id ?? null,
+      syncs: syncRows
+        .filter((x) => x.project_repo_id === r.id)
+        .map((x) => ({
+          ...(syncDto(x) as NonNullable<ReturnType<typeof syncDto>>),
+          workstationId: x.workstation_id,
+          workstationName: x.workstation_name,
+          canSync: !!x.mine,
+        })),
       setup: clones
         .filter((c) => c.project_repo_id === r.id)
         .map((c) => ({
@@ -274,6 +290,22 @@ export async function getProjectDetail(
   };
 }
 
+/** The stored check of a working branch as the API shows it (null: never checked). */
+export function syncDto(r: Row | undefined) {
+  if (!r) return null;
+  return {
+    workingBranch: r.working_branch as string,
+    state: r.state,
+    ahead: Number(r.ahead),
+    behind: Number(r.behind),
+    dirty: !!r.dirty,
+    onBranch: !!r.on_branch,
+    checkedOutBranch: (r.checked_out_branch as string | null) ?? null,
+    ...(r.detail ? { detail: r.detail as string } : {}),
+    checkedAt: iso(r.checked_at) as string,
+  };
+}
+
 export async function workstationDtos(
   ctx: Ctx,
   where: string,
@@ -289,6 +321,11 @@ export async function workstationDtos(
   const repos = await rows(
     ctx.pool,
     `SELECT workstation_id, project_repo_id, local_path, reported_at FROM workstation_repos WHERE workstation_id = ANY($1::uuid[])`,
+    [list.map((w) => w.id)],
+  );
+  const syncs = await rows(
+    ctx.pool,
+    `SELECT * FROM repo_sync_status WHERE workstation_id = ANY($1::uuid[])`,
     [list.map((w) => w.id)],
   );
   const running = await rows(
@@ -362,6 +399,9 @@ export async function workstationDtos(
         projectRepoId: r.project_repo_id,
         localPath: r.local_path,
         reportedAt: iso(r.reported_at) as string,
+        sync: syncDto(
+          syncs.find((x) => x.workstation_id === r.workstation_id && x.project_repo_id === r.project_repo_id),
+        ),
       })),
     pairedAt: iso(w.paired_at) as string,
     devopsAccess: w.devops_access,

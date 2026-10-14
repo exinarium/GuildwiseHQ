@@ -51,6 +51,9 @@ export interface ClaudeCommand {
   stdin?: string;
 }
 
+export const BASH_DEFAULT_TIMEOUT_MS = 300_000;
+export const BASH_MAX_TIMEOUT_MS = 900_000;
+
 /**
  * Linux refuses a single argument over 128 KiB (MAX_ARG_STRLEN) and the whole command line over a fraction of the
  * stack limit: spawn fails with E2BIG. A card with a long history (handoffs, review comments, thread) renders a prompt
@@ -77,6 +80,10 @@ export function sessionEnv(
     USERPROFILE: input.sandbox.home,
     // Claude Code's own temp root and the TMPDIR of its sandboxed shell (default /tmp/claude): private and writable.
     CLAUDE_CODE_TMPDIR: input.sandbox.tmp,
+    // Per-command limits Claude Code honours: a default of 5 min and a hard cap of 15 min, so an agent cannot pass
+    // timeout=3600000 (or a background task) to park a hanging test run for an hour.
+    BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
+    BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
   };
   // Opt-in: Claude Code strips credentials from what Bash and MCP children see and isolates their PID namespace.
   // The DevOps engineer is unsandboxed and works as the user: their HOME (docker, ssh, kube configs) and the agent

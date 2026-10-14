@@ -380,6 +380,11 @@ describe('the agent process gets a minimal environment (review H2a)', () => {
     ])
       expect(env[k], k).toBeUndefined();
   });
+  it('caps the per-command timeout (default 5 min, at most 15 min)', () => {
+    const env = sessionEnv(input(), ClaudeRuntimeConfigSchema.parse({}), { PATH: '/usr/bin' });
+    expect(env.BASH_DEFAULT_TIMEOUT_MS).toBe('300000');
+    expect(env.BASH_MAX_TIMEOUT_MS).toBe('900000');
+  });
   it('gives the session a private, writable temp dir instead of the shared /tmp', () => {
     const env = sessionEnv(input(), ClaudeRuntimeConfigSchema.parse({}), {
       PATH: '/usr/bin',

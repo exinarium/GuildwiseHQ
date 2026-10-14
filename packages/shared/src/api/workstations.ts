@@ -5,11 +5,16 @@ import { ConnectableForgeSchema, GitConnectionSchema, RepoRefSchema } from '../f
 import {
   JiraStatusSchema,
   OrgFolderStateSchema,
+  RepoSyncStatusSchema,
   RunnerUpdateStateSchema,
   RuntimeInfoSchema,
   ToolchainInfoSchema,
 } from '../protocol/runner.ts';
 import { IsoTime } from './common.ts';
+
+/** Where a repository's working branch stands against origin on one workstation (the runner's last check). */
+export const RepoSyncDtoSchema = RepoSyncStatusSchema.omit({ repoId: true });
+export type RepoSyncDto = z.infer<typeof RepoSyncDtoSchema>;
 
 /** Repository hygiene of a workstation: its cadence and the last run (docs/design/phases.md addendum). */
 export const WorkstationHygieneSchema = z.object({
@@ -45,7 +50,15 @@ export const WorkstationDtoSchema = z.object({
   lastSeenAt: IsoTime.nullable(),
   runtimes: z.array(RuntimeInfoSchema),
   /** Project repos this workstation holds a clone of. */
-  repos: z.array(z.object({ projectRepoId: z.uuid(), localPath: z.string(), reportedAt: IsoTime })),
+  repos: z.array(
+    z.object({
+      projectRepoId: z.uuid(),
+      localPath: z.string(),
+      reportedAt: IsoTime,
+      /** The working branch against origin (absent: not checked yet). */
+      sync: RepoSyncDtoSchema.nullable().optional(),
+    }),
+  ),
   pairedAt: IsoTime,
   /** M3: what this workstation's DevOps engineer may do without asking, and who it is. */
   devopsAccess: DevOpsAccessSchema.optional(),

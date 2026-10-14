@@ -24,6 +24,7 @@ import { useMcpServers } from '../api/queries/mcp.ts';
 import { useRehomeAgent } from '../api/queries/members.ts';
 import { useDepartments } from '../api/queries/org.ts';
 import { useProjects } from '../api/queries/projects.ts';
+import { useRunningShifts } from '../api/queries/shifts.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
 import { AgentMcpSection } from '../components/agents/AgentMcpSection.tsx';
 import { AgentRoleFollow } from '../components/agents/AgentRoleFollow.tsx';
@@ -38,6 +39,7 @@ import { AgentStats, WorkQualityPanel } from '../components/hr/AgentStats.tsx';
 import { ChangeModelDialog, ChangeRoleDialog } from '../components/hr/ChangeDialogs.tsx';
 import { RecommendationList, RoleUpdates } from '../components/hr/Recommendations.tsx';
 import { SandboxWarning } from '../components/SandboxWarning.tsx';
+import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
 import {
   Avatar,
   Badge,
@@ -232,6 +234,22 @@ export function Agents() {
   );
 }
 
+/** The shift the agent is running now: how long, how long it has been quiet, and the stop controls. */
+function AgentRunningShift({ agentId, canStop }: { agentId: string; canStop: boolean }) {
+  const running = useRunningShifts();
+  const shift = running.data?.find((s) => s.agentId === agentId && s.status !== 'ended');
+  if (!shift) return null;
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-control border border-line px-3 py-2"
+      data-testid="agent-running-shift"
+    >
+      <ShiftClock shift={shift} />
+      {canStop && <ShiftStopControls shift={shift} />}
+    </div>
+  );
+}
+
 function AgentCard({
   hr,
   roleName,
@@ -371,6 +389,7 @@ function AgentCard({
               </Link>
             ))}
       </p>
+      <AgentRunningShift agentId={a.id} canStop={canManage} />
       <AgentRoleFollow agent={a} role={role} />
       {!a.isDevops && <AgentStats stats={hr.stats} roleName={roleName.toLowerCase()} />}
       {isBuilder && <WorkQualityPanel quality={hr.quality} />}

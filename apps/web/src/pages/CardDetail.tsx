@@ -42,6 +42,7 @@ import { McpUsagePanel } from '../components/McpUsagePanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
 import { ShiftLog } from '../components/ShiftLog.tsx';
+import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
 import {
   cancellableChildren,
   StartedByLine,
@@ -388,6 +389,13 @@ export function CardDetailView({
                 </span>
               }
             >
+              <div
+                className="mb-3 flex flex-wrap items-center justify-between gap-2"
+                data-testid="shift-controls"
+              >
+                <ShiftClock shift={currentShift} />
+                {permissions.canRelease && <ShiftStopControls shift={currentShift} />}
+              </div>
               <ShiftLog key={currentShift.id} shift={currentShift} />
             </Panel>
           )}
@@ -594,7 +602,7 @@ export function CardDetailView({
         open={confirm === 'release'}
         onOpenChange={(o) => !o && setConfirm(null)}
         title={`Release ${card.ref}?`}
-        description="The agent's claim ends so another agent can take the card. Work in progress is not kept."
+        description="The agent's claim ends so another agent can take the card. The agent's work so far is saved on the card's branch."
         confirmLabel="Release card"
         pending={release.isPending}
         onConfirm={() =>

@@ -66,6 +66,10 @@ export interface RuntimeSession {
   /** SIGTERM, then SIGKILL after 10 s (tree kill on Windows). Resolves once the process is gone. */
   stop(reason: string): Promise<void>;
   usage(): Usage;
+  /** Kills the commands the agent is running (its tool process trees) and lets the agent go on. Returns how many processes. */
+  killTools?(): Promise<number>;
+  /** When the runtime last wrote anything (epoch ms); the idle watchdog reads it. */
+  lastActivityAt?(): number;
 }
 
 export interface ChatStartInput {

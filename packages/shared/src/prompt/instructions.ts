@@ -89,6 +89,7 @@ export function renderInstructions(brief: ShiftBrief): string {
       '- Search the ledger with `aom ledger search` before asking a question.',
       '- The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.',
       '- .NET: plain `dotnet build` and `dotnet test` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass `-m`/`-maxcpucount` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (`SocketException` in `NamedPipeServerStream`, or a build that hangs).',
+      '- Tests: run unit tests only, in the foreground, with a hang limit (`dotnet test ... --blame-hang-timeout 2m --blame-hang-dump-type none`; any other long command: `timeout <seconds> <command>`). Never run integration or end-to-end suites (anything that needs a running server, network or other services): filter them out when a solution mixes both, and name in your handoff the suites you left for the testers. Never run two full suites at once, never start a long command as a background task and poll it with `sleep` loops. If tests already fail on the base commit, check that once, note it in the handoff and do not try to fix unrelated failures.',
       `- This shift may run for at most ${brief.shift.maxShiftMinutes} minutes.`,
     ].join('\n'),
   );

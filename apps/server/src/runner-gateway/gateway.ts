@@ -54,6 +54,16 @@ export class RunnerGateway {
     );
   }
 
+  /** Sends `shift.kill_tools` ("stop the running command") if the shift's runner is connected. */
+  killTools(workstationId: string, shiftId: string): boolean {
+    return this.ctx.services.runners.send(
+      workstationId,
+      'shift.kill_tools',
+      { shiftId },
+      this.ctx.clock.now(),
+    );
+  }
+
   deliverPending(workstationId: string) {
     return this.handlers.deliverPending(workstationId);
   }

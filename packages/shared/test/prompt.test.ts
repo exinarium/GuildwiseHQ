@@ -184,6 +184,7 @@ describe('renderInstructions', () => {
       - Search the ledger with \`aom ledger search\` before asking a question.
       - The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.
       - .NET: plain \`dotnet build\` and \`dotnet test\` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass \`-m\`/\`-maxcpucount\` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (\`SocketException\` in \`NamedPipeServerStream\`, or a build that hangs).
+      - Tests: run unit tests only, in the foreground, with a hang limit (\`dotnet test ... --blame-hang-timeout 2m --blame-hang-dump-type none\`; any other long command: \`timeout <seconds> <command>\`). Never run integration or end-to-end suites (anything that needs a running server, network or other services): filter them out when a solution mixes both, and name in your handoff the suites you left for the testers. Never run two full suites at once, never start a long command as a background task and poll it with \`sleep\` loops. If tests already fail on the base commit, check that once, note it in the handoff and do not try to fix unrelated failures.
       - This shift may run for at most 60 minutes.
       "
     `);
@@ -250,6 +251,7 @@ describe('renderInstructions', () => {
       - Search the ledger with \`aom ledger search\` before asking a question.
       - The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.
       - .NET: plain \`dotnet build\` and \`dotnet test\` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass \`-m\`/\`-maxcpucount\` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (\`SocketException\` in \`NamedPipeServerStream\`, or a build that hangs).
+      - Tests: run unit tests only, in the foreground, with a hang limit (\`dotnet test ... --blame-hang-timeout 2m --blame-hang-dump-type none\`; any other long command: \`timeout <seconds> <command>\`). Never run integration or end-to-end suites (anything that needs a running server, network or other services): filter them out when a solution mixes both, and name in your handoff the suites you left for the testers. Never run two full suites at once, never start a long command as a background task and poll it with \`sleep\` loops. If tests already fail on the base commit, check that once, note it in the handoff and do not try to fix unrelated failures.
       - This shift may run for at most 60 minutes.
       "
     `);
@@ -335,7 +337,10 @@ describe('renderHandoffs', () => {
   it('trims oldest full notes first to fit the budget and truncates a huge latest note', async () => {
     const { renderHandoffs } = await import('../src/prompt/shift-prompt.ts');
     const big = 'x'.repeat(5000);
-    const out = renderHandoffs([1, 2, 3].map((n) => mk(n, `head ${n}\n${big}`)), { budget: 6000 });
+    const out = renderHandoffs(
+      [1, 2, 3].map((n) => mk(n, `head ${n}\n${big}`)),
+      { budget: 6000 },
+    );
     expect(out.length).toBeLessThanOrEqual(6200);
     expect(out).toContain('2 earlier handoffs shortened');
     expect(out).toContain('### build / Ada / handoff (2026-10-03T12:03:00.000Z)');

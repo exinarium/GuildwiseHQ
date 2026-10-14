@@ -88,6 +88,8 @@ To move a card to a different stage (for example to fix a stuck card):
 
 The **More actions** menu (the three dots) also has **Release** (put the card back in the queue so another agent can claim it), **Re-home** (forget its workstation and worktree) and **Cancel card** (a reason is required). Only the project owner (Owner and Admins) or the card's creator sees these actions.
 
+If an agent seems stuck, open the card: the live shift shows how long it has run and when it last did anything. **Stop the running command** kills a hung test run or build and lets the agent go on; **Stop shift** ends the shift and either re-queues the card or keeps it with the same agent. A shift that stays silent is also stopped by itself after a while.
+
 **Reopen a finished card.** On a **Done** or **Cancelled** card click **Reopen**, pick the stage (Build by default) and give a reason. The branch and any open pull request are kept, so the next shift continues on them and finalizing again reuses the pull request. Cards that depend on it wait for it again.
 
 **Archive.** Done and cancelled cards leave the board a day after they were finished. Click **Archive** on the board to search them (reference, title, ticket key), filter by status, agent or date, open one or reopen it. **Priority** and **Completion action** can be changed on the card page at any time; a completion action changed during a running finalise applies to the next one.

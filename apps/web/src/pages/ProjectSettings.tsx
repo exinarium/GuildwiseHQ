@@ -21,6 +21,7 @@ import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
+import { RepoSyncLine } from '../components/RepoSync.tsx';
 import {
   Badge,
   Button,
@@ -100,11 +101,13 @@ export function ProjectSettings() {
       {
         name: name.trim(),
         ...(expert ? { workingBranch: branch.trim() } : {}),
-        ...(traits.usesRepos ? {
-                defaultCompletion: landing,
-                removeFinishedBranches: removeBranches,
-                prBranchPrefix: prPrefix.trim(),
-              } : {}),
+        ...(traits.usesRepos
+          ? {
+              defaultCompletion: landing,
+              removeFinishedBranches: removeBranches,
+              prBranchPrefix: prPrefix.trim(),
+            }
+          : {}),
         ...(traits.usesRepos ? { architecturalGlobs: lines(arch) } : {}),
         ...(traits.hasTestStage ? { e2eGlobs: lines(e2e) } : {}),
       },
@@ -305,6 +308,17 @@ export function ProjectSettings() {
                   {traits.usesRepos && (
                     <WorkingBranchControl projectId={id} repo={r} isOwner={project?.myRole === 'owner'} />
                   )}
+                  {traits.usesRepos &&
+                    (r.syncs ?? []).map((sy) => (
+                      <RepoSyncLine
+                        key={sy.workstationId}
+                        sync={sy}
+                        workstationId={sy.workstationId}
+                        repoId={r.id}
+                        canSync={sy.canSync}
+                        where={(r.syncs ?? []).length > 1 ? sy.workstationName : undefined}
+                      />
+                    ))}
                 </li>
               ))}
               {activeRepos.length === 0 && (
