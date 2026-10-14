@@ -7,6 +7,7 @@ import {
   useSetTimezone,
   useUpdateReporting,
 } from '../api/queries/reporting.ts';
+import { BriefingToggle } from '../components/BriefingToggle.tsx';
 import { UserAvatar } from '../components/Face.tsx';
 import { AvatarPicker } from '../components/profile/AvatarPicker.tsx';
 import { TwoFactorPanel } from '../components/security/TwoFactorPanel.tsx';
@@ -106,6 +107,8 @@ export function Settings() {
           <span>Show me branches and git controls</span>
         </label>
       </Panel>
+
+      <BriefingToggle />
 
       <Panel>
         <h2 className="text-lg font-semibold text-fg">Weekly blog digest</h2>

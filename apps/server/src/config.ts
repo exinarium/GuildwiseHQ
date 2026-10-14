@@ -62,6 +62,8 @@ const EnvSchema = z.object({
   AOM_ASSISTANT_MODEL_PUBLIC: z.string().min(1).default('claude-haiku-4-5'),
   /** Weekly blog digest mail (Monday 08:00 Africa/Johannesburg). Switch off with AOM_BLOG_DIGEST=false (the platform setting can also stop it). */
   AOM_BLOG_DIGEST: bool(true),
+  /** The Monday briefing mail per member (Monday 08:00 in the organization's time zone). Switch off with AOM_WEEKLY_BRIEFING=false. */
+  AOM_WEEKLY_BRIEFING: bool(true),
   /** LinkedIn app credentials, only needed to renew the organization token with its refresh token. */
   AOM_LINKEDIN_CLIENT_ID: z.string().optional(),
   AOM_LINKEDIN_CLIENT_SECRET: z.string().optional(),
@@ -159,6 +161,8 @@ export interface Config {
   assistantModelPublic: string;
   /** Send the weekly blog digest (env switch; the super admin's blog settings are a second switch). */
   blogDigest: boolean;
+  /** Send the Monday briefing mails. */
+  weeklyBriefing: boolean;
   linkedinClientId: string | undefined;
   linkedinClientSecret: string | undefined;
   billingJobs: boolean;
@@ -227,6 +231,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     assistantPublicDailyUsd: e.AOM_ASSISTANT_PUBLIC_DAILY_USD,
     assistantModelPublic: e.AOM_ASSISTANT_MODEL_PUBLIC,
     blogDigest: e.AOM_BLOG_DIGEST,
+    weeklyBriefing: e.AOM_WEEKLY_BRIEFING,
     linkedinClientId: e.AOM_LINKEDIN_CLIENT_ID || undefined,
     linkedinClientSecret: e.AOM_LINKEDIN_CLIENT_SECRET || undefined,
     billingJobs: e.AOM_BILLING_JOBS,

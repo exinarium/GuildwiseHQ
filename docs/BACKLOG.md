@@ -22,35 +22,6 @@ organisation with AI**: that is why departments, custom roles, custom workflows 
 from a look at rebelzero.ai (a Cape Town / New York AI consultancy that builds and runs business agents for clients:
 voice, front office, back office, follow-ups, pipeline). To be discussed with the owner before building.
 
-### 35. Trust page and POPIA notice
-
-We have Privacy and Terms but no Trust or POPIA page. The substance exists: an event log of every action (who, what,
-when), sandboxed agents, secrets that stay on the workstation, human approval steps, data not used for training (state the
-model provider's terms accurately). Wanted: a public `/trust` page (security, data handling, approvals, audit, sub-processors,
-where data is hosted) and a `/popia` notice (Information Officer, purposes, rights, cross-border transfer), linked from the
-footer and sign-up. Legal wording to be checked by the owner.
-
-### 36. Savings calculator on the landing page
-
-An estimator in the spirit of rebelzero.ai's admin-cost calculator: team size × hourly cost × share of work that is routine
-(tickets, bug fixes, reviews, reports) × share agents could take → hours a month, money a year, full-time equivalents,
-set against the Guildwise plan price. Clearly labelled an estimate. Later variants per department (support, finance,
-marketing) as the non-software side grows.
-
-### 37. Value report per organisation
-
-Turn what we already record (cards done, time in each stage, shift cost and tokens, rework rounds) into "this month your
-agents finished 42 cards, about X hours of work, for $Y of usage". Needs an estimate of human time per card (by size /
-type, adjustable per organisation, or the owner's own estimate on the card). On the Metrics/Costs pages, in the weekly
-briefing (#38) and exportable for a manager. Include "next best actions": stuck cards, agents that fail often, projects
-without work.
-
-### 38. Weekly briefing
-
-A Monday summary per member (e-mail and push, opt-out per person): cards done and shipped, what is waiting on you (desk
-items, approvals, questions), blocked or failing work, spend against budget, agent and workstation health, and the value
-figures of #37. Per organisation and per project for managers; a short version for members.
-
 ### 39. Paid setup package
 
 A fixed-price onboarding service: connect repositories and integrations, design departments, roles and workflows, hire
@@ -240,6 +211,10 @@ The details of each done item follow this list, by date.
 - #34: Integrations page (MVP): connect Claude, GitHub, Bitbucket, GitLab, Azure DevOps, Jira and MCP servers from the web. Done 2026-10-14 (phase 2 and 3 leftovers on the item).
 - #60: Claude sign-in from the web (`claude setup-token` driven by the runner; MCP sign-in with paste-back). Done 2026-10-14 (MVP).
 - #64: Manual QA after Finalize, assigned to the person who started the card. Done 2026-10-14.
+- #35: Trust page (`/trust`) and POPIA notice (`/popia`), linked from the footer and sign-up. Done 2026-10-14 (draft legal text, placeholders for the owner).
+- #36: Savings calculator on the landing page. Done 2026-10-14.
+- #37: Value report per organisation on the Costs page (hours estimate by card type, trend, next best actions, CSV). Done 2026-10-14.
+- #38: Monday briefing e-mail per member (long version for Owners and Admins, opt-out in Settings). Done 2026-10-14.
 
 ## 2026-10-14 (done)
 
@@ -611,6 +586,94 @@ actor, with the reason), so they follow the project. Done and cancelled cards, a
 carries the value before the migration runs follows the project. Tests: runner `completion.test.ts`,
 `completion-working-branch.test.ts`, `architect-guard.test.ts`, `aom-git-push.test.ts`, `claude-args.test.ts`; server
 `push-branch-retired.test.ts`; web `CardNew.test.tsx`; shared `push-branch-retired.test.ts`.
+
+### 35. Trust page and POPIA notice
+
+We have Privacy and Terms but no Trust or POPIA page. The substance exists: an event log of every action (who, what,
+when), sandboxed agents, secrets that stay on the workstation, human approval steps, data not used for training (state the
+model provider's terms accurately). Wanted: a public `/trust` page (security, data handling, approvals, audit, sub-processors,
+where data is hosted) and a `/popia` notice (Information Officer, purposes, rights, cross-border transfer), linked from the
+footer and sign-up. Legal wording to be checked by the owner.
+
+**Done (2026-10-14).** Public pages `/trust` (Trust and security) and `/popia` (POPIA notice), written as markdown in
+`apps/web/src/legal/trust.md` and `popia.md` and prerendered like `/privacy` and `/terms` (`legal.ts`, `vite.config.ts`, the
+server's static route in `app.ts`, the sitemap, the dev-server middleware). Trust covers sandboxed agents that run on the
+customer's own machines, secrets that stay on the workstation, the end-to-end encrypted browser to runner channel for
+credentials, the append-only event log, human approval steps (finalize approval, manual QA, decision desk, budgets), data
+handling, hosting and the sub-processors (Namecheap, SendGrid, Paystack, Anthropic). POPIA covers the responsible party,
+Information Officer, purposes, lawful basis, recipients, cross-border transfers (section 72), data subject rights and the
+Information Regulator's public contact details. Linked from the landing footer (Trust and security, POPIA notice) and the
+sign-up consent line. Tests: `legal.test.tsx` (topics, footer links, path mapping) and the server's `legal-pages.test.ts`.
+**DRAFT LEGAL TEXT: the owner must review it before it is relied on.** Placeholders left on the pages for the owner, each
+marked in square brackets: (1) the hosting location (country and data centre): DEPLOY.md says only "VPS" and the privacy
+policy names Namecheap, so the location is unknown; (2) the Information Officer: the page reuses the name and e-mail already
+in the privacy policy (Pieter Jordaan) and asks the owner to confirm them and the registration with the Information
+Regulator; (3) the Anthropic wording ("data sent through its API is not used to train its models under its commercial
+terms") is marked "VERIFY WORDING BEFORE PUBLISHING". The existing privacy policy lists model providers as chosen by the
+customer, while the new Trust page names Anthropic as the provider behind the assistant and the agents; the owner should
+decide whether the privacy policy's sub-processor list should name Anthropic too (and Postmark, which is used for inbound
+mail in DEPLOY.md).
+
+### 36. Savings calculator on the landing page
+
+An estimator in the spirit of rebelzero.ai's admin-cost calculator: team size × hourly cost × share of work that is routine
+(tickets, bug fixes, reviews, reports) × share agents could take → hours a month, money a year, full-time equivalents,
+set against the Guildwise plan price. Clearly labelled an estimate. Later variants per department (support, finance,
+marketing) as the non-software side grows.
+
+**Done (2026-10-14).** A "Savings estimate" section on the landing page between the efficiency check and the features
+(`SavingsCalculator.tsx`, pure maths in `savings.ts`). Inputs (labelled fields; sliders with a live value): team size, fully
+loaded cost per hour (USD), share of work that is routine, share of that agents could take. Outputs: hours a month
+(`team x 160 x routine x agents`), money a year, full-time equivalents, and the cheapest plan with room for that many members
+(read from the same live plan catalogue as the pricing section, `publicPlans.ts`, falling back to the seeded plans) with its
+yearly price, what is left and the multiple; a team larger than every plan is told to ask for a quote. Marked as an estimate in
+the section and under the result. Responsive (two columns from 720 px, 44 px touch targets), `aria-live` result. Tests:
+`savings.test.tsx` (maths, plan choice, clamping, rendering and recalculation). Per-department variants are left for #42.
+
+### 37. Value report per organisation
+
+Turn what we already record (cards done, time in each stage, shift cost and tokens, rework rounds) into "this month your
+agents finished 42 cards, about X hours of work, for $Y of usage". Needs an estimate of human time per card (by size /
+type, adjustable per organisation, or the owner's own estimate on the card). On the Metrics/Costs pages, in the weekly
+briefing (#38) and exportable for a manager. Include "next best actions": stuck cards, agents that fail often, projects
+without work.
+
+**Done (2026-10-14).** `GET /api/value?month=YYYY-MM&projectId=` (Owner and Admin) returns, for the month in the organization's
+time zone and the month before it: finished cards (done, not regression or feed), estimated human hours, usage (sum of
+`shift_costs`), the value of those hours at the organization's hourly value, the return (value / usage), agent hours actually
+worked, rework rounds and average days to done; the split by card type and by project; and "next best actions" (cards with no
+movement for 3 days, agents with at least 3 failed shifts and 30% failures in 14 days, projects with no card activity for 14 days).
+`GET /api/value/export.csv` gives a row per project and the totals. The estimate of human time is a default per card type
+(feature 8 h, bug 3, support 1, refactor 5, docs 2, research 4; feed and regression 0; hour valued at 40 USD converted at the
+organization's rate), adjustable by the Owner or an Admin (`PUT /api/value/settings`, event `OrgValueSettingsChanged`, migration
+1960 `organizations.value_settings`, replayed on rebuild). Web: a "What the agents delivered" panel at the top of the Costs page
+("This month: N cards, ~X hours of work, $Y usage, ~Z× return", the trend against last month, next best actions, CSV export,
+"Adjust the estimates"). The same figures feed the Monday briefing (#38). Tests: `value-report.test.ts` (server, 6) and
+`value-panel.test.tsx` (web, 3). Not built: the per-card override of the hours estimate (it needs a card event and a field
+on the card form; the per-type setting covers the common case) and a value view for members (the Costs page is for Owner and
+Admin; members see their own figures only in the briefing, without money).
+
+### 38. Weekly briefing
+
+A Monday summary per member (e-mail and push, opt-out per person): cards done and shipped, what is waiting on you (desk
+items, approvals, questions), blocked or failing work, spend against budget, agent and workstation health, and the value
+figures of #37. Per organisation and per project for managers; a short version for members.
+
+**Done (2026-10-14).** A Monday e-mail per member and organization (`commands/weekly-briefing.ts`, template `mail/briefing.ts`,
+run from the scheduler). Due Monday 08:00 in the organization's time zone (its Owner's reporting zone, UTC when unset); a server
+that was down still sends for two days after. Exactly once per person, organization and ISO week: a `briefing_deliveries` row
+(migration 1961, operational) is claimed before sending and reopened only when the send threw (three attempts over later ticks).
+Opt-out per person in Settings ("Monday briefing", `briefing_prefs`, `GET/PUT /api/me/weekly-briefing`, default on);
+`AOM_WEEKLY_BRIEFING=false` switches the whole feature off; simulation and suspended organizations are skipped; a week with nothing
+to report is recorded as skipped and not mailed. **Members** get: cards done last week on their projects, what waits on them
+(decision desk items they can see, manual QA assigned to them, approvals), blocked cards, and the health notices addressed to them
+(Claude login expired, an MCP server that needs a sign-in). **Owners and Admins** also get the value figures of #37 (this month so
+far and last month), spend this month and each project budget with its percentage, one line per project (done, blocked, spend),
+agents that fail often and the next best actions. Tests with the capturing fake mailer: `weekly-briefing.test.ts` (7: schedule
+helpers incl. other time zones, nothing before 08:00, long and short versions, opt-out, idempotence and the two-day window, retry
+after a failed send, environment switch, preference API) and `briefing-toggle.test.tsx`. Not built: push notifications (there is
+no push channel yet), a per-project manager briefing separate from the organization one (the organization mail has a per-project
+section), and a one-click unsubscribe link in the mail (the mail points to Settings).
 
 ## 2026-10-13 (done)
 

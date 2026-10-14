@@ -14,6 +14,7 @@ import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
 import { socialTick } from '../commands/social.ts';
 import { sweepSubworkflows } from '../commands/subworkflows.ts';
+import { weeklyBriefingTick } from '../commands/weekly-briefing.ts';
 import type { Ctx } from '../context.ts';
 import { pruneMail } from '../mail/inbound/prune.ts';
 import { licensingTick } from '../orgs/licensing.ts';
@@ -117,6 +118,9 @@ export class Scheduler {
       await cloudTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'cloud workstations failed'));
       await expireRuns(this.ctx).catch((err) => this.ctx.log.error({ err }, 'run environment expiry failed'));
       await this.blog();
+      await weeklyBriefingTick(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'weekly briefing failed'),
+      );
       return fired;
     });
     this.chain = next.catch(() => {});
