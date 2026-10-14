@@ -25,6 +25,14 @@ Every new organisation gets an inbox address automatically when it is created (e
 one too). Help section and a tooltip on the inbox page explain forwarding (Gmail, Outlook, aliases). DNS (MX for
 `in.guildwisehq.com`) and the SendGrid parse host are set up on deploy day; everything else is built ahead.
 
+**Also (owner, 2026-10-14): model providers on the Trust page and the Privacy policy come from one shared list.** General
+wording first (agents use the provider and account the customer connects; data goes from the customer's workstation to
+that provider under the customer's agreement; Guildwise's servers send it nowhere), then a table generated from the list:
+provider, what it is used for, whose account, link to its data-use terms (today: Anthropic for agents on the customer's
+account, and Anthropic for Guildwise's own landing assistant and blog writer on the platform key). A test fails when a
+runtime/provider exists in the code without an entry. The Privacy policy's sub-processors use the same list, and
+SendGrid replaces Postmark for inbound mail everywhere (Privacy, DEPLOY.md).
+
 ## Direction (owner, 2026-10-13)
 
 Guildwise started as a tool for software teams (the owner built it for his own work), but the aim is **running a whole
