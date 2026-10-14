@@ -815,9 +815,9 @@ export class RunnerHandlers {
           matched.add(m.id as string);
           await exec(
             tx,
-            `INSERT INTO workstation_repos (workstation_id, project_repo_id, local_path, reported_at) VALUES ($1,$2,$3,$4)
-             ON CONFLICT (workstation_id, project_repo_id) DO UPDATE SET local_path=EXCLUDED.local_path, reported_at=EXCLUDED.reported_at`,
-            [conn.workstationId, m.id, r.localPath, now],
+            `INSERT INTO workstation_repos (workstation_id, project_repo_id, local_path, reported_at, git_identity) VALUES ($1,$2,$3,$4,$5::jsonb)
+             ON CONFLICT (workstation_id, project_repo_id) DO UPDATE SET local_path=EXCLUDED.local_path, reported_at=EXCLUDED.reported_at, git_identity=EXCLUDED.git_identity`,
+            [conn.workstationId, m.id, r.localPath, now, r.identity ? JSON.stringify(r.identity) : null],
           );
         }
       }

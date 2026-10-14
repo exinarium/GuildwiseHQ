@@ -63,8 +63,8 @@ export async function requestReleasePr(
       remoteUrlNormalized: repo.remote_url_normalized,
       head,
       ...(repo.main_branch ? { base: repo.main_branch } : {}),
-      title: `Merge ${head} into ${repo.main_branch ?? 'the main branch'} (${p.name})`,
-      body: `Opened from Guildwise: the work integrated on ${head} for project ${p.key}.`,
+      title: `Merge ${head} into ${repo.main_branch ?? 'the main branch'}`,
+      body: `Brings the work integrated on ${head} into ${repo.main_branch ?? 'the main branch'}.`,
       ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
     });
     return { requestId, workstationId: ws.id as string };

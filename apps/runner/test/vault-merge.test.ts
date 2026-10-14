@@ -28,7 +28,7 @@ const cmd = (v: { origin: string }, over: Partial<VaultMergeCommand> = {}): Vaul
     from: { vaultId: 'pers1', remoteUrl: v.origin },
     into: 'personal',
     lift: ['interests/ainews'],
-    commitMessage: 'aom: merge the personal vault into the organization vault',
+    commitMessage: 'Merge the personal vault into the organization vault',
     ...over,
   });
 
@@ -55,7 +55,7 @@ describe('mergeVaultInto (vault.merge, "drop personal")', () => {
     expect(existsSync(join(o.mine, 'personal/interests'))).toBe(false);
     expect(existsSync(join(o.mine, 'personal/.git'))).toBe(false);
     expect(sh(o.mine, 'git', ['log', '-1', '--format=%an|%s'])).toBe(
-      'Atlas (aom)|aom: merge the personal vault into the organization vault',
+      'Workstation Owner|Merge the personal vault into the organization vault',
     );
     expect(sh(o.mine, 'git', ['status', '--porcelain'])).toBe('');
     // the source is never changed: it stays as a backup

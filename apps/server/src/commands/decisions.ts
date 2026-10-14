@@ -95,7 +95,7 @@ export async function writeDecisionFile(ctx: Ctx, rec: DecisionRecord): Promise<
     path,
     mode: 'create',
     content: renderDecisionFile(rec),
-    commitMessage: `aom: decision ${rec.cardRef ? `${rec.cardRef} ` : ''}${rec.question.replace(/\s+/g, ' ').slice(0, 60)}`,
+    commitMessage: `decision ${rec.cardRef ? `${rec.cardRef} ` : ''}${rec.question.replace(/\s+/g, ' ').slice(0, 60)}`,
   });
   if (!r.queued || !r.workstationId || !r.commandId) return { queued: false, reason: 'no_workstation' };
   await ctx.services.gateway.deliverPending(r.workstationId);
@@ -142,7 +142,7 @@ export async function appendStandingOrder(
     path,
     mode: 'append',
     content: `\n## ${input.title.trim()}\n\n${input.body.trim()}\n\n_Added ${day}._\n`,
-    commitMessage: `aom: standing order ${input.title.replace(/\s+/g, ' ').slice(0, 60)}`,
+    commitMessage: `standing order ${input.title.replace(/\s+/g, ' ').slice(0, 60)}`,
   });
   if (!r.queued || !r.workstationId || !r.commandId) return { queued: false, reason: 'no_workstation' };
   await ctx.services.gateway.deliverPending(r.workstationId);

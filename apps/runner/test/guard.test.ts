@@ -158,26 +158,24 @@ describe('guard with concurrent shifts', () => {
 });
 
 describe('autocommit', () => {
-  it('commits leftovers with the agent identity and a conventional message; no-op when clean', async () => {
+  it('commits leftovers as the owner with a plain message; no-op when clean', async () => {
     const { path } = await setup('builder');
     const env = {
-      GIT_AUTHOR_NAME: 'Ada (aom)',
-      GIT_AUTHOR_EMAIL: 'a@agents.aom.invalid',
-      GIT_COMMITTER_NAME: 'Ada (aom)',
-      GIT_COMMITTER_EMAIL: 'a@agents.aom.invalid',
+      GIT_AUTHOR_NAME: 'Pieter Jordaan',
+      GIT_AUTHOR_EMAIL: 'pieter@example.test',
+      GIT_COMMITTER_NAME: 'Pieter Jordaan',
+      GIT_COMMITTER_EMAIL: 'pieter@example.test',
     };
     const input = {
       worktree: path,
-      ref: 'TOY-1',
-      stage: 'build',
-      shiftId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
+      ticket: 'DCPL-4276',
       env,
     };
     expect(await autoCommit(input)).toBe(false);
     writeFileSync(join(path, 'left.txt'), 'l');
     expect(await autoCommit(input)).toBe(true);
-    expect(sh(path, 'git', ['log', '-1', '--format=%s|%an'])).toBe(
-      'TOY-1 build leftovers (shift 019e3f6a)|Ada (aom)',
+    expect(sh(path, 'git', ['log', '-1', '--format=%s|%an|%cn'])).toBe(
+      'DCPL-4276: Work in progress|Pieter Jordaan|Pieter Jordaan',
     );
     expect(sh(path, 'git', ['status', '--porcelain'])).toBe('');
   });
@@ -263,9 +261,7 @@ describe('test output directories are artifacts, not changes', () => {
     expect(await discardTestArtifacts(path)).toBe(true);
     expect(existsSync(join(path, 'test-results'))).toBe(false);
     expect(existsSync(join(path, 'apps/web/test-results'))).toBe(false);
-    expect(
-      await autoCommit({ worktree: path, ref: 'TOY-1', stage: 'test', shiftId: 's1234567', env: {} }),
-    ).toBe(false);
+    expect(await autoCommit({ worktree: path, env: {} })).toBe(false);
     expect(await discardTestArtifacts(path)).toBe(false);
   });
 });

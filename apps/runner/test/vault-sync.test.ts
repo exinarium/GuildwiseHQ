@@ -42,7 +42,7 @@ describe('syncVault (docs/ARCHITECTURE.md section 16.3)', () => {
     const r = await syncVault(input(v));
     expect(r).toMatchObject({ status: 'ok', committed: true, pushed: true });
     const [latest] = originLog(v);
-    expect(latest).toMatch(/^Atlas \(aom\)\|aom sync Desk \d{4}-\d\d-\d\dT/);
+    expect(latest).toMatch(/^Workstation Owner\|Update notes \d{4}-\d\d-\d\dT/);
     expect(originFile(v, 'projects/toy/PROJECT.md')).toBe('# Toy\nuse pnpm\n');
     // nothing new: a no-op pass
     expect(await syncVault(input(v))).toMatchObject({
@@ -107,7 +107,7 @@ describe('syncVault (docs/ARCHITECTURE.md section 16.3)', () => {
     const r = await syncVault(gone);
     expect(r.status).toBe('error');
     expect(readFileSync(join(v.mine, 'draft.md'), 'utf8')).toBe('wip\n');
-    expect(sh(v.mine, 'git', ['log', '-1', '--format=%s'])).toMatch(/^aom sync Desk/); // committed locally, pushed later
+    expect(sh(v.mine, 'git', ['log', '-1', '--format=%s'])).toMatch(/^Update notes /); // committed locally, pushed later
   });
 
   it('a failed clone reports an error', async () => {
@@ -145,7 +145,7 @@ describe('VaultManager', () => {
     // local edit
     write(dir, 'projects/toy/decisions/d.md', 'decision\n');
     await waitUntil(
-      () => originLog(v).some((l) => l.includes('aom sync Desk')),
+      () => originLog(v).some((l) => l.includes('Update notes')),
       5000,
       'push within the interval',
     );

@@ -9,36 +9,54 @@ cleanupTmp();
 const AGENT = '019e3f6a-7b1c-7a2d-8c3e-0123456789a1';
 
 describe('sandbox', () => {
-  it('creates home/claude/scratch with the agent git identity', async () => {
+  it('creates home/claude/scratch with the resolved commit identity, never the agent name', async () => {
     const paths = runnerPaths(tmp());
-    const sb = await ensureSandbox(paths, AGENT, 'Ada');
+    const who = { name: 'Pieter Jordaan', email: 'pieter@example.test' };
+    const sb = await ensureSandbox(paths, AGENT, 'Ada', who);
     expect(sb.home).toBe(join(paths.root, 'agents', AGENT, 'home'));
     for (const d of [sb.home, sb.configDir, sb.scratch, sb.tmp]) expect(existsSync(d)).toBe(true);
     const gitconfig = readFileSync(join(sb.home, '.gitconfig'), 'utf8');
-    expect(gitconfig).toContain('name = Ada (aom)');
-    expect(gitconfig).toContain(`email = ${AGENT}@agents.aom.invalid`);
+    expect(gitconfig).toContain('name = Pieter Jordaan');
+    expect(gitconfig).toContain('email = pieter@example.test');
+    expect(gitconfig).not.toMatch(/Ada|aom|\.invalid/);
 
-    const env = sandboxEnv(sb);
-    expect(env).toMatchObject({ HOME: sb.home, USERPROFILE: sb.home, CLAUDE_CONFIG_DIR: sb.configDir });
-    // git picks the identity up from the sandbox environment
+    const env = sandboxEnv(sb, undefined, {}, who);
+    expect(env).toMatchObject({
+      HOME: sb.home,
+      USERPROFILE: sb.home,
+      CLAUDE_CONFIG_DIR: sb.configDir,
+      GIT_AUTHOR_NAME: who.name,
+      GIT_AUTHOR_EMAIL: who.email,
+      GIT_COMMITTER_NAME: who.name,
+      GIT_COMMITTER_EMAIL: who.email,
+    });
+    // a real commit made with the sandbox environment carries the owner as author AND committer
     const repo = tmp();
     sh(repo, 'git', ['init', '-b', 'main']);
     const { execFileSync } = await import('node:child_process');
-    const out = execFileSync('git', ['config', 'user.name'], {
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'Work in progress'], {
       cwd: repo,
       env: { ...process.env, ...env },
+    });
+    const out = execFileSync('git', ['log', '-1', '--format=%an|%ae|%cn|%ce'], {
+      cwd: repo,
       encoding: 'utf8',
     });
-    expect(out.trim()).toBe('Ada (aom)');
+    expect(out.trim()).toBe('Pieter Jordaan|pieter@example.test|Pieter Jordaan|pieter@example.test');
+  });
+
+  it('without an identity the sandbox config has no [user] section and the environment sets none', async () => {
+    const paths = runnerPaths(tmp());
+    const sb = await ensureSandbox(paths, AGENT, 'Ada', null);
+    expect(readFileSync(join(sb.home, '.gitconfig'), 'utf8')).not.toContain('[user]');
+    expect(sandboxEnv(sb).GIT_AUTHOR_NAME).toBeUndefined();
   });
 
   it('is idempotent and agent.wipe removes the directory idempotently', async () => {
     const paths = runnerPaths(tmp());
-    await ensureSandbox(paths, AGENT, 'Ada');
-    await ensureSandbox(paths, AGENT, 'Ada Renamed');
-    expect(readFileSync(join(paths.agentDir(AGENT), 'home', '.gitconfig'), 'utf8')).toContain(
-      'Ada Renamed (aom)',
-    );
+    await ensureSandbox(paths, AGENT, 'Ada', { name: 'One', email: 'one@example.test' });
+    await ensureSandbox(paths, AGENT, 'Ada Renamed', { name: 'Two', email: 'two@example.test' });
+    expect(readFileSync(join(paths.agentDir(AGENT), 'home', '.gitconfig'), 'utf8')).toContain('name = Two');
     expect(await wipeAgent(paths, AGENT)).toEqual({ removed: true });
     expect(existsSync(paths.agentDir(AGENT))).toBe(false);
     expect(await wipeAgent(paths, AGENT)).toEqual({ removed: false });

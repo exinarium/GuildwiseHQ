@@ -370,7 +370,7 @@ async function migrateOrg(tx: Tx, run: OrgRun): Promise<void> {
             from: { vaultId: vaults.personal?.id, remoteUrl: vaults.personal?.remote_url },
             into: 'personal',
             lift,
-            commitMessage: 'aom: merge the personal vault into the organization vault',
+            commitMessage: 'merge the personal vault into the organization vault',
             push: true,
           }),
         );

@@ -1,7 +1,8 @@
 import { readdir, stat } from 'node:fs/promises';
 import { basename, join, relative, resolve, sep } from 'node:path';
-import type { RepoReport } from '@aom/shared';
+import type { RepoIdentityFact, RepoReport } from '@aom/shared';
 import { currentBranch, git } from './git.ts';
+import { repoLevelIdentity } from './identity.ts';
 
 const SKIP = new Set(['node_modules', '.git', 'dist', '.venv', 'vendor']);
 
@@ -37,6 +38,8 @@ export interface ScannedRepo {
   localKey: string;
   remoteUrl: string | null;
   headBranch: string | null;
+  /** The identity commits get here without a project setting (repository, global or system config); null: none set. */
+  identity: RepoIdentityFact | null;
 }
 
 /**
@@ -65,6 +68,7 @@ export async function scanAllRepos(
       localKey: found.get(localPath) as string,
       remoteUrl: r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : null,
       headBranch: await currentBranch(localPath),
+      identity: await repoLevelIdentity(localPath),
     });
   }
   return out;
@@ -73,7 +77,9 @@ export async function scanAllRepos(
 /** The repositories that have an `origin` remote (what projects match against). */
 export function withRemote(all: ScannedRepo[]): RepoReport[] {
   return all.flatMap((r) =>
-    r.remoteUrl ? [{ remoteUrl: r.remoteUrl, localPath: r.localPath, headBranch: r.headBranch }] : [],
+    r.remoteUrl
+      ? [{ remoteUrl: r.remoteUrl, localPath: r.localPath, headBranch: r.headBranch, identity: r.identity }]
+      : [],
   );
 }
 

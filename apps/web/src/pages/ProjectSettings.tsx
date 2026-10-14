@@ -6,6 +6,7 @@ import { AddRepoForm } from '../components/AddRepoForm.tsx';
 import { ArchitectPanel } from '../components/ArchitectPanel.tsx';
 import { BudgetBanner } from '../components/BudgetBanner.tsx';
 import { BudgetPanel } from '../components/BudgetPanel.tsx';
+import { CommitAsPanel } from '../components/CommitAsPanel.tsx';
 import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { ConvertPanel } from '../components/ConvertPanel.tsx';
 import { DeployTargetsPanel } from '../components/DeployTargetsPanel.tsx';
@@ -22,8 +23,8 @@ import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
-import { RunSettings } from '../components/runs/RunSettings.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
+import { RunSettings } from '../components/runs/RunSettings.tsx';
 import {
   Badge,
   Button,
@@ -330,6 +331,11 @@ export function ProjectSettings() {
             </ul>
             {traits.usesRepos && <AddRepoForm projectId={id} />}
           </Panel>
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="commit-as" className="scroll-mt-20">
+          <CommitAsPanel projectId={id} canEdit={project.myRole === 'owner' || canConvert} />
         </div>
       )}
       {project && traits.usesRepos && (q.data.environments ?? []).length > 0 && (

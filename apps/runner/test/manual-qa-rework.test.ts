@@ -101,7 +101,7 @@ describe('rework after a merged finalize (manual QA send back)', () => {
     const log = originLog(repo);
     expect(log).toContain('fix after QA');
     expect(log.match(/add thing/g)).toHaveLength(1);
-    expect(log.match(/Merge TOY-1/g)).toHaveLength(2);
+    expect(log.match(/Merge Add thing/g)).toHaveLength(2);
     expect(sh(repo.origin, 'git', ['show', 'main:thing.txt'])).toBe('v2 (fixed after QA)');
     // the card branch still never reached origin
     expect(sh(repo.origin, 'git', ['for-each-ref', '--format=%(refname)', 'refs/heads'])).toBe(
@@ -129,7 +129,7 @@ describe('rework after a merged finalize (manual QA send back)', () => {
     });
     const second = await finalize(repo, path);
     expect(second.ok).toBe(true);
-    expect(originLog(repo).match(/Merge TOY-1/g)).toHaveLength(1);
+    expect(originLog(repo).match(/Merge Add thing/g)).toHaveLength(1);
     expect(second.mergeCommit).toBe(first.mergeCommit);
   });
 });

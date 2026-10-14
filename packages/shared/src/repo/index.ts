@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import { CONNECTABLE_FORGES, createFullNameError, ForgeKindSchema } from '../forge/index.ts';
+import { CommitAsSchema } from './commit-identity.ts';
+
+export * from './commit-identity.ts';
 
 /**
  * Approved repository setup (docs/SPEC.md, "External systems boundary"): an agent asks, the project owner approves on
@@ -108,6 +111,8 @@ export const RepoCreatePayloadSchema = z
     projectName: z.string(),
     /** The branch the initial commit goes to (the project's working branch). */
     branch: z.string().default('main'),
+    /** The project's "Commit as" setting for the initial commit (absent: the workstation's git identity). */
+    commitAs: CommitAsSchema.nullable().optional(),
   })
   .superRefine((v, ctx) => {
     const err =

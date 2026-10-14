@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { StoredCompletionAction, TestEvidence } from '../cards/types.ts';
 import { ForgeKindSchema } from '../forge/index.ts';
+import { CommitAsSchema } from '../repo/commit-identity.ts';
 
 /**
  * M4 contract shared by the server and the runner: the `finalize.execute` runner command, the tester environment
@@ -35,6 +36,8 @@ export const DESK_SUBKIND = {
   /** The latest main branch could not be merged into the working branch before a build (a notice). */
   mainMergeSkipped: 'main_merge_skipped',
   mainBranchUnset: 'main_branch_unset',
+  /** Backlog #65: no commit identity is set for a project on a workstation, so the runner refuses to commit (an alert). */
+  noCommitIdentity: 'no_commit_identity',
   /** The runtime's login (Claude Code `/login`) expired on a workstation; cleared when it works again (a notice). */
   claudeAuthExpired: 'claude_auth_expired',
   /** A plugin MCP server granted to a project needs sign-in on a workstation; cleared when signed in (a notice). */
@@ -79,6 +82,8 @@ export const FinalizeExecutePayloadSchema = z.object({
   prBody: z.string().optional(),
   /** The git provider chosen on the repository (absent: detected from the remote URL). */
   forge: ForgeKindSchema.optional(),
+  /** The project's "Commit as" setting (absent: the clone's or the workstation's git identity). */
+  commitAs: CommitAsSchema.nullable().optional(),
 });
 export type FinalizeExecutePayload = z.infer<typeof FinalizeExecutePayloadSchema>;
 

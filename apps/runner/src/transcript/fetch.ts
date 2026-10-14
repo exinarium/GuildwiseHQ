@@ -180,7 +180,7 @@ async function getText(
     const res = await deps.fetch(url, {
       redirect: 'follow',
       signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-      headers: { 'user-agent': 'aom-runner/transcript', accept: '*/*' },
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible)', accept: '*/*' },
     });
     if (!res.ok) return undefined;
     const buf = Buffer.from(await res.arrayBuffer());

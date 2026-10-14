@@ -840,7 +840,7 @@ export function registerDefinitionHook(ctx: Ctx): () => void {
         path,
         mode: 'replace',
         content,
-        commitMessage: `aom: ${kind} ${row.key} v${row.version}`,
+        commitMessage: `${kind} ${row.key} v${row.version}`,
       });
       if (r.queued && r.workstationId) await ctx.services.gateway.deliverPending(r.workstationId);
     } catch (err) {

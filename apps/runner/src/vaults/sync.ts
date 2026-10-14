@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { remoteUrlError } from '@aom/shared';
 import { currentBranch, git, gitOk } from '../git/git.ts';
+import { commitEnv, requireCommitIdentity } from '../git/identity.ts';
 
 export interface VaultIdentity {
   name: string;
@@ -23,13 +24,14 @@ export type VaultSyncResult =
   | { status: 'conflict'; files: string[] }
   | { status: 'error'; error: string };
 
-/** Git identity for sync commits: the workstation's DevOps engineer. The user's own credentials do the network I/O. */
-export const identityEnv = (id: VaultIdentity): Record<string, string> => ({
-  GIT_AUTHOR_NAME: id.name,
-  GIT_AUTHOR_EMAIL: id.email,
-  GIT_COMMITTER_NAME: id.name,
-  GIT_COMMITTER_EMAIL: id.email,
-});
+/**
+ * Git identity for vault commits: the same resolver as every other commit (backlog #65), without a project: the vault
+ * clone's own git config, else the workstation user's global one. Throws `NoCommitIdentityError` when there is none.
+ * (The `identity` the server sends in `vault.configure` named an agent and is no longer used for commits.)
+ */
+export async function vaultCommitEnv(dir: string): Promise<Record<string, string>> {
+  return commitEnv(await requireCommitIdentity(dir));
+}
 
 /** `file://` and path remotes exist for the test suites only: `AOM_ALLOW_LOCAL_REMOTES=1`. */
 export const allowLocalRemotes = (): boolean => process.env.AOM_ALLOW_LOCAL_REMOTES === '1';
@@ -112,20 +114,16 @@ async function needsPush(dir: string, branch: string, env: Record<string, string
 
 /**
  * One sync pass over a vault (docs/ARCHITECTURE.md section 16.3), deterministic git work without an LLM:
- * 1. clone if missing; 2. commit local edits (`aom sync <workstation> <time>`, DevOps identity);
+ * 1. clone if missing; 2. commit local edits (`Update notes <time>`, the resolved identity);
  * 3. `pull --rebase --autostash`, a conflict aborts the rebase and is reported; 4. push, retrying once from step 3 when
  * the push is rejected.
  */
 export async function syncVault(input: VaultSyncInput): Promise<VaultSyncResult> {
-  const env = identityEnv(input.identity);
   const now = input.now ?? (() => new Date());
   try {
-    const cloned = await ensureClone(input.dir, input.remoteUrl, env);
-    const committed = await commitAll(
-      input.dir,
-      `aom sync ${input.workstationName} ${now().toISOString()}`,
-      env,
-    );
+    const cloned = await ensureClone(input.dir, input.remoteUrl, {});
+    const env = await vaultCommitEnv(input.dir);
+    const committed = await commitAll(input.dir, `Update notes ${now().toISOString().slice(0, 16)}Z`, env);
     const branch = (await currentBranch(input.dir)) ?? 'main';
     let pulled = false;
     let pushed = false;

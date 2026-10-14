@@ -1,15 +1,18 @@
+import type { CommitAs } from '@aom/shared';
 import { isSafeGitRef } from '@aom/shared';
-import { git, hasRemote, repoIdentity, revParse } from './git.ts';
-
-const FALLBACK_IDENTITY = { name: 'Guildwise HQ (aom)', email: 'aom@runner.aom.invalid' };
+import { git, hasRemote, revParse } from './git.ts';
+import { committerEnv, requireCommitIdentity } from './identity.ts';
 
 /**
- * Rebasing rewrites commits, which needs a committer; the author of each commit is kept. The committer is the git
- * identity configured in the repository (no trace of the product in its history); the runner's own only when none is set.
+ * Rebasing rewrites commits, which needs a committer; the author of each commit is kept. The committer is the resolved
+ * commit identity (project setting, repository, workstation; see identity.ts); with none set this throws
+ * `NoCommitIdentityError`, there is no fallback to a product name.
  */
-export async function rebaseEnv(worktree: string): Promise<Record<string, string>> {
-  const id = await repoIdentity(worktree, FALLBACK_IDENTITY);
-  return { GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email };
+export async function rebaseEnv(
+  worktree: string,
+  commitAs?: CommitAs | null,
+): Promise<Record<string, string>> {
+  return committerEnv(await requireCommitIdentity(worktree, commitAs));
 }
 
 /** A merge commit needs an author too: the same identity as the committer of a rebase. */
@@ -39,14 +42,15 @@ export async function baseTarget(worktree: string, baseBranch: string): Promise<
 export async function rebaseOntoBase(
   worktree: string,
   baseBranch: string,
+  commitAs?: CommitAs | null,
 ): Promise<'up_to_date' | 'rebased' | 'merged'> {
   if (!isSafeGitRef(baseBranch)) throw new Error(`refusing unsafe base branch ${JSON.stringify(baseBranch)}`);
   if (await hasRemote(worktree)) await git(worktree, ['fetch', '--', 'origin', baseBranch]);
   const target = await baseTarget(worktree, baseBranch);
-  const renv = await rebaseEnv(worktree);
   // Already contains the base (for example the builder merged it and resolved a conflict there): nothing to do.
   if ((await git(worktree, ['merge-base', '--is-ancestor', target, 'HEAD'])).exitCode === 0)
     return 'up_to_date';
+  const renv = await rebaseEnv(worktree, commitAs);
   // A card branch with merge commits of its own is brought up to date with a merge: a plain rebase would drop those
   // merges and replay the card's commits, hitting the conflicts their resolution already settled.
   const mergeBase = (await git(worktree, ['merge-base', target, 'HEAD'])).stdout.trim();

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { streamId } from '@aom/shared';
+import { withCommitAs } from '../commands/commit-as.ts';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
@@ -83,8 +84,14 @@ export async function devopsPass(
     }
     busy.add(r.devops_agent_id);
     started.push({ requestId: r.id, shiftId, workstationId: r.workstation_id, agentId: r.devops_agent_id });
-    const payload = await buildDevopsShiftStart(ctx, r.id, shiftId);
-    if (payload) ctx.services.runners.send(r.workstation_id, 'shift.start', payload, ctx.clock.now());
+    const built = await buildDevopsShiftStart(ctx, r.id, shiftId);
+    if (built)
+      ctx.services.runners.send(
+        r.workstation_id,
+        'shift.start',
+        await withCommitAs(ctx, built),
+        ctx.clock.now(),
+      );
   }
   return started;
 }

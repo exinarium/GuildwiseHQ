@@ -3,6 +3,7 @@ import { chmodSync, existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { commitEnv } from '../git/identity.ts';
 import type { RunnerPaths } from '../paths.ts';
 
 export interface Sandbox {
@@ -159,15 +160,17 @@ export function sandboxFor(paths: RunnerPaths, agentId: string): Sandbox {
   };
 }
 
-export function agentEmail(agentId: string): string {
-  return `${agentId}@agents.aom.invalid`;
-}
-
-/** Creates `agents/<id>/{home,claude,scratch,tmp}` and the agent's `.gitconfig` (idempotent; refreshes the name). */
+/**
+ * Creates `agents/<id>/{home,claude,scratch,tmp}` and the agent's `.gitconfig` (idempotent; rewritten every time).
+ * Commits made in the sandbox carry `identity`, the one the runner resolved for the project (backlog #65: the owner's
+ * own name, never the agent's or the product's). Without an identity the file has no `[user]` section, so git refuses
+ * to commit. `_agentName` is kept for callers; it is not written anywhere a client could see.
+ */
 export async function ensureSandbox(
   paths: RunnerPaths,
   agentId: string,
-  agentName: string,
+  _agentName: string,
+  identity?: { name: string; email: string } | null,
 ): Promise<Sandbox> {
   const sb = sandboxFor(paths, agentId);
   await Promise.all([sb.home, sb.configDir, sb.scratch].map((d) => mkdir(d, { recursive: true })));
@@ -175,9 +178,7 @@ export async function ensureSandbox(
   if (sb.cacheRoot) await ensureSharedCaches(sb.cacheRoot);
   await ensureDotnetShm();
   const gitconfig = [
-    '[user]',
-    `\tname = ${agentName} (aom)`,
-    `\temail = ${agentEmail(agentId)}`,
+    ...(identity ? ['[user]', `\tname = ${identity.name}`, `\temail = ${identity.email}`] : []),
     '[commit]',
     '\tgpgsign = false',
     '[core]',
@@ -196,12 +197,15 @@ export function sandboxEnv(
   realHome: string = homedir(),
   /** Variables of the agent toolchains (DOTNET_ROOT, JAVA_HOME, ...), already checked by the registry. */
   toolchainEnv: Record<string, string> = {},
+  /** The resolved commit identity: author and committer of every commit in the sandbox (an agent cannot pick another). */
+  identity?: { name: string; email: string } | null,
 ): Record<string, string> {
   const nugetFallback = userNugetPackages(realHome);
   return {
     ...toolchainEnv,
     ...(sb.cacheRoot ? cacheEnv(sb.cacheRoot) : {}),
     ...dotnetEnv(sb.home),
+    ...(identity ? commitEnv(identity) : {}),
     // read-only: packages already restored for the user are found without a download
     ...(nugetFallback ? { NUGET_FALLBACK_PACKAGES: nugetFallback } : {}),
     HOME: sb.home,

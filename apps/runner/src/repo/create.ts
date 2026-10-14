@@ -1,9 +1,16 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
-import { cloneUrlFor, type RepoCreatePayload, type RepoCreateResult, repoNameError } from '@aom/shared';
+import {
+  cloneUrlFor,
+  NO_COMMIT_IDENTITY_MESSAGE,
+  type RepoCreatePayload,
+  type RepoCreateResult,
+  repoNameError,
+} from '@aom/shared';
 import { execa } from 'execa';
 import { forgeOfKind } from '../forge/index.ts';
 import type { ForgeEnv } from '../forge/types.ts';
+import { resolveCommitIdentity } from '../git/identity.ts';
 
 /**
  * Executes the `repo.create` command (approved repository setup). The server sends it only to the project owner's own
@@ -201,9 +208,13 @@ export class RepoCreator {
       const readme = join(target, 'README.md');
       if (!existsSync(readme)) writeFileSync(readme, `# ${p.projectName}\n`);
       await this.git(target, ['add', 'README.md']);
-      const hasId = (await this.git(target, ['config', 'user.email'])).exitCode === 0;
+      const who = await resolveCommitIdentity(target, p.commitAs);
+      if (!who) return { ok: false, error: NO_COMMIT_IDENTITY_MESSAGE };
       const commit = await this.git(target, [
-        ...(hasId ? [] : ['-c', 'user.name=Guildwise HQ', '-c', 'user.email=aom@localhost']),
+        '-c',
+        `user.name=${who.name}`,
+        '-c',
+        `user.email=${who.email}`,
         'commit',
         '-m',
         'Initial commit',
@@ -315,9 +326,13 @@ export class RepoCreator {
       const readme = join(target, 'README.md');
       if (!existsSync(readme)) writeFileSync(readme, `# ${p.projectName}\n`);
       await this.git(target, ['add', 'README.md']);
-      const hasId = (await this.git(target, ['config', 'user.email'])).exitCode === 0;
+      const who = await resolveCommitIdentity(target, p.commitAs);
+      if (!who) return { ok: false, error: NO_COMMIT_IDENTITY_MESSAGE };
       const commit = await this.git(target, [
-        ...(hasId ? [] : ['-c', 'user.name=Guildwise HQ', '-c', 'user.email=aom@localhost']),
+        '-c',
+        `user.name=${who.name}`,
+        '-c',
+        `user.email=${who.email}`,
         'commit',
         '-m',
         'Initial commit',

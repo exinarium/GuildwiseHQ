@@ -263,6 +263,8 @@ export interface ClaudeSettings {
     };
   };
   includeCoAuthoredBy: false;
+  /** Claude Code's newer switch: no "Co-Authored-By" trailer and no "Generated with" line in commits and pull requests. */
+  attribution: { commit: ''; pr: '' };
 }
 
 function sandboxBlock(
@@ -441,6 +443,7 @@ function buildDevopsSettings(
       additionalDirectories: [paths.scratch],
     },
     includeCoAuthoredBy: false,
+    attribution: { commit: '', pr: '' },
   };
 }
 
@@ -482,6 +485,7 @@ export function buildShiftSettings(
       additionalDirectories: [paths.scratch, ...ctx.gitDirs, ...(ctx.readDirs ?? [])],
     },
     includeCoAuthoredBy: false,
+    attribution: { commit: '', pr: '' },
   };
   const sb = sandboxBlock(tools, ctx, paths.home, paths.scratch, paths.tmp, {
     browser: runsBrowsers(p, roleKey),
@@ -528,6 +532,7 @@ export function buildChatSettings(
       additionalDirectories: [paths.scratch, ...(ctx.readDirs ?? [])],
     },
     includeCoAuthoredBy: false,
+    attribution: { commit: '', pr: '' },
   };
   // The chat may only run `aom`: no registries needed, only the IPC socket.
   const sb = sandboxBlock(

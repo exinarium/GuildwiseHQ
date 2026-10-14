@@ -13,7 +13,7 @@ import { confine } from '../fs-safe.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { mergeVaultInto, SAME_REPOSITORY_MESSAGE, type VaultMergeResult } from './merge.ts';
-import { ensureClone, identityEnv, isClean, isCloned, syncVault, type VaultSyncResult } from './sync.ts';
+import { ensureClone, isClean, isCloned, syncVault, type VaultSyncResult } from './sync.ts';
 import { moveVaultFolder, type VaultMoveResult, VaultWriteError, writeVaultFile } from './write.ts';
 
 export interface VaultTransport {
@@ -213,7 +213,7 @@ export class VaultManager {
       const v = this.vault(cmd.vaultId);
       if (!cfg || !v) throw new VaultWriteError(`vault ${cmd.vaultId} is not configured on this workstation`);
       const dir = this.dir(cmd.vaultId);
-      await ensureClone(dir, v.remoteUrl, identityEnv(cfg.identity));
+      await ensureClone(dir, v.remoteUrl, {});
       const w = await writeVaultFile(dir, cmd, cfg.identity);
       if (this.paused.has(cmd.vaultId))
         return { ...w, pushed: false, paused: true, conflict: this.paused.get(cmd.vaultId) };
@@ -240,7 +240,7 @@ export class VaultManager {
       const v = this.vault(cmd.vaultId);
       if (!cfg || !v) throw new VaultWriteError(`vault ${cmd.vaultId} is not configured on this workstation`);
       const dir = this.dir(cmd.vaultId);
-      await ensureClone(dir, v.remoteUrl, identityEnv(cfg.identity));
+      await ensureClone(dir, v.remoteUrl, {});
       const w = await moveVaultFolder(dir, cmd, cfg.identity);
       if (this.paused.has(cmd.vaultId)) return { ...w, pushed: false, paused: true };
       if (!cmd.push) return { ...w, pushed: false, paused: false };
@@ -271,7 +271,7 @@ export class VaultManager {
       if (!cfg || !v) throw new VaultWriteError(`vault ${cmd.vaultId} is not configured on this workstation`);
       const dir = this.dir(cmd.vaultId);
       const srcDir = this.dir(cmd.from.vaultId);
-      const env = identityEnv(cfg.identity);
+      const env = {};
       // A repository is never merged into itself (before cloning: the URLs; mergeVaultInto checks the clones again).
       if (normalizeRemoteUrl(cmd.from.remoteUrl) === normalizeRemoteUrl(v.remoteUrl))
         return {

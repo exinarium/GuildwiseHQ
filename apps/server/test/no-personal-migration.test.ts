@@ -191,7 +191,7 @@ describe('the migration', () => {
       from: { vaultId: personalVault, remoteUrl: 'git@example.test:srv/personal.git' },
       into: 'personal',
       lift: ['interests/ai-news'],
-      commitMessage: 'aom: merge the personal vault into the organization vault',
+      commitMessage: 'merge the personal vault into the organization vault',
       push: true,
     });
     // the personal projects read their folders from personal/; work projects and interests are untouched

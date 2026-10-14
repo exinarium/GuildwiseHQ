@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ForgeKindSchema, GitAccessMethodSchema } from '../forge/index.ts';
 import { WorkingBranchReason } from '../hygiene/index.ts';
 import { ProjectKeySchema } from '../ids.ts';
+import { CommitAsSchema } from '../repo/commit-identity.ts';
 import {
   BranchPrefixSchema,
   GitRefSchema,
@@ -127,6 +128,14 @@ export const projectEvents = [
   defineEvent(
     'ProjectRepoMainBranchSet',
     z.object({ projectId: Id, repoId: Id, mainBranch: GitRefSchema.nullable(), setBy: Id.optional() }),
+  ),
+  /**
+   * The owner set (or cleared, `commitAs: null`) the name and e-mail every commit of the project carries (backlog #65).
+   * Not a secret. Cleared: the runner falls back to the identity of the clone or of the workstation.
+   */
+  defineEvent(
+    'ProjectCommitAsSet',
+    z.object({ projectId: Id, commitAs: CommitAsSchema.nullable(), setBy: Id.optional() }),
   ),
   /** The runner found the working branch missing in the repository and created it from `from` (pushed when `pushed`). */
   defineEvent(

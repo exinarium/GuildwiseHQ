@@ -122,9 +122,6 @@ describe('architect post-shift guard', () => {
     const who = { name: 'a', email: 'a@x.test' };
     await autoCommit({
       worktree: t.path,
-      ref: 'TOY-1',
-      stage: 'investigate',
-      shiftId: 'abcdefgh-1',
       env: {
         ['GIT_AUTHOR_NAME']: who.name,
         ['GIT_AUTHOR_EMAIL']: who.email,

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   BA_ROLE_KEY,
+  type CommitAs,
   DESK_SUBKIND,
   FORGE_LABELS,
   isOrgManager,
@@ -19,6 +20,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { loadCommitAs } from './commit-as.ts';
 import { agentActor, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { settleConversionIn } from './convert.ts';
 import { addRepoIn } from './projects.ts';
@@ -438,7 +440,12 @@ export async function resolveRepoCreateIn(
     ],
     { tx },
   );
-  await enqueueRunnerCommand(tx, ws.id, 'repo.create', repoCreatePayload(req) as never);
+  await enqueueRunnerCommand(
+    tx,
+    ws.id,
+    'repo.create',
+    repoCreatePayload(req, await loadCommitAs(tx, req.project_id)) as never,
+  );
   return ws.id;
 }
 
@@ -537,8 +544,9 @@ async function completeCreatedRepoIn(
   await settleConversionIn(ctx, tx, req.project_id);
 }
 
-function repoCreatePayload(req: Row): RepoCreatePayload {
+function repoCreatePayload(req: Row, commitAs: CommitAs | null): RepoCreatePayload {
   return {
+    commitAs,
     requestId: req.id,
     name: req.name,
     visibility: req.visibility,
@@ -599,7 +607,12 @@ export async function retryRepoCreateIn(ctx: Ctx, tx: Tx, user: { id: string }, 
     ],
     { tx },
   );
-  await enqueueRunnerCommand(tx, ws.id, 'repo.create', repoCreatePayload(req) as never);
+  await enqueueRunnerCommand(
+    tx,
+    ws.id,
+    'repo.create',
+    repoCreatePayload(req, await loadCommitAs(tx, req.project_id)) as never,
+  );
   return ws.id;
 }
 
