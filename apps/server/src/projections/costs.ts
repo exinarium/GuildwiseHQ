@@ -15,9 +15,10 @@ export const costProjectors: Record<string, Projector> = {
     const p = ev<EventOf<'ShiftEnded'>>(e).payload;
     const s = await one(
       tx,
-      `SELECT s.org_id, s.agent_id, s.kind, s.card_id, s.model,
+      `SELECT s.org_id, s.agent_id, CASE WHEN s.kind = 'chat' AND ag.role_key = 'ceo' THEN 'ceo_chat' ELSE s.kind END AS kind, s.card_id, s.model,
               COALESCE(s.project_id, c.project_id, bt.project_id) AS project_id, bt.phase_id
          FROM shifts s
+         LEFT JOIN agents ag ON ag.id = s.agent_id
          LEFT JOIN cards c ON c.id = s.card_id
          LEFT JOIN ba_tasks bt ON bt.id = s.ba_task_id
         WHERE s.id = $1`,

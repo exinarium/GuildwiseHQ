@@ -3,6 +3,7 @@ import { agentProjectors } from './agents.ts';
 import { blogProjectors } from './blog.ts';
 import { cardProjectors } from './cards.ts';
 import { catalogueProjectors } from './catalogue.ts';
+import { ceoProjectors } from './ceo.ts';
 import { chatProjectors } from './chats.ts';
 import { commitAsProjectors } from './commit-as.ts';
 import { costProjectors } from './costs.ts';
@@ -79,6 +80,7 @@ const domains: Array<Record<string, Projector>> = [
   interestRunProjectors,
   runProjectors,
   commitAsProjectors,
+  ceoProjectors,
 ];
 
 export function buildProjectors(): ProjectorMap {
@@ -115,6 +117,10 @@ export const PROJECTION_TABLES = [
   'role_extensions',
   'departments',
   'agents',
+  'ceo_settings',
+  'ceo_actions',
+  'ceo_tasks',
+  'ceo_memories',
   'cards',
   'card_dependencies',
   'subworkflow_runs',

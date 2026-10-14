@@ -277,6 +277,8 @@ export async function hireAgent(
     if (!roleDef) throw badRequest('unknown_role', `role '${req.roleKey}' does not exist`);
     if (roleDef.definition.key === DEVOPS_ROLE_KEY)
       throw badRequest('invalid_role', 'DevOps engineers are hired automatically per workstation');
+    if (roleDef.definition.key === 'ceo')
+      throw badRequest('invalid_role', 'the CEO is appointed, not hired: use Appoint CEO (POST /api/ceo/appoint)');
     if (!roleDef.definition.seniorityLevels.includes(req.seniority)) {
       throw badRequest(
         'invalid_seniority',
@@ -574,6 +576,8 @@ export async function fireAgent(
     if (a.status === 'retired') throw conflict('agent_retired', 'agent is already retired');
     if (a.is_devops)
       throw conflict('devops_cannot_be_fired', 'the DevOps engineer cannot be fired; reset it instead');
+    if (a.role_key === 'ceo')
+      throw conflict('ceo_cannot_be_fired', 'the CEO cannot be fired: pause or disable it on the CEO page');
     const cards = await rows(
       tx,
       `SELECT c.*, (SELECT h.id FROM card_handoffs h WHERE h.card_id = c.id ORDER BY h.created_at DESC, h.event_seq DESC LIMIT 1) AS last_handoff_id
@@ -641,4 +645,35 @@ export async function resetAgent(ctx: Ctx, user: AuthSession['user'], agentId: s
     );
     if (a.workstation_id) await enqueueRunnerCommand(tx, a.workstation_id, 'agent.wipe', { agentId });
   });
+}
+
+/** A manager pauses an agent: no new work (a running shift finishes). The CEO and the DevOps engineer are not paused this way. */
+export async function setAgentPaused(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  agentId: string,
+  paused: boolean,
+  reason?: string,
+): Promise<void> {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const a = await manageableAgent(tx, user, agentId);
+    if (a.status !== 'active') throw conflict('agent_inactive', 'agent is not active');
+    if (a.is_devops) throw badRequest('devops_fixed', 'the DevOps engineer cannot be paused');
+    if (a.role_key === 'ceo') throw badRequest('ceo_fixed', 'pause the CEO on the CEO page');
+    if (paused === !!a.paused_at) return;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.agent(agentId),
+          event: paused
+            ? { type: 'AgentPaused', payload: { agentId, by: user.id, reason: reason ?? '', viaCeo: false } }
+            : { type: 'AgentResumed', payload: { agentId, by: user.id, viaCeo: false } },
+          actor: userActor(user.id),
+          scope: agentScope(a),
+        },
+      ],
+      { tx },
+    );
+  });
+  if (!paused) ctx.services.dispatcher.trigger();
 }

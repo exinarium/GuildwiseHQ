@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
 import { DiffStats, StoredCompletionAction } from '../cards/types.ts';
+import { CeoShiftSchema } from '../ceo/ipc.ts';
 import {
   EnvEnsurePayloadSchema,
   RepoClonePayloadSchema,
@@ -368,6 +369,8 @@ export const ChatContextSchema = z.object({
   mcpServers: z.array(z.string()).optional(),
   /** The knowledge vault this chat may read (read-only; absent: none for this workstation). */
   vault: ChatVaultSchema.optional(),
+  /** Set for the owner's chat with the CEO: persona, standing instructions, rules and the policy in words. */
+  ceo: z.object({ brief: z.string() }).optional(),
 });
 export type ChatContext = z.infer<typeof ChatContextSchema>;
 
@@ -891,7 +894,7 @@ export const WelcomeSchema = msg('welcome', {
 export const ShiftStartSchema = msg('shift.start', {
   shiftId: z.uuid(),
   claimId: z.uuid(),
-  kind: z.enum(['card', 'question', 'devops', 'ba_task']),
+  kind: z.enum(['card', 'question', 'devops', 'ba_task', 'ceo']),
   agent: AgentRuntimeSpecSchema,
   brief: ShiftBriefSchema,
   worktree: WorktreeSpecSchema.nullable(),
@@ -912,6 +915,8 @@ export const ShiftStartSchema = msg('shift.start', {
   question: QuestionShiftSchema.optional(),
   /** Phases: for `kind: 'ba_task'` the background task (phase report, follow-up briefs, ...); the brief carries a placeholder card. */
   baTask: BaTaskShiftSchema.optional(),
+  /** The CEO agent's wake or daily review (no card, no worktree); the brief carries a placeholder card. */
+  ceo: CeoShiftSchema.optional(),
   /** M3: the card's vault (its project vault or the organization vault); the runner reads only this vault and passes only it as `--add-dir`. */
   vault: ShiftVaultSchema.nullable().optional(),
   /** The project's reference repositories: read-only for this shift when the workstation has a clone. */

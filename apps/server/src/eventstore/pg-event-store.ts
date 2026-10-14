@@ -2,6 +2,7 @@ import { DomainEventSchema } from '@aom/shared';
 import type pg from 'pg';
 import type { Clock } from '../clock.ts';
 import { rows } from '../db/sql.ts';
+import { actingAgent } from './acting.ts';
 import { APPEND_LOCK_ID, type Tx, withTx } from '../db/tx.ts';
 import {
   type AppendInput,
@@ -77,6 +78,10 @@ export class PgEventStore implements EventStore {
           throw new ConcurrencyError(input.streamId, exp, current);
         const version = current + 1;
         versions.set(input.streamId, version);
+        const acting = actingAgent();
+        const actor =
+          acting && input.actor.kind === 'user' ? { kind: 'agent' as const, id: acting.agentId } : input.actor;
+        const causation = input.causationId ?? (acting ? acting.actionId : null);
         const r = await rows(
           tx,
           `INSERT INTO events (stream_id, stream_version, type, payload, actor_kind, actor_id, org_id,
@@ -87,14 +92,14 @@ export class PgEventStore implements EventStore {
             version,
             ev.type,
             JSON.stringify(ev.payload),
-            input.actor.kind,
-            input.actor.id,
+            actor.kind,
+            actor.id,
             input.scope.orgId,
             input.scope.projectId,
             input.scope.audience,
             input.scope.userId ?? null,
             input.correlationId ?? null,
-            input.causationId ?? null,
+            causation,
             this.clock.now(),
           ],
         );

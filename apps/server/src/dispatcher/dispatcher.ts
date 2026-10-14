@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { ceoPass } from '../ceo/pass.ts';
 import { withCommitAs } from '../commands/commit-as.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
@@ -31,6 +32,9 @@ const TRIGGER_TYPES = new Set([
   'QuestionAnswered',
   'DeskItemResolved',
   'AgentHired',
+  'AgentResumed',
+  'CeoEnabled',
+  'CeoResumed',
   'AgentChanged',
   'AgentRehomed',
   'AgentPermissionsRebased',
@@ -161,7 +165,7 @@ export class Dispatcher {
               (SELECT count(*)::int FROM cards c WHERE c.claimed_by_agent_id = a.id AND c.claim_id IS NOT NULL) AS active
          FROM agents a JOIN workstations ws ON ws.id = a.workstation_id
                  JOIN users wu ON wu.id = ws.user_id AND wu.status = 'active'
-        WHERE a.status='active' AND NOT a.is_devops AND ws.status='active' AND ws.connected AND ws.last_seen_at > $1
+        WHERE a.status='active' AND a.paused_at IS NULL AND a.role_key <> 'ceo' AND NOT a.is_devops AND ws.status='active' AND ws.connected AND ws.last_seen_at > $1
           AND ${wsServesOrgSql('ws', 'a.org_id')}
         ORDER BY a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
       [onlineSince],
@@ -236,6 +240,7 @@ export class Dispatcher {
     await devopsPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
     await questionPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
     await baTaskPass(this.ctx, (agentId) => (this.cooldown.get(agentId) ?? 0) > nowMs);
+    await ceoPass(this.ctx);
     await testingPass(this.ctx);
     for (const r of made) await this.sendShiftStart(r);
     return made;

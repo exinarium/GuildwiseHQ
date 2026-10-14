@@ -8,6 +8,7 @@ export * from './blog.ts';
 export * from './board.ts';
 export * from './cards.ts';
 export * from './catalogue.ts';
+export * from './ceo.ts';
 export * from './chats.ts';
 export * from './cloud.ts';
 export * from './common.ts';

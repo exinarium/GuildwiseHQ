@@ -12,6 +12,9 @@ import {
   WORKING_BRANCH_SUBKIND,
 } from '@aom/shared';
 import { orgRoleOf } from '../auth/org-context.ts';
+import { acceptRecommendation, rejectRecommendation } from '../ceo/accept.ts';
+import { onOwnerAnswer } from '../ceo/learning.ts';
+import { rememberFromDeskAnswer } from '../ceo/memory.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { projectRole } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
@@ -71,8 +74,12 @@ export async function answerDeskItem(
   id: string,
   req: AnswerDeskItemRequest,
 ): Promise<{ ledgerEntryId: string; unblockedCardIds: string[] }> {
-  const after: { mapped?: { intake: Row; projectKey: string }; hygieneRepo?: string; batchQueued?: boolean } =
-    {};
+  const after: {
+    mapped?: { intake: Row; projectKey: string };
+    hygieneRepo?: string;
+    batchQueued?: boolean;
+    item?: Row;
+  } = {};
   const answered = await withAppendTx(ctx.pool, async (tx) => {
     const { item, mayAct } = await lockItem(tx, user, id);
     if (item.status !== 'open') throw conflict('already_answered', `this item is already ${item.status}`);
@@ -200,11 +207,23 @@ export async function answerDeskItem(
       if (b.hygieneForRepo) after.hygieneRepo = b.hygieneForRepo;
     }
     await ctx.store.append(events, { tx });
+    after.item = item;
     return { ledgerEntryId: entryId, unblockedCardIds: blocked.map((b) => b.card_id) };
   });
   if (after.mapped) continueIntake(ctx, after.mapped.intake, after.mapped.projectKey);
   if (after.batchQueued) ctx.services.dispatcher.trigger();
   if (after.hygieneRepo) await runHygieneForConfirmedRepo(ctx, after.hygieneRepo);
+  // The CEO learns from the owner's own answers (training observation, pattern candidates) and keeps a rule on request.
+  const ans = after.item;
+  if (ans && (await orgRoleOf(ctx.pool, user.id, ans.org_id)) === 'owner') {
+    await onOwnerAnswer(ctx, ans.org_id, user.id, ans, { optionId: req.optionId, text: req.answer }).catch((err) =>
+      ctx.log.error({ err }, 'ceo learning failed'),
+    );
+    if (req.remember)
+      await rememberFromDeskAnswer(ctx, ans.org_id, user.id, { id: ans.id, title: ans.title, subkind: ans.subkind }, req.answer).catch(
+        (err) => ctx.log.error({ err }, 'ceo remember failed'),
+      );
+  }
   return answered;
 }
 
@@ -239,6 +258,7 @@ async function closeItem(
   let devops = false;
   let partial = false;
   let phases = false;
+  let ceoItem: Row | undefined;
   await withAppendTx(ctx.pool, async (tx) => {
     const { item, mayAct } = await lockItem(tx, user, id);
     // Acknowledging a "repository not created" alert is not giving up on the request: Retry still works on it while
@@ -253,6 +273,12 @@ async function closeItem(
     if (item.kind === 'question' && resolution !== 'dismissed')
       throw badRequest('wrong_kind', 'questions are answered (POST /api/desk/:id/answer) or dismissed');
     if (!mayAct) throw forbidden('only the card owner (or any manager, per the decision policy) can do this');
+    // The CEO's recommendations are the Owner's to accept (docs/design/ceo-agent-v2.md: Admins read only).
+    if (item.subkind === 'ceo_recommendation') {
+      if ((await orgRoleOf(tx, user.id, item.org_id)) !== 'owner')
+        throw forbidden('only the organization Owner can accept or decline the CEO recommendations');
+      ceoItem = item;
+    }
     // M3 kinds: resolving the item acts on the DevOps request / paused vault in the same transaction.
     if (item.kind === 'approval' && item.subkind === 'devops') {
       if (resolution === 'acknowledged')
@@ -338,5 +364,9 @@ async function closeItem(
       );
   });
   if (devops || phases) ctx.services.dispatcher.trigger();
+  if (ceoItem) {
+    if (resolution === 'approved') await acceptRecommendation(ctx, user, ceoItem);
+    else await rejectRecommendation(ctx, user, ceoItem, note);
+  }
   if (workstationToDeliver) await ctx.services.gateway.deliverPending(workstationToDeliver);
 }

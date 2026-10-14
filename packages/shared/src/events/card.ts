@@ -139,6 +139,11 @@ export const cardEvents = [
         .optional(),
     }),
   ),
+  /** The card was taken from one agent and is preferred for another (release plus prefer). */
+  defineEvent(
+    'CardReassigned',
+    z.object({ cardId: Id, fromAgentId: Id.optional(), toAgentId: Id, by: Id.optional(), viaCeo: z.boolean().default(false) }),
+  ),
   defineEvent(
     'HandoffWritten',
     z.object({

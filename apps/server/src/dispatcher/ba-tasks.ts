@@ -66,7 +66,7 @@ export async function baTaskPass(
       `SELECT a.*, ws.id AS ws_id, ws.runtimes, ws.connected, ws.last_seen_at
          FROM agents a JOIN workstations ws ON ws.id = a.workstation_id AND ws.status = 'active'
                        JOIN users wu ON wu.id = ws.user_id AND wu.status = 'active'
-        WHERE a.org_id = $1 AND a.role_key = 'ba' AND a.status = 'active' AND NOT a.is_devops
+        WHERE a.org_id = $1 AND a.role_key = 'ba' AND a.status = 'active' AND a.paused_at IS NULL AND NOT a.is_devops
           AND ${wsServesOrgSql('ws', 'a.org_id')}
           AND ($4::boolean OR ((a.allowed_project_ids IS NULL OR $2::uuid = ANY (a.allowed_project_ids))
                AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = $2::uuid AND pm.user_id = ws.user_id

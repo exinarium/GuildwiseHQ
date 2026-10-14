@@ -10,6 +10,7 @@ import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { ceoActive, ceoReachable } from '../ceo/state.ts';
 import { reportingOf } from './settings.ts';
 import { baAvailable, enqueueReporterTask } from './tasks.ts';
 
@@ -67,15 +68,24 @@ export function createRoutingInterceptor(ctx: Ctx) {
     )
       return inputs;
     const now = ctx.clock.now();
-    const cache = new Map<string, boolean>();
-    const active = async (orgId: string, projectId: string | null): Promise<boolean> => {
+    // Who looks at held and urgent items: the CEO when one is active and reachable (it replaces the BA's reporter job,
+    // docs/design/ceo-agent-v2.md D3), else the BA, else nobody (items reach the manager unchanged).
+    const cache = new Map<string, 'ceo' | 'ba' | null>();
+    const who = async (orgId: string, projectId: string | null): Promise<'ceo' | 'ba' | null> => {
       const key = `${orgId}|${projectId ?? ''}`;
       if (!cache.has(key)) {
         const prefs = await reportingOf(tx, orgId);
-        cache.set(key, prefs.routeViaBa && (await baAvailable(tx, orgId, projectId, now)));
+        let v: 'ceo' | 'ba' | null = null;
+        if (prefs.routeViaBa) {
+          if ((await ceoActive(tx, orgId)) && (await ceoReachable(tx, orgId, now)).ok) v = 'ceo';
+          else if (await baAvailable(tx, orgId, projectId, now)) v = 'ba';
+        }
+        cache.set(key, v);
       }
-      return cache.get(key) as boolean;
+      return cache.get(key) ?? null;
     };
+    const active = async (orgId: string, projectId: string | null): Promise<boolean> => (await who(orgId, projectId)) !== null;
+    const byBa = async (orgId: string, projectId: string | null): Promise<boolean> => (await who(orgId, projectId)) === 'ba';
     const held = new Map<string, { orgId: string; projectId: string | null; ids: string[] }>();
     const noted = new Map<string, { orgId: string; projectId: string | null; ids: string[] }>();
     const add = (m: typeof held, orgId: string, projectId: string | null, id: string): void => {
@@ -116,12 +126,12 @@ export function createRoutingInterceptor(ctx: Ctx) {
             (p.kind === 'escalation' ||
               (p.kind === 'approval' && (await isRepeatedApproval(tx, orgId, p, now))))
           )
-            add(noted, orgId, projectId, p.deskItemId);
+            if (await byBa(orgId, projectId)) add(noted, orgId, projectId, p.deskItemId);
           out.push(input);
         } else {
           const deadline = new Date(now.getTime() + REPORTER.triageWindowMinutes * 60_000).toISOString();
           out.push({ ...input, event: { ...ev, payload: { ...p, triage: { deadline } } } });
-          add(held, orgId, projectId, p.deskItemId);
+          if (await byBa(orgId, projectId)) add(held, orgId, projectId, p.deskItemId);
         }
         continue;
       }
@@ -140,7 +150,7 @@ export function createRoutingInterceptor(ctx: Ctx) {
         ) {
           const deadline = new Date(now.getTime() + REPORTER.triageWindowMinutes * 60_000).toISOString();
           out.push({ ...input, event: { ...ev, payload: { ...p, triage: { deadline } } } });
-          add(held, orgId, projectId, p.deskItemId);
+          if (await byBa(orgId, projectId)) add(held, orgId, projectId, p.deskItemId);
           continue;
         }
       }
@@ -148,7 +158,7 @@ export function createRoutingInterceptor(ctx: Ctx) {
         // A question that went up the chain and now reaches the manager's desk: the BA adds context (unless the BA
         // itself passed it on, whose reasoning is already in the trail).
         const p = ev.payload;
-        if (p.routedTo === 'manager' && (await active(orgId, null))) {
+        if (p.routedTo === 'manager' && (await byBa(orgId, null))) {
           const by = p.fromAgentId
             ? await one<{ role_key: string }>(tx, 'SELECT role_key FROM agents WHERE id=$1', [p.fromAgentId])
             : undefined;

@@ -10,6 +10,7 @@ import { type Detected, detectAll } from './detectors.ts';
 import { buildFloorDigest } from './digest.ts';
 import { systemBy } from './report-items.ts';
 import { reportingOf } from './settings.ts';
+import { queueCeoReviews } from '../ceo/pass.ts';
 import { enqueueReporterTask } from './tasks.ts';
 
 export interface ReporterRun {
@@ -197,6 +198,7 @@ async function queueUrgentAlerts(ctx: Ctx): Promise<number> {
     ctx.pool,
     `SELECT s.* FROM ba_signals s
       WHERE s.urgency='urgent' AND s.status='open'
+        AND NOT EXISTS (SELECT 1 FROM ceo_settings c WHERE c.org_id = s.org_id AND c.enabled AND NOT c.paused AND c.agent_id IS NOT NULL)
         AND NOT EXISTS (SELECT 1 FROM ba_tasks t WHERE t.kind='floor_alert' AND s.id = ANY(t.signal_ids))
       ORDER BY s.first_seen_at, s.id`,
   );
@@ -234,9 +236,10 @@ async function queueFloorReports(ctx: Ctx, now: Date): Promise<number> {
     ctx.pool,
     `SELECT o.id FROM organizations o JOIN users u ON u.id = o.owner_user_id AND u.status='active'
       WHERE o.status IN ('trial','active')
+        AND NOT EXISTS (SELECT 1 FROM ceo_settings c WHERE c.org_id = o.id AND c.enabled AND NOT c.paused AND c.agent_id IS NOT NULL)
         AND EXISTS (SELECT 1 FROM projects p WHERE p.org_id = o.id AND p.status='active' AND p.kind='project')`,
   );
-  let n = 0;
+  let n = await queueCeoReviews(ctx, now);
   for (const o of orgs) {
     const prefs = await reportingOf(ctx.pool, o.id);
     const due = floorReportDue(now, prefs.timezone, prefs.dailyAt, prefs.floorReportDay, prefs.createdAt);

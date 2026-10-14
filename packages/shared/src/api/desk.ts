@@ -97,6 +97,35 @@ export const DeskItemDtoSchema = z.object({
     .optional(),
   /** Workstation notices (`claude_auth_expired`, `mcp_needs_sign_in`): which workstation, for the Integrations deep link. */
   data: z.object({ workstationId: z.string().optional(), key: z.string().optional() }).optional(),
+  /** The CEO agent (docs/design/ceo-agent-v2.md section 6): the action that answered or handled the item (Undo), and its recommendation. */
+  ceo: z
+    .object({
+      actionId: z.uuid().nullable(),
+      agentName: z.string().nullable(),
+      reason: z.string().nullable(),
+      confidence: z.number().nullable(),
+      undoable: z.boolean(),
+      recommendation: z
+        .object({
+          actionId: z.uuid(),
+          option: z.string().nullable(),
+          text: z.string().nullable(),
+          reason: z.string(),
+          confidence: z.number(),
+        })
+        .nullable(),
+    })
+    .nullable()
+    .optional(),
+  /** The CEO's daily report: the actions of the last 24 hours (for Undo) and the training scores. */
+  ceoReport: z
+    .object({
+      actions: z.array(z.object({ id: z.uuid(), class: z.string(), mode: z.string(), status: z.string(), subject: z.string(), undoable: z.boolean() })),
+      scores: z.array(z.object({ class: z.string(), agreed: z.number().int(), total: z.number().int() })),
+      fallback: z.boolean(),
+    })
+    .nullable()
+    .optional(),
   /** False for members who may see but not answer (owner_only on a shared card). */
   canAnswer: z.boolean(),
   createdAt: IsoTime,
@@ -123,6 +152,8 @@ export const AnswerDeskItemRequestSchema = z.object({
   answer: z.string().min(1).max(20000),
   optionId: z.string().min(1).optional(),
   ledger: DeskLedgerChoiceSchema.default({ scope: 'decision' }),
+  /** "Remember this for the CEO": the answer is kept as an owner rule (only the organization Owner's answers count). */
+  remember: z.boolean().optional(),
 });
 export type AnswerDeskItemRequest = z.infer<typeof AnswerDeskItemRequestSchema>;
 

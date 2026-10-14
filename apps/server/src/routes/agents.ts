@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify';
 import { requireOrg, requireUser } from '../auth/guards.ts';
 import {
   fireAgent,
+  setAgentPaused,
   hireAgent,
   patchAgent,
   setAgentAllowedProjects,
@@ -100,6 +101,18 @@ export function agentRoutes(ctx: Ctx) {
         return { agent: await one(s.user.id, req.params.id) };
       },
     );
+
+    app.post('/api/agents/:id/pause', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await setAgentPaused(ctx, s.user, req.params.id, true);
+      return { agent: await one(s.user.id, req.params.id) };
+    });
+
+    app.post('/api/agents/:id/resume', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await setAgentPaused(ctx, s.user, req.params.id, false);
+      return { agent: await one(s.user.id, req.params.id) };
+    });
 
     app.post('/api/agents/:id/fire', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);

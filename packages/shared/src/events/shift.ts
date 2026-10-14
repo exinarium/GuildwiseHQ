@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { defineEvent, Id, Stage, Usage } from './define.ts';
 
-export const ShiftKind = z.enum(['card', 'chat', 'question', 'devops', 'ba_task']);
+export const ShiftKind = z.enum(['card', 'chat', 'question', 'devops', 'ba_task', 'ceo']);
 export type ShiftKind = z.infer<typeof ShiftKind>;
 
 export const ShiftEndOutcome = z.enum([
