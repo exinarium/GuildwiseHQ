@@ -76,6 +76,6 @@ export async function saveAndVerify(
   });
   const forge = forgeOfKind(env, t.provider, host, t.organization);
   const st = await (forge.status as () => Promise<GitConnection>)();
-  if (st.state !== 'connected') env.tokens.remove(t.provider, host);
+  if (st.state !== 'connected') env.tokens.remove(t.provider, host, t.organization);
   return st;
 }

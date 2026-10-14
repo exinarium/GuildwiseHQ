@@ -240,8 +240,24 @@ The details of each done item follow this list, by date.
 - #34: Integrations page (MVP): connect Claude, GitHub, Bitbucket, GitLab, Azure DevOps, Jira and MCP servers from the web. Done 2026-10-14 (phase 2 and 3 leftovers on the item).
 - #60: Claude sign-in from the web (`claude setup-token` driven by the runner; MCP sign-in with paste-back). Done 2026-10-14 (MVP).
 - #64: Manual QA after Finalize, assigned to the person who started the card. Done 2026-10-14.
+- #66: Azure DevOps tokens of two organisations no longer overwrite each other. Done 2026-10-14.
 
 ## 2026-10-14 (done)
+
+### 66. Azure DevOps tokens of two organisations overwrite each other
+
+`FileTokenStore` (`apps/runner/src/forge/tokens.ts`) keyed tokens by `provider@host`, so two Azure DevOps organisations on
+`dev.azure.com` shared one slot and the second PAT replaced the first (Azure PATs are organization-scoped).
+
+**Done (2026-10-14).** Azure DevOps tokens are now keyed `azure-devops@<host>#<organization>` (organization lower-cased);
+other providers keep `provider@host`. `TokenStore.get` and `remove` take the organization, and `remove` drops only that
+organization's token. An old `azure-devops@dev.azure.com` entry that carries an `organization` is migrated on read to the
+organization key (it stays readable; the file is rewritten in the new shape on the next save). Every lookup passes the
+organization: git auth takes it from the remote url (`dev.azure.com/<org>/...` and `<org>.visualstudio.com`, via
+`parseRemote`), the REST calls from the first path segment of the API url, `status()` from the forge's organization, the
+Integrations adapter (connect, test, remove) and `git-connect --organization` through that adapter, and `gitConnections`
+reports one status per connected organization. A forge without an organization (and no `AZURE_DEVOPS_ORGANIZATION`) finds no
+PAT and falls back to the service principal or `az login`. Tests: `apps/runner/test/azure-tokens.test.ts`.
 
 ### 58. Start action: run the project on a branch
 

@@ -142,12 +142,28 @@ export async function gitConnections(
     for (const t of known) if (t.provider === provider) list.add(t.host);
     for (const [h, s] of env.ssh?.settings.all() ?? []) if (s.provider === provider) list.add(h);
     for (const host of list) {
-      const forge =
-        provider === 'azure-devops' ? new AzureDevOpsForge(env, host) : forgeOfKind(env, provider, host);
-      if (!forge.status) continue;
-      const conn = await forge.status();
-      const ssh = sshInfo(env.ssh, provider, host);
-      out.push(ssh ? { ...conn, ssh } : conn);
+      // Azure DevOps: one status per connected organization (their PATs are separate), one without when none is.
+      const orgs =
+        provider === 'azure-devops'
+          ? [
+              ...new Set(
+                known
+                  .filter((t) => t.provider === provider && t.host.toLowerCase() === host.toLowerCase())
+                  .map((t) => t.organization)
+                  .filter((o): o is string => !!o),
+              ),
+            ]
+          : [];
+      for (const org of orgs.length ? orgs : [undefined]) {
+        const forge =
+          provider === 'azure-devops'
+            ? new AzureDevOpsForge(env, host, org)
+            : forgeOfKind(env, provider, host);
+        if (!forge.status) continue;
+        const conn = await forge.status();
+        const ssh = sshInfo(env.ssh, provider, host);
+        out.push(ssh ? { ...conn, ssh } : conn);
+      }
     }
   }
   return out;

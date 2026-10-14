@@ -305,7 +305,7 @@ describe('Azure DevOps adapter (REST stubbed)', () => {
         },
       ],
     ]);
-    const az = new AzureDevOpsForge(env({ fetch: f.fetch, tokens: tokens() }));
+    const az = new AzureDevOpsForge(env({ fetch: f.fetch, tokens: tokens() }), 'dev.azure.com', 'acme');
     expect(await az.status?.()).toMatchObject({ state: 'connected', account: 'acme', method: 'token' });
     const list = await az.listRepos({});
     expect(list[0]).toMatchObject({
@@ -334,7 +334,7 @@ describe('Azure DevOps adapter (REST stubbed)', () => {
     const bad = fakeFetch([
       ['GET https://dev.azure.com/acme/_apis/projects', new Response('<html>', { status: 203 })],
     ]);
-    const az = new AzureDevOpsForge(env({ fetch: bad.fetch, tokens: tokens() }));
+    const az = new AzureDevOpsForge(env({ fetch: bad.fetch, tokens: tokens() }), 'dev.azure.com', 'acme');
     expect((await az.status?.())?.state).toBe('not_connected');
     const none = new AzureDevOpsForge(env());
     expect((await none.status?.())?.state).toBe('not_connected');
@@ -574,7 +574,7 @@ describe('connections and the token store', () => {
     const s = new FileTokenStore(file);
     s.set({ provider: 'azure-devops', host: 'dev.azure.com', token: 'abc', organization: 'acme' });
     expect(statSync(file).mode & 0o777).toBe(0o600);
-    expect(new FileTokenStore(file).get('azure-devops', 'dev.azure.com')?.organization).toBe('acme');
+    expect(new FileTokenStore(file).get('azure-devops', 'dev.azure.com', 'acme')?.organization).toBe('acme');
     expect(JSON.stringify(s.list())).not.toContain('abc');
     expect(readFileSync(file, 'utf8')).toContain('abc');
   });
@@ -656,7 +656,11 @@ describe('Azure DevOps with a Microsoft Entra service principal', () => {
     const t = new MemoryTokenStore();
     t.set({ provider: 'azure-devops', host: 'dev.azure.com', token: 'PAT', organization: 'acme' });
     const f = fakeFetch([['GET https://dev.azure.com/acme/_apis/projects', { count: 1 }]]);
-    const withPat = new AzureDevOpsForge(env({ fetch: f.fetch, tokens: t, processEnv: sp }));
+    const withPat = new AzureDevOpsForge(
+      env({ fetch: f.fetch, tokens: t, processEnv: sp }),
+      'dev.azure.com',
+      'acme',
+    );
     expect(await withPat.status?.()).toMatchObject({ method: 'token' });
     expect(f.calls.some((c) => c.url.includes('login.microsoftonline.com'))).toBe(false);
 

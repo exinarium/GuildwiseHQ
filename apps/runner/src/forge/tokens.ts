@@ -19,20 +19,45 @@ export interface StoredToken {
  * the server says connected or not, never the token.
  */
 export interface TokenStore {
-  get(provider: ConnectableForge, host: string): StoredToken | undefined;
+  /** `organization` is required to find an Azure DevOps token (PATs are organization-scoped); other providers ignore it. */
+  get(provider: ConnectableForge, host: string, organization?: string): StoredToken | undefined;
   set(t: Omit<StoredToken, 'savedAt'>): void;
-  remove(provider: ConnectableForge, host: string): boolean;
+  /** Removes only that organization's token for Azure DevOps. */
+  remove(provider: ConnectableForge, host: string, organization?: string): boolean;
   list(): Array<Omit<StoredToken, 'token'>>;
 }
 
-const key = (p: string, h: string) => `${p}@${h.toLowerCase()}`;
+/**
+ * `provider@host`, and for Azure DevOps `azure-devops@host#organization` (organization lower-cased): two organisations on
+ * dev.azure.com each keep their own PAT.
+ */
+export const tokenKey = (p: string, h: string, org?: string): string =>
+  p === 'azure-devops' && org?.trim()
+    ? `${p}@${h.toLowerCase()}#${org.trim().toLowerCase()}`
+    : `${p}@${h.toLowerCase()}`;
+
+/** Moves an old `azure-devops@host` entry that carries an organization to its organization key (the new key wins). */
+function migrate(data: Record<string, StoredToken>): Record<string, StoredToken> {
+  const out: Record<string, StoredToken> = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (v?.provider === 'azure-devops' && v.organization && !k.includes('#')) continue;
+    out[k] = v;
+  }
+  for (const [k, v] of Object.entries(data)) {
+    if (v?.provider === 'azure-devops' && v.organization && !k.includes('#')) {
+      const nk = tokenKey(v.provider, v.host, v.organization);
+      if (!out[nk]) out[nk] = v;
+    }
+  }
+  return out;
+}
 
 export class FileTokenStore implements TokenStore {
   constructor(private readonly file: string) {}
 
   private read(): Record<string, StoredToken> {
     try {
-      return JSON.parse(readFileSync(this.file, 'utf8')) as Record<string, StoredToken>;
+      return migrate(JSON.parse(readFileSync(this.file, 'utf8')) as Record<string, StoredToken>);
     } catch {
       return {};
     }
@@ -51,20 +76,21 @@ export class FileTokenStore implements TokenStore {
     }
   }
 
-  get(provider: ConnectableForge, host: string) {
-    return this.read()[key(provider, host)];
+  get(provider: ConnectableForge, host: string, organization?: string) {
+    return this.read()[tokenKey(provider, host, organization)];
   }
 
   set(t: Omit<StoredToken, 'savedAt'>) {
     const data = this.read();
-    data[key(t.provider, t.host)] = { ...t, savedAt: new Date().toISOString() };
+    data[tokenKey(t.provider, t.host, t.organization)] = { ...t, savedAt: new Date().toISOString() };
     this.write(data);
   }
 
-  remove(provider: ConnectableForge, host: string) {
+  remove(provider: ConnectableForge, host: string, organization?: string) {
     const data = this.read();
-    if (!data[key(provider, host)]) return false;
-    delete data[key(provider, host)];
+    const k = tokenKey(provider, host, organization);
+    if (!data[k]) return false;
+    delete data[k];
     this.write(data);
     return true;
   }
@@ -78,14 +104,14 @@ export class FileTokenStore implements TokenStore {
 /** In-memory store for tests. */
 export class MemoryTokenStore implements TokenStore {
   private readonly m = new Map<string, StoredToken>();
-  get(provider: ConnectableForge, host: string) {
-    return this.m.get(key(provider, host));
+  get(provider: ConnectableForge, host: string, organization?: string) {
+    return this.m.get(tokenKey(provider, host, organization));
   }
   set(t: Omit<StoredToken, 'savedAt'>) {
-    this.m.set(key(t.provider, t.host), { ...t, savedAt: new Date().toISOString() });
+    this.m.set(tokenKey(t.provider, t.host, t.organization), { ...t, savedAt: new Date().toISOString() });
   }
-  remove(provider: ConnectableForge, host: string) {
-    return this.m.delete(key(provider, host));
+  remove(provider: ConnectableForge, host: string, organization?: string) {
+    return this.m.delete(tokenKey(provider, host, organization));
   }
   list() {
     return [...this.m.values()].map(({ token: _t, ...rest }) => rest);

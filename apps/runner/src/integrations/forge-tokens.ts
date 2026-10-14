@@ -205,7 +205,7 @@ export class AzureDevOpsIntegration implements IntegrationAdapter {
       const s = fromGitConnection('azure-devops', org, 'workstation', c);
       const saved = this.env.forge.tokens
         .list()
-        .find((t) => t.provider === 'azure-devops' && t.organization === org);
+        .find((t) => t.provider === 'azure-devops' && t.organization?.toLowerCase() === org.toLowerCase());
       return { ...s, site: org || s.site || host, ...(saved?.savedAt ? { savedAt: saved.savedAt } : {}) };
     } catch (err) {
       return {
@@ -241,7 +241,7 @@ export class AzureDevOpsIntegration implements IntegrationAdapter {
   }
 
   async remove(org: string): Promise<Outcome> {
-    this.env.forge.tokens.remove('azure-devops', defaultHost('azure-devops'));
+    this.env.forge.tokens.remove('azure-devops', defaultHost('azure-devops'), org);
     this.env.touchRecheck();
     return this.status(org);
   }

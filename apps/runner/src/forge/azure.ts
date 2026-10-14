@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { GitConnection, RepoRef } from '@aom/shared';
+import { type GitConnection, parseRemote, type RepoRef } from '@aom/shared';
 import { errText, ForgeHttpError, ForgeUnavailableError, isHttps, jsonCall, tokenHelperEnv } from './http.ts';
 import type {
   BranchRules,
@@ -115,13 +115,15 @@ export class AzureDevOpsForge implements Forge {
     }
   }
 
-  private async auth(): Promise<{
+  private async auth(organization?: string): Promise<{
     header: string;
     pat?: string;
     organization?: string;
     servicePrincipal?: boolean;
   } | null> {
-    const t = this.env.tokens.get('azure-devops', this.host);
+    const e = this.env.processEnv ?? process.env;
+    const want = organization ?? this.organization ?? (e.AZURE_DEVOPS_ORGANIZATION?.trim() || undefined);
+    const t = this.env.tokens.get('azure-devops', this.host, want);
     if (t)
       return {
         header: `Basic ${Buffer.from(`:${t.token}`).toString('base64')}`,
@@ -145,7 +147,14 @@ export class AzureDevOpsForge implements Forge {
   }
 
   private async call<T>(url: string, init?: { method?: string; body?: unknown }): Promise<T> {
-    const a = await this.auth();
+    // The organization is the first path segment of every API url: its own PAT is used.
+    let urlOrg: string | undefined;
+    try {
+      urlOrg = decodeURIComponent(new URL(url).pathname.split('/')[1] ?? '') || undefined;
+    } catch {
+      urlOrg = undefined;
+    }
+    const a = await this.auth(urlOrg);
     if (!a)
       throw new ForgeUnavailableError(
         'not connected to Azure DevOps: run `aom-runner git-connect azure-devops`',
@@ -192,7 +201,7 @@ export class AzureDevOpsForge implements Forge {
 
   async gitAuth(url: string): Promise<GitAuth> {
     if (!isHttps(url)) return { args: [], env: {} };
-    const a = await this.auth();
+    const a = await this.auth(parseRemote(url)?.namespace[0]);
     if (!a) return { args: [], env: {} };
     if (a.pat) return { args: [], env: tokenHelperEnv(new URL(url).host, 'pat', a.pat) };
     // Entra token: an Authorization header for this host, held in the git process environment only.
