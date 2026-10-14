@@ -46,6 +46,8 @@ mkdir -p /tmp/guide-tools && (cd /tmp/guide-tools && npm init -y && npm i sharp)
 node ../docs/guide/prepare-assets.mjs
 ```
 
+The global setup gives the stack its own git identity (`GIT_CONFIG_GLOBAL`, the demo owner Pieter Demo), because commits are refused without one. Manual QA is switched off for the Web shop while the history is seeded and on again for the last seed step (one card in QA). The mock DevOps engineer cannot start real services: the capture of the Run a branch panel sets the environment to running in the guide database, and puts it back afterwards.
+
 Without `AOM_GUIDE_KEEP` the stack is stopped at the end, like in the default e2e run. The tests named `seed: ...` build the world (organization of Pieter with an Admin and a Member, a Guest, workstations, agents, cards in every state, a phase, schedules, interests, budgets, a platform administrator with support requests, and the next morning's floor report; the last seed step moves the test clock to the next morning) and are recorded in `$AOM_E2E_DIR/guide-state.json`; the tests named `capture: ...` only look. The one capture that changes something (`budgets`) puts the budget back.
 
 ## Adding a figure

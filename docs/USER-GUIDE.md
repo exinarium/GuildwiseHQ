@@ -29,6 +29,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [3.2 Turn on two-factor login (3 minutes)](#32-turn-on-two-factor-login-3-minutes)
   - [3.3 Take the tour (1 minute)](#33-take-the-tour-1-minute)
   - [3.4 Add a workstation (5 minutes)](#34-add-a-workstation-5-minutes)
+  - [3.4a Connect your integrations](#34a-connect-your-integrations)
   - [3.5 Hire your first agents (2 minutes)](#35-hire-your-first-agents-2-minutes)
   - [3.6 Create your first project (1 minute)](#36-create-your-first-project-1-minute)
   - [3.7 Create your first card (2 minutes)](#37-create-your-first-card-2-minutes)
@@ -54,6 +55,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [4.18 Chatting with agents](#418-chatting-with-agents)
   - [4.19 Cloud workstations: a VPS or a Codespace](#419-cloud-workstations-a-vps-or-a-codespace)
   - [4.20 The architect: investigate and design](#420-the-architect-investigate-and-design)
+  - [4.21 Run a branch to try it](#421-run-a-branch-to-try-it)
   - [4.22 Your CEO](#422-your-ceo)
 - [5. For Members](#5-for-members)
   - [5.1 What you can do](#51-what-you-can-do)
@@ -74,6 +76,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [7.8 Simulation organizations, demos and deleting them](#78-simulation-organizations-demos-and-deleting-them)
 - [8. Everyday workflows](#8-everyday-workflows)
   - [8.1 A feature, from intake to deploy](#81-a-feature-from-intake-to-deploy)
+  - [Reopening a finished card](#reopening-a-finished-card)
   - [8.2 From research to a project](#82-from-research-to-a-project)
   - [8.3 Setting up interests without being flooded](#83-setting-up-interests-without-being-flooded)
   - [8.4 Controlling spend](#84-controlling-spend)
@@ -91,6 +94,8 @@ This guide is for people who have never worked with AI agents before. You do not
 - [Appendix B. More documentation](#appendix-b-more-documentation)
 
 <!-- /toc -->
+
+
 
 
 
@@ -283,6 +288,10 @@ If something goes wrong, the installer says what happened and links to the insta
 
 Once the workstation is paired, open **Integrations** in the sidebar (or the **Integrations** button on the workstation's card). With several workstations you choose one first. Each tile is one connection with its status: *Connected*, *Not connected*, *Refused*, *Expired*, *Needs sign-in*, *Unreachable*, *Tool missing* or *Not needed*; it also shows who it is signed in as, the scopes (missing ones in amber), when it expires and when it was last checked. **Connect**, **Replace**, **Test** and **Remove** are on the tile; "How to set it up" lists the steps with links to where the token is made, and "From a terminal" gives the command for a machine without a browser.
 
+![The Integrations page: pick a workstation](guide/assets/integrations-index.jpg)
+
+![The Integrations of one workstation: each connection is a tile with its status](guide/assets/integrations.jpg)
+
 What you type is **sealed in your browser** with a key that belongs to that workstation (the page shows the key id; `aom-runner doctor` shows the same id) and only the workstation can open it. Guildwise relays it and cannot read it; it is checked with the provider on the workstation and saved there only when the provider accepts it. If you would rather never send a credential from the browser, run `aom-runner integrations allow-web off` on the workstation: the page then says it is turned off there and you use the terminal commands.
 
 - **Claude Code.** *Sign in with your Claude subscription*: **Connect**, open the link, sign in at claude.ai, copy the code the page shows and paste it back. The workstation keeps a year-long token and switches to it by itself; agents wait no longer for a login that expired. Or paste an **Anthropic API key** (best for a cloud workstation), or a token made elsewhere with `claude setup-token`. A subscription is for your own use.
@@ -426,6 +435,8 @@ What you will find there:
 - **MCP servers:** external tools such as Jira or Confluence for your agents, taken from the **Claude Code plugins** installed and enabled on your workstation (the runner reports them; nothing secret is sent). Only the **organization Owner** can grant a server to a project, under **Grant an MCP server**; **Remove** takes it away; everyone on the project can read the list. Two things are needed before an agent can use a server: the grant here **and** the server in the agent's tool permissions, either through a custom role (Organization, Roles, "What it may do", "External tools") or, for any hired agent including the built-in roles, the **External tools (MCP)** switches on its card on the Agents page (see "External tools (MCP)" under the Agents page; only the Owner can switch them on). Agents then work with the access your signed-in plugin has, so a server whose tools can write, send or delete lets an agent change data in that service as you. Each server carries a warning (judged from its tool names when they are known, otherwise a general one): prefer read-only use and grant such servers only to roles you trust with it. The tools an agent called are listed on the card under **External tools used**. The DevOps engineer is not affected. Claude.ai connectors and servers you added by hand are not offered yet.
 - **Architect:** whether new cards are investigated and designed before they are built (off by default), whether the latest main branch is merged first (on by default) and where the architect's reports go (4.20).
 - **Commit as:** the name and e-mail every commit of the project carries, so the work reads as yours. Leave it empty to use the repository's own git setting, then your workstation's global one. The page shows which one each workstation uses; with none set, nothing is committed and the desk says so. Agents never commit under their own names.
+
+![The Commit as panel in the project settings](guide/assets/commit-as.jpg)
 - **How finished work lands:** **Commit and push to the working branch** (the default; no pull request) or **Pull request I approve** (4.4).
 - **Team:** who works in the project (see below).
 - **Merging:** the setting **Merge large changes without my approval** (off by default). Read chapter 4.12 before turning it on.
@@ -570,6 +581,8 @@ Setting a budget below what was already spent pauses the project at once. Member
 
 **Value report.** At the top of the Costs page: "This month: 42 cards, ~168 hours of work, $84 usage, ~80x return", the change against last month, and **Next best actions** (cards that have not moved for days, agents that fail often, projects with no work). The hours are an estimate of what a person would have needed, by card type; Owners and Admins can change them under **Adjust the estimates**. **Export value report (CSV)** downloads it.
 
+![The value report at the top of the Costs page](guide/assets/value-report.jpg)
+
 **Monday briefing.** Every Monday at 08:00 (organization time) you get an e-mail with what was finished, what waits on you, what is blocked and the health of your agents and workstations; Owners and Admins also get spend against budget and the value report. Switch it off under **Settings, Monday briefing**.
 
 **Currency.** Under **Costs, Currency and prices** type a three-letter currency code and how many units make one US dollar (for example `EUR` and `0.92`). Changing the rate changes how history is shown, not what was recorded.
@@ -666,6 +679,12 @@ Then add an automation **When an e-mail arrives** and choose the inbox. **Fill t
 **Intake and the outbox.** The **Intake** page (sidebar, Owners and Admins) is where you hand the BA a ticket: paste a Jira key or a GitHub issue address and the BA reads it, asks you about anything unclear, maps it to a project and drafts the cards. Updates the agents want to post back to the ticket (a comment, a resolution) wait on your desk as **Outbound update** items. You can edit them, approve or reject. Nothing is posted without your approval, and agent names and internal details are scrubbed from the text. Jira and GitHub logins stay on your workstation.
 
 **Batch intake.** To bring in many tickets without a chat per ticket, open **Intake**, switch to **Batch**, paste one ticket per line (Jira keys or URLs, GitHub issues; up to 50), optionally pick a project for all of them and add a note, then **Start batch**. The BA works through the tickets in the background, two at a time, doing what it does in a chat: it reads the ticket, maps it to a project, writes the spec and creates the cards. Tickets that already have a card are skipped ("skipped: already P4-12"). When the BA cannot go on with a ticket (unclear, no project fits, missing access) it asks one question on your desk that names the ticket; your answer resumes that ticket and the others carry on. The batch page shows each ticket's status, its cards and the question, with **Retry** for failed tickets and **Cancel batch** (tickets the BA is already working on finish).
+
+![The Batch form: one ticket per line](guide/assets/intake-batch-form.jpg)
+
+![A finished batch: each ticket with its status and its card](guide/assets/intake-batch.jpg)
+
+![A batch where the BA waits for your answer](guide/assets/intake-batch-question.jpg)
 
 ![Intake](guide/assets/intake-view.jpg)
 
@@ -769,6 +788,12 @@ Once a reviewer approves, the card moves to **Test**. A tester runs the tests of
 
 **Manual QA.** When a card is finalized (merged, pushed or turned into a pull request) it does not go straight to Done. It goes to the **QA** column, assigned to the person who started it: whoever ran the intake chat or batch, else the card's creator, else the project owner. An agent (the tester, or the BA when no tester is hired) writes the test steps on the card, grouped by scenario (happy path, edge cases, error handling, regressions, UI and data checks). The assignee gets a desk item and the card shows under **Waiting for my QA** on the board. They choose:
 
+![A card in QA: the test steps and Pass, Skip the test, Send back](guide/assets/qa-panel.jpg)
+
+![The QA item on the desk](guide/assets/desk-qa.jpg)
+
+![The board with the Waiting for my QA filter](guide/assets/board-qa.jpg)
+
 - **Pass**: the card is accepted and moves to Done.
 - **Skip the test**: not tested; the card moves to Done and the card says so. Add a reason if you like.
 - **Send back**: a comment is required. The card returns to Build as rework with your comment as a review comment for the builder, in the same branch that already holds the merged work, and goes through review, test, finalize and QA again. You never have to reopen a closed card.
@@ -777,6 +802,8 @@ Once a reviewer approves, the card moves to **Test**. A tester runs the tests of
 The update that the BA drafts for the Jira or GitHub ticket is held while the card is in QA. **Passing the card or skipping the test approves it**: it is posted to the ticket at once from the card owner's workstation, with no further approval on the desk. A card that is sent back keeps its update held until a later pass. The assignee, the project's owner and managers, and the organization's Owners and Admins can act on a card in QA.
 
 Manual QA is on for every project. The project Owner and the organization's Owners and Admins can switch it off in the project's **Settings**, **Manual QA before done**. The setting counts when a card is finalized: a card already in progress follows whatever is set at that moment, and a card that is already in QA stays there until someone decides. Scheduled (automatic) cards and investigation-only cards have no QA.
+
+![Manual QA before done in the project settings](guide/assets/manual-qa-setting.jpg)
 
 After a merge, a **full suite** card runs the entire end-to-end suite once. If it fails, a bug card and a desk notice follow. **Run regression** on the board runs the whole suite on demand.
 
@@ -901,13 +928,19 @@ You can start a project on any branch of any repository to try it, without leavi
 
 **Start it.** On a card that has a branch, press **Run this branch**: the card's repository runs at the card branch and the project's other repositories at their working branch. On the project's board, press **Run branch...**: choose the workstation, tick the repositories and pick a branch for each, and, when the project declares several services, tick the ones you want (the ones they need are ticked for you). Only online workstations with an up to date runner that hold a clone of the repository are offered.
 
+![The Run a branch dialog](guide/assets/dlg-run-branch.jpg)
+
 **What happens.** The workstation's DevOps engineer reads the repository's `BUILD.md` and the **run instructions** in Project settings, works out how to run the project, starts each service and checks it is healthy. You watch the panel: its state (preparing, starting, running, degraded, failed), every service with its state, ports and links, the commit each repository runs at, and **Logs** (the last 500 lines, then live). The first start takes a while because the engineer works it out; what worked is saved as the project's **plan** for that workstation (read-only under Project settings, **Run and test**). Later starts **replay the plan** in seconds, with no DevOps run. If the replay fails, or you changed the run instructions, the declared services or `BUILD.md`, the plan is marked stale or failed and the engineer repairs it and saves a new version. Nothing is added to your repositories.
+
+![A running environment: services, links, commits and the stop time](guide/assets/run-panel.jpg)
 
 **Restart.** **Restart** starts the services again at the same commit. **Update & restart** first brings the run copy of the code up to the head of its branch (it refuses if the branch was rewritten) and runs the install steps that need it. A stopped environment keeps its run copy for a day, so Restart brings it back quickly.
 
 **Stop it.** **Stop** ends the services; the run copy of the code is kept for a day, then removed. An environment stops by itself after the project's time (8 hours by default); **Extend** adds the same again. A workstation runs at most two environments at once. The **Workstations** page lists everything running on a machine, for all projects.
 
 **Project settings, Run and test.** Free-text run instructions for the project and for each repository (they win over `BUILD.md`), the stop time, whether the branch's code may use Docker (off by default; with it on, Docker steps run outside any sandbox, so only for projects you trust), and optional **services** (name, repository, folder, command, ports as `name:default:ENV_VAR`, health check, what it starts after, the path of an env file on the workstation). Declared services are used exactly as written. Put secrets in an env file on the workstation, never in the settings: only its path is stored.
+
+![Project settings, Run and test](guide/assets/run-settings.jpg)
 
 > **Good to know:** the links point at `localhost` on the workstation. If your browser is on another machine, the panel shows the `ssh -L` command that forwards the ports. The services run in the runner's sandbox: they use the machine's network, but can write only to the run copy and cannot read your credential folders. Docker services (only if you allowed Docker) run outside the sandbox, and the panel says so.
 
@@ -1113,6 +1146,8 @@ Four situations you will meet again and again, start to finish.
 A card that is **Done** or **Cancelled** can go back to work. Open it and click **Reopen** (the card's creator and the project owner see it). Pick the stage to reopen into (it starts on the first stage an agent works, usually Build), give a reason and confirm. The card keeps its branch and the pull request opened for it: the next agent continues on the same branch, and when you finalize with **Open a pull request** again, Guildwise reuses the pull request that is still open instead of failing. The card's timeline reads "Reopened by ... into Build: <reason>", and the card thread shows the earlier pull request link so the agent knows it exists.
 
 **Archive.** A Done or Cancelled card leaves the board 24 hours after it was finished. The project's **Archive** (a link in the board header) lists these cards newest first, with search by reference, title or ticket key, filters for status, agent and date, and paging. An archived card opens as usual and can be reopened; a reopened card is back on the board. Reports and metrics still count archived cards.
+
+![The Archive of a project](guide/assets/archive.jpg)
 
 **Priority and completion action at any time.** On an open card, even while an agent is working on it, **Priority** and **Completion action** (expert mode) are changed in place on the card page. The completion action is locked only while a finalise waits for approval or runs; a change then applies to the next finalise. A Done card still takes a new priority; a Cancelled card takes nothing.
 

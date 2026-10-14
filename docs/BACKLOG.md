@@ -124,14 +124,6 @@ Leftovers on done items: #20 (MCP tool names per server are not listed; refreshe
 a configured token is used) and #27 (a reopened research card keeps its published status; a reopened cancelled bug child
 does not put its resumed parent back to waiting).
 
-### 17. Stale figures in the user guide
-
-6 of the 87 figures in `docs/guide` still show old screens (`desk-branch`, the test-stage, conflict and large-merge
-scenes, the phases-in-reporting scenes, desk items with the simple-mode / saved-work hygiene wording). The guide's seed
-steps in the Playwright `guide` project fail on simple mode (phase reporting 409 `phase_not_open`, the hygiene
-working-branch question, test-stage scenes, the edited-card step). Fix the seeds the way the e2e specs were fixed
-(expert mode where needed), re-capture, rebuild `guide.html` and the PDF.
-
 ## 2026-10-11
 
 ### 3. Affiliate programme for influencers
@@ -242,6 +234,7 @@ The details of each done item follow this list, by date.
 - #36: Savings calculator on the landing page. Done 2026-10-14.
 - #37: Value report per organisation on the Costs page (hours estimate by card type, trend, next best actions, CSV). Done 2026-10-14.
 - #38: Monday briefing e-mail per member (long version for Owners and Admins, opt-out in Settings). Done 2026-10-14.
+- #17: Stale figures in the user guide: guide seeds fixed, every figure re-captured, figures for the newer features, guide.html and PDF rebuilt. Done 2026-10-14.
 
 ## 2026-10-14 (done)
 
@@ -424,6 +417,38 @@ noisy or looping sender cannot use up an organisation's allowance.
 **Done (2026-10-14).** `AOM_INBOUND_RATE_PER_SENDER_PER_HOUR` (default 20, `0` = off) next to the per-organisation limit. A message over it is
 stored as skipped with reason `sender_rate_limited` (no text) and one desk notice per sender and organisation per day says who. Test
 `inbound-mail.test.ts`; `docs/DEPLOY.md` variable row.
+
+### 17. Stale figures in the user guide
+
+6 of the 87 figures in `docs/guide` still show old screens (`desk-branch`, the test-stage, conflict and large-merge
+scenes, the phases-in-reporting scenes, desk items with the simple-mode / saved-work hygiene wording). The guide's seed
+steps in the Playwright `guide` project fail on simple mode (phase reporting 409 `phase_not_open`, the hygiene
+working-branch question, test-stage scenes, the edited-card step). Fix the seeds the way the e2e specs were fixed
+(expert mode where needed), re-capture, rebuild `guide.html` and the PDF.
+
+**Done (2026-10-14).** The Playwright `guide` project runs again on the current release and every figure was taken again from
+one fresh run (`docs/guide/assets`: 85 figures before, 100 now). Seed fixes (`e2e/tests/guide-screenshots.spec.ts`,
+`e2e/guide-global-setup.ts`): cards use the completion actions `pr` and `merge` (`push_branch` is retired); Manual QA is
+switched off for the Web shop while the history is seeded (it is on by default, so every finalized card would wait in QA) and
+on again at the end for one QA card; the phase cards are all assigned before any of them is waited for (the phase leaves
+`open` as soon as its cards are done: `phase_not_open`); the hygiene question is made in a repository without `main` or
+`master` (simple mode confirms those without asking; the question is the working-branch one, with `trunk` and `develop`
+as options); the conflict scene now waits for the DevOps conflict attempt (the card waits "on DevOps", it no longer goes
+straight back to Build); the run uses a git identity of its own (`GIT_CONFIG_GLOBAL` with the demo owner), because commits
+are refused without one since #65. The stale scenes (`desk-branch`, test stage, conflict, large merge, phases in reporting,
+the hygiene wording on the desk) show the current screens. New figures (15) with their text in `docs/USER-GUIDE.md`:
+`integrations-index`, `integrations` (3.4a), `commit-as` (4.3), `value-report` (4.6), `intake-batch-form`,
+`intake-batch`, `intake-batch-question` (4.8), `qa-panel`, `desk-qa`, `board-qa`, `manual-qa-setting` (4.12), `archive`
+(8.1), `dlg-run-branch`, `run-panel`, `run-settings` (4.21). `guide.html` and the PDF (94 pages) were rebuilt with
+`assemble-guide.mjs` and `build-guide.mjs`.
+
+Known limits of the demo: the mock DevOps engineer cannot start real services, so the environment of the run figure is
+set to "running" in the guide database (demo data); every Integrations tile reads "Not connected" because the mock runner
+holds no credentials; the **approval** step of custom workflows (`purpose: 'approval'`) is still reserved on the server,
+so it has no figure; the Trust and POPIA pages have no section in the guide. Found on the way, not fixed here: migration
+`1867_intake_batches.sql` makes `intake_batches.org_id` reference `users(id)` instead of the organizations table, so
+**Start batch** fails with a 500 for any organization whose id is not also a user id (the guide database drops the
+constraint).
 
 ### 58. Start action: run the project on a branch
 
