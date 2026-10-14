@@ -15,6 +15,16 @@ run them, when enabled, against a **local** environment (started on the workstat
 **remote** one (a URL configured in the project). The tester's sandbox then allows exactly that host (localhost ports or
 the remote host), nothing else.
 
+### 67. Support e-mail into the Support console; an inbox for every organisation
+
+**Owner request (2026-10-14):** route support e-mail through inbound mail (SendGrid Inbound Parse, #62) so the console
+updates itself: a customer's e-mail answer to a support mail lands on its request (and reopens an answered or closed
+one), and a new e-mail to the support routing address opens a new request. Support mails then carry a routing Reply-To
+(e.g. `support+<ref>@in.guildwisehq.com`) instead of the support mailbox; staff still get every message by e-mail.
+Every new organisation gets an inbox address automatically when it is created (existing organisations without one get
+one too). Help section and a tooltip on the inbox page explain forwarding (Gmail, Outlook, aliases). DNS (MX for
+`in.guildwisehq.com`) and the SendGrid parse host are set up on deploy day; everything else is built ahead.
+
 ## Direction (owner, 2026-10-13)
 
 Guildwise started as a tool for software teams (the owner built it for his own work), but the aim is **running a whole
