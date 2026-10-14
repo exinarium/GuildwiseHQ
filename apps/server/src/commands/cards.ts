@@ -80,7 +80,9 @@ export type CardView = FillableCard & WorkflowCardView;
  * the workflows use (`docsNeeded`, `designNeeded`, `investigationOnly`, `riskTier`, ...), then `fields`.
  */
 export function workflowView(c: Row): WorkflowCardView {
-  return { ...c, ...cardView(c) };
+  // A card that has a QA document is in the manual QA flow: its QA stages are active (`when manualQa` / `qaAgent`).
+  // The flags for a card that has not left Finalize are derived by `finalizeNext` (commands/qa-flow.ts).
+  return { ...c, ...cardView(c), ...(c.qa ? { manualQa: true, qaAgent: true } : {}) };
 }
 
 export function cardView(c: Row): CardView {
@@ -619,11 +621,38 @@ export async function moveCard(
       throw badRequest('unknown_stage', `stage '${toStage}' does not exist in this card's workflow`);
     if (stage.kind === 'terminal')
       throw badRequest('invalid_stage', 'use cancel or finalize to close a card');
+    // Manual QA opens when a card is finalized (it needs an assignee and a desk item): it is not a place to move to.
+    if (stage.kind === 'human' || (stage.id === 'qa_steps' && wf?.definition.key === 'code'))
+      throw badRequest('invalid_stage', 'manual QA starts by itself when the card is finalized');
     const missing = stage.kind === 'agent' ? requiredMissing(cardView(card), stage) : [];
     if (missing.length)
       throw unprocessable('missing_fields', `missing required fields: ${missing.join(', ')}`, { missing });
     const status = stage.kind === 'manual' ? 'draft' : 'queued';
+    // Moving a card out of manual QA closes the person's desk item.
+    const qa = card.qa as { deskItemId?: string | null } | null;
+    const qaItem =
+      (card.stage === 'qa_steps' || card.stage === 'manual_qa') && qa?.deskItemId
+        ? await one(tx, 'SELECT status FROM desk_items WHERE id=$1', [qa.deskItemId])
+        : undefined;
     const events: AppendInput[] = [
+      ...(qaItem?.status === 'open' && qa?.deskItemId
+        ? [
+            {
+              streamId: streamId.desk(qa.deskItemId),
+              event: {
+                type: 'DeskItemResolved' as const,
+                payload: {
+                  deskItemId: qa.deskItemId,
+                  resolution: 'dismissed' as const,
+                  note: `Moved to ${toStage} by ${user.displayName}`,
+                  by: { kind: 'user' as const, userId: user.id },
+                },
+              },
+              actor: userActor(user.id),
+              scope: projectScope(card.org_id, card.project_id),
+            },
+          ]
+        : []),
       ...releaseEvents(card, user.id, 'manual'),
       {
         streamId: streamId.card(card.id),

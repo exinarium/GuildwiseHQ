@@ -128,6 +128,8 @@ JSON
     const proj = await api.post('/api/projects', { data: { key, name } });
     expect(proj.status(), await proj.text()).toBe(201);
     const id = (await proj.json()).project.id as string;
+    // Manual QA after Finalize is on for real projects; this spec runs cards to Done, so it is off here.
+    expect((await api.put(`/api/projects/${id}/manual-qa`, { data: { enabled: false } })).status()).toBe(200);
     const add = await api.post(`/api/projects/${id}/repos`, {
       data: { name: repo, remoteUrl: paths.origin, workingBranch: 'main' },
     });

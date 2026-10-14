@@ -10,6 +10,7 @@ import { ConcurrencyCapPanel } from '../components/ConcurrencyCapPanel.tsx';
 import { ConvertPanel } from '../components/ConvertPanel.tsx';
 import { DeployTargetsPanel } from '../components/DeployTargetsPanel.tsx';
 import { FullSuitePanel } from '../components/FullSuitePanel.tsx';
+import { ManualQaPanel } from '../components/ManualQaPanel.tsx';
 import { McpServersPanel } from '../components/McpServersPanel.tsx';
 import { MembersPanel } from '../components/MembersPanel.tsx';
 import { MergePolicyPanel } from '../components/MergePolicyPanel.tsx';
@@ -382,6 +383,15 @@ export function ProjectSettings() {
       {project && traits.usesRepos && (
         <div id="architect" className="scroll-mt-20">
           <ArchitectPanel
+            projectId={id}
+            project={project}
+            canChange={project.myRole === 'owner' || canConvert}
+          />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="manual-qa" className="scroll-mt-20">
+          <ManualQaPanel
             projectId={id}
             project={project}
             canChange={project.myRole === 'owner' || canConvert}

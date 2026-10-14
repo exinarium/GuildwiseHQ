@@ -49,7 +49,14 @@ import { cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
 /** Events after which a card may sit in a sub-workflow stage (and a blocked one may have been released). */
 const ENTRY_EVENTS = new Set(['StageCompleted', 'CardSpecified', 'CardMovedByManager', 'DeskItemResolved']);
 /** Events after which a card may have ended (a child of a waiting parent). */
-const END_EVENTS = new Set(['StageCompleted', 'CardFinalized', 'CardCancelled', 'CardMovedByManager']);
+const END_EVENTS = new Set([
+  'StageCompleted',
+  'CardFinalized',
+  'QaPassed',
+  'QaSkipped',
+  'CardCancelled',
+  'CardMovedByManager',
+]);
 const INTEREST = [...new Set([...ENTRY_EVENTS, ...END_EVENTS])];
 
 async function readCursor(ctx: Ctx): Promise<bigint> {

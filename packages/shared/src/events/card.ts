@@ -338,7 +338,10 @@ export const cardEvents = [
         prUrl: z.string().optional(),
         pushedBranch: z.string().optional(),
       }),
-      toStage: z.literal('done'),
+      /** `done`, or the first manual QA stage when the project has manual QA on (docs/design/manual-qa.md). */
+      toStage: z.enum(['done', 'qa_steps', 'manual_qa']),
+      /** A card pinned to an older built-in version moves to this one when it enters manual QA (same stages up to Finalize). */
+      workflowVersionId: Id.optional(),
     }),
   ),
   /** `cause: 'project_archived'` marks a card closed because its project was archived (not cancelled by hand). */

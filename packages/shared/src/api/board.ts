@@ -80,7 +80,16 @@ export const BoardCardSchema = z.object({
    * Why a `waiting` card waits: a bug it spawned, the manager's merge approval, a running merge, DevOps, or the child
    * card of its sub-workflow step.
    */
-  waitingFor: z.enum(['bug', 'approval', 'finalizing', 'devops', 'subworkflow']).nullable().optional(),
+  waitingFor: z.enum(['bug', 'approval', 'finalizing', 'devops', 'subworkflow', 'qa']).nullable().optional(),
+  /** Manual QA: who the card waits for (absent outside the QA stages). */
+  qa: z
+    .object({
+      state: z.enum(['steps', 'open']),
+      assigneeUserId: z.uuid(),
+      assigneeName: z.string(),
+    })
+    .nullable()
+    .optional(),
   /** The card was started by a sub-workflow step of this parent card ("Started by APP-41"). */
   startedBy: z.object({ id: z.uuid(), ref: z.string() }).nullable().optional(),
   /** M4: suite (full E2E / regression) cards are marked on the board. */

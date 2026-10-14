@@ -162,6 +162,8 @@ export const ProjectDtoSchema = z.object({
   mergeLargeChanged: z.object({ byName: z.string(), at: IsoTime }).nullable().optional(),
   /** Whether finishing a card automatically starts a full end-to-end test run card (default true). */
   fullSuiteAfterFinalize: z.boolean().optional(),
+  /** Manual QA after Finalize: the person who started a card tests it before it is done (default true). */
+  manualQa: z.boolean().optional(),
   /** Architect settings: run Investigate & design before build by default (off unless the project opts in). */
   designStep: z.boolean().optional(),
   /** Merge the latest main branch into the working branch before work starts (default on). */

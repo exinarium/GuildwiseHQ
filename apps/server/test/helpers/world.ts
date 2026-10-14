@@ -89,7 +89,16 @@ export const fullFields = (extra: Record<string, unknown> = {}) => ({
 });
 
 export async function createWorld(
-  opts: { env?: Record<string, string>; project?: Record<string, unknown>; listen?: boolean } = {},
+  opts: {
+    env?: Record<string, string>;
+    project?: Record<string, unknown>;
+    listen?: boolean;
+    /**
+     * Manual QA after Finalize (docs/design/manual-qa.md) is on for every real project. The suites that drive a card
+     * through Finalize to Done switch it off here unless they test QA (`manualQa: true`).
+     */
+    manualQa?: boolean;
+  } = {},
 ): Promise<World> {
   const t = await createTestApp({ env: opts.env, listen: opts.listen ?? true });
   const owner = await t.userSession(uniqueEmail('owner'));
@@ -100,6 +109,13 @@ export async function createWorld(
     }),
     201,
   );
+  if (opts.manualQa !== true)
+    await ok(
+      t.req('PUT', `/api/projects/${proj.project.id}/manual-qa`, {
+        cookie: owner.cookie,
+        body: { enabled: false },
+      }),
+    );
   const added = await ok<any>(
     t.req('POST', `/api/projects/${proj.project.id}/repos`, {
       cookie: owner.cookie,

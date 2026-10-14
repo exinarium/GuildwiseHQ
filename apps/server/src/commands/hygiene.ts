@@ -7,13 +7,13 @@ import {
   type HygieneRepoSpec,
   type HygieneSpec,
   type HygieneTrigger,
+  isNotWorkingBranchCandidate,
   PHASE_ASSIGNABLE_STATUSES,
   parseBranchName,
   RESEARCH_STAGE_WORKFLOW,
   renderHygieneRequest,
   streamId,
   summarizeSweep,
-  isNotWorkingBranchCandidate,
   WORKING_BRANCH_KEEP_OPTION,
   WORKING_BRANCH_OTHER_OPTION,
   WORKING_BRANCH_SUBKIND,
@@ -695,9 +695,10 @@ export async function hygieneReportEvents(
     const project = await one(tx, 'SELECT org_id FROM projects WHERE id=$1', [spec1.projectId]);
     if (!project) continue;
     const deskItemId = randomUUID();
-    const stored = sw.branch || sw.stash
-      ? `Unsaved edits in ${spec1.name} (${sw.files.length} file${sw.files.length === 1 ? '' : 's'}) were stored safely on that workstation ${sw.stash ? `in a git stash (git stash list: '${sw.stash}')` : `on the branch ${sw.branch}${sw.pushed ? ' and uploaded' : ''}`}. Nothing was changed in your files and nothing reached the working branch.`
-      : `Unsaved edits in ${spec1.name} were left alone.`;
+    const stored =
+      sw.branch || sw.stash
+        ? `Unsaved edits in ${spec1.name} (${sw.files.length} file${sw.files.length === 1 ? '' : 's'}) were stored safely on that workstation ${sw.stash ? `in a git stash (git stash list: '${sw.stash}')` : `on the branch ${sw.branch}${sw.pushed ? ' and uploaded' : ''}`}. Nothing was changed in your files and nothing reached the working branch.`
+        : `Unsaved edits in ${spec1.name} were left alone.`;
     const skipped = sw.skipped.length
       ? ` ${sw.skipped.length} file${sw.skipped.length === 1 ? ' that looks' : 's that look'} like a password or key (${sw.skipped.slice(0, 5).join(', ')}) ${sw.skipped.length === 1 ? 'was' : 'were'} not copied.`
       : '';
@@ -709,9 +710,10 @@ export async function hygieneReportEvents(
           deskItemId,
           kind: 'alert',
           subkind: DESK_SUBKIND.savedWork,
-          title: sw.branch || sw.stash
-            ? `Your unsaved work in ${spec1.name} was stored safely`
-            : `Secret-looking files in ${spec1.name} were left alone`,
+          title:
+            sw.branch || sw.stash
+              ? `Your unsaved work in ${spec1.name} was stored safely`
+              : `Secret-looking files in ${spec1.name} were left alone`,
           body: stored + skipped,
           options: [],
           blocking: false,

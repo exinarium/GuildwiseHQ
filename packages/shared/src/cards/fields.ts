@@ -34,6 +34,16 @@ export const CARD_COLUMN_FIELDS: Record<string, FieldMeta> = {
   priority: { label: 'Priority', kind: 'number' },
 };
 
+/**
+ * Flags the server derives when it evaluates a workflow (they are on no card): `manualQa` (the project has manual QA on and
+ * the card is not an investigation-only card) and `qaAgent` (an agent of the tester or BA role is hired, so the QA steps
+ * can be written). Workflows may use them in `when` (docs/design/manual-qa.md).
+ */
+export const DERIVED_BOOLEAN_FIELDS: Record<string, FieldMeta> = {
+  manualQa: { label: 'Manual QA after Finalize', kind: 'boolean' },
+  qaAgent: { label: 'An agent can write the QA steps', kind: 'boolean' },
+};
+
 // ---------------------------------------------------------------- mock script
 
 export const MockActionSchema = z.enum([
@@ -288,7 +298,7 @@ export function fieldCatalogue(
   fieldSet: string,
   customFields: ReadonlyArray<{ key: string; label: string; type: FieldKind }> = [],
 ): Record<string, FieldMeta> {
-  const out: Record<string, FieldMeta> = { ...CARD_COLUMN_FIELDS };
+  const out: Record<string, FieldMeta> = { ...CARD_COLUMN_FIELDS, ...DERIVED_BOOLEAN_FIELDS };
   if (isBuiltinFieldSet(fieldSet)) Object.assign(out, FIELD_SETS[fieldSet].fields);
   for (const c of customFields) out[c.key] = { label: c.label, kind: c.type };
   return out;

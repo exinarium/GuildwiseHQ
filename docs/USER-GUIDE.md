@@ -167,7 +167,8 @@ A card in a code project goes through the same stages every time. You do not hav
 4. **Review**: a reviewer reads the change and either approves or sends it back (rework).
 5. **Test**: a tester runs the tests in the test plan. A failure creates a bug card, and the original waits for the fix.
 6. **Finalize**: the BA completes the card the way the project says: committed and pushed to the working branch with no pull request, or as a pull request for you to approve (4.4, *How finished work lands*).
-7. **Done**.
+7. **QA (optional, on by default)**: the person who started the card tests it, with test steps an agent wrote (4.12, *Manual QA*).
+8. **Done**.
 
 If anyone gets stuck or needs a decision, the card turns to **Blocked** and a question appears on your desk.
 
@@ -754,6 +755,17 @@ Once a reviewer approves, the card moves to **Test**. A tester runs the tests of
 ![A large merge waiting for approval](guide/assets/desk-large-merge.jpg)
 
 > **Watch out:** in project settings, **Merge large changes without my approval** lets large changes merge as soon as they are finalized. Only the two reviews, the tests and the post-merge full suite then stand in between. It is off by default, only the project owner can change it, it asks you to confirm, and every change is recorded.
+
+**Manual QA.** When a card is finalized (merged, pushed or turned into a pull request) it does not go straight to Done. It goes to the **QA** column, assigned to the person who started it: whoever ran the intake chat or batch, else the card's creator, else the project owner. An agent (the tester, or the BA when no tester is hired) writes the test steps on the card, grouped by scenario (happy path, edge cases, error handling, regressions, UI and data checks). The assignee gets a desk item and the card shows under **Waiting for my QA** on the board. They choose:
+
+- **Pass**: the card is accepted and moves to Done.
+- **Skip the test**: not tested; the card moves to Done and the card says so. Add a reason if you like.
+- **Send back**: a comment is required. The card returns to Build as rework with your comment as a review comment for the builder, in the same branch that already holds the merged work, and goes through review, test, finalize and QA again. You never have to reopen a closed card.
+- **Give it to someone else**: pick another member of the project; they get the desk item.
+
+The update that the BA drafts for the Jira or GitHub ticket is held while the card is in QA. **Passing the card or skipping the test approves it**: it is posted to the ticket at once from the card owner's workstation, with no further approval on the desk. A card that is sent back keeps its update held until a later pass. The assignee, the project's owner and managers, and the organization's Owners and Admins can act on a card in QA.
+
+Manual QA is on for every project. The project Owner and the organization's Owners and Admins can switch it off in the project's **Settings**, **Manual QA before done**. The setting counts when a card is finalized: a card already in progress follows whatever is set at that moment, and a card that is already in QA stays there until someone decides. Scheduled (automatic) cards and investigation-only cards have no QA.
 
 After a merge, a **full suite** card runs the entire end-to-end suite once. If it fails, a bug card and a desk notice follow. **Run regression** on the board runs the whole suite on demand.
 

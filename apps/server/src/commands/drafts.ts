@@ -13,7 +13,7 @@ import {
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
-import { one, type Row } from '../db/sql.ts';
+import { one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { conflict, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
@@ -21,6 +21,7 @@ import { loadManageable } from './cards.ts';
 import { agentActor, cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import type { RpcReply } from './intake.ts';
 import { screenOutbound } from './leak-check.ts';
+import { cardGoesThroughQa } from './qa-flow.ts';
 
 const KIND_LABEL: Record<OutboundKind, string> = {
   comment: 'comment',
@@ -35,7 +36,15 @@ export function cardTicket(card: Row): ExternalRef | null {
 }
 
 export type DraftOutcome =
-  | { ok: true; draftId: string; deskItemId: string; ref: ExternalRef; duplicate: boolean }
+  | {
+      ok: true;
+      draftId: string;
+      /** Null while the draft is held for manual QA (no desk item yet). */
+      deskItemId: string | null;
+      ref: ExternalRef;
+      duplicate: boolean;
+      held?: boolean;
+    }
   | { ok: false; error: string; blocked: boolean; matches: string[] };
 
 export interface DraftInput {
@@ -45,6 +54,81 @@ export interface DraftInput {
   author: OutboundAuthor;
   /** The BA drafts once per card and kind: asking again returns the draft that exists. */
   once?: boolean;
+  /** Manual QA applies to the card: record the draft as held, with no desk item, until QA passes or is skipped. */
+  hold?: boolean;
+}
+
+/** The desk approval for a drafted update (also used when a held draft is released after manual QA). */
+export function outboundApprovalItem(input: {
+  card: Row;
+  ref: ExternalRef;
+  kind: OutboundKind;
+  body: string;
+  author: OutboundAuthor;
+  deskItemId: string;
+}): AppendInput {
+  const { card, ref, kind, body, author, deskItemId } = input;
+  return {
+    streamId: streamId.desk(deskItemId),
+    event: {
+      type: 'DeskItemCreated',
+      payload: {
+        deskItemId,
+        kind: 'approval',
+        subkind: DESK_SUBKIND.outbound,
+        title: `Approve ${KIND_LABEL[kind]} for ${ref.system === 'jira' ? 'Jira' : 'GitHub'} ${ref.key}`,
+        body,
+        options: [],
+        blocking: false,
+        pinned: false,
+        cardId: card.id,
+        projectId: card.project_id,
+        affectedCardIds: [card.id],
+        askedBy: author.kind === 'agent' ? { kind: 'agent', agentId: author.agentId } : { kind: 'system' },
+      },
+    },
+    actor: author.kind === 'agent' ? agentActor(author.agentId) : SYSTEM_ACTOR,
+    scope: projectScope(card.org_id, card.project_id),
+  };
+}
+
+/**
+ * Manual QA passed or was skipped: that decision is the approval of every draft held for the card (docs/design/manual-qa.md
+ * section 5). Returns the events to append with the decision and the approved rows, which the caller queues for the
+ * card owner's workstation (`queueOutboundPost`) in the same transaction.
+ */
+export async function approveHeldDraftEvents(
+  tx: Tx,
+  card: Row,
+  by: { id: string },
+  how: 'passed' | 'skipped',
+): Promise<{ events: AppendInput[]; drafts: Row[] }> {
+  const held = await rows(
+    tx,
+    `SELECT * FROM outbound_drafts WHERE card_id=$1 AND status='held' ORDER BY created_at FOR UPDATE`,
+    [card.id],
+  );
+  const events: AppendInput[] = [];
+  for (const d of held) {
+    events.push(
+      {
+        streamId: streamId.outbound(d.id),
+        event: {
+          type: 'OutboundApproved',
+          payload: { draftId: d.id, finalBody: d.body, approvedBy: by.id, edited: false, viaManualQa: true },
+        },
+        actor: userActor(by.id),
+        scope: projectScope(card.org_id, card.project_id),
+      },
+      cardMessage(
+        card,
+        { kind: 'system' },
+        'system',
+        `The update for ${d.external_key} (${KIND_LABEL[d.kind as OutboundKind]}) was approved by manual QA (${how === 'passed' ? 'passed' : 'skipped'}); your workstation posts it.`,
+      ),
+    );
+  }
+  return { events, drafts: held.map((d) => ({ ...d, status: 'approved', final_body: d.body })) };
 }
 
 /**
@@ -67,16 +151,17 @@ export async function draftOutboundIn(ctx: Ctx, tx: Tx, input: DraftInput): Prom
     const existing = await one(
       tx,
       `SELECT id, desk_item_id FROM outbound_drafts
-        WHERE card_id=$1 AND kind=$2 AND status IN ('pending','approved','posted') ORDER BY created_at LIMIT 1`,
+        WHERE card_id=$1 AND kind=$2 AND status IN ('held','pending','approved','posted') ORDER BY created_at LIMIT 1`,
       [card.id, kind],
     );
     if (existing)
       return {
         ok: true,
         draftId: existing.id,
-        deskItemId: existing.desk_item_id,
+        deskItemId: existing.desk_item_id ?? null,
         ref,
         duplicate: true,
+        ...(existing.desk_item_id ? {} : { held: true }),
       };
   }
   const draftId = randomUUID();
@@ -118,30 +203,41 @@ export async function draftOutboundIn(ctx: Ctx, tx: Tx, input: DraftInput): Prom
     );
     return { ok: false, blocked: true, matches: leak.matches, error: leakMessage(leak.matches) };
   }
+  if (input.hold) {
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.outbound(draftId),
+          event: {
+            type: 'OutboundHeld',
+            payload: {
+              draftId,
+              cardId: card.id,
+              externalSystem: ref.system,
+              externalKey: ref.key,
+              ...(ref.url ? { externalUrl: ref.url } : {}),
+              kind,
+              body,
+              draftedBy: author,
+            },
+          },
+          actor,
+          scope,
+        },
+        cardMessage(
+          card,
+          { kind: 'system' },
+          'system',
+          `An update for ${ref.key} (${KIND_LABEL[kind]}) is ready. It is held until manual QA passes or is skipped; nothing is posted before then.`,
+        ),
+      ],
+      { tx },
+    );
+    return { ok: true, draftId, deskItemId: null, ref, duplicate: false, held: true };
+  }
   const deskItemId = randomUUID();
   const events: AppendInput[] = [
-    {
-      streamId: streamId.desk(deskItemId),
-      event: {
-        type: 'DeskItemCreated',
-        payload: {
-          deskItemId,
-          kind: 'approval',
-          subkind: DESK_SUBKIND.outbound,
-          title: `Approve ${KIND_LABEL[kind]} for ${ref.system === 'jira' ? 'Jira' : 'GitHub'} ${ref.key}`,
-          body,
-          options: [],
-          blocking: false,
-          pinned: false,
-          cardId: card.id,
-          projectId: card.project_id,
-          affectedCardIds: [card.id],
-          askedBy: author.kind === 'agent' ? { kind: 'agent', agentId: author.agentId } : { kind: 'system' },
-        },
-      },
-      actor: author.kind === 'agent' ? agentActor(author.agentId) : SYSTEM_ACTOR,
-      scope,
-    },
+    outboundApprovalItem({ card, ref, kind, body, author, deskItemId }),
     {
       streamId: streamId.outbound(draftId),
       event: {
@@ -200,6 +296,8 @@ export async function outboundDraftRpc(
       body: p.data.body,
       author: { kind: 'agent', agentId: shift.agent_id },
       once: true,
+      // Manual QA follows Finalize: the update is held until the person has tested (passed or skipped).
+      hold: await cardGoesThroughQa(tx, card),
     });
     if (!r.ok) return [false, undefined, r.error];
     return [
@@ -208,7 +306,9 @@ export async function outboundDraftRpc(
         draftId: r.draftId,
         message: r.duplicate
           ? `This card already has a ${p.data.kind} draft for ${r.ref.key}.`
-          : `Drafted. The manager approves, edits or rejects it on the desk; nothing is posted before that. Continue with your finalize.`,
+          : r.held
+            ? 'Drafted. It is held until the person who started the card has tested it (manual QA); then the manager approves, edits or rejects it on the desk. Nothing is posted before that. Continue with your finalize.'
+            : `Drafted. The manager approves, edits or rejects it on the desk; nothing is posted before that. Continue with your finalize.`,
       },
     ];
   });

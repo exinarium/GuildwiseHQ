@@ -42,6 +42,8 @@ const TRIGGER_TYPES = new Set([
   'CardMovedByManager',
   'CardReopened',
   'CardFinalized',
+  'QaOpened',
+  'QaSentBack',
   'DevOpsRequested',
   'DevOpsRequestRequeued',
   'DevOpsApprovalResolved',

@@ -2,6 +2,7 @@ import {
   CheckCircle2,
   CircleDashed,
   CircleDot,
+  ClipboardCheck,
   Eye,
   FileText,
   Flag,
@@ -30,6 +31,7 @@ const KNOWN: Record<string, StageStyle> = {
   'Test (waiting on bug)': { color: 'var(--stage-waiting)', icon: Hourglass },
   Docs: { color: 'var(--stage-docs)', icon: FileText },
   Finalize: { color: 'var(--stage-finalize)', icon: Flag },
+  QA: { color: 'var(--stage-review)', icon: ClipboardCheck },
   Done: { color: 'var(--stage-done)', icon: CheckCircle2 },
 };
 

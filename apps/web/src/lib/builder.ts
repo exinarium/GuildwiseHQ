@@ -29,7 +29,7 @@ import {
 
 type StageIn = WorkflowDefinitionInput['stages'][number];
 type OutcomeIn = NonNullable<StageIn['outcomes']>[number];
-type StepKindValue = 'agent' | 'manual' | 'terminal' | 'subworkflow';
+type StepKindValue = 'agent' | 'manual' | 'terminal' | 'subworkflow' | 'human';
 
 /** What the builder stores for a draft: the definition without the server-assigned `version` and `builtIn`. */
 export type BuilderDef = Omit<WorkflowDefinitionInput, 'version' | 'builtIn'>;
@@ -72,6 +72,9 @@ export interface BuilderStep {
     syncMainBefore: boolean;
     approvals?: { small: number; large: number };
     requiredCapabilities: string[];
+    /** Built-in steps only: a person's step (manual QA) and the role an agent step falls back to. */
+    human?: NonNullable<StageIn['human']>;
+    fallbackRole?: string;
   };
 }
 
@@ -211,6 +214,8 @@ export function fromDefinition(
       syncMainBefore: s.syncMainBefore ?? false,
       ...(s.approvals ? { approvals: { ...s.approvals } } : {}),
       requiredCapabilities: [...(s.requiredCapabilities ?? [])],
+      ...(s.human ? { human: { ...s.human } } : {}),
+      ...(s.fallbackRole ? { fallbackRole: s.fallbackRole } : {}),
     },
   }));
   return {
@@ -307,6 +312,8 @@ export function toDefinition(model: BuilderModel, opts: { frozen?: FrozenIds } =
       ...(s.extra.approvals ? { approvals: { ...s.extra.approvals } } : {}),
       maxShiftMinutes: s.maxShiftMinutes,
       requiredCapabilities: [...s.extra.requiredCapabilities],
+      ...(s.extra.human ? { human: { ...s.extra.human } } : {}),
+      ...(s.extra.fallbackRole ? { fallbackRole: s.extra.fallbackRole } : {}),
     })),
     ...(model.extends ? { extends: { ...model.extends } } : {}),
   };
@@ -833,6 +840,7 @@ export const KIND_LABEL: Record<StepKindValue, string> = {
   manual: 'Starts here (someone fills in the card)',
   agent: 'Work done by an agent',
   subworkflow: 'Start another workflow',
+  human: 'A person does this step (built in)',
   terminal: 'Finished',
 };
 

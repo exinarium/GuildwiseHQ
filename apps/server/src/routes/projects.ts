@@ -13,6 +13,7 @@ import {
   SetArchitectSettingsRequestSchema,
   SetConcurrencyCapRequestSchema,
   SetFullSuiteRequestSchema,
+  SetManualQaRequestSchema,
   SetMergePolicyRequestSchema,
   SetProjectMcpServersRequestSchema,
   SetReferenceReposRequestSchema,
@@ -38,6 +39,7 @@ import {
   retryRepoClone,
   setConcurrencyCap,
   setFullSuite,
+  setManualQa,
   setMergePolicy,
   setReferenceRepos,
   updateProject,
@@ -158,6 +160,23 @@ export function projectRoutes(ctx: Ctx) {
       async (req) => {
         const a = await requireOrg(ctx, req);
         await setFullSuite(
+          ctx,
+          a.session.user,
+          { id: a.orgId, role: a.role },
+          req.params.id,
+          req.body.enabled,
+        );
+        return getProjectDetail(ctx, a.session.user.id, req.params.id);
+      },
+    );
+
+    /** Manual QA after Finalize (default on): the person who started a card tests it before it is done. */
+    app.put(
+      '/api/projects/:id/manual-qa',
+      { schema: { params: IdParamsSchema, body: SetManualQaRequestSchema } },
+      async (req) => {
+        const a = await requireOrg(ctx, req);
+        await setManualQa(
           ctx,
           a.session.user,
           { id: a.orgId, role: a.role },

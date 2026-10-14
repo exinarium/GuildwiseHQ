@@ -206,10 +206,15 @@ describe('a variant created on code v1 and rebased onto v2', () => {
     expect(rebased.status).toBe(201);
     expect(rebased.body).toMatchObject({ key: 'code-inv-v1', version: 2, status: 'draft' });
     expect(rebased.body.issues.filter((i: any) => i.severity === 'error')).toEqual([]);
-    expect(rebased.body.stages.map((s: any) => s.id)).toEqual(ALL_STAGES);
+    expect(rebased.body.stages.map((s: any) => s.id)).toEqual([
+      ...ALL_STAGES.slice(0, -1),
+      'qa_steps',
+      'manual_qa',
+      'done',
+    ]);
     const def2 = (await q('SELECT definition FROM workflow_versions WHERE id=$1', [rebased.body.id]))[0]!
       .definition;
-    expect(def2.extends).toEqual({ key: 'code', version: 2 });
+    expect(def2.extends).toEqual({ key: 'code', version: 3 });
     const sub = await ok<any>(w.t.req('POST', variantUrl(`${rebased.body.id}/submit`), owner()));
     expect((await d.resolve(sub.deskItemId, 'approved')).status).toBe(200);
 

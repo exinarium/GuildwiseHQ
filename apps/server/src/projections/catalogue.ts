@@ -7,9 +7,9 @@ async function insertStages(tx: Tx, workflowVersionId: string, stages: WorkflowD
   for (const [i, s] of stages.entries()) {
     await exec(
       tx,
-      `INSERT INTO workflow_stages (workflow_version_id, stage_id, ordinal, kind, claim_role, senior_only, column_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [workflowVersionId, s.id, i, s.kind, s.claimRole, s.seniorOnly, s.column],
+      `INSERT INTO workflow_stages (workflow_version_id, stage_id, ordinal, kind, claim_role, senior_only, column_key, fallback_role)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [workflowVersionId, s.id, i, s.kind, s.claimRole, s.seniorOnly, s.column, s.fallbackRole ?? null],
     );
   }
 }

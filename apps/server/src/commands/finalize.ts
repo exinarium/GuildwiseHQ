@@ -22,6 +22,8 @@ import { loadManageable } from './cards.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { effectiveCompletionAction } from './completion.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
+import { qaOpenEvents } from './qa.ts';
+import { finalizeNext, qaAssignee } from './qa-flow.ts';
 import { rebaseConflictEvents } from './rebase.ts';
 import { spawnCardEvent } from './spawn.ts';
 
@@ -327,6 +329,10 @@ export async function applyFinalizeResult(
           ),
         );
       }
+      // With manual QA the card goes to the person who started it instead of straight to done (docs/design/manual-qa.md).
+      const next = await finalizeNext(tx, card);
+      const assignee = next.toStage === 'done' ? null : await qaAssignee(tx, card);
+      const toStage = assignee ? next.toStage : 'done';
       events.push(
         {
           streamId: streamId.card(card.id),
@@ -340,7 +346,10 @@ export async function applyFinalizeResult(
                 prUrl: result.prUrl,
                 pushedBranch: result.pushedBranch,
               },
-              toStage: 'done',
+              toStage,
+              ...(toStage !== 'done' && next.workflowVersionId
+                ? { workflowVersionId: next.workflowVersionId }
+                : {}),
             },
           },
           actor: SYSTEM_ACTOR,
@@ -354,6 +363,16 @@ export async function applyFinalizeResult(
           { resultRef: result },
         ),
       );
+      if (assignee && toStage !== 'done')
+        events.push(
+          ...qaOpenEvents(
+            card,
+            assignee,
+            toStage,
+            (await one(tx, 'SELECT display_name FROM users WHERE id=$1', [assignee.userId]))?.display_name ??
+              'the person who started it',
+          ),
+        );
       if (result.notice) {
         const deskItemId = randomUUID();
         events.push({

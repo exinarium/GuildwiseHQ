@@ -112,6 +112,67 @@ async function moveTo(
   );
 }
 
+/** Merges `patch` into the card's `qa` document. */
+function qaMerge(tx: Tx, cardId: string, patch: Record<string, unknown>) {
+  return exec(tx, `UPDATE cards SET qa = COALESCE(qa, '{}'::jsonb) || $2::jsonb WHERE id=$1`, [
+    cardId,
+    JSON.stringify(patch),
+  ]);
+}
+
+function qaActivity(
+  tx: Tx,
+  e: StoredEvent,
+  cardId: string,
+  kind: 'qa',
+  summary: string,
+  reason: string | null,
+  userId: string | null,
+) {
+  return exec(
+    tx,
+    `INSERT INTO card_activity (card_id, kind, summary, reason, user_id, agent_id, event_seq, at)
+     VALUES ($1,$2,$3,$4,$5,NULL,$6,$7)`,
+    [cardId, kind, summary, reason, userId, e.seq.toString(), e.createdAt],
+  );
+}
+
+/** QaPassed / QaSkipped: the card is done (the held outgoing comment is released in the same append). */
+async function qaFinish(
+  tx: Tx,
+  e: StoredEvent,
+  cardId: string,
+  kind: 'passed' | 'skipped',
+  by: string,
+  note: string | null,
+) {
+  await mutateCard(
+    tx,
+    e,
+    cardId,
+    () =>
+      exec(
+        tx,
+        `UPDATE cards SET stage='done', status='done', finalized_at=$2, updated_at=$2,
+                claim_id=NULL, claimed_by_agent_id=NULL, claim_workstation_id=NULL, claim_shift_id=NULL,
+                claimed_at=NULL, lease_expires_at=NULL
+          WHERE id=$1`,
+        [cardId, e.createdAt],
+      ),
+    { agentId: null, userId: by },
+  );
+  await qaMerge(tx, cardId, { state: kind, decision: { kind, by, note, at: e.createdAt } });
+  await qaActivity(
+    tx,
+    e,
+    cardId,
+    'qa',
+    kind === 'passed' ? 'Manual QA passed' : 'Manual QA skipped (not tested)',
+    note,
+    by,
+  );
+}
+
 const DISTINCT_EXCLUDED = `ARRAY(SELECT DISTINCT x FROM unnest(ARRAY[original_builder_agent_id, last_agent_id]) AS x WHERE x IS NOT NULL)`;
 
 export const cardProjectors: Record<string, Projector> = {
@@ -470,7 +531,16 @@ export const cardProjectors: Record<string, Projector> = {
           [card.workflow_version_id, p.toStage],
         )
       : undefined;
-    if (st?.kind === 'terminal') {
+    if (st?.kind === 'human') {
+      // A step for a person (manual QA): the card waits in the step's column, nobody claims it.
+      await mutateCard(tx, e, p.cardId, () =>
+        exec(
+          tx,
+          `UPDATE cards SET stage=$2, status='waiting', excluded_agent_ids='{}', updated_at=$3 WHERE id=$1`,
+          [p.cardId, p.toStage, e.createdAt],
+        ),
+      );
+    } else if (st?.kind === 'terminal') {
       await mutateCard(tx, e, p.cardId, () =>
         exec(tx, `UPDATE cards SET stage=$2, status='done', finalized_at=$3, updated_at=$3 WHERE id=$1`, [
           p.cardId,
@@ -575,6 +645,30 @@ export const cardProjectors: Record<string, Projector> = {
 
   CardFinalized: async (tx, e) => {
     const p = ev<'CardFinalized'>(e).payload;
+    if (p.toStage !== 'done') {
+      // Manual QA follows (docs/design/manual-qa.md): the work is merged, the card is not done. An agent writes the QA
+      // steps (`qa_steps`, queued) or the person is waited for at once (`manual_qa`, waiting). `finalized_at` and the
+      // done status come with QaPassed / QaSkipped.
+      await mutateCard(tx, e, p.cardId, () =>
+        exec(
+          tx,
+          `UPDATE cards SET stage=$2, status=$3, queued_at = CASE WHEN $3 = 'queued' THEN $4::timestamptz ELSE queued_at END,
+                  updated_at=$4, excluded_agent_ids='{}', review_approvals=0,
+                  workflow_version_id = COALESCE($5::uuid, workflow_version_id),
+                  claim_id=NULL, claimed_by_agent_id=NULL, claim_workstation_id=NULL, claim_shift_id=NULL,
+                  claimed_at=NULL, lease_expires_at=NULL
+            WHERE id=$1`,
+          [
+            p.cardId,
+            p.toStage,
+            p.toStage === 'qa_steps' ? 'queued' : 'waiting',
+            e.createdAt,
+            p.workflowVersionId ?? null,
+          ],
+        ),
+      );
+      return;
+    }
     await mutateCard(tx, e, p.cardId, () =>
       exec(
         tx,
@@ -585,6 +679,76 @@ export const cardProjectors: Record<string, Projector> = {
         [p.cardId, e.createdAt],
       ),
     );
+  },
+
+  // ---- manual QA (docs/design/manual-qa.md): `cards.qa` holds the assignee, the steps and the last decision.
+  QaOpened: async (tx, e) => {
+    const p = ev<'QaOpened'>(e).payload;
+    await qaMerge(tx, p.cardId, {
+      state: p.toStage === 'qa_steps' ? 'steps' : 'open',
+      assigneeUserId: p.assigneeUserId,
+      source: p.source,
+      openedAt: e.createdAt,
+      steps: null,
+      stepsBy: null,
+      decision: null,
+      deskItemId: p.deskItemId,
+    });
+    await qaActivity(tx, e, p.cardId, 'qa', 'Moved to manual QA', null, null);
+  },
+
+  QaStepsPosted: async (tx, e) => {
+    const p = ev<'QaStepsPosted'>(e).payload;
+    await qaMerge(tx, p.cardId, { steps: p.steps, stepsBy: p.agentId ?? null, state: 'open' });
+  },
+
+  QaAssigned: async (tx, e) => {
+    const p = ev<'QaAssigned'>(e).payload;
+    await qaMerge(tx, p.cardId, {
+      assigneeUserId: p.assigneeUserId,
+      source: 'reassigned',
+      deskItemId: p.deskItemId,
+    });
+    await qaActivity(tx, e, p.cardId, 'qa', 'Manual QA handed to another member', null, p.by);
+  },
+
+  QaPassed: async (tx, e) => {
+    const p = ev<'QaPassed'>(e).payload;
+    await qaFinish(tx, e, p.cardId, 'passed', p.by, p.note ?? null);
+  },
+
+  QaSkipped: async (tx, e) => {
+    const p = ev<'QaSkipped'>(e).payload;
+    await qaFinish(tx, e, p.cardId, 'skipped', p.by, p.reason ?? null);
+  },
+
+  QaSentBack: async (tx, e) => {
+    const p = ev<'QaSentBack'>(e).payload;
+    // Like a reopen: the first run's finalize state is cleared; branch, worktree path and the merge stay as history.
+    await mutateCard(
+      tx,
+      e,
+      p.cardId,
+      () =>
+        exec(
+          tx,
+          `UPDATE cards SET stage=$2, status='queued', queued_at=$3, updated_at=$3, rework_round = rework_round + 1,
+                  excluded_agent_ids='{}', review_approvals=0, finalized_at=NULL,
+                  finalize_state=NULL, finalize_error=NULL, finalize_desk_item_id=NULL, last_rejection=NULL,
+                  retry_after=NULL, retry_failures=0, retry_episode_id=NULL
+            WHERE id=$1`,
+          [p.cardId, p.toStage, e.createdAt],
+        ),
+      { agentId: null, userId: p.by },
+    );
+    const sentBack = (await getCard(tx, p.cardId))?.qa?.sentBackCount ?? 0;
+    await qaMerge(tx, p.cardId, {
+      state: 'sent_back',
+      sentBackCount: Number(sentBack) + 1,
+      lastSendBack: { by: p.by, comment: p.comment, at: e.createdAt },
+      decision: { kind: 'sent_back', by: p.by, note: p.comment, at: e.createdAt },
+    });
+    await qaActivity(tx, e, p.cardId, 'qa', 'Sent back from manual QA', p.comment, p.by);
   },
 
   CardCancelled: async (tx, e) => {

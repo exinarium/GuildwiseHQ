@@ -264,6 +264,31 @@ const SPEC: Record<IssueCode, Spec> = {
     text: ({ step }) =>
       `${step} starts the new card straight away but leaves required information empty. Fill it in, or start the card as a draft.`,
   },
+  human_missing_config: {
+    field: 'kind',
+    text: ({ step }) => `${step} is a step for a person but does not say what kind. This is a built-in step.`,
+  },
+  human_config_misplaced: {
+    field: 'kind',
+    text: ({ step }) => `${step} carries settings for a person's step but is not one.`,
+  },
+  human_has_role: {
+    field: 'role',
+    text: ({ step }) => `${step} is done by a person, so it takes no role.`,
+  },
+  fallback_role_misplaced: {
+    field: 'role',
+    text: ({ step }) => `${step} has a fallback role but is not an agent step.`,
+  },
+  unknown_fallback_role: {
+    field: 'role',
+    text: ({ step }) => `${step} names a fallback role that does not exist. Pick another role.`,
+  },
+  human_stage_not_custom: {
+    field: 'kind',
+    text: ({ step }) =>
+      `${step} is a step for a person (manual QA). Custom workflows cannot use it yet; make it an agent step.`,
+  },
   missing_done_criteria: {
     field: 'doneCriteria',
     text: ({ step }) =>

@@ -26,7 +26,7 @@ import { grantedMcpServers } from '../commands/mcp-servers.ts';
 import { runBriefFor } from '../commands/runs.ts';
 import { projectHasVault, vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
-import { iso, one, type Row, rows } from '../db/sql.ts';
+import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { ClaimResult } from '../dispatcher/claim.ts';
 import { cardLedgerEntries, standingOrdersFor } from '../queries/ledger.ts';
 import { orgReadRepos, referenceReadRepos } from './read-repos.ts';
@@ -57,6 +57,46 @@ export async function agentSpecFor(ctx: Ctx, a: Row): Promise<AgentRuntimeSpec> 
   if (org && !effectiveFeatures(org.plan, org.features).browserTools)
     return { ...spec, permissions: { ...spec.permissions, browser: false } };
   return spec;
+}
+
+/** Name of the person who last sent the card back from manual QA (null: it was never sent back). */
+async function qaSentBackBy(db: Queryable, card: Row): Promise<string | null> {
+  const by = card.qa?.lastSendBack?.by as string | undefined;
+  if (!by) return null;
+  return (await one(db, 'SELECT display_name FROM users WHERE id=$1', [by]))?.display_name ?? 'the tester';
+}
+
+/**
+ * What the builder must address: the latest "request changes" of a reviewer, or, when the card was sent back from manual
+ * QA after that, the tester's comment (shown as a review comment).
+ */
+function reviewCommentsOf(
+  lastChanges: Row | undefined,
+  card: Row,
+  qaName: string | null,
+): ShiftBrief['reviewComments'] {
+  const sb = card.qa?.lastSendBack as { comment: string; at: string } | undefined;
+  if (sb && qaName && (!lastChanges || new Date(sb.at) > new Date(lastChanges.created_at)))
+    return [
+      {
+        reviewerName: `${qaName} (manual QA)`,
+        reasons: [],
+        criteriaMissed: [],
+        comments: sb.comment,
+        at: iso(sb.at) as string,
+      },
+    ];
+  return lastChanges
+    ? [
+        {
+          reviewerName: lastChanges.agent_name ?? 'reviewer',
+          reasons: lastChanges.data?.reasons ?? [],
+          criteriaMissed: lastChanges.data?.criteriaMissed ?? [],
+          comments: lastChanges.note,
+          at: iso(lastChanges.created_at) as string,
+        },
+      ]
+    : [];
 }
 
 /** Brief for one card shift: what the agent sees (docs/ARCHITECTURE.md section 11.2, ShiftBrief). */
@@ -195,17 +235,7 @@ export async function buildBrief(
       note: h.note,
       at: iso(h.created_at) as string,
     })),
-    reviewComments: lastChanges
-      ? [
-          {
-            reviewerName: lastChanges.agent_name ?? 'reviewer',
-            reasons: lastChanges.data?.reasons ?? [],
-            criteriaMissed: lastChanges.data?.criteriaMissed ?? [],
-            comments: lastChanges.note,
-            at: iso(lastChanges.created_at) as string,
-          },
-        ]
-      : [],
+    reviewComments: reviewCommentsOf(lastChanges, card, await qaSentBackBy(ctx.pool, card)),
     thread: thread.reverse().map((m) => {
       // Replies that came in by e-mail are outside text: their name is not the sender's to choose either.
       const outside = m.data?.source === 'email';

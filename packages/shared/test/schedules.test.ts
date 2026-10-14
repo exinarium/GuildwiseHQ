@@ -194,7 +194,7 @@ describe('webhook payloads', () => {
 
 describe('automation triggers', () => {
   it('reads each internal event from its domain events, and a stage from every route into it', () => {
-    expect(eventTypesOf('card_done')).toEqual(['CardFinalized']);
+    expect(eventTypesOf('card_done')).toEqual(['CardFinalized', 'QaPassed', 'QaSkipped']);
     expect(eventTypesOf('card_finalized')).toEqual(['CardFinalized']);
     expect(eventTypesOf('card_stage_reached')).toEqual([
       'StageCompleted',

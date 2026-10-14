@@ -5,6 +5,7 @@ import {
   type DigestItemDto,
   isOrgManager,
   isPhaseDeskSubkind,
+  isProjectMember,
   isProjectOwner,
   type OrgRole,
   type ProjectRole,
@@ -51,6 +52,9 @@ export function canAnswerItem(
   if (r.kind === 'rating') return role !== null;
   // Phases: any active member of the project may act (owner decision A1).
   if (isPhaseDeskSubkind(r.subkind)) return role !== null;
+  // Manual QA: the person it is addressed to, the project's owner and managers, organization Owners and Admins.
+  if (r.subkind === 'manual_qa')
+    return r.addressee_user_id === userId || isProjectMember(role) || isOrgManager({ orgRole });
   if (r.card_id) {
     return canAnswerCardDeskItem({
       userId,

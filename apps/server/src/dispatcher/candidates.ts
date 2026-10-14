@@ -87,7 +87,12 @@ export function eligibility(A: AgentRefs) {
                                                 WHERE pa.value = (${A.id}::uuid)::text)))
       AND EXISTS (SELECT 1 FROM workstations aw JOIN project_members apm ON apm.user_id = aw.user_id
                    WHERE aw.id = ${A.workstationId} AND apm.project_id = c.project_id AND apm.status = 'active')`,
-    role: `st.kind = 'agent' AND st.claim_role = ${A.roleKey}`,
+    // A stage with a `fallback_role` (the QA steps: tester, else BA) is also taken by the fallback role while the
+    // organization has no active agent of the stage's own role that may work the project.
+    role: `st.kind = 'agent' AND (st.claim_role = ${A.roleKey}
+      OR (st.fallback_role = ${A.roleKey} AND NOT EXISTS (
+            SELECT 1 FROM agents fa WHERE fa.org_id = c.org_id AND fa.status = 'active' AND fa.role_key = st.claim_role
+               AND (fa.allowed_project_ids IS NULL OR c.project_id = ANY (fa.allowed_project_ids)))))`,
     senior: `(NOT st.senior_only OR ${A.senior})`,
     notExcluded: `NOT (${A.id} = ANY (c.excluded_agent_ids))`,
     tier: `(c.risk_tier IS NULL OR c.risk_tier = ANY (${A.riskTiers}))`,

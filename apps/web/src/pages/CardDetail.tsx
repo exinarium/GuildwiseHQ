@@ -44,6 +44,7 @@ import { InvestigationPanel, MainSyncNote } from '../components/InvestigationPan
 import { McpUsagePanel } from '../components/McpUsagePanel.tsx';
 import { OutboundHistory } from '../components/OutboundHistory.tsx';
 import { PublicationPanel } from '../components/PublicationPanel.tsx';
+import { QaPanel } from '../components/QaPanel.tsx';
 import { ShiftLog } from '../components/ShiftLog.tsx';
 import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
 import {
@@ -390,6 +391,7 @@ export function CardDetailView({
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
+          {data.qa && <QaPanel cardId={card.id} qa={data.qa} />}
           {currentShift && currentShift.status !== 'ended' && (
             <Panel
               title={

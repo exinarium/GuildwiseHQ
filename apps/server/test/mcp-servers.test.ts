@@ -213,7 +213,10 @@ describe('plugin MCP servers: what the runner is told', () => {
     const b = await Browser.open(w.baseUrl, w.owner.cookie);
     await b.hello();
     const chat = (
-      await ok<any>(w.t.req('POST', '/api/chats', { cookie: w.owner.cookie, body: { agentId: agent.id } }), 201)
+      await ok<any>(
+        w.t.req('POST', '/api/chats', { cookie: w.owner.cookie, body: { agentId: agent.id } }),
+        201,
+      )
     ).chat;
     b.send({ type: 'chat.send', threadId: chat.threadId, body: 'read the ticket', clientMsgId: 'i1' });
     const start = await r.waitFor('chat.start', (f) => f.message === 'read the ticket');

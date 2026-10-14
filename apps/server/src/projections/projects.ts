@@ -319,6 +319,10 @@ export const projectProjectors: Record<string, Projector> = {
     const p = (e.event as EventOf<'ProjectFullSuiteSet'>).payload;
     await exec(tx, 'UPDATE projects SET full_suite_after_finalize=$2 WHERE id=$1', [p.projectId, p.enabled]);
   },
+  ProjectManualQaSet: async (tx, e) => {
+    const p = (e.event as EventOf<'ProjectManualQaSet'>).payload;
+    await exec(tx, 'UPDATE projects SET manual_qa=$2 WHERE id=$1', [p.projectId, p.enabled]);
+  },
   ProjectConcurrencyCapSet: async (tx, e) => {
     const p = (e.event as EventOf<'ProjectConcurrencyCapSet'>).payload;
     await exec(tx, 'UPDATE projects SET max_concurrent_shifts=$2 WHERE id=$1', [p.projectId, p.cap]);

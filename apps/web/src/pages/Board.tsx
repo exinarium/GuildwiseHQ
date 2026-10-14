@@ -1,6 +1,7 @@
 import { ArrowRightLeft, Search, Settings, SquareKanban } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Navigate, useParams } from 'react-router';
+import { useMe } from '../api/queries/auth.ts';
 import { useBoard } from '../api/queries/board.ts';
 import { useInterests } from '../api/queries/interests.ts';
 import { usePhases } from '../api/queries/phases.ts';
@@ -67,6 +68,7 @@ export function Board() {
   const phases = usePhases(project?.id);
   const traits = useProjectWorkflowTraits(project?.id, project?.workflowKey);
   const [filter, setFilter] = useState(NO_FILTER);
+  const me = useMe();
   const [converting, setConverting] = useState(false);
   const detail = useProject(project?.workflowKey === 'research' ? project.id : undefined);
   const canConvert = useCanConvert(project);
@@ -111,6 +113,7 @@ export function Board() {
   }
 
   const cards = board.data?.columns.flatMap((c) => c.cards) ?? [];
+  const myId = me.data?.user?.id;
   const blocked = cards.filter((c) => c.blocked).length;
   const open = board.data
     ? board.data.columns.filter((c) => c.name !== 'Done').reduce((n, c) => n + c.cards.length, 0)
@@ -211,6 +214,14 @@ export function Board() {
           <FilterChip pressed={filter.unassigned} onClick={() => setF({ unassigned: !filter.unassigned })}>
             Unassigned
           </FilterChip>
+          {myId && cards.some((c) => c.qa) && (
+            <FilterChip
+              pressed={filter.qaFor !== null}
+              onClick={() => setF({ qaFor: filter.qaFor === null ? myId : null })}
+            >
+              Waiting for my QA ({cards.filter((c) => c.qa?.assigneeUserId === myId).length})
+            </FilterChip>
+          )}
         </div>
         <PriorityPicker
           allowAny

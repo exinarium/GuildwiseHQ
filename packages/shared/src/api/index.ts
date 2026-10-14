@@ -33,6 +33,7 @@ export * from './phases.ts';
 export * from './platform.ts';
 export * from './project-workflows.ts';
 export * from './projects.ts';
+export * from './qa.ts';
 export * from './research.ts';
 export * from './schedules.ts';
 export * from './setup.ts';
