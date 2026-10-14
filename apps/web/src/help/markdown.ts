@@ -13,7 +13,8 @@ export type Block =
   | { t: 'ul'; items: Inline[][] }
   | { t: 'ol'; items: Inline[][] }
   | { t: 'quote'; c: Inline[] }
-  | { t: 'code'; v: string };
+  | { t: 'code'; v: string }
+  | { t: 'table'; head: Inline[][]; rows: Inline[][][] };
 
 export interface Frontmatter {
   title: string;
@@ -127,6 +128,23 @@ export function parseBlocks(body: string): Block[] {
       blocks.push({ t: ordered ? 'ol' : 'ul', items: items.map(parseInline) });
       continue;
     }
+    // A pipe table: a header row, a separator row (`| --- | --- |`), then body rows.
+    if (/^\s*\|/.test(line) && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1] ?? '')) {
+      flush();
+      const cells = (l: string) =>
+        l
+          .trim()
+          .replace(/^\|/, '')
+          .replace(/\|$/, '')
+          .split('|')
+          .map((c) => parseInline(c.trim()));
+      const head = cells(line);
+      i += 2;
+      const body: Inline[][][] = [];
+      while (i < lines.length && /^\s*\|/.test(lines[i] as string)) body.push(cells(lines[i++] as string));
+      blocks.push({ t: 'table', head, rows: body });
+      continue;
+    }
     if (/^>\s?/.test(line)) {
       flush();
       const q: string[] = [];
@@ -156,5 +174,7 @@ export function blockText(b: Block): string {
       return b.items.map(inlineText).join(' ');
     case 'code':
       return b.v;
+    case 'table':
+      return [b.head, ...b.rows].map((r) => r.map(inlineText).join(' ')).join(' ');
   }
 }
