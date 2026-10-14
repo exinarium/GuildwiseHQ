@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type BaTaskShift, BUILTIN_ROLES, baTaskBriefOutcomes, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ExternalAdapters } from '../src/external/index.ts';
 import { makeShiftStart } from './fixtures.ts';
 import { type Harness, startHarness, worktreeOf } from './harness.ts';
 import { cleanupTmp } from './helpers.ts';
@@ -403,4 +404,87 @@ describe('ba_task shifts on the mock runtime', () => {
       expect(reports(h, msg.shiftId)).toEqual([]);
     }, 60_000);
   });
+});
+
+describe('batch_intake shifts (#63)', () => {
+  const batchShift = (
+    hh: Harness,
+    note?: string,
+    answers: Array<{ question: string; answer: string | null }> = [],
+  ) =>
+    taskShift(hh, 'batch_intake', {
+      phase: undefined as never,
+      cards: [],
+      followups: [],
+      outstanding: [],
+      batch: {
+        batchId: uuidv7(),
+        itemId: uuidv7(),
+        system: 'jira',
+        ticketKey: 'ABC-7',
+        ...(note ? { note } : {}),
+        projects: [{ key: 'TOY', name: 'Toy', repos: ['toy'] }],
+        cards: [],
+        answers,
+      },
+    });
+
+  it('reads the ticket through the runner, creates the card with the intake verbs and reports done', async () => {
+    const calls: Array<{ method: string; params: any }> = [];
+    const external = new ExternalAdapters([
+      {
+        system: 'jira',
+        readSource: async (ref) => ({ ref, title: 'Dark mode', body: 'Please', labels: [], comments: [] }),
+        postApproved: async () => ({}),
+      },
+    ]);
+    h = await startHarness(
+      {
+        rpc: (m) => {
+          calls.push({ method: m.method, params: m.params });
+          return { ok: true, result: m.method === 'card.create' ? { ref: 'TOY-9', missing: [] } : {} };
+        },
+      },
+      { external },
+    );
+    const msg = batchShift(h);
+    const ended = await run(h, msg);
+    expect(ended.outcome).toBe('reported');
+    expect(calls.map((c) => c.method)).toEqual(['intake.map', 'card.create', 'card.specify']);
+    expect(calls[0]?.params).toEqual({ project: 'TOY' });
+    expect(reports(h, msg.shiftId)[0]?.report).toMatchObject({
+      kind: 'outcome',
+      outcomeId: 'batch_done',
+      note: 'Created TOY-9 from ABC-7: Dark mode',
+    });
+    const md = readFileSync(join(h.dataDir, 'agents', msg.agent.agentId, 'claude', 'CLAUDE.md'), 'utf8');
+    expect(md).toContain('one ticket of a batch intake');
+    expect(md).toContain('aom batch ask');
+    expect(existsSync(worktreeOf(h))).toBe(false);
+  }, 60_000);
+
+  it('asks one question when it cannot go on, and carries on once it has an answer', async () => {
+    h = await startHarness({
+      rpc: (m) => ({ ok: true, result: m.method === 'card.create' ? { ref: 'TOY-9', missing: [] } : {} }),
+    });
+    const asked = batchShift(h, 'please [ask]');
+    await run(h, asked);
+    expect(reports(h, asked.shiftId)[0]?.report).toMatchObject({
+      kind: 'outcome',
+      outcomeId: 'batch_ask',
+      data: { question: 'Which project does this belong to?', options: ['first', 'second'] },
+    });
+    const answered = batchShift(h, 'please [ask]', [
+      { question: 'Which project does this belong to?', answer: 'first' },
+    ]);
+    await run(h, answered);
+    expect(reports(h, answered.shiftId)[0]?.report).toMatchObject({ outcomeId: 'batch_done' });
+  }, 60_000);
+
+  it('can fail a ticket', async () => {
+    h = await startHarness();
+    const msg = batchShift(h, '[fail]');
+    await run(h, msg);
+    expect(reports(h, msg.shiftId)[0]?.report).toMatchObject({ outcomeId: 'batch_fail' });
+  }, 60_000);
 });

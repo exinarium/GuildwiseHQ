@@ -325,6 +325,7 @@ export class Runner {
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
       syncAfterFetch: (t) => this.sync.sync(t, { fetch: false, locked: true }).then(() => undefined),
       mcpSignInNote: (granted) => this.mcpSignInNote(granted),
+      external: () => this.external,
     });
     this.external =
       opts.external ??

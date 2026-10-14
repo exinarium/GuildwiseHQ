@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { MockScriptSchema } from '../cards/fields.ts';
 import { StoredFinalizeAction } from '../cards/types.ts';
 import { RegressionPlatform } from '../events/testing.ts';
+import { BatchTaskSchema, batchBriefOutcomes } from '../intake/batch.ts';
 import type { ReporterTaskKind } from '../reporter/index.ts';
 import { isReporterTaskKind, ReporterTaskSchema, reporterBriefOutcomes } from '../reporter/index.ts';
 
@@ -305,6 +306,8 @@ export const BaTaskKind = z.enum([
   'floor_alert',
   'floor_report',
   'scheduled_brief',
+  // Batch intake (#63): one ticket of a batch, worked on in the background.
+  'batch_intake',
 ]);
 export type BaTaskKind = z.infer<typeof BaTaskKind>;
 export const BaTaskStatus = z.enum(['queued', 'running', 'done', 'failed', 'fallback', 'cancelled']);
@@ -350,6 +353,8 @@ export const BaTaskShiftSchema = z.object({
     })
     .optional(),
   reporter: ReporterTaskSchema.optional(),
+  /** `batch_intake`: the ticket this shift turns into cards. */
+  batch: BatchTaskSchema.optional(),
   cards: z
     .array(
       PhaseCardOutcome.extend({
@@ -537,6 +542,7 @@ export type BranchCheckMergedResult = z.infer<typeof BranchCheckMergedResultSche
 
 /** Outcomes placed in the synthetic brief of a `ba_task` shift (the runner validates reports against them). */
 export function baTaskBriefOutcomes(kind: BaTaskKind) {
+  if (kind === 'batch_intake') return batchBriefOutcomes();
   if (isReporterTaskKind(kind)) return reporterBriefOutcomes(kind as ReporterTaskKind);
   const o = (id: string, label: string, data: string) => ({ id, label, kind: 'success' as const, data });
   switch (kind) {

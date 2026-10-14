@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   type AnswerDeskItemRequest,
+  BATCH_QUESTION_SUBKIND,
   type DeskActor,
   type DeskResolution,
   isOrgManager,
@@ -27,6 +28,7 @@ import { mergedAnswerNotes } from './escalation.ts';
 import { resolveLargeMergeIn } from './finalize.ts';
 import { runHygieneForConfirmedRepo, workingBranchAnsweredEvents } from './hygiene.ts';
 import { continueIntake, mappingAnsweredEvents } from './intake.ts';
+import { batchAnsweredEvents, batchDismissedEvents } from './intake-batch.ts';
 import { resolveOutboundIn } from './outbox.ts';
 import { resolvePhaseDeskItemIn } from './phases.ts';
 import { resolveRepoCreateIn, retryRepoCreateIn } from './repo-create.ts';
@@ -69,7 +71,8 @@ export async function answerDeskItem(
   id: string,
   req: AnswerDeskItemRequest,
 ): Promise<{ ledgerEntryId: string; unblockedCardIds: string[] }> {
-  const after: { mapped?: { intake: Row; projectKey: string }; hygieneRepo?: string } = {};
+  const after: { mapped?: { intake: Row; projectKey: string }; hygieneRepo?: string; batchQueued?: boolean } =
+    {};
   const answered = await withAppendTx(ctx.pool, async (tx) => {
     const { item, mayAct } = await lockItem(tx, user, id);
     if (item.status !== 'open') throw conflict('already_answered', `this item is already ${item.status}`);
@@ -177,6 +180,13 @@ export async function answerDeskItem(
         after.mapped = { intake: m.intake, projectKey: m.projectKey };
       }
     }
+    // Batch intake (#63): the answer goes to the ticket the question was about (the desk item's data names the
+    // batch item); the item gets a new BA task that carries it.
+    if (item.subkind === BATCH_QUESTION_SUBKIND) {
+      const b = await batchAnsweredEvents(tx, item, req.answer);
+      events.push(...b.events);
+      after.batchQueued = b.queued;
+    }
     // Hygiene: the answer to a working-branch question stores the branch on the repository.
     if (item.subkind === WORKING_BRANCH_SUBKIND) {
       const b = await workingBranchAnsweredEvents(tx, item, user, req);
@@ -187,6 +197,7 @@ export async function answerDeskItem(
     return { ledgerEntryId: entryId, unblockedCardIds: blocked.map((b) => b.card_id) };
   });
   if (after.mapped) continueIntake(ctx, after.mapped.intake, after.mapped.projectKey);
+  if (after.batchQueued) ctx.services.dispatcher.trigger();
   if (after.hygieneRepo) await runHygieneForConfirmedRepo(ctx, after.hygieneRepo);
   return answered;
 }
@@ -293,9 +304,14 @@ async function closeItem(
       await resolveVaultConflictIn(ctx, tx, user, wv.vault_id, wv.workstation_id);
       workstationToDeliver = wv.workstation_id;
     }
+    const batchEvents =
+      item.subkind === BATCH_QUESTION_SUBKIND && resolution === 'dismissed'
+        ? await batchDismissedEvents(tx, item)
+        : [];
     if (!retryClosedAlert && !partial)
       await ctx.store.append(
         [
+          ...batchEvents,
           {
             streamId: streamId.desk(item.id),
             event: {

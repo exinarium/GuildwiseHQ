@@ -48,6 +48,7 @@ export const ROUTING_EXEMPT_SUBKINDS: readonly string[] = [
   'phase_done',
   'phase_results',
   'unmapped_ticket',
+  'batch_question',
 ];
 
 // ----------------------------------------------------------------------------------------------- prefs

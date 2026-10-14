@@ -53,6 +53,14 @@ export function commandForOutcome(outcome: BriefOutcome): string {
       return 'aom report floor --summary-file <report.md>';
     case 'scheduled_brief':
       return 'aom report brief --summary-file <report.md>';
+    case 'batch_done':
+      return 'aom batch done --note "<the cards you created and why this split>"';
+    case 'batch_ask':
+      return 'aom batch ask --text "<one precise question>" [--option "<answer a>"]... [--recommend <n>]';
+    case 'batch_skip':
+      return 'aom batch skip --note "<why this ticket needs no card>"';
+    case 'batch_fail':
+      return 'aom batch fail --note "<why this ticket cannot be turned into cards>"';
     case 'phase_results':
       return 'aom phase results --summary-file <report.md>';
     default:

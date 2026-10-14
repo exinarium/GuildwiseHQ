@@ -241,6 +241,9 @@ export const phaseEvents = [
       scheduleName: z.string().max(120).optional(),
       /** The task is for the whole organization (any BA may take it); its project is only the carrier it is filed under. */
       orgLevel: z.boolean().optional(),
+      /** `batch_intake`: the batch and the item this task works on. */
+      batchId: Id.optional(),
+      batchItemId: Id.optional(),
     }),
   ),
   /** A `ba_task` shift was dispatched to the runner (creates the shift row). */

@@ -635,6 +635,8 @@ Then add an automation **When an e-mail arrives** and choose the inbox. **Fill t
 
 **Intake and the outbox.** The **Intake** page (sidebar, Owners and Admins) is where you hand the BA a ticket: paste a Jira key or a GitHub issue address and the BA reads it, asks you about anything unclear, maps it to a project and drafts the cards. Updates the agents want to post back to the ticket (a comment, a resolution) wait on your desk as **Outbound update** items. You can edit them, approve or reject. Nothing is posted without your approval, and agent names and internal details are scrubbed from the text. Jira and GitHub logins stay on your workstation.
 
+**Batch intake.** To bring in many tickets without a chat per ticket, open **Intake**, switch to **Batch**, paste one ticket per line (Jira keys or URLs, GitHub issues; up to 50), optionally pick a project for all of them and add a note, then **Start batch**. The BA works through the tickets in the background, two at a time, doing what it does in a chat: it reads the ticket, maps it to a project, writes the spec and creates the cards. Tickets that already have a card are skipped ("skipped: already P4-12"). When the BA cannot go on with a ticket (unclear, no project fits, missing access) it asks one question on your desk that names the ticket; your answer resumes that ticket and the others carry on. The batch page shows each ticket's status, its cards and the question, with **Retry** for failed tickets and **Cancel batch** (tickets the BA is already working on finish).
+
 ![Intake](guide/assets/intake-view.jpg)
 
 ![An outbound update waiting for approval](guide/assets/desk-outbound.jpg)

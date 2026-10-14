@@ -29,6 +29,7 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { dedupMatches } from '../queries/ledger.ts';
 import { cardView, createCardIn, patchCardIn, specifyCardIn } from './cards.ts';
 import { agentActor, cardMessage, orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { batchIntakeOf } from './intake-batch.ts';
 import { phaseChatRpc, proposeCardPhaseIn } from './phases.ts';
 
 /** Reply of a chat-scoped rpc: `[ok, result?, error?]` (the gateway turns it into `rpc.response`). */
@@ -98,7 +99,7 @@ export async function getIntake(ctx: Ctx, orgId: string, id: string): Promise<In
 }
 
 /** Projects the user may map a ticket to: the organization's own first, then the ones shared with them. */
-async function visibleProjects(db: Queryable, userId: string, orgId: string): Promise<Row[]> {
+export async function visibleProjects(db: Queryable, userId: string, orgId: string): Promise<Row[]> {
   return rows(
     db,
     `SELECT p.id, p.key, p.name, p.org_id,
@@ -303,6 +304,8 @@ export interface Responder {
 
 /** The intake a BA chat belongs to (the chat's shift id -> its thread -> the intake). Null when it is none. */
 export async function intakeOf(ctx: Ctx, shift: Row): Promise<Responder | null> {
+  // Batch intake (#63): a BA task shift works in the intake of its ticket.
+  if (shift.kind === 'ba_task') return batchIntakeOf(ctx, shift);
   const threadId = ctx.services.chat.threadOfChat(shift.id);
   if (!threadId) return null;
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [shift.agent_id]);

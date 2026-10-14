@@ -846,6 +846,31 @@ const VERBS: Record<string, Verb> = {
     const note = textFlag(ctx, p, 'note', false)?.trim() || 'Finalize';
     return report(ctx, outcome('finalized', note, {}));
   },
+  /** BA (batch intake): the terminal command of a ticket of a batch: `aom batch done|ask|skip|fail`. */
+  batch: async (ctx, p) => {
+    const sub = p.positionals[0];
+    const usage =
+      'usage: aom batch done --note "<cards created>" | ask --text "<question>" [--option "<a>"]... [--recommend <n>] | skip --note "<why>" | fail --note "<why>"';
+    if (sub === 'ask') {
+      const rec = one(p, 'recommend');
+      return report(
+        ctx,
+        outcome('batch_ask', one(p, 'text') ?? '', {
+          question:
+            one(p, 'text') ??
+            ((): never => {
+              throw new UsageError('--text "<question>" is required');
+            })(),
+          options: many(p, 'option'),
+          ...(rec !== undefined ? { recommend: Number(rec) } : {}),
+        }),
+      );
+    }
+    const id = { done: 'batch_done', skip: 'batch_skip', fail: 'batch_fail' }[sub ?? ''];
+    if (!id) throw new UsageError(usage);
+    const note = textFlag(ctx, p, 'note', sub !== 'done') ?? '';
+    return report(ctx, outcome(id, note, {}));
+  },
   intake: async (ctx, p) => {
     const sub = p.positionals[0];
     if (sub === 'map') {
@@ -1015,6 +1040,7 @@ export const USAGE = `usage: aom <verb> [options]
   test pass --evidence "<text>" [--command "<cmd>"]...
   test fail --title "<bug>" --note "<text>" [--evidence "<text>"] [--command "<cmd>"]...
   outcome <id> --note "<text>" [--data-file <json>]
+  batch done|ask|skip|fail ...   BA batch intake: end the shift for this ticket (done: cards created; ask: one question for the owner, who answers on the desk; skip; fail)
   answer --item <id> --text "<answer>" [--option <id>]   answer a colleague's question (question shifts)
   escalate --item <id> --note "<what must be decided>"   pass the question on (peer -> BA -> manager's desk)
   finalize [--note "<note>"]   BA: run the card's own completion action (you never choose it; an investigation-only card with its report in the vault needs no git step)

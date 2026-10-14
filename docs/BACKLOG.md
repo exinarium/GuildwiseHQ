@@ -276,6 +276,7 @@ The details of each done item follow this list, by date.
 - #50: Claude login expiry: detect, pause, notify, resume; credentials copied under a lock instead of symlinked. Done 2026-10-14.
 - #61: No card or agent branch is pushed unless the goal is a pull request. Done 2026-10-14.
 - #62: Inbound e-mail through SendGrid Inbound Parse. Done 2026-10-14.
+- #63: Batch intake: hand the BA a list of tickets. Done 2026-10-14.
 
 ## 2026-10-14 (done)
 
@@ -290,6 +291,38 @@ recommended) and parsed fields (`headers`, `text`, `html`, `envelope`, `charsets
 normalised message as Postmark, so threads, cards, rate limit and untrusted rendering are unchanged; SendGrid's `dkim`, `SPF`
 and `spam_score` fields feed the existing checks. Auth is the existing Basic-auth secret in the webhook URL. DEPLOY.md has the
 set-up steps. Tests: `test/inbound-sendgrid.test.ts`.
+
+### 63. Batch intake: hand the BA a list of tickets
+
+**Owner request (2026-10-14):** "Intake works well now, but I want to point it at a bunch of tickets at once without
+starting a single chat per ticket. Do what I do now, but also just post a bunch of tickets to spec and the BA should just
+run with it."
+
+**Done (2026-10-14).** The Intake page has a **Batch** mode next to the chat: one ticket per line (Jira keys or URLs,
+GitHub issues), an optional project for all of them, a note for all of them. `POST /api/intake/batches` (Owner and Admins,
+as for a chat intake; at most 50 tickets; lines that are no ticket are refused, repeats ignored) creates an event-sourced
+batch (`IntakeBatchCreated`, ..., projections `intake_batches` and `intake_batch_items`, migration 1867) with one item per
+ticket. A ticket that already has a card (matched on the card's `externalRef`) or an intake is recorded as `skipped:
+already P4-12`. Each other item becomes a BA task of the new kind `batch_intake`: a background BA shift (not a chat) whose
+prompt gives the ticket, the optional project and the note, and tells the BA to do what it does in an intake chat: read the
+ticket (`aom source read`, attachments), map it, write the spec and create the cards with the same verbs and flags
+(`aom card create|update|specify`, designNeeded, investigationOnly, mergeMainFirst; never completionAction). The shift
+works in a real intake of the ticket (created with the first card verb, started by the batch's creator), so cards are
+linked to it and the ticket's chat thread exists. The shift ends with `aom batch done|ask|skip|fail`; `done` is refused
+while no card exists or a card is still a draft. At most 2 items of one batch are with a BA at once (`BATCH_MAX_IN_FLIGHT`,
+checked in `baTaskPass`), and batch tasks queue behind every other BA task, so phase reports and reporter work still flow.
+Statuses per item: queued, reading, waiting, done, skipped, failed (Retry), cancelled; batch: running, done, cancelled
+(Cancel stops queued and waiting items; shifts in flight finish).
+
+*Questions go to the desk, one desk item per blocked ticket* (owner decision): `aom batch ask` raises a desk question
+(subkind `batch_question`, data = batch and item, text starting with the ticket key) and the item goes to `waiting`; the
+shift ends and other items carry on. Answering the desk item queues a new BA task for exactly that item, with the whole
+question and answer history in its prompt (routing by the item named in the desk item's data, so there is no guessing which
+ticket an answer is for). Dismissing the question fails the item (Retry asks again). A task nobody can take fails its item.
+The runner gives a batch shift `aom source read|attachments|attachment` (ticket credentials stay on the workstation, only
+the batch ticket's attachments) and `aom card attach`. The web shows the batch list and a detail view (ticket links, card
+links, the question with a link to its desk item, Retry, Cancel), refreshed every 5 seconds while a batch runs. Tests:
+server `intake-batch.test.ts`, web `intake-batch.test.tsx`, shared `batch.test.ts`, runner `batch-cli.test.ts`.
 
 ### 47. Intake: the BA tries to read the code itself
 
