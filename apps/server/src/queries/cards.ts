@@ -297,7 +297,8 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     permissions: {
       canEdit: manage && (card.status === 'draft' || (card.status === 'queued' && !card.claim_id)),
       canEditPriority: manage && card.status !== 'cancelled',
-      canEditCompletion: manage && open && !['awaiting_approval', 'running'].includes(card.finalize_state ?? ''),
+      canEditCompletion:
+        manage && open && !['awaiting_approval', 'running'].includes(card.finalize_state ?? ''),
       canSetRisk: manage && open && !['awaiting_approval', 'running'].includes(card.finalize_state ?? ''),
       canSetPhase: open && memberRefusal(card) === null,
       canSpecify: manage && card.status === 'draft',

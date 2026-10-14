@@ -43,6 +43,7 @@ export const CardDraftSchema = z.object({
   cardType: CardType.default('feature'),
   /** One of the project's enabled workflows; absent: the project's default for the card type. */
   workflowKey: z.string().min(1).optional(),
+  /** Agents may not set it (the server refuses a draft that names it); kept in the schema so the refusal can teach. */
   completionAction: CompletionAction.optional(),
   docsNeeded: z.boolean().optional(),
   /** Run Investigate & design (architect) before build; absent: the project's setting. */

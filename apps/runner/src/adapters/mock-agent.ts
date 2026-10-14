@@ -1093,7 +1093,6 @@ async function intakeMain(): Promise<number> {
     const draft = {
       title,
       cardType: 'feature',
-      completionAction: d.completionAction ?? source.completionAction ?? 'push_branch',
       docsNeeded: d.docsNeeded ?? false,
       ...((d.repo ?? repo) ? { repo: d.repo ?? repo } : {}),
       ...(key ? { externalRef: key } : {}),
@@ -1256,7 +1255,6 @@ async function deskMain(): Promise<number> {
   const draft = {
     title,
     cardType: 'feature',
-    completionAction: 'push_branch',
     docsNeeded: false,
     ...(repoName ? { repo: repoName } : {}),
     fields: {

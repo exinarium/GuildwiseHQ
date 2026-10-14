@@ -34,6 +34,10 @@ import { phaseChatRpc, proposeCardPhaseIn } from './phases.ts';
 /** Reply of a chat-scoped rpc: `[ok, result?, error?]` (the gateway turns it into `rpc.response`). */
 export type RpcReply = [boolean, unknown?, string?];
 
+/** #52: only people choose how a card lands. The draft schemas still name the key so that it is refused, not dropped. */
+const COMPLETION_ACTION_REFUSAL =
+  "agents may not set the completion action: remove completionAction from the card. The project's default applies; ask the manager to change it on the card page (or in the project settings).";
+
 const pseudoUser = (userId: string): AuthSession['user'] => ({ id: userId }) as AuthSession['user'];
 
 // ------------------------------------------------------------------------------------------- queries
@@ -526,6 +530,7 @@ async function createDraft(
 ): Promise<RpcReply> {
   const p = CardDraftSchema.safeParse(params);
   if (!p.success) return [false, undefined, `invalid card draft: ${zodText(p.error.issues)}`];
+  if (p.data.completionAction !== undefined) return [false, undefined, COMPLETION_ACTION_REFUSAL];
   if (!intake.mapped_project_id)
     return [
       false,
@@ -548,7 +553,6 @@ async function createDraft(
         externalRef: draft.externalRef ?? draft.fields.externalRef ?? intake.external_key ?? undefined,
       },
       ...(draft.repo ? { repoId: await resolveRepo(tx, project.id, draft.repo) } : {}),
-      ...(draft.completionAction ? { completionAction: draft.completionAction } : {}),
       ...(draft.docsNeeded !== undefined ? { docsNeeded: draft.docsNeeded } : {}),
       ...(draft.designNeeded !== undefined ? { designNeeded: draft.designNeeded } : {}),
       ...(draft.investigationOnly !== undefined ? { investigationOnly: draft.investigationOnly } : {}),
@@ -624,6 +628,7 @@ async function updateDraft(
   const { ref, ...rest } = params;
   const p = CardDraftPatchSchema.safeParse(rest);
   if (!p.success) return [false, undefined, `invalid card patch: ${zodText(p.error.issues)}`];
+  if (p.data.completionAction !== undefined) return [false, undefined, COMPLETION_ACTION_REFUSAL];
   const patch = p.data;
   const out = await withAppendTx(ctx.pool, async (tx) => {
     const card = await draftOf(tx, intake, ref);
@@ -634,7 +639,6 @@ async function updateDraft(
     if (patch.designNeeded !== undefined) changes.designNeeded = patch.designNeeded;
     if (patch.investigationOnly !== undefined) changes.investigationOnly = patch.investigationOnly;
     if (patch.mergeMainFirst !== undefined) changes.mergeMainFirst = patch.mergeMainFirst;
-    if (patch.completionAction !== undefined) changes.completionAction = patch.completionAction;
     if (patch.riskTier !== undefined) changes.riskTier = patch.riskTier;
     if (patch.repo !== undefined) changes.repoId = await resolveRepo(tx, card.project_id, patch.repo);
     if (patch.dependencies !== undefined)
