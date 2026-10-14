@@ -20,6 +20,7 @@ export interface HelloOptions {
   sudoKey?: { keyId: string; publicKey: string };
   capabilities?: string[];
   maxRunEnvironments?: number;
+  integrationsVersion?: number;
 }
 
 /** In-process runner speaking the shared protocol; auto-acks server messages that need it. */
@@ -100,6 +101,7 @@ export class FakeRunner {
       ...(o.sudoKey ? { sudoKey: o.sudoKey } : {}),
       ...(o.capabilities ? { capabilities: o.capabilities } : {}),
       ...(o.maxRunEnvironments ? { maxRunEnvironments: o.maxRunEnvironments } : {}),
+      ...(o.integrationsVersion ? { integrationsVersion: o.integrationsVersion } : {}),
     });
   }
 

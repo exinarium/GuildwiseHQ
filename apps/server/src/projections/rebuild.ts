@@ -47,6 +47,12 @@ export const SAVED: Array<{ table: string; restoreWhere: string }> = [
   { table: 'runner_commands', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
   // The runner's public key for the sudo password (migration 1370): announced in `hello`, not an event.
   { table: 'workstation_keys', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
+  // The Integrations page (migration 1870): facts the runner reported and short-lived requests; not events.
+  { table: 'workstation_integrations', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
+  {
+    table: 'integration_requests',
+    restoreWhere: 'workstation_id IN (SELECT id FROM workstations) AND user_id IN (SELECT id FROM users)',
+  },
   { table: 'runner_token_rotations', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
   {
     table: 'workstation_repos',

@@ -296,6 +296,11 @@ Installer troubleshooting: expired links, restart, permissions, git version, san
 - Docker or yt-dlp show a warning: Both are optional. Docker is only needed if your testers run containers; yt-dlp lets agents read video transcripts. Run the command again and say yes when it asks, or ignore the warning.
 - I still need help: If the workstation is already paired, Ask DevOps on it can often fix the problem for you. Otherwise use Contact us and say which system you use and which step stopped. The form attaches the details we need. For a server or Codespace, see Cloud workstations.
 
+### Integrations
+Connect Claude, git hosts, Jira and MCP servers from the web.
+- Connect: Click Connect on a tile. Your token is encrypted in your browser for that workstation.
+- Greyed out: The tile says why. From a terminal shows the command instead.
+
 ### Converting a project
 Converting from research to code or another workflow, what is kept, and the conversion process.
 - Converting: Only the organization's Owner and Admins can convert. To convert a project:

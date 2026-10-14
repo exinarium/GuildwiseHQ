@@ -10,11 +10,15 @@ export function buildAdapters(
   config: RunnerConfig,
   paths: RunnerPaths,
   auth?: ClaudeAuthMonitor,
+  credentials?: NonNullable<ConstructorParameters<typeof ClaudeCodeAdapter>[2]>['credentials'],
 ): Map<string, RuntimeAdapter> {
   const adapters = new Map<string, RuntimeAdapter>();
   adapters.set(
     'claude-code',
-    new ClaudeCodeAdapter(config.runtimes['claude-code'], paths, auth ? { auth } : undefined),
+    new ClaudeCodeAdapter(config.runtimes['claude-code'], paths, {
+      ...(auth ? { auth } : {}),
+      ...(credentials ? { credentials } : {}),
+    }),
   );
   if (config.runtimes.mock?.enabled) adapters.set('mock', new MockAdapter(config.runtimes.mock, paths));
   return adapters;

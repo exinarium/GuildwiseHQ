@@ -95,6 +95,8 @@ export const DeskItemDtoSchema = z.object({
     .object({ projectId: z.uuid(), projectKey: z.string(), interestId: z.uuid().optional() })
     .nullable()
     .optional(),
+  /** Workstation notices (`claude_auth_expired`, `mcp_needs_sign_in`): which workstation, for the Integrations deep link. */
+  data: z.object({ workstationId: z.string().optional(), key: z.string().optional() }).optional(),
   /** False for members who may see but not answer (owner_only on a shared card). */
   canAnswer: z.boolean(),
   createdAt: IsoTime,

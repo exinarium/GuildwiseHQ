@@ -220,8 +220,20 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       auth?: ClaudeAuthMonitor;
       /** Test hook: the login probe (default: `claude auth status`, then one minimal `claude -p`). */
       probe?: () => Promise<'ok' | 'expired' | 'unknown'>;
+      /** The credential in force (secrets/claude.json over config.json); read at every session start. */
+      credentials?: () => Pick<ClaudeConfig, 'authMode' | 'oauthToken' | 'apiKey'> | undefined;
     } = {},
   ) {}
+
+  /**
+   * The configuration in force right now: `cfg` with the credential a provider supplies (`secrets/claude.json`, written
+   * by the Integrations page or `aom-runner auth`) laid over it. Read at every session start, so a new token needs no
+   * restart of the runner.
+   */
+  private get live(): ClaudeConfig {
+    const c = this.host.credentials?.();
+    return c ? { ...this.cfg, ...c } : this.cfg;
+  }
 
   private realHome(): string {
     return this.host.home ?? homedir();
@@ -348,7 +360,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           ]),
         ],
       },
-      this.cfg,
+      this.live,
     );
     const parser = new ClaudeStreamParser();
     return spawnSession({
@@ -413,7 +425,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       )}\n`,
     );
     await this.linkCredentials(dir, used);
-    const cmd = buildClaudeChatCommand(chatInput, this.cfg);
+    const cmd = buildClaudeChatCommand(chatInput, this.live);
     const parser = new ClaudeStreamParser();
     return spawnSession({
       bin: cmd.bin,
@@ -474,9 +486,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   /** The environment a login probe runs with: the runner's own, plus the configured provider credential. */
   private probeEnv(): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = { ...process.env };
-    if (this.cfg.authMode === 'oauth' && this.cfg.oauthToken)
-      env.CLAUDE_CODE_OAUTH_TOKEN = this.cfg.oauthToken;
-    else if (this.cfg.authMode === 'api_key' && this.cfg.apiKey) env.ANTHROPIC_API_KEY = this.cfg.apiKey;
+    const c = this.live;
+    if (c.authMode === 'oauth' && c.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = c.oauthToken;
+    else if (c.authMode === 'api_key' && c.apiKey) env.ANTHROPIC_API_KEY = c.apiKey;
     return env;
   }
 
@@ -512,10 +524,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   /** The user's own `claude` login is shared with the agents (no token or key configured). */
   private usesSharedLogin(): boolean {
-    return !(
-      (this.cfg.authMode === 'oauth' && this.cfg.oauthToken) ||
-      (this.cfg.authMode === 'api_key' && this.cfg.apiKey)
-    );
+    const c = this.live;
+    return !((c.authMode === 'oauth' && c.oauthToken) || (c.authMode === 'api_key' && c.apiKey));
   }
 
   /**

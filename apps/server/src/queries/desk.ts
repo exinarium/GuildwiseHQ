@@ -118,6 +118,14 @@ export function toDeskDto(
         }
       : null,
     projectId: r.project_id,
+    ...(r.data && typeof r.data === 'object' && (r.data.workstationId || r.data.key)
+      ? {
+          data: {
+            ...(typeof r.data.workstationId === 'string' ? { workstationId: r.data.workstationId } : {}),
+            ...(typeof r.data.key === 'string' ? { key: r.data.key } : {}),
+          },
+        }
+      : {}),
     ...(r.interest ? { interest: r.interest } : {}),
     dedupEntries: (r.dedup_ledger_ids as string[]).flatMap((id) => {
       const e = dedup.get(id);

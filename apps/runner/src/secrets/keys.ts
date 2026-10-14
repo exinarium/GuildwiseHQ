@@ -1,5 +1,6 @@
 import {
   constants,
+  createDecipheriv,
   createHash,
   createPrivateKey,
   createPublicKey,
@@ -8,7 +9,36 @@ import {
 } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { SudoKey } from '@aom/shared';
+import {
+  ENVELOPE_MAX_AHEAD_MS,
+  INTEGRATION_ENVELOPE_ALG,
+  type IntegrationEnvelopeOp,
+  type IntegrationKindId,
+  integrationAad,
+  type SealedEnvelope,
+  type SealedPlaintext,
+  SealedPlaintextSchema,
+  type SudoKey,
+} from '@aom/shared';
+
+/** Why an integration envelope was refused. `code` is safe to show; the message never holds plaintext. */
+export class EnvelopeError extends Error {
+  constructor(
+    readonly code: 'key' | 'decrypt' | 'mismatch' | 'expired' | 'too_far',
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** The outer fields of a command: the AAD is rebuilt from these, so a moved ciphertext fails to decrypt. */
+export interface EnvelopeOuter {
+  workstationId: string;
+  ref: string;
+  kind: IntegrationKindId;
+  instance: string;
+  op: IntegrationEnvelopeOp;
+}
 
 /**
  * The runner's key pair for secrets the manager sends it (the sudo password). RSA-OAEP with SHA-256, 2048 bits: the
@@ -51,5 +81,58 @@ export class RunnerKeys {
       },
       Buffer.from(ciphertextB64, 'base64'),
     ).toString('utf8');
+  }
+
+  /**
+   * Opens a hybrid envelope (RSA-OAEP-256 wraps an AES-256-GCM key; the AAD binds workstation, request, kind, instance and
+   * op). Refuses another key id, a ciphertext moved to another request (the AAD is rebuilt from the command's outer
+   * fields), inner fields that differ from the outer ones, an expired envelope and one valid for more than 15 minutes.
+   * The replay check is the caller's (`ReplayCache`). Throws `EnvelopeError`; the plaintext is returned only on success.
+   */
+  open(envelope: SealedEnvelope, outer: EnvelopeOuter, now: number = Date.now()): SealedPlaintext {
+    if (envelope.alg !== INTEGRATION_ENVELOPE_ALG)
+      throw new EnvelopeError('decrypt', 'the sealed values use an unknown scheme: reload the page');
+    if (envelope.keyId !== this.publicKey.keyId)
+      throw new EnvelopeError(
+        'key',
+        'the values were sealed for another key (the runner key changed): reload the page and enter them again',
+      );
+    let plain: Buffer;
+    try {
+      const aes = privateDecrypt(
+        {
+          key: createPrivateKey(this.privatePem),
+          padding: constants.RSA_PKCS1_OAEP_PADDING,
+          oaepHash: 'sha256',
+        },
+        Buffer.from(envelope.wrappedKey, 'base64'),
+      );
+      const ct = Buffer.from(envelope.ct, 'base64');
+      if (aes.length !== 32 || ct.length < 17) throw new Error('shape');
+      const d = createDecipheriv('aes-256-gcm', aes, Buffer.from(envelope.iv, 'base64'));
+      d.setAAD(Buffer.from(integrationAad(outer), 'utf8'));
+      d.setAuthTag(ct.subarray(ct.length - 16));
+      plain = Buffer.concat([d.update(ct.subarray(0, ct.length - 16)), d.final()]);
+    } catch {
+      throw new EnvelopeError('decrypt', 'the sealed values could not be opened: enter them again');
+    }
+    let inner: SealedPlaintext;
+    try {
+      inner = SealedPlaintextSchema.parse(JSON.parse(plain.toString('utf8')));
+    } catch {
+      throw new EnvelopeError('decrypt', 'the sealed values are damaged: enter them again');
+    }
+    if (
+      inner.ref !== outer.ref ||
+      inner.workstationId !== outer.workstationId ||
+      inner.kind !== outer.kind ||
+      inner.instance !== outer.instance ||
+      inner.op !== outer.op
+    )
+      throw new EnvelopeError('mismatch', 'the sealed values belong to another request');
+    if (inner.exp <= now) throw new EnvelopeError('expired', 'the sealed values expired: enter them again');
+    if (inner.exp > now + ENVELOPE_MAX_AHEAD_MS)
+      throw new EnvelopeError('too_far', 'the sealed values are valid for too long');
+    return inner;
   }
 }

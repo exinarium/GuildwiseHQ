@@ -1,4 +1,6 @@
 import type { WorkstationDto } from '@aom/shared';
+import { Link } from 'react-router';
+import { integrationsLink } from '../lib/integrations.ts';
 import { Badge } from './ui.tsx';
 
 /**
@@ -9,7 +11,16 @@ export function JiraStatusLine({ w }: { w: WorkstationDto }) {
   const s = w.jira?.status ?? null;
   return (
     <div className="mt-4 border-t border-line pt-3 text-sm" data-testid="jira-status">
-      <p className="mb-2 text-xs font-medium text-subtle">Jira</p>
+      <p className="mb-2 flex items-center gap-3 text-xs font-medium text-subtle">
+        Jira
+        <Link
+          to={integrationsLink(w.id, 'jira', { connect: s?.state !== 'connected' })}
+          className="font-normal text-brand-text underline"
+          data-testid="jira-open-integrations"
+        >
+          {s?.state === 'connected' ? 'Open Integrations' : 'Connect on the Integrations page'}
+        </Link>
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <span className="w-40 font-medium text-fg">Ticket attachments</span>
         {!s ? (

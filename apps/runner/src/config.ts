@@ -66,6 +66,16 @@ export const MockRuntimeConfigSchema = z.object({
   sandboxReason: z.string().optional(),
 });
 
+/**
+ * Local policy for connecting integrations from the web (docs/design/integrations-page.md D8). `allowWeb` false refuses every
+ * web-submitted credential and sign-in on this workstation (`aom-runner integrations allow-web off`). Machine-wide logins
+ * (`~/.claude`, `gh`, MCP sign-ins) are changed from the web only by the machine's primary pairing.
+ */
+export const IntegrationsPolicyConfigSchema = z.object({
+  allowWeb: z.boolean().default(true),
+  machineScopeFromWeb: z.enum(['primary', 'never']).default('primary'),
+});
+
 export const RunnerConfigSchema = z.object({
   serverUrl: z.string().min(1),
   workstationId: z.string().min(1),
@@ -86,6 +96,8 @@ export const RunnerConfigSchema = z.object({
     .default({ 'claude-code': ClaudeRuntimeConfigSchema.parse({}) }),
   /** M8: credentials for posting approved updates to Jira (GitHub uses this machine's `gh` login). */
   jira: JiraConfigSchema.optional(),
+  /** Integrations page policy (see `IntegrationsPolicyConfigSchema`). */
+  integrations: IntegrationsPolicyConfigSchema.default(IntegrationsPolicyConfigSchema.parse({})),
   /**
    * The .NET install root agents use (`~` allowed). By default the runner picks the root with the most SDK versions
    * among `$DOTNET_ROOT`, `~/.dotnet`, `/usr/share/dotnet`, ... and the root behind `dotnet` on PATH.

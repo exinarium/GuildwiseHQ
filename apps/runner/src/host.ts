@@ -5,6 +5,7 @@ import { createLogger, type Logger } from './log.ts';
 import {
   entryConfigPath,
   entryDir,
+  isMachinePrimary,
   loadIndex,
   type PairingEntry,
   pairingIndexPath,
@@ -190,6 +191,13 @@ export class RunnerHost {
       maxShiftMsOverride: this.opts.maxShiftMsOverride,
       sharedCap: () => this.capFor(entry.id),
       updateStatus: () => this.updateStatus,
+      isPrimaryPairing: () => {
+        try {
+          return isMachinePrimary(loadIndex(this.opts.root), entry);
+        } catch {
+          return true;
+        }
+      },
       onConnected: () => this.opts.onConnected?.(),
       ...this.opts.runnerOptions,
     });

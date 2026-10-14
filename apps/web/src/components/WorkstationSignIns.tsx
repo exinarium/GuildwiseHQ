@@ -1,4 +1,6 @@
 import { mcpSignInInstruction, type WorkstationDto } from '@aom/shared';
+import { Link } from 'react-router';
+import { focusOf, integrationsLink } from '../lib/integrations.ts';
 import { Callout } from './ui.tsx';
 
 /** What on this workstation needs a sign-in the manager must do on the machine: the Claude login, plugin MCP servers. */
@@ -23,12 +25,26 @@ export function WorkstationSignIns({ w }: { w: WorkstationDto }) {
           <code className="font-mono text-xs">claude</code>, then{' '}
           <code className="font-mono text-xs">/login</code> (or{' '}
           <code className="font-mono text-xs">claude setup-token</code>, see the runner help). Work resumes by
-          itself once it works.
+          itself once it works.{' '}
+          <Link
+            to={integrationsLink(w.id, 'claude-code', { connect: true })}
+            className="font-medium underline"
+            data-testid="claude-sign-in-link"
+          >
+            Sign in from the web
+          </Link>
         </Callout>
       )}
       {p.mcp.map((s) => (
         <Callout key={s.name} tone="warning" data-testid={`mcp-sign-in-${s.name}`}>
-          Needs sign-in: {mcpSignInInstruction(s.server, w.name)}
+          Needs sign-in: {mcpSignInInstruction(s.server, w.name)}{' '}
+          <Link
+            to={integrationsLink(w.id, focusOf('mcp', s.name))}
+            className="font-medium underline"
+            data-testid={`mcp-sign-in-link-${s.name}`}
+          >
+            Sign in from the web
+          </Link>
         </Callout>
       ))}
     </div>

@@ -18,6 +18,7 @@ export * from './hygiene/index.ts';
 export * from './hygiene/secrets.ts';
 export * from './ids.ts';
 export * from './intake/index.ts';
+export * from './integrations/index.ts';
 export * from './interests/index.ts';
 export * from './investigation/index.ts';
 export * from './mail/index.ts';

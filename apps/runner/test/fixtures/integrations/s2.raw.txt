@@ -1,0 +1,9 @@
+Starting authentication for "atl"…
+Visit this URL to authorize:
+  ]8;;https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=REDACTED&code_challenge=REDACTED&code_challenge_method=S256&redirect_uri=http%3A%2F%2Flocalhost%3APORT%2Fcallback&state=REDACTEDhttps://mcp.atlassian.com/v1/authorize?response_type=code&client_id=REDACTED&code_challenge=REDACTED&code_challenge_method=S256&redirect_uri=http%3A%2F%2Flocalhost%3APORT%2Fcallback&state=REDACTED]8;;
+
+Waiting for authorization… (^C to cancel)
+[1G[0JOr paste the redirect URL here: [33Ghttp://localhost:1234/callback?code=FAKE&state=REDACTED
+That doesn't look like a redirect URL for this sign-in — paste the full address from the browser page this sign-in opened.
+[1G[0JOr paste the redirect URL here: [33G
+Session terminated, killing shell... ...killed.

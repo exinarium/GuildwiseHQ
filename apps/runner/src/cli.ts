@@ -7,6 +7,7 @@ import {
   type ConnectableForge,
   devcontainerText,
   FORGE_LABELS,
+  INTEGRATION_STATE_LABELS,
   RunnerPairRequestSchema,
   RunnerPairResponseSchema,
 } from '@aom/shared';
@@ -16,8 +17,7 @@ import { sandboxDoctorLines, sandboxState } from './adapters/claude-policy.ts';
 import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
 import { toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { requestRotatedToken } from './connection/rotate.ts';
-import { JiraAdapter } from './external/jira.ts';
-import { JiraCredentialStore, jiraFile, normalizeJiraBaseUrl } from './external/jira-store.ts';
+import { JiraCredentialStore, jiraFile } from './external/jira-store.ts';
 import {
   connectSteps,
   describeConnection,
@@ -30,6 +30,10 @@ import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { RunnerHost } from './host.ts';
+import { ClaudeCredentialStore, claudeFile } from './integrations/claude-store.ts';
+import { headlessAdapters, headlessEnv } from './integrations/headless.ts';
+import { JiraIntegration } from './integrations/jira.ts';
+import { isFailure, type Outcome } from './integrations/types.ts';
 import { createLogger } from './log.ts';
 import { changeOrgFolder, ORG_ID_RE } from './org-folder.ts';
 import {
@@ -37,9 +41,11 @@ import {
   entryConfigPath,
   entryDir,
   findPairing,
+  isMachinePrimary,
   loadIndex,
   type PairingEntry,
   removePairing,
+  saveIndex,
 } from './pairings.ts';
 import { resolveDataDir, runnerPaths } from './paths.ts';
 import { RunnerKeys } from './secrets/keys.ts';
@@ -153,17 +159,17 @@ async function authSet(
     throw new Error(`Pipe the ${kind} in: \`read -rs K; printf %s "$K" | aom-runner auth ${kind}\``);
   const { root, entries } = selectPairings(opts);
   for (const e of entries) {
-    const file = entryConfigPath(root, e);
-    const config = loadConfig(file);
-    const cc = config.runtimes['claude-code'];
-    config.runtimes['claude-code'] =
+    // secrets/claude.json (mode 0600): a running runner reads it at the next session start, so no restart is needed
+    const store = new ClaudeCredentialStore(claudeFile(runnerPaths(entryDir(root, e)).secrets));
+    store.save(
       kind === 'api-key'
-        ? { ...cc, authMode: 'api_key', apiKey: value }
-        : { ...cc, authMode: 'oauth', oauthToken: value };
-    saveConfig(file, config);
+        ? { authMode: 'api_key', apiKey: value, via: 'cli', method: 'api_key' }
+        : { authMode: 'oauth', oauthToken: value, via: 'cli', method: 'oauth_token' },
+    );
+    touchRecheck(runnerPaths(entryDir(root, e)).secrets);
   }
   console.log(
-    `Saved on this machine only (mode 0600). Restart the runner to use it: systemctl --user restart aom-runner`,
+    'Saved on this machine only (mode 0600, secrets/claude.json). A running runner uses it from the next session; no restart is needed.',
   );
 }
 
@@ -590,12 +596,14 @@ interface JiraConnectOpts {
  */
 async function jiraConnect(opts: JiraConnectOpts): Promise<void> {
   const { root, entries } = selectPairings(opts);
+  // The same adapter the Integrations page uses: one path, one set of checks, one place the credentials are stored.
   const targets = entries.map((e) => {
     const paths = runnerPaths(entryDir(root, e));
     return {
       paths,
       store: new JiraCredentialStore(jiraFile(paths.secrets)),
       config: loadConfig(entryConfigPath(root, e)),
+      jira: new JiraIntegration(headlessEnv(paths)),
     };
   });
   const first = targets[0] as (typeof targets)[number];
@@ -612,15 +620,15 @@ async function jiraConnect(opts: JiraConnectOpts): Promise<void> {
     return done();
   }
   if (opts.status) {
-    if (!current) {
+    const s = await first.jira.status();
+    if (s.state === 'not_connected' && !current) {
       console.log('Jira: not connected. Run `aom-runner jira-connect`.');
       process.exitCode = 1;
       return;
     }
-    const s = await new JiraAdapter({ config: current }).checkStatus();
     console.log(
       s.state === 'connected'
-        ? `Jira: connected to ${s.baseUrl}${s.account ? ` as ${s.account}` : ''}.`
+        ? `Jira: connected to ${s.site}${s.account ? ` as ${s.account}` : ''}.`
         : `Jira: ${s.state === 'refused' ? 'refused' : 'not connected'}${s.detail ? ` (${s.detail})` : ''}.`,
     );
     process.exitCode = s.state === 'connected' ? 0 : 1;
@@ -636,8 +644,7 @@ async function jiraConnect(opts: JiraConnectOpts): Promise<void> {
     (await promptLine(
       `Jira base URL${current ? ` [${current.baseUrl}]` : ' (https://yourcompany.atlassian.net)'}: `,
     ));
-  const baseUrl = normalizeJiraBaseUrl(askedUrl || current?.baseUrl || '');
-  if (!baseUrl) throw new Error('a Jira base URL such as https://yourcompany.atlassian.net is required');
+  const baseUrl = askedUrl || current?.baseUrl || '';
   const askedMail =
     opts.email ??
     (await promptLine(
@@ -646,18 +653,18 @@ async function jiraConnect(opts: JiraConnectOpts): Promise<void> {
   const mail = (askedMail || (opts.email === undefined ? current?.email : '') || '').trim();
   const token = await promptSecret('API token (hidden): ');
   if (!token) throw new Error('an API token is required');
-  const cfg = { baseUrl, ...(mail ? { email: mail } : {}), apiToken: token };
-  const status = await new JiraAdapter({ config: cfg }).checkStatus();
-  if (status.state !== 'connected') {
-    console.error(
-      `Jira did not accept these credentials: ${status.detail ?? status.state}. Nothing was saved.`,
-    );
+  let result: Awaited<ReturnType<JiraIntegration['connect']>> | undefined;
+  for (const t of targets) {
+    result = await t.jira.connect('', 'token', { baseUrl, email: mail, token });
+    if (isFailure(result)) break;
+  }
+  if (!result || isFailure(result)) {
+    console.error(result?.error ?? 'Jira did not accept these credentials. Nothing was saved.');
     process.exitCode = 1;
     return;
   }
-  for (const t of targets) t.store.save(cfg);
   console.log(
-    `Connected to ${baseUrl}${status.account ? ` as ${status.account}` : ''}. Saved on this machine only (mode 0600).`,
+    `Connected to ${result.site}${result.account ? ` as ${result.account}` : ''}. Saved on this machine only (mode 0600).`,
   );
   done();
 }
@@ -766,25 +773,29 @@ async function gitConnect(providerArg: string, opts: GitConnectOpts): Promise<vo
     organization = await promptLine('Azure DevOps organization: ');
   const token = await promptSecret('Paste the token (it is not shown): ');
   if (!token) throw new Error('no token entered');
-  let st: Awaited<ReturnType<typeof saveAndVerify>> | undefined;
+  // The adapters the Integrations page uses: one path, one set of checks.
+  const instance =
+    provider === 'azure-devops' ? (organization ?? '') : provider === 'bitbucket-cloud' ? '' : host;
+  let outcome: Outcome | undefined;
   for (const s of stores) {
-    st = await saveAndVerify(
-      { exec: realExecutor, fetch, tokens: s.store },
-      {
-        provider,
-        host,
-        token,
-        ...(user ? { user } : {}),
-        ...(organization ? { organization } : {}),
-      },
-    );
+    const { adapters } = headlessAdapters(s.paths);
+    const adapter = adapters.get(provider);
+    if (!adapter?.connect) throw new Error(`${provider} cannot be connected with a token here`);
+    outcome = await adapter.connect(instance, 'token', {
+      token,
+      ...(user ? { email: user } : {}),
+    });
+    if (isFailure(outcome)) break;
   }
-  if (!st || st.state !== 'connected') {
-    console.error(`The token was not accepted${st?.detail ? `: ${st.detail}` : ''}. Nothing was saved.`);
+  if (!outcome || isFailure(outcome)) {
+    const why = outcome && isFailure(outcome) ? outcome.error : '';
+    console.error(`The token was not accepted${why ? `: ${why}` : ''}. Nothing was saved.`);
     process.exitCode = 1;
     return;
   }
-  console.log(describeConnection(st));
+  console.log(
+    `${FORGE_LABELS[provider]} (${host}): connected${outcome.account ? ` as ${outcome.account}` : ''}`,
+  );
   done();
 }
 
@@ -865,6 +876,60 @@ async function gitConnectSsh(
   }
   done();
   return code;
+}
+
+/** `aom-runner integrations`: every integration of this workstation, as the Integrations page shows them. */
+async function integrationsList(opts: { dataDir?: string; pairing?: string }): Promise<void> {
+  const { root, entries } = selectPairings(opts);
+  const index = loadIndex(root);
+  for (const e of entries) {
+    const paths = runnerPaths(entryDir(root, e));
+    const config = loadConfig(entryConfigPath(root, e));
+    console.log(
+      `${entries.length > 1 ? `${e.id}: ` : ''}web connect ${config.integrations.allowWeb ? 'on' : 'OFF'}; machine-wide logins from the web: ${
+        config.integrations.machineScopeFromWeb === 'never'
+          ? 'never'
+          : isMachinePrimary(index, e)
+            ? 'allowed (primary pairing)'
+            : 'not allowed (not the primary pairing)'
+      }`,
+    );
+    const { adapters } = headlessAdapters(paths);
+    for (const a of adapters.values()) {
+      for (const i of await a.instances()) {
+        const st = await a.status(i);
+        console.log(
+          `  ${a.kind}${i ? ` ${i}` : ''}: ${INTEGRATION_STATE_LABELS[st.state]}${st.account ? ` as ${st.account}` : ''}${st.method ? ` (${st.method})` : ''}${st.detail ? `. ${st.detail}` : ''}`,
+        );
+      }
+    }
+  }
+}
+
+/** `aom-runner integrations allow-web on|off`: the local switch for credentials and sign-ins submitted from the web. */
+function integrationsAllowWeb(value: string, opts: { dataDir?: string; pairing?: string }): void {
+  if (value !== 'on' && value !== 'off') throw new Error('use: aom-runner integrations allow-web on|off');
+  const { root, entries } = selectPairings(opts);
+  for (const e of entries) {
+    const file = entryConfigPath(root, e);
+    const config = loadConfig(file);
+    saveConfig(file, { ...config, integrations: { ...config.integrations, allowWeb: value === 'on' } });
+    touchRecheck(runnerPaths(entryDir(root, e)).secrets);
+  }
+  console.log(
+    value === 'on'
+      ? 'Credentials and sign-ins submitted from the web are accepted on this workstation.'
+      : 'Credentials and sign-ins submitted from the web are now refused on this workstation. Use the terminal commands instead.',
+  );
+}
+
+/** `aom-runner integrations machine-admin <pairing>`: which pairing may change machine-wide logins from the web. */
+function integrationsMachineAdmin(selector: string, opts: { dataDir?: string }): void {
+  const root = resolveDataDir(opts.dataDir);
+  const index = loadIndex(root);
+  const entry = findPairing(index, selector);
+  saveIndex(root, { ...index, machineAdmin: entry.id });
+  console.log(`${entry.id} may now change machine-wide logins (~/.claude, gh, MCP sign-ins) from the web.`);
 }
 
 export function buildProgram(): Command {
@@ -984,6 +1049,27 @@ export function buildProgram(): Command {
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(jiraConnect);
+  const integrations = program
+    .command('integrations')
+    .description(
+      'the integrations of this workstation (what the Integrations page shows) and the local policy',
+    );
+  integrations
+    .command('list', { isDefault: true })
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(integrationsList);
+  integrations
+    .command('allow-web <on|off>')
+    .description('accept (on) or refuse (off) credentials and sign-ins submitted from the web app')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(integrationsAllowWeb);
+  integrations
+    .command('machine-admin <pairing>')
+    .description('the pairing that may change machine-wide logins (~/.claude, gh, MCP) from the web')
+    .option(...dataDirOpt)
+    .action(integrationsMachineAdmin);
   const repos = program.command('repos').description('manage the folders scanned for git repositories');
   repos
     .command('add <path>')

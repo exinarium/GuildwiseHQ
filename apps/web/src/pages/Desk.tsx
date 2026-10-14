@@ -1,4 +1,4 @@
-import { type DeskItemDto, isPhaseDeskSubkind, WORKING_BRANCH_SUBKIND } from '@aom/shared';
+import { DESK_SUBKIND, type DeskItemDto, isPhaseDeskSubkind, WORKING_BRANCH_SUBKIND } from '@aom/shared';
 import {
   Bell,
   CheckCheck,
@@ -54,6 +54,7 @@ import {
   sortDeskItems,
 } from '../lib/desk.ts';
 import { useExpertMode } from '../lib/expert-mode.ts';
+import { focusOf, integrationsLink } from '../lib/integrations.ts';
 import { ageLabel, formatDateTime } from '../lib/time.ts';
 
 type FilterKey = 'all' | 'blocking' | 'questions' | 'approvals' | 'notices';
@@ -387,6 +388,9 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
           to see the stage table, graph and validation. Nothing is available until you approve.
         </p>
       )}
+      {(item.subkind === DESK_SUBKIND.claudeAuthExpired || item.subkind === DESK_SUBKIND.mcpNeedsSignIn) && (
+        <SignInFromWeb item={item} />
+      )}
       {item.kind === 'rating' && item.interest && (
         <p className="mt-1 text-sm text-muted">
           From the interest{' '}
@@ -467,6 +471,29 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
 }
 
 /** Dismiss asks first: it closes the item without an answer and tells the asker. */
+/**
+ * "Sign in from the web" on the two workstation sign-in notices. The server may carry `data.workstationId` and
+ * `data.key` (`mcp_signin:<workstation>:<server>`) on the item; without them the link goes to /integrations, which picks
+ * the workstation.
+ */
+function SignInFromWeb({ item }: { item: DeskItemDto }) {
+  const data = (item as { data?: { workstationId?: string; key?: string } }).data;
+  const mcp = item.subkind === DESK_SUBKIND.mcpNeedsSignIn;
+  const server = mcp ? data?.key?.split(':').slice(2).join(':') : undefined;
+  const focus = mcp ? (server ? focusOf('mcp', server) : 'mcp') : 'claude-code';
+  return (
+    <p className="mt-2 text-sm">
+      <Link
+        to={integrationsLink(data?.workstationId, focus, { connect: !mcp || !!server })}
+        className="text-brand-text underline"
+        data-testid="desk-sign-in-web"
+      >
+        Sign in from the web
+      </Link>
+    </p>
+  );
+}
+
 function DismissButton({ item }: { item: DeskItemDto }) {
   const dismiss = useDismissDeskItem();
   const toast = useToast();

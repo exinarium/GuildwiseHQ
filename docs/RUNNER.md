@@ -280,7 +280,8 @@ The server never receives or stores a Claude credential.
 
 - `ANTHROPIC_API_KEY` in the environment of `up` (a Codespaces secret) is written into this machine's `config.json` (mode 0600, `authMode: api_key`).
 - `CLAUDE_CODE_OAUTH_TOKEN` likewise (`authMode: oauth`; a subscription token, individual use).
-- `aom-runner auth api-key` / `aom-runner auth oauth-token` read the value from stdin and store it the same way: `read -rs K; printf %s "$K" | aom-runner auth api-key`, then restart the service.
+- `aom-runner auth api-key` / `aom-runner auth oauth-token` read the value from stdin and store it in `secrets/claude.json` (mode 0600): `read -rs K; printf %s "$K" | aom-runner auth api-key`. A running runner uses it from the next session; no restart is needed.
+- From the web: the Integrations page can do the same without a terminal (API key, a token made elsewhere, or `claude setup-token` driven by the runner). See "Integrations (connect from the web)".
 - The default recommended in the app is the customer's own API key; a subscription login is allowed with an "individual use" warning.
 
 ### `aom-runner devcontainer [path] --server <url>`
@@ -436,11 +437,13 @@ GitHub uses your machine's `gh` CLI login (run `gh auth login` once).
 
 ### Setting credentials
 
-Edit `config.json` manually (mode 0600) or use the pair command with `--mock` flag.
+Use the app (Integrations page, see "Integrations (connect from the web)") or the commands below. The credentials are kept in
+the `secrets/` folder of the pairing (mode 0600); editing `config.json` by hand still works and is the fallback when the secrets
+file has no credential.
 
 **OAuth token (recommended for Claude Code):**
-1. Run `claude setup-token` to get a token
-2. Edit `~/.aom-runner/config.json`:
+1. Run `claude setup-token` to get a token (or let the Integrations page do it: "Sign in with your Claude subscription")
+2. `printf %s "$TOKEN" | aom-runner auth oauth-token` (stored in `secrets/claude.json`; no restart needed). The older form, in `config.json`, still works:
    ```json
    { "runtimes": { "claude-code": { "authMode": "oauth", "oauthToken": "..." } } }
    ```
@@ -1123,7 +1126,7 @@ aom-runner jira-connect --base-url https://yourcompany.atlassian.net --email you
 
 Jira Cloud: create an API token at https://id.atlassian.com/manage-profile/security/api-tokens and use your Atlassian
 e-mail. Jira Data Center: leave the e-mail empty and use a personal access token. The command checks the credentials
-with `GET /rest/api/2/myself` and saves nothing when Jira refuses them. The token is stored in
+with `GET /rest/api/2/myself` and saves nothing when Jira refuses them. Use the classic "Create API token", not "with scopes" (a scoped token must be called through `api.atlassian.com`, which is not done yet). The Integrations page connects Jira the same way. The token is stored in
 `<data dir>/secrets/jira.json` (mode 0600, directory 0700), like the git tokens, never in `config.json`; a `jira` block in
 `config.json` (the older form) is still read when there is no secrets file, and the secrets file wins. With several
 pairings the credentials go to all of them unless `--pairing` names one. A running runner picks the change up within
@@ -1280,7 +1283,7 @@ It is re-scanned every minute and reported when it changed. The Workstations pag
 then say: *Needs sign-in: On <workstation>, run `claude`, then `/mcp`, choose <server>, Authenticate.* When such a server
 is granted to a project the owner also gets a desk notice (cleared by the system once it is signed in), and an agent
 whose shift or chat starts with a granted server that needs sign-in is told so in its instructions, with the sentence to
-give the manager, so it does not retry the tools. Older runners report no state and raise nothing.
+give the manager, so it does not retry the tools. Older runners report no state and raise nothing. The sign-in can be done from the Integrations page (`claude mcp login <key> --no-browser` with a paste-back of the redirect address; see "Integrations (connect from the web)"), and the desk notice has a "Sign in from the web" action.
 
 ### The architect: organization source folder, git and the main merge
 
@@ -1698,14 +1701,68 @@ A builder on a work-domain card sees only the work vault; personal cards see onl
 
 A simulation organization (see `docs/ARCHITECTURE.md` section 33) has no workstation of yours. The server pairs one for the Owner and runs a normal runner process on the server itself: mock runtime only (`--mock`, `AOM_RUNNER_MOCK=1`), its own data directory `AOM_SIMULATION_DIR/<org id>/runner`, repo root `.../repos`, and local bare "origin" repositories `.../origin`. The pace is `AOM_MOCK_STEP_MS` (100, 1500 or 5000 ms for fast, normal and slow) and `AOM_MOCK_CHAT_TOKEN_MS`. Chat replies come from `AOM_MOCK_REPLIES_FILE`, a JSON map whose keys are an exact message, a `/regular expression/flags`, or `*` for the default; a value is a reply or a list of replies (`{name}` is the agent, `{message}` the user's text). The same file format is used for the training video. `ANTHROPIC_API_KEY`, `GH_TOKEN` and `GITHUB_TOKEN` are blanked in its environment. It needs `git` and the built runner on the server (`AOM_SIMULATION_RUNNER_BIN`, or the packaged release in `AOM_RUNNER_RELEASE_DIR`, which the server unpacks once).
 
+## Integrations (connect from the web)
+
+The Integrations page (`/workstations/<id>/integrations`) lists every integration of a workstation as a tile (Claude Code, GitHub,
+GitLab, Bitbucket Cloud, Azure DevOps, SSH keys, Jira, MCP servers) with its status and the actions Connect, Replace, Test and
+Remove. The kinds, methods, fields, scopes and help steps come from one registry (`packages/shared/src/integrations/registry.ts`); a
+runner adapter per kind (`apps/runner/src/integrations/`) does the work. Needs runner 0.1.11 or newer; an older runner shows its
+state read-only and the page says which command to run instead. Every command-line path stays (`git-connect`, `jira-connect`,
+`auth`) and uses the same adapters, so the page and the terminal agree and a change made in one shows in the other within seconds.
+
+**How a secret gets from the browser to the runner.** The browser seals the values with the runner's public key (the key whose id
+`aom-runner doctor` prints, shown on the page): a random AES-256-GCM key encrypts the fields, RSA-OAEP-256 wraps that key, and the
+authenticated data binds the envelope to one workstation, request, kind, instance and operation. The server relays the ciphertext
+in the durable command queue and cannot read it; it empties the payload when the runner answers (or after ten minutes) and never
+logs it. The runner opens it, refuses an expired envelope (10 minutes), one already used (the seen refs survive a restart), another
+key id and one moved to another request, checks the values with the provider and saves them only when the provider accepts them.
+An active, malicious server could still serve altered page code or swap the public key: that is why the key id is shown in both
+places and why you can turn web connect off.
+
+**Local policy** (`config.json`, `integrations`; commands below):
+- `aom-runner integrations` lists the status of every integration (the same facts the page shows) and the policy.
+- `aom-runner integrations allow-web off|on` refuses (or accepts again) every credential and sign-in submitted from the web on this workstation. Test stays allowed.
+- Machine-wide logins (`~/.claude`, `gh`, MCP sign-ins) belong to the whole machine, not to one pairing. From the web they can be changed only by the machine's primary pairing (the first one, or the one named with `aom-runner integrations machine-admin <pairing>`); `machineScopeFromWeb: "never"` in `config.json` turns that off completely. The tile shows why an action is disabled.
+
+**Claude from the web.** "Sign in with your Claude subscription" runs `claude setup-token` in a pseudo-terminal made with `script(1)`
+(Linux and macOS; native Windows has none, so the tile shows the command). The page shows the sign-in link; the owner signs in
+at claude.ai and pastes the code the Anthropic page shows; the runner writes it to the CLI, captures the year-long token it
+prints, stores it in `secrets/claude.json` and switches that workstation to `oauth` mode without a restart. Agents then get
+`CLAUDE_CODE_OAUTH_TOKEN` and no longer depend on the refresh token of `~/.claude`. Plugin MCP sign-ins are still passed to
+agents as private copies. The token never reaches the server. A subscription token is for individual use. Output the runner does not
+recognise ends the sign-in as failed with the command to run in a terminal; it never hangs (limit: 10 minutes, two sign-ins at a time).
+
+**MCP servers from the web.** `claude mcp login <server key> --no-browser` prints the provider's authorization link and asks for
+the redirect URL. The page shows the link (with its host) and a field. After signing in the provider redirects to
+`http://localhost:<port>/callback?...`: if the browser is on the workstation itself, the CLI also listens there and finishes by
+itself; otherwise that page does not load, which is expected: copy the whole address and paste it into the field (up to three
+tries; a wrong address is asked for again). Limits: claude.ai connectors and hand-added servers are not listed; a provider that needs
+the redirect delivered another way needs "on the workstation run `claude`, `/mcp`, Authenticate".
+
+**GitHub, GitLab, Bitbucket Cloud, Azure DevOps, Jira.** GitHub: a device code (`gh auth login --web`, the code and link shown on the
+page) or a classic token handed to `gh auth login --with-token` on stdin, then `gh auth setup-git`. GitLab, Azure DevOps and
+Bitbucket Cloud: the token goes through the same `saveAndVerify` as `git-connect` (`secrets/git-tokens.json`); the GitLab tile also
+shows the scopes and expiry from `personal_access_tokens/self`. Jira: base URL, e-mail and a classic API token, checked with
+`GET /rest/api/2/myself` (scoped Atlassian tokens need the `api.atlassian.com` route and are a later phase).
+
+**Files.** `secrets/claude.json`, `secrets/integration-seen.json`, `logs/integrations.jsonl`, `tmp/integrations/` (the working
+directory of the sign-in CLIs, never a repository). **Protocol:** runner messages `integrations.report` (every status, plus the
+policy) and `integration.session` (progress of a sign-in; acked), `hello.integrationsVersion`; server commands
+`integration.connect|begin|input|cancel|test|remove`. Recorded transcripts of the real CLIs (claude 2.1.299, gh 2.102) are the
+fixtures under `apps/runner/test/fixtures/integrations/`; Claude's screens can change between versions, so the matchers live in
+one place each (`claude-code.ts`, `mcp.ts`, `github.ts`) and a version bump should re-run `claude setup-token` once to check them.
+
 ## Credentials and secrets
 
 **Credentials stay on the machine:**
 - Runner token: stored in `config.json` (mode 0600); agents are denied the data directory (see the threat model)
+- Claude token or API key: `secrets/claude.json` (mode 0600; written by the Integrations page and `aom-runner auth`; `config.json` is the fallback)
 - Claude credentials: stored in agent's `CLAUDE_CONFIG_DIR` (mode 0700) or symlinked to your `~/.claude/.credentials.json` (the sandbox denies reading the real file to shell commands; Claude Code itself reads it)
 - Jira token: stored by `aom-runner jira-connect` in `secrets/jira.json` (mode 0600, directory 0700; an older `jira` block in `config.json` is still read); agents are denied `secrets/` and never see it; only connected / not connected / refused is reported to the server
 - Git hosts: the `gh` / `glab` logins, or tokens saved by `aom-runner git-connect` in `secrets/git-tokens.json` (0600); only connected / not connected is reported to the server
 - Vault SSH keys: used from machine's SSH agent or keyfiles
+
+- Values typed on the Integrations page travel sealed (see below); `secrets/integration-seen.json` holds the refs of used envelopes (no values); `logs/integrations.jsonl` records who changed what (time, kind, operation, result; no values)
 
 **Nothing leaves the runner:**
 - Credentials are never sent to the server
