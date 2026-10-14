@@ -1,6 +1,19 @@
 import type { PageHelp } from './types.ts';
 
 export const PAGE_HELP: Record<string, PageHelp> = {
+  '/p/:projectKey/archive': {
+    title: 'Archive',
+    article: 'board-and-cards#moving-cards',
+    intro:
+      'Done and cancelled cards leave the board a day after they were finished. They are listed here, newest first. Open a card to read it, or to reopen it: a reopened card is back on the board.',
+    controls: [
+      { name: 'Search', text: 'Find a card by reference, title or ticket key.' },
+      {
+        name: 'Status, Agent and dates',
+        text: 'Narrow the list to done or cancelled cards, to one agent, or to a period.',
+      },
+    ],
+  },
   '/p/:projectKey/board': {
     title: 'Board',
     intro:

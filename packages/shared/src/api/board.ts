@@ -137,3 +137,46 @@ export const CardSearchResponseSchema = z.object({
   ),
 });
 export type CardSearchResponse = z.infer<typeof CardSearchResponseSchema>;
+
+/** Done and cancelled cards leave the board this long after they were finished; the project's archive lists them (#51). */
+export const CARD_ARCHIVE_AFTER_HOURS = 24;
+
+/** `GET /api/archive?projectId=`: the archived cards of a project, newest finished first. Dates are `YYYY-MM-DD` (UTC days). */
+export const ArchiveQuerySchema = z.object({
+  projectId: z.uuid(),
+  /** Matches the ref (prefix), the title or the ticket key (`externalRef`) of the card. */
+  q: z.string().trim().max(100).optional(),
+  status: z.enum(['done', 'cancelled']).optional(),
+  agentId: z.uuid().optional(),
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+});
+export type ArchiveQuery = z.infer<typeof ArchiveQuerySchema>;
+
+export const ArchivedCardSchema = z.object({
+  id: z.uuid(),
+  ref: z.string(),
+  title: z.string(),
+  cardType: CardType,
+  status: z.enum(['done', 'cancelled']),
+  externalRef: z.string().nullable(),
+  priority: z.number().int(),
+  finishedAt: IsoTime,
+  /** How a done card landed (`pr`, `push_branch`, `merge`), when known. */
+  completionAction: z.string().nullable(),
+  /** The agent that last handed the card over (null for a card that never had a shift). */
+  lastAgent: z.string().nullable(),
+});
+export type ArchivedCard = z.infer<typeof ArchivedCardSchema>;
+
+export const ArchiveResponseSchema = z.object({
+  projectId: z.uuid(),
+  afterHours: z.number().int(),
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  cards: z.array(ArchivedCardSchema),
+});
+export type ArchiveResponse = z.infer<typeof ArchiveResponseSchema>;

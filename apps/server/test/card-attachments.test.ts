@@ -325,7 +325,6 @@ describe('the BA attaches files to the cards of its intake', () => {
   const draft = {
     title: 'Slide-out history',
     cardType: 'feature',
-    completionAction: 'pr',
     repo: 'toy',
     externalRef: 'DCPL-4276',
     fields: {

@@ -90,6 +90,8 @@ The **More actions** menu (the three dots) also has **Release** (put the card ba
 
 **Reopen a finished card.** On a **Done** or **Cancelled** card click **Reopen**, pick the stage (Build by default) and give a reason. The branch and any open pull request are kept, so the next shift continues on them and finalizing again reuses the pull request. Cards that depend on it wait for it again.
 
+**Archive.** Done and cancelled cards leave the board a day after they were finished. Click **Archive** on the board to search them (reference, title, ticket key), filter by status, agent or date, open one or reopen it. **Priority** and **Completion action** can be changed on the card page at any time; a completion action changed during a running finalise applies to the next one.
+
 **Ask DevOps** on the card opens a request to the DevOps engineer with the card attached, for example when a tool is missing or the card's repository has a problem.
 
 ## Backing off {#backing-off}

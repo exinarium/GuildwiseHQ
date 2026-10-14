@@ -7,23 +7,11 @@ Logged fixes to pick up when development resumes. Newest first.
 Owner's bug and wish list from a day of real use (production, P4 / Flow-Web). Root causes are being investigated; each
 item gets its findings and fix when built.
 
-### 47. Intake: the BA tries to read the code itself
-
-During intake the BA tried to read the repositories and asked for reference repositories. The owner refused: reading
-code is the Architect's job (BA spec → Architect → build, #9). The BA's intake instructions and permissions must keep it
-on the ticket, the requirements and the spec, and hand code questions to the Architect step.
-
 ### 48. Authorise MCP servers from the web
 
 The BA needed the Atlassian plugin MCP authorised (OAuth) and the owner could not do that from the web. Wanted: the
 runner reports each server's auth state; the app shows "needs sign-in" per workstation with a clear action, and if possible
 starts the sign-in from the web. Fits the Integrations page (#34).
-
-### 49. The BA does not know the runner's Jira integration
-
-The runner has a Jira API connection (`aom-runner jira-connect`, `aom source attachments`), but the BA did not know it and
-could not use it when MCP was unavailable. The BA's instructions must name it, and the BA should be able to read a ticket
-(fields, description, comments, attachments) through it.
 
 ### 50. Claude login expiry stops agents
 
@@ -31,35 +19,17 @@ When the workstation's Claude Code login (OAuth) expires, agents fail until the 
 it expires (refresh not written back from the sandbox?), detect it, pause that workstation's work, tell the owner
 ("run `claude /login` on <workstation>"), and resume by itself once the login works again.
 
-### 51. Archive done cards after a day
-
-Done cards should leave the board a day after they are done, into an archive that stays searchable and findable (card
-search, filters by project / date / agent), and from which a card can still be opened and reopened (#27).
-
-### 52. A card finalised as a pull request against the project's completion action
-
-Cards inherit the project's completion action (#30), but one card still opened a pull request. The BA must not set or
-override the completion action; only people may change it on a card.
-
 ### 53. Unstick an agent
 
 A way to free an agent whose running processes hang: from the card / agent / workstation page, stop the running command
 or restart the shift (kill the whole process tree in the sandbox, keep the work), plus an automatic watchdog when a shift
 shows no progress for a set time.
 
-### 54. Change priority and completion action on a card at any time
-
-Priority and completion action should be editable in every card status (handled sanely while a finalise is running).
-
 ### 55. Agents get stuck running unit tests of broken projects
 
 Builders hang while running the unit tests of projects that do not build or whose tests hang (.NET). Needs per-command
 time limits and hang detection for test runs (e.g. `dotnet test --blame-hang-timeout`), and instructions on what to do
 when a project's tests are broken before the agent touched it.
-
-### 56. The board shows $0.00 spend this month
-
-The board's spend figure shows $0.00 this month instead of the real total.
 
 ### 57. The local working branch falls behind origin
 
@@ -306,6 +276,56 @@ The details of each done item follow this list, by date.
 - #33: .NET builds in a repository without `.gitmodules`. Done 2026-10-13.
 - #45: No Guildwise trace in repositories: saved work in stashes. Done 2026-10-13.
 - #46: Branch prefix per project for pull-request branches. Done 2026-10-13.
+- #56: The board shows $0.00 spend this month. Done 2026-10-14.
+- #54: Change priority and completion action on a card at any time. Done 2026-10-14.
+- #52: Agents may not set the completion action. Done 2026-10-14.
+- #47: The BA must not read the code during intake. Done 2026-10-14.
+- #49: The BA knows the runner's Jira integration (prompts; the runner command is separate). Done 2026-10-14.
+- #51: Archive done cards after a day. Done 2026-10-14.
+
+## 2026-10-14 (done)
+
+### 47. Intake: the BA tries to read the code itself
+
+During intake the BA tried to read the repositories and asked for reference repositories. The owner refused: reading
+code is the Architect's job (BA spec → Architect → build, #9). The BA's intake instructions and permissions must keep it
+on the ticket, the requirements and the spec, and hand code questions to the Architect step.
+
+**Done (2026-10-14).** The BA no longer reads code during intake. Its intake step 3 and the intake chat instructions now say: use PROJECT.md, the vault, the ledger and the ticket; never read source code and never ask the manager for repository or reference-repository access; put code questions into the card and set `designNeeded` (or `investigationOnly`) so the Architect investigates. The same rule is in the BA core rules. Hard enforcement in `chat/relay.ts`: a chat with the BA (role key `ba`) gets no `readRepos`, no `localReadRepos` and no card worktree path; other roles are unchanged. USER-GUIDE 4.18 says so. BA role version 13 (one bump with #49 and #52; hired agents follow it, #29).
+
+### 49. The BA does not know the runner's Jira integration
+
+The runner has a Jira API connection (`aom-runner jira-connect`, `aom source attachments`), but the BA did not know it and
+could not use it when MCP was unavailable. The BA's instructions must name it, and the BA should be able to read a ticket
+(fields, description, comments, attachments) through it.
+
+**Done (2026-10-14), prompt part.** The BA instructions (intake steps 1 and 1a), the intake chat instructions and the Jira skill text now name the workstation's Jira connection: `aom source read --ref <KEY>` (fields, description, comments, links), `aom source attachments <KEY>` and `aom source attachment <KEY> ...`; the Atlassian MCP server is only a fallback; when the runner says Jira is not connected the BA asks the manager to run `aom-runner jira-connect` on the workstation. The runner side (`aom source read` for a Jira key) is built separately in `apps/runner/src/external/jira.ts` and `aom-cli.ts`. BA role version 13.
+
+### 51. Archive done cards after a day
+
+Done cards should leave the board a day after they are done, into an archive that stays searchable and findable (card
+search, filters by project / date / agent), and from which a card can still be opened and reopened (#27).
+
+**Done (2026-10-14).** Done and cancelled cards leave the board 24 hours after they were finished (`CARD_ARCHIVE_AFTER_HOURS` in `@aom/shared`). New projection column `cards.finished_at` (migration 1840), kept by a trigger so every path that finishes or reopens a card (finalize, feed, testing, research, cancel, reopen, a projection rebuild) sets and clears it; existing cards are backfilled. The board query hides cards with `finished_at` older than the cutoff. New `GET /api/archive?projectId=` (any member of the project): done and cancelled cards past the cutoff, newest first, search by reference prefix, title or ticket key, filters for status, agent (any handoff of the card) and finished-from/until dates, paging (`page`, `pageSize`). Web: an **Archive** button in the board header opens `/p/<KEY>/archive` with the search, the filters and paging; each row opens the card, and Reopen (#27) works there and puts the card back on the board. The command palette search still finds archived done cards. Metrics, costs and reports read the cards table and still count archived cards. Not done: an organization setting for the 24 hours; a cross-project archive; cancelled cards were already off the board and stay off it.
+
+### 52. A card finalised as a pull request against the project's completion action
+
+Cards inherit the project's completion action (#30), but one card still opened a pull request. The BA must not set or
+override the completion action; only people may change it on a card.
+
+**Done (2026-10-14).** An agent can no longer set the completion action. The server refuses it with a message that teaches ("agents may not set the completion action: ... the project's default applies ... ask the manager to change it on the card page"): in the intake `card.create` and `card.update` RPCs, and in `createCardIn`/`patchCardIn` for any agent actor. The draft schemas keep the optional key so the refusal can name it instead of silently dropping it. Spawned cards (finalize, regression, sub-workflows) are system actors and are unaffected. Prompts: `completionAction` is gone from the BA draft field lists and from the intake chat step, BA step 6 now reads "Never set completionAction", and it is a core rule. The runner's mock agent no longer sends it. The BA can still pass `--action` when it finalizes a card (existing finalize design, #30); say so if that should go too. BA role version 13.
+
+### 54. Change priority and completion action on a card at any time
+
+Priority and completion action should be editable in every card status (handled sanely while a finalise is running).
+
+**Done (2026-10-14).** `priority` and `completionAction` are "light" keys: they change on any open card, also while it is claimed or in any stage; other fields keep their guards (draft or queued and unclaimed). The completion action is refused with `finalize_pending` only while a finalise awaits approval or runs (the finalise message carries the action captured at queue time); a done card takes a priority but not a completion action; a cancelled card takes neither (`card_closed`). The card query has `permissions.canEditPriority` and `canEditCompletion`. The card page shows inline selects for Priority and Completion action (project default option included, hint "Applies to the next finalise"), patching straight away with the server's refusal next to the control. The Edit dialog stays for draft and queued cards. The dispatcher reads `cards.priority` live in its candidate query, so a new priority applies from the next pick.
+
+### 56. The board shows $0.00 spend this month
+
+The board's spend figure shows $0.00 this month instead of the real total.
+
+**Done (2026-10-14).** `budgetsFor` loaded the month's spend only when some project of the organization had a budget, so a project without one showed $0.00. It now always loads the spend (one query per organization). The board header shows the real figure ("$4.25 this month"); the budget meter and card notices still render nothing budget related without a monthly amount. The per-card budget notice was not affected (it needs a budget).
 
 ## 2026-10-13 (done)
 
