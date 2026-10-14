@@ -744,7 +744,7 @@ export class Runner {
       maxConcurrentShifts: this.opts.config.maxConcurrentShifts,
       sudoKey: this.keys.publicKey,
       // Run a branch needs process groups and /proc or ps: not on native Windows.
-      capabilities: platform() === 'win32' ? [] : ['runs:1', 'runs:2'],
+      capabilities: platform() === 'win32' ? ['ceo:1'] : ['runs:1', 'runs:2', 'ceo:1'],
       maxRunEnvironments: this.freshConfig().maxRunEnvironments,
       integrationsVersion: INTEGRATIONS_VERSION,
     };

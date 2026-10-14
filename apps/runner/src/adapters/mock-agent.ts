@@ -1328,10 +1328,102 @@ async function deskMain(): Promise<number> {
   return finish();
 }
 
+// ------------------------------------------------------------------------------------------------ the CEO
+
+/** The scripted CEO (simulation and tests): it reads the snapshot and uses the real `aom ceo` verbs, with no model. */
+async function ceoMain(brief: Brief): Promise<number> {
+  const review = brief.shift.outcomes.some((o) => o.id === 'ceo_report');
+  emit({ kind: 'progress', text: `mock CEO ${review ? 'daily review' : 'wake'}: reading the snapshot` });
+  await sleep(stepMs);
+  const snap = aom(['ceo', 'snapshot']);
+  emit({ kind: 'usage', usage: { inputTokens: 1500, outputTokens: 300 } });
+  if (snap.code !== 0) {
+    process.stderr.write(`aom ceo snapshot failed: ${snap.err}\n`);
+    return 1;
+  }
+  const lines = snap.out.split('\n');
+  const done: string[] = [];
+  let n = 0;
+  // A card in back-off: end it (a safe, decided action; the server may still turn it into a recommendation).
+  for (const l of lines) {
+    const m = /^(\S+-\d+) id=\S+ why=backoff/.exec(l);
+    if (!m) continue;
+    const r = aom(['ceo', 'act', 'release-backoff', '--card', m[1] as string, '--reason', 'the back-off has run its course', '--confidence', '0.9']);
+    done.push(`${m[1]}: ${(r.out || r.err).trim()}`);
+    n++;
+  }
+  // A blocking question: the mock CEO has no rule to cite, so it recommends the first option.
+  for (const l of lines) {
+    const m = /^item=(\S+) question\S* BLOCKING/.exec(l);
+    if (!m) continue;
+    const r = aom(['ceo', 'recommend', '--item', m[1] as string, '--option', 'o1', '--reason', 'the first option is the usual choice', '--confidence', '0.6']);
+    done.push(`question ${String(m[1]).slice(0, 8)}: ${(r.out || r.err).trim()}`);
+    n++;
+  }
+  await sleep(stepMs);
+  const summary = `mock CEO handled ${n} item(s). ${done.join(' | ')}`.trim();
+  if (review) {
+    const dir = mkdtempSync(join(tmpdir(), 'mock-ceo-'));
+    const file = join(dir, 'report.md');
+    writeFileSync(
+      file,
+      [
+        '## Needs you',
+        n ? done.map((d) => `- ${d}`).join('\n') : 'none',
+        '',
+        '## Decisions I took',
+        'see the activity log',
+        '',
+        '## Issues and risks',
+        'none',
+        '',
+        '## Budget',
+        'within the budgets',
+        '',
+        '## Training',
+        'none',
+      ].join('\n'),
+    );
+    const r = aom(['ceo', 'report', '--summary-file', file]);
+    emit({ kind: 'final', text: r.code === 0 ? `mock CEO reported: ${r.out.trim()}` : `mock CEO report failed: ${(r.err || r.out).trim()}` });
+    return 0;
+  }
+  const r = aom(['ceo', 'done', '--summary', summary]);
+  emit({ kind: 'final', text: r.code === 0 ? `mock CEO done: ${r.out.trim()}` : `mock CEO failed: ${(r.err || r.out).trim()}` });
+  return 0;
+}
+
+/** The owner's chat with the mock CEO: rules are remembered, "task:" opens a task, anything else answers from the desk. */
+async function ceoChatMain(): Promise<number> {
+  const message = process.env.AOM_MOCK_MESSAGE ?? '';
+  const said: string[] = [];
+  const say = (text: string) => {
+    said.push(text);
+    emit({ kind: 'delta', text: `${text}\n` });
+  };
+  emit({ kind: 'session', runtimeSessionId: process.env.AOM_MOCK_SESSION ?? 'mock-ceo' });
+  emit({ kind: 'usage', usage: { inputTokens: message.length, outputTokens: 100 } });
+  if (/^\s*(always|never|i prefer)\b/i.test(message)) {
+    const r = aom(['ceo', 'memory', 'propose', '--text', message.trim(), '--source', 'owner_chat', '--quote', message.trim()]);
+    say(r.code === 0 ? 'Noted. I will follow that rule from now on.' : `I could not record that: ${(r.err || r.out).trim()}`);
+  } else if (/^\s*task:/i.test(message)) {
+    const title = message.replace(/^\s*task:\s*/i, '').trim();
+    const r = aom(['ceo', 'task', 'create', '--title', title.slice(0, 200), '--request', title]);
+    say(r.code === 0 ? `On it: ${title}` : `I could not open that task: ${(r.err || r.out).trim()}`);
+  } else {
+    const r = aom(['ceo', 'snapshot', '--section', 'desk']);
+    const open = r.out.split('\n').filter((l) => l.startsWith('item=')).length;
+    say(`There ${open === 1 ? 'is' : 'are'} ${open} open item${open === 1 ? '' : 's'} on the desk.`);
+  }
+  emit({ kind: 'final', text: said.join('\n') });
+  return 0;
+}
+
 async function main(): Promise<number> {
   if (process.env.AOM_MOCK_CHAT === 'desk') return deskMain();
   if (process.env.AOM_MOCK_CHAT === 'intake') return intakeMain();
   if (process.env.AOM_MOCK_CHAT === 'design') return designMain();
+  if (process.env.AOM_MOCK_CHAT === 'ceo') return ceoChatMain();
   const card = aom(['card', '--json']);
   if (card.code !== 0) {
     process.stderr.write(`aom card failed: ${card.err}\n`);
@@ -1340,6 +1432,7 @@ async function main(): Promise<number> {
   const brief = JSON.parse(card.out) as Brief;
   if ((brief.shift as { kind?: string }).kind === 'devops') return devopsMain(brief as DevopsBrief);
   if (brief.shift.kind === 'question') return questionMain(brief);
+  if ((brief.shift as { kind?: string }).kind === 'ceo') return ceoMain(brief);
   if ((brief.shift as { kind?: string }).kind === 'ba_task') return baTaskMain(brief as BaTaskBrief);
   const stage = brief.shift.stage;
   const action = pickAction(brief, attemptIndex(brief));

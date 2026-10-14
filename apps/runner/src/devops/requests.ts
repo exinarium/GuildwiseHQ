@@ -1,10 +1,13 @@
 import {
   type BaTaskShift,
+  type CeoShift,
   type DevopsShift,
   ENVIRONMENT_HELP_SECTION,
   type QuestionShift,
   renderBaTaskInstructions,
   renderBaTaskPrompt,
+  renderCeoInstructions,
+  renderCeoPrompt,
   renderDevopsInstructions,
   renderDevopsPrompt,
   renderInstructions,
@@ -25,6 +28,9 @@ export const devopsOf = (msg: ShiftStartMsg): DevopsShift | undefined =>
 export const baTaskOf = (msg: ShiftStartMsg): BaTaskShift | undefined =>
   msg.kind === 'ba_task' ? msg.baTask : undefined;
 
+/** A CEO shift (a wake or the daily review): no card, no worktree; the brief is rendered by the server. */
+export const ceoOf = (msg: ShiftStartMsg): CeoShift | undefined => (msg.kind === 'ceo' ? msg.ceo : undefined);
+
 /** A question shift answers one desk item (M7): no worktree, the brief is the card the question is about. */
 export const questionOf = (msg: ShiftStartMsg): QuestionShift | undefined =>
   msg.kind === 'question' ? msg.question : undefined;
@@ -35,6 +41,8 @@ export function shiftTexts(msg: ShiftStartMsg, brief: ShiftBrief): { instruction
   if (devops) {
     return { instructions: renderDevopsInstructions(brief, devops), prompt: renderDevopsPrompt(devops) };
   }
+  const ceo = ceoOf(msg);
+  if (ceo) return { instructions: renderCeoInstructions(brief, ceo), prompt: renderCeoPrompt(ceo) };
   const baTask = baTaskOf(msg);
   if (baTask) {
     return { instructions: renderBaTaskInstructions(brief, baTask), prompt: renderBaTaskPrompt(baTask) };
@@ -59,6 +67,8 @@ export const cardPayload = (
 ): ShiftBrief & { devops?: DevopsShift; question?: QuestionShift; baTask?: BaTaskShift } => {
   const devops = devopsOf(msg);
   if (devops) return { ...msg.brief, devops };
+  const ceo = ceoOf(msg);
+  if (ceo) return msg.brief;
   const baTask = baTaskOf(msg);
   if (baTask) return { ...msg.brief, baTask };
   const question = questionOf(msg);

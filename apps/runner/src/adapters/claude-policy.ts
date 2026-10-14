@@ -455,6 +455,7 @@ export function buildShiftSettings(
   isDevops = false,
 ): ClaudeSettings {
   if (isDevops) return buildDevopsSettings(p, ctx, paths);
+  if (roleKey === 'ceo') return buildCeoSettings(ctx, paths);
   const tools = new Set(p.allowedTools);
   const allow: string[] = [];
   const deny: string[] = [
@@ -505,6 +506,21 @@ export function buildDevopsChatSettings(
   paths: { home: string; configDir: string; scratch: string; tmp: string },
 ): ClaudeSettings {
   return buildDevopsSettings(p, ctx, paths);
+}
+
+/**
+ * The CEO agent (docs/design/ceo-agent-v2.md section 5.3), in a wake shift and in the owner's chat: it reads (its scratch
+ * directory and the organization knowledge vault, read-only), writes only in its scratch directory and runs one shell
+ * command, `aom`. No web, no MCP server, no network, no repository. The chat profile already is this; the denies make
+ * the absence of the web and of MCP explicit so a change to the role's tools cannot widen it.
+ */
+export function buildCeoSettings(
+  ctx: ClaudePolicyContext,
+  paths: { home: string; configDir: string; scratch: string; tmp: string },
+): ClaudeSettings {
+  const s = buildChatSettings(false, [], { ...ctx, extraAllowedDomains: [] }, paths);
+  s.permissions.deny = [...new Set([...s.permissions.deny, 'WebFetch', 'WebSearch', 'mcp__*', 'NotebookEdit'])];
+  return s;
 }
 
 /** Chat sessions read and talk; the only shell command they may run is `aom` (comment, ledger search). */

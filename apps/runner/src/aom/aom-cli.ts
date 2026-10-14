@@ -60,6 +60,9 @@ const BOOLEAN_FLAGS = new Set([
   'all',
   'wait',
   'docker',
+  'dry-run',
+  'keep-card',
+  'investigation',
 ]);
 
 /** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
@@ -514,6 +517,154 @@ async function investigationReport(
       location: 'repo',
     }),
   );
+}
+
+/** Flags `aom ceo act` reads itself; every other flag is a parameter of the action (`--keep-card` -> `keepCard`). */
+const CEO_CONTROL_FLAGS = new Set(['reason', 'confidence', 'evidence', 'dry-run', 'key', 'json']);
+const camel = (k: string): string => k.replace(/-([a-z])/g, (_m, c: string) => c.toUpperCase());
+
+const CEO_USAGE = `usage: aom ceo snapshot [--section <name>] | show card|agent|project|shift|desk-item|workstation <ref> | search desk|cards|memory "<q>" | costs [--days n]
+       aom ceo act <action> [--<param> <value>]... --reason "<why>" --confidence 0.0-1.0 [--evidence ledger:<id>|memory:<id>|signal:<id>|hr:<id>]... [--dry-run] [--key <k>]
+       aom ceo recommend --item <desk id> [--option <o1>|--text "..."] --reason "..." --confidence 0.0-1.0  |  --action <name> [--<param> <value>]... --reason "..." --confidence ...
+       aom ceo notify --kind needs_you|urgent|task_done --text "..." [--title "..."] [--task <id>] [--item <id>]
+       aom ceo task create --title "..." [--request "..."] [--due <iso>] | task update --id <id> [--status s] [--note "..."] [--watch card:<id>]... | task list
+       aom ceo memory propose --text "..." --source owner_chat|desk:<item id> [--kind rule|preference|fact] [--quote "..."]
+       aom ceo done --summary "..."   (a wake, terminal)   |   aom ceo report --summary-file <md>   (the daily review, terminal)`;
+
+function ceoPrint(ctx: AomContext, p: Parsed, r: unknown): void {
+  if (has(p, 'json')) {
+    ctx.io.out(`${JSON.stringify(r, null, 2)}\n`);
+    return;
+  }
+  const o = r as { text?: string; status?: string; message?: string; tasks?: unknown[]; wouldBe?: string };
+  if (typeof o?.text === 'string') ctx.io.out(`${o.text}\n`);
+  else if (o?.status || o?.message) ctx.io.out(`${o.status ?? ''}${o.status && o.message ? ': ' : ''}${o.message ?? ''}\n`);
+  else ctx.io.out(`${JSON.stringify(r, null, 2)}\n`);
+}
+
+function ceoParams(p: Parsed, skip: Set<string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of p.flags) if (!skip.has(k)) out[camel(k)] = v.length > 1 ? v : v[0];
+  return out;
+}
+
+function ceoReasoned(p: Parsed): { reason: string; confidence: number; evidence: string[] } {
+  const reason = one(p, 'reason');
+  const conf = Number(one(p, 'confidence'));
+  if (!reason || !Number.isFinite(conf) || conf < 0 || conf > 1)
+    throw new UsageError('--reason "<why>" and --confidence <0.0-1.0> are required');
+  return { reason, confidence: conf, evidence: many(p, 'evidence') };
+}
+
+/** `aom ceo ...`: the CEO agent's management verbs. The server decides what the CEO may do; a refusal is a normal answer. */
+async function ceoVerb(ctx: AomContext, p: Parsed): Promise<number> {
+  const sub = p.positionals[0];
+  const args = p.positionals.slice(1);
+  switch (sub) {
+    case 'snapshot':
+      ceoPrint(ctx, p, await rpc(ctx, 'ceo', { op: 'snapshot', ...(one(p, 'section') ? { section: one(p, 'section') } : {}) }));
+      return 0;
+    case 'show':
+      if (!args[0] || !args[1]) throw new UsageError(CEO_USAGE);
+      ceoPrint(ctx, p, await rpc(ctx, 'ceo', { op: 'show', kind: args[0], ref: args.slice(1).join(' ') }));
+      return 0;
+    case 'search':
+      if (!args[0] || !args[1]) throw new UsageError(CEO_USAGE);
+      ceoPrint(ctx, p, await rpc(ctx, 'ceo', { op: 'search', in: args[0], q: args.slice(1).join(' ') }));
+      return 0;
+    case 'costs':
+      ceoPrint(ctx, p, await rpc(ctx, 'ceo', { op: 'costs', ...(one(p, 'days') ? { days: Number(one(p, 'days')) } : {}) }));
+      return 0;
+    case 'act': {
+      const action = args[0];
+      if (!action) throw new UsageError(CEO_USAGE);
+      const r = (await rpc(ctx, 'ceo', {
+        op: 'act',
+        action,
+        params: ceoParams(p, CEO_CONTROL_FLAGS),
+        ...ceoReasoned(p),
+        ...(one(p, 'key') ? { key: one(p, 'key') } : {}),
+        dryRun: has(p, 'dry-run'),
+      })) as { status?: string };
+      ceoPrint(ctx, p, r);
+      return r.status === 'refused' ? 1 : 0;
+    }
+    case 'recommend': {
+      const item = one(p, 'item');
+      const base = { op: 'recommend', ...ceoReasoned(p), ...(one(p, 'key') ? { key: one(p, 'key') } : {}) };
+      if (item) {
+        const r = await rpc(ctx, 'ceo', { ...base, item, ...(one(p, 'option') ? { option: one(p, 'option') } : {}), ...(one(p, 'text') ? { text: one(p, 'text') } : {}) });
+        ceoPrint(ctx, p, r);
+        return (r as { status?: string }).status === 'refused' ? 1 : 0;
+      }
+      const action = one(p, 'action');
+      if (!action) throw new UsageError(CEO_USAGE);
+      const r = await rpc(ctx, 'ceo', { ...base, action, params: ceoParams(p, new Set([...CEO_CONTROL_FLAGS, 'action'])) });
+      ceoPrint(ctx, p, r);
+      return (r as { status?: string }).status === 'refused' ? 1 : 0;
+    }
+    case 'notify': {
+      const kind = one(p, 'kind');
+      const text = textFlag(ctx, p, 'text', true) as string;
+      if (!kind) throw new UsageError(CEO_USAGE);
+      ceoPrint(
+        ctx,
+        p,
+        await rpc(ctx, 'ceo', {
+          op: 'notify',
+          kind,
+          text,
+          ...(one(p, 'title') ? { title: one(p, 'title') } : {}),
+          ...(one(p, 'task') ? { task: one(p, 'task') } : {}),
+          ...(one(p, 'item') ? { item: one(p, 'item') } : {}),
+          ...(one(p, 'key') ? { key: one(p, 'key') } : {}),
+        }),
+      );
+      return 0;
+    }
+    case 'task': {
+      const act = args[0];
+      if (act !== 'create' && act !== 'update' && act !== 'list') throw new UsageError(CEO_USAGE);
+      const watch = many(p, 'watch').map((w) => {
+        const [kind, ...id] = w.split(':');
+        return { kind, id: id.join(':') };
+      });
+      const r = await rpc(ctx, 'ceo', {
+        op: 'task',
+        sub: act,
+        ...(one(p, 'id') ? { id: one(p, 'id') } : {}),
+        ...(one(p, 'title') ? { title: one(p, 'title') } : {}),
+        ...(one(p, 'request') ? { request: one(p, 'request') } : {}),
+        ...(one(p, 'status') ? { status: one(p, 'status') } : {}),
+        ...(one(p, 'note') ? { note: one(p, 'note') } : {}),
+        ...(one(p, 'due') ? { due: one(p, 'due') } : {}),
+        ...(watch.length ? { watch } : {}),
+      });
+      ceoPrint(ctx, p, r);
+      return (r as { status?: string }).status === 'refused' ? 1 : 0;
+    }
+    case 'memory': {
+      if (args[0] !== 'propose' && args[0] !== 'confirm') throw new UsageError(CEO_USAGE);
+      const r = await rpc(ctx, 'ceo', {
+        op: 'memory',
+        sub: args[0],
+        ...(one(p, 'id') ? { id: one(p, 'id') } : {}),
+        ...(one(p, 'text') ? { text: one(p, 'text') } : {}),
+        ...(one(p, 'kind') ? { kind: one(p, 'kind') } : {}),
+        ...(one(p, 'source') ? { source: one(p, 'source') } : {}),
+        ...(one(p, 'quote') ? { quote: one(p, 'quote') } : {}),
+        ...(one(p, 'scope') ? { scope: one(p, 'scope') } : {}),
+      });
+      ceoPrint(ctx, p, r);
+      return (r as { status?: string }).status === 'refused' ? 1 : 0;
+    }
+    case 'done':
+      return report(ctx, outcome('ceo_done', 'Wake handled', { summary: textFlag(ctx, p, 'summary', true) as string }));
+    case 'report':
+      return report(ctx, outcome('ceo_report', 'Daily report', { report: textFlag(ctx, p, 'summary', true) as string }));
+    default:
+      throw new UsageError(CEO_USAGE);
+  }
 }
 
 const VERBS: Record<string, Verb> = {
@@ -1106,6 +1257,7 @@ const VERBS: Record<string, Verb> = {
     ctx.io.out(`${typeof r === 'string' ? r : JSON.stringify(r, null, 2)}\n`);
     return 0;
   },
+  ceo: ceoVerb,
   outcome: async (ctx, p) => {
     const id = p.positionals[0];
     if (!id) throw new UsageError('usage: aom outcome <outcomeId> --note "<text>" [--data-file <json>]');
@@ -1160,6 +1312,7 @@ export const USAGE = `usage: aom <verb> [options]
   sudo -- <command> [args...]                 DevOps engineer: run a command as administrator (only when the manager granted sudo; the password stays on the runner)
   toolchain list | add <name> --bin <dir>... [--read <dir>]... [--env KEY=VALUE]... | remove <name>   tools sandboxed agents may use; DevOps engineer: register what you installed so agents get it on PATH
   hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
+  ceo snapshot | show | search | act <action> ... | recommend | notify | task | memory | done | report   CEO agent only: manage the organisation within the policy (see your instructions)
   run info | status | logs <svc> | step --name <n> -- <cmd> | service --name <n> --port http:5000:ENV_VAR --health <url> -- <cmd> | ready | fail --reason <t>   DevOps engineer of a "run this branch" request: the runner starts and supervises the services (see your instructions)
 `;
 

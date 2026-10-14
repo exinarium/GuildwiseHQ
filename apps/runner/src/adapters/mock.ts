@@ -54,6 +54,7 @@ export class MockAdapter implements RuntimeAdapter {
   async startChat(input: ChatStartInput): Promise<RuntimeSession> {
     if (input.agent.roleKey === 'ba' && input.context?.intake && !input.context.intake.fromChat)
       return this.startIntakeChat(input);
+    if (input.agent.roleKey === 'ceo') return this.startIntakeChat(input, 'ceo');
     if (input.agent.roleKey === 'ba' && /^\s*design\b/i.test(input.message))
       return this.startIntakeChat(input, 'design');
     if (input.agent.roleKey === 'ba' && /^\s*(create card|request repo)\b/i.test(input.message))
@@ -112,7 +113,7 @@ export class MockAdapter implements RuntimeAdapter {
    */
   private async startIntakeChat(
     input: ChatStartInput,
-    mode: 'intake' | 'design' | 'desk' = 'intake',
+    mode: 'intake' | 'design' | 'desk' | 'ceo' = 'intake',
   ): Promise<RuntimeSession> {
     const [bin, ...pre] = selfCommand('mock-agent') as [string, ...string[]];
     const prior = /-(\d+)$/.exec(input.resumeSessionId ?? '');
