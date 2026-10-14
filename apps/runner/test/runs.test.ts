@@ -443,9 +443,9 @@ describe('guards', () => {
     expect(secret.ok).toBe(false);
     expect(secret.error).toMatch(/looks like a credential/);
     expect(secret.error).toMatch(/--env-file/);
-    const escape = (await t.mgr.rpc(envId, 'run.step', { name: 'x', cwd: '../..', cmd: ['ls'] }, c)) as any;
-    expect(escape.ok).toBe(false);
-    expect(escape.error).toMatch(/inside the repository/);
+    const outside = (await t.mgr.rpc(envId, 'run.step', { name: 'x', cwd: '../..', cmd: ['ls'] }, c)) as any;
+    expect(outside.ok).toBe(false);
+    expect(outside.error).toMatch(/inside the repository/);
     const foreign = (await t.mgr.rpc(
       envId,
       'run.info',

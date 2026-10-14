@@ -202,6 +202,12 @@ The tester role (new version) gets an "Environment" section: `aom env info`, `ao
 | P3 | Integration tests local: `code` v3, `integrationTests` field, `environment` stage property, dispatcher provisioning (D9), forwarders and `aom-env`, `aom test suite`, 1910, suite results UI, flaky handling, retire `.aom/test-env.json`; auto-restart after runner restart | full stack |
 | P4 | Remote targets: 1920, secrets, `allowedDomains` per target, destructive guard, private-address targets after spike (c), macOS testers, copy a plan between workstations, tunnel (only if asked) | full stack |
 
+**Status (2026-10-14): P1 is built** (backlog #58). Differences from the table above: `aom run` waits at most about 100 seconds per call
+and answers "still running" (exit code 3), because of Claude's Bash time limit; `run.start` is a durable command and the DevOps `run`
+request is filed in the same transaction; `projects.integration_tests` is not added yet (P3); services run unsandboxed (P2); the
+`run.status` message is not acknowledged but is resent for every environment after each `welcome`; the browser follows logs with
+`run.watch`, the server tells the runner with a `run.follow` message (instead of a `run.logs` command). Spike (a) was skipped (P3).
+
 ## 8. Open questions for the owner
 1. **Replay the saved plan, or ask DevOps every time?** You chose the DevOps agent to run the start. The recommendation is that DevOps works out the first start (and any failed one) and saves a plan, and the runner replays it after that: starts take seconds instead of a shift, and there is no model cost. DevOps is still the one who decides how to run the project. Is that acceptable?
 2. **Remote mode per card.** A remote target only tests what is deployed on it. Recommendation: per-card integration tests always run **local**; remote targets serve suite, regression and phase follow-up cards (which already deploy first). The alternative is DevOps deploying each card branch to the target before the test, which serializes cards on one target.

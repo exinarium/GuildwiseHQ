@@ -218,7 +218,7 @@ const WEB_PORT_NAMES = /^(https?|web|ui|app|frontend|site|api|admin|dashboard)$/
 /** `--health http://...`, `tcp:<port or port name>`, `log:<regex>`, `none[:graceSec]`. */
 export function parseRunHealth(spec: string): RunHealth {
   if (/^https?:\/\//i.test(spec)) return RunHealthSchema.parse({ kind: 'http', url: spec });
-  const m = /^(tcp|log|none|http2xx3xx):(.*)$/s.exec(spec) ?? (spec === 'none' ? ['', 'none', ''] : null);
+  const m = /^(tcp|log|none):(.*)$/s.exec(spec) ?? (spec === 'none' ? ['', 'none', ''] : null);
   if (!m)
     throw new Error(`a health check is a URL, tcp:<port>, log:<regex> or none[:seconds] (got "${spec}")`);
   const [, kind, rest] = m as unknown as [string, string, string];
@@ -226,6 +226,16 @@ export function parseRunHealth(spec: string): RunHealth {
     return RunHealthSchema.parse({ kind: 'tcp', port: /^\d+$/.test(rest) ? Number(rest) : rest });
   if (kind === 'log') return RunHealthSchema.parse({ kind: 'log', regex: rest });
   return RunHealthSchema.parse({ kind: 'none', ...(rest ? { graceSec: Number(rest) } : {}) });
+}
+
+/** The inverse of `parseRunPort` / `parseRunHealth`, for the settings form and the plan view. */
+export const formatRunPort = (p: RunPort): string =>
+  `${p.name}:${p.default}${p.envVar ? `:${p.envVar}` : ''}`;
+export function formatRunHealth(h: RunHealth): string {
+  if (h.kind === 'http') return h.url;
+  if (h.kind === 'tcp') return `tcp:${h.port}`;
+  if (h.kind === 'log') return `log:${h.regex}`;
+  return `none:${h.graceSec}`;
 }
 
 // ------------------------------------------------------------------------------------------ project settings

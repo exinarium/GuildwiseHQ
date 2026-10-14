@@ -1,7 +1,7 @@
 ---
 title: Board and cards
 summary: Reading the board and its warning banners, creating and editing cards, moving cards, backing off, risk tiers and search.
-keywords: [board, card, stage, workflow, risk, backing off, search, banner, blocked, warning, budget, hygiene, why stuck, attachments, files, screenshots, upload]
+keywords: [board, card, stage, workflow, risk, backing off, search, banner, blocked, warning, budget, hygiene, why stuck, attachments, files, screenshots, upload, run branch]
 order: 5
 ---
 
@@ -95,6 +95,10 @@ If an agent seems stuck, open the card: the live shift shows how long it has run
 **Archive.** Done and cancelled cards leave the board a day after they were finished. Click **Archive** on the board to search them (reference, title, ticket key), filter by status, agent or date, open one or reopen it. **Priority** and **Completion action** can be changed on the card page at any time; a completion action changed during a running finalise applies to the next one.
 
 **Ask DevOps** on the card opens a request to the DevOps engineer with the card attached, for example when a tool is missing or the card's repository has a problem.
+
+## Run a branch {#run-a-branch}
+
+**Run this branch** (card) or **Run branch...** (board) has the workstation's DevOps engineer start the project so you can try it; it stops by itself after the time in **Project settings > Run and test**, or when you click **Stop**.
 
 ## Backing off {#backing-off}
 

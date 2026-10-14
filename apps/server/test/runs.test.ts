@@ -6,7 +6,10 @@ import { PROJECTION_TABLES } from '../src/projections/index.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { Browser } from './helpers/browser.ts';
-import { closeAdminPool, q } from './helpers/db.ts';
+import { closeAdminPool, q as rawQ } from './helpers/db.ts';
+
+// rows as loose records (the tests read columns by name)
+const q = async (sql: string, params?: unknown[]): Promise<any[]> => (await rawQ(sql, params)) as any[];
 import { FakeRunner } from './helpers/fake-runner.ts';
 import { createWorld, MOCK_RUNTIME, ok, pairWorkstation, until, type World } from './helpers/world.ts';
 
@@ -326,7 +329,7 @@ describe('what the runner reports', () => {
     expect(active[0].fingerprint).not.toBe(v1.fingerprint); // BUILD.md changed
     expect(plans.find((p: any) => p.id === v1.id).status).toBe('superseded');
 
-    const bad = plan('bad');
+    const bad: any = plan('bad');
     bad.services[0].after = ['ghost'];
     r.send('run.plan.saved', { envId: env.id, plan: bad });
     await r.barrier();

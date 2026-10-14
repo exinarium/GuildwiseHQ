@@ -1318,7 +1318,10 @@ export class RunManager {
 
   /** A browser follows (or stops following) the logs: `run.log` is sent only meanwhile. */
   follow(envId: string, on: boolean): void {
-    if (!on) return this.unfollow(envId);
+    if (!on) {
+      this.unfollow(envId);
+      return;
+    }
     const env = this.envs.get(envId);
     if (!env || this.followers.has(envId)) return;
     const files = new Map<string, FileFollower>();

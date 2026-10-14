@@ -21,6 +21,7 @@ import { RepoAccessControl } from '../components/RepoAccessControl.tsx';
 import { RepoProjectPathControl } from '../components/RepoProjectPathControl.tsx';
 import { RepoProviderControl } from '../components/RepoProviderControl.tsx';
 import { EnvironmentPanel, RepoSetupStatus } from '../components/RepoSetupStatus.tsx';
+import { RunSettings } from '../components/runs/RunSettings.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
 import {
   Badge,
@@ -122,6 +123,7 @@ export function ProjectSettings() {
     ...(project && traits.usesRepos
       ? [
           { id: 'phases', label: 'Phases and deploys' },
+          { id: 'run', label: 'Run and test' },
           { id: 'reference-repos', label: 'Reference repos' },
           { id: 'merge', label: 'Merging' },
         ]
@@ -343,6 +345,11 @@ export function ProjectSettings() {
           <PhasesPanel projectId={id} />
           <DeployTargetsPanel projectId={id} />
           <FollowupDefaultsPanel projectId={id} />
+        </div>
+      )}
+      {project && traits.usesRepos && (
+        <div id="run" className="scroll-mt-20">
+          <RunSettings projectId={id} canEdit={project.myRole === 'owner'} />
         </div>
       )}
       {project && traits.usesRepos && (

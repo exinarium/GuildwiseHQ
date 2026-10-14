@@ -34,6 +34,9 @@ import {
 } from '../components/CardEdit.tsx';
 import { CardPhase } from '../components/CardPhase.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
+import { RunBranchDialog } from '../components/runs/RunBranchDialog.tsx';
+import { RunList } from '../components/runs/RunPanel.tsx';
+import { useRuns } from '../api/queries/runs.ts';
 import { EvidencePanel, TestingLinks } from '../components/EvidencePanel.tsx';
 import { AgentAvatar } from '../components/Face.tsx';
 import { FinalizePanel } from '../components/FinalizePanel.tsx';
@@ -272,6 +275,17 @@ export function CardDetailView({
                 Reopen
               </Button>
             )}
+            {card.repoId && card.homeWorkstationId && card.status !== 'cancelled' && (
+              <RunBranchDialog
+                projectId={card.projectId}
+                card={{
+                  id: card.id,
+                  ref: card.ref,
+                  repoId: card.repoId,
+                  homeWorkstationId: card.homeWorkstationId,
+                }}
+              />
+            )}
             <AskDevOpsButton
               variant="quiet"
               label="Ask DevOps"
@@ -399,6 +413,7 @@ export function CardDetailView({
               <ShiftLog key={currentShift.id} shift={currentShift} />
             </Panel>
           )}
+          <CardRuns cardId={card.id} />
           <McpUsagePanel usage={data.mcpUsage ?? []} />
           {data.publication && <PublicationPanel publication={data.publication} />}
           <InvestigationPanel card={card} />
@@ -940,5 +955,16 @@ export function CancelDialog({
         </div>
       </form>
     </Dialog>
+  );
+}
+
+/** The run environments started for this card (the panel shows state, links, expiry and logs). */
+function CardRuns({ cardId }: { cardId: string }) {
+  const runs = useRuns({ cardId });
+  if (!runs.data || runs.data.length === 0) return null;
+  return (
+    <div data-testid="card-runs">
+      <RunList envs={runs.data} />
+    </div>
   );
 }

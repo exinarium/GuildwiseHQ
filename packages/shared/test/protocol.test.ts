@@ -155,6 +155,9 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
     diffStats: { files: 2, added: 10, removed: 1, architecturalPaths: [] },
     riskTier: 'small',
   },
+  'run.status': { ...env('run.status'), envId: U.a, state: 'healthy', services: [] },
+  'run.log': { ...env('run.log'), envId: U.a, service: 'web', lines: ['ready'] },
+  'run.plan.saved': { ...env('run.plan.saved'), envId: U.a, plan: { version: 1, repos: [], setup: [], services: [], notes: '' } },
   'repo.sync_status': {
     ...env('repo.sync_status'),
     status: {
@@ -226,6 +229,7 @@ const serverToRunner: Record<string, Record<string, unknown>> = {
     prepare: { rebase: false },
     maxShiftMinutes: 60,
   },
+  'run.follow': { ...env('run.follow'), envId: U.a, follow: true },
   'shift.stop': { ...env('shift.stop'), shiftId: U.a, reason: 'timeout' },
   'shift.kill_tools': { ...env('shift.kill_tools'), shiftId: U.a },
   'shift.report.result': { ...env('shift.report.result'), reportId: U.d, accepted: false, error: 'nope' },
@@ -311,6 +315,8 @@ describe('browser protocol', () => {
     'chat.cancel': { type: 'chat.cancel', threadId: U.c },
     'shift.watch': { type: 'shift.watch', shiftId: U.a },
     'shift.unwatch': { type: 'shift.unwatch', shiftId: U.a },
+    'run.watch': { type: 'run.watch', envId: U.a },
+    'run.unwatch': { type: 'run.unwatch', envId: U.a },
     ping: { type: 'ping' },
   };
   const toBrowser: Record<string, ServerToBrowser> = {
@@ -337,6 +343,8 @@ describe('browser protocol', () => {
     'chat.delta': { type: 'chat.delta', threadId: U.c, text: 'hi' },
     'chat.done': { type: 'chat.done', threadId: U.c, messageId: U.d },
     'chat.error': { type: 'chat.error', threadId: U.c, reason: 'workstation_offline' },
+    'run.changed': { type: 'run.changed', envId: U.a },
+    'run.log': { type: 'run.log', envId: U.a, service: 'web', lines: ['x'] },
     presence: { type: 'presence', workstationId: U.a, connected: true },
     pong: { type: 'pong' },
   };

@@ -21,6 +21,9 @@ import {
   PriorityPicker,
   Skeleton,
 } from '../components/ui.tsx';
+import { RunBranchDialog } from '../components/runs/RunBranchDialog.tsx';
+import { RunList } from '../components/runs/RunPanel.tsx';
+import { useRuns } from '../api/queries/runs.ts';
 import { setLastProjectKey } from '../lib/lastProject.ts';
 import { money } from '../lib/money.ts';
 import { useCanConvert, useProjectWorkflowTraits } from '../lib/projectWorkflow.ts';
@@ -67,6 +70,7 @@ export function Board() {
   const [converting, setConverting] = useState(false);
   const detail = useProject(project?.workflowKey === 'research' ? project.id : undefined);
   const canConvert = useCanConvert(project);
+  const runs = useRuns({ projectId: project?.id }, { enabled: !!project?.id });
 
   useEffect(() => {
     if (project) setLastProjectKey(project.key);
@@ -137,6 +141,7 @@ export function Board() {
         actions={
           <>
             <PhaseFilter phases={phases.data ?? []} value={phaseId} onChange={setPhaseId} />
+            {traits.usesRepos && <RunBranchDialog projectId={project.id} />}
             {traits.hasTestStage && <RegressionDialog projectId={project.id} />}
             {project.workflowKey === 'research' && canConvert && detail.data && (
               <Button data-testid="convert-board-open" onClick={() => setConverting(true)}>
@@ -174,6 +179,11 @@ export function Board() {
           open={converting}
           onOpenChange={setConverting}
         />
+      )}
+      {runs.data && runs.data.length > 0 && (
+        <div className="mb-3" data-testid="board-runs">
+          <RunList envs={runs.data} />
+        </div>
       )}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="relative w-full sm:w-72">
