@@ -146,7 +146,7 @@ export function QaPanel({ cardId, qa }: { cardId: string; qa: CardQa }) {
         )}
         {qa.heldComment && (
           <Callout tone="info" title={`The update for ${qa.heldComment.externalKey} is held`}>
-            It is posted to the ticket (after your approval on the desk) once QA passes or is skipped.
+            It is posted to the ticket as soon as QA passes or is skipped.
           </Callout>
         )}
         {qa.sentBackCount > 0 && open && (

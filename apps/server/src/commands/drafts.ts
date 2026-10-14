@@ -93,10 +93,16 @@ export function outboundApprovalItem(input: {
 }
 
 /**
- * Manual QA passed or was skipped: every draft held for the card becomes a normal pending draft with its desk approval
- * (docs/design/manual-qa.md section 5). Returns the events to append with the QA decision.
+ * Manual QA passed or was skipped: that decision is the approval of every draft held for the card (docs/design/manual-qa.md
+ * section 5). Returns the events to append with the decision and the approved rows, which the caller queues for the
+ * card owner's workstation (`queueOutboundPost`) in the same transaction.
  */
-export async function releaseHeldDraftEvents(tx: Tx, card: Row): Promise<AppendInput[]> {
+export async function approveHeldDraftEvents(
+  tx: Tx,
+  card: Row,
+  by: { id: string },
+  how: 'passed' | 'skipped',
+): Promise<{ events: AppendInput[]; drafts: Row[] }> {
   const held = await rows(
     tx,
     `SELECT * FROM outbound_drafts WHERE card_id=$1 AND status='held' ORDER BY created_at FOR UPDATE`,
@@ -104,41 +110,25 @@ export async function releaseHeldDraftEvents(tx: Tx, card: Row): Promise<AppendI
   );
   const events: AppendInput[] = [];
   for (const d of held) {
-    const deskItemId = randomUUID();
-    const author: OutboundAuthor =
-      d.drafted_by_kind === 'agent' && d.drafted_by_id
-        ? { kind: 'agent', agentId: d.drafted_by_id }
-        : d.drafted_by_kind === 'user' && d.drafted_by_id
-          ? { kind: 'user', userId: d.drafted_by_id }
-          : { kind: 'user', userId: card.owner_user_id };
     events.push(
-      outboundApprovalItem({
-        card,
-        ref: {
-          system: d.external_system,
-          key: d.external_key,
-          ...(d.external_url ? { url: d.external_url } : {}),
-        },
-        kind: d.kind,
-        body: d.body,
-        author,
-        deskItemId,
-      }),
       {
         streamId: streamId.outbound(d.id),
-        event: { type: 'OutboundReleased', payload: { draftId: d.id, deskItemId } },
-        actor: SYSTEM_ACTOR,
+        event: {
+          type: 'OutboundApproved',
+          payload: { draftId: d.id, finalBody: d.body, approvedBy: by.id, edited: false, viaManualQa: true },
+        },
+        actor: userActor(by.id),
         scope: projectScope(card.org_id, card.project_id),
       },
       cardMessage(
         card,
         { kind: 'system' },
         'system',
-        `The update for ${d.external_key} (${KIND_LABEL[d.kind as OutboundKind]}) is released and waiting for your approval on the desk.`,
+        `The update for ${d.external_key} (${KIND_LABEL[d.kind as OutboundKind]}) was approved by manual QA (${how === 'passed' ? 'passed' : 'skipped'}); your workstation posts it.`,
       ),
     );
   }
-  return events;
+  return { events, drafts: held.map((d) => ({ ...d, status: 'approved', final_body: d.body })) };
 }
 
 /**

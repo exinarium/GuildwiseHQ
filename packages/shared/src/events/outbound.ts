@@ -47,7 +47,7 @@ export const outboundEvents = [
   ),
   /**
    * The BA drafted an update while manual QA is on for the card: it is held (no desk item, nothing posted) until QA
-   * passes or is skipped, then `OutboundReleased` puts it on the desk as usual (docs/design/manual-qa.md section 5).
+   * passes or is skipped, then that decision approves it (`OutboundApproved` with `viaManualQa`) and it is posted (docs/design/manual-qa.md section 5).
    */
   defineEvent(
     'OutboundHeld',
@@ -62,8 +62,6 @@ export const outboundEvents = [
       draftedBy: OutboundAuthor.optional(),
     }),
   ),
-  /** Manual QA passed or was skipped: the held draft is now a normal pending draft with its desk approval. */
-  defineEvent('OutboundReleased', z.object({ draftId: Id, deskItemId: Id })),
   /** The draft mentioned something internal (an agent name, review or bounce history, ...) and never reached the desk. */
   defineEvent(
     'OutboundBlocked',
@@ -87,6 +85,8 @@ export const outboundEvents = [
       finalBody: z.string().min(1).max(20000),
       approvedBy: Id,
       edited: z.boolean().default(false),
+      /** Approved by the manual QA decision (pass or skip) of `approvedBy`, not on the desk. */
+      viaManualQa: z.boolean().optional(),
     }),
   ),
   defineEvent('OutboundRejected', z.object({ draftId: Id, by: Id, reason: z.string().max(2000).optional() })),

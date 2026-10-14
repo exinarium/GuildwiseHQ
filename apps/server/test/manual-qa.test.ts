@@ -167,18 +167,28 @@ describe('manual QA after finalize', () => {
     expect(await cardRow(card.id)).toMatchObject({ stage: 'done', status: 'done' });
     expect((await cardRow(card.id)).finalized_at).not.toBeNull();
     expect((await cardRow(card.id)).finished_at).not.toBeNull();
-    // released: a normal pending draft with its approval on the desk, still not posted
+    // the pass IS the approval: no second approval on the desk, the owner's workstation posts it at once
     const rows = await draftRows(card.id);
-    expect(rows).toMatchObject([{ status: 'pending' }]);
-    expect(rows[0]?.desk_item_id).toBeTruthy();
-    const out = (await desk()).find((i) => i.subkind === 'outbound' && i.card?.id === card.id);
-    expect(out).toMatchObject({ status: 'open', body: 'Archived items are now part of the export.' });
-    await new Promise((x) => setTimeout(x, 250));
-    expect(r.received.slice(from).filter((f: any) => f.command === 'outbound.post')).toHaveLength(0);
-    // approving posts it as before
-    await owner().post(`/api/desk/${out.id}/resolve`, { resolution: 'approved' });
+    expect(rows).toMatchObject([{ status: 'approved' }]);
+    expect((await desk()).filter((i) => i.subkind === 'outbound')).toHaveLength(0);
     const cmd = await r.waitFor('command', (f: any) => f.command === 'outbound.post', 15_000, from);
-    expect(cmd.payload).toMatchObject({ cardId: card.id, kind: 'resolution' });
+    expect(cmd.payload).toMatchObject({
+      cardId: card.id,
+      kind: 'resolution',
+      body: 'Archived items are now part of the export.',
+    });
+    const approval = (await eventsOfType('OutboundApproved')).find((e) => e.draftId === rows[0]?.id);
+    expect(approval).toMatchObject({
+      approvedBy: (await cardRow(card.id)).owner_user_id,
+      viaManualQa: true,
+      edited: false,
+    });
+    r.send('command.result', {
+      commandId: cmd.commandId,
+      ok: true,
+      result: { ok: true, externalRef: 'QA-2#c1' },
+    });
+    await until(async () => (await draftRows(card.id))[0]?.status === 'posted', 3000, 'posted');
     // the QA desk item is closed, the decision is on the card, the events are the audit trail
     const closed = await q('SELECT status, answer, answer_option FROM desk_items WHERE id=$1', [dKey]);
     expect(closed[0]).toMatchObject({
@@ -191,7 +201,6 @@ describe('manual QA after finalize', () => {
       decision: { kind: 'passed', note: 'works on my machine' },
     });
     expect((await eventsOfType('QaPassed')).filter((e) => e.cardId === card.id)).toHaveLength(1);
-    expect((await eventsOfType('OutboundReleased')).filter((e) => e.draftId === rows[0]?.id)).toHaveLength(1);
     // and it cannot be decided twice
     expect((await qaPost(card.id, 'pass')).status).toBe(409);
   }, 120_000);
@@ -205,7 +214,9 @@ describe('manual QA after finalize', () => {
       state: 'skipped',
       decision: { kind: 'skipped', note: 'no time today' },
     });
-    expect((await draftRows(card.id))[0]).toMatchObject({ status: 'pending' });
+    // a skip approves the held update too
+    expect((await draftRows(card.id))[0]).toMatchObject({ status: 'approved' });
+    expect((await eventsOfType('OutboundApproved')).find((e) => e.viaManualQa)).toBeTruthy();
     expect((await eventsOfType('QaSkipped')).filter((e) => e.cardId === card.id)).toHaveLength(1);
     const detail = await ok<any>(owner().get(`/api/cards/${card.id}`));
     expect(detail.qa).toMatchObject({ state: 'skipped', canAct: false });
@@ -268,8 +279,19 @@ describe('manual QA after finalize', () => {
     // passing now releases the one held comment
     expect((await qaPost(card.id, 'pass')).status).toBe(200);
     expect(await cardRow(card.id)).toMatchObject({ stage: 'done', status: 'done' });
-    expect((await draftRows(card.id))[0]).toMatchObject({ status: 'pending' });
+    expect((await draftRows(card.id))[0]).toMatchObject({ status: 'approved' });
   }, 180_000);
+
+  it('a failed post of the QA-approved update raises the usual failure item on the desk', async () => {
+    const card = await atFinalize('QA-12');
+    await finalizeByBa(card.id, { draft: 'Shipped.' });
+    const from = r.received.length;
+    expect((await qaPost(card.id, 'pass')).status).toBe(200);
+    const cmd = await r.waitFor('command', (f: any) => f.command === 'outbound.post', 15_000, from);
+    r.send('command.result', { commandId: cmd.commandId, ok: false, error: 'Jira is down' });
+    await until(async () => (await draftRows(card.id))[0]?.status === 'failed', 3000, 'failed');
+    expect((await desk()).some((i) => i.subkind === 'outbound_failed' && i.card?.id === card.id)).toBe(true);
+  }, 120_000);
 
   it('hand over to another member: a new desk item for them; strangers and non-members are refused', async () => {
     const card = await atFinalize('QA-5');

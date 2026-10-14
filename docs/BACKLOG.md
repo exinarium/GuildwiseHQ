@@ -318,14 +318,14 @@ the card and shown as a tickable checklist grouped by scenario. With no agent at
 says so.
 
 **Held outgoing comment.** While a card will pass through QA, the BA's `aom outbound draft` records the draft as `held`
-(`OutboundHeld`: no desk item, nothing posted). `QaPassed` / `QaSkipped` release it (`OutboundReleased`): it becomes the
-usual pending draft with the owner's desk approval and posts from their workstation as before. A send back leaves it held.
+(`OutboundHeld`: no desk item, nothing posted). `QaPassed` / `QaSkipped` approve it directly (`OutboundApproved` with `viaManualQa`, approvedBy = the person who decided): it is
+posted from the card owner's workstation at once, with no second desk approval; a failed post raises the usual desk alert. A send back leaves it held.
 Drafts the manager writes by hand are not held. **Rework after a merge** needed no runner change: the server keeps the
 card's worktree path and branch after the merge, the next claim is a `reuse`, `ensureWorktree` cuts the deleted card branch
 afresh from the working branch (which already has the merged work) and the second finalize merges only the new commits
 (runner test `manual-qa-rework.test.ts`). Migration `1930_manual_qa.sql`. Tests: shared `manual-qa.test.ts`, server
 `manual-qa.test.ts`, runner `manual-qa-rework.test.ts`, web `qa-panel.test.tsx`. Role versions: BA 14, tester 5.
-**Not done:** the released comment still needs the owner's desk approval (one more click); `purpose: 'approval'` (#16);
+**Not done:** `purpose: 'approval'` (#16);
 custom workflows cannot use `human` steps yet; project variants of v2 do not have QA.
 
 ### 62. Inbound e-mail through SendGrid Inbound Parse

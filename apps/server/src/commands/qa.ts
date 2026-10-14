@@ -23,7 +23,8 @@ import { badRequest, conflict, forbidden } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { workflowView } from './cards.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
-import { releaseHeldDraftEvents } from './drafts.ts';
+import { approveHeldDraftEvents } from './drafts.ts';
+import { queueOutboundPost } from './outbox.ts';
 import { inQaStage, QA_STAGE, QA_STEPS_STAGE, type QaAssigneeSource } from './qa-flow.ts';
 
 /**
@@ -211,6 +212,7 @@ async function finish(
   kind: 'passed' | 'skipped',
   text: string | undefined,
 ): Promise<void> {
+  let deliverTo: string | null = null;
   await withAppendTx(ctx.pool, async (tx) => {
     const { card, qa } = await lockQaCard(tx, user, idOrRef);
     const scope = projectScope(card.org_id, card.project_id);
@@ -236,7 +238,7 @@ async function finish(
               ...(qa.deskItemId ? { deskItemId: qa.deskItemId } : {}),
             },
           };
-    const released = await releaseHeldDraftEvents(tx, card);
+    const released = await approveHeldDraftEvents(tx, card, user, kind);
     await ctx.store.append(
       [
         { streamId: streamId.card(card.id), event, actor: userActor(user.id), scope },
@@ -257,11 +259,13 @@ async function finish(
             : `Manual QA skipped by ${who} (not tested)${text ? `: ${text}` : '.'} ${card.ref} is done.`,
           { qa: kind },
         ),
-        ...released,
+        ...released.events,
       ],
       { tx },
     );
+    for (const d of released.drafts) deliverTo = (await queueOutboundPost(tx, d)) ?? deliverTo;
   });
+  if (deliverTo) await ctx.services.gateway.deliverPending(deliverTo);
 }
 
 export const passQa = (ctx: Ctx, user: AuthSession['user'], idOrRef: string, req: QaPassRequest) =>

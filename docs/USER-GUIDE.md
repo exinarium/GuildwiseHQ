@@ -743,7 +743,7 @@ Once a reviewer approves, the card moves to **Test**. A tester runs the tests of
 - **Send back**: a comment is required. The card returns to Build as rework with your comment as a review comment for the builder, in the same branch that already holds the merged work, and goes through review, test, finalize and QA again. You never have to reopen a closed card.
 - **Give it to someone else**: pick another member of the project; they get the desk item.
 
-The update that the BA drafts for the Jira or GitHub ticket is held while the card is in QA. When the card passes or the test is skipped it appears on your desk for the usual approval and is posted after you approve it. A card that is sent back keeps its update held until a later pass. The assignee, the project's owner and managers, and the organization's Owners and Admins can act on a card in QA.
+The update that the BA drafts for the Jira or GitHub ticket is held while the card is in QA. **Passing the card or skipping the test approves it**: it is posted to the ticket at once from the card owner's workstation, with no further approval on the desk. A card that is sent back keeps its update held until a later pass. The assignee, the project's owner and managers, and the organization's Owners and Admins can act on a card in QA.
 
 Manual QA is on for every project. The project Owner and the organization's Owners and Admins can switch it off in the project's **Settings**, **Manual QA before done**. The setting counts when a card is finalized: a card already in progress follows whatever is set at that moment, and a card that is already in QA stays there until someone decides. Scheduled (automatic) cards and investigation-only cards have no QA.
 

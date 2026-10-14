@@ -169,7 +169,10 @@ describe('manual QA events', () => {
       { type: 'QaSkipped', payload: { cardId: U, by: U, reason: 'no time' } },
       { type: 'QaSentBack', payload: { cardId: U, by: U, comment: 'broken', toStage: 'build' } },
       { type: 'ProjectManualQaSet', payload: { projectId: U, enabled: false, by: U } },
-      { type: 'OutboundReleased', payload: { draftId: U, deskItemId: U } },
+      {
+        type: 'OutboundApproved',
+        payload: { draftId: U, finalBody: 'Done.', approvedBy: U, viaManualQa: true },
+      },
       {
         type: 'OutboundHeld',
         payload: {

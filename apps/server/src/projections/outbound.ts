@@ -6,7 +6,6 @@ const ev = <
   T extends
     | 'OutboundDrafted'
     | 'OutboundHeld'
-    | 'OutboundReleased'
     | 'OutboundBlocked'
     | 'OutboundApproved'
     | 'OutboundRejected'
@@ -64,15 +63,6 @@ export const outboundProjectors: Record<string, Projector> = {
         e.createdAt,
         p.cardId,
       ],
-    );
-  },
-
-  OutboundReleased: async (tx, e) => {
-    const p = ev<'OutboundReleased'>(e).payload;
-    await exec(
-      tx,
-      `UPDATE outbound_drafts SET status='pending', desk_item_id=$2, updated_at=$3 WHERE id=$1 AND status='held'`,
-      [p.draftId, p.deskItemId, e.createdAt],
     );
   },
 
