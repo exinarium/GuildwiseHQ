@@ -1250,6 +1250,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Open a conversation with your BA about it.',
       },
       {
+        name: 'Batch',
+        text: 'Paste many tickets, one per line. The BA works through them in the background and asks on the desk when stuck.',
+      },
+      {
         name: 'Earlier intakes',
         text: 'Your previous intakes. Click one to pick the conversation up again.',
       },
@@ -1271,6 +1275,26 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       {
         name: 'Pick the project',
         text: 'Shown when the BA could not map the ticket to a project: it takes you to the desk question.',
+      },
+    ],
+    article: 'intake-and-outbox#intake',
+  },
+  '/intake/batches/:id': {
+    title: 'Batch intake',
+    intro: 'One batch of tickets: what the BA has done with each, the cards it created and the questions it asked.',
+    controls: [
+      {
+        name: 'Ticket status',
+        text: 'Queued, BA is working, Waiting for you, Done, Skipped (already has a card), Failed or Cancelled.',
+      },
+      {
+        name: 'Answer on the desk',
+        text: 'Shown for a ticket the BA could not go on with: your answer on the desk resumes that ticket.',
+      },
+      { name: 'Retry', text: 'Ask the BA to try a failed ticket again.' },
+      {
+        name: 'Cancel batch',
+        text: 'Stops the tickets that are not started or are waiting; tickets the BA is working on finish.',
       },
     ],
     article: 'intake-and-outbox#intake',

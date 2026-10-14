@@ -296,6 +296,7 @@ export class Runner {
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
       syncAfterFetch: (t) => this.sync.sync(t, { fetch: false, locked: true }).then(() => undefined),
+      external: () => this.external,
     });
     this.external =
       opts.external ??

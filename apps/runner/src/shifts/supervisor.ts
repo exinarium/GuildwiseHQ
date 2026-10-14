@@ -43,14 +43,18 @@ import {
 } from '@aom/shared';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
 import {
+  attachFileFromAgent,
   cardAttachmentsDir,
   describeSynced,
+  downloadJiraAttachments,
+  listJiraAttachments,
   type ServerHttp,
   syncCardAttachments,
 } from '../attachments/index.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
 import { cardPayload, shiftTexts } from '../devops/requests.ts';
+import { type ExternalAdapters, formatSource } from '../external/index.ts';
 import { checkFeedItemsFetched, FetchedUrls } from '../feeds/validation.ts';
 import {
   architectFetch,
@@ -158,6 +162,8 @@ export interface SupervisorDeps {
   sudoRun?: (cmd: string, args: string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** `aom git status|connect` for the DevOps engineer (the runner drives the login on this workstation). */
   git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
+  /** The ticket systems of this workstation: a batch intake shift reads its ticket (`aom source read`) like an intake chat. */
+  external?: () => ExternalAdapters | undefined;
   /** Credentials for pushing a working branch the runner creates (absent: the user's own git setup). */
   gitAuth?: GitAuth;
   /** The organization source folder of an organization (the architect reads every repository under it, read-only). */
@@ -885,6 +891,10 @@ export class ShiftSupervisor {
         // A DevOps shift reads its request's card (`aom card show`) through the server, which serves only that card.
         if (req.method === 'card.get' && s.msg.kind === 'devops' && (req.params.ref || req.params.linked))
           return this.deps.rpc(s.msg.shiftId, req.method, req.params);
+        if (s.msg.kind === 'ba_task' && s.msg.baTask?.batch && req.method.startsWith('source.'))
+          return this.batchSource(s, req.method, req.params);
+        if (s.msg.kind === 'ba_task' && s.msg.baTask?.batch && req.method === 'card.attach')
+          return this.batchAttach(s, req.params);
         if (req.method === 'card.get' && s.msg.kind === 'ba_task' && req.params.ref)
           return this.deps.rpc(s.msg.shiftId, req.method, req.params);
         if (req.method === 'card.get')
@@ -914,6 +924,69 @@ export class ShiftSupervisor {
         return this.deps.rpc(s.msg.shiftId, req.method, req.params);
       },
     };
+  }
+
+  /**
+   * Batch intake (#63): `aom source read|attachments|attachment` for the ticket of this shift, with the runner's own
+   * ticket credentials (the sandbox has no network). Attachments are limited to that ticket.
+   */
+  private async batchSource(
+    s: ActiveShift,
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<IpcRpcResponse> {
+    const batch = s.msg.baTask?.batch;
+    const external = this.deps.external?.();
+    if (!batch || !external) return { ok: false, error: 'this runner has no ticket adapters' };
+    try {
+      if (method === 'source.read') {
+        const ref = String(params.ref ?? '').trim();
+        if (!ref) return { ok: false, error: 'usage: aom source read --ref <KEY>' };
+        return { ok: true, result: formatSource(await external.readText(ref)) };
+      }
+      if (!s.sandbox) return { ok: false, error: 'this shift has no workspace yet' };
+      const deps = {
+        jira: () => external.jira,
+        scratch: s.sandbox.scratch,
+        allowed: batch.system === 'jira' ? [batch.ticketKey.toUpperCase()] : [],
+      };
+      if (method === 'source.attachments')
+        return { ok: true, result: await listJiraAttachments(deps, params.key) };
+      if (method === 'source.attachment')
+        return {
+          ok: true,
+          result: await downloadJiraAttachments(
+            deps,
+            params.key,
+            typeof params.name === 'string' ? params.name : undefined,
+            params.all === true,
+          ),
+        };
+      return { ok: false, error: `${method} is not available in this task` };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /** `aom card attach <path> --card <REF>` in a batch intake shift: the BA puts a downloaded file on a card it created. */
+  private async batchAttach(s: ActiveShift, params: Record<string, unknown>): Promise<IpcRpcResponse> {
+    const sb = s.sandbox;
+    const http = this.deps.http;
+    if (!sb || !http) return { ok: false, error: 'this runner cannot reach the server for files' };
+    try {
+      return {
+        ok: true,
+        result: await attachFileFromAgent({
+          path: String(params.path ?? ''),
+          ref: typeof params.ref === 'string' && params.ref ? params.ref : undefined,
+          roots: [sb.scratch, sb.tmp],
+          rpc: (m, p) => this.deps.rpc(s.msg.shiftId, m, p),
+          http,
+        }),
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   /** `aom card attachments`: copies the attachments of the shift's card again (the server says which ones it may read). */

@@ -23,6 +23,8 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { agentActor, orgScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { effectiveCompletionAction } from './completion.ts';
+import { intakeRpc } from './intake.ts';
+import { applyBatchReport, batchRpcGuard } from './intake-batch.ts';
 import {
   actorOf,
   agentBy,
@@ -115,6 +117,7 @@ export async function applyBaTaskReport(
       accepted: false,
       error: 'this task is no longer open; there is nothing left to do. Finish now.',
     };
+  if (task.kind === 'batch_intake') return applyBatchReport(ctx, tx, shift, task, msg.report);
   if (isReporterTaskKind(task.kind)) return applyReporterReport(ctx, tx, _ws, msg, shift, task);
   const phase = await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [task.phase_id]);
   if (!phase) return { accepted: false, error: 'the phase is gone. Finish now.' };
@@ -238,6 +241,19 @@ export async function applyBaTaskReport(
   return { accepted: true };
 }
 
+/** The intake verbs a batch intake shift may use (the BA's chat verbs, minus the conversation). */
+const BATCH_RPC = new Set([
+  'card.create',
+  'card.update',
+  'card.specify',
+  'intake.map',
+  'intake.unmapped',
+  'phase.list',
+  'phase.propose',
+  'phase.assign',
+  'phase.submit',
+]);
+
 /** `phase.followup.brief` (non-terminal) in a `followups_brief` shift: delegate one follow-up. */
 export async function baTaskRpc(
   ctx: Ctx,
@@ -245,6 +261,15 @@ export async function baTaskRpc(
   method: string,
   params: Record<string, unknown>,
 ): Promise<[boolean, unknown?, string?]> {
+  if (BATCH_RPC.has(method)) {
+    const batch = await one(ctx.pool, `SELECT 1 FROM ba_tasks WHERE shift_id=$1 AND kind='batch_intake'`, [
+      shift.id,
+    ]);
+    if (batch) {
+      const refusal = await batchRpcGuard(ctx, shift, method, params);
+      return refusal ? [false, undefined, refusal] : intakeRpc(ctx, shift, method, params);
+    }
+  }
   if (method === 'card.get' || method === 'thread.read') return readRpc(ctx, shift, method, params);
   if (method !== 'phase.followup.brief') return [false, undefined, `${method} is not available in this task`];
   const p = FollowupBriefParamsSchema.safeParse(params);
@@ -435,6 +460,28 @@ export async function endBaTaskShift(
  * manager is told so. Appends in `tx`.
  */
 export async function runBaTaskFallback(ctx: Ctx, tx: Tx, task: Row): Promise<void> {
+  if (task.kind === 'batch_intake') {
+    // No BA to work on the ticket: the item fails (the projection) and the owner can retry it.
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.baTask(task.id),
+          event: {
+            type: 'BaTaskCompleted',
+            payload: {
+              taskId: task.id,
+              status: 'fallback',
+              note: 'no BA was available to work on this ticket',
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: orgScope(task.org_id),
+        },
+      ],
+      { tx },
+    );
+    return;
+  }
   if (isReporterTaskKind(task.kind)) return runReporterFallback(ctx, tx, task);
   const phase = await one(tx, 'SELECT * FROM phases WHERE id=$1 FOR UPDATE', [task.phase_id]);
   const done = (note: string) =>

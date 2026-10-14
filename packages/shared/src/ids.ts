@@ -30,6 +30,7 @@ export const streamId = {
   interest: (id: string) => `interest-${id}`,
   phase: (id: string) => `phase-${id}`,
   baTask: (id: string) => `ba-task-${id}`,
+  intakeBatch: (id: string) => `intake-batch-${id}`,
   baSignal: (id: string) => `ba-signal-${id}`,
   shift: (id: string) => `shift-${id}`,
   vault: (id: string) => `vault-${id}`,

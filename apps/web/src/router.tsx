@@ -21,6 +21,7 @@ import { Desk } from './pages/Desk.tsx';
 import { ForgotPassword } from './pages/ForgotPassword.tsx';
 import { Help, PlatformHelp } from './pages/Help.tsx';
 import { IntakeNew, IntakeView } from './pages/Intake.tsx';
+import { BatchView } from './pages/IntakeBatch.tsx';
 import { InterestDetail } from './pages/InterestDetail.tsx';
 import { Interests } from './pages/Interests.tsx';
 import { Ledger } from './pages/Ledger.tsx';
@@ -128,6 +129,7 @@ export const routes = [
       { path: '/ledger', element: <Ledger /> },
       { path: '/chat/:threadId', element: <Chat /> },
       { path: '/intake', element: <IntakeNew /> },
+      { path: '/intake/batches/:id', element: <BatchView /> },
       { path: '/intake/:id', element: <IntakeView /> },
     ],
   },

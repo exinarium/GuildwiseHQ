@@ -20,6 +20,7 @@ import {
 } from '../components/ui.tsx';
 import { describeSource, intakeStatusText } from '../lib/intake.ts';
 import { ageLabel } from '../lib/time.ts';
+import { BatchForm, BatchList } from './IntakeBatch.tsx';
 
 /** Start an intake: paste a Jira key or GitHub issue (or describe the need) and talk to the BA about it. */
 export function IntakeNew() {
@@ -27,6 +28,7 @@ export function IntakeNew() {
   const create = useCreateIntake();
   const intakes = useIntakes();
   const [note, setNote] = useState('');
+  const [mode, setMode] = useState<'chat' | 'batch'>('chat');
   const source = describeSource(note);
 
   const submit = (e: FormEvent) => {
@@ -43,29 +45,47 @@ export function IntakeNew() {
         back={{ to: '/desk', label: 'Back to the desk' }}
         sub="Paste a ticket or describe the need. Your business analyst turns it into cards and asks you what it cannot decide."
       />
-      <Panel>
-        <form onSubmit={submit} aria-label="Start an intake" className="flex flex-col gap-3" noValidate>
-          <TextArea
-            label="Ticket or need"
-            rows={3}
-            placeholder="ABC-123, acme/web#12, an issue URL, or describe what you need"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-          {note.trim() && (
-            <p className="flex items-center gap-2 text-sm text-muted" data-testid="intake-source">
-              <Badge tone="brand">Detected</Badge>
-              {source.label}
-            </p>
-          )}
-          <ErrorBox error={create.error} />
-          <div>
-            <Button type="submit" variant="primary" disabled={!note.trim()} loading={create.isPending}>
-              Start intake
-            </Button>
-          </div>
-        </form>
-      </Panel>
+      <div role="tablist" aria-label="Intake mode" className="mb-3 flex gap-2">
+        {(['chat', 'batch'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={mode === m}
+            onClick={() => setMode(m)}
+            className={`rounded-card border px-3 py-1.5 text-sm font-medium ${mode === m ? 'border-brand bg-brand-soft text-brand-soft-fg' : 'border-line text-muted hover:border-control'}`}
+          >
+            {m === 'chat' ? 'One ticket (chat)' : 'Batch'}
+          </button>
+        ))}
+      </div>
+      {mode === 'batch' && <BatchForm />}
+      {mode === 'chat' && (
+        <Panel>
+          <form onSubmit={submit} aria-label="Start an intake" className="flex flex-col gap-3" noValidate>
+            <TextArea
+              label="Ticket or need"
+              rows={3}
+              placeholder="ABC-123, acme/web#12, an issue URL, or describe what you need"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+            {note.trim() && (
+              <p className="flex items-center gap-2 text-sm text-muted" data-testid="intake-source">
+                <Badge tone="brand">Detected</Badge>
+                {source.label}
+              </p>
+            )}
+            <ErrorBox error={create.error} />
+            <div>
+              <Button type="submit" variant="primary" disabled={!note.trim()} loading={create.isPending}>
+                Start intake
+              </Button>
+            </div>
+          </form>
+        </Panel>
+      )}
+      <BatchList />
       {(intakes.data?.length ?? 0) > 0 && (
         <section className="mt-8" aria-label="Earlier intakes">
           <h2 className="mb-2 text-lg font-semibold text-fg">Earlier intakes</h2>

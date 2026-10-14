@@ -438,8 +438,9 @@ export const phaseProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO ba_tasks (id, org_id, project_id, phase_id, followup_id, kind, status, preferred_agent_id,
-         signal_ids, desk_item_ids, local_date, instructions, deliver, schedule_id, schedule_name, org_level, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16)`,
+         signal_ids, desk_item_ids, local_date, instructions, deliver, schedule_id, schedule_name, org_level, created_at, updated_at,
+         batch_id, batch_item_id)
+       VALUES ($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16,$17,$18)`,
       [
         p.taskId,
         org,
@@ -457,6 +458,8 @@ export const phaseProjectors: Record<string, Projector> = {
         p.scheduleName ?? null,
         p.orgLevel ?? false,
         e.createdAt,
+        p.batchId ?? null,
+        p.batchItemId ?? null,
       ],
     );
     // A floor report is queued once per local day: remember the day on the owner.
@@ -490,6 +493,12 @@ export const phaseProjectors: Record<string, Projector> = {
       `UPDATE ba_tasks SET status='running', agent_id=$2, shift_id=$3, updated_at=$4 WHERE id=$1`,
       [p.taskId, p.agentId, p.shiftId, e.createdAt],
     );
+    // Batch intake: the item is being read by the BA.
+    await exec(
+      tx,
+      `UPDATE intake_batch_items SET status='reading', updated_at=$2 WHERE task_id=$1 AND status='queued'`,
+      [p.taskId, e.createdAt],
+    );
   },
 
   BaTaskRequeued: async (tx, e) => {
@@ -499,6 +508,11 @@ export const phaseProjectors: Record<string, Projector> = {
       `UPDATE ba_tasks SET status='queued', shift_id=NULL, agent_id=NULL, attempts = attempts + $4::int, note=$2, updated_at=$3
         WHERE id=$1`,
       [p.taskId, p.reason, e.createdAt, p.attempt ? 1 : 0],
+    );
+    await exec(
+      tx,
+      `UPDATE intake_batch_items SET status='queued', updated_at=$2 WHERE task_id=$1 AND status='reading'`,
+      [p.taskId, e.createdAt],
     );
   },
 
@@ -510,5 +524,13 @@ export const phaseProjectors: Record<string, Projector> = {
       p.note ?? null,
       e.createdAt,
     ]);
+    // Batch intake: a task the server gave up on (no BA, failed attempts) fails its item; the owner can retry.
+    if (p.status === 'fallback' || p.status === 'failed')
+      await exec(
+        tx,
+        `UPDATE intake_batch_items SET status='failed', reason=COALESCE($3, 'the BA could not work on this ticket'), updated_at=$2
+          WHERE task_id=$1 AND status IN ('queued','reading')`,
+        [p.taskId, e.createdAt, p.note ?? null],
+      );
   },
 };

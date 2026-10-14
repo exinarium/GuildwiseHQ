@@ -21,6 +21,8 @@ To bring a ticket into Guildwise HQ:
 
 The card then joins the normal queue and follows your project's workflow.
 
+**Many tickets at once:** on the Intake page switch to **Batch**, paste one ticket per line (up to 50), optionally pick a project and add a note, and click **Start batch**. The BA works through them in the background, two at a time, and creates the cards without a chat. Tickets that already have a card are skipped. When the BA cannot go on with a ticket it asks on the desk, naming the ticket; your answer resumes that ticket and the others carry on. The batch page shows each ticket's status and cards, and offers **Retry** and **Cancel batch**.
+
 You can also ask the BA to create cards in any chat, not just during intake. The BA works with your access: it can only use projects you are a member of.
 
 ## Unmapped tickets {#unmapped-tickets}

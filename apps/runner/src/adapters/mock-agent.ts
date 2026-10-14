@@ -642,7 +642,15 @@ interface BaTaskBrief extends Brief {
       | 'urgent_note'
       | 'floor_alert'
       | 'floor_report'
-      | 'scheduled_brief';
+      | 'scheduled_brief'
+      | 'batch_intake';
+    batch?: {
+      ticketKey: string;
+      projectKey?: string;
+      note?: string;
+      projects: Array<{ key: string }>;
+      answers: Array<{ question: string; answer: string | null }>;
+    };
     followupId?: string;
     phase?: { ref: string; name: string; description: string; workingBranch: string };
     reporter?: {
@@ -846,8 +854,62 @@ async function reporterTaskMain(
  * Custom: `[fail]` in the instruction fails it. Results: one line per follow-up. `[ba_no_report]` in the phase
  * description ends the shift without reporting (retries, then the server's template).
  */
+/**
+ * Batch intake, scripted: `[ask]` in the owner's note (until it has an answer) asks one question; `[fail]` fails the
+ * ticket; otherwise it maps the ticket (when no project was chosen), creates and specifies one card and reports done.
+ */
+async function batchIntakeMain(b: NonNullable<BaTaskBrief['baTask']['batch']>): Promise<number> {
+  emit({ kind: 'progress', text: `mock BA batch intake ${b.ticketKey}` });
+  await sleep(stepMs);
+  emit({ kind: 'usage', usage: { inputTokens: 500, outputTokens: 120 } });
+  const done = (args: string[]) => {
+    const r = aom(['batch', ...args]);
+    emit({
+      kind: 'final',
+      text: r.code === 0 ? `mock batch: ${args[0]}` : `mock batch failed: ${(r.err || r.out).trim()}`,
+    });
+    return r.code === 0 ? 0 : 1;
+  };
+  if (b.note?.includes('[ask]') && b.answers.every((a) => !a.answer))
+    return done([
+      'ask',
+      '--text',
+      'Which project does this belong to?',
+      '--option',
+      'first',
+      '--option',
+      'second',
+    ]);
+  if (b.note?.includes('[fail]')) return done(['fail', '--note', 'mock: cannot be turned into cards']);
+  // The ticket is read through the runner (its own ticket credentials).
+  const read = aom(['source', 'read', '--ref', b.ticketKey]);
+  const ticketLine = read.code === 0 ? (read.out.split('\n')[0] ?? '') : '';
+  const key = b.projectKey ?? b.projects[0]?.key;
+  if (!b.projectKey && key) aom(['intake', 'map', '--project', key]);
+  const title = `Ticket ${b.ticketKey}`;
+  const draft = {
+    title,
+    cardType: 'feature',
+    docsNeeded: false,
+    fields: {
+      context: title,
+      requirements: title,
+      acceptanceCriteria: [`Implements: ${title}`],
+      affectedAreas: 'src/',
+      constraints: 'none',
+      testPlan: 'Run the unit tests',
+    },
+  };
+  const c = aom(['card', 'create', '--json', JSON.stringify(draft)]);
+  const ref = /Created (\S+) /.exec(c.out)?.[1];
+  if (c.code !== 0 || !ref) return done(['fail', '--note', `mock: ${(c.err || c.out).trim().slice(0, 300)}`]);
+  aom(['card', 'specify', ref]);
+  return done(['done', '--note', `Created ${ref}${ticketLine ? ` from ${ticketLine}` : ''}`]);
+}
+
 async function baTaskMain(brief: BaTaskBrief): Promise<number> {
   const t = brief.baTask;
+  if (t.batch) return batchIntakeMain(t.batch);
   if (t.reporter)
     return reporterTaskMain(
       t as BaTaskBrief['baTask'] & { reporter: NonNullable<BaTaskBrief['baTask']['reporter']> },

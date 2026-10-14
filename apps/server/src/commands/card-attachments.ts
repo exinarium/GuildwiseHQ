@@ -223,7 +223,7 @@ async function agentScope(ctx: Ctx, shift: Row): Promise<{ cards: Row[]; attacha
   if (shift.kind === 'devops') {
     const req = await one(ctx.pool, 'SELECT card_id FROM devops_requests WHERE shift_id=$1', [shift.id]);
     if (req?.card_id) await byId(req.card_id);
-  } else if (shift.kind === 'chat') {
+  } else if (shift.kind === 'chat' || shift.kind === 'ba_task') {
     const who = await intakeOf(ctx, shift);
     if (who) {
       const r = await rows(
@@ -284,7 +284,7 @@ export async function attachmentRpc(
     if (method === 'card.attach.begin') {
       const p = AttachBeginParamsSchema.safeParse(params);
       if (!p.success) return [false, undefined, 'usage: aom card attach <path> [--card <REF>]'];
-      if (shift.kind !== 'chat' || scope.attachable.size === 0)
+      if ((shift.kind !== 'chat' && shift.kind !== 'ba_task') || scope.attachable.size === 0)
         return [
           false,
           undefined,

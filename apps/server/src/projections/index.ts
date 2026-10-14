@@ -11,6 +11,7 @@ import { environmentProjectors } from './environment.ts';
 import { feedProjectors } from './feeds.ts';
 import { hygieneProjectors } from './hygiene.ts';
 import { intakeProjectors } from './intake.ts';
+import { intakeBatchProjectors } from './intake-batch.ts';
 import { interestRunProjectors } from './interest-runs.ts';
 import { interestProjectors } from './interests.ts';
 import { ledgerProjectors } from './ledger.ts';
@@ -66,6 +67,7 @@ const domains: Array<Record<string, Projector>> = [
   feedProjectors,
   researchProjectors,
   intakeProjectors,
+  intakeBatchProjectors,
   trackRecordProjectors,
   outboundProjectors,
   repoProjectors,
@@ -141,6 +143,8 @@ export const PROJECTION_TABLES = [
   'interest_deliveries',
   'intakes',
   'intake_cards',
+  'intake_batches',
+  'intake_batch_items',
   'agent_card_stats',
   'agent_review_log',
   'agent_stats_daily',

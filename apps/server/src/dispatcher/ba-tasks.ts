@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { BA_TASK_MAX_ATTEMPTS, BA_TASK_MAX_SHIFT_MINUTES, BA_TASK_STALL_MS, streamId } from '@aom/shared';
+import {
+  BA_TASK_MAX_ATTEMPTS,
+  BA_TASK_MAX_SHIFT_MINUTES,
+  BA_TASK_STALL_MS,
+  BATCH_MAX_IN_FLIGHT,
+  streamId,
+} from '@aom/shared';
 import { endBaTaskShift, runBaTaskFallback } from '../commands/ba-tasks.ts';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
@@ -37,12 +43,23 @@ export async function baTaskPass(
     ctx.pool,
     `SELECT t.* FROM ba_tasks t JOIN projects p ON p.id = t.project_id AND p.status = 'active'
        JOIN organizations po ON po.id = p.org_id AND po.status IN ('trial','active')
-      WHERE t.status = 'queued' AND NOT ${budgetPausedSql('p', '$1')} ORDER BY t.created_at, t.id`,
+      WHERE t.status = 'queued' AND NOT ${budgetPausedSql('p', '$1')}
+      ORDER BY (t.kind = 'batch_intake'), t.created_at, t.id`,
     [now],
   );
   const started: BaTaskDispatch[] = [];
   const busy = new Set<string>();
   for (const t of queued) {
+    // Batch intake: at most BATCH_MAX_IN_FLIGHT items of one batch are with a BA at once. Batch work also queues behind
+    // all other BA tasks (see the ORDER BY), so normal BA work still flows.
+    if (t.batch_id) {
+      const running = await one(
+        ctx.pool,
+        `SELECT count(*)::int AS n FROM ba_tasks WHERE batch_id=$1 AND status='running'`,
+        [t.batch_id],
+      );
+      if ((running?.n ?? 0) >= BATCH_MAX_IN_FLIGHT) continue;
+    }
     const bas = await rows(
       ctx.pool,
       `SELECT a.*, ws.id AS ws_id, ws.runtimes, ws.connected, ws.last_seen_at
@@ -56,7 +73,8 @@ export async function baTaskPass(
         ORDER BY (a.id = $3::uuid) DESC, a.last_shift_ended_at NULLS FIRST, a.hired_at, a.id`,
       [t.org_id, t.project_id, t.preferred_agent_id, t.kind === 'floor_report' || t.org_level === true],
     );
-    const stalled = now.getTime() - new Date(t.updated_at).getTime() > BA_TASK_STALL_MS;
+    const stalled =
+      t.kind !== 'batch_intake' && now.getTime() - new Date(t.updated_at).getTime() > BA_TASK_STALL_MS;
     if (bas.length === 0 || t.attempts >= BA_TASK_MAX_ATTEMPTS || stalled) {
       await withAppendTx(ctx.pool, async (tx) => {
         const cur = await one(tx, `SELECT * FROM ba_tasks WHERE id=$1 AND status='queued' FOR UPDATE`, [
