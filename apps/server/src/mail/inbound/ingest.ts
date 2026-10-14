@@ -126,6 +126,51 @@ async function findThread(db: Queryable, route: Route, m: NormalizedInbound): Pr
   );
 }
 
+/** One desk notice per sender and organisation per day when a sender goes over the per-sender limit. */
+async function raiseSenderNotice(
+  ctx: Ctx,
+  tx: Queryable,
+  route: Route,
+  sender: string,
+  limit: number,
+  now: Date,
+): Promise<void> {
+  const day = now.toISOString().slice(0, 10);
+  const dup = await tx.query(
+    `SELECT 1 FROM desk_items WHERE org_id=$1 AND subkind='inbound_sender_limited'
+        AND data->>'sender'=$2 AND data->>'day'=$3 LIMIT 1`,
+    [route.orgId, sender.toLowerCase(), day],
+  );
+  if (dup.rowCount) return;
+  const deskItemId = randomUUID();
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.desk(deskItemId),
+        event: {
+          type: 'DeskItemCreated',
+          payload: {
+            deskItemId,
+            kind: 'alert',
+            subkind: 'inbound_sender_limited',
+            title: `${sender} sent more than ${limit} e-mails in an hour`,
+            body: `Further messages from this sender are recorded as skipped (not turned into cards) until the hour passes. This notice appears once per sender per day. If it is a loop or a noisy system, block the sender or ask them to stop; the skipped messages are in the inbox.`,
+            options: [],
+            blocking: false,
+            pinned: false,
+            affectedCardIds: [],
+            askedBy: { kind: 'system' },
+            data: { sender: sender.toLowerCase(), day, inboxId: route.inboxId },
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: orgScope(route.orgId),
+      },
+    ],
+    { tx },
+  );
+}
+
 /**
  * One message into one inbox. Always answers (a webhook that errors is retried by the provider for hours): policy
  * problems are recorded as skipped messages the organisation can see, not as errors.
@@ -161,11 +206,28 @@ async function ingestOne(ctx: Ctx, route: Route, m: NormalizedInbound, now: Date
     return { ...base, messageId: null, status: 'dropped', reason: 'rate_limited' };
   }
 
+  // Per-sender rate: one noisy or looping sender cannot use up the organisation's allowance (0 = off).
+  const senderLimit = cfg.ratePerSenderPerHour;
+  let senderRecent = 0;
+  if (senderLimit > 0) {
+    senderRecent = Number(
+      (
+        await one(
+          ctx.pool,
+          `SELECT count(*) AS n FROM mail_messages
+            WHERE org_id=$1 AND direction='in' AND lower(from_address)=lower($2) AND received_at > $3`,
+          [route.orgId, m.from, new Date(now.getTime() - 3_600_000)],
+        )
+      )?.n ?? 0,
+    );
+  }
+
   const auth = authVerdict(m);
   let reason: string | undefined;
   if (!route.active) reason = 'address_retired';
   else if (!route.enabled) reason = 'inbox_disabled';
   else if (recent >= cfg.ratePerHour) reason = 'rate_limited';
+  else if (senderLimit > 0 && senderRecent >= senderLimit) reason = 'sender_rate_limited';
   else if (m.bytes > cfg.maxMessageBytes) reason = 'too_large';
   else if (m.automatic) reason = 'automatic';
   else if (m.spamScore !== null && m.spamScore >= cfg.spamThreshold) reason = 'spam';
@@ -247,6 +309,7 @@ async function ingestOne(ctx: Ctx, route: Route, m: NormalizedInbound, now: Date
       ],
       { tx },
     );
+    if (reason === 'sender_rate_limited') await raiseSenderNotice(ctx, tx, route, m.from, senderLimit, now);
     return 'stored' as const;
   });
   if (result === 'duplicate') return { ...base, messageId: null, status: 'duplicate', reason: 'duplicate' };

@@ -114,6 +114,7 @@ beforeAll(async () => {
       AOM_INBOUND_DOMAIN: DOMAIN,
       AOM_INBOUND_SECRET: SECRET,
       AOM_INBOUND_RATE_PER_HOUR: '100',
+      AOM_INBOUND_RATE_PER_SENDER_PER_HOUR: '0',
     },
   });
   r = await w.connectRunner();
@@ -321,6 +322,34 @@ describe('safety limits', () => {
       expect((await send({ to: otherInbox.address })).results[0].status).toBe('received');
     } finally {
       cfg.ratePerHour = saved;
+    }
+  });
+
+  it('limits one sender per hour: skipped as sender_rate_limited, one desk notice per sender per day, 0 = off', async () => {
+    const cfg = w.t.app.ctx.config.inbound;
+    const saved = cfg.ratePerSenderPerHour;
+    const noisy = `noisy-${randomUUID().slice(0, 6)}@loop.example`;
+    try {
+      cfg.ratePerSenderPerHour = 2;
+      expect((await send({ from: noisy })).results[0].status).toBe('received');
+      expect((await send({ from: noisy })).results[0].status).toBe('received');
+      const over = await send({ from: noisy });
+      expect(over.results[0]).toMatchObject({ status: 'skipped', reason: 'sender_rate_limited' });
+      expect((await lastMessage()).body_text).toBe('');
+      expect((await send({ from: noisy })).results[0].reason).toBe('sender_rate_limited');
+      // someone else is not affected
+      expect((await send({ from: 'calm@loop.example' })).results[0].status).toBe('received');
+      const notices = await q(
+        `SELECT * FROM desk_items WHERE org_id=$1 AND subkind='inbound_sender_limited' AND data->>'sender'=$2`,
+        [orgId, noisy],
+      );
+      expect(notices).toHaveLength(1);
+      expect(notices[0]?.kind).toBe('alert');
+      // off
+      cfg.ratePerSenderPerHour = 0;
+      expect((await send({ from: noisy })).results[0].status).toBe('received');
+    } finally {
+      cfg.ratePerSenderPerHour = saved;
     }
   });
 });

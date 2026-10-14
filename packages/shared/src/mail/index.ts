@@ -78,6 +78,7 @@ export const MAIL_SKIP_REASONS = {
   spam: 'Looked like spam',
   sender_check_failed: 'The sender could not be verified (failed the DKIM check)',
   rate_limited: 'Too many messages arrived in the last hour',
+  sender_rate_limited: 'This sender sent too many messages in the last hour',
   too_large: 'The message was larger than the limit',
   automatic: 'An automatic reply, bounce or list mail',
   address_retired: 'Sent to an address that was replaced',
