@@ -1,6 +1,13 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RunEndReason, RunEnvState, RunPurpose, RunService, RunServiceState } from '@aom/shared';
+import type {
+  RunEndReason,
+  RunEnvState,
+  RunPlan,
+  RunPurpose,
+  RunService,
+  RunServiceState,
+} from '@aom/shared';
 
 /** What the runner keeps of a run environment, in `<data dir>/runs/<envId>/state.json` (survives a runner restart). */
 
@@ -24,6 +31,8 @@ export interface ServiceState {
   health: 'unknown' | 'passing' | 'failing' | 'none';
   everHealthy: boolean;
   startedAt?: number;
+  /** Where it runs: the service sandbox, outside it because of Docker, or no sandbox at all (see `RunServiceStatus`). */
+  sandbox: 'sandboxed' | 'docker' | 'off';
 }
 
 export interface StepState {
@@ -34,6 +43,9 @@ export interface StepState {
   timeoutSec: number;
   when: string;
   status: 'running' | 'ok' | 'failed';
+  /** A replayed step that its `when` rule skipped. */
+  skipped?: boolean;
+  sandbox?: 'sandboxed' | 'docker' | 'off';
   exitCode?: number | null;
   startedAt: number;
   finishedAt?: number;
@@ -76,6 +88,15 @@ export interface EnvState {
   buildHash?: string;
   createdAt: number;
   endedAt?: number;
+  /** The plan this environment runs from (replayed, or saved by `aom run ready`): what Restart starts again. */
+  plan?: RunPlan;
+  planId?: string;
+  /** The plan is being replayed (start, restart): `aom run` waits, and a runner restart in between counts as a failure. */
+  replaying?: boolean;
+  /** A stopped manual environment keeps its run worktrees until then (Restart revives it). */
+  keptUntil?: number;
+  /** The environment's private /tmp (the services' HOME lives in it). */
+  runTmp?: string;
 }
 
 export const LIVE_ENV_STATES: readonly RunEnvState[] = [

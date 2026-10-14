@@ -61,6 +61,11 @@ export const RunServiceStatusSchema = z.object({
   exitCode: z.number().int().nullable().optional(),
   lastError: z.string().max(2000).optional(),
   pid: z.number().int().optional(),
+  /**
+   * Where the process runs: `sandboxed` (the runner's service sandbox, D10), `docker` (outside the sandbox because it
+   * uses Docker, which the project allowed) or `off` (no sandbox: bubblewrap is missing or the runner's sandbox is off).
+   */
+  sandbox: z.enum(['sandboxed', 'docker', 'off']).default('sandboxed'),
 });
 export type RunServiceStatus = z.infer<typeof RunServiceStatusSchema>;
 
@@ -115,6 +120,19 @@ export const RunStartPayloadSchema = z.object({
   portRange: z.object({ from: z.number().int(), to: z.number().int() }),
   ttlAt: z.iso.datetime(),
   allowDocker: z.boolean().default(false),
+  /**
+   * A current saved plan (P2): the runner replays it with no model call after it prepared the worktrees. `buildHash` is
+   * the hash of the BUILD.md files the plan was made from; when the worktrees' BUILD.md differs the plan is stale.
+   * Absent: the DevOps engineer works out how to run (a request is filed with the start).
+   */
+  replay: z
+    .object({
+      planId: z.uuid(),
+      version: z.number().int().positive(),
+      plan: RunPlanSchema,
+      buildHash: z.string().max(100).nullable().optional(),
+    })
+    .optional(),
 });
 export type RunStartPayload = z.infer<typeof RunStartPayloadSchema>;
 
@@ -123,6 +141,23 @@ export const RunStopPayloadSchema = z.object({
   reason: RunEndReasonSchema.default('stopped'),
 });
 export type RunStopPayload = z.infer<typeof RunStopPayloadSchema>;
+
+/**
+ * `run.restart`: stop the services and start them again from the environment's plan (same worktrees). `update`
+ * fast-forwards the run worktrees to the head of their branches first. Also revives a stopped manual environment whose
+ * worktrees the runner still keeps (24 hours after the stop).
+ */
+export const RunRestartPayloadSchema = z.object({
+  envId: z.uuid(),
+  update: z.boolean().default(false),
+  ttlAt: z.iso.datetime(),
+  /** Server bookkeeping: the environment was stopped and is revived (the runner decides from its own state). */
+  revive: z.boolean().default(false),
+});
+export type RunRestartPayload = z.infer<typeof RunRestartPayloadSchema>;
+
+/** How long a manual environment keeps its run worktrees after it stopped (fast restarts, incremental builds). */
+export const RUN_WORKTREE_KEEP_HOURS = 24;
 
 export const RunExtendPayloadSchema = z.object({ envId: z.uuid(), ttlAt: z.iso.datetime() });
 export type RunExtendPayload = z.infer<typeof RunExtendPayloadSchema>;
@@ -165,6 +200,20 @@ export const RunPlanSavedMsgSchema = z.object({
   buildHash: z.string().max(100).optional(),
 });
 
+/**
+ * The saved plan could not bring the environment up (a step or service failed, or the plan is out of date): the runner
+ * stopped what it started and asks the server to file a DevOps `run` request that repairs the plan. Acked.
+ */
+export const RunReplayFailedMsgSchema = z.object({
+  envId: z.uuid(),
+  reason: z.string().max(4000),
+  /** Last lines of the failing step or service (secrets redacted). */
+  logTail: z.string().max(8000).default(''),
+  /** The plan's fingerprint no longer matches (BUILD.md changed): the plan is marked stale. */
+  stale: z.boolean().default(false),
+});
+export type RunReplayFailedMsg = z.infer<typeof RunReplayFailedMsgSchema>;
+
 // ------------------------------------------------------------------------------------------------------ API
 
 export const RunSourceDtoSchema = z.object({
@@ -202,6 +251,10 @@ export const RunEnvironmentDtoSchema = z.object({
   lastError: z.string().nullable(),
   canStop: z.boolean(),
   canExtend: z.boolean(),
+  /** Restart / Update & restart: a running environment, or a stopped manual one whose worktrees are still kept. */
+  canRestart: z.boolean().default(false),
+  /** The environment started from a saved plan (no model call) rather than through the DevOps engineer. */
+  replayed: z.boolean().default(false),
 });
 export type RunEnvironmentDto = z.infer<typeof RunEnvironmentDtoSchema>;
 export const RunEnvironmentsResponseSchema = z.object({ environments: z.array(RunEnvironmentDtoSchema) });
@@ -228,6 +281,9 @@ export const StartRunRequestSchema = z.object({
   note: z.string().max(2000).optional(),
 });
 export type StartRunRequest = z.infer<typeof StartRunRequestSchema>;
+
+export const RestartRunRequestSchema = z.object({ update: z.boolean().optional() });
+export type RestartRunRequest = z.infer<typeof RestartRunRequestSchema>;
 
 export const ExtendRunRequestSchema = z.object({ hours: z.number().int().min(1).max(72).optional() });
 export type ExtendRunRequest = z.infer<typeof ExtendRunRequestSchema>;

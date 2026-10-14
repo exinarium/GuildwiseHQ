@@ -208,6 +208,16 @@ request is filed in the same transaction; `projects.integration_tests` is not ad
 `run.status` message is not acknowledged but is resent for every environment after each `welcome`; the browser follows logs with
 `run.watch`, the server tells the runner with a `run.follow` message (instead of a `run.logs` command). Spike (a) was skipped (P3).
 
+**P2 is built** (backlog #58, capability `runs:2`, migration 1940). Differences and additions: the plan fingerprint is stored as two
+hashes on `run_plans` (`build_hash` from the runner, `settings_hash` from the server) so the server can decide to replay without
+reading a repository, and the runner re-checks the BUILD.md half after it prepared the worktrees; a stale plan is marked when the
+settings are saved or when a start finds the mismatch (`RunPlanMarkedStale`); a failed replay is the acknowledged runner message
+`run.replay.failed` (the server files the DevOps request then, with the failure in its context and brief, not at the start);
+Restart and Update & restart are the command `run.restart` (event `RunEnvironmentRestarted`); a manual environment with a plan
+keeps its run worktrees 24 hours after a stop and Restart revives it; the sweep asks `worktrees.query` about `run-<env>` folders;
+services start in a `systemd-run --user --scope` unit when the user manager is reachable (outside the runner service's cgroup).
+Phase 3 keeps: automatic restart after a reboot or crash.
+
 ## 8. Open questions for the owner
 1. **Replay the saved plan, or ask DevOps every time?** You chose the DevOps agent to run the start. The recommendation is that DevOps works out the first start (and any failed one) and saves a plan, and the runner replays it after that: starts take seconds instead of a shift, and there is no model cost. DevOps is still the one who decides how to run the project. Is that acceptable?
 2. **Remote mode per card.** A remote target only tests what is deployed on it. Recommendation: per-card integration tests always run **local**; remote targets serve suite, regression and phase follow-up cards (which already deploy first). The alternative is DevOps deploying each card branch to the target before the test, which serializes cards on one target.

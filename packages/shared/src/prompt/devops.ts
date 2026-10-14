@@ -113,8 +113,9 @@ export function renderRunSection(run: DevopsRun): string {
         ? `Services wanted: ${run.services.join(', ')} (and what they depend on).`
         : 'Services wanted: all of the project.',
       `Ports: the plan's default port is used when it is free; otherwise the runner allocates one from ${run.portRange.from}-${run.portRange.to} and sets the variable you named with --port. Use \${svc.port} templates in --env values to point services at each other.`,
+      "Sandbox: steps and services run in the runner's sandbox: they use the host network, may write only to the run worktrees, the shared package caches and a private /tmp, and cannot read credential folders or the runner's data. An env file is read by the runner and injected; do not copy secrets anywhere.",
       run.allowDocker
-        ? 'Docker: allowed for this project (such steps run outside any sandbox).'
+        ? 'Docker: allowed for this project (docker/compose steps and services run outside the sandbox and are flagged so in the app).'
         : 'Docker: NOT allowed for this project. If the project cannot run without it, end with `aom run fail --reason` saying so.',
       run.ttlAt ? `The environment stops by itself at ${run.ttlAt}.` : '',
     ]
@@ -168,6 +169,12 @@ export function renderRunSection(run: DevopsRun): string {
   if (run.currentPlan) {
     out.push(`### The plan saved earlier (${run.planStatus ?? 'active'}); repair it if it no longer works`);
     out.push(clip(JSON.stringify(run.currentPlan, null, 2), 8000));
+  }
+  if (run.replayFailure) {
+    out.push(
+      '### The saved plan was replayed first and failed. Fix the cause, then register the working steps again (`aom run ready` saves a new plan version)',
+    );
+    out.push(clip(run.replayFailure.trim(), 8000));
   }
   out.push('### Steps');
   out.push(

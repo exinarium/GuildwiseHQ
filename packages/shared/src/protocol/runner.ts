@@ -44,6 +44,8 @@ import {
   RunExtendPayloadSchema,
   RunLogLinesSchema,
   RunPlanSavedMsgSchema,
+  RunReplayFailedMsgSchema,
+  RunRestartPayloadSchema,
   RunStartPayloadSchema,
   RunStatusSchema,
   RunStopPayloadSchema,
@@ -525,6 +527,7 @@ export const RunnerCommandNameSchema = z.enum([
   'run.start',
   'run.stop',
   'run.extend',
+  'run.restart',
   'integration.connect',
   'integration.begin',
   'integration.input',
@@ -570,6 +573,7 @@ export const CommandPayloadSchemas = {
   'run.start': RunStartPayloadSchema,
   'run.stop': RunStopPayloadSchema,
   'run.extend': RunExtendPayloadSchema,
+  'run.restart': RunRestartPayloadSchema,
   'integration.connect': IntegrationConnectPayloadSchema,
   'integration.begin': IntegrationBeginPayloadSchema,
   'integration.input': IntegrationInputPayloadSchema,
@@ -836,6 +840,8 @@ export const RunStatusMsgSchema = msg('run.status', RunStatusSchema.shape);
 export const RunLogMsgSchema = msg('run.log', RunLogLinesSchema.shape);
 /** `aom run ready` saved the steps and services that worked as the project's run plan on this workstation. Acked. */
 export const RunPlanSavedMsgSchemaWire = msg('run.plan.saved', RunPlanSavedMsgSchema.shape);
+/** The saved plan failed or is out of date: the server files a DevOps `run` request to repair it. Acked. */
+export const RunReplayFailedMsgSchemaWire = msg('run.replay.failed', RunReplayFailedMsgSchema.shape);
 export const ChatDeltaSchema = msg('chat.delta', {
   chatId: z.string(),
   threadId: z.uuid(),
@@ -983,6 +989,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   RunStatusMsgSchema,
   RunLogMsgSchema,
   RunPlanSavedMsgSchemaWire,
+  RunReplayFailedMsgSchemaWire,
   ChatDeltaSchema,
   ChatDoneSchema,
   ChatErrorSchema,
@@ -1028,6 +1035,7 @@ export const RUNNER_ACKED_TYPES: ReadonlySet<string> = new Set<RunnerToServerTyp
   'command.result',
   'vault.conflict',
   'run.plan.saved',
+  'run.replay.failed',
   'integration.session',
 ]);
 export const SERVER_ACKED_TYPES: ReadonlySet<string> = new Set<ServerToRunnerType>(['shift.stop']);

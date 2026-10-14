@@ -1,7 +1,7 @@
 import { isLiveRunState, type RunEnvironmentDto, type RunEnvState, type RunServiceState } from '@aom/shared';
-import { ExternalLink, Square, Timer } from 'lucide-react';
+import { ArrowUpFromLine, ExternalLink, RotateCw, Square, Timer } from 'lucide-react';
 import { useState } from 'react';
-import { useExtendRun, useStopRun } from '../../api/queries/runs.ts';
+import { useExtendRun, useRestartRun, useStopRun } from '../../api/queries/runs.ts';
 import { Badge, Button, ConfirmDialog, ErrorBox, Panel, useToast } from '../ui.tsx';
 import { RunLogs } from './RunLogs.tsx';
 
@@ -59,6 +59,7 @@ const clock = (iso: string) => new Date(iso).toLocaleString([], { dateStyle: 'sh
 export function RunPanel({ env, showProject = false }: { env: RunEnvironmentDto; showProject?: boolean }) {
   const stop = useStopRun();
   const extend = useExtendRun();
+  const restart = useRestartRun();
   const toast = useToast();
   const [logs, setLogs] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -82,9 +83,43 @@ export function RunPanel({ env, showProject = false }: { env: RunEnvironmentDto;
         </span>
       }
       actions={
-        live && (
+        (live || env.canRestart) && (
           <>
-            {env.canExtend && (
+            {env.canRestart && (
+              <>
+                <Button
+                  size="sm"
+                  data-testid="run-restart"
+                  loading={restart.isPending}
+                  title="Stop the services and start them again from the saved plan, at the same commit"
+                  onClick={() =>
+                    restart.mutate(
+                      { id: env.id },
+                      { onSuccess: () => toast.success('Restarting the environment') },
+                    )
+                  }
+                >
+                  <RotateCw aria-hidden="true" className="size-4" />
+                  Restart
+                </Button>
+                <Button
+                  size="sm"
+                  data-testid="run-update-restart"
+                  loading={restart.isPending}
+                  title="Bring the run worktrees up to the head of their branches, then restart"
+                  onClick={() =>
+                    restart.mutate(
+                      { id: env.id, update: true },
+                      { onSuccess: () => toast.success('Updating and restarting the environment') },
+                    )
+                  }
+                >
+                  <ArrowUpFromLine aria-hidden="true" className="size-4" />
+                  Update &amp; restart
+                </Button>
+              </>
+            )}
+            {live && env.canExtend && (
               <Button
                 size="sm"
                 data-testid="run-extend"
@@ -97,7 +132,7 @@ export function RunPanel({ env, showProject = false }: { env: RunEnvironmentDto;
                 Extend
               </Button>
             )}
-            {env.canStop && (
+            {live && env.canStop && (
               <Button
                 size="sm"
                 variant="danger-ghost"
@@ -126,10 +161,18 @@ export function RunPanel({ env, showProject = false }: { env: RunEnvironmentDto;
           </p>
         )}
         {env.state === 'requested' || env.state === 'preparing' || env.state === 'starting' ? (
-          <p className="text-muted" data-testid="run-working">
-            The DevOps engineer of {env.workstationName} is working out how to run this project. The services
-            appear here as they start.
-          </p>
+          env.replayed && !env.devopsRequestId ? (
+            <p className="text-muted" data-testid="run-working">
+              Starting from the saved run plan{env.planVersion ? ` (version ${env.planVersion})` : ''}: no
+              DevOps run is needed. If it fails, the DevOps engineer of {env.workstationName} repairs the
+              plan.
+            </p>
+          ) : (
+            <p className="text-muted" data-testid="run-working">
+              The DevOps engineer of {env.workstationName} is working out how to run this project. The
+              services appear here as they start.
+            </p>
+          )
         ) : null}
 
         {env.servicesStatus.length > 0 && (
@@ -142,6 +185,24 @@ export function RunPanel({ env, showProject = false }: { env: RunEnvironmentDto;
                 <span className="font-medium">{s.name}</span>
                 <Badge tone={SVC_TONE[s.state]}>{s.state}</Badge>
                 {s.restarts > 0 && <span className="text-xs text-muted">restarted {s.restarts}x</span>}
+                {s.sandbox === 'docker' && (
+                  <Badge
+                    tone="warning"
+                    data-testid="run-unsandboxed"
+                    title="Docker is allowed for this project; this service is not in the sandbox"
+                  >
+                    Docker: outside the sandbox
+                  </Badge>
+                )}
+                {s.sandbox === 'off' && (
+                  <Badge
+                    tone="warning"
+                    data-testid="run-unsandboxed"
+                    title="The runner could not sandbox this service (bubblewrap missing or the sandbox is off)"
+                  >
+                    No sandbox
+                  </Badge>
+                )}
                 {s.ports.map((p) => (
                   <span
                     key={p.name}
@@ -217,13 +278,13 @@ export function RunPanel({ env, showProject = false }: { env: RunEnvironmentDto;
             {logs && <RunLogs envId={env.id} services={env.servicesStatus.map((s) => s.name)} />}
           </div>
         )}
-        <ErrorBox error={stop.error ?? extend.error} />
+        <ErrorBox error={stop.error ?? extend.error ?? restart.error} />
       </div>
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
         title="Stop this environment?"
-        description={`The services of ${env.sources.map((s) => s.repoName).join(', ')} stop and the run worktrees are removed.`}
+        description={`The services of ${env.sources.map((s) => s.repoName).join(', ')} stop. A manual environment keeps its run worktrees for a day, so a Restart is quick; after that they are removed.`}
         confirmLabel="Stop"
         tone="danger"
         onConfirm={() => stop.mutate(env.id, { onSuccess: () => setConfirm(false) })}

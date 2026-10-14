@@ -6,6 +6,7 @@ import {
   formatCommandLine,
   formatRunHealth,
   formatRunPort,
+  isAckedFromRunner,
   isSafeRelativeDir,
   makeEnvelope,
   parseCommandLine,
@@ -13,9 +14,11 @@ import {
   parseRunPort,
   RunnerToServerSchema,
   RunPlanSchema,
+  RunRestartPayloadSchema,
   RunSettingsSchema,
   RunStartPayloadSchema,
   renderDevopsPrompt,
+  renderRunSection,
   runOrder,
   ServerToRunnerSchema,
   validateRunPlan,
@@ -224,6 +227,95 @@ describe('protocol additions', () => {
       ServerToRunnerSchema.safeParse(makeEnvelope('run.follow', { envId: ID(2), follow: true })).success,
     ).toBe(true);
     expect(RunStartPayloadSchema.safeParse({ ...start, sources: [] }).success).toBe(false);
+  });
+
+  it('carries a saved plan to replay in run.start, and knows run.restart and run.replay.failed', () => {
+    const start = {
+      envId: ID(2),
+      projectId: ID(3),
+      projectKey: 'TOY',
+      projectName: 'Toy',
+      purpose: 'manual',
+      requestId: null,
+      sources: [{ repoId: ID(1), name: 'toy', remoteUrlNormalized: 'github.com/acme/toy', branch: 'main' }],
+      portRange: { from: 20000, to: 29999 },
+      ttlAt: '2026-10-15T10:00:00.000Z',
+      replay: {
+        planId: ID(9),
+        version: 3,
+        plan: { services: [svc('web')] },
+        buildHash: 'abc',
+      },
+    };
+    const parsed = RunStartPayloadSchema.parse(start);
+    expect(parsed.replay?.plan.services[0]?.name).toBe('web');
+    expect(
+      RunStartPayloadSchema.safeParse({ ...start, replay: { ...start.replay, version: 0 } }).success,
+    ).toBe(false);
+    expect(RunRestartPayloadSchema.parse({ envId: ID(2), ttlAt: '2026-10-15T10:00:00.000Z' })).toEqual({
+      envId: ID(2),
+      update: false,
+      revive: false,
+      ttlAt: '2026-10-15T10:00:00.000Z',
+    });
+    const cmd = makeEnvelope('command', {
+      commandId: 'c2',
+      command: 'run.restart',
+      payload: { envId: ID(2), update: true, ttlAt: '2026-10-15T10:00:00.000Z' },
+    });
+    expect(ServerToRunnerSchema.safeParse(cmd).success).toBe(true);
+    expect(
+      RunnerToServerSchema.safeParse(
+        makeEnvelope('run.replay.failed', { envId: ID(2), reason: 'service "web" failed', logTail: 'x' }),
+      ).success,
+    ).toBe(true);
+    // the failure is acked: it is persisted and resent until the server has filed the DevOps request
+    expect(isAckedFromRunner('run.replay.failed')).toBe(true);
+  });
+
+  it('has the events of a stale plan and a restart', () => {
+    const ok = (type: string, payload: unknown) => DomainEventSchema.safeParse({ type, payload }).success;
+    expect(
+      ok('RunPlanMarkedStale', {
+        planId: ID(9),
+        projectId: ID(3),
+        workstationId: ID(5),
+        reason: 'build_doc',
+      }),
+    ).toBe(true);
+    expect(
+      ok('RunPlanMarkedStale', { planId: ID(9), projectId: ID(3), workstationId: ID(5), reason: 'whatever' }),
+    ).toBe(false);
+    expect(ok('RunEnvironmentRestarted', { envId: ID(2), by: ID(6), update: true })).toBe(true);
+    expect(
+      ok('RunPlanSaved', {
+        planId: ID(9),
+        projectId: ID(3),
+        workstationId: ID(5),
+        version: 2,
+        plan: { services: [svc('web')] },
+        fingerprint: 'f',
+        requestId: null,
+        buildHash: 'b',
+        settingsHash: 's',
+      }),
+    ).toBe(true);
+  });
+
+  it('puts the failed replay and the sandbox in the DevOps brief', () => {
+    const run = DevopsRunSchema.parse({
+      envId: ID(2),
+      purpose: 'manual',
+      projectKey: 'TOY',
+      projectName: 'Toy',
+      sources: [{ repoId: ID(1), name: 'toy', branch: 'main' }],
+      portRange: { from: 20000, to: 29999 },
+      replayFailure: 'step "build" failed (exit 3)\n\nLast output:\nBOOM',
+    });
+    const text = renderRunSection(run);
+    expect(text).toContain('The saved plan was replayed first and failed');
+    expect(text).toContain('BOOM');
+    expect(text).toMatch(/Sandbox: steps and services run in the runner/);
   });
 
   it('knows run.status, run.log and run.plan.saved from the runner, and hello capabilities', () => {

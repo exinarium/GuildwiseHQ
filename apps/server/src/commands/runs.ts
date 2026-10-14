@@ -9,10 +9,15 @@ import {
   isLiveRunState,
   isOrgManager,
   isSafeGitRef,
+  type RestartRunRequest,
+  RUN_WORKTREE_KEEP_HOURS,
   type RunEnvironmentDto,
   type RunnerToServerOf,
+  type RunPlan,
   type RunPlanDto,
   RunPlanSchema,
+  type RunReplayFailedMsg,
+  type RunRestartPayload,
   type RunSettingsResponse,
   RunSettingsSchema,
   type RunStartPayload,
@@ -46,6 +51,8 @@ import { deliver } from './workstation-setup.ts';
 
 /** A `requested` environment the runner never answered is given up after this long. */
 const REQUESTED_TIMEOUT_MS = 10 * 60_000;
+/** A replay the runner reported nothing about for this long is given up (the runner reports at every step). */
+const REPLAY_TIMEOUT_MS = 30 * 60_000;
 /** A finished DevOps `run` request whose environment is still not ready is given up after this grace period. */
 const REQUEST_DONE_GRACE_MS = 30_000;
 
@@ -53,7 +60,8 @@ const REQUEST_DONE_GRACE_MS = 30_000;
 
 const ENV_SQL = `SELECT e.*, p.key AS project_key, p.name AS project_name, w.name AS workstation_name, w.user_id AS ws_user_id,
        c.ref AS card_ref, u.display_name AS requested_by_name,
-       (SELECT jsonb_object_agg(r.id::text, r.name) FROM project_repos r WHERE r.project_id = e.project_id) AS repo_names
+       (SELECT jsonb_object_agg(r.id::text, r.name) FROM project_repos r WHERE r.project_id = e.project_id) AS repo_names,
+       COALESCE((SELECT 'runs:2' = ANY(c2.capabilities) FROM workstation_capabilities c2 WHERE c2.workstation_id = e.workstation_id), false) AS ws_replay
   FROM run_environments e JOIN projects p ON p.id = e.project_id JOIN workstations w ON w.id = e.workstation_id
   LEFT JOIN cards c ON c.id = e.card_id LEFT JOIN users u ON u.id = e.requested_by`;
 
@@ -63,7 +71,31 @@ async function mayManage(db: Queryable, userId: string, r: Row): Promise<boolean
   return isOrgManager({ orgRole: await orgRoleOf(db, userId, r.org_id) });
 }
 
-async function toDto(db: Queryable, userId: string, r: Row): Promise<RunEnvironmentDto> {
+/** A stopped manual environment keeps its run worktrees (and can be revived) for this long. */
+const KEEP_MS = RUN_WORKTREE_KEEP_HOURS * 3600_000;
+
+/** Can this environment be restarted now: running and ready, or stopped, manual, with a plan and its worktrees still kept? */
+function restartable(r: Row, now: Date): 'live' | 'revive' | null {
+  if (!r.ws_replay) return null;
+  if (['healthy', 'degraded'].includes(r.state)) return 'live';
+  if (
+    r.state === 'stopped' &&
+    r.purpose === 'manual' &&
+    r.plan_version !== null &&
+    ['stopped', 'ttl'].includes(r.stop_reason ?? '') &&
+    r.stopped_at &&
+    now.getTime() - new Date(r.stopped_at).getTime() < KEEP_MS
+  )
+    return 'revive';
+  return null;
+}
+
+async function toDto(
+  db: Queryable,
+  userId: string,
+  r: Row,
+  now: Date = new Date(),
+): Promise<RunEnvironmentDto> {
   const names = (r.repo_names ?? {}) as Record<string, string>;
   const manage = await mayManage(db, userId, r);
   const live = isLiveRunState(r.state);
@@ -100,6 +132,8 @@ async function toDto(db: Queryable, userId: string, r: Row): Promise<RunEnvironm
     lastError: r.last_error ?? null,
     canStop: live && r.state !== 'stopping' && manage,
     canExtend: live && r.state !== 'stopping' && manage && r.expires_at !== null,
+    canRestart: manage && restartable(r, now) !== null,
+    replayed: r.replayed === true,
   };
 }
 
@@ -118,7 +152,7 @@ export async function listRuns(
       ORDER BY e.created_at DESC, e.id LIMIT 100`,
     [visible, userId, q.projectId ?? null, q.cardId ?? null, q.workstationId ?? null, q.live ?? true],
   );
-  return Promise.all(list.map((r) => toDto(ctx.pool, userId, r)));
+  return Promise.all(list.map((r) => toDto(ctx.pool, userId, r, ctx.clock.now())));
 }
 
 async function loadEnv(db: Queryable, userId: string, id: string, forUpdate = false): Promise<Row> {
@@ -130,7 +164,7 @@ async function loadEnv(db: Queryable, userId: string, id: string, forUpdate = fa
 }
 
 export async function getRun(ctx: Ctx, userId: string, id: string): Promise<RunEnvironmentDto> {
-  return toDto(ctx.pool, userId, await loadEnv(ctx.pool, userId, id));
+  return toDto(ctx.pool, userId, await loadEnv(ctx.pool, userId, id), ctx.clock.now());
 }
 
 // ------------------------------------------------------------------------------------------- settings
@@ -217,7 +251,76 @@ export async function setRunSettings(
       ],
       { tx },
     );
+    await staleCheck(ctx, tx, projectId);
   });
+}
+
+// ------------------------------------------------------------------------------------------ fingerprint
+
+/**
+ * The server's half of a plan's fingerprint: the run instructions (project and per repository) and the structured
+ * fields. The runner's half is the hash of BUILD.md. A change to either makes the plan stale (design section 2.2).
+ */
+export async function settingsHashOf(db: Queryable, projectId: string): Promise<string> {
+  const project = await one(db, 'SELECT run_instructions, run_settings FROM projects WHERE id=$1', [
+    projectId,
+  ]);
+  const repos = await rows(
+    db,
+    'SELECT id, run_instructions FROM project_repos WHERE project_id=$1 ORDER BY id',
+    [projectId],
+  );
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        project?.run_instructions ?? '',
+        repos.map((x) => [x.id, x.run_instructions ?? '']),
+        project?.run_settings ?? {},
+      ]),
+    )
+    .digest('hex');
+}
+
+/** Does the plan cover this start: every repository it uses is among the chosen ones, and every wanted service is in it? */
+function planCovers(plan: RunPlan, repoIds: string[], wanted: string[]): boolean {
+  if (plan.services.length === 0) return false;
+  const have = new Set(repoIds);
+  if ([...plan.setup, ...plan.services].some((x) => !have.has(x.repoId))) return false;
+  return wanted.every((w) => plan.services.some((s) => s.name.toLowerCase() === w.toLowerCase()));
+}
+
+/** Marks a plan stale (an event: `RunPlanMarkedStale`); the next start goes through the DevOps engineer. */
+async function markPlanStale(ctx: Ctx, tx: Tx, plan: Row, reason: 'settings' | 'build_doc'): Promise<void> {
+  if (plan.status !== 'active') return;
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.project(plan.project_id),
+        event: {
+          type: 'RunPlanMarkedStale',
+          payload: {
+            planId: plan.id,
+            projectId: plan.project_id,
+            workstationId: plan.workstation_id,
+            reason,
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: projectScope(plan.org_id, plan.project_id),
+      },
+    ],
+    { tx },
+  );
+}
+
+/** After the settings changed: every active plan whose settings half no longer matches is stale. */
+async function staleCheck(ctx: Ctx, tx: Tx, projectId: string): Promise<void> {
+  const hash = await settingsHashOf(tx, projectId);
+  const plans = await rows(tx, `SELECT * FROM run_plans WHERE project_id=$1 AND status='active'`, [
+    projectId,
+  ]);
+  for (const pl of plans)
+    if (pl.settings_hash !== null && pl.settings_hash !== hash) await markPlanStale(ctx, tx, pl, 'settings');
 }
 
 // ------------------------------------------------------------------------------------------ start
@@ -240,6 +343,8 @@ async function capsOf(db: Queryable, workstationId: string) {
   );
   return {
     runs: ((c?.capabilities ?? []) as string[]).includes('runs:1'),
+    /** `runs:2`: plan replay, Restart and the service sandbox. */
+    replay: ((c?.capabilities ?? []) as string[]).includes('runs:2'),
     max: (c?.max_run_environments as number | null) ?? DEFAULT_MAX_RUN_ENVIRONMENTS,
   };
 }
@@ -353,11 +458,45 @@ export async function startRun(
     const expiresAt = new Date(now.getTime() + ttlHours * 3600_000);
     const sourcesJson = chosen.map((s) => ({ repoId: s.repo.id, branch: s.branch, commit: null }));
     const summary = `Run ${chosen.map((s) => `${s.repo.name}@${s.branch}`).join(', ')} of ${project.name}${card ? ` (card ${card.ref})` : ''}`;
+
+    // A current saved plan is replayed by the runner with no model call; anything else goes through the DevOps engineer.
+    let replay: RunStartPayload['replay'];
+    let replayPlanRow: Row | undefined;
+    if (caps.replay) {
+      const planRow = await one(
+        tx,
+        `SELECT * FROM run_plans WHERE project_id=$1 AND workstation_id=$2 AND status='active'`,
+        [project.id, ws.id],
+      );
+      if (planRow && planRow.settings_hash !== null && planRow.build_hash !== null) {
+        if (planRow.settings_hash !== (await settingsHashOf(tx, project.id))) {
+          await markPlanStale(ctx, tx, planRow, 'settings');
+        } else {
+          const plan = RunPlanSchema.safeParse(planRow.plan);
+          if (
+            plan.success &&
+            planCovers(
+              plan.data,
+              chosen.map((c) => c.repo.id),
+              req.services ?? [],
+            )
+          ) {
+            replayPlanRow = planRow;
+            replay = {
+              planId: planRow.id,
+              version: planRow.version,
+              plan: plan.data,
+              buildHash: planRow.build_hash,
+            };
+          }
+        }
+      }
+    }
     await exec(
       tx,
       `INSERT INTO run_environments (id, org_id, project_id, workstation_id, purpose, card_id, sources, services, state,
-          requested_by, branch_key, created_at, updated_at, expires_at)
-       VALUES ($1,$2,$3,$4,'manual',$5,$6::jsonb,$7::text[],'requested',$8,$9,$10,$10,$11)`,
+          requested_by, branch_key, created_at, updated_at, expires_at, replayed, plan_id, plan_version)
+       VALUES ($1,$2,$3,$4,'manual',$5,$6::jsonb,$7::text[],'requested',$8,$9,$10,$10,$11,$12,$13,$14)`,
       [
         envId,
         project.org_id,
@@ -370,24 +509,32 @@ export async function startRun(
         key,
         now,
         expiresAt,
+        !!replay,
+        replayPlanRow?.id ?? null,
+        replayPlanRow?.version ?? null,
       ],
     );
-    const { requestId } = await createDevOpsRequestIn(ctx, tx, {
-      workstationId: ws.id,
-      orgId: project.org_id,
-      summary: req.note ? `${summary}\n\n${req.note}` : summary,
-      requestedBy: { kind: 'user', id: user.id, name: user.displayName },
-      ...(card ? { cardId: card.id } : {}),
-      origin: card ? 'card' : 'workstation',
-      context: {
-        projectId: project.id,
-        workstationId: ws.id,
-        ...(card ? { cardId: card.id } : {}),
-        requestKind: 'run',
-        envId,
-      },
-    });
-    await exec(tx, 'UPDATE run_environments SET devops_request_id=$2 WHERE id=$1', [envId, requestId]);
+    let requestId: string | null = null;
+    if (!replay) {
+      requestId = (
+        await createDevOpsRequestIn(ctx, tx, {
+          workstationId: ws.id,
+          orgId: project.org_id,
+          summary: req.note ? `${summary}\n\n${req.note}` : summary,
+          requestedBy: { kind: 'user', id: user.id, name: user.displayName },
+          ...(card ? { cardId: card.id } : {}),
+          origin: card ? 'card' : 'workstation',
+          context: {
+            projectId: project.id,
+            workstationId: ws.id,
+            ...(card ? { cardId: card.id } : {}),
+            requestKind: 'run',
+            envId,
+          },
+        })
+      ).requestId;
+      await exec(tx, 'UPDATE run_environments SET devops_request_id=$2 WHERE id=$1', [envId, requestId]);
+    }
     await ctx.store.append(
       [
         {
@@ -431,6 +578,7 @@ export async function startRun(
       portRange: { ...DEFAULT_RUN_PORT_RANGE },
       ttlAt: expiresAt.toISOString(),
       allowDocker: settings.allowDocker,
+      ...(replay ? { replay } : {}),
     };
     await enqueueRunnerCommand(tx, ws.id, 'run.start', payload);
     return { wsId: ws.id };
@@ -542,6 +690,192 @@ export async function extendRun(
   return getRun(ctx, user.id, id);
 }
 
+/**
+ * Restart (same commit) or Update & restart (fast-forward the run worktrees to the branch head) of a running
+ * environment, or of a stopped manual one whose worktrees the runner still keeps (a day). The runner may refuse (no plan,
+ * a rewritten branch, the worktrees gone): its answer lands in `last_error`.
+ */
+export async function restartRun(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  id: string,
+  req: RestartRunRequest,
+): Promise<RunEnvironmentDto> {
+  const now = ctx.clock.now();
+  const wsId = await withAppendTx(ctx.pool, async (tx) => {
+    const r = await loadEnv(tx, user.id, id, true);
+    if (!(await mayManage(tx, user.id, r))) throw forbidden('you cannot restart this environment');
+    if (!r.ws_replay)
+      throw conflict(
+        'runs_not_supported',
+        'the runner on that workstation is too old to restart: update the runner on that machine',
+      );
+    const how = restartable(r, now);
+    if (!how)
+      throw conflict(
+        'not_restartable',
+        r.state === 'stopped'
+          ? 'this environment can no longer be restarted (its worktrees are kept for a day after a stop): start the branch again'
+          : 'only a running environment can be restarted',
+      );
+    const ws = await one(tx, 'SELECT connected, name FROM workstations WHERE id=$1', [r.workstation_id]);
+    if (!ws?.connected) throw conflict('workstation_offline', `${ws?.name ?? 'the workstation'} is offline`);
+    if (how === 'revive') {
+      const other = await one(
+        tx,
+        `SELECT id FROM run_environments WHERE workstation_id=$1 AND project_id=$2 AND branch_key=$3
+            AND purpose='manual' AND state NOT IN ('stopped','failed') AND id <> $4`,
+        [r.workstation_id, r.project_id, r.branch_key, r.id],
+      );
+      if (other)
+        throw conflict('already_running', 'this branch is already running on that workstation', {
+          envId: other.id,
+        });
+      const caps = await capsOf(tx, r.workstation_id);
+      const live = await one(
+        tx,
+        `SELECT count(*)::int AS n FROM run_environments WHERE workstation_id=$1 AND state NOT IN ('stopped','failed')`,
+        [r.workstation_id],
+      );
+      if (Number(live?.n ?? 0) >= caps.max)
+        throw conflict('run_cap', `that workstation already runs ${live?.n} environments: stop one first`);
+    }
+    const project = await one(tx, 'SELECT run_settings FROM projects WHERE id=$1', [r.project_id]);
+    const hours = RunSettingsSchema.parse(project?.run_settings ?? {}).ttlHours;
+    const expiresAt = new Date(now.getTime() + hours * 3600_000);
+    await exec(
+      tx,
+      `UPDATE run_environments SET state='starting', activity=$2, expires_at=$3, healthy_at=NULL, stop_requested_at=NULL,
+              devops_request_id=NULL, replayed=true, updated_at=$4 WHERE id=$1`,
+      [r.id, req.update ? 'updating and restarting' : 'restarting', expiresAt, now],
+    );
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.run(r.id),
+          event: {
+            type: 'RunEnvironmentRestarted',
+            payload: { envId: r.id, by: user.id, update: !!req.update, revived: how === 'revive' },
+          },
+          actor: userActor(user.id),
+          scope: projectScope(r.org_id, r.project_id),
+        },
+      ],
+      { tx },
+    );
+    const payload: RunRestartPayload = {
+      envId: r.id,
+      update: !!req.update,
+      ttlAt: expiresAt.toISOString(),
+      revive: how === 'revive',
+    };
+    await enqueueRunnerCommand(tx, r.workstation_id, 'run.restart', payload);
+    return r.workstation_id as string;
+  });
+  deliver(ctx, [wsId]);
+  ctx.services.browser.runChanged(id);
+  return getRun(ctx, user.id, id);
+}
+
+/** `command.result` of `run.restart`: a refusal puts the environment back as it was and says why. */
+export async function applyRunRestartResult(
+  ctx: Ctx,
+  workstationId: string,
+  payload: Record<string, any>,
+  ok: boolean,
+  result: unknown,
+  error: string | undefined,
+): Promise<void> {
+  const res = (result ?? {}) as { ok?: boolean; error?: string };
+  if (ok && res.ok !== false) return;
+  const reason = (res.error ?? error ?? 'the runner could not restart the environment').slice(0, 2000);
+  const now = ctx.clock.now();
+  await withAppendTx(ctx.pool, async (tx) => {
+    const r = await one(tx, 'SELECT * FROM run_environments WHERE id=$1 AND workstation_id=$2 FOR UPDATE', [
+      String(payload.envId),
+      workstationId,
+    ]);
+    if (!r) return;
+    // A revived environment goes back to stopped; a running one was never touched by the runner (it keeps its state
+    // until its next report), so only the reason is recorded.
+    await exec(
+      tx,
+      `UPDATE run_environments SET last_error=$2, updated_at=$3,
+              state = CASE WHEN $4::boolean AND state = 'starting' THEN 'stopped' ELSE state END
+        WHERE id=$1`,
+      [r.id, reason, now, payload.revive === true],
+    );
+  });
+  ctx.services.browser.runChanged(String(payload.envId));
+}
+
+/**
+ * `run.replay.failed`: the saved plan did not bring the environment up (or BUILD.md changed). The plan is marked stale
+ * when its fingerprint no longer matches; a DevOps `run` request is filed to repair it, with the failure log tail.
+ */
+export async function applyRunReplayFailed(
+  ctx: Ctx,
+  tx: Tx,
+  workstationId: string,
+  msg: RunReplayFailedMsg,
+): Promise<void> {
+  const r = await one(tx, `${ENV_SQL} WHERE e.id=$1 AND e.workstation_id=$2 FOR UPDATE OF e`, [
+    msg.envId,
+    workstationId,
+  ]);
+  if (!r || !isLiveRunState(r.state) || r.state === 'stopping' || r.stop_requested_at) return;
+  if (msg.stale && r.plan_id) {
+    const plan = await one(tx, 'SELECT * FROM run_plans WHERE id=$1', [r.plan_id]);
+    if (plan) await markPlanStale(ctx, tx, plan, 'build_doc');
+  }
+  // One DevOps request at a time: a repair already queued or running for this environment is enough.
+  if (r.devops_request_id) {
+    const open = await one(
+      tx,
+      `SELECT 1 AS x FROM devops_requests WHERE id=$1 AND status IN ('queued','running','needs_approval')`,
+      [r.devops_request_id],
+    );
+    if (open) return;
+  }
+  const sources = (r.sources ?? []) as Array<{ repoId: string; branch: string }>;
+  const names = (r.repo_names ?? {}) as Record<string, string>;
+  const summary = `Run ${sources.map((s) => `${names[s.repoId] ?? 'repository'}@${s.branch}`).join(', ')} of ${r.project_name}${r.card_ref ? ` (card ${r.card_ref})` : ''}. The saved run plan failed (${msg.reason.slice(0, 300)}): repair it.`;
+  const requester = r.requested_by
+    ? {
+        kind: 'user' as const,
+        id: r.requested_by as string,
+        name: (r.requested_by_name as string) ?? 'a user',
+      }
+    : { kind: 'system' as const, id: null };
+  const { requestId } = await createDevOpsRequestIn(ctx, tx, {
+    workstationId,
+    orgId: r.org_id,
+    summary,
+    requestedBy: requester,
+    ...(r.card_id ? { cardId: r.card_id } : {}),
+    origin: r.card_id ? 'card' : 'workstation',
+    context: {
+      projectId: r.project_id,
+      workstationId,
+      ...(r.card_id ? { cardId: r.card_id } : {}),
+      requestKind: 'run',
+      envId: r.id,
+      replayFailure: `${msg.reason}${msg.logTail ? `\n\nLast output:\n${msg.logTail}` : ''}`.slice(0, 12000),
+    },
+  });
+  await exec(
+    tx,
+    `UPDATE run_environments SET devops_request_id=$2, state='starting', activity=$3, last_error=$4, updated_at=$5 WHERE id=$1`,
+    [
+      r.id,
+      requestId,
+      'the saved plan failed: waiting for the DevOps engineer',
+      msg.reason.slice(0, 2000),
+      ctx.clock.now(),
+    ],
+  );
+}
+
 // ------------------------------------------------------------------------------- runner reports
 
 /** `run.status` from the runner: the state of an environment of this workstation. */
@@ -570,7 +904,7 @@ export async function applyRunStatus(ctx: Ctx, workstationId: string, raw: RunSt
     await exec(
       tx,
       `UPDATE run_environments SET state=$2::text, services_status=$3::jsonb, activity=$4::text, sources=$5::jsonb, updated_at=$6,
-              last_error = CASE WHEN $7::text IS NOT NULL THEN $7::text ELSE last_error END,
+              last_error = CASE WHEN $7::text IS NOT NULL THEN $7::text WHEN $2::text = 'healthy' THEN NULL ELSE last_error END,
               healthy_at = CASE WHEN $2::text = 'healthy' AND healthy_at IS NULL THEN $6 ELSE healthy_at END,
               stopped_at = CASE WHEN $8::boolean THEN $6 ELSE stopped_at END,
               stop_reason = CASE WHEN $8::boolean THEN $9::text ELSE stop_reason END
@@ -680,6 +1014,8 @@ export async function applyRunPlanSaved(
             fingerprint,
             requestId: r.devops_request_id ?? null,
             envId: r.id,
+            ...(msg.buildHash ? { buildHash: msg.buildHash } : { buildHash: '' }),
+            settingsHash: await settingsHashOf(tx, r.project_id),
           },
         },
         actor: runnerActor(workstationId),
@@ -729,11 +1065,17 @@ export async function expireRuns(ctx: Ctx): Promise<{ stopped: string[] }> {
         AND (
           (e.expires_at IS NOT NULL AND e.expires_at <= $1)
           OR (e.state = 'requested' AND e.created_at <= $2)
+          OR (e.state IN ('preparing','starting') AND e.devops_request_id IS NULL AND e.replayed AND e.updated_at <= $4)
           OR (e.state IN ('requested','preparing','starting') AND e.devops_request_id IS NOT NULL AND EXISTS (
                 SELECT 1 FROM devops_requests q WHERE q.id = e.devops_request_id AND q.status IN ('done','failed')
                    AND q.updated_at <= $3))
         )`,
-    [now, new Date(now.getTime() - REQUESTED_TIMEOUT_MS), new Date(now.getTime() - REQUEST_DONE_GRACE_MS)],
+    [
+      now,
+      new Date(now.getTime() - REQUESTED_TIMEOUT_MS),
+      new Date(now.getTime() - REQUEST_DONE_GRACE_MS),
+      new Date(now.getTime() - REPLAY_TIMEOUT_MS),
+    ],
   );
   const wss = new Set<string>();
   for (const r of due) {
@@ -748,7 +1090,9 @@ export async function expireRuns(ctx: Ctx): Promise<{ stopped: string[] }> {
           const why =
             cur.state === 'requested'
               ? 'The runner did not pick the environment up in time.'
-              : 'The DevOps engineer finished without making the environment ready.';
+              : cur.devops_request_id === null
+                ? 'The saved plan did not finish starting in time.'
+                : 'The DevOps engineer finished without making the environment ready.';
           await requestStopIn(ctx, tx, cur, null, 'failed');
           await exec(tx, 'UPDATE run_environments SET last_error=$2 WHERE id=$1', [cur.id, why]);
         }
@@ -811,6 +1155,9 @@ export async function runBriefFor(ctx: Ctx, req: Row): Promise<DevopsRun | null>
       .filter((r) => sources.some((s) => s.repoId === r.id) && (r.run_instructions ?? '').trim())
       .map((r) => ({ repoId: r.id, name: r.name, text: r.run_instructions })),
     declared: settings.services,
+    ...((req.context as { replayFailure?: string } | null)?.replayFailure
+      ? { replayFailure: (req.context as { replayFailure: string }).replayFailure }
+      : {}),
     currentPlan: plan ? RunPlanSchema.parse(plan.plan) : null,
     planStatus: plan?.status ?? null,
     portRange: { ...DEFAULT_RUN_PORT_RANGE },

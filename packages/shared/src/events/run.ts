@@ -31,6 +31,19 @@ export const runEvents = [
       fingerprint: z.string(),
       requestId: Id.nullable(),
       envId: Id.optional(),
+      /** The two halves of the fingerprint: BUILD.md (hashed by the runner) and the settings (hashed by the server). */
+      buildHash: z.string().max(100).optional(),
+      settingsHash: z.string().max(100).optional(),
+    }),
+  ),
+  /** The plan no longer matches BUILD.md or the Run & test settings: the next start goes through the DevOps engineer. */
+  defineEvent(
+    'RunPlanMarkedStale',
+    z.object({
+      planId: Id,
+      projectId: Id,
+      workstationId: Id,
+      reason: z.enum(['settings', 'build_doc']),
     }),
   ),
   /** Someone started a branch (or the server a test environment). */
@@ -48,6 +61,11 @@ export const runEvents = [
       requestId: Id.nullable(),
       expiresAt: z.iso.datetime().nullable(),
     }),
+  ),
+  /** Restart (same commit) or Update & restart of an environment. */
+  defineEvent(
+    'RunEnvironmentRestarted',
+    z.object({ envId: Id, by: Id.nullable(), update: z.boolean(), revived: z.boolean().default(false) }),
   ),
   defineEvent('RunEnvironmentStopRequested', z.object({ envId: Id, by: Id.nullable() })),
   defineEvent(

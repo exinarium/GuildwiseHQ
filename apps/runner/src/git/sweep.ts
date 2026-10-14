@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { readdir, rmdir, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import type { WorktreeSweepResult } from '@aom/shared';
 import { currentBranch, git } from './git.ts';
 import { removeWorktree } from './worktrees.ts';
@@ -44,6 +44,61 @@ async function listCandidates(worktreesDir: string): Promise<string[]> {
     }
   }
   return out;
+}
+
+/** A run environment's folder (`<project>/run-<env>`): it holds one detached worktree per repository. */
+const isRunDir = (path: string): boolean => /^run-[0-9a-f]{8}$/.test(basename(path));
+
+/**
+ * Sweeps one run environment folder (backlog #58). The server said its environment is not live (stopped for more than the
+ * 24 hours manual environments keep their worktrees, or unknown to it). A worktree with uncommitted changes is
+ * reported, not deleted; the folder goes only when every worktree in it could be removed.
+ */
+async function sweepRunDir(
+  dir: string,
+  input: SweepInput,
+  result: WorktreeSweepResult,
+  repos: Set<string>,
+): Promise<void> {
+  const children: string[] = [];
+  for (const name of await readdir(dir).catch(() => [])) {
+    const p = join(dir, name);
+    if (await isDir(p)) children.push(p);
+    else {
+      result.kept++; // a stray file: not ours to judge
+      return;
+    }
+  }
+  let dirty = false;
+  for (const c of children) {
+    const repo = await repoOfWorktree(c);
+    if (repo) repos.add(repo);
+    if (!repo) {
+      // not a worktree of ours
+      result.kept++;
+      dirty = true;
+      continue;
+    }
+    const files = await changedFiles(c);
+    if (files.length > 0) {
+      result.dirty.push({ path: c, branch: await currentBranch(c), files });
+      dirty = true;
+      continue;
+    }
+    try {
+      await removeWorktree({ path: c, deleteBranch: false, roots: [input.worktreesDir] });
+      result.removed.push(c);
+    } catch {
+      result.kept++;
+      dirty = true;
+    }
+  }
+  if (!dirty) {
+    await rmdir(dir).then(
+      () => result.removed.push(dir),
+      () => {},
+    );
+  }
 }
 
 /** The clone a linked worktree belongs to (its common git dir's parent), or null when it is not a worktree. */
@@ -94,6 +149,10 @@ export async function sweepWorktrees(input: SweepInput): Promise<WorktreeSweepRe
   for (const path of candidates) {
     if (live.has(path) || busy.has(path)) {
       result.kept++;
+      continue;
+    }
+    if (isRunDir(path)) {
+      await sweepRunDir(path, input, result, repos);
       continue;
     }
     const repo = await repoOfWorktree(path);

@@ -133,7 +133,9 @@ export function RunSettings({ projectId, canEdit }: { projectId: string; canEdit
         <p className="text-sm text-muted">
           Tell the DevOps engineer how to run this project. It reads this and the repository's BUILD.md the
           first time someone starts a branch, works out the steps and saves them as a plan for the
-          workstation. Nothing is added to your repositories.
+          workstation. Later starts replay that plan with no DevOps run; changing these settings or BUILD.md
+          makes the plan stale and the DevOps engineer works it out again. Nothing is added to your
+          repositories.
         </p>
         <TextArea
           label="Run instructions"
@@ -348,6 +350,12 @@ function PlanView({ plans }: { plans: RunPlanDto[] }) {
             </Badge>
             <span className="text-xs text-muted">saved {new Date(p.savedAt).toLocaleString()}</span>
           </div>
+          {p.status === 'stale' && (
+            <p className="mt-1 text-xs text-muted" data-testid="run-plan-stale">
+              These settings or BUILD.md changed after the plan was saved. The next start goes through the
+              DevOps engineer, who saves a new version.
+            </p>
+          )}
           {p.plan.setup.length > 0 && (
             <>
               <p className="mt-2 text-xs font-medium text-muted">Setup steps</p>

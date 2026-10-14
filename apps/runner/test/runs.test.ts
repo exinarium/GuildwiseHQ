@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { runnerPaths } from '../src/paths.ts';
 import { RunManager, type RunManagerDeps } from '../src/runs/manager.ts';
 import { pidAlive } from '../src/runs/proc.ts';
+import { ServiceLauncher } from '../src/runs/sandbox.ts';
 import { cleanupTmp, makeRepo, sh, tmp, waitUntil } from './helpers.ts';
 
 cleanupTmp();
@@ -53,6 +54,8 @@ function setup(over: Partial<RunManagerDeps> = {}) {
     send: (type, payload) => sent.push({ type, payload }),
     log: { info() {}, warn() {}, error() {} },
     maxEnvironments: () => 2,
+    // no systemd scope and no sandbox here: the process basics are tested on plain child processes
+    launcher: new ServiceLauncher({ noScope: true }),
     portRange: () => ({ from: rangeBase, to: rangeBase + 400 }),
     timing: {
       waitMs: 8000,

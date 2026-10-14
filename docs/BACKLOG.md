@@ -236,7 +236,7 @@ The details of each done item follow this list, by date.
 - #61: No card or agent branch is pushed unless the goal is a pull request. Done 2026-10-14.
 - #62: Inbound e-mail through SendGrid Inbound Parse. Done 2026-10-14.
 - #63: Batch intake: hand the BA a list of tickets. Done 2026-10-14.
-- #58: Start action: run a project branch on a workstation (phase 1: manual start, supervised services, panel, plans recorded). Done 2026-10-14; P2 to P4 leftovers on the item.
+- #58: Start action: run a project branch on a workstation (phase 1: manual start, supervised services, panel, plans recorded). Done 2026-10-14; P2 done (plan replay, service sandbox, Restart / Update & restart, run worktree sweep, services survive a runner restart); P3 and P4 leftovers on the item.
 - #34: Integrations page (MVP): connect Claude, GitHub, Bitbucket, GitLab, Azure DevOps, Jira and MCP servers from the web. Done 2026-10-14 (phase 2 and 3 leftovers on the item).
 - #60: Claude sign-in from the web (`claude setup-token` driven by the runner; MCP sign-in with paste-back). Done 2026-10-14 (MVP).
 - #64: Manual QA after Finalize, assigned to the person who started the card. Done 2026-10-14.
@@ -293,11 +293,34 @@ engineer of a workstation works out how to run a project; the **runner** runs an
 - DevOps role v7: "Running a project". Docs: RUNNER.md "Run a branch", USER-GUIDE 4.21, help, What's new.
 - Tests: runner `runs.test.ts`, `runs-shift.test.ts`, `aom-cli-run.test.ts`; server `runs.test.ts`; web `runs-ui.test.tsx`.
 
+**P2 done (2026-10-14).** Capability `runs:2`, migration 1940.
+- **Plan replay.** A current plan (status `active`, `settings_hash` equal to the server's hash of the run instructions and
+  structured fields, `build_hash` equal to the hash of `BUILD.md` the runner computes from the run worktrees) is replayed by the
+  runner with no DevOps request: setup steps honour `when` (`always`, `first`, `changed:<glob>`), services start in `after` order
+  with health. Any failure (or a `BUILD.md` mismatch) stops what started and sends the acknowledged `run.replay.failed`; the
+  server then files the DevOps `run` request with the failure log tail in its brief, and `aom run ready` saves the repaired
+  plan as the next version (`RunPlanSaved`). A mismatch marks the plan `stale` (`RunPlanMarkedStale`, also when the run settings
+  are saved); plans from P1 have no hashes and are not replayed. The Run and test settings show the plan status.
+- **Service sandbox (D10).** Steps, services and `stopCmd` run under the runner's bubblewrap profile (`runs/sandbox.ts`): host
+  network, read-only filesystem, the agents' unreadable set (`HOME_SECRETS`, the data dir) plus the buses, systemd user manager
+  and Docker socket masked, writes only to the run worktrees, the shared caches and a private `/tmp`; scrubbed environment; no
+  `--die-with-parent`. Follows the runner's `sandbox` setting (`required` refuses without bubblewrap). Docker steps need the
+  project opt-in, run outside the sandbox and are flagged in the panel (`Docker: outside the sandbox`, `No sandbox`).
+- **Restart / Update & restart.** `POST /api/runs/:id/restart {update?}`, command `run.restart`, event `RunEnvironmentRestarted`,
+  buttons in the panel. Update is a fast-forward of the run worktrees (refused for a rewritten branch). A manual environment with
+  a plan keeps its worktrees 24 h after a stop and Restart revives it (cap and "branch already running" apply).
+- **Run worktree sweep.** `worktrees.query` answers for `run-<env>` folders (running, or a manual stopped one with a plan within
+  24 h = live); the runner sweep removes the others, reports dirty ones and deletes nothing without an answer.
+- **Runner restart survival.** Services start in `systemd-run --user --scope` units (outside the runner service's cgroup) when
+  the user manager is reachable, so a runner restart or self-update no longer kills them; re-adoption by pid and start time is
+  unchanged; fallback is the P1 behaviour (`KillMode=process` documented). `AOM_RUN_NO_SCOPE=1` turns it off.
+- Tests: runner `runs-p2.test.ts` (sandbox argv, real bwrap isolation, scope, replay success, fallback, stale, restart, update,
+  revive, sweep); server `runs-replay.test.ts`; shared and web additions. Docs: RUNNER.md, USER-GUIDE 4.21, help, What's new.
+- Not done: automatic restart of manual environments after a runner or machine restart (P3), a `docker` service cannot be
+  sandboxed by design, the sandbox keeps the host network (a service can reach internal hosts).
+
 **Left for later phases (design section 7).**
-- **P2:** replay of the saved plan by the runner with DevOps as the fallback, the plan fingerprint and `stale` handling
-  (the fingerprint is stored already), the service sandbox (D10: services still run as the runner's user), Docker steps
-  listed as unsandboxed, the `run-*` worktree sweep (worktrees are removed on stop; a crashed runner can leave one), Restart and
-  Update & restart, keeping manual worktrees 24 h.
+- **P2: done (2026-10-14), see below.**
 - **P3:** integration tests per project (migration `integration_tests`, `code` v3, the `integrationTests` card field, the
   `environment` stage property, dispatcher provisioning), per-port forwarders and `aom-env` for testers, `aom test suite`,
   suite results (1910), flaky handling, retiring `.aom/test-env.json`, automatic restart of environments after a runner restart,

@@ -48,6 +48,8 @@ export const DevOpsRequestContextSchema = z.object({
   /** A `run` request ("Run this branch"): the run environment the DevOps engineer sets up. */
   requestKind: z.literal('run').optional(),
   envId: z.uuid().optional(),
+  /** The saved run plan was replayed first and failed: why, with the tail of the failing log (for the DevOps brief). */
+  replayFailure: z.string().max(12000).optional(),
 });
 export type DevOpsRequestContext = z.infer<typeof DevOpsRequestContextSchema>;
 

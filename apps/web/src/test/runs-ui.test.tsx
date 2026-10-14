@@ -193,6 +193,91 @@ describe('environment panel', () => {
     await waitFor(() => expect(calls.some((c) => c.url.endsWith('/stop'))).toBe(true));
   });
 
+  it('Restart and Update & restart call the server; a viewer who may not restart does not see them', async () => {
+    const user = userEvent.setup();
+    routes[`POST /api/runs/${ID(50)}/restart`] = () => json({ environment: env({ state: 'starting' }) }, 202);
+    wrap(<RunPanel env={env({ canRestart: true, replayed: true }) as never} />);
+    await user.click(screen.getByTestId('run-restart'));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/restart'))).toMatchObject({ method: 'POST', body: {} }),
+    );
+    calls.length = 0;
+    await user.click(screen.getByTestId('run-update-restart'));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/restart'))).toMatchObject({ body: { update: true } }),
+    );
+  });
+
+  it('a stopped environment that can still be restarted offers Restart, but not Stop or Extend', () => {
+    wrap(
+      <RunPanel
+        env={
+          env({
+            state: 'stopped',
+            canRestart: true,
+            canStop: false,
+            canExtend: false,
+            stoppedAt: new Date().toISOString(),
+            stopReason: 'stopped',
+            servicesStatus: [],
+          }) as never
+        }
+      />,
+    );
+    expect(screen.getByTestId('run-restart')).toBeInTheDocument();
+    expect(screen.getByTestId('run-update-restart')).toBeInTheDocument();
+    expect(screen.queryByTestId('run-stop')).toBeNull();
+    expect(screen.queryByTestId('run-extend')).toBeNull();
+  });
+
+  it('a start from the saved plan says so, and services outside the sandbox are flagged', () => {
+    wrap(
+      <RunPanel
+        env={
+          env({
+            state: 'starting',
+            replayed: true,
+            devopsRequestId: null,
+            planVersion: 4,
+            servicesStatus: [
+              {
+                name: 'db',
+                state: 'healthy',
+                ports: [],
+                urls: [],
+                health: 'passing',
+                restarts: 0,
+                sandbox: 'docker',
+              },
+              {
+                name: 'web',
+                state: 'starting',
+                ports: [],
+                urls: [],
+                health: 'unknown',
+                restarts: 0,
+                sandbox: 'sandboxed',
+              },
+              {
+                name: 'job',
+                state: 'healthy',
+                ports: [],
+                urls: [],
+                health: 'none',
+                restarts: 0,
+                sandbox: 'off',
+              },
+            ],
+          }) as never
+        }
+      />,
+    );
+    expect(screen.getByTestId('run-working')).toHaveTextContent('saved run plan (version 4)');
+    expect(screen.getByTestId('run-working')).not.toHaveTextContent('working out how to run');
+    const flags = screen.getAllByTestId('run-unsandboxed');
+    expect(flags.map((f) => f.textContent)).toEqual(['Docker: outside the sandbox', 'No sandbox']);
+  });
+
   it('hides the buttons the viewer may not use and for a finished environment', () => {
     const { unmount } = wrap(<RunPanel env={env({ canStop: false, canExtend: false }) as never} />);
     expect(screen.queryByTestId('run-stop')).toBeNull();
@@ -486,6 +571,30 @@ describe('run and test settings', () => {
       { repoId: WEB, runInstructions: '' },
       { repoId: API, runInstructions: 'dotnet 8' },
     ]);
+  });
+
+  it('says when a saved plan is stale and what happens next', async () => {
+    routes['GET /api/projects/' + PROJECT + '/run-settings'] = () =>
+      json(
+        settings({
+          plans: [
+            {
+              id: ID(81),
+              workstationId: WS,
+              workstationName: 'Desk',
+              version: 2,
+              status: 'stale',
+              savedAt: new Date().toISOString(),
+              plan: { version: 1, repos: [], setup: [], services: [], notes: '' },
+            },
+          ],
+        }),
+      );
+    wrap(<RunSettings projectId={PROJECT} canEdit />);
+    expect(await screen.findByTestId('run-plan-stale')).toHaveTextContent(
+      'next start goes through the DevOps engineer',
+    );
+    expect(screen.getByTestId('run-plan-Desk')).toHaveTextContent('version 2, stale');
   });
 
   it('refuses a malformed port or a dependency cycle before sending anything', async () => {

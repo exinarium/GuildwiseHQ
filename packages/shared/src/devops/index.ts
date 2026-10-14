@@ -56,6 +56,8 @@ export const DevopsRunSchema = z.object({
   /** The plan saved for this project on this workstation (absent: none yet), and how it ended last time. */
   currentPlan: RunPlanSchema.nullable().default(null),
   planStatus: z.enum(['active', 'stale', 'superseded']).nullable().default(null),
+  /** The saved plan was tried first and failed (or was out of date): why, with the tail of the failing log. */
+  replayFailure: z.string().max(12000).optional(),
   portRange: z.object({ from: z.number().int(), to: z.number().int() }),
   allowDocker: z.boolean().default(false),
   ttlAt: z.iso.datetime().nullable().default(null),

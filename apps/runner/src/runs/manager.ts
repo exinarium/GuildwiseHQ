@@ -1,10 +1,21 @@
 import { spawn } from 'node:child_process';
-import { closeSync, mkdirSync, openSync, rmdirSync, writeSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmdirSync,
+  rmSync,
+  writeSync,
+} from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, delimiter, join, resolve } from 'node:path';
 import {
   formatCommandLine,
   type IpcRpcResponse,
   isSafeRelativeDir,
+  RUN_WORKTREE_KEEP_HOURS,
   type RunDeclaredService,
   type RunEndReason,
   type RunExtendPayload,
@@ -12,26 +23,33 @@ import {
   type RunLogLines,
   type RunPlan,
   RunPlanSchema,
+  type RunRestartPayload,
   type RunService,
   RunServiceSchema,
+  type RunSetupStep,
   type RunStartPayload,
   type RunStatus,
   type RunStopPayload,
   runOrder,
   validateRunPlan,
+  withDependencies,
 } from '@aom/shared';
+import picomatch from 'picomatch';
 import { z } from 'zod';
+import type { SandboxMode } from '../adapters/claude-policy.ts';
 import { git } from '../git/git.ts';
 import { withRepoLock } from '../git/repo-lock.ts';
 import { removeWorktree } from '../git/worktrees.ts';
 import type { Logger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { cacheEnv, ensureSharedCaches, sharedCacheRoot } from '../sandbox/sandbox.ts';
 import { checkEnvVar } from '../toolchain/registry.ts';
 import { buildHash, findBuildDoc } from './discovery.ts';
 import { probeHttp, probeTcp } from './health.ts';
 import { FileFollower, rotateIfBig, tailLines } from './logs.ts';
 import { PortAllocator, type PortRange } from './ports.ts';
 import { pidAlive, procStartTime, sameProcess, signalGroup, stopGroup } from './proc.ts';
+import { ServiceLauncher, sandboxCommand, scopeCommand, scrubEnv } from './sandbox.ts';
 import {
   type EnvState,
   isLiveEnv,
@@ -48,7 +66,9 @@ import { readEnvFile, redactValues, substitute } from './text.ts';
  * Services get their own process group (they outlive the runner and are re-adopted after a restart), log to
  * `<data dir>/runs/<envId>/<service>.log` and are stopped with `stopCmd`, SIGTERM and finally SIGKILL.
  *
- * Phase 1 runs services as the user, outside any sandbox (the service sandbox is phase 2).
+ * Phase 2: steps and services run under the runner's bubblewrap profile (`sandbox.ts`, D10) and in a systemd scope of their
+ * own when the user manager is reachable (they then survive a runner restart or self-update); a current saved plan is
+ * replayed without a model call and falls back to the DevOps engineer on any failure; Restart and Update & restart.
  */
 
 export interface RunTiming {
@@ -78,7 +98,10 @@ export const DEFAULT_TIMING: RunTiming = {
 export interface RunManagerDeps {
   paths: RunnerPaths;
   findRepo(normalized: string): Promise<{ localPath: string } | undefined>;
-  send(type: 'run.status' | 'run.log' | 'run.plan.saved', payload: Record<string, unknown>): void;
+  send(
+    type: 'run.status' | 'run.log' | 'run.plan.saved' | 'run.replay.failed',
+    payload: Record<string, unknown>,
+  ): void;
   log: Logger;
   maxEnvironments(): number;
   portRange(): PortRange;
@@ -88,6 +111,18 @@ export interface RunManagerDeps {
   timing?: Partial<RunTiming>;
   /** Test hook: where services are looked up for ports (default: real sockets). */
   isPortFree?: (port: number) => Promise<boolean>;
+  /** The runner's sandbox setting for the claude-code runtime. Absent: no service sandbox (tests). */
+  sandboxMode?(): { mode: SandboxMode; allowUnsandboxed: boolean };
+  launcher?: ServiceLauncher;
+  /** The real home directory (its credential folders are unreadable for services). */
+  realHome?: string;
+}
+
+interface ReplayCtx {
+  /** A new worktree: `first` and `changed:` steps run. False for a restart in the same worktrees. */
+  fresh: boolean;
+  /** Files changed by Update & restart, per repository (a restart without update: nothing changed). */
+  changed: Map<string, string[]>;
 }
 
 export interface RunCaller {
@@ -97,6 +132,24 @@ export interface RunCaller {
 }
 
 const DOCKER_CMDS = new Set(['docker', 'docker-compose', 'podman', 'podman-compose']);
+/** The user-bus variables `systemd-run --user` needs and a sandboxed service must not inherit. */
+const SCOPE_ONLY_ENV = ['XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS'];
+const sandboxNote = (k: 'sandboxed' | 'docker' | 'off'): string =>
+  k === 'sandboxed' ? '' : k === 'docker' ? ' (outside the sandbox: Docker)' : ' (no sandbox)';
+const isDockerCommand = (cmd: string[]): boolean =>
+  DOCKER_CMDS.has(basename(cmd[0] ?? '')) || (cmd[1] === 'compose' && basename(cmd[0] ?? '') === 'docker');
+
+/** The clone's git dir a linked worktree points at (`<clone>/.git`), so a sandboxed `git` can read it. */
+function gitDirOf(worktree: string): string[] {
+  try {
+    const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(join(worktree, '.git'), 'utf8'));
+    if (!m) return [];
+    // <clone>/.git/worktrees/<name>  ->  <clone>/.git
+    return [resolve(m[1] as string, '..', '..')];
+  } catch {
+    return [];
+  }
+}
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const slug = (s: string) =>
   s
@@ -143,10 +196,13 @@ export class RunManager {
   private timer: NodeJS.Timeout | null = null;
   private shuttingDown = false;
   private allocator: PortAllocator | null = null;
+  private readonly launcher: ServiceLauncher;
+  private readonly restarting = new Set<string>();
 
   constructor(private readonly deps: RunManagerDeps) {
     this.store = new RunStore(join(deps.paths.root, 'runs'));
     this.timing = { ...DEFAULT_TIMING, ...(deps.timing ?? {}) };
+    this.launcher = deps.launcher ?? new ServiceLauncher();
   }
 
   // ------------------------------------------------------------------------------------------ lifecycle
@@ -173,6 +229,14 @@ export class RunManager {
       }
       if (env.state === 'stopping') {
         void this.stop({ envId: env.envId, reason: env.endReason ?? 'stopped' });
+      } else if (env.replaying) {
+        // the runner went down while the plan was being replayed: hand over to the DevOps engineer
+        await this.replayFailed(
+          env,
+          'The runner restarted while the saved plan was being replayed.',
+          '',
+          false,
+        );
       } else if (env.services.length > 0 && alive === 0) {
         await this.finish(
           env,
@@ -217,6 +281,14 @@ export class RunManager {
     for (const env of this.envs.values()) {
       if (isLiveEnv(env) || !env.reportedFinal) this.report(env, true);
     }
+  }
+
+  /** The `run-<env>` folders of environments that are live or keep their worktrees for a restart: the sweep skips them. */
+  worktreeDirs(): string[] {
+    const now = Date.now();
+    return [...this.envs.values()]
+      .filter((e) => isLiveEnv(e) || (e.keptUntil ?? 0) > now)
+      .flatMap((e) => (e.sources[0] ? [resolve(e.sources[0].path, '..')] : []));
   }
 
   liveEnvIds(): string[] {
@@ -281,9 +353,17 @@ export class RunManager {
     }
     if (env.state === 'preparing') {
       env.state = 'starting';
-      env.activity = 'waiting for the DevOps engineer';
+      if (p.replay) {
+        env.activity = `replaying the saved plan (version ${p.replay.version})`;
+        env.plan = p.replay.plan;
+        env.planId = p.replay.planId;
+        env.replaying = true;
+      } else {
+        env.activity = 'waiting for the DevOps engineer';
+      }
       this.save(env);
       this.report(env);
+      if (p.replay) void this.replayStart(env, p.replay.buildHash);
     }
     this.flush();
     return { ok: true };
@@ -362,12 +442,15 @@ export class RunManager {
     env.activity = 'stopping';
     this.save(env);
     this.report(env);
-    await this.teardown(env);
+    // A manual environment that has a plan keeps its worktrees for a day: Restart revives it with the build outputs.
+    const keep = env.purpose === 'manual' && !!env.plan && reason !== 'failed';
+    await this.teardown(env, keep);
+    if (keep) env.keptUntil = Date.now() + RUN_WORKTREE_KEEP_HOURS * 3600_000;
     await this.finish(env, reason === 'failed' ? 'failed' : 'stopped', reason);
   }
 
-  /** Stops every service and step, closes follow, removes the run worktrees. */
-  private async teardown(env: EnvState): Promise<void> {
+  /** Stops every service and step, closes follow, removes the run worktrees (unless they are kept for a restart). */
+  private async teardown(env: EnvState, keepWorktrees = false): Promise<void> {
     this.unfollow(env.envId);
     for (const s of env.steps) if (s.status === 'running') this.killStep(env, s);
     const order =
@@ -377,6 +460,8 @@ export class RunManager {
       const svc = env.services.find((s) => s.def.name === o.name);
       if (svc) await this.stopService(env, svc);
     }
+    if (env.runTmp) rmSync(env.runTmp, { recursive: true, force: true });
+    if (keepWorktrees) return;
     for (const src of env.sources) {
       await removeWorktree({ path: src.path, deleteBranch: false, roots: [this.deps.paths.worktrees] }).catch(
         (e) => this.deps.log.warn(`could not remove the run worktree ${src.path}: ${String(e)}`),
@@ -424,6 +509,287 @@ export class RunManager {
     this.save(env);
   }
 
+  // ----------------------------------------------------------------------------- replay and restart
+
+  private currentBuildHash(env: EnvState): string {
+    const docs = env.sources.flatMap((s) => {
+      const d = findBuildDoc(s.path, s.projectPath);
+      return d ? [{ repoId: s.repoId, content: d.content }] : [];
+    });
+    return buildHash(docs);
+  }
+
+  /** The first start from a saved plan: BUILD.md must still be what the plan was made from, then the plan runs. */
+  private async replayStart(env: EnvState, planBuildHash: string | null | undefined): Promise<void> {
+    try {
+      if (planBuildHash != null && planBuildHash !== this.currentBuildHash(env)) {
+        await this.replayFailed(env, 'BUILD.md has changed since the plan was saved.', '', true);
+        return;
+      }
+      const r = await this.replayPlan(env, { fresh: true, changed: new Map() });
+      if (!r.ok && !r.aborted) await this.replayFailed(env, r.reason, r.tail, false);
+    } catch (err) {
+      await this.replayFailed(env, err instanceof Error ? err.message : String(err), '', false);
+    }
+  }
+
+  private stepDue(step: RunSetupStep, ctx: ReplayCtx): boolean {
+    const when = (step.when ?? 'always').trim();
+    if (when === 'first') return ctx.fresh;
+    if (when.startsWith('changed:')) {
+      if (ctx.fresh) return true;
+      const pattern = when.slice('changed:'.length).trim();
+      if (!pattern) return true;
+      const match = picomatch(pattern, { dot: true });
+      return (ctx.changed.get(step.repoId) ?? []).some((f) => f === '*' || match(f));
+    }
+    return true; // 'always' (and anything this runner does not know)
+  }
+
+  /**
+   * Runs the environment's plan: the setup steps that are due, then the services in `after` order, each until healthy.
+   * `aborted`: the environment was stopped meanwhile (nothing to report).
+   */
+  private async replayPlan(
+    env: EnvState,
+    ctx: ReplayCtx,
+  ): Promise<{ ok: true } | { ok: false; aborted?: boolean; reason: string; tail: string }> {
+    const plan = env.plan as RunPlan;
+    const gone = () => !isLiveEnv(env) || env.state === 'stopping';
+    const aborted = { ok: false as const, aborted: true, reason: 'stopped', tail: '' };
+    env.replaying = true;
+    this.save(env);
+    try {
+      env.steps = [];
+      env.services = [];
+      for (const [i, st] of plan.setup.entries()) {
+        if (gone()) return aborted;
+        const src = env.sources.find((x) => x.repoId === st.repoId);
+        if (!src)
+          return {
+            ok: false,
+            reason: `the plan's step "${st.name}" names a repository this environment does not have`,
+            tail: '',
+          };
+        const logFile = join(
+          this.store.dir(env.envId),
+          'steps',
+          `${String(i + 1).padStart(2, '0')}-${slug(st.name)}.log`,
+        );
+        const step: StepState = {
+          name: st.name,
+          repoId: st.repoId,
+          cwd: st.cwd,
+          cmd: st.cmd,
+          timeoutSec: st.timeoutSec,
+          when: st.when,
+          status: 'running',
+          startedAt: Date.now(),
+          logFile,
+        };
+        env.steps.push(step);
+        if (!this.stepDue(st, ctx)) {
+          step.status = 'ok';
+          step.skipped = true;
+          step.finishedAt = Date.now();
+          continue;
+        }
+        this.checkDocker(env, st.cmd, false);
+        const cwd = this.cwdIn(src, st.cwd);
+        env.activity = `running ${st.name}`;
+        this.save(env);
+        this.report(env);
+        await this.runStep(env, step, cwd, {});
+        if (gone()) return aborted;
+        if (step.status !== 'ok')
+          return {
+            ok: false,
+            reason: `step "${st.name}" failed (exit ${step.exitCode ?? '?'})`,
+            tail: tailLines(step.logFile, 40).join('\n'),
+          };
+      }
+      for (const w of env.wanted)
+        if (!plan.services.some((s) => s.name.toLowerCase() === w.toLowerCase()))
+          return { ok: false, reason: `the plan has no service "${w}"`, tail: '' };
+      const order = env.wanted.length
+        ? withDependencies(plan.services, env.wanted)
+        : (runOrder(plan.services) ?? plan.services);
+      if (order.length === 0) return { ok: false, reason: 'the plan has no services', tail: '' };
+      for (const def of order) {
+        if (gone()) return aborted;
+        const r = await this.bringUp(env, def, def.startTimeoutSec * 1000 + 15_000);
+        if (gone()) return aborted;
+        if (r.error || !r.svc)
+          return { ok: false, reason: r.error ?? `service "${def.name}" did not start`, tail: '' };
+        if (r.svc.state !== 'healthy')
+          return {
+            ok: false,
+            reason: `service "${def.name}" ${r.svc.state}${r.svc.lastError ? `: ${r.svc.lastError}` : ''}`,
+            tail: this.serviceTail(env, r.svc, 40),
+          };
+      }
+      env.readyAt = Date.now();
+      env.activity = undefined;
+      this.recompute(env);
+      this.save(env);
+      this.report(env, true);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err), tail: '' };
+    } finally {
+      env.replaying = false;
+      this.save(env);
+    }
+  }
+
+  private serviceTail(env: EnvState, svc: ServiceState, n: number): string {
+    const secrets = this.runtime.get(`${env.envId}/${svc.def.name}`)?.secrets ?? new Set<string>();
+    return tailLines(this.logPath(env, svc.def.name), n)
+      .map((l) => redactValues(l, secrets))
+      .join('\n');
+  }
+
+  /**
+   * The plan could not bring the environment up: stop what it started and hand over to the DevOps engineer. The server
+   * files the request (it repairs the plan and saves a new version); `stale`: the plan no longer matches BUILD.md.
+   */
+  private async replayFailed(env: EnvState, reason: string, tail: string, stale: boolean): Promise<void> {
+    if (!isLiveEnv(env) || env.state === 'stopping') return;
+    await this.dismantle(env);
+    env.replaying = false;
+    env.readyAt = undefined;
+    env.requestId = null; // the DevOps request the server files now adopts the environment (see rpcInner)
+    env.state = 'starting';
+    env.error = undefined;
+    env.activity = 'the saved plan failed: waiting for the DevOps engineer';
+    this.save(env);
+    this.report(env, true);
+    this.deps.log.warn(`run ${env.envId}: the saved plan failed: ${reason}`);
+    this.deps.send('run.replay.failed', {
+      envId: env.envId,
+      reason: reason.slice(0, 4000),
+      logTail: tail.slice(-8000),
+      stale,
+    });
+  }
+
+  /** Stops every service and step of the environment (it keeps its worktrees) and forgets them. */
+  private async dismantle(env: EnvState): Promise<void> {
+    for (const s of env.steps) if (s.status === 'running') this.killStep(env, s);
+    const order =
+      runOrder(env.services.map((s) => ({ name: s.def.name, after: s.def.after }))) ??
+      env.services.map((s) => ({ name: s.def.name, after: [] as string[] }));
+    for (const o of [...order].reverse()) {
+      const svc = env.services.find((s) => s.def.name === o.name);
+      if (svc) await this.stopService(env, svc);
+    }
+    env.services = [];
+    env.steps = [];
+  }
+
+  /**
+   * `run.restart`: the services start again from the environment's plan in the same run worktrees. `update` first
+   * fast-forwards the worktrees to the head of their branches (refused when a branch was rewritten). Also revives a
+   * stopped manual environment whose worktrees are still kept. The answer says whether it was accepted; the rest runs
+   * in the background and reports through `run.status` (and, when the plan fails, `run.replay.failed`).
+   */
+  async restart(p: RunRestartPayload): Promise<{ ok: boolean; error?: string }> {
+    const env = this.envs.get(p.envId);
+    if (!env)
+      return {
+        ok: false,
+        error: 'this workstation does not know the environment (any more): start it again',
+      };
+    if (!env.plan)
+      return {
+        ok: false,
+        error: 'the environment has no run plan to restart from: the DevOps engineer has not finished it',
+      };
+    if (this.restarting.has(env.envId) || env.replaying)
+      return { ok: false, error: 'the environment is already (re)starting' };
+    const revive = !isLiveEnv(env);
+    if (revive) {
+      if (env.purpose !== 'manual' || !env.keptUntil || env.keptUntil < Date.now())
+        return { ok: false, error: 'the run worktrees were removed: start the branch again' };
+      if (env.sources.some((s) => !existsSync(s.path)))
+        return { ok: false, error: 'the run worktrees are gone: start the branch again' };
+      const live = [...this.envs.values()].filter(isLiveEnv).length;
+      if (live >= this.deps.maxEnvironments())
+        return {
+          ok: false,
+          error: `this workstation already runs ${live} environment${live === 1 ? '' : 's'} (limit ${this.deps.maxEnvironments()}); stop one first`,
+        };
+    } else if (env.state === 'stopping' || env.state === 'preparing' || env.state === 'requested') {
+      return { ok: false, error: `the environment is ${env.state}` };
+    }
+    // Update: look first, change nothing until it is known to be a fast-forward.
+    const updates: Array<{ src: SourceState; to: string }> = [];
+    if (p.update) {
+      for (const src of env.sources) {
+        const repo = await this.deps.findRepo(src.remoteUrlNormalized);
+        if (!repo) return { ok: false, error: `there is no local clone of ${src.name} any more` };
+        const to = await this.resolveCommit(repo.localPath, src.branch);
+        if (!to)
+          return {
+            ok: false,
+            error: `branch "${src.branch}" does not exist in the local clone of ${src.name}`,
+          };
+        if (src.commit && to !== src.commit) {
+          const anc = await git(src.path, ['merge-base', '--is-ancestor', src.commit, to]);
+          if (anc.exitCode !== 0)
+            return {
+              ok: false,
+              error: `branch "${src.branch}" of ${src.name} was rewritten (it is not a fast-forward of ${src.commit.slice(0, 10)}): use Restart, or stop it and start the branch again`,
+            };
+        }
+        if (to !== src.commit) updates.push({ src, to });
+      }
+    }
+    this.restarting.add(env.envId);
+    env.replaying = true; // also blocks `aom run` and a second restart from now on
+    if (revive) {
+      env.endedAt = undefined;
+      env.endReason = undefined;
+      env.error = undefined;
+      env.keptUntil = undefined;
+      env.reportedFinal = false;
+    }
+    env.state = 'starting';
+    env.ttlAt = p.ttlAt;
+    env.readyAt = undefined;
+    env.activity = updates.length ? 'updating and restarting' : 'restarting';
+    this.save(env);
+    this.report(env, true);
+    void this.doRestart(env, updates).finally(() => this.restarting.delete(env.envId));
+    return { ok: true };
+  }
+
+  private async doRestart(env: EnvState, updates: Array<{ src: SourceState; to: string }>): Promise<void> {
+    try {
+      await this.dismantle(env);
+      const changed = new Map<string, string[]>();
+      for (const u of updates) {
+        const from = u.src.commit;
+        const co = await git(u.src.path, ['checkout', '--detach', u.to]);
+        if (co.exitCode !== 0)
+          throw new Error(
+            `could not move the worktree of ${u.src.name} to the branch head: ${co.stderr.trim().slice(0, 300)}`,
+          );
+        const diff = from ? await git(u.src.path, ['diff', '--name-only', from, u.to]) : null;
+        changed.set(
+          u.src.repoId,
+          diff && diff.exitCode === 0 ? diff.stdout.split('\n').filter(Boolean) : ['*'],
+        );
+        u.src.commit = u.to;
+        this.save(env);
+      }
+      const r = await this.replayPlan(env, { fresh: false, changed });
+      if (!r.ok && !r.aborted) await this.replayFailed(env, r.reason, r.tail, false);
+    } catch (err) {
+      await this.replayFailed(env, err instanceof Error ? err.message : String(err), '', false);
+    }
+  }
+
   // ------------------------------------------------------------------------------------------ status
 
   private statusOf(env: EnvState): RunStatus {
@@ -445,6 +811,7 @@ export class RunManager {
         ...(s.exitCode !== undefined ? { exitCode: s.exitCode } : {}),
         ...(s.lastError ? { lastError: s.lastError.slice(0, 2000) } : {}),
         ...(s.pid ? { pid: s.pid } : {}),
+        sandbox: s.sandbox ?? 'off',
       })),
       sources: env.sources.map((s) => ({ repoId: s.repoId, commit: s.commit })),
       ...(env.activity ? { activity: env.activity.slice(0, 300) } : {}),
@@ -539,11 +906,22 @@ export class RunManager {
     if (!env) return { ok: false, error: 'this environment does not exist (any more) on this workstation' };
     if (env.requestId && env.requestId !== caller.requestId)
       return { ok: false, error: 'this environment belongs to another DevOps request' };
+    // After a failed replay the environment has no request yet: the DevOps engineer the server filed for it takes over
+    // (the supervisor only lets the shift of that environment's `run` request call this).
+    if (!env.requestId && ['run.step', 'run.service', 'run.ready', 'run.fail'].includes(method)) {
+      env.requestId = caller.requestId;
+      this.save(env);
+    }
     await this.prepared.get(envId);
     try {
       if (method === 'run.info') return { ok: true, result: { message: this.info(env) } };
       if (method === 'run.status') return { ok: true, result: { message: this.statusText(env) } };
       if (method === 'run.logs') return this.logs(env, params);
+      if (env.replaying)
+        return {
+          ok: false,
+          error: 'the runner is replaying the saved plan; wait until it has finished or failed',
+        };
       if (!isLiveEnv(env) || env.state === 'stopping')
         return {
           ok: false,
@@ -582,7 +960,8 @@ export class RunManager {
       `Environment ${env.envId} of ${env.projectName} (${env.projectKey}): ${env.state}`,
       `Expires: ${env.ttlAt}`,
       `Port range for allocated ports: ${env.portRange.from}-${env.portRange.to} (a service's default port is used when it is free)`,
-      `Docker: ${env.allowDocker ? 'allowed' : 'not allowed'}`,
+      `Docker: ${env.allowDocker ? 'allowed (docker/compose steps run outside the sandbox)' : 'not allowed'}`,
+      'Steps and services run in the runner sandbox: host network, writes only to the worktrees below, the shared package caches and a private /tmp (HOME is /tmp/home); credential folders and the runner data are unreadable.',
       'Repositories (detached run worktrees, no branch; your own commands may read and build there):',
       ...env.sources.map(
         (s) =>
@@ -643,10 +1022,7 @@ export class RunManager {
   }
 
   private checkDocker(env: EnvState, cmd: string[], flagged: boolean): void {
-    const dockerish =
-      DOCKER_CMDS.has(basename(cmd[0] ?? '')) ||
-      (cmd[1] === 'compose' && basename(cmd[0] ?? '') === 'docker');
-    if ((dockerish || flagged) && !env.allowDocker)
+    if ((isDockerCommand(cmd) || flagged) && !env.allowDocker)
       throw new Error(
         'this command uses Docker, which is not allowed for this project (Project settings > Run & test > "Branch code may use Docker"). End with `aom run fail --reason` if it cannot run without it',
       );
@@ -657,16 +1033,112 @@ export class RunManager {
     return resolve(src.path, cwd);
   }
 
-  private baseEnv(): Record<string, string> {
+  private baseEnv(sandboxed = false): Record<string, string> {
     const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(process.env))
-      if (v !== undefined && !k.startsWith('AOM_')) out[k] = v;
+    if (sandboxed) Object.assign(out, scrubEnv(process.env));
+    else
+      for (const [k, v] of Object.entries(process.env))
+        if (v !== undefined && !k.startsWith('AOM_')) out[k] = v;
     const dirs = this.deps.pathDirs?.() ?? [];
     if (dirs.length)
       out.PATH = [...dirs, ...(out.PATH ?? '').split(delimiter)]
         .filter((x, i, a) => x && a.indexOf(x) === i)
         .join(delimiter);
+    if (sandboxed)
+      Object.assign(
+        out,
+        {
+          HOME: '/tmp/home',
+          TMPDIR: '/tmp',
+          TMP: '/tmp',
+          TEMP: '/tmp',
+          XDG_CACHE_HOME: '/tmp/home/.cache',
+          XDG_CONFIG_HOME: '/tmp/home/.config',
+          XDG_DATA_HOME: '/tmp/home/.local/share',
+          // .NET: a private CLI home and no build servers that outlive the service
+          DOTNET_CLI_HOME: '/tmp/home/.dotnet',
+          DOTNET_NOLOGO: '1',
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+          DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1',
+          MSBUILDDISABLENODEREUSE: '1',
+          DOTNET_CLI_USE_MSBUILD_SERVER: '0',
+        },
+        cacheEnv(sharedCacheRoot(this.deps.paths)),
+      );
     return out;
+  }
+
+  /** `/tmp/aom-run-<env>`: bound over /tmp inside the sandbox; the services' HOME lives in it. */
+  private ensureRunTmp(env: EnvState): void {
+    env.runTmp ??= `/tmp/aom-run-${env.envId.slice(0, 8)}`;
+    mkdirSync(join(env.runTmp, 'home'), { recursive: true, mode: 0o700 });
+  }
+
+  /** Where a command runs: the service sandbox, outside it because of Docker (opted in), or with no sandbox at all. */
+  private async sandboxKind(argv: string[], dockerFlag: boolean): Promise<'sandboxed' | 'docker' | 'off'> {
+    if (dockerFlag || isDockerCommand(argv)) return 'docker'; // checkDocker already insisted on the project's opt-in
+    const cfg = this.deps.sandboxMode?.();
+    if (!cfg || cfg.mode === 'off') return 'off';
+    if (await this.launcher.sandboxAvailable()) return 'sandboxed';
+    if (cfg.mode === 'best_effort' && cfg.allowUnsandboxed) return 'off';
+    throw new Error(
+      'the service sandbox (bubblewrap) is not available on this workstation: install bubblewrap (apt install bubblewrap), or allow unsandboxed runs in the runner config (sandbox "best_effort" with allowUnsandboxed)',
+    );
+  }
+
+  /** The command line a step or service is really started with, and the environment it gets. */
+  private async launch(
+    env: EnvState,
+    argv: string[],
+    extraEnv: Record<string, string>,
+    o: { docker: boolean; service?: string },
+  ): Promise<{
+    cmd: string;
+    args: string[];
+    env: Record<string, string>;
+    sandbox: 'sandboxed' | 'docker' | 'off';
+  }> {
+    const sandbox = await this.sandboxKind(argv, o.docker);
+    let cmd = argv[0] as string;
+    let args = argv.slice(1);
+    if (sandbox === 'sandboxed') {
+      this.ensureRunTmp(env);
+      const cacheRoot = sharedCacheRoot(this.deps.paths);
+      await ensureSharedCaches(cacheRoot);
+      const c = sandboxCommand(
+        {
+          runnerRoot: this.deps.paths.root,
+          realHome: this.deps.realHome ?? homedir(),
+          worktrees: env.sources.map((s) => s.path),
+          cacheRoot,
+          runTmp: env.runTmp as string,
+          gitDirs: env.sources.flatMap((s) => gitDirOf(s.path)),
+        },
+        argv,
+      );
+      cmd = c.cmd;
+      args = c.args;
+    }
+    const childEnv = { ...this.baseEnv(sandbox === 'sandboxed'), ...extraEnv };
+    // Services leave the runner's cgroup (systemd scope) so a runner restart or update does not kill them.
+    if (o.service && (await this.launcher.scopeAvailable())) {
+      let inner = [cmd, ...args];
+      if (sandbox === 'sandboxed') {
+        // systemd-run needs the user bus variables; the sandboxed command must not see them (`env` execs, the pid stays).
+        inner = ['env', ...SCOPE_ONLY_ENV.flatMap((k) => ['-u', k]), ...inner];
+        for (const k of SCOPE_ONLY_ENV) {
+          const v = process.env[k];
+          if (v !== undefined) childEnv[k] = v;
+        }
+      }
+      const c = scopeCommand(
+        `aom-run-${env.envId.slice(0, 8)}-${slug(o.service)}-${Date.now().toString(36)}`,
+        inner,
+      );
+      cmd = c.cmd;
+      args = c.args;
+    }
+    return { cmd, args, env: childEnv, sandbox };
   }
 
   private checkEnv(env: Record<string, string>): void {
@@ -748,7 +1220,6 @@ export class RunManager {
   private runStep(env: EnvState, step: StepState, cwd: string, extra: Record<string, string>): Promise<void> {
     return new Promise<void>((done) => {
       const fd = openSync(step.logFile, 'a');
-      writeSync(fd, `[aom] ${formatCommandLine(step.cmd)}\n`);
       const finish = (code: number | null, why?: string) => {
         closeSync(fd);
         step.status = code === 0 ? 'ok' : 'failed';
@@ -768,32 +1239,37 @@ export class RunManager {
         this.report(env);
         done();
       };
-      try {
-        const child = spawn(step.cmd[0] as string, step.cmd.slice(1), {
-          cwd,
-          env: { ...this.baseEnv(), ...extra },
-          detached: true,
-          stdio: ['ignore', fd, fd],
-        });
-        (child as unknown as { aomStep?: boolean }).aomStep = true;
-        stepProcs.set(`${env.envId}/${step.name.toLowerCase()}`, child);
-        const timer = setTimeout(() => {
-          if (child.pid) signalGroup(child.pid, 'SIGKILL');
-          finish(null, `killed after ${step.timeoutSec} s (timeout)`);
-        }, step.timeoutSec * 1000);
-        child.once('error', (err) => {
-          clearTimeout(timer);
-          finish(127, `could not start: ${err.message}`);
-        });
-        child.once('exit', (code, signal) => {
-          clearTimeout(timer);
-          stepProcs.delete(`${env.envId}/${step.name.toLowerCase()}`);
-          if (step.status === 'running')
-            finish(code ?? (signal ? 137 : 1), signal ? `ended by ${signal}` : undefined);
-        });
-      } catch (err) {
-        finish(127, `could not start: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      void (async () => {
+        try {
+          const l = await this.launch(env, step.cmd, extra, { docker: false });
+          step.sandbox = l.sandbox;
+          writeSync(fd, `[aom] ${formatCommandLine(step.cmd)}${sandboxNote(l.sandbox)}\n`);
+          const child = spawn(l.cmd, l.args, {
+            cwd,
+            env: l.env,
+            detached: true,
+            stdio: ['ignore', fd, fd],
+          });
+          (child as unknown as { aomStep?: boolean }).aomStep = true;
+          stepProcs.set(`${env.envId}/${step.name.toLowerCase()}`, child);
+          const timer = setTimeout(() => {
+            if (child.pid) signalGroup(child.pid, 'SIGKILL');
+            finish(null, `killed after ${step.timeoutSec} s (timeout)`);
+          }, step.timeoutSec * 1000);
+          child.once('error', (err) => {
+            clearTimeout(timer);
+            finish(127, `could not start: ${err.message}`);
+          });
+          child.once('exit', (code, signal) => {
+            clearTimeout(timer);
+            stepProcs.delete(`${env.envId}/${step.name.toLowerCase()}`);
+            if (step.status === 'running')
+              finish(code ?? (signal ? 137 : 1), signal ? `ended by ${signal}` : undefined);
+          });
+        } catch (err) {
+          finish(127, `could not start: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      })();
     });
   }
 
@@ -873,6 +1349,21 @@ export class RunManager {
     const src = this.repoOf(env, p.repo);
     const def: RunService = RunServiceSchema.parse({ ...p, repoId: src.repoId });
     this.checkDeclared(caller.declared, def, env);
+    const r = await this.bringUp(env, def, this.timing.waitMs);
+    if (r.error || !r.svc) return { ok: false, error: r.error ?? 'the service did not start' };
+    return this.serviceAnswer(env, r.svc);
+  }
+
+  /**
+   * Validates a service definition and starts it (after its dependencies are healthy), then waits for its health up to
+   * `waitMs`. Used by `aom run service` and by the plan replay. A refusal comes back as `error`.
+   */
+  private async bringUp(
+    env: EnvState,
+    def: RunService,
+    waitMs: number,
+  ): Promise<{ svc?: ServiceState; error?: string }> {
+    const src = this.repoOf(env, def.repoId);
     this.checkDocker(env, def.cmd, def.docker);
     this.checkEnv(def.env);
     this.cwdIn(src, def.cwd);
@@ -881,7 +1372,6 @@ export class RunManager {
       const dep = env.services.find((s) => s.def.name.toLowerCase() === a.toLowerCase());
       if (!dep)
         return {
-          ok: false,
           error: `service "${def.name}" starts after "${a}", which is not started yet: start "${a}" first`,
         };
     }
@@ -891,13 +1381,12 @@ export class RunManager {
       await this.stopService(env, existing);
       env.services = env.services.filter((s) => s !== existing);
     }
-    const deadline = Date.now() + this.timing.waitMs;
+    const deadline = Date.now() + waitMs;
     for (const a of def.after) {
       const dep = env.services.find((s) => s.def.name.toLowerCase() === a.toLowerCase()) as ServiceState;
       while (dep.state === 'starting' && Date.now() < deadline) await sleep(this.timing.healthPollMs);
       if (dep.state !== 'healthy')
         return {
-          ok: false,
           error: `"${a}" is not healthy (${dep.state}${dep.lastError ? `: ${dep.lastError}` : ''}); fix it first (\`aom run logs ${a}\`)`,
         };
     }
@@ -908,6 +1397,7 @@ export class RunManager {
       restarts: 0,
       health: def.health.kind === 'none' ? 'none' : 'unknown',
       everHealthy: false,
+      sandbox: 'off',
     };
     // Ports: the default when free, else an allocated one (only when the app can be told which port to use).
     const alloc = this.portAllocator(env);
@@ -916,7 +1406,6 @@ export class RunManager {
       const got = await alloc.pick(port.default, held, !!port.envVar);
       if (!got)
         return {
-          ok: false,
           error: port.envVar
             ? `no free port in ${env.portRange.from}-${env.portRange.to} for ${def.name}:${port.name}`
             : `port ${port.default} (${def.name}:${port.name}) is already in use on this workstation and this service cannot be told another port. Give the port an environment variable (--port ${port.name}:${port.default}:ENV_VAR) if the app reads one, or stop whatever holds port ${port.default}`,
@@ -933,9 +1422,9 @@ export class RunManager {
     env.activity = `starting ${def.name}`;
     this.save(env);
     this.report(env);
-    this.spawnService(env, svc, src);
+    await this.spawnService(env, svc, src);
     await this.waitHealthy(env, svc, deadline);
-    return this.serviceAnswer(env, svc);
+    return { svc };
   }
 
   private portAllocator(env: EnvState): PortAllocator {
@@ -980,10 +1469,10 @@ export class RunManager {
     };
   }
 
-  /** The environment the child gets: the machine's, the env file, the plan's `env`, then the ports. */
+  /** What a service adds to the machine's environment: the env file, the plan's `env`, then the ports. */
   private serviceEnv(env: EnvState, svc: ServiceState): Record<string, string> {
     const rt = this.rt(env, svc.def.name);
-    const out = this.baseEnv();
+    const out: Record<string, string> = {};
     if (svc.def.envFile) {
       const vars = readEnvFile(svc.def.envFile, this.forbiddenRoots(env));
       Object.assign(out, vars);
@@ -998,7 +1487,7 @@ export class RunManager {
     return out;
   }
 
-  private spawnService(env: EnvState, svc: ServiceState, src: SourceState): void {
+  private async spawnService(env: EnvState, svc: ServiceState, src: SourceState): Promise<void> {
     const rt = this.rt(env, svc.def.name);
     const log = this.logPath(env, svc.def.name);
     const others = new Map(env.services.map((s) => [s.def.name.toLowerCase(), s]));
@@ -1012,11 +1501,15 @@ export class RunManager {
       return;
     }
     try {
-      const childEnv = this.serviceEnv(env, svc);
-      writeSync(fd, `[aom] starting ${svc.def.name}: ${formatCommandLine(argv)}\n`);
-      const child = spawn(argv[0] as string, argv.slice(1), {
+      const l = await this.launch(env, argv, this.serviceEnv(env, svc), {
+        docker: svc.def.docker,
+        service: svc.def.name,
+      });
+      svc.sandbox = l.sandbox;
+      writeSync(fd, `[aom] starting ${svc.def.name}: ${formatCommandLine(argv)}${sandboxNote(l.sandbox)}\n`);
+      const child = spawn(l.cmd, l.args, {
         cwd: resolve(src.path, svc.def.cwd),
-        env: childEnv,
+        env: l.env,
         detached: true, // setsid: its own process group, so the whole tree can be stopped and it survives the runner
         stdio: ['ignore', fd, fd],
       });
@@ -1168,8 +1661,7 @@ export class RunManager {
         const src = env.sources.find((s) => s.repoId === svc.def.repoId) as SourceState;
         rt.restartTimer = setTimeout(() => {
           if (!isLiveEnv(env) || env.state === 'stopping') return;
-          this.spawnService(env, svc, src);
-          this.changed(env);
+          void this.spawnService(env, svc, src).then(() => this.changed(env));
         }, delay);
         rt.restartTimer.unref();
         this.changed(env);
@@ -1207,28 +1699,33 @@ export class RunManager {
 
   private runStopCmd(env: EnvState, svc: ServiceState, src: SourceState): Promise<void> {
     return new Promise<void>((done) => {
-      try {
-        const c = spawn(svc.def.stopCmd?.[0] as string, (svc.def.stopCmd ?? []).slice(1), {
-          cwd: resolve(src.path, svc.def.cwd),
-          env: this.serviceEnv(env, svc),
-          stdio: 'ignore',
-          detached: true,
-        });
-        const t = setTimeout(() => {
-          if (c.pid) signalGroup(c.pid, 'SIGKILL');
+      void (async () => {
+        try {
+          const l = await this.launch(env, svc.def.stopCmd as string[], this.serviceEnv(env, svc), {
+            docker: svc.def.docker,
+          });
+          const c = spawn(l.cmd, l.args, {
+            cwd: resolve(src.path, svc.def.cwd),
+            env: l.env,
+            stdio: 'ignore',
+            detached: true,
+          });
+          const t = setTimeout(() => {
+            if (c.pid) signalGroup(c.pid, 'SIGKILL');
+            done();
+          }, 15_000);
+          c.once('exit', () => {
+            clearTimeout(t);
+            done();
+          });
+          c.once('error', () => {
+            clearTimeout(t);
+            done();
+          });
+        } catch {
           done();
-        }, 15_000);
-        c.once('exit', () => {
-          clearTimeout(t);
-          done();
-        });
-        c.once('error', () => {
-          clearTimeout(t);
-          done();
-        });
-      } catch {
-        done();
-      }
+        }
+      })();
     });
   }
 
@@ -1275,6 +1772,7 @@ export class RunManager {
     });
     const problems = validateRunPlan(plan);
     if (problems.length) return { ok: false, error: `the plan is not valid: ${problems.join('; ')}` };
+    env.plan = plan;
     env.readyAt = Date.now();
     env.notes = notes;
     env.state = 'healthy';

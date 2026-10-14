@@ -1,6 +1,7 @@
 import {
   ExtendRunRequestSchema,
   IdParamsSchema,
+  RestartRunRequestSchema,
   RunsQuerySchema,
   SetRunSettingsRequestSchema,
   StartRunRequestSchema,
@@ -12,6 +13,7 @@ import {
   getRun,
   getRunSettings,
   listRuns,
+  restartRun,
   setRunSettings,
   startRun,
   stopRun,
@@ -62,6 +64,17 @@ export function runRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         return { environment: await extendRun(ctx, s.user, req.params.id, req.body) };
+      },
+    );
+
+    app.post(
+      '/api/runs/:id/restart',
+      { schema: { params: IdParamsSchema, body: RestartRunRequestSchema } },
+      async (req, reply) => {
+        const s = await requireUser(ctx, req);
+        const environment = await restartRun(ctx, s.user, req.params.id, req.body);
+        reply.code(202);
+        return { environment };
       },
     );
 

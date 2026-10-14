@@ -37,8 +37,8 @@ export const runProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO run_plans (id, org_id, project_id, workstation_id, version, status, plan, fingerprint,
-                              devops_request_id, saved_by_agent_id, created_at)
-       VALUES ($1,$2,$3,$4,$5,'active',$6::jsonb,$7,$8,$9,$10)`,
+                              devops_request_id, saved_by_agent_id, created_at, build_hash, settings_hash)
+       VALUES ($1,$2,$3,$4,$5,'active',$6::jsonb,$7,$8,$9,$10,$11,$12)`,
       [
         p.planId,
         e.scope.orgId,
@@ -50,7 +50,13 @@ export const runProjectors: Record<string, Projector> = {
         p.requestId,
         req?.devops_agent_id ?? null,
         e.createdAt,
+        p.buildHash ?? null,
+        p.settingsHash ?? null,
       ],
     );
+  },
+  RunPlanMarkedStale: async (tx, e) => {
+    const p = (e.event as EventOf<'RunPlanMarkedStale'>).payload;
+    await exec(tx, `UPDATE run_plans SET status='stale' WHERE id=$1 AND status='active'`, [p.planId]);
   },
 };

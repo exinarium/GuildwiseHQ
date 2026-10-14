@@ -1,6 +1,7 @@
 import {
   type ExtendRunRequest,
   isLiveRunState,
+  type RestartRunRequest,
   type RunEnvironmentDto,
   RunEnvironmentResponseSchema,
   RunEnvironmentsResponseSchema,
@@ -69,6 +70,12 @@ export const useStopRun = () => useRunAction((id: string) => post(`/runs/${id}/s
 export const useExtendRun = () =>
   useRunAction((v: { id: string } & ExtendRunRequest) =>
     post(`/runs/${v.id}/extend`, v.hours ? { hours: v.hours } : {}),
+  );
+
+/** Restart (same commit) or Update & restart (`update`): also revives a manual environment stopped less than a day ago. */
+export const useRestartRun = () =>
+  useRunAction((v: { id: string } & RestartRunRequest) =>
+    post(`/runs/${v.id}/restart`, v.update ? { update: true } : {}),
   );
 
 export function useRunSettings(projectId: string | undefined) {
