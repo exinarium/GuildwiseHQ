@@ -26,6 +26,10 @@ Cards stay as drafts until you are ready to specify them. A new project goes to 
 
 Under **Architect** in the project settings the owner decides whether new cards are investigated and designed by an architect before the builder starts (off by default), whether the latest main branch is merged first (on by default), and where the architect's reports go (a folder in the repository, or the knowledge vault). See [The architect](/help/architect).
 
+## Commit as {#commit-as}
+
+Commits made for a project carry your name, never an agent's. Under **Commit as** in the project settings the Owner (or an organization Owner or Admin) can set the name and e-mail. Empty: the repository's git setting is used, then the workstation's global one. With none of the three, nothing is committed and the desk tells you.
+
 ## Reference repositories {#reference-repos}
 
 By default an agent only sees the folder of the card it is working on (and, in a chat about a project, the project's own repositories). To let a project's agents **read** other code, for example to compare two repositories or look up how a library is used, the project owner adds **Reference repositories** in the project settings:

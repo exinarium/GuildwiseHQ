@@ -8,7 +8,7 @@ import {
   type VaultWriteCommand,
 } from '@aom/shared';
 import { git, gitOk } from '../git/git.ts';
-import { identityEnv, type VaultIdentity } from './sync.ts';
+import { type VaultIdentity, vaultCommitEnv } from './sync.ts';
 
 export class VaultWriteError extends Error {}
 
@@ -69,7 +69,7 @@ export async function writeVaultFile(
   }
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, next);
-  const env = identityEnv(identity);
+  const env = await vaultCommitEnv(dir);
   await gitOk(dir, ['add', '--', cmd.path], { env });
   const staged = await git(dir, ['diff', '--cached', '--quiet', '--', cmd.path], { env });
   if (staged.exitCode === 0) return { written: true, committed: false };
@@ -156,7 +156,7 @@ export async function moveVaultFolder(
       moved = true;
     } else moved = await mergeInto(src, dst, '', conflicts);
   }
-  const env = identityEnv(identity);
+  const env = await vaultCommitEnv(dir);
   // Stage both sides (the deletions of `from` and the files of `to`), then commit what changed, if anything. A side that
   // is neither on disk nor tracked has nothing to stage (git refuses such a pathspec).
   const known: string[] = [];

@@ -11,6 +11,8 @@ import {
   isSuiteOrigin,
   isValidReportPath,
   type LedgerMatch,
+  NO_COMMIT_IDENTITY_CODE,
+  NO_COMMIT_IDENTITY_MESSAGE,
   outcomeDataSchema,
   type RunnerToServerOf,
   requiredMissing,
@@ -713,6 +715,43 @@ function mainBranchUnsetNotice(card: Row, from: string): AppendInput {
   };
 }
 
+/** One open alert per workstation and project when the runner refuses to commit for lack of an identity (backlog #65). */
+async function noCommitIdentityNotice(tx: Tx, ws: WsRef, card: Row): Promise<AppendInput[]> {
+  const w = await one<{ name: string }>(tx, 'SELECT name FROM workstations WHERE id=$1', [ws.id]);
+  const title = `Nothing can be committed on ${w?.name ?? 'a workstation'}: no commit identity is set`;
+  const open = await one(
+    tx,
+    `SELECT id FROM desk_items WHERE project_id=$1 AND subkind=$2 AND status='open' AND title=$3`,
+    [card.project_id, DESK_SUBKIND.noCommitIdentity, title],
+  );
+  if (open) return [];
+  const deskItemId = randomUUID();
+  return [
+    {
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemCreated',
+        payload: {
+          deskItemId,
+          kind: 'alert',
+          subkind: DESK_SUBKIND.noCommitIdentity,
+          title,
+          body: NO_COMMIT_IDENTITY_MESSAGE,
+          options: [],
+          blocking: false,
+          pinned: false,
+          cardId: card.id,
+          projectId: card.project_id,
+          affectedCardIds: [],
+          askedBy: { kind: 'system' },
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(card.org_id, card.project_id),
+    },
+  ];
+}
+
 export async function applyShiftRejected(
   ctx: Ctx,
   tx: Tx,
@@ -765,8 +804,12 @@ export async function applyShiftRejected(
   } else if (['repo_missing', 'worktree_failed', 'runtime_unavailable', 'internal'].includes(msg.reason)) {
     rejection = { reason: msg.reason, detail: msg.detail ?? msg.reason.replaceAll('_', ' ') };
   }
-  const text =
-    msg.reason === 'auth_expired'
+  const noIdentity =
+    msg.reason === 'internal' && (msg.detail ?? '').startsWith(`${NO_COMMIT_IDENTITY_CODE}:`);
+  if (noIdentity) extra.push(...(await noCommitIdentityNotice(tx, ws, card)));
+  const text = noIdentity
+    ? NO_COMMIT_IDENTITY_MESSAGE
+    : msg.reason === 'auth_expired'
       ? 'The Claude login on this workstation has expired, so the shift could not run. The card is back in the queue without penalty and resumes once the login works again.'
       : `Shift rejected by the runner (${msg.reason}${msg.detail ? `: ${msg.detail}` : ''}); the card is back in the queue.`;
   await ctx.store.append(

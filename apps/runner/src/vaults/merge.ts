@@ -3,7 +3,7 @@ import { copyFile, mkdir, readdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { isSafeVaultPath, normalizeRemoteUrl, type VaultMergeCommand } from '@aom/shared';
 import { git, gitOk } from '../git/git.ts';
-import { identityEnv, type VaultIdentity } from './sync.ts';
+import { type VaultIdentity, vaultCommitEnv } from './sync.ts';
 import { VaultWriteError } from './write.ts';
 
 export interface VaultMergeResult {
@@ -90,7 +90,7 @@ export async function mergeVaultInto(
     await copyFile(from, to);
     copied++;
   }
-  const env = identityEnv(identity);
+  const env = await vaultCommitEnv(dir);
   // Stage what the merge owns (the folder and the lifted folders); a side that is neither on disk nor tracked has nothing to stage.
   const known: string[] = [];
   for (const p of [into, ...lift]) {

@@ -65,6 +65,7 @@ import {
 } from '../git/architect-git.ts';
 import { computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, originBranchNames } from '../git/git.ts';
+import { NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
 import {
   abortMerge,
   mergeInProgress,
@@ -195,6 +196,13 @@ interface ReportVerdict {
   matches?: LedgerMatch[];
 }
 
+/** The tracker ticket key the card came from (`DCPL-4276`), the only reference that may appear in a commit message. */
+const TICKET_KEY = /^[A-Za-z][A-Za-z0-9]*-\d+$/;
+const ticketOf = (msg: ShiftStartMsg): string | null => {
+  const k = msg.brief.card.fields.externalRef;
+  return typeof k === 'string' && TICKET_KEY.test(k.trim()) ? k.trim() : null;
+};
+
 interface ActiveShift {
   msg: ShiftStartMsg;
   startedAt: Date;
@@ -228,6 +236,8 @@ interface ActiveShift {
   resumed?: boolean;
   startedSent?: boolean;
   sandbox?: Sandbox;
+  /** The commit identity resolved for this shift (project setting, repository, workstation); null when none is set. */
+  identity?: { name: string; email: string; source: string } | null;
   /** What the "merge latest main first" step did (reported with `shift.started`). */
   syncMain?: { result: NonNullable<ShiftStartedSyncMain['result']>; commit?: string; files?: string[] };
   /** `origin/<main>` SHAs merged into the card branch this shift: the guard exempts what those merges brought in. */
@@ -514,7 +524,17 @@ export class ShiftSupervisor {
       return;
     }
 
-    const sandbox = await ensureSandbox(paths, msg.agent.agentId, msg.agent.name);
+    // Every commit of this shift (the agent's, the runner's leftovers commit, merges) carries one identity: the project's
+    // "Commit as", else the clone's git config, else the workstation's (backlog #65). With none set a shift that works in
+    // a repository is refused, there is no fallback to an agent or product name.
+    const identityRepo = msg.worktree ? await this.deps.findRepo(msg.worktree.remoteUrlNormalized) : null;
+    const identity = await resolveCommitIdentity(identityRepo?.localPath ?? paths.root, msg.commitAs);
+    if (identityRepo && !identity) {
+      this.reject(msg.shiftId, 'internal', NO_IDENTITY_WIRE);
+      return;
+    }
+    s.identity = identity;
+    const sandbox = await ensureSandbox(paths, msg.agent.agentId, msg.agent.name, identity);
     s.sandbox = sandbox;
     let cwd = sandbox.scratch;
 
@@ -533,6 +553,7 @@ export class ShiftSupervisor {
           ...(msg.prepare.syncMain.mainBranch ? { mainBranch: msg.prepare.syncMain.mainBranch } : {}),
           workingBranch: msg.prepare.syncMain.workingBranch,
           ref: msg.brief.card.ref,
+          commitAs: msg.commitAs ?? null,
           integrationDir: paths.integration,
           ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
         }).catch((err) => {
@@ -559,7 +580,8 @@ export class ShiftSupervisor {
               }
             : {}),
         });
-        if (msg.prepare.rebase && !s.resumed) await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch);
+        if (msg.prepare.rebase && !s.resumed)
+          await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch, msg.commitAs ?? null);
         if (sync && s.worktree.created) await this.finishMainSync(s, sync);
         else await this.resumeMainMerge(s);
       } catch (err) {
@@ -680,7 +702,7 @@ export class ShiftSupervisor {
     await adapter.writeInstructions(sandbox, texts.instructions);
     s.token = this.deps.ipc.registerShift(this.handlerFor(s));
     s.env = {
-      ...sandboxEnv(sandbox, undefined, tc?.env),
+      ...sandboxEnv(sandbox, undefined, tc?.env, identity),
       AOM_IPC_URL: this.deps.ipc.url,
       ...(this.deps.ipc.socketPath ? { AOM_IPC_SOCKET: this.deps.ipc.socketPath } : {}),
       AOM_SHIFT_TOKEN: s.token,
@@ -815,9 +837,7 @@ export class ShiftSupervisor {
       const leftovers = unreported ? await uncommittedFiles(s.worktree.path) : [];
       const committed = await autoCommit({
         worktree: s.worktree.path,
-        ref: msg.brief.card.ref,
-        stage: msg.brief.shift.stage,
-        shiftId: msg.shiftId,
+        ticket: ticketOf(msg),
         env: s.env,
       });
       if (leftovers.length > 0) {
@@ -1103,6 +1123,7 @@ export class ShiftSupervisor {
     const r = await mergeMainIntoCard(wt, {
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
+      commitAs: msg.commitAs ?? null,
       ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
     });
     if ('error' in r) {
@@ -1267,7 +1288,7 @@ export class ShiftSupervisor {
         path: vaultPath,
         mode: 'replace',
         content: text,
-        commitMessage: `aom: investigation ${msg.brief.card.ref} ${msg.brief.card.title}`.slice(0, 120),
+        commitMessage: `Investigation: ${msg.brief.card.title}`.slice(0, 120),
         push: true,
       });
     } catch (err) {
@@ -1327,7 +1348,7 @@ export class ShiftSupervisor {
             path: p,
             mode: 'replace',
             content: renderTranscriptFile(result, s.startedAt),
-            commitMessage: `aom: transcript ${msg.brief.card.ref} ${result.title ?? url}`.slice(0, 120),
+            commitMessage: `Transcript: ${result.title ?? url}`.slice(0, 120),
             push: true,
           });
           path = p;
@@ -1401,7 +1422,7 @@ export class ShiftSupervisor {
         path: prepared.path,
         mode: 'create',
         content: prepared.content,
-        commitMessage: `aom: research ${msg.brief.card.ref} ${prepared.publication.title}`.slice(0, 120),
+        commitMessage: `Research: ${prepared.publication.title}`.slice(0, 120),
         push: true,
       });
       this.addProgress(
@@ -1518,9 +1539,7 @@ export class ShiftSupervisor {
           if (msg.agent.permissions.mayCommit) {
             await autoCommit({
               worktree: s.worktree.path,
-              ref: msg.brief.card.ref,
-              stage: msg.brief.shift.stage,
-              shiftId: msg.shiftId,
+              ticket: ticketOf(msg),
               env: s.env,
             });
           }
@@ -1532,9 +1551,7 @@ export class ShiftSupervisor {
           if (msg.agent.permissions.mayCommit) {
             await autoCommit({
               worktree: s.worktree.path,
-              ref: msg.brief.card.ref,
-              stage: msg.brief.shift.stage,
-              shiftId: msg.shiftId,
+              ticket: ticketOf(msg),
               env: s.env,
             });
           }

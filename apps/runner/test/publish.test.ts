@@ -197,7 +197,7 @@ describe('aom publish through the runner (scripted checker)', () => {
       'https://example.test/research/1',
     ]);
     expect(note).toContain('Short answer: yes');
-    expect(originLog(vault)[0]).toMatch(/^Atlas \(aom\)\|aom: research SHOOT-1 Is 6mm ARC enough for deer\?/);
+    expect(originLog(vault)[0]).toMatch(/^Workstation Owner\|Research: Is 6mm ARC enough for deer\?/);
   }, 120_000);
 
   it('a checker with no vault cannot publish', async () => {
@@ -346,7 +346,7 @@ describe('mock researcher and checker through the real aom CLI', () => {
       .map((i) => i.text)
       .join('\n');
     expect(log).toMatch(/publishing without citations was refused.*No citations, no publication/s);
-    expect(originLog(vault)[0]).toContain('aom: research SHOOT-1');
+    expect(originLog(vault)[0]).toContain('Research: ');
   }, 120_000);
 
   it('checker: a draft with an unsupported claim goes back as unsupported and nothing is written', async () => {

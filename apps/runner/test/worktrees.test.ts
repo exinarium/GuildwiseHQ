@@ -318,7 +318,14 @@ describe('repo scan', () => {
     mkdirSync(join(repo.scanRoot, 'node_modules', 'x'), { recursive: true });
     sh(join(repo.scanRoot, 'node_modules'), 'git', ['clone', repo.origin, 'x/inner']);
     const found = await scanRepos([repo.scanRoot, '/definitely/not/there']);
-    expect(found).toEqual([{ remoteUrl: repo.origin, localPath: repo.clone, headBranch: 'main' }]);
+    expect(found).toEqual([
+      {
+        remoteUrl: repo.origin,
+        localPath: repo.clone,
+        headBranch: 'main',
+        identity: { name: 'Workstation Owner', email: 'owner@example.test', source: 'global' },
+      },
+    ]);
   });
 });
 

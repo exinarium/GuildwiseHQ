@@ -2,8 +2,9 @@ import { join } from 'node:path';
 import { type FinalizeExecutePayload, type FinalizeResult, isSafeGitRef } from '@aom/shared';
 import type { BranchRules } from '../forge/types.ts';
 import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
-import { git, gitOk, hasRemote, repoIdentity, revParse } from './git.ts';
-import { identityEnv, withIntegrationWorktree } from './integration.ts';
+import { git, gitOk, hasRemote, revParse } from './git.ts';
+import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import { withIntegrationWorktree } from './integration.ts';
 import { baseTarget, RebaseConflictError, rebaseOntoBase } from './rebase.ts';
 import { withRepoLock } from './repo-lock.ts';
 import { ensureWorktree } from './worktrees.ts';
@@ -34,11 +35,19 @@ export interface CompletionInput {
     branch: string,
     forge?: FinalizeExecutePayload['forge'],
   ) => Promise<BranchRules | null>;
-  /** Identity for the merge commit (the runner has no agent behind it). */
-  identity?: { name: string; email: string };
 }
 
-const IDENTITY = { name: 'Guildwise HQ (aom)', email: 'aom@runner.aom.invalid' };
+/**
+ * What clients see of a card in a commit or a pull request: the tracker ticket key when the card came from a ticket
+ * (`DCPL-4276`), else just the title. Never the card ref (`P4-12`): internal references are not shown outside.
+ */
+const outsideTicket = (p: FinalizeExecutePayload): string | null =>
+  p.ticket && p.ticket !== p.ref ? p.ticket : null;
+const changeTitle = (p: FinalizeExecutePayload): string => {
+  const t = outsideTicket(p);
+  return t ? `${t}: ${p.title}` : p.title;
+};
+const mergeMessage = (p: FinalizeExecutePayload): string => `Merge ${changeTitle(p)}`;
 
 const fail = (action: FinalizeResult['action'], error: string): FinalizeResult => ({
   ok: false,
@@ -95,14 +104,19 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
   if (dirty) return fail(action, `the card worktree has uncommitted changes:\n${dirty.slice(0, 500)}`);
 
   try {
-    await rebaseOntoBase(wt, p.baseBranch);
+    await rebaseOntoBase(wt, p.baseBranch, p.commitAs);
   } catch (err) {
     if (err instanceof RebaseConflictError)
       return { ok: false, action, conflict: true, conflictedFiles: err.conflictedFiles, error: err.message };
+    if (err instanceof NoCommitIdentityError) return fail(action, err.message);
     return fail(action, `rebase failed: ${errMsg(err)}`);
   }
 
-  if (action === 'merge') return merge(input, wt);
+  if (action === 'merge')
+    return merge(input, wt).catch((err) => {
+      if (err instanceof NoCommitIdentityError) return fail(action, err.message);
+      throw err;
+    });
   const remote = await hasRemote(wt);
   if (!remote) return fail(action, 'cannot open a PR: the repository has no origin remote');
   // A pull request goes out under <prefix>/<ticket>.
@@ -115,7 +129,7 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
       cwd: wt,
       base: p.baseBranch,
       branch: head,
-      title: p.prTitle ?? `${p.ref}: ${p.title}`,
+      title: p.prTitle ?? changeTitle(p),
       body: p.prBody ?? p.title,
       forge: p.forge ?? null,
     });
@@ -194,17 +208,13 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
   if (merged.exitCode === 0)
     return { ok: true, action: 'merge', mergeCommit: (await revParse(repoPath, startPoint)) ?? undefined };
 
-  const env = identityEnv(input.identity ?? (await repoIdentity(repoPath, IDENTITY)));
+  const env = commitEnv(await requireCommitIdentity(repoPath, p.commitAs));
   const integration = join(input.integrationDir, p.ref);
   const tempBranch = `aom-integration/${p.ref.toLowerCase()}`;
   const result = await withIntegrationWorktree(
     { repoPath, dir: integration, root: input.integrationDir, tempBranch, startPoint },
     async (): Promise<FinalizeResult> => {
-      const m = await git(
-        integration,
-        ['merge', '--no-ff', '-m', `Merge ${p.ref}: ${p.title}`, p.branchName],
-        { env },
-      );
+      const m = await git(integration, ['merge', '--no-ff', '-m', mergeMessage(p), p.branchName], { env });
       if (m.exitCode !== 0) {
         const files = (await git(integration, ['diff', '--name-only', '--diff-filter=U'])).stdout
           .split('\n')
@@ -261,7 +271,7 @@ async function viaChange(
       cwd: wt,
       base,
       branch: head,
-      title: p.prTitle ?? `${p.ref}: ${p.title}`,
+      title: p.prTitle ?? changeTitle(p),
       body: p.prBody ?? p.title,
       forge: p.forge ?? null,
     });

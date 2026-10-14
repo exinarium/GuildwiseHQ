@@ -192,16 +192,3 @@ export async function gitVersion(): Promise<{ raw: string; major: number; minor:
     return null;
   }
 }
-
-/**
- * The git identity configured in this repository (`user.name` / `user.email`, local, global or system), so commits the
- * runner makes itself carry the owner's name and leave no trace of the product. `fallback` only when none is set.
- */
-export async function repoIdentity(
-  cwd: string,
-  fallback: { name: string; email: string },
-): Promise<{ name: string; email: string }> {
-  const name = (await git(cwd, ['config', 'user.name'])).stdout.trim();
-  const email = (await git(cwd, ['config', 'user.email'])).stdout.trim();
-  return { name: name || fallback.name, email: email || fallback.email };
-}

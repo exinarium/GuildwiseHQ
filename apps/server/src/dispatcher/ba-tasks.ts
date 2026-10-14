@@ -7,6 +7,7 @@ import {
   streamId,
 } from '@aom/shared';
 import { endBaTaskShift, runBaTaskFallback } from '../commands/ba-tasks.ts';
+import { withCommitAs } from '../commands/commit-as.ts';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { budgetPausedSql } from '../costs/index.ts';
@@ -126,8 +127,9 @@ export async function baTaskPass(
       busy.add(a.id);
       if (!ok) continue;
       started.push({ taskId: t.id, shiftId, agentId: a.id, workstationId: a.ws_id });
-      const payload = await buildBaTaskShiftStart(ctx, t.id, shiftId);
-      if (payload) ctx.services.runners.send(a.ws_id, 'shift.start', payload, ctx.clock.now());
+      const built = await buildBaTaskShiftStart(ctx, t.id, shiftId);
+      if (built)
+        ctx.services.runners.send(a.ws_id, 'shift.start', await withCommitAs(ctx, built), ctx.clock.now());
       break;
     }
   }

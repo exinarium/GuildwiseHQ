@@ -19,6 +19,7 @@ import { conflict } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { loadManageable } from './cards.ts';
+import { loadCommitAs } from './commit-as.ts';
 import { cardMessage, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { effectiveCompletionAction } from './completion.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
@@ -88,9 +89,11 @@ export async function queueExecute(tx: Tx, card: Row, action: CompletionAction):
       ? { remoteBranch: earlier.pushedBranch }
       : {}),
     worktreePath: card.worktree_path ?? null,
-    prTitle: `${card.ref}: ${card.title}`,
-    prBody: `${card.title}\n\nCard ${card.ref}.`,
+    // What clients read (backlog #65): the ticket key when the card came from a ticket, a plain title, no card ref.
+    prTitle: ticket !== card.ref ? `${ticket}: ${card.title}` : card.title,
+    prBody: card.title,
     ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
+    commitAs: await loadCommitAs(tx, project.id),
   };
   await enqueueRunnerCommand(tx, card.home_workstation_id, 'finalize.execute', payload as never);
   return card.home_workstation_id;

@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { withCommitAs } from '../commands/commit-as.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { DISPATCH_LOCK_ID } from '../db/tx.ts';
@@ -280,8 +281,9 @@ export class Dispatcher {
   }
 
   async sendShiftStart(c: ClaimResult): Promise<boolean> {
-    const payload = await buildShiftStart(this.ctx, c);
-    if (!payload) return false;
+    const built = await buildShiftStart(this.ctx, c);
+    if (!built) return false;
+    const payload = await withCommitAs(this.ctx, built);
     const sent = this.ctx.services.runners.send(
       c.workstationId,
       'shift.start',

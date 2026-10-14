@@ -4,6 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
+    setupFiles: ['test/setup-git.ts'],
     testTimeout: 30_000,
     // The fixtures use bare repos on disk as remotes; production refuses local remotes.
     env: { AOM_ALLOW_LOCAL_REMOTES: '1' },

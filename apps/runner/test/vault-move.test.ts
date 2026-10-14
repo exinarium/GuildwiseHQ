@@ -14,7 +14,7 @@ const cmd = (over: Partial<VaultMoveCommand> = {}): VaultMoveCommand =>
     vaultId: 'v1',
     from: 'projects/news',
     to: 'interests/news',
-    commitMessage: 'aom: move projects/news to interests/news',
+    commitMessage: 'Move projects/news to interests/news',
     ...over,
   });
 
@@ -43,7 +43,7 @@ describe('moveVaultFolder (vault.move, docs/design/restructure.md owner decision
     );
     expect(readFileSync(join(v.mine, 'projects/other/keep.md'), 'utf8')).toBe('stays\n');
     expect(sh(v.mine, 'git', ['log', '-1', '--format=%an|%s'])).toBe(
-      'Atlas (aom)|aom: move projects/news to interests/news',
+      'Workstation Owner|Move projects/news to interests/news',
     );
     expect(sh(v.mine, 'git', ['status', '--porcelain'])).toBe('');
     // git sees renames, so `git log --follow` keeps the history

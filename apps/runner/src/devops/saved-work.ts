@@ -1,8 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type HygieneRepoResult, looksLikeSecret } from '@aom/shared';
-import { git, repoIdentity } from '../git/git.ts';
+import { type HygieneRepoResult, looksLikeSecret, NO_COMMIT_IDENTITY_MESSAGE } from '@aom/shared';
+import { git } from '../git/git.ts';
+import { commitEnv, resolveCommitIdentity } from '../git/identity.ts';
 
 type Saved = NonNullable<HygieneRepoResult['savedWork']>;
 
@@ -16,16 +17,10 @@ type Saved = NonNullable<HygieneRepoResult['savedWork']>;
 /** Marks the stash entries hygiene made: "saved work 2026-10-13T10:00:00.000Z: ...". */
 export const SAVED_WORK_RE = /saved work \d{4}-\d{2}-\d{2}T/;
 
-const FALLBACK = { name: 'Repository hygiene', email: 'hygiene@localhost.invalid' };
-
-async function identityEnv(cwd: string): Promise<Record<string, string>> {
-  const id = await repoIdentity(cwd, FALLBACK);
-  return {
-    GIT_AUTHOR_NAME: id.name,
-    GIT_AUTHOR_EMAIL: id.email,
-    GIT_COMMITTER_NAME: id.name,
-    GIT_COMMITTER_EMAIL: id.email,
-  };
+/** The resolved commit identity (backlog #65); null when none is set anywhere: nothing is saved then. */
+async function identityEnv(cwd: string): Promise<Record<string, string> | null> {
+  const id = await resolveCommitIdentity(cwd);
+  return id ? commitEnv(id) : null;
 }
 
 /** The stash entries as `{ sha, subject }`, newest first. */
@@ -57,6 +52,7 @@ export async function stashCommits(
   opts: { log?: (cmd: string) => void } = {},
 ): Promise<{ ok: boolean; error?: string }> {
   const env = await identityEnv(cwd);
+  if (!env) return { ok: false, error: NO_COMMIT_IDENTITY_MESSAGE };
   const tree = (await git(cwd, ['rev-parse', `${tip}^{tree}`])).stdout.trim();
   if (!tree) return { ok: false, error: 'could not read the commits to keep' };
   const i = await git(cwd, ['commit-tree', tree, '-p', tip, '-m', 'index on saved work'], { env });
@@ -204,8 +200,9 @@ export async function saveUncommittedWork(
   );
   const untracked = files.filter((f) => untrackedAll.has(f));
   const tracked = files.filter((f) => !untrackedAll.has(f));
-  const dir = await mkdtemp(join(tmpdir(), 'saved-'));
   const ident = await identityEnv(cwd);
+  if (!ident) return { saved: null, error: NO_COMMIT_IDENTITY_MESSAGE };
+  const dir = await mkdtemp(join(tmpdir(), 'saved-'));
   const env = { GIT_INDEX_FILE: join(dir, 'index'), ...ident };
   const envU = { GIT_INDEX_FILE: join(dir, 'index-untracked'), ...ident };
   try {
@@ -255,16 +252,11 @@ export async function saveUncommittedWork(
     const uCommit = uTree ? await commit(uTree, [], `untracked files on ${branchName}: ${headLine}`) : '';
     const wCommit =
       iCommit &&
-      (await commit(
-        wTree,
-        [head, iCommit, ...(uCommit ? [uCommit] : [])],
-        `On ${branchName}: ${message}`,
-      ));
+      (await commit(wTree, [head, iCommit, ...(uCommit ? [uCommit] : [])], `On ${branchName}: ${message}`));
     if (!wCommit || (uTree && !uCommit)) return { saved: null, error: 'git commit-tree failed' };
     opts.log?.(`git -C ${cwd} stash store -m "${message}" ${wCommit.slice(0, 7)}`);
     const store = await git(cwd, ['stash', 'store', '-m', message, wCommit], { env: ident });
-    if (store.exitCode !== 0)
-      return { saved: null, error: store.stderr.trim() || 'git stash store failed' };
+    if (store.exitCode !== 0) return { saved: null, error: store.stderr.trim() || 'git stash store failed' };
     return { saved: { branch: '', stash: message, files, skipped, pushed: false } };
   } finally {
     await rm(dir, { recursive: true, force: true });

@@ -593,7 +593,7 @@ async function migrateFeedProject(tx: Queryable, c: OrgCtx, p: Row): Promise<voi
       1,
       renderInterestDoc({ ...body, agents: {} }),
       '',
-      `aom: interest ${s.name}`.slice(0, 100),
+      `interest ${s.name}`.slice(0, 100),
     );
     if (dedup.length > 0 || seedVersion > 0)
       fileWrite(
@@ -605,7 +605,7 @@ async function migrateFeedProject(tx: Queryable, c: OrgCtx, p: Row): Promise<voi
         seedVersion + 1,
         renderTasteSeedSection(dedup.map((text) => ({ text, interestId: null }))),
         TASTE_HEADER,
-        `aom: taste rules v${seedVersion + 1}`,
+        `taste rules v${seedVersion + 1}`,
       );
     if (n > 0) {
       const rated = await rows(
@@ -637,7 +637,7 @@ async function migrateFeedProject(tx: Queryable, c: OrgCtx, p: Row): Promise<voi
             ),
           ].join('\n'),
           TASTE_HEADER,
-          'aom: imported ratings',
+          'imported ratings',
         );
     }
   }
@@ -913,7 +913,7 @@ export async function migrateRestructure(
               vaultId: m.row.id,
               from: m.from,
               to: m.to,
-              commitMessage: `aom: move ${m.from} to ${m.to}`,
+              commitMessage: `move ${m.from} to ${m.to}`,
               push: true,
             });
           }

@@ -18,7 +18,6 @@ const GIT_ENV: Record<string, string> = {
   GIT_AUTHOR_EMAIL: 'test@example.test',
   GIT_COMMITTER_NAME: 'Test',
   GIT_COMMITTER_EMAIL: 'test@example.test',
-  GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_CONFIG_NOSYSTEM: '1',
 };
 beforeAll(() => {

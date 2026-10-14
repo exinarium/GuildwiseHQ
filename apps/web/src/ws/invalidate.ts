@@ -115,6 +115,7 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['card'],
         // run settings and saved run plans (ProjectRunSettingsSet, RunPlanSaved)
         ['run-settings'],
+        ['commit-as'],
         // deploy targets and the default follow-ups live on the project stream
         ['deploy-targets'],
         ['followup-defaults'],

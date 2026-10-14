@@ -1,8 +1,9 @@
 import { basename, join } from 'node:path';
-import { isSafeGitRef } from '@aom/shared';
+import { type CommitAs, isSafeGitRef } from '@aom/shared';
 import { isProtectedBranchRejection } from './gh.ts';
-import { ambiguousMainMessage, git, gitOk, hasRemote, repoIdentity, resolveDefaultBranch, revParse } from './git.ts';
-import { identityEnv, RUNNER_IDENTITY, withIntegrationWorktree } from './integration.ts';
+import { ambiguousMainMessage, git, gitOk, hasRemote, resolveDefaultBranch, revParse } from './git.ts';
+import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import { withIntegrationWorktree } from './integration.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
@@ -24,7 +25,8 @@ export interface SyncMainInput {
   /** The runner's integration directory (a throwaway worktree is made below it). */
   integrationDir: string;
   auth?: GitAuth;
-  identity?: { name: string; email: string };
+  /** The project's "Commit as" setting; absent: the repository's or the workstation's git identity. */
+  commitAs?: CommitAs | null;
 }
 
 export type SyncMainOutcome =
@@ -66,7 +68,7 @@ export async function syncMainIntoWorking(input: SyncMainInput): Promise<SyncMai
     // Unset: the remote's own default (never a guess between main and master; with two candidates nothing is merged).
     const main = input.mainBranch ?? (await resolveDefaultBranch(repoPath, { auth: input.auth })).branch;
     if (!main || main === working || !isSafeGitRef(main)) return { kind: 'nothing' };
-    const env = identityEnv(input.identity ?? (await repoIdentity(repoPath, RUNNER_IDENTITY)));
+    const env = commitEnv(await requireCommitIdentity(repoPath, input.commitAs));
     const message = `Merge ${main} into ${working}`;
 
     const attempt = async (): Promise<SyncMainOutcome | 'retry'> => {
@@ -118,7 +120,8 @@ export async function syncMainIntoWorking(input: SyncMainInput): Promise<SyncMai
       if (second !== 'retry') return second;
       const mainSha = (await revParse(repoPath, `refs/remotes/origin/${main}`)) ?? '';
       return { kind: 'needs_card_merge', reason: 'push_failed', files: [], main: mainSha };
-    } catch {
+    } catch (err) {
+      if (err instanceof NoCommitIdentityError) throw err;
       return { kind: 'nothing' };
     }
   });
@@ -136,7 +139,7 @@ export type CardMergeOutcome =
  */
 export async function mergeMainIntoCard(
   worktree: string,
-  opts: { mainBranch?: string; ref: string; identity?: { name: string; email: string }; auth?: GitAuth },
+  opts: { mainBranch?: string; ref: string; commitAs?: CommitAs | null; auth?: GitAuth },
 ): Promise<CardMergeOutcome | { error: string }> {
   let main = opts.mainBranch;
   if (!main) {
@@ -152,13 +155,9 @@ export async function mergeMainIntoCard(
   if (!mainSha) return { error: `the main branch '${main}' does not exist in this repository` };
   if ((await git(worktree, ['merge-base', '--is-ancestor', target, 'HEAD'])).exitCode === 0)
     return { result: 'up_to_date', main: mainSha };
-  const m = await git(
-    worktree,
-    ['merge', '--no-ff', '-m', `Merge ${main} into the card branch`, target],
-    {
-      env: identityEnv(opts.identity ?? (await repoIdentity(worktree, RUNNER_IDENTITY))),
-    },
-  );
+  const m = await git(worktree, ['merge', '--no-ff', '-m', `Merge ${main} into the card branch`, target], {
+    env: commitEnv(await requireCommitIdentity(worktree, opts.commitAs)),
+  });
   if (m.exitCode === 0)
     return {
       result: 'merged_into_card',

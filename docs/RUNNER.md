@@ -324,7 +324,7 @@ status.json                     updated by start (process state, connection stat
 outbox/                         pending messages (persisted, retried on reconnect)
 agents/
   <agentId>/
-    home/                       HOME for the agent (contains git .gitconfig identity)
+    home/                       HOME for the agent (contains the .gitconfig with the commit identity)
     claude/                     CLAUDE_CONFIG_DIR (credentials, memory, cache)
     scratch/                    working directory for the agent's own files
 cache/                          package caches shared by all agents of this runner (nuget, npm, pnpm, pip, gradle, maven, ...)
@@ -696,7 +696,7 @@ allow-list (`PATH`, `LANG`/`LC_*`, `TERM`, `TZ`, proxy and CA variables such as 
 few variables Windows needs to start a process) plus:
 - `HOME=~/.aom-runner/agents/<agentId>/home`
 - `CLAUDE_CONFIG_DIR=~/.aom-runner/agents/<agentId>/claude`
-- `GIT_CONFIG_GLOBAL=~/.aom-runner/agents/<agentId>/home/.gitconfig` (with agent name and email)
+- `GIT_CONFIG_GLOBAL=~/.aom-runner/agents/<agentId>/home/.gitconfig` (with the commit identity of the shift, see "Commit identity"; never the agent's name)
 - `AOM_IPC_URL=http://127.0.0.1:<ephemeral>` and `AOM_IPC_SOCKET=<private unix socket>` (for the `aom` CLI; the CLI
   prefers the socket, because the sandbox has no route to loopback TCP)
 - `AOM_SHIFT_TOKEN=<per-shift-token>` (ephemeral, valid only during the shift)
@@ -773,7 +773,7 @@ See [DevOps shifts are unsandboxed](#devops-shifts-are-unsandboxed).
 
 ### Per-agent directories
 
-- `agents/<agentId>/home/`: HOME directory with `.gitconfig` identity (name and email)
+- `agents/<agentId>/home/`: HOME directory with a `.gitconfig` that holds the commit identity of the current shift (see "Commit identity")
 - `agents/<agentId>/claude/`: CLAUDE_CONFIG_DIR for Claude Code (credentials, auto-memory, caches)
 - `agents/<agentId>/scratch/`: working directory for agent's scratch files
 
@@ -891,6 +891,29 @@ toolchains** with the source ("detected", "added by DevOps on <date>") and, for 
 registered (`toolchain.remove` command). Verified in the real bubblewrap sandbox with `/home` hidden: net8.0 and
 net10.0 projects build and run from `~/.dotnet` although `/usr/local/bin/dotnet` (SDK 8 only) is first on PATH
 (`test/sandbox-dotnet-roots.test.ts`, skipped without bwrap or dotnet).
+
+### Commit identity
+
+Every commit the runner or an agent makes carries the owner's own name, so the work reads as the owner's (backlog #65).
+One resolver (`src/git/identity.ts`) picks the identity, in this order:
+
+1. the project setting **Commit as** (name and e-mail, Project settings; arrives as `commitAs` in `shift.start`,
+   `finalize.execute` and `repo.create`),
+2. the clone's repository-level `git config user.name` / `user.email` (a card worktree shares the clone's config),
+3. the workstation user's global git config, then the system one, as the runner's OS user sees it,
+4. none: the runner refuses to commit. A shift that works in a repository is rejected (`internal`, detail
+   `no_commit_identity: ...`); the card gets a note and the desk one alert per workstation and project; a finalize returns
+   the same message. It names the three places to set the identity. There is no fallback to an agent or product name.
+
+Name and e-mail come from the same level (a level with only one of them is skipped). The identity is used as author and
+committer by: the agent sandbox (its `.gitconfig` and `GIT_AUTHOR_*` / `GIT_COMMITTER_*`, so an agent commits as the owner
+whatever it types), the shift-end leftovers commit, finalize merges, the merge of main into the working branch and the card
+branch, rebases, saved-work stashes, the first commit of `repo.create`, and the knowledge vault clones (vaults have no
+project: steps 2 and 3 only). Messages are plain: `[<ticket>: ]Work in progress`, `[<ticket>: ]<title>` for merges and
+pull requests, `Update notes <time>` for vault syncs; the ticket is the tracker key the card came from, never a card ref.
+The runner reports the identity each clone would use (`identity: {name, email, source}`) in `hello` and `repos.report`; the
+web app shows it in Project settings. Tests set `GIT_CONFIG_GLOBAL` to a temporary file (`test/setup-git.ts`); nothing reads
+the real `~/.gitconfig`.
 
 ### Git worktrees
 

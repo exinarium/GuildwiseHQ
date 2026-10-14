@@ -4,6 +4,7 @@ import { blogProjectors } from './blog.ts';
 import { cardProjectors } from './cards.ts';
 import { catalogueProjectors } from './catalogue.ts';
 import { chatProjectors } from './chats.ts';
+import { commitAsProjectors } from './commit-as.ts';
 import { costProjectors } from './costs.ts';
 import { deskProjectors } from './desk.ts';
 import { devopsProjectors } from './devops.ts';
@@ -77,6 +78,7 @@ const domains: Array<Record<string, Projector>> = [
   interestProjectors,
   interestRunProjectors,
   runProjectors,
+  commitAsProjectors,
 ];
 
 export function buildProjectors(): ProjectorMap {

@@ -71,7 +71,7 @@ export function registerTasteHook(ctx: Ctx): () => void {
           FEED_LIST_FILE,
           renderFeedEntries(ev.payload.items, e.createdAt),
           FEED_LIST_HEADER,
-          `aom: feed ${card?.ref ?? ''} ${ev.payload.items.length} item(s)`.replace(/\s+/g, ' '),
+          `feed ${card?.ref ?? ''} ${ev.payload.items.length} item(s)`.replace(/\s+/g, ' '),
         );
       } else if (ev.type === 'InterestRunDone') {
         const run = await one(
@@ -95,7 +95,7 @@ export function registerTasteHook(ctx: Ctx): () => void {
             cardRef: run.ref,
           }),
           RUNS_HEADER,
-          `aom: run ${run.ref}`,
+          `run ${run.ref}`,
         );
       } else if (ev.type === 'ResearchPublished') {
         const run = await one(
@@ -119,7 +119,7 @@ export function registerTasteHook(ctx: Ctx): () => void {
             cardRef: run.ref,
           }),
           RUNS_HEADER,
-          `aom: run ${run.ref}`,
+          `run ${run.ref}`,
         );
       } else if (ev.type === 'ItemRated') {
         const item = await one(
@@ -144,7 +144,7 @@ export function registerTasteHook(ctx: Ctx): () => void {
             reason: ev.payload.reason,
           }),
           TASTE_HEADER,
-          `aom: taste ${ev.payload.verdict} ${item.title}`.slice(0, 100),
+          `taste ${ev.payload.verdict} ${item.title}`.slice(0, 100),
         );
       } else if (ev.type === 'InterestTasteSet') {
         // The managed `seed` section of taste.md mirrors the rules built into the interest (the brief carries them either way).
@@ -160,7 +160,7 @@ export function registerTasteHook(ctx: Ctx): () => void {
           TASTE_SEED_SECTION_ID,
           ev.payload.version,
           renderTasteSeedSection(ev.payload.rules.map((text) => ({ text, interestId: null }))),
-          `aom: taste rules v${ev.payload.version}`,
+          `taste rules v${ev.payload.version}`,
         );
       } else if (ev.type === 'InterestCreated' || ev.type === 'InterestUpdated') {
         const p = ev.payload as InterestBody;
@@ -173,7 +173,7 @@ export function registerTasteHook(ctx: Ctx): () => void {
           INTEREST_SECTION_ID,
           Number(e.seq),
           renderInterestDoc({ ...p, agents: await agentNames(ctx, p.agents as InterestAgents) }),
-          `aom: interest ${p.name}`.slice(0, 100),
+          `interest ${p.name}`.slice(0, 100),
         );
       } else if (ev.type === 'DeskItemResolved' && ev.payload.resolution === 'approved') {
         const d = await one(
@@ -188,7 +188,7 @@ export function registerTasteHook(ctx: Ctx): () => void {
           TASTE_FILE,
           renderTasteRule(d.body),
           TASTE_HEADER,
-          `aom: taste rule ${d.body}`.replace(/\s+/g, ' ').slice(0, 100),
+          `taste rule ${d.body}`.replace(/\s+/g, ' ').slice(0, 100),
         );
       }
     } catch (err) {

@@ -22,7 +22,7 @@ const cmd = (over: Partial<VaultWriteCommand> = {}): VaultWriteCommand =>
     path: 'projects/toy/decisions/2026-10-03-use-email-019e3f.md',
     mode: 'create',
     content: '# Use email\n\nStatus: accepted\n',
-    commitMessage: 'aom: decision TOY-4 use email',
+    commitMessage: 'Decision: use email',
     ...over,
   });
 
@@ -41,7 +41,7 @@ describe('writeVaultFile (vault.write, docs/ARCHITECTURE.md section 16.4)', () =
       '# Use email\n\nStatus: accepted\n',
     );
     expect(sh(v.mine, 'git', ['log', '-1', '--format=%an|%ae|%s'])).toBe(
-      'Atlas (aom)|atlas@agents.aom.invalid|aom: decision TOY-4 use email',
+      'Workstation Owner|owner@example.test|Decision: use email',
     );
     expect(sh(v.mine, 'git', ['status', '--porcelain'])).toBe('');
   });
@@ -66,7 +66,7 @@ describe('writeVaultFile (vault.write, docs/ARCHITECTURE.md section 16.4)', () =
       path: 'standing-orders.md',
       mode: 'append',
       content: block,
-      commitMessage: 'aom: standing order',
+      commitMessage: 'Standing order',
     });
     expect(await writeVaultFile(v.mine, a, IDENTITY)).toEqual({ written: true, committed: true });
     expect(readFileSync(join(v.mine, 'standing-orders.md'), 'utf8')).toBe(`# Standing orders\n${block}`);
@@ -75,7 +75,7 @@ describe('writeVaultFile (vault.write, docs/ARCHITECTURE.md section 16.4)', () =
       path: 'standing-orders.md',
       mode: 'append',
       content: '\n## Second\n',
-      commitMessage: 'aom: second',
+      commitMessage: 'Second',
     });
     await writeVaultFile(v.mine, b, IDENTITY);
     expect(readFileSync(join(v.mine, 'standing-orders.md'), 'utf8')).toBe(
@@ -129,7 +129,7 @@ describe('VaultManager.write: committed and pushed', () => {
     expect(originFile(v, 'projects/toy/decisions/2026-10-03-use-email-019e3f.md')).toBe(
       '# Use email\n\nStatus: accepted\n',
     );
-    expect(originLog(v)[0]).toBe('Atlas (aom)|aom: decision TOY-4 use email');
+    expect(originLog(v)[0]).toBe('Workstation Owner|Decision: use email');
     // a retry of the same command (redelivery after a lost ack) is a success
     expect(await m.write(cmd())).toMatchObject({ written: false, committed: false, pushed: false });
     m.stop();
@@ -143,7 +143,7 @@ describe('VaultManager.write: committed and pushed', () => {
     expect(r).toMatchObject({ committed: true, pushed: false });
     expect(originLog(v)).toHaveLength(1);
     expect(await m.syncNow('v1')).toMatchObject({ status: 'ok', pushed: true });
-    expect(originLog(v)[0]).toContain('aom: decision');
+    expect(originLog(v)[0]).toContain('Decision:');
     m.stop();
   });
 
@@ -224,7 +224,7 @@ describe('vault.write section mode (docs/design/interests.md section 6)', () => 
       header: TASTE_HEADER,
       content: renderTasteSeedSection([{ text: rule, interestId: null }]),
       section: { id: 'seed', version },
-      commitMessage: `aom: taste rules v${version}`,
+      commitMessage: `Taste rules v${version}`,
     });
 
   it('creates the file with the header, inserts above rating lines, replaces a newer version and ignores stale or identical writes', async () => {

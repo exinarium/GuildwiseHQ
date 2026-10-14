@@ -66,7 +66,7 @@ describe('decision files (QuestionAnswered -> vault.write)', () => {
       push: true,
       path: 'projects/toy/decisions/2026-10-03-should-the-login-form-use-email-or-username-019e3f.md',
     });
-    expect(payload.commitMessage).toBe('aom: decision TOY-4 Should the login form use email or username?');
+    expect(payload.commitMessage).toBe('decision TOY-4 Should the login form use email or username?');
     expect(payload.content).toContain('# Should the login form use email or username?');
     expect(payload.content).toContain('Status: accepted');
     expect(payload.content).toContain('Asked by Ada (builder) on card TOY-4.');

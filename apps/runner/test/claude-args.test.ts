@@ -133,6 +133,7 @@ describe('claude settings.json: permissions per role (review M3)', () => {
     expect(s.permissions.defaultMode).toBe('dontAsk');
     expect(s.permissions.blockReadsOutsideWorkingDirectories).toBe(true);
     expect(s.includeCoAuthoredBy).toBe(false);
+    expect(s.attribution).toEqual({ commit: '', pr: '' });
   });
 
   it('builder: edits only inside its worktree; may rebase/checkout/switch there (G-Q12); denies push and reset --hard', () => {

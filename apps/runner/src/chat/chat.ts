@@ -26,6 +26,7 @@ import {
 } from '../attachments/index.ts';
 import { type ExternalAdapters, formatSource, readScopedJira } from '../external/index.ts';
 import { confine } from '../fs-safe.ts';
+import { resolveCommitIdentity } from '../git/identity.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
@@ -309,7 +310,12 @@ export class ChatManager {
       this.error(msg, `runtime ${msg.agent.runtime} is not available for chat on this workstation`);
       return;
     }
-    const sandbox = await ensureSandbox(paths, msg.agent.agentId, msg.agent.name);
+    const sandbox = await ensureSandbox(
+      paths,
+      msg.agent.agentId,
+      msg.agent.name,
+      await resolveCommitIdentity(paths.root),
+    );
     chat.sandbox = sandbox;
     const attachDir = cardAttachmentsDir(sandbox.tmp);
     mkdirSync(attachDir, { recursive: true });

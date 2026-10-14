@@ -1,4 +1,4 @@
-import { makeEnvelope, type ServerToRunner } from '@aom/shared';
+import { makeEnvelope, type RepoReport, type ServerToRunner } from '@aom/shared';
 import type { WebSocket } from 'ws';
 
 export interface RunnerConn {
@@ -10,7 +10,7 @@ export interface RunnerConn {
   /** True once the post-reconnect reconciliation ran (docs/ARCHITECTURE.md section 11.2). */
   reconciled: boolean;
   helloShiftIds: string[];
-  lastRepos: Array<{ remoteUrl: string; localPath: string; headBranch: string | null }>;
+  lastRepos: RepoReport[];
   /** shiftId -> consecutive heartbeats that did not report it. */
   missing: Map<string, number>;
   stopSentAt: Map<string, number>;

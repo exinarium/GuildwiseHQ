@@ -38,7 +38,7 @@ import {
 } from '../integrations/schema.ts';
 import { MAX_MCP_SERVERS, McpServerInfoSchema } from '../mcp/index.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
-import { RepoCreatePayloadSchema } from '../repo/index.ts';
+import { CommitAsSchema, RepoCreatePayloadSchema, RepoIdentityFactSchema } from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
 import {
   RunExtendPayloadSchema,
@@ -110,6 +110,8 @@ export const RepoReportSchema = z.object({
   remoteUrl: z.string(),
   localPath: z.string(),
   headBranch: z.string().nullable(),
+  /** The git identity commits get in this clone without a project setting (repository, global or system git config); absent: none set. Additive. */
+  identity: RepoIdentityFactSchema.nullable().optional(),
 });
 export type RepoReport = z.infer<typeof RepoReportSchema>;
 
@@ -911,6 +913,8 @@ export const ShiftStartSchema = msg('shift.start', {
   localReadRepos: z.array(LocalReadRepoSchema).optional(),
   /** Plugin MCP servers the project's Owner granted (names only); a card shift gets the ones its role may call. */
   mcpServers: z.array(z.string()).optional(),
+  /** The project's "Commit as" setting, used for every commit of this shift (absent: the clone's or the workstation's git identity). */
+  commitAs: CommitAsSchema.nullable().optional(),
 });
 export const ShiftStopSchema = msg('shift.stop', { shiftId: z.uuid(), reason: ShiftStopReasonSchema });
 /** "Stop the running command": the runner kills the commands the agent runs (its tool process trees); the shift goes on. */

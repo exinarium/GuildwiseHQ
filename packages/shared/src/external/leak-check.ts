@@ -23,6 +23,18 @@ const INTERNAL_TERMS: ReadonlyArray<readonly [string, RegExp]> = [
   ['internal branch', /\baom\/[\w./-]+/i],
   ['role title', /\b(?:scouts?|curators?)\b/i],
   ['standing orders', /\bstanding\s+orders?\b/i],
+  // Invisible organisation (backlog #65): nothing a client reads reveals AI, the product or the card system.
+  ['product link', /guildwise(?:hq)?\.com/i],
+  [
+    'AI',
+    /\b(?:AI|A\.I\.)[\s-]+(?:agents?|assistants?|bots?|tools?|generated|powered|written)\b|\bartificial\s+intelligence\b/i,
+  ],
+  ['AI', /\b(?:Claude|Anthropic|ChatGPT|OpenAI|LLMs?)\b/],
+  [
+    'generated notice',
+    /\b(?:generated|written|created|authored|drafted)\s+(?:by|with|using)\s+(?:an?\s+)?(?:AI|Claude|agent|bot|Guildwise)/i,
+  ],
+  ['card reference', /\bcard\s+[A-Z][A-Z0-9]{1,9}-P?\d+\b/],
 ];
 
 /**

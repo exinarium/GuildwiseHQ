@@ -153,7 +153,7 @@ export async function investigationRecordRpc(
           section: { id: INVESTIGATIONS_SECTION_ID, version: Number(stored[0]?.seq ?? 0n) },
           content: renderInvestigationsIndex(entries, { folder: target.folder }),
           header: PROJECT_FILE_HEADER,
-          commitMessage: `aom: list the investigation ${card.ref} in PROJECT.md`,
+          commitMessage: `list the investigation ${card.ref} in PROJECT.md`,
         });
         if (w.queued) workstationId = w.workstationId;
       }

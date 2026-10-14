@@ -3,18 +3,6 @@ import { dirname } from 'node:path';
 import { git } from './git.ts';
 import { removeWorktree } from './worktrees.ts';
 
-/** Identity for merge commits the runner makes itself (there is no agent behind them). */
-export const RUNNER_IDENTITY = { name: 'Guildwise HQ (aom)', email: 'aom@runner.aom.invalid' };
-
-export const identityEnv = (
-  id: { name: string; email: string } = RUNNER_IDENTITY,
-): Record<string, string> => ({
-  GIT_AUTHOR_NAME: id.name,
-  GIT_AUTHOR_EMAIL: id.email,
-  GIT_COMMITTER_NAME: id.name,
-  GIT_COMMITTER_EMAIL: id.email,
-});
-
 /**
  * Runs `fn` inside a throwaway worktree of the clone on `tempBranch`, cut from `startPoint` (a merge into the working
  * branch is made here, never in the card's worktree or the user's checkout). The worktree and the temporary branch are

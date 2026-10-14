@@ -506,7 +506,7 @@ export async function writeResearchIndex(ctx: Ctx, e: StoredEvent): Promise<void
       convertedTo: to?.name ?? p.toWorkflowKey,
     }),
     header: PROJECT_FILE_HEADER,
-    commitMessage: 'aom: list the research notes in PROJECT.md',
+    commitMessage: 'list the research notes in PROJECT.md',
   });
   if (r.queued && r.workstationId) await ctx.services.gateway.deliverPending(r.workstationId);
 }

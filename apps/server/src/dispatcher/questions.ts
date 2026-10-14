@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { streamId } from '@aom/shared';
+import { withCommitAs } from '../commands/commit-as.ts';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import { endQuestionShift, escalateEvents, QUESTION_STALL_MS } from '../commands/escalation.ts';
 import type { Ctx } from '../context.ts';
@@ -103,8 +104,9 @@ export async function questionPass(
     busy.add(r.routed_agent_id);
     if (!ok) continue;
     started.push({ deskItemId: r.id, shiftId, agentId: r.routed_agent_id, workstationId: r.ws_id });
-    const payload = await buildQuestionShiftStart(ctx, r.id, shiftId);
-    if (payload) ctx.services.runners.send(r.ws_id, 'shift.start', payload, ctx.clock.now());
+    const built = await buildQuestionShiftStart(ctx, r.id, shiftId);
+    if (built)
+      ctx.services.runners.send(r.ws_id, 'shift.start', await withCommitAs(ctx, built), ctx.clock.now());
   }
   return started;
 }
