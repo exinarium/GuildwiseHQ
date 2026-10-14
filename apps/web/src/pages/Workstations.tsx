@@ -8,7 +8,6 @@ import { BRAND } from '../brand.ts';
 import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
 import { GitConnectionsPanel } from '../components/GitConnections.tsx';
 import { JiraStatusLine } from '../components/JiraStatusLine.tsx';
-import { signInProblems, WorkstationSignIns } from '../components/WorkstationSignIns.tsx';
 import { SandboxUnavailable, SandboxWarning } from '../components/SandboxWarning.tsx';
 import {
   Badge,
@@ -24,6 +23,7 @@ import {
   Panel,
   useToast,
 } from '../components/ui.tsx';
+import { signInProblems, WorkstationSignIns } from '../components/WorkstationSignIns.tsx';
 import { AddWorkstationWizard } from '../components/workstations/AddWorkstationWizard.tsx';
 import { AgentToolchains } from '../components/workstations/AgentToolchains.tsx';
 import { CloudWorkstations } from '../components/workstations/CloudWorkstations.tsx';

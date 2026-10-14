@@ -11,6 +11,14 @@ import type { RunnerPaths } from '../paths.ts';
 import { agentTmpDir, CACHE_ENV_KEYS, DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
 import { selfCommand } from '../shims.ts';
 import {
+  type ClaudeAuthMonitor,
+  type CredentialPaths,
+  harvestAgentCredentials,
+  isAuthFailureText,
+  prepareAgentCredentials,
+  probeClaudeLogin,
+} from './claude-auth.ts';
+import {
   agentEnv,
   buildChatSettings,
   buildDevopsChatSettings,
@@ -22,14 +30,6 @@ import {
   sandboxState,
   toolchainReadPaths,
 } from './claude-policy.ts';
-import {
-  type ClaudeAuthMonitor,
-  type CredentialPaths,
-  harvestAgentCredentials,
-  isAuthFailureText,
-  prepareAgentCredentials,
-  probeClaudeLogin,
-} from './claude-auth.ts';
 import { ClaudeStreamParser } from './claude-stream-parser.ts';
 import { spawnSession } from './process-session.ts';
 import type {

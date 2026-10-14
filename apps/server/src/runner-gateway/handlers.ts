@@ -22,7 +22,6 @@ import { applyWorktreeSweepResult } from '../commands/hygiene.ts';
 import { intakeRpc } from '../commands/intake.ts';
 import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
-import { syncClaudeAuthNotice, syncMcpSignInNotices } from '../commands/workstation-notices.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
 import { applyOutboundResult, finishOutboundCommand, queueApprovedFor } from '../commands/outbox.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
@@ -42,6 +41,7 @@ import {
 import { applyToolchainsReport } from '../commands/toolchains.ts';
 import { transcriptStoreRpc } from '../commands/transcripts.ts';
 import { applyVaultConflict, markVaultStatus, queueVaultConfigure } from '../commands/vaults.ts';
+import { syncClaudeAuthNotice, syncMcpSignInNotices } from '../commands/workstation-notices.ts';
 import {
   applyEnvEnsureResult,
   applyRepoCloneResult,

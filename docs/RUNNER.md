@@ -440,6 +440,9 @@ Edit `config.json` manually (mode 0600) or use the pair command with `--mock` fl
    { "runtimes": { "claude-code": { "authMode": "oauth", "oauthToken": "..." } } }
    ```
 
+The token from `claude setup-token` is the most robust choice: it does not expire the way an interactive login does
+(see "The Claude login: expiry, pause and resume").
+
 **Jira API token:**
 1. Go to https://id.atlassian.com/manage-profile/security/api-tokens
 2. Create a token and copy it
@@ -1250,6 +1253,17 @@ itself with the stored token. (Test on the real workstation: a granted stdio ser
 The server tallies them per shift (`shifts.mcp_calls`, `[{ server, tool, count }]`, kept over a rebuild) and the card shows
 **External tools used** per shift (`mcpUsage` in the card detail).
 
+**Sign-in state** (`authState` of each reported server: `signed_in`, `needs_sign_in`, `not_needed`). The runner decides it
+from the **keys** of `mcpOAuth` in `~/.claude/.credentials.json` only (`plugin:<plugin>:<server>` or `<key>|<hash>`); no
+token value is read into a report, a log or the server. An entry whose access token expired counts as signed in while it
+holds a refresh token (Claude Code refreshes it on use). stdio servers, and remote servers that carry their own `headers`
+or `headersHelper` (an API key), are `not_needed`; any other remote server without a stored sign-in is `needs_sign_in`.
+It is re-scanned every minute and reported when it changed. The Workstations page and the project's MCP servers panel
+then say: *Needs sign-in: On <workstation>, run `claude`, then `/mcp`, choose <server>, Authenticate.* When such a server
+is granted to a project the owner also gets a desk notice (cleared by the system once it is signed in), and an agent
+whose shift or chat starts with a granted server that needs sign-in is told so in its instructions, with the sentence to
+give the manager, so it does not retry the tools. Older runners report no state and raise nothing.
+
 ### The architect: organization source folder, git and the main merge
 
 The architect (built-in role `architect`, claims every `investigate*` stage) is the only role with `permissions.readOrgRepos`
@@ -1693,6 +1707,37 @@ tail -f ~/.aom-runner/logs/shifts/*.jsonl # watch specific shifts
 2. Verify `config.json` has the correct `serverUrl`
 3. Check the server is running: `curl https://aom.example.com/api/health`
 4. Check the firewall allows WebSocket connections to the server
+
+### The Claude login: expiry, pause and resume
+
+Interactive Claude Code logins (`claude` then `/login`, kept in `~/.claude/.credentials.json`) can expire. Symptom in a
+shift log: `Failed to authenticate: OAuth session expired and could not be refreshed` (an error result, 0 tokens).
+
+- **Detection.** The runner recognises such a failure in the stream result, an assistant message flagged as an
+  authentication failure, or the stderr of a failed session ("Please run /login", "OAuth refresh token is no longer
+  valid", `authentication_error`, 401 `invalid_api_key`). It marks the Claude runtime `auth: expired` and reports it
+  (`runtimes.report`, additive `auth` field) as **unavailable**, so nothing is dispatched to the workstation.
+- **The failing shift** is returned as `shift.rejected` with the reason `auth_expired`, not as a crash: the card goes back
+  to the queue without penalty (not counted by the loop breaker, back-off or the digests), with a note on the card.
+- **Notice.** The server raises one desk notice for the workstation's owner and e-mails once: *Claude login expired on
+  <workstation>: run `claude` then `/login` on that machine (or `claude setup-token`)*. The Workstations page shows it too.
+  (There is no push-notification channel yet; the e-mail is the out-of-app notification.)
+- **Probe and resume.** While expired, every 3 minutes (`authProbeMs`) the runner runs `claude auth status --json` and then
+  one minimal `claude -p` call (one turn, the smallest model). When it works the runtime is reported available again,
+  dispatching resumes and the server closes its notice by itself. A restart of the runner forgets the state; the first shift
+  then finds it out again (and is put back the same way).
+- **Why it expired so often, and the fix.** Agents used to get `.credentials.json` as a **symlink** to the machine's file.
+  Every agent's Claude Code refreshes the access token on its own and the refresh token rotates, so concurrent agents
+  raced each other: an atomic rename by one replaced the link, leaving its refreshed token in an agent directory and the
+  others holding a refresh token that was already used. Now each agent session gets a **private copy**, made under a
+  runner-wide lock (`claude-credentials.lock` in the data directory). When the machine's access token expires within 10
+  minutes, one refresh probe runs under the lock first, so agents start with a fresh token. After the session, a copy whose
+  `claudeAiOauth.expiresAt` (or a plugin sign-in in `mcpOAuth`) is newer than the machine's is written back atomically,
+  under the same lock; nothing older ever overwrites. The files stay mode 0600, token values are never logged.
+- **Most robust: a long-lived token.** Run `claude setup-token` once and set `"authMode": "oauth"` and `"oauthToken"` for
+  the runtime (see "Setting credentials"). The token is passed to agents as `CLAUDE_CODE_OAUTH_TOKEN`; no credentials file is
+  shared (only the `mcpOAuth` entries of granted servers are copied), so nothing races or rotates. If that token is
+  revoked the same detection, pause and resume apply.
 
 ### Shift did not complete
 

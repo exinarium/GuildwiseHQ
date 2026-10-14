@@ -7,8 +7,8 @@ import {
   formatSource,
   GithubAdapter,
   JiraAdapter,
-  SourceReadError,
   readScopedJira,
+  SourceReadError,
 } from '../src/external/index.ts';
 
 const issue = {

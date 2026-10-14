@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CaptureMailer } from './helpers/blog.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
-import { CaptureMailer } from './helpers/blog.ts';
 import { freshState, shiftHelpers } from './helpers/shifts.ts';
 import { createWorld, MOCK_RUNTIME, ok, until, type World } from './helpers/world.ts';
 
@@ -119,8 +119,8 @@ describe('plugin MCP servers: sign-in state', () => {
     // not granted yet: nothing to tell
     expect(await items('mcp_needs_sign_in')).toHaveLength(0);
 
-    ok(
-      await w.t.req('PUT', `/api/projects/${w.projectId}/mcp-servers`, {
+    await ok(
+      w.t.req('PUT', `/api/projects/${w.projectId}/mcp-servers`, {
         cookie: w.owner.cookie,
         body: { servers: [ATLASSIAN.name] },
       }),

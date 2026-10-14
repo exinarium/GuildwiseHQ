@@ -6,6 +6,7 @@ import {
   defaultHost,
   type EnvEnsurePayload,
   type IpcRpcResponse,
+  type McpAuthState,
   normalizeRemoteUrl,
   type RepoReport,
   type RunnerCommandName,
@@ -14,7 +15,6 @@ import {
   type ServerToRunner,
   uuidv7,
   type WorktreeSweepResult,
-  type McpAuthState,
 } from '@aom/shared';
 import { ClaudeAuthMonitor } from './adapters/claude-auth.ts';
 import { ClaudeCodeAdapter } from './adapters/claude-code.ts';
