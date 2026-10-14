@@ -604,15 +604,18 @@ handling, hosting and the sub-processors (Namecheap, SendGrid, Paystack, Anthrop
 Information Officer, purposes, lawful basis, recipients, cross-border transfers (section 72), data subject rights and the
 Information Regulator's public contact details. Linked from the landing footer (Trust and security, POPIA notice) and the
 sign-up consent line. Tests: `legal.test.tsx` (topics, footer links, path mapping) and the server's `legal-pages.test.ts`.
-**DRAFT LEGAL TEXT: the owner must review it before it is relied on.** Placeholders left on the pages for the owner, each
-marked in square brackets: (1) the hosting location (country and data centre): DEPLOY.md says only "VPS" and the privacy
-policy names Namecheap, so the location is unknown; (2) the Information Officer: the page reuses the name and e-mail already
-in the privacy policy (Pieter Jordaan) and asks the owner to confirm them and the registration with the Information
-Regulator; (3) the Anthropic wording ("data sent through its API is not used to train its models under its commercial
-terms") is marked "VERIFY WORDING BEFORE PUBLISHING". The existing privacy policy lists model providers as chosen by the
-customer, while the new Trust page names Anthropic as the provider behind the assistant and the agents; the owner should
-decide whether the privacy policy's sub-processor list should name Anthropic too (and Postmark, which is used for inbound
-mail in DEPLOY.md).
+**DRAFT LEGAL TEXT: the owner must review it before it is relied on.** Facts are shared, not copied: company name,
+registration number, address, Information Officer and e-mail, the regulator's complaints address and the hosting provider and
+location live in `apps/web/src/legal/facts.ts` and are filled into Terms, Privacy, Trust and POPIA through `{{name}}` tokens
+(`fillFacts` in `legal.ts`), so they cannot drift (the privacy policy's hosting line now says "Namecheap (hosting, Phoenix,
+Arizona, United States)" per the owner). The POPIA notice covers the transfer to the United States and its safeguards.
+Placeholder left for the owner (marked in square brackets on the Trust page): the Anthropic wording ("data sent through its API is
+not used to train its models under its commercial terms"), marked "VERIFY WORDING BEFORE PUBLISHING". The POPIA notice adds to the
+privacy policy only the Information Regulator's postal address and general enquiries e-mail (public details; check them) and asks
+nothing new of the owner about the Information Officer (the privacy policy already names Pieter Jordaan; registration of the
+officer with the Regulator is not stated anywhere and is not claimed). Also for the owner to decide: the privacy policy says model
+providers are chosen by the customer and does not name Anthropic or Postmark (inbound mail in DEPLOY.md), while the Trust page
+names Anthropic as the provider behind the assistant and agents.
 
 ### 36. Savings calculator on the landing page
 
