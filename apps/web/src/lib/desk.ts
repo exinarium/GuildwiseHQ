@@ -87,6 +87,9 @@ const SUBKIND_LABEL: Record<string, string> = {
   working_branch: 'Working branch',
   main_merge_skipped: 'Main not merged',
   no_architect: 'No architect hired',
+  ceo_recommendation: 'CEO recommendation',
+  ceo_report: 'CEO report',
+  ceo_notice: 'CEO notice',
 };
 
 const titleCase = (raw: string) => {

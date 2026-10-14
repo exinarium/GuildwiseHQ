@@ -45,6 +45,7 @@ export function crumbsFor(pathname: string, search: string, projects: ProjectDto
     ],
     ['/agents', () => [{ label: 'Organization' }, { label: 'Agents' }]],
     ['/hr', () => [{ label: 'Organization' }, { label: 'Agents' }]],
+    ['/org/ceo', () => [{ label: 'Organization' }, { label: 'CEO' }]],
     ['/org', () => [{ label: 'Organization' }, { label: 'Roles & workflows' }]],
     [
       '/org/workflows/:draftId',

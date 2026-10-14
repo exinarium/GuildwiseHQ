@@ -66,6 +66,9 @@ export function SetupChecklistProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** Optional steps (the CEO) are never counted in the progress. */
+export const requiredSteps = (c: SetupChecklist): SetupStep[] => c.steps.filter((s) => !s.optional);
+
 /** Whether the sidebar button shows: there are steps, the user did not hide it, and the setup is not finished. */
 export const checklistVisible = (c: SetupChecklist | undefined): c is SetupChecklist =>
   !!c && c.steps.length > 0 && !c.dismissed && !c.complete;
@@ -74,7 +77,8 @@ export const checklistVisible = (c: SetupChecklist | undefined): c is SetupCheck
 export function SetupWidget({ collapsed = false }: { collapsed?: boolean }) {
   const { data, open, setOpen } = useSetupChecklistUi();
   if (!checklistVisible(data)) return null;
-  const label = `Get started: ${data.doneCount} of ${data.steps.length} steps done`;
+  const total = requiredSteps(data).length;
+  const label = `Get started: ${data.doneCount} of ${total} steps done`;
   return (
     <button
       type="button"
@@ -95,7 +99,7 @@ export function SetupWidget({ collapsed = false }: { collapsed?: boolean }) {
         <>
           <span className="min-w-0 flex-1 truncate text-left">Get started</span>
           <span className="tnum text-xs" data-testid="setup-widget-count">
-            {data.doneCount}/{data.steps.length}
+            {data.doneCount}/{total}
           </span>
         </>
       )}
@@ -123,6 +127,14 @@ function StepRow({ step, onGo }: { step: SetupStep; onGo: () => void }) {
       <div className="min-w-0 flex-1">
         <p className={cx('text-sm font-medium', step.done ? 'text-muted line-through' : 'text-fg')}>
           {step.title}
+          {step.optional && (
+            <span
+              className="ml-2 rounded-full bg-sunken px-2 py-px text-xs font-normal text-muted"
+              data-testid={`setup-optional-${step.id}`}
+            >
+              optional
+            </span>
+          )}
         </p>
         <p className="text-sm text-muted">{step.hint}</p>
         {!step.done && missing && <p className="text-sm text-muted">{missing}</p>}
@@ -145,7 +157,9 @@ function StepRow({ step, onGo }: { step: SetupStep; onGo: () => void }) {
               ? 'Hire'
               : step.id === 'ba'
                 ? 'Talk'
-                : 'Start'}
+                : step.id === 'ceo'
+                  ? 'Appoint'
+                  : 'Start'}
         </Link>
       )}
     </li>
@@ -156,7 +170,8 @@ function StepRow({ step, onGo }: { step: SetupStep; onGo: () => void }) {
 export function SetupChecklistDialog() {
   const { data, open, setOpen, hide } = useSetupChecklistUi();
   if (!data || data.steps.length === 0) return null;
-  const pct = Math.round((data.doneCount / data.steps.length) * 100);
+  const total = requiredSteps(data).length;
+  const pct = total ? Math.round((data.doneCount / total) * 100) : 0;
   return (
     <Dialog
       open={open}
@@ -185,7 +200,7 @@ export function SetupChecklistDialog() {
           role="progressbar"
           aria-label="Setup progress"
           aria-valuemin={0}
-          aria-valuemax={data.steps.length}
+          aria-valuemax={total}
           aria-valuenow={data.doneCount}
           className="h-1.5 overflow-hidden rounded-full bg-sunken"
         >
@@ -216,7 +231,7 @@ export function SetupHelpCard() {
         <p className="text-sm text-muted">
           {data.complete
             ? 'All five steps are done.'
-            : `${data.doneCount} of ${data.steps.length} steps done: project, repository, workstation, team and the business analyst.`}
+            : `${data.doneCount} of ${requiredSteps(data).length} steps done: project, repository, workstation, team and the business analyst.`}
         </p>
       </div>
       <Button

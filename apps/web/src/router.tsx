@@ -14,6 +14,7 @@ import { BILLING_GATE_PATH } from './pages/BillingGate.tsx';
 import { Board } from './pages/Board.tsx';
 import { CardDetail } from './pages/CardDetail.tsx';
 import { CardNew } from './pages/CardNew.tsx';
+import { Ceo } from './pages/Ceo.tsx';
 import { Chat } from './pages/Chat.tsx';
 import { ContactPublic } from './pages/ContactPublic.tsx';
 import { Costs } from './pages/Costs.tsx';
@@ -112,6 +113,7 @@ export const routes = [
       { path: '/org', element: <OrgDesigner /> },
       { path: '/org/workflows/:draftId', element: <WorkflowBuilderPage /> },
       { path: '/org-chart', element: <OrgChartPage /> },
+      { path: '/org/ceo', element: <Ceo /> },
       { path: '/costs', element: <Costs /> },
       { path: '/workstations', element: <Workstations /> },
       { path: '/workstations/:id/integrations', element: <Integrations /> },

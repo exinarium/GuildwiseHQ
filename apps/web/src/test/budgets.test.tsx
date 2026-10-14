@@ -240,6 +240,30 @@ const report = (over: Partial<CostsReport> = {}): CostsReport => {
   };
 };
 
+describe('the Costs page: Management (CEO)', () => {
+  it('shows the CEO spend as its own row, and none without a CEO', async () => {
+    const t = (cost: number) => ({
+      costMicros: cost,
+      shifts: 3,
+      inputTokens: 1500,
+      outputTokens: 300,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    stub({ '/api/costs': () => report({ management: t(3_000_000) }) });
+    wrap(<Costs />);
+    const row = await screen.findByTestId('costs-management');
+    expect(row).toHaveTextContent('Management (CEO)');
+    expect(row).toHaveTextContent('$3.00');
+  });
+  it('has no Management row without a CEO', async () => {
+    stub({ '/api/costs': () => report() });
+    wrap(<Costs />);
+    await screen.findByTestId('costs-total');
+    expect(screen.queryByTestId('costs-management')).toBeNull();
+  });
+});
+
 describe('the Costs page', () => {
   it('breaks spend down by project, agent, model and day, with budgets and a CSV link', async () => {
     const calls = stub({ '/api/costs': () => report() });

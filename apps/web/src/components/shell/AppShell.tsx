@@ -12,6 +12,7 @@ import { useIsDesktop, useIsTabletUp } from '../../lib/useMediaQuery.ts';
 import { getSocket, useSocketState } from '../../ws/socket.ts';
 import { AgentFacesSync } from '../AgentFacesSync.tsx';
 import { ChatDrawer } from '../ChatDrawer.tsx';
+import { AskCeoButton } from '../ceo/AskCeoButton.tsx';
 import { AskDevOpsProvider, useAskDevOps } from '../devops/AskDevOps.tsx';
 import { PageHelpPanel } from '../help/PageHelpPanel.tsx';
 import { CommandPalette } from '../palette/CommandPalette.tsx';
@@ -237,6 +238,7 @@ function Shell({ name, live }: { name: string; live: string }) {
                       <Wrench aria-hidden="true" className="size-4" />
                       <span className="hidden xl:inline">Ask DevOps</span>
                     </button>
+                    <AskCeoButton />
                     <button
                       type="button"
                       onClick={() => setChat(true)}

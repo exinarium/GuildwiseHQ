@@ -104,3 +104,15 @@ export function useSetFocusProjects() {
     },
   });
 }
+
+/** Pause or resume an agent (a paused agent takes no new work). The CEO may also do it. */
+export function usePauseAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; pause: boolean; reason?: string }) =>
+      post(`/agents/${v.id}/${v.pause ? 'pause' : 'resume'}`, v.reason ? { reason: v.reason } : {}),
+    onSuccess: () => {
+      for (const key of ['agents', 'hr', 'org-chart', 'ceo']) void qc.invalidateQueries({ queryKey: [key] });
+    },
+  });
+}

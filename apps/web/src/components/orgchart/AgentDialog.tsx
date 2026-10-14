@@ -86,7 +86,16 @@ export function AgentDialog({
           <Row label="Escalates to">
             {agent.isDevops ? `${chart.owner.name}, on the desk` : escalationText(agent, chart)}
           </Row>
-          <Row label="Department">{agent.department ?? 'none'}</Row>
+          <Row label="Department">
+            {agent.department === 'management' ? 'Management' : (agent.department ?? 'none')}
+          </Row>
+          {agent.roleKey === 'ceo' && (
+            <Row label="Manage">
+              <Link to="/org/ceo" className="text-brand-text underline">
+                Manage on the CEO page
+              </Link>
+            </Row>
+          )}
           <Row label="Workstation">
             {station ? (
               <>

@@ -1,7 +1,7 @@
 import type { OrgChart, OrgChartAgent } from '@aom/shared';
 import { Crown, UserPlus } from 'lucide-react';
 import { Link } from 'react-router';
-import { escalationText } from '../../lib/orgChart.ts';
+import { escalationText, isPausedCeo } from '../../lib/orgChart.ts';
 import { type LaidEdge, layoutOrgChart, NODE_H, NODE_W } from '../../lib/orgChartLayout.ts';
 import { cx } from '../ui/cx.ts';
 import { AgentTile } from './AgentTile.tsx';
@@ -9,6 +9,7 @@ import { AgentTile } from './AgentTile.tsx';
 const EDGE_LABEL: Record<LaidEdge['kind'], string> = {
   peer: 'a senior of the same role',
   ba: 'the BA',
+  ceo: 'the CEO',
   desk: 'you, on the desk',
 };
 
@@ -145,6 +146,7 @@ export function ChartCanvas({
               agent={byId.get(a.id) ?? a}
               onOpen={onOpen}
               escalation={escalationText(a, chart)}
+              paused={isPausedCeo(chart, a)}
               className={cx('absolute')}
               style={{ ...place, width: NODE_W, height: NODE_H }}
             />
@@ -152,7 +154,14 @@ export function ChartCanvas({
         })}
       </div>
       <ul className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted" aria-label="Legend">
-        {(['peer', 'ba', 'desk'] as const).map((k) => (
+        {(
+          [
+            'peer',
+            'ba',
+            ...(layout.nodes.some((n) => n.kind === 'ceo') ? (['ceo'] as const) : []),
+            'desk',
+          ] as const
+        ).map((k) => (
           <li key={k} className="flex items-center gap-1.5">
             <svg aria-hidden="true" width="26" height="8" focusable="false">
               <line

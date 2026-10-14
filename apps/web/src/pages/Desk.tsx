@@ -15,6 +15,12 @@ import { useOverrideBudget } from '../api/queries/costs.ts';
 import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
 import { BaNote, FloorReport } from '../components/BaNote.tsx';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
+import {
+  CeoAnswered,
+  CeoRecommendation,
+  CeoReportBlock,
+  RememberCheckbox,
+} from '../components/ceo/DeskCeo.tsx';
 import { DigestRating } from '../components/DigestRating.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
 import { EscalationTrail } from '../components/EscalationTrail.tsx';
@@ -58,13 +64,14 @@ import { useExpertMode } from '../lib/expert-mode.ts';
 import { focusOf, integrationsLink } from '../lib/integrations.ts';
 import { ageLabel, formatDateTime } from '../lib/time.ts';
 
-type FilterKey = 'all' | 'blocking' | 'questions' | 'approvals' | 'notices';
+type FilterKey = 'all' | 'blocking' | 'questions' | 'approvals' | 'notices' | 'ceo';
 const FILTERS: Array<{ key: FilterKey; label: string; test: (i: DeskItemDto) => boolean }> = [
   { key: 'all', label: 'All', test: () => true },
   { key: 'blocking', label: 'Blocking', test: (i) => i.blocking },
   { key: 'questions', label: 'Questions', test: (i) => i.kind === 'question' || i.kind === 'escalation' },
   { key: 'approvals', label: 'Approvals', test: (i) => i.kind === 'approval' },
   { key: 'notices', label: 'Notices', test: (i) => i.kind === 'alert' || i.kind === 'rating' },
+  { key: 'ceo', label: 'Handled by CEO', test: (i) => !!i.ceo?.actionId },
 ];
 
 const GROUPS: Array<{ id: string; label: string; test: (i: DeskItemDto) => boolean }> = [
@@ -129,6 +136,8 @@ export function Desk() {
     return () => clearTimeout(t);
   }, [hash, items.length]);
 
+  const closedShown = (closed.data?.items ?? []).filter(filterKey === 'ceo' ? filter.test : () => true);
+
   if (open.isPending)
     return (
       <div className="mx-auto max-w-3xl">
@@ -186,7 +195,13 @@ export function Desk() {
             role="group"
             aria-label="Filter items"
           >
-            {FILTERS.map((f) => (
+            {FILTERS.filter(
+              (f) =>
+                f.key !== 'ceo' ||
+                filterKey === 'ceo' ||
+                count(f) > 0 ||
+                (closed.data?.items ?? []).some(f.test),
+            ).map((f) => (
               <FilterChip
                 key={f.key}
                 pressed={filterKey === f.key}
@@ -253,7 +268,7 @@ export function Desk() {
         ))}
       </div>
 
-      {(closed.data?.items.length ?? 0) > 0 && (
+      {closedShown.length > 0 && (
         <details
           className="mt-8"
           data-testid="desk-closed"
@@ -261,10 +276,10 @@ export function Desk() {
           onToggle={(e) => setShowClosed((e.target as HTMLDetailsElement).open)}
         >
           <summary className="cursor-pointer text-sm font-medium text-muted hover:text-fg">
-            Answered and closed ({closed.data?.items.length})
+            Answered and closed ({closedShown.length})
           </summary>
           <ul className="mt-3 flex flex-col gap-2">
-            {closed.data?.items.map((i) => (
+            {closedShown.map((i) => (
               <li key={i.id} data-testid={`desk-closed-${i.id}`}>
                 <Panel padding="compact">
                   <p className="text-base font-medium text-fg">{i.title}</p>
@@ -294,6 +309,7 @@ export function Desk() {
                     <span>· {formatDateTime(i.answeredAt)}</span>
                   </p>
                   {i.answer && <p className="mt-1 text-sm whitespace-pre-wrap text-muted">{i.answer}</p>}
+                  <CeoAnswered item={i} />
                   <EscalationTrail item={i} />
                 </Panel>
               </li>
@@ -303,6 +319,19 @@ export function Desk() {
       )}
       <ChatDrawer open={chatOpen} onOpenChange={setChatOpen} />
     </div>
+  );
+}
+
+/** Questions (and escalations) are answered with the option list and note; the CEO's recommendation goes in there. */
+function usesAnswerForm(item: DeskItemDto): boolean {
+  return (
+    item.status === 'open' &&
+    item.canAnswer &&
+    item.subkind !== 'manual_qa' &&
+    !isPhaseDeskSubkind(item.subkind) &&
+    item.subkind !== 'unmapped_ticket' &&
+    item.subkind !== WORKING_BRANCH_SUBKIND &&
+    (item.kind === 'question' || (item.kind === 'escalation' && item.subkind !== 'vault_conflict'))
   );
 }
 
@@ -367,6 +396,9 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
       {item.body && item.kind !== 'rating' && (
         <p className="mt-1.5 text-base whitespace-pre-wrap text-muted">{item.body}</p>
       )}
+      {item.subkind === 'ceo_report' && <CeoReportBlock item={item} />}
+      <CeoAnswered item={item} />
+      {!usesAnswerForm(item) && <CeoRecommendation item={item} />}
       {item.floor && (
         <details className="mt-3" data-testid="floor-facts">
           <summary className="cursor-pointer text-sm font-medium text-muted hover:text-fg">
@@ -535,7 +567,10 @@ function DismissButton({ item }: { item: DeskItemDto }) {
 function AnswerForm({ item }: { item: DeskItemDto }) {
   const answer = useAnswerDeskItem();
   const toast = useToast();
-  const [optionId, setOptionId] = useState<string | null>(defaultOption(item));
+  const rec = item.ceo?.recommendation ?? null;
+  const recOption = rec?.option && item.options.some((o) => o.id === rec.option) ? rec.option : null;
+  const [optionId, setOptionId] = useState<string | null>(recOption ?? defaultOption(item));
+  const [remember, setRemember] = useState(false);
   const [typed, setTyped] = useState('');
   const [choice, setChoice] = useState<LedgerChoiceKey>('decision');
   const [err, setErr] = useState('');
@@ -546,13 +581,40 @@ function AnswerForm({ item }: { item: DeskItemDto }) {
     if (!text) return setErr('Choose an option or write an answer');
     setErr('');
     answer.mutate(
-      { id: item.id, body: { answer: text, ...(optionId ? { optionId } : {}), ledger: choiceFor(choice) } },
+      {
+        id: item.id,
+        body: {
+          answer: text,
+          ...(optionId ? { optionId } : {}),
+          ledger: choiceFor(choice),
+          ...(remember ? { remember: true } : {}),
+        },
+      },
       { onSuccess: () => toast.success('Answer sent. The agent carries on.') },
     );
   };
+  // "Accept recommendation": answer with exactly what the CEO recommends.
+  const acceptText = recOption ? answerText('', recOption, item.options) : (rec?.text ?? '');
+  const accept = () =>
+    answer.mutate(
+      {
+        id: item.id,
+        body: {
+          answer: acceptText,
+          ...(recOption ? { optionId: recOption } : {}),
+          ledger: choiceFor('decision'),
+        },
+      },
+      { onSuccess: () => toast.success('Answer sent. The agent carries on.') },
+    );
 
   return (
     <form onSubmit={submit} aria-label="Answer" className="mt-4 flex flex-col gap-4" noValidate>
+      <CeoRecommendation
+        item={item}
+        onAccept={acceptText ? accept : undefined}
+        accepting={answer.isPending}
+      />
       {item.options.length > 0 && (
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-1.5 text-sm font-medium text-fg">Options</legend>
@@ -591,6 +653,7 @@ function AnswerForm({ item }: { item: DeskItemDto }) {
         onChange={(e) => setTyped(e.target.value)}
         error={err}
       />
+      <RememberCheckbox checked={remember} onChange={setRemember} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="sm:w-72">
           <Select
@@ -678,10 +741,13 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
           <>
             <Button
               onClick={() =>
-                resolve.mutate({ id: item.id, body: { resolution: 'rejected' } }, done('Rejected'))
+                resolve.mutate(
+                  { id: item.id, body: { resolution: 'rejected' } },
+                  done(item.subkind === 'ceo_recommendation' ? 'Not now' : 'Rejected'),
+                )
               }
             >
-              Reject
+              {item.subkind === 'ceo_recommendation' ? 'Not now' : 'Reject'}
             </Button>
             <Button
               variant="primary"
@@ -692,15 +758,17 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
                     id: item.id,
                     body: { resolution: 'approved', ...(edited ? { editedBody: edited } : {}) },
                   },
-                  done('Approved'),
+                  done(item.subkind === 'ceo_recommendation' ? 'Done' : 'Approved'),
                 )
               }
             >
-              {item.subkind === 'large_merge'
-                ? 'Approve merge'
-                : item.subkind === 'repo_create'
-                  ? 'Create repository'
-                  : 'Approve'}
+              {item.subkind === 'ceo_recommendation'
+                ? 'Do it'
+                : item.subkind === 'large_merge'
+                  ? 'Approve merge'
+                  : item.subkind === 'repo_create'
+                    ? 'Create repository'
+                    : 'Approve'}
             </Button>
           </>
         ) : item.subkind === 'budget_paused' && item.budgetProject ? (

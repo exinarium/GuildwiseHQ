@@ -37,6 +37,7 @@ export function escalationText(a: OrgChartAgent, chart: OrgChart): string {
   if (a.escalatesTo.level === 'peer')
     return `${names(a.escalatesTo.agentIds)} (senior ${a.roleLabel.toLowerCase()})`;
   if (a.escalatesTo.level === 'ba') return `the BA (${names(a.escalatesTo.agentIds)})`;
+  if (a.escalatesTo.level === 'ceo') return `the CEO (${names(a.escalatesTo.agentIds)})`;
   return `${chart.owner.name}, on the desk`;
 }
 
@@ -49,7 +50,11 @@ export function groupByDepartment(
   label: string;
   roles: Array<{ key: string; label: string; agents: OrgChartAgent[] }>;
 }> {
-  return departments
+  // Management (the CEO) is listed first.
+  const ordered = [...departments].sort(
+    (a, b) => Number(b.key === 'management') - Number(a.key === 'management'),
+  );
+  return ordered
     .map((d) => {
       const inDept = agents.filter((a) => !a.isDevops && (a.department ?? 'other') === d.key);
       const roles = [...new Set(inDept.map((a) => a.roleKey))].sort().map((key) => {
@@ -62,7 +67,11 @@ export function groupByDepartment(
           );
         return { key, label: mine[0]?.roleLabel ?? key, agents: mine };
       });
-      return { key: d.key, label: d.label, roles };
+      return { key: d.key, label: d.key === 'management' ? 'Management' : d.label, roles };
     })
     .filter((d) => d.roles.length > 0);
 }
+
+/** Is this agent the organization's CEO, and is it paused? */
+export const isPausedCeo = (chart: OrgChart, a: OrgChartAgent): boolean =>
+  !!chart.ceo && chart.ceo.agentId === a.id && chart.ceo.paused;
