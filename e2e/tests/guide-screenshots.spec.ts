@@ -119,7 +119,7 @@ async function makeCard(
       title: c.title,
       cardType: 'feature',
       repoId: S.ids[`repo:${projectKey}`],
-      completionAction: o.action ?? 'push_branch',
+      completionAction: o.action ?? 'pr',
       docsNeeded: o.docs ?? false,
       ...(o.deps ? { dependencies: o.deps } : {}),
       fields: {
@@ -277,6 +277,9 @@ step('workstation A, projects, agents', async () => {
     expect(r.status(), await r.text()).toBe(201);
     S.ids[`project:${key}`] = (await r.json()).project.id;
   }
+  // Manual QA is on by default: the seeded history goes straight to Done; the QA scene is made at the end
+  const noQa = await p.put(`/api/projects/${S.ids['project:WEB']}/manual-qa`, { data: { enabled: false } });
+  expect(noQa.status(), await noQa.text()).toBe(200);
   const add = await p.post(`/api/projects/${S.ids['project:WEB']}/repos`, {
     data: { name: 'web', remoteUrl: paths.origin, workingBranch: 'main' },
   });
@@ -366,9 +369,9 @@ step('history: four clean cards, a docs card', async () => {
   const refs: string[] = [];
   for (const [key, action] of [
     ['csv', 'merge'],
-    ['last_login', 'push_branch'],
-    ['typo', 'push_branch'],
-    ['cache', 'push_branch'],
+    ['last_login', 'pr'],
+    ['typo', 'pr'],
+    ['cache', 'pr'],
   ] as const) {
     const c = await makeCard(p, 'WEB', CARDS[key] as CardSpec, { action });
     refs.push(c.ref);
@@ -423,6 +426,7 @@ step('a phase of two cards that is finished and waits for approval', async () =>
   expect(ph.status(), await ph.text()).toBe(201);
   const phase = (await ph.json()) as { id: string; ref: string };
   S.ids['phase:ref'] = phase.ref;
+  const phaseRefs: string[] = [];
   for (const c of [
     spec(
       'Show the order total in words on the receipt',
@@ -440,8 +444,9 @@ step('a phase of two cards that is finished and waits for approval', async () =>
     const card = await makeCard(p, 'WEB', c, { action: 'merge' });
     const put = await p.put(`/api/cards/${card.id}/phase`, { data: { phaseId: phase.id } });
     expect(put.status(), await put.text()).toBe(200);
-    await done(card.ref);
+    phaseRefs.push(card.ref);
   }
+  for (const r of phaseRefs) await done(r);
   await waitFor(
     'the phase waits for approval',
     () => q<any>(`SELECT status FROM phases WHERE id=$1`, [phase.id]),
@@ -639,13 +644,14 @@ step('a repository whose working branch is not confirmed: hygiene asks on the de
   rmSync(origin, { recursive: true, force: true });
   rmSync(clone, { recursive: true, force: true });
   mkdirSync(paths.vaults, { recursive: true });
-  git(paths.vaults, 'init', '--bare', '-b', 'main', origin);
+  // no main or master: simple mode confirms the working branch of a repository that has one of them without asking
+  git(paths.vaults, 'init', '--bare', '-b', 'trunk', origin);
   git(paths.repoRoot, 'clone', origin, 'notes-app');
-  git(clone, 'checkout', '-b', 'main');
+  git(clone, 'checkout', '-b', 'trunk');
   writeFileSync(join(clone, 'README.md'), '# Team notes\n');
   git(clone, 'add', '.');
   git(clone, 'commit', '-m', 'Initial commit');
-  git(clone, 'push', '-u', 'origin', 'main');
+  git(clone, 'push', '-u', 'origin', 'trunk');
   git(clone, 'branch', 'develop');
   git(clone, 'push', 'origin', 'develop');
   const proj = await p.post('/api/projects', {
@@ -782,7 +788,7 @@ step('intake and the outbox', async () => {
       title: 'Customers cannot reset their password on mobile',
       body: 'The reset link opens the desktop page and the form is cut off on phones.',
       project: 'WEB',
-      completionAction: 'push_branch',
+      completionAction: 'pr',
       acceptanceCriteria: ['The reset form fits a 360 px wide screen', 'The link works from the email app'],
     }),
   );
@@ -1368,19 +1374,7 @@ step('test stage: bug loop, conflict, review queue, large merge, busy agents, to
     { mock: { test: ['fail', 'ok'] } },
   );
   S.ids['card:tb'] = tb.ref;
-  const tc = await makeCard(
-    p,
-    web,
-    mk(
-      'Send a receipt email after payment',
-      'Customers only get the order confirmation, not a receipt.',
-      'Send a PDF receipt when the payment is confirmed.',
-      ['The receipt has the VAT number'],
-    ),
-    { mock: { test: ['hang'] } },
-  );
-  S.ids['card:tc'] = tc.ref;
-  for (const r of [tb.ref, tc.ref]) await inStage(r, 'test', 'queued');
+  await inStage(tb.ref, 'test', 'queued');
 
   // large merge: reviewed elsewhere, waits for the manager at Finalize
   const lm = await makeCard(
@@ -1433,8 +1427,28 @@ step('test stage: bug loop, conflict, review queue, large merge, busy agents, to
   expect(
     (await p.post(`/api/cards/${ta.ref}/cancel`, { data: { reason: 'Replaced by a later card' } })).ok(),
   ).toBeTruthy();
-  await waitCard(cc.ref, 'back in build after the conflict', (c) => c.rework_round >= 1);
-  await waitCard(tb.ref, 'waiting on its bug', (c) => c.status === 'waiting');
+  await waitCard(cc.ref, 'back in build after the conflict', (c) => c.rework_round >= 1, 300_000);
+  await waitCard(tb.ref, 'waiting on its bug', (c) => c.status === 'waiting', 300_000);
+  // the second long test is made only now: if the runner turns the conflicting card's shift away because it is still
+  // tearing down the cancelled one, the card goes to the back of the queue and a hanging test would starve it
+  const tc = await makeCard(
+    p,
+    web,
+    mk(
+      'Send a receipt email after payment',
+      'Customers only get the order confirmation, not a receipt.',
+      'Send a PDF receipt when the payment is confirmed.',
+      ['The receipt has the VAT number'],
+    ),
+    { mock: { test: ['hang'] } },
+  );
+  S.ids['card:tc'] = tc.ref;
+  // the reviewer is busy with the long review: the manager sends the card to test herself
+  await inStage(tc.ref, 'review', 'queued');
+  const tcMove = await p.post(`/api/cards/${tc.id}/move`, {
+    data: { toStage: 'test', reason: 'Reviewed together in a pairing session' },
+  });
+  expect(tcMove.ok(), await tcMove.text()).toBeTruthy();
   await inStage(tc.ref, 'test', 'claimed');
   const bug = (
     await q<any>(
@@ -1444,12 +1458,18 @@ step('test stage: bug loop, conflict, review queue, large merge, busy agents, to
   )[0].ref as string;
   await q(`UPDATE cards SET title='Bug: the delivery estimate says Sunday' WHERE ref=$1`, [bug]);
   S.ids['card:bug'] = bug;
-  // the builders fix the bug and rebuild the conflicting card; both end up waiting for the reviewer
+  // the builder fixes the bug and waits for the reviewer; the conflicting card waits while DevOps tries to resolve the
+  // conflict on a separate branch (it needs the manager's approval on the desk)
   await inStage(bug, 'review', 'queued');
-  await waitCard(
-    cc.ref,
-    'rebuilt and waiting for review',
-    (c) => c.stage === 'review' && c.status === 'queued',
+  await waitFor(
+    'DevOps request for the conflict',
+    () =>
+      q<any>(
+        `SELECT status FROM devops_requests WHERE card_id=(SELECT id FROM cards WHERE ref=$1)`,
+        [cc.ref],
+      ),
+    (r) => r.length > 0,
+    120_000,
   );
   // Grace takes a long build too: from here nobody is free to build
   const gh = await makeCard(
@@ -1465,9 +1485,9 @@ step('test stage: bug loop, conflict, review queue, large merge, busy agents, to
   );
   S.ids['card:gh'] = gh.ref;
   await inStage(gh.ref, 'build', 'claimed');
-  // the manager sends the bug fix and the conflicting card back to build, and a reviewed card to test
+  // the manager sends the bug fix back to build, and a reviewed card to test
   const idOf = async (ref: string) => (await card(ref)).id as string;
-  for (const ref of [bug, cc.ref]) {
+  for (const ref of [bug]) {
     const r = await p.post(`/api/cards/${await idOf(ref)}/move`, {
       data: { toStage: 'build', reason: 'The change needs another round before review' },
     });
@@ -1817,6 +1837,117 @@ step(
     );
   },
 );
+
+step('batch intake: tickets pasted in a list, one already has a card, one waits for an answer', async () => {
+  const p = await pieter();
+  // Known product bug (found while making the guide): migration 1867 makes intake_batches.org_id reference users(id)
+  // instead of organizations(id), so a batch of an organization whose id is not a user id fails with a 500. The guide
+  // database drops the constraint so the screens can be shot; the repository's migration is not touched here.
+  await q(`ALTER TABLE intake_batches DROP CONSTRAINT IF EXISTS intake_batches_org_id_fkey`);
+  const srcDir = join(A, 'mock-sources');
+  const tickets: Array<[string, string, string]> = [
+    ['SUP-240', 'Show the delivery estimate on the order confirmation page', 'Customers ask when the parcel arrives.'],
+    ['SUP-241', 'Add a "reorder" button to past orders', 'Returning customers want to repeat an order in one click.'],
+    ['SUP-242', 'Let customers change the delivery address until the order ships', 'Support gets this request every week.'],
+  ];
+  for (const [key, title, body] of tickets)
+    writeFileSync(join(srcDir, `${key}.json`), JSON.stringify({ title, body, project: 'WEB' }));
+  const web = S.ids['project:WEB'] as string;
+  const start = async (data: Record<string, unknown>) => {
+    const r = await p.post('/api/intake/batches', { data });
+    expect(r.status(), await r.text()).toBeLessThan(300);
+    const b = (await r.json()) as any;
+    return (b.id ?? b.batch?.id) as string;
+  };
+  const old = await q<any>(`SELECT id FROM intake_batches ORDER BY created_at LIMIT 1`);
+  const first =
+    (old[0]?.id as string | undefined) ??
+    (await start({ tickets: ['SUP-240', 'SUP-241', 'SUP-231', 'SUP-242'], projectId: web }));
+  S.ids.batch = first;
+  await waitFor(
+    'the batch is processed',
+    async () => ((await (await p.get(`/api/intake/batches/${first}`)).json()) as any).batch.items as any[],
+    (items) => items.length === 4 && items.every((i) => ['done', 'skipped', 'failed'].includes(i.status)),
+    240_000,
+  );
+  // the mock BA names its cards "Ticket <key>": give them the ticket's title
+  for (const [key, title, body] of tickets)
+    await q(
+      `UPDATE cards SET title=$2, fields = jsonb_set(jsonb_set(fields,'{context}',to_jsonb($3::text)),'{requirements}',to_jsonb($2::text)) WHERE title=$1`,
+      [`Ticket ${key}`, title, body],
+    );
+  // a second batch where the BA has a question (the mock BA asks when the note says [ask])
+  writeFileSync(
+    join(srcDir, 'SUP-250.json'),
+    JSON.stringify({ title: 'Export invoices as PDF', body: 'Finance wants PDF invoices.' }),
+  );
+  S.ids.batchAsk = await start({ tickets: ['SUP-250'], note: '[ask] check which shop this is for' });
+  await waitFor(
+    'the batch question',
+    async () => ((await (await p.get(`/api/intake/batches/${S.ids.batchAsk}`)).json()) as any).batch.items as any[],
+    (items) => items.some((i) => i.status === 'waiting'),
+    240_000,
+  );
+});
+
+step('a run of the Web shop on its working branch', async () => {
+  const p = await pieter();
+  const r = await p.post('/api/runs', {
+    data: { projectId: S.ids['project:WEB'], workstationId: S.ids.wsA },
+  });
+  expect(r.status(), await r.text()).toBeLessThan(300);
+  const b = (await r.json()) as any;
+  S.ids.runEnv = (b.environment?.id ?? b.id) as string;
+});
+
+step('manual QA: a finalized card waits for the person who started it', async () => {
+  const p = await pieter();
+  const on = await p.put(`/api/projects/${S.ids['project:WEB']}/manual-qa`, { data: { enabled: true } });
+  expect(on.status(), await on.text()).toBe(200);
+  const c = await makeCard(
+    p,
+    'WEB',
+    spec(
+      'Show the order status as a progress bar',
+      'Customers do not see at a glance whether their order is packed or shipped.',
+      'Show a four-step progress bar (received, packed, shipped, delivered) on the order page.',
+      ['The current step is highlighted', 'The bar fits a phone screen'],
+    ),
+    { action: 'pr' },
+  );
+  S.ids['card:qa'] = c.ref;
+  await waitCard(c.ref, 'waiting for QA', (x) => x.stage === 'manual_qa' && x.status === 'waiting', 300_000);
+});
+
+step('polish: realistic test steps on the QA card', async () => {
+  const steps = [
+    '## Happy path',
+    '- [ ] Open an order that has shipped: the bar shows "Shipped" highlighted',
+    '- [ ] Open an order that was only received: only the first step is highlighted',
+    '## Edge cases',
+    '- [ ] A cancelled order shows "Cancelled" instead of the bar',
+    '## UI and data checks',
+    '- [ ] On a phone (360 px wide) the four steps still fit on one line',
+  ].join('\n');
+  await q(`UPDATE cards SET qa = jsonb_set(qa, '{steps}', to_jsonb($2::text)) WHERE ref=$1`, [
+    S.ids['card:qa'],
+    steps,
+  ]);
+  // the mock BA asks because the note holds [ask]; the reader should see a plain note
+  await q(`UPDATE intake_batches SET note = btrim(replace(note, '[ask]', '')) WHERE note LIKE '%[ask]%'`);
+  // Manual QA was switched on while cards were still in flight: the manager has tested all but three of them
+  const p = await pieter();
+  const keep = [S.ids['card:qa'], 'WEB-49', 'WEB-41'];
+  for (const c of await q<any>(`SELECT id, ref FROM cards WHERE stage='manual_qa' AND status='waiting'`)) {
+    if (keep.includes(c.ref)) continue;
+    const r = await p.post(`/api/cards/${c.id}/qa/pass`, { data: {} });
+    expect(r.ok(), await r.text()).toBeTruthy();
+  }
+  // two of the first cards were finished days ago: they have left the board and are in the Archive
+  await q(`UPDATE cards SET finished_at = finished_at - interval '3 days' WHERE ref = ANY($1::text[])`, [
+    [S.ids['card:typo'], S.ids['card:cache']],
+  ]);
+});
 
 test('seed: finished', async () => {
   expect(Object.keys(S.done).length).toBeGreaterThan(5);
@@ -2201,6 +2332,77 @@ cap('the platform area', async () => {
   await open(s, '/platform/audit');
   await snap(s, 'platform-audit', { maxH: 900, content: true });
   await ctx.close();
+});
+
+cap('the newer features: integrations, batch intake, run a branch, manual QA, commit as, archive, value report', async () => {
+  await pPage.setViewportSize({ width: 1280, height: 1200 });
+  // Integrations of the first workstation
+  await open(pPage, '/integrations');
+  await snap(pPage, 'integrations-index', { maxH: 700, content: true });
+  await open(pPage, `/workstations/${S.ids.wsA}/integrations`);
+  await snap(pPage, 'integrations', { maxH: 1000, content: true });
+  // batch intake: the form with a pasted list, then a finished batch and one with a question
+  await open(pPage, '/intake');
+  await pPage.getByRole('tab', { name: 'Batch' }).click();
+  await pPage.getByLabel('Tickets, one per line').fill('SUP-251\nSUP-252\nacme/web#12\nhttps://example.atlassian.net/browse/SUP-253');
+  await snap(pPage, 'intake-batch-form', { sel: pPage.getByRole('form', { name: 'Start a batch intake' }) });
+  await open(pPage, `/intake/batches/${S.ids.batch}`);
+  await snap(pPage, 'intake-batch', { maxH: 1100, content: true });
+  await open(pPage, `/intake/batches/${S.ids.batchAsk}`);
+  await snap(pPage, 'intake-batch-question', { maxH: 900, content: true });
+  // run a branch: the dialog on the board and the panel of a started environment. The mock DevOps engineer cannot
+  // start real services, so the environment it left behind is shown as a running one (demo data, the way the
+  // seed rewords the mock agents' questions).
+  const svc = (name: string, port: number) => ({
+    name,
+    state: 'healthy',
+    ports: [{ name: 'http', port, url: `http://localhost:${port}/` }],
+    urls: [`http://localhost:${port}/`],
+    health: 'passing',
+    restarts: 0,
+    sandbox: 'sandboxed',
+  });
+  await q(
+    `UPDATE run_environments SET state='healthy', services_status=$2::jsonb, last_error=NULL, stop_reason=NULL,
+       stop_requested_at=NULL, stopped_at=NULL, healthy_at=now(), activity=NULL WHERE id=$1`,
+    [S.ids.runEnv, JSON.stringify([svc('web', 20001), svc('api', 20002)])],
+  );
+  await open(pPage, '/p/WEB/board');
+  await expect(pPage.getByTestId('board-runs')).toBeVisible({ timeout: 30_000 });
+  await snap(pPage, 'run-panel', { sel: pPage.getByTestId('board-runs') });
+  await pPage.getByTestId('run-branch-open').click();
+  await expect(pPage.getByRole('dialog')).toBeVisible();
+  await snap(pPage, 'dlg-run-branch', { sel: pPage.getByRole('dialog') });
+  await pPage.keyboard.press('Escape');
+  // the other board shots do not show an environment: put it back to what the mock DevOps engineer left
+  await q(
+    `UPDATE run_environments SET state='failed', services_status='[]'::jsonb, stop_reason='failed', stopped_at=now(),
+       last_error='The DevOps engineer finished without making the environment ready.' WHERE id=$1`,
+    [S.ids.runEnv],
+  );
+  // manual QA: the card, the desk item and the setting
+  await open(pPage, `/cards/${S.ids['card:qa']}`);
+  await expect(pPage.getByTestId('qa-panel')).toBeVisible();
+  await snap(pPage, 'qa-panel', { sel: pPage.getByTestId('qa-panel') });
+  await open(pPage, '/desk');
+  const qaItem = pPage.getByTestId('qa-desk-item').first().locator('xpath=ancestor::article[1]');
+  await snap(pPage, 'desk-qa', { sel: qaItem });
+  await open(pPage, '/p/WEB/board');
+  await snap(pPage, 'board-qa', { maxH: 1000, content: true });
+  await open(pPage, `/projects/${S.ids['project:WEB']}/settings`);
+  // the form's own placeholders are the product's example; show the demo owner (nothing is saved)
+  const commitAs = pPage.getByTestId('commit-as');
+  await commitAs.getByLabel('Name').fill('Pieter Demo');
+  await commitAs.getByLabel('E-mail').fill('pieter@demo.local');
+  await snap(pPage, 'commit-as', { sel: commitAs });
+  await snap(pPage, 'manual-qa-setting', { sel: pPage.getByTestId('manual-qa-toggle').locator('xpath=ancestor::section[1]') });
+  await snap(pPage, 'run-settings', { sel: pPage.getByTestId('run-settings').locator('xpath=ancestor::section[1]') });
+  // the archive of finished cards
+  await open(pPage, '/p/WEB/archive');
+  await snap(pPage, 'archive', { maxH: 900, content: true });
+  // the value report on the Costs page
+  await open(pPage, '/costs');
+  await snap(pPage, 'value-report', { sel: pPage.getByTestId('value-panel').locator('xpath=ancestor::section[1]') });
 });
 
 cap('on a phone', async () => {

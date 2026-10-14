@@ -100,6 +100,12 @@ export default async function globalSetup(): Promise<(() => Promise<void>) | und
     ].map(deleteMailFor),
   );
 
+  // Commits need an identity (backlog #65): the demo workstation owner, so no machine's own git config is read.
+  const gitConfig = join(E2E_DIR, 'gitconfig');
+  writeFileSync(gitConfig, '[user]\n\tname = Pieter Demo\n\temail = pieter@demo.local\n');
+  process.env.GIT_CONFIG_GLOBAL = gitConfig;
+  process.env.GIT_CONFIG_NOSYSTEM = '1';
+
   const env = {
     ...process.env,
     DATABASE_URL,
