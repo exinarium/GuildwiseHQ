@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { baTaskPass } from '../src/dispatcher/ba-tasks.ts';
 import { sweepEventTriggers } from '../src/commands/schedule-triggers.ts';
+import { baTaskPass } from '../src/dispatcher/ba-tasks.ts';
 import type { MailMessage } from '../src/mail/mailer.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -140,7 +140,9 @@ describe('asking for a draft', () => {
     const m = await addMember(w, 'plainmember');
     const asMember = await w.t.req('POST', `/api/mail-threads/${threadId}/draft`, { cookie: m.cookie });
     expect(asMember.status).toBe(404);
-    expect((await w.t.req('GET', `/api/mail-threads/${threadId}/draft`, { cookie: m.cookie })).status).toBe(404);
+    expect((await w.t.req('GET', `/api/mail-threads/${threadId}/draft`, { cookie: m.cookie })).status).toBe(
+      404,
+    );
     expect(await q('SELECT 1 FROM mail_reply_drafts')).toHaveLength(0);
   });
 
@@ -161,14 +163,19 @@ describe('the BA writes the draft', () => {
   it('gets the conversation, the card and who sends; a draft naming agents is refused, a clean one is stored and nothing is sent', async () => {
     const start = await draftShift();
     const t = start.baTask.mailDraft;
-    expect(t.messages.at(-1)).toMatchObject({ direction: 'in', from: 'ana@acme.com', text: 'Please come and look.' });
+    expect(t.messages.at(-1)).toMatchObject({
+      direction: 'in',
+      from: 'ana@acme.com',
+      text: 'Please come and look.',
+    });
     expect(t.subject).toBe('Printer is on fire');
     expect(t.to).toBe('ana@acme.com');
     expect(t.senderName).toBeTruthy();
     expect(t.card.ref).toMatch(/^TOY-/);
     expect(start.brief.shift.outcomes.map((o: any) => o.id)).toEqual(['mail_draft_done', 'mail_draft_fail']);
 
-    const agentName = (await q('SELECT name FROM agents WHERE org_id=$1 LIMIT 1', [orgId]))[0]?.name as string;
+    const agentName = (await q('SELECT name FROM agents WHERE org_id=$1 LIMIT 1', [orgId]))[0]
+      ?.name as string;
     const bad = await report(start.shiftId, {
       kind: 'outcome',
       outcomeId: 'mail_draft_done',
@@ -190,7 +197,10 @@ describe('the BA writes the draft', () => {
       kind: 'outcome',
       outcomeId: 'mail_draft_done',
       note: 'Reply draft',
-      data: { text: 'Hello Ana,\n\nI will send someone today.\n\nKind regards,\nPat', subject: 'Re: Printer' },
+      data: {
+        text: 'Hello Ana,\n\nI will send someone today.\n\nKind regards,\nPat',
+        subject: 'Re: Printer',
+      },
     });
     expect(good.accepted).toBe(true);
     await end(start.shiftId);
@@ -200,7 +210,9 @@ describe('the BA writes the draft', () => {
       text: 'Hello Ana,\n\nI will send someone today.\n\nKind regards,\nPat',
       subject: 'Re: Printer',
     });
-    expect((await q('SELECT status FROM ba_tasks WHERE kind=$1', ['mail_reply_draft']))[0]?.status).toBe('done');
+    expect((await q('SELECT status FROM ba_tasks WHERE kind=$1', ['mail_reply_draft']))[0]?.status).toBe(
+      'done',
+    );
     // never auto-sent
     expect(sent).toHaveLength(0);
     expect(await q(`SELECT 1 FROM mail_messages WHERE direction='out'`)).toHaveLength(0);
@@ -215,7 +227,9 @@ describe('the BA writes the draft', () => {
     );
     expect(res.messages.at(-1).direction).toBe('out');
     expect(sent).toHaveLength(1);
-    const ev = (await q(`SELECT payload FROM events WHERE type='MailReplySent' ORDER BY seq DESC LIMIT 1`))[0] as any;
+    const ev = (
+      await q(`SELECT payload FROM events WHERE type='MailReplySent' ORDER BY seq DESC LIMIT 1`)
+    )[0] as any;
     expect(ev.payload.draftedBy).toBe('ba');
     expect(await draftOf(`/api/cards/${cardId}/mail-draft`)).toBeNull();
   });

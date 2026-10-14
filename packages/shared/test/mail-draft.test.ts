@@ -31,7 +31,14 @@ const brief = {
   role: { instructions: 'You are the BA.', coreRules: ['Be brief.'] },
   shift: { outcomes: baTaskBriefOutcomes('mail_reply_draft') },
 } as never;
-const baTask = { taskId: 't', kind: 'mail_reply_draft', mailDraft: task, cards: [], followups: [], outstanding: [] } as never;
+const baTask = {
+  taskId: 't',
+  kind: 'mail_reply_draft',
+  mailDraft: task,
+  cards: [],
+  followups: [],
+  outstanding: [],
+} as never;
 
 describe('mail_reply_draft task', () => {
   it('has a done and a fail outcome, each with its aom command', () => {
@@ -44,7 +51,9 @@ describe('mail_reply_draft task', () => {
   it('tells the BA to write as the organisation and never mention agents, AI or Guildwise', () => {
     const text = renderBaTaskInstructions(brief, baTask);
     expect(text).toContain("Write as Acme Ltd's own person");
-    expect(text).toContain('Never mention agents, AI, assistants, language models, automation, bots, Guildwise');
+    expect(text).toContain(
+      'Never mention agents, AI, assistants, language models, automation, bots, Guildwise',
+    );
     expect(text).toContain('nothing is sent by itself');
     expect(text).toContain('Pat');
   });
