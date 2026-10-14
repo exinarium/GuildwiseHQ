@@ -74,6 +74,22 @@ An easy way to start the project on a chosen branch to try it. Build/run instruc
 choose which services to start. Needs design: where it runs (the workstation), who may start it, ports and logs, how it
 is stopped.
 
+### 59. Integration and E2E tests per project, run by testers
+
+**Owner decision (2026-10-14):** whether integration and E2E tests run is a per-project setting. They need networking, so
+builders and reviewers never run them (unit tests only; the handoff names the suites left out). Dedicated tester agents
+run them, when enabled, against a **local** environment (started on the workstation, see the start action #58) or a
+**remote** one (a URL configured in the project). The tester's sandbox then allows exactly that host (localhost ports or
+the remote host), nothing else.
+
+### 60. Claude sign-in from the web
+
+**Owner request (2026-10-14):** sign in to Claude (and MCP servers, #48) from the web instead of the terminal. Idea: the
+runner starts `claude setup-token` (or the login flow) itself, sends the sign-in URL to the app, the owner opens it and
+pastes the code back on the Integrations page (#34); the runner finishes the flow and keeps the token on the workstation
+(it never reaches the server). MCP OAuth uses a localhost callback, so it works directly only when the browser is on the
+workstation; otherwise needs the same paste-the-code relay. Part of the #34 design.
+
 ## Direction (owner, 2026-10-13)
 
 Guildwise started as a tool for software teams (the owner built it for his own work), but the aim is **running a whole
