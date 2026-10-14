@@ -107,6 +107,64 @@ describe('editing a card', () => {
   });
 });
 
+describe('priority and completion action at any time (#54)', () => {
+  it('both change on a claimed card; other fields stay locked; the permissions say so', async () => {
+    await freshState();
+    await hireTeam(w);
+    const card = await w.card({ title: 'Claimed light edits' });
+    const start = await p.next('Bea');
+    await p.startShift(r, start);
+    expect((await cardRow(card.id)).status).toBe('claimed');
+    const d = await detail(card.id);
+    expect(d.permissions).toMatchObject({ canEdit: false, canEditPriority: true, canEditCompletion: true });
+    const res = await patch(card.id, { priority: 1, completionAction: 'push_branch' });
+    expect(res.status).toBe(200);
+    expect(res.body.card).toMatchObject({ priority: 1, completionAction: 'push_branch' });
+    expect((await q('SELECT priority FROM cards WHERE id=$1', [card.id]))[0]?.priority).toBe(1);
+    // mixed with a heavy edit, the whole patch is refused
+    const mixed = await patch(card.id, { priority: 2, title: 'Nope' });
+    expect(mixed.status).toBe(409);
+    expect(mixed.body.error.code).toBe('card_claimed');
+    expect((await cardRow(card.id)).priority).toBe(1);
+  });
+
+  it('the completion action waits while a finalise is awaiting approval or running; priority does not', async () => {
+    const card = await draft({ title: 'Finalising', completionAction: 'merge' });
+    for (const state of ['awaiting_approval', 'running']) {
+      await q(`UPDATE cards SET finalize_state=$2 WHERE id=$1`, [card.id, state]);
+      const d = await detail(card.id);
+      expect(d.permissions).toMatchObject({ canEditCompletion: false, canEditPriority: true });
+      const refused = await patch(card.id, { completionAction: 'pr' });
+      expect(refused.status).toBe(409);
+      expect(refused.body.error.code).toBe('finalize_pending');
+      expect((await patch(card.id, { priority: 4 })).status).toBe(200);
+    }
+    await q(`UPDATE cards SET finalize_state=NULL WHERE id=$1`, [card.id]);
+    expect((await patch(card.id, { completionAction: 'pr' })).status).toBe(200);
+  });
+
+  it('a done card takes a priority only; a cancelled card takes nothing', async () => {
+    const done = await draft({ title: 'Finished' });
+    await q(`UPDATE cards SET status='done', stage='done' WHERE id=$1`, [done.id]);
+    const d = await detail(done.id);
+    expect(d.permissions).toMatchObject({ canEditPriority: true, canEditCompletion: false });
+    expect((await patch(done.id, { priority: 2 })).status).toBe(200);
+    const c1 = await patch(done.id, { completionAction: 'pr' });
+    expect(c1.status).toBe(409);
+    expect(c1.body.error.code).toBe('card_closed');
+    expect((await patch(done.id, { title: 'x' })).body.error.code).toBe('card_closed');
+    expect((await patch(done.id, { riskTier: 'large', reason: 'why' })).body.error.code).toBe('card_closed');
+
+    const gone = await draft({ title: 'Cancelled' });
+    await q(`UPDATE cards SET status='cancelled' WHERE id=$1`, [gone.id]);
+    expect((await detail(gone.id)).permissions).toMatchObject({
+      canEditPriority: false,
+      canEditCompletion: false,
+    });
+    expect((await patch(gone.id, { priority: 2 })).body.error.code).toBe('card_closed');
+  });
+});
+
 describe('risk tier override', () => {
   const riskActivity = async (id: string) =>
     (await detail(id)).activity.filter((a: any) => a.kind === 'risk_tier');

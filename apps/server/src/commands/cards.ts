@@ -150,6 +150,21 @@ async function assertDependencies(tx: Tx, projectId: string, deps: string[], sel
 }
 
 /** Who a card command acts as, and where the card comes from: the BA's intake chat creates cards as `intake`. */
+/**
+ * Only people choose how a card lands (#52): an agent that names a completion action is refused, never silently
+ * ignored, so the message teaches it. System actors (spawned cards) and people are unaffected.
+ */
+export function assertActorMaySetCompletionAction(
+  actor: AppendInput['actor'] | undefined,
+  completionAction: unknown,
+): void {
+  if (actor?.kind === 'agent' && completionAction !== undefined)
+    throw badRequest(
+      'completion_action_not_allowed',
+      "agents may not set the completion action: the project's default applies to every card you create or update. Leave completionAction out; if this card needs a different landing, ask the manager to change it on the card page.",
+    );
+}
+
 export interface CardActing {
   origin?: CardOrigin;
   actor?: AppendInput['actor'];
@@ -205,6 +220,7 @@ export async function createCardIn(
   acting: CardActing = {},
 ): Promise<{ cardId: string; ref: string; missing?: string[] }> {
   const actor = acting.actor ?? userActor(user.id);
+  assertActorMaySetCompletionAction(acting.actor, req.completionAction);
   const project = await loadVisibleProject(tx, user.id, req.projectId);
   if (project.status !== 'active') throw conflict('project_archived', 'project is archived');
   const projectWf = await resolveWorkflow(tx, project.org_id, project.workflow_key);
@@ -333,10 +349,21 @@ export async function loadManageable(tx: Tx, user: AuthSession['user'], idOrRef:
   return card;
 }
 
-/** Open cards only; a draft or a queued (unclaimed) card may be edited, any open card may get a risk tier override. */
+/**
+ * What may change on which card. Heavy edits (title, fields, repository, flags, dependencies) need a draft or a queued,
+ * unclaimed card. Light keys do not (#54): `priority` and `completionAction` change on any open card, claimed or not;
+ * the risk tier changes on any open card. A pending merge (finalize awaiting approval or running) already captured the
+ * completion action and the risk tier, so those two wait until it is settled. A done card still takes a priority
+ * (it is the priority the card gets if it is reopened); a cancelled card takes nothing.
+ */
 export function editRefusal(card: Row, patch: PatchCardRequest): { code: string; message: string } | null {
-  const { riskTier, reason: _reason, ...rest } = patch;
+  const { riskTier, reason: _reason, priority: _priority, completionAction, ...rest } = patch;
   const edits = Object.entries(rest).some(([, v]) => v !== undefined);
+  if (
+    card.status === 'cancelled' ||
+    (card.status === 'done' && (edits || riskTier !== undefined || completionAction !== undefined))
+  )
+    return { code: 'card_closed', message: `card is ${card.status}` };
   if (edits) {
     if (card.claim_id || card.status === 'claimed')
       return {
@@ -349,13 +376,17 @@ export function editRefusal(card: Row, patch: PatchCardRequest): { code: string;
         message: `${card.ref} is ${card.status}: only a draft or a queued, unclaimed card can be edited`,
       };
   }
-  if (riskTier !== undefined) {
-    if (card.finalize_state === 'awaiting_approval' || card.finalize_state === 'running')
-      return {
-        code: 'finalize_pending',
-        message: `${card.ref} has a merge pending: settle it before changing the risk tier`,
-      };
-  }
+  const pending = card.finalize_state === 'awaiting_approval' || card.finalize_state === 'running';
+  if (riskTier !== undefined && pending)
+    return {
+      code: 'finalize_pending',
+      message: `${card.ref} has a merge pending: settle it before changing the risk tier`,
+    };
+  if (completionAction !== undefined && completionAction !== card.completion_action && pending)
+    return {
+      code: 'finalize_pending',
+      message: `${card.ref} is being finalised with the completion action it had when the finalise was requested: settle it first; the new action applies to the next finalise`,
+    };
   return null;
 }
 
@@ -408,7 +439,6 @@ export async function patchCard(
 ): Promise<string> {
   return withAppendTx(ctx.pool, async (tx) => {
     const card = await loadManageable(tx, user, idOrRef);
-    if (['done', 'cancelled'].includes(card.status)) throw conflict('card_closed', `card is ${card.status}`);
     if (patch.riskTier !== undefined && !patch.reason)
       throw unprocessable('reason_required', 'a reason is required to override the risk tier');
     const refusal = editRefusal(card, patch);
@@ -426,7 +456,11 @@ export async function patchCardIn(
   acting: CardActing = {},
 ): Promise<string> {
   const card = await loadManageable(tx, user, idOrRef);
-  if (['done', 'cancelled'].includes(card.status)) throw conflict('card_closed', `card is ${card.status}`);
+  if (card.status === 'cancelled' || card.status === 'done') {
+    const closed = editRefusal(card, patch);
+    if (closed) throw conflict(closed.code, closed.message);
+  }
+  assertActorMaySetCompletionAction(acting.actor, patch.completionAction);
   const wf = await loadWorkflowById(tx, card.workflow_version_id);
   const changes: CardChanges = {};
   if (patch.title !== undefined && patch.title !== card.title) changes.title = patch.title;

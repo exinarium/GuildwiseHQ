@@ -1,9 +1,15 @@
-import type { CardDto, WorkflowDefinition } from '@aom/shared';
+import {
+  COMPLETION_ACTION_LABELS,
+  type CardDto,
+  CompletionAction,
+  type WorkflowDefinition,
+} from '@aom/shared';
 import { type FormEvent, useState } from 'react';
 import { ApiError } from '../api/client.ts';
 import { usePatchCard } from '../api/queries/cards.ts';
 import { useProject } from '../api/queries/projects.ts';
 import { buildPatchRequest, type CardFormValues, formValuesFromCard } from '../lib/cardForm.ts';
+import { PRIORITY_LEVELS, priorityLevel } from '../lib/priority.ts';
 import { CardFormFields } from './CardFormFields.tsx';
 import { Button, Dialog, ErrorBox, Select, TextArea } from './ui.tsx';
 
@@ -132,5 +138,88 @@ export function RiskTierDialog({
         </div>
       </form>
     </Dialog>
+  );
+}
+
+const SELECT_CLASS =
+  'mt-1 h-9 w-full rounded-control border border-control bg-surface px-2 text-sm text-fg disabled:opacity-60';
+
+/** Priority of an open card, changed in place at any time (also while the card is claimed): picked up in the new order. */
+export function PriorityControl({ card }: { card: CardDto }) {
+  const patch = usePatchCard(card.id);
+  return (
+    <div>
+      <dt className="text-xs font-medium text-subtle">
+        <label htmlFor={`priority-${card.id}`}>Priority</label>
+      </dt>
+      <dd className="text-fg">
+        <select
+          id={`priority-${card.id}`}
+          data-testid="card-priority"
+          className={SELECT_CLASS}
+          value={priorityLevel(card.priority).value}
+          disabled={patch.isPending}
+          onChange={(e) => patch.mutate({ priority: Number(e.target.value) })}
+        >
+          {PRIORITY_LEVELS.map((l) => (
+            <option key={l.key} value={l.value}>
+              {l.label}
+            </option>
+          ))}
+        </select>
+        {patch.error && (
+          <p role="alert" className="mt-1 text-xs text-danger">
+            {refusalText(patch.error)}
+          </p>
+        )}
+      </dd>
+    </div>
+  );
+}
+
+/** Completion action of an open card, changed in place; the value in effect at the next finalise is the one that counts. */
+export function CompletionControl({ card }: { card: CardDto }) {
+  const patch = usePatchCard(card.id);
+  const project = useProject(card.projectId);
+  const projectDefault = project.data?.project.defaultCompletion;
+  return (
+    <div>
+      <dt className="text-xs font-medium text-subtle">
+        <label htmlFor={`completion-${card.id}`}>Completion action</label>
+      </dt>
+      <dd className="text-fg">
+        <select
+          id={`completion-${card.id}`}
+          data-testid="card-completion"
+          className={SELECT_CLASS}
+          value={card.completionAction ?? ''}
+          disabled={patch.isPending}
+          onChange={(e) =>
+            patch.mutate({
+              completionAction: e.target.value === '' ? null : (e.target.value as CompletionAction),
+            })
+          }
+        >
+          <option value="">
+            {projectDefault
+              ? `Project default (${COMPLETION_ACTION_LABELS[projectDefault].label})`
+              : 'Project default'}
+          </option>
+          {CompletionAction.options.map((a) => (
+            <option key={a} value={a}>
+              {COMPLETION_ACTION_LABELS[a].label}
+            </option>
+          ))}
+        </select>
+        <span className="mt-1 block text-xs text-subtle" data-testid="completion-hint">
+          Applies to the next finalise.
+        </span>
+        {patch.error && (
+          <p role="alert" className="mt-1 text-xs text-danger">
+            {refusalText(patch.error)}
+          </p>
+        )}
+      </dd>
+    </div>
   );
 }
