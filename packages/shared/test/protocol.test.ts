@@ -71,6 +71,28 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
     ...env('jira.report'),
     status: { state: 'connected', baseUrl: 'https://acme.atlassian.net', account: 'Pieter' },
   },
+  'integrations.report': {
+    ...env('integrations.report'),
+    registryVersion: 1,
+    integrations: [
+      {
+        kind: 'jira',
+        instance: '',
+        state: 'connected',
+        account: 'Pieter',
+        checkedAt: '2026-10-14T10:00:00.000Z',
+        scope: 'workstation',
+      },
+    ],
+  },
+  'integration.session': {
+    ...env('integration.session'),
+    sessionId: 'sess-1',
+    kind: 'github',
+    instance: 'github.com',
+    state: 'awaiting_user',
+    prompt: { url: 'https://github.com/login/device', urlHost: 'github.com', userCode: 'ABCD-1234' },
+  },
   'toolchains.report': {
     ...env('toolchains.report'),
     toolchains: [

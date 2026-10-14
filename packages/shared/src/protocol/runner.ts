@@ -23,6 +23,17 @@ import {
   RepoAccessPayloadSchema,
 } from '../forge/index.ts';
 import { SWEEP_QUERY_MAX_PATHS, WorktreesSweepPayloadSchema } from '../hygiene/index.ts';
+import {
+  IntegrationBeginPayloadSchema,
+  IntegrationCancelPayloadSchema,
+  IntegrationConnectPayloadSchema,
+  IntegrationInputPayloadSchema,
+  IntegrationRequestPayloadSchema,
+  IntegrationSessionMsgSchema,
+  IntegrationsPolicySchema,
+  IntegrationStatusSchema,
+  MAX_INTEGRATION_STATUSES,
+} from '../integrations/schema.ts';
 import { PROTOCOL_VERSION, uuidv7 } from '../ids.ts';
 import { IntakeContextSchema, QuestionShiftSchema } from '../intake/index.ts';
 import { MAX_MCP_SERVERS, McpServerInfoSchema } from '../mcp/index.ts';
@@ -503,6 +514,12 @@ export const RunnerCommandNameSchema = z.enum([
   'org.folder',
   'toolchain.remove',
   'repo.sync',
+  'integration.connect',
+  'integration.begin',
+  'integration.input',
+  'integration.cancel',
+  'integration.test',
+  'integration.remove',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -539,7 +556,16 @@ export const CommandPayloadSchemas = {
   'org.folder': OrgFolderCommandSchema,
   'toolchain.remove': z.object({ name: z.string().min(1).max(80) }),
   'repo.sync': RepoSyncPayloadSchema,
+  'integration.connect': IntegrationConnectPayloadSchema,
+  'integration.begin': IntegrationBeginPayloadSchema,
+  'integration.input': IntegrationInputPayloadSchema,
+  'integration.cancel': IntegrationCancelPayloadSchema,
+  'integration.test': IntegrationRequestPayloadSchema,
+  'integration.remove': IntegrationRequestPayloadSchema,
 } as const;
+
+/** The commands that carry a sealed envelope: their payload is emptied once answered, and they expire. */
+export const ENVELOPE_COMMANDS: ReadonlySet<string> = new Set(['integration.connect', 'integration.input']);
 
 export const ShiftRejectReasonSchema = z.enum([
   'busy',
@@ -593,6 +619,8 @@ export const HelloSchema = msg('hello', {
   maxConcurrentShifts: z.number().int().positive().optional(),
   /** The key the manager's browser encrypts the sudo password with (the private half never leaves the runner). */
   sudoKey: SudoKeySchema.optional(),
+  /** The runner supports connecting integrations from the web (docs/design/integrations-page.md). Absent from older runners. */
+  integrationsVersion: z.number().int().positive().optional(),
 });
 export const OutboxFlushedSchema = msg('outbox.flushed', {});
 export const HeartbeatSchema = msg('heartbeat', {
@@ -620,6 +648,18 @@ export const JiraStatusSchema = z.object({
 export type JiraStatus = z.infer<typeof JiraStatusSchema>;
 /** Sent after `welcome`, after `aom-runner jira-connect` and on the `git.status` command. */
 export const JiraReportSchema = msg('jira.report', { status: JiraStatusSchema });
+/**
+ * Every integration of this workstation as one fact record each (docs/design/integrations-page.md). Sent after `welcome`,
+ * after a connect, remove or test, after a recheck marker and on the re-scan when something changed. The legacy
+ * `git.report`, `jira.report`, `mcp.servers` and `runtimes.report` continue unchanged.
+ */
+export const IntegrationsReportSchema = msg('integrations.report', {
+  integrations: z.array(IntegrationStatusSchema).max(MAX_INTEGRATION_STATUSES),
+  registryVersion: z.number().int().nonnegative(),
+  policy: IntegrationsPolicySchema.optional(),
+});
+/** Progress of an interactive sign-in (URL, device code, paste step, result). Acked: a terminal state must not be lost. */
+export const IntegrationSessionSchema = msg('integration.session', IntegrationSessionMsgSchema.shape);
 /**
  * The organisation source folders set on this workstation and the folders it offers as candidates (absolute paths,
  * sub folders of the repo roots, bounded). Sent after `welcome`, after every re-scan and after `org.folder`.
@@ -902,6 +942,8 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   McpServersReportSchema,
   ToolchainsReportSchema,
   JiraReportSchema,
+  IntegrationsReportSchema,
+  IntegrationSessionSchema,
   RunnerUpdateReportSchema,
   ShiftAcceptedSchema,
   ShiftRejectedSchema,
@@ -955,6 +997,7 @@ export const RUNNER_ACKED_TYPES: ReadonlySet<string> = new Set<RunnerToServerTyp
   'chat.error',
   'command.result',
   'vault.conflict',
+  'integration.session',
 ]);
 export const SERVER_ACKED_TYPES: ReadonlySet<string> = new Set<ServerToRunnerType>(['shift.stop']);
 

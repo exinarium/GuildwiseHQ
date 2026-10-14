@@ -36,4 +36,30 @@ export const workstationEvents = [
   ),
   defineEvent('WorkstationDisconnected', z.object({ workstationId: Id })),
   defineEvent('WorkstationTokenRotated', z.object({ workstationId: Id, tokenHash: z.string().min(1) })),
+  // Integrations audit (docs/design/integrations-page.md D7): who did what, never a token, field value, URL or code.
+  defineEvent(
+    'WorkstationIntegrationConnected',
+    z.object({
+      workstationId: Id,
+      kind: z.string().max(40),
+      instance: z.string().max(200),
+      method: z.string().max(40).optional(),
+      account: z.string().max(200).optional(),
+      by: Id,
+    }),
+  ),
+  defineEvent(
+    'WorkstationIntegrationRemoved',
+    z.object({ workstationId: Id, kind: z.string().max(40), instance: z.string().max(200), by: Id }),
+  ),
+  defineEvent(
+    'WorkstationIntegrationSignInStarted',
+    z.object({
+      workstationId: Id,
+      kind: z.string().max(40),
+      instance: z.string().max(200),
+      method: z.string().max(40),
+      by: Id,
+    }),
+  ),
 ] as const;
