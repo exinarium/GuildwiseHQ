@@ -342,6 +342,10 @@ export class Runner {
       maxEnvironments: () => this.freshConfig().maxRunEnvironments,
       portRange: () => this.freshConfig().runPortRange,
       pathDirs: () => this.toolchains.resolve().pathDirs,
+      sandboxMode: () => {
+        const c = this.freshConfig().runtimes['claude-code'];
+        return { mode: c.sandbox, allowUnsandboxed: c.allowUnsandboxed };
+      },
       ...(opts.runTiming ? { timing: opts.runTiming } : {}),
     });
     this.supervisor = new ShiftSupervisor({
@@ -740,7 +744,7 @@ export class Runner {
       maxConcurrentShifts: this.opts.config.maxConcurrentShifts,
       sudoKey: this.keys.publicKey,
       // Run a branch needs process groups and /proc or ps: not on native Windows.
-      capabilities: platform() === 'win32' ? [] : ['runs:1'],
+      capabilities: platform() === 'win32' ? [] : ['runs:1', 'runs:2'],
       maxRunEnvironments: this.freshConfig().maxRunEnvironments,
       integrationsVersion: INTEGRATIONS_VERSION,
     };
@@ -909,7 +913,7 @@ export class Runner {
         // The server answers in chunks of at most SWEEP_QUERY_MAX_PATHS; ask in one go while it fits.
         return this.askLiveWorktrees(paths);
       },
-      busyPaths: this.supervisor.worktreePaths(),
+      busyPaths: [...this.supervisor.worktreePaths(), ...this.runs.worktreeDirs()],
       repoPaths: this.repos.map((r) => r.localPath),
       outboxPending: this.outbox.count(),
     }).finally(() => {
@@ -1113,6 +1117,9 @@ export class Runner {
       } else if (command === 'run.stop') {
         await this.runs.stop(CommandPayloadSchemas['run.stop'].parse(payload));
         done(true, { stopped: true });
+      } else if (command === 'run.restart') {
+        // A refusal (no plan, rewritten branch, worktrees gone) is an answer, shown to the person who pressed the button.
+        done(true, await this.runs.restart(CommandPayloadSchemas['run.restart'].parse(payload)));
       } else if (command === 'run.extend') {
         this.runs.extend(CommandPayloadSchemas['run.extend'].parse(payload));
         done(true, { extended: true });

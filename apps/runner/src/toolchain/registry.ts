@@ -73,7 +73,7 @@ export const ENV_ALLOW = new Set([
   'PNPM_HOME',
   'VOLTA_HOME',
 ]);
-const SECRETISH = /TOKEN|SECRET|PASSW|PASSPHRASE|KEY|CREDENTIAL|AUTH|COOKIE|SESSION/i;
+export const SECRETISH = /TOKEN|SECRET|PASSW|PASSPHRASE|KEY|CREDENTIAL|AUTH|COOKIE|SESSION/i;
 /** Shapes of credentials that must never travel in a toolchain variable, whatever its name. */
 const SECRET_VALUE =
   /\b(sk-[\w-]{16,}|gh[pousr]_\w{20,}|github_pat_\w{20,}|glpat-[\w-]{16,}|xox[abprs]-[\w-]{10,}|AKIA[0-9A-Z]{16}|eyJ[\w-]{10,}\.[\w-]{10,}\.)|-----BEGIN [A-Z ]*PRIVATE KEY|:\/\/[^\s/:@]+:[^\s/@]+@|^Bearer\s/i;

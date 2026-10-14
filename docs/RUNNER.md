@@ -1451,7 +1451,7 @@ else cuts the branch from the working branch.
 
 ### Run a branch (supervised services)
 
-Backlog #58 (`docs/design/run-and-integration-tests.md`, phase 1). Someone presses **Run this branch** (card page) or
+Backlog #58 (`docs/design/run-and-integration-tests.md`, phases 1 and 2). Someone presses **Run this branch** (card page) or
 **Run branch...** (the project's board); the server sends `run.start` and files a DevOps request of kind `run`. The runner
 and the DevOps engineer split the work:
 
@@ -1479,21 +1479,76 @@ and the DevOps engineer split the work:
 - **Waiting.** `aom run step` and `aom run service` answer after at most about 100 seconds ("still running", exit code 3) so a
   long build never trips Claude's Bash time limit; the work goes on in the runner.
 - **`aom run ready`** checks every wanted service is healthy, sends `run.plan.saved` (the steps that worked, the services, the
-  notes and a hash of `BUILD.md`) and moves the environment to `healthy`. The server records the plan (`run_plans`); phase 1
-  does not replay it yet. `aom run fail` ends the environment as `failed`.
+  notes and a hash of `BUILD.md`) and moves the environment to `healthy`. The server records the plan (`run_plans`) together
+  with the two halves of its fingerprint (the `BUILD.md` hash from the runner, a hash of the run instructions and structured
+  fields from the server). The runner keeps the plan on the environment (it is what Restart starts again). `aom run fail`
+  ends the environment as `failed`.
+- **Plan replay (phase 2, `runs:2`).** When a plan for the project on this workstation is `active` and both halves of its
+  fingerprint match, the server sends `run.start` with the plan (`replay`) and files **no DevOps request**: the runner prepares
+  the worktrees, compares the plan's `BUILD.md` hash with the one it computes from the run worktrees, then replays the plan
+  with no model call. Setup steps run in order and honour `when`: `always` (default), `first` (only in a fresh worktree) and
+  `changed:<glob>` (in a fresh worktree, and after Update & restart when a changed file matches; the glob is matched against
+  paths relative to the repository root, dotfiles included). Services start in `after` order (only the wanted ones and what they
+  need), each until healthy, within its `startTimeoutSec`. The runner re-validates every step: `cwd` inside the worktree, env
+  files outside every worktree and the data dir, the credential filter on `env`, Docker only with the project opt-in. **Any
+  failure** (a step, a service, a vanished repository, a runner restart in between) stops what the replay started, empties the
+  environment, forgets the request id and sends `run.replay.failed` (acknowledged: persisted and resent) with the reason and the
+  last 40 log lines (secrets redacted). The server then files a DevOps `run` request whose brief carries the failure and the
+  current plan; the engineer repairs it with `aom run` and `aom run ready` saves a new plan version. The first `aom run` call
+  from that request adopts the environment. A `BUILD.md` that differs from the plan's hash is the same path with `stale: true`:
+  the server marks the plan `stale` (`RunPlanMarkedStale`); a change to the run instructions or the declared services marks it
+  stale as soon as it is saved. Plans saved before phase 2 have no hashes and are not replayed.
+- **Service sandbox (D10, phase 2).** Steps and services run under the runner's own bubblewrap profile
+  (`apps/runner/src/runs/sandbox.ts`), not the DevOps session's: `--ro-bind / /` (read-only), `--unshare-pid`, `--cap-drop ALL`,
+  the **host network** (no `--unshare-net`: a dev server must listen where a browser can reach it), and the same unreadable
+  set agents get (`HOME_SECRETS` in the real home and the runner data dir, masked with an empty tmpfs; the worktrees and caches
+  are bound back inside it). Unix sockets are not filtered by bubblewrap, so the system and session buses, `/run/systemd`,
+  `/run/user/<uid>` (the user's systemd manager: `systemd-run --user` would start a unit outside the sandbox) and the Docker
+  socket are masked too. Writable: the run worktrees, the shared caches (`<data dir>/cache`, with the same cache variables
+  agents get) and a private `/tmp` (`/tmp/aom-run-<env>`, removed when the environment stops) in which `HOME` lives
+  (`/tmp/home`). The environment is scrubbed of credentials (names like TOKEN/SECRET/KEY, `SSH_AUTH_SOCK`, the bus variables,
+  `AOM_*`, `CLAUDE*`, `ANTHROPIC*`); env-file values are injected on top. There is **no `--die-with-parent` and no
+  `--new-session`**: a service is detached (its own process group) and outlives the runner and the shift. The sandbox follows
+  `runtimes["claude-code"].sandbox`: `required` (default) refuses to start a step or service when bubblewrap cannot run;
+  `best_effort` with `allowUnsandboxed` runs unsandboxed; `off` runs unsandboxed. A service that runs outside the sandbox is
+  flagged in the environment panel (`No sandbox`). **Docker** (`docker`, `docker compose`, `podman`, or a service declared
+  `docker`) needs the project's "Branch code may use Docker" opt-in, runs **outside the sandbox** as the runner's user and is
+  flagged `Docker: outside the sandbox`. Env files are read by the runner and injected into the process environment; the
+  values never leave the runner and are replaced by `***` in logs. A plan's `stopCmd` runs in the same sandbox.
+- **Restart, Update & restart.** `run.restart` stops the services (reverse order), optionally fast-forwards every run worktree
+  to the head of its branch (`git checkout --detach <head>`; refused with the reason when the branch was rewritten, i.e. the
+  old commit is not an ancestor, and then nothing is changed), and replays the environment's plan in the same worktrees, so
+  incremental build outputs survive. Setup steps `first` are skipped, `changed:<glob>` steps run only when Update changed a
+  matching file, `always` steps run. The expiry restarts from now. If the replay fails the usual fallback to the DevOps engineer
+  applies. The same command **revives** a stopped manual environment: a manual environment that has a plan keeps its run
+  worktrees for 24 hours after a stop (a test environment, a failed one, or one without a plan removes them at once); the
+  server allows Restart on it for that long, within the cap and when the same branch is not running again.
+- **Run worktree sweep.** `worktrees.sweep` (and the start-up sweep) also looks at `run-<env>` folders. The runner asks the
+  server (`worktrees.query`) which are live: an environment that runs, or a stopped manual one with a plan stopped less than
+  24 hours ago. Anything else (older, failed, a test environment, unknown to the server) is removed worktree by worktree; a
+  worktree with uncommitted changes is **reported (`dirty`) and not deleted**, and the folder stays. With no answer from the
+  server nothing is removed, and the runner never touches the folders of its own live or kept environments.
 - **Reports.** `run.status` on every change (debounced, and immediately before an `aom run` call answers; also for every
   known environment after each `welcome`, so a missed final state is resent); `run.log` only while a browser follows
   (`run.follow`), first the last 500 lines, then new ones every half second. Neither is acknowledged.
 - **Restart of the runner.** Services are *not* stopped when the runner stops (a self-update, a restart): on start the runner
   re-adopts every service whose pid and start time still match and goes on supervising it. An environment whose services are
-  gone ends as `runner_restarted`. (A systemd unit that kills the whole control group, the default, takes the services with
-  it: set `KillMode=process` on the unit to keep them across restarts. Restarting them automatically comes in phase 3.)
+  gone ends as `runner_restarted`; one that was in the middle of a replay is handed to the DevOps engineer. systemd's default
+  `KillMode=control-group` would kill the services with the runner, so each service is started with
+  `systemd-run --user --scope --unit=aom-run-<env>-<service>-<n>`: the scope is a unit of its own under the user manager, outside
+  the runner service's cgroup, and systemd-run enters it by itself (the pid stays that of the command, so the pid and start
+  time re-adoption works unchanged; for a sandboxed service the user-bus variables are passed to systemd-run only and removed
+  with `env -u` before bubblewrap). It is used when `systemd-run --user --scope true` works (a systemd user session with
+  `XDG_RUNTIME_DIR`: the installer's lingering gives that); without it (no systemd, a container, macOS) services start as
+  plain detached processes as before, and then `KillMode=process` on the unit is the only way to keep them across a restart.
+  `AOM_RUN_NO_SCOPE=1` turns the scope off. `systemctl --user list-units 'aom-run-*'` lists the scopes. Restarting
+  environments automatically after a reboot or a crash comes in phase 3.
 - **Time limit.** The server stops manual environments at their expiry (8 hours by default, **Extend** adds the project's TTL);
   the runner also stops one itself ten minutes after its expiry if the server could not.
-- **Phase 1 is unsandboxed.** The service sandbox (design D10: bubblewrap, `denyRead` of secrets, writes only to the run
-  worktree) is phase 2. Services run as the runner's user, like the DevOps engineer that starts them, so only run branches of
-  projects you trust. The tester access (forwarders and `aom-env`, D6) and the integration-test mode are phase 3.
-- Not available on native Windows (the hello does not announce `runs:1` there).
+- **Residual risk.** A sandboxed service shares the host network, so it can reach anything the machine can (internal hosts,
+  databases on localhost); only Docker steps (opt-in) and a runner with the sandbox off run with the user's full rights. The
+  tester access (forwarders and `aom-env`, D6) and the integration-test mode are phase 3.
+- Not available on native Windows (the hello does not announce `runs:1` or `runs:2` there).
 
 ### DevOps shifts are unsandboxed
 

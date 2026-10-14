@@ -34,7 +34,13 @@ import { applyReleasePrResult } from '../commands/release-pr.ts';
 import { applyRepoCreateResult, repoCreateRpc } from '../commands/repo-create.ts';
 import { applyRepoSyncStatus, seedRepoSync } from '../commands/repo-sync.ts';
 import { riskTierRpc } from '../commands/risk.ts';
-import { applyRunPlanSaved, applyRunStartResult, applyRunStatus } from '../commands/runs.ts';
+import {
+  applyRunPlanSaved,
+  applyRunReplayFailed,
+  applyRunRestartResult,
+  applyRunStartResult,
+  applyRunStatus,
+} from '../commands/runs.ts';
 import { applyIntegrationResult } from '../commands/schedule-triggers.ts';
 import {
   applyShiftEnded,
@@ -195,6 +201,11 @@ export class RunnerHandlers {
       case 'run.plan.saved':
         await this.withInbox(conn, msg.id, (tx) => applyRunPlanSaved(this.ctx, tx, conn.workstationId, msg));
         return this.ack(conn, msg);
+      case 'run.replay.failed':
+        await this.withInbox(conn, msg.id, (tx) =>
+          applyRunReplayFailed(this.ctx, tx, conn.workstationId, msg),
+        );
+        return this.ack(conn, msg);
       case 'jira.report':
         await applyJiraReport(this.ctx, conn.workstationId, msg.status);
         return;
@@ -246,7 +257,7 @@ export class RunnerHandlers {
       case 'worktrees.query':
         this.send(conn, 'worktrees.live', {
           queryId: msg.queryId,
-          live: await liveWorktreePaths(this.ctx.pool, conn.workstationId, msg.paths),
+          live: await liveWorktreePaths(this.ctx.pool, conn.workstationId, msg.paths, this.ctx.clock.now()),
         });
         return;
       case 'command.result': {
@@ -367,6 +378,17 @@ export class RunnerHandlers {
           // Terminal: the runner is preparing the worktrees, or says why not (the environment then fails).
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
           await applyRunStartResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+        } else if (cmd?.type === 'run.restart') {
+          // Terminal: the runner started the restart, or says why not (shown on the environment).
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyRunRestartResult(
+            this.ctx,
+            conn.workstationId,
+            cmd.payload,
+            msg.ok,
+            msg.result,
+            msg.error,
+          );
         } else if (cmd?.type === 'repo.sync') {
           // Terminal: the answer is the branch's state; "could not move it" is an answer, not a failure.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

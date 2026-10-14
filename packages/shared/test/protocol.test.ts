@@ -179,7 +179,18 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
   },
   'run.status': { ...env('run.status'), envId: U.a, state: 'healthy', services: [] },
   'run.log': { ...env('run.log'), envId: U.a, service: 'web', lines: ['ready'] },
-  'run.plan.saved': { ...env('run.plan.saved'), envId: U.a, plan: { version: 1, repos: [], setup: [], services: [], notes: '' } },
+  'run.plan.saved': {
+    ...env('run.plan.saved'),
+    envId: U.a,
+    plan: { version: 1, repos: [], setup: [], services: [], notes: '' },
+  },
+  'run.replay.failed': {
+    ...env('run.replay.failed'),
+    envId: U.a,
+    reason: 'step failed',
+    logTail: 'boom',
+    stale: false,
+  },
   'repo.sync_status': {
     ...env('repo.sync_status'),
     status: {
