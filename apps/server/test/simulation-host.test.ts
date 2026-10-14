@@ -79,6 +79,13 @@ describe.skipIf(!hasRunner)('the simulated workstation', () => {
       t.req('POST', '/api/projects', { cookie: owner.cookie, body: { key: 'SIM', name: 'Simulated' } }),
       201,
     );
+    // This scenario ends at Done right after Finalize: manual QA (on by default, #64) is not part of it.
+    await ok(
+      t.req('PUT', `/api/projects/${proj.project.id}/manual-qa`, {
+        cookie: owner.cookie,
+        body: { enabled: false },
+      }),
+    );
     const added = await ok<any>(
       t.req('POST', `/api/projects/${proj.project.id}/repos`, {
         cookie: owner.cookie,
