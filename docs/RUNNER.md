@@ -331,6 +331,9 @@ worktrees/
   <PROJECT>-<number>/
     aom/toy-1-...               git worktrees on branch aom/<ref>-<slug>
     aom/toy-2-...
+    run-<envId8>/<repo>/        detached run worktrees of a run environment (no branch)
+runs/
+  <envId>/                      one run environment ("Run a branch"): state.json, <service>.log (+ .1), steps/
 mock-state/                     per-card attempt counters for mock script (test only)
 logs/
   runner.log                    JSON Lines log of runner events
@@ -428,6 +431,8 @@ GitHub uses your machine's `gh` CLI login (run `gh auth login` once).
 #### Agent and vault settings
 - **maxConcurrentShifts** (default `4`): max agent shifts this workstation runs at once; a shift offered beyond it is rejected as `busy` and the card waits. The runner announces it in `hello`, the Workstations page shows `running of limit`, and the server caps it at `AOM_MAX_SHIFTS_PER_WORKSTATION` (default 16). Restart the runner after changing it.
 - **vaultSyncIntervalSec** (default `300`): how often to pull/commit/push vaults
+- **maxRunEnvironments** (default `2`): how many run environments this workstation holds at once ("Run a branch", below). The runner announces it in `hello`; a start beyond it is refused with the list of what runs. Restart the runner after changing it.
+- **runPortRange** (default `{ "from": 20000, "to": 29999 }`): where ports are allocated from when a service's default port is taken.
 
 ### Setting credentials
 
@@ -583,6 +588,19 @@ aom devops "<request>"                                 ask the DevOps engineer
 ```
 
 Agents must run `aom ledger search` before raising a question: every answer (from the manager, a senior or the BA) is recorded in the ledger once and should never be asked twice. `aom question` also runs a duplicate check and returns matching ledger entries; a non-blocking question that matches needs `--force`.
+
+**DevOps engineer of a "Run request" (run a branch), only for the environment of its own request:**
+```sh
+aom run info                                            worktree paths, port range, expiry
+aom run step --name "npm ci" --repo web --cwd . [--timeout 1200] [--env K=V]... -- npm ci
+aom run step --name "npm ci" --wait                     wait for a step that was still running
+aom run service --name api --repo api --cwd src/Api --port http:5000:ASPNETCORE_HTTP_PORTS \
+    --health 'http://localhost:${port}/health' [--env-file /abs/path] [--env K=V]... [--after db] \
+    [--start-timeout 300] [--stop-cmd "<cmd>"] -- dotnet run
+aom run status | aom run logs <service|step> [--lines N]
+aom run ready [--notes "<text>"]                        every wanted service is healthy: save the plan
+aom run fail --reason "<why>"                           give up: the environment ends as failed
+```
 
 **Builder/researcher shifts (To do, Rework, Research):**
 ```sh
@@ -1427,6 +1445,52 @@ worktree until finalize, and are pushed only if the card ends in a pull request.
 a card branch once the card is finished and the work is elsewhere (see "Repository hygiene"). If a reopened card's branch
 was removed, the next shift recreates it: `ensureWorktree` in `reuse` mode takes `origin/<branch>` when it still exists,
 else cuts the branch from the working branch.
+
+### Run a branch (supervised services)
+
+Backlog #58 (`docs/design/run-and-integration-tests.md`, phase 1). Someone presses **Run this branch** (card page) or
+**Run branch...** (the project's board); the server sends `run.start` and files a DevOps request of kind `run`. The runner
+and the DevOps engineer split the work:
+
+- **The runner prepares and supervises.** `run.start` creates one detached worktree per repository at
+  `worktrees/<KEY>-<project>/run-<env>/<repo>` (the local branch head, else `origin/<branch>`; `git worktree add --detach`, **no
+  branch is created**, nothing is written into the repository). It answers the command with `ok:false` and the reason when the
+  cap (`maxRunEnvironments`) is reached, there is no clone or the branch does not exist.
+- **The DevOps engineer works out how.** Its brief carries `BUILD.md` (the runner looks in the repository's project folder,
+  then the root, case-insensitively), the project's run instructions and the declared services. It calls `aom run step|service`
+  (above). The runner runs them: **it** spawns each service, never the Claude session, so a service outlives the shift. The
+  command is an argument list (no shell). `${port}`, `${<port name>}`, `${<service>.port}` and `${<service>.<port name>}` are
+  substituted in arguments, `--env` values and health URLs. `--env` values must pass the toolchain credential filter
+  (`checkEnvVar`: no TOKEN/KEY/SECRET names or secret-looking values); secrets go in `--env-file`, an absolute path outside the
+  worktrees and the data folder, of which only the path is kept. Values from env files are replaced by `***` in `aom run logs`
+  and in streamed logs. A service declared in the project settings cannot be contradicted (command, folder, ports, health,
+  `after`). Docker commands (`docker`, `docker compose`, `podman`) are refused unless the project allows them.
+- **Services.** Each runs in its own process group (Node `detached`, i.e. `setsid`), stdout and stderr go to
+  `runs/<env>/<service>.log` (copy-truncate rotation at 20 MB, one older file `.log.1`), state to `runs/<env>/state.json`
+  (pid and process start time). Ports: the default is used when it is free (a real bind test) and not held by another
+  environment, otherwise one is allocated from `runPortRange` and written to the port's environment variable; a port with no
+  variable that is taken makes the call fail with that explanation. `after` is honoured (the dependency must be healthy).
+  Health: `http` (2xx, or 2xx and 3xx), `tcp`, `log` (regex), `none` (alive after a grace period), re-checked every 10 s once
+  healthy (three failures: unhealthy). A service that was healthy and exits after `aom run ready` is restarted three times
+  (1, 5 and 15 s); the fourth exit fails the environment. Stop: `--stop-cmd`, then SIGTERM to the group, SIGKILL after 10 s.
+- **Waiting.** `aom run step` and `aom run service` answer after at most about 100 seconds ("still running", exit code 3) so a
+  long build never trips Claude's Bash time limit; the work goes on in the runner.
+- **`aom run ready`** checks every wanted service is healthy, sends `run.plan.saved` (the steps that worked, the services, the
+  notes and a hash of `BUILD.md`) and moves the environment to `healthy`. The server records the plan (`run_plans`); phase 1
+  does not replay it yet. `aom run fail` ends the environment as `failed`.
+- **Reports.** `run.status` on every change (debounced, and immediately before an `aom run` call answers; also for every
+  known environment after each `welcome`, so a missed final state is resent); `run.log` only while a browser follows
+  (`run.follow`), first the last 500 lines, then new ones every half second. Neither is acknowledged.
+- **Restart of the runner.** Services are *not* stopped when the runner stops (a self-update, a restart): on start the runner
+  re-adopts every service whose pid and start time still match and goes on supervising it. An environment whose services are
+  gone ends as `runner_restarted`. (A systemd unit that kills the whole control group, the default, takes the services with
+  it: set `KillMode=process` on the unit to keep them across restarts. Restarting them automatically comes in phase 3.)
+- **Time limit.** The server stops manual environments at their expiry (8 hours by default, **Extend** adds the project's TTL);
+  the runner also stops one itself ten minutes after its expiry if the server could not.
+- **Phase 1 is unsandboxed.** The service sandbox (design D10: bubblewrap, `denyRead` of secrets, writes only to the run
+  worktree) is phase 2. Services run as the runner's user, like the DevOps engineer that starts them, so only run branches of
+  projects you trust. The tester access (forwarders and `aom-env`, D6) and the integration-test mode are phase 3.
+- Not available on native Windows (the hello does not announce `runs:1` there).
 
 ### DevOps shifts are unsandboxed
 

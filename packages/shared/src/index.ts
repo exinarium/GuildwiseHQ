@@ -30,6 +30,7 @@ export * from './repo/index.ts';
 export * from './reporter/index.ts';
 export * from './research/index.ts';
 export * from './roles/index.ts';
+export * from './runs/index.ts';
 export * from './safe.ts';
 export * from './schedules/index.ts';
 export * from './testing/index.ts';

@@ -31,6 +31,9 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['publications'],
         ['projects'],
       ];
+    case 'run':
+      // RunEnvironmentRequested / StopRequested / Ended
+      return [['runs']];
     case 'phase':
     case 'ba':
       // Phase* events and the BA's background tasks
@@ -110,6 +113,8 @@ export function keysForEvent(event: Pick<VisibleEvent, 'type' | 'streamId' | 'pr
         ['agents'],
         ['desk'],
         ['card'],
+        // run settings and saved run plans (ProjectRunSettingsSet, RunPlanSaved)
+        ['run-settings'],
         // deploy targets and the default follow-ups live on the project stream
         ['deploy-targets'],
         ['followup-defaults'],

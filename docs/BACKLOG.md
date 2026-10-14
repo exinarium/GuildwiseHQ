@@ -7,13 +7,6 @@ Logged fixes to pick up when development resumes. Newest first.
 Owner's bug and wish list from a day of real use (production, P4 / Flow-Web). Root causes are being investigated; each
 item gets its findings and fix when built.
 
-### 58. Start action: run the project on a branch
-
-An easy way to start the project on a chosen branch to try it. Build/run instructions per project: if a repository has a
-`BUILD.md`, the agent uses it; otherwise instructions can be given in Project settings. For a multi-repository project,
-choose which services to start. Needs design: where it runs (the workstation), who may start it, ports and logs, how it
-is stopped.
-
 ### 59. Integration and E2E tests per project, run by testers
 
 **Owner decision (2026-10-14):** whether integration and E2E tests run is a per-project setting. They need networking, so
@@ -277,8 +270,56 @@ The details of each done item follow this list, by date.
 - #61: No card or agent branch is pushed unless the goal is a pull request. Done 2026-10-14.
 - #62: Inbound e-mail through SendGrid Inbound Parse. Done 2026-10-14.
 - #63: Batch intake: hand the BA a list of tickets. Done 2026-10-14.
+- #58: Start action: run a project branch on a workstation (phase 1: manual start, supervised services, panel, plans recorded). Done 2026-10-14; P2 to P4 leftovers on the item.
 
 ## 2026-10-14 (done)
+
+### 58. Start action: run the project on a branch
+
+An easy way to start the project on a chosen branch to try it. Build/run instructions per project: if a repository has a
+`BUILD.md`, the agent uses it; otherwise instructions can be given in Project settings. For a multi-repository project,
+choose which services to start. Needs design: where it runs (the workstation), who may start it, ports and logs, how it
+is stopped.
+
+**Done, phase 1 (2026-10-14)**, per `docs/design/run-and-integration-tests.md` (owner decisions in section 10). The DevOps
+engineer of a workstation works out how to run a project; the **runner** runs and supervises it.
+- Start: **Run this branch** (card page) and **Run branch...** (the board: workstation, repository and branch pickers, service
+  checkboxes with their dependencies) call `POST /api/runs` (`commands/runs.ts`). Authorised for the workstation's owner and
+  the organization's Owners and Admins; the project must be visible to the caller. It writes `run_environments` (migration
+  1900, operational: kept across projection rebuilds), appends `RunEnvironmentRequested`, queues `run.start` and files a
+  DevOps request of kind `run` (`context {requestKind:'run', envId}`) whose brief carries the run instructions (project and per
+  repository), the declared services, the saved plan and, filled in by the runner, `BUILD.md` and the commits. Cap
+  `maxRunEnvironments` (default 2, announced in `hello`); the same branch set cannot run twice on a workstation.
+- Runner (`apps/runner/src/runs/`): detached run worktrees (no branch), `aom run info|step|service|status|logs|ready|fail`
+  for the DevOps engineer of that request only, services in their own process group with logs in `runs/<env>/`, rotated at
+  20 MB, `state.json`, health checks (http, tcp, log, none), `after` ordering, ports (default if free, else `runPortRange`
+  through the port's variable, `${svc.port}` templates), stop = `stopCmd`, SIGTERM to the group, SIGKILL after 10 s, three
+  restarts of a healthy service, re-adoption of live services after a runner restart, `run.status`, `run.log` only while a
+  browser follows, `run.plan.saved` from `aom run ready`. Declared services cannot be contradicted; Docker is refused unless the
+  project allows it; secrets only through `--env-file` (path outside the worktrees and data folder; values redacted in logs).
+- Server: events `ProjectRunSettingsSet`, `RunPlanSaved`, `RunEnvironmentRequested`, `RunEnvironmentStopRequested`,
+  `RunEnvironmentEnded`; migrations 1880 (run instructions and settings), 1890 (`run_plans`, recorded, not replayed), 1900;
+  TTL tick in the scheduler (manual environments stop at their expiry, an unanswered `requested` one after 10 minutes, one whose
+  DevOps request ended without `ready` after 30 s); `GET/POST /api/runs`, `/api/runs/:id`, `stop`, `extend`,
+  `GET/PUT /api/projects/:id/run-settings`; browser topic `run.watch` / `run.changed` / `run.log`.
+- Web: Project settings **Run and test** (instructions, TTL, Docker opt-in, services, read-only plans), the environment panel
+  (state, services with links and ports, commits, expiry with Extend, Stop, live logs, `ssh -L` hint) on the card page, the
+  board and the Workstations page ("Running environments").
+- DevOps role v7: "Running a project". Docs: RUNNER.md "Run a branch", USER-GUIDE 4.21, help, What's new.
+- Tests: runner `runs.test.ts`, `runs-shift.test.ts`, `aom-cli-run.test.ts`; server `runs.test.ts`; web `runs-ui.test.tsx`.
+
+**Left for later phases (design section 7).**
+- **P2:** replay of the saved plan by the runner with DevOps as the fallback, the plan fingerprint and `stale` handling
+  (the fingerprint is stored already), the service sandbox (D10: services still run as the runner's user), Docker steps
+  listed as unsandboxed, the `run-*` worktree sweep (worktrees are removed on stop; a crashed runner can leave one), Restart and
+  Update & restart, keeping manual worktrees 24 h.
+- **P3:** integration tests per project (migration `integration_tests`, `code` v3, the `integrationTests` card field, the
+  `environment` stage property, dispatcher provisioning), per-port forwarders and `aom-env` for testers, `aom test suite`,
+  suite results (1910), flaky handling, retiring `.aom/test-env.json`, automatic restart of environments after a runner restart,
+  memory use per environment. Spike (a) (socat forwarders inside a real tester Bash call) was skipped: it belongs to P3.
+- **P4:** remote targets (1920, secrets, `allowedDomains`), copy a plan between workstations, macOS testers, tunnels.
+- Not done in P1 either: a desk notification when an environment fails or stops (the DevOps request thread gets a system
+  note), `ssh -L` is only a hint, `run.status` is not acknowledged (it is resent after every `welcome`).
 
 ### 62. Inbound e-mail through SendGrid Inbound Parse
 

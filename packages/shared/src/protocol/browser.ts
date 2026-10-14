@@ -33,6 +33,9 @@ export const BrowserChatSendSchema = z.object({
 export const BrowserChatCancelSchema = z.object({ type: z.literal('chat.cancel'), threadId: z.uuid() });
 export const BrowserShiftWatchSchema = z.object({ type: z.literal('shift.watch'), shiftId: z.uuid() });
 export const BrowserShiftUnwatchSchema = z.object({ type: z.literal('shift.unwatch'), shiftId: z.uuid() });
+/** Follow the logs of a run environment (the runner sends log lines only while somebody follows). */
+export const BrowserRunWatchSchema = z.object({ type: z.literal('run.watch'), envId: z.uuid() });
+export const BrowserRunUnwatchSchema = z.object({ type: z.literal('run.unwatch'), envId: z.uuid() });
 export const BrowserPingSchema = z.object({ type: z.literal('ping') });
 
 export const BrowserToServerSchema = z.discriminatedUnion('type', [
@@ -41,6 +44,8 @@ export const BrowserToServerSchema = z.discriminatedUnion('type', [
   BrowserChatCancelSchema,
   BrowserShiftWatchSchema,
   BrowserShiftUnwatchSchema,
+  BrowserRunWatchSchema,
+  BrowserRunUnwatchSchema,
   BrowserPingSchema,
 ]);
 export type BrowserToServer = z.infer<typeof BrowserToServerSchema>;
@@ -76,6 +81,15 @@ export const PresenceSchema = z.object({
   workstationId: z.uuid(),
   connected: z.boolean(),
 });
+/** A run environment changed (state, services, expiry): the client refetches it. */
+export const BrowserRunChangedSchema = z.object({ type: z.literal('run.changed'), envId: z.uuid() });
+export const BrowserRunLogSchema = z.object({
+  type: z.literal('run.log'),
+  envId: z.uuid(),
+  service: z.string(),
+  lines: z.array(z.string()),
+  history: z.boolean().optional(),
+});
 export const PongSchema = z.object({ type: z.literal('pong') });
 
 export const ServerToBrowserSchema = z.discriminatedUnion('type', [
@@ -87,6 +101,8 @@ export const ServerToBrowserSchema = z.discriminatedUnion('type', [
   BrowserChatDoneSchema,
   BrowserChatErrorSchema,
   PresenceSchema,
+  BrowserRunChangedSchema,
+  BrowserRunLogSchema,
   PongSchema,
 ]);
 export type ServerToBrowser = z.infer<typeof ServerToBrowserSchema>;

@@ -92,6 +92,12 @@ export const RunnerConfigSchema = z.object({
    */
   dotnetRoot: z.string().optional(),
   maxConcurrentShifts: z.number().int().positive().default(4),
+  /** Run a branch (#58): how many run environments this workstation holds at once, and the range allocated ports come from. */
+  maxRunEnvironments: z.number().int().positive().default(2),
+  runPortRange: z
+    .object({ from: z.number().int().min(1024).max(65535), to: z.number().int().min(1024).max(65535) })
+    .refine((r) => r.from <= r.to, { message: 'runPortRange.from must not exceed to' })
+    .default({ from: 20000, to: 29999 }),
   vaultSyncIntervalSec: z.number().int().positive().default(300),
 });
 export type RunnerConfig = z.infer<typeof RunnerConfigSchema>;

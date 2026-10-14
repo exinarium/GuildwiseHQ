@@ -65,6 +65,7 @@ import { forbiddenReadPath } from './read-repos.ts';
 import { RepoAccessUpdater } from './repo/access.ts';
 import { RepoCloner } from './repo/clone.ts';
 import { RepoCreator } from './repo/create.ts';
+import { RunManager } from './runs/manager.ts';
 import { wipeAgent } from './sandbox/sandbox.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { SudoVault } from './secrets/sudo.ts';
@@ -146,6 +147,8 @@ export interface RunnerOptions {
   } | null;
   /** Called once per welcome: a freshly updated version uses it to prove it can connect. */
   onConnected?: () => void;
+  /** Test seam: timings of the run supervision (see `runs/manager.ts`). */
+  runTiming?: Partial<import('./runs/manager.ts').RunTiming>;
 }
 
 /** The long-running runner process: connection, IPC server, supervisor and command handlers. */
@@ -168,6 +171,8 @@ export class Runner {
   readonly sudo: SudoVault;
   /** Tools agents may use: detected, configured and registered by the DevOps engineer (`aom toolchain`). */
   readonly toolchains: ToolchainRegistry;
+  /** Run a branch (#58): detached run worktrees, setup steps and supervised services. */
+  readonly runs: RunManager;
   private readonly exec: Executor;
   /** Keeps each repository's local working branch in step with origin (fetch, fast-forward when safe, report). */
   readonly sync: SyncService;
@@ -291,6 +296,16 @@ export class Runner {
       ...(opts.config.dotnetRoot ? { dotnetRoot: opts.config.dotnetRoot } : {}),
     }));
     this.toolchains.onChange = () => this.reportToolchains(false);
+    this.runs = new RunManager({
+      paths: this.paths,
+      findRepo: (n) => this.findRepo(n),
+      send: (type, payload) => void this.client.send(type as never, payload as never),
+      log: this.log,
+      maxEnvironments: () => this.freshConfig().maxRunEnvironments,
+      portRange: () => this.freshConfig().runPortRange,
+      pathDirs: () => this.toolchains.resolve().pathDirs,
+      ...(opts.runTiming ? { timing: opts.runTiming } : {}),
+    });
     this.supervisor = new ShiftSupervisor({
       paths: this.paths,
       config: opts.config,
@@ -321,6 +336,7 @@ export class Runner {
       sudoRun: (cmd, args) => this.sudo.run(cmd, args),
       git: this.agentGit,
       toolchains: this.toolchains,
+      runs: this.runs,
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
       syncAfterFetch: (t) => this.sync.sync(t, { fetch: false, locked: true }).then(() => undefined),
@@ -384,6 +400,7 @@ export class Runner {
       this.reportMcpServers(true);
       this.reportToolchains(true);
       this.reportUpdate();
+      this.runs.reportAll();
       opts.onConnected?.();
       this.maxConcurrent = Math.min(w.limits.maxConcurrentShifts, opts.config.maxConcurrentShifts);
       this.writeStatus(true);
@@ -481,6 +498,10 @@ export class Runner {
     await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
     await this.scan();
     this.supervisor.resumePersisted();
+    await this.runs
+      .adopt()
+      .catch((err) => this.log.warn(`could not re-adopt run environments: ${String(err)}`));
+    this.runs.start();
     this.vaults.start();
     this.client.start();
     this.sync.start(this.opts.syncIntervalMs);
@@ -515,6 +536,8 @@ export class Runner {
     for (const t of this.timers) clearInterval(t);
     this.sync.stop();
     this.vaults.stop();
+    // Run environments keep running (they are re-adopted by the next process); only the bookkeeping ends.
+    this.runs.shutdown();
     await this.supervisor.stopAll('manager');
     await this.chat.cancelAll('runner stopped');
     await this.client.stop();
@@ -605,6 +628,9 @@ export class Runner {
       activeShifts: this.supervisor.activeShifts(),
       maxConcurrentShifts: this.opts.config.maxConcurrentShifts,
       sudoKey: this.keys.publicKey,
+      // Run a branch needs process groups and /proc or ps: not on native Windows.
+      capabilities: platform() === 'win32' ? [] : ['runs:1'],
+      maxRunEnvironments: this.freshConfig().maxRunEnvironments,
     };
   }
 
@@ -902,6 +928,9 @@ export class Runner {
       case 'command':
         void this.runCommand(msg.commandId, msg.command, msg.payload);
         break;
+      case 'run.follow':
+        this.runs.follow(msg.envId, msg.follow);
+        break;
       case 'chat.start':
         void this.chat.handleStart(msg);
         break;
@@ -964,6 +993,15 @@ export class Runner {
           ...(r.detail ? { detail: r.detail.slice(0, 400) } : {}),
           checkedAt: r.checkedAt,
         });
+      } else if (command === 'run.start') {
+        // A refusal (cap, no clone, unknown branch) is an answer: the server ends the environment as failed.
+        done(true, await this.runs.startEnv(CommandPayloadSchemas['run.start'].parse(payload)));
+      } else if (command === 'run.stop') {
+        await this.runs.stop(CommandPayloadSchemas['run.stop'].parse(payload));
+        done(true, { stopped: true });
+      } else if (command === 'run.extend') {
+        this.runs.extend(CommandPayloadSchemas['run.extend'].parse(payload));
+        done(true, { extended: true });
       } else if (command === 'repos.rescan') {
         await this.rescan();
         done(true, { repos: this.repos.length });

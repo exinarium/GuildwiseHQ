@@ -14,6 +14,9 @@ export type SocketState = 'connecting' | 'open' | 'closed';
 
 type ProgressListener = (items: ProgressItem[], cardId: string | null) => void;
 
+/** Log lines of a run environment (`history`: the buffered tail sent when following started). */
+export type RunLogListener = (service: string, lines: string[], history: boolean) => void;
+
 /** What a chat panel hears about its conversation (docs/ARCHITECTURE.md section 20). */
 export type ChatEvent =
   | { type: 'delta'; text: string }
@@ -33,6 +36,7 @@ export class LiveSocket {
   private state: SocketState = 'closed';
   private stateListeners = new Set<() => void>();
   private watchers = new Map<string, Set<ProgressListener>>();
+  private runWatchers = new Map<string, Set<RunLogListener>>();
   private chatListeners = new Map<string, Set<ChatListener>>();
 
   constructor(
@@ -90,6 +94,7 @@ export class LiveSocket {
       this.retry = 0;
       this.send({ type: 'hello', ...(this.lastSeq !== undefined ? { lastSeq: this.lastSeq } : {}) });
       for (const shiftId of this.watchers.keys()) this.send({ type: 'shift.watch', shiftId });
+      for (const envId of this.runWatchers.keys()) this.send({ type: 'run.watch', envId });
       clearInterval(this.pingTimer);
       this.pingTimer = setInterval(() => this.send({ type: 'ping' }), 25_000);
     };
@@ -142,6 +147,12 @@ export class LiveSocket {
       case 'shift.progress':
         for (const cb of this.watchers.get(msg.shiftId) ?? []) cb(msg.items, msg.cardId);
         break;
+      case 'run.changed':
+        void this.qc.invalidateQueries({ queryKey: ['runs'] });
+        break;
+      case 'run.log':
+        for (const cb of this.runWatchers.get(msg.envId) ?? []) cb(msg.service, msg.lines, msg.history === true);
+        break;
       case 'chat.delta':
         this.emitChat(msg.threadId, { type: 'delta', text: msg.text });
         break;
@@ -183,6 +194,26 @@ export class LiveSocket {
 
   cancelChat(threadId: string): void {
     this.send({ type: 'chat.cancel', threadId });
+  }
+
+  /** Live log of a run environment: sends `run.watch` (the runner then streams) and returns an unsubscribe. */
+  watchRun(envId: string, cb: RunLogListener): () => void {
+    let set = this.runWatchers.get(envId);
+    if (!set) {
+      set = new Set();
+      this.runWatchers.set(envId, set);
+      this.send({ type: 'run.watch', envId });
+    }
+    set.add(cb);
+    return () => {
+      const s = this.runWatchers.get(envId);
+      if (!s) return;
+      s.delete(cb);
+      if (s.size === 0) {
+        this.runWatchers.delete(envId);
+        this.send({ type: 'run.unwatch', envId });
+      }
+    };
   }
 
   /** Live shift log: sends `shift.watch` and returns an unsubscribe that sends `shift.unwatch`. */

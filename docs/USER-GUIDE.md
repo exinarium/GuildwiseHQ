@@ -854,6 +854,22 @@ The **architect** is a senior agent on the most capable model (Opus, high effort
 
 > **In the app:** Help, "The architect: investigate and design" (`/help/architect`).
 
+### 4.21 Run a branch to try it
+
+You can start a project on any branch of any repository to try it, without leaving the app. It runs **on one of your workstations** as ordinary processes (links open `http://localhost:<port>/` there).
+
+**Start it.** On a card that has a branch, press **Run this branch**: the card's repository runs at the card branch and the project's other repositories at their working branch. On the project's board, press **Run branch...**: choose the workstation, tick the repositories and pick a branch for each, and, when the project declares several services, tick the ones you want (the ones they need are ticked for you). Only online workstations with an up to date runner that hold a clone of the repository are offered.
+
+**What happens.** The workstation's DevOps engineer reads the repository's `BUILD.md` and the **run instructions** in Project settings, works out how to run the project, starts each service and checks it is healthy. You watch the panel: its state (preparing, starting, running, degraded, failed), every service with its state, ports and links, the commit each repository runs at, and **Logs** (the last 500 lines, then live). The first start takes a while because the engineer works it out; what worked is saved as the project's **plan** for that workstation (read-only under Project settings, **Run and test**). Nothing is added to your repositories.
+
+**Stop it.** **Stop** ends the services and removes the run copy of the code. An environment stops by itself after the project's time (8 hours by default); **Extend** adds the same again. A workstation runs at most two environments at once. The **Workstations** page lists everything running on a machine, for all projects.
+
+**Project settings, Run and test.** Free-text run instructions for the project and for each repository (they win over `BUILD.md`), the stop time, whether the branch's code may use Docker (off by default; with it on, Docker steps run outside any sandbox, so only for projects you trust), and optional **services** (name, repository, folder, command, ports as `name:default:ENV_VAR`, health check, what it starts after, the path of an env file on the workstation). Declared services are used exactly as written. Put secrets in an env file on the workstation, never in the settings: only its path is stored.
+
+> **Good to know:** the links point at `localhost` on the workstation. If your browser is on another machine, the panel shows the `ssh -L` command that forwards the ports. This first version runs the services with your own account's rights and replays nothing: when a run fails, the engineer repairs it and saves a new plan.
+
+> **In the app:** Help, "Run a branch" (`/help/board-and-cards#run-a-branch`).
+
 ## 5. For Members
 
 A **Member** works inside the projects an Owner or Admin has added them to. You do the day-to-day work: write cards, answer questions, hire your own agents and follow the board. You do not manage the organization.

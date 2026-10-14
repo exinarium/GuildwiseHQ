@@ -14,7 +14,11 @@ import {
   type IpcReportResponse,
   type IpcRpcResponse,
   type LedgerMatch,
+  parseCommandLine,
+  parseRunHealth,
+  parseRunPort,
   type QuestionShift,
+  type RpcMethod,
   renderBaTaskPrompt,
   renderDevopsPrompt,
   renderQuestionPrompt,
@@ -54,6 +58,8 @@ const BOOLEAN_FLAGS = new Set([
   'public',
   'decision',
   'all',
+  'wait',
+  'docker',
 ]);
 
 /** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
@@ -63,6 +69,13 @@ const takesInlineJson = (verb: string | undefined, argv: string[]): boolean =>
 export function parseArgs(argv: string[], verb?: string): Parsed {
   // `aom sudo -- <command> [args...]`: everything after the verb is the command, flags included.
   if (verb === 'sudo') return { flags: new Map(), positionals: argv[0] === '--' ? argv.slice(1) : argv };
+  // `aom run step|service ... -- <command> [args...]`: the command after `--` is taken as it is, flags included.
+  if (verb === 'run' && argv.includes('--')) {
+    const at = argv.indexOf('--');
+    const head = parseArgs(argv.slice(0, at), verb);
+    head.flags.set(RUN_CMD_FLAG, argv.slice(at + 1));
+    return head;
+  }
   const inlineJson = takesInlineJson(verb, argv);
   const flags = new Map<string, string[]>();
   const positionals: string[] = [];
@@ -87,6 +100,9 @@ export function parseArgs(argv: string[], verb?: string): Parsed {
 }
 
 class UsageError extends Error {}
+
+/** Where `parseArgs` keeps the command after `--` of `aom run`. */
+const RUN_CMD_FLAG = ' cmd';
 
 /** A JSON object given inline (`--json '<json>'`), in a file (`--file <path>`) or on stdin (`--file -`). Null when none was given. */
 function jsonBody(ctx: AomContext, p: Parsed): Record<string, unknown> | null {
@@ -947,6 +963,78 @@ const VERBS: Record<string, Verb> = {
     if (r.stderr) ctx.io.err(r.stderr.endsWith('\n') ? r.stderr : `${r.stderr}\n`);
     return r.exitCode === 0 ? 0 : 1;
   },
+  /** `aom run info|status|logs|step|service|ready|fail` (DevOps engineer of a "run this branch" request): the runner starts and supervises the services. */
+  run: async (ctx, p) => {
+    const sub = p.positionals[0];
+    const usage =
+      'usage: aom run info | status | logs <service|step> [--lines N] | step --name "<n>" [--repo <r>] [--cwd <dir>] [--timeout <s>] [--env K=V]... -- <cmd...> | step --name "<n>" --wait | service --name <n> [--repo <r>] [--cwd <dir>] [--port name:default[:ENV_VAR]]... [--health <url|tcp:port|log:regex|none[:s]>] [--env-file <abs path>] [--env K=V]... [--after <svc>]... [--start-timeout <s>] [--stop-cmd "<cmd>"] -- <cmd...> | ready [--notes "<t>"] | fail --reason "<why>"   (add --env-id <id> only to name another environment)';
+    if (!sub) throw new UsageError(usage);
+    const cmd = p.flags.get(RUN_CMD_FLAG);
+    const base: Record<string, unknown> = one(p, 'env-id') ? { env: one(p, 'env-id') } : {};
+    const kv = (list: string[]): Record<string, string> => {
+      const out: Record<string, string> = {};
+      for (const e of list) {
+        const i = e.indexOf('=');
+        if (i < 1) throw new UsageError(`--env needs KEY=VALUE, got "${e}"`);
+        out[e.slice(0, i)] = e.slice(i + 1);
+      }
+      return out;
+    };
+    let method: RpcMethod;
+    let params: Record<string, unknown> = base;
+    if (sub === 'info' || sub === 'status') method = sub === 'info' ? 'run.info' : 'run.status';
+    else if (sub === 'logs') {
+      method = 'run.logs';
+      const service = p.positionals[1];
+      if (!service) throw new UsageError(usage);
+      params = { ...base, service, ...(one(p, 'lines') ? { lines: Number(one(p, 'lines')) } : {}) };
+    } else if (sub === 'step') {
+      method = 'run.step';
+      const name = one(p, 'name');
+      if (!name) throw new UsageError(usage);
+      if (!cmd?.length && !has(p, 'wait')) throw new UsageError(usage);
+      params = {
+        ...base,
+        name,
+        ...(one(p, 'repo') ? { repo: one(p, 'repo') } : {}),
+        ...(one(p, 'cwd') ? { cwd: one(p, 'cwd') } : {}),
+        ...(cmd?.length ? { cmd } : {}),
+        ...(one(p, 'timeout') ? { timeoutSec: Number(one(p, 'timeout')) } : {}),
+        ...(one(p, 'when') ? { when: one(p, 'when') } : {}),
+        env: kv(many(p, 'env')),
+        wait: has(p, 'wait'),
+      };
+    } else if (sub === 'service') {
+      method = 'run.service';
+      const name = one(p, 'name');
+      if (!name || !cmd?.length) throw new UsageError(usage);
+      const stop = one(p, 'stop-cmd');
+      params = {
+        ...base,
+        name,
+        ...(one(p, 'repo') ? { repo: one(p, 'repo') } : {}),
+        ...(one(p, 'cwd') ? { cwd: one(p, 'cwd') } : {}),
+        cmd,
+        ports: many(p, 'port').map((s) => parseRunPort(s)),
+        ...(one(p, 'health') ? { health: parseRunHealth(one(p, 'health') as string) } : {}),
+        ...(one(p, 'env-file') ? { envFile: one(p, 'env-file') } : {}),
+        env: kv(many(p, 'env')),
+        after: many(p, 'after'),
+        ...(one(p, 'start-timeout') ? { startTimeoutSec: Number(one(p, 'start-timeout')) } : {}),
+        ...(stop ? { stopCmd: parseCommandLine(stop) } : {}),
+        docker: has(p, 'docker'),
+      };
+    } else if (sub === 'ready') {
+      method = 'run.ready';
+      params = { ...base, notes: textFlag(ctx, p, 'notes', false) ?? '' };
+    } else if (sub === 'fail') {
+      method = 'run.fail';
+      params = { ...base, reason: textFlag(ctx, p, 'reason', true) };
+    } else throw new UsageError(usage);
+    const r = (await rpc(ctx, method, params)) as { message?: string; exitCode?: number } | null;
+    if (r?.message) ctx.io.out(r.message.endsWith('\n') ? r.message : `${r.message}\n`);
+    return r?.exitCode ?? 0;
+  },
   /** `aom toolchain list|add|remove`: tools sandboxed agents may use (the DevOps engineer registers what it installed). */
   toolchain: async (ctx, p) => {
     const sub = p.positionals[0] ?? 'list';
@@ -1072,6 +1160,7 @@ export const USAGE = `usage: aom <verb> [options]
   sudo -- <command> [args...]                 DevOps engineer: run a command as administrator (only when the manager granted sudo; the password stays on the runner)
   toolchain list | add <name> --bin <dir>... [--read <dir>]... [--env KEY=VALUE]... | remove <name>   tools sandboxed agents may use; DevOps engineer: register what you installed so agents get it on PATH
   hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
+  run info | status | logs <svc> | step --name <n> -- <cmd> | service --name <n> --port http:5000:ENV_VAR --health <url> -- <cmd> | ready | fail --reason <t>   DevOps engineer of a "run this branch" request: the runner starts and supervises the services (see your instructions)
 `;
 
 /** Runs the CLI; returns the exit code (0 ok, 1 error or rejected report, 2 not available). */

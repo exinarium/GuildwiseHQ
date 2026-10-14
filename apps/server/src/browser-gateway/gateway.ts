@@ -26,6 +26,8 @@ interface BConn {
   sessionId: string;
   projects: Set<string>;
   watchers: Set<string>;
+  /** Run environments whose logs this socket follows. */
+  runWatchers: Set<string>;
   /** False until `hello` was processed (live events are buffered meanwhile). */
   ready: boolean;
   buffer: StoredEvent[];
@@ -98,7 +100,11 @@ export class BrowserGateway {
     });
     const drop = () => {
       void chain.then((conn) => {
-        if (conn) this.conns.delete(conn);
+        if (!conn) return;
+        this.conns.delete(conn);
+        const runs = [...conn.runWatchers];
+        conn.runWatchers.clear();
+        for (const envId of runs) this.followRun(envId);
       });
     };
     socket.on('close', drop);
@@ -150,6 +156,7 @@ export class BrowserGateway {
       sessionId: session.sessionId,
       projects,
       watchers: new Set(),
+      runWatchers: new Set(),
       ready: false,
       buffer: [],
       sentUpTo: 0n,
@@ -194,6 +201,17 @@ export class BrowserGateway {
       case 'shift.unwatch':
         c.watchers.delete(msg.shiftId);
         return;
+      case 'run.watch': {
+        if (await this.canWatchRun(c, msg.envId)) {
+          c.runWatchers.add(msg.envId);
+          this.followRun(msg.envId);
+        }
+        return;
+      }
+      case 'run.unwatch':
+        c.runWatchers.delete(msg.envId);
+        this.followRun(msg.envId);
+        return;
       case 'chat.send':
         return this.ctx.services.chat.send(c.userId, msg);
       case 'chat.cancel':
@@ -215,6 +233,77 @@ export class BrowserGateway {
       [shiftId, c.userId],
     );
     return !!mine || isOrgManager({ orgRole: await orgRoleOf(this.ctx.pool, c.userId, s.org_id) });
+  }
+
+  /** Whoever may see the environment (its project's members, or the owner of its workstation) may follow its logs. */
+  private async canWatchRun(c: BConn, envId: string): Promise<boolean> {
+    const r = await one(
+      this.ctx.pool,
+      'SELECT e.project_id, w.user_id FROM run_environments e JOIN workstations w ON w.id = e.workstation_id WHERE e.id=$1',
+      [envId],
+    );
+    return !!r && (r.user_id === c.userId || c.projects.has(r.project_id));
+  }
+
+  /** Tells the runner whether anybody follows the environment's logs (on the first and last watcher). */
+  private followRun(envId: string): void {
+    const follow = [...this.conns].some((c) => c.runWatchers.has(envId));
+    void one(this.ctx.pool, 'SELECT workstation_id FROM run_environments WHERE id=$1', [envId])
+      .then((r) => {
+        if (r)
+          this.ctx.services.runners.send(
+            r.workstation_id,
+            'run.follow',
+            { envId, follow },
+            this.ctx.clock.now(),
+          );
+      })
+      .catch(() => undefined);
+  }
+
+  /** A runner (re)connected: it forgot who follows, so tell it again for the environments somebody watches. */
+  resendRunFollows(workstationId: string): void {
+    const ids = new Set<string>();
+    for (const c of this.conns) for (const id of c.runWatchers) ids.add(id);
+    for (const envId of ids) {
+      void one(this.ctx.pool, 'SELECT 1 FROM run_environments WHERE id=$1 AND workstation_id=$2', [
+        envId,
+        workstationId,
+      ])
+        .then((r) => {
+          if (r)
+            this.ctx.services.runners.send(
+              workstationId,
+              'run.follow',
+              { envId, follow: true },
+              this.ctx.clock.now(),
+            );
+        })
+        .catch(() => undefined);
+    }
+  }
+
+  /** An environment changed: every socket that can see it refetches (cheap, a few per environment). */
+  runChanged(envId: string): void {
+    void one(
+      this.ctx.pool,
+      'SELECT e.project_id, w.user_id FROM run_environments e JOIN workstations w ON w.id = e.workstation_id WHERE e.id=$1',
+      [envId],
+    )
+      .then((r) => {
+        if (!r) return;
+        for (const c of this.conns)
+          if (c.ready && (c.userId === r.user_id || c.projects.has(r.project_id)))
+            this.send(c, { type: 'run.changed', envId });
+      })
+      .catch(() => undefined);
+  }
+
+  /** Forwards run log lines to the sockets following the environment. */
+  runLog(envId: string, service: string, lines: string[], history?: boolean): void {
+    for (const c of this.conns)
+      if (c.runWatchers.has(envId))
+        this.send(c, { type: 'run.log', envId, service, lines, ...(history ? { history: true } : {}) });
   }
 
   private deliver(c: BConn, e: StoredEvent): void {

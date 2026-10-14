@@ -223,6 +223,14 @@ export const RpcMethodSchema = z.enum([
   'card.attachments',
   'card.attach',
   'card.attach.begin',
+  /** The DevOps engineer of a `run` request starts and checks the services of its environment; answered by the runner itself. */
+  'run.info',
+  'run.step',
+  'run.service',
+  'run.status',
+  'run.logs',
+  'run.ready',
+  'run.fail',
 ]);
 export type RpcMethod = z.infer<typeof RpcMethodSchema>;
 

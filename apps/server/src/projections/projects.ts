@@ -41,6 +41,9 @@ export async function deleteProjectRows(tx: Tx, projectId: string): Promise<void
     P,
   );
   await exec(tx, `UPDATE devops_requests SET card_id = NULL WHERE card_id IN (${cards})`, P);
+  // Run environments and plans of the project (migrations 1890, 1900).
+  await exec(tx, 'DELETE FROM run_environments WHERE project_id=$1', P);
+  await exec(tx, 'DELETE FROM run_plans WHERE project_id=$1', P);
   await exec(tx, 'UPDATE intakes SET mapped_project_id = NULL WHERE mapped_project_id=$1', P);
   await exec(
     tx,

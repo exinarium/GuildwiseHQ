@@ -7,6 +7,8 @@ import { useRunningShifts } from '../api/queries/shifts.ts';
 import { usePairingCode, useUnlinkWorkstation, useWorkstations } from '../api/queries/workstations.ts';
 import { BRAND } from '../brand.ts';
 import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
+import { RunList } from '../components/runs/RunPanel.tsx';
+import { useRuns } from '../api/queries/runs.ts';
 import { GitConnectionsPanel } from '../components/GitConnections.tsx';
 import { JiraStatusLine } from '../components/JiraStatusLine.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
@@ -171,6 +173,18 @@ function CardlessShifts({ workstationId }: { workstationId: string }) {
   );
 }
 
+/** Run environments on this workstation, all projects (backlog #58); each can be extended and stopped here. */
+function WorkstationRuns({ workstationId }: { workstationId: string }) {
+  const runs = useRuns({ workstationId });
+  if (!runs.data || runs.data.length === 0) return null;
+  return (
+    <div className="mt-3" data-testid="workstation-runs">
+      <p className="mb-1 text-xs font-medium text-subtle">Running environments</p>
+      <RunList envs={runs.data} showProject />
+    </div>
+  );
+}
+
 export function WorkstationCard({
   w,
   admin = false,
@@ -319,6 +333,7 @@ export function WorkstationCard({
             {!admin && <GitConnectionsPanel w={w} />}
             {!admin && <JiraStatusLine w={w} />}
             {!admin && <DevOpsPanel w={w} />}
+            {!admin && <WorkstationRuns workstationId={w.id} />}
             <ErrorBox error={unpair.error} />
           </div>
         )}
