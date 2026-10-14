@@ -158,7 +158,11 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
 
   let startPoint = base;
   if (await hasRemote(repoPath)) {
-    const f = await git(repoPath, ['fetch', '--', 'origin', base]);
+    // With the repo's git auth, like the card-branch fetch above: a private repo that needs a token would otherwise
+    // fall back to a stale origin/<base> and the card would start from old code (#57).
+    const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
+    const a = input.auth && url ? await input.auth(url) : { args: [], env: {} };
+    const f = await git(repoPath, [...a.args, 'fetch', '--', 'origin', base], { env: a.env });
     if (f.exitCode === 0 || (await revParse(repoPath, `refs/remotes/origin/${base}`))) {
       if (await revParse(repoPath, `refs/remotes/origin/${base}`)) startPoint = `origin/${base}`;
     }
@@ -224,7 +228,11 @@ async function createWorkingBranchLocked(
   if (!def || !isSafeGitRef(def)) return { ok: false, defaultBranch: null, branches };
   const failed = (error: string) => ({ ok: false as const, defaultBranch: def, branches, error });
   const remote = await hasRemote(repoPath);
-  if (remote) await git(repoPath, ['fetch', '--', 'origin', def]);
+  if (remote) {
+    const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
+    const a = opts.auth && url ? await opts.auth(url) : { args: [], env: {} };
+    await git(repoPath, [...a.args, 'fetch', '--', 'origin', def], { env: a.env });
+  }
   const from = (await revParse(repoPath, `refs/remotes/origin/${def}`)) ? `origin/${def}` : def;
   if (!(await revParse(repoPath, from)))
     return failed(
