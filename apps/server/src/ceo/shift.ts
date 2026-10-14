@@ -49,9 +49,9 @@ export async function endCeoShift(
     await exec(tx, `UPDATE ceo_batches SET status='failed', attempts=$2, updated_at=now() WHERE id=$1`, [batch.id, attempts]);
     await exec(
       tx,
-      `UPDATE ceo_wakes SET status = CASE WHEN reason <> 'daily_review' AND $3::int >= 2 THEN 'failed' ELSE 'pending' END,
-              batch_id=NULL, attempts=$3::int WHERE batch_id=$1 AND status='taken'`,
-      [batch.id, batch.id, attempts],
+      `UPDATE ceo_wakes SET status = CASE WHEN reason <> 'daily_review' AND $2::int >= 2 THEN 'failed' ELSE 'pending' END,
+              batch_id=NULL, attempts=$2::int WHERE batch_id=$1 AND status='taken'`,
+      [batch.id, attempts],
     );
   }
   return events;
