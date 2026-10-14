@@ -609,8 +609,8 @@ registration number, address, Information Officer and e-mail, the regulator's co
 location live in `apps/web/src/legal/facts.ts` and are filled into Terms, Privacy, Trust and POPIA through `{{name}}` tokens
 (`fillFacts` in `legal.ts`), so they cannot drift (the privacy policy's hosting line now says "Namecheap (hosting, Phoenix,
 Arizona, United States)" per the owner). The POPIA notice covers the transfer to the United States and its safeguards.
-Placeholder left for the owner (marked in square brackets on the Trust page): the Anthropic wording ("data sent through its API is
-not used to train its models under its commercial terms"), marked "VERIFY WORDING BEFORE PUBLISHING". The POPIA notice adds to the
+The Anthropic wording ("data sent through its API is not used to train its models under its commercial terms") is on the
+Trust page without a review marker (owner, 2026-10-14). The POPIA notice adds to the
 privacy policy only the Information Regulator's postal address and general enquiries e-mail (public details; check them) and asks
 nothing new of the owner about the Information Officer (the privacy policy already names Pieter Jordaan; registration of the
 officer with the Regulator is not stated anywhere and is not claimed). Also for the owner to decide: the privacy policy says model
