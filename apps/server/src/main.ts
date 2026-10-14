@@ -36,6 +36,7 @@ if (config.dataMigrations) {
       store: new PgEventStore(pool, buildProjectors(), clock),
       clock,
       log: (m) => console.log(m),
+      inboundDomain: config.inbound.domain,
     });
   } finally {
     await pool.end();

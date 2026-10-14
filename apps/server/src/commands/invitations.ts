@@ -1,3 +1,4 @@
+import { ensureOrgInbox } from './mail-inboxes.ts';
 import { randomUUID } from 'node:crypto';
 import {
   type InvitationInfoResponse,
@@ -473,6 +474,7 @@ export async function acceptInvitation(
       newUser: { email: inv.email, passwordHash },
     });
     await ctx.store.append(events, { tx });
+    await ensureOrgInbox(ctx, tx, orgId, ctx.config.inbound.domain);
     return {
       orgId,
       kind: inv.kind as string,
@@ -522,6 +524,7 @@ export async function acceptInvitationExisting(
       orgName: input.orgName,
     });
     await ctx.store.append(events, { tx });
+    await ensureOrgInbox(ctx, tx, orgId, ctx.config.inbound.domain);
     // Their workstations get this organization's DevOps engineer.
     await hireDevopsForOrgIn(ctx, tx, session.user.id, orgId);
     return {

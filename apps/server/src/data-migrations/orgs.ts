@@ -13,6 +13,8 @@ export interface DataMigrationEnv {
   store: PgEventStore;
   clock: Clock;
   log: (msg: string) => void;
+  /** `AOM_INBOUND_DOMAIN`, for the data migration that gives every organisation an inbox. */
+  inboundDomain?: string | undefined;
 }
 
 export interface OrgMigrationPlan {
