@@ -1,4 +1,4 @@
-import { deskMode, renderUntrusted, trainingDaysLeft } from '@aom/shared';
+import { deskMode, renderCeoData, trainingDaysLeft } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { computeRecommendations } from '../hr/recommendations.ts';
@@ -68,7 +68,7 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
         .join('\n') || 'none'}`,
     );
     const names = ps.map((p) => `${p.key}: ${clip(p.name, 60)}`).join('\n');
-    if (names) out.push(renderUntrusted('Project names', names));
+    if (names) out.push(renderCeoData('Project names', names));
   }
 
   if (want('cards')) {
@@ -92,7 +92,7 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
     out.push(
       `## Cards needing attention\n${cs.map((c) => `${c.ref} id=${c.id} why=${c.why} status=${c.status} stage=${c.stage} prio=${c.priority} rework=${c.rework_round}${c.agent_name ? ` agent=${c.agent_name}` : ''}${c.retry_after ? ` backoff_until=${new Date(c.retry_after).toISOString()}` : ''}`).join('\n') || 'none'}`,
     );
-    if (cs.length) out.push(renderUntrusted('Card titles', cs.map((c) => `${c.ref}: ${clip(c.title, 100)}`).join('\n')));
+    if (cs.length) out.push(renderCeoData('Card titles', cs.map((c) => `${c.ref}: ${clip(c.title, 100)}`).join('\n')));
   }
 
   if (want('shifts')) {
@@ -150,7 +150,7 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
     const ds = await rows(
       ctx.pool,
       `SELECT d.id, d.kind, d.subkind, d.title, d.blocking, d.pinned, d.created_at, d.triage, d.routed_to, d.ceo_recommendation IS NOT NULL AS recommended
-         FROM desk_items d WHERE d.org_id=$1 AND d.status='open' AND d.subkind NOT IN ('ceo_report')
+         FROM desk_items d WHERE d.org_id=$1 AND d.status='open' AND COALESCE(d.subkind,'') <> 'ceo_report'
         ORDER BY d.pinned DESC, d.blocking DESC, d.created_at LIMIT 30`,
       [orgId],
     );
@@ -159,13 +159,13 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
         `item=${d.id} ${d.kind}${d.subkind ? `:${d.subkind}` : ''}${d.blocking ? ' BLOCKING' : ''}${d.pinned ? ' PINNED' : ''}${d.triage === 'pending' ? ' HELD' : ''}${d.recommended ? ' (you recommended)' : ''} age=${ago(d.created_at, now)} your_mode=${ceo ? deskMode(ceo.policy, d.kind, d.subkind) : '-'}`,
     );
     out.push(`## Open desk items\n${lines.join('\n') || 'none'}`);
-    if (ds.length) out.push(renderUntrusted('Desk item titles (written by agents and systems)', ds.map((d) => `${d.id.slice(0, 8)}: ${clip(d.title, 140)}`).join('\n')));
+    if (ds.length) out.push(renderCeoData('Desk item titles (written by agents and systems)', ds.map((d) => `${d.id.slice(0, 8)}: ${clip(d.title, 140)}`).join('\n')));
   }
 
   if (want('signals')) {
     const ss = await rows(ctx.pool, `SELECT id, kind, urgency, count, subject, first_seen_at FROM ba_signals WHERE org_id=$1 AND status <> 'resolved' ORDER BY (urgency='urgent') DESC, first_seen_at LIMIT 20`, [orgId]);
     out.push(`## Open signals\n${ss.map((s) => `signal=${s.id} ${s.kind} ${s.urgency} x${s.count} since ${ago(s.first_seen_at, now)}`).join('\n') || 'none'}`);
-    if (ss.length) out.push(renderUntrusted('Signal subjects', ss.map((s) => `${s.id.slice(0, 8)}: ${clip((s.subject as Row)?.title, 120)}`).join('\n')));
+    if (ss.length) out.push(renderCeoData('Signal subjects', ss.map((s) => `${s.id.slice(0, 8)}: ${clip((s.subject as Row)?.title, 120)}`).join('\n')));
   }
 
   if (want('hr')) {
@@ -184,8 +184,8 @@ export async function buildSnapshot(ctx: Ctx, orgId: string, section?: string): 
     out.push(
       `## You (the CEO)\ntraining: ${ceo.training.on ? `ON (${trainingDaysLeft(ceo.training, now)} days left; staffing and model changes are recommendations only)` : 'off (graduated)'} | policy v${ceo.policyVersion} | spend today ${money(spend?.day)} month ${money(spend?.month)}\nopen tasks: ${tasks.map((t) => `${t.id} [${t.status}]`).join(', ') || 'none'}\nyour actions in the last 24h (do not repeat or flap):\n${acts.map((a) => `${a.id.slice(0, 8)} ${a.class} ${a.mode}${a.status === 'undone' ? ' UNDONE by the owner' : ''} ${ago(a.created_at, now)} ago`).join('\n') || 'none'}`,
     );
-    if (acts.length) out.push(renderUntrusted('Subjects of your recent actions', acts.map((a) => `${a.id.slice(0, 8)}: ${clip(a.subject_label, 100)}`).join('\n')));
-    if (tasks.length) out.push(renderUntrusted('Task titles (from the owner)', tasks.map((t) => `${t.id.slice(0, 8)}: ${clip(t.title, 100)}`).join('\n')));
+    if (acts.length) out.push(renderCeoData('Subjects of your recent actions', acts.map((a) => `${a.id.slice(0, 8)}: ${clip(a.subject_label, 100)}`).join('\n')));
+    if (tasks.length) out.push(renderCeoData('Task titles (from the owner)', tasks.map((t) => `${t.id.slice(0, 8)}: ${clip(t.title, 100)}`).join('\n')));
   }
 
   const text = out.join('\n\n');

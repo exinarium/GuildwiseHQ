@@ -1,4 +1,4 @@
-import { CEO_ROLE_KEY, type CeoRpc, CeoRpcSchema, renderUntrusted } from '@aom/shared';
+import { CEO_ROLE_KEY, type CeoRpc, CeoRpcSchema, renderCeoData } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Row, rows } from '../db/sql.ts';
 import { agentActor } from '../commands/common.ts';
@@ -127,7 +127,7 @@ async function show(ctx: Ctx, orgId: string, rpc: Extract<CeoRpc, { op: 'show' }
     const msgs = await rows(ctx.pool, `SELECT kind, body, author_kind, created_at FROM thread_messages WHERE thread_id=$1 ORDER BY created_at DESC LIMIT 6`, [c.id]);
     return [
       `${c.ref} id=${c.id} status=${c.status} stage=${c.stage} priority=${c.priority} rework=${c.rework_round} agent=${c.agent_name ?? '-'}${c.retry_after ? ` backoff_until=${new Date(c.retry_after).toISOString()}` : ''}`,
-      renderUntrusted(`Card ${c.ref}`, `${c.title}\n\nRecent thread:\n${msgs.reverse().map((m) => `[${m.author_kind}/${m.kind}] ${String(m.body).slice(0, 500)}`).join('\n')}`),
+      renderCeoData(`Card ${c.ref}`, `${c.title}\n\nRecent thread:\n${msgs.reverse().map((m) => `[${m.author_kind}/${m.kind}] ${String(m.body).slice(0, 500)}`).join('\n')}`),
     ].join('\n');
   }
   if (rpc.kind === 'agent') {
@@ -139,7 +139,7 @@ async function show(ctx: Ctx, orgId: string, rpc: Extract<CeoRpc, { op: 'show' }
   if (rpc.kind === 'desk-item') {
     const d = await one(ctx.pool, `SELECT * FROM desk_items WHERE org_id=$1 AND id::text=$2`, [orgId, ref]);
     if (!d) return 'desk item not found';
-    return [`item=${d.id} ${d.kind}${d.subkind ? `:${d.subkind}` : ''} status=${d.status}${d.blocking ? ' BLOCKING' : ''} options=${JSON.stringify(d.options)}`, renderUntrusted('Desk item', `${d.title}\n\n${d.body ?? ''}`)].join('\n');
+    return [`item=${d.id} ${d.kind}${d.subkind ? `:${d.subkind}` : ''} status=${d.status}${d.blocking ? ' BLOCKING' : ''} options=${JSON.stringify(d.options)}`, renderCeoData('Desk item', `${d.title}\n\n${d.body ?? ''}`)].join('\n');
   }
   if (rpc.kind === 'shift') {
     const s = await one(ctx.pool, `SELECT s.*, a.name FROM shifts s JOIN agents a ON a.id=s.agent_id WHERE s.org_id=$1 AND s.id::text=$2`, [orgId, ref]);
@@ -161,10 +161,10 @@ async function search(ctx: Ctx, orgId: string, rpc: Extract<CeoRpc, { op: 'searc
   }
   if (rpc.in === 'cards') {
     const c = await rows(ctx.pool, `SELECT ref, id, status, title FROM cards WHERE org_id=$1 AND title ILIKE $2 ORDER BY updated_at DESC LIMIT 10`, [orgId, like]);
-    return c.length ? renderUntrusted('Cards', c.map((x) => `${x.ref} (${x.status}) ${x.title}`).join('\n')) : 'no cards match';
+    return c.length ? renderCeoData('Cards', c.map((x) => `${x.ref} (${x.status}) ${x.title}`).join('\n')) : 'no cards match';
   }
   const d = await rows(ctx.pool, `SELECT id, kind, subkind, status, title FROM desk_items WHERE org_id=$1 AND title ILIKE $2 ORDER BY created_at DESC LIMIT 10`, [orgId, like]);
-  return d.length ? renderUntrusted('Desk items', d.map((x) => `${x.id} ${x.kind}:${x.subkind ?? ''} ${x.status} ${x.title}`).join('\n')) : 'no desk items match';
+  return d.length ? renderCeoData('Desk items', d.map((x) => `${x.id} ${x.kind}:${x.subkind ?? ''} ${x.status} ${x.title}`).join('\n')) : 'no desk items match';
 }
 
 async function costs(ctx: Ctx, orgId: string, days: number): Promise<string> {

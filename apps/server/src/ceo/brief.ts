@@ -6,7 +6,7 @@ import {
   type CeoShift,
   OWNER_RESERVED_LABEL,
   renderFloorReportFallback,
-  renderUntrusted,
+  renderCeoData,
   sumScores,
   trainingDaysLeft,
 } from '@aom/shared';
@@ -114,7 +114,7 @@ export async function buildCeoBrief(
     }`,
   );
   const labels = wakes.filter((w) => w.subject_label).map((w) => `${String(w.subject_id).slice(0, 8)}: ${w.subject_label}`);
-  if (labels.length) parts.push(renderUntrusted('Titles of what woke you (written by agents and systems, not by the owner)', labels.join('\n')));
+  if (labels.length) parts.push(renderCeoData('Titles of what woke you (written by agents and systems, not by the owner)', labels.join('\n')));
   parts.push(`## Organisation snapshot\n${await buildSnapshot(ctx, ceo.orgId)}`);
   parts.push(`## The owner's rules\n${await ownerRules(ctx, ceo, topic)}`);
   parts.push(`## What you may do\n${policyInWords(ceo.policy, ceo.training, now)}`);
@@ -127,7 +127,7 @@ export async function buildCeoBrief(
       [ceo.orgId, new Date(now.getTime() - 86_400_000)],
     );
     parts.push(`## Your actions in the last 24 hours\n${acts.map((a) => `- action:${a.id.slice(0, 8)} ${CLASS_LABEL[a.class as ActionClass] ?? a.class} [${a.mode}${a.status === 'undone' ? ', UNDONE' : ''}] ${a.reason}`).join('\n') || 'none'}`);
-    if (acts.length) parts.push(renderUntrusted('Subjects of your actions', acts.map((a) => `${a.id.slice(0, 8)}: ${String(a.subject_label).slice(0, 100)}`).join('\n')));
+    if (acts.length) parts.push(renderCeoData('Subjects of your actions', acts.map((a) => `${a.id.slice(0, 8)}: ${String(a.subject_label).slice(0, 100)}`).join('\n')));
     parts.push(await trainingSection(ctx, ceo));
     parts.push(
       `## Your task\nWrite the owner's daily report in markdown, with these headings in this order (say "none" under an empty one). Lead with what needs the owner. Be brief: it is read at breakfast. Do not invent facts, and do not repeat the facts digest (the server appends it).\n${REVIEW_HEADINGS.join('\n')}\nBefore you write, handle what you can with \`aom ceo act\`. Then write the file in your scratch directory and finish with \`aom ceo report --summary-file <file>\`.`,
