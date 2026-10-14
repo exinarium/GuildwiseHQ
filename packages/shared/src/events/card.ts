@@ -4,13 +4,13 @@ import {
   CardStatus,
   CardType,
   ClaimReleaseReason,
-  CompletionAction,
   DEFAULT_CARD_PRIORITY,
   DecisionPolicy,
   DiffStats,
-  FinalizeAction,
   ReworkReason,
   RiskTier,
+  StoredCompletionAction,
+  StoredFinalizeAction,
   TestEvidence,
   ThreadMessageKind,
 } from '../cards/types.ts';
@@ -25,7 +25,7 @@ export const CardChangesSchema = z
     priority: z.number().int().min(1).max(9),
     repoId: Id.nullable(),
     docsNeeded: z.boolean(),
-    completionAction: CompletionAction.nullable(),
+    completionAction: StoredCompletionAction.nullable(),
     riskTier: RiskTier.nullable(),
     riskTierOverridden: z.boolean(),
     dependencies: z.array(Id),
@@ -75,7 +75,7 @@ export const cardEvents = [
       investigationOnly: z.boolean().default(false),
       /** Merge the latest main branch before work starts: null/absent follows the project setting. */
       mergeMainFirst: z.boolean().nullable().optional(),
-      completionAction: CompletionAction.optional(),
+      completionAction: StoredCompletionAction.optional(),
       riskTier: RiskTier.optional(),
       dependencies: z.array(Id).default([]),
       requiredCapabilities: z.array(z.string()).default([]),
@@ -322,7 +322,7 @@ export const cardEvents = [
     'FinalizeRequested',
     z.object({
       cardId: Id,
-      action: FinalizeAction,
+      action: StoredFinalizeAction,
       requestedBy: Id,
       /** A large-tier merge that skipped the desk approval because the project setting allows it. */
       withoutApproval: z.boolean().optional(),
@@ -332,7 +332,7 @@ export const cardEvents = [
     'CardFinalized',
     z.object({
       cardId: Id,
-      action: FinalizeAction,
+      action: StoredFinalizeAction,
       resultRef: z.object({
         mergeCommit: z.string().optional(),
         prUrl: z.string().optional(),

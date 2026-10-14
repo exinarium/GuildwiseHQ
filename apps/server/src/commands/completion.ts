@@ -11,7 +11,9 @@ export interface EffectiveCompletion {
 }
 
 export async function effectiveCompletion(db: Queryable, card: Row): Promise<EffectiveCompletion> {
-  if (card.completion_action) return { action: card.completion_action as CompletionAction, source: 'card' };
+  // `push_branch` was retired (backlog #61): a card that still carries it follows the project instead.
+  if (card.completion_action && card.completion_action !== 'push_branch')
+    return { action: card.completion_action as CompletionAction, source: 'card' };
   const project = await one(db, 'SELECT default_completion FROM projects WHERE id=$1', [card.project_id]);
   return { action: (project?.default_completion as CompletionAction | undefined) ?? null, source: 'project' };
 }

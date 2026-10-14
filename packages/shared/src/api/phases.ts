@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CompletionAction } from '../cards/types.ts';
+import { StoredCompletionAction } from '../cards/types.ts';
 import {
   BaTaskKind,
   BaTaskStatus,
@@ -124,7 +124,7 @@ export const PhaseMemberDtoSchema = z.object({
   status: z.string(),
   assignment: PhaseAssignment,
   outcome: z.enum(['finalized', 'closed_manually', 'cancelled', 'waiting_merge', 'published']).nullable(),
-  action: CompletionAction.nullable(),
+  action: StoredCompletionAction.nullable(),
   resultRef: z
     .object({ mergeCommit: z.string(), prUrl: z.string(), pushedBranch: z.string() })
     .partial()

@@ -604,14 +604,14 @@ aom test fail --title "<bug>" --note "<text>" [--evidence "<text>"] [--command "
 aom card create --json '<draft json>'      # or --file <draft.json>, or --file - to read stdin
 aom card update <REF> --json '<patch json>' # or --file <patch.json> / --file -
 aom card specify <REF>
-aom finalize --note "<note>"                  # BA: runs the card's own completion action (never chosen by the agent; pr requires `gh`, falls back to push_branch otherwise)
+aom finalize --note "<note>"                  # BA: runs the card's own completion action (never chosen by the agent; pr requires `gh`, without it the branch is pushed under the PR name and a desk notice asks for the pull request by hand)
 aom answer --item <id> --text "<answer>" [--option <id>]
 aom escalate --item <id> --note "<what must be decided>"
 aom intake map --project <KEY> | aom intake unmapped --note "<why>"
 aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] [--host <h>] --name <name> --private|--public --project <KEY> [--description "<text>"]   # BA chat and DevOps: asks the project owner; their runner creates it after approval
 #   name: owner/repo (github) | group[/subgroup]/project (gitlab) | organization/project/repo (azure-devops) | workspace/repo (bitbucket-cloud)
 aom git status [<provider>] | aom git connect <provider> [--host <h>]   # DevOps only: check or start this workstation's git host login
-aom git push | fetch | merge-main | verify-merge   # architect only (investigate stages): the runner pushes the card branch, fetches origin, merges the latest main, checks a conflict resolution
+aom git fetch | merge-main | verify-merge   # architect only (investigate stages): the runner fetches origin, merges the latest main, checks a conflict resolution (`aom git push` is refused: agents never push)
 aom design --report <path> --summary "<text>"           # architect: hand the designed card to build (outcome handoff)
 aom investigate --report <path> --summary "<text>"      # architect: end an investigation-only card (outcome report)
 aom investigation record --title "<t>" --summary-file <md> [--decision]   # BA at Finalize of an investigation-only card
@@ -1282,8 +1282,7 @@ The architect (built-in role `architect`, claims every `investigate*` stage) is 
   out-of-scope discard skip a worktree with `MERGE_HEAD`), and the next architect shift inherits it.
 - **Commit, push, merge, fetch.** The agent keeps `git push*`, `git fetch*`, `git pull*`, `git remote*`, `git rebase*`,
   `git checkout*`, `git switch*` and `git reset --hard*` denied; it may `git add`, `git commit` and `git merge`.
-  `aom git push` (rpc `git.push`) pushes **the card branch only** (and only for a `pr` or `push_branch` card) (`git push -u origin <branch>` with the runner's
-  `GitAuth`; any other ref is refused); `aom git fetch` (`git.fetch`) fetches origin; `aom git merge-main`
+  `aom git push` (rpc `git.push`) is **always refused** (backlog #61: no card or agent branch is pushed unless the goal is a pull request, and then the runner pushes it at finalize); `aom git fetch` (`git.fetch`) fetches origin; `aom git merge-main`
   (`git.merge_main`) merges the latest `origin/<main>` into the card branch and leaves a conflict in the worktree;
   `aom git verify-merge` (`git.verify_merge`) checks that a resolution is complete (no merge in progress, no unmerged
   file, no conflict marker, HEAD is the merge commit). The rpcs work only in `investigate*` stages of card shifts.
@@ -1404,10 +1403,10 @@ declined", GH013 and the like) the same way: the card branch is pushed and a pul
 to `pr` with a note on the card. Nothing is forced. Hosts other than GitHub are covered by the rejected-push path only.
 
 **When a card branch reaches origin.** Only when the completion action needs it: `pr` (the pull request needs the
-branch), `push_branch`, and the protected-branch fallback above (a pull request). With `merge` the runner merges the
+branch) and the protected-branch fallback above (a pull request); a pull request branch goes out as `<prefix>/<ticket>`, never under the `aom/` card name. (The retired `push_branch` action is refused.) With `merge` the runner merges the
 card branch into the working branch in a local integration worktree and pushes only the working branch; the card branch
-never leaves the workstation. The architect's `aom git push` follows the same rule: it is refused (with the reason) for a
-card whose action is `merge` or not yet set, and its design commits stay in the worktree until finalize. Hygiene removes
+never leaves the workstation. The architect's `aom git push` is refused for every card (with the reason): its design commits stay in the
+worktree until finalize, and are pushed only if the card ends in a pull request. Hygiene removes
 a card branch once the card is finished and the work is elsewhere (see "Repository hygiene"). If a reopened card's branch
 was removed, the next shift recreates it: `ensureWorktree` in `reuse` mode takes `origin/<branch>` when it still exists,
 else cuts the branch from the working branch.

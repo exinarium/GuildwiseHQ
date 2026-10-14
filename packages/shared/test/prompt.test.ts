@@ -180,7 +180,7 @@ describe('renderInstructions', () => {
       # Boundaries
 
       - Work only inside your current working directory (the card worktree).
-      - Do not push, rebase, checkout or switch branches; do not touch other worktrees.
+      - Never push; the runner lands your work. Do not rebase, checkout or switch branches; do not touch other worktrees.
       - Search the ledger with \`aom ledger search\` before asking a question.
       - The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.
       - .NET: plain \`dotnet build\` and \`dotnet test\` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass \`-m\`/\`-maxcpucount\` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (\`SocketException\` in \`NamedPipeServerStream\`, or a build that hangs).
@@ -247,7 +247,7 @@ describe('renderInstructions', () => {
       # Boundaries
 
       - Work only inside your current working directory (the card worktree).
-      - Do not push, rebase, checkout or switch branches; do not touch other worktrees.
+      - Never push; the runner lands your work. Do not rebase, checkout or switch branches; do not touch other worktrees.
       - Search the ledger with \`aom ledger search\` before asking a question.
       - The toolchains (for example .NET, Node) and the package caches are shared and already installed; do not install SDKs. Build and test in the shell. Ask DevOps to build outside the sandbox only if a sandbox error persists after a retry.
       - .NET: plain \`dotnet build\` and \`dotnet test\` work as they are (the sandbox runs MSBuild in one process, one CPU). Do not pass \`-m\`/\`-maxcpucount\` with a number above 1 and do not start build servers: MSBuild worker nodes cannot start in the sandbox (\`SocketException\` in \`NamedPipeServerStream\`, or a build that hangs).

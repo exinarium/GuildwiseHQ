@@ -105,7 +105,7 @@ describe('CardNew validation', () => {
     const user = setup(true, true);
     await user.type(screen.getByLabelText('Title'), 'Full card');
     await user.selectOptions(screen.getByLabelText('Repository'), REPO);
-    await user.selectOptions(screen.getByLabelText('Completion action'), 'push_branch');
+    await user.selectOptions(screen.getByLabelText('Completion action'), 'pr');
     for (const label of ['Context', 'Requirements', 'Affected areas', 'Constraints', 'Test plan']) {
       await user.type(screen.getByLabelText(label), `${label} text`);
     }
@@ -119,7 +119,7 @@ describe('CardNew validation', () => {
     expect(body.fields.acceptanceCriteria).toEqual(['one', 'two']);
     expect(body.fields.mock).toEqual({ review: ['changes', 'ok'] });
     expect(body.repoId).toBe(REPO);
-    expect(body.completionAction).toBe('push_branch');
+    expect(body.completionAction).toBe('pr');
   });
 
   it('offers the project default first and sends no completion action unless it is changed', async () => {
@@ -132,6 +132,16 @@ describe('CardNew validation', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
     expect(body).not.toHaveProperty('completionAction');
+  });
+
+  it('does not offer the retired push-the-branch action (backlog #61)', () => {
+    setup(true, true);
+    const select = screen.getByLabelText('Completion action') as HTMLSelectElement;
+    const values = within(select)
+      .getAllByRole('option')
+      .map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(expect.arrayContaining(['pr', 'merge']));
+    expect(values).not.toContain('push_branch');
   });
 
   it('rejects a malformed mock script', async () => {

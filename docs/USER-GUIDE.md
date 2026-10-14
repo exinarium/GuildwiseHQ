@@ -477,7 +477,6 @@ Agents always work on a card branch of their own. **How finished work lands** (p
 | --- | --- | --- |
 | **Commit and push to the working branch** (the default; stored as `merge`) | The card branch is merged into the working branch and the working branch is pushed. | None. |
 | **Pull request** (`pr`) | The card branch is pushed and a pull request is opened into the working branch (that is the main branch when you use one branch), for you to review and merge. | Card branch to working branch. |
-| **Push the card branch only** (`push_branch`) | The card branch is pushed and nothing else happens; someone combines it by hand. | None. |
 
 A card follows its project: it has no completion action of its own unless a person sets one on that card (expert mode, at any time before it is finalised). Agents, the BA included, never set it. When you change the project setting, every card that has not set its own, open or not yet started, follows the change; a card with its own action keeps it. In expert mode choose **Project default** on the card to go back to following the project.
 
@@ -487,7 +486,7 @@ If the working branch is protected on the code host (it refuses direct changes),
 
 You see plain outcomes on cards: *"Goes into the working branch after review and test"*, *"Your change is live on the working branch"*, *"Waiting for you to merge the pull request"* (with the working branch's name when it is not main). When two changes clash, the DevOps engineer tries to fix it first and leaves a note on the card.
 
-If you know git and want the details, turn on **Expert mode for code changes** in **Settings** (it is per person and off by default; it only changes what you see). It brings back the per-card completion action (commit and push to the working branch, pull request, or push the card branch only), branch names and commit hashes, **Mark merged** on the phase page, and the questions about keeping or changing the working branch for a new intake or phase. The main and working branch rows in the repository settings are shown to everyone.
+If you know git and want the details, turn on **Expert mode for code changes** in **Settings** (it is per person and off by default; it only changes what you see). It brings back the per-card completion action (commit and push to the working branch, or pull request), branch names and commit hashes, **Mark merged** on the phase page, and the questions about keeping or changing the working branch for a new intake or phase. The main and working branch rows in the repository settings are shown to everyone.
 
 #### Repository hygiene and the working branch
 
@@ -730,7 +729,7 @@ Once a reviewer approves, the card moves to **Test**. A tester runs the tests of
 
 ![Setting the risk tier](guide/assets/dlg-risk.jpg)
 
-**Finalize.** The BA completes the card the way the project's **How finished work lands** says (4.4): committed and pushed to the working branch, or as a pull request for you. In expert mode a card can have its own completion action: **Commit and push to the working branch** (no pull request), **Pull request** (push the card branch and open a pull request into the working branch) or **Push the card branch only**. **A large change that would be committed to the working branch waits for your approval** on the desk, and the card stays in the Finalize column with an "Awaiting your approval" badge.
+**Finalize.** The BA completes the card the way the project's **How finished work lands** says (4.4): committed and pushed to the working branch, or as a pull request for you. In expert mode a card can have its own completion action: **Commit and push to the working branch** (no pull request), **Pull request** (push the card branch and open a pull request into the working branch). A card branch is only ever pushed to the git host when the work goes out as a pull request; otherwise it stays on the workstation. **A large change that would be committed to the working branch waits for your approval** on the desk, and the card stays in the Finalize column with an "Awaiting your approval" badge.
 
 ![A large merge waiting for approval](guide/assets/desk-large-merge.jpg)
 

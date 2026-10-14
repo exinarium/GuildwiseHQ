@@ -733,17 +733,18 @@ const VERBS: Record<string, Verb> = {
    */
   git: async (ctx, p) => {
     const usage =
-      'usage: aom git status [<provider>] [--host <host>] | aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <host>]\n       aom git push | fetch | merge-main | verify-merge   (the architect: the runner pushes the card branch, fetches origin, merges the latest main, checks a conflict resolution)';
+      'usage: aom git status [<provider>] [--host <host>] | aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <host>]\n       aom git fetch | merge-main | verify-merge   (the architect: the runner fetches origin, merges the latest main, checks a conflict resolution; agents never push)';
     const sub = p.positionals[0];
     const host = one(p, 'host');
-    // The architect's git is run by the runner (the agent's own shell cannot push or fetch): the card branch only.
-    if (sub === 'push' || sub === 'fetch' || sub === 'merge-main' || sub === 'verify-merge') {
+    // Agents never push (backlog #61): the runner lands the work, and pushes a branch only for a pull request.
+    if (sub === 'push')
+      throw new UsageError(
+        'aom git push is not available: agents never push. The card branch stays on this workstation and the runner lands your work when the card finishes',
+      );
+    // The architect's git is run by the runner (the agent's own shell cannot fetch).
+    if (sub === 'fetch' || sub === 'merge-main' || sub === 'verify-merge') {
       const method = `git.${sub.replace('-', '_')}`;
-      const r = (await rpc(
-        ctx,
-        method,
-        sub === 'push' && p.positionals[1] ? { branch: p.positionals[1] } : {},
-      )) as {
+      const r = (await rpc(ctx, method, {})) as {
         message?: string;
       };
       ctx.io.out(`${r?.message ?? 'Done.'}\n`);
@@ -1019,7 +1020,7 @@ export const USAGE = `usage: aom <verb> [options]
   finalize [--note "<note>"]   BA: run the card's own completion action (you never choose it; an investigation-only card with its report in the vault needs no git step)
   design --report <path> --summary "<text>" | investigate --report <path> --summary "<text>"   architect: hand the card on with its design (build), or end an investigation-only card (finalize); the runner checks the report is committed
   investigation record --title "<t>" --summary-file <md> [--decision]   BA: record an investigation-only card's result in the ledger and PROJECT.md (needed before finalize)
-  git push | fetch | merge-main | verify-merge   architect: the runner pushes the card branch, fetches origin, merges the latest main, checks the conflict resolution
+  git fetch | merge-main | verify-merge   architect: the runner fetches origin, merges the latest main, checks the conflict resolution (agents never push)
   repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] [--host <h>] --name <owner/repo | group/project | org/project/repo | workspace/repo> --private|--public --project <KEY> [--description "<t>"]   BA chat / DevOps: ask the project owner to create a repository on a git host (they approve on the desk; the runner creates it)
   git status [<provider>] | git connect <provider> [--host <h>]   DevOps: check or start this workstation's git host login (a browser login prints a URL and code for the user; a token is never typed by the agent)
   intake map --project <KEY> | intake unmapped --note "<why>"   BA intake: map the ticket, or ask the manager

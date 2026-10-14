@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CompletionAction, TestEvidence } from '../cards/types.ts';
+import { StoredCompletionAction, TestEvidence } from '../cards/types.ts';
 import { ForgeKindSchema } from '../forge/index.ts';
 
 /**
@@ -54,7 +54,7 @@ export const FinalizeExecutePayloadSchema = z.object({
   projectKey: z.string(),
   /** Keeps worktree directories of same-keyed projects (other organizations) apart; absent in old commands. */
   projectId: z.uuid().optional(),
-  action: CompletionAction,
+  action: StoredCompletionAction,
   repoId: z.uuid(),
   remoteUrlNormalized: z.string(),
   baseBranch: z.string(),
@@ -79,7 +79,7 @@ export type FinalizeExecutePayload = z.infer<typeof FinalizeExecutePayloadSchema
 /** `command.result.result` of `finalize.execute`. Expected failures set `ok: false` with `error` or `conflict`. */
 export const FinalizeResultSchema = z.object({
   ok: z.boolean(),
-  action: CompletionAction,
+  action: StoredCompletionAction,
   mergeCommit: z.string().optional(),
   prUrl: z.string().optional(),
   pushedBranch: z.string().optional(),

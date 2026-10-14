@@ -200,7 +200,7 @@ describe('architect shift: the investigation outcome', () => {
 });
 
 describe('architect shift: git run by the runner', () => {
-  it('git.push publishes the card branch only; other refs and other stages are refused', async () => {
+  it('git.push is always refused: the card branch never reaches origin (backlog #61)', async () => {
     const seen: Record<string, any> = {};
     let branch = '';
     await start(async (i, ctl) => {
@@ -213,10 +213,11 @@ describe('architect shift: git run by the runner', () => {
     });
     await h!.runShift({ stage: 'investigate', briefExtra: { investigation: investigation() } });
     expect(seen.main.json.ok).toBe(false);
-    expect(seen.main.json.error).toContain('only the card branch');
-    expect(seen.ok.json.ok).toBe(true);
+    expect(seen.main.json.error).toContain('never push');
+    expect(seen.ok.json.ok).toBe(false);
+    expect(seen.ok.json.error).toContain('never push');
     expect(seen.fetch.json.ok).toBe(true);
-    expect(sh(h!.repo.origin, 'git', ['branch', '--list', branch]).trim()).toContain(branch);
+    expect(sh(h!.repo.origin, 'git', ['branch', '--list', branch]).trim()).toBe('');
     expect(sh(h!.repo.origin, 'git', ['log', '--format=%s', 'main'])).toBe('initial');
   });
 

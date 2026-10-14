@@ -3,6 +3,7 @@ import { migrateBlogLaunch } from './blog-launch.ts';
 import { migrateCardCompletionInherit } from './card-completion-inherit.ts';
 import { migrateNoPersonal } from './no-personal.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
+import { migratePushBranchRetired } from './push-branch-retired.ts';
 import { migrateRestructure } from './restructure.ts';
 
 export {
@@ -24,6 +25,11 @@ export {
 } from './no-personal.ts';
 export { type DataMigrationEnv, formatPlan, migrateOrgs, ORGS_MIGRATION, planOrgMigration } from './orgs.ts';
 export {
+  migratePushBranchRetired,
+  PUSH_BRANCH_RETIRED_MIGRATION,
+  type PushBranchRetiredReport,
+} from './push-branch-retired.ts';
+export {
   formatRestructurePlan,
   migrateRestructure,
   planRestructure,
@@ -41,6 +47,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'blog-launch-2026-10', run: (env) => migrateBlogLaunch(env) },
   { name: 'blog-cite-cleanup-2026-10', run: (env) => migrateBlogCiteCleanup(env) },
   { name: 'card-completion-inherit-2026-10', run: (env) => migrateCardCompletionInherit(env) },
+  { name: 'push-branch-retired-2026-10', run: (env) => migratePushBranchRetired(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

@@ -26,7 +26,8 @@ describe('card-completion-inherit-2026-10', () => {
     const open = await w.card({ title: 'Open with pr', completionAction: 'pr' });
     const inheriting = await w.card({ title: 'Already inherits', completionAction: undefined });
     const done = await w.card({ title: 'Finished with pr', completionAction: 'pr' });
-    const cancelled = await w.card({ title: 'Cancelled with push', completionAction: 'push_branch' });
+    const cancelled = await w.card({ title: 'Cancelled with push', completionAction: 'pr' });
+    await q(`UPDATE cards SET completion_action='push_branch' WHERE id=$1`, [cancelled.id]);
     await q(`UPDATE cards SET status='done' WHERE id=$1`, [done.id]);
     await q(`UPDATE cards SET status='cancelled' WHERE id=$1`, [cancelled.id]);
 

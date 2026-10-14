@@ -142,6 +142,9 @@ describe('claude settings.json: permissions per role (review M3)', () => {
       expect(s.permissions.deny).not.toContain(d);
     for (const d of [
       'Bash(git push:*)',
+      'Bash(git -C * push)',
+      'Bash(git -C * push *)',
+      'Bash(git -c * push *)',
       'Bash(git reset --hard:*)',
       'Bash(git stash drop:*)',
       'Bash(git stash pop:*)',

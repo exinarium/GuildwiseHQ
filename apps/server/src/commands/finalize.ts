@@ -8,6 +8,7 @@ import {
   type FinalizeResult,
   FinalizeResultSchema,
   isSafeGitRef,
+  type StoredCompletionAction,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -25,7 +26,7 @@ import { rebaseConflictEvents } from './rebase.ts';
 import { spawnCardEvent } from './spawn.ts';
 
 /** A large-tier merge, the kind that waits for the manager unless the owner's project setting lets it through. */
-export const isLargeMerge = (card: Row, action: CompletionAction): boolean =>
+export const isLargeMerge = (card: Row, action: StoredCompletionAction): boolean =>
   action === 'merge' && card.risk_tier === 'large';
 
 export type MergeGate = 'none' | 'approval' | 'waived';
@@ -34,7 +35,11 @@ export type MergeGate = 'none' | 'approval' | 'waived';
  * Does finalizing `card` with `action` wait for the manager's desk approval? `waived`: it is a large merge but the
  * project's "merge large changes without my approval" setting (owner only, default off) skips the approval.
  */
-export async function mergeGate(db: Queryable, card: Row, action: CompletionAction): Promise<MergeGate> {
+export async function mergeGate(
+  db: Queryable,
+  card: Row,
+  action: StoredCompletionAction,
+): Promise<MergeGate> {
   if (!isLargeMerge(card, action)) return 'none';
   const p = await one(db, 'SELECT merge_large_without_approval AS waived FROM projects WHERE id=$1', [
     card.project_id,
@@ -77,7 +82,9 @@ export async function queueExecute(tx: Tx, card: Row, action: CompletionAction):
     branchName: card.branch_name,
     prBranchPrefix: project.pr_branch_prefix || DEFAULT_PR_BRANCH_PREFIX,
     ticket,
-    ...(earlier.pushedBranch && isSafeGitRef(earlier.pushedBranch) ? { remoteBranch: earlier.pushedBranch } : {}),
+    ...(earlier.pushedBranch && isSafeGitRef(earlier.pushedBranch)
+      ? { remoteBranch: earlier.pushedBranch }
+      : {}),
     worktreePath: card.worktree_path ?? null,
     prTitle: `${card.ref}: ${card.title}`,
     prBody: `${card.title}\n\nCard ${card.ref}.`,
@@ -291,7 +298,8 @@ export async function applyFinalizeResult(
     const requested = (card.finalize_action ??
       (await effectiveCompletionAction(tx, card))) as CompletionAction;
     // A protected branch turns a merge into a pull request: record what actually happened.
-    const action: CompletionAction = ok && result?.ok && result.protectedBranch ? result.action : requested;
+    const action: CompletionAction =
+      ok && result?.ok && result.protectedBranch ? (result.action as CompletionAction) : requested;
     const scope = projectScope(card.org_id, card.project_id);
     const events: AppendInput[] = [];
 

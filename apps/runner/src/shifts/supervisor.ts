@@ -1034,7 +1034,6 @@ export class ShiftSupervisor {
       branchName: s.worktree.branchName,
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
-      completionAction: msg.brief.card.completionAction,
       ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
       recordMainSha: (sha: string) => {
         if (!s.mainShas.includes(sha)) s.mainShas.push(sha);

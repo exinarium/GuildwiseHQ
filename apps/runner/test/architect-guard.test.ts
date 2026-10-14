@@ -68,7 +68,6 @@ async function setup() {
     branchName: BRANCH,
     mainBranch: 'main',
     ref: 'TOY-1',
-    completionAction: 'push_branch' as 'pr' | 'push_branch' | 'merge' | null,
     recordMainSha: (sha: string) => void mainShas.push(sha),
     startMainSha: () => mainShas.at(-1),
   };
@@ -214,40 +213,20 @@ describe('architect post-shift guard', () => {
 });
 
 describe('architect git (run by the runner)', () => {
-  it('pushes the card branch and nothing else', async () => {
+  it('never pushes, whatever the ref or the completion action (backlog #61)', async () => {
     const t = await setup();
     writeFileSync(join(t.path, 'NOTES.md'), 'n\n');
     t.commit();
-    for (const ref of ['main', 'refs/heads/main', 'origin/main', 'aom/other-card', 'HEAD:main', '--force'])
-      expect(await architectPush(t.ctx, ref)).toMatchObject({ ok: false });
-    expect(sh(t.repo.origin, 'git', ['branch', '--list', BRANCH])).toBe('');
-    const ok = await architectPush(t.ctx);
-    expect(ok).toMatchObject({ ok: true });
-    expect(sh(t.repo.origin, 'git', ['rev-parse', BRANCH])).toBe(sh(t.path, 'git', ['rev-parse', 'HEAD']));
-    // naming the card branch explicitly is the same thing
-    expect(await architectPush(t.ctx, BRANCH)).toMatchObject({ ok: true });
-    // main on origin never moved
-    expect(sh(t.repo.origin, 'git', ['log', '--format=%s', 'main'])).toBe('initial');
-  });
-
-  it('does not push the card branch of a card that is merged (or has no action yet): it stays local', async () => {
-    const t = await setup();
-    writeFileSync(join(t.path, 'NOTES.md'), 'n\n');
-    t.commit();
-    for (const action of ['merge', null] as const) {
-      const r = await architectPush({ ...t.ctx, completionAction: action });
+    for (const ref of [undefined, BRANCH, 'main', 'refs/heads/main', 'origin/main', 'HEAD:main', '--force']) {
+      const r = await architectPush(t.ctx, ref);
       expect(r).toMatchObject({ ok: false });
-      expect(sh(t.repo.origin, 'git', ['for-each-ref', '--format=%(refname)', 'refs/heads'])).toBe(
-        'refs/heads/main',
-      );
+      expect(!r.ok && r.error).toMatch(/never push/);
     }
-    expect(await architectPush({ ...t.ctx, completionAction: 'pr' })).toMatchObject({ ok: true });
-  });
-
-  it('refuses to push uncommitted work or an unfinished merge', async () => {
-    const t = await setup();
-    writeFileSync(join(t.path, 'README.md'), 'edited\n');
-    expect(await architectPush(t.ctx)).toMatchObject({ ok: false });
+    // nothing reached origin: only main, still at the initial commit
+    expect(sh(t.repo.origin, 'git', ['for-each-ref', '--format=%(refname)', 'refs/heads'])).toBe(
+      'refs/heads/main',
+    );
+    expect(sh(t.repo.origin, 'git', ['log', '--format=%s', 'main'])).toBe('initial');
   });
 
   it('fetches origin so origin/<main> can be compared', async () => {

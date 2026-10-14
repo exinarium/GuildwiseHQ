@@ -92,11 +92,22 @@ describe('how finished work lands (project default)', () => {
     });
     const shown = await ok<any>(w.t.req('GET', `/api/cards/${inheriting.id}`, { cookie: w.owner.cookie }));
     expect(shown.card).toMatchObject({ completionAction: null, effectiveCompletionAction: 'pr' });
-    expect((await create({ completionAction: 'push_branch' })).card).toMatchObject({
-      completionAction: 'push_branch',
-      effectiveCompletionAction: 'push_branch',
+    expect((await create({ completionAction: 'merge' })).card).toMatchObject({
+      completionAction: 'merge',
+      effectiveCompletionAction: 'merge',
       completionActionSource: 'card',
     });
+    // push_branch was retired (backlog #61): creating a card with it is refused
+    const retired = await w.t.req('POST', '/api/cards', {
+      cookie: w.owner.cookie,
+      body: {
+        projectId: w.projectId,
+        title: 'Retired',
+        cardType: 'feature',
+        completionAction: 'push_branch',
+      },
+    });
+    expect(retired.status).toBe(400);
 
     await ok(
       w.t.req('PATCH', `/api/projects/${w.projectId}`, {

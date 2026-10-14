@@ -91,11 +91,12 @@ describe('completion with a working branch that differs from the main branch', (
     expect(pr.calls[0]).toMatchObject({ base: 'develop', branch: BRANCH });
   });
 
-  it('pushing only the card branch leaves both the working branch and the main branch alone', async () => {
+  it('the retired push_branch action changes nothing on origin', async () => {
     const { repo, path } = await developCard();
     const developBefore = sh(repo.origin, 'git', ['rev-parse', 'develop']);
     const res = await run(repo, payload(repo, path, 'push_branch'));
-    expect(res).toMatchObject({ ok: true, pushedBranch: BRANCH });
+    expect(res).toMatchObject({ ok: false });
     expect(sh(repo.origin, 'git', ['rev-parse', 'develop'])).toBe(developBefore);
+    expect(sh(repo.origin, 'git', ['branch', '--list', BRANCH])).toBe('');
   });
 });
