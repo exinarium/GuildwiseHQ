@@ -78,7 +78,7 @@ Click **History** on an automation to see every run: when, what triggered it, wh
 
 ## E-mail inbox {#email-inbox}
 
-An inbox is an address that turns incoming mail into cards. The Owner or an Admin makes one under **Organization > E-mail inbox**; it looks like `acme-k3x9p2m7qd@in.guildwisehq.com`. **Copy** gives you the address; **New address** replaces it (the old one stops working at once, and mail sent to it is shown as skipped).
+An inbox is an address that turns incoming mail into cards. Every organisation gets one when it is created (the **Main inbox**); the Owner or an Admin can make more under **Organization > E-mail inbox**. it looks like `acme-k3x9p2m7qd@in.guildwisehq.com`. **Copy** gives you the address; **New address** replaces it (the old one stops working at once, and mail sent to it is shown as skipped).
 
 **Use your own address by forwarding.** Customers keep writing to support@yourcompany.com. Set that mailbox to forward everything to your Guildwise address: in Gmail, Settings > Forwarding and POP/IMAP > Add a forwarding address; in Outlook, Settings > Mail > Forwarding; or use a forwarding rule or alias at your mail host. Guildwise does not send mail to the customer for you: reply from your own mailbox as usual.
 

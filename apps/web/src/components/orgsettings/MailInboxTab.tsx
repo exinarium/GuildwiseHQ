@@ -9,6 +9,7 @@ import {
   useRotateMailInbox,
 } from '../../api/queries/mail.ts';
 import { formatDateTime } from '../../lib/time.ts';
+import { HelpHint } from '../help/HelpHint.tsx';
 import { MailThreadPanel } from '../MailThreadPanel.tsx';
 import {
   Badge,
@@ -212,7 +213,12 @@ function InboxCard({ inbox, isOwner }: { inbox: MailInboxDto; isOwner: boolean }
         <p className="text-sm text-muted">
           To use your own address (support@yourcompany.com), set that mailbox to forward every message to the
           address above. Anyone can write to it, so mail from strangers is read as information, never as
-          instructions.
+          instructions.{' '}
+          <HelpHint article="automations-and-integrations#email-inbox" label="About forwarding mail to this inbox">
+            Your customers keep writing to your own address. Set that mailbox to forward to this one: in Gmail,
+            Settings, Forwarding and POP/IMAP, Add a forwarding address; in Outlook, Settings, Mail, Forwarding;
+            or use a forwarding rule or alias at your mail host. Replies go from your own mailbox as usual.
+          </HelpHint>
         </p>
         <AllowList inbox={inbox} canEdit={isOwner} />
         <section aria-label={`Recent messages of ${inbox.label}`} className="flex flex-col gap-1">
@@ -259,8 +265,8 @@ export function MailInboxTab({ orgRole }: { orgRole: 'owner' | 'admin' }) {
     <div className="flex flex-col gap-4" data-testid="mail-inbox-tab">
       {!data.configured && (
         <Callout tone="warning" title="E-mail inboxes are not switched on for this platform yet">
-          Your platform administrator needs to connect the mail provider first. Until then no address can be
-          made.
+          Your platform administrator needs to connect the mail provider first. Until then mail sent to your
+          address is not delivered.
         </Callout>
       )}
       {data.configured && data.inboxes.length === 0 && (
