@@ -2,6 +2,78 @@
 
 Logged fixes to pick up when development resumes. Newest first.
 
+## 2026-10-14
+
+Owner's bug and wish list from a day of real use (production, P4 / Flow-Web). Root causes are being investigated; each
+item gets its findings and fix when built.
+
+### 47. Intake: the BA tries to read the code itself
+
+During intake the BA tried to read the repositories and asked for reference repositories. The owner refused: reading
+code is the Architect's job (BA spec → Architect → build, #9). The BA's intake instructions and permissions must keep it
+on the ticket, the requirements and the spec, and hand code questions to the Architect step.
+
+### 48. Authorise MCP servers from the web
+
+The BA needed the Atlassian plugin MCP authorised (OAuth) and the owner could not do that from the web. Wanted: the
+runner reports each server's auth state; the app shows "needs sign-in" per workstation with a clear action, and if possible
+starts the sign-in from the web. Fits the Integrations page (#34).
+
+### 49. The BA does not know the runner's Jira integration
+
+The runner has a Jira API connection (`aom-runner jira-connect`, `aom source attachments`), but the BA did not know it and
+could not use it when MCP was unavailable. The BA's instructions must name it, and the BA should be able to read a ticket
+(fields, description, comments, attachments) through it.
+
+### 50. Claude login expiry stops agents
+
+When the workstation's Claude Code login (OAuth) expires, agents fail until the owner runs `/login`. Wanted: find out why
+it expires (refresh not written back from the sandbox?), detect it, pause that workstation's work, tell the owner
+("run `claude /login` on <workstation>"), and resume by itself once the login works again.
+
+### 51. Archive done cards after a day
+
+Done cards should leave the board a day after they are done, into an archive that stays searchable and findable (card
+search, filters by project / date / agent), and from which a card can still be opened and reopened (#27).
+
+### 52. A card finalised as a pull request against the project's completion action
+
+Cards inherit the project's completion action (#30), but one card still opened a pull request. The BA must not set or
+override the completion action; only people may change it on a card.
+
+### 53. Unstick an agent
+
+A way to free an agent whose running processes hang: from the card / agent / workstation page, stop the running command
+or restart the shift (kill the whole process tree in the sandbox, keep the work), plus an automatic watchdog when a shift
+shows no progress for a set time.
+
+### 54. Change priority and completion action on a card at any time
+
+Priority and completion action should be editable in every card status (handled sanely while a finalise is running).
+
+### 55. Agents get stuck running unit tests of broken projects
+
+Builders hang while running the unit tests of projects that do not build or whose tests hang (.NET). Needs per-command
+time limits and hang detection for test runs (e.g. `dotnet test --blame-hang-timeout`), and instructions on what to do
+when a project's tests are broken before the agent touched it.
+
+### 56. The board shows $0.00 spend this month
+
+The board's spend figure shows $0.00 this month instead of the real total.
+
+### 57. The local working branch falls behind origin
+
+After a pull request is merged, origin moves but the local working branch stays behind. Agents must always start from
+the latest code (fetch and fast-forward before work), and the app should show "out of sync" for a repository's working
+branch with a "Sync now" action.
+
+### 58. Start action: run the project on a branch
+
+An easy way to start the project on a chosen branch to try it. Build/run instructions per project: if a repository has a
+`BUILD.md`, the agent uses it; otherwise instructions can be given in Project settings. For a multi-repository project,
+choose which services to start. Needs design: where it runs (the workstation), who may start it, ports and logs, how it
+is stopped.
+
 ## Direction (owner, 2026-10-13)
 
 Guildwise started as a tool for software teams (the owner built it for his own work), but the aim is **running a whole
