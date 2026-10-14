@@ -94,3 +94,62 @@ export const InboundHealthSchema = z.object({
   }),
 });
 export type InboundHealth = z.infer<typeof InboundHealthSchema>;
+
+/** One message of a conversation, in or out. Text is outside content for incoming mail: shown as plain text only. */
+export const MailThreadMessageDtoSchema = z.object({
+  id: z.uuid(),
+  direction: z.enum(['in', 'out']),
+  from: z.string(),
+  fromName: z.string().nullable(),
+  to: z.string(),
+  subject: z.string(),
+  text: z.string(),
+  at: IsoTime,
+  status: z.string(),
+  /** Outgoing: the person who sent it. */
+  sentByName: z.string().nullable(),
+});
+export type MailThreadMessageDto = z.infer<typeof MailThreadMessageDtoSchema>;
+
+/** A conversation with the reply state for the current person. */
+export const MailThreadDtoSchema = z.object({
+  id: z.uuid(),
+  inboxId: z.uuid(),
+  subject: z.string(),
+  cardId: z.uuid().nullable(),
+  cardRef: z.string().nullable(),
+  messages: z.array(MailThreadMessageDtoSchema),
+  /** Who a reply goes to: the sender of the latest message that was accepted. Null when there is nobody to answer. */
+  replyTo: z.string().nullable(),
+  /** The current person may reply as the organisation (org Owner/Admin, or manager of the card's project). */
+  canReply: z.boolean(),
+  /** Why a reply is not possible (shown instead of the form). */
+  cannotReplyReason: z.string().nullable(),
+});
+export type MailThreadDto = z.infer<typeof MailThreadDtoSchema>;
+
+export const MAIL_REPLY_MAX_CHARS = 20_000;
+export const MailReplyRequestSchema = z.object({
+  text: z.string().trim().min(1).max(MAIL_REPLY_MAX_CHARS),
+  /** Defaults to "Re: <subject of the thread>". */
+  subject: z.string().trim().min(1).max(300).optional(),
+  /** The reply was written by the BA as a draft the person reviewed. */
+  draftedBy: z.enum(['ba']).optional(),
+});
+export type MailReplyRequest = z.infer<typeof MailReplyRequestSchema>;
+
+/** "Draft with BA": a reply draft the BA is writing or has written for the current person to review. */
+export const MAIL_DRAFT_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
+export const MailDraftDtoSchema = z.object({
+  id: z.uuid(),
+  status: z.enum(MAIL_DRAFT_STATUSES),
+  /** The draft, once `done`. Not sent: the person edits it in the reply box and sends it. */
+  text: z.string().nullable(),
+  subject: z.string().nullable(),
+  /** Why no draft came (`failed`). */
+  error: z.string().nullable(),
+  createdAt: IsoTime,
+});
+export type MailDraftDto = z.infer<typeof MailDraftDtoSchema>;
+export const MailDraftResponseSchema = z.object({ draft: MailDraftDtoSchema.nullable() });
+export type MailDraftResponse = z.infer<typeof MailDraftResponseSchema>;

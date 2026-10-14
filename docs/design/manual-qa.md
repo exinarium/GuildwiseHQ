@@ -63,7 +63,7 @@ with a "Waiting for my QA" filter, Project settings toggle, desk item with the t
 ## 6. Open points
 
 - Project variants that extend v2 do not get the stages until rebased onto v3.
-- `purpose: 'approval'` (#16) is reserved: the kind and config exist, the handler does not.
+- `purpose: 'approval'` (#16) is built (`commands/approval.ts`); custom workflows and variants may use `human` steps of both purposes (the QA step of a custom workflow opens through the same reactor).
 - The held comment is posted from the card owner's workstation, even when someone else passes the card (as with any outgoing update); with no workstation of theirs the command waits in the durable queue.
 - A card whose home workstation has no tester or BA waits in `qa_steps` (the usual home-workstation rule applies to every agent stage); the person can pass, skip or send it back at any time, steps or not.
 - Scheduled (automatic) and investigation-only cards have no QA; a bug child never finalizes on its own.

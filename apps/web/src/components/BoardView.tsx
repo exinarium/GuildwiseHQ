@@ -21,6 +21,7 @@ const WAITING_LABEL = {
   devops: 'waiting on DevOps',
   subworkflow: 'waiting for sub-workflow',
   qa: 'waiting for QA',
+  approval_step: 'waiting for approval',
 } as const;
 
 const HIDE_KEY = `${BRAND.storagePrefix}-board-hide-empty`;
@@ -34,6 +35,7 @@ export interface BoardFilter {
   priority: number | null;
   /** Manual QA: show only the cards waiting for this user to test them (their user id); null = any. */
   qaFor: string | null;
+  approvalFor: string | null;
 }
 export const NO_FILTER: BoardFilter = {
   text: '',
@@ -42,6 +44,7 @@ export const NO_FILTER: BoardFilter = {
   unassigned: false,
   priority: null,
   qaFor: null,
+  approvalFor: null,
 };
 
 export const matchesFilter = (c: BoardCard, f: BoardFilter): boolean => {
@@ -52,6 +55,7 @@ export const matchesFilter = (c: BoardCard, f: BoardFilter): boolean => {
   if (f.unassigned && c.assignee) return false;
   if (f.priority !== null && priorityLevel(c.priority).value !== f.priority) return false;
   if (f.qaFor !== null && c.qa?.assigneeUserId !== f.qaFor) return false;
+  if (f.approvalFor !== null && c.approval?.approverUserId !== f.approvalFor) return false;
   return true;
 };
 
@@ -146,6 +150,13 @@ export function CardTile({
                 }
               >
                 QA: {card.qa.assigneeName}
+              </Badge>
+            </span>
+          )}
+          {card.approval && (
+            <span data-testid="approval-chip">
+              <Badge tone="amber" title={`Waiting for approval at ${card.approval.stageLabel}`}>
+                Approval: {card.approval.approverName}
               </Badge>
             </span>
           )}

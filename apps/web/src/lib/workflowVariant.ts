@@ -137,8 +137,8 @@ export function variantRows(
           {
             id: ins.stage.id,
             label: ins.stage.label,
-            kind: 'agent',
-            claimRole: ins.stage.claimRole,
+            kind: ins.stage.kind === 'approval' ? 'human' : 'agent',
+            claimRole: ins.stage.claimRole ?? null,
             doneCriteria: ins.stage.doneCriteria,
           },
           true,

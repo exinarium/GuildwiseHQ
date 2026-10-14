@@ -249,7 +249,9 @@ const REPORT_USAGE = `usage: aom report triage --file <decisions.json>      # { 
        aom report notes --file <notes.json>          # { "notes": [ { "itemId", "note", "related"? } ] }
        aom report signals --file <reports.json>     # { "reports": [ { "signalId", "summary", "annotateItemId"? } ] }
        aom report floor --summary-file <report.md>
-       aom report brief --summary-file <report.md>`;
+       aom report brief --summary-file <report.md>
+       aom report mail-draft --text-file <reply.txt> [--subject "<subject>"]
+       aom report mail-draft-fail --note "<why no reply can be written>"`;
 
 /** `aom report ...`: the BA's reporter tasks (held items, urgent notes, urgent signals, the daily floor report). */
 async function reportVerb(ctx: AomContext, p: Parsed): Promise<number> {
@@ -279,6 +281,21 @@ async function reportVerb(ctx: AomContext, p: Parsed): Promise<number> {
         outcome('scheduled_brief', 'Scheduled task report', {
           report: textFlag(ctx, p, 'summary', true) as string,
         }),
+      );
+    case 'mail-draft': {
+      const subject = one(p, 'subject')?.trim();
+      return report(
+        ctx,
+        outcome('mail_draft_done', 'Reply draft', {
+          text: textFlag(ctx, p, 'text', true) as string,
+          ...(subject ? { subject } : {}),
+        }),
+      );
+    }
+    case 'mail-draft-fail':
+      return report(
+        ctx,
+        outcome('mail_draft_fail', (textFlag(ctx, p, 'note', true) as string).trim().slice(0, 500), {}),
       );
     default:
       throw new UsageError(REPORT_USAGE);
@@ -1154,6 +1171,7 @@ export const USAGE = `usage: aom <verb> [options]
   phase followup done|fail <n> --summary "<t>" [--link <url>]...   BA task (custom follow-up): you did it, or could not (terminal)
   phase results --summary-file <md>          BA task (follow-ups finished): report the results (terminal)
   report triage|notes|signals --file <json> | report floor --summary-file <md>   BA reporter task (held items, urgent notes, urgent signals, the daily floor report): report to the manager (terminal)
+  report mail-draft --text-file <txt> [--subject "<s>"] | report mail-draft-fail --note "<why>"   BA mail reply draft: report the draft for a person to review and send (terminal; it is never sent by itself)
   devops "<request>"                         ask this workstation's DevOps engineer (does not end your shift)
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed

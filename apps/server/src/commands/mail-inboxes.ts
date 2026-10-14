@@ -14,11 +14,11 @@ import {
 import type { OrgAccess } from '../auth/org-context.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Queryable, rows } from '../db/sql.ts';
-import { withAppendTx } from '../db/tx.ts';
+import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { orgSlug, randomToken } from '../mail/inbound/ingest.ts';
 import { configuredProvider } from '../mail/inbound/providers.ts';
-import { orgScope, userActor } from './common.ts';
+import { orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
 
 /** Inboxes an organisation can have. */
 export const MAX_INBOXES_PER_ORG = 5;
@@ -27,7 +27,7 @@ const domainOf = (ctx: Ctx): string | null =>
   configuredProvider(ctx.config) && ctx.config.inbound.domain ? ctx.config.inbound.domain : null;
 
 /** `<slug>-<random>@<inbound domain>`: the random part is what stops anyone guessing an address. */
-async function newAddress(ctx: Ctx, db: Queryable, orgId: string, domain: string): Promise<string> {
+async function newAddress(db: Queryable, orgId: string, domain: string): Promise<string> {
   const org = await one(db, 'SELECT name FROM organizations WHERE id=$1', [orgId]);
   const slug = orgSlug(org?.name ?? 'org');
   for (let i = 0; i < 5; i++) {
@@ -75,6 +75,85 @@ export async function listInboxes(ctx: Ctx, orgId: string): Promise<MailInboxesR
   };
 }
 
+/** What an inbox needs to be written: the event store and the clock (a boot data migration has no `Ctx`). */
+export type InboxDeps = Pick<Ctx, 'store' | 'clock'>;
+
+interface NewInbox {
+  id: string;
+  orgId: string;
+  label: string;
+  projectId: string | null;
+  domain: string;
+  createdBy: string | null;
+  actor: ReturnType<typeof userActor> | typeof SYSTEM_ACTOR;
+}
+
+/** The inbox row, its first address and the `MailInboxCreated` event, in the caller's transaction. */
+async function insertInbox(ctx: InboxDeps, tx: Tx, n: NewInbox): Promise<void> {
+  const now = ctx.clock.now();
+  const address = await newAddress(tx, n.orgId, n.domain);
+  await tx.query(
+    `INSERT INTO mail_inboxes (id, org_id, project_id, label, created_by, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$6)`,
+    [n.id, n.orgId, n.projectId, n.label, n.createdBy, now],
+  );
+  await tx.query('INSERT INTO mail_addresses (address, inbox_id, org_id, created_at) VALUES ($1,$2,$3,$4)', [
+    address,
+    n.id,
+    n.orgId,
+    now,
+  ]);
+  await ctx.store.append(
+    [
+      {
+        streamId: streamId.mailInbox(n.id),
+        event: {
+          type: 'MailInboxCreated',
+          payload: {
+            inboxId: n.id,
+            label: n.label,
+            address,
+            ...(n.projectId ? { projectId: n.projectId } : {}),
+          },
+        },
+        actor: n.actor,
+        scope: orgScope(n.orgId),
+      },
+    ],
+    { tx },
+  );
+}
+
+/** The label of the inbox every organisation gets when it is created. */
+export const DEFAULT_INBOX_LABEL = 'Main inbox';
+
+/**
+ * Every organisation has an inbound inbox address from the day it is created. Idempotent: an organisation that has any
+ * inbox is left alone. The address is made from `AOM_INBOUND_DOMAIN` alone (it works for the organisation as soon as DNS
+ * and the provider are set up, and nothing needs to be done per organisation then); with no domain nothing is created, and
+ * the boot data migration (`org-inboxes-2026-10`) makes them once the domain is set. Returns true when one was created.
+ */
+export async function ensureOrgInbox(
+  ctx: InboxDeps,
+  tx: Tx,
+  orgId: string,
+  domain: string | undefined,
+): Promise<boolean> {
+  if (!domain) return false;
+  if (!(await one(tx, 'SELECT 1 FROM organizations WHERE id=$1', [orgId]))) return false;
+  if (await one(tx, 'SELECT 1 FROM mail_inboxes WHERE org_id=$1 LIMIT 1', [orgId])) return false;
+  await insertInbox(ctx, tx, {
+    id: randomUUID(),
+    orgId,
+    label: DEFAULT_INBOX_LABEL,
+    projectId: null,
+    domain,
+    createdBy: null,
+    actor: SYSTEM_ACTOR,
+  });
+  return true;
+}
+
 export async function createInbox(
   ctx: Ctx,
   a: OrgAccess,
@@ -95,36 +174,15 @@ export async function createInbox(
       const p = await one(tx, 'SELECT 1 FROM projects WHERE id=$1 AND org_id=$2', [req.projectId, a.orgId]);
       if (!p) throw notFound('project not found');
     }
-    const now = ctx.clock.now();
-    const address = await newAddress(ctx, tx, a.orgId, domain);
-    await tx.query(
-      `INSERT INTO mail_inboxes (id, org_id, project_id, label, created_by, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$6)`,
-      [id, a.orgId, req.projectId ?? null, req.label, a.session.user.id, now],
-    );
-    await tx.query(
-      'INSERT INTO mail_addresses (address, inbox_id, org_id, created_at) VALUES ($1,$2,$3,$4)',
-      [address, id, a.orgId, now],
-    );
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.mailInbox(id),
-          event: {
-            type: 'MailInboxCreated',
-            payload: {
-              inboxId: id,
-              label: req.label,
-              address,
-              ...(req.projectId ? { projectId: req.projectId } : {}),
-            },
-          },
-          actor: userActor(a.session.user.id),
-          scope: orgScope(a.orgId),
-        },
-      ],
-      { tx },
-    );
+    await insertInbox(ctx, tx, {
+      id,
+      orgId: a.orgId,
+      label: req.label,
+      projectId: req.projectId ?? null,
+      domain,
+      createdBy: a.session.user.id,
+      actor: userActor(a.session.user.id),
+    });
   });
   return (await dtoOf(ctx.pool, id)) as MailInboxDto;
 }
@@ -145,7 +203,7 @@ export async function rotateInbox(ctx: Ctx, a: OrgAccess, id: string): Promise<M
     const old = await one(tx, 'SELECT address FROM mail_addresses WHERE inbox_id=$1 AND active FOR UPDATE', [
       id,
     ]);
-    const address = await newAddress(ctx, tx, a.orgId, domain);
+    const address = await newAddress(tx, a.orgId, domain);
     await tx.query('UPDATE mail_addresses SET active=false, retired_at=$2 WHERE inbox_id=$1 AND active', [
       id,
       now,

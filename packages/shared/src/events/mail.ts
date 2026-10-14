@@ -53,4 +53,21 @@ export const mailEvents = [
   ),
   /** The card made from a thread's first message: replies to the thread now reach the card. */
   defineEvent('MailThreadLinked', z.object({ threadId: Id, cardId: Id, messageId: Id })),
+  /**
+   * A person replied to a conversation as the organisation (Reply on a card made from e-mail, or in the inbox). The text
+   * is stored on the thread (operational table), not in the event.
+   */
+  defineEvent(
+    'MailReplySent',
+    z.object({
+      threadId: Id,
+      messageId: Id,
+      inboxId: Id,
+      cardId: Id.optional(),
+      to: z.string().max(254),
+      by: Id,
+      /** The reply started as a draft written by the BA and was reviewed by the sender. */
+      draftedBy: z.enum(['ba']).optional(),
+    }),
+  ),
 ] as const;

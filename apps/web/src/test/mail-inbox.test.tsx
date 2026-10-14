@@ -169,6 +169,20 @@ describe('Organization > E-mail inbox', () => {
     expect(within(card).getByText(/forward every message to the\s+address above/)).toBeInTheDocument();
   });
 
+  it('explains auto-forwarding in a tooltip: Gmail, Outlook, aliases, and that customers keep their own address', async () => {
+    const user = userEvent.setup();
+    wrap(<MailInboxTab orgRole="owner" />);
+    const card = await screen.findByTestId('mail-inbox');
+    await user.click(within(card).getByRole('button', { name: 'About forwarding mail to this inbox' }));
+    const tip = await screen.findByText(/Your customers keep writing to your own address/);
+    expect(tip.textContent).toMatch(/Gmail/);
+    expect(tip.textContent).toMatch(/Outlook/);
+    expect(tip.textContent).toMatch(/alias/);
+    expect(screen.getByTestId('help-hint').getAttribute('data-article')).toBe(
+      'automations-and-integrations#email-inbox',
+    );
+  });
+
   it('the Owner adds a sender or a domain to the allow-list, and removes one', async () => {
     const user = userEvent.setup();
     wrap(<MailInboxTab orgRole="owner" />);

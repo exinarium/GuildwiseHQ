@@ -23,10 +23,12 @@ import { orgRoleOf } from '../auth/org-context.ts';
 import { loadVisibleCard, loadVisibleProject } from '../authz/scope.ts';
 import { loadWorkflowById, resolveWorkflow } from '../catalogue/loader.ts';
 import { enabledWorkflows } from '../catalogue/project-workflows.ts';
+import { cardApprovalDto } from '../commands/approval.ts';
 import { attachmentsOf } from '../commands/card-attachments.ts';
 import { effectiveCompletion } from '../commands/completion.ts';
 import { memberRefusal } from '../commands/phases.ts';
 import { cardQaDto } from '../commands/qa.ts';
+import { humanPurposeOf } from '../commands/qa-flow.ts';
 import type { Ctx } from '../context.ts';
 import {
   budgetDto,
@@ -318,6 +320,7 @@ export async function getCardDetail(ctx: Ctx, userId: string, idOrRef: string): 
     testing: await cardTesting(ctx, card, manage),
     subworkflows: await subworkflowsPanel(ctx, userId, card),
     qa: await cardQaDto(ctx.pool, card, { id: userId }, role),
+    approval: await cardApprovalDto(ctx.pool, card, { id: userId }, role),
     blockers: (
       await rows(
         ctx.pool,
@@ -535,16 +538,36 @@ export async function getBoard(
     cards.filter((c) => c.origin === 'subworkflow').map((c) => c.id as string),
   );
   const byColumn = new Map<string, BoardResponse['columns'][number]['cards']>(columns.map((c) => [c, []]));
-  // Manual QA: who each card in a QA stage waits for.
+  // Steps for a person (manual QA, approval; a custom workflow's too): who each such card waits for.
+  const humanOf = new Map<string, 'qa' | 'approval'>();
+  for (const c of cards)
+    if (c.status === 'waiting' || c.status === 'queued') {
+      const p = await humanPurposeOf(ctx.pool, c);
+      if (p) humanOf.set(c.id as string, p);
+    }
+  const isQaCard = (c: Row) => c.stage === 'qa_steps' || humanOf.get(c.id) === 'qa';
+  const approvalOf = (c: Row) =>
+    humanOf.get(c.id) === 'approval' && c.approval?.state === 'open' && c.approval.stageId === c.stage
+      ? (c.approval as { approverUserId: string })
+      : null;
   const qaPeople = new Map<string, string>(
     (
       await rows(ctx.pool, `SELECT id, display_name FROM users WHERE id = ANY($1::uuid[])`, [
-        cards
-          .filter((c) => (c.stage === 'qa_steps' || c.stage === 'manual_qa') && c.qa?.assigneeUserId)
-          .map((c) => c.qa.assigneeUserId as string),
+        [
+          ...cards
+            .filter((c) => isQaCard(c) && c.qa?.assigneeUserId)
+            .map((c) => c.qa.assigneeUserId as string),
+          ...cards.map((c) => approvalOf(c)?.approverUserId).filter((x): x is string => !!x),
+        ],
       ])
     ).map((u) => [u.id as string, u.display_name as string]),
   );
+  const stageLabelOf = new Map<string, string>();
+  for (const c of cards)
+    if (humanOf.get(c.id) === 'approval') {
+      const w = await loadWorkflowById(ctx.pool, c.workflow_version_id);
+      stageLabelOf.set(c.id as string, (w ? getStage(w.definition, c.stage)?.label : undefined) ?? c.stage);
+    }
   for (const c of cards) {
     const { column } = await cardColumn(ctx, c);
     if (!byColumn.has(column)) byColumn.set(column, []);
@@ -568,24 +591,36 @@ export async function getBoard(
       waitingFor:
         c.status !== 'waiting'
           ? null
-          : c.stage === 'manual_qa'
+          : humanOf.get(c.id) === 'qa'
             ? 'qa'
-            : subWaiting.has(c.id)
-              ? 'subworkflow'
-              : c.finalize_state === 'awaiting_approval'
-                ? 'approval'
-                : c.finalize_state === 'running'
-                  ? 'finalizing'
-                  : c.parked_request_id && !c.waiting_on_id
-                    ? 'devops'
-                    : 'bug',
+            : approvalOf(c)
+              ? 'approval_step'
+              : subWaiting.has(c.id)
+                ? 'subworkflow'
+                : c.finalize_state === 'awaiting_approval'
+                  ? 'approval'
+                  : c.finalize_state === 'running'
+                    ? 'finalizing'
+                    : c.parked_request_id && !c.waiting_on_id
+                      ? 'devops'
+                      : 'bug',
       waitingOn: subWaiting.has(c.id)
         ? (subWaiting.get(c.id) as NonNullable<ReturnType<typeof subWaiting.get>>)
         : c.waiting_on_id
           ? { id: c.waiting_on_id, ref: c.waiting_on_ref }
           : null,
       ...(subStarted.has(c.id) ? { startedBy: subStarted.get(c.id) } : {}),
-      ...((c.stage === 'qa_steps' || c.stage === 'manual_qa') && c.qa?.assigneeUserId
+      ...(approvalOf(c)
+        ? {
+            approval: {
+              approverUserId: (approvalOf(c) as { approverUserId: string }).approverUserId,
+              approverName:
+                qaPeople.get((approvalOf(c) as { approverUserId: string }).approverUserId) ?? 'someone',
+              stageLabel: stageLabelOf.get(c.id) ?? c.stage,
+            },
+          }
+        : {}),
+      ...(isQaCard(c) && c.qa?.assigneeUserId
         ? {
             qa: {
               state: c.stage === 'qa_steps' ? ('steps' as const) : ('open' as const),

@@ -52,24 +52,6 @@ run them, when enabled, against a **local** environment (started on the workstat
 **remote** one (a URL configured in the project). The tester's sandbox then allows exactly that host (localhost ports or
 the remote host), nothing else.
 
-### 67. Support e-mail into the Support console; an inbox for every organisation
-
-**Owner request (2026-10-14):** route support e-mail through inbound mail (SendGrid Inbound Parse, #62) so the console
-updates itself: a customer's e-mail answer to a support mail lands on its request (and reopens an answered or closed
-one), and a new e-mail to the support routing address opens a new request. Support mails then carry a routing Reply-To
-(e.g. `support+<ref>@in.guildwisehq.com`) instead of the support mailbox; staff still get every message by e-mail.
-Every new organisation gets an inbox address automatically when it is created (existing organisations without one get
-one too). Help section and a tooltip on the inbox page explain forwarding (Gmail, Outlook, aliases). DNS (MX for
-`in.guildwisehq.com`) and the SendGrid parse host are set up on deploy day; everything else is built ahead.
-
-**Also (owner, 2026-10-14): model providers on the Trust page and the Privacy policy come from one shared list.** General
-wording first (agents use the provider and account the customer connects; data goes from the customer's workstation to
-that provider under the customer's agreement; Guildwise's servers send it nowhere), then a table generated from the list:
-provider, what it is used for, whose account, link to its data-use terms (today: Anthropic for agents on the customer's
-account, and Anthropic for Guildwise's own landing assistant and blog writer on the platform key). A test fails when a
-runtime/provider exists in the code without an entry. The Privacy policy's sub-processors use the same list, and
-SendGrid replaces Postmark for inbound mail everywhere (Privacy, DEPLOY.md).
-
 ## Direction (owner, 2026-10-13)
 
 Guildwise started as a tool for software teams (the owner built it for his own work), but the aim is **running a whole
@@ -126,28 +108,6 @@ Leftovers on done items: #20 (MCP tool names per server are not listed; refreshe
 a configured token is used) and #27 (a reopened research card keeps its published status; a reopened cancelled bug child
 does not put its resumed parent back to waiting).
 
-### 14. Incoming webhooks as an automation trigger
-
-**Decided (owner, 2026-10-12): later.** The `webhook_in` trigger kind exists in the schema (`packages/shared/src/schedules`)
-but the server refuses it (`trigger_not_available`). Wanted: a per-automation URL with a secret (stored hashed), payload
-fields as mapping tokens, the payload treated as untrusted (`renderUntrusted`), cards start as drafts unless the Owner
-allows otherwise, rate limits and an audit run per call. See `docs/design/workflow-builder.md`.
-
-### 15. Reply to an e-mail thread from inside Guildwise
-
-`sendInThread` (`apps/server/src/mail/inbound/reply.ts`) sends into an inbox thread with the right Message-ID,
-In-Reply-To and a `Reply-To` of `<address>+<thread token>`, but nothing calls it. Wanted: a "Reply" action on a card that
-came from e-mail (and on the thread view), permissions (who may reply as the organisation), the reply stored on the
-thread and the card, optional agent-drafted reply that a human sends.
-
-### 16. "Owner approves" step kind in workflows
-
-**Decided (owner, 2026-10-12): later.** A workflow step that waits for the Owner (or a named member) to approve on the
-desk, with approve / send back routes, in the workflow builder and the validator.
-
-**Update (2026-10-14):** the stage kind `human` (`human: { purpose: 'qa' | 'approval' }`) exists since manual QA (#64).
-This item adds `purpose: 'approval'` (server handler, panel, builder and validator for custom workflows).
-
 ### 17. Stale figures in the user guide
 
 6 of the 87 figures in `docs/guide` still show old screens (`desk-branch`, the test-stage, conflict and large-merge
@@ -155,11 +115,6 @@ scenes, the phases-in-reporting scenes, desk items with the simple-mode / saved-
 steps in the Playwright `guide` project fail on simple mode (phase reporting 409 `phase_not_open`, the hygiene
 working-branch question, test-stage scenes, the edited-card step). Fix the seeds the way the e2e specs were fixed
 (expert mode where needed), re-capture, rebuild `guide.html` and the PDF.
-
-### 19. Per-sender limit for inbound e-mail
-
-Inbound mail has a per-organisation hourly limit (`AOM_INBOUND_RATE_PER_HOUR`). Add an optional per-sender limit so one
-noisy or looping sender cannot use up an organisation's allowance.
 
 ## 2026-10-11
 
@@ -274,6 +229,61 @@ The details of each done item follow this list, by date.
 
 ## 2026-10-14 (done)
 
+### 67. Support e-mail into the Support console; an inbox for every organisation
+
+**Owner request (2026-10-14):** route support e-mail through inbound mail (SendGrid Inbound Parse, #62) so the console
+updates itself: a customer's e-mail answer to a support mail lands on its request (and reopens an answered or closed
+one), and a new e-mail to the support routing address opens a new request. Support mails then carry a routing Reply-To
+(e.g. `support+<ref>@in.guildwisehq.com`) instead of the support mailbox; staff still get every message by e-mail.
+Every new organisation gets an inbox address automatically when it is created (existing organisations without one get
+one too). Help section and a tooltip on the inbox page explain forwarding (Gmail, Outlook, aliases). DNS (MX for
+`in.guildwisehq.com`) and the SendGrid parse host are set up on deploy day; everything else is built ahead.
+
+**Also (owner, 2026-10-14): model providers on the Trust page and the Privacy policy come from one shared list.** General
+wording first (agents use the provider and account the customer connects; data goes from the customer's workstation to
+that provider under the customer's agreement; Guildwise's servers send it nowhere), then a table generated from the list:
+provider, what it is used for, whose account, link to its data-use terms (today: Anthropic for agents on the customer's
+account, and Anthropic for Guildwise's own landing assistant and blog writer on the platform key). A test fails when a
+runtime/provider exists in the code without an entry. The Privacy policy's sub-processors use the same list, and
+SendGrid replaces Postmark for inbound mail everywhere (Privacy, DEPLOY.md).
+
+**Done (2026-10-14).**
+
+*A. Support e-mail routing* (`mail/inbound/support.ts`, `commands/support.ts`, migration 1980). With inbound mail configured (provider and
+domain), support mails to a person (acknowledgement, staff reply) use `Reply-To: support+<token>@<inbound domain>`; the token
+(`support_tickets.reply_token`, 12 random characters) is made on first use and belongs to one request. Inbound mail to that address is added
+to the request as the person's message (reopens answered or closed, staff told by e-mail like an in-app follow-up, attachments listed by name,
+type and size and not kept, stored once per Message-ID). Mail to `support@<inbound domain>` opens a new request (kind question; a sender who
+is a user is linked to the account, and to the organization when they belong to exactly one); the acknowledgement is sent like for the form,
+threaded under their mail. A reply to our support Message-ID from the contact address also finds its request. **Decision:** a token that
+matches no request is a new request (the message to support is kept, not lost). Ignored and counted, never acknowledged: automatic mail,
+spam, failed sender checks, too large, mail from our own addresses or the inbound domain, more than 3 new requests an hour from one address,
+more than 30 follow-ups an hour on one request. Without inbound mail nothing changes. DEPLOY.md names the address to forward
+(`support@guildwisehq.com` to `support@in.guildwisehq.com`). Tests: `apps/server/test/support-inbound.test.ts`.
+
+*B. An inbox for every organization* (`ensureOrgInbox` in `commands/mail-inboxes.ts`, data migration `org-inboxes-2026-10`). A new organization
+(sign-up, accepted invitation) gets a **Main inbox** in the same transaction; the boot migration gives existing organizations without any
+inbox one (event `MailInboxCreated` by the system actor). The address is made from `AOM_INBOUND_DOMAIN` alone, so it exists before DNS. **Decision:**
+with the domain unset nothing is created, and the migration (it runs on every boot and only acts on organizations with no inbox, so it is not
+recorded as done) creates them once the domain is set and the server restarted. Help: USER-GUIDE, help article paragraph, and a **?** tooltip
+on the inbox page (Gmail, Outlook, aliases, customers keep writing to their own address). Tests: `org-inboxes.test.ts`, `mail-inbox.test.tsx`.
+
+*C. Model providers list* (`apps/web/src/legal/providers.ts`). One list (id, name, purpose, whose account, data, terms link, what it covers); Trust
+page and Privacy policy print the general wording and a table made from it through `fillFacts` (`{{modelProvidersIntro}}`, `{{providersTable}}`;
+the legal markdown parser now reads pipe tables). Today: Anthropic for agents (your account, connected on your workstation) and Anthropic for the
+landing assistant and blog writer (Guildwise's platform key, no customer data). `providers.test.ts` fails when a runner adapter, an "ai"
+integration kind, a role's default runtime or a provider SDK in the server has no entry. SendGrid replaces Postmark for inbound mail in the legal
+texts and DEPLOY.md (the Postmark steps are gone; the adapter stays in the code, unused).
+
+*D. Draft with BA* (#15 leftover; migration 1981). **Draft with BA** on the card Reply panel and the thread view asks for a `mail_reply_draft`
+BA task (org level, any BA; `POST /api/cards/:id/mail-draft`, `/api/mail-threads/:id/draft`, same permission as replying). The BA gets the
+conversation (outside text in untrusted blocks), the card and who sends, and is told to write as the organization's own person in plain mail and
+never mention agents, AI or Guildwise; it reports with `aom report mail-draft --text-file` (or `mail-draft-fail`). The server refuses a draft that
+names an agent, "AI agent" or Guildwise (the same check as the send), stores it in `mail_reply_drafts`, and the panel (polling) puts it in the
+reply box to edit; never sent by itself. A send from a draft records `MailReplySent.draftedBy = 'ba'` and uses the draft up; the reveal check still
+runs on send. No BA hired: 409 `no_ba` with a message; no BA takes it in time or two failed attempts: the draft is marked failed. Tests:
+server `mail-draft.test.ts`, shared `mail-draft.test.ts`, runner `ba-task-shift.test.ts` (mail_reply_draft), web `mail-reply.test.tsx`.
+
 ### 66. Azure DevOps tokens of two organisations overwrite each other
 
 `FileTokenStore` (`apps/runner/src/forge/tokens.ts`) keyed tokens by `provider@host`, so two Azure DevOps organisations on
@@ -288,6 +298,79 @@ organization: git auth takes it from the remote url (`dev.azure.com/<org>/...` a
 Integrations adapter (connect, test, remove) and `git-connect --organization` through that adapter, and `gitConnections`
 reports one status per connected organization. A forge without an organization (and no `AZURE_DEVOPS_ORGANIZATION`) finds no
 PAT and falls back to the service principal or `az login`. Tests: `apps/runner/test/azure-tokens.test.ts`.
+
+### 14. Incoming webhooks as an automation trigger
+
+**Decided (owner, 2026-10-12): later.** The `webhook_in` trigger kind exists in the schema (`packages/shared/src/schedules`)
+but the server refuses it (`trigger_not_available`). Wanted: a per-automation URL with a secret (stored hashed), payload
+fields as mapping tokens, the payload treated as untrusted (`renderUntrusted`), cards start as drafts unless the Owner
+allows otherwise, rate limits and an audit run per call. See `docs/design/workflow-builder.md`.
+
+**Done (2026-10-14).** `webhook_in` is a working trigger. Saving an automation with it makes a secret (`hook_...`, 192 random bits) and
+shows the URL once, `https://<host>/api/hooks/<automation id>/<secret>` (or the secret as `Authorization: Bearer ...` on
+`/api/hooks/<id>`); only its SHA-256 is kept, in the trigger (`ScheduleUpdated` replays it; the browser never gets it).
+**New secret** replaces it at once, **Switch the secret off** (`POST /api/schedules/:id/revoke-secret`) refuses every call until a new one is made.
+A wrong id, wrong secret, revoked or paused hook all answer the same 404. JSON only, at most 64 KB, an optional
+`Idempotency-Key` makes a repeated call a no-op. Payload fields are `{hook.title}`, `{hook.customer.name}` (five levels) and
+`{hook.json}` tokens of a card mapping; they are never expanded twice, and every field filled from them is **untrusted**: the
+brief (shift and DevOps) wraps them in `renderUntrusted` ("Webhook: ...", table `card_untrusted`, migration 1951; old runners
+still read `source: 'email'` and say "E-mail" in the label). Cards from a hook are drafts unless the Owner ticks **Let its
+cards start queued** and the card is set to start queued; members can only make draft hooks. Limits: per hook `maxPerHour`
+(default 60, 429 over it, one audit run per hour says so), the automation's own `ratePerHour` for cards (20), and 300 calls a
+minute per address. Every accepted call is a run in the automation's history (`trigger: event`, label "Incoming webhook",
+payload text not stored; a card that cannot be made is a failed run and a 422). Any action can run from a hook (a BA task, DevOps request, webhook). Tests: shared
+`schedules.test.ts`, server `hooks.test.ts`, web `hook-automations.test.tsx`. **Open:** the secret travels in the URL, which
+proxies may log (the Bearer form avoids that); no HMAC signature check (the server keeps only a hash).
+
+### 15. Reply to an e-mail thread from inside Guildwise
+
+`sendInThread` (`apps/server/src/mail/inbound/reply.ts`) sends into an inbox thread with the right Message-ID,
+In-Reply-To and a `Reply-To` of `<address>+<thread token>`, but nothing calls it. Wanted: a "Reply" action on a card that
+came from e-mail (and on the thread view), permissions (who may reply as the organisation), the reply stored on the
+thread and the card, optional agent-drafted reply that a human sends.
+
+**Done (2026-10-14).** **Reply** on a card made from e-mail (card page, panel *E-mail conversation*) and **Conversation** on each
+message of the inbox page open the thread and a reply box (`GET /api/cards/:id/mail-thread`, `POST /api/cards/:id/mail-reply`;
+`GET /api/mail-threads/:id`, `POST /api/mail-threads/:id/reply`). Who may reply as the organisation: the Owner and Admins, and the owner
+and managers of the card's project (a thread without a card: Owner and Admins only). The reply goes to the sender of the latest accepted
+message, through `sendInThread` and the normal mailer with Message-ID, In-Reply-To, References and a Reply-To of the inbox
+address plus the thread token (the customer's answer comes back to the same card). It is plain text from the platform's sending address under the
+organisation's name, no footer. It is stored as an outgoing message of the thread (`mail_messages.sent_by`, migration 1950), a
+`MailReplySent` event and a comment on the card. A send failure stores nothing (409 `mail_send_failed`); 30 replies an hour per
+organisation. **Invisible organisation** (owner rule): a reply naming an agent of the organisation, "AI agent", "Guildwise" or
+guildwisehq is refused with 422 `reply_reveals_internals` and the list of what to take out. Tests: server `mail-reply.test.ts`, web `mail-reply.test.tsx`.
+**Draft with BA:** done under #67 (task kind `mail_reply_draft`, `aom report mail-draft`).
+**Was not done here:** the agent-drafted reply ("Draft with BA" as a BA task and an `aom` command). The reply box takes a draft (`draft`/`draftedBy` props, `MailReplySent.draftedBy`)
+so a human reviews it before sending, never auto-sent.
+
+### 16. "Owner approves" step kind in workflows
+
+**Decided (owner, 2026-10-12): later.** A workflow step that waits for the Owner (or a named member) to approve on the
+desk, with approve / send back routes, in the workflow builder and the validator.
+
+**Update (2026-10-14):** the stage kind `human` (`human: { purpose: 'qa' | 'approval' }`) exists since manual QA (#64).
+This item adds `purpose: 'approval'` (server handler, panel, builder and validator for custom workflows).
+
+**Done (2026-10-14).** `purpose: 'approval'` works. A `human` step with `human: { purpose: 'approval', approver }` (`org_owner`,
+`project_owner`, `starter` or `member` + user) waits for that person on the desk (subkind `approval_step`) with routes **approve** (to
+the next step) and **send_back** (to an earlier agent step, as rework; the comment is required and reaches that step as a review
+comment "<name> (approval)"). The Owner and Admins and the project owner may always act; a named member who is not on the project
+falls back to the Owner (the card says so). Entry is found by the workflow reactor (`enterHumanStep`), so every way a card can
+reach the step opens it, once per entry; a `when` guard skips the step. Events `ApprovalRequested` / `ApprovalDecided` (+ `StageCompleted`), `cards.approval`
+(migration 1952), card page panel, desk item, board chip/lane and **Waiting for my approval** filter. Validator rule 12 (approver,
+outcomes, send-back target) with plain-word messages. **Custom workflows and variants may use `human` steps** (both purposes; the
+builder offers *A person approves it on the desk* and *A person tests it*; project variants can insert an approval after a step).
+QA steps of custom workflows open manual QA by the same reactor; `QaPassed`/`QaSkipped` gained an optional `toStage`. Tests: shared
+`approval-step.test.ts`, server `approval-step.test.ts`, web `approval-step.test.tsx`.
+
+### 19. Per-sender limit for inbound e-mail
+
+Inbound mail has a per-organisation hourly limit (`AOM_INBOUND_RATE_PER_HOUR`). Add an optional per-sender limit so one
+noisy or looping sender cannot use up an organisation's allowance.
+
+**Done (2026-10-14).** `AOM_INBOUND_RATE_PER_SENDER_PER_HOUR` (default 20, `0` = off) next to the per-organisation limit. A message over it is
+stored as skipped with reason `sender_rate_limited` (no text) and one desk notice per sender and organisation per day says who. Test
+`inbound-mail.test.ts`; `docs/DEPLOY.md` variable row.
 
 ### 58. Start action: run the project on a branch
 

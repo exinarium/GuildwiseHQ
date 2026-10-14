@@ -55,6 +55,10 @@ export function commandForOutcome(outcome: BriefOutcome): string {
       return 'aom report floor --summary-file <report.md>';
     case 'scheduled_brief':
       return 'aom report brief --summary-file <report.md>';
+    case 'mail_draft_done':
+      return 'aom report mail-draft --text-file <reply.txt> [--subject "<subject>"]';
+    case 'mail_draft_fail':
+      return 'aom report mail-draft-fail --note "<why no reply can be written>"';
     case 'batch_done':
       return 'aom batch done --note "<the cards you created and why this split>"';
     case 'batch_ask':

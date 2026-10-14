@@ -84,6 +84,11 @@ export async function answerDeskItem(
         'use_qa_actions',
         'manual QA is decided on the card: pass, skip, send back or hand over (POST /api/cards/:id/qa/...)',
       );
+    if (item.subkind === 'approval_step')
+      throw badRequest(
+        'use_approval_actions',
+        'an approval is decided on the card: approve or send back (POST /api/cards/:id/approval/...)',
+      );
     if (!mayAct) throw forbidden('only the card owner (or any manager, per the decision policy) can answer');
     if (req.optionId && !(item.options as Array<{ id: string }>).some((o) => o.id === req.optionId))
       throw badRequest('unknown_option', 'optionId is not one of the item options');

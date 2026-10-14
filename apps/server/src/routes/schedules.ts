@@ -18,6 +18,7 @@ import {
   listSystemSchedules,
   type OrgCtx,
   patchSchedule,
+  revokeHookSecret,
   rotateWebhookSecret,
   runScheduleNow,
   testSchedule,
@@ -57,9 +58,13 @@ export function scheduleRoutes(ctx: Ctx) {
       const s = await requireUser(ctx, req);
       const r = await createSchedule(ctx, s.user, await orgOf(req, s), req.body);
       reply.code(201);
+      const dto = await getScheduleDto(ctx.pool, s.user.id, r.id);
       return {
-        ...(await getScheduleDto(ctx.pool, s.user.id, r.id)),
+        ...dto,
         ...(r.webhookSecret ? { webhookSecret: r.webhookSecret } : {}),
+        ...(r.webhookSecret && dto.hookUrl
+          ? { hookUrlWithSecret: `${ctx.config.publicOrigin}${dto.hookUrl}/${r.webhookSecret}` }
+          : {}),
       };
     });
 
@@ -98,7 +103,18 @@ export function scheduleRoutes(ctx: Ctx) {
 
     app.post('/api/schedules/:id/rotate-secret', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
-      return { webhookSecret: await rotateWebhookSecret(ctx, s.user, await orgOf(req, s), req.params.id) };
+      const secret = await rotateWebhookSecret(ctx, s.user, await orgOf(req, s), req.params.id);
+      const dto = await getScheduleDto(ctx.pool, s.user.id, req.params.id);
+      return {
+        webhookSecret: secret,
+        ...(dto.hookUrl ? { hookUrlWithSecret: `${ctx.config.publicOrigin}${dto.hookUrl}/${secret}` } : {}),
+      };
+    });
+
+    app.post('/api/schedules/:id/revoke-secret', { schema: { params: IdParamsSchema } }, async (req) => {
+      const s = await requireUser(ctx, req);
+      await revokeHookSecret(ctx, s.user, await orgOf(req, s), req.params.id);
+      return getScheduleDto(ctx.pool, s.user.id, req.params.id);
     });
   };
 }

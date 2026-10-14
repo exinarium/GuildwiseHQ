@@ -643,7 +643,14 @@ interface BaTaskBrief extends Brief {
       | 'floor_alert'
       | 'floor_report'
       | 'scheduled_brief'
-      | 'batch_intake';
+      | 'batch_intake'
+      | 'mail_reply_draft';
+    mailDraft?: {
+      senderName: string;
+      orgName: string;
+      subject: string;
+      messages: Array<{ direction: 'in' | 'out'; text: string }>;
+    };
     batch?: {
       ticketKey: string;
       projectKey?: string;
@@ -907,8 +914,55 @@ async function batchIntakeMain(b: NonNullable<BaTaskBrief['baTask']['batch']>): 
   return done(['done', '--note', `Created ${ref}${ticketLine ? ` from ${ticketLine}` : ''}`]);
 }
 
+/**
+ * Mail reply draft, scripted: `[draft_reveal]` in the conversation drafts a reply that names the platform (the server refuses it
+ * and the mock corrects it), `[draft_fail]` reports that no reply can be written; otherwise it writes a short plain reply.
+ */
+async function mailDraftMain(m: NonNullable<BaTaskBrief['baTask']['mailDraft']>): Promise<number> {
+  emit({ kind: 'progress', text: `mock BA mail draft: ${m.subject}` });
+  await sleep(stepMs);
+  emit({ kind: 'usage', usage: { inputTokens: 400, outputTokens: 90 } });
+  const all = m.messages.map((x) => x.text).join('\n');
+  const finish = (r: { code: number; out: string; err: string }) => {
+    emit({
+      kind: 'final',
+      text: r.code === 0 ? 'mock mail draft reported' : `mock mail draft failed: ${(r.err || r.out).trim()}`,
+    });
+    return r.code === 0 ? 0 : 1;
+  };
+  if (all.includes('[draft_fail]'))
+    return finish(aom(['report', 'mail-draft-fail', '--note', 'mock: nothing to answer']));
+  const first = m.senderName.split(/\s+/)[0] ?? m.senderName;
+  const write = (body: string) => tmpText('reply.txt', body);
+  if (all.includes('[draft_reveal]')) {
+    const bad = aom([
+      'report',
+      'mail-draft',
+      '--text-file',
+      write(`Hello,\n\nOur AI agent looked into this.\n\n${first}`),
+    ]);
+    if (bad.code === 0) return finish(bad); // the server should have refused it
+  }
+  const latest =
+    [...m.messages]
+      .reverse()
+      .find((x) => x.direction === 'in')
+      ?.text.split('\n')[0] ?? '';
+  return finish(
+    aom([
+      'report',
+      'mail-draft',
+      '--text-file',
+      write(
+        `Hello,\n\nThank you for your message about "${latest.slice(0, 80)}". I will look into it and come back to you shortly.\n\nKind regards,\n${first}`,
+      ),
+    ]),
+  );
+}
+
 async function baTaskMain(brief: BaTaskBrief): Promise<number> {
   const t = brief.baTask;
+  if (t.mailDraft) return mailDraftMain(t.mailDraft);
   if (t.batch) return batchIntakeMain(t.batch);
   if (t.reporter)
     return reporterTaskMain(

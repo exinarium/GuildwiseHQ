@@ -2,6 +2,7 @@ import { migrateBlogCiteCleanup } from './blog-cite-cleanup.ts';
 import { migrateBlogLaunch } from './blog-launch.ts';
 import { migrateCardCompletionInherit } from './card-completion-inherit.ts';
 import { migrateNoPersonal } from './no-personal.ts';
+import { migrateOrgInboxes } from './org-inboxes.ts';
 import { type DataMigrationEnv, migrateOrgs } from './orgs.ts';
 import { migratePushBranchRetired } from './push-branch-retired.ts';
 import { migrateRestructure } from './restructure.ts';
@@ -23,6 +24,7 @@ export {
   NO_PERSONAL_MIGRATION,
   planNoPersonal,
 } from './no-personal.ts';
+export { migrateOrgInboxes, ORG_INBOXES_MIGRATION } from './org-inboxes.ts';
 export { type DataMigrationEnv, formatPlan, migrateOrgs, ORGS_MIGRATION, planOrgMigration } from './orgs.ts';
 export {
   migratePushBranchRetired,
@@ -48,6 +50,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'blog-cite-cleanup-2026-10', run: (env) => migrateBlogCiteCleanup(env) },
   { name: 'card-completion-inherit-2026-10', run: (env) => migrateCardCompletionInherit(env) },
   { name: 'push-branch-retired-2026-10', run: (env) => migratePushBranchRetired(env) },
+  { name: 'org-inboxes-2026-10', run: (env) => migrateOrgInboxes(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

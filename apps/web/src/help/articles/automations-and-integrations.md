@@ -78,13 +78,15 @@ Click **History** on an automation to see every run: when, what triggered it, wh
 
 ## E-mail inbox {#email-inbox}
 
-An inbox is an address that turns incoming mail into cards. The Owner or an Admin makes one under **Organization > E-mail inbox**; it looks like `acme-k3x9p2m7qd@in.guildwisehq.com`. **Copy** gives you the address; **New address** replaces it (the old one stops working at once, and mail sent to it is shown as skipped).
+An inbox is an address that turns incoming mail into cards. Every organisation gets one when it is created (the **Main inbox**); the Owner or an Admin can make more under **Organization > E-mail inbox**. it looks like `acme-k3x9p2m7qd@in.guildwisehq.com`. **Copy** gives you the address; **New address** replaces it (the old one stops working at once, and mail sent to it is shown as skipped).
 
 **Use your own address by forwarding.** Customers keep writing to support@yourcompany.com. Set that mailbox to forward everything to your Guildwise address: in Gmail, Settings > Forwarding and POP/IMAP > Add a forwarding address; in Outlook, Settings > Mail > Forwarding; or use a forwarding rule or alias at your mail host. Guildwise does not send mail to the customer for you: reply from your own mailbox as usual.
 
 **What happens to a mail.** The page lists the recent messages and what became of each: *Draft card created*, *Card created*, *Added to a card*, or *Skipped* with the reason (looks like spam, the sender failed the DKIM check, an automatic reply or bounce, too large, too many in an hour, or no automation picked it up). Make an automation **When an e-mail arrives**, choose the inbox, and fill the card with `{email.subject}`, `{email.body}`, `{email.from}`, `{email.date}` and `{email.thread}`.
 
 **Safe by default.** Mail from strangers is information, not instructions. The agents see it inside a marked block that tells them to treat it as data; HTML becomes plain text; attachments are listed but not kept; links are never opened. Cards start as **drafts** for the BA or you. The Owner can **allow-list** a sender (`ana@acme.com`) or a domain (`acme.com`): a card from them can go straight to the agents when the automation is set to *Queued for the agents*, but only when their address could be verified.
+
+**Reply from Guildwise.** On a card made from e-mail, **Reply** answers as your organization. **Draft with BA** has a BA write a draft into the reply box; you read it, change it and send it. It is never sent by itself.
 
 **Replies.** A reply to a mail that became a card is added to the card as a comment (matched by its reply headers or by the address it was sent to), and runs any **When a reply arrives** automation. **Repeats** can limit an automation to one card per conversation, or per subject and sender.
 

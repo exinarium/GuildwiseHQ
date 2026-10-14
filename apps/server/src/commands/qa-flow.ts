@@ -12,9 +12,28 @@ export const QA_STEPS_STAGE = 'qa_steps';
 export const QA_STAGE = 'manual_qa';
 export const QA_ROLE_KEYS = ['tester', BA_ROLE_KEY];
 
-/** Is the card in one of the QA stages? */
+/** Is the card in one of the built-in QA stages? (A custom workflow's QA step is found by `qaStageOf`.) */
 export const inQaStage = (card: { stage?: string }): boolean =>
   card.stage === QA_STEPS_STAGE || card.stage === QA_STAGE;
+
+/**
+ * The QA step the card is in: a built-in QA stage, or a `human` step with purpose `qa` of a custom workflow or a project
+ * variant. Null when the card is not at a QA step.
+ */
+export async function qaStageOf(db: Queryable, card: Row): Promise<string | null> {
+  if (inQaStage(card)) return card.stage;
+  const wf = await loadWorkflowById(db, card.workflow_version_id);
+  const st = wf ? getStage(wf.definition, card.stage) : undefined;
+  return st?.kind === 'human' && st.human?.purpose === 'qa' ? st.id : null;
+}
+
+/** The purpose of the person's step the card is in (`qa` or `approval`), or null. */
+export async function humanPurposeOf(db: Queryable, card: Row): Promise<'qa' | 'approval' | null> {
+  if (card.stage === QA_STAGE) return 'qa';
+  const wf = await loadWorkflowById(db, card.workflow_version_id);
+  const st = wf ? getStage(wf.definition, card.stage) : undefined;
+  return st?.kind === 'human' ? (st.human?.purpose ?? null) : null;
+}
 
 /**
  * Does manual QA apply to this card at all? The project setting is on, and the card is not an investigation (nothing to

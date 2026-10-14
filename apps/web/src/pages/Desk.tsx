@@ -13,6 +13,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useOverrideBudget } from '../api/queries/costs.ts';
 import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
+import { ApprovalDeskItem } from '../components/ApprovalDeskItem.tsx';
 import { BaNote, FloorReport } from '../components/BaNote.tsx';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
 import { DigestRating } from '../components/DigestRating.tsx';
@@ -439,12 +440,16 @@ export function DeskItem({ item, now }: { item: DeskItemDto; now?: number }) {
           Read only:{' '}
           {item.subkind === 'manual_qa'
             ? 'only the person asked to test this card, or a project owner or manager, can answer this.'
-            : item.card
-              ? 'only the card owner can answer this.'
-              : 'only the project owner can answer.'}
+            : item.subkind === 'approval_step'
+              ? 'only the person asked to approve this card, the project owner or an organization Owner or Admin can answer this.'
+              : item.card
+                ? 'only the card owner can answer this.'
+                : 'only the project owner can answer.'}
         </p>
       ) : item.subkind === 'manual_qa' ? (
         <QaDeskItem item={item} />
+      ) : item.subkind === 'approval_step' ? (
+        <ApprovalDeskItem item={item} />
       ) : isPhaseDeskSubkind(item.subkind) ? (
         <PhaseDeskItem item={item} />
       ) : item.subkind === 'unmapped_ticket' ? (

@@ -1,4 +1,5 @@
 import { renderBatchInstructions, renderBatchPrompt } from '../intake/batch.ts';
+import { renderMailDraftInstructions, renderMailDraftPrompt } from '../mail/draft.ts';
 import type { BaTaskShift } from '../phases/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { commandForOutcome } from './commands.ts';
@@ -20,6 +21,8 @@ const TASK_TITLE: Record<
  */
 export function renderBaTaskInstructions(brief: ShiftBrief, task: BaTaskShift): string {
   if (task.batch) return renderBatchInstructions(brief, brief.shift.outcomes, commandForOutcome);
+  if (task.mailDraft)
+    return renderMailDraftInstructions(brief, task.mailDraft, brief.shift.outcomes, commandForOutcome);
   if (!task.phase) return renderReporterInstructions(brief, task);
   const phase = task.phase;
   const kind = task.kind as keyof typeof TASK_TITLE;
@@ -69,6 +72,7 @@ function followupLine(f: BaTaskShift['followups'][number]): string {
 /** The prompt of a `ba_task` shift: the phase, its cards, the follow-ups and what is outstanding. */
 export function renderBaTaskPrompt(task: BaTaskShift): string {
   if (task.batch) return renderBatchPrompt(task.batch);
+  if (task.mailDraft) return renderMailDraftPrompt(task.mailDraft);
   if (!task.phase) return renderReporterPrompt(task);
   const phase = task.phase;
   const out: string[] = [];

@@ -151,7 +151,7 @@ export interface MailRunInfo {
 }
 
 /** Mapping tokens that carry text an outside sender wrote (the date and thread id are ours). */
-const OUTSIDE_TOKEN = /\{email\.(?:subject|body|from)\}/;
+const OUTSIDE_TOKEN = /\{(?:email\.(?:subject|body|from)|hook\.[A-Za-z0-9_.]+)\}/;
 
 /** Which targets of a field mapping are filled from the sender's text: those fields and the title are untrusted. */
 export function untrustedTargets(mapping: Record<string, string> | undefined): {
@@ -183,6 +183,8 @@ export interface RunSpec {
   text?: Partial<ExpandContext>;
   /** Values of the `{tokens}` of a field mapping (`card.ref`, `issue.title`, `card.fields.x`, ...). */
   tokens?: Record<string, string | undefined>;
+  /** Incoming webhook calls: the Owner's choice about queued cards (otherwise a card from a call is a draft). */
+  hook?: { allowQueued: boolean };
   /** The thing the run answers (source card or intake id), for `dedupe: 'thread'`. */
   sourceId?: string;
   /** Structured details the webhook carries. */
@@ -287,11 +289,17 @@ export async function executeAction(ctx: Ctx, tx: Tx, s: Row, spec: RunSpec): Pr
     // A card made from e-mail is a draft unless the automation asks for it to be queued AND the sender is on the
     // Owner's allow-list AND the sender could be verified (an address in From can be forged).
     const mail = spec.mail;
+    const hook = spec.hook;
+    // A card from an incoming webhook is a draft too, unless the Owner allowed this hook to queue directly.
     const start = mail
       ? t.start === 'queued' && mail.allowListed && mail.auth === 'pass'
         ? 'queued'
         : 'draft'
-      : t.start;
+      : hook
+        ? t.start === 'queued' && hook.allowQueued
+          ? 'queued'
+          : 'draft'
+        : t.start;
     const card = await scheduledCard(tx, project, t, s.id, title, s.interest_id, {
       ...(mail ? { origin: 'email' as const } : fromEvent ? { origin: 'trigger' as const } : {}),
       ...(start ? { start } : {}),
@@ -321,11 +329,20 @@ export async function executeAction(ctx: Ctx, tx: Tx, s: Row, spec: RunSpec): Pr
           scope: orgScope(s.org_id),
         });
     }
+    if (hook) {
+      // The fields filled from the payload are outside content: briefs render them in an untrusted block.
+      const untrusted = untrustedTargets(t.mapping);
+      await tx.query(
+        `INSERT INTO card_untrusted (card_id, org_id, source, fields, title, created_at)
+         VALUES ($1,$2,'webhook',$3,$4,$5) ON CONFLICT (card_id) DO NOTHING`,
+        [card.cardId, s.org_id, untrusted.fields, untrusted.title, spec.firedFor],
+      );
+    }
     return {
       ...base,
       events,
       status: 'ok',
-      summary: `Created ${card.ref}${start === 'draft' ? ' as a draft' : ''}${mail ? ' from an e-mail' : ''}`,
+      summary: `Created ${card.ref}${start === 'draft' ? ' as a draft' : ''}${mail ? ' from an e-mail' : hook ? ' from a webhook call' : ''}`,
       result: { cardIds: [card.cardId] },
       ...(dedupeKey ? { dedupeKey } : {}),
       after: [async () => ctx.services.dispatcher.trigger()],

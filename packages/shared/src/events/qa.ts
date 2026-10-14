@@ -42,12 +42,25 @@ export const qaEvents = [
   /** Accepted: the held outgoing ticket comment (if any) is released and the card is done. */
   defineEvent(
     'QaPassed',
-    z.object({ cardId: Id, by: Id, note: z.string().max(5000).optional(), deskItemId: Id.optional() }),
+    z.object({
+      cardId: Id,
+      by: Id,
+      note: z.string().max(5000).optional(),
+      deskItemId: Id.optional(),
+      /** Custom workflows: the stage the pass leads to when it is not the end (absent: the card is done). */
+      toStage: z.string().min(1).optional(),
+    }),
   ),
   /** Not tested: same as passed, recorded as skipped. */
   defineEvent(
     'QaSkipped',
-    z.object({ cardId: Id, by: Id, reason: z.string().max(5000).optional(), deskItemId: Id.optional() }),
+    z.object({
+      cardId: Id,
+      by: Id,
+      reason: z.string().max(5000).optional(),
+      deskItemId: Id.optional(),
+      toStage: z.string().min(1).optional(),
+    }),
   ),
   /** Failed: the card goes back to rework with the comment for the builder; the outgoing comment stays held. */
   defineEvent(

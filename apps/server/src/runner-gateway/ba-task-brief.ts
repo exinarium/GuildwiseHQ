@@ -9,6 +9,7 @@ import {
 } from '@aom/shared';
 import { loadRole } from '../catalogue/loader.ts';
 import { buildBatchTask } from '../commands/intake-batch.ts';
+import { buildMailDraftTask } from '../commands/mail-draft.ts';
 import { cardOutcomes, computeOutstanding, followupRows, suiteOf } from '../commands/phase-events.ts';
 import { toTargetBrief } from '../commands/phase-followups.ts';
 import { workingBranchOf } from '../commands/phases.ts';
@@ -92,25 +93,31 @@ export async function buildBaTaskShiftStart(
   if (!task) return null;
   const reporter = isReporterTaskKind(task.kind);
   const batch = task.kind === 'batch_intake';
-  if (!task.phase_id && !reporter && !batch) return null;
+  const mailDraft = task.kind === 'mail_reply_draft';
+  if (!task.phase_id && !reporter && !batch && !mailDraft) return null;
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [task.agent_id]);
   if (!agent) return null;
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
   const batchTask = batch ? await buildBatchTask(ctx.pool, task) : null;
-  const baTask: BaTaskShift | null = batch
-    ? batchTask
-      ? { taskId: task.id, kind: task.kind, batch: batchTask, cards: [], followups: [], outstanding: [] }
+  const mailTask = mailDraft ? await buildMailDraftTask(ctx.pool, task) : null;
+  const baTask: BaTaskShift | null = mailDraft
+    ? mailTask
+      ? { taskId: task.id, kind: task.kind, mailDraft: mailTask, cards: [], followups: [], outstanding: [] }
       : null
-    : reporter
-      ? {
-          taskId: task.id,
-          kind: task.kind,
-          cards: [],
-          followups: [],
-          outstanding: [],
-          reporter: await buildReporterTask(ctx, ctx.pool, task),
-        }
-      : await buildBaTask(ctx.pool, task);
+    : batch
+      ? batchTask
+        ? { taskId: task.id, kind: task.kind, batch: batchTask, cards: [], followups: [], outstanding: [] }
+        : null
+      : reporter
+        ? {
+            taskId: task.id,
+            kind: task.kind,
+            cards: [],
+            followups: [],
+            outstanding: [],
+            reporter: await buildReporterTask(ctx, ctx.pool, task),
+          }
+        : await buildBaTask(ctx.pool, task);
   const project = await one(ctx.pool, 'SELECT * FROM projects WHERE id=$1', [task.project_id]);
   if (!role || !baTask || !project) return null;
   const brief: ShiftBrief = {
@@ -118,7 +125,13 @@ export async function buildBaTaskShiftStart(
       id: shiftId,
       kind: 'ba_task',
       stage: 'ba_task',
-      stageLabel: batch ? 'Batch intake' : reporter ? 'Reporter task' : 'Phase task',
+      stageLabel: mailDraft
+        ? 'Mail reply draft'
+        : batch
+          ? 'Batch intake'
+          : reporter
+            ? 'Reporter task'
+            : 'Phase task',
       doneCriteria: 'The task is reported to the manager with the command for it.',
       outcomes: baTaskBriefOutcomes(task.kind),
       maxShiftMinutes: BA_TASK_MAX_SHIFT_MINUTES,
@@ -126,9 +139,15 @@ export async function buildBaTaskShiftStart(
     agent: { id: agent.id, name: agent.name, seniority: agent.seniority },
     card: {
       id: baTask.phase?.id ?? task.id,
-      ref: baTask.phase?.ref ?? (batch ? (baTask.batch?.ticketKey ?? 'BATCH') : 'REPORT'),
+      ref:
+        baTask.phase?.ref ?? (mailDraft ? 'MAIL' : batch ? (baTask.batch?.ticketKey ?? 'BATCH') : 'REPORT'),
       title:
-        baTask.phase?.name ?? (batch ? `Batch intake: ${baTask.batch?.ticketKey}` : 'Report to the manager'),
+        baTask.phase?.name ??
+        (mailDraft
+          ? 'Draft an e-mail reply'
+          : batch
+            ? `Batch intake: ${baTask.batch?.ticketKey}`
+            : 'Report to the manager'),
       cardType: 'support',
       fields: {},
       riskTier: null,

@@ -244,6 +244,8 @@ export const phaseEvents = [
       /** `batch_intake`: the batch and the item this task works on. */
       batchId: Id.optional(),
       batchItemId: Id.optional(),
+      /** `mail_reply_draft`: the draft request this task writes. */
+      mailDraftId: Id.optional(),
     }),
   ),
   /** A `ba_task` shift was dispatched to the runner (creates the shift row). */

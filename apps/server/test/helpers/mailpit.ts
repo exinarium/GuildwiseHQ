@@ -42,3 +42,10 @@ export async function latestInviteToken(email: string, origin: string, count = 1
   if (!m) throw new Error(`no invite link in mail: ${text}`);
   return m[1] as string;
 }
+
+/** The Reply-To addresses of a stored message. */
+export async function replyToOf(id: string): Promise<string[]> {
+  const res = await fetch(`${API}/message/${id}`);
+  const body = (await res.json()) as { ReplyTo?: Array<{ Address: string }> };
+  return (body.ReplyTo ?? []).map((a) => a.Address);
+}
