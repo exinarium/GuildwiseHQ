@@ -20,7 +20,8 @@ import {
 import { getMailThread, replyToMailThread } from '../commands/mail-reply.ts';
 import type { Ctx } from '../context.ts';
 import { HttpError, notFound } from '../errors.ts';
-import { countInbound, ingestInbound } from '../mail/inbound/ingest.ts';
+import { countInbound } from '../mail/inbound/ingest.ts';
+import { dispatchInbound } from '../mail/inbound/support.ts';
 import { configuredProvider, webhookAuthorised } from '../mail/inbound/providers.ts';
 import { BadInbound, type MultipartBody } from '../mail/inbound/types.ts';
 import { typed } from './util.ts';
@@ -109,7 +110,7 @@ export function inboundRoutes(ctx: Ctx) {
           await countInbound(ctx.pool, 'unparsable').catch(() => {});
           return reply.code(200).send({ ok: true, ignored: 'unreadable' });
         }
-        const results = await ingestInbound(ctx, message);
+        const results = await dispatchInbound(ctx, message);
         return reply.code(200).send({
           ok: true,
           results: results.map((r) => ({ status: r.status, ...(r.reason ? { reason: r.reason } : {}) })),
