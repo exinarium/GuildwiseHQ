@@ -217,7 +217,7 @@ export const ceoProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO ceo_memories (id, org_id, kind, scope, source, source_ref, confidence, status, class, text_hash, created_at, last_confirmed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,CASE WHEN $8='active' THEN $11 ELSE NULL END)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::timestamptz,CASE WHEN $8::text='active' THEN $11::timestamptz ELSE NULL END)
        ON CONFLICT (id) DO NOTHING`,
       [
         p.memoryId,
@@ -261,8 +261,8 @@ export const ceoProjectors: Record<string, Projector> = {
     const p = ev<'CeoMemoryAdjusted'>(e).payload;
     await exec(
       tx,
-      `UPDATE ceo_memories SET confidence=$2, observations=COALESCE($3, observations),
-              status = CASE WHEN $2 < 0.4 AND status='active' THEN 'retired' ELSE status END
+      `UPDATE ceo_memories SET confidence=$2::real, observations=COALESCE($3::int, observations),
+              status = CASE WHEN $2::real < 0.4 AND status='active' THEN 'retired' ELSE status END
         WHERE id=$1 AND status <> 'forgotten'`,
       [p.memoryId, p.confidence, p.observations ?? null],
     );

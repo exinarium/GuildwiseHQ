@@ -16,7 +16,8 @@ import { one } from '../db/sql.ts';
 import { HttpError } from '../errors.ts';
 import { withActingAgent } from '../eventstore/acting.ts';
 import type { AppendInput } from '../eventstore/types.ts';
-import { ACTIONS, ceoBy } from './actions.ts';
+import { ceoBy } from './actions.ts';
+import { ACTIONS } from './registry.ts';
 import type { CeoState } from './state.ts';
 import type { ActionDef, ActionEnv, Prepared } from './types.ts';
 
@@ -171,6 +172,7 @@ export function makeEnv(
     owner,
     actionId: randomUUID(),
     now: ctx.clock.now(),
+    evidence: [],
     batchId: origin.batchId,
     chatThreadId: origin.chatThreadId,
   };
@@ -290,16 +292,18 @@ export async function runAction(
       };
     const params = parsed.data as Record<string, unknown>;
     const call = { ...rpc, params };
+    env.evidence = rpc.evidence;
     const prepared = await def.prepare(env, params);
     if (prepared.refuse) return { status: 'refused', message: prepared.refuse };
+    const eff: ActionDef = prepared.classOverride ? { ...def, cls: prepared.classOverride } : def;
 
-    const evidence = def.cls === 'desk.answer_question' || prepared.needsEvidence ? await evidenceFound(ctx, env.orgId, rpc.evidence) : 1;
-    const limit = prepared.limitReached ?? (await genericLimit(env, def.cls, prepared));
+    const evidence = eff.cls === 'desk.answer_question' || prepared.needsEvidence ? await evidenceFound(ctx, env.orgId, rpc.evidence) : 1;
+    const limit = prepared.limitReached ?? (await genericLimit(env, eff.cls, prepared));
     const verdict: PolicyVerdict = opts.force
       ? { verdict: 'allow', reason: 'the owner accepted this recommendation' }
       : opts.recommendOnly
         ? { verdict: 'recommend', reason: 'raised by the CEO as a recommendation', cause: 'mode' }
-        : evaluatePolicy(env.ceo.policy, def.cls, {
+        : evaluatePolicy(env.ceo.policy, eff.cls, {
           confidence: rpc.confidence,
           training: env.ceo.training.on,
           untrustedOrigin: origin.untrusted,
@@ -318,19 +322,19 @@ export async function runAction(
       };
 
     if (verdict.verdict === 'deny') {
-      await ctx.store.append([auditEvent(env, origin, def, call, prepared, 'refused', verdict, key)]);
+      await ctx.store.append([auditEvent(env, origin, eff, call, prepared, 'refused', verdict, key)]);
       return { status: 'refused', mode: 'refused', actionId: env.actionId, message: `Refused: ${verdict.reason}.` };
     }
 
     if (verdict.verdict === 'recommend') {
-      const rec = await recommendEvents(env, def, call, prepared, verdict, key, origin);
+      const rec = await recommendEvents(env, eff, call, prepared, verdict, key, origin);
       if (rec.duplicate)
         return {
           status: 'recommended',
           deskItemId: rec.duplicate,
           message: 'The owner already has a recommendation for this on the desk.',
         };
-      await ctx.store.append([auditEvent(env, origin, def, call, prepared, 'recommended', verdict, key), ...rec.events]);
+      await ctx.store.append([auditEvent(env, origin, eff, call, prepared, 'recommended', verdict, key), ...rec.events]);
       return {
         status: 'recommended',
         mode: 'recommended',
@@ -345,7 +349,7 @@ export async function runAction(
       def.execute(env, params, prepared),
     );
     await ctx.store.append([
-      auditEvent(env, origin, def, call, prepared, 'decided', verdict, key, {
+      auditEvent(env, origin, eff, call, prepared, 'decided', verdict, key, {
         result: executed.result,
         inverse: executed.inverse,
       }),

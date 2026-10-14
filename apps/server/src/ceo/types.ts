@@ -14,6 +14,8 @@ export interface ActionEnv {
   owner: AuthSession['user'];
   actionId: string;
   now: Date;
+  /** Evidence ids the call cites (set by the engine before `prepare`). */
+  evidence: string[];
   /** The wake batch or chat thread the action belongs to. */
   batchId?: string | undefined;
   chatThreadId?: string | undefined;
@@ -35,6 +37,8 @@ export interface Prepared {
   limitReached?: string | undefined;
   /** What to remember for `execute` (looked-up rows). */
   data?: Record<string, any> | undefined;
+  /** The policy class this call really belongs to (applying an HR recommendation may be a hire, a model change or a firing). */
+  classOverride?: ActionClass | undefined;
   /** The agent the action is about, for per-agent counters. */
   targetAgentId?: string | undefined;
 }

@@ -19,10 +19,10 @@ import { conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import type { ActionDef, ActionEnv, Prepared } from './types.ts';
 
-const itemScope = (item: Row) =>
+export const itemScope = (item: Row) =>
   item.project_id ? projectScope(item.org_id, item.project_id) : orgScope(item.org_id);
 
-const truncate = (s: string, n: number): string => {
+export const truncate = (s: string, n: number): string => {
   const t = s.replace(/\s+/g, ' ').trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 };
@@ -36,7 +36,7 @@ export const ceoBy = (env: Pick<ActionEnv, 'agentId'>): DeskActor => ({
 
 
 /** Appends in its own transaction; with `openItem` the desk item must still be open (row locked): nobody answered meanwhile. */
-async function appendLocked(env: ActionEnv, events: AppendInput[], openItem?: string): Promise<void> {
+export async function appendLocked(env: ActionEnv, events: AppendInput[], openItem?: string): Promise<void> {
   await withAppendTx(env.ctx.pool, async (tx) => {
     if (openItem) {
       const cur = await one(tx, 'SELECT status FROM desk_items WHERE id=$1 FOR UPDATE', [openItem]);
@@ -46,10 +46,10 @@ async function appendLocked(env: ActionEnv, events: AppendInput[], openItem?: st
   });
 }
 
-const refuse = (message: string): Prepared => ({ subjectKind: '', subjectId: '', subjectLabel: '', refuse: message });
+export const refuse = (message: string): Prepared => ({ subjectKind: '', subjectId: '', subjectLabel: '', refuse: message });
 
 /** The desk item of this organization (held items included: the CEO triages those). */
-async function deskItem(tx: Queryable, orgId: string, id: string): Promise<Row | undefined> {
+export async function deskItem(tx: Queryable, orgId: string, id: string): Promise<Row | undefined> {
   return one(
     tx,
     `SELECT d.*, c.ref AS card_ref, c.owner_user_id AS card_owner, c.decision_policy AS card_policy,
@@ -60,7 +60,7 @@ async function deskItem(tx: Queryable, orgId: string, id: string): Promise<Row |
   );
 }
 
-async function cardOf(tx: Queryable, env: ActionEnv, ref: string) {
+export async function cardOf(tx: Queryable, env: ActionEnv, ref: string) {
   try {
     return (await loadVisibleCard(tx, env.owner.id, ref)).card;
   } catch {
