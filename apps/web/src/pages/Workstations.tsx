@@ -15,6 +15,7 @@ import { ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
 import {
   Badge,
   Button,
+  ButtonLink,
   Callout,
   ConfirmDialog,
   ConnectionDot,
@@ -32,6 +33,7 @@ import { AgentToolchains } from '../components/workstations/AgentToolchains.tsx'
 import { CloudWorkstations } from '../components/workstations/CloudWorkstations.tsx';
 import { OrgSourceFolder } from '../components/workstations/OrgSourceFolder.tsx';
 import { RunnerUpdateBadge } from '../components/workstations/RunnerUpdateBadge.tsx';
+import { integrationsLink } from '../lib/integrations.ts';
 import { useCanManageOrg } from '../lib/orgRole.ts';
 import { unavailableRuntimes, unsandboxedConsequence, unsandboxedRuntimes } from '../lib/sandbox.ts';
 import { copyText } from '../lib/secure.ts';
@@ -240,6 +242,17 @@ export function WorkstationCard({
               </span>
             )}
             <ConnectionDot connected={w.connected} />
+            {!admin && (
+              <ButtonLink
+                to={integrationsLink(w.id)}
+                variant="secondary"
+                size="sm"
+                data-testid="workstation-integrations"
+                aria-label={`Integrations of ${w.name}`}
+              >
+                Integrations
+              </ButtonLink>
+            )}
             <Button
               variant="danger-ghost"
               size="sm"

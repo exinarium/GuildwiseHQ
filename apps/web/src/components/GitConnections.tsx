@@ -13,7 +13,9 @@ import {
   type WorkstationDto,
 } from '@aom/shared';
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { useGitSsh, useRecheckGit } from '../api/queries/forges.ts';
+import { focusOf, integrationsLink } from '../lib/integrations.ts';
 import { copyText } from '../lib/secure.ts';
 import { Badge, Button, ErrorBox, TextInput, useToast } from './ui.tsx';
 
@@ -62,10 +64,13 @@ export function ConnectHelper({
   provider,
   workstationId,
   host,
+  ownerName,
 }: {
   provider: ConnectableForge;
   workstationId: string;
   host?: string;
+  /** The workstation belongs to another member: say who to ask instead of linking. */
+  ownerName?: string;
 }) {
   const toast = useToast();
   const recheck = useRecheckGit();
@@ -76,33 +81,53 @@ export function ConnectHelper({
       data-testid={`connect-${provider}`}
     >
       <p className="mb-2 font-medium text-fg">Connect {FORGE_LABELS[provider]} on this workstation</p>
-      <p className="mb-2 text-muted">
-        Run this in a terminal on the workstation. Your login or token stays on that machine; the server only
-        learns whether it is connected. The DevOps engineer can walk you through it in chat.
-      </p>
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <code className="rounded bg-surface px-2 py-1 font-mono text-xs break-all">{cmd}</code>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={async () => {
-            if (await copyText(cmd)) toast.success('Command copied');
-          }}
-        >
-          Copy
-        </Button>
-      </div>
-      <ol className="mb-3 list-none space-y-1 text-muted">
-        {connectSteps(provider, host).map((s) => (
-          <li key={s}>{s}</li>
-        ))}
-      </ol>
-      <Button size="sm" onClick={() => recheck.mutate(workstationId)} loading={recheck.isPending}>
-        Check again
-      </Button>
-      {recheck.isSuccess && (
-        <span className="ml-2 text-xs text-subtle">Asked the workstation; this updates in a moment.</span>
+      {ownerName ? (
+        <p className="mb-2 text-muted" data-testid={`ask-owner-${provider}`}>
+          Ask {ownerName} to connect {FORGE_LABELS[provider]} on this workstation.
+        </p>
+      ) : (
+        <p className="mb-2">
+          <Link
+            to={integrationsLink(workstationId, focusOf(provider, host ?? ''), { connect: true })}
+            className="text-brand-text underline"
+            data-testid={`connect-on-integrations-${provider}`}
+          >
+            Connect on the Integrations page
+          </Link>
+        </p>
       )}
+      <details data-testid={`from-terminal-${provider}`}>
+        <summary className="mb-2 cursor-pointer font-medium text-muted hover:text-fg">
+          From a terminal
+        </summary>
+        <p className="mb-2 text-muted">
+          Run this in a terminal on the workstation. Your login or token stays on that machine; the server
+          only learns whether it is connected. The DevOps engineer can walk you through it in chat.
+        </p>
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <code className="rounded bg-surface px-2 py-1 font-mono text-xs break-all">{cmd}</code>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={async () => {
+              if (await copyText(cmd)) toast.success('Command copied');
+            }}
+          >
+            Copy
+          </Button>
+        </div>
+        <ol className="mb-3 list-none space-y-1 text-muted">
+          {connectSteps(provider, host).map((s) => (
+            <li key={s}>{s}</li>
+          ))}
+        </ol>
+        <Button size="sm" onClick={() => recheck.mutate(workstationId)} loading={recheck.isPending}>
+          Check again
+        </Button>
+        {recheck.isSuccess && (
+          <span className="ml-2 text-xs text-subtle">Asked the workstation; this updates in a moment.</span>
+        )}
+      </details>
       <ErrorBox error={recheck.error} />
     </div>
   );
@@ -276,7 +301,16 @@ export function GitConnectionsPanel({ w }: { w: WorkstationDto }) {
   const [sshOpen, setSshOpen] = useState<ConnectableForge | null>(null);
   return (
     <div className="mt-4 border-t border-line pt-3 text-sm" data-testid="git-connections">
-      <p className="mb-2 text-xs font-medium text-subtle">Git hosts</p>
+      <p className="mb-2 flex items-center gap-3 text-xs font-medium text-subtle">
+        Git hosts
+        <Link
+          to={integrationsLink(w.id, 'github')}
+          className="font-normal text-brand-text underline"
+          data-testid="git-open-integrations"
+        >
+          Open Integrations
+        </Link>
+      </p>
       {!w.git || w.git.connections.length === 0 ? (
         <p className="text-subtle">
           Not reported yet (needs a current runner). Run{' '}

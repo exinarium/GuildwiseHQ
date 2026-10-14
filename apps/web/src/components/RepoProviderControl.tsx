@@ -8,6 +8,7 @@ import {
   type ProjectRepoDto,
 } from '@aom/shared';
 import { useState } from 'react';
+import { useMe } from '../api/queries/auth.ts';
 import { useSetRepoForge } from '../api/queries/forges.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
 import { ConnectHelper, ConnectionBadge, connectionOf } from './GitConnections.tsx';
@@ -28,6 +29,7 @@ export function RepoProviderControl({
 }) {
   const set = useSetRepoForge(projectId);
   const workstations = useWorkstations();
+  const me = useMe();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(false);
   const kind: ForgeKind = repo.forge ?? detectForgeKind(repo.remoteUrl);
@@ -92,6 +94,9 @@ export function RepoProviderControl({
           provider={kind as ConnectableForge}
           workstationId={ws.id}
           {...(conn?.host ? { host: conn.host } : {})}
+          {...(me.data && ws.userId !== me.data.user.id
+            ? { ownerName: (ws as { ownerEmail?: string }).ownerEmail ?? 'the workstation owner' }
+            : {})}
         />
       )}
     </div>

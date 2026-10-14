@@ -54,6 +54,15 @@ export function crumbsFor(pathname: string, search: string, projects: ProjectDto
         { label: 'Workflow builder' },
       ],
     ],
+    [
+      '/workstations/:id/integrations',
+      () => [
+        { label: 'Organization' },
+        { label: 'Workstations', to: '/workstations' },
+        { label: 'Integrations' },
+      ],
+    ],
+    ['/integrations', () => [{ label: 'Organization' }, { label: 'Integrations' }]],
     ['/workstations', () => [{ label: 'Organization' }, { label: 'Workstations' }]],
     ['/metrics', () => [{ label: 'Organization' }, { label: 'Metrics' }]],
     ['/ledger', () => [{ label: 'Knowledge' }, { label: 'Ledger' }]],

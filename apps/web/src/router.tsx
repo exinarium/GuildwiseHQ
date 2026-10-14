@@ -21,6 +21,7 @@ import { Desk } from './pages/Desk.tsx';
 import { ForgotPassword } from './pages/ForgotPassword.tsx';
 import { Help, PlatformHelp } from './pages/Help.tsx';
 import { IntakeNew, IntakeView } from './pages/Intake.tsx';
+import { Integrations, IntegrationsIndex } from './pages/Integrations.tsx';
 import { InterestDetail } from './pages/InterestDetail.tsx';
 import { Interests } from './pages/Interests.tsx';
 import { Ledger } from './pages/Ledger.tsx';
@@ -112,6 +113,8 @@ export const routes = [
       { path: '/org-chart', element: <OrgChartPage /> },
       { path: '/costs', element: <Costs /> },
       { path: '/workstations', element: <Workstations /> },
+      { path: '/workstations/:id/integrations', element: <Integrations /> },
+      { path: '/integrations', element: <IntegrationsIndex /> },
       { path: '/settings', element: <Settings /> },
       { path: '/settings/vaults', element: <Vaults /> },
       { path: '/settings/org', element: <OrgSettings /> },

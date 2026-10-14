@@ -12,6 +12,7 @@ import {
   Lightbulb,
   type LucideIcon,
   Network,
+  Plug,
   Server,
   Settings,
   Timer,
@@ -112,6 +113,14 @@ export function buildNav(opts: {
         { id: 'org-chart', label: 'Org chart', to: '/org-chart', icon: Network, testId: 'nav-org-chart' },
         { id: 'org', label: 'Roles & workflows', to: '/org', icon: Workflow },
         { id: 'workstations', label: 'Workstations', to: '/workstations', icon: Server },
+        {
+          id: 'integrations',
+          label: 'Integrations',
+          to: '/integrations',
+          icon: Plug,
+          match: (p) => p.startsWith('/integrations') || /^\/workstations\/[^/]+\/integrations/.test(p),
+          testId: 'nav-integrations',
+        },
         { id: 'metrics', label: 'Metrics', to: '/metrics', icon: ChartColumn },
         ...(canManage
           ? [{ id: 'costs', label: 'Costs', to: '/costs', icon: Coins, testId: 'nav-costs' }]

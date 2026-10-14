@@ -1,6 +1,9 @@
 import { type McpServerCandidateDto, mcpServerWarning, mcpSignInInstruction } from '@aom/shared';
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { useSetProjectMcpServers } from '../api/queries/mcp.ts';
+import { useWorkstations } from '../api/queries/workstations.ts';
+import { focusOf, integrationsLink } from '../lib/integrations.ts';
 import { Badge, Button, Callout, ErrorBox, Panel, Select } from './ui.tsx';
 
 const TRANSPORT: Record<string, string> = { stdio: 'runs on the workstation', http: 'remote', sse: 'remote' };
@@ -23,6 +26,7 @@ export function McpServersPanel({
   canGrant: boolean;
 }) {
   const set = useSetProjectMcpServers(projectId);
+  const mine = useWorkstations().data ?? [];
   const [pick, setPick] = useState('');
   const byName = new Map(candidates.map((c) => [c.name, c]));
   const available = candidates.filter((c) => !granted.includes(c.name));
@@ -96,7 +100,22 @@ export function McpServersPanel({
                     className="text-xs text-amber-700 dark:text-amber-400"
                     data-testid={`mcp-needs-sign-in-${name}`}
                   >
-                    Needs sign-in: {mcpSignInInstruction(byName.get(name)?.server ?? name, ws)}
+                    Needs sign-in: {mcpSignInInstruction(byName.get(name)?.server ?? name, ws)} {(() => {
+                      const w = mine.find((m) => m.name === ws);
+                      return w ? (
+                        <Link
+                          to={integrationsLink(w.id, focusOf('mcp', name))}
+                          className="font-medium underline"
+                          data-testid={`mcp-sign-in-link-${name}`}
+                        >
+                          Sign in from the web
+                        </Link>
+                      ) : (
+                        <span data-testid={`mcp-ask-owner-${name}`}>
+                          Ask the owner of {ws} to sign in to {byName.get(name)?.server ?? name} on {ws}.
+                        </span>
+                      );
+                    })()}
                   </p>
                 ))}
               </li>

@@ -839,6 +839,26 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'workstations-and-installer#add-a-workstation',
   },
+  '/integrations': {
+    title: 'Integrations',
+    intro:
+      'Every login a workstation needs, in one place: Claude, git hosts, Jira and MCP servers. Connect from the browser; your token is encrypted for that workstation.',
+    controls: [
+      {
+        name: 'Tile',
+        text: 'One integration: whether it is connected, as whom, missing scopes, expiry and when it was last checked.',
+      },
+      {
+        name: 'Connect, Replace, Test, Remove',
+        text: 'Connect or replace asks for the fields, encrypts them in your browser and lets the workstation check them with the provider. A greyed-out button says why.',
+      },
+      {
+        name: 'From a terminal',
+        text: 'The command to run on the workstation instead, for headless machines.',
+      },
+    ],
+    article: 'integrations',
+  },
   '/settings': {
     title: 'Settings',
     intro:
