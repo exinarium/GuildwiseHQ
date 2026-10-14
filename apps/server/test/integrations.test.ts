@@ -37,6 +37,8 @@ afterAll(async () => {
   await closeAdminPool();
 });
 
+// rows as loose objects (the helper's rows are typed strictly)
+const qa = (sql: string, params?: unknown[]) => q(sql, params) as unknown as Promise<any[]>;
 const owner = (method: string, url: string, body?: unknown) =>
   w.t.req(method, url, { cookie: w.owner.cookie, body });
 const base = () => `/api/workstations/${w.workstationId}/integrations`;
@@ -153,7 +155,7 @@ describe('connect: the server relays the envelope and forgets it', () => {
     const cmd = await nextCommand('integration.connect', from);
     expect(cmd.payload).toMatchObject({ requestId, kind: 'jira', method: 'token' });
     expect((cmd.payload as any).envelope.ct).toBe(MARK);
-    const [row] = await q(`SELECT payload, expires_at, status FROM runner_commands WHERE id=$1`, [
+    const [row] = await qa(`SELECT payload, expires_at, status FROM runner_commands WHERE id=$1`, [
       cmd.commandId,
     ]);
     expect(row.expires_at).not.toBeNull();
@@ -164,7 +166,7 @@ describe('connect: the server relays the envelope and forgets it', () => {
 
     answer(cmd.commandId, { status: status('jira', 'connected', { account: 'Pieter' }) });
     await settle();
-    const [after] = await q(`SELECT payload, status FROM runner_commands WHERE id=$1`, [cmd.commandId]);
+    const [after] = await qa(`SELECT payload, status FROM runner_commands WHERE id=$1`, [cmd.commandId]);
     expect(after.payload).toEqual({});
     expect(after.status).toBe('done');
     const done = await ok<any>(owner('GET', `${base()}/requests/${requestId}`));
@@ -177,7 +179,7 @@ describe('connect: the server relays the envelope and forgets it', () => {
     const page = await ok<any>(owner('GET', base()));
     expect(page.integrations.find((i: any) => i.kind === 'jira')).toMatchObject({ state: 'connected' });
     // the audit event holds who and what, never a value
-    const ev = await q(
+    const ev = await qa(
       `SELECT payload FROM events WHERE type='WorkstationIntegrationConnected' ORDER BY seq DESC LIMIT 1`,
     );
     expect(ev[0].payload).toMatchObject({
@@ -209,7 +211,7 @@ describe('connect: the server relays the envelope and forgets it', () => {
       state: 'failed',
       error: expect.stringContaining('write:pullrequest:bitbucket'),
     });
-    const [row] = await q(`SELECT status, payload, attempts FROM runner_commands WHERE id=$1`, [
+    const [row] = await qa(`SELECT status, payload, attempts FROM runner_commands WHERE id=$1`, [
       cmd.commandId,
     ]);
     expect(row.status).toBe('done');
@@ -273,7 +275,7 @@ describe('connect: the server relays the envelope and forgets it', () => {
 
   it('only the latest undelivered connect for a target is relayed: the earlier one is failed and emptied', async () => {
     const a = randomUUID();
-    const [old] = await q(
+    const [old] = await qa(
       `INSERT INTO runner_commands (workstation_id, type, payload, expires_at) VALUES ($1,'integration.connect',$2,now() + interval '5 minutes') RETURNING id`,
       [
         w.workstationId,
@@ -286,7 +288,7 @@ describe('connect: the server relays the envelope and forgets it', () => {
         }),
       ],
     );
-    await q(
+    await qa(
       `INSERT INTO integration_requests (id, workstation_id, user_id, kind, instance, op, method, state, command_id, created_at, updated_at, expires_at)
        VALUES ($1,$2,$3,'azure-devops','acme','connect','token','pending',$4,now(),now(),now() + interval '1 hour')`,
       [a, w.workstationId, w.owner.id, old.id],
@@ -301,7 +303,7 @@ describe('connect: the server relays the envelope and forgets it', () => {
       envelope: envelope(),
     });
     expect(second.status).toBe(202);
-    const [dropped] = await q(`SELECT status, payload FROM runner_commands WHERE id=$1`, [old.id]);
+    const [dropped] = await qa(`SELECT status, payload FROM runner_commands WHERE id=$1`, [old.id]);
     expect(dropped).toMatchObject({ status: 'failed', payload: {} });
     expect(await ok<any>(owner('GET', `${base()}/requests/${a}`))).toMatchObject({ state: 'failed' });
     const cmd = await nextCommand('integration.connect', from);
@@ -363,11 +365,11 @@ describe('interactive sign-ins', () => {
       expect(res.status, `paste ${n}`).toBe(202);
       const cmd = await nextCommand('integration.input', f);
       expect((cmd.payload as any).sessionId).toBe(sid);
-      const [row] = await q(`SELECT expires_at FROM runner_commands WHERE id=$1`, [cmd.commandId]);
+      const [row] = await qa(`SELECT expires_at FROM runner_commands WHERE id=$1`, [cmd.commandId]);
       expect(row.expires_at).not.toBeNull();
       answer(cmd.commandId, { accepted: true });
       await settle();
-      const [empty] = await q(`SELECT payload FROM runner_commands WHERE id=$1`, [cmd.commandId]);
+      const [empty] = await qa(`SELECT payload FROM runner_commands WHERE id=$1`, [cmd.commandId]);
       expect(empty.payload).toEqual({});
       if (n < 3)
         r.send('integration.session', {
@@ -407,7 +409,7 @@ describe('interactive sign-ins', () => {
     expect(
       (await ok<any>(owner('GET', base()))).integrations.find((i: any) => i.kind === 'claude-code'),
     ).toMatchObject({ state: 'connected' });
-    const started2 = await q(
+    const started2 = await qa(
       `SELECT payload FROM events WHERE type='WorkstationIntegrationSignInStarted' ORDER BY seq DESC LIMIT 1`,
     );
     expect(started2[0].payload).toMatchObject({ kind: 'claude-code', method: 'setup_token', by: w.owner.id });
@@ -454,7 +456,7 @@ describe('test and remove', () => {
       state: 'done',
       status: { state: 'not_connected' },
     });
-    const ev = await q(
+    const ev = await qa(
       `SELECT payload FROM events WHERE type='WorkstationIntegrationRemoved' ORDER BY seq DESC LIMIT 1`,
     );
     expect(ev[0].payload).toMatchObject({ kind: 'jira', by: w.owner.id });
@@ -475,7 +477,7 @@ describe('expiry', () => {
     const requestId = randomUUID();
     // make the runner unable to answer: close the socket after the request is queued but before it is claimed is racy,
     // so insert the command directly the way the route does, with an expiry in the past
-    const [cmd] = await q(
+    const [cmd] = await qa(
       `INSERT INTO runner_commands (workstation_id, type, payload, expires_at, status) VALUES ($1,'integration.connect',$2,$3,'sent') RETURNING id`,
       [
         w.workstationId,
@@ -483,13 +485,13 @@ describe('expiry', () => {
         new Date(Date.now() - 60_000),
       ],
     );
-    await q(
+    await qa(
       `INSERT INTO integration_requests (id, workstation_id, user_id, kind, instance, op, method, state, command_id, created_at, updated_at, expires_at)
        VALUES ($1,$2,$3,'jira','','connect','token','pending',$4,now(),now(),now() + interval '1 hour')`,
       [requestId, w.workstationId, w.owner.id, cmd.id],
     );
     await sweepIntegrations(w.t.app.ctx);
-    const [after] = await q(`SELECT status, payload FROM runner_commands WHERE id=$1`, [cmd.id]);
+    const [after] = await qa(`SELECT status, payload FROM runner_commands WHERE id=$1`, [cmd.id]);
     expect(after).toMatchObject({ status: 'failed', payload: {} });
     expect(await ok<any>(owner('GET', `${base()}/requests/${requestId}`))).toMatchObject({
       state: 'expired',
@@ -497,7 +499,7 @@ describe('expiry', () => {
   });
 
   it('an expired command is never delivered', async () => {
-    const [cmd] = await q(
+    const [cmd] = await qa(
       `INSERT INTO runner_commands (workstation_id, type, payload, expires_at) VALUES ($1,'integration.input',$2,$3) RETURNING id`,
       [
         w.workstationId,
@@ -514,14 +516,14 @@ describe('expiry', () => {
         .slice(from)
         .some((c) => c.commandId === cmd.id),
     ).toBe(false);
-    await q(`UPDATE runner_commands SET status='failed', payload='{}' WHERE id=$1`, [cmd.id]);
+    await qa(`UPDATE runner_commands SET status='failed', payload='{}' WHERE id=$1`, [cmd.id]);
   });
 });
 
 describe('older runners', () => {
   it('the page shows statuses derived from the legacy reports, read-only; connecting says to update the runner', async () => {
     const wsId = w.workstationId;
-    await q(`UPDATE workstations SET integrations_version=NULL WHERE id=$1`, [wsId]);
+    await qa(`UPDATE workstations SET integrations_version=NULL WHERE id=$1`, [wsId]);
     r.send('git.report', {
       connections: [
         {
@@ -586,10 +588,10 @@ describe('older runners', () => {
 
 describe('no secret on the server side', () => {
   it('the envelope text appears in no event and in no log line; the redact paths cover the envelope', async () => {
-    const events = await q(`SELECT payload FROM events WHERE type LIKE 'WorkstationIntegration%'`);
+    const events = await qa(`SELECT payload FROM events WHERE type LIKE 'WorkstationIntegration%'`);
     expect(events.length).toBeGreaterThan(0);
     expect(JSON.stringify(events)).not.toContain(MARK);
-    const requests = await q(`SELECT * FROM integration_requests`);
+    const requests = await qa(`SELECT * FROM integration_requests`);
     expect(JSON.stringify(requests)).not.toContain(MARK);
     // the logger with the app's redact options: a request body with an envelope is censored
     const lines: string[] = [];
@@ -608,7 +610,7 @@ describe('no secret on the server side', () => {
   });
 
   it('commands whose payload is emptied leave nothing behind', async () => {
-    const left = await q(
+    const left = await qa(
       `SELECT id FROM runner_commands WHERE type IN ('integration.connect','integration.input') AND status IN ('done','failed') AND payload::text LIKE $1`,
       [`%${MARK}%`],
     );
@@ -624,9 +626,9 @@ describe('operational tables survive a rebuild', () => {
       registryVersion: 1,
     });
     await settle();
-    const before = await q(`SELECT count(*)::int AS n FROM workstation_integrations`);
+    const before = await qa(`SELECT count(*)::int AS n FROM workstation_integrations`);
     await rebuildProjections(w.t.app.ctx.pool, w.t.app.ctx.store);
-    const after = await q(`SELECT count(*)::int AS n FROM workstation_integrations WHERE workstation_id=$1`, [
+    const after = await qa(`SELECT count(*)::int AS n FROM workstation_integrations WHERE workstation_id=$1`, [
       w.workstationId,
     ]);
     expect(after[0].n).toBe(1);
