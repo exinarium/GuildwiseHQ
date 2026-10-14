@@ -1,5 +1,6 @@
 import {
   type BudgetDto,
+  DEFAULT_MAX_RUN_ENVIRONMENTS,
   detectForgeKind,
   isOrgOperational,
   McpServerInfoSchema,
@@ -336,6 +337,15 @@ export async function workstationDtos(
     [list.map((w) => w.id)],
   );
   const hygiene = await hygieneDtos(ctx.pool, list as never);
+  const caps = new Map<string, Row>(
+    (
+      await rows(
+        ctx.pool,
+        'SELECT workstation_id, capabilities, max_run_environments FROM workstation_capabilities WHERE workstation_id = ANY($1::uuid[])',
+        [list.map((w) => w.id)],
+      )
+    ).map((c) => [c.workstation_id as string, c]),
+  );
   const keys = new Map<string, string>(
     (
       await rows(
@@ -408,6 +418,11 @@ export async function workstationDtos(
     devopsAccess: w.devops_access,
     devopsAgentId: w.devops_agent_id ?? null,
     hygiene: hygiene.get(w.id),
+    runs: {
+      capable: ((caps.get(w.id)?.capabilities ?? []) as string[]).includes('runs:1'),
+      maxEnvironments:
+        (caps.get(w.id)?.max_run_environments as number | null) ?? DEFAULT_MAX_RUN_ENVIRONMENTS,
+    },
     rights: w.devops_rights ? { ...w.devops_rights, stale: !!w.devops_rights_stale } : null,
     rightsCheck: rightsCheck(w),
     sudo: {

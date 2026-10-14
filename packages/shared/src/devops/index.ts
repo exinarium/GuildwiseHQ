@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { BriefAttachmentSchema } from '../attachments/index.ts';
 import { DevOpsAccessSchema, DevOpsRequester } from '../events/devops.ts';
 import { HygieneReportSchema, HygieneSpecSchema } from '../hygiene/index.ts';
+import { RunDeclaredServiceSchema, RunPlanSchema } from '../runs/plan.ts';
+import { RunPurposeSchema } from '../runs/types.ts';
 
 /**
  * DevOps shifts (docs/ARCHITECTURE.md section 16.2). A DevOps shift has no card: it works one request and ends with
@@ -25,6 +27,42 @@ export const DevopsApprovalDataSchema = z.object({
   commands: z.array(z.string()).default([]),
 });
 export type DevopsApprovalData = z.infer<typeof DevopsApprovalDataSchema>;
+
+/**
+ * A `run` request ("Run this branch"): everything the DevOps engineer needs to bring one environment up
+ * (docs/design/run-and-integration-tests.md section 2.3). `buildDocs` is filled by the runner, which finds BUILD.md in the
+ * run worktrees; the server never reads repositories.
+ */
+export const DevopsRunSchema = z.object({
+  envId: z.uuid(),
+  purpose: RunPurposeSchema,
+  projectKey: z.string(),
+  projectName: z.string(),
+  /** Repositories and the branch (and commit, once known) each runs at. */
+  sources: z.array(
+    z.object({
+      repoId: z.uuid(),
+      name: z.string(),
+      branch: z.string(),
+      projectPath: z.string().optional(),
+      commit: z.string().nullable().optional(),
+    }),
+  ),
+  /** The services asked for (empty: all). */
+  services: z.array(z.string()).default([]),
+  runInstructions: z.string().default(''),
+  repoInstructions: z.array(z.object({ repoId: z.uuid(), name: z.string(), text: z.string() })).default([]),
+  declared: z.array(RunDeclaredServiceSchema).default([]),
+  /** The plan saved for this project on this workstation (absent: none yet), and how it ended last time. */
+  currentPlan: RunPlanSchema.nullable().default(null),
+  planStatus: z.enum(['active', 'stale', 'superseded']).nullable().default(null),
+  portRange: z.object({ from: z.number().int(), to: z.number().int() }),
+  allowDocker: z.boolean().default(false),
+  ttlAt: z.iso.datetime().nullable().default(null),
+  /** BUILD.md of each repository (looked for in the project path, then the repository root); filled by the runner. */
+  buildDocs: z.array(z.object({ repoId: z.uuid(), path: z.string(), content: z.string() })).default([]),
+});
+export type DevopsRun = z.infer<typeof DevopsRunSchema>;
 
 /** The `devops` part of `shift.start` for `kind: 'devops'`. */
 export const DevopsShiftSchema = z.object({
@@ -68,6 +106,8 @@ export const DevopsShiftSchema = z.object({
     .optional(),
   /** Repository hygiene: the repositories of this workstation to tidy (see `aom hygiene run`). */
   hygiene: HygieneSpecSchema.optional(),
+  /** A `run` request: the environment to bring up (see `aom run`). */
+  run: DevopsRunSchema.optional(),
   /** Earlier messages of the request thread, oldest first. */
   history: z
     .array(z.object({ authorName: z.string(), kind: z.string(), body: z.string(), at: z.iso.datetime() }))

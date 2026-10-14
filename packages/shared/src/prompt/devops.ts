@@ -1,5 +1,6 @@
-import type { DevopsShift } from '../devops/index.ts';
+import type { DevopsRun, DevopsShift } from '../devops/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
+import { formatCommandLine } from '../runs/plan.ts';
 import { commandForOutcome } from './commands.ts';
 
 /** Appended by the runner to the instructions of card shifts (kept out of `renderInstructions` on purpose). */
@@ -98,6 +99,89 @@ export function renderDevopsInstructions(brief: ShiftBrief, devops: DevopsShift)
   return `${out.join('\n\n')}\n`;
 }
 
+const clip = (t: string, n: number) => (t.length > n ? `${t.slice(0, n)}\n... (cut at ${n} characters)` : t);
+
+/** The "Run this branch" request as plain text: what to run, the instructions, the plan so far, how to proceed. */
+export function renderRunSection(run: DevopsRun): string {
+  const out: string[] = [];
+  out.push(`## Run request: ${run.projectName} (${run.projectKey})`);
+  out.push(
+    [
+      `Environment id: ${run.envId} (every \`aom run\` command uses it: \`--env ${run.envId}\`)`,
+      'The runner already prepared one detached worktree per repository at the commit below (`aom run info` prints their paths and the ports it allocated). Start every process through `aom run service`, so the runner supervises it: never start a server yourself (it would die with this shift).',
+      run.services.length
+        ? `Services wanted: ${run.services.join(', ')} (and what they depend on).`
+        : 'Services wanted: all of the project.',
+      `Ports: the plan's default port is used when it is free; otherwise the runner allocates one from ${run.portRange.from}-${run.portRange.to} and sets the variable you named with --port. Use \${svc.port} templates in --env values to point services at each other.`,
+      run.allowDocker
+        ? 'Docker: allowed for this project (such steps run outside any sandbox).'
+        : 'Docker: NOT allowed for this project. If the project cannot run without it, end with `aom run fail --reason` saying so.',
+      run.ttlAt ? `The environment stops by itself at ${run.ttlAt}.` : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  );
+  out.push('### Repositories');
+  out.push(
+    run.sources
+      .map(
+        (r) =>
+          `- ${r.name} (repo id ${r.repoId}): branch ${r.branch}${r.commit ? ` at ${r.commit.slice(0, 10)}` : ''}${r.projectPath ? `, project folder ${r.projectPath}` : ''}`,
+      )
+      .join('\n'),
+  );
+  if (run.runInstructions.trim()) {
+    out.push('### Run instructions of the project (they override BUILD.md where they conflict)');
+    out.push(clip(run.runInstructions.trim(), 8000));
+  }
+  for (const r of run.repoInstructions.filter((x) => x.text.trim())) {
+    out.push(`### Run instructions for ${r.name}`);
+    out.push(clip(r.text.trim(), 8000));
+  }
+  for (const d of run.buildDocs) {
+    out.push(
+      `### BUILD.md of ${run.sources.find((x) => x.repoId === d.repoId)?.name ?? d.repoId} (${d.path})`,
+    );
+    out.push(clip(d.content.trim(), 12000));
+  }
+  if (
+    run.buildDocs.length === 0 &&
+    !run.runInstructions.trim() &&
+    run.repoInstructions.every((x) => !x.text.trim())
+  )
+    out.push(
+      'There is no BUILD.md and no run instructions: read the README, compose files and package scripts of each repository.',
+    );
+  if (run.declared.length) {
+    out.push(
+      '### Services declared in the project settings (use these names, commands, ports and health checks; do not contradict them)',
+    );
+    out.push(
+      run.declared
+        .map(
+          (d) =>
+            `- ${d.name}: repo ${d.repoId}, cwd ${d.cwd}${d.cmd ? `, command ${formatCommandLine(d.cmd)}` : ''}${d.envFile ? `, env file ${d.envFile}` : ''}${d.ports.length ? `, ports ${d.ports.map((p) => `${p.name}:${p.default}${p.envVar ? `:${p.envVar}` : ''}`).join(' ')}` : ''}${d.health ? `, health ${JSON.stringify(d.health)}` : ''}${d.after.length ? `, after ${d.after.join(' ')}` : ''}`,
+        )
+        .join('\n'),
+    );
+  }
+  if (run.currentPlan) {
+    out.push(`### The plan saved earlier (${run.planStatus ?? 'active'}); repair it if it no longer works`);
+    out.push(clip(JSON.stringify(run.currentPlan, null, 2), 8000));
+  }
+  out.push('### Steps');
+  out.push(
+    [
+      '1. `aom run info` (worktree paths, ports).',
+      '2. Setup steps, in order: `aom run step --name "npm ci" --repo <name> --cwd . -- npm ci`.',
+      '3. Each service: `aom run service --name api --repo <name> --cwd src/Api --port http:5000:ASPNETCORE_HTTP_PORTS --health http://localhost:${port}/health [--env-file <absolute path outside the repository>] [--env KEY=VALUE] [--after db] -- dotnet run`. It returns when the service is healthy or failed (`aom run logs <service>` shows why).',
+      '4. `aom run status` to check; `aom run ready --notes "<what you learned>"` when every wanted service is healthy: the runner then saves the steps as the project\'s run plan. Never put secrets in --env; use an env file outside the repository.',
+      '5. Give up with `aom run fail --reason "<why>"` (the environment ends as failed). Either way end the request with `aom devops-done` (summarise the URLs and ports).',
+    ].join('\n'),
+  );
+  return out.join('\n\n');
+}
+
 /** The prompt of a DevOps shift: the request, who asked, earlier thread messages and any granted approval. */
 export function renderDevopsPrompt(devops: DevopsShift): string {
   const out: string[] = [];
@@ -111,6 +195,7 @@ export function renderDevopsPrompt(devops: DevopsShift): string {
     out.push('## Card');
     out.push(cardSection(devops.card));
   }
+  if (devops.run) out.push(renderRunSection(devops.run));
   if (devops.approval) {
     out.push('## Approved by the manager');
     out.push(
@@ -131,9 +216,11 @@ export function renderDevopsPrompt(devops: DevopsShift): string {
   }
   out.push('## Your job in this shift');
   out.push(
-    devops.hygiene
-      ? 'This is a repository hygiene request. Run `aom hygiene run`: it fetches, commits uncommitted changes to the confirmed working branch, pulls, pushes and deletes merged agent branches in the repositories above, tells you what it could not resolve and ends the request. Do not run the git commands yourself, and never commit or push to a repository whose working branch is not confirmed: the command already refuses and asks the manager.'
-      : 'Do the request within your granted access, then report with `aom devops-done` or `aom devops-approval`.',
+    devops.run
+      ? 'This is a run request: bring the environment up with `aom run` as described above, then report with `aom devops-done`.'
+      : devops.hygiene
+        ? 'This is a repository hygiene request. Run `aom hygiene run`: it fetches, commits uncommitted changes to the confirmed working branch, pulls, pushes and deletes merged agent branches in the repositories above, tells you what it could not resolve and ends the request. Do not run the git commands yourself, and never commit or push to a repository whose working branch is not confirmed: the command already refuses and asks the manager.'
+        : 'Do the request within your granted access, then report with `aom devops-done` or `aom devops-approval`.',
   );
   return `${out.join('\n\n')}\n`;
 }

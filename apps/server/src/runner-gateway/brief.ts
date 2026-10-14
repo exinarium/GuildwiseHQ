@@ -23,6 +23,7 @@ import { workflowView } from '../commands/cards.ts';
 import { effectiveCompletionAction } from '../commands/completion.ts';
 import { scoutCandidates, seenUrls, tasteSeedFor } from '../commands/feeds.ts';
 import { grantedMcpServers } from '../commands/mcp-servers.ts';
+import { runBriefFor } from '../commands/runs.ts';
 import { projectHasVault, vaultForProject } from '../commands/vaults.ts';
 import type { Ctx } from '../context.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
@@ -550,6 +551,7 @@ export async function buildDevopsShiftStart(
       workstationName: ws.name,
       access: DevOpsAccessSchema.parse(ws.devops_access ?? {}),
       hygiene: req.hygiene ?? undefined,
+      run: (await runBriefFor(ctx, req)) ?? undefined,
       approval:
         ap?.resolution === 'approved'
           ? { action: ap.action, reason: ap.reason, commands: ap.commands ?? [], note: ap.note ?? undefined }

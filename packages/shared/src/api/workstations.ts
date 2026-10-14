@@ -65,6 +65,8 @@ export const WorkstationDtoSchema = z.object({
   devopsAccess: DevOpsAccessSchema.optional(),
   devopsAgentId: z.uuid().nullable().optional(),
   hygiene: WorkstationHygieneSchema.optional(),
+  /** Run a branch (#58): whether the runner can do it and how many environments it holds at most. */
+  runs: z.object({ capable: z.boolean(), maxEnvironments: z.number().int() }).optional(),
   /**
    * What the runner found when it last checked the rights ticked on the DevOps engineer (null: never checked, or
    * nothing ticked). `stale`: the ticks changed since.

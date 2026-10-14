@@ -59,6 +59,13 @@ export const SAVED: Array<{ table: string; restoreWhere: string }> = [
     restoreWhere:
       'workstation_id IN (SELECT id FROM workstations) AND project_repo_id IN (SELECT id FROM project_repos)',
   },
+  // Run environments (migration 1900): process state reported by the runner, not an event; and what a runner announced.
+  {
+    table: 'run_environments',
+    restoreWhere:
+      'project_id IN (SELECT id FROM projects) AND workstation_id IN (SELECT id FROM workstations)',
+  },
+  { table: 'workstation_capabilities', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
   // Every clone a runner reported (migration 1640): operational, replaced on each report.
   { table: 'workstation_repo_catalog', restoreWhere: 'workstation_id IN (SELECT id FROM workstations)' },
   // Written by the runner's rpc, not a projection (migration 1300), but it references `projects`: the CASCADE below empties it.

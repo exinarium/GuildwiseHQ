@@ -7,6 +7,7 @@ import { evaluateAllBudgets } from '../commands/budgets.ts';
 import { fireDueHygiene } from '../commands/hygiene.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
+import { expireRuns } from '../commands/runs.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
 import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
@@ -113,6 +114,7 @@ export class Scheduler {
       await this.triggers();
       await auditMailTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'audit mail failed'));
       await cloudTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'cloud workstations failed'));
+      await expireRuns(this.ctx).catch((err) => this.ctx.log.error({ err }, 'run environment expiry failed'));
       await this.blog();
       return fired;
     });

@@ -80,6 +80,7 @@ import { projectWorkflowRoutes } from './routes/project-workflows.ts';
 import { projectRoutes } from './routes/projects.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
+import { runRoutes } from './routes/runs.ts';
 import { scheduleRoutes } from './routes/schedules.ts';
 import { setupChecklistRoutes } from './routes/setup-checklist.ts';
 import { sharingRoutes } from './routes/sharing.ts';
@@ -345,6 +346,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(threadRoutes(ctx));
   await app.register(vaultRoutes(ctx));
   await app.register(devopsRoutes(ctx));
+  await app.register(runRoutes(ctx));
   await app.register(sharingRoutes(ctx));
   await app.register(testingRoutes(ctx));
   await app.register(scheduleRoutes(ctx));

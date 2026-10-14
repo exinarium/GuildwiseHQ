@@ -64,7 +64,11 @@ export interface World {
   runnerToken: string;
   baseUrl: string;
   /** Connect a fake runner with hello (repos matching the toy repo) and wait for welcome + reconcile. */
-  connectRunner(opts?: { hello?: boolean }): Promise<FakeRunner>;
+  connectRunner(opts?: {
+    hello?: boolean;
+    capabilities?: string[];
+    maxRunEnvironments?: number;
+  }): Promise<FakeRunner>;
   hire(
     name: string,
     roleKey: string,
@@ -121,6 +125,8 @@ export async function createWorld(
         r.hello({
           repos: [{ remoteUrl: REPO_SSH, localPath: '/tmp/toy', headBranch: 'main' }],
           runtimes: MOCK_RUNTIME,
+          ...(o.capabilities ? { capabilities: o.capabilities } : {}),
+          ...(o.maxRunEnvironments ? { maxRunEnvironments: o.maxRunEnvironments } : {}),
         });
         await r.waitFor('welcome');
         await t.app.ctx.notifier.flush();

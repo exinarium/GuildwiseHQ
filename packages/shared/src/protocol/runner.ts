@@ -29,6 +29,14 @@ import { MAX_MCP_SERVERS, McpServerInfoSchema } from '../mcp/index.ts';
 import { BaTaskShiftSchema, BranchCheckMergedPayloadSchema } from '../phases/index.ts';
 import { RepoCreatePayloadSchema } from '../repo/index.ts';
 import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
+import {
+  RunExtendPayloadSchema,
+  RunLogLinesSchema,
+  RunPlanSavedMsgSchema,
+  RunStartPayloadSchema,
+  RunStatusSchema,
+  RunStopPayloadSchema,
+} from '../runs/types.ts';
 import { VaultFolderSchema } from '../safe.ts';
 import { FinalizeExecutePayloadSchema } from '../testing/index.ts';
 import {
@@ -503,6 +511,9 @@ export const RunnerCommandNameSchema = z.enum([
   'org.folder',
   'toolchain.remove',
   'repo.sync',
+  'run.start',
+  'run.stop',
+  'run.extend',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -539,6 +550,9 @@ export const CommandPayloadSchemas = {
   'org.folder': OrgFolderCommandSchema,
   'toolchain.remove': z.object({ name: z.string().min(1).max(80) }),
   'repo.sync': RepoSyncPayloadSchema,
+  'run.start': RunStartPayloadSchema,
+  'run.stop': RunStopPayloadSchema,
+  'run.extend': RunExtendPayloadSchema,
 } as const;
 
 export const ShiftRejectReasonSchema = z.enum([
@@ -593,6 +607,10 @@ export const HelloSchema = msg('hello', {
   maxConcurrentShifts: z.number().int().positive().optional(),
   /** The key the manager's browser encrypts the sudo password with (the private half never leaves the runner). */
   sudoKey: SudoKeySchema.optional(),
+  /** Features this runner has (additive): `runs:1` = it can run a branch (`run.start`); the web app hides the buttons otherwise. */
+  capabilities: z.array(z.string().max(40)).max(50).optional(),
+  /** The runner's cap on run environments held at once (default 2 when absent). */
+  maxRunEnvironments: z.number().int().positive().optional(),
 });
 export const OutboxFlushedSchema = msg('outbox.flushed', {});
 export const HeartbeatSchema = msg('heartbeat', {
@@ -772,6 +790,12 @@ export const WorktreesQuerySchema = msg('worktrees.query', {
   queryId: z.string().min(1),
   paths: z.array(z.string()).max(SWEEP_QUERY_MAX_PATHS),
 });
+/** A run environment changed (state, services, commit); also sent for every known environment after `welcome`. Not acked. */
+export const RunStatusMsgSchema = msg('run.status', RunStatusSchema.shape);
+/** Log lines of a run environment, only while a browser follows (`run.follow`). Not acked. */
+export const RunLogMsgSchema = msg('run.log', RunLogLinesSchema.shape);
+/** `aom run ready` saved the steps and services that worked as the project's run plan on this workstation. Acked. */
+export const RunPlanSavedMsgSchemaWire = msg('run.plan.saved', RunPlanSavedMsgSchema.shape);
 export const ChatDeltaSchema = msg('chat.delta', {
   chatId: z.string(),
   threadId: z.uuid(),
@@ -880,6 +904,8 @@ export const ChatStartSchema = msg('chat.start', {
   context: ChatContextSchema,
 });
 export const TokenRotatedSchema = msg('token.rotated', { token: z.string().min(1) });
+/** A browser started (or stopped) following the logs of a run environment: the runner sends `run.log` only meanwhile. */
+export const RunFollowSchema = msg('run.follow', { envId: z.uuid(), follow: z.boolean() });
 export const ChatCancelSchema = msg('chat.cancel', { chatId: z.string() });
 export const CommandSchema = msg('command', {
   commandId: z.string(),
@@ -912,6 +938,9 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   RepoSyncStatusMsgSchema,
   RpcRequestSchema,
   WorktreesQuerySchema,
+  RunStatusMsgSchema,
+  RunLogMsgSchema,
+  RunPlanSavedMsgSchemaWire,
   ChatDeltaSchema,
   ChatDoneSchema,
   ChatErrorSchema,
@@ -935,6 +964,7 @@ export const ServerToRunnerSchema = z.discriminatedUnion('type', [
   ChatCancelSchema,
   CommandSchema,
   TokenRotatedSchema,
+  RunFollowSchema,
   AckSchema,
 ]);
 export type ServerToRunner = z.infer<typeof ServerToRunnerSchema>;
@@ -955,6 +985,7 @@ export const RUNNER_ACKED_TYPES: ReadonlySet<string> = new Set<RunnerToServerTyp
   'chat.error',
   'command.result',
   'vault.conflict',
+  'run.plan.saved',
 ]);
 export const SERVER_ACKED_TYPES: ReadonlySet<string> = new Set<ServerToRunnerType>(['shift.stop']);
 

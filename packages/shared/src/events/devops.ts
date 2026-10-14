@@ -45,6 +45,9 @@ export const DevOpsRequestContextSchema = z.object({
   deskItemId: z.uuid().optional(),
   repoId: z.uuid().optional(),
   errorText: z.string().max(4000).optional(),
+  /** A `run` request ("Run this branch"): the run environment the DevOps engineer sets up. */
+  requestKind: z.literal('run').optional(),
+  envId: z.uuid().optional(),
 });
 export type DevOpsRequestContext = z.infer<typeof DevOpsRequestContextSchema>;
 

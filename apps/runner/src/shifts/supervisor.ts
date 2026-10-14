@@ -82,6 +82,7 @@ import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../read-repos.ts';
 import { preparePublication } from '../research/publish.ts';
+import type { RunManager } from '../runs/manager.ts';
 import { ensureSandbox, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../testing/environment.ts';
 import {
@@ -176,6 +177,8 @@ export interface SupervisorDeps {
   idle?: Partial<IdleLimits> & { now?: () => number };
   /** Agent toolchains (PATH, read access, variables of sandboxed agents; `aom toolchain` of the DevOps engineer). */
   toolchains?: ToolchainRegistry;
+  /** Run a branch (#58): the environments `aom run` of a DevOps `run` request works on. */
+  runs?: RunManager;
 }
 
 /** The server's answer to a `shift.report`: what the agent is told (and any ledger matches for a question). */
@@ -608,6 +611,16 @@ export class ShiftSupervisor {
           ]
         : [];
     s.brief = withVaultContext(msg.brief, vaultCtx);
+    // A "run this branch" request: the runner finds BUILD.md and the commits itself (the server never reads repositories).
+    if (msg.kind === 'devops' && msg.devops?.run && this.deps.runs) {
+      const run = msg.devops.run;
+      run.buildDocs = await this.deps.runs.buildDocs(run.envId).catch(() => []);
+      const commits = this.deps.runs.sourcesOf(run.envId);
+      run.sources = run.sources.map((r) => ({
+        ...r,
+        commit: commits.find((c) => c.repoId === r.repoId)?.commit ?? r.commit ?? null,
+      }));
+    }
     const texts = shiftTexts(msg, s.brief);
     // The project's reference repositories (read-only), for a card shift only; only clones this runner found itself.
     const registeredFolders =
@@ -910,6 +923,7 @@ export class ShiftSupervisor {
         if (req.method === 'card.attachments') return this.cardAttachments(s, req.params);
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
         if (req.method === 'sudo.run') return this.sudoRun(s, req.params);
+        if (req.method.startsWith('run.')) return this.runRpc(s, req.method, req.params);
         if (req.method.startsWith('toolchain.'))
           return toolchainRpc(
             this.deps.toolchains,
@@ -932,6 +946,28 @@ export class ShiftSupervisor {
         return this.deps.rpc(s.msg.shiftId, req.method, req.params);
       },
     };
+  }
+
+  /**
+   * `aom run ...`: only the DevOps engineer of a `run` request, only for that request's environment (an `--env` for
+   * another one is refused, and without `--env` the shift's own environment is meant).
+   */
+  private async runRpc(
+    s: ActiveShift,
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<IpcRpcResponse> {
+    const run = s.msg.kind === 'devops' ? s.msg.devops?.run : undefined;
+    if (!this.deps.runs) return { ok: false, error: 'running a branch is not available on this runner' };
+    if (!run || s.msg.kind !== 'devops' || !s.msg.agent.isDevops || !s.msg.devops)
+      return { ok: false, error: '`aom run` is only for the DevOps engineer of a "run this branch" request' };
+    const asked = typeof params.env === 'string' && params.env ? params.env : run.envId;
+    if (asked !== run.envId)
+      return { ok: false, error: `this request works environment ${run.envId}, not ${asked}` };
+    return this.deps.runs.rpc(run.envId, method, params, {
+      requestId: s.msg.devops.requestId,
+      declared: run.declared ?? [],
+    });
   }
 
   /** `aom card attachments`: copies the attachments of the shift's card again (the server says which ones it may read). */

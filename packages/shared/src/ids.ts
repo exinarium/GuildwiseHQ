@@ -32,6 +32,7 @@ export const streamId = {
   baTask: (id: string) => `ba-task-${id}`,
   baSignal: (id: string) => `ba-signal-${id}`,
   shift: (id: string) => `shift-${id}`,
+  run: (id: string) => `run-${id}`,
   vault: (id: string) => `vault-${id}`,
   workflow: (orgId: string | null, key: string) => `workflow-${orgId ?? 'builtin'}-${key}`,
   department: (orgId: string) => `departments-${orgId}`,

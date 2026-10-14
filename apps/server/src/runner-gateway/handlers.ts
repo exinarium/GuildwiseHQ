@@ -29,6 +29,7 @@ import { applyReleasePrResult } from '../commands/release-pr.ts';
 import { applyRepoCreateResult, repoCreateRpc } from '../commands/repo-create.ts';
 import { applyRepoSyncStatus, seedRepoSync } from '../commands/repo-sync.ts';
 import { riskTierRpc } from '../commands/risk.ts';
+import { applyRunPlanSaved, applyRunStartResult, applyRunStatus } from '../commands/runs.ts';
 import { applyIntegrationResult } from '../commands/schedule-triggers.ts';
 import {
   applyShiftEnded,
@@ -174,6 +175,15 @@ export class RunnerHandlers {
       case 'repo.sync_status':
         await applyRepoSyncStatus(this.ctx, conn.workstationId, msg.status);
         return;
+      case 'run.status':
+        await applyRunStatus(this.ctx, conn.workstationId, msg);
+        return;
+      case 'run.log':
+        this.ctx.services.browser.runLog(msg.envId, msg.service, msg.lines, msg.history);
+        return;
+      case 'run.plan.saved':
+        await this.withInbox(conn, msg.id, (tx) => applyRunPlanSaved(this.ctx, tx, conn.workstationId, msg));
+        return this.ack(conn, msg);
       case 'jira.report':
         await applyJiraReport(this.ctx, conn.workstationId, msg.status);
         return;
@@ -342,6 +352,10 @@ export class RunnerHandlers {
               [msg.commandId, problem.slice(0, 500), this.ctx.clock.now()],
             );
           else await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+        } else if (cmd?.type === 'run.start') {
+          // Terminal: the runner is preparing the worktrees, or says why not (the environment then fails).
+          await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+          await applyRunStartResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
         } else if (cmd?.type === 'repo.sync') {
           // Terminal: the answer is the branch's state; "could not move it" is an answer, not a failure.
           await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -461,6 +475,15 @@ export class RunnerHandlers {
          ON CONFLICT (workstation_id) DO UPDATE SET key_id=EXCLUDED.key_id, public_key=EXCLUDED.public_key, updated_at=EXCLUDED.updated_at`,
         [conn.workstationId, msg.sudoKey.keyId, msg.sudoKey.publicKey, now],
       );
+    await exec(
+      ctx.pool,
+      `INSERT INTO workstation_capabilities (workstation_id, capabilities, max_run_environments, updated_at)
+       VALUES ($1,$2::text[],$3,$4)
+       ON CONFLICT (workstation_id) DO UPDATE SET capabilities=EXCLUDED.capabilities,
+         max_run_environments=EXCLUDED.max_run_environments, updated_at=EXCLUDED.updated_at`,
+      [conn.workstationId, msg.capabilities ?? [], msg.maxRunEnvironments ?? null, now],
+    );
+    ctx.services.browser.resendRunFollows(conn.workstationId);
     // Whatever the previous connection was sent may not have arrived: it is due again on this one.
     await requeueSentCommands(ctx.pool, conn.workstationId);
     await this.matchRepos(conn);

@@ -23,6 +23,7 @@ import { projectWorkflowEvents } from './project-workflows.ts';
 import { repoEvents } from './repo.ts';
 import { reporterEvents } from './reporter.ts';
 import { researchEvents } from './research.ts';
+import { runEvents } from './run.ts';
 import { scheduleEvents } from './schedule.ts';
 import { sharingEvents } from './sharing.ts';
 import { shiftEvents } from './shift.ts';
@@ -64,6 +65,7 @@ export const DomainEventSchema = z.discriminatedUnion('type', [
   ...interestEvents,
   ...costEvents,
   ...blogEvents,
+  ...runEvents,
 ]);
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
 export type EventType = DomainEvent['type'];
@@ -96,6 +98,7 @@ export * from './project-workflows.ts';
 export * from './repo.ts';
 export * from './reporter.ts';
 export * from './research.ts';
+export * from './run.ts';
 export * from './schedule.ts';
 export * from './sharing.ts';
 export * from './shift.ts';
